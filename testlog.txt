@@ -1,0 +1,306 @@
+[==========] Running 21 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 21 tests from TorchpyTest
+[ RUN      ] TorchpyTest.LoadLibrary
+unknown file: Failure
+C++ exception with description "Exception Caught inside torch::deploy embedded library: 
+open file failed because of errno 2 on fopen: , file path: torch/csrc/deploy/example/generated/load_library
+Exception raised from RAIIFile at ../caffe2/serialize/file_adapter.cc:27 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0x6b (0x7f1f69f0257b in /data/home/sahanp/repos/pytorch/build/lib/libc10.so)
+frame #1: c10::detail::torchCheckFail(char const*, char const*, unsigned int, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0xce (0x7f1f69efe1ce in /data/home/sahanp/repos/pytorch/build/lib/libc10.so)
+frame #2: caffe2::serialize::FileAdapter::RAIIFile::RAIIFile(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x134 (0x7f1f7897add4 in /data/home/sahanp/repos/pytorch/build/lib/libtorch_cpu.so)
+frame #3: caffe2::serialize::FileAdapter::FileAdapter(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x41 (0x7f1f7897b451 in /data/home/sahanp/repos/pytorch/build/lib/libtorch_cpu.so)
+frame #4: caffe2::serialize::PyTorchStreamReader::PyTorchStreamReader(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x7f (0x7f1f7897954f in /data/home/sahanp/repos/pytorch/build/lib/libtorch_cpu.so)
+frame #5: torch::deploy::InterpreterManager::loadPackage(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x6a (0x7f1f7f99139a in /data/home/sahanp/repos/pytorch/build/lib/libtorch_deploy.so)
+frame #6: TorchpyTest_LoadLibrary_Test::TestBody() + 0xc1 (0x55e06c9aee31 in ./build/bin/test_deploy)
+frame #7: void testing::internal::HandleExceptionsInMethodIfSupported<testing::Test, void>(testing::Test*, void (testing::Test::*)(), char const*) + 0x4a (0x55e06c9f3dfa in ./build/bin/test_deploy)
+frame #8: <unknown function> + 0x5876f (0x55e06c9e276f in ./build/bin/test_deploy)
+frame #9: <unknown function> + 0x58a52 (0x55e06c9e2a52 in ./build/bin/test_deploy)
+frame #10: <unknown function> + 0x592c5 (0x55e06c9e32c5 in ./build/bin/test_deploy)
+frame #11: testing::internal::UnitTestImpl::RunAllTests() + 0xe2f (0x55e06c9ebe2f in ./build/bin/test_deploy)
+frame #12: testing::UnitTest::Run() + 0x7d (0x55e06c9ec1ed in ./build/bin/test_deploy)
+frame #13: main + 0x1f (0x55e06c9acadf in ./build/bin/test_deploy)
+frame #14: __libc_start_main + 0xe7 (0x7f1f69759bf7 in /lib/x86_64-linux-gnu/libc.so.6)
+frame #15: _start + 0x2a (0x55e06c9ae20a in ./build/bin/test_deploy)
+
+" thrown in the test body.
+[  FAILED  ] TorchpyTest.LoadLibrary (472 ms)
+[ RUN      ] TorchpyTest.InitTwice
+[       OK ] TorchpyTest.InitTwice (1000 ms)
+[ RUN      ] TorchpyTest.DifferentInterps
+[       OK ] TorchpyTest.DifferentInterps (696 ms)
+[ RUN      ] TorchpyTest.SimpleModel
+unknown file: Failure
+C++ exception with description "Exception Caught inside torch::deploy embedded library: 
+open file failed because of errno 2 on fopen: , file path: torch/csrc/deploy/example/generated/simple
+Exception raised from RAIIFile at ../caffe2/serialize/file_adapter.cc:27 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0x6b (0x7f1f69f0257b in /data/home/sahanp/repos/pytorch/build/lib/libc10.so)
+frame #1: c10::detail::torchCheckFail(char const*, char const*, unsigned int, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0xce (0x7f1f69efe1ce in /data/home/sahanp/repos/pytorch/build/lib/libc10.so)
+frame #2: caffe2::serialize::FileAdapter::RAIIFile::RAIIFile(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x134 (0x7f1f7897add4 in /data/home/sahanp/repos/pytorch/build/lib/libtorch_cpu.so)
+frame #3: caffe2::serialize::FileAdapter::FileAdapter(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x41 (0x7f1f7897b451 in /data/home/sahanp/repos/pytorch/build/lib/libtorch_cpu.so)
+frame #4: caffe2::serialize::PyTorchStreamReader::PyTorchStreamReader(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x7f (0x7f1f7897954f in /data/home/sahanp/repos/pytorch/build/lib/libtorch_cpu.so)
+frame #5: torch::deploy::InterpreterManager::loadPackage(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x6a (0x7f1f7f99139a in /data/home/sahanp/repos/pytorch/build/lib/libtorch_deploy.so)
+frame #6: compare_torchpy_jit(char const*, char const*) + 0xdc (0x55e06c9b261c in ./build/bin/test_deploy)
+frame #7: void testing::internal::HandleExceptionsInMethodIfSupported<testing::Test, void>(testing::Test*, void (testing::Test::*)(), char const*) + 0x4a (0x55e06c9f3dfa in ./build/bin/test_deploy)
+frame #8: <unknown function> + 0x5876f (0x55e06c9e276f in ./build/bin/test_deploy)
+frame #9: <unknown function> + 0x58a52 (0x55e06c9e2a52 in ./build/bin/test_deploy)
+frame #10: <unknown function> + 0x592c5 (0x55e06c9e32c5 in ./build/bin/test_deploy)
+frame #11: testing::internal::UnitTestImpl::RunAllTests() + 0xe2f (0x55e06c9ebe2f in ./build/bin/test_deploy)
+frame #12: testing::UnitTest::Run() + 0x7d (0x55e06c9ec1ed in ./build/bin/test_deploy)
+frame #13: main + 0x1f (0x55e06c9acadf in ./build/bin/test_deploy)
+frame #14: __libc_start_main + 0xe7 (0x7f1f69759bf7 in /lib/x86_64-linux-gnu/libc.so.6)
+frame #15: _start + 0x2a (0x55e06c9ae20a in ./build/bin/test_deploy)
+
+" thrown in the test body.
+[  FAILED  ] TorchpyTest.SimpleModel (342 ms)
+[ RUN      ] TorchpyTest.ResNet
+unknown file: Failure
+C++ exception with description "Exception Caught inside torch::deploy embedded library: 
+open file failed because of errno 2 on fopen: , file path: torch/csrc/deploy/example/generated/resnet
+Exception raised from RAIIFile at ../caffe2/serialize/file_adapter.cc:27 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0x6b (0x7f1f69f0257b in /data/home/sahanp/repos/pytorch/build/lib/libc10.so)
+frame #1: c10::detail::torchCheckFail(char const*, char const*, unsigned int, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0xce (0x7f1f69efe1ce in /data/home/sahanp/repos/pytorch/build/lib/libc10.so)
+frame #2: caffe2::serialize::FileAdapter::RAIIFile::RAIIFile(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x134 (0x7f1f7897add4 in /data/home/sahanp/repos/pytorch/build/lib/libtorch_cpu.so)
+frame #3: caffe2::serialize::FileAdapter::FileAdapter(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x41 (0x7f1f7897b451 in /data/home/sahanp/repos/pytorch/build/lib/libtorch_cpu.so)
+frame #4: caffe2::serialize::PyTorchStreamReader::PyTorchStreamReader(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x7f (0x7f1f7897954f in /data/home/sahanp/repos/pytorch/build/lib/libtorch_cpu.so)
+frame #5: torch::deploy::InterpreterManager::loadPackage(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x6a (0x7f1f7f99139a in /data/home/sahanp/repos/pytorch/build/lib/libtorch_deploy.so)
+frame #6: compare_torchpy_jit(char const*, char const*) + 0xdc (0x55e06c9b261c in ./build/bin/test_deploy)
+frame #7: void testing::internal::HandleExceptionsInMethodIfSupported<testing::Test, void>(testing::Test*, void (testing::Test::*)(), char const*) + 0x4a (0x55e06c9f3dfa in ./build/bin/test_deploy)
+frame #8: <unknown function> + 0x5876f (0x55e06c9e276f in ./build/bin/test_deploy)
+frame #9: <unknown function> + 0x58a52 (0x55e06c9e2a52 in ./build/bin/test_deploy)
+frame #10: <unknown function> + 0x592c5 (0x55e06c9e32c5 in ./build/bin/test_deploy)
+frame #11: testing::internal::UnitTestImpl::RunAllTests() + 0xe2f (0x55e06c9ebe2f in ./build/bin/test_deploy)
+frame #12: testing::UnitTest::Run() + 0x7d (0x55e06c9ec1ed in ./build/bin/test_deploy)
+frame #13: main + 0x1f (0x55e06c9acadf in ./build/bin/test_deploy)
+frame #14: __libc_start_main + 0xe7 (0x7f1f69759bf7 in /lib/x86_64-linux-gnu/libc.so.6)
+frame #15: _start + 0x2a (0x55e06c9ae20a in ./build/bin/test_deploy)
+
+" thrown in the test body.
+[  FAILED  ] TorchpyTest.ResNet (344 ms)
+[ RUN      ] TorchpyTest.Movable
+[       OK ] TorchpyTest.Movable (340 ms)
+[ RUN      ] TorchpyTest.MultiSerialSimpleModel
+unknown file: Failure
+C++ exception with description "Exception Caught inside torch::deploy embedded library: 
+open file failed because of errno 2 on fopen: , file path: torch/csrc/deploy/example/generated/simple
+Exception raised from RAIIFile at ../caffe2/serialize/file_adapter.cc:27 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0x6b (0x7f1f69f0257b in /data/home/sahanp/repos/pytorch/build/lib/libc10.so)
+frame #1: c10::detail::torchCheckFail(char const*, char const*, unsigned int, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0xce (0x7f1f69efe1ce in /data/home/sahanp/repos/pytorch/build/lib/libc10.so)
+frame #2: caffe2::serialize::FileAdapter::RAIIFile::RAIIFile(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x134 (0x7f1f7897add4 in /data/home/sahanp/repos/pytorch/build/lib/libtorch_cpu.so)
+frame #3: caffe2::serialize::FileAdapter::FileAdapter(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x41 (0x7f1f7897b451 in /data/home/sahanp/repos/pytorch/build/lib/libtorch_cpu.so)
+frame #4: caffe2::serialize::PyTorchStreamReader::PyTorchStreamReader(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x7f (0x7f1f7897954f in /data/home/sahanp/repos/pytorch/build/lib/libtorch_cpu.so)
+frame #5: torch::deploy::InterpreterManager::loadPackage(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x6a (0x7f1f7f99139a in /data/home/sahanp/repos/pytorch/build/lib/libtorch_deploy.so)
+frame #6: TorchpyTest_MultiSerialSimpleModel_Test::TestBody() + 0xf3 (0x55e06c9b6643 in ./build/bin/test_deploy)
+frame #7: void testing::internal::HandleExceptionsInMethodIfSupported<testing::Test, void>(testing::Test*, void (testing::Test::*)(), char const*) + 0x4a (0x55e06c9f3dfa in ./build/bin/test_deploy)
+frame #8: <unknown function> + 0x5876f (0x55e06c9e276f in ./build/bin/test_deploy)
+frame #9: <unknown function> + 0x58a52 (0x55e06c9e2a52 in ./build/bin/test_deploy)
+frame #10: <unknown function> + 0x592c5 (0x55e06c9e32c5 in ./build/bin/test_deploy)
+frame #11: testing::internal::UnitTestImpl::RunAllTests() + 0xe2f (0x55e06c9ebe2f in ./build/bin/test_deploy)
+frame #12: testing::UnitTest::Run() + 0x7d (0x55e06c9ec1ed in ./build/bin/test_deploy)
+frame #13: main + 0x1f (0x55e06c9acadf in ./build/bin/test_deploy)
+frame #14: __libc_start_main + 0xe7 (0x7f1f69759bf7 in /lib/x86_64-linux-gnu/libc.so.6)
+frame #15: _start + 0x2a (0x55e06c9ae20a in ./build/bin/test_deploy)
+
+" thrown in the test body.
+[  FAILED  ] TorchpyTest.MultiSerialSimpleModel (1043 ms)
+[ RUN      ] TorchpyTest.ThreadedSimpleModel
+unknown file: Failure
+C++ exception with description "Exception Caught inside torch::deploy embedded library: 
+open file failed because of errno 2 on fopen: , file path: torch/csrc/deploy/example/generated/simple
+Exception raised from RAIIFile at ../caffe2/serialize/file_adapter.cc:27 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0x6b (0x7f1f69f0257b in /data/home/sahanp/repos/pytorch/build/lib/libc10.so)
+frame #1: c10::detail::torchCheckFail(char const*, char const*, unsigned int, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0xce (0x7f1f69efe1ce in /data/home/sahanp/repos/pytorch/build/lib/libc10.so)
+frame #2: caffe2::serialize::FileAdapter::RAIIFile::RAIIFile(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x134 (0x7f1f7897add4 in /data/home/sahanp/repos/pytorch/build/lib/libtorch_cpu.so)
+frame #3: caffe2::serialize::FileAdapter::FileAdapter(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x41 (0x7f1f7897b451 in /data/home/sahanp/repos/pytorch/build/lib/libtorch_cpu.so)
+frame #4: caffe2::serialize::PyTorchStreamReader::PyTorchStreamReader(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x7f (0x7f1f7897954f in /data/home/sahanp/repos/pytorch/build/lib/libtorch_cpu.so)
+frame #5: torch::deploy::InterpreterManager::loadPackage(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x6a (0x7f1f7f99139a in /data/home/sahanp/repos/pytorch/build/lib/libtorch_deploy.so)
+frame #6: TorchpyTest_ThreadedSimpleModel_Test::TestBody() + 0xfa (0x55e06c9b412a in ./build/bin/test_deploy)
+frame #7: void testing::internal::HandleExceptionsInMethodIfSupported<testing::Test, void>(testing::Test*, void (testing::Test::*)(), char const*) + 0x4a (0x55e06c9f3dfa in ./build/bin/test_deploy)
+frame #8: <unknown function> + 0x5876f (0x55e06c9e276f in ./build/bin/test_deploy)
+frame #9: <unknown function> + 0x58a52 (0x55e06c9e2a52 in ./build/bin/test_deploy)
+frame #10: <unknown function> + 0x592c5 (0x55e06c9e32c5 in ./build/bin/test_deploy)
+frame #11: testing::internal::UnitTestImpl::RunAllTests() + 0xe2f (0x55e06c9ebe2f in ./build/bin/test_deploy)
+frame #12: testing::UnitTest::Run() + 0x7d (0x55e06c9ec1ed in ./build/bin/test_deploy)
+frame #13: main + 0x1f (0x55e06c9acadf in ./build/bin/test_deploy)
+frame #14: __libc_start_main + 0xe7 (0x7f1f69759bf7 in /lib/x86_64-linux-gnu/libc.so.6)
+frame #15: _start + 0x2a (0x55e06c9ae20a in ./build/bin/test_deploy)
+
+" thrown in the test body.
+[  FAILED  ] TorchpyTest.ThreadedSimpleModel (1052 ms)
+[ RUN      ] TorchpyTest.ErrorsReplicatingObj
+unknown file: Failure
+C++ exception with description "Exception Caught inside torch::deploy embedded library: 
+open file failed because of errno 2 on fopen: , file path: torch/csrc/deploy/example/generated/simple
+Exception raised from RAIIFile at ../caffe2/serialize/file_adapter.cc:27 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0x6b (0x7f1f69f0257b in /data/home/sahanp/repos/pytorch/build/lib/libc10.so)
+frame #1: c10::detail::torchCheckFail(char const*, char const*, unsigned int, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0xce (0x7f1f69efe1ce in /data/home/sahanp/repos/pytorch/build/lib/libc10.so)
+frame #2: caffe2::serialize::FileAdapter::RAIIFile::RAIIFile(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x134 (0x7f1f7897add4 in /data/home/sahanp/repos/pytorch/build/lib/libtorch_cpu.so)
+frame #3: caffe2::serialize::FileAdapter::FileAdapter(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x41 (0x7f1f7897b451 in /data/home/sahanp/repos/pytorch/build/lib/libtorch_cpu.so)
+frame #4: caffe2::serialize::PyTorchStreamReader::PyTorchStreamReader(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x7f (0x7f1f7897954f in /data/home/sahanp/repos/pytorch/build/lib/libtorch_cpu.so)
+frame #5: torch::deploy::InterpreterManager::loadPackage(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x6a (0x7f1f7f99139a in /data/home/sahanp/repos/pytorch/build/lib/libtorch_deploy.so)
+frame #6: TorchpyTest_ErrorsReplicatingObj_Test::TestBody() + 0xf0 (0x55e06c9af3b0 in ./build/bin/test_deploy)
+frame #7: void testing::internal::HandleExceptionsInMethodIfSupported<testing::Test, void>(testing::Test*, void (testing::Test::*)(), char const*) + 0x4a (0x55e06c9f3dfa in ./build/bin/test_deploy)
+frame #8: <unknown function> + 0x5876f (0x55e06c9e276f in ./build/bin/test_deploy)
+frame #9: <unknown function> + 0x58a52 (0x55e06c9e2a52 in ./build/bin/test_deploy)
+frame #10: <unknown function> + 0x592c5 (0x55e06c9e32c5 in ./build/bin/test_deploy)
+frame #11: testing::internal::UnitTestImpl::RunAllTests() + 0xe2f (0x55e06c9ebe2f in ./build/bin/test_deploy)
+frame #12: testing::UnitTest::Run() + 0x7d (0x55e06c9ec1ed in ./build/bin/test_deploy)
+frame #13: main + 0x1f (0x55e06c9acadf in ./build/bin/test_deploy)
+frame #14: __libc_start_main + 0xe7 (0x7f1f69759bf7 in /lib/x86_64-linux-gnu/libc.so.6)
+frame #15: _start + 0x2a (0x55e06c9ae20a in ./build/bin/test_deploy)
+
+" thrown in the test body.
+[  FAILED  ] TorchpyTest.ErrorsReplicatingObj (1414 ms)
+[ RUN      ] TorchpyTest.ThrowsSafely
+unknown file: Failure
+C++ exception with description "Exception Caught inside torch::deploy embedded library: 
+open file failed because of errno 2 on fopen: , file path: torch/csrc/deploy/example/generated/simple
+Exception raised from RAIIFile at ../caffe2/serialize/file_adapter.cc:27 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0x6b (0x7f1f69f0257b in /data/home/sahanp/repos/pytorch/build/lib/libc10.so)
+frame #1: c10::detail::torchCheckFail(char const*, char const*, unsigned int, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0xce (0x7f1f69efe1ce in /data/home/sahanp/repos/pytorch/build/lib/libc10.so)
+frame #2: caffe2::serialize::FileAdapter::RAIIFile::RAIIFile(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x134 (0x7f1f7897add4 in /data/home/sahanp/repos/pytorch/build/lib/libtorch_cpu.so)
+frame #3: caffe2::serialize::FileAdapter::FileAdapter(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x41 (0x7f1f7897b451 in /data/home/sahanp/repos/pytorch/build/lib/libtorch_cpu.so)
+frame #4: caffe2::serialize::PyTorchStreamReader::PyTorchStreamReader(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x7f (0x7f1f7897954f in /data/home/sahanp/repos/pytorch/build/lib/libtorch_cpu.so)
+frame #5: torch::deploy::InterpreterManager::loadPackage(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x6a (0x7f1f7f99139a in /data/home/sahanp/repos/pytorch/build/lib/libtorch_deploy.so)
+frame #6: TorchpyTest_ThrowsSafely_Test::TestBody() + 0x1c4 (0x55e06c9afb04 in ./build/bin/test_deploy)
+frame #7: void testing::internal::HandleExceptionsInMethodIfSupported<testing::Test, void>(testing::Test*, void (testing::Test::*)(), char const*) + 0x4a (0x55e06c9f3dfa in ./build/bin/test_deploy)
+frame #8: <unknown function> + 0x5876f (0x55e06c9e276f in ./build/bin/test_deploy)
+frame #9: <unknown function> + 0x58a52 (0x55e06c9e2a52 in ./build/bin/test_deploy)
+frame #10: <unknown function> + 0x592c5 (0x55e06c9e32c5 in ./build/bin/test_deploy)
+frame #11: testing::internal::UnitTestImpl::RunAllTests() + 0xe2f (0x55e06c9ebe2f in ./build/bin/test_deploy)
+frame #12: testing::UnitTest::Run() + 0x7d (0x55e06c9ec1ed in ./build/bin/test_deploy)
+frame #13: main + 0x1f (0x55e06c9acadf in ./build/bin/test_deploy)
+frame #14: __libc_start_main + 0xe7 (0x7f1f69759bf7 in /lib/x86_64-linux-gnu/libc.so.6)
+frame #15: _start + 0x2a (0x55e06c9ae20a in ./build/bin/test_deploy)
+
+" thrown in the test body.
+[  FAILED  ] TorchpyTest.ThrowsSafely (1084 ms)
+[ RUN      ] TorchpyTest.AcquireMultipleSessionsInTheSamePackage
+unknown file: Failure
+C++ exception with description "Exception Caught inside torch::deploy embedded library: 
+open file failed because of errno 2 on fopen: , file path: torch/csrc/deploy/example/generated/simple
+Exception raised from RAIIFile at ../caffe2/serialize/file_adapter.cc:27 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0x6b (0x7f1f69f0257b in /data/home/sahanp/repos/pytorch/build/lib/libc10.so)
+frame #1: c10::detail::torchCheckFail(char const*, char const*, unsigned int, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0xce (0x7f1f69efe1ce in /data/home/sahanp/repos/pytorch/build/lib/libc10.so)
+frame #2: caffe2::serialize::FileAdapter::RAIIFile::RAIIFile(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x134 (0x7f1f7897add4 in /data/home/sahanp/repos/pytorch/build/lib/libtorch_cpu.so)
+frame #3: caffe2::serialize::FileAdapter::FileAdapter(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x41 (0x7f1f7897b451 in /data/home/sahanp/repos/pytorch/build/lib/libtorch_cpu.so)
+frame #4: caffe2::serialize::PyTorchStreamReader::PyTorchStreamReader(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x7f (0x7f1f7897954f in /data/home/sahanp/repos/pytorch/build/lib/libtorch_cpu.so)
+frame #5: torch::deploy::InterpreterManager::loadPackage(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x6a (0x7f1f7f99139a in /data/home/sahanp/repos/pytorch/build/lib/libtorch_deploy.so)
+frame #6: TorchpyTest_AcquireMultipleSessionsInTheSamePackage_Test::TestBody() + 0xc5 (0x55e06c9b0415 in ./build/bin/test_deploy)
+frame #7: void testing::internal::HandleExceptionsInMethodIfSupported<testing::Test, void>(testing::Test*, void (testing::Test::*)(), char const*) + 0x4a (0x55e06c9f3dfa in ./build/bin/test_deploy)
+frame #8: <unknown function> + 0x5876f (0x55e06c9e276f in ./build/bin/test_deploy)
+frame #9: <unknown function> + 0x58a52 (0x55e06c9e2a52 in ./build/bin/test_deploy)
+frame #10: <unknown function> + 0x592c5 (0x55e06c9e32c5 in ./build/bin/test_deploy)
+frame #11: testing::internal::UnitTestImpl::RunAllTests() + 0xe2f (0x55e06c9ebe2f in ./build/bin/test_deploy)
+frame #12: testing::UnitTest::Run() + 0x7d (0x55e06c9ec1ed in ./build/bin/test_deploy)
+frame #13: main + 0x1f (0x55e06c9acadf in ./build/bin/test_deploy)
+frame #14: __libc_start_main + 0xe7 (0x7f1f69759bf7 in /lib/x86_64-linux-gnu/libc.so.6)
+frame #15: _start + 0x2a (0x55e06c9ae20a in ./build/bin/test_deploy)
+
+" thrown in the test body.
+[  FAILED  ] TorchpyTest.AcquireMultipleSessionsInTheSamePackage (366 ms)
+[ RUN      ] TorchpyTest.AcquireMultipleSessionsInDifferentPackages
+unknown file: Failure
+C++ exception with description "Exception Caught inside torch::deploy embedded library: 
+open file failed because of errno 2 on fopen: , file path: torch/csrc/deploy/example/generated/simple
+Exception raised from RAIIFile at ../caffe2/serialize/file_adapter.cc:27 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0x6b (0x7f1f69f0257b in /data/home/sahanp/repos/pytorch/build/lib/libc10.so)
+frame #1: c10::detail::torchCheckFail(char const*, char const*, unsigned int, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0xce (0x7f1f69efe1ce in /data/home/sahanp/repos/pytorch/build/lib/libc10.so)
+frame #2: caffe2::serialize::FileAdapter::RAIIFile::RAIIFile(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x134 (0x7f1f7897add4 in /data/home/sahanp/repos/pytorch/build/lib/libtorch_cpu.so)
+frame #3: caffe2::serialize::FileAdapter::FileAdapter(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x41 (0x7f1f7897b451 in /data/home/sahanp/repos/pytorch/build/lib/libtorch_cpu.so)
+frame #4: caffe2::serialize::PyTorchStreamReader::PyTorchStreamReader(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x7f (0x7f1f7897954f in /data/home/sahanp/repos/pytorch/build/lib/libtorch_cpu.so)
+frame #5: torch::deploy::InterpreterManager::loadPackage(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x6a (0x7f1f7f99139a in /data/home/sahanp/repos/pytorch/build/lib/libtorch_deploy.so)
+frame #6: TorchpyTest_AcquireMultipleSessionsInDifferentPackages_Test::TestBody() + 0xc5 (0x55e06c9b05d5 in ./build/bin/test_deploy)
+frame #7: void testing::internal::HandleExceptionsInMethodIfSupported<testing::Test, void>(testing::Test*, void (testing::Test::*)(), char const*) + 0x4a (0x55e06c9f3dfa in ./build/bin/test_deploy)
+frame #8: <unknown function> + 0x5876f (0x55e06c9e276f in ./build/bin/test_deploy)
+frame #9: <unknown function> + 0x58a52 (0x55e06c9e2a52 in ./build/bin/test_deploy)
+frame #10: <unknown function> + 0x592c5 (0x55e06c9e32c5 in ./build/bin/test_deploy)
+frame #11: testing::internal::UnitTestImpl::RunAllTests() + 0xe2f (0x55e06c9ebe2f in ./build/bin/test_deploy)
+frame #12: testing::UnitTest::Run() + 0x7d (0x55e06c9ec1ed in ./build/bin/test_deploy)
+frame #13: main + 0x1f (0x55e06c9acadf in ./build/bin/test_deploy)
+frame #14: __libc_start_main + 0xe7 (0x7f1f69759bf7 in /lib/x86_64-linux-gnu/libc.so.6)
+frame #15: _start + 0x2a (0x55e06c9ae20a in ./build/bin/test_deploy)
+
+" thrown in the test body.
+[  FAILED  ] TorchpyTest.AcquireMultipleSessionsInDifferentPackages (363 ms)
+[ RUN      ] TorchpyTest.TensorSharingNotAllowed
+[       OK ] TorchpyTest.TensorSharingNotAllowed (742 ms)
+[ RUN      ] TorchpyTest.TaggingRace
+[       OK ] TorchpyTest.TaggingRace (6053 ms)
+[ RUN      ] TorchpyTest.DisarmHook
+[       OK ] TorchpyTest.DisarmHook (821 ms)
+[ RUN      ] TorchpyTest.RegisterModule
+[       OK ] TorchpyTest.RegisterModule (804 ms)
+[ RUN      ] TorchpyTest.FxModule
+unknown file: Failure
+C++ exception with description "Exception Caught inside torch::deploy embedded library: 
+open file failed because of errno 2 on fopen: , file path: torch/csrc/deploy/example/generated/simple_leaf_fx
+Exception raised from RAIIFile at ../caffe2/serialize/file_adapter.cc:27 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0x6b (0x7f1f69f0257b in /data/home/sahanp/repos/pytorch/build/lib/libc10.so)
+frame #1: c10::detail::torchCheckFail(char const*, char const*, unsigned int, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0xce (0x7f1f69efe1ce in /data/home/sahanp/repos/pytorch/build/lib/libc10.so)
+frame #2: caffe2::serialize::FileAdapter::RAIIFile::RAIIFile(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x134 (0x7f1f7897add4 in /data/home/sahanp/repos/pytorch/build/lib/libtorch_cpu.so)
+frame #3: caffe2::serialize::FileAdapter::FileAdapter(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x41 (0x7f1f7897b451 in /data/home/sahanp/repos/pytorch/build/lib/libtorch_cpu.so)
+frame #4: caffe2::serialize::PyTorchStreamReader::PyTorchStreamReader(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x7f (0x7f1f7897954f in /data/home/sahanp/repos/pytorch/build/lib/libtorch_cpu.so)
+frame #5: torch::deploy::InterpreterManager::loadPackage(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x6a (0x7f1f7f99139a in /data/home/sahanp/repos/pytorch/build/lib/libtorch_deploy.so)
+frame #6: TorchpyTest_FxModule_Test::TestBody() + 0xeb (0x55e06c9b391b in ./build/bin/test_deploy)
+frame #7: void testing::internal::HandleExceptionsInMethodIfSupported<testing::Test, void>(testing::Test*, void (testing::Test::*)(), char const*) + 0x4a (0x55e06c9f3dfa in ./build/bin/test_deploy)
+frame #8: <unknown function> + 0x5876f (0x55e06c9e276f in ./build/bin/test_deploy)
+frame #9: <unknown function> + 0x58a52 (0x55e06c9e2a52 in ./build/bin/test_deploy)
+frame #10: <unknown function> + 0x592c5 (0x55e06c9e32c5 in ./build/bin/test_deploy)
+frame #11: testing::internal::UnitTestImpl::RunAllTests() + 0xe2f (0x55e06c9ebe2f in ./build/bin/test_deploy)
+frame #12: testing::UnitTest::Run() + 0x7d (0x55e06c9ec1ed in ./build/bin/test_deploy)
+frame #13: main + 0x1f (0x55e06c9acadf in ./build/bin/test_deploy)
+frame #14: __libc_start_main + 0xe7 (0x7f1f69759bf7 in /lib/x86_64-linux-gnu/libc.so.6)
+frame #15: _start + 0x2a (0x55e06c9ae20a in ./build/bin/test_deploy)
+
+" thrown in the test body.
+[  FAILED  ] TorchpyTest.FxModule (1194 ms)
+[ RUN      ] TorchpyTest.TensorSerializationSharing
+[       OK ] TorchpyTest.TensorSerializationSharing (811 ms)
+[ RUN      ] TorchpyTest.SharedLibraryLoad
+[       OK ] TorchpyTest.SharedLibraryLoad (976 ms)
+[ RUN      ] TorchpyTest.UsesDistributed
+unknown file: Failure
+C++ exception with description "Exception Caught inside torch::deploy embedded library: 
+open file failed because of errno 2 on fopen: , file path: torch/csrc/deploy/example/generated/uses_distributed
+Exception raised from RAIIFile at ../caffe2/serialize/file_adapter.cc:27 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0x6b (0x7f1f69f0257b in /data/home/sahanp/repos/pytorch/build/lib/libc10.so)
+frame #1: c10::detail::torchCheckFail(char const*, char const*, unsigned int, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0xce (0x7f1f69efe1ce in /data/home/sahanp/repos/pytorch/build/lib/libc10.so)
+frame #2: caffe2::serialize::FileAdapter::RAIIFile::RAIIFile(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x134 (0x7f1f7897add4 in /data/home/sahanp/repos/pytorch/build/lib/libtorch_cpu.so)
+frame #3: caffe2::serialize::FileAdapter::FileAdapter(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x41 (0x7f1f7897b451 in /data/home/sahanp/repos/pytorch/build/lib/libtorch_cpu.so)
+frame #4: caffe2::serialize::PyTorchStreamReader::PyTorchStreamReader(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x7f (0x7f1f7897954f in /data/home/sahanp/repos/pytorch/build/lib/libtorch_cpu.so)
+frame #5: torch::deploy::InterpreterManager::loadPackage(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x6a (0x7f1f7f99139a in /data/home/sahanp/repos/pytorch/build/lib/libtorch_deploy.so)
+frame #6: TorchpyTest_UsesDistributed_Test::TestBody() + 0xc2 (0x55e06c9b16f2 in ./build/bin/test_deploy)
+frame #7: void testing::internal::HandleExceptionsInMethodIfSupported<testing::Test, void>(testing::Test*, void (testing::Test::*)(), char const*) + 0x4a (0x55e06c9f3dfa in ./build/bin/test_deploy)
+frame #8: <unknown function> + 0x5876f (0x55e06c9e276f in ./build/bin/test_deploy)
+frame #9: <unknown function> + 0x58a52 (0x55e06c9e2a52 in ./build/bin/test_deploy)
+frame #10: <unknown function> + 0x592c5 (0x55e06c9e32c5 in ./build/bin/test_deploy)
+frame #11: testing::internal::UnitTestImpl::RunAllTests() + 0xe2f (0x55e06c9ebe2f in ./build/bin/test_deploy)
+frame #12: testing::UnitTest::Run() + 0x7d (0x55e06c9ec1ed in ./build/bin/test_deploy)
+frame #13: main + 0x1f (0x55e06c9acadf in ./build/bin/test_deploy)
+frame #14: __libc_start_main + 0xe7 (0x7f1f69759bf7 in /lib/x86_64-linux-gnu/libc.so.6)
+frame #15: _start + 0x2a (0x55e06c9ae20a in ./build/bin/test_deploy)
+
+" thrown in the test body.
+[  FAILED  ] TorchpyTest.UsesDistributed (399 ms)
+[ RUN      ] TorchpyTest.Autograd
+[       OK ] TorchpyTest.Autograd (831 ms)
+[----------] 21 tests from TorchpyTest (21156 ms total)
+
+[----------] Global test environment tear-down
+[==========] 21 tests from 1 test suite ran. (21156 ms total)
+[  PASSED  ] 10 tests.
+[  FAILED  ] 11 tests, listed below:
+[  FAILED  ] TorchpyTest.LoadLibrary
+[  FAILED  ] TorchpyTest.SimpleModel
+[  FAILED  ] TorchpyTest.ResNet
+[  FAILED  ] TorchpyTest.MultiSerialSimpleModel
+[  FAILED  ] TorchpyTest.ThreadedSimpleModel
+[  FAILED  ] TorchpyTest.ErrorsReplicatingObj
+[  FAILED  ] TorchpyTest.ThrowsSafely
+[  FAILED  ] TorchpyTest.AcquireMultipleSessionsInTheSamePackage
+[  FAILED  ] TorchpyTest.AcquireMultipleSessionsInDifferentPackages
+[  FAILED  ] TorchpyTest.FxModule
+[  FAILED  ] TorchpyTest.UsesDistributed
+
+11 FAILED TESTS
