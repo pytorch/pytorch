@@ -21,7 +21,7 @@ from .model_utils import (
     attach_output_convert_info_to_model,
 )
 from . import auto_trace_rewriter
-from torch.ao.quantization import ObserverBase, FakeQuantizeBase
+from torch.ao.quantization import is_activation_post_process
 
 logger = logging.getLogger('auto_trace')
 logging.basicConfig(level=logging.DEBUG)
@@ -96,9 +96,7 @@ def add_auto_observation(
             nonlocal cur_module
             parent_module = cur_module
             if enable_logging:
-                is_obs_or_fq = isinstance(
-                    parent_module, (ObserverBase, FakeQuantizeBase))
-                if not is_obs_or_fq:
+                if not is_activation_post_process(parent_module):
                     # logging for insides of obs/fq is not useful for this framework
 
                     # fqn map does not contain observers, which is why we
