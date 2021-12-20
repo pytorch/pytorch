@@ -480,58 +480,68 @@ class TestOptim(TestCase):
     def test_adam(self):
         for optimizer in [optim.Adam, optim_mt.Adam]:
             self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3)
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2), lr=1e-3, maximize=maximize),
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, amsgrad=True, maximize=maximize),
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, weight_decay=0.1, maximize=maximize),
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-3)
+                    lr=1e-3, amsgrad=True, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3, amsgrad=True)
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3, weight_decay=0.1)
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-3, amsgrad=True)
+                    lr=1e-3, maximize=maximize),
+                [lambda opt: ExponentialLR(opt, gamma=0.9)],
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-3),
-                [lambda opt: ExponentialLR(opt, gamma=0.9)]
+                    lr=1e-3, maximize=maximize),
+                [lambda opt: LinearLR(opt, start_factor=0.4, total_iters=4)],
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-3),
-                [lambda opt: LinearLR(opt, start_factor=0.4, total_iters=4)]
+                    lr=1e-3, maximize=maximize),
+                [lambda opt: ConstantLR(opt, factor=0.4, total_iters=4)],
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-3),
-                [lambda opt: ConstantLR(opt, factor=0.4, total_iters=4)]
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3, amsgrad=True),
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, amsgrad=True, maximize=maximize),
                 [lambda opt: ConstantLR(opt, factor=0.4, total_iters=4),
-                 lambda opt: ExponentialLR(opt, gamma=0.9)]
+                 lambda opt: ExponentialLR(opt, gamma=0.9)],
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3, amsgrad=True),
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, amsgrad=True, maximize=maximize),
                 [lambda opt: ExponentialLR(opt, gamma=0.9),
-                 lambda opt: ReduceLROnPlateau(opt)]
+                 lambda opt: ReduceLROnPlateau(opt)],
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-3, amsgrad=True),
+                    lr=1e-3, amsgrad=True, maximize=maximize),
                 [lambda opt: StepLR(opt, gamma=0.9, step_size=10),
-                 lambda opt: ReduceLROnPlateau(opt)]
+                 lambda opt: ReduceLROnPlateau(opt)],
+                constructor_accepts_maximize=True
             )
             with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
                 optimizer(None, lr=1e-2, betas=(1.0, 0.0))
@@ -1406,6 +1416,14 @@ class TestLRScheduler(TestCase):
         scheduler = SequentialLR(self.opt, schedulers=schedulers, milestones=milestones)
         self._test(scheduler, targets, epochs)
 
+    def test_chained_lr2_get_last_lr_before_step(self):
+        schedulers = [
+            LinearLR(self.opt, start_factor=0.4, total_iters=3),
+            MultiStepLR(self.opt, milestones=[4, 8, 10], gamma=0.1)
+        ]
+        scheduler = ChainedScheduler(schedulers)
+        self.assertEqual(scheduler.get_last_lr(), schedulers[-1].get_last_lr())
+
     def test_chained_lr1(self):
         epochs = 10
         schedulers = [None] * 1
@@ -1413,6 +1431,7 @@ class TestLRScheduler(TestCase):
         schedulers[0] = StepLR(self.opt, gamma=0.1, step_size=3)
         scheduler = ChainedScheduler(schedulers)
         self._test([scheduler], targets, epochs)
+        self.assertEqual(scheduler.get_last_lr(), schedulers[-1].get_last_lr())
 
     def test_chained_lr2(self):
         epochs = 10
@@ -1421,6 +1440,7 @@ class TestLRScheduler(TestCase):
         schedulers[0] = LinearLR(self.opt, start_factor=0.4, total_iters=3)
         scheduler = ChainedScheduler(schedulers)
         self._test([scheduler], targets, epochs)
+        self.assertEqual(scheduler.get_last_lr(), schedulers[-1].get_last_lr())
 
     def test_chained_lr3(self):
         epochs = 10
@@ -1430,6 +1450,7 @@ class TestLRScheduler(TestCase):
         schedulers[1] = MultiStepLR(self.opt, milestones=[4, 8, 10], gamma=0.1)
         scheduler = ChainedScheduler(schedulers)
         self._test([scheduler], targets, epochs)
+        self.assertEqual(scheduler.get_last_lr(), schedulers[-1].get_last_lr())
 
     def test_chained_lr4(self):
         epochs = 9
@@ -1443,6 +1464,7 @@ class TestLRScheduler(TestCase):
         schedulers[2] = StepLR(self.opt, gamma=0.1, step_size=3)
         scheduler = ChainedScheduler(schedulers)
         self._test([scheduler], targets, epochs)
+        self.assertEqual(scheduler.get_last_lr(), schedulers[-1].get_last_lr())
 
     def test_compound_step_and_multistep_lr(self):
         epochs = 10
@@ -2168,16 +2190,9 @@ class TestLRScheduler(TestCase):
         if isinstance(schedulers, _LRScheduler):
             schedulers = [schedulers]
 
-        def get_optimizer(scheduler):
-            if hasattr(scheduler, "optimizer"):
-                return scheduler.optimizer
-            else:
-                assert isinstance(scheduler, ChainedScheduler), \
-                    f"Error: scheduler={scheduler} does not have an optimizer and is not a chained scheduler."
-                return get_optimizer(scheduler._schedulers[0])
         optimizers = set()
         for scheduler in schedulers:
-            optimizers.add(get_optimizer(scheduler))
+            optimizers.add(scheduler.optimizer)
         for epoch in range(epochs):
             for param_group, target in zip(self.opt.param_groups, targets):
                 self.assertEqual(target[epoch], param_group['lr'],

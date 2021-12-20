@@ -241,6 +241,47 @@ class TestMkldnn(TestCase):
     def test_conv3d(self):
         self._test_conv_base(dim=3)
 
+    def test_conv2d_nhwc(self):
+        conv_module = torch.nn.Conv2d
+        input_shapes = (224, 224)
+        options = itertools.product([True, False], [True, False], [1, 2], [1, 4])
+        for train, bias, dilation, groups in options:
+            N = torch.randint(3, 10, (1,)).item()
+            M = torch.randint(1, 3, (1,)).item() * groups
+            C = torch.randint(1, 3, (1,)).item() * groups
+            x_shape = (N, C) + input_shapes
+            x = torch.randn(x_shape, dtype=torch.float32)
+            # conv1: mkldnn conv2d in contiguous memory format (nchw)
+            # conv2: mkldnn conv2d in channels last memory format (nhwc)
+            conv1 = conv_module(in_channels=C,
+                                out_channels=M,
+                                kernel_size=3,
+                                stride=2,
+                                padding=1,
+                                dilation=dilation,
+                                bias=bias,
+                                groups=groups).float()
+            conv2 = copy.deepcopy(conv1).to(memory_format=torch.channels_last)
+            x1 = x.clone()
+            x2 = x.clone().to(memory_format=torch.channels_last)
+            if train:
+                x1.requires_grad_()
+                x2.requires_grad_()
+            y1 = conv1(x1)
+            y2 = conv2(x2)
+            self.assertEqual(y1, y2)
+            if train:
+                y1.sum().backward()
+                y2.sum().backward()
+                self.assertTrue(x2.grad.is_contiguous(memory_format=torch.channels_last))
+                self.assertEqual(conv1.weight.grad,
+                                 conv2.weight.grad,
+                                 atol=1e-3,
+                                 rtol=1e-3)
+                if bias:
+                    self.assertEqual(conv1.bias.grad, conv2.bias.grad)
+                self.assertEqual(x1.grad, x2.grad)
+
     @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def _test_conv_bf16_base(self, dim):
         conv_module = {1: torch.nn.Conv1d, 2: torch.nn.Conv2d, 3: torch.nn.Conv3d}
@@ -308,6 +349,15 @@ class TestMkldnn(TestCase):
             self.assertEqual(
                 conv2d(x),
                 conv2d_loaded(x.to_mkldnn()).to_dense())
+
+    # This test is to check whether 1D conv is supported for mkldnn tensor,
+    # which is exposed by Issue https://github.com/pytorch/pytorch/issues/68034.
+    def test_conv1d_functional(self):
+        input = torch.randn(2, 3, 10).to_mkldnn()
+        weight = torch.randn(3, 3, 3).to_mkldnn()
+        bias = torch.randn(3).to_mkldnn()
+        output = torch.nn.functional.conv1d(input, weight, bias)
+        self.assertEqual(output.size(), torch.Size([2, 3, 8]))
 
     def test_relu(self):
         x = torch.randn((4, 5), dtype=torch.float32) * 10

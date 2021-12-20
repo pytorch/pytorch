@@ -672,6 +672,65 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     return {};
   }
 
+  void check_bounds_throw(int64_t idx, int64_t bound, const BufPtr& buf) {
+    std::stringstream ss;
+    ss << "Index out of bounds in check_bounds. Index: " << idx
+       << "; bounds: [0, " << bound << ").";
+    throw malformed_input(ss.str(), buf);
+  }
+
+  void check_bounds(const BufPtr& buf, const std::vector<ExprPtr>& indices) {
+    const std::vector<ExprPtr>& dims = buf->dims();
+    if (dims.size() != indices.size()) {
+      // indices are flattened, but not buffer
+      if (indices.size() == 1) {
+        if (dims.size() != buf->strides().size()) {
+          throw malformed_input(
+              "Number of dimensions did not match number of strides", buf);
+        }
+        size_t buf_size = 1;
+        if (dims.size() > 0) {
+          ExprHandle buf_size_expr = ExprHandle(immLike(dims[0], 1));
+          ExprHandle negative_one = ExprHandle(immLike(dims[0], -1));
+          for (const auto& i : c10::irange(dims.size())) {
+            buf_size_expr = buf_size_expr +
+                ((negative_one + ExprHandle(dims[i])) *
+                 ExprHandle(buf->strides()[i]));
+          }
+          buf_size_expr.node()->accept(this);
+          buf_size = value().intValue();
+        }
+        indices[0]->accept(this);
+        const auto& index_values = indexVec(value());
+        for (auto& j : index_values) {
+          if (j < 0 || j >= buf_size) {
+            check_bounds_throw(j, buf_size, buf);
+          }
+        }
+        return;
+      }
+      throw malformed_input(
+          "dimensions and indices mismatch in check_bounds. Buf has " +
+              std::to_string(dims.size()) + " dimensions and indices has " +
+              std::to_string(indices.size()) + " dimensions.",
+          buf);
+    }
+    for (const auto& i : c10::irange(dims.size())) {
+      auto opt_dim = intValue(dims[i]);
+      if (!opt_dim) {
+        continue;
+      }
+      auto dim_bound = *opt_dim;
+      indices[i]->accept(this);
+      const auto& ithDimIndices = indexVec(value());
+      for (auto& j : ithDimIndices) {
+        if (j < 0 || j >= dim_bound) {
+          check_bounds_throw(j, dim_bound, buf);
+        }
+      }
+    }
+  }
+
   TORCH_API void visit(LoadPtr v) override {
     auto iter = buffer_mapping_.find(v->buf());
     if (iter == buffer_mapping_.end()) {
@@ -679,7 +738,10 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     }
     void* ptr = iter->second;
 
-    ExprPtr flat_idx = flatten_index(v->buf()->dims(), v->indices());
+    check_bounds(v->buf(), v->indices());
+
+    ExprPtr flat_idx =
+        flatten_index(v->buf()->dims(), v->indices(), v->buf()->strides());
     flat_idx->accept(this);
     auto index = indexVec(value());
     ScalarType v_sdtype = v->dtype().scalar_type();
@@ -721,7 +783,10 @@ class SimpleIREvaluatorImpl : public IRVisitor {
 
     void* ptr = iter->second;
 
-    ExprPtr flat_idx = flatten_index(v->buf()->dims(), v->indices());
+    check_bounds(v->buf(), v->indices());
+
+    ExprPtr flat_idx =
+        flatten_index(v->buf()->dims(), v->indices(), v->buf()->strides());
     flat_idx->accept(this);
     auto index = indexVec(value());
     ScalarType v_sdtype = v->value()->dtype().scalar_type();
@@ -764,6 +829,11 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     if (!func_registry.count(v->func_name())) {
       throw unimplemented_lowering(v);
     }
+    GRAPH_DEBUG(
+        "EXTERNAL CALL: func=",
+        v->func_name(),
+        ", buf=",
+        v->buf()->name_hint());
 
     std::vector<BufPtr> bufs(v->buf_args());
     bufs.insert(bufs.begin(), v->buf());
@@ -771,6 +841,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     std::vector<void*> buf_ptrs;
     std::vector<int64_t> buf_ranks;
     std::vector<int64_t> buf_dims;
+    std::vector<int64_t> buf_strides;
     std::vector<int8_t> buf_dtypes;
     std::vector<int64_t> extra_args;
 
@@ -786,6 +857,10 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       for (ExprPtr dim_expr : b->dims()) {
         dim_expr->accept(this);
         buf_dims.push_back(value().intValue());
+      }
+      for (const ExprPtr& stride_expr : b->strides()) {
+        stride_expr->accept(this);
+        buf_strides.push_back(value().intValue());
       }
     }
     for (ExprPtr a : v->args()) {
@@ -815,6 +890,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
         buf_ptrs.data(),
         buf_ranks.data(),
         buf_dims.data(),
+        buf_strides.data(),
         buf_dtypes.data(),
         extra_args.size(),
         extra_args.data());
@@ -892,6 +968,8 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       total_byte_size *= value_.intValue();
     }
     auto int_count = (total_byte_size + sizeof(int) - 1) / sizeof(int);
+    GRAPH_DEBUG(
+        "ALLOCATE: buf=", v->buf()->name_hint(), ", size=", total_byte_size);
     std::unique_ptr<std::vector<int>> buffer(new std::vector<int>(int_count));
     auto iter = buffer_mapping_.find(b);
     if (iter != buffer_mapping_.end() && iter->second != nullptr) {
@@ -905,6 +983,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
 
   void visit(FreePtr v) override {
     BufPtr b = v->buf();
+    GRAPH_DEBUG("FREE: buf=", v->buf()->name_hint());
     int count = internal_buffers_.erase(b);
     if (count == 0) {
       throw std::runtime_error(
