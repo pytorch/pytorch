@@ -1,4 +1,3 @@
-#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <torch/csrc/jit/passes/fold_conv_bn.h>
 
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
