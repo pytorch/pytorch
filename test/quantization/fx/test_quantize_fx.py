@@ -44,6 +44,7 @@ from torch.ao.quantization import (
     float16_dynamic_qconfig,
     float16_static_qconfig,
     float_qparams_weight_only_qconfig,
+    float_qparams_weight_only_qconfig_4bit,
     get_default_qconfig,
     get_default_qat_qconfig,
     get_default_qconfig_dict,
@@ -55,7 +56,6 @@ from torch.ao.quantization import (
     default_placeholder_observer,
     default_weight_observer,
     PerChannelMinMaxObserver,
-    QConfigDynamic,
     FixedQParamsFakeQuantize,
     FixedQParamsObserver,
     FusedMovingAvgObsFakeQuantize,
@@ -422,6 +422,8 @@ class TestFuseFx(QuantizationTestCase):
         )
         self.assertTrue('But found \'typo\' instead.' in str(context.exception))
 
+    @unittest.skip("Temprorarily skipping the test case, will enable after the simple"
+                   "pattern format is supported")
     def test_fuse_addtional_fuser_method(self):
         class MyConvReLU(torch.nn.Module):
             pass
@@ -3201,6 +3203,37 @@ class TestQuantizeFx(QuantizationTestCase):
         # checking result match
         self.assertEqual(out_ref, out)
 
+    def test_conv_lowering(self):
+        convs = {1: nn.Conv1d, 2: nn.Conv2d, 3: nn.Conv3d}
+        qconvs = {1: nn.quantized.Conv1d, 2: nn.quantized.Conv2d, 3: nn.quantized.Conv3d}
+
+        class M(torch.nn.Module):
+            def __init__(self, dim):
+                super().__init__()
+                self.conv = convs[dim](3, 3, 3)
+
+            def forward(self, x):
+                return self.conv(x)
+
+        for dim in range(1, len(convs) + 1):
+            m = M(dim).eval()
+            m = prepare_fx(m, {"": default_qconfig})
+            m_ref = copy.deepcopy(m)
+            m_ref = convert_fx(m_ref, is_reference=True)
+            m = convert_fx(m)
+            data = self.img_data_dict[dim][0][0]
+            out_ref = m_ref(data)
+            out = m(data)
+            # check that reference pattern for quantized conv module is fused
+            expected_node_occurrence = {
+                ns.call_function(torch.quantize_per_tensor): 1,
+                ns.call_module(qconvs[dim]): 1,
+                ns.call_method("dequantize"): 1
+            }
+            self.checkGraphModuleNodes(m, expected_node_occurrence=expected_node_occurrence)
+            # checking result match
+            self.assertTrue(torch.equal(out_ref, out))
+
     def test_convert_qconfig_dict(self):
         class Linear(torch.nn.Module):
             def __init__(self):
@@ -5150,25 +5183,26 @@ class TestQuantizeFxOps(QuantizationTestCase):
             def forward(self, indices):
                 return self.emb(indices)
 
-        model = M().eval()
-        indices = torch.tensor([9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8, 3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3])
-        quantized_node = ns.call_module(nnq.Embedding)
-        configs = [
-            (float_qparams_weight_only_qconfig, ns.call_module(nnq.Embedding)),
-            (None, ns.call_module(nn.Embedding)),
-            (default_qconfig, ns.call_module(nn.Embedding)),
-        ]
+        for qconfig_type in [float_qparams_weight_only_qconfig, float_qparams_weight_only_qconfig_4bit]:
+            model = M().eval()
+            indices = torch.tensor([9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8, 3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3])
+            quantized_node = ns.call_module(nnq.Embedding)
+            configs = [
+                (qconfig_type, ns.call_module(nnq.Embedding)),
+                (None, ns.call_module(nn.Embedding)),
+                (default_qconfig, ns.call_module(nn.Embedding)),
+            ]
 
-        for qconfig, node in configs:
-            qconfig_dict = {"": qconfig}
-            m = prepare_fx(model, qconfig_dict)
-            self.checkGraphModuleNodes(m, expected_node_occurrence={
-                ns.call_module(torch.ao.quantization.MinMaxObserver): 0
-            })
-            m = convert_fx(m)
-            self.checkGraphModuleNodes(m, expected_node=node)
-            # make sure it runs
-            m(indices)
+            for qconfig, node in configs:
+                qconfig_dict = {"": qconfig}
+                m = prepare_fx(model, qconfig_dict)
+                self.checkGraphModuleNodes(m, expected_node_occurrence={
+                    ns.call_module(torch.ao.quantization.MinMaxObserver): 0
+                })
+                m = convert_fx(m)
+                self.checkGraphModuleNodes(m, expected_node=node)
+                # make sure it runs
+                m(indices)
 
     def test_embedding_bag(self):
         class M(torch.nn.Module):
@@ -5189,8 +5223,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
             float_qparams_observer = PerChannelMinMaxObserver.with_args(dtype=dtype,
                                                                         qscheme=torch.per_channel_affine_float_qparams,
                                                                         ch_axis=0)
-            float_qparams_qconfig = QConfigDynamic(activation=default_placeholder_observer,
-                                                   weight=float_qparams_observer)
+            float_qparams_qconfig = QConfig(activation=default_placeholder_observer,
+                                            weight=float_qparams_observer)
             self.checkGraphModeFxOp(
                 model,
                 inputs,
