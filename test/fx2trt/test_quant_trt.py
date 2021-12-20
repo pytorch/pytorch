@@ -678,15 +678,25 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
             prepare_custom_config_dict=prepare_custom_config_dict,
             backend_config_dict=modified_backend_config_dict)
         node_occurrence = {
+            ns.call_module(torch.ao.quantization.HistogramObserver): 0,
+        }
+        self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+        standalone_node_occurrence = {
             ns.call_module(torch.ao.quantization.HistogramObserver): 3,
         }
-        self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+        self.checkGraphModuleNodes(m.standalone, expected_node_occurrence=standalone_node_occurrence)
         m = _convert_fx_do_not_use(m, is_reference=True, backend_config_dict=modified_backend_config_dict)
         node_occurrence = {
-            ns.call_function(torch.quantize_per_tensor): 3,
-            ns.call_method("dequantize"): 3,
+            ns.call_function(torch.quantize_per_tensor): 0,
+            ns.call_method("dequantize"): 0,
         }
         self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+        standalone_node_occurrence = {
+            ns.call_function(torch.quantize_per_tensor): 3,
+            ns.call_module(nnqr.Conv2d): 1,
+            ns.call_method("dequantize"): 3,
+        }
+        self.checkGraphModuleNodes(m.standalone, expected_node_occurrence=standalone_node_occurrence)
 
 if __name__ == "__main__":
     run_tests()
