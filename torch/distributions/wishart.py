@@ -1,5 +1,7 @@
 import math
 import warnings
+from numbers import Number
+from typing import Union
 
 import torch
 from torch.distributions import constraints
@@ -53,7 +55,7 @@ class Wishart(ExponentialFamily):
     has_rsample = True
 
     def __init__(self,
-                 df: torch.Tensor,
+                 df: Union[torch.Tensor, Number],
                  covariance_matrix: torch.Tensor = None,
                  precision_matrix: torch.Tensor = None,
                  scale_tril: torch.Tensor = None,
@@ -64,19 +66,31 @@ class Wishart(ExponentialFamily):
         if scale_tril is not None:
             assert scale_tril.dim() > 1, \
                 "scale_tril must be at least two-dimensional, with optional leading batch dimensions"
-            batch_shape = torch.broadcast_shapes(scale_tril.shape[:-2], df.shape)
+            if isinstance(df, Number):
+                df = torch.tensor(df, dtype=scale_tril.dtype, device=scale_tril.device)
+                batch_shape = torch.Size()
+            else:
+                batch_shape = torch.broadcast_shapes(scale_tril.shape[:-2], df.shape)
             event_shape = scale_tril.shape[-2:]
             self.scale_tril = scale_tril.expand(batch_shape + (-1, -1))
         elif covariance_matrix is not None:
             assert covariance_matrix.dim() > 1, \
                 "covariance_matrix must be at least two-dimensional, with optional leading batch dimensions"
-            batch_shape = torch.broadcast_shapes(covariance_matrix.shape[:-2], df.shape)
+            if isinstance(df, Number):
+                df = torch.tensor(df, dtype=covariance_matrix.dtype, device=covariance_matrix.device)
+                batch_shape = torch.Size()
+            else:
+                batch_shape = torch.broadcast_shapes(covariance_matrix.shape[:-2], df.shape)
             event_shape = covariance_matrix.shape[-2:]
             self.covariance_matrix = covariance_matrix.expand(batch_shape + (-1, -1))
         elif precision_matrix is not None:
             assert precision_matrix.dim() > 1, \
                 "precision_matrix must be at least two-dimensional, with optional leading batch dimensions"
-            batch_shape = torch.broadcast_shapes(precision_matrix.shape[:-2], df.shape)
+            if isinstance(df, Number):
+                df = torch.tensor(df, dtype=precision_matrix.dtype, device=precision_matrix.device)
+                batch_shape = torch.Size()
+            else:
+                batch_shape = torch.broadcast_shapes(precision_matrix.shape[:-2], df.shape)
             event_shape = precision_matrix.shape[-2:]
             self.precision_matrix = precision_matrix.expand(batch_shape + (-1, -1))
 
