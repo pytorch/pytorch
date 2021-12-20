@@ -1,19 +1,22 @@
 import contextlib
 
+import torch.jit
+
 
 def _change_class(module) -> None:
     cls = module.__class__
+    func_params = module._functional_parameters
 
-    def _getattr(self, name):
-        if name in module._functional_parameters:
-            return module._functional_parameters[name]
-        return cls.__getattr__(self, name)
+    def _getattribute(self, name):
+        if name in func_params:
+            return func_params[name]
+        return object.__getattribute__(self, name)
 
     param_cls = type(
-        f"Parametrized{cls.__name__}",
+        f"StatelessReplacer{cls.__name__}",
         (cls,),
         {
-            "__getattr__": _getattr,
+            "__getattribute__": _getattribute,
         },
     )
 
@@ -24,20 +27,22 @@ def _change_class(module) -> None:
 def _swap_parameters(module, tensor_name, tensor):
     # Changes the module class to get a new __getattr__ dunder method
     # that looks for the reparametrized tensor
-    if hasattr(module, '_functional_parameters'):
+    if hasattr(module, "_functional_parameters"):
+        # Check if the module has an active reparametrization
+        # for this parameter
         module._functional_parameters[tensor_name] = tensor
     else:
         # change module class to set a new __getattr__ function
         # register tensor
-        _change_class(module)
         module._functional_parameters = {}
         module._functional_parameters[tensor_name] = tensor
+        _change_class(module)
 
 
 def _remove_swap(module, name):
-    if hasattr(module, '_orig_class'):
+    if hasattr(module, "_orig_class"):
         module.__class__ = module._orig_class
-        delattr(module, '_orig_class')
+        delattr(module, "_orig_class")
 
 
 @contextlib.contextmanager
@@ -63,6 +68,16 @@ def _apply_func_submodules(func, module, path, args):
 
 def functional_call(module, parameters_and_buffers, args, kwargs=None):
     # TODO allow kwargs such as unsafe and others for parametrization
+    if (
+            torch.jit.is_tracing()
+            or torch.jit.is_scripting()
+            or isinstance(module, (
+                torch.jit.RecursiveScriptModule,
+                torch.jit.ScriptModule,
+                torch.jit.ScriptFunction)
+            )
+    ):
+        raise RuntimeError("The stateless API can't be used with Jitted modules")
     if kwargs is None:
         kwargs = {}
     with reparametrize_module(module, parameters_and_buffers):

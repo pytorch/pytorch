@@ -58,9 +58,16 @@ class TestStatelessFunctionalAPI(TestCase):
         jit_module = torch.jit.script(module)
         with self.assertRaisesRegex(
             RuntimeError,
-            r'delete methods or parameters'
+            r'used with Jitted modules'
         ):
             self._run_call_with_mock_module(jit_module)
+        x = torch.rand((1, 1))
+        traced_module = torch.jit.trace(module, x)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r'used with Jitted modules'
+        ):
+            self._run_call_with_mock_module(traced_module)
 
     @unittest.skipIf(not TEST_MULTIGPU, 'multi-GPU not supported')
     def test_functional_call_with_data_parallel(self):
