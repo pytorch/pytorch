@@ -216,6 +216,14 @@ bool hasNodeWithKind(const StaticModule& smodule, const std::string& kind) {
   return getNodeWithKind(smodule, kind) != nullptr;
 }
 
+std::shared_ptr<Graph> getGraphFromScript(const std::string& jit_script) {
+  script::Module module("module");
+  module.define(jit_script);
+
+  Method method = module.get_method("forward");
+  return module.get_method("forward").graph();
+}
+
 std::shared_ptr<Graph> getGraphFromIR(const std::string& ir) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> vmap;
