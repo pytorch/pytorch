@@ -178,6 +178,7 @@ def _prepare_fx(
     equalization_qconfig_dict: Optional[Dict[str, Any]] = None,
     backend_config_dict: Optional[Dict[str, Any]] = None,
     is_standalone_module: bool = False,
+    is_qat: bool = False,
 ) -> ObservedGraphModule:
     r""" Internal helper function for prepare_fx
     Args:
@@ -242,6 +243,7 @@ forward graph of the parent module,
         equalization_qconfig_dict=equalization_qconfig_dict,
         backend_config_dict=backend_config_dict,
         is_standalone_module=is_standalone_module,
+        is_qat=is_qat,
     )
 
     for attr_name in preserved_attributes:
@@ -254,6 +256,7 @@ def _prepare_standalone_module_fx(
     qconfig_dict: Any,
     prepare_custom_config_dict: Optional[Dict[str, Any]] = None,
     backend_config_dict: Optional[Dict[str, Any]] = None,
+    is_qat: bool = False,
 ) -> GraphModule:
     r""" [Internal use only] Prepare a standalone module, so that it can be used when quantizing the
     parent module.
@@ -283,6 +286,7 @@ def _prepare_standalone_module_fx(
         prepare_custom_config_dict,
         backend_config_dict,
         is_standalone_module=True,
+        is_qat=is_qat,
     )
 
 
@@ -505,6 +509,7 @@ def prepare_fx(
         prepare_custom_config_dict,
         equalization_qconfig_dict,
         backend_config_dict,
+        is_qat=False,
     )
 
 
@@ -552,6 +557,7 @@ def prepare_qat_fx(
         qconfig_dict,
         prepare_custom_config_dict,
         backend_config_dict=backend_config_dict,
+        is_qat=True,
     )
 
 
