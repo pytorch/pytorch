@@ -7,10 +7,15 @@ if exist %GFLAGS_EXE% (
     echo Some smoke tests
     %GFLAGS_EXE% /i python.exe +sls
     python %SCRIPT_HELPERS_DIR%\run_python_nn_smoketests.py
+    echo %ERRORLEVEL%
+    echo "just ran the python script"
     if ERRORLEVEL 1 exit /b 1
+    exit /b 1
 
     %GFLAGS_EXE% /i python.exe -sls
+    echo %ERRORLEVEL%
     if ERRORLEVEL 1 exit /b 1
+    exit /b 1
 )
 
 echo Copying over test times file
