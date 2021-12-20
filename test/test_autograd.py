@@ -7873,9 +7873,6 @@ class TestAutogradForwardMode(TestCase):
             # No differentiable outputs, shouldn't error
             eq = foo == bar
 
-            # Inplace
-            foo.eq_(bar)
-
     def test_create_new_zeros_with_same_meta(self):
         new_zeroes_fn = torch.ops.aten._new_zeros_with_same_feature_meta
 
@@ -8397,17 +8394,6 @@ class TestAutogradDeviceType(TestCase):
             self.assertTrue(y.requires_grad)
             z = x.to(torch.bfloat16)
             self.assertTrue(z.requires_grad)
-
-    def test_copy_forward_ad_broadcasting(self, device):
-        # copy_ allows the src to have a different shape from self as long as src is
-        # broadcastable to self. Make sure forward AD handles this case.
-        primal = torch.rand(3, 3, device=device)
-        tangent = torch.rand(3, 3, device=device)
-        non_dual = torch.rand(1, 3, 3, device=device)
-
-        with fwAD.dual_level():
-            dual = fwAD.make_dual(primal, tangent)
-            non_dual.copy_(dual)
 
     @onlyCUDA
     def test_simple_reentrant_cross_device(self, device):
