@@ -20,9 +20,9 @@ cmake_configure_file(
     out = "cmake_macros.h",
     definitions = {
         "C10_BUILD_SHARED_LIBS": True,
-        "C10_USE_GLOG": "config_setting://c10:using_glog",
         "C10_USE_GFLAGS": "config_setting://c10:using_gflags",
-        "C10_USE_NUMA": False,
+        "C10_USE_GLOG": "config_setting://c10:using_glog",
         "C10_USE_MSVC_STATIC_RUNTIME": True,
+        "C10_USE_NUMA": False,
     },
 )
