@@ -407,6 +407,7 @@ def print_coverage_info(th=100, nn=25):
         'torch.prod',  # dynamic (backward)
         'torch.norm',  # norm with nuc is not commonly used; we support the other cases.
         'torch.svd',  # There isn't a bug, it is just nondeterministic so we can't test it.
+        'torch.nn.functional.embedding',  # We support everything except the sparse option.
     }
     remove_from_set(statuses['test_vmap_exhaustive'], vmap_exemptions)
     remove_from_set(statuses['test_vmapvjp'], vmap_exemptions)
