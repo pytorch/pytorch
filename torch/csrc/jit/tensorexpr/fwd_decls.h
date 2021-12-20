@@ -102,7 +102,6 @@ class Cond;
 class ExternalCall;
 class For;
 class Free;
-class PlacementAllocate;
 class SyncThreads;
 using AllocatePtr = NodePtr<Allocate>;
 using AtomicAddPtr = NodePtr<AtomicAdd>;
@@ -111,7 +110,6 @@ using CondPtr = NodePtr<Cond>;
 using ExternalCallPtr = NodePtr<ExternalCall>;
 using ForPtr = NodePtr<For>;
 using FreePtr = NodePtr<Free>;
-using PlacementAllocatePtr = NodePtr<PlacementAllocate>;
 using SyncThreadsPtr = NodePtr<SyncThreads>;
 
 #define IMM_DECLARE(Type, Name) \

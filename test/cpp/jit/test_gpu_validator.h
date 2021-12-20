@@ -369,7 +369,7 @@ inline void testValidate(
                 TensorDomain::noReductions(
                     fusion_output_tv->getMaybeRFactorDomain())
                     .size(),
-        "Dimensionality mismatch in outputs.");
+        "Dimensionality mismatch in inputs.");
 
     auto tolerance_values = getTolerance(
         fusion_output_tv->getDataType().value(), reduction_size, tolerances);

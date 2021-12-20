@@ -1,5 +1,20 @@
 
 namespace broadcast {
+
+template <bool X_THREAD, bool Y_THREAD, bool Z_THREAD>
+__host__ __device__ unsigned offset_of_source(
+    const dim3& block_dim,
+    const dim3& thread_idx) {
+  unsigned offset = 0;
+  if (!Z_THREAD)
+    offset = offset * block_dim.z + thread_idx.z;
+  if (!Y_THREAD)
+    offset = offset * block_dim.y + thread_idx.y;
+  if (!X_THREAD)
+    offset = offset * block_dim.x + thread_idx.x;
+  return offset;
+}
+
 // Broadcasts within partitioned groups of threads.
 //
 // X_THREAD: Broadcast from threadIdx.x == 0 if true
@@ -18,8 +33,7 @@ __device__ void blockBroadcast(
       (!Y_THREAD || threadIdx.y == 0) && (!Z_THREAD || threadIdx.z == 0);
 
   const auto shared_offset =
-      index_utils::maskedOffset<!X_THREAD, !Y_THREAD, !Z_THREAD>(
-          threadIdx, blockDim);
+      offset_of_source<X_THREAD, Y_THREAD, Z_THREAD>(blockDim, threadIdx);
 
   if (has_valid_data && read_write_pred) {
     shared_mem[shared_offset] = inp_val;

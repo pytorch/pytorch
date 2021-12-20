@@ -49,7 +49,6 @@ namespace at { namespace cuda {
   _(cuOccupancyMaxActiveBlocksPerMultiprocessor) \
   _(cuGetErrorString)                            \
   _(cuLaunchKernel)                              \
-  _(cuLaunchCooperativeKernel)                   \
   _(cuCtxGetCurrent)                             \
   _(cuModuleUnload)                              \
   _(cuDevicePrimaryCtxGetState)                  \

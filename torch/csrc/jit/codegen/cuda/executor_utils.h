@@ -320,8 +320,7 @@ void validateVectorizedTensors(
     const at::ArrayRef<IValue>& inputs,
     const std::vector<at::Tensor>& outputs,
     GpuLower& lower,
-    caching::ExecutorCompileTimeInfoCache* data_cache,
-    kir::ExpressionEvaluator& expr_eval);
+    caching::ExecutorCompileTimeInfoCache* data_cache = nullptr);
 
 } // namespace executor_utils
 } // namespace cuda

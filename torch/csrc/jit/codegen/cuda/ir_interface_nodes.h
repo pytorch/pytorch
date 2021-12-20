@@ -17,7 +17,6 @@ namespace fuser {
 namespace cuda {
 
 class WelfordResult;
-class ViewTransform;
 
 //! A Bool value
 //!

@@ -70,7 +70,6 @@ enum class ExprType {
   TransposeOp,
   ShiftOp,
   GatherOp,
-  ViewOp,
   Split,
   Merge,
 };
@@ -195,15 +194,15 @@ static constexpr std::array<ParallelType, 6> kParallelTypeThreads = {
     ParallelType::TIDy,
     ParallelType::TIDz};
 
-static constexpr std::array<ParallelType, 3> kParallelTypeBIDs = {
+static constexpr std::array<ParallelType, 6> kParallelTypeBIDs = {
     ParallelType::BIDx,
     ParallelType::BIDy,
     ParallelType::BIDz};
 
-static constexpr std::array<ParallelType, 3> kParallelTypeTIDs = {
-    ParallelType::TIDx,
-    ParallelType::TIDy,
-    ParallelType::TIDz};
+static constexpr std::array<ParallelType, 6> kParallelTypeTIDs = {
+    ParallelType::BIDx,
+    ParallelType::BIDy,
+    ParallelType::BIDz};
 
 enum class MemoryType { Local, Shared, Global };
 
@@ -220,8 +219,7 @@ enum class IterType {
   Reduction,
   BroadcastWithStride,
   BroadcastWithoutStride,
-  Gather,
-  Stride
+  Gather
 };
 
 enum class SwizzleType { NoSwizzle, Transpose };

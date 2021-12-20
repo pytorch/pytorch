@@ -228,10 +228,6 @@ Statement* OptOutMutator::mutate(GatherOp* op) {
   return new GatherOp(out, in, window_shape, pad_width);
 }
 
-Statement* OptOutMutator::mutate(ViewOp* vop) {
-  return vop;
-}
-
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

@@ -21,7 +21,7 @@ from torch.ao.quantization._correct_bias import (
 import copy
 
 
-class TestBiasCorrectionEager(QuantizationTestCase):
+class TestBiasCorrection(QuantizationTestCase):
     def compute_sqnr(self, x, y):
         Ps = torch.norm(x)
         Pn = torch.norm(x - y)

@@ -38,11 +38,10 @@ struct KernelSummary {
   bool has_block_reductions = false;
 
   //! Number of static grid reductions
-  bool has_grid_reductions = false;
+  int number_of_grid_reductions = 0;
 
-  //! Do we have any grid reduction in a loop, or grid reductions dependent on
-  //! grid reductions
-  bool has_cooperative_grid_reduction = false;
+  //! Do we have any grid reduction in a loop?
+  bool has_grid_reduction_in_loop = false;
 
   //! Do we have any block broadcasts?
   bool has_block_broadcasts = false;
@@ -65,9 +64,6 @@ struct KernelSummary {
   //! List of dynamic local memory buffers.
   //! Only used for debugging.
   std::vector<const kir::Allocate*> dynamic_lmem_allocations;
-
-  //! ceilDiv extents that must be divisible
-  std::vector<std::pair<const kir::Val*, const kir::Val*>> splits_to_validate;
 };
 
 //! Container for a lowered Kernel IR

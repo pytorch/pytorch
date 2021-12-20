@@ -503,11 +503,7 @@ TORCH_CUDA_CU_API TensorView* shift(
 //! Each window of size window_shape is stored as a additional
 //! innermost domain, meaning that the number of dimensions of the
 //! output tensor doubles. The pad_width parameter specifies the
-//! padding width of each side of each axis. The strides parameter
-//! specifies striding of the operation. Non-unit striding is
-//! implemented with strided split, whose outer output domain becomes
-//! the root domain for subsequent consumers. The inner output domain
-//! becomes a Stride domain, which is ignored by subsequent consumers.
+//! padding width of each side of each axis.
 //!
 //! Example:
 //!   t0: 2D tensor of [N, M]
@@ -520,20 +516,15 @@ TORCH_CUDA_CU_API TensorView* shift(
 TORCH_CUDA_CU_API TensorView* gather(
     TensorView* inp,
     const std::vector<int>& window_shape,
-    const std::vector<std::vector<int>>& pad_width,
-    const std::vector<int>& strides = {});
+    const std::vector<std::vector<int>>& pad_width);
 
 //! Gather a window of nearby elements for each element.
 //!
 //! Same as the another gather interface but with Int* parameters.
-//!
-//! TODO: Remove this interface as we do not intend to support dynamic
-//! window shapes at this moment.
 TORCH_CUDA_CU_API TensorView* gather(
     TensorView* inp,
     const std::vector<Int*>& window_shape,
-    const std::vector<std::vector<Int*>>& pad_width,
-    const std::vector<int>& strides = {});
+    const std::vector<std::vector<Int*>>& pad_width);
 
 } // namespace cuda
 } // namespace fuser

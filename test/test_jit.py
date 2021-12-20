@@ -56,7 +56,6 @@ from jit.test_jit_utils import TestJitUtils  # noqa: F401
 from jit.test_scriptmod_ann import TestScriptModuleInstanceAttributeTypeAnnotation  # noqa: F401
 from jit.test_types import TestTypesAndAnnotation  # noqa: F401
 from jit.test_misc import TestMisc  # noqa: F401
-from jit.test_upgraders import TestUpgraders  # noqa: F401
 from jit.test_pdt import TestPDT  # noqa: F401
 from jit.test_tensor_creation_ops import TestTensorCreationOps  # noqa: F401
 from jit.test_module_apis import TestModuleAPIs  # noqa: F401
@@ -71,7 +70,6 @@ from jit.test_models import MnistNet
 from jit.test_batch_mm import TestBatchMM  # noqa: F401
 from jit.test_dtype_analysis import TestDtypeAnalysis, TestDtypeCustomRulesCPU  # noqa: F401
 from jit.test_dce import TestDCE  # noqa: F401
-from jit.test_sparse import TestSparse  # noqa: F401
 
 # Torch
 from torch import Tensor

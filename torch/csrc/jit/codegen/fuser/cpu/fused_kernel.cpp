@@ -34,14 +34,15 @@ static const std::string getTempPath() {
 static const std::string temp_dir = getTempPath();
 static const std::string so_template = temp_dir + "pytorch_fuserXXXXXX.dll";
 static const std::string cpp_template = temp_dir + "pytorch_fuserXXXXXX.cpp";
-static const std::string check_exists_string = "where ${program} > nul 2> nul";
+static const std::string check_exists_string =
+    "where \"${program}\" > nul 2> nul";
 static std::vector<std::wstring> env_list;
 constexpr int so_suffix_len = 4;
 constexpr int cpp_suffix_len = 4;
 #else
 static const std::string so_template = "/tmp/pytorch_fuserXXXXXX.so";
 static const std::string cpp_template = "/tmp/pytorch_fuserXXXXXX.cpp";
-static const std::string check_exists_string = "which ${program} > /dev/null";
+static const std::string check_exists_string = "which '${program}' > /dev/null";
 constexpr int so_suffix_len = 3;
 constexpr int cpp_suffix_len = 4;
 #endif
@@ -49,10 +50,8 @@ constexpr int cpp_suffix_len = 4;
 intptr_t run(const std::string& cmd);
 
 static bool programExists(const std::string& program) {
-  std::stringstream ss;
-  c10::printQuotedString(ss, program);
   TemplateEnv env;
-  env.s("program", ss.str());
+  env.s("program", program);
   std::string cmd = format(check_exists_string, env);
 #ifdef _MSC_VER
   return (run(cmd.c_str()) == 0);
@@ -189,7 +188,6 @@ struct CompilerConfig {
 #endif
 
     if (!programExists(cxx)) {
-      TORCH_WARN("Compiler passed via CXX envvar does not exist!");
       cxx = "";
     }
   }
@@ -207,7 +205,7 @@ struct CompilerConfig {
   const std::string openmp_flags = "-fopenmp";
 #endif
 // Set openmp to true only if PyTorch is compiled with OpenMP support
-// OpenMP is typically not available on MacOS platform
+// OpenMP is typically not availabel on MacOS platform
 #if defined(_OPENMP)
   bool openmp = true;
 #else
@@ -269,7 +267,6 @@ static void runCompiler(
     const std::string& cpp_file,
     const std::string& so_file) {
   auto& config = getConfig();
-  TORCH_CHECK(!config.cxx.empty(), "Failed to compile a fused CPU kernel: Compiler not found");
   TemplateEnv env;
   env.s("cxx", config.cxx);
   env.s("fopenmp", config.openmp ? config.openmp_flags : "");

@@ -77,7 +77,6 @@ class BroadcastOp;
 class TransposeOp;
 class ShiftOp;
 class GatherOp;
-class ViewOp;
 
 // By default, all IR nodes are handled in this dispatch, and will call an empty
 // function on all nodes.
@@ -109,7 +108,6 @@ class TORCH_CUDA_CU_API OptOutConstDispatch : public PolymorphicBase {
   virtual void handle(const TransposeOp*) {}
   virtual void handle(const ShiftOp*) {}
   virtual void handle(const GatherOp*) {}
-  virtual void handle(const ViewOp*) {}
 };
 
 class TORCH_CUDA_CU_API OptOutDispatch : public PolymorphicBase {
@@ -140,7 +138,6 @@ class TORCH_CUDA_CU_API OptOutDispatch : public PolymorphicBase {
   virtual void handle(TransposeOp*) {}
   virtual void handle(ShiftOp*) {}
   virtual void handle(GatherOp*) {}
-  virtual void handle(ViewOp*) {}
 };
 
 class TORCH_CUDA_CU_API OptInConstDispatch : public PolymorphicBase {
@@ -206,9 +203,6 @@ class TORCH_CUDA_CU_API OptInConstDispatch : public PolymorphicBase {
   }
   virtual void handle(const GatherOp*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for GatherOp.");
-  }
-  virtual void handle(const ViewOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for ViewOp.");
   }
 };
 
@@ -276,9 +270,6 @@ class TORCH_CUDA_CU_API OptInDispatch : public PolymorphicBase {
   virtual void handle(GatherOp*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for GatherOp.");
   }
-  virtual void handle(ViewOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for ViewOp.");
-  }
 };
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -331,7 +322,6 @@ class TORCH_CUDA_CU_API OptOutMutator : public PolymorphicBase {
   virtual Statement* mutate(TransposeOp*);
   virtual Statement* mutate(ShiftOp*);
   virtual Statement* mutate(GatherOp*);
-  virtual Statement* mutate(ViewOp*);
 };
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -406,9 +396,6 @@ class TORCH_CUDA_CU_API OptInMutator : public PolymorphicBase {
   }
   virtual Statement* mutate(GatherOp*) {
     TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for GatherOp.");
-  }
-  virtual Statement* mutate(ViewOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for ViewOp.");
   }
 };
 

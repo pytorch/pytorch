@@ -45,7 +45,7 @@ struct CUDAMethods : public CUDAStubs {
     });
     auto stream = at::cuda::getCurrentCUDAStream();
     if (cpu_ns) {
-      *cpu_ns = torch::profiler::impl::getTime();
+      *cpu_ns = getTime();
     }
     TORCH_CUDA_CHECK(cudaEventRecord(cuda_event_ptr, stream));
   }

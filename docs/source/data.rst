@@ -421,8 +421,6 @@ Example::
 .. autoclass:: ConcatDataset
 .. autoclass:: ChainDataset
 .. autoclass:: Subset
-.. autofunction:: torch.utils.data.default_collate
-.. autofunction:: torch.utils.data.default_convert
 .. autofunction:: torch.utils.data.get_worker_info
 .. autofunction:: torch.utils.data.random_split
 .. autoclass:: torch.utils.data.Sampler

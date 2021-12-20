@@ -88,7 +88,7 @@ class ModelWithFunctionals(torch.nn.Module):
         return w
 
 
-class TestNumericSuiteEager(QuantizationTestCase):
+class TestEagerModeNumericSuite(QuantizationTestCase):
     @override_qengines
     def test_compare_weights_conv_static(self):
         r"""Compare the weights of float and static quantized conv layer"""
