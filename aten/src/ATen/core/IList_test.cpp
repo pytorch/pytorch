@@ -193,15 +193,12 @@ TEST(IOptTensorRefListTest, Boxed_Iterate) {
   auto vec = get_boxed_opt_tensor_vector();
   const List<optional<at::Tensor>> boxed(vec);
   at::IOptTensorRefList list(boxed);
-  size_t i = 0;
-  for (auto it = list.begin(); it != list.end(); ++it) {
-    EXPECT_EQ(boxed[i].has_value(), (*it).has_value());
-    if ((*it).has_value()) {
-      EXPECT_TRUE((*boxed[i]).is_same(**it));
+  for (size_t i = 0; i < list.size(); i++) {
+    EXPECT_EQ(boxed[i].has_value(), list[i].has_value());
+    if (list[i].has_value()) {
+      EXPECT_TRUE((*boxed[i]).is_same(*list[i]));
     }
-    i++;
   }
-  EXPECT_EQ(i, list.size());
 }
 
 TEST(IOptTensorRefListTest, Boxed_IterateRange) {
@@ -223,15 +220,12 @@ TEST(IOptTensorRefListTest, Unboxed_Iterate) {
   auto vec = get_unboxed_opt_tensor_vector();
   at::ArrayRef<at::OptionalTensorRef> unboxed(vec);
   at::IOptTensorRefList list(unboxed);
-  size_t i = 0;
-  for (auto it = list.begin(); it != list.end(); ++it) {
-    EXPECT_EQ(unboxed[i].has_value(), (*it).has_value());
-    if ((*it).has_value()) {
-      EXPECT_TRUE((*unboxed[i]).is_same(**it));
+  for (size_t i = 0; i < list.size(); i++) {
+    EXPECT_EQ(unboxed[i].has_value(), list[i].has_value());
+    if (list[i].has_value()) {
+      EXPECT_TRUE((*unboxed[i]).is_same(*list[i]));
     }
-    i++;
   }
-  EXPECT_EQ(i, list.size());
 }
 
 TEST(IOptTensorRefListTest, Unboxed_IterateRange) {

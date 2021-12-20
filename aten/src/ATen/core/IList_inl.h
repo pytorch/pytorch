@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ATen/core/List.h>
-#include <ATen/core/IList.h>
+#include <ATen/core/Tensor.h>
 
 namespace at {
 class Tensor;
@@ -35,10 +35,15 @@ class IListTagImplBase<IListTag::Unboxed, T, ListElemT> {
   }
 
   /*
-   * We have this function (besides the `unwrap`s above) because the
-   * implementation for `IListIterator::operator*` wasn't syntatically
-   * equal for the existing tags at the time (`Unboxed` and `Boxed`).
+   * We have these function (besides the `unwrap`s above) because the
+   * implementation for both `IList::operator[]` and `IListIterator::operator*`
+   * weren't syntatically equal for the existing tags at the time
+   * (`Unboxed` and `Boxed`).
    */
+  static IListConstRef<T> get(const list_type& it, size_t i) {
+    return it[i];
+  }
+
   static IListConstRef<T> iterator_get(
       const typename list_type::const_iterator& it) {
     return *it;
@@ -66,6 +71,10 @@ class IListTagImplBase<IListTag::Boxed, T, ListElemT> {
   static const typename list_type::const_iterator& unwrap(
       const IListIterator<T>& it) {
     return it.payload_.boxed_iterator;
+  }
+
+  static IListConstRef<T> get(const list_type& it, size_t i) {
+    return it[i];
   }
 
   static IListConstRef<T> iterator_get(
@@ -109,11 +118,19 @@ class IListTagImpl<IListTag::Boxed, at::OptionalTensorRef>
 
  public:
   /*
-   * Given an iterator type corresponding to the `Boxed` tag, we override
+   * Given an instance of the types corresponding to the `Boxed` tag, we override
    * the default implementation, so that we can return a `at::OptionalTensorRef`.
    */
+  static IListConstRef<at::OptionalTensorRef> get(const list_type& list, size_t i) {
+    const auto& opt = list[i];
+    return (opt.has_value()) ? *opt : at::OptionalTensorRef{};
+  }
+
   static IListConstRef<at::OptionalTensorRef> iterator_get(
-      const typename list_type::const_iterator& it);
+      const typename list_type::const_iterator& it) {
+    const auto& ivalue = (*it).get();
+    return (ivalue.isNone()) ? at::OptionalTensorRef{} : ivalue.toTensor();
+  }
 };
 
 } // namespace detail
