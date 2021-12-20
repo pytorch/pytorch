@@ -216,8 +216,12 @@ def prepare_get_standalone_module_configs(
     # fallback to use parent module's qconfig if user didn't specify qconfig dict
     if sm_qconfig_dict is None:
         sm_qconfig_dict = {"": qconfig}
+    if sm_prepare_config_dict is None:
+        sm_prepare_config_dict = {}
     # TODO: sm_backend_config_dict can fallback to use parent's backend_config_dict
     # as well, this can be added later
+    if sm_backend_config_dict is None:
+        sm_backend_config_dict = {}
     return sm_qconfig_dict, sm_prepare_config_dict, sm_backend_config_dict
 
 def qat_swap_modules(
