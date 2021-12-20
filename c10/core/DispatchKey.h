@@ -548,8 +548,9 @@ constexpr DispatchKey toBackendKey(DispatchKey k) {
     return static_cast<DispatchKey>(static_cast<uint8_t>(k) - static_cast<uint8_t>(DispatchKey::StartOfSparseBackends));
   } else if (k >= DispatchKey::StartOfAutogradBackends && k <= DispatchKey::EndOfAutogradBackends) {
     return static_cast<DispatchKey>(static_cast<uint8_t>(k) - static_cast<uint8_t>(DispatchKey::StartOfAutogradBackends));
+  } else {
+    throw std::invalid_argument("invalid key");
   }
-  throw std::invalid_argument("invalid key");
 }
 
 constexpr DispatchKey toFunctionalityKey(DispatchKey k) {

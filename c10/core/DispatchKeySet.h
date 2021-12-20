@@ -246,7 +246,7 @@ class C10_API DispatchKeySet final {
   }
   constexpr DispatchKeySet removeFunctionalityKeys(DispatchKeySet ks) const {
 #ifdef NDEBUG
-	if (repr_ & full_backend_mask != 0) {
+	if ((repr_ & full_backend_mask) != 0) {
 	  throw std::invalid_argument("DispatchKeySet::removeFunctionalitykeys() called with backends bits set");
 	}
 #endif
