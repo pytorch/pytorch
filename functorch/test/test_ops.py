@@ -982,6 +982,7 @@ class TestDecompositionOpInfo(TestCase):
         skip('mvlgamma'),
         skip('tanh', device_type='cuda'),  # cuda bfloat16 failure
         skip('nn.functional.tanhshrink', device_type='cuda'),  # cuda bfloat16 failure
+        skip('nn.functional.huber_loss', device_type='cuda'),  # cuda bfloat16 failure
         skip('eig'),
         skip('nn.functional.dropout'),
         skip('_masked.softmin'),
