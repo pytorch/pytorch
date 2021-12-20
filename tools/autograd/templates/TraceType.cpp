@@ -1,5 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include "torch/csrc/autograd/VariableTypeUtils.h"
+#include "torch/csrc/jit/frontend/tracer.h"
 
 #include <torch/library.h>
 

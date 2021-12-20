@@ -1,4 +1,3 @@
-#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <torch/csrc/jit/passes/onnx/peephole.h>
 
 #include <c10/util/Exception.h>
