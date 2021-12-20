@@ -1,4 +1,3 @@
-#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <torch/csrc/jit/passes/onnx/unpack_quantized_weights.h>
 
 #include <ATen/native/quantized/cpu/packed_params.h>

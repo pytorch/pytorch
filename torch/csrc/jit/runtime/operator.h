@@ -13,7 +13,7 @@
 #include <torch/library.h>
 
 #include <ATen/core/function_schema.h>
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
 
 #include <functional>
 #include <initializer_list>
