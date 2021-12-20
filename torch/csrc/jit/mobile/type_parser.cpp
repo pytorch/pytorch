@@ -101,7 +101,7 @@ TypePtr TypeParser::parseNonSimple(const std::string& token) {
   if (token == "List") {
     return CreateSingleElementType<ListType>();
   } else if (token == "Optional") {
-    return parseSingleElemenetType(DynamicType::Tag::Optional);
+    return parseSingleElementType(DynamicType::Tag::Optional);
   } else if (token == "Future") {
     return CreateSingleElementType<FutureType>();
   } else if (token == "Dict") {
@@ -299,7 +299,7 @@ TypePtr TypeParser::CreateSingleElementType() {
   return result;
 }
 
-TypePtr TypeParser::parseSingleElemenetType(DynamicType::Tag tag) {
+TypePtr TypeParser::parseSingleElementType(DynamicType::Tag tag) {
   expectChar('[');
   auto result =
       std::make_shared<DynamicType>(tag, DynamicType::Arguments(parse()));
