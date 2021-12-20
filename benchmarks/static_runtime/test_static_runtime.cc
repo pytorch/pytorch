@@ -1738,6 +1738,10 @@ TEST(StaticRuntime, VarStack) {
   std::vector<IValue> args4 = {at::randn({4, 5, 6}), at::randn({4, 5, 6}), -1};
   testStaticRuntime(var_stack_script, args4);
 
+  // Non-serial path
+  std::vector<IValue> args5 = {at::randn({1, 2, 3}), at::randn({1, 2, 3}), 3};
+  testStaticRuntime(var_stack_script, args5);
+
   testStaticRuntime(var_stack_script, args1, args2);
 }
 
