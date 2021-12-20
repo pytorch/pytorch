@@ -1,4 +1,3 @@
-#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <torch/csrc/jit/codegen/cuda/executor.h>
 
 #include <torch/csrc/jit/codegen/cuda/codegen.h>
