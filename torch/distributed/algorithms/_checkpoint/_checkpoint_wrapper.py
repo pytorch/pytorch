@@ -1,9 +1,7 @@
 from enum import Enum, auto
+
 import torch
 from torch.utils.checkpoint import checkpoint
-from typing import Any
-from functools import partial
-from weakref import ref
 
 
 class CheckpointImpl(Enum):
@@ -11,10 +9,31 @@ class CheckpointImpl(Enum):
     NO_REENTRANT = auto()
 
 
+class _CheckpointWrapper(torch.nn.Module):
+    """
+    An nn.Module that wraps another nn.Module with checkpointing.
+    """
+    def __init__(
+        self,
+        mod: torch.nn.Module,
+        checkpoint_impl: CheckpointImpl = CheckpointImpl.REENTRANT,
+    ):
+        super().__init__()
+        self.mod = mod
+        self.checkpoint_impl = checkpoint_impl
+
+    def forward(self, *args, **kwargs):
+        return checkpoint(
+            self.mod,
+            use_reentrant=(self.checkpoint_impl == CheckpointImpl.REENTRANT),
+            *args,
+            **kwargs,
+        )
+
+
 def checkpoint_wrapper(
-    module: torch.nn.Module,
-    checkpoint_impl: CheckpointImpl = CheckpointImpl.REENTRANT
-):
+    module: torch.nn.Module, checkpoint_impl: CheckpointImpl = CheckpointImpl.REENTRANT
+) -> torch.nn.Module:
     """
     A convenience wrapper for activation checkpointing. If the module is wrapped
     with this function, all subsequent calls to the module will automatically
@@ -38,29 +57,5 @@ def checkpoint_wrapper(
         raise ValueError(
             "No support for non-reentrant based checkpoint implementation."
         )
-    # Use weakref to avoid creating a refcycle: m -> m.forward -> m. This would
-    # leak GPU memory because python won't gc the module when the module is
-    # freed.
-    module.forward = partial(  # type: ignore[assignment]
-        _checkpointed_forward,
-        type(module).forward,
-        ref(module),
-        checkpoint_impl,
-    )
-    return module
 
-def _checkpointed_forward(
-    original_forward: Any, weak_self: Any, checkpoint_impl: Any, *args: Any, **kwargs: Any
-) -> Any:
-    module = weak_self()
-    # If grads are disabled, call into original forward
-    if not torch.is_grad_enabled():
-        return original_forward(module, *args, **kwargs)
-
-    forward_args = (module, ) + args
-    return checkpoint(
-        original_forward,
-        use_reentrant=(checkpoint_impl == CheckpointImpl.REENTRANT),
-        *forward_args,
-        **kwargs
-    )
+    return _CheckpointWrapper(module, checkpoint_impl)
