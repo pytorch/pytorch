@@ -226,9 +226,7 @@ Tensor computeQuantizedAdd(
   ExprHandle out_qscale = DoubleImm::make(c10::get<double>(inputs[2]));
   ExprHandle out_qzero = LongImm::make(c10::get<int64_t>(inputs[3]));
   Dtype dequant_dtype = kFloat;
-  TORCH_INTERNAL_ASSERT(
-      outputType, buildErrorMessage("quantized lowering expects output dtype"));
-  Dtype out_dtype = Dtype(*outputType);
+  Dtype out_dtype = outputType ? Dtype(*outputType) : QA.dtype();
   std::vector<VarPtr> vars;
   std::vector<ExprHandle> indices;
   for (const auto& os : outputShape) {
