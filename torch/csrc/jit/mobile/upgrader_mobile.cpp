@@ -25,7 +25,7 @@ getOperatorVersionMapForMobile() {
   return operatorVersionMapForMobile;
 }
 
-std::vector<ByteCodeFunctionWithOperator> getUpgraderBytecodeList() {
+std::vector<ByteCodeFunctionWithOperator>& getUpgraderBytecodeList() {
   static std::vector<ByteCodeFunctionWithOperator> upgraderBytecodeList({
       ByteCodeFunctionWithOperator({
           mobile::Function::registerFunc(
