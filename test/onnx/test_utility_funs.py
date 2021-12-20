@@ -1149,7 +1149,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         renamed_intermediate = 0
         for n in g.nodes():
             for v in n.inputs():
-                if "onnx::Mul_" in v.debugName():
+                if v.debugName().startswith("onnx::Mul_"):
                     renamed_intermediate += 1
         self.assertEqual(renamed_intermediate, 2)
 

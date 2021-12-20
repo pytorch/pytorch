@@ -555,7 +555,7 @@ def _model_to_graph(model, args, verbose=False,
 
     # If output names lack a proper name and are identified only by their unique
     # give them a legible name for debugging purposes
-    _replace_unique_output_ids(graph, params_dict)
+    _apply_friendly_debug_names(graph, params_dict)
 
     return graph, params_dict, torch_out
 
@@ -805,12 +805,12 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
     return torch_out
 
 
-def _replace_unique_output_ids(graph, params):
+def _apply_friendly_debug_names(graph, params):
     for n in graph.nodes():
         for v in n.inputs():
-            if v.debugName() != str(v.unique()):
-                continue
             old_name = v.debugName()
+            if old_name != str(v.unique()):
+                continue
             new_name = f"{n.kind()}_{v.unique()}"
             v.setDebugName(new_name)
             if old_name in params:
