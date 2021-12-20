@@ -330,8 +330,8 @@ struct CudaGraphFuser {
     }
 
     if ((consumer->inputs().size() + consumer->outputs().size() +
-         producer->inputs().size() +
-         producer->outputs().size()) > subgraph_arg_limit_) {
+         producer->inputs().size() + producer->outputs().size()) >
+        subgraph_arg_limit_) {
       return at::nullopt;
     }
 
@@ -762,12 +762,14 @@ struct CudaGraphFuser {
           // fusing nodes sharing inputs, this could save memory bandwidth by
           // reducing number of tensor read.
           for (const auto& u : producer->uses()) {
-            // only merge nodes before consumer, since any sibling after consumer
-            // has already considered merging this consumer to them already.
+            // only merge nodes before consumer, since any sibling after
+            // consumer has already considered merging this consumer to them
+            // already.
             if (u.user->isBefore(consumer)) {
               auto fusion_group = tryFuse(consumer, u.user);
               if (fusion_group) {
-                return std::make_pair(fusion_group.value()->reverseIterator(), true);
+                return std::make_pair(
+                    fusion_group.value()->reverseIterator(), true);
               }
             }
           }
@@ -1960,6 +1962,8 @@ void decomposeConvOps(Block* block) {
     auto bias_n = graph->insertNode(graph->create(
         prim::add_optional, {n->output(0), unsqueezed_bias->output()}, 1));
     bias_n->output()->setType(n->output(0)->type());
+    // moving add_optional after conv2d since it uses its output.
+    bias_n->moveAfter(n);
 
     // replace later uses
     n->output(0)->replaceAllUsesAfterNodeWith(bias_n, bias_n->output());

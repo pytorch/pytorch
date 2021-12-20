@@ -23,7 +23,7 @@ class TypeParser {
   void expectChar(char c);
   template <class T>
   TypePtr CreateSingleElementType();
-  TypePtr parseSingleElemenetType(DynamicType::Tag);
+  TypePtr parseSingleElementType(DynamicType::Tag);
 
   void lex();
 
