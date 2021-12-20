@@ -1782,7 +1782,7 @@ class ModelForFusion(nn.Module):
         x = self.sub1(x)
         x = self.dequant(x)
         x = self.sub2(x)
-        x = x.view(-1, 36).contiguous()
+        x = x.reshape(-1, 36).contiguous()
         x = self.fc(x)
         y = self.conv2(y)
         y = self.relu2(y)
