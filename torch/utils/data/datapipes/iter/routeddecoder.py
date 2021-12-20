@@ -48,9 +48,15 @@ class RoutedDecoderIterDataPipe(IterDataPipe[Tuple[str, Any]]):
         for data in self.datapipe:
             pathname = data[0]
             result = self.decoder(data)
-            yield (pathname, result[pathname])
+            yield pathname, result[pathname]
 
     def __len__(self) -> int:
         if isinstance(self.datapipe, Sized):
             return len(self.datapipe)
         raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
+
+    def save_snapshot(self):
+        pass
+
+    def restore_snapshot(self, snapshot=None):
+        pass

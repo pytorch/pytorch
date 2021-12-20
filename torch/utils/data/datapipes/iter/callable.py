@@ -140,6 +140,12 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
         else:
             self.fn = dill_function  # type: ignore[assignment]
 
+    def save_snapshot(self):
+        pass
+
+    def restore_snapshot(self, snapshot=None):
+        pass
+
 
 @functional_datapipe("collate")
 class CollatorIterDataPipe(MapperIterDataPipe):

@@ -98,3 +98,9 @@ class FilterIterDataPipe(IterDataPipe[T_co]):
             self.filter_fn = dill.loads(dill_function)  # type: ignore[assignment]
         else:
             self.filter_fn = dill_function  # type: ignore[assignment]
+
+    def save_snapshot(self):
+        pass
+
+    def restore_snapshot(self, snapshot=None):
+        pass

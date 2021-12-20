@@ -43,6 +43,14 @@ class SamplerIterDataPipe(IterDataPipe[T_co]):
             return len(self.sampler)
         raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
 
+    def save_snapshot(self):
+        # TODO: 1. Should this DataPipe have a buffer?
+        # TODO: 2. It really depends on the specific sampler (potentially need poor man's sampling
+        pass
+
+    def restore_snapshot(self, snapshot=None):
+        pass
+
 
 @functional_datapipe('shuffle')
 class ShufflerIterDataPipe(IterDataPipe[T_co]):
@@ -119,3 +127,10 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
         if isinstance(self.datapipe, Sized):
             return len(self.datapipe)
         raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
+
+    def save_snapshot(self):
+        # TODO: Need to save the buffer
+        pass
+
+    def restore_snapshot(self, snapshot=None):
+        pass

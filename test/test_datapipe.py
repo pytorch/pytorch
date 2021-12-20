@@ -127,6 +127,22 @@ def reset_after_n_next_calls(datapipe: Union[IterDataPipe[T_co], MapDataPipe[T_c
     return res_before_reset, list(datapipe)
 
 
+def snapshot_test_helper(source_datapipe: IterDataPipe,
+                         new_datapipe: IterDataPipe, n_elements_to_advance: int) -> IterDataPipe:
+    """
+    Given an IterDataPipe and an integer `n`, advance the source_datapipe `n` times,
+    then get the state and snapshot from the DataPipe, recreates it by passing the
+    state and snapshot into the given new_datapipe and returns it.
+    """
+    it = iter(source_datapipe)
+    for _ in range(n_elements_to_advance):
+        next(it)
+    state = source_datapipe.__getstate__()
+    snapshot = source_datapipe.save_snapshot()
+    new_datapipe.__setstate__(state)
+    new_datapipe.restore_snapshot(snapshot)
+
+
 def odd_or_even(x: int) -> int:
     return x % 2
 
@@ -736,6 +752,13 @@ class TestFunctionalIterDataPipe(TestCase):
         # __len__ Test: inherits length from sequence
         self.assertEqual(len(input_ls), len(input_dp))
 
+        # Snapshot Test:
+        n_elements_to_advance = 5
+        new_dp = dp.iter.IterableWrapper([])
+        snapshot_test_helper(input_dp, new_dp, n_elements_to_advance)
+        for old_ele, new_ele in zip(input_dp, new_dp):
+            self.assertEqual(old_ele, new_ele)
+
     def test_concat_iterdatapipe(self):
         input_dp1 = dp.iter.IterableWrapper(range(10))
         input_dp2 = dp.iter.IterableWrapper(range(5))
@@ -1086,6 +1109,13 @@ class TestFunctionalIterDataPipe(TestCase):
         self.assertEqual(list(range(n_elements_before_reset)), res_before_reset)
         self.assertEqual(list(range(10)), res_after_reset)
 
+        # Snapshot Test: DataPipe restores properly
+        n_elements_to_advance = 5
+        new_dp = dp.iter.Mapper(datapipe=dp.iter.IterableWrapper([]), fn=partial(fn, dtype=torch.int, sum=True))
+        snapshot_test_helper(map_dp, new_dp, n_elements_to_advance)
+        for old_ele, new_ele in zip(map_dp, new_dp):
+            self.assertEqual(old_ele, new_ele)
+
     @suppress_warnings  # Suppress warning for lambda fn
     def test_map_tuple_list_with_col_iterdatapipe(self):
         def fn_11(d):
@@ -1408,6 +1438,13 @@ class TestFunctionalIterDataPipe(TestCase):
         res_before_reset, res_after_reset = reset_after_n_next_calls(filter_dp, n_elements_before_reset)
         self.assertEqual(list(range(5, 10))[:n_elements_before_reset], res_before_reset)
         self.assertEqual(list(range(5, 10)), res_after_reset)
+
+        # Snapshot Test: DataPipe restores properly
+        n_elements_to_advance = 5
+        new_dp = dp.iter.Filter(datapipe=dp.iter.IterableWrapper([]), filter_fn=partial(_filter_fn, val=5, clip=True))
+        snapshot_test_helper(filter_dp, new_dp, n_elements_to_advance)
+        for old_ele, new_ele in zip(filter_dp, new_dp):
+            self.assertEqual(old_ele, new_ele)
 
     def test_sampler_iterdatapipe(self):
         input_dp = dp.iter.IterableWrapper(range(10))

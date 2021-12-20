@@ -34,6 +34,12 @@ class ShardingFilterIterDataPipe(IterDataPipe):
                 (1 if (self.instance_id < len(self.source_datapipe) % self.num_of_instances) else 0)
         raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
 
+    def save_snapshot(self):
+        pass  # Do nothing if previous DataPipe is properly restored
+
+    def restore_snapshot(self, snapshot=None):
+        pass
+
 
 @functional_datapipe('batch')
 class BatcherIterDataPipe(IterDataPipe[DataChunk]):
@@ -91,6 +97,14 @@ class BatcherIterDataPipe(IterDataPipe[DataChunk]):
             return self.length
         raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
 
+    def save_snapshot(self):
+        # TODO: We may want to potentially change `batch` to `current_batch` and save it
+        #       in case some error occurs while __iter__ is midway through?
+        pass  # Do nothing if previous DataPipe is properly restored
+
+    def restore_snapshot(self, snapshot=None):
+        pass
+
 
 @functional_datapipe('unbatch')
 class UnBatcherIterDataPipe(IterDataPipe):
@@ -135,6 +149,14 @@ class UnBatcherIterDataPipe(IterDataPipe):
                         yield i
             else:
                 raise IndexError(f"unbatch_level {self.unbatch_level} exceeds the depth of the DataPipe")
+
+    def save_snapshot(self):
+        # TODO: Poor man's snapshotting
+        #       Need to know what the last known element is in __iter__ and how many have yielded since
+        pass
+
+    def restore_snapshot(self, snapshot=None):
+        pass
 
 
 def _in_batch_shuffle_fn(data: DataChunk):
@@ -227,6 +249,13 @@ class BucketBatcherIterDataPipe(IterDataPipe[DataChunk[T_co]]):
             return self.length
         raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
 
+    def save_snapshot(self):
+        # TODO: Need to ensure that the whole chain of DataPipe (map, shuffle) are all saved properly within __init__
+        pass  # Pass is fine if the traversal captures DataPipes within __init__
+
+    def restore_snapshot(self, snapshot=None):
+        pass
+
 
 @functional_datapipe('groupby')
 class GrouperIterDataPipe(IterDataPipe[DataChunk]):
@@ -313,3 +342,4 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
             res = buffer_elements.pop(key)
             buffer_size -= len(res)
             yield self.wrapper_class(res)
+

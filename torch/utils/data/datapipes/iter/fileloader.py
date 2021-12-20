@@ -26,9 +26,9 @@ class FileLoaderIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
 
     def __init__(
             self,
-            datapipe : Iterable[str],
+            datapipe: Iterable[str],
             mode: str = 'b',
-            length : int = -1):
+            length: int = -1):
         super().__init__()
         self.datapipe: Iterable = datapipe
         self.mode: str = mode
@@ -48,3 +48,9 @@ class FileLoaderIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
         if self.length == -1:
             raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
         return self.length
+
+    def save_snapshot(self):
+        pass  # Do nothing if previous DataPipe is properly restored
+
+    def restore_snapshot(self, snapshot=None):
+        pass

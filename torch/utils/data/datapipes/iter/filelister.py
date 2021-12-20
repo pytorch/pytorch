@@ -29,10 +29,18 @@ class FileListerIterDataPipe(IterDataPipe[str]):
         self.abspath: bool = abspath
         self.length: int = length
 
-    def __iter__(self) -> Iterator[str] :
+    def __iter__(self) -> Iterator[str]:
         yield from get_file_pathnames_from_root(self.root, self.masks, self.recursive, self.abspath)
 
     def __len__(self):
         if self.length == -1:
             raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
         return self.length
+
+    def save_snapshot(self):
+        # TODO: Need to remember what has been yielded - use a buffer? The size shouldn't be large
+        # TODO: How do we deal with state changes of disk?
+        pass
+
+    def restore_snapshot(self, snapshot=None):
+        pass

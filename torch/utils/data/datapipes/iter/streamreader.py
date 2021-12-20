@@ -23,4 +23,11 @@ class StreamReaderIterDataPipe(IterDataPipe[Tuple[str, bytes]]):
                 d = stream.read(self.chunk)
                 if not d:
                     break
-                yield (furl, d)
+                yield furl, d
+
+    def save_snapshot(self):
+        # TODO: Remember last stream url and stream, and how many chunks you have read so far
+        pass
+
+    def restore_snapshot(self, snapshot=None):
+        pass

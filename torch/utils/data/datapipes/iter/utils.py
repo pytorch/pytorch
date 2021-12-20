@@ -22,6 +22,8 @@ class IterableWrapperIterDataPipe(IterDataPipe):
     def __init__(self, iterable, deepcopy=True):
         self.iterable = iterable
         self.deepcopy = deepcopy
+        self.state_counter = 0
+        self.iter = None
 
     def __iter__(self):
         source_data = self.iterable
@@ -39,6 +41,31 @@ class IterableWrapperIterDataPipe(IterDataPipe):
                 )
         for data in source_data:
             yield data
+
+    def __next__(self):
+        if self.iter is None:
+            self.iter = self.__iter__()
+        self.state_counter += 1
+        return next(self.iter)
+
+    def save_snapshot(self):
+        return self.state_counter
+
+    def restore_snapshot(self, target_count=None):  # This should be called after __setstate__
+        if target_count is None:
+            target_count = self.state_counter
+        self.state_counter = 0
+        while self.state_counter < target_count:
+            next(self)
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        del state['iter']
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__ = state
+        self.iter = self.__iter__()
 
     def __len__(self):
         return len(self.iterable)
