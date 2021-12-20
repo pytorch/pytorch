@@ -19,6 +19,7 @@ from typing import (
     Set,
     Union,
     cast,
+    DefaultDict,
 )
 
 import torch
@@ -589,7 +590,9 @@ class PackageExporter:
             is_pickle=True,
         )
 
-        def _check_mocked_error(module: str, field: str):
+        def _check_mocked_error(module: Optional[str], field: Optional[str]):
+            assert isinstance(module, str)
+            assert isinstance(field, str)
             if self._can_implicitly_extern(module):
                 return
             for pattern, pattern_info in self.patterns.items():
@@ -608,7 +611,7 @@ class PackageExporter:
             all_dependencies = []
             module = None
             field = None
-            memo = defaultdict(int)
+            memo: DefaultDict[int, str] = defaultdict(None)
             memo_count = 0
             for opcode, arg, pos in pickletools.genops(data_value):
                 if pickle_protocol == 4:
