@@ -1,3 +1,4 @@
+#include <ATen/core/dynamic_type.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/mobile/function.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
@@ -100,7 +101,7 @@ const c10::FunctionSchema& Function::getSchema() const {
 
 void Function::run(Stack& stack) {
   if (hasSchema()) { // if we have a schema then resolve optional args if any
-    getSchema().checkAndNormalizeInputs(
+    getSchema().checkAndNormalizeInputs<c10::DynamicType>(
         stack, std::unordered_map<std::string, IValue>{} /*kwargs*/);
   }
   InterpreterState interp_state(code_);

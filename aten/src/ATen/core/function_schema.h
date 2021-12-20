@@ -255,6 +255,7 @@ struct FunctionSchema {
   // this should always be set no matter what
   c10::optional<AliasAnalysisKind> alias_kind_;
 
+  template <typename T>
   void checkArg(const IValue& value, const Argument& argument, optional<size_t> pos) const;
 
   void checkSchema() const {
@@ -358,6 +359,7 @@ struct FunctionSchema {
 
   // Check that inputs have the correct types and appends any missing default
   // values.
+  template <typename T = c10::Type>
   void checkAndNormalizeInputs(
       std::vector<IValue>& inputs,
       const std::unordered_map<std::string, IValue>& kwargs =

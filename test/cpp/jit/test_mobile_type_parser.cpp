@@ -2,11 +2,7 @@
 #include <test/cpp/jit/test_utils.h>
 
 #include <ATen/core/jit_type.h>
-
-namespace c10 {
-TypePtr parseType(const std::string& pythonStr);
-std::vector<TypePtr> parseType(std::vector<std::string>& pythonStr);
-} // namespace c10
+#include <torch/csrc/jit/mobile/type_parser.h>
 
 namespace torch {
 namespace jit {
@@ -96,11 +92,7 @@ TEST(MobileTypeParserTest, DictNestedNamedTupleTypeList) {
   std::string type_str_2(
       "Dict[str, __torch__.base_models.preproc_types.PreprocOutputType]");
   std::vector<std::string> type_strs = {type_str_1, type_str_2};
-  std::vector<c10::TypePtr> named_tuple_tps = c10::parseType(type_strs);
-  std::string named_tuple_annotation_str = named_tuple_tps[1]->annotation_str();
-  ASSERT_EQ(
-      named_tuple_annotation_str,
-      "Dict[str, __torch__.base_models.preproc_types.PreprocOutputType]");
+  EXPECT_NO_THROW(c10::parseType(type_strs));
 }
 
 TEST(MobileTypeParserTest, NamedTupleNestedNamedTupleTypeList) {

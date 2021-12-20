@@ -6,13 +6,6 @@
 #include <torch/custom_class.h>
 #include <queue>
 
-namespace torch {
-namespace jit {
-const std::unordered_map<std::string, c10::TypePtr>& string_to_type_lut();
-}
-} // namespace torch
-
-using torch::jit::string_to_type_lut;
 using torch::jit::valid_single_char_tokens;
 
 namespace c10 {
@@ -67,7 +60,7 @@ std::vector<TypePtr> TypeParser::parseList() {
       pythonStr_ = pythonStrs_[i];
       start_ = 0;
       lex();
-      type_ptr = parse();
+      type_ptr = parse<c10::DynamicType>();
     }
     typePtrs[i] = type_ptr;
     str_type_ptr_map_[type_ptr->repr_str()] = type_ptr;
@@ -97,68 +90,6 @@ std::unordered_set<std::string> TypeParser::getContainedTypes() {
   return contained_types_;
 }
 
-TypePtr TypeParser::parseNonSimple(const std::string& token) {
-  if (token == "List") {
-    return CreateSingleElementType<ListType>();
-  } else if (token == "Optional") {
-    return parseSingleElementType(DynamicType::Tag::Optional);
-  } else if (token == "Future") {
-    return CreateSingleElementType<FutureType>();
-  } else if (token == "Dict") {
-    expectChar('[');
-    auto key = parse();
-    expectChar(',');
-    auto val = parse();
-    expectChar(']');
-    return DictType::create(std::move(key), std::move(val));
-  } else if (token == "Tuple") {
-    std::vector<TypePtr> types;
-    expectChar('[');
-    while (cur() != "]") {
-      types.emplace_back(parse());
-      if (cur() != "]") {
-        expectChar(',');
-      }
-    }
-    expect("]");
-    return TupleType::create(types);
-  }
-  return nullptr;
-}
-
-TypePtr TypeParser::parse() {
-  std::string token = next();
-  auto simpleTypeIt = string_to_type_lut().find(token);
-  if (simpleTypeIt != string_to_type_lut().end()) {
-    if (cur() != "]" && cur() != "," && cur() != "") {
-      TORCH_CHECK(
-          false, "Simple type ", token, " is followed by ", "invalid chars.");
-    }
-    contained_types_.insert(token);
-    return simpleTypeIt->second;
-  } else if (getNonSimpleType().find(token) != getNonSimpleType().end()) {
-    contained_types_.insert(token);
-    return parseNonSimple(token);
-  } else if (token == "__torch__") {
-    expectChar('.');
-    if (cur() == "torch") {
-      // torch bind class starts with __torch__.torch.classes
-      return parseTorchbindClassType();
-    } else {
-      // other class starts with __torch__ following by custom names
-      return parseCustomType();
-    }
-  } else {
-    TORCH_CHECK(
-        false,
-        "Type ",
-        token,
-        " is not supported in the parser, ",
-        "or the token is in wrong format.");
-  }
-  return nullptr;
-}
-
 // NamedTuple custom type will be following structure:
 // "qualified_named[
 //   NamedTuple, [
@@ -185,7 +116,7 @@ TypePtr TypeParser::parseNamedTuple(const std::string& qualified_name) {
     expect("[");
     std::string field_name = next();
     expect(",");
-    TypePtr field_type = parse();
+    TypePtr field_type = parse<c10::Type>();
     field_names.emplace_back(field_name);
     field_types.emplace_back(field_type);
     expect("]");
@@ -294,15 +225,15 @@ void TypeParser::expectChar(char c) {
 template <class T>
 TypePtr TypeParser::CreateSingleElementType() {
   expectChar('[');
-  auto result = T::create(parse());
+  auto result = T::create(parse<c10::Type>());
   expectChar(']');
   return result;
 }
 
 TypePtr TypeParser::parseSingleElementType(DynamicType::Tag tag) {
   expectChar('[');
-  auto result =
-      std::make_shared<DynamicType>(tag, DynamicType::Arguments(parse()));
+  auto result = std::make_shared<DynamicType>(
+      tag, DynamicType::Arguments(parse<c10::DynamicType>()));
   expectChar(']');
   return result;
 }
@@ -344,11 +275,6 @@ void TypeParser::advance() {
 
 C10_NODISCARD c10::string_view TypeParser::cur() const {
   return next_token_;
-}
-
-TORCH_API at::TypePtr parseType(const std::string& pythonStr) {
-  at::TypeParser parser(pythonStr);
-  return parser.parse();
 }
 
 TORCH_API std::vector<at::TypePtr> parseType(

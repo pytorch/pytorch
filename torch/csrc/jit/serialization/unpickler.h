@@ -4,6 +4,7 @@
 #include <c10/util/ArrayRef.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/Export.h>
+#include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/serialization/pickler.h>
 
 namespace torch {
@@ -23,6 +24,8 @@ class DeserializationStorageContext;
 // support models saved before 1.1
 class TORCH_API Unpickler {
   TH_DISALLOW_COPY_AND_ASSIGN(Unpickler);
+
+  using TypeParserT = c10::TypePtr (*)(const std::string&);
 
  public:
   // tensors inside the pickle are references to the tensor_table.
@@ -51,7 +54,8 @@ class TORCH_API Unpickler {
       std::function<at::DataPtr(const std::string&)> read_record,
       c10::optional<at::Device> device,
       bool use_storage_device = false,
-      std::shared_ptr<DeserializationStorageContext> storage_context = nullptr)
+      std::shared_ptr<DeserializationStorageContext> storage_context = nullptr,
+      TypeParserT type_parser = c10::parseType)
       : reader_(std::move(reader)),
         tensor_table_(),
         type_resolver_(std::move(type_resolver)),
@@ -61,6 +65,7 @@ class TORCH_API Unpickler {
         device_(std::move(device)),
         use_storage_device_(use_storage_device),
         storage_context_(std::move(storage_context)),
+        type_parser_(type_parser),
         version_(caffe2::serialize::kProducedFileFormatVersion) {}
 
   // consume the pickle stream, producing an IValue from the contents.
@@ -159,6 +164,8 @@ class TORCH_API Unpickler {
   // Used for torch.package to enable sharing of storages across
   // ScriptModules and eager modules
   std::shared_ptr<DeserializationStorageContext> storage_context_;
+
+  TypeParserT type_parser_{c10::parseType};
 
   // See [type tag serialization]
   uint64_t version_;

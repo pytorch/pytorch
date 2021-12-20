@@ -171,6 +171,7 @@ inline bool FunctionSchema::isBackwardCompatibleWith(
   return true;
 }
 
+template<typename T>
 inline void FunctionSchema::checkArg(
     const IValue& value,
     const Argument& argument,
@@ -179,7 +180,7 @@ inline void FunctionSchema::checkArg(
     // Fast-path for the common case
     return;
   }
-  if (!value.type()->isSubtypeOf(*argument.type())) {
+  if (!value.type<T>()->isSubtypeOf(*argument.type())) {
     TORCH_CHECK(
         false,
         formatTypeMismatchMsg(
@@ -222,6 +223,7 @@ inline std::string FunctionSchema::findErrorInKwargs(const std::vector<std::stri
   return "";
 }
 
+template <typename T>
 inline void FunctionSchema::checkAndNormalizeInputs(
     std::vector<IValue>& inputs,
     const std::unordered_map<std::string, IValue>& kwargs) const {
@@ -241,12 +243,12 @@ inline void FunctionSchema::checkAndNormalizeInputs(
   for (const auto pos : c10::irange(arguments().size())) {
     const auto& argument = arguments()[pos];
     if (pos < inputs.size()) {
-      checkArg(inputs[pos], argument, pos);
+      checkArg<T>(inputs[pos], argument, pos);
       continue;
     }
     auto it = kwargs.find(argument.name());
     if (it != kwargs.end()) {
-      checkArg(it->second, argument, nullopt);
+      checkArg<T>(it->second, argument, nullopt);
       inputs.push_back(it->second);
       consumed_kwargs++;
       continue;

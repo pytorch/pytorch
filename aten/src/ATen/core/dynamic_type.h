@@ -130,6 +130,11 @@ class DynamicType : public Type {
 
   explicit DynamicType(Tag, Arguments);
 
+  TypePtr containedType(size_t) const override;
+  Tag tag() const {
+    return tag_;
+  }
+
  private:
   friend struct Type;
   static std::shared_ptr<const DynamicType> create(const Type& ty);
@@ -155,6 +160,16 @@ class DynamicType : public Type {
     ClassTypePtr class_;
   };
 };
+
+template <typename T>
+struct DynamicTypeTrait {};
+#define DYNAMIC_TYPE_TAG_VALUE(NAME, _) \
+template <> \
+struct DynamicTypeTrait<NAME ## Type> { \
+static constexpr auto tagValue = DynamicType::Tag::NAME; \
+};
+    FORALL_DYNAMIC_TYPES(DYNAMIC_TYPE_TAG_VALUE)
+#undef DYNAMIC_TYPE_TAG_VALUE
 
 template <>
 struct IValue::TagType<c10::DynamicType> {

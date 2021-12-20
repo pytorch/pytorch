@@ -165,10 +165,19 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
 }
 
 void restoreContainerTypeTags(const IValue& ivalue, const TypePtr& type) {
-  if (auto dict_type = type->cast<DictType>()) {
+  auto is = [&](TypeKind kind, DynamicType::Tag tag) {
+    if (type->kind() == kind) {
+      return true;
+    }
+    if (auto dyn = type->castRaw<DynamicType>()) {
+      return dyn->tag() == tag;
+    }
+    return false;
+  };
+  if (is(DictType::Kind, DynamicType::Tag::Dict)) {
     auto dict = ivalue.toGenericDict();
-    dict.unsafeSetKeyType(dict_type->getKeyType());
-    dict.unsafeSetValueType(dict_type->getValueType());
+    dict.unsafeSetKeyType(type->containedType(0));
+    dict.unsafeSetValueType(type->containedType(1));
   } else if (auto list_type = type->cast<ListType>()) {
     ivalue.toList().unsafeSetElementType(list_type->getElementType());
   } else {
@@ -565,7 +574,7 @@ void Unpickler::readGlobal(
           if (type_resolver_ == nullptr) {
             // If we haven't injected a custom way of retrieving types from
             // names, use a barebones type parser.
-            type = c10::parseType(type_str);
+            type = type_parser_(type_str);
           } else {
             type = type_resolver_(type_str).type_;
           }
