@@ -399,6 +399,7 @@ class TestMkldnn(TestCase):
             self.assertRaisesRegex(RuntimeError,
                                    msg,
                                    lambda: m(x2))
+
     def _test_prelu_base(self, size, num_channels):
         x = torch.randn(size, dtype=torch.float32)
         x1 = x.clone().requires_grad_()
