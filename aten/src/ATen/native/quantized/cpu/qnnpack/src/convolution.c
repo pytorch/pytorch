@@ -40,7 +40,7 @@ static inline size_t compute_output_dimension(
 /**
  * Not exposed in header file
  */
-enum pytorch_qnnp_status pytorch_qnnp_create_convolution_ndhwc_q8(
+static enum pytorch_qnnp_status pytorch_qnnp_create_convolution_ndhwc_q8(
     uint32_t input_padding_depth,
     uint32_t input_padding_height,
     uint32_t input_padding_width,
