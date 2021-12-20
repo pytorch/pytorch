@@ -6,7 +6,7 @@
 
 namespace c10 {
 
-class TypeParser {
+class TORCH_API TypeParser {
   template <typename T>
   struct TypeFactory {};
 
