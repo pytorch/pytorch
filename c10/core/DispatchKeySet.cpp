@@ -69,24 +69,6 @@ DispatchKeySet getBackendKeySetFromAutograd(DispatchKey t) {
   }
 }
 
-DispatchKeySet getAutocastRelatedKeySetFromBackend(DispatchKey t) {
-  TORCH_INTERNAL_ASSERT(t <= DispatchKey::EndOfBackendKeys || t == DispatchKey::Undefined);
-  switch (t) {
-    case DispatchKey::CPUBit:
-      return DispatchKeySet(DispatchKey::AutocastCPU);
-    case DispatchKey::CUDABit:
-    case DispatchKey::XLABit:
-      return DispatchKeySet(DispatchKey::AutocastCUDA);
-    default:
-      return DispatchKeySet();
-  }
-}
-
-DispatchKeySet getAutogradRelatedKeySetFromBackend(DispatchKey t) {
-  return DispatchKeySet(
-      {DispatchKey::ADInplaceOrView, getAutogradKeyFromBackend(t)});
-}
-
 bool isIncludedInAlias(DispatchKey k, DispatchKey alias) {
   return k != DispatchKey::Undefined && runtimeDispatchKeySetHas(alias, k);
 }

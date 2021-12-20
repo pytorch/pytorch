@@ -82,14 +82,7 @@ class C10_API DispatchKeySet final {
   // must be explicit when they do this!
   constexpr DispatchKeySet(Raw, uint64_t x) : repr_(x) {}
 
-  // This is difficult to make constexpr: toFunctionalityKey and toBackendKey will need to be constexpr too
   constexpr explicit DispatchKeySet(DispatchKey k) {
-    // Technically it would be possible to add alias dispatch keys to a DispatchKeySet,
-    // but the semantics are a little confusing and this currently isn't needed anywhere.
-    if (isAliasDispatchKey(k)) {
-      throw std::invalid_argument("invalid key");
-    }
-
     if (k == DispatchKey::Undefined) {
       // Case 1: handle Undefined specifically
       repr_ = 0;
@@ -98,16 +91,16 @@ class C10_API DispatchKeySet final {
       // These keys (e.g. DispatchKey::CPUBit) have a backend bit set, but no functionality bits.
       uint64_t backend_val = 1ULL << static_cast<uint8_t>(k);
       repr_ = backend_val;
-    } else if (isPerBackendFunctionalityKey(k)) {
-      // Case 3: handle "per-backend-functionality" keys
-      // E.g. for DispatchKey::Dense, or DispatchKey::Sparse,
-      // we'll only set the functionality bit and not set any backend bits.
-      // The - 1 is because Undefined is technically a "functionality" that doesn't show up in the bitset.
-      // So e.g. Dense is technically the second functionality, but the lowest functionality bit.
+    } else if (k < DispatchKey::EndOfFunctionalityKeys) {
+      // Case 2: handle "functionality-only" keys
+      // These keys have a functionality bit set, but no backend bits
+      // These can technically be either:
+      // - valid runtime keys (e.g. DispatchKey::AutogradOther, DispatchKey::FuncTorchBatched, etc)
+      // - "building block" keys that aren't actual runtime keys (e.g. DispatchKey::Dense or Sparse)
       uint64_t functionality_val = 1ULL << (static_cast<uint8_t>(k) - 1);
       repr_ = functionality_val;
-    } else {
-      // Case 4: "runtime" keys that have a functionality bit.
+    } else if (k <= DispatchKey::EndOfAutogradBackends) {
+      // Case 3: "runtime" keys that have a functionality bit AND a backend bit.
       // First compute which bit to flip for the functionality.
       auto functionality_k = toFunctionalityKey(k);
       // The - 1 is because Undefined is technically a "functionality" that doesn't show up in the bitset.
@@ -115,22 +108,21 @@ class C10_API DispatchKeySet final {
       uint64_t functionality_val = 1ULL << (static_cast<uint8_t>(functionality_k) - 1);
 
       // then compute which bit to flip for the backend
-      if (k > DispatchKey::EndOfFunctionalityKeys) {
-        // Case 4a: handle the runtime instances of "per-backend functionality" keys
-        // For example, given DispatchKey::CPU, we should set:
-        // - the Dense functionality bit
-        // - the CPUBit backend bit
-        // first compute which bit to flip for the backend
-        auto backend_k = toBackendKey(k);
-        uint64_t backend_val = 1ULL << static_cast<uint8_t>(backend_k);
-        repr_ = functionality_val + backend_val;
-      } else {
-        // Case 4b handle the runtime functionality keys that are not per-backend.
-        // In this case, the functionality key is not per-backend, so we don't set any backend bits.
-        // e.g. DispatchKey::FuncTorchBatched.
-        repr_ = functionality_val;
-      }
+      // Case 4a: handle the runtime instances of "per-backend functionality" keys
+      // For example, given DispatchKey::CPU, we should set:
+      // - the Dense functionality bit
+      // - the CPUBit backend bit
+      // first compute which bit to flip for the backend
+      auto backend_k = toBackendKey(k);
+      uint64_t backend_val = 1ULL << static_cast<uint8_t>(backend_k);
+      repr_ = functionality_val + backend_val;
+    } else {
+      // At this point, we should have covered every case except for alias keys.
+      // Technically it would be possible to add alias dispatch keys to a DispatchKeySet,
+      // but the semantics are a little confusing and this currently isn't needed anywhere.
+      throw std::invalid_argument("You cannot create a DispatchKeySet using alias DispatchKeys");
     }
+
   }
 
   explicit constexpr DispatchKeySet(std::initializer_list<DispatchKey> ks)
@@ -139,11 +131,45 @@ class C10_API DispatchKeySet final {
       repr_ |= DispatchKeySet(k).repr_;
     }
   }
+
   // Test if a DispatchKey is in the set
-  bool inline has(DispatchKey t) const {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(t != DispatchKey::Undefined);
-    auto ks = DispatchKeySet(t);
+  constexpr bool has(DispatchKey t) const {
+#ifdef NDEBUG
+  if (t == DispatchKey::Undefined) {
+	throw std::invalid_argument("DispatchKeySet::has() called with Undefined key");
+  }
+#endif
+    return has_all(DispatchKeySet(t));
+  }
+
+  // Test if a DispatchKey is in the set
+  // Given a DispatchKeySet of functionality keys and (potentially) backend keys,
+  // tests if all of them are in the current set.
+  constexpr bool has_all(DispatchKeySet ks) const {
     return static_cast<bool>((repr_ & ks.repr_) == ks.repr_);
+  }
+
+  // Given a DispatchKeySet of functionality keys and (potentially) backend keys,
+  // tests if any of them are in the current set.
+  // This could technically be pretty easily implemented using has().
+  // It is strictly a perf optimization though.
+  // There are many places in the code base
+  // where we want to test for multiple functionality keys together.
+  // HOWEVER, runtime per-backend functionality keys aren't allowed to be used with this function,
+  // because you can end up with weird results.
+  // e.g. DispatchKeySet(DispatchKey::AutogradCPU).has_any(DispatchKeySet(DispatchKey::CPU)) would return true.
+  inline bool has_any(DispatchKeySet ks) const {
+    //TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      // Either there are no backend bits in the input keyset
+      //((ks.repr_ & full_backend_mask) == 0) ||
+      // or there are no per-backend-functionality bits
+      //((ks & DispatchKeySet({
+          //DispatchKey::Dense,
+          //DispatchKey::Quantized,
+          //DispatchKey::Sparse,
+          //DispatchKey::Autograd,
+        //}).repr_) == 0));
+    return static_cast<bool>((repr_ & ks.repr_) != 0);
   }
   // Test if DispatchKeySet is a superset of ks.
   bool isSupersetOf(DispatchKeySet ks) const {
@@ -184,10 +210,9 @@ class C10_API DispatchKeySet final {
   C10_NODISCARD DispatchKeySet add(DispatchKey t) const {
     return *this | DispatchKeySet(t);
   }
-  // TODO: remove
-  //C10_NODISCARD DispatchKeySet remove(DispatchKey t) const {
-    //return DispatchKeySet(repr_ & ~DispatchKeySet(t).repr_);
-  //}
+  C10_NODISCARD DispatchKeySet add(DispatchKeySet ks) const {
+    return *this | ks;
+  }
 
   // Remove a DispatchKey from the DispatchKey set.
   // Only functionality bits are allowed to be removed from a keyset.
@@ -209,14 +234,23 @@ class C10_API DispatchKeySet final {
     // backend bits: CPU, CUDA
     //
     // Instead, removeFunctionalityKey(DispatchKey.AutogradCPU) will only remove the "Autograd" bit from the bitset.
-    if (t <= DispatchKey::EndOfBackendKeys) {
+    if (C10_UNLIKELY(t <= DispatchKey::EndOfBackendKeys)) {
       throw std::invalid_argument("invalid key");
     }
-    if (isAliasDispatchKey(t)) {
+    if C10_UNLIKELY((isAliasDispatchKey(t))) {
       throw std::invalid_argument("invalid key");
     }
-    auto functionality_k = isPerBackendFunctionalityKey(t) ? t : toFunctionalityKey(t);
+    //auto functionality_k = isPerBackendFunctionalityKey(t) ? t : toFunctionalityKey(t);
+    auto functionality_k =  toFunctionalityKey(t);
     return DispatchKeySet(repr_ & ~DispatchKeySet(functionality_k).repr_);
+  }
+  constexpr DispatchKeySet removeFunctionalityKeys(DispatchKeySet ks) const {
+#ifdef NDEBUG
+	if (repr_ & full_backend_mask != 0) {
+	  throw std::invalid_argument("DispatchKeySet::removeFunctionalitykeys() called with backends bits set");
+	}
+#endif
+    return DispatchKeySet(repr_ & ~ks.repr_);
   }
   // Is the set empty?  (AKA undefined tensor)
   bool empty() const {
@@ -486,10 +520,23 @@ constexpr DispatchKeySet backend_dispatch_keyset = autogradother_backends |
 constexpr DispatchKeySet math_dispatch_keyset =
         backend_dispatch_keyset | autograd_dispatch_keyset;
 
-
 constexpr DispatchKeySet backend_bitset_mask = DispatchKeySet(
     DispatchKeySet::RAW,
     (1ULL << (static_cast<uint8_t>(DispatchKey::EndOfBackendKeys) + 1)) - 1);
+
+constexpr auto inplace_or_view_ks = DispatchKeySet(DispatchKey::ADInplaceOrView);
+constexpr auto autograd_cpu_ks = DispatchKeySet(DispatchKey::AutogradCPU);
+constexpr auto autograd_xpu_ks = DispatchKeySet(DispatchKey::AutogradXPU);
+constexpr auto autograd_cuda_ks = DispatchKeySet(DispatchKey::AutogradCUDA);
+constexpr auto autograd_xla_ks = DispatchKeySet(DispatchKey::AutogradXLA);
+constexpr auto autograd_lazy_ks = DispatchKeySet(DispatchKey::AutogradLazy);
+constexpr auto autograd_mlc_ks = DispatchKeySet(DispatchKey::AutogradMLC);
+constexpr auto autograd_hpu_ks = DispatchKeySet(DispatchKey::AutogradHPU);
+constexpr auto autograd_nestedtensor_ks = DispatchKeySet(DispatchKey::AutogradNestedTensor);
+constexpr auto autograd_privateuse1_ks = DispatchKeySet(DispatchKey::AutogradPrivateUse1);
+constexpr auto autograd_privateuse2_ks = DispatchKeySet(DispatchKey::AutogradPrivateUse2);
+constexpr auto autograd_privateuse3_ks = DispatchKeySet(DispatchKey::AutogradPrivateUse3);
+constexpr auto autograd_other_ks = DispatchKeySet(DispatchKey::AutogradOther);
 
 struct OpTableOffsetAndMask {
   uint16_t offset;
@@ -516,10 +563,56 @@ C10_API bool runtimeDispatchKeySetHas(DispatchKey t, DispatchKey k);
 C10_API DispatchKeySet getBackendKeySetFromAutograd(DispatchKey t);
 
 // Returns a DispatchKeySet of autograd related keys mapped to backend.
-C10_API DispatchKeySet getAutogradRelatedKeySetFromBackend(DispatchKey t);
+// for a given backend key, use the associated autograd key.
+// for non-backend keys, use AutogradOther as a default.
+// Note: it's convenient and fast to return a default here rather than (say)
+// returning an optional<DispatchKey>, or throwing. But it makes callers
+// responsible for either a) enforcing the invariant that only backend keys
+// be passed as arguments, or b) interpreting our return value carefully.
+inline DispatchKeySet getAutogradRelatedKeySetFromBackend(DispatchKey t) {
+  switch (t) {
+    case DispatchKey::CPUBit:
+      return inplace_or_view_ks | autograd_cpu_ks;
+    case DispatchKey::XPUBit:
+      return inplace_or_view_ks | autograd_xpu_ks;
+    case DispatchKey::CUDABit:
+      return inplace_or_view_ks | autograd_cuda_ks;
+    case DispatchKey::XLABit:
+      return inplace_or_view_ks | autograd_xla_ks;
+    case DispatchKey::LazyBit:
+      return inplace_or_view_ks | autograd_lazy_ks;
+    case DispatchKey::MLCBit:
+      return inplace_or_view_ks | autograd_mlc_ks;
+    case DispatchKey::HPUBit:
+      return inplace_or_view_ks | autograd_hpu_ks;
+    case DispatchKey::NestedTensorBit:
+      return inplace_or_view_ks | autograd_nestedtensor_ks;
+    case DispatchKey::PrivateUse1Bit:
+      return inplace_or_view_ks | autograd_privateuse1_ks;
+    case DispatchKey::PrivateUse2Bit:
+      return inplace_or_view_ks | autograd_privateuse2_ks;
+    case DispatchKey::PrivateUse3Bit:
+      return inplace_or_view_ks | autograd_privateuse3_ks;
+    default:
+      return inplace_or_view_ks | autograd_other_ks;
+  }
+}
 
 // Returns a DispatchKeySet of autocast related keys mapped to backend.
-C10_API DispatchKeySet getAutocastRelatedKeySetFromBackend(DispatchKey t);
+inline DispatchKeySet getAutocastRelatedKeySetFromBackend(DispatchKey t) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(t <= DispatchKey::EndOfBackendKeys || t == DispatchKey::Undefined);
+  constexpr auto autocast_cpu_ks = DispatchKeySet(DispatchKey::AutocastCPU);
+  constexpr auto autocast_cuda_ks = DispatchKeySet(DispatchKey::AutocastCUDA);
+  switch (t) {
+    case DispatchKey::CPUBit:
+      return autocast_cpu_ks;
+    case DispatchKey::CUDABit:
+    case DispatchKey::XLABit:
+      return autocast_cuda_ks;
+    default:
+      return DispatchKeySet();
+  }
+}
 
 // This API exists because we have a use case for checking
 // getRuntimeDispatchKeySet(alias).has(DispatchKey::Undefined)

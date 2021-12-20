@@ -553,10 +553,9 @@ constexpr DispatchKey toBackendKey(DispatchKey k) {
 }
 
 constexpr DispatchKey toFunctionalityKey(DispatchKey k) {
-  if (!isRuntimeDispatchKey(k)) {
+  if (C10_UNLIKELY(k <= DispatchKey::EndOfBackendKeys)) {
     throw std::invalid_argument("invalid key");
-  }
-  if (k <= DispatchKey::EndOfFunctionalityKeys) {
+  } else if (k <= DispatchKey::EndOfFunctionalityKeys) {
     return k;
   } else if (k <= DispatchKey::EndOfDenseBackends) {
     return DispatchKey::Dense;
