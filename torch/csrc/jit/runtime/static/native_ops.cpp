@@ -563,10 +563,10 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(aten::split, aten_split, [](Node* n) -> SROpera
   };
 });
 
-// See [Increment reference count for returned constants]
+// See [Create owned refs for returned constants]
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
-    static_runtime::incref,
-    static_runtime_incref,
+    static_runtime::create_owned_ref,
+    static_runtime_create_owned_ref,
     [](Node*) -> SROperator {
       return
           [](ProcessedNode* p_node) { p_node->Output(0) = p_node->Input(0); };
@@ -576,13 +576,13 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(prim::If, prim_If, [](Node* n) -> SROperator {
   return [](ProcessedNode* p_node) {
     auto condition = p_node->Input(0).toBool();
     auto& blocks = p_node->blocks();
-    DCHECK(blocks.size() == 2);
+    DCHECK_EQ(blocks.size(), 2);
     auto& runner = blocks[!condition];
 
     auto output = (*runner)({});
     if (output.isTuple()) {
       auto& elems = output.toTupleRef().elements();
-      DCHECK(elems.size() == p_node->num_outputs());
+      DCHECK_EQ(elems.size(), p_node->num_outputs());
       for (const auto i : c10::irange(elems.size())) {
         p_node->Output(i) = elems[i];
       }
