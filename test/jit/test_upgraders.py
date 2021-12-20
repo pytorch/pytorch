@@ -114,7 +114,7 @@ class TestUpgraders(JitTestCase):
 
         # add test upgrader in the upgraders map
         @torch.jit.script
-        def _test_serialization_subcmul_0_2(self: torch.Tensor, other: torch.Tensor, alpha: Union[int, float]=2) -> torch.Tensor:
+        def _test_serialization_subcmul_0_2(self: torch.Tensor, other: torch.Tensor, alpha: Union[int, float] = 2) -> torch.Tensor:
             return other - (self * alpha)
 
         torch._C._test_only_populate_upgraders({"_test_serialization_subcmul_0_2": str(_test_serialization_subcmul_0_2.graph)})
