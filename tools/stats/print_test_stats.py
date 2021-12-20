@@ -794,7 +794,7 @@ def process_intentional_test_runs(runs: List[TestCase]) -> Tuple[int, int]:
 
 def assemble_flaky_test_stats(duplicated_tests_by_file: Dict[str, DuplicatedDict]) -> Any:
     flaky_tests = []
-    workflow_job_id = os.environ.get("WORKFLOW_ID", os.environ.get("CIRCLE_WORKFLOW_ID", None))
+    workflow_id = os.environ.get("WORKFLOW_ID", os.environ.get("CIRCLE_WORKFLOW_ID", None))
     for file_name, suite_to_dict in duplicated_tests_by_file.items():
         for suite_name, testcase_to_runs in suite_to_dict.items():
             for testcase_name, list_of_runs in testcase_to_runs.items():
@@ -815,10 +815,10 @@ def assemble_flaky_test_stats(duplicated_tests_by_file: Dict[str, DuplicatedDict
         # write to S3 to go to Rockset as well
         import uuid
         for flaky_test in flaky_tests:
-            flaky_test["workflow_job_id"] = workflow_job_id
-            key = f'flaky_tests/{workflow_job_id}/{uuid.uuid4()}.json'
-            obj = get_S3_object_from_bucket('ossci-raw-job-status', key)
-            obj.put(Body=json.dumps(flaky_test).encode())
+            flaky_test["workflow_id"] = workflow_id
+            key = f"flaky_tests/{workflow_id}/{uuid.uuid4()}.json"
+            obj = get_S3_object_from_bucket("ossci-raw-job-status", key)
+            obj.put(Body=json.dumps(flaky_test), ContentType="application/json")
 
 
 def build_info() -> ReportMetaMeta:
