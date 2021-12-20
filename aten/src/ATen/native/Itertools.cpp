@@ -37,7 +37,7 @@ Tensor cartesian_prod(TensorList tensors) {
   if (tensors.size() == 1) {
     return tensors[0];
   }
-  std::vector<Tensor> grids = at::meshgrid(tensors);
+  std::vector<Tensor> grids = at::meshgrid(tensors, "ij");
   for(Tensor &t : grids) {
     t = t.flatten();
   }
