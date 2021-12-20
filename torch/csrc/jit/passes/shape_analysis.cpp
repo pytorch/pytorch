@@ -1,4 +1,3 @@
-#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <torch/csrc/jit/passes/shape_analysis.h>
 
 #include <c10/util/Exception.h>
@@ -15,6 +14,7 @@
 
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/core/symbol.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
