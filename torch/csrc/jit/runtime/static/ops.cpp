@@ -156,18 +156,23 @@ namespace {
 // non-_MSC_VER version is a syntax error according to MSVC. Use the
 // appropriate version depending on if we're MSVC or not.
 
-#define TO_COPY_OUT_FAST_PATH_LOGIC(out, self, self_t)                         \
-  do {                                                                         \
-    const auto N = self.numel();                                               \
-    const auto self_data = self.data_ptr<self_t>();                            \
-    AT_DISPATCH_ALL_TYPES_AND2(                                                \
-        kHalf, kBFloat16, out.scalar_type(), "to_copy_out_inner_loop", [&]() { \
-          const auto out_data = out.data_ptr<scalar_t>();                      \
-          for (const auto idx : c10::irange(N)) {                              \
-            /* NOLINTNEXTLINE(bugprone-signed-char-misuse) */                  \
-            out_data[idx] = static_cast<scalar_t>(self_data[idx]);             \
-          }                                                                    \
-        });                                                                    \
+#define TO_COPY_OUT_FAST_PATH_LOGIC(out, self, self_t)             \
+  do {                                                             \
+    const auto N = self.numel();                                   \
+    const auto self_data = self.data_ptr<self_t>();                \
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(                        \
+        kHalf,                                                     \
+        kBFloat16,                                                 \
+        kBool,                                                     \
+        out.scalar_type(),                                         \
+        "to_copy_out_inner_loop",                                  \
+        [&]() {                                                    \
+          const auto out_data = out.data_ptr<scalar_t>();          \
+          for (const auto idx : c10::irange(N)) {                  \
+            /* NOLINTNEXTLINE(bugprone-signed-char-misuse) */      \
+            out_data[idx] = static_cast<scalar_t>(self_data[idx]); \
+          }                                                        \
+        });                                                        \
   } while (0)
 
 #ifdef _MSC_VER
@@ -197,6 +202,18 @@ at::Tensor& to_copy_out(
   } else {
     at::native::resize_(out, self.sizes(), c10::nullopt);
   }
+  auto is_unsupported_dtype = [](ScalarType t) {
+#define TORCH_OPS_UNSUPPORTED_TYPE(_, type) \
+  case k##type:                             \
+    return true;
+    switch (t) {
+      AT_FORALL_QINT_TYPES(TORCH_OPS_UNSUPPORTED_TYPE)
+      AT_FORALL_COMPLEX_TYPES(TORCH_OPS_UNSUPPORTED_TYPE)
+      default:
+        return false;
+    }
+#undef TORCH_OPS_UNSUPPORTED_TYPE
+  };
   // Fast path: can we just copy the data ourselves? Avoids creating a
   // TensorIterator in at::native::copy_, which is relatively
   // expensive.
@@ -207,14 +224,15 @@ at::Tensor& to_copy_out(
        memory_format == c10::MemoryFormat::Contiguous) &&
       // CopyKernel.cpp handles this case specially, so let's not mess
       // with it.
-      !self.is_neg() &&
+      !self.is_neg() && !is_unsupported_dtype(self.dtype().toScalarType()) &&
+      !is_unsupported_dtype(out.dtype().toScalarType()) &&
       !(
           // FBGEMM optimization might kick in, don't interfere with
           // that.
           (self.dtype() == kFloat && out.dtype() == kHalf) ||
           (self.dtype() == kHalf && out.dtype() == kFloat))) {
-    AT_DISPATCH_ALL_TYPES_AND2(
-        kHalf, kBFloat16, self.scalar_type(), "to_copy_out", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND3(
+        kHalf, kBFloat16, kBool, self.scalar_type(), "to_copy_out", [&]() {
           TO_COPY_OUT_FAST_PATH_BODY(out, self);
         });
     return out;
