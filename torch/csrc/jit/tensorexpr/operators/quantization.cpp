@@ -115,6 +115,32 @@ BufHandle makeQBufHandleNCHW(
       LongImm::make(qzero).node());
 }
 
+bool isNHWC(const BufHandle& buf) {
+  const auto& strides = buf.node()->strides();
+  const auto& dims = buf.node()->dims();
+  if (strides.size() != 4) {
+    return false;
+  }
+  auto dims1 = to<LongImm>(IRSimplifier::simplify(dims[1]))->value();
+  auto strides1 = to<LongImm>(IRSimplifier::simplify(strides[1]))->value();
+  auto strides3 = to<LongImm>(IRSimplifier::simplify(strides[3]))->value();
+
+  return ((strides3 == dims1) && (strides1 == 1));
+}
+
+bool isNLC(const BufHandle& buf) {
+  const auto& strides = buf.node()->strides();
+  const auto& dims = buf.node()->dims();
+  if (strides.size() != 3) {
+    return false;
+  }
+  auto dims1 = to<LongImm>(IRSimplifier::simplify(dims[1]))->value();
+  auto strides1 = to<LongImm>(IRSimplifier::simplify(strides[1]))->value();
+  auto strides3 = to<LongImm>(IRSimplifier::simplify(strides[3]))->value();
+
+  return ((strides3 == dims1) && (strides1 == 1));
+}
+
 Tensor computeQuantizePerTensor(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
@@ -179,8 +205,18 @@ Tensor computeQuantizePerTensorExternalCall(
     }
     throw malformed_input("Expected quantized dtype");
   }(qdtype);
-  auto ResultBuf = makeQBufHandleNCHW(
-      "quantize_per_tensor", outputShape, dtype, qscale, qzero);
+  auto ResultBuf = [&]() {
+    if (isNHWC(x)) {
+      return makeQBufHandleNHWC(
+          "quantize_per_tensor", outputShape, dtype, qscale, qzero);
+    }
+    if (isNLC(x)) {
+      return makeQBufHandleNLC(
+          "quantize_per_tensor", outputShape, dtype, qscale, qzero);
+    }
+    return makeQBufHandleNCHW(
+        "quantize_per_tensor", outputShape, dtype, qscale, qzero);
+  }();
   StmtPtr s = ExternalCall::make(
       ResultBuf, "nnc_aten_quantize_per_tensor", {x}, {qscale, qzero, qdtype});
   return Tensor(ResultBuf.node(), s);
@@ -415,19 +451,6 @@ Tensor computeQuantizedLinearRelu(
   return Tensor(ResultBuf.node(), s);
 }
 
-bool isChannelsLast(const BufHandle& buf) {
-  const auto& strides = buf.node()->strides();
-  const auto& dims = buf.node()->dims();
-  if (strides.size() != 4) {
-    return false;
-  }
-  auto dims1 = to<LongImm>(IRSimplifier::simplify(dims[1]))->value();
-  auto strides1 = to<LongImm>(IRSimplifier::simplify(strides[1]))->value();
-  auto strides3 = to<LongImm>(IRSimplifier::simplify(strides[3]))->value();
-
-  return ((strides3 == dims1) && (strides1 == 1));
-}
-
 Tensor computeQuantizedAdd(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
@@ -441,8 +464,8 @@ Tensor computeQuantizedAdd(
   const auto out_qzero = c10::get<int64_t>(inputs[3]);
   // Change to dtype based on outputType when dtype propagation implemented
   const auto out_qdtype = immQDType(qa);
-  const bool isQAChannelsLast = isChannelsLast(qa);
-  const bool isQBChannelsLast = isChannelsLast(qb);
+  const bool isQAChannelsLast = isNHWC(qa);
+  const bool isQBChannelsLast = isNHWC(qb);
   auto ResultBuf = (isQAChannelsLast || isQBChannelsLast)
       ? makeQBufHandleNHWC(
             "quantized_add",
@@ -536,7 +559,7 @@ Tensor computeQuantizedRelu(
     at::Device device) {
   const BufHandle& qa = c10::get<BufHandle>(inputs[0]);
   const auto out_qdtype = immQDType(qa);
-  const bool isQAChannelsLast = isChannelsLast(qa);
+  const bool isQAChannelsLast = isNHWC(qa);
   auto ResultBuf = isQAChannelsLast ? makeQBufHandleNHWC(
                                           "quantized_relu",
                                           outputShape,
