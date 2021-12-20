@@ -222,7 +222,7 @@ TensorTypePtr TensorType::create(const at::Tensor& t) {
   VaryingShape<size_t> stride_indices;
   VaryingShape<int64_t> strides;
   VaryingShape<int64_t> sizes;
-  if (!t.is_mkldnn() && !t.is_sparse()) {
+  if (!t.is_mkldnn() && !t.is_sparse() && !t.is_sparse_csr()) {
     sizes = VaryingShape<int64_t>{t.sizes().vec()};
     strides = VaryingShape<int64_t>{t.strides().vec()};
     return TensorType::create(
@@ -261,6 +261,31 @@ TensorTypePtr TensorType::create(
     return TensorType::create(
       scalar_type, device, symbol_sizes, VaryingShape<Stride>(*sizes.size()), requires_grad, undefined);
   }
+}
+
+TensorTypePtr TensorType::create(
+    c10::optional<at::ScalarType> scalar_type,
+    c10::optional<Device> device,
+    const SymbolicShape& sizes,
+    const VaryingShape<Stride>& strides,
+    c10::optional<bool> requires_grad,
+    c10::optional<bool> undefined) {
+  auto pt = TensorTypePtr(new TensorType(
+      scalar_type, device, sizes, strides, requires_grad, undefined));
+  return pt;
+}
+
+TensorTypePtr TensorType::create(
+    c10::optional<at::ScalarType> scalar_type,
+    c10::optional<Device> device,
+    c10::optional<size_t> dim,
+    c10::optional<bool> requires_grad) {
+  return TensorType::create(
+      scalar_type,
+      device,
+      SymbolicShape(dim),
+      VaryingShape<Stride>(dim),
+      requires_grad);
 }
 
 std::string TensorType::str() const {
@@ -378,31 +403,6 @@ TensorType::TensorType(
       strides_(strides),
       requires_grad_(requires_grad),
       undefined_(undefined) {}
-
-TensorTypePtr TensorType::create(
-    c10::optional<at::ScalarType> scalar_type,
-    c10::optional<Device> device,
-    const SymbolicShape& sizes,
-    const VaryingShape<Stride>& strides,
-    c10::optional<bool> requires_grad,
-    c10::optional<bool> undefined) {
-  auto pt = TensorTypePtr(new TensorType(
-      scalar_type, device, sizes, strides, requires_grad, undefined));
-  return pt;
-}
-
-TensorTypePtr TensorType::create(
-    c10::optional<at::ScalarType> scalar_type,
-    c10::optional<Device> device,
-    c10::optional<size_t> dim,
-    c10::optional<bool> requires_grad) {
-  return TensorType::create(
-      scalar_type,
-      device,
-      SymbolicShape(dim),
-      VaryingShape<Stride>(dim),
-      requires_grad);
-}
 
 TensorTypePtr TensorType::createContiguous(
     at::ScalarType scalar_type,
