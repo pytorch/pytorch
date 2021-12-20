@@ -10,6 +10,7 @@ import torch.distributed as dist
 from torch.distributed import rpc
 from torch.distributed import _sharded_tensor
 from torch.distributed._sharded_tensor import (
+    sharded_op_impl,
     load_with_process_group,
     pre_load_state_dict_hook,
     shard_parameter,
@@ -2120,6 +2121,72 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
                 wrong_pin_memory_shards,
                 sharded_tensor_metadata
             )
+
+class TestShardedTensorCustomOps(ShardedTensorTestBase):
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    def test_custom_op(self):
+
+        @sharded_op_impl(torch.asin)
+        def my_sharded_asin(types, args, kwargs, process_group):
+            return torch.asin(args[0].local_shards()[0].tensor)
+
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
+            ],
+        )
+
+        st = _sharded_tensor.rand(spec, 10, 10)
+        res = torch.asin(st)
+        self.assertEqual(res, torch.asin(st.local_shards()[0].tensor))
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    def test_custom_op_override(self):
+
+        t = torch.rand(10, 10).cuda(self.rank)
+
+        @sharded_op_impl(torch.nn.functional.linear)
+        def my_sharded_linear(types, args, kwargs, process_group):
+            return t
+
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
+            ],
+        )
+        m = torch.nn.Linear(32, 16).cuda(self.rank)
+        shard_parameter(m, 'weight', spec)
+
+        result = m(torch.rand(15, 32).cuda(self.rank))
+        self.assertEqual(t, result)
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    def test_custom_op_errors(self):
+
+        with self.assertRaisesRegex(TypeError, 'expects signature'):
+            @sharded_op_impl(torch.nn.functional.linear)
+            def my_op1(types, args, kwargs, process_group, random_param):
+                pass
+
+        with self.assertRaisesRegex(TypeError, 'expects signature'):
+            @sharded_op_impl(torch.nn.functional.linear)
+            def my_op2(types):
+                pass
 
 
 if __name__ == '__main__':

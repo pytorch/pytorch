@@ -563,10 +563,10 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(aten::split, aten_split, [](Node* n) -> SROpera
   };
 });
 
-// See [Increment reference count for returned constants]
+// See [Create owned refs for returned constants]
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
-    static_runtime::incref,
-    static_runtime_incref,
+    static_runtime::create_owned_ref,
+    static_runtime_create_owned_ref,
     [](Node*) -> SROperator {
       return
           [](ProcessedNode* p_node) { p_node->Output(0) = p_node->Input(0); };
@@ -576,13 +576,13 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(prim::If, prim_If, [](Node* n) -> SROperator {
   return [](ProcessedNode* p_node) {
     auto condition = p_node->Input(0).toBool();
     auto& blocks = p_node->blocks();
-    DCHECK(blocks.size() == 2);
+    DCHECK_EQ(blocks.size(), 2);
     auto& runner = blocks[!condition];
 
     auto output = (*runner)({});
     if (output.isTuple()) {
       auto& elems = output.toTupleRef().elements();
-      DCHECK(elems.size() == p_node->num_outputs());
+      DCHECK_EQ(elems.size(), p_node->num_outputs());
       for (const auto i : c10::irange(elems.size())) {
         p_node->Output(i) = elems[i];
       }
@@ -595,14 +595,18 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(prim::If, prim_If, [](Node* n) -> SROperator {
 
 namespace {
 
-std::vector<IValue> collectLoopInputs(const ProcessedNode& p_node) {
+std::vector<IValue> collectLoopSubBlockInputs(const ProcessedNode& p_node) {
   const auto num_inputs = p_node.num_inputs();
-  DCHECK(num_inputs >= 2);
+  DCHECK_GE(num_inputs, 2);
+  // The first two inputs to the loop node are the max trip count
+  // and initial condition. We don't collect them here, since those
+  // are not inputs for the sub-block.
   const auto num_args = num_inputs - 2;
 
   std::vector<IValue> result;
-  result.reserve(num_args);
-  // First argument is always the loop counter, initially zero.
+  result.reserve(num_args + 1);
+  // First argument to the loop sub-block is always the loop counter, initially
+  // zero.
   result.emplace_back(0);
 
   for (const auto i : c10::irange(num_args)) {
@@ -623,10 +627,10 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         auto condition = p_node->Input(1).toBool();
 
         auto& blocks = p_node->blocks();
-        DCHECK(blocks.size() == 1);
+        DCHECK_EQ(blocks.size(), 1);
         auto& runner = blocks[0];
 
-        auto args = collectLoopInputs(*p_node);
+        auto args = collectLoopSubBlockInputs(*p_node);
         int64_t loop_count = 0;
 
         while (condition && loop_count < max_trip_count) {
@@ -646,7 +650,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         }
 
         const auto num_outputs = p_node->num_outputs();
-        DCHECK(args.size() == num_outputs + 1);
+        DCHECK_EQ(args.size(), num_outputs + 1);
         for (const auto i : c10::irange(num_outputs)) {
           p_node->Output(i) = std::move(args[i + 1]);
         }
