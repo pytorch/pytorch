@@ -227,6 +227,35 @@ TEST_F(Quantization, QuantUpsampleNearst2dDequantUInt8) {
   CHECK_EQ(check, 1);
 }
 
+TEST_F(Quantization, UpsampleNearst2d) {
+  const auto graph_string = R"IR(
+      graph(%x : Float(1, 1, 2, 2, strides=[2, 2, 2, 1], device=cpu)):
+        %4 : NoneType = prim::Constant()
+        %3 : int[] = prim::Constant[value=[4, 4]]()
+        %u : Float(1, 1, 4, 4) = aten::upsample_nearest2d(%x, %3, %4)
+        return (%u))IR";
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  auto x = at::rand({1, 1, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto y_expected = at::upsample_nearest2d(x, {4, 4});
+
+  TensorExprKernel k(graph);
+  std::vector<at::Tensor> inputs = {x};
+  StmtPtr s = k.getCodeGenStmt();
+
+  std::vector<IValue> stack = fmap<IValue>(inputs);
+  k.run(stack);
+  auto y = stack[0].toTensor();
+  bool check = at::allclose(y_expected, y);
+  if (!check) {
+    std::cout << "x:\n" << x << std::endl;
+    std::cout << "y_expected:\n" << y_expected << std::endl;
+    std::cout << "y:\n" << y << std::endl;
+  }
+  CHECK_EQ(check, 1);
+}
+
 at::Tensor quantized_cat(
     c10::List<at::Tensor> const& xs,
     int64_t dim,
