@@ -111,7 +111,7 @@ def is_vararg(the_callable):
 
 def get_param_names(fn, n_args):
     if isinstance(fn, OpOverloadPacket):
-        fn = fn.default
+        fn = fn.op
 
     if not is_function_or_method(fn) and hasattr(fn, '__call__') and is_function_or_method(fn.__call__):  # noqa: B004
         # De-sugar calls to classes

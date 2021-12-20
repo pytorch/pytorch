@@ -7,6 +7,7 @@ import types
 
 import torch.jit
 import torch._utils_internal
+
 # Query `hasattr` only once.
 _SET_GLOBAL_FLAGS = hasattr(sys, 'getdlopenflags') and hasattr(sys, 'setdlopenflags')
 
@@ -25,12 +26,17 @@ def dl_open_guard():
         sys.setdlopenflags(old_flags)
 
 class OpOverload:
-    def __init__(self, op, schema):
+    def __init__(self, overloadpacket, op, schema):
         self.op = op
         self.schema = schema
+        self.overloadpacket = overloadpacket
 
+    # it's a no-op since OpOverload object is immutable and must be for a given op overload.
     def __deepcopy__(self, memo=None):
         return self
+
+    def __str__(self):
+        return "OpOverload(op='{}.{}', overload='{}')".format(*self.qualified_name().split("::"), self.overload_name())
 
     def __call__(self, *args, **kwargs):
         return self.op(*args, **kwargs or {})
@@ -59,37 +65,51 @@ class OpOverloadPacket():
         self.op_name = op_name
         self.op = op
 
+    # it's a no-op since OpOverloadPacket object is immutable and must be for a given op.
     def __deepcopy__(self, memo=None):
         return self
 
-    # def __repr__(self):
-    #     return f"OpOverloadPacket({self.op_name}, {id(self)})"
+    def __str__(self):
+        return "OpOverloadPacket(op='{}.{}')".format(*self.qualified_op_name.split("::"))
 
     def __getattr__(self, key):
         # It is not a valid op_name when __file__ is passed in
         if key == '__file__':
             return 'torch.ops'
+
+        throw_error = False
+
         try:
             use_key = "" if key == 'default' else key
             op_ = torch._C._get_operation_overload(self.qualified_op_name, use_key)
             schema = torch._C._get_schema(self.qualified_op_name, use_key)
-            overload = OpOverload(op_, schema)
+            overload = OpOverload(self, op_, schema)
             # cache the overload object
             setattr(self, key, overload)
             return overload
         except RuntimeError:
-            out = getattr(self.op, key)
-            return out
+            try:
+                # This is added to maintain bc in case the user queries an attribute that exists on `self.op`
+                # which used to be returned before instead of the OpOverloadPacket
+                out = getattr(self.op, key)
+                return out
+            except AttributeError:
+                throw_error = True
+
+        # We throw an error here as opposed to above since the stack trace and error message
+        # printed in that case is a bit confusing:
+        # RuntimeError: Found no matching schema
+        # During handling of the above exception, another exception occurred:
+        # AttributeError ...
+        if throw_error:
+            raise AttributeError("'{}' object has no attribute '{}'".format(str(self), key))
 
     def __call__(self, *args, **kwargs):
-        # to ensure torch.ops.foo.bar() is still callable from JIT
-        # "" key handling from above
-        # save a fn_ptr and just call that here. in its current version, it will be pretty slow
-        if kwargs is None:
-            kwargs = {}
-        return self.op(*args, **kwargs)
+        # overloading __call__ to ensure torch.ops.foo.bar() is still callable from JIT
+        # We save the function ptr as the `op` attribute on OpOverloadPacket to access it here.
+        return self.op(*args, **kwargs or {})
 
-# resolution of torch.fn is different from torch.ops. ... fn
+# Resolution of torch.fn is different from torch.ops. ... fn
 # First one is parsing the python objects and then matching the schema -> calls into the unboxed version of the method
 
 # second one is done by JIT. Creates a stack of all the overloads and then tries to match the correct one at runtime
@@ -141,6 +161,8 @@ class _OpNamespace(types.ModuleType):
         op.__module__ = self.__module__ + "." + namespace_name
         opoverloadpacket = OpOverloadPacket(qualified_op_name, op_name, op)
         opoverloadpacket.__module__ = self.__module__ + "." + namespace_name
+        # cache the opoverloadpacket to ensure that each op corresponds to
+        # a unique OpOverloadPacket object
         setattr(self, op_name, opoverloadpacket)
         return opoverloadpacket
 
