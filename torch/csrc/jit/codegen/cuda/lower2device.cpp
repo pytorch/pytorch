@@ -281,13 +281,9 @@ void GpuLower::replaceSymbolicSizes() {
       inputs_and_outputs.push_back(val->as<TensorView>());
     }
   }
-  // Symbolic size is necessary for outputs if there are no inputs.
-  // Otherwise infer output sizes from the inputs via expression evaluation.
-  if (fusion_->inputs().empty()) {
-    for (auto val : fusion_->outputs()) {
-      if (ir_utils::isTV(val)) {
-        inputs_and_outputs.push_back(val->as<TensorView>());
-      }
+  for (auto val : fusion_->outputs()) {
+    if (ir_utils::isTV(val)) {
+      inputs_and_outputs.push_back(val->as<TensorView>());
     }
   }
 
@@ -308,7 +304,6 @@ void GpuLower::replaceSymbolicSizes() {
           (id->getIterType() == IterType::BroadcastWithoutStride)) {
         continue;
       } else if (
-          id->isRFactorProduct() ||
           // NOLINTNEXTLINE(bugprone-branch-clone)
           (id->getIterType() == IterType::BroadcastWithStride) ||
           orig_size->isConstScalar()) {
@@ -454,6 +449,9 @@ void GpuLower::lower() {
   thread_pred_map_.build(fusion_);
 
   // Depends on thread_pred_map_
+  validateThreadPredicates(fusion_);
+
+  // Depends on thread_pred_map_
   validateParallelize(fusion_);
 
   // Scan the whole fusion and build mappings about halo extensions of
@@ -466,8 +464,6 @@ void GpuLower::lower() {
 
   // Detects all exprssions that don't need predicates
   predicateElimination().build(fusion_);
-
-  nonDivisibleSplitInfo().build(fusion_);
 
   // Set the kernel inputs & outputs
   for (auto input : fusion_->inputs()) {
@@ -711,12 +707,6 @@ class GpuLower::KernelIrMapper : private OptInConstDispatch {
   }
 
   void handle(const GatherOp* node) final {
-    const auto lowered_node = ir_builder_.create<kir::UnaryOp>(
-        UnaryOpType::Set, lowerValue(node->out()), lowerValue(node->in()));
-    TORCH_CHECK(gpu_lower_->kir_expr_map_.insert({node, lowered_node}).second);
-  }
-
-  void handle(const ViewOp* node) final {
     const auto lowered_node = ir_builder_.create<kir::UnaryOp>(
         UnaryOpType::Set, lowerValue(node->out()), lowerValue(node->in()));
     TORCH_CHECK(gpu_lower_->kir_expr_map_.insert({node, lowered_node}).second);

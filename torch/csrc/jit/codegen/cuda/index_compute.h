@@ -207,10 +207,6 @@ class RootPredicateInfo {
     return root_ids_;
   }
 
-  const auto& consumerIds() const {
-    return consumer_ids_;
-  }
-
   //! Return a false RootPredicateInfo, i.e., both start and stop
   //! predicates are false.
   static RootPredicateInfo getFalseInfo();
@@ -226,8 +222,6 @@ class RootPredicateInfo {
   std::vector<kir::Val*> stop_offsets_;
   // Track which roots have been handled by the generated predicates
   std::unordered_set<IterDomain*> root_ids_;
-  // Consumer IDs that correspond to root_ids_
-  std::unordered_set<IterDomain*> consumer_ids_;
 };
 
 // Simple interface for IndexCompute

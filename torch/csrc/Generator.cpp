@@ -4,6 +4,7 @@
 #include <ATen/ATen.h>
 #include <ATen/CPUGeneratorImpl.h>
 
+#include <TH/TH.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Exceptions.h>

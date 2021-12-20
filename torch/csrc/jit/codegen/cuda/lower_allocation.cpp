@@ -207,7 +207,7 @@ class AllocationInserter : public kir::MutableIrVisitor {
     std::vector<kir::Val*> alloc_dims;
 
     for (const auto id : maybe_rfactor_domain) {
-      if (id->isReduction() || id->isStride() ||
+      if (id->isReduction() ||
           id->iterType() == IterType::BroadcastWithoutStride) {
         continue;
       }
@@ -374,9 +374,12 @@ class AllocationInserter : public kir::MutableIrVisitor {
       const auto local_id =
           gpu_lower->lowerValue(fuser_tv->axis(axis_i))->as<kir::IterDomain>();
 
-      // Don't use reduction/stride/broadcast axis in the allocation
-      // computation
-      if (local_id->isReduction() || local_id->isStride() ||
+      if (
+          // If we're reducing this dimension, don't use it in the allocation
+          // computation
+          local_id->isReduction() ||
+          // If this is a broadcast dimension, don't use it in the allocation
+          // computation
           local_id->isBroadcast()) {
         continue;
       }

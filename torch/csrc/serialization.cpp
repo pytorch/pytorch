@@ -169,4 +169,4 @@ void doWrite(io fildes, void* raw_buf, size_t nbytes) {
 
 // NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <torch/csrc/generic/serialization.cpp>
-#include <torch/csrc/THGenerateByteType.h>
+#include <TH/THGenerateByteType.h>

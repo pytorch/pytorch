@@ -22,8 +22,6 @@
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 #include <ATen/TensorSubclassLikeUtils.h>
-#include <c10/util/SmallBuffer.h>
-
 
 #include <ciso646>
 #include <algorithm>
@@ -1011,17 +1009,6 @@ Tensor var_backward(Tensor grad, const Tensor& self, c10::optional<IntArrayRef> 
   const int64_t dof = _safe_size(self.sizes(), dim) - correction;
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions)
   return (2.0 / dof) * grad * (self - self.mean(dim, /*keepdim=*/true));
-}
-
-Tensor var_jvp(const Tensor& self_t, const Tensor& self_p, const Tensor& result, c10::optional<IntArrayRef> dim_opt,
-    c10::optional<int64_t> correction_opt, bool keepdim) {
-  auto correction = correction_opt.value_or(1);
-  if (self_p.dim() == 0 || !dim_opt.has_value()) {
-    return var_backward(self_t.conj(), self_p, correction).sum().expand_as(result).conj();
-  }
-  auto dim = dim_opt.value();
-  const int64_t dof = _safe_size(self_p.sizes(), dim) - correction;
-  return ((2.0 / dof) * self_t.conj() * (self_p - self_p.mean(dim, /*keepdim=*/true))).sum(dim, keepdim).conj();
 }
 
 Tensor std_backward(
@@ -4757,25 +4744,6 @@ Tensor _lu_with_info_jvp(
 Tensor warn_backwards(const Tensor &grad_output) {
   TORCH_WARN("Warn from backward");
   return grad_output;
-}
-
-// This function only exists because cuDNN does not support bias gradient computation and it's not easy
-// to slice a std::tuple to return only grad_input / grad_weight from convolution_backward. It will
-// be removed when the cudnn_convolution and cudnn_convolution_transpose go away.
-std::tuple<Tensor, Tensor> _cudnn_convolution_backward(
-    const at::Tensor & self, const at::Tensor & grad_output, const at::Tensor & weight, at::IntArrayRef padding,
-    at::IntArrayRef output_padding, at::IntArrayRef stride, at::IntArrayRef dilation, bool transposed, int64_t groups,
-    ::std::array<bool,2> output_mask) {
-  if (!grad_output.defined()) {
-    return std::tuple<Tensor, Tensor>();
-  }
-
-  // Just call the general backward and ignore the bias gradient part.
-  std::tuple<Tensor, Tensor, Tensor> grad_inputs = at::convolution_backward(
-      grad_output, self, weight, c10::nullopt, stride, padding, dilation, transposed,
-      output_padding, groups, {output_mask[0], output_mask[1], false});
-  std::tuple<Tensor, Tensor> result = std::make_tuple(std::get<0>(grad_inputs), std::get<1>(grad_inputs));
-  return result;
 }
 
 } // namespace details

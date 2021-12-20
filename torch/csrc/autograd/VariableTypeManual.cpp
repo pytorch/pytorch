@@ -177,11 +177,7 @@ Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool n
         new_fw_grad = self_fw_grad.fill_(0);
       }
     } else {
-      if (!self.is_same_size(src_fw_grad)) {
-        new_fw_grad = src_fw_grad.broadcast_to(self.sizes());
-      } else {
-        new_fw_grad = src_fw_grad;
-      }
+      new_fw_grad = src_fw_grad;
     }
     self._set_fw_grad(new_fw_grad, /* level */ 0, /* is_inplace_op */ true);
   }

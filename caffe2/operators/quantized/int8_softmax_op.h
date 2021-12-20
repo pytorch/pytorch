@@ -15,11 +15,7 @@ namespace int8 {
 class Int8SoftmaxOp final : public Operator<CPUContext> {
  public:
   explicit Int8SoftmaxOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CPUContext>(operator_def, ws) {
-#if !defined(FBCODE_CAFFE2) && defined(USE_INTERNAL_PTHREADPOOL_IMPL)
-        ws_ = ws;
-#endif
-      }
+      : Operator<CPUContext>(operator_def, ws), ws_(ws) {}
 
   ~Int8SoftmaxOp() {
     if (this->qnnpackOperator_ != nullptr) {
@@ -92,9 +88,7 @@ class Int8SoftmaxOp final : public Operator<CPUContext> {
   }
 
  private:
-#if !defined(FBCODE_CAFFE2) && defined(USE_INTERNAL_PTHREADPOOL_IMPL)
   Workspace* ws_;
-#endif
   // QNNPACK SoftArgMax operator
   qnnp_operator_t qnnpackOperator_{nullptr};
 };

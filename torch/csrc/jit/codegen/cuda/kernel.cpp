@@ -23,12 +23,6 @@ class KernelIrScanner : private kir::IrVisitor {
     for (const auto& ir_node : kernel->irNodes()) {
       ir_node->accept(this);
     }
-    const auto gpu_lower = GpuLower::current();
-    for (auto split : gpu_lower->nonDivisibleSplitInfo().splitsToValidate()) {
-      auto extent = gpu_lower->lowerValue(split->in()->extent());
-      auto factor = gpu_lower->lowerValue(split->factor());
-      summary_.splits_to_validate.emplace_back(extent, factor);
-    }
   }
 
   const auto& summary() const {
@@ -124,25 +118,20 @@ class KernelIrScanner : private kir::IrVisitor {
     updateGridReductionInLoop(dom);
   }
 
-  void visit(const kir::GridBroadcast*) final {
-    summary_.has_cooperative_grid_reduction = true;
-  }
-
  private:
   size_t max_smem_type_size_ = 0;
   KernelSummary summary_;
 
  private:
   void updateGridReductionInLoop(TensorDomain* dom) {
-    summary_.has_grid_reductions = true;
+    ++summary_.number_of_grid_reductions;
 
     const auto gpu_lower = GpuLower::current();
     for (const auto i : c10::irange(dom->nDims())) {
       const auto id =
           gpu_lower->caParallelMap().getConcreteMappedID(dom->domain()[i]);
-
-      summary_.has_cooperative_grid_reduction =
-          summary_.has_cooperative_grid_reduction ||
+      summary_.has_grid_reduction_in_loop =
+          summary_.has_grid_reduction_in_loop ||
           !(id->isThread() || id->extent()->isOneInt());
     }
   }

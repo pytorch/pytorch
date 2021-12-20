@@ -1,1 +1,1 @@
-Fixes #ISSUE_NUMBER
+Fixes #{issue number}

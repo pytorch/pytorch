@@ -34,7 +34,6 @@ enable_logging = False
 
 def add_auto_observation(
     model : torch.nn.Module,
-    qconfig_dict: Dict[str, Any],
     example_inputs: Tuple[Any],
     input_dtypes: Any = (torch.float,),  # must be same structure as model inputs
     output_dtypes: Any = (torch.float,),  # must be same structure as model outputs
@@ -205,11 +204,9 @@ def add_auto_observation(
                             global_disable_torch_function_override
                         global_disable_torch_function_override = True
 
-                        # mypy ignore is used instead of assert because this
-                        # runs on every forward and assert has a performance cost
                         args, kwargs = parent_qstate.op_prepare_before_hook(
                             cur_module, args, kwargs, first_call, qtensor_id,
-                            fqn, cur_module)  # type: ignore[arg-type]
+                            fqn, cur_module)
 
                         # original forward
                         output = orig_module_call(self, *args, **kwargs)
@@ -266,29 +263,27 @@ def add_auto_observation(
                     # Create a list before iterating because we are adding new
                     # named modules inside the loop.
                     named_modules = list(self.named_modules())
-                    for fqn, v in named_modules:
+                    for k, v in named_modules:
 
-                        # fqn is the global FQN, i.e. 'foo.bar.baz'
+                        # k is the global FQN, i.e. 'foo.bar.baz'
                         # v is the module instance
                         #
                         # we need to associate the global FQN with SeenOp
                         # for modules, this is the module FQN
                         # for functions, this is the parent module FQN
-                        module_id_to_fqn[id(v)] = fqn
+                        module_id_to_fqn[id(v)] = k
 
-                        if is_leaf(v):
-                            continue
-
-                        if v is self:
-                            # for the top level module only, specify input
-                            # and output dtypes
-                            v._auto_quant_state = AutoQuantizationState(
-                                qconfig_dict, fqn,
-                                input_dtypes, output_dtypes)
-                            pass
-                        else:
-                            v._auto_quant_state = AutoQuantizationState(
-                                qconfig_dict, fqn)
+                        has_qconfig = hasattr(v, 'qconfig') and v.qconfig is not None
+                        if has_qconfig and not is_leaf(v):
+                            if v is self:
+                                # for the top level module only, specify input
+                                # and output dtypes
+                                v._auto_quant_state = AutoQuantizationState(
+                                    v.qconfig, input_dtypes, output_dtypes)
+                                pass
+                            else:
+                                v._auto_quant_state = AutoQuantizationState(
+                                    v.qconfig)
 
                 global_op_idx[0] = 0
 

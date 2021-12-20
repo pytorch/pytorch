@@ -1,6 +1,5 @@
 #ifndef THP_STORAGE_INC
 #define THP_STORAGE_INC
-#include <torch/csrc/THConcat.h>
 
 #define THPStorageStr TH_CONCAT_STRING_3(torch.,Real,Storage)
 #define THPStorageClass TH_CONCAT_3(THP,Real,StorageClass)
@@ -15,6 +14,6 @@
 #define THPStorageBaseStr TH_CONCAT_STRING_2(Real,StorageBase)
 
 #include <torch/csrc/generic/Storage.h>
-#include <torch/csrc/THGenerateByteType.h>
+#include <TH/THGenerateByteType.h>
 
 #endif

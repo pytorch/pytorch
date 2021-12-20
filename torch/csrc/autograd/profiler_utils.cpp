@@ -27,8 +27,8 @@ static constexpr auto kMat1Size = "mat1_size";
 static constexpr auto kMat2Size = "mat2_size";
 
 static bool validateInput(const std::string &op_name, size_t min_size,
-                          const std::vector<c10::IValue>& inputs,
-                          const c10::ArrayRef<int>& should_be_tensor) {
+                       const std::vector<c10::IValue>& inputs,
+                       const std::vector<int>& should_be_tensor) {
   std::stringstream ss;
   if (inputs.size() < min_size) {
       ss << "Failed to save extra arguments for flops compuation of op "
@@ -63,7 +63,8 @@ std::unordered_map<std::string, c10::IValue> saveExtraArgs(const at::RecordFunct
   }
 
   if (fname == kConv2dOp) {
-    bool check = validateInput(fname, kConv2dGroups + 1, inputs, {0, 1});
+    std::vector<int> tensors{0, 1};
+    bool check = validateInput(fname, kConv2dGroups + 1, inputs, tensors);
     if (!check) {
       return map;
     }
@@ -81,7 +82,8 @@ std::unordered_map<std::string, c10::IValue> saveExtraArgs(const at::RecordFunct
     map[kDilation] = inputs[kConv2dDilation];
     map[kGroups] = inputs[kConv2dGroups];
   } else if (fname == kMMOp) {
-    bool check = validateInput(fname, 2, inputs, {0, 1});
+    std::vector<int> tensors{0, 1};
+    bool check = validateInput(fname, 2, inputs, tensors);
     if (!check) {
       return map;
     }
@@ -91,7 +93,8 @@ std::unordered_map<std::string, c10::IValue> saveExtraArgs(const at::RecordFunct
     map[kMat1Size] = at::IValue(left.sizes());
     map[kMat2Size] = at::IValue(right.sizes());
   } else if (fname == kAddMMOp) {
-    bool check = validateInput(fname, 3, inputs, {0, 1, 2});
+    std::vector<int> tensors{0, 1, 2};
+    bool check = validateInput(fname, 3, inputs, tensors);
     if (!check) {
       return map;
     }
@@ -105,7 +108,8 @@ std::unordered_map<std::string, c10::IValue> saveExtraArgs(const at::RecordFunct
     map[kMat1Size] = at::IValue(left.sizes());
     map[kMat2Size] = at::IValue(right.sizes());
   } else if (fname == kMulOp) {
-    bool check = validateInput(fname, 1, inputs, {0});
+    std::vector<int> tensors{0};
+    bool check = validateInput(fname, 1, inputs, tensors);
     if (!check) {
       return map;
     }
@@ -113,7 +117,8 @@ std::unordered_map<std::string, c10::IValue> saveExtraArgs(const at::RecordFunct
     at::Tensor mat = inputs[0].toTensor();
     map[kMatSize] = at::IValue(mat.sizes());
   } else if (fname == kAddOp) {
-    bool check = validateInput(fname, 1, inputs, {0});
+    std::vector<int> tensors{0};
+    bool check = validateInput(fname, 1, inputs, tensors);
     if (!check) {
       return map;
     }
@@ -121,7 +126,8 @@ std::unordered_map<std::string, c10::IValue> saveExtraArgs(const at::RecordFunct
     at::Tensor mat = inputs[0].toTensor();
     map[kMatSize] = at::IValue(mat.sizes());
   } else if (fname == kBMMOp) {
-    bool check = validateInput(fname, 2, inputs, {0, 1});
+    std::vector<int> tensors{0, 1};
+    bool check = validateInput(fname, 2, inputs, tensors);
     if (!check) {
       return map;
     }
@@ -131,7 +137,8 @@ std::unordered_map<std::string, c10::IValue> saveExtraArgs(const at::RecordFunct
     map[kMat1Size] = at::IValue(left.sizes());
     map[kMat2Size] = at::IValue(right.sizes());
   } else if (fname == kBAddBMMOp) {
-    bool check = validateInput(fname, 3, inputs, {0, 1, 2});
+    std::vector<int> tensors{0, 1, 2};
+    bool check = validateInput(fname, 3, inputs, tensors);
     if (!check) {
       return map;
     }

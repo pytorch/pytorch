@@ -30,9 +30,7 @@ class TORCH_API CodeGen {
       : stmt_(stmt),
         buffer_args_(std::move(buffer_args)),
         device_(device),
-        kernel_func_name_(std::move(kernel_func_name)) {
-    allocIntermediateBufs();
-  }
+        kernel_func_name_(std::move(kernel_func_name)) {}
 
   virtual ~CodeGen() = default;
 
@@ -100,8 +98,6 @@ class TORCH_API CodeGen {
   const std::string& kernel_func_name() const {
     return kernel_func_name_;
   }
-
-  void allocIntermediateBufs();
 
  protected:
   static void* argToPtr(const BufferArg& bufferArg, const CallArg& callArg);

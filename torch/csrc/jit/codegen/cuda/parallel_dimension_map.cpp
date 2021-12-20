@@ -317,7 +317,16 @@ bool ParallelDimensionMap::equalDim(kir::Val* dim1, kir::Val* dim2) {
 
 std::string ParallelDimensionMap::toString() const {
   std::stringstream ss;
-  for (auto pt : kParallelTypeThreads) {
+
+  const std::array<ParallelType, 6> ptypes{
+      ParallelType::BIDx,
+      ParallelType::BIDy,
+      ParallelType::BIDz,
+      ParallelType::TIDx,
+      ParallelType::TIDy,
+      ParallelType::TIDz};
+
+  for (auto pt : ptypes) {
     ss << pt << ": ";
     auto dim = get(pt);
     if (dim != nullptr) {

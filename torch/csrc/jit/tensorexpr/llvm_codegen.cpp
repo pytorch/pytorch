@@ -290,7 +290,6 @@ class LLVMCodeGenImpl : public IRVisitor {
   void visit(IntrinsicsPtr v) override;
   void visit(AllocatePtr v) override;
   void visit(FreePtr v) override;
-  void visit(PlacementAllocatePtr v) override;
   void visit(LetPtr v) override;
   void visit(CondPtr v) override;
   void visit(ExternalCallPtr v) override;
@@ -356,9 +355,9 @@ LLVMCodeGen::LLVMCodeGen(
     c10::optional<std::string> triple,
     c10::optional<std::string> cpu,
     c10::optional<std::string> attrs)
-    : CodeGen(stmt, args, device, kernel_func_name) {
-  impl_ = std::make_unique<LLVMCodeGenImpl>(
-      this->stmt(), args, device, dtype, triple, cpu, attrs);
+    : CodeGen(stmt, args, device, kernel_func_name),
+      impl_(std::make_unique<
+            LLVMCodeGenImpl>(stmt, args, device, dtype, triple, cpu, attrs)) {
   callee_ = std::make_unique<LLVMCodeGenCallee>(
       impl_->releaseJIT(), (void*)impl_->getKernelAddress());
 }
@@ -2048,11 +2047,6 @@ void LLVMCodeGenImpl::visit(AllocatePtr v) {
   irb_.SetInsertPoint(irb_.GetInsertBlock());
   llvm::Value* malloc = irb_.Insert(I);
   varToVal_[v->buffer_var()] = malloc;
-}
-
-void LLVMCodeGenImpl::visit(PlacementAllocatePtr v) {
-  llvm::Value* ptr = varToVal_.at(v->buf_to_reuse()->base_handle());
-  varToVal_[v->buf()->base_handle()] = ptr;
 }
 
 void LLVMCodeGenImpl::visit(FreePtr v) {

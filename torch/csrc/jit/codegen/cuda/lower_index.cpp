@@ -111,9 +111,32 @@ void IndexLowering::visit(const kir::TernaryOp* top) {
 
 namespace {
 
-// Get the size of the temporary work buffer for grid communication, this can be
-// grid reduction, broadcast, or grid welford.
-kir::Val* getGridCommWorkBufferSize(
+void allocateGridReductionFlag(
+    kir::TensorView* out_tv,
+    kir::Expr* current_scope_expr) {
+  kir::IrBuilder ir_builder(GpuLower::current()->kernel());
+
+  const auto flag_name = kir::GridReduction::getPredicateFlagName(out_tv);
+  const auto flag_var = ir_builder.create<kir::Allocate>(
+      ir_builder.create<kir::NamedScalar>(flag_name, DataType::Bool),
+      MemoryType::Local,
+      ir_builder.create<kir::Int>(1));
+
+  // When enclosed by IfThenElse, place the variable outside of the
+  // IfThenElse. This IfThenElse is assumed to be the prediate for
+  // this grid reduction expression.
+  if (current_scope_expr->isA<kir::IfThenElse>()) {
+    scope_utils::insertBefore(
+        current_scope_expr->parentScope(), current_scope_expr, flag_var);
+  } else {
+    TORCH_INTERNAL_ASSERT(current_scope_expr->isA<kir::ForLoop>());
+    current_scope_expr->as<kir::ForLoop>()->body().push_back(flag_var);
+  }
+}
+
+// Get the size of the temporary work buffer for a grid
+// reduction/welford.
+kir::Val* getGridReductionWorkBufferSize(
     kir::IrBuilder& ir_builder,
     const kir::TensorDomain* td) {
   // The buffer size is the number of thread blocks multiplied by the
@@ -133,8 +156,7 @@ kir::Val* getGridCommWorkBufferSize(
     }
     if (isParallelTypeThreadDim(pt) &&
         std::any_of(td->domain().begin(), td->domain().end(), [&](auto out_id) {
-          return out_id->parallelType() == pt &&
-              (out_id->isReduction() || out_id->isBroadcast());
+          return out_id->parallelType() == pt && out_id->isReduction();
         })) {
       continue;
     }
@@ -143,10 +165,10 @@ kir::Val* getGridCommWorkBufferSize(
   return buffer_size;
 }
 
-kir::Val* getGridSyncBufferSize(
+kir::Val* getGridReductionSyncBufferSize(
     kir::IrBuilder& ir_builder,
     const kir::TensorDomain* td) {
-  // See the comment above for getGridCommWorkBufferSize.
+  // See the comment above for getGridReductionWorkBufferSize.
   kir::Val* buffer_size = ir_builder.create<kir::Int>(1);
   for (auto pt : kParallelTypeBIDs) {
     auto pt_dim = GpuLower::current()->parallelDimensionMap().get(pt);
@@ -154,8 +176,7 @@ kir::Val* getGridSyncBufferSize(
       continue;
     }
     if (std::any_of(td->domain().begin(), td->domain().end(), [&](auto out_id) {
-          return out_id->parallelType() == pt &&
-              (out_id->isReduction() || out_id->isBroadcast());
+          return out_id->parallelType() == pt && out_id->isReduction();
         })) {
       continue;
     }
@@ -164,9 +185,8 @@ kir::Val* getGridSyncBufferSize(
   return buffer_size;
 }
 
-// Allocate global buffer for a grid communication calls, i.e. grid reduce, grid
-// welford reduce, grid broadcast.
-kir::Allocate* allocGlobalBufferForGridComm(
+// Allocate a buffer for a grid reductin or welford.
+kir::Allocate* allocGlobalBufferForGridReduction(
     kir::IrBuilder& ir_builder,
     kir::Val* buffer_size,
     DataType dtype,
@@ -227,15 +247,19 @@ void IndexLowering::visit(const kir::ReductionOp* rop) {
   }
 
   if (is_grid_reduce) {
-    const auto reduce_buffer = allocGlobalBufferForGridComm(
+    // First, declare a boolean flag variable storing the return value
+    // of the gridReduce() helper
+    allocateGridReductionFlag(out_tv, active_scope_expr_);
+
+    const auto reduce_buffer = allocGlobalBufferForGridReduction(
         ir_builder_,
-        getGridCommWorkBufferSize(ir_builder_, out_domain),
+        getGridReductionWorkBufferSize(ir_builder_, out_domain),
         out->dtype(),
         false);
 
-    const auto sync_buffer = allocGlobalBufferForGridComm(
+    const auto sync_buffer = allocGlobalBufferForGridReduction(
         ir_builder_,
-        getGridSyncBufferSize(ir_builder_, out_domain),
+        getGridReductionSyncBufferSize(ir_builder_, out_domain),
         DataType::Int,
         true);
 
@@ -347,20 +371,23 @@ void IndexLowering::visit(const kir::WelfordOp* wop) {
   }
 
   if (is_grid_reduce) {
+    // Allocate T_pred
+    allocateGridReductionFlag(out_tv, active_scope_expr_);
+
     // Buffer allocation
     const auto work_buffer_size =
-        getGridCommWorkBufferSize(ir_builder_, out_domain);
+        getGridReductionWorkBufferSize(ir_builder_, out_domain);
 
-    const auto out_var_buffer = allocGlobalBufferForGridComm(
+    const auto out_var_buffer = allocGlobalBufferForGridReduction(
         ir_builder_, work_buffer_size, out_var->dtype(), false);
-    const auto out_avg_buffer = allocGlobalBufferForGridComm(
+    const auto out_avg_buffer = allocGlobalBufferForGridReduction(
         ir_builder_, work_buffer_size, out_avg->dtype(), false);
-    const auto out_N_buffer = allocGlobalBufferForGridComm(
+    const auto out_N_buffer = allocGlobalBufferForGridReduction(
         ir_builder_, work_buffer_size, out_N->dtype(), false);
 
-    const auto sync_buffer = allocGlobalBufferForGridComm(
+    const auto sync_buffer = allocGlobalBufferForGridReduction(
         ir_builder_,
-        getGridSyncBufferSize(ir_builder_, out_domain),
+        getGridReductionSyncBufferSize(ir_builder_, out_domain),
         DataType::Int,
         true);
 
@@ -403,54 +430,15 @@ void IndexLowering::visit(const kir::WelfordOp* wop) {
 void IndexLowering::visit(const kir::BroadcastOp* bop) {
   TORCH_INTERNAL_ASSERT(ir_utils::isTVOp(bop));
 
-  const auto out_tv = bop->out()->as<kir::TensorView>();
-
   const auto out = lowerDstIndex(bop->out());
   const auto in = lowerSrcIndex(bop->in(), bop->out());
   auto indexed_expr = ir_builder_.create<kir::BroadcastOp>(out, in);
-
-  const ParallelTypeBitmap parallel_bitmap =
-      GpuLower::current()->threadPredMap().getParallelBroadcastDomains(
-          out_tv->fuserTv());
-
-  const bool block_x = parallel_bitmap.get(ParallelType::BIDx);
-  const bool block_y = parallel_bitmap.get(ParallelType::BIDy);
-  const bool block_z = parallel_bitmap.get(ParallelType::BIDz);
 
   if (bop->predicate()) {
     indexed_expr->setPredicate(bop->predicate());
   }
 
-  const bool grid_broadcast_needed = block_x || block_y || block_z;
-  if (!grid_broadcast_needed) {
-    pushBack(indexed_expr);
-    return;
-  }
-
-  // Grid broadcast
-  const auto out_domain = out_tv->domain();
-  const auto broadcast_buffer = allocGlobalBufferForGridComm(
-      ir_builder_,
-      getGridCommWorkBufferSize(ir_builder_, out_domain),
-      out->dtype(),
-      false);
-
-  const auto sync_buffer = allocGlobalBufferForGridComm(
-      ir_builder_,
-      getGridSyncBufferSize(ir_builder_, out_domain),
-      DataType::Int,
-      true);
-
-  auto grid_broadcast = ir_builder_.create<kir::GridBroadcast>(
-      indexed_expr, broadcast_buffer, sync_buffer);
-
-  if (bop->predicate()) {
-    grid_broadcast->setPredicate(bop->predicate());
-  }
-
-  pushBack(broadcast_buffer);
-  pushBack(sync_buffer);
-  pushBack(grid_broadcast);
+  pushBack(indexed_expr);
 }
 
 void IndexLowering::visit(const kir::Allocate* allocate) {
