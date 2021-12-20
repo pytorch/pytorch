@@ -20,7 +20,7 @@ from torch.ao.quantization import (
 from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     default_qconfig, default_dynamic_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
     propagate_qconfig_, convert, get_default_qconfig, quantize_dynamic_jit, quantize_jit, float_qparams_weight_only_qconfig, \
-    get_default_qat_qconfig, PerChannelMinMaxObserver, default_dynamic_quant_observer, QConfigDynamic, quantize
+    get_default_qat_qconfig, PerChannelMinMaxObserver, default_dynamic_quant_observer, quantize
 from torch.quantization.quantization_mappings import (
     get_default_dynamic_quant_module_mappings,
     get_default_qconfig_propagation_list,
@@ -940,8 +940,8 @@ class QuantizationTestCase(TestCase):
             float_qparams_observer = PerChannelMinMaxObserver.with_args(dtype=dtype,
                                                                         qscheme=torch.per_channel_affine_float_qparams,
                                                                         ch_axis=0)
-            float_embedding.qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
-                                                     weight=float_qparams_observer)
+            float_embedding.qconfig = QConfig(activation=default_dynamic_quant_observer,
+                                              weight=float_qparams_observer)
 
         prepare_dynamic(float_embedding)
 

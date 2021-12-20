@@ -10557,12 +10557,7 @@ op_db: List[OpInfo] = [
                         # TODO: FIXME: jiterator doesn't support non-tensor inputs
                         DecorateInfo(unittest.expectedFailure,
                                      'TestBinaryUfuncs',
-                                     'test_broadcast_python_scalar'),
-                        # TODO: FIXME: jiterator doesn't support casts to unsupported types
-                        DecorateInfo(unittest.expectedFailure,
-                                     'TestBinaryUfuncs',
-                                     'test_type_promotion',
-                                     device_type='cuda'))),
+                                     'test_broadcast_python_scalar'),)),
     BinaryUfuncInfo('isclose',
                     ref=np.isclose,
                     dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -10946,6 +10941,8 @@ op_db: List[OpInfo] = [
            dtypes=floating_types_and(torch.int64),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            decorators=[
                # RuntimeError: falseINTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":185, please report a bug to PyTorch.
@@ -10956,6 +10953,7 @@ op_db: List[OpInfo] = [
            variant_test_name='constant',
            aten_name='constant_pad_nd',
            supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
            sample_inputs_func=partial(sample_inputs_nn_pad, mode='constant'),
            supports_out=False),
