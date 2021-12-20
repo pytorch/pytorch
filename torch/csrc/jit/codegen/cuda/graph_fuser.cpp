@@ -1962,6 +1962,8 @@ void decomposeConvOps(Block* block) {
     auto bias_n = graph->insertNode(graph->create(
         prim::add_optional, {n->output(0), unsqueezed_bias->output()}, 1));
     bias_n->output()->setType(n->output(0)->type());
+    // moving add_optional after conv2d since it uses its output.
+    bias_n->moveAfter(n);
 
     // replace later uses
     n->output(0)->replaceAllUsesAfterNodeWith(bias_n, bias_n->output());
