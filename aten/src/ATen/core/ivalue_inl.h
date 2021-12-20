@@ -8,10 +8,11 @@
 #include <ATen/core/Dict.h>
 #include <ATen/core/List.h>
 #include <ATen/core/functional.h>
-#include <ATen/core/jit_type.h>
 #include <ATen/core/interned_strings.h>
+#include <ATen/core/jit_type.h>
 #include <ATen/core/qualified_name.h>
 #include <ATen/core/rref_interface.h>
+#include <ATen/core/symbol.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/Event.h>
