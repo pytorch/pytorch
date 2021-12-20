@@ -1136,32 +1136,35 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
                 return x2
 
         input_shape = (1, 1, 1, 1)
-        qconfig_dict = {'': torch.quantization.default_qconfig}
         example_inputs = (torch.randn(*input_shape),)
 
+        qconfig_dict = {'': torch.quantization.default_qconfig}
         m = M().eval()
         m = _quantize_dbr.prepare(m, qconfig_dict, example_inputs)
+        # calibrate, to populate statistics
+        m(example_inputs[0])
         m = _quantize_dbr.convert(m)
-        m_copy = copy.deepcopy(m)
 
-        # Ensure the two models have different weights
-        conv_qweight = torch._empty_affine_quantized(input_shape, scale=100, zero_point=50, dtype=torch.qint8)
-        linear_qweight = torch._empty_affine_quantized([1, 1], scale=200, zero_point=25, dtype=torch.qint8)
-        m_copy.conv.set_weight_bias(conv_qweight, torch.zeros(1))
-        m_copy.linear.set_weight_bias(linear_qweight, torch.zeros(1))
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        m2 = M().eval()
+        m2 = _quantize_dbr.prepare(m2, qconfig_dict, example_inputs)
+        # do not calibrate, to ensure important statistics are populated without calibration and
+        # the results are different at every node, including the quantize_per_tensor node
+        m2 = _quantize_dbr.convert(m2)
 
         # Results should be different without loading from serialized state_dict
         expected = m(example_inputs[0])
-        actual = m_copy(example_inputs[0])
+        actual = m2(example_inputs[0])
         self.assertFalse(_allclose(expected, actual))
 
         # Results should be the same after loading from serialized state_dict
         with tempfile.NamedTemporaryFile() as f:
             torch.save(m.state_dict(), f.name)
             loaded_state_dict = torch.load(f.name)
-            m_copy.load_state_dict(loaded_state_dict)
+            m2.load_state_dict(loaded_state_dict)
         expected = m(example_inputs[0])
-        actual = m_copy(example_inputs[0])
+        actual = m2(example_inputs[0])
+        # TODO: why does this fail?
         self.assertTrue(_allclose(expected, actual))
 
 @skipIfNoFBGEMM
