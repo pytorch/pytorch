@@ -1,12 +1,32 @@
 #include <ATen/ATen.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
 namespace at {
 namespace native {
+
+DEFINE_DISPATCH(qmean_inner_dim_stub);
+
+// If mean values are taken in the innermost dims, the fast path can be used.
+inline bool is_mean_inner_dim_fast_path(
+    const Tensor& self,
+    IntArrayRef dim,
+    c10::optional<ScalarType> opt_dtype) {
+  auto dims = dim.vec();
+  std::sort(dims.begin(), dims.end(), std::greater<int64_t>());
+  bool is_fast_path = dims.empty() || dims[0] == -1 || dims[0] == self.dim() - 1;
+  is_fast_path = is_fast_path &&
+      (!opt_dtype.has_value() || opt_dtype.value() == self.scalar_type());
+  for (int i = 1; i < dims.size(); ++i) {
+    is_fast_path = is_fast_path && (dims[i] == dims[i-1] - 1);
+  }
+  return is_fast_path;
+}
+
 #ifdef USE_PYTORCH_QNNPACK
 Tensor qnnpack_mean(const Tensor& input, IntArrayRef dim, bool keepdim) {
   Tensor output;
@@ -96,6 +116,12 @@ Tensor& mean_out_quantized_cpu(
     return result;
   }
 #endif
+
+  // Take average in the innermost dimensions
+  if (is_mean_inner_dim_fast_path(self, dim, opt_dtype)) {
+    qmean_inner_dim_stub(self.device().type(), self, dim, keepdim, opt_dtype, result);
+    return result;
+  }
   auto self_dequantized = self.dequantize();
   auto result_dequantized = at::mean(self_dequantized, dim, keepdim, opt_dtype);
   result = at::quantize_per_tensor(
