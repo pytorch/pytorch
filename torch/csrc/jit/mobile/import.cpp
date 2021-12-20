@@ -226,7 +226,7 @@ class BytecodeDeserializer final {
   // operators from the given model. If it's less than the current runtime,
   // upgrader will be applied at loading stage.
   uint64_t operator_version_;
-  std::atomic<bool> _upgrader_initialized{false};
+  std::once_flag _upgrader_initialized;
 };
 
 BytecodeDeserializer::BytecodeDeserializer(
@@ -310,26 +310,21 @@ void BytecodeDeserializer::init_upgrader(mobile::Function* function) {
   // initialized yet. However, it's not thread safe. When multiple thread loads
   // module together, it's possible that they all consider it's the first
   // module. Use an atomic variable here to make sure it's thread safe.
-  if (!_upgrader_initialized.load(std::memory_order_seq_cst)) {
-    for (auto& byteCodeFunctionWithOperator : getUpgraderBytecodeList()) {
-      // When kUpgraderByteCode is initialized in upgrader_mobile.h, the mobile
-      // function is initialized with everything (instruction, constants, types,
-      // registerer size and etc), except operator. The operator function is
-      // also static initialized and is available later. The oprator for the
-      // upgrader function will be initialized when the first module is loaded.
-      for (const auto& op : byteCodeFunctionWithOperator.operators) {
-        byteCodeFunctionWithOperator.function.append_operator(
-            op.name,
-            op.overload_name,
-            op.num_specified_args,
-            caffe2::serialize::kMaxSupportedFileFormatVersion);
-      }
-      // Add the upgrader function in code.
-      function->append_function(byteCodeFunctionWithOperator.function);
+  for (auto& byteCodeFunctionWithOperator : getUpgraderBytecodeList()) {
+    // When kUpgraderByteCode is initialized in upgrader_mobile.h, the mobile
+    // function is initialized with everything (instruction, constants, types,
+    // registerer size and etc), except operator. The operator function is
+    // also static initialized and is available later. The oprator for the
+    // upgrader function will be initialized when the first module is loaded.
+    for (const auto& op : byteCodeFunctionWithOperator.operators) {
+      byteCodeFunctionWithOperator.function.append_operator(
+          op.name,
+          op.overload_name,
+          op.num_specified_args,
+          caffe2::serialize::kMaxSupportedFileFormatVersion);
     }
-    // Set the flag _upgrader_initialized to ture, and for the 2, 3, ...
-    // modules, no need to initalized again
-    _upgrader_initialized.store(true, std::memory_order_seq_cst);
+    // Add the upgrader function in code.
+    function->append_function(byteCodeFunctionWithOperator.function);
   }
 }
 
@@ -410,7 +405,9 @@ void BytecodeDeserializer::parseMethods(
       debug_handles_m_tuple =
           std::move(*std::move((*debug_handles)[i]).toTuple()).elements();
     }
-    init_upgrader(function.get());
+    std::call_once(
+        _upgrader_initialized, [&]() { this->init_upgrader(function.get()); });
+
     // 1. First pass all operators from models
     parseOperators(
         std::move(ops_list),
