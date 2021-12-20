@@ -10589,12 +10589,7 @@ op_db: List[OpInfo] = [
                         # TODO: FIXME: jiterator doesn't support non-tensor inputs
                         DecorateInfo(unittest.expectedFailure,
                                      'TestBinaryUfuncs',
-                                     'test_broadcast_python_scalar'),
-                        # TODO: FIXME: jiterator doesn't support casts to unsupported types
-                        DecorateInfo(unittest.expectedFailure,
-                                     'TestBinaryUfuncs',
-                                     'test_type_promotion',
-                                     device_type='cuda'))),
+                                     'test_broadcast_python_scalar'),)),
     BinaryUfuncInfo('isclose',
                     ref=np.isclose,
                     dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -12624,6 +12619,9 @@ op_db: List[OpInfo] = [
            skips=(
                # test does not work with passing lambda for op
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+               # CUDA runs out of memory
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_fwgrad_bwgrad',
+                            device_type='cuda', dtypes=[torch.cdouble]),
            )),
     OpInfo('linalg.pinv',
            aten_name='linalg_pinv',
