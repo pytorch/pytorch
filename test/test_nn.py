@@ -1834,9 +1834,126 @@ class TestNN(NNTestCase):
         parameters.pop('p4')
         check()
 
+        # Check reverse works
+        forward = list(iter(parameter_dict))
+        backward = list(reversed(parameter_dict))
+        self.assertEqual(len(forward), len(backward))
+        n = len(forward)
+        for i in range(n):
+            self.assertIs(forward[i], backward[n - i - 1])
+        check()
+
+        # Check copy works
+        copy = parameter_dict.copy()
+
+        # Check all keys are present and have shallow copied values
+        for key in parameter_dict:
+            self.assertTrue(key in copy)
+            self.assertEqual(parameter_dict[key], copy[key])
+            self.assertIs(parameter_dict[key], copy[key])
+        check()
+
+        parameter_dict["p20"] = Parameter(torch.randn(10, 10))
+        copy["p21"] = Parameter(torch.randn(9, 10))
+
+        self.assertTrue("p20" in parameter_dict)
+        self.assertFalse("p20" in copy)
+        self.assertFalse("p21" in parameter_dict)
+        self.assertTrue("p21" in copy)
+        parameter_dict.pop("p20")
+        check()
+
+        p = Parameter(torch.randn(10, 10))
+        parameter_dict['p12'] = p
+        p_popitem = parameter_dict.popitem()
+        self.assertEqual(p_popitem[0], 'p12')
+        self.assertIs(p_popitem[1], p)
+
+        # Unit test for set_default
+        # 1. Ensure parameter is correctly inserted when
+        #    the key is not present in `ParameterDict`
+        assert 'p11' not in parameter_dict
+        parameters['p11'] = Parameter(torch.randn(10, 10))
+        p_setdefault = parameter_dict.setdefault('p11', parameters['p11'])
+        self.assertIs(p_setdefault, parameters['p11'])
+        # 2. Ensure parameter is NOT inserted when the
+        #    key is already present in `ParameterDict`
+        p = Parameter(torch.randn(10, 10))
+        self.assertFalse(parameter_dict.setdefault('p11', p) is p)
+        # 3. Ensure `None` is inserted when the key is not
+        #    present in `Parameter` and parameter is not specified
+        self.assertIs(parameter_dict.setdefault('p26'), None)
+        del parameter_dict['p26']
+        check()
+
+        parameters2 = OrderedDict([
+            ('p13', Parameter(torch.randn(10, 10))),
+            ('p2', Parameter(torch.randn(10, 10))),
+            ('p3', Parameter(torch.randn(10, 10))),
+        ])
+        parameter_dict2 = nn.ParameterDict(parameters2)
+        parameters.update(parameters2)
+        parameter_dict |= parameter_dict2
+        check()
+
+        parameters2 = OrderedDict()
+        parameter_dict2 = nn.ParameterDict(parameters2)
+        parameters.update(parameters2)
+        parameter_dict |= parameter_dict2
+        check()
+
+        parameters2 = OrderedDict([
+            ('p14', Parameter(torch.randn(10, 10))),
+            ('p15', Parameter(torch.randn(10, 10))),
+            ('p13', Parameter(torch.randn(10, 10))),
+        ])
+        parameter_dict2 = nn.ParameterDict(parameters2)
+        parameters.update(parameters2)
+        parameter_dict |= parameter_dict2
+        check()
+
+        # Check __or__ and __ror__ works
+        parameters2 = OrderedDict([
+            ('p20', Parameter(torch.randn(10, 10))),
+            ('p21', Parameter(torch.randn(10, 10))),
+            ('p22', Parameter(torch.randn(10, 10))),
+        ])
+        parameter_dict2 = nn.ParameterDict(parameters2)
+        parameters.update(parameters2)
+        parameter_dict = parameter_dict | parameter_dict2
+        check()
+
+        parameters2 = OrderedDict([
+            ('p23', Parameter(torch.randn(10, 10))),
+            ('p24', Parameter(torch.randn(10, 10))),
+            ('p25', Parameter(torch.randn(10, 10))),
+        ])
+        parameter_dict2 = nn.ParameterDict(parameters2)
+        parameters2.update(parameters)
+        parameters = parameters2
+        parameter_dict = parameter_dict2 | parameter_dict
+        check()
+
+        parameters['p17'] = Parameter(torch.randn(10, 10))
+        parameter_dict['p17'] = parameters['p17']
+        self.assertIs(parameters['p17'], parameter_dict.get('p17'))
+        temp_param = Parameter(torch.randn(10, 10))
+        self.assertIs(parameters['p17'], parameter_dict.get('p17', temp_param))
+        self.assertIs(None, parameter_dict.get('p18'))
+        self.assertIs(temp_param, parameter_dict.get('p18', temp_param))
+        check()
+
         parameter_dict.clear()
         self.assertEqual(len(parameter_dict), 0)
         parameters.clear()
+        check()
+
+        parameter_dict2 = parameter_dict.fromkeys(['p19', 'p20'])
+        self.assertEqual({'p19': None, 'p20': None}, parameter_dict2)
+        check()
+
+        parameter_dict2 = parameter_dict.fromkeys(['p19', 'p20'], temp_param)
+        self.assertEqual({'p19': temp_param, 'p20': temp_param}, parameter_dict2)
         check()
 
     def test_add_module(self):
@@ -5282,6 +5399,64 @@ class TestNN(NNTestCase):
         # Verify that bias=False applies to both in and out projection layers.
         self.assertIsNone(mha.in_proj_bias)
         self.assertIsNone(mha.out_proj.bias)
+
+    def test_multihead_attn_invalid_shape(self):
+        mha = torch.nn.MultiheadAttention(3, 3)
+
+        # Batched (3D) query cases
+        query = torch.randn(3, 3, 3)
+        key = torch.randn(3, 3, 3)
+        value = torch.randn(3, 3, 3)
+
+        msg = "expected `key` and `value` to be 3-D but found 2-D and 3-D tensors respectively"
+        # 3D query, 2D key and 3D value
+        with self.assertRaisesRegex(AssertionError, msg):
+            mha(query, torch.randn(3, 3), value)
+
+        msg = "expected `key` and `value` to be 3-D but found 3-D and 2-D tensors respectively"
+        # 3D query, 3D key and 2D value
+        with self.assertRaisesRegex(AssertionError, msg):
+            mha(query, key, torch.randn(3, 3))
+
+        msg = "expected `key_padding_mask` to be `None` or 2-D but found 1-D tensor instead"
+        # 3D query, 3D key, 3D value and 1D key_padding_mask
+        with self.assertRaisesRegex(AssertionError, msg):
+            mha(query, key, value, key_padding_mask=torch.tensor([False, True, True], dtype=torch.bool))
+
+        msg = "expected `attn_mask` to be `None`, 2-D or 3-D but found 1-D tensor instead"
+        # 3D query, 3D key, 3D value and 1D attn_mask
+        with self.assertRaisesRegex(AssertionError, msg):
+            mha(query, key, value, attn_mask=torch.tensor([False, True, True], dtype=torch.bool))
+
+        # Unbatched (2D) query cases
+        query = torch.randn(3, 3)
+        key = torch.randn(3, 3)
+        value = torch.randn(3, 3)
+
+        msg = "expected `key` and `value` to be 2-D but found 3-D and 2-D tensors respectively"
+        # 2D query, 3D key and 2D value
+        with self.assertRaisesRegex(AssertionError, msg):
+            mha(query, torch.randn(3, 3, 3), value)
+
+        msg = "expected `key` and `value` to be 2-D but found 2-D and 3-D tensors respectively"
+        # 2D query, 3D key and 2D value
+        with self.assertRaisesRegex(AssertionError, msg):
+            mha(query, key, torch.randn(3, 3, 3))
+
+        msg = "expected `key_padding_mask` to be `None` or 1-D but found 2-D tensor instead"
+        # 2D query, 2D key, 2D value and 1D key_padding_mask
+        with self.assertRaisesRegex(AssertionError, msg):
+            mha(query, key, value, key_padding_mask=torch.tensor([[False, True, True] * 2], dtype=torch.bool))
+
+        msg = "expected `attn_mask` to be `None`, 2-D or 3-D but found 1-D tensor instead"
+        # 2D query, 2D key, 2D value and 1D attn_mask
+        with self.assertRaisesRegex(AssertionError, msg):
+            mha(query, key, value, attn_mask=torch.tensor([False, True, True], dtype=torch.bool))
+
+        msg = r"Expected `attn_mask` shape to be \(3, 3, 3\)"
+        # 2D query, 2D key, 2D value and 3D incorrect attn_mask
+        with self.assertRaisesRegex(AssertionError, msg):
+            mha(query, key, value, attn_mask=torch.randn(4, 3, 3).bernoulli_().to(torch.bool))
 
     def test_normalize(self):
         inputs = torch.randn(1, 3, 4, 4, requires_grad=True)
@@ -15622,16 +15797,38 @@ class TestNNDeviceType(NNTestCase):
                 self.assertEqual(grad, grad_check, msg=msg, atol=atol, rtol=rtol)
 
     def test_masked_softmax(self, device):
-        B = 10
-        num_heads = 8
-        L = 512
+        sizes = [(1, 1, 32), (3, 16, 310), (12, 4, 1024), (4, 2, 1200)]
+        for (B, num_heads, L) in sizes:
+            input = torch.randn((B, num_heads, L, L))
+            mask = torch.randint(0, 2, (B, L))
+            if (self.device_type == "cuda"):
+                input = input.cuda()
+                mask = mask.cuda()
+            mask = mask.reshape(B, 1, 1, L).expand(B, num_heads, L, L).bool()
+            native_res = torch._masked_softmax(input, mask)
+            mask = mask.float()
+
+            def slow_masked_softmax(input, mask):
+                exp = torch.exp(input)
+                exp = exp * mask
+                s = exp.sum(dim=3, keepdim=True).expand(exp.size())
+                return exp / s
+            pt_res = slow_masked_softmax(input, mask)
+            self.assertEqual(pt_res, native_res, exact_dtype=True)
+
+    @onlyCUDA
+    def test_masked_softmax_transformer_layout(self, device):
+        B = 211
+        num_heads = 16
+        L = 42
         input = torch.randn((B, num_heads, L, L))
         mask = torch.randint(0, 2, (B, L))
         if (self.device_type == "cuda"):
             input = input.cuda()
             mask = mask.cuda()
-        mask = mask.reshape(B, 1, 1, L).expand(B, num_heads, L, L).bool()
+        mask = mask.bool()
         native_res = torch._masked_softmax(input, mask)
+        mask = mask.reshape(B, 1, 1, L).expand(B, num_heads, L, L)
         mask = mask.float()
 
         def slow_masked_softmax(input, mask):
