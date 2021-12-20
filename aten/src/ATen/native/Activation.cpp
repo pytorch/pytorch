@@ -615,13 +615,13 @@ Tensor prelu_cpu(const Tensor& self, const Tensor& weight_) {
   }
 
   const int64_t ndim = self.dim();
-  // Helper to convert 1d tensors to an nd tensor that broadcasts with input
+  // Helper to convert 1d tensors or scalar tensor to an nd tensor that broadcasts with input
   // All elements go into the channel dimension
   DimVector sizes(ndim, 1), strides(ndim, 0);
   auto as_nd = [&](const Tensor& t) {
-    TORCH_INTERNAL_ASSERT(t.defined() && t.dim() == 1);
-    sizes[1] = t.sizes()[0];
-    strides[1] = t.strides()[0];
+    TORCH_INTERNAL_ASSERT(t.defined() && (t.dim() == 1 || t.dim() == 0));
+    sizes[1] = t.dim() == 1 ? t.sizes()[0] : 1;
+    strides[1] = t.dim() == 1 ? t.strides()[0] : 0;
     return t.as_strided(sizes, strides);
   };
   Tensor w;
@@ -665,13 +665,13 @@ std::tuple<Tensor, Tensor> prelu_backward_cpu(const Tensor& grad_out_, const Ten
   }
 
   const int64_t ndim = self.dim();
-  // Helper to convert 1d tensors to an nd tensor that broadcasts with input
+  // Helper to convert 1d tensor or scalar tensor to an nd tensor that broadcasts with input
   // All elements go into the channel dimension
   DimVector sizes(ndim, 1), strides(ndim, 0);
   auto as_nd = [&](const Tensor& t) {
-    TORCH_INTERNAL_ASSERT(t.defined() && t.dim() == 1);
-    sizes[1] = t.sizes()[0];
-    strides[1] = t.strides()[0];
+    TORCH_INTERNAL_ASSERT(t.defined() && (t.dim() == 1 || t.dim() == 0));
+    sizes[1] = t.dim() == 1 ? t.sizes()[0] : 1;
+    strides[1] = t.dim() == 1 ? t.strides()[0] : 0;
     return t.as_strided(sizes, strides);
   };
   Tensor w;
