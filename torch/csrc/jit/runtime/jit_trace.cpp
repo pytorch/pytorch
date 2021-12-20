@@ -1,7 +1,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
 #include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
