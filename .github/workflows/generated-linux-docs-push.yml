@@ -356,7 +356,7 @@ jobs:
             --tty \
             --detach \
             --user jenkins \
-            -v "${RUNNER_TEMP}/.netrc":/var/lib/jenkins/workspace/.netrc \
+            -v "${RUNNER_TEMP}/.netrc":/home/jenkins/.netrc \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
