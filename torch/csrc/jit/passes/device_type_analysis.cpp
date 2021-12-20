@@ -30,8 +30,10 @@ Returns: Bool indicating if anything was changed
 bool setDeviceType(Value* value, c10::optional<Device> device) {
   auto tensor_type = value->type()->cast<TensorType>();
   TORCH_INTERNAL_ASSERT(tensor_type, "Expecting a tensor type");
-  bool changed = tensor_type->device() != device;
-  value->setType(tensor_type->withDevice(device));
+  bool changed = (tensor_type->device() != device);
+  if (changed) {
+    value->setType(tensor_type->withDevice(device));
+  }
   return changed;
 }
 
@@ -181,10 +183,30 @@ struct DeviceTypePropagationPass {
     }
   }
 
-  void mergeAndApplyTensorProps(
+  // Small functions to overload for both Dtype and Device
+  bool is_tensor_prop_empty(const TensorType& val) const {
+    return !val.device().has_value();
+  }
+
+  bool is_tensor_prop_same(const TensorType& val1, const TensorType& val2)
+      const {
+    // Notes that it allows for null devices to be the same
+    return val1.device() == val2.device();
+  }
+
+  bool copy_tensor_prop(Value* dst, TensorType& src_type) {
+    return setDeviceType(dst, src_type.device());
+  }
+
+  bool set_empty_prop(Value* dst) {
+    return setDeviceType(dst, c10::nullopt);
+  }
+
+  bool mergeAndApplyTensorProps(
       const at::ArrayRef<Value*>& src1,
       const at::ArrayRef<Value*>& src2,
       const at::ArrayRef<Value*>& dst) {
+    bool changed = false;
     TORCH_INTERNAL_ASSERT(src1.size() == src2.size());
     TORCH_INTERNAL_ASSERT(src1.size() == dst.size());
 
@@ -195,18 +217,15 @@ struct DeviceTypePropagationPass {
         continue;
       }
 
-      auto true_device = src1_type->device();
-      auto false_device = src2_type->device();
-      if (!true_device.has_value() || !false_device.has_value()) {
-        // For now, being conservative and not handling the null device case.
-        continue;
+      if (is_tensor_prop_empty(*src1_type) ||
+          is_tensor_prop_empty(*src2_type) ||
+          !is_tensor_prop_same(*src1_type, *src2_type)) {
+        changed |= set_empty_prop(dst[i]);
+      } else {
+        changed |= copy_tensor_prop(dst[i], *src1_type);
       }
-      if (true_device.value() != false_device.value()) {
-        continue;
-      }
-
-      setDeviceType(dst[i], true_device.value());
     }
+    return changed;
   }
 
   /*
