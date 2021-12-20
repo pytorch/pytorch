@@ -70,6 +70,7 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
 
     ${TORCH_ROOT}/third_party/gloo
     ${TORCH_ROOT}/third_party/onnx
+    ${TORCH_ROOT}/third_party/flatbuffers/include
     ${pybind11_INCLUDE_DIRS}
 
     ${TORCH_SRC_DIR}/csrc
@@ -104,11 +105,10 @@ else()
       -fno-strict-aliasing
       -Wno-write-strings
       -Wno-strict-aliasing)
-endif()
-
-if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-    list(APPEND TORCH_PYTHON_COMPILE_OPTIONS
-      -Wno-writable-strings)
+    if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+        list(APPEND TORCH_PYTHON_COMPILE_OPTIONS
+          -Wno-writable-strings)
+    endif()
 endif()
 
 if(USE_CUDA)
@@ -344,6 +344,8 @@ if(HAVE_SOVERSION)
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
 endif()
 add_dependencies(torch_python torch_python_stubs)
+add_dependencies(torch_python flatbuffers)
+
 
 if(USE_PRECOMPILED_HEADERS)
   target_precompile_headers(torch_python PRIVATE

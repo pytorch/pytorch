@@ -842,14 +842,12 @@ class TestGradients(TestCase):
             self.skipTest("Skipped! Operation does not support inplace autograd.")
         self._gradgrad_test_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()))
 
-    def _forward_grad_helper(self, device, dtype, op, variant, is_inplace):
+    def _forward_grad_helper(self, device, dtype, op, variant):
         # TODO: clean up how attributes are passed to gradcheck from OpInfos
         def call_grad_test_helper():
-            check_batched_forward_grad = ((op.check_batched_forward_grad and not is_inplace) or
-                                          (op.check_inplace_batched_forward_grad and is_inplace))
             self._grad_test_helper(device, dtype, op, variant, check_forward_ad=True, check_backward_ad=False,
                                    check_undefined_grad=False, check_batched_grad=False,
-                                   check_batched_forward_grad=check_batched_forward_grad)
+                                   check_batched_forward_grad=op.check_batched_forward_grad)
         if op.supports_forward_ad:
             call_grad_test_helper()
         else:
@@ -863,7 +861,7 @@ class TestGradients(TestCase):
     def test_forward_mode_AD(self, device, dtype, op):
         self._skip_helper(op, device, dtype)
 
-        self._forward_grad_helper(device, dtype, op, op.get_op(), is_inplace=False)
+        self._forward_grad_helper(device, dtype, op, op.get_op())
 
     @_gradcheck_ops(op_db)
     def test_inplace_forward_mode_AD(self, device, dtype, op):
@@ -872,7 +870,7 @@ class TestGradients(TestCase):
         if not op.inplace_variant or not op.supports_inplace_autograd:
             self.skipTest("Skipped! Operation does not support inplace autograd.")
 
-        self._forward_grad_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()), is_inplace=True)
+        self._forward_grad_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()))
 
     # Functions that do not support autograd should not fail in forward mode
     # Inplace functions (such as "resize_") are expected to fail in forward mode and should be skipped

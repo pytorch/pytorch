@@ -130,12 +130,19 @@ class TORCH_API Module {
     return *cu_.get();
   }
 
+  void set_delete_memory(std::shared_ptr<char> delete_mem) {
+    mem_to_delete_ = delete_mem;
+  }
+
  private:
   c10::intrusive_ptr<c10::ivalue::Object> object_;
   std::unordered_map<std::string, std::string> metadata_;
   std::shared_ptr<CompilationUnit> cu_;
   MobileDebugTable debug_table_;
   bool has_debug_handles_ = false;
+
+  // Extra handle for the module to delete when itself is deleted
+  std::shared_ptr<char> mem_to_delete_;
 };
 } // namespace mobile
 } // namespace jit
