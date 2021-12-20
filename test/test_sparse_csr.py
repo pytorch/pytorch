@@ -1184,8 +1184,16 @@ class TestSparseCSR(TestCase):
                 raise ValueError("Expected 2D tensor but got tensor with dimension: {sample.input.ndim}.")
 
             expected = op(sample.input, *sample.args, **sample.kwargs)
+            sample.input = sample.input.to_sparse_csr()
+
+            # TODO: @krshrimali, enable support for complex inputs for square
+            if sample.input.is_complex() and op.name == "square":
+                with self.assertRaisesRegex(RuntimeError, "not supported"):
+                    expect = op(sample.input, *sample.args, **sample.kwargs)
+                continue
+
             assert torch.is_tensor(expected)
-            output = op(sample.input.to_sparse_csr(), *sample.args, **sample.kwargs)
+            output = op(sample.input, *sample.args, **sample.kwargs)
             assert torch.is_tensor(output)
 
             self.assertEqual(output.to_dense(), expected)
@@ -1205,7 +1213,21 @@ class TestSparseCSR(TestCase):
                 raise ValueError("Expected 2D tensor but got tensor with dimension: {sample.input.ndim}.")
 
             sample.input = sample.input.to_sparse_csr()
-            expect = op(sample.input, *sample.args, **sample.kwargs)
+
+            # TODO: @krshrimali, enable support for complex inputs for square
+            if sample.input.is_complex() and op.name == "square":
+                with self.assertRaisesRegex(RuntimeError, "not supported"):
+                    expect = op(sample.input, *sample.args, **sample.kwargs)
+
+                # Create an out Sparse CSR Tensor
+                out = self.genSparseCSRTensor(sample.input.size(), sample.input._nnz(),
+                                              device=sample.input.device, dtype=sample.input.dtype,
+                                              index_dtype=sample.input.crow_indices().dtype)
+                with self.assertRaisesRegex(RuntimeError, "not supported"):
+                    op(sample.input, *sample.args, **sample.kwargs, out=out)
+                continue
+            else:
+                expect = op(sample.input, *sample.args, **sample.kwargs)
 
             out = self.genSparseCSRTensor(sample.input.size(), sample.input._nnz(),
                                           device=sample.input.device, dtype=expect.dtype,
@@ -1232,15 +1254,21 @@ class TestSparseCSR(TestCase):
                 raise ValueError("Expected 2D tensor but got tensor with dimension: {sample.input.ndim}.")
 
             sample.input = sample.input.to_sparse_csr()
-            expect = op(sample.input, *sample.args, **sample.kwargs)
 
-            if not torch.can_cast(expect.dtype, dtype):
-                with self.assertRaisesRegex(RuntimeError, "result type"):
+            # TODO: @krshrimali, enable support for complex inputs for square
+            if sample.input.is_complex() and op.name == "square":
+                with self.assertRaisesRegex(RuntimeError, "not supported"):
+                    expect = op(sample.input, *sample.args, **sample.kwargs)
+            else:
+                expect = op(sample.input, *sample.args, **sample.kwargs)
+
+            if sample.input.is_complex() and op.name in ["abs", "square"]:
+                with self.assertRaisesRegex(RuntimeError, "not supported"):
                     op.inplace_variant(sample.input, *sample.args, **sample.kwargs)
                 continue
 
-            if sample.input.is_complex() and op.name == "abs":
-                with self.assertRaisesRegex(RuntimeError, "not supported"):
+            if not torch.can_cast(expect.dtype, dtype):
+                with self.assertRaisesRegex(RuntimeError, "result type"):
                     op.inplace_variant(sample.input, *sample.args, **sample.kwargs)
                 continue
 
