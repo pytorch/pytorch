@@ -30,7 +30,8 @@ def linear(*, input, weight, bias):
 
 @register_acc_op_properties(AccOpProperty.quantized)
 @register_acc_op
-def quantized_linear(*, input, weight, bias, acc_out_ty):
+def quantized_linear(*, input, weight, bias, acc_out_ty=None):
+    assert acc_out_ty is not None
     qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams")
     return nn.quantized.functional.linear(
         input,
@@ -490,7 +491,8 @@ def hardswish_mapper(node: torch.fx.Node, _: nn.Module) -> torch.fx.Node:
     ],
 )
 @register_acc_op
-def quantized_add(*, input, other, acc_out_ty):
+def quantized_add(*, input, other, acc_out_ty=None):
+    assert acc_out_ty is not None
     qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams")
     return torch.ops.quantized.add(
         input,
@@ -515,7 +517,8 @@ def quantized_add(*, input, other, acc_out_ty):
     ],
 )
 @register_acc_op
-def quantized_mul(*, input, other, acc_out_ty):
+def quantized_mul(*, input, other, acc_out_ty=None):
+    assert acc_out_ty is not None
     qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams")
     return torch.ops.quantized.mul(
         input,
@@ -542,7 +545,8 @@ def quantized_mul(*, input, other, acc_out_ty):
     ],
 )
 @register_acc_op
-def quantize_per_tensor(*, input, acc_out_ty):
+def quantize_per_tensor(*, input, acc_out_ty=None):
+    assert acc_out_ty is not None
     qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams")
     dtype = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "dtype")
     return torch.quantize_per_tensor(
@@ -568,7 +572,8 @@ def quantize_per_tensor(*, input, acc_out_ty):
     ],
 )
 @register_acc_op
-def quantize_per_channel(*, input, acc_out_ty):
+def quantize_per_channel(*, input, acc_out_ty=None):
+    assert acc_out_ty is not None
     qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams")
     dtype = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "dtype")
     return torch.quantize_per_channel(
@@ -590,13 +595,15 @@ def dequantize(*, input):
 
 @register_acc_op_properties(AccOpProperty.pointwise, AccOpProperty.unary, AccOpProperty.quantized)
 @register_acc_op
-def rescale_quantize_per_tensor(*, input, acc_out_ty):
+def rescale_quantize_per_tensor(*, input, acc_out_ty=None):
+    assert acc_out_ty is not None
     d = dequantize(input=input)
     return quantize_per_tensor(input=d, acc_out_ty=acc_out_ty)
 
 @register_acc_op_properties(AccOpProperty.unary, AccOpProperty.quantized)
 @register_acc_op
-def rescale_quantize_per_channel(*, input, acc_out_ty):
+def rescale_quantize_per_channel(*, input, acc_out_ty=None):
+    assert acc_out_ty is not None
     d = dequantize(input=input)
     return quantize_per_channel(input=d, acc_out_ty=acc_out_ty)
 
@@ -1408,7 +1415,8 @@ def custom_narrow_mapper(node: torch.fx.Node, mod: nn.Module) -> torch.fx.Node:
     kwargs_to_move_to_acc_out_ty=[("shape", "shape")],
 )
 @register_acc_op
-def reshape(*, input, acc_out_ty):
+def reshape(*, input, acc_out_ty=None):
+    assert acc_out_ty is not None
     return torch.reshape(
         input, tuple(acc_utils.get_field_from_acc_out_ty(acc_out_ty, "shape"))
     )
@@ -1449,8 +1457,8 @@ def custom_tensor_reshape_mapper(node: torch.fx.Node, _: nn.Module) -> torch.fx.
 
 @register_acc_op_properties(AccOpProperty.pointwise, AccOpProperty.unary)
 @register_acc_op
-def to_dtype(input, acc_out_ty):
-    assert acc_out_ty is not None, "valid acc_out_ty needed"
+def to_dtype(input, acc_out_ty=None):
+    assert acc_out_ty is not None
     return input.to(dtype=acc_utils.get_field_from_acc_out_ty(acc_out_ty, "dtype"))
 
 
