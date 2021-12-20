@@ -48,29 +48,6 @@ private:
   bool* called_;
 };
 
-TEST(OperatorRegistrationTest, AAA) {
-  bool called_kernel_cpu = false;
-  auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
-    .kernel<MockKernel>(c10::DispatchKey::CPU, &called_kernel_cpu));
-
-  auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
-
-  ASSERT_TRUE(op.has_value());
-  auto state = op->dumpState();
-  std::cout << "state=" << std::endl;
-  std::cout << state << std::endl;
-  auto table = op->dumpComputedTable();
-  std::cout << "computedTable=" << std::endl;
-  std::cout << table << std::endl;
-  ASSERT_FALSE(called_kernel_cpu);
-  callOp(*op, dummyTensor(c10::DispatchKey::CPU));
-  ASSERT_TRUE(called_kernel_cpu);
-  expectThrows<c10::Error>([&] {
-    callOp(*op, dummyTensor(c10::DispatchKey::CUDA));
-  }, "Could not run '_test::dummy' with arguments from the 'CUDA'"
-  " backend.");
-}
-
 TEST(OperatorRegistrationTest, whenRegisteringWithSchemaBeforeKernelInOptionsObject_thenCanBeCalled) {
   bool called = false;
   auto registrar = c10::RegisterOperators().op(c10::RegisterOperators::options().schema("_test::dummy(Tensor dummy) -> ()").catchAllKernel<MockKernel>(&called));
@@ -529,7 +506,6 @@ TEST(OperatorRegistrationTest, whenRegisteringAutogradKernel_thenCanCallAutograd
 
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value());
-  std::cout << op -> dumpComputedTable() << std::endl;
 
   called_autograd = false;
   expectThrows<c10::Error>([&] {
@@ -647,28 +623,27 @@ TEST(OperatorRegistrationTest, AutogradLazyOverridesAutogradKernel) {
 
 void whenRegisterWithLazyBackendsAndCatchAll_AutogradLazyBackendsIsNotFilled(DispatchKey key) {
   {
-    //auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
-      //.catchAllKernel<decltype(nonautograd_kernel), nonautograd_kernel>());
+	auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
+	  .catchAllKernel<decltype(nonautograd_kernel), nonautograd_kernel>());
 
-    //auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
-    //ASSERT_TRUE(op.has_value());
+	auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
+	ASSERT_TRUE(op.has_value());
 
-    //called_nonautograd = called_autograd = false;
-    //op->typed<void (Tensor)>().call(dummyTensor(key, [>requires_grad=<]true));
-    //EXPECT_TRUE(called_nonautograd);
-    //EXPECT_FALSE(called_autograd);
+	called_nonautograd = called_autograd = false;
+	op->typed<void (Tensor)>().call(dummyTensor(key, /*requires_grad=*/true));
+	EXPECT_TRUE(called_nonautograd);
+	EXPECT_FALSE(called_autograd);
 
-    //called_nonautograd = called_autograd = false;
-    //op->typed<void (Tensor)>().call(dummyTensor(key));
-    //EXPECT_FALSE(called_autograd);
-    //EXPECT_TRUE(called_nonautograd);
+	called_nonautograd = called_autograd = false;
+	op->typed<void (Tensor)>().call(dummyTensor(key));
+	EXPECT_FALSE(called_autograd);
+	EXPECT_TRUE(called_nonautograd);
   }
   {
     auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
       .kernel<decltype(autograd_kernel), &autograd_kernel>(key)
       .catchAllKernel<decltype(nonautograd_kernel), nonautograd_kernel>());
 
-    std::cout << "a" << std::endl;
     auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
     ASSERT_TRUE(op.has_value());
 
@@ -676,15 +651,12 @@ void whenRegisterWithLazyBackendsAndCatchAll_AutogradLazyBackendsIsNotFilled(Dis
     // kernel in precompute but just keep fallthrough kernel from backend fallback.
     // Thus it falls through Autograd{XLA, Lazy} and reaches the kernel at XLA / Lazy key.
     called_nonautograd = called_autograd = false;
-    std::cout << "b" << std::endl;
     op->typed<void (Tensor)>().call(dummyTensor(key, /*requires_grad=*/true));
-    std::cout << "c" << std::endl;
     EXPECT_FALSE(called_nonautograd);
     EXPECT_TRUE(called_autograd);
 
     called_nonautograd = called_autograd = false;
     op->typed<void (Tensor)>().call(dummyTensor(key));
-    std::cout << "d" << std::endl;
     EXPECT_TRUE(called_autograd);
     EXPECT_FALSE(called_nonautograd);
   }

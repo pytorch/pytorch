@@ -390,7 +390,8 @@ std::string OperatorEntry::listAllDispatchKeys() const {
   str << "[";
 
   bool has_kernels = false;
-  for (uint8_t iter = 0; iter != static_cast<uint8_t>(DispatchKey::NumDispatchKeys); ++iter) {
+  for (auto k : DispatchKeySet(DispatchKeySet::FULL)) {
+    auto iter = DispatchKeySet(k).getDispatchTableIndexForDispatchKeySet();
     if (!dispatchTable_[iter].isValid()) {
       continue;
     }

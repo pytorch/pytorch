@@ -20,6 +20,50 @@ namespace c10 {
 // we "count leading zeros" when we extract the highest priority dispatch
 // key.)
 //
+//
+// Note [Categorization of Dispatch Keys]
+// Internally, dispatch keys are packed into 64-bit DispatchKeySet objects
+// that get passed around at runtime.
+// However, there isn't necessarily a 1-to-1 mapping between bits in the keyset
+// and individual dispatch keys.
+//
+// First: why do we have this distinction, and why not map every dispatch key directly to a bit?
+// This is mostly because we have several types of functionalities
+// that different backends would like to customize.
+// For example, we have:
+// - "Dense":     CPU, CUDA, XLA, ... (~12 keys)
+// - "Sparse":    SparseCPU, SparseCUDA, ...
+// - "Quantized": QuantizedCPU, QuantizedCUDA, QuantizedXLA, ...
+// - "Autograd":  AutogradCPU, AutogradCUDA, Autograd XLA, ...
+// The problem is that total number of keys grows quadratically with [# backends] x [# functionalities],
+// making it very difficult to map each key directly to a bit in a bitset without dramatically increasing
+// the size of the bitset over time.
+//
+// Dispatch keys can roughly be divided into 3 broad categories.
+//
+// (1) "Building block" keys
+//    (a) Backend-bit keys (e.g. CPUBit, CUDABIt)
+//    (b) (per-backend) functionality-bit keys (e.g. AutogradFunctionality, Sparse, Dense)
+// Building block keys always correspond to individual bits in a DispatchKeySet.
+// Building block keys can be combined in a DispatchKeySet to form actual runtime keys.
+// For example,
+// DispatchKeySet({
+//   DispatchKey::CPUBit, DispatchKey::AutogradFunctionality
+// }).has(DispatchKey::AutogradCPU); <-- True.
+//
+// (2) "Runtime" keys
+//    (a) Per-backend functionality "instances" (AutogradCUDA, SparseCUDA, CUDA)
+//    (b) backend-agnostic functionalities (e.g. FuncTorchBatched)
+//    (c) non-customizeable backends (e.g. FPGA)
+// Runtime keys are the keys that correspond to actual kernels in the operator table at runtime.
+//
+//
+// (3) "Alias" keys
+//    e.g. CompositeImplicitAutograd
+//
+// ~~~~~ "Building block" keys ~~~~~
+//
+
 // NOTE: Keep the list in sync with `DispatchKey` in tools/codegen/model.py
 enum class DispatchKey : uint8_t {
 
@@ -298,8 +342,6 @@ enum class DispatchKey : uint8_t {
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ FIN ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   EndOfFunctionalityKeys, // End of functionality keys.
-  // TODO: remove
-  NumDispatchKeys = EndOfFunctionalityKeys, // End of functionality keys.
 
   // ~~~~~~~~~~~~~~ "Dense" Per-Backend Dispatch keys ~~~~~~~~~~~~~~~~~~~~ //
   // Here are backends which you think of as traditionally specifying

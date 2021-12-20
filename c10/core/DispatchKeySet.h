@@ -35,24 +35,71 @@ offsetsAndMasks() {
 // DispatchKeySet specifies what type ids apply.  The internal representation is
 // as a 64-bit bit set (this means only 64 tensor type ids are supported).
 //
-// TODO: modernize this description.
 // Note that DispatchKeys are ordered; thus, we can ask questions like "what is
 // the highest priority DispatchKey in the set"?  (The set itself is not
 // ordered; two sets with the same ids will always have the ids ordered in the
 // same way.)
 //
-// At the moment, there are no nontrivial uses of this set; tensors are always
-// singletons.  In the near future, this set will represent variable? + tensor
-// type id.  In the far future, it will be requires grad? + profiling? +
-// tracing? + lazy? + tensor type id.
+// Note [DispatchKeySet Internal Representation]
+// Internally, dispatch keys are packed into 64-bit DispatchKeySet objects
+// that get passed around at runtime.
+// However, there isn't necessarily a 1-to-1 mapping between bits in the keyset
+// and individual dispatch keys.
 //
-// (The difference between variable and requires grad, is that
-// there are currently three states a tensor can be:
-//  1. Not a variable
-//  2. Variable with requires_grad=False
-//  3. Variable with requires_grad=True
-// Eventually, we want to kill state (1), and only dispatch to autograd
-// handling code if one of the inputs requires grad.)
+// First: why do we have this distinction, and why not map every dispatch key directly to a bit?
+// This is mostly because we have several types of functionalities
+// that different backends would like to customize.
+// For example, we have:
+// - "Dense":     CPU, CUDA, XLA, ... (~12 keys)
+// - "Sparse":    SparseCPU, SparseCUDA, ...
+// - "Quantized": QuantizedCPU, QuantizedCUDA, QuantizedXLA, ...
+// - "Autograd":  AutogradCPU, AutogradCUDA, Autograd XLA, ...
+// The problem is that total number of keys grows quadratically with [# backends] x [# functionalities],
+// making it very difficult to map each key directly to a bit in a bitset without dramatically increasing
+// the size of the bitset over time.
+//
+// Dispatch keys can be divided into 3 broad categories.
+//
+// (1) "Building block" keys
+//    (a) Backend-bit keys (e.g. CPUBit, CUDABIt)
+//    (b) (per-backend) functionality-bit keys (e.g. AutogradFunctionality, Sparse, Dense)
+//
+// Building block keys always correspond to individual bits in a DispatchKeySet.
+// They can also be combined in a DispatchKeySet to form actual runtime keys.
+// e.g.
+//     auto dense_cpu_ks = DispatchKeySet({DispatchKey::CPUBit, DispatchKey::Dense});
+//     // The keyset has the runtime dense-cpu key.
+//     dense_cpu_ks.has(DispatchKey::CPU);
+//     // And it contains the building block keys too.
+//     dense_cpu_ks.has(DispatchKey::CPUBit);
+//     dense_cpu_ks.has(DispatchKey::Dense);
+//
+// Not every backend and not every functionality counts as a "building block key".
+// This is mostly to give us more levers to pull in the design space.
+// Backend keys and functionality keys that count as "building blocks" will contribute
+// to a full cross product of functionality that can be overriden.
+//
+// For example, right now we have at least 12 "backend" building blocks (CPU, CUDA, XLA, ...)
+// and at least 4 "functionality" building blocks (Dense, Sparse, Quantized, AutogradFunctionality, ...).
+// These keys together allow every dispatcher operator to be customized in up to 12*4 different ways.
+//
+//
+// (2) "Runtime" keys
+//    (a) Per-backend functionality "instances" (AutogradCUDA, SparseCUDA, CUDA)
+//    (b) backend-agnostic functionalities (e.g. FuncTorchBatched)
+//    (c) non-customizeable backends (e.g. FPGA)
+//
+//
+//
+// Runtime keys are the keys that correspond to actual function slots in the operator table at runtime.
+//
+//
+//
+// (3) "Alias" keys
+//    e.g. CompositeImplicitAutograd
+//
+// ~~~~~ "Building block" keys ~~~~~
+//
 //
 // An undefined tensor is one with an empty tensor type set.
 class C10_API DispatchKeySet final {
@@ -91,7 +138,7 @@ class C10_API DispatchKeySet final {
       // These keys (e.g. DispatchKey::CPUBit) have a backend bit set, but no functionality bits.
       uint64_t backend_val = 1ULL << static_cast<uint8_t>(k);
       repr_ = backend_val;
-    } else if (k < DispatchKey::EndOfFunctionalityKeys) {
+    } else if (k <= DispatchKey::EndOfFunctionalityKeys) {
       // Case 2: handle "functionality-only" keys
       // These keys have a functionality bit set, but no backend bits
       // These can technically be either:
@@ -136,7 +183,7 @@ class C10_API DispatchKeySet final {
   constexpr bool has(DispatchKey t) const {
 #ifdef NDEBUG
   if (t == DispatchKey::Undefined) {
-	throw std::invalid_argument("DispatchKeySet::has() called with Undefined key");
+    throw std::invalid_argument("DispatchKeySet::has() called with Undefined key");
   }
 #endif
     return has_all(DispatchKeySet(t));
@@ -159,16 +206,16 @@ class C10_API DispatchKeySet final {
   // because you can end up with weird results.
   // e.g. DispatchKeySet(DispatchKey::AutogradCPU).has_any(DispatchKeySet(DispatchKey::CPU)) would return true.
   inline bool has_any(DispatchKeySet ks) const {
-    //TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       // Either there are no backend bits in the input keyset
-      //((ks.repr_ & full_backend_mask) == 0) ||
+      ((ks.repr_ & full_backend_mask) == 0) ||
       // or there are no per-backend-functionality bits
-      //((ks & DispatchKeySet({
-          //DispatchKey::Dense,
-          //DispatchKey::Quantized,
-          //DispatchKey::Sparse,
-          //DispatchKey::Autograd,
-        //}).repr_) == 0));
+      ((ks & DispatchKeySet({
+          DispatchKey::Dense,
+          DispatchKey::Quantized,
+          DispatchKey::Sparse,
+          DispatchKey::Autograd,
+        }).repr_) == 0));
     return static_cast<bool>((repr_ & ks.repr_) != 0);
   }
   // Test if DispatchKeySet is a superset of ks.
@@ -195,7 +242,6 @@ class C10_API DispatchKeySet final {
   }
 
   // Compute self ^ other
-  // TODO: check where this is used
   constexpr DispatchKeySet operator^(DispatchKeySet other) const {
     return DispatchKeySet(repr_ ^ other.repr_);
   }
@@ -240,15 +286,14 @@ class C10_API DispatchKeySet final {
     if C10_UNLIKELY((isAliasDispatchKey(t))) {
       throw std::invalid_argument("invalid key");
     }
-    //auto functionality_k = isPerBackendFunctionalityKey(t) ? t : toFunctionalityKey(t);
     auto functionality_k =  toFunctionalityKey(t);
     return DispatchKeySet(repr_ & ~DispatchKeySet(functionality_k).repr_);
   }
   constexpr DispatchKeySet removeFunctionalityKeys(DispatchKeySet ks) const {
 #ifdef NDEBUG
-	if ((repr_ & full_backend_mask) != 0) {
-	  throw std::invalid_argument("DispatchKeySet::removeFunctionalitykeys() called with backends bits set");
-	}
+    if ((ks.repr_ & full_backend_mask) != 0) {
+      throw std::invalid_argument("DispatchKeySet::removeFunctionalitykeys() called with backends bits set");
+    }
 #endif
     return DispatchKeySet(repr_ & ~ks.repr_);
   }
@@ -268,7 +313,7 @@ class C10_API DispatchKeySet final {
     return static_cast<DispatchKey>(functionality_idx);
   }
 
-  // This is effectively like toBackendKey(DispatchKey), but less restrictive.
+  // This is similar like toBackendKey(DispatchKey), but less restrictive.
   // toBackendKey() errors out if the key that it was passed has no backend bits,
   // which is useful for error checking.
   // We need a version of that here that can also handle "fake" backends like FPGA,
@@ -291,17 +336,6 @@ class C10_API DispatchKeySet final {
     return functionality_k;
   }
 
-  // TODO remove
-  //DispatchKey highestPriorityTypeId() const {
-    //return static_cast<DispatchKey>(64 - llvm::countLeadingZeros(repr_));
-  //}
-
-  // TODO remove
-  //DispatchKey highestPriorityBackendTypeId() const {
-    //return (*this &
-            //((1ULL << static_cast<uint8_t>(DispatchKey::EndOfBackendKeys)) - 1))
-        //.highestPriorityTypeId();
-  //}
   // Returns the index of the most-significant bit in the keyset.
   // This is used to as part of the calculation into the operator table to get:
   // - the highest "functionality" bit in the keyset.
@@ -330,17 +364,16 @@ class C10_API DispatchKeySet final {
   uint64_t repr_ = 0;
 
  public:
-  // STL iterator for DispatchKeySet. Iterates through all DispatchKeys in the
-  // set. The iterator is only invalidated by the destruction of the underlying
+  // STL iterator for DispatchKeySet. Iterates through all runtime DispatchKeys in
+  // the set. The iterator is only invalidated by the destruction of the underlying
   // DispatchKeySet as the iterator stores a pointer to the raw representation
   // of the DispatchKeySet.
-  // Note: We only iterate through *functionality* keys. The only purpose that
-  // the backend bits serve during iteration is to decide which runtime key
-  // to return when we hit a per-backend functionality key.
+  // Note: When we encounter a per-backend functionality (e.g. Dense or Sparse),
+  // we will iterate through EVERY backend in the keyset, for that functionality.
   // For example, if the next functionality key to iterate over is Autograd,
   // and the backend bits in the keyset correspond to [DispatchKey::CPUBit, DispatchKey::CUDABit],
-  // then the next key we return will be DispatchKey::AutogradCUDA
-  // (because CUDA has higher precedence than CPU among backend keys).
+  // then the next two keys we return will be DispatchKey::AutogradCPU, DispatchKey::AutogradCUDA
+  // (CPU first because it has lower precedence than CUDA in DispatchKey.h).
   class iterator {
    public:
     using self_type = iterator;

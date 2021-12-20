@@ -13,15 +13,12 @@ TEST(DispatchKeySet, ShowSemantics) {
   // It corresponds to "dense" functionality, "CPU" backend.
   // This means that it gets a dense functionality bit, and a cpu backend bit set.
   auto undefined_set = DispatchKeySet();
-  std::cout << "undefined: " << undefined_set.getDispatchTableIndexForDispatchKeySet() << std::endl;
   auto dense_cpu_set = DispatchKeySet(DispatchKey::CPU);
-  std::cout << "dense_cpu: " << dense_cpu_set.getDispatchTableIndexForDispatchKeySet() << std::endl;
   ASSERT_TRUE(dense_cpu_set.has(DispatchKey::Dense));
   ASSERT_TRUE(dense_cpu_set.has(DispatchKey::CPUBit));
   ASSERT_TRUE(dense_cpu_set.has(DispatchKey::CPU));
 
   auto dense_lazy_set = DispatchKeySet(DispatchKey::Lazy);
-  std::cout << "dense_xla: " << dense_cpu_set.getDispatchTableIndexForDispatchKeySet() << std::endl;
   ASSERT_TRUE(dense_lazy_set.has(DispatchKey::Dense));
   ASSERT_TRUE(dense_lazy_set.has(DispatchKey::LazyBit));
   ASSERT_TRUE(dense_lazy_set.has(DispatchKey::Lazy));
@@ -33,15 +30,12 @@ TEST(DispatchKeySet, ShowSemantics) {
   ASSERT_TRUE(dense_cpu_set.has(DispatchKey::CPUBit));
   ASSERT_TRUE(dense_cpu_set.has(DispatchKey::CPU));
   ASSERT_EQ(dense_cpu_set, dense_cpu_set_from_building_blocks);
-  std::cout << "B" << std::endl;
 
   // Similarly, the AutogradCUDA key gets 2 bits in the keyset:
   // The "Autograd" functionality bit, and the "CUDA" backend bit
   auto autograd_cuda = DispatchKeySet(DispatchKey::AutogradCUDA);
-  std::cout << "autograd_cuda: " << autograd_cuda.getDispatchTableIndexForDispatchKeySet() << std::endl;
   ASSERT_TRUE(autograd_cuda.has(DispatchKey::AutogradFunctionality));
   ASSERT_TRUE(autograd_cuda.has(DispatchKey::CUDABit));
-  std::cout << "C" << std::endl;
 
   // Because DispatchKeySet uses a condensed internal representation, you cannot use it
   // to represent the FULL cross product of backends and functionalities
@@ -51,25 +45,19 @@ TEST(DispatchKeySet, ShowSemantics) {
           DispatchKey::Dense,
           DispatchKey::CUDA,
           DispatchKey::CPU});
-  std::cout << "autograd_dense_cpu_cuda: " << autograd_dense_cpu_cuda.getDispatchTableIndexForDispatchKeySet() << std::endl;
   auto fpga = DispatchKeySet(DispatchKey::FPGA);
-  std::cout << "fpga: " << fpga.getDispatchTableIndexForDispatchKeySet() << std::endl;
   auto fpga_and_cpu = DispatchKeySet({DispatchKey::FPGA, DispatchKey::CPU});
-  std::cout << "fpga_and_cpu: " << fpga_and_cpu.getDispatchTableIndexForDispatchKeySet() << std::endl;
-  std::cout << "D" << std::endl;
   // this keyset has all of the building block keys:
   ASSERT_TRUE(autograd_dense_cpu_cuda.has(DispatchKey::AutogradFunctionality));
   ASSERT_TRUE(autograd_dense_cpu_cuda.has(DispatchKey::Dense));
   ASSERT_TRUE(autograd_dense_cpu_cuda.has(DispatchKey::CUDABit));
   ASSERT_TRUE(autograd_dense_cpu_cuda.has(DispatchKey::CPUBit));
-  std::cout << "E" << std::endl;
 
   // and it also has the "runtime" keys that correspond to the full cross-product of functionality
   ASSERT_TRUE(autograd_dense_cpu_cuda.has(DispatchKey::AutogradCPU));
   ASSERT_TRUE(autograd_dense_cpu_cuda.has(DispatchKey::AutogradCPU));
   ASSERT_TRUE(autograd_dense_cpu_cuda.has(DispatchKey::CPU));
   ASSERT_TRUE(autograd_dense_cpu_cuda.has(DispatchKey::CUDA));
-  std::cout << "F" << std::endl;
 
   // This means that there's no way to represent a keyset with, say, only Autograd CUDA + Dense CPU.
   // Instead, you should think of a keyset as inheriting the full set of functionalities + backends of its keys.
@@ -85,7 +73,6 @@ TEST(DispatchKeySet, ShowSemantics) {
   ASSERT_EQ(autograd_dense_cpu_cuda, DispatchKeySet({
               DispatchKey::CUDA,
               DispatchKey::AutogradCPU}));
-  std::cout << "G" << std::endl;
 
 
   // ~~~~~~~~~~ DispatchKeySet iterators ~~~~~~~~~~~
@@ -95,7 +82,6 @@ TEST(DispatchKeySet, ShowSemantics) {
   auto t1 = empty_set.begin();
   auto t2 = empty_set.end();
   ASSERT_EQ(*empty_set.begin(), *empty_set.end());
-  std::cout << "H" << std::endl;
 
   // However, only keys that correspond to actual runtime indices of kernels in the operator table
   // show up when you iterate through a keyset.
@@ -103,7 +89,6 @@ TEST(DispatchKeySet, ShowSemantics) {
   auto dense_cpu_iter = dense_cpu_set.begin();
   ASSERT_EQ(*dense_cpu_iter++, DispatchKey::CPU);
   ASSERT_EQ(*dense_cpu_iter, *dense_cpu_set.end());
-  std::cout << "I" << std::endl;
 
   auto autograd_dense_cpu_cuda_iter = autograd_dense_cpu_cuda.begin();
   ASSERT_EQ(*autograd_dense_cpu_cuda_iter++, DispatchKey::CPU);
@@ -111,7 +96,6 @@ TEST(DispatchKeySet, ShowSemantics) {
   ASSERT_EQ(*autograd_dense_cpu_cuda_iter++, DispatchKey::AutogradCPU);
   ASSERT_EQ(*autograd_dense_cpu_cuda_iter++, DispatchKey::AutogradCUDA);
   ASSERT_EQ(*autograd_dense_cpu_cuda_iter, *autograd_dense_cpu_cuda.end());
-  std::cout << "J" << std::endl;
 
   // But other "functionality bits" that are not defined per-backend DO get their own slots in the operator table.
   auto mixed_keyset = DispatchKeySet({
@@ -124,7 +108,6 @@ TEST(DispatchKeySet, ShowSemantics) {
   ASSERT_EQ(*mixed_iter++, DispatchKey::FPGA);
   ASSERT_EQ(*mixed_iter++, DispatchKey::Functionalize);
   ASSERT_EQ(*mixed_iter, *mixed_keyset.end());
-  std::cout << "K" << std::endl;
 
 }
 
@@ -181,7 +164,7 @@ TEST(DispatchKeySet, SingletonFunctionalityKeys) {
 // and take up more than one bit in a DispatchKeySet. They take up one functionality bit + one backend bit.
 // e.g. CPU, CUDA, SparseCPU, SparseCUDA, AutogradCPU, AutogradCUDA
 TEST(DispatchKeySet, SingletonPerBackendFunctionalityKeys) {
-  for (uint8_t i = static_cast<uint8_t>(DispatchKey::NumDispatchKeys) + 1;
+  for (uint8_t i = static_cast<uint8_t>(DispatchKey::StartOfDenseBackends);
           i <= static_cast<uint8_t>(DispatchKey::EndOfAutogradBackends); i++) {
     auto tid = static_cast<DispatchKey>(i);
     DispatchKeySet sing(tid);
@@ -299,6 +282,27 @@ TEST(DispatchKeySet, IteratorEmpty) {
   ASSERT_EQ(i, 0);
 }
 
+TEST(DispatchKeySet, IteratorCrossProduct) {
+  // The iterator should return all runtime keys in the set,
+  // including the cross product of {backends} x {functionalities}
+  auto ks = DispatchKeySet({
+    DispatchKey::CPUBit,
+    DispatchKey::CUDABit,
+    DispatchKey::Dense,
+    DispatchKey::FPGA,
+    DispatchKey::AutogradFunctionality});
+
+  auto iter = ks.begin();
+  // iterate through dense backends first.
+  ASSERT_EQ(DispatchKey::CPU, *(iter++));
+  ASSERT_EQ(DispatchKey::CUDA, *(iter++));
+  // FPGA doesn't have a backend bit, so it isn't included in the cross product.
+  ASSERT_EQ(DispatchKey::FPGA, *(iter++));
+  // iterate through the autograd keys laster.
+  ASSERT_EQ(DispatchKey::AutogradCPU, *(iter++));
+  ASSERT_EQ(DispatchKey::AutogradCUDA, *(iter++));
+}
+
 TEST(DispatchKeySet, IteratorFull) {
   DispatchKeySet full_set(DispatchKeySet::FULL);
   uint8_t i = 0;
@@ -306,8 +310,9 @@ TEST(DispatchKeySet, IteratorFull) {
   for (const auto& it : full_set) {
     i++;
   }
-  // TODO: don't hardcode this
-  ASSERT_EQ(i, 82);
+  // Total # of runtime entries includes an entry for DispatchKey::Undefined,
+  // which is not included when iterating through the DispatchKeySet.
+  ASSERT_EQ(i, num_runtime_entries - 1);
 }
 
 TEST(DispatchKeySet, IteratorRangeFull) {
@@ -316,13 +321,11 @@ TEST(DispatchKeySet, IteratorRangeFull) {
 
   for (DispatchKey dispatch_key : full_set) {
     i++;
-    // TODO: get rid of this. Just for debugging.
-    std::cout << "dispatch key " << i << " = " << toString(dispatch_key) << std::endl;
-    std::cout << "idx in operator table " << i << " = " << DispatchKeySet(dispatch_key).getDispatchTableIndexForDispatchKeySet() << std::endl;
   }
 
-  // TODO: don't hardcode this
-  ASSERT_EQ(i, 82);
+  // Total # of runtime entries includes an entry for DispatchKey::Undefined,
+  // which is not included when iterating through the DispatchKeySet.
+  ASSERT_EQ(i, num_runtime_entries - 1);
 }
 
 TEST(DispatchKeySet, FailAtEndIterator) {
