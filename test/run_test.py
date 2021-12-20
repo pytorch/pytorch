@@ -4,6 +4,8 @@ import argparse
 import copy
 from datetime import datetime
 from distutils.util import strtobool
+from distutils.version import LooseVersion
+import functools
 import os
 import pathlib
 import shutil
@@ -102,7 +104,6 @@ TESTS = discover_tests(
         'test_kernel_launch_checks',
         'test_metal',
         'test_nnapi',
-        'test_python_dispatch',
         'test_functionalization',
         'test_segment_reductions',
         'test_static_runtime',
@@ -203,6 +204,7 @@ WINDOWS_BLOCKLIST = [
     "distributed/_sharded_tensor/ops/test_embedding_bag",
     "distributed/_sharded_tensor/ops/test_init",
     "distributed/_sharded_tensor/ops/test_linear",
+    "distributed/_sharded_optim/test_sharded_optim",
 ] + FSDP_TEST
 
 ROCM_BLOCKLIST = [
@@ -215,6 +217,7 @@ ROCM_BLOCKLIST = [
     "distributed/_sharded_tensor/ops/test_embedding_bag",
     "distributed/_sharded_tensor/ops/test_init",
     "distributed/_sharded_tensor/ops/test_linear",
+    "distributed/_sharded_optim/test_sharded_optim",
     "test_determination",
     "test_multiprocessing",
     "test_jit_legacy",
@@ -308,7 +311,6 @@ DISTRIBUTED_TESTS = [
     "distributed/test_c10d_common",
     "distributed/test_c10d_gloo",
     "distributed/test_c10d_nccl",
-    "distributed/test_jit_c10d",
     "distributed/test_c10d_spawn_gloo",
     "distributed/test_c10d_spawn_nccl",
     "distributed/test_store",
@@ -353,6 +355,7 @@ DISTRIBUTED_TESTS = [
     "distributed/_sharded_tensor/ops/test_embedding_bag",
     "distributed/_sharded_tensor/ops/test_init",
     "distributed/_sharded_tensor/ops/test_linear",
+    "distributed/_sharded_optim/test_sharded_optim",
 ] + [test for test in TESTS if test.startswith("distributed/fsdp")]
 
 # Dictionary matching test modules (in TESTS) to lists of test cases (within that test_module) that would be run when
@@ -460,6 +463,13 @@ def test_cuda_primary_ctx(test_module, test_directory, options):
     return run_test(
         test_module, test_directory, options, extra_unittest_args=["--subprocess"]
     )
+
+run_test_with_subprocess = functools.partial(run_test, extra_unittest_args=["--subprocess"])
+
+
+def get_run_test_with_subprocess_fn():
+    return lambda test_module, test_directory, options: run_test_with_subprocess(test_module, test_directory, options)
+
 
 
 def _test_cpp_extensions_aot(test_directory, options, use_ninja):
@@ -597,7 +607,7 @@ def test_distributed(test_module, test_directory, options):
                         test_module, test_directory, options, launcher_cmd=mpiexec
                     )
                 else:
-                    return_code = run_test(test_module, test_directory, options)
+                    return_code = run_test(test_module, test_directory, options, extra_unittest_args=["--subprocess"])
                 if return_code != 0:
                     return return_code
             finally:
@@ -610,8 +620,17 @@ CUSTOM_HANDLERS = {
     "test_cpp_extensions_aot_no_ninja": test_cpp_extensions_aot_no_ninja,
     "test_cpp_extensions_aot_ninja": test_cpp_extensions_aot_ninja,
     "distributed/test_distributed_spawn": test_distributed,
+    "distributed/test_c10d_nccl": get_run_test_with_subprocess_fn(),
+    "distributed/test_c10d_gloo": get_run_test_with_subprocess_fn(),
+    "distributed/test_c10d_common": get_run_test_with_subprocess_fn(),
+    "distributed/test_c10d_spawn_gloo": get_run_test_with_subprocess_fn(),
+    "distributed/test_c10d_spawn_nccl": get_run_test_with_subprocess_fn(),
+    "distributed/test_store": get_run_test_with_subprocess_fn(),
+    "distributed/test_pg_wrapper": get_run_test_with_subprocess_fn(),
+    "distributed/rpc/test_faulty_agent": get_run_test_with_subprocess_fn(),
+    "distributed/rpc/test_tensorpipe_agent": get_run_test_with_subprocess_fn(),
+    "distributed/rpc/cuda/test_tensorpipe_agent": get_run_test_with_subprocess_fn(),
 }
-
 
 def parse_test_module(test):
     return test.split(".")[0]
@@ -715,10 +734,11 @@ def parse_args():
         action="store_true",
         help="always run blocklisted windows tests",
     )
-    parser.add_argument(
-        "--determine-from",
-        help="File of affected source filenames to determine which tests to run.",
-    )
+    # NS: Disable target determination until it can be made more reliable
+    # parser.add_argument(
+    #     "--determine-from",
+    #     help="File of affected source filenames to determine which tests to run.",
+    # )
     parser.add_argument(
         "--continue-through-error",
         action="store_true",
@@ -891,6 +911,13 @@ def get_selected_tests(options):
             WINDOWS_BLOCKLIST.append("cpp_extensions_jit")
             WINDOWS_BLOCKLIST.append("jit")
             WINDOWS_BLOCKLIST.append("jit_fuser")
+
+        # This is exception thats caused by this issue https://github.com/pytorch/pytorch/issues/69460
+        # This below code should be removed once this issue is solved
+        if torch.version.cuda is not None and LooseVersion(torch.version.cuda) >= "11.5":
+            WINDOWS_BLOCKLIST.append("test_cpp_extensions_aot")
+            WINDOWS_BLOCKLIST.append("test_cpp_extensions_aot_ninja")
+            WINDOWS_BLOCKLIST.append("test_cpp_extensions_aot_no_ninja")
 
         selected_tests = exclude_tests(WINDOWS_BLOCKLIST, selected_tests, "on Windows")
 

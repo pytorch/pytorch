@@ -49,6 +49,7 @@
 // where & and * represent the C-style address-of and indirection operations.
 
 #include <ATen/native/TensorAdvancedIndexing.h>
+#include <ATen/native/IndexKernel.h>
 #include <ATen/native/IndexingUtils.h>
 
 #include <ATen/ATen.h>
@@ -171,6 +172,68 @@ TORCH_META_FUNC2(scatter, value_reduce)
 TORCH_META_FUNC(scatter_add)
 (const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
   scatter_meta_impl(*this, self, dim, index, src, "add");
+}
+
+TORCH_META_FUNC(_scatter_reduce)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const c10::string_view reduce,
+ const c10::optional<int64_t> output_size) {
+
+  TORCH_CHECK(dim >= -self.dim() && dim < self.dim(),
+      "Expected `dim` to be in range ", -self.dim(), " to ", self.dim() - 1, " (got ", dim, ")");
+
+  auto sizes = self.sizes().vec();
+
+  dim = dim < 0 ? dim + self.dim() : dim;
+
+  if (output_size.has_value())
+    sizes[dim] = output_size.value();
+  else
+    sizes[dim] = index.numel() > 0 ? index.max().item<int64_t>() + 1: 0;
+
+  set_output(sizes, self.options());
+}
+
+TORCH_PRECOMPUTE_META_FUNC(index_add)
+(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Scalar& alpha) {
+  dim = maybe_wrap_dim(dim, self.dim());
+  auto numel = index.numel();
+
+  TORCH_CHECK_INDEX(index.dim() <= 1, "index_add_(): Index is supposed to be a vector, but got dim: ",
+                    index.dim(), " with type: ", index.scalar_type(), " and size: ", index.sizes());
+  TORCH_CHECK(index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int,
+              "index_add_(): Expected dtype int32/int64 for index but got: ", index.scalar_type());
+  TORCH_CHECK(self.scalar_type() == source.scalar_type(),
+              "index_add_(): self (", self.scalar_type(), ") and source (", source.scalar_type(),
+              ") must have the same scalar type");
+  TORCH_CHECK(dim == 0 || dim < source.dim(),
+              "index_add_(): Indexing dim ", dim, " is out of bounds of the source tensor with dim ",
+              source.dim());
+  TORCH_CHECK(numel == (source.dim() == 0 ? 1 : source.size(dim)),
+              "index_add_(): Number of indices (", numel, ") should be equal to source.size(dim): (",
+              source.size(dim), "), for dim: ", dim);
+
+  auto& result = maybe_get_output(0);
+  bool is_defined = result.defined();
+  set_output(self.sizes(), self.options());
+  if (is_defined) {
+    at::assert_no_internal_overlap(result);
+    at::assert_no_overlap(result, index);
+    at::assert_no_overlap(result, source);
+  }
+
+  // A hack to run TensorIterator checks in the meta function.
+  // See comment: https://github.com/pytorch/pytorch/pull/65993#discussion_r760307417
+  // TODO: (@krshrimali) Try inheriting from TensorIteratorBase instead.
+  if (result.device() == kMeta) {
+    auto selfSlice = result.select(dim, 0);
+    auto sourceSlice = source.select(dim, 0);
+    auto iter = TensorIterator::borrowing_binary_op(selfSlice, selfSlice, sourceSlice);
+  }
+
+  return TORCH_PRECOMPUTE_STRUCT(index_add)().set_dim(dim);
 }
 
 } // namespace meta
@@ -707,28 +770,14 @@ Tensor index_copy(const Tensor & self, int64_t dim, const Tensor & index, const 
   return self.clone(at::MemoryFormat::Preserve).index_copy_(dim, index, source);
 }
 
-
-Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source, const Scalar &alpha) {
-  dim = maybe_wrap_dim(dim, self.dim());
-
+TORCH_IMPL_FUNC(index_add_cpu_out)
+(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Scalar& alpha, const Tensor& result) {
+  if (!result.is_same(self)) result.copy_(self);
   auto numel = index.numel();
-  TORCH_CHECK_INDEX(index.dim() <= 1, "index_add_(): Index is supposed to be a vector");
-  TORCH_CHECK(index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int,
-          "index_add_(): Expected dtype int32/int64 for index");
-  TORCH_CHECK(self.scalar_type() == source.scalar_type(),
-              "index_add_(): self and source must have the same scalar type");
-  TORCH_CHECK(dim == 0 || dim < source.dim(),
-              "index_add_(): Indexing dim ", dim, " is out of bounds of tensor");
-  TORCH_CHECK(numel == (source.dim() == 0 ? 1 : source.size(dim)),
-              "index_add_(): Number of indices should be equal to self.size(dim)");
-
-  at::assert_no_internal_overlap(self);
-  at::assert_no_overlap(self, index);
-  at::assert_no_overlap(self, source);
 
   auto index_contig = index.contiguous();
 
-  if (self.dim() > 1) {
+  if (result.dim() > 1) {
     // Equivalent to:
     //   for (const auto i : c10::irange(numel)) {
     //     auto selfSlice = self.select(dim, index_data[i]);
@@ -737,13 +786,13 @@ Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const T
     //   }
     // But much faster as this reuses the iterator from add_
     if (numel == 0) {
-      return self;
+      return;
     }
-    auto selfSlice = self.select(dim, 0);
+    auto selfSlice = result.select(dim, 0);
     auto sourceSlice = source.select(dim, 0);
-    auto self_stride_bytes = self.stride(dim) * elementSize(self.scalar_type());
+    auto self_stride_bytes = result.stride(dim) * elementSize(result.scalar_type());
     auto source_stride_bytes = source.stride(dim) * elementSize(source.scalar_type());
-    auto self_dim_size = self.size(dim);
+    auto self_dim_size = result.size(dim);
     auto iter = TensorIterator::borrowing_binary_op(selfSlice, selfSlice, sourceSlice);
 
     AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "index_add_cpu_", [&] () {
@@ -766,38 +815,25 @@ Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const T
     // explicitly capture all required variables to work around windows build
     // TODO: fix this when windows can correctly capture variables in nested lambda
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
-      self.scalar_type(), "index_add_", [&self, &source, &dim, &index_contig, &numel, &alpha] {
+      result.scalar_type(), "index_add_", [&result, &source, &dim, &index_contig, &numel, &alpha] {
       auto alpha_value = alpha.to<scalar_t>();
-      auto self_stride = self.dim() == 0 ? 1 : self.stride(dim);
+      auto result_stride = result.dim() == 0 ? 1 : result.stride(dim);
       auto source_stride = source.dim() == 0 ? 1 : source.stride(dim);
-      // TODO: Maybe TensorAccessor can beused here?
-      auto* self_ptr = self.data_ptr<scalar_t>();
+      // TODO: Maybe TensorAccessor can be used here?
+      auto* result_ptr = result.data_ptr<scalar_t>();
       auto* source_ptr = source.data_ptr<scalar_t>();
       AT_DISPATCH_INDEX_TYPES(index_contig.scalar_type(), "index_add_cpu_",
-        [&index_contig, &numel, &self, &self_ptr, &self_stride, &source_ptr, &source_stride, alpha_value] {
+        [&index_contig, &numel, &result, &result_ptr, &result_stride, &source_ptr, &source_stride, &alpha_value] {
         auto index_data = index_contig.data_ptr<index_t>();
         for (const auto i : c10::irange(numel)) {
             auto self_i = index_data[i];
-            TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self.numel()), "index out of range in self");
-            scalar_t *self_ip = self_ptr + self_i * self_stride;
+            TORCH_CHECK_INDEX((self_i >= 0) && (self_i < result.numel()), "index out of range in self");
+            scalar_t *self_ip = result_ptr + self_i * result_stride;
             *self_ip += *(source_ptr + i * source_stride) * alpha_value;
         }
       });
     });
   }
-  return self;
-}
-
-Tensor& index_add_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  return self.index_add_(dim, index, source, 1);
-}
-
-Tensor index_add(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source, const Scalar &alpha) {
-  return self.clone(at::MemoryFormat::Preserve).index_add_(dim, index, source, alpha);
-}
-
-Tensor index_add(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  return self.clone(at::MemoryFormat::Preserve).index_add_(dim, index, source);
 }
 
 // Check that indices fall within dimension array size
@@ -1259,6 +1295,61 @@ TORCH_IMPL_FUNC(scatter_add)
   } else {
     scatter_add_stub(self.device().type(), mut_out, dim, index, src);
   }
+}
+
+TORCH_IMPL_FUNC(_scatter_reduce_structured_cpu)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const c10::string_view reduce,
+ const c10::optional<int64_t> output_size,
+ const Tensor& out) {
+
+  // TODO: Add documentation.
+
+  TORCH_CHECK(self.dim() == index.dim(),
+      "Shape mismatch between `self` (got ", self.sizes(), ") and `index` (got ", index.sizes(), ")");
+  for (int64_t i = 0; i < self.dim(); i++) {
+    TORCH_CHECK(self.size(i) == index.size(i),
+        "Shape mismatch between `self` (got ", self.sizes(), ") and `index` (got ", index.sizes(), ")");
+  }
+
+  TORCH_CHECK(reduce == "sum", "`reduce` argument must be 'sum'");
+
+  // TODO: We currently expect contiguous memory layout.
+  TORCH_CHECK(self.is_contiguous(), "`self` needs to be contiguous");
+  TORCH_CHECK(index.is_contiguous(), "`index` needs to be contiguous");
+  TORCH_CHECK(out.is_contiguous(), "`out` needs to be contiguous");
+
+  dim = dim < 0 ? dim + self.dim() : dim;
+
+  out.zero_();
+
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, self.scalar_type(), "_scatter_reduce", [&] {
+    auto self_data = self.data_ptr<scalar_t>();
+    auto index_data = index.data_ptr<int64_t>();
+    auto out_data = out.data_ptr<scalar_t>();
+
+    int64_t offset1 = 1, offset2 = 1;
+    for (int64_t d = 0; d < dim; d++)
+      offset1 *= self.size(d);
+    for (int64_t d = dim + 1; d < self.dim(); d++)
+      offset2 *= self.size(d);
+
+    scalar_t value;
+    int64_t dim_index;
+    for (int64_t i = 0; i < offset1; i++) {
+      for (int64_t j = 0; j < self.size(dim); j++) {
+        for (int64_t k = 0; k < offset2; k++) {
+          value = self_data[i * self.stride(dim) * self.size(dim) + j * self.stride(dim) + k];
+          dim_index = index_data[i * index.stride(dim) * index.size(dim) + j * index.stride(dim) + k];
+          TORCH_CHECK(dim_index >= 0 && dim_index < out.size(dim),
+              "Expected `index` values to be in range ", 0, " to ", out.size(dim), " (got ", dim_index, ")");
+          out_data[i * out.stride(dim) * out.size(dim) + dim_index * out.stride(dim) + k] += value;
+        }
+      }
+    }
+  });
 }
 
 Tensor masked_scatter(const Tensor & self, const Tensor & mask, const Tensor & source) {
