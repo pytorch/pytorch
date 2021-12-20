@@ -1,12 +1,14 @@
 ARG UBUNTU_VERSION
 ARG CUDA_VERSION
 ARG CUDNN_VERSION
+ARG IMAGE_NAME
 
-FROM nvidia/cuda:${CUDA_VERSION}-cudnn${CUDNN_VERSION}-devel-ubuntu${UBUNTU_VERSION}
+FROM ${IMAGE_NAME}
 
 ARG UBUNTU_VERSION
 ARG CUDA_VERSION
 ARG CUDNN_VERSION
+
 
 ENV DEBIAN_FRONTEND noninteractive
 
@@ -24,7 +26,7 @@ ARG KATEX
 ADD ./common/install_katex.sh install_katex.sh
 RUN bash ./install_katex.sh && rm install_katex.sh
 
-# Install conda and other packages (e.g., numpy, coverage, pytest)
+# Install conda and other packages (e.g., numpy, pytest)
 ENV PATH /opt/conda/bin:$PATH
 ARG ANACONDA_PYTHON_VERSION
 ADD ./common/install_conda.sh install_conda.sh
@@ -75,7 +77,7 @@ RUN rm install_cmake.sh
 ADD ./common/install_cache.sh install_cache.sh
 ENV PATH /opt/cache/bin:$PATH
 RUN bash ./install_cache.sh && rm install_cache.sh
-ENV CUDA_NVCC_EXECUTABLE=/opt/cache/lib/nvcc
+ENV CMAKE_CUDA_COMPILER_LAUNCHER=/opt/cache/bin/sccache
 
 # Add jni.h for java host build
 ADD ./common/install_jni.sh install_jni.sh
@@ -94,9 +96,17 @@ ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
 # AWS specific CUDA build guidance
 ENV TORCH_CUDA_ARCH_LIST Maxwell
 ENV TORCH_NVCC_FLAGS "-Xfatbin -compress-all"
+ENV CUDA_PATH /usr/local/cuda
 
 # Install LLVM dev version (Defined in the pytorch/builder github repository)
 COPY --from=pytorch/llvm:9.0.1 /opt/llvm /opt/llvm
+
+# Hack for CUDA 11.5.0 image to install cudnn8 since cudnn8 is not included with CUDA 11.5 image
+# Also note cudnn 8.2.0.53 is labeled for cuda 11.3
+ARG INSTALL_CUDNN
+ADD ./common/install_cudnn8.sh install_cudnn8.sh
+RUN if [ -n "${INSTALL_CUDNN}" ]; then bash install_cudnn8.sh; fi
+RUN rm install_cudnn8.sh
 
 USER jenkins
 CMD ["bash"]

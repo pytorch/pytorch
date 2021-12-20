@@ -2,12 +2,15 @@ import torch
 from copy import deepcopy
 from functools import wraps, partial
 from itertools import chain
+import itertools
+import torch.nn.functional as F
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import floating_types
 from torch.testing._internal.common_device_type import (
-    _TestParametrizer, _dtype_test_suffix, _update_param_kwargs, skipIf)
+    _TestParametrizer, _update_param_kwargs, skipIf)
 from torch.testing._internal.common_nn import nllloss_reference, get_reduction
-from torch.testing._internal.common_utils import freeze_rng_state
+from torch.testing._internal.common_utils import (
+    freeze_rng_state, set_single_threaded_if_parallel_tbb)
 from types import ModuleType
 from typing import List, Tuple, Type, Set, Dict
 
@@ -48,25 +51,32 @@ for namespace in MODULE_NAMESPACES:
 class modules(_TestParametrizer):
     """ PROTOTYPE: Decorator for specifying a list of modules over which to run a test. """
 
-    def __init__(self, module_info_list):
-        super().__init__(handles_dtypes=True)
+    def __init__(self, module_info_list, allowed_dtypes=None):
         self.module_info_list = module_info_list
+        self.allowed_dtypes = set(allowed_dtypes) if allowed_dtypes is not None else None
 
     def _parametrize_test(self, test, generic_cls, device_cls):
-        for module_info in self.module_info_list:
-            # TODO: Factor some of this out since it's similar to OpInfo.
-            for dtype in floating_types():
-                # Construct the test name.
-                test_name = '{}_{}{}'.format(module_info.name.replace('.', '_'),
-                                             device_cls.device_type,
-                                             _dtype_test_suffix(dtype))
+        if device_cls is None:
+            raise RuntimeError('The @modules decorator is only intended to be used in a device-specific '
+                               'context; use it with instantiate_device_type_tests() instead of '
+                               'instantiate_parametrized_tests()')
 
+        for module_info in self.module_info_list:
+            # Construct the test name; device / dtype parts are handled outside.
+            # See [Note: device and dtype suffix placement]
+            test_name = module_info.name.replace('.', '_')
+
+            dtypes = set(module_info.dtypes)
+            if self.allowed_dtypes is not None:
+                dtypes = dtypes.intersection(self.allowed_dtypes)
+
+            for dtype in dtypes:
                 # Construct parameter kwargs to pass to the test.
                 param_kwargs = {'module_info': module_info}
                 _update_param_kwargs(param_kwargs, 'dtype', dtype)
 
                 try:
-                    active_decorators = []
+                    active_decorators = [set_single_threaded_if_parallel_tbb]
                     if module_info.should_skip(generic_cls.__name__, test.__name__, device_cls.device_type, dtype):
                         active_decorators.append(skipIf(True, "Skipped!"))
 
@@ -140,11 +150,15 @@ class ModuleInfo(object):
                  module_inputs_func,  # Function to generate module inputs
                  skips=(),  # Indicates which tests to skip
                  decorators=None,  # Additional decorators to apply to generated tests
+                 dtypes=floating_types(),  # dtypes this function is expected to work with
+                 supports_gradgrad=True,  # whether the op supports second order gradients
                  ):
         self.module_cls = module_cls
         self.module_inputs_func = module_inputs_func
         self.skips = skips
         self.decorators = decorators
+        self.dtypes = dtypes
+        self.supports_gradgrad = supports_gradgrad
 
     def should_skip(self, cls_name, test_name, device_type, dtype):
         return any(si.is_active(cls_name, test_name, device_type, dtype) for si in self.skips)
@@ -163,8 +177,8 @@ def module_inputs_torch_nn_Linear(module_info, device, dtype, requires_grad, **k
 
     module_inputs = [
         ModuleInput(constructor_input=FunctionInput(10, 8),
-                    forward_input=FunctionInput(make_input((4, 10))),
-                    reference_fn=lambda m, p, i: torch.mm(i, p[0].t()) + p[1].view(1, -1).expand(4, 8)),
+                    forward_input=FunctionInput(input=make_input((4, 10))),
+                    reference_fn=lambda m, p, input: torch.mm(input, p[0].t()) + p[1].view(1, -1).expand(4, 8)),
         ModuleInput(constructor_input=FunctionInput(10, 8, bias=False),
                     forward_input=FunctionInput(make_input((4, 10))),
                     desc='no_bias',
@@ -180,14 +194,22 @@ def module_inputs_torch_nn_Linear(module_info, device, dtype, requires_grad, **k
 
 def module_inputs_torch_nn_NLLLoss(module_info, device, dtype, requires_grad, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_weight = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
 
     cases: List[Tuple[str, dict]] = [
         ('', {}),
+        ('reduction_sum', {'reduction': 'sum'}),
+        ('reduction_none', {'reduction': 'none'}),
         ('ignore_index', {'ignore_index': 2}),
-        ('weights', {'weight': make_input(10)}),
-        ('weights_ignore_index', {'weight': make_input(10), 'ignore_index': 2}),
-        ('weights_ignore_index_neg', {'weight': make_input(10), 'ignore_index': -1})
+        ('weights', {'weight': make_weight(10).abs()}),
+        ('weights_ignore_index', {'weight': make_weight(10).abs(), 'ignore_index': 2}),
+        ('weights_ignore_index_neg', {'weight': make_weight(10).abs(), 'ignore_index': -1})
     ]
+
+    # TODO: Uncomment when negative weights is supported.
+    # negative_weight = make_weight(10)
+    # negative_weight[0] = -1
+    # cases.append(('weights_negative', {'weight': negative_weight}))
     module_inputs = []
     for desc, constructor_kwargs in cases:
 
@@ -215,7 +237,6 @@ def no_batch_dim_reference_fn(m, p, *args, **kwargs):
     with freeze_rng_state():
         return m(*single_batch_input_args).squeeze(0)
 
-
 def no_batch_dim_reference_criterion_fn(m, *args, **kwargs):
     """Reference function for criterion supporting no batch dimensions."""
     output = no_batch_dim_reference_fn(m, *args, **kwargs)
@@ -224,6 +245,23 @@ def no_batch_dim_reference_criterion_fn(m, *args, **kwargs):
         return output.squeeze(0)
     # reduction is 'sum' or 'mean' which results in a 0D tensor
     return output
+
+
+def no_batch_dim_reference_mha(m, p, *args, **kwargs):
+    """Reference function for MultiheadAttention supporting no batch dimensions.
+
+    The module is passed the input and target in batched form with a single item.
+    The output is squeezed to compare with the no-batch input.
+    """
+    batch_dim = 0 if kwargs.get('batch_first', True) else 1
+    if 'batch_first' in kwargs:
+        kwargs.pop('batch_first')
+    if 'key_padding_mask' in kwargs and kwargs['key_padding_mask'] is not None:
+        kwargs['key_padding_mask'] = kwargs['key_padding_mask'].unsqueeze(0)
+    single_batch_input_args = [input.unsqueeze(batch_dim) for input in args]
+    with freeze_rng_state():
+        output = m(*single_batch_input_args, **kwargs)
+        return (output[0].squeeze(batch_dim), output[1].squeeze(0))
 
 
 def generate_regression_criterion_inputs(make_input):
@@ -306,6 +344,86 @@ def module_inputs_torch_nn_L1Loss(module_info, device, dtype, requires_grad, **k
                     desc='scalar')] + generate_regression_criterion_inputs(make_input)
 
 
+def module_inputs_torch_nn_Hardswish(module_info, device, dtype, requires_grad, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(
+            constructor_input=FunctionInput(),
+            forward_input=FunctionInput(make_input(shape=4)),
+            reference_fn=no_batch_dim_reference_fn,
+            desc='no_batch_dim',
+        )
+    ]
+
+
+def module_inputs_torch_nn_TransformerEncoderLayer(module_info, device, dtype, requires_grad, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(
+            constructor_input=FunctionInput(4, 2, 16, 0.0),
+            forward_input=FunctionInput(
+                make_input(shape=(2, 3, 4))
+            ),
+            desc='relu_activation'
+        ),
+        ModuleInput(
+            constructor_input=FunctionInput(4, 2, 8, 0.0, F.gelu),
+            forward_input=FunctionInput(
+                make_input(shape=(2, 3, 4))
+            ),
+            desc='gelu_activation'
+        ),
+    ]
+
+
+def module_inputs_torch_nn_Embedding(module_info, device, dtype, requires_grad, **kwargs):
+    make_empty = partial(torch.empty, device=device, dtype=torch.long, requires_grad=False)
+    return [
+        ModuleInput(
+            constructor_input=FunctionInput(num_embeddings=4, embedding_dim=3),
+            forward_input=FunctionInput(make_empty(2, 3).random_(4))
+        ),
+        ModuleInput(
+            constructor_input=FunctionInput(num_embeddings=4, embedding_dim=3),
+            forward_input=FunctionInput(make_empty(1, 512).random_(4).expand(7, 512)),
+            desc='discontiguous'
+        ),
+    ]
+
+
+def module_inputs_torch_nn_MultiheadAttention(module_info, device, dtype, requires_grad, **kwargs):
+    # Currently all samples below are for validating the no-batch-dim support.
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    samples = []
+    bool_vals = (True, False)
+    key_padding_masks = (None, torch.tensor([False, False, True], device=device, dtype=torch.bool))
+    attn_masks = (None, torch.tensor([False, False, True], device=device, dtype=torch.bool).expand((3, 3, 3)))
+    products = itertools.product(bool_vals, bool_vals, bool_vals, key_padding_masks, attn_masks)
+    for bias, add_bias_kv, add_zero_attn, key_padding_mask, attn_mask in products:
+        samples.append(
+            ModuleInput(
+                constructor_input=FunctionInput(embed_dim=3, num_heads=3, batch_first=True,
+                                                bias=bias, add_bias_kv=add_bias_kv, add_zero_attn=add_zero_attn),
+                forward_input=FunctionInput(make_input((3, 3)), make_input((3, 3)), make_input((3, 3)),
+                                            key_padding_mask=key_padding_mask, attn_mask=attn_mask),
+                reference_fn=no_batch_dim_reference_mha,
+            )
+        )
+        samples.append(
+            ModuleInput(
+                constructor_input=FunctionInput(embed_dim=3, num_heads=3, batch_first=False,
+                                                bias=bias, add_bias_kv=add_bias_kv, add_zero_attn=add_zero_attn),
+                forward_input=FunctionInput(make_input((3, 3)), make_input((3, 3)), make_input((3, 3)),
+                                            key_padding_mask=key_padding_mask, attn_mask=attn_mask),
+                reference_fn=partial(no_batch_dim_reference_mha, batch_first=False),
+            )
+        )
+
+    return samples
+
+
 # Database of ModuleInfo entries in alphabetical order.
 module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.AvgPool1d,
@@ -318,6 +436,16 @@ module_db: List[ModuleInfo] = [
                module_inputs_func=module_inputs_torch_nn_Linear),
     ModuleInfo(torch.nn.NLLLoss,
                module_inputs_func=module_inputs_torch_nn_NLLLoss),
+    ModuleInfo(torch.nn.Hardswish,
+               module_inputs_func=module_inputs_torch_nn_Hardswish,
+               supports_gradgrad=False),
+    ModuleInfo(torch.nn.TransformerEncoderLayer,
+               module_inputs_func=module_inputs_torch_nn_TransformerEncoderLayer,
+               supports_gradgrad=False),
+    ModuleInfo(torch.nn.MultiheadAttention,
+               module_inputs_func=module_inputs_torch_nn_MultiheadAttention),
+    ModuleInfo(torch.nn.Embedding,
+               module_inputs_func=module_inputs_torch_nn_Embedding),
     ModuleInfo(torch.nn.ReLU,
                module_inputs_func=module_inputs_torch_nn_ReLU),
 ]

@@ -7,7 +7,7 @@ import torch.nn as nn
 import torch.nn.quantized as nnq
 from torch.nn.intrinsic import _FusedModule
 
-from torch.quantization.quantization_mappings import (
+from torch.ao.quantization.quantization_mappings import (
     get_default_dynamic_quant_module_mappings,
     get_default_static_quant_module_mappings,
     get_default_qat_module_mappings,
@@ -18,15 +18,17 @@ from torch.quantization.quantization_mappings import (
 )
 
 from torch.ao.quantization.stubs import DeQuantStub, QuantWrapper
-from torch.quantization.qconfig import (
+from torch.ao.quantization.qconfig import (
     add_module_to_qconfig_obs_ctr,
     default_dynamic_qconfig,
     float16_dynamic_qconfig,
-    float_qparams_weight_only_qconfig)
+    float_qparams_weight_only_qconfig,
+    float_qparams_weight_only_qconfig_4bit,
+    activation_is_memoryless)
 
 def is_activation_post_process(module):
-    return (isinstance(module, torch.quantization.ObserverBase) or
-            isinstance(module, torch.quantization.FakeQuantizeBase))
+    return (isinstance(module, torch.ao.quantization.ObserverBase) or
+            isinstance(module, torch.ao.quantization.FakeQuantizeBase))
 
 def _propagate_qconfig_helper(module, qconfig_dict, allow_list=None,
                               qconfig_parent=None, prefix=''):
@@ -54,7 +56,7 @@ def _propagate_qconfig_helper(module, qconfig_dict, allow_list=None,
     module_qconfig = qconfig_dict.get(prefix, module_qconfig)
     module_qconfig = getattr(module, 'qconfig', module_qconfig)
 
-    torch.quantization.qconfig.assert_valid_qconfig(module_qconfig, module)
+    torch.ao.quantization.qconfig.assert_valid_qconfig(module_qconfig, module)
 
     qconfig_with_device_check = add_module_to_qconfig_obs_ctr(module_qconfig, module)
     module.qconfig = qconfig_with_device_check
@@ -64,7 +66,6 @@ def _propagate_qconfig_helper(module, qconfig_dict, allow_list=None,
         _propagate_qconfig_helper(child, qconfig_dict, allow_list,
                                   qconfig_with_device_check, module_prefix)
 
-# TODO(jerryzh): expose allow_list
 def propagate_qconfig_(module, qconfig_dict=None, allow_list=None):
     r"""Propagate qconfig through the module hierarchy and assign `qconfig`
     attribute on each leaf module
@@ -75,6 +76,7 @@ def propagate_qconfig_(module, qconfig_dict=None, allow_list=None):
             quantization configuration, qconfig applies to all submodules of a
             given module unless qconfig for the submodules are specified (when
             the submodule already has qconfig attribute)
+        allow_list: a set that lists out allowable modules to be propagated with qconfig
 
     Return:
         None, module is modified inplace with qconfig attached
@@ -88,10 +90,20 @@ def _observer_forward_hook(self, input, output):
     """
     return self.activation_post_process(output)
 
-def register_activation_post_process_hook(module):
+def _observer_forward_pre_hook(self, input):
+    r"""Forward pre hook that calls observer on the output
+    """
+    return self.activation_post_process(input[0])
+
+def register_activation_post_process_hook(module, pre_hook=False):
     assert hasattr(module, 'activation_post_process'), \
-        'Expect activation_post_process attribut already attached to the module'
-    return module.register_forward_hook(_observer_forward_hook)
+        'Expect activation_post_process attribute already attached to the module'
+    if pre_hook:
+        handle = module.register_forward_pre_hook(_observer_forward_pre_hook)
+        module._forward_pre_hooks.move_to_end(handle.id, last=False)
+    else:
+        handle = module.register_forward_hook(_observer_forward_hook)
+        module._forward_hooks.move_to_end(handle.id, last=False)
 
 def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=None, device=None, custom_module_class_mapping=None):
     r"""Add observer for the leaf child of the module.
@@ -133,7 +145,7 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
 
     def insert_activation_post_process(m, special_act_post_process=None):
         """ Adds an activation post process module and register
-        a post hook that calls the module
+        a pre or post hook that calls the module
         """
         # We don't insert observer/fake_quantize for DeQuantStub
         if needs_observation(m) and not isinstance(m, DeQuantStub):
@@ -142,8 +154,7 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
                 m.qconfig, device, special_act_post_process))
             # Register observer as the first entry in the hook list
             # All post forward hooks are preserved and will be executed after the observer before convert
-            handle = register_activation_post_process_hook(m)
-            m._forward_hooks.move_to_end(handle.id, last=False)
+            register_activation_post_process_hook(m, pre_hook=activation_is_memoryless(m.qconfig))
 
     for name, child in module.named_children():
         if type(child) in [nnq.FloatFunctional, nnq.QFunctional]:
@@ -264,13 +275,19 @@ def _remove_activation_post_process(module):
        is_activation_post_process(module.activation_post_process):
         delattr(module, 'activation_post_process')
 
-    # remove activation_post_proceess hook
-    handle_ids_to_remove = set()
-    for handle_id, hook_fn in module._forward_hooks.items():
-        if hook_fn is _observer_forward_hook:
-            handle_ids_to_remove.add(handle_id)
-    for handle_id in handle_ids_to_remove:
-        module._forward_hooks.pop(handle_id)
+    # remove activation_post_proceess pre and post hooks
+    def remove_hooks(pre_hook=False):
+        hook_map = module._forward_pre_hooks if pre_hook else module._forward_hooks
+        observer_hook = _observer_forward_pre_hook if pre_hook else _observer_forward_hook
+        handle_ids_to_remove = set()
+        for handle_id, hook_fn in hook_map.items():
+            if hook_fn is observer_hook:
+                handle_ids_to_remove.add(handle_id)
+        for handle_id in handle_ids_to_remove:
+            hook_map.pop(handle_id)
+
+    remove_hooks(pre_hook=True)
+    remove_hooks(pre_hook=False)
 
 # TODO: rename to something more general
 def _remove_qconfig(module):
@@ -336,7 +353,7 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
               configuration, qconfig applies to all submodules of a given
               module unless qconfig for the submodules are specified (when the
               submodule already has qconfig attribute). Entries in the dictionary
-              need to be QConfigDynamic instances.
+              need to be QConfig instances.
 
             - A set of types and/or submodule names to apply dynamic quantization to,
               in which case the `dtype` argument is used to specify the bit-width
@@ -369,6 +386,11 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
         elif dtype == torch.quint8:
             qconfig_spec = {
                 nn.EmbeddingBag : float_qparams_weight_only_qconfig,
+                nn.Embedding : float_qparams_weight_only_qconfig,
+            }
+        elif dtype == torch.quint4x2:
+            qconfig_spec = {
+                nn.EmbeddingBag : float_qparams_weight_only_qconfig_4bit,
             }
         else:
             raise ValueError(
@@ -380,6 +402,8 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
             default_qconfig = float16_dynamic_qconfig
         elif dtype is torch.quint8:
             default_qconfig = float_qparams_weight_only_qconfig
+        elif dtype is torch.quint4x2:
+            default_qconfig = float_qparams_weight_only_qconfig_4bit
         else:
             raise RuntimeError('Unknown dtype specified for quantize_dynamic: ', str(dtype))
         qconfig_spec = dict(zip(qconfig_spec, itertools.repeat(default_qconfig)))
@@ -394,7 +418,7 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
     convert(model, mapping, inplace=True)
     return model
 
-def prepare_qat(model, mapping=None, inplace=False):
+def prepare_qat(model, mapping=None, inplace=False, allow_list=None):
     r"""
     Prepares a copy of the model for quantization calibration or
     quantization-aware training and converts it to quantized version.
@@ -408,6 +432,7 @@ def prepare_qat(model, mapping=None, inplace=False):
                  replaced.
         inplace: carry out model transformations in-place, the original module
                  is mutated
+        allow_list: a set that lists out allowable modules to be propagated with qconfig
     """
     torch._C._log_api_usage_once("quantization_api.quantize.prepare_qat")
     if mapping is None:
@@ -416,7 +441,7 @@ def prepare_qat(model, mapping=None, inplace=False):
     if not inplace:
         model = copy.deepcopy(model)
 
-    propagate_qconfig_(model, qconfig_dict=None)
+    propagate_qconfig_(model, qconfig_dict=None, allow_list=allow_list)
     convert(model, mapping=mapping, inplace=True, remove_qconfig=False)
     prepare(model, observer_non_leaf_module_list=set(mapping.values()), inplace=True)
     return model

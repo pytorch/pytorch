@@ -527,7 +527,7 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
       auto diff_graph = std::move(dnode->g(attr::Subgraph));
       Gradient gradient = differentiate(diff_graph);
       RemoveTensorTypeSpecializations(gradient.f);
-      RemoveProfilingNodes(gradient.f);
+      ProfilingRecord::removeProfilingNodes(gradient.f->block());
       GRAPH_DEBUG("Forward graph:\n", *(gradient.f));
       GRAPH_DEBUG("Backward graph:\n", *(gradient.df));
       // just like inside autograd.Functions, the forward of a differentiable
@@ -543,7 +543,7 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
         copy,
         getAutodiffSubgraphInlining() ? autodiffSubgraphNodeThreshold : 1);
     replaceFallbackGraphWithFallbackFunction(copy->block());
-    RemoveProfilingNodes(copy);
+    ProfilingRecord::removeProfilingNodes(copy->block());
     GRAPH_DEBUG(
         "After InlineAutodiffSubgraphs and Removing Profiling Nodes\n", *copy);
   } else {
@@ -668,6 +668,13 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
     // before any other pass that could insert `prim::iprofile_value` node on
     // `aten::_grad_sum_to_size` input.
     InsertProfileNodesForSpecializeAutogradZero(pr_.get());
+    // `InsertProfileNodesForCUDAFuser` inserts profile node for non-tensor
+    // value
+#ifndef C10_MOBILE
+    if (RegisterCudaFuseGraph::isRegistered()) {
+      torch::jit::fuser::cuda::InsertProfileNodesForCUDAFuser(pr_.get());
+    }
+#endif
     GRAPH_DUMP("Profiled Graph: ", pr_->graph());
     profiling_plan_ = ExecutionPlan(pr_->graph(), function_name_);
     // fall-through
@@ -714,7 +721,7 @@ GraphExecutorState ProfilingGraphExecutorImpl::getDebugState() {
 
 Node* insertFallbackFunctionCall(
     Graph* graph,
-    Function* func,
+    GraphFunction* func,
     ArrayRef<Value*> inputs) {
   auto tuple_type = func->graph()->return_node()->input(0)->type();
   Value* fn_constant = graph->insertNode(graph->create(prim::Constant))
@@ -733,7 +740,7 @@ Node* insertFallbackFunctionCall(
   return fun_unpack_tuple;
 }
 
-Function* createFallbackPathFunction(
+GraphFunction* createFallbackPathFunction(
     Block* b,
     const std::string& function_name) {
   auto value_map = [](Value* v) { return v; };

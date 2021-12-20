@@ -1,6 +1,6 @@
 // This file registers special JIT operators used to implement the PyTorch CUDA
 // API in TorchScript.
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 #include <torch/csrc/api/include/torch/utils.h>
 #include <torch/csrc/jit/cuda/cuda.h>
 #include <torch/csrc/jit/ir/ir.h>

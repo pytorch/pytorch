@@ -11,7 +11,7 @@ from torch.fx._compatibility import compatibility
 
 from .operator_support import (
     get_node_target,
-    OperatorSupport,
+    OperatorSupportBase,
 )
 from .graph_drawer import FxGraphDrawer
 from .shape_prop import ShapeProp
@@ -82,7 +82,7 @@ class FxNetAccNodesFinder:
     def __init__(
         self,
         module: torch.fx.GraphModule,
-        operator_support: OperatorSupport,
+        operator_support: OperatorSupportBase,
         allow_non_tensor: bool,
     ):
         self.module = module
@@ -226,8 +226,9 @@ class _SplitterBase:
         self,
         module: torch.fx.GraphModule,
         sample_input: Tensors,
-        operator_support: OperatorSupport,
+        operator_support: OperatorSupportBase,
         settings: _SplitterSettingBase,
+        non_acc_submodule_name: str = "_run_on_cpu_",
     ):
         """
         Preprocesses graph before splitting:
@@ -255,6 +256,8 @@ class _SplitterBase:
         # Modify deps to add more deps for fused nodes
         self.deps = self.find_deps()
         self.update_deps_for_fusions()
+
+        self.non_acc_submodule_name = non_acc_submodule_name
 
     # ===============================================================
     # Helpers for ctor and initial state
@@ -421,7 +424,7 @@ class _SplitterBase:
         reports += f" {acc_subgraphs_num} acc subgraphs and {cpu_subgraphs_num} cpu subgraphs.\n"
 
         for i, subgraph in enumerate(subgraphs):
-            reports += f"_run_on_acc_{i}: " if subgraph.is_acc else f"_run_on_cpu_{i}: "
+            reports += f"_run_on_acc_{i}: " if subgraph.is_acc else f"{self.non_acc_submodule_name}{i}: "
             reports += f"{len(subgraph.nodes)} node(s)\n"
 
         self.tag(subgraphs)
@@ -655,13 +658,17 @@ class _SplitterBase:
         current_cpu_nodes, current_acc_nodes = self.starter_nodes()
         visited_nodes: NodeSet = set()
 
-        # If there are CPU nodes, start with them
-        acc_subgraph: bool = not current_cpu_nodes
+        # Determine which subgraph to start from based on node dependency
+        acc_subgraph: bool = True
+        for n in current_cpu_nodes:
+            if self.deps[n] <= visited_nodes:
+                acc_subgraph = False
+                break
+
         current_subgraph_nodes: NodeList = []
 
         # Result accumulator
         subgraphs: List[Subgraph] = []
-
         while current_cpu_nodes or current_acc_nodes:
             # Find the first node that should belong to the current subgraph and has all dependencies resolved
             current_nodes = current_acc_nodes if acc_subgraph else current_cpu_nodes
@@ -688,7 +695,10 @@ class _SplitterBase:
 
             # Add fusion buddies
             if node in self.fusions:
-                current_acc_nodes.update(self.fusions[node] - visited_nodes)
+                if node in self.acc_nodes:
+                    current_acc_nodes.update(self.fusions[node] - visited_nodes)
+                else:
+                    current_cpu_nodes.update(self.fusions[node] - visited_nodes)
 
             # Put depending nodes into the queue
             for user in node.users:
@@ -738,8 +748,9 @@ class _SplitterBase:
     def tag(self, subgraphs: List[Subgraph]):
         self.tags: List[str] = []
         for subgraph in subgraphs:
-            template = "_run_on_acc_{}" if subgraph.is_acc else "_run_on_cpu_{}"
-            tag = template.format(len(self.tags))
+            subgraph_name = self.non_acc_submodule_name
+
+            tag = f"_run_on_acc_{len(self.tags)}" if subgraph.is_acc else f"{self.non_acc_submodule_name}{len(self.tags)}"
             self.tags.append(tag)
             for node in subgraph.nodes:
                 if hasattr(node, "tag"):

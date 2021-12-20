@@ -181,7 +181,7 @@ TEST(InterpreterTest, IgnorableArgsInSchemaWithOut) {
   auto op_to_specified_args = function.op_to_num_specified_args();
   ASSERT_TRUE(op_to_specified_args.size() == 1);
   // this should be 3 when the add_out flag is set to True
-  ASSERT_TRUE(op_to_specified_args["aten::add.out"] == 4);
+  ASSERT_TRUE(op_to_specified_args["aten::add.out"] == 3);
 }
 
 TEST(InterpreterTest, runAsyncBasicTest) {

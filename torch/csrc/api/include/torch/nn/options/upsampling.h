@@ -3,7 +3,7 @@
 #include <c10/util/variant.h>
 #include <torch/arg.h>
 #include <torch/enum.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/expanding_array.h>
 #include <torch/types.h>
 
@@ -37,7 +37,7 @@ struct TORCH_API UpsampleOptions {
 
   /// if "True", the corner pixels of the input and output tensors are
   /// aligned, and thus preserving the values at those pixels. This only has
-  /// effect when :attr:`mode` is "linear", "bilinear", or
+  /// effect when :attr:`mode` is "linear", "bilinear", "bicubic", or
   /// "trilinear". Default: "False"
   TORCH_ARG(c10::optional<bool>, align_corners) = c10::nullopt;
 };

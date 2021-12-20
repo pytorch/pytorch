@@ -2,6 +2,7 @@
 #include <ATen/core/jit_type.h>
 #if AT_PARALLEL_OPENMP
 #include <ATen/Parallel.h>
+#include <ATen/ParallelFuture.h>
 
 #include <atomic>
 

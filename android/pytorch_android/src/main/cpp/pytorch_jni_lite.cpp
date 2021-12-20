@@ -6,6 +6,7 @@
 #include <fbjni/ByteBuffer.h>
 #include <fbjni/fbjni.h>
 
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/script.h>
@@ -157,7 +158,7 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
     std::vector<at::IValue> inputs{};
     size_t n = jinputs->size();
     inputs.reserve(n);
-    for (size_t i = 0; i < n; i++) {
+    for (const auto i : c10::irange(n)) {
       at::IValue atIValue = JIValue::JIValueToAtIValue(jinputs->getElement(i));
       if (at::kVulkan == deviceType_) {
         inputs.push_back(
@@ -186,7 +187,7 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
     std::vector<at::IValue> inputs{};
     size_t n = jinputs->size();
     inputs.reserve(n);
-    for (size_t i = 0; i < n; i++) {
+    for (const auto i : c10::irange(n)) {
       at::IValue atIValue = JIValue::JIValueToAtIValue(jinputs->getElement(i));
       if (at::kVulkan == deviceType_) {
         inputs.push_back(

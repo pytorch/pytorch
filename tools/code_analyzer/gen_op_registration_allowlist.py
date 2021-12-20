@@ -14,14 +14,11 @@ import yaml
 from collections import defaultdict
 from typing import Dict, List, Set
 
+DepGraph = Dict[str, Set[str]]
 
 def canonical_name(opname: str) -> str:
     # Skip the overload name part as it's not supported by code analyzer yet.
     return opname.split('.', 1)[0]
-
-
-DepGraph = Dict[str, Set[str]]
-
 
 def load_op_dep_graph(fname: str) -> DepGraph:
     with open(fname, 'r') as stream:

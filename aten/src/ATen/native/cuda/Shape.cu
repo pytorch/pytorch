@@ -9,12 +9,10 @@
 #include <c10/core/MemoryFormat.h>
 #include <c10/util/Optional.h>
 
-#include <THC/THC.h>
-
 namespace at {
 namespace native {
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 constexpr int CAT_ARRAY_BATCH_SIZE = 1024;
 #else
 constexpr int CAT_ARRAY_BATCH_SIZE = 128;
@@ -432,6 +430,8 @@ inline c10::MemoryFormat compute_output_memory_format(const TensorList &inputs) 
 }
 
 Tensor& cat_out_cuda(TensorList inputs, int64_t dimension, Tensor& out) {
+  check_cat_no_zero_dim(inputs);
+  dimension = legacy_cat_wrap_dim(dimension, inputs);
 
   // previously, size [0] tensors were the only possible empty tensors; thus, it
   // wasn't possible to cat empty tensors unless all the other tensors were
@@ -546,7 +546,7 @@ Tensor& cat_out_cuda(TensorList inputs, int64_t dimension, Tensor& out) {
     });
   allSameType = allSameType && (out.scalar_type() == firstType);
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
   if (inputs.size() > 1 &&
       out.dim() <= CAT_ARRAY_MAX_INPUT_DIMS &&
       at::cuda::detail::canUse32BitIndexMath(out) &&

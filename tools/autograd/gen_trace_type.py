@@ -5,7 +5,7 @@ from tools.codegen.api.types import CppSignatureGroup, DispatcherSignature
 from tools.codegen.api import cpp
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.context import with_native_function
-from tools.codegen.gen import parse_native_yaml, FileManager
+from tools.codegen.utils import FileManager
 from tools.codegen.model import (Argument, NativeFunction, SchemaKind,
                                  TensorOptionsArguments)
 
@@ -27,7 +27,7 @@ MANUAL_BACKEND = set([
 # For these ops we want to skip the codegen-ed registration to both Autograd and Tracer keys.
 # You can find the manual registration in torch/csrc/autograd/VariableTypeManual.cpp
 MANUAL_AUTOGRAD_AND_TRACER = set([
-    'resize_', 'resize_as_', 'detach', 'detach_', 'copy_', '_fw_primal',
+    'resize_', 'resize_as_', 'detach', 'detach_', 'copy_', '_fw_primal', '_make_dual',
 ])
 
 # Currently MANUAL_AUTOGRAD and MANUAL_TRACER share the same set of ops:
@@ -405,11 +405,10 @@ def gen_trace_type_func(
         'trace_wrapper_registrations': [method_registration(fn)],
     }
 
-def gen_trace_type(out: str, native_yaml_path: str, template_path: str) -> None:
+def gen_trace_type(out: str, native_functions: List[NativeFunction], template_path: str) -> None:
     # NOTE: see Note [Sharded File] at the top of the VariableType.cpp
     # template regarding sharding of the generated files.
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
-    native_functions = parse_native_yaml(native_yaml_path).native_functions
     fm.write_sharded(
         'TraceType.cpp',
         [fn for fn in native_functions if cpp.name(fn.func) not in MANUAL_TRACER],

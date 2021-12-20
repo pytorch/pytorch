@@ -3,7 +3,6 @@
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/anomaly_mode.h>
-#include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/saved_variable.h>
 #include <torch/csrc/autograd/input_metadata.h>
 #include <torch/csrc/autograd/variable.h>
@@ -11,6 +10,7 @@
 #include <torch/csrc/utils/variadic.h>
 
 #include <ATen/ATen.h>
+#include <ATen/record_function.h>
 #include <ATen/SequenceNumber.h>
 #include <c10/util/Exception.h>
 
@@ -181,12 +181,12 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   /// Adds the type and shape metadata for a new input. Returns the index of
   /// of the new input.
   uint32_t add_input_metadata(
-    const at::TensorOptions& options
-  , at::IntArrayRef shape
-  , at::Device device) noexcept {
+    const at::TensorOptions& options,
+    at::IntArrayRef shape,
+    bool is_tensor_subclass) noexcept {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     uint32_t input_nr = input_metadata_.size();
-    input_metadata_.emplace_back(options, shape, device);
+    input_metadata_.emplace_back(options, shape, is_tensor_subclass);
     return input_nr;
   }
 

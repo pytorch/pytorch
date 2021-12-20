@@ -8,7 +8,7 @@ import re
 from subprocess import check_call, check_output, CalledProcessError
 import sys
 import sysconfig
-from setuptools import distutils  # type: ignore[import]
+from distutils.version import LooseVersion
 from typing import IO, Any, Dict, List, Optional, Union, cast
 
 from . import which
@@ -18,9 +18,9 @@ from .numpy_ import USE_NUMPY, NUMPY_INCLUDE_DIR
 
 def _mkdir_p(d: str) -> None:
     try:
-        os.makedirs(d)
-    except OSError:
-        pass
+        os.makedirs(d, exist_ok=True)
+    except OSError as e:
+        raise RuntimeError(f"Failed to create folder {os.path.abspath(d)}: {e.strerror}") from e
 
 
 # Ninja
@@ -118,23 +118,33 @@ class CMake:
         cmake_command = 'cmake'
         if IS_WINDOWS:
             return cmake_command
-        cmake3 = which('cmake3')
-        cmake = which('cmake')
-        if cmake3 is not None and CMake._get_version(cmake3) >= distutils.version.LooseVersion("3.10.0"):
-            cmake_command = 'cmake3'
-            return cmake_command
-        elif cmake is not None and CMake._get_version(cmake) >= distutils.version.LooseVersion("3.10.0"):
-            return cmake_command
-        else:
+        cmake3_version = CMake._get_version(which('cmake3'))
+        cmake_version = CMake._get_version(which('cmake'))
+
+        _cmake_min_version = LooseVersion("3.10.0")
+        if all((ver is None or ver < _cmake_min_version for ver in [cmake_version, cmake3_version])):
             raise RuntimeError('no cmake or cmake3 with version >= 3.10.0 found')
 
+        if cmake3_version is None:
+            cmake_command = 'cmake'
+        elif cmake_version is None:
+            cmake_command = 'cmake3'
+        else:
+            if cmake3_version >= cmake_version:
+                cmake_command = 'cmake3'
+            else:
+                cmake_command = 'cmake'
+        return cmake_command
+
     @staticmethod
-    def _get_version(cmd: str) -> Any:
+    def _get_version(cmd: Optional[str]) -> Any:
         "Returns cmake version."
 
+        if cmd is None:
+            return None
         for line in check_output([cmd, '--version']).decode('utf-8').split('\n'):
             if 'version' in line:
-                return distutils.version.LooseVersion(line.strip().split(' ')[2])
+                return LooseVersion(line.strip().split(' ')[2])
         raise RuntimeError('no version found')
 
     def run(self, args: List[str], env: Dict[str, str]) -> None:
@@ -243,7 +253,7 @@ class CMake:
             var: var for var in
             ('BLAS',
              'BUILDING_WITH_TORCH_LIBS',
-             'CUDA_HOST_COMPILER',
+             'CUDA_HOST_COMILER',
              'CUDA_NVCC_EXECUTABLE',
              'CUDA_SEPARABLE_COMPILATION',
              'CUDNN_LIBRARY',
@@ -267,6 +277,15 @@ class CMake:
              'OPENSSL_ROOT_DIR')
         })
 
+        # Aliases which are lower priority than their canonical option
+        low_priority_aliases = {
+            'CUDA_HOST_COMPILER': 'CMAKE_CUDA_HOST_COMPILER',
+            'CUDAHOSTCXX': 'CUDA_HOST_COMPILER',
+            'CMAKE_CUDA_HOST_COMPILER': 'CUDA_HOST_COMPILER',
+            'CMAKE_CUDA_COMPILER': 'CUDA_NVCC_EXECUTABLE',
+            'CUDACXX': 'CUDA_NVCC_EXECUTABLE'
+        }
+
         for var, val in my_env.items():
             # We currently pass over all environment variables that start with "BUILD_", "USE_", and "CMAKE_". This is
             # because we currently have no reliable way to get the list of all build options we have specified in
@@ -278,6 +297,11 @@ class CMake:
                 build_options[true_var] = val
             elif var.startswith(('BUILD_', 'USE_', 'CMAKE_')) or var.endswith(('EXITCODE', 'EXITCODE__TRYRUN_OUTPUT')):
                 build_options[var] = val
+
+            if var in low_priority_aliases:
+                key = low_priority_aliases[var]
+                if key not in build_options:
+                    build_options[key] = val
 
         # The default value cannot be easily obtained in CMakeLists.txt. We set it here.
         py_lib_path = sysconfig.get_path('purelib')
@@ -387,7 +411,7 @@ class CMake:
             # then. Until then, we use "--" to pass parameters to the
             # underlying build system.
             build_args += ['--']
-            if IS_WINDOWS:
+            if IS_WINDOWS and not USE_NINJA:
                 # We are likely using msbuild here
                 build_args += ['/p:CL_MPCount={}'.format(max_jobs)]
             else:

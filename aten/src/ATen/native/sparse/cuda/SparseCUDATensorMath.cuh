@@ -1,8 +1,14 @@
 #pragma once
 
 #include <ATen/cuda/detail/TensorInfo.cuh>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <c10/macros/Macros.h>
+
+namespace at {
+class Tensor;
+}
+namespace c10 {
+class Scalar;
+}
 
 namespace at { namespace native {
 
