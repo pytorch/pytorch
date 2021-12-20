@@ -68,7 +68,7 @@ if (${cond}) {
 """)
 
 OP_NAME = CodeTemplate("""\
-op_name = jit::Symbol::fromQualString("aten::${trace_name}");
+op_name = c10::Symbol::fromQualString("aten::${trace_name}");
 """)
 
 # These functions have their names recorded under trace renamed,
@@ -220,10 +220,10 @@ if (jit::tracer::isTracing()) {
   tracer_state = jit::tracer::getTracingState();
   at::Symbol op_name;
   ${set_op_name}
-  node = tracer_state->graph->create(op_name, /*num_outputs=*/0);
+  node = tracer_state->createNode(op_name, /*num_outputs=*/0);
   jit::tracer::recordSourceLocation(node);
   ${add_trace_inputs}
-  tracer_state->graph->insertNode(node);
+  tracer_state->insertNode(node);
   ${inplace_guard}
   jit::tracer::setTracingState(nullptr);
 }
