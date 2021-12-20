@@ -535,10 +535,10 @@ def fractional_max_pool3d_with_indices(
                         Useful to pass to :func:`~torch.nn.functional.max_unpool3d`.
 
     Shape:
-        - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(C, H_{in}, W_{in})`.
-        - Output: :math:`(N, C, H_{out}, W_{out})` or :math:`(C, H_{out}, W_{out})`, where
-          :math:`(H_{out}, W_{out})=\text{output\_size}` or
-          :math:`(H_{out}, W_{out})=\text{output\_ratio} \times (H_{in}, W_{in})`
+        - Input: :math:`(N, C, T_{in}, H_{in}, W_{in})` or :math:`(C, T_{in}, H_{in}, W_{in})`.
+        - Output: :math:`(N, C, T_{out}, H_{out}, W_{out})` or :math:`(C, T_{out}, H_{out}, W_{out})`, where
+          :math:`(T_{out}, H_{out}, W_{out})=\text{output\_size}` or
+          :math:`(T_{out}, H_{out}, W_{out})=\text{output\_ratio} \times (T_{in}, H_{in}, W_{in})`
 
     Examples::
         >>> input = torch.randn(20, 16, 50, 32, 16)
