@@ -609,8 +609,8 @@ ANDROID_WORKFLOWS = [
 BAZEL_WORKFLOWS = [
     CIWorkflow(
         arch="linux",
-        build_environment="linux-xenial-py3.6-gcc7-bazel-test",
-        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7",
+        build_environment="linux-xenial-cuda11.3-py3.6-gcc7-bazel-test",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_BAZEL, LABEL_CIFLOW_CPU, LABEL_CIFLOW_LINUX},
