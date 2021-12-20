@@ -624,6 +624,7 @@ void bernoulli_kernel(Tensor& self, const Tensor& p_, RNG gen) {
     std::lock_guard<std::mutex> lock(gen->mutex_);
     rng_engine_inputs = gen->philox_cuda_state(10);
   }
+  TORCH_CHECK(at::isFloatingType(p_.scalar_type()), "expected probabilities tensor to have floating type, got ", p_.scalar_type());
   auto p_CUDA = p_.to(kCUDA);
   //cast probabilities tensor to double for double `self` tensor, and to `float` for everything else
   if (self.dtype() == at::kDouble) {
