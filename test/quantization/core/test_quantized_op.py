@@ -452,14 +452,13 @@ class TestQuantizedOps(TestCase):
                                            dtype=torch_type)
             dqX = qX.dequantize()
 
-            # torch.nn.functional
             op = torch.nn.functional.gelu
             dqY = op(dqX)
             qY = torch.quantize_per_tensor(dqY, scale=scale, zero_point=zero_point,
                                            dtype=torch_type)
             qY_hat = op(qX)
             self.assertEqual(qY.dequantize(), qY_hat.dequantize(),
-                             msg="F.leaky_relu failed ({} vs {})".format(qY, qY_hat))
+                             msg="F.gelu failed ({} vs {})".format(qY, qY_hat))
 
     """Tests the correctness of the quantized::qlayer_norm op."""
     @skipIfNoFBGEMM

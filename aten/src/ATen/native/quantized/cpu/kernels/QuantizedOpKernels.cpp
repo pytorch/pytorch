@@ -624,10 +624,12 @@ void qgelu_kernel(const Tensor& qx, Tensor& qy) {
   auto scale_neg_zp_premul_vec = scale_vec * zero_point_vec.neg();
   int64_t output_zero_point = zero_point;
   float output_scale = scale;
+  float inv_output_scale = 1.0 / output_scale;
+  const auto kAlphaVec = Vectorized<float>(M_SQRT1_2);
+  const auto kOneVec = Vectorized<float>(1);
+  const auto kPointFiveVec = Vectorized<float>(0.5);
 
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qgelu", [&]() {
-    float inv_output_scale = 1.0 / output_scale;
-
     qy = at::_empty_affine_quantized(
         qx.sizes(),
         // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
@@ -649,9 +651,6 @@ void qgelu_kernel(const Tensor& qx, Tensor& qy) {
               output_scale, output_zero_point, value_dy);
         },
         [&](Vec value_qx) -> Vec {
-          const auto kAlphaVec = Vectorized<float>(M_SQRT1_2);
-          const auto kOneVec = Vectorized<float>(1);
-          const auto kPointFiveVec = Vectorized<float>(0.5);
           auto value_dx = value_qx.dequantize(
               scale_vec, zero_point_vec, scale_neg_zp_premul_vec);
           for (auto & value : value_dx) {
