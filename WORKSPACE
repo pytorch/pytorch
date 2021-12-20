@@ -181,8 +181,3 @@ new_empty_repository(
     name = "cuda",
     build_file = "//third_party:cuda.BUILD",
 )
-
-local_repository(
-    name = "com_github_google_flatbuffers",
-    path = "third_party/flatbuffers",
-)
