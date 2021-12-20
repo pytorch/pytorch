@@ -398,7 +398,7 @@ Tensor _convolution_jvp(
   bool benchmark, bool deterministic, bool cudnn_enabled, bool allow_tf32
 );
 
-Tensor convolution_backward_jvp_grad_bias(const Tensor& grad_out_t, const Tensor& grad_bias, const Tensor& weight_p);
+Tensor convolution_backward_jvp_grad_bias(const Tensor& grad_out_t, const Tensor& grad_bias);
 
 Tensor cat_jvp(at::TensorList tensors, int64_t dim);
 Tensor stack_jvp(at::TensorList tensors, int64_t dim);

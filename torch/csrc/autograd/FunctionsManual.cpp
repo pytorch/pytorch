@@ -748,12 +748,11 @@ Tensor _convolution_jvp(
 
 Tensor convolution_backward_jvp_grad_bias(
     const Tensor& grad_out_t,
-    const Tensor& grad_bias,
-    const Tensor& weight_p) {  // weight_p is only used to infer size only
+    const Tensor& grad_bias) {
   if (!grad_bias.defined()) {
     return Tensor();
   }
-  int64_t dim = weight_p.dim() - 2;
+  int64_t dim = grad_out_t.dim() - 2;
   if (dim == 1) {
     // Cannot pass initializer list due to overload ambiguity
     auto dimlist = std::vector<int64_t>{0, 2};
@@ -765,8 +764,8 @@ Tensor convolution_backward_jvp_grad_bias(
   } else {
     TORCH_INTERNAL_ASSERT(
         false,
-        "convolution_backward_jvp_grad_bias expected dim of weigh to be 3, 4, or 4, but got: ",
-        weight_p.dim());
+        "convolution_backward_jvp_grad_bias expected dim of grad_out_t to be 3, 4, or 4, but got: ",
+        grad_out_t.dim());
   }
 }
 
