@@ -156,10 +156,10 @@ MemoryPlanner::MemoryPlanner(
     bool enable_out_variant,
     bool manage_output_tensors,
     bool optimize_memory) {
-  auto& managed_tensor_values = block_info.managed_tensor_values();
-  auto& managed_output_tensor_values =
+  const auto& managed_tensor_values = block_info.managed_tensor_values();
+  const auto& managed_output_tensor_values =
       block_info.managed_output_tensor_values();
-  auto& leaked_values = block_info.leaked_values();
+  const auto& leaked_values = block_info.leaked_values();
 
   // collect unmanaged output ivalues
   FastSet<IValue*> unmanaged_ivalues;

@@ -1,7 +1,7 @@
 #pragma once
 
-#include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
+#include <ATen/core/symbol.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
@@ -215,6 +215,16 @@ class ProcessedFunction;
 class ProcessedNode;
 class StaticRuntime;
 
+// A `BlockInfo` instance stores all of the shared state that each
+// `StaticRuntimeBlockRunner` will need to access. Most of this information is
+// read-only and shared between threads.
+// - Each `BlockInfo` corresponds to one block in the graph.
+// - Each `BlockInfo` may be used by multiple block runners (when there are many
+//   threads).
+// - All of the `BlockInfo`s are stored in a vector in the `StaticModule` and
+//   are initialized during `StaticModule` construction.
+// - Most of the information stored is used to initialize the block's memory
+//   planner.
 class BlockInfo {
  public:
   BlockInfo(uint32_t input_idx, Block* block)
@@ -224,9 +234,7 @@ class BlockInfo {
       std::vector<ProcessedNode> nodes,
       const FastMap<Node*, bool>& node_has_out_variant);
 
-  // NB: This function copies nodes_ since each block runner instance
-  // needs its own copy!
-  std::vector<ProcessedNode> nodes() const {
+  const std::vector<ProcessedNode>& nodes() const {
     return nodes_;
   }
 
@@ -246,11 +254,11 @@ class BlockInfo {
     return block_->nodes();
   }
 
-  void set_output_indices(std::vector<uint32_t> indices) {
+  void set_output_indices(std::vector<uint16_t> indices) {
     output_indices_ = std::move(indices);
   }
 
-  const std::vector<uint32_t>& block_output_indices() const {
+  const std::vector<uint16_t>& block_output_indices() const {
     return output_indices_;
   }
 
@@ -300,19 +308,21 @@ class BlockInfo {
   }
 
  private:
-  std::vector<ProcessedNode> nodes_{};
+  std::vector<ProcessedNode> nodes_;
 
   ValueGroup value_group_;
 
-  FastSet<const Node*> node_is_optimizable_container_type_{};
-  FastSet<const Value*> managed_tensor_values_{};
-  FastSet<const Value*> managed_output_tensor_values_{};
-  FastSet<const Value*> leaked_values_{};
+  FastSet<const Node*> node_is_optimizable_container_type_;
+  FastSet<const Value*> managed_tensor_values_;
+  FastSet<const Value*> managed_output_tensor_values_;
+  FastSet<const Value*> leaked_values_;
 
   ManagedTensorRanges managed_tensor_ranges_{};
 
-  const uint32_t input_idx_;
-  std::vector<uint32_t> output_indices_;
+  // The index of this block's inputs in the shared values_ array.
+  const uint16_t input_idx_;
+  // The indices of this block's outputs in the shared values_ array.
+  std::vector<uint16_t> output_indices_;
   Block* block_;
 };
 
@@ -356,6 +366,22 @@ class TORCH_API StaticModule {
   size_t num_inputs() const;
   size_t num_outputs() const;
 
+  size_t num_constants() const {
+    return constants_.size();
+  }
+
+  size_t num_intermediate_values() const {
+    return num_intermediate_values_;
+  }
+
+  size_t total_num_values() const {
+    return num_inputs() + num_constants() + num_intermediate_values();
+  }
+
+  C10_NODISCARD const std::vector<uint16_t>& output_indices() const {
+    return output_indices_;
+  }
+
   const std::vector<IValue>& constants() const {
     return constants_;
   }
@@ -388,6 +414,18 @@ class TORCH_API StaticModule {
 
   bool first_input_is_self() const {
     return module_.has_value();
+  }
+
+  size_t inputs_offset() const {
+    return 0;
+  }
+
+  size_t constants_offset() const {
+    return inputs_offset() + num_inputs();
+  }
+
+  size_t intermediate_values_offset() const {
+    return constants_offset() + num_constants();
   }
 
   StaticRuntime& runtime();
@@ -431,10 +469,42 @@ class TORCH_API StaticModule {
   std::vector<IValue> constants_;
   // The functions to be called by corresponding ProcessedNode.
   std::vector<ProcessedFunction> functions_{};
+  // The nodes we need to run
+  std::vector<ProcessedNode> nodes_;
+  // Indices of graph outputs in the single values array.
+  std::vector<uint16_t> output_indices_;
+
+  ValueGroup value_group_;
+
+  FastSet<const Node*> node_is_optimizable_container_type_;
+
+  FastSet<const Value*> managed_tensor_values_{};
+  FastSet<const Value*> managed_output_tensor_values_{};
+  FastSet<const Value*> leaked_values_{};
+  ManagedTensorRanges managed_tensor_ranges_{};
+
+  size_t num_intermediate_values_ = 0;
+
+  // Includes self if module_ != nullopt.
+  // Note that we might have num_inputs_ == 0 even if the schema has a `self`
+  // argument. In this case, `self` isn't used in the graph, but the schema
+  // includes it anyways to be consistent with the JIT interpreter.
+  size_t num_inputs_;
+  // See `BlockInfo` definition. The blocks are stored in depth-first order.
   std::vector<BlockInfo> blocks_;
   size_t value_buffer_size_ = 0;
 };
 
+// `StaticRuntimeBlockRunner` contains the core runtime logic. Each block runner
+// corresponds to one block in the graph and has its own memory planner.
+// `StaticRuntime` will initialize all `StaticRuntimeBlockRunner`s
+// upon construction. Each block runner only directly executes nodes from its
+// block. Special ops with sub-blocks like `prim::If` may have
+// `StaticRuntimeBlockRunner`s stored in their `ProcessedNode`s; these
+// sub-blocks get executed in the op's implementation.
+// `StaticRuntime` stores a vector of IValues that all
+// `StaticRuntimeBlockRunner`s share. This vector is used to store all
+// constants, inputs, and intermediate tensors.
 class TORCH_API StaticRuntimeBlockRunner {
  public:
   explicit StaticRuntimeBlockRunner(
@@ -588,10 +658,18 @@ class TORCH_API StaticRuntimeBlockRunner {
       const KeywordArgs& kwargs);
 
   // helper method for copying input args/kwargs into inputs_
+  template <typename IValueList>
   void set_inputs(
-      const std::vector<c10::IValue>& args,
-      const KeywordArgs& kwargs);
-  void set_inputs(std::vector<c10::IValue>&& args, const KeywordArgs& kwargs);
+      IValueList&& args,
+      const std::unordered_map<std::string, c10::IValue>& kwargs);
+
+  // Set Input(idx) to args[idx]. Invoked by set_inputs. Copies or moves
+  // depending on overload.
+  void set_arg(const size_t idx, std::vector<IValue>&& args);
+  void set_arg(const size_t idx, const std::vector<IValue>& args);
+
+  // Set Input(idx) to arg. Always copies. Used for kwargs.
+  void set_arg(const size_t idx, const IValue& arg);
 
   void verify_and_correct_memory_overlap(ProcessedNode& n);
 
@@ -624,8 +702,13 @@ class TORCH_API StaticRuntimeBlockRunner {
   const StaticModule& static_module_;
   const BlockInfo& block_info_;
 
-  bool manage_output_tensors_enabled_ = false;
   const bool is_root_block_;
+  // Cache this so we don't have to call static_module_.first_input_is_self()
+  const bool first_input_is_self_;
+  // Index of the start of this blocks inputs in the shared values_ array.
+  const uint16_t inputs_begin_;
+
+  bool manage_output_tensors_enabled_ = false;
   std::unique_ptr<MemoryPlanner> planner_;
   // ProcessedNodes reference their inputs and outputs with
   // offsets into this array, which saves memory.
@@ -634,8 +717,6 @@ class TORCH_API StaticRuntimeBlockRunner {
   std::vector<IValue>& values_;
   std::vector<IValue*> outputs_;
   std::vector<ProcessedNode> nodes_;
-
-  const uint32_t inputs_begin_;
 };
 
 class TORCH_API ProcessedFunction {
@@ -772,6 +853,8 @@ class TORCH_API ProcessedNode {
   }
 
  private:
+  // For control flow; processed nodes may have sub-blocks which can
+  // be executed by op implementations.
   std::vector<std::shared_ptr<StaticRuntimeBlockRunner>> blocks_;
 
   C10_NODISCARD bool verify_outputs_dont_overlap_each_other() const;
@@ -790,6 +873,13 @@ class TORCH_API ProcessedNode {
 #endif
 };
 
+// `StaticRuntime` is the owner of the array of IValues (used for constants,
+// inputs, and intermediate tensors) that all `StaticRuntimeBlockRunner`s share.
+// Upon construction, it initializes all block runners. `operator()` simply
+// forwards the inputs to the top-level block runner. Each `StaticRuntime`
+// instance corresponds to one `StaticModule`. Multiple `StaticRuntime`
+// instances can be created; this is useful for multi-threaded execution, since
+// `operator()` is not thread-safe.
 class TORCH_API StaticRuntime {
  public:
   explicit StaticRuntime(const StaticModule& sm);
@@ -809,6 +899,7 @@ class TORCH_API StaticRuntime {
   bool isManagedOutputTensor(const IValue& ivalue) const;
   void disableManageOutputTensors();
 
+  // Gets the top-level memory planner. Used for testing.
   const MemoryPlanner* get_memory_planner() const;
 
   void benchmark(

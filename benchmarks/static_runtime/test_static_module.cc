@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/runtime/static/memory_planner.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
+#include <memory>
 
 #include "deep_wide_pt.h"
 #include "test_utils.h"
@@ -34,17 +35,6 @@ bool testCanEnableStaticRuntime(const std::string& jit_script) {
 
   // here we do not freeze graph
   return canEnableStaticRuntime(graph);
-}
-
-bool testHasInplaceOp(const std::string& jit_script) {
-  script::Module module("module");
-  module.define(jit_script);
-
-  Method method = module.get_method("forward");
-  auto graph = module.get_method("forward").graph();
-
-  AliasDb alias_db(graph);
-  return HasInplaceOp(graph, alias_db);
 }
 
 bool testModuleHasOp(const std::string& jit_script, const char* op_name) {
@@ -217,18 +207,85 @@ TEST(StaticModule, RValueInputs) {
   EXPECT_TRUE(expected.toTensor().equal(actual.toTensor()));
 }
 
-TEST(StaticRuntime, InPlace) {
-  EXPECT_TRUE(testHasInplaceOp(reshape_inplace_script));
-  EXPECT_TRUE(testHasInplaceOp(reshape_inplace_script_1));
-  EXPECT_TRUE(testHasInplaceOp(sigmoid_inplace_script));
-  EXPECT_FALSE(testHasInplaceOp(sigmoid_out_script));
-}
-
 TEST(StaticRuntime, ModuleHasOp) {
   EXPECT_TRUE(testModuleHasOp(reshape_inplace_script, "aten::sigmoid_"));
   EXPECT_TRUE(testModuleHasOp(reshape_inplace_script_1, "aten::reshape"));
   EXPECT_TRUE(testModuleHasOp(sigmoid_inplace_script, "aten::clone"));
   EXPECT_FALSE(testModuleHasOp(reshape_inplace_script_1, "aten::add_"));
+}
+
+TEST(StaticRuntime, ReplaceWithCopy_replaces_reshape) {
+  auto ExpectToReplaceWithCopy = [](const std::string& jit_script) {
+    auto graph = getGraphFromScript(jit_script);
+    EXPECT_TRUE(graphHasOp(graph, "aten::reshape"));
+    EXPECT_FALSE(graphHasOp(graph, "static_runtime::reshape_copy"));
+
+    ReplaceWithCopy(graph);
+
+    // aten::reshape -> static_runtime::reshape_copy
+    EXPECT_FALSE(graphHasOp(graph, "aten::reshape"));
+    EXPECT_TRUE(graphHasOp(graph, "static_runtime::reshape_copy"));
+  };
+
+  ExpectToReplaceWithCopy(R"JIT(
+    def forward(self, inp: Tensor, shape: List[int]):
+        a = inp.reshape(shape)
+        return (a)
+  )JIT");
+  ExpectToReplaceWithCopy(R"JIT(
+    def forward(self, inp: Tensor, shape: List[int]):
+        a = inp * 2
+        b = inp * 3
+        c = inp.reshape(shape)
+        return (a, b, c)
+  )JIT");
+}
+
+TEST(
+    StaticRuntime,
+    ReplaceWithCopy_does_not_replace_reshape_if_input_has_writters) {
+  auto ExpectNotToReplaceWithCopy = [](const std::string& jit_script) {
+    auto graph = getGraphFromScript(jit_script);
+    EXPECT_TRUE(graphHasOp(graph, "aten::reshape"));
+    EXPECT_FALSE(graphHasOp(graph, "static_runtime::reshape_copy"));
+
+    ReplaceWithCopy(graph);
+
+    // No Replacement
+    EXPECT_TRUE(graphHasOp(graph, "aten::reshape"));
+    EXPECT_FALSE(graphHasOp(graph, "static_runtime::reshape_copy"));
+  };
+
+  ExpectNotToReplaceWithCopy(R"JIT(
+    def forward(self, inp: Tensor, shape: List[int]):
+        a = inp.reshape(shape)
+        inp *= 2
+        return (a)
+  )JIT");
+  ExpectNotToReplaceWithCopy(R"JIT(
+    def forward(self, inp: Tensor, shape: List[int]):
+        a = inp.reshape(shape)
+        a *= 2
+        return (a)
+  )JIT");
+  ExpectNotToReplaceWithCopy(R"JIT(
+    def forward(self, inp: Tensor, inp2: Tensor, shape: List[int]):
+        a = inp.reshape(shape)
+        a *= 2
+        b = a.reshape(shape)
+        return (b)
+  )JIT");
+  ExpectNotToReplaceWithCopy(R"JIT(
+    def forward(self, inp: Tensor, shape: List[int]):
+        a = inp.reshape(shape)
+        b = a.reshape(shape)
+        c = b.reshape(shape)
+        d = c.reshape(shape)
+        e = b.sigmoid_()
+        return (d)
+  )JIT");
+  ExpectNotToReplaceWithCopy(reshape_inplace_script);
+  ExpectNotToReplaceWithCopy(reshape_inplace_script_1);
 }
 
 TEST(StaticRuntime, CanEnableStaticRuntime) {
@@ -1316,7 +1373,71 @@ TEST(AssignStorageToManagedTensors, MultipleUnused) {
       src, std::move(managed_tensor_name_to_tensor), min_reused_tensors);
 }
 
-TEST(CreateOwnedRefs, TopLevel) {
+namespace {
+void testStaticModuleThrows(
+    const std::string& src,
+    const std::vector<IValue>& args,
+    const std::unordered_map<std::string, IValue>& kwargs) {
+  auto static_module = makeStaticModuleFromScript(src);
+  EXPECT_THROW(static_module(args, kwargs), c10::Error);
+}
+} // namespace
+
+TEST(StaticModule, IncorrectTypesPassed) {
+  const std::string args_bool_script = R"JIT(
+    def forward(self, x: bool):
+        return x
+  )JIT";
+  testStaticModuleThrows(args_bool_script, {at::randn({1})}, {});
+
+  const std::string args_tensor_script = R"JIT(
+    def forward(self, x: Tensor):
+        return x
+  )JIT";
+  testStaticModuleThrows(args_tensor_script, {false}, {});
+
+  const std::string kwargs_int_script = R"JIT(
+    def forward(self, x: bool = True):
+        return x
+  )JIT";
+  testStaticModuleThrows(kwargs_int_script, {}, {{"x", at::randn({1})}});
+
+  const std::string kwargs_tensor_script = R"JIT(
+    def forward(self, x: Tensor = torch.randn((1, ))):
+        return x
+  )JIT";
+  testStaticModuleThrows(kwargs_tensor_script, {}, {{"x", 1.0}});
+}
+
+TEST(StaticModule, TooManyArgs) {
+  const std::string args_src = R"JIT(
+    def forward(self, x: int):
+        return x
+  )JIT";
+  testStaticModuleThrows(args_src, {0, 1}, {});
+
+  const std::string kwargs_src = R"JIT(
+    def forward(self, x: int = 1):
+        return x
+  )JIT";
+  testStaticModuleThrows(kwargs_src, {}, {{"y", 0}, {"x", 1}});
+}
+
+TEST(StaticModule, NotEnoughArgs) {
+  const std::string args_src = R"JIT(
+    def forward(self, x: int):
+        return x
+  )JIT";
+  testStaticModuleThrows(args_src, {}, {});
+
+  const std::string kwargs_src = R"JIT(
+    def forward(self, *, x: int):
+        return x
+  )JIT";
+  testStaticModuleThrows(kwargs_src, {}, {});
+}
+
+TEST(CreateOwnedRefsForReturnedConstants, TopLevel) {
   const auto src = R"IR(
     graph():
         %c: int = prim::Constant[value=42]()
@@ -1324,11 +1445,11 @@ TEST(CreateOwnedRefs, TopLevel) {
   )IR";
 
   auto graph = getGraphFromIR(src);
-  CreateOwnedRefs(*graph);
+  CreateOwnedRefsForReturnedConstants(*graph);
   EXPECT_TRUE(hasNodeWithKind(graph, "static_runtime::create_owned_ref"));
 }
 
-TEST(CreateOwnedRefs, ValueFromOuterScope) {
+TEST(CreateOwnedRefsForReturnedConstants, ValueFromOuterScope) {
   const auto src = R"IR(
     graph(%cond: bool, %1: int):
         %c: int = aten::add(%1, %1)
@@ -1341,6 +1462,6 @@ TEST(CreateOwnedRefs, ValueFromOuterScope) {
   )IR";
 
   auto graph = getGraphFromIR(src);
-  CreateOwnedRefs(*graph);
+  CreateOwnedRefsForReturnedConstants(*graph);
   EXPECT_TRUE(hasNodeWithKind(graph, "static_runtime::create_owned_ref"));
 }
