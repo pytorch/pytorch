@@ -1,4 +1,4 @@
-from typing import Callable, List, Tuple, Any, Optional, Dict
+from typing import Callable, List, Tuple, Any, Optional, Dict, Set
 
 import torch
 import torch.nn.functional as F
@@ -117,6 +117,10 @@ class AutoQuantizationState(torch.nn.Module):
         # to its final value after tracing.
         self.needs_dtype_transform_on_outputs = True
 
+        # For debugging only, stores the types of ops seen by the parent which
+        # did not require op hooks.
+        self.seen_op_types_without_op_hooks: Set[Callable] = set()
+
     def has_at_least_one_seen_op_info(self) -> bool:
         return len(self.idx_to_seen_op_infos) > 0
 
@@ -144,6 +148,8 @@ class AutoQuantizationState(torch.nn.Module):
         for i in self.output_qtensor_infos:
             s += f"{i} "
         s += "]\n"
+        # seen_op_types_without_op_hooks
+        s += f"(seen_op_types_without_op_hooks): {self.seen_op_types_without_op_hooks}\n"
         # idx_to_packed_weight_name
         if len(self.idx_to_packed_weight_name):
             s += "(idx_to_packed_weight_name): {\n"
@@ -151,7 +157,7 @@ class AutoQuantizationState(torch.nn.Module):
                 s += f"  {k}: {v}\n"
             s += "}\n"
         else:
-            s += "(idx_to_packed_weight_name): {}\n"
+            s += "(idx_to_packed_weight_name): {}"
         if len(self.tensor_id_to_scale_zp):
             s += "(tensor_id_to_scale_zp): {\n"
             for k, v in self.tensor_id_to_scale_zp.items():  # type: ignore[assignment]
@@ -838,3 +844,6 @@ class AutoQuantizationState(torch.nn.Module):
     def forward(self, x):
         raise NotImplementedError('Calling AutoQuantizationState.forward is not supported')
         # return x
+
+    def add_seen_op_type_without_op_hooks(self, op_type: Callable) -> None:
+        self.seen_op_types_without_op_hooks.add(op_type)
