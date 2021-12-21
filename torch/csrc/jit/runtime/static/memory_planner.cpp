@@ -129,7 +129,7 @@ bool setIncludes(const FastSet<const Value*>& set, const Value* v) {
 }
 
 std::vector<std::pair<size_t, at::Tensor*>> assignStorageToOutputTensors(
-    StaticRuntimeBlockRunner* block_runner,
+    BlockRunner* block_runner,
     const FastSet<const Value*>& managed_output_tensor_values) {
   std::vector<std::pair<size_t, at::Tensor*>> managed_output_tensors;
   for (auto& pnode : block_runner->nodes()) {
@@ -151,7 +151,7 @@ std::vector<std::pair<size_t, at::Tensor*>> assignStorageToOutputTensors(
 } // namespace
 
 MemoryPlanner::MemoryPlanner(
-    StaticRuntimeBlockRunner* block_runner,
+    BlockRunner* block_runner,
     const BlockInfo& block_info,
     bool enable_out_variant,
     bool manage_output_tensors,

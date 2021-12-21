@@ -549,21 +549,52 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     });
 
 REGISTER_NATIVE_OPERATOR_FUNCTOR(aten::split, aten_split, [](Node* n) -> SROperator {
-  if (!n->matches(torch::schema(
+  if (n->matches(torch::schema(
           "aten::split(Tensor(a -> *) self, int split_size, int dim=0) -> Tensor(a)[]"))) {
-    LogAndDumpSchema(n);
-    return nullptr;
+    return [](ProcessedNode* p_node) {
+      const auto& self = p_node->Input(0).toTensor();
+      const auto split_size = p_node->Input(1).toInt();
+      const auto dim = p_node->Input(2).toInt();
+      p_node->Output(0) = at::native::split(self, split_size, dim);
+    };
   }
 
-  return [](ProcessedNode* p_node) {
-    const auto& self = p_node->Input(0).toTensor();
-    const auto split_size = p_node->Input(1).toInt();
-    const auto dim = p_node->Input(2).toInt();
-    p_node->Output(0) = at::native::split(self, split_size, dim);
-  };
+  if (n->matches(torch::schema(
+          "aten::split(Tensor(a -> *) self, int[] split_sizes, int dim=0) -> (Tensor[])"))) {
+    return [](ProcessedNode* p_node) {
+      const auto& self = p_node->Input(0).toTensor();
+      const auto& split_sizes = p_node->Input(1).toIntList();
+      const auto dim = p_node->Input(2).toInt();
+      p_node->Output(0) =
+          at::native::split_with_sizes(self, split_sizes.vec(), dim);
+    };
+  }
+
+  LogAndDumpSchema(n);
+  return nullptr;
 });
 
-// See [Create owned refs for returned constants]
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::split_with_sizes,
+    aten_split_with_sizes,
+    [](Node* n) -> SROperator {
+      if (!n->matches(torch::schema(
+              "aten::split_with_sizes(Tensor(a -> *) self, int[] split_sizes, int dim=0) -> Tensor(a)[]")) &&
+          !n->matches(torch::schema(
+              "aten::split_with_sizes(Tensor(a -> *) self, int[] split_sizes, int dim=0) -> (Tensor[])"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+      return [](ProcessedNode* p_node) {
+        const auto& self = p_node->Input(0).toTensor();
+        const auto& split_sizes = p_node->Input(1).toIntList();
+        const auto dim = p_node->Input(2).toInt();
+        p_node->Output(0) =
+            at::native::split_with_sizes(self, split_sizes.vec(), dim);
+      };
+    });
+
+// See [Create owned refs for special values]
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
     static_runtime::create_owned_ref,
     static_runtime_create_owned_ref,
@@ -572,12 +603,12 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
           [](ProcessedNode* p_node) { p_node->Output(0) = p_node->Input(0); };
     });
 
-REGISTER_NATIVE_OPERATOR_FUNCTOR(prim::If, prim_If, [](Node* n) -> SROperator {
+REGISTER_NATIVE_OPERATOR_FUNCTOR(prim::If, prim_If, [](Node*) -> SROperator {
   return [](ProcessedNode* p_node) {
     auto condition = p_node->Input(0).toBool();
-    auto& blocks = p_node->blocks();
-    DCHECK_EQ(blocks.size(), 2);
-    auto& runner = blocks[!condition];
+    auto& block_runners = p_node->block_runners();
+    DCHECK_EQ(block_runners.size(), 2);
+    auto& runner = block_runners[!condition];
 
     auto output = (*runner)({});
     if (output.isTuple()) {
