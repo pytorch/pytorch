@@ -47,13 +47,13 @@ from torch.onnx.utils import unpack_quantized_tensor
 _ORT_PROVIDERS = ["CPUExecutionProvider"]
 
 def flatten_tuples(elem):
-    tup = []
+    flattened = []
     for t in elem:
-        if isinstance(t, (tuple)):
-            tup += flatten_tuples(t)
+        if isinstance(t, tuple):
+            flattened.extend(flatten_tuples(t))
         else:
-            tup += [t]
-    return tup
+            flattened.append(t)
+    return flattened
 
 
 def to_numpy(elem):
@@ -62,7 +62,7 @@ def to_numpy(elem):
             return elem.detach().cpu().numpy()
         else:
             return elem.cpu().numpy()
-    elif isinstance(elem, list) or isinstance(elem, tuple):
+    elif isinstance(elem, (list, tuple)):
         return [to_numpy(inp) for inp in elem]
     elif isinstance(elem, bool):
         return np.array(elem, dtype=bool)
@@ -75,10 +75,7 @@ def to_numpy(elem):
         for k in elem:
             flattened += [to_numpy(k)] + [to_numpy(elem[k])]
         return flattened
-    elif elem is None:
-        return elem
-    else:
-        raise ValueError(f"Don't know how to convert {type(elem).__name__} {elem} to numpy.")
+    return elem
 
 
 def convert_to_onnx(model, input=None, opset_version=9, do_constant_folding=True,
@@ -122,7 +119,7 @@ def unpack_to_numpy(values):
 
 
 def run_ort(ort_sess, inputs):
-    input = unpack_to_numpy(flatten_tuples(inputs))
+    inputs = unpack_to_numpy(flatten_tuples(inputs))
     ort_inputs = {}
     kw_inputs = {}
     if inputs and isinstance(inputs[-1], dict):
@@ -1804,12 +1801,12 @@ class TestONNXRuntime(unittest.TestCase):
         y = 2
         self.run_test(ArithmeticModule(), (x, y))
 
+    # TODO: Add a comment explaining why this doesn't work in scripting.
     @skipScriptTest()
     def test_tuple_with_none_outputs(self):
         class TupleModel(torch.nn.Module):
             def forward(self, x):
-                l = (x, None, (x, None))
-                return (x, l)
+                return (x, (x, None, (x, None)))
 
         x = torch.randn(3, 4)
         self.run_test(TupleModel(), (x,))
