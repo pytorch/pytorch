@@ -1065,7 +1065,7 @@ TEST(ManagedTensorRanges, NoAliases) {
 
   FastSet<const Value*> managed_tensors = {y, z};
   AliasDb alias_db(graph);
-  auto ranges = ManagedTensorRanges(graph->block(), alias_db, managed_tensors);
+  auto ranges = ManagedTensorRanges(*graph->block(), alias_db, managed_tensors);
 
   std::vector<Node*> nodes(
       graph->block()->nodes().begin(), graph->block()->nodes().end());
@@ -1105,7 +1105,7 @@ TEST(ManagedTensorRanges, AliasExtendingLifetimes) {
 
   FastSet<const Value*> managed_tensors = {y, z1, z2};
   AliasDb alias_db(graph);
-  auto ranges = ManagedTensorRanges(graph->block(), alias_db, managed_tensors);
+  auto ranges = ManagedTensorRanges(*graph->block(), alias_db, managed_tensors);
 
   std::vector<Node*> nodes(
       graph->block()->nodes().begin(), graph->block()->nodes().end());
@@ -1152,7 +1152,7 @@ TEST(ManagedTensorRanges, LifetimeOverlap) {
   auto* e = vmap["e"];
 
   AliasDb alias_db(graph);
-  auto ranges = ManagedTensorRanges(graph->block(), alias_db, {b, c, d, e});
+  auto ranges = ManagedTensorRanges(*graph->block(), alias_db, {b, c, d, e});
   const std::vector<std::pair<Value*, Value*>> overlapping_values{
       {b, c}, {c, d}, {c, e}};
 
@@ -1187,7 +1187,7 @@ TEST(ManagedTensorRanges, OverlappingLifetimesContainers) {
   auto* d = vmap["d"];
 
   AliasDb alias_db(graph);
-  auto ranges = ManagedTensorRanges(graph->block(), alias_db, {b, c, d});
+  auto ranges = ManagedTensorRanges(*graph->block(), alias_db, {b, c, d});
 
   EXPECT_TRUE(ranges.lifetimesOverlap(b, c));
   EXPECT_TRUE(ranges.lifetimesOverlap(b, d));
@@ -1208,7 +1208,7 @@ TEST(ManagedTensorRanges, OverlappingLifetimesOutputs) {
   auto* output = vmap["output"];
 
   AliasDb alias_db(graph);
-  auto ranges = ManagedTensorRanges(graph->block(), alias_db, {b, output});
+  auto ranges = ManagedTensorRanges(*graph->block(), alias_db, {b, output});
 
   EXPECT_TRUE(ranges.lifetimesOverlap(b, output));
 }
@@ -1296,7 +1296,7 @@ void testAssignStorageToManagedTensors(
 
   AliasDb alias_db(graph);
   auto ranges =
-      ManagedTensorRanges(graph->block(), alias_db, managed_tensor_values);
+      ManagedTensorRanges(*graph->block(), alias_db, managed_tensor_values);
   auto groups = assignStorageToManagedTensors(
       graph->block()->nodes(), ranges, tensor_value_to_tensor);
 
@@ -1437,7 +1437,7 @@ TEST(StaticModule, NotEnoughArgs) {
   testStaticModuleThrows(kwargs_src, {}, {});
 }
 
-TEST(CreateOwnedRefsForReturnedConstants, TopLevel) {
+TEST(CreateOwnedRefsForSpecialValues, TopLevel) {
   const auto src = R"IR(
     graph():
         %c: int = prim::Constant[value=42]()
@@ -1445,11 +1445,11 @@ TEST(CreateOwnedRefsForReturnedConstants, TopLevel) {
   )IR";
 
   auto graph = getGraphFromIR(src);
-  CreateOwnedRefsForReturnedConstants(*graph);
+  CreateOwnedRefsForSpecialValues(*graph);
   EXPECT_TRUE(hasNodeWithKind(graph, "static_runtime::create_owned_ref"));
 }
 
-TEST(CreateOwnedRefsForReturnedConstants, ValueFromOuterScope) {
+TEST(CreateOwnedRefsForSpecialValues, ValueFromOuterScope) {
   const auto src = R"IR(
     graph(%cond: bool, %1: int):
         %c: int = aten::add(%1, %1)
@@ -1462,6 +1462,36 @@ TEST(CreateOwnedRefsForReturnedConstants, ValueFromOuterScope) {
   )IR";
 
   auto graph = getGraphFromIR(src);
-  CreateOwnedRefsForReturnedConstants(*graph);
+  CreateOwnedRefsForSpecialValues(*graph);
   EXPECT_TRUE(hasNodeWithKind(graph, "static_runtime::create_owned_ref"));
+}
+
+TEST(ForceNonEmptyOutputs, TwoSubBlocks) {
+  const auto src = R"IR(
+    graph(%cond: bool):
+        %lst : int[] = prim::ListConstruct()
+        %1 : int = prim::Constant[value=1]()
+        %2 : int = prim::Constant[value=2]()
+        prim::If(%cond)
+          block0():
+            aten::append(%lst, %1)
+            -> ()
+          block1():
+            aten::append(%lst, %2)
+            -> ()
+        return (%lst)
+  )IR";
+
+  auto graph = getGraphFromIR(src);
+  ForceNonEmptyOutputs(*graph);
+
+  for (auto* node : graph->nodes()) {
+    if (node->blocks().empty()) {
+      continue;
+    }
+    EXPECT_EQ(node->outputs().size(), 1);
+    for (auto* sub_block : node->blocks()) {
+      EXPECT_EQ(sub_block->outputs().size(), 1);
+    }
+  }
 }
