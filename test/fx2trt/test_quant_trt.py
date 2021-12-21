@@ -632,9 +632,10 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
             def __init__(self):
                 super().__init__()
                 self.conv = torch.nn.Conv2d(3, 3, 3)
+                self.relu = torch.nn.ReLU()
 
             def forward(self, x, y):
-                return self.conv(x) + y
+                return self.relu(self.conv(x) + y)
 
         class M(torch.nn.Module):
             def __init__(self):
@@ -657,7 +658,7 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
         }
 
         conv_add_config = {
-            "pattern": (operator.add, torch.nn.Conv2d, MatchAllNode),
+            "pattern": (torch.nn.ReLU, (operator.add, torch.nn.Conv2d, MatchAllNode)),
             "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
             "dtype_configs": [
                 weighted_op_qint8_dtype_config,
@@ -680,12 +681,16 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
         node_occurrence = {
             ns.call_module(torch.ao.quantization.HistogramObserver): 0,
         }
+        print("prepared:", m)
+        print("prepared standalone:", m.standalone)
         self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
         standalone_node_occurrence = {
             ns.call_module(torch.ao.quantization.HistogramObserver): 3,
         }
         self.checkGraphModuleNodes(m.standalone, expected_node_occurrence=standalone_node_occurrence)
         m = _convert_fx_do_not_use(m, is_reference=True, backend_config_dict=modified_backend_config_dict)
+        print("converted:", m)
+        print("converted standalone:", m.standalone)
         node_occurrence = {
             ns.call_function(torch.quantize_per_tensor): 0,
             ns.call_method("dequantize"): 0,
@@ -694,6 +699,7 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
         standalone_node_occurrence = {
             ns.call_function(torch.quantize_per_tensor): 3,
             ns.call_module(nnqr.Conv2d): 1,
+            ns.call_module(nn.ReLU): 1,
             ns.call_method("dequantize"): 3,
         }
         self.checkGraphModuleNodes(m.standalone, expected_node_occurrence=standalone_node_occurrence)
