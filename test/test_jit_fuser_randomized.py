@@ -18,13 +18,19 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class TestRandomized(TestCase):
+    def setUp(self):
+        # Set the seed to 1. This tests the codepath through random
+        # transformation.
+        os.environ["PYTORCH_TENSOREXPR_RANDOM_TRANSFORM_SEED"] = "1"
+
+    def tearDown(self):
+        # Set it back to 0.
+        os.environ["PYTORCH_TENSOREXPR_RANDOM_TRANSFORM_SEED"] = "0"
+
     def test_relu(self):
         def fn_test_relu(x, y):
             return F.relu(x + 0.5 * y)
 
-        # Set the seed to 1. This tests the codepath through random
-        # transformation.
-        os.environ["PYTORCH_TENSOREXPR_RANDOM_TRANSFORM_SEED"] = "1"
         device = "cpu"
         x = torch.randn(4, 4, dtype=torch.float, device=device)
         y = torch.randn(4, 4, dtype=torch.float, device=device)
