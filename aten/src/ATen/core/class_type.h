@@ -2,6 +2,7 @@
 
 #include <memory>
 
+#include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type_base.h>
 #include <c10/util/Optional.h>
 
@@ -15,7 +16,6 @@ struct Function;
 namespace c10 {
 
 struct FunctionSchema;
-struct IValue;
 
 // This enumerator represents the 'kind' of an attribute - a buffer, a parameter, or neither.
 // This state is mutually exclusive. Buffers and Parameters can only appear on modules.
