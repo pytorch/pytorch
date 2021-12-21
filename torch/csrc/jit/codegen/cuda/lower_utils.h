@@ -137,6 +137,9 @@ c10::optional<IterDomain*> getMaybeWarpReductionDim(const ReductionOp* node);
 //! to a CA leaf axis.
 bool derivedFromRootCAAxes(const TensorView* tv, IterDomain* axis);
 
+std::unordered_map<ParallelType, kir::IterDomain*, TypeHash> getParallelDomains(
+    kir::Val* val);
+
 } // namespace ir_utils
 
 namespace loop_utils {

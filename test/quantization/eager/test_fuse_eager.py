@@ -26,6 +26,7 @@ from torch.testing._internal.common_quantization import (
     ModelWithSequentialFusion,
     ModelForLinearBNFusion,
     ModelForFusionWithBias,
+    ModelForConvTransposeBNFusion,
     test_only_eval_fn,
     test_only_train_fn,
     skipIfNoFBGEMM,
@@ -38,7 +39,7 @@ from torch.testing._internal.common_quantized import (
 
 
 @skipIfNoFBGEMM
-class TestFusion(QuantizationTestCase):
+class TestFuseEager(QuantizationTestCase):
     def test_fuse_module_train(self):
         model = ModelForFusion(default_qat_qconfig).train()
         # Test step by step fusion
@@ -329,6 +330,23 @@ class TestFusion(QuantizationTestCase):
 
         model = fuse_modules(model, [["fc", "bn"]])
         self.assertEqual(type(model.bn), nn.Identity)
+        self.assertEqual(golden, model(inp2))
+
+    def test_fusion_convtranspose_bn_eval(self):
+        model = ModelForConvTransposeBNFusion().train()
+        inp1 = torch.randn(8, 3, 16)
+        inp2 = torch.randn(8, 3, 16)
+
+        # Get some interesting values into the running mean and variance.
+        model(inp1)
+        model.eval()
+        golden = model(inp2)
+
+        model = fuse_modules(model, [["conv1", "bn1"], ["conv2", "bn2"], ["conv3", "bn3"]])
+        self.assertEqual(type(model.bn1), nn.Identity)
+        self.assertEqual(type(model.bn2), nn.Identity)
+        self.assertEqual(type(model.bn3), nn.Identity)
+
         self.assertEqual(golden, model(inp2))
 
     def test_forward_hooks_preserved(self):
