@@ -53,7 +53,7 @@ void decompose_functional(const c10::OperatorHandle& op, torch::jit::Stack* stac
 
   // Step 2: set up TLS such that we hit the functionalization kernels before the batching rules.
   // Note: this relies on the fact that Functionalization > BatchMode in DispatchKey.h
-  c10::impl::IncludeDispatchKeyGuard include_guard(c10::DispatchKeySet(c10::DispatchKey::Functionalize));
+  c10::impl::IncludeDispatchKeyGuard include_guard(c10::DispatchKeySet{c10::DispatchKey::Functionalize});
 
   // Step 3: redispatch to native kernel
   // TODO: this is technically kind of sketchy, since we're relying on the fact
