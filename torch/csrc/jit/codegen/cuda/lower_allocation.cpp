@@ -21,6 +21,8 @@ class AllocationInserter : public kir::ExprMutator {
  private:
   using kir::ExprMutator::handle;
 
+  // Expanded version of BasicAllocInfo in lower_utils.h helps to track
+  // additional information
   struct AllocationInformation {
     // The for loop that the initialization of this allocation must be
     // placed in, nullptr if not within a loop
@@ -62,59 +64,23 @@ class AllocationInserter : public kir::ExprMutator {
     kir::ForLoop* init_for_loop = nullptr;
     auto fuser_tv = info.buffer->fuserTv();
     size_t fl_idx_next = 0;
+    auto loop_alloc_info =
+        loop_utils::getAllocInformation(info.buffer->fuserTv(), for_loops_);
 
-    bool outer_alloc_found = false;
-    kir::ForLoop* alloc_for_loop = nullptr;
-    size_t alloc_fl_idx_next = 0;
+    info.init_for_loop = loop_alloc_info.init_for_loop;
+    info.alloc_for_loop = loop_alloc_info.alloc_for_loop;
+    info.alloc_pos = loop_alloc_info.alloc_pos;
 
-    for (auto fl : for_loops_) {
-      if (alloc_pos == fuser_tv->getComputeAtPosition()) {
-        break;
+    auto next_fl = [](kir::ForLoop* fl, const std::vector<kir::ForLoop*> fls) {
+      for (auto i : c10::irange(fls.size())) {
+        if (fl == fls[i]) {
+          if (i + 1 < fls.size()) {
+            return fls[i + 1];
+          }
+        }
       }
-
-      if (fuser_tv->axis(alloc_pos)->isReduction()) {
-        const auto outputs =
-            FusionGuard::getCurFusion()->getTerminatingOutputs();
-        TORCH_INTERNAL_ASSERT(
-            std::find(outputs.begin(), outputs.end(), fuser_tv) !=
-                outputs.end(),
-            "Invalid computeAt of T",
-            fuser_tv->name(),
-            ". A reducation axis is detected within computeAt axes even though it is not an output tensor.");
-        break;
-      }
-
-      auto fl_id = fl->iter_domain();
-
-      if (fl_id->parallelType() == ParallelType::Unroll) {
-        break;
-      }
-
-      // Shared memory must be allocated outside of unswitched
-      // domains. See issue #1133.
-      if (fl_id->parallelType() == ParallelType::Unswitch &&
-          fuser_tv->getMemoryType() == MemoryType::Shared) {
-        outer_alloc_found = true;
-      }
-
-      auto local_id = gpu_lower->lowerValue(fuser_tv->axis(alloc_pos))
-                          ->as<kir::IterDomain>();
-
-      if (gpu_lower->caLoopMap().areMapped(local_id, fl_id)) {
-        alloc_pos++;
-      }
-
-      init_for_loop = fl;
-      ++fl_idx_next;
-
-      if (!outer_alloc_found) {
-        alloc_for_loop = fl;
-        ++alloc_fl_idx_next;
-      }
-    }
-
-    info.alloc_pos = alloc_pos;
-    info.init_for_loop = init_for_loop;
+      TORCH_INTERNAL_ASSERT(false, "Could not find desired loop.");
+    };
 
     if (info.init_for_loop == nullptr) {
       info.init_place_before = for_loops_.size() > 0 ? for_loops_[0] : expr;
@@ -126,24 +92,23 @@ class AllocationInserter : public kir::ExprMutator {
         // Place allocation after the last computeAt axis
         // TODO: may be more efficient to place before the first non-computeAt
         // axis
-        info.init_place_before = for_loops_.at(fl_idx_next);
+        info.init_place_before = next_fl(info.init_for_loop, for_loops_);
       }
     }
 
     // Set the allocation loop and the place_before expression in the
     // same way as the initialization loop and place_before expression
-    if (!outer_alloc_found) {
+    if (info.alloc_for_loop == info.init_for_loop) {
       info.alloc_for_loop = info.init_for_loop;
       info.alloc_place_before = info.init_place_before;
     } else {
-      info.alloc_for_loop = alloc_for_loop;
       if (info.alloc_for_loop == nullptr) {
         info.alloc_place_before = for_loops_.size() > 0 ? for_loops_[0] : expr;
       } else {
         // Since there must be an inner unswitched domain,
         // alloc_for_loop should never be the inner-most loop.
         TORCH_INTERNAL_ASSERT(info.alloc_for_loop != for_loops_.back());
-        info.alloc_place_before = for_loops_.at(alloc_fl_idx_next);
+        info.alloc_place_before = next_fl(info.alloc_for_loop, for_loops_);
       }
     }
   }

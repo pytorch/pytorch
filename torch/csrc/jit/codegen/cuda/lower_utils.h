@@ -138,26 +138,33 @@ std::unordered_map<ParallelType, kir::IterDomain*, TypeHash> getParallelDomains(
 
 namespace loop_utils {
 
-// I wanted to make the tv's in these util functions constant, but that started
-// a long const-ness project going into TensorView (making functions const
-// there) then into lower_loops where we sort exprs.
-// TODO: We should fix this when we have some time.
+struct BasicAllocInfo {
+  // The for loop that the initialization of this allocation must be
+  // placed in, nullptr if not within a loop
+  kir::ForLoop* init_for_loop = nullptr;
 
-// Figure out which loop the allocation needs to be in. Returns nullptr if
-// outside the first loop in loops. Also find out which index in tv the
-// first dimension that needs to be allocated is. Meaning we need to allocate
-// that local axis and above.
-// TODO: Only remaining use of this is in index compute, remove use from there,
-// or refactor and use in lower_allocation
-std::pair<kir::ForLoop*, int64_t> getAllocPoint(
+  // Keep track of the actual allocation loop. This can be different
+  // from init_for_loop only with unswitched shared memory allocations,
+  // which are moved outer loops to avoid duplicated allocations. This means
+  // that the alloc position may be outside what's expected. Most applications
+  // outside lower_allocation is likely looking for init_for_loop which is
+  // more directly related to how large an allocation is and how it's used.
+  // (see issue #1133).
+  kir::ForLoop* alloc_for_loop = nullptr;
+
+  // The allocation position relative to buffer IDs, it could be outside the
+  // compute at position if it's shared memory with a compute at inside an
+  // unswitch
+  size_t alloc_pos = 0;
+};
+
+// Fill the above allocation struct based on provided information. id_map is
+// used if we're looking at a producer tensor but loops on a consumer tensor.
+BasicAllocInfo getAllocInformation(
     const TensorView* tv,
     const std::vector<kir::ForLoop*>& loops,
-    const std::unordered_map<IterDomain*, IterDomain*>& id_map,
-    bool use_id_map);
-
-std::pair<kir::ForLoop*, int64_t> getAllocPoint(
-    const TensorView* tv,
-    const std::vector<kir::ForLoop*>& loops);
+    const std::unordered_map<IterDomain*, IterDomain*>& id_map = {},
+    bool use_id_map = false);
 } // namespace loop_utils
 
 // Replace value pass on Kernel IR.

@@ -345,68 +345,72 @@ std::unordered_map<ParallelType, kir::IterDomain*, TypeHash> getParallelDomains(
 
 namespace loop_utils {
 
-// TODO: Clean this up, Naoya added a mechanism we should be able to reuse.
-std::pair<kir::ForLoop*, int64_t> getAllocPoint(
+BasicAllocInfo getAllocInformation(
     const TensorView* tv,
-    const std::vector<kir::ForLoop*>& loops,
+    const std::vector<kir::ForLoop*>& for_loops,
     const std::unordered_map<IterDomain*, IterDomain*>& id_map,
     bool use_id_map) {
-  const auto gpu_lower = GpuLower::current();
+  BasicAllocInfo info;
+  auto gpu_lower = GpuLower::current();
+  const auto& loop_map = gpu_lower->caLoopMap();
 
-  // If in global memory, it can be all the way outside the loops.
-  if (tv->getMemoryType() == MemoryType::Global) {
-    return {nullptr, 0};
-  }
+  bool outer_alloc_found = false;
 
-  // Figure out where we want to place alloc/reduction initialization. We want
-  // outside an unroll loop, or inside our computeAt point.
-  kir::ForLoop* alloc_loop = nullptr;
+  for (auto fl : for_loops) {
+    if (info.alloc_pos == tv->getComputeAtPosition()) {
+      break;
+    }
 
-  auto loops_it = loops.begin();
-  // Look at each axis individually in out's domain
-  for (const auto tv_i : c10::irange((int64_t)tv->getComputeAtPosition())) {
-    // Grab the axis ID
+    if (tv->axis(info.alloc_pos)->isReduction()) {
+      const auto outputs = FusionGuard::getCurFusion()->getTerminatingOutputs();
+      TORCH_INTERNAL_ASSERT(
+          std::find(outputs.begin(), outputs.end(), tv) != outputs.end(),
+          "Invalid computeAt of T",
+          tv->name(),
+          ". A reducation axis is detected outside computeAt point even though it is not an output tensor.");
+      break;
+    }
 
-    auto local_id = tv->axis(tv_i);
+    auto fl_id = fl->iter_domain();
+
+    if (fl_id->parallelType() == ParallelType::Unroll) {
+      break;
+    }
+
+    // Shared memory must be allocated outside of unswitched
+    // domains. See issue #1133.
+    if (fl_id->parallelType() == ParallelType::Unswitch &&
+        tv->getMemoryType() == MemoryType::Shared) {
+      outer_alloc_found = true;
+    }
+
+    // Assume global memory is allocated at outer most scope.
+    if (tv->getMemoryType() == MemoryType::Global) {
+      outer_alloc_found = true;
+    }
+
+    auto local_id = tv->axis(info.alloc_pos);
+
     if (use_id_map) {
       auto id_it = id_map.find(local_id);
       if (id_it != id_map.end()) {
         local_id = id_it->second;
       }
     }
+    auto kir_local_id = gpu_lower->lowerValue(local_id)->as<kir::IterDomain>();
 
-    if (gpu_lower->trivialReductionInfo().isDerivedFromRoot(local_id)) {
-      continue;
+    if (loop_map.areMapped(kir_local_id, fl_id)) {
+      info.alloc_pos++;
     }
 
-    auto lowered_local_id =
-        gpu_lower->lowerValue(local_id)->as<kir::IterDomain>();
-    loops_it = std::find_if(
-        loops_it, loops.end(), [&lowered_local_id](const auto& loop) {
-          return GpuLower::current()->caLoopMap().areMapped(
-                     lowered_local_id, loop->iter_domain()) ||
-              loop->iter_domain()->parallelType() == ParallelType::Unroll;
-        });
+    info.init_for_loop = fl;
 
-    TORCH_INTERNAL_ASSERT(
-        loops_it != loops.end(),
-        "Could not find all required axes for indexing when trying to index into ",
-        tv);
-    if ((*loops_it)->iter_domain()->parallelType() == ParallelType::Unroll) {
-      return {alloc_loop, tv_i};
+    if (!outer_alloc_found) {
+      info.alloc_for_loop = fl;
     }
-
-    alloc_loop = *loops_it;
-    ++loops_it;
   }
 
-  return {alloc_loop, (int64_t)tv->getComputeAtPosition()};
-}
-
-std::pair<kir::ForLoop*, int64_t> getAllocPoint(
-    const TensorView* tv,
-    const std::vector<kir::ForLoop*>& loops) {
-  return getAllocPoint(tv, loops, {}, false);
+  return info;
 }
 
 } // namespace loop_utils

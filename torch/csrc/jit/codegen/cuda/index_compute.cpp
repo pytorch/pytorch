@@ -1059,12 +1059,10 @@ std::pair<
 indexMapFromTV(
     const TensorView* tv,
     const std::vector<kir::ForLoop*>& loops,
-    const std::pair<kir::ForLoop*, int64_t>& alloc_point,
+    kir::ForLoop* alloc_loop,
     bool as_consumer) {
   const auto gpu_lower = GpuLower::current();
   kir::IrBuilder ir_builder(gpu_lower->kernel());
-
-  auto alloc_loop = alloc_point.first;
 
   bool within_alloc = false;
   if (alloc_loop == nullptr) {
@@ -1528,14 +1526,15 @@ std::vector<kir::Val*> Index::getNonGlobalProducerStridedIndices(
   // Find allocation point of producer relative to loop nests. P2C map is
   // required because producer was replayed as consumer, so we can't use the
   // regular compute at maps to line up its iter domains with the for loops.
-  auto alloc_point =
-      loop_utils::getAllocPoint(producer_tv, loops, p2c_alloc_map, true);
+  auto alloc_info =
+      loop_utils::getAllocInformation(producer_tv, loops, p2c_alloc_map, true);
   std::unordered_map<kir::ForLoop*, kir::Val*> loop_to_ind_map;
   std::unordered_set<kir::ForLoop*> zero_loops;
   std::tie(loop_to_ind_map, zero_loops) =
-      indexMapFromTV(producer_tv, loops, alloc_point, false);
+      indexMapFromTV(producer_tv, loops, alloc_info.init_for_loop, false);
 
-  ensureStaticIndexing(producer_tv, alloc_point.first, loops, p2c_alloc_map);
+  ensureStaticIndexing(
+      producer_tv, alloc_info.init_for_loop, loops, p2c_alloc_map);
 
   // Map loop nests to indicies, zeroing out those not used due to locality of
   // memory
@@ -1937,13 +1936,13 @@ std::vector<kir::Val*> Index::getNonGlobalConsumerStridedIndices(
   auto reference_domain = reference.domain;
   auto reference_id_map = reference.concrete_to_id;
 
-  auto alloc_point = loop_utils::getAllocPoint(consumer_tv, loops);
+  auto alloc_info = loop_utils::getAllocInformation(consumer_tv, loops);
   std::unordered_map<kir::ForLoop*, kir::Val*> loop_to_ind_map;
   std::unordered_set<kir::ForLoop*> zero_loops;
   std::tie(loop_to_ind_map, zero_loops) =
-      indexMapFromTV(consumer_tv, loops, alloc_point, true);
+      indexMapFromTV(consumer_tv, loops, alloc_info.init_for_loop, true);
 
-  ensureStaticIndexing(consumer_tv, alloc_point.first, loops);
+  ensureStaticIndexing(consumer_tv, alloc_info.init_for_loop, loops);
 
   // Map loop nests to indicies, zeroing out those not used due to locality of
   // memory
