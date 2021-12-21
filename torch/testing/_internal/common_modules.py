@@ -14,6 +14,7 @@ from torch.testing._internal.common_utils import (
     freeze_rng_state, set_single_threaded_if_parallel_tbb)
 from types import ModuleType
 from typing import List, Tuple, Type, Set, Dict
+import unittest
 
 
 # List of all namespaces containing modules to test.
@@ -294,6 +295,23 @@ def no_batch_dim_reference_mha(m, p, *args, **kwargs):
         return (output[0].squeeze(batch_dim), output[1].squeeze(0))
 
 
+def no_batch_dim_reference_lstmcell(m, p, *args, **kwargs):
+    """Reference function for MultiheadAttention supporting no batch dimensions.
+
+    The module is passed the input and target in batched form with a single item.
+    The output is squeezed to compare with the no-batch input.
+    """
+    single_batch_input_args = []
+    for arg in args:
+        if isinstance(arg, torch.Tensor):
+            single_batch_input_args.append(arg.unsqueeze(0))
+        else:
+            single_batch_input_args.append((arg[0].unsqueeze(0), arg[1].unsqueeze(0)))
+    with freeze_rng_state():
+        output = m(*single_batch_input_args, **kwargs)
+        return (output[0].squeeze(0), output[1].squeeze(0))
+
+
 def generate_regression_criterion_inputs(make_input):
     return [
         ModuleInput(
@@ -454,6 +472,54 @@ def module_inputs_torch_nn_MultiheadAttention(module_info, device, dtype, requir
     return samples
 
 
+def module_inputs_torch_nn_RNN_GRU_Cell(module_info, device, dtype, requires_grad, **kwargs):
+    # Currently all samples below are for validating the no-batch-dim support.
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    samples = [
+        ModuleInput(
+            constructor_input=FunctionInput(5, 10),
+            forward_input=FunctionInput(make_input(5), make_input(10)),
+            reference_fn=no_batch_dim_reference_fn,
+        ),
+        ModuleInput(
+            constructor_input=FunctionInput(5, 10, bias=True),
+            forward_input=FunctionInput(make_input(5), make_input(10)),
+            reference_fn=no_batch_dim_reference_fn,
+        )
+    ]
+
+    is_rnn = kwargs.get('is_rnn', False)
+    if is_rnn:
+        samples.append(
+            ModuleInput(
+                constructor_input=FunctionInput(5, 10, bias=True, nonlinearity='relu'),
+                forward_input=FunctionInput(make_input(5), make_input(10)),
+                reference_fn=no_batch_dim_reference_fn,
+            )
+        )
+
+    return samples
+
+
+def module_inputs_torch_nn_LSTMCell(module_info, device, dtype, requires_grad, **kwargs):
+    # Currently all samples below are for validating the no-batch-dim support.
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    samples = (
+        ModuleInput(
+            constructor_input=FunctionInput(5, 10),
+            forward_input=FunctionInput(make_input(5), (make_input(10), make_input(10))),
+            reference_fn=no_batch_dim_reference_lstmcell,
+        ),
+        ModuleInput(
+            constructor_input=FunctionInput(5, 10, bias=True),
+            forward_input=FunctionInput(make_input(5), (make_input(10), make_input(10))),
+            reference_fn=no_batch_dim_reference_lstmcell,
+        ),
+    )
+
+    return samples
+
+
 # Database of ModuleInfo entries in alphabetical order.
 module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.AvgPool1d,
@@ -487,4 +553,14 @@ module_db: List[ModuleInfo] = [
                module_inputs_func=module_inputs_torch_nn_Embedding),
     ModuleInfo(torch.nn.ReLU,
                module_inputs_func=module_inputs_torch_nn_ReLU),
+    ModuleInfo(torch.nn.RNNCell,
+               module_inputs_func=partial(module_inputs_torch_nn_RNN_GRU_Cell, is_rnn=True)),
+    ModuleInfo(torch.nn.GRUCell,
+               module_inputs_func=module_inputs_torch_nn_RNN_GRU_Cell),
+    ModuleInfo(torch.nn.LSTMCell,
+               module_inputs_func=module_inputs_torch_nn_LSTMCell,
+               decorators=(
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_grad'),
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_gradgrad'),
+               ),)
 ]

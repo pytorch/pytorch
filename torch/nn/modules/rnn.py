@@ -880,6 +880,25 @@ class GRU(RNNBase):
             return output, self.permute_hidden(hidden, unsorted_indices)
 
 
+def unbatched_rnncell_forward(fn):
+    def wrapped(self, input: Tensor, hx: Optional[Tensor] = None):
+        assert input.dim() in (1, 2)
+        is_batched = input.dim() == 2
+        if not is_batched:
+            if hx is not None:
+                assert input.dim() == hx.dim()
+                hx = hx.unsqueeze(0)
+            input = input.unsqueeze(0)
+
+        ret = fn(self, input, hx)
+
+        if not is_batched:
+            ret = ret.squeeze(0)
+        return ret
+
+    return wrapped
+
+
 class RNNCellBase(Module):
     __constants__ = ['input_size', 'hidden_size', 'bias']
 
@@ -990,6 +1009,14 @@ class RNNCell(RNNCellBase):
         self.nonlinearity = nonlinearity
 
     def forward(self, input: Tensor, hx: Optional[Tensor] = None) -> Tensor:
+        assert input.dim() in (1, 2)
+        is_batched = input.dim() == 2
+        if not is_batched:
+            if hx is not None:
+                assert input.dim() == hx.dim()
+                hx = hx.unsqueeze(0)
+            input = input.unsqueeze(0)
+
         if hx is None:
             hx = torch.zeros(input.size(0), self.hidden_size, dtype=input.dtype, device=input.device)
         if self.nonlinearity == "tanh":
@@ -1008,6 +1035,10 @@ class RNNCell(RNNCellBase):
             ret = input  # TODO: remove when jit supports exception flow
             raise RuntimeError(
                 "Unknown nonlinearity: {}".format(self.nonlinearity))
+
+        if not is_batched:
+            ret = ret.squeeze(0)
+
         return ret
 
 
@@ -1079,14 +1110,29 @@ class LSTMCell(RNNCellBase):
         super(LSTMCell, self).__init__(input_size, hidden_size, bias, num_chunks=4, **factory_kwargs)
 
     def forward(self, input: Tensor, hx: Optional[Tuple[Tensor, Tensor]] = None) -> Tuple[Tensor, Tensor]:
+        is_batched = input.dim() == 2
+        if not is_batched:
+            input = input.unsqueeze(0)
         if hx is None:
             zeros = torch.zeros(input.size(0), self.hidden_size, dtype=input.dtype, device=input.device)
             hx = (zeros, zeros)
-        return _VF.lstm_cell(
+        else:
+            assert isinstance(hx, tuple)
+            hx_dim = hx[0].dim()
+            assert hx_dim == hx[1].dim()
+            # assert hx_dim == input.dim(), "Dimension of input and hidden state should be the same."
+            if not is_batched:
+                hx = (hx[0].unsqueeze(0), hx[1].unsqueeze(0))
+
+        ret = _VF.lstm_cell(
             input, hx,
             self.weight_ih, self.weight_hh,
             self.bias_ih, self.bias_hh,
         )
+
+        if not is_batched:
+            ret = (ret[0].squeeze(0), ret[1].squeeze(0))
+        return ret
 
 
 class GRUCell(RNNCellBase):
@@ -1157,10 +1203,23 @@ class GRUCell(RNNCellBase):
         super(GRUCell, self).__init__(input_size, hidden_size, bias, num_chunks=3, **factory_kwargs)
 
     def forward(self, input: Tensor, hx: Optional[Tensor] = None) -> Tensor:
+        assert input.dim() in (1, 2)
+        is_batched = input.dim() == 2
+        if not is_batched:
+            if hx is not None:
+                assert input.dim() == hx.dim()
+                hx = hx.unsqueeze(0)
+            input = input.unsqueeze(0)
+
         if hx is None:
             hx = torch.zeros(input.size(0), self.hidden_size, dtype=input.dtype, device=input.device)
-        return _VF.gru_cell(
+        ret = _VF.gru_cell(
             input, hx,
             self.weight_ih, self.weight_hh,
             self.bias_ih, self.bias_hh,
         )
+
+        if not is_batched:
+            ret = ret.squeeze(0)
+
+        return ret
