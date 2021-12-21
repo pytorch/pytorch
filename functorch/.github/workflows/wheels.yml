@@ -1,0 +1,36 @@
+name: Wheels
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches:
+      - main
+
+jobs:
+
+  build-wheel:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        py_ver: [ "3.7", "3.8", "3.9" ]
+        os: ["ubuntu-18.04", "macos-latest"]
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.py_ver }}
+          architecture: x64
+      - name: Checkout functorch
+        uses: actions/checkout@v2
+      - name: Install PyTorch Nightly
+        run: |
+          python3 -mpip install --pre torch -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
+      - name: Build wheel
+        run: |
+          python3 -mpip install wheel
+          python3 setup.py bdist_wheel
+      - name: Upload wheel as GHA artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: functorch-py${{ matrix.py_ver }}.whl
+          path: dist/*.whl
