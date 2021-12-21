@@ -384,7 +384,6 @@ class TestIterableDataPipeBasic(TestCase):
         datapipe4.add_handler(_png_decoder)
         _helper(cached, datapipe4, channel_first=True)
 
-
     def test_groupby_iterable_datapipe(self):
         temp_dir = self.temp_dir.name
         temp_tarfile_pathname = os.path.join(temp_dir, "test_tar.tar")
@@ -763,21 +762,27 @@ class TestFunctionalIterDataPipe(TestCase):
         input_dp1 = dp.iter.IterableWrapper(range(10))
         input_dp2 = dp.iter.IterableWrapper(range(5))
 
+        # Functional Test: Raises exception for empty input
         with self.assertRaisesRegex(ValueError, r"Expected at least one DataPipe"):
             dp.iter.Concater()
 
+        # Functional Test: Raises exception for non-IterDataPipe input
         with self.assertRaisesRegex(TypeError, r"Expected all inputs to be `IterDataPipe`"):
             dp.iter.Concater(input_dp1, ())  # type: ignore[arg-type]
 
+        # Functional Test: Concatenate DataPipes as expected
         concat_dp = input_dp1.concat(input_dp2)
         self.assertEqual(len(concat_dp), 15)
         self.assertEqual(list(concat_dp), list(range(10)) + list(range(5)))
 
-        # Test Reset
-        self.assertEqual(list(concat_dp), list(range(10)) + list(range(5)))
+        # Reset Test: reset the DataPipe
+        n_elements_before_reset = 5
+        res_before_reset, res_after_reset = reset_after_n_next_calls(concat_dp, n_elements_before_reset)
+        self.assertEqual(list(range(5)), res_before_reset)
+        self.assertEqual(list(range(10)) + list(range(5)), res_after_reset)
 
+        # __len__ Test: inherits length from source DataPipe
         input_dp_nl = IDP_NoLen(range(5))
-
         concat_dp = input_dp1.concat(input_dp_nl)
         with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
             len(concat_dp)
