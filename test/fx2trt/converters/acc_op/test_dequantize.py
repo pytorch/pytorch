@@ -6,7 +6,7 @@ import tensorrt as trt
 import torch.fx
 import torch.fx.experimental.fx_acc.acc_ops as acc_ops
 import torch.nn as nn
-from caffe2.torch.fb.fx2trt.tests.test_utils import AccTestCase, InputTensorSpec
+from torch.testing._internal.common_fx2trt import AccTestCase, InputTensorSpec
 
 
 @unittest.skip(

@@ -157,10 +157,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
         return store
 
     def test_address_already_in_use(self):
-        if sys.platform == "win32":
-            err_msg_reg = "Only one usage of each socket address*"
-        else:
-            err_msg_reg = "^Address already in use$"
+        err_msg_reg = "^The server socket has failed to listen on any local "
         with self.assertRaisesRegex(RuntimeError, err_msg_reg):
             addr = DEFAULT_HOSTNAME
             port = common.find_free_port()
@@ -171,6 +168,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
             store1 = dist.TCPStore(addr, port, 1, True)  # noqa: F841
             store2 = dist.TCPStore(addr, port, 1, True)  # noqa: F841
 
+    @retry_on_connect_failures
     def test_multitenancy(self):
         addr = DEFAULT_HOSTNAME
         port = common.find_free_port()
