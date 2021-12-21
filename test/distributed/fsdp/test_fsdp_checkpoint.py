@@ -88,7 +88,7 @@ class TestFSDPCheckpoint(FSDPTest):
         "cpu_offload",
         [CPUOffload(offload_params=True), CPUOffload(offload_params=False)],
     )
-    @parametrize("offload_activations", [True])
+    @parametrize("offload_activations", [True, False])
     def test_checkpoint_fsdp_wrapping(self, cpu_offload, offload_activations):
         # Test checkpoint(FSDP(layer1), FSDP(layer2), ....)
         ckpt_sequential_wrapped_fsdp = checkpoint_wrapper(
