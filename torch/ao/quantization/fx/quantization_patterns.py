@@ -44,10 +44,6 @@ from .utils import (
     get_qconv_op,
 )
 
-from .qconfig_utils import (
-    get_standalone_module_configs,
-)
-
 from ..qconfig import QConfigAny
 
 from abc import ABC
