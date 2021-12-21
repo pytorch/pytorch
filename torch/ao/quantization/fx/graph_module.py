@@ -32,7 +32,7 @@ class ObservedGraphModule(GraphModule):
             '_equalization_qconfig_map',
             '_node_name_to_scope',
             '_qconfig_dict',
-            '_is_training',
+            '_is_qat',
             '_observed_node_names']).union(preserved_attr_names)
         preserved_attrs = {attr: getattr(root, attr) for attr in self.preserved_attr_names if hasattr(root, attr)}
         super().__init__(root, graph)
@@ -64,7 +64,6 @@ class ObservedStandaloneGraphModule(ObservedGraphModule):
 
 def is_observed_standalone_module(module: Any) -> bool:
     return isinstance(module, ObservedStandaloneGraphModule)
-
 
 def _save_packed_weight(self, destination, prefix, keep_vars):
     for attr_name in dir(self):
@@ -105,4 +104,4 @@ class QuantizedGraphModule(GraphModule):
     def __deepcopy__(self, memo):
         fake_mod = torch.nn.Module()
         fake_mod.__dict__ = copy.deepcopy(self.__dict__)
-        return ObservedStandaloneGraphModule(fake_mod, self.graph, self.preserved_attr_names)
+        return QuantizedGraphModule(fake_mod, self.graph, self.preserved_attr_names)
