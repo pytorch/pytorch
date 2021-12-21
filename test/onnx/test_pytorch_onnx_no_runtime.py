@@ -47,18 +47,10 @@ class TestOptionalOutput(unittest.TestCase):
 
 
     @parametrize(
-        "module_class,x_size",
-        ((IfNoneInput, 0),
-         (IfNoneInput, 1),
-         (IfNoneOutput, 0),
-         (IfNoneOutput, 1),
-         (LoopNoneInput, 0),
-         (LoopNoneInput, 1),
-         (LoopNoneOutput, 0),
-         (LoopNoneOutput, 1),
-         ),
-        name_fn=lambda module_class, x_size: f"{module_class.__name__}_{x_size}",
-    )
+        "module_class",
+        (IfNoneInput, IfNoneOutput, LoopNoneInput, LoopNoneOutput),
+        name_fn=lambda module_class: module_class.__name__)
+    @parametrize("x_size", (0, 1), name_fn=lambda x_size: str(x_size))
     def test_optional_output(self, module_class: Type[torch.nn.Module], x_size: int):
         # Need scripting to preserve control flow for this test to be meaningful.
         model = torch.jit.script(module_class())
@@ -76,7 +68,8 @@ class TestOptionalOutput(unittest.TestCase):
         output_0_tensor_type = output_0_optional_type.elem_type.tensor_type
         self.assertEqual(
             output_0_tensor_type.elem_type,
-            symbolic_helper.scalar_type_to_onnx[symbolic_helper.scalar_type_to_pytorch_type.index(x.dtype)])
+            symbolic_helper.scalar_type_to_onnx[
+                symbolic_helper.scalar_type_to_pytorch_type.index(x.dtype)])
         self.assertEqual(len(output_0_tensor_type.shape.dim), len(x.shape))
 
 
