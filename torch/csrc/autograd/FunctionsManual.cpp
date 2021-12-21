@@ -1363,7 +1363,6 @@ Tensor binary_cross_entropy_target_backward(
   int64_t reduction) {
   auto grad_target = (1. - self).log_().sub_(self.log());
   if (!areAnyTensorSubclassLike({grad})) {
-    // fast-path
     grad_target.mul_(grad);
   } else {
     grad_target = grad_target * grad;
@@ -1371,7 +1370,6 @@ Tensor binary_cross_entropy_target_backward(
 
   if (isDefined(weight)) {
     if (!isTensorSubclassLike(weight.value())) {
-      // fast-path
       grad_target.mul_(weight.value());
     } else {
       grad_target = grad_target * weight.value();
@@ -1390,7 +1388,6 @@ Tensor binary_cross_entropy_with_logits_target_backward(const Tensor& grad_outpu
   Tensor grad_target;
   if (isDefined(pos_weight)) {
     if (!areAnyTensorSubclassLike({*pos_weight, grad_output})) {
-      // fast-path
       grad_target = (1. - self.sigmoid()).log_().sub_(pos_weight->mul(self.sigmoid().log_())).mul_(grad_output);
     } else {
       grad_target = (1. - self.sigmoid()).log_().sub(pos_weight->mul(self.sigmoid().log_())).mul(grad_output);
@@ -1489,7 +1486,6 @@ Tensor binary_cross_entropy_double_backward(const Tensor & grad_output, const Te
   // gradient wrt input
   auto gI = (input * input - 2 * input * target + target) / (inp_pl_eps.pow(2) * one_m_inp_pl_eps.pow(2));
   if (!areAnyTensorSubclassLike({gI, grad})) {
-    // optimization
     gI *= (grad * grad_output);
   } else {
     gI = gI * (grad * grad_output);
@@ -1497,7 +1493,6 @@ Tensor binary_cross_entropy_double_backward(const Tensor & grad_output, const Te
 
   if (isDefined(weight)) {
     if (!isTensorSubclassLike(*weight)) {
-      // optimization
       gI *= *weight;
     } else {
       gI = gI.mul(*weight);
@@ -1515,7 +1510,6 @@ Tensor binary_cross_entropy_double_backward_grad_output(const Tensor & grad, con
   // gradient wrt grad_output
   auto ggO = (input - target) / ((input + eps) * (1 - input + eps));
   if (!areAnyTensorSubclassLike({ggO, grad})) {
-    // optimization
     ggO *= grad;
   } else {
     ggO = ggO * grad;
@@ -1523,7 +1517,6 @@ Tensor binary_cross_entropy_double_backward_grad_output(const Tensor & grad, con
 
   if (isDefined(weight)) {
     if (!isTensorSubclassLike(*weight)) {
-      // optimization
       ggO *= *weight;
     } else {
       ggO = ggO.mul(*weight);
