@@ -474,15 +474,6 @@ class TORCH_API StaticModule {
   // Indices of graph outputs in the single values array.
   std::vector<uint16_t> output_indices_;
 
-  ValueGroup value_group_;
-
-  FastSet<const Node*> node_is_optimizable_container_type_;
-
-  FastSet<const Value*> managed_tensor_values_{};
-  FastSet<const Value*> managed_output_tensor_values_{};
-  FastSet<const Value*> leaked_values_{};
-  ManagedTensorRanges managed_tensor_ranges_{};
-
   size_t num_intermediate_values_ = 0;
 
   // Includes self if module_ != nullopt.

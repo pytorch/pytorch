@@ -587,9 +587,6 @@ std::pair<size_t, size_t> StaticModule::prepareProcessedNodes(
   const auto block_start = block_idx;
   const auto node_start = node_idx;
 
-  const auto inputs_index_offset = inputs_offset();
-  const auto constants_index_offset = constants_offset();
-  const auto values_index_offset = intermediate_values_offset();
   auto& block_info = blocks_[block_idx++];
   std::vector<ProcessedNode> nodes;
   FastMap<Node*, bool> node_has_out_variant;
