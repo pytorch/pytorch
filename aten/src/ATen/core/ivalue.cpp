@@ -1,6 +1,7 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/Dict.h>
 #include <ATen/core/Formatting.h>
+#include <ATen/core/class_type.h>
 #include <ATen/core/enum_type.h>
 #include <ATen/core/function.h>
 #include <ATen/core/jit_type.h>
@@ -25,11 +26,11 @@ namespace ivalue {
 
 // This is in ivalue.cpp because we need to access Type::annotation_str, which
 // is declared in jit_type.h
-void checkCustomClassType(const Type* expected_type, const Type* actual_type) {
+void checkCustomClassType(const ClassType* expected_type, const Type* actual_type) {
   // NB: doing pointer comparison here
   // If in the future there ever arises a need to call operator== on custom class
   // Type's, this needs to be changed!
-  TORCH_CHECK(actual_type == expected_type,
+  TORCH_CHECK(actual_type == static_cast<const Type*>(expected_type),
               "Tried to convert an IValue of type ",
               actual_type ? actual_type->repr_str() : std::string("*NULL*"),
               " to custom class type ",
