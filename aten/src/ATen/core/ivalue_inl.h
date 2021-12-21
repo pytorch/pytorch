@@ -1354,6 +1354,8 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
     return c10::make_intrusive<Object>(std::move(type), numSlots);
   }
 
+  static c10::intrusive_ptr<Object> create(ClassTypePtr classType, size_t numSlots);
+
   /**
    * Slot API.
    *
@@ -2046,7 +2048,7 @@ template <
     typename T,
     std::enable_if_t<std::is_base_of<torch::CustomClassHolder, T>::value, int>>
 IValue::IValue(c10::intrusive_ptr<T> custom_class) {
-  TypePtr classType = []() {
+  auto classType = []() {
     try {
       return c10::getCustomClassType<c10::intrusive_ptr<T>>();
     } catch (const c10::Error&) {
@@ -2056,8 +2058,7 @@ IValue::IValue(c10::intrusive_ptr<T> custom_class) {
           "");
     }
   }();
-  auto ivalue_obj = c10::ivalue::Object::create(
-      c10::StrongTypePtr(nullptr, classType), /*num_slots=*/1);
+  auto ivalue_obj = c10::ivalue::Object::create(std::move(classType), /* numSlots */1);
   ivalue_obj->setSlot(0, IValue::make_capsule(std::move(custom_class)));
   payload.u.as_intrusive_ptr = null_to_undefined_tensor(ivalue_obj.release());
   tag = Tag::Object;
