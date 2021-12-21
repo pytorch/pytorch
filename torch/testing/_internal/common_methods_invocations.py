@@ -8761,13 +8761,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_gradgrad=False,
            assert_autodiffed=False,
-           sample_inputs_func=sample_inputs_cdist,
-           skips=(
-               # RuntimeError: _cdist_backward requires X1 to be contiguous
-               DecorateInfo(unittest.skip("_cdist_backward requires X1 to be contiguous"),
-                            'TestCommon', 'test_noncontiguous_samples'),
-           )
-           ),
+           sample_inputs_func=sample_inputs_cdist),
     UnaryUfuncInfo('ceil',
                    ref=np.ceil,
                    dtypes=floating_types_and(torch.bfloat16),
@@ -9586,6 +9580,9 @@ op_db: List[OpInfo] = [
                    skips=(
                        # Dispatch stub: unsupported device typemeta
                        DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad', device_type='meta'),
+                       # (ROCm) Memory access fault by GPU node-4 (Agent handle: 0x55cebc9e8430) on address 0x7fa17b757000
+                       DecorateInfo(unittest.skip("Skipped! ROCm memory exception"), 'TestGradients', 'test_fn_fwgrad_bwgrad',
+                                    device_type='cuda', dtypes=[torch.float64], active_if=TEST_WITH_ROCM),
                    )),
     BinaryUfuncInfo('floor_divide',
                     dtypes=all_types_and(torch.half, torch.bfloat16),
@@ -9665,6 +9662,9 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32, torch.complex64)),  # noqa: B950
                # 69925: RuntimeError: Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu!
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad', device_type='cuda'),
+               # (ROCm) Memory exception on virtual address 0x7f6f3deb7000, node id 4: Page not present
+               DecorateInfo(unittest.skip("Skipped! ROCm memory exception"), 'TestGradients', 'test_fn_fwgrad_bwgrad',
+                            device_type='cuda', dtypes=[torch.float64, torch.complex128], active_if=TEST_WITH_ROCM),
            ),
            supports_inplace_autograd=False,
            sample_inputs_func=sample_inputs_gradient),
@@ -10245,6 +10245,9 @@ op_db: List[OpInfo] = [
            skips=(
                # 69855: RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
+               # (ROCm) unexpected success
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_fwgrad_bwgrad',
+                            device_type='cuda', dtypes=[torch.float64], active_if=TEST_WITH_ROCM),
            )),
     OpInfo('median',
            dtypes=all_types_and(torch.bfloat16),
@@ -10257,6 +10260,9 @@ op_db: List[OpInfo] = [
            skips=(
                # 69855: RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
+               # (ROCm) unexpected success
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_fwgrad_bwgrad',
+                            device_type='cuda', dtypes=[torch.float64], active_if=TEST_WITH_ROCM),
            )),
     OpInfo('nanmedian',
            dtypes=all_types_and(torch.bfloat16),
@@ -10269,6 +10275,9 @@ op_db: List[OpInfo] = [
            skips=(
                # 69855: RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
+               # (ROCm) unexpected success
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_fwgrad_bwgrad',
+                            device_type='cuda', dtypes=[torch.float64], active_if=TEST_WITH_ROCM),
            )),
     OpInfo('var_mean',
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
@@ -10373,6 +10382,9 @@ op_db: List[OpInfo] = [
            skips=(
                # 69855: RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
+               # (ROCm) unexpected success
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_fwgrad_bwgrad',
+                            device_type='cuda', dtypes=[torch.float64], active_if=TEST_WITH_ROCM),
            )),
     OpInfo('quantile',
            dtypes=floating_types(),
@@ -10577,12 +10589,7 @@ op_db: List[OpInfo] = [
                         # TODO: FIXME: jiterator doesn't support non-tensor inputs
                         DecorateInfo(unittest.expectedFailure,
                                      'TestBinaryUfuncs',
-                                     'test_broadcast_python_scalar'),
-                        # TODO: FIXME: jiterator doesn't support casts to unsupported types
-                        DecorateInfo(unittest.expectedFailure,
-                                     'TestBinaryUfuncs',
-                                     'test_type_promotion',
-                                     device_type='cuda'))),
+                                     'test_broadcast_python_scalar'),)),
     BinaryUfuncInfo('isclose',
                     ref=np.isclose,
                     dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -10709,6 +10716,8 @@ op_db: List[OpInfo] = [
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            supports_out=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=sample_inputs_adaptive_avg_pool1d),
     OpInfo('nn.functional.adaptive_avg_pool2d',
@@ -10726,6 +10735,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
            ),
            supports_out=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=sample_inputs_adaptive_avg_pool2d),
     OpInfo('nn.functional.adaptive_avg_pool3d',
@@ -10745,6 +10756,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
            ),
            supports_out=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=sample_inputs_adaptive_avg_pool3d),
     OpInfo('nn.functional.adaptive_max_pool1d',
@@ -10793,6 +10806,8 @@ op_db: List[OpInfo] = [
            aten_name='avg_pool1d',
            supports_autograd=True,
            supports_out=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            dtypes=floating_types_and(torch.int64),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -10800,6 +10815,8 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.avg_pool3d',
            aten_name='avg_pool3d',
            supports_autograd=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            supports_out=False,
            dtypes=floating_types_and(torch.int64),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
@@ -10950,6 +10967,8 @@ op_db: List[OpInfo] = [
            supports_out=False),
     OpInfo('nn.functional.pad',
            variant_test_name='reflect',
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            dtypes=floating_and_complex_types(),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half),
            sample_inputs_func=partial(sample_inputs_nn_pad, mode='reflect'),
@@ -10963,6 +10982,8 @@ op_db: List[OpInfo] = [
            supports_out=False),
     OpInfo('nn.functional.pad',
            variant_test_name='replicate',
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            dtypes=floating_and_complex_types(),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half),
            sample_inputs_func=partial(sample_inputs_nn_pad, mode='replicate'),
@@ -11018,6 +11039,8 @@ op_db: List[OpInfo] = [
            aten_name="interpolate",
            variant_test_name='nearest',
            supports_autograd=True,
+           supports_fwgrad_bwgrad=True,
+           supports_forward_ad=True,
            dtypes=floating_types_and(torch.uint8),
            dtypesIfCUDA=floating_types_and(torch.half, torch.uint8),
            sample_inputs_func=partial(sample_inputs_interpolate, 'nearest'),
@@ -11032,6 +11055,8 @@ op_db: List[OpInfo] = [
            aten_name="interpolate",
            variant_test_name='linear',
            supports_autograd=True,
+           supports_fwgrad_bwgrad=True,
+           supports_forward_ad=True,
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.half),
            sample_inputs_func=partial(sample_inputs_interpolate, 'linear'),
@@ -11045,7 +11070,9 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.interpolate',
            aten_name="interpolate",
            variant_test_name='bilinear',
+           supports_fwgrad_bwgrad=True,
            supports_autograd=True,
+           supports_forward_ad=True,
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.half),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -11061,6 +11088,8 @@ op_db: List[OpInfo] = [
            aten_name="interpolate",
            variant_test_name='bicubic',
            supports_autograd=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.half),
            sample_inputs_func=partial(sample_inputs_interpolate, 'bicubic'),
@@ -11076,6 +11105,8 @@ op_db: List[OpInfo] = [
            aten_name="interpolate",
            variant_test_name='trilinear',
            supports_autograd=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.half),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -11091,6 +11122,8 @@ op_db: List[OpInfo] = [
            aten_name="interpolate",
            variant_test_name='area',
            supports_autograd=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=partial(sample_inputs_interpolate, 'area'),
@@ -11104,6 +11137,8 @@ op_db: List[OpInfo] = [
            supports_out=False),
     OpInfo('nn.functional.upsample_bilinear',
            supports_autograd=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.half),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -11117,6 +11152,8 @@ op_db: List[OpInfo] = [
            supports_out=False),
     OpInfo('nn.functional.upsample_nearest',
            supports_autograd=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            dtypes=floating_types_and(torch.uint8),
            dtypesIfCUDA=floating_types_and(torch.half, torch.uint8),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -11144,6 +11181,8 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.avg_pool2d',
            aten_name='avg_pool2d',
            supports_autograd=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            supports_out=False,
            dtypes=floating_types_and(torch.int64),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
@@ -11524,8 +11563,9 @@ op_db: List[OpInfo] = [
         ref=lambda x, threshold, value: np.where(x > threshold, x, value).astype(x.dtype),
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
-        supports_forward_ad=False,
         supports_autograd=True,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         assert_autodiffed=False,
         supports_gradgrad=True,
         supports_out=False,
@@ -11621,11 +11661,11 @@ op_db: List[OpInfo] = [
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_autograd=True,
+           supports_forward_ad=True,
            assert_autodiffed=False,
            sample_inputs_func=sample_inputs_softshrink_hardshrink_hardtanh,
            supports_gradgrad=True,
            supports_out=False,
-           supports_forward_ad=False,
            ),
     OpInfo('nn.functional.hardshrink',
            aten_name="hardshrink",
@@ -12612,6 +12652,9 @@ op_db: List[OpInfo] = [
            skips=(
                # test does not work with passing lambda for op
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+               # CUDA runs out of memory
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_fwgrad_bwgrad',
+                            device_type='cuda', dtypes=[torch.cdouble]),
            )),
     OpInfo('linalg.pinv',
            aten_name='linalg_pinv',
@@ -13801,6 +13844,9 @@ op_db: List[OpInfo] = [
            skips=(
                # Dispatch stub: unsupported device typemeta
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad', device_type='meta'),
+               # (ROCm) Memory access fault by GPU node-4 (Agent handle: 0x55860348e690) on address 0x7f0f4ddcb000
+               DecorateInfo(unittest.skip("Skipped! ROCm memory exception"), 'TestGradients', 'test_fn_fwgrad_bwgrad',
+                            device_type='cuda', dtypes=[torch.float64, torch.complex128], active_if=TEST_WITH_ROCM),
            )),
     OpInfo('trapezoid',
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
@@ -13811,6 +13857,9 @@ op_db: List[OpInfo] = [
            skips=(
                # Dispatch stub: unsupported device typemeta
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad', device_type='meta'),
+               # (ROCm) Memory access fault by GPU node-4 (Agent handle: 0x55bbf53d5500) on address 0x7fe536eb5000
+               DecorateInfo(unittest.skip("Skipped! ROCm memory exception"), 'TestGradients', 'test_fn_fwgrad_bwgrad',
+                            device_type='cuda', dtypes=[torch.float64, torch.complex128], active_if=TEST_WITH_ROCM),
            )),
     OpInfo('cumulative_trapezoid',
            dtypes=all_types_and_complex_and(),
@@ -14319,7 +14368,10 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view', device_type='cuda'),
             # On CUDA, the op is dispatched (and a few more conditions) to
             # _fused_dropout, which doesn't support forward AD
-            DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD', device_type='cuda'),),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD', device_type='cuda'),
+            # (ROCm) NotImplementedError: Trying to use forward AD with native_dropout that does not support it
+            DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_fwgrad_bwgrad',
+                         device_type='cuda', dtypes=[torch.float64], active_if=TEST_WITH_ROCM),),
         gradcheck_wrapper=wrapper_set_seed,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -14444,6 +14496,7 @@ op_db: List[OpInfo] = [
         "nn.functional.softplus",
         ref=reference_softplus,
         sample_inputs_func=sample_inputs_softplus,
+        supports_forward_ad=True,
         dtypes=floating_types(),
         dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
         supports_out=False,
