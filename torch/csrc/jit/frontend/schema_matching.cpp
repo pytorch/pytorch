@@ -662,7 +662,8 @@ Value* emitBuiltinCall(
           upgrader_schemas.push_back(old_schema);
           found_upgrader = true;
         } else {
-          if (!isOpEntryCurrent(version_entry->second, graph_version.value())) {
+          if (!isOpCurrentBasedOnUpgraderEntries(
+                  version_entry->second, graph_version.value())) {
             TORCH_INTERNAL_ASSERT(false, "Valid upgrader must be present");
           }
         }

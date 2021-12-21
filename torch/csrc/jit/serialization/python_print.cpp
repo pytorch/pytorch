@@ -744,7 +744,9 @@ struct PythonPrintImpl {
 
   void checkVersion(Node* node) {
     if (node->owningGraph()->get_op_version().has_value()) {
-      min_version_ = std::max(min_version_, node->owningGraph()->get_op_version().value());
+      min_version_ = std::max(
+          min_version_,
+          (uint64_t)node->owningGraph()->get_op_version().value());
     } else {
       // if there is no version attached to the graph,
       // we still want to find the min required runtime
