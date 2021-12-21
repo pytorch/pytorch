@@ -45,7 +45,6 @@ if(USE_CUDA)
 endif()
 
 set(TH_LINK_STYLE STATIC)
-add_subdirectory(src/TH)
 set(TH_CPU_INCLUDE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_CURRENT_BINARY_DIR}/src

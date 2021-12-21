@@ -406,7 +406,7 @@ class TestSparse(TestCase):
         a_coalesced = a.coalesce()
         self.assertTrue(a_coalesced.is_coalesced())
         self.assertEqual(torch.tensor(12.3, dtype=dtype, device=device), a.to_dense())
-        self.assertEqual(a, a.coalesce().to_dense().to_sparse())
+        self.assertEqual(a.coalesce(), a.coalesce().to_dense().to_sparse())
 
         # tensor with multiple values
         a = self.sparse_tensor(self.index_tensor([], device=device).unsqueeze(1).expand(0, 2),
