@@ -623,9 +623,6 @@ class TestOperators(TestCase):
         # xfail "above the line".
         xfail('double', 'channels_last'),
 
-        # See https://github.com/pytorch/pytorch/issues/66357
-        xfail('nn.functional.pad', 'circular'),
-
         # RuntimeError: expand: the number of sizes provided (1) must be greater or
         # equal to the number of dimensions in the tensor (2)
         xfail('nanquantile'),
@@ -690,7 +687,6 @@ class TestOperators(TestCase):
         xfail('linalg.inv'),
         xfail('masked_fill'),
         xfail('linalg.tensorinv'),
-        xfail('nn.functional.pad', 'circular'),
         xfail('linalg.matrix_power'),
         xfail('maximum'),
         xfail('linalg.householder_product'),
@@ -796,7 +792,6 @@ class TestOperators(TestCase):
         xfail('nanquantile'),
         xfail('nn.functional.conv_transpose2d'),
         xfail('nn.functional.gelu'),
-        xfail('nn.functional.pad', 'circular'),
         xfail('norm', 'nuc'),
         xfail('pinverse'),
         xfail('prod'),
