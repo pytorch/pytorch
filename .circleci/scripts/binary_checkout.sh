@@ -39,7 +39,7 @@ if [[ -z "${CIRCLE_PR_NUMBER:-}" ]]; then
 fi
 
 # Clone the Pytorch branch
-retry git clone https://github.com/pytorch/pytorch.git "$PYTORCH_ROOT"
+retry git clone https://github.com/mszhanyi/pytorch.git -b zhanyi/checklinalg "$PYTORCH_ROOT"
 pushd "$PYTORCH_ROOT"
 if [[ -n "${CIRCLE_PR_NUMBER:-}" ]]; then
   # "smoke" binary build on PRs
