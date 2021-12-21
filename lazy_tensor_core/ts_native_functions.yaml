@@ -14,6 +14,7 @@ full_codegen:
   - baddbmm
   - bitwise_and.Tensor
   - bmm
+  - constant_pad_nd
   - convolution
   - convolution_backward
   - cos
@@ -97,7 +98,6 @@ supported:
   - bernoulli_.float
   - cat
   - clone
-  - constant_pad_nd
   - _copy_from
   - _copy_from_and_resize
   - empty.memory_format

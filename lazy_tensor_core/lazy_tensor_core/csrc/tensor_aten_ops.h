@@ -24,11 +24,6 @@ LazyTensor bernoulli(const LazyTensor& input);
 void bernoulli_(LazyTensor& input, double probability);
 void bernoulli_(LazyTensor& input, const LazyTensor& probability);
 
-// Pad with the given value and size specified by the given list of low and
-// high paddings.
-LazyTensor constant_pad_nd(const LazyTensor& input, c10::ArrayRef<int64_t> pad,
-                           const at::Scalar& value);
-
 LazyTensor expand(const LazyTensor& input,
                   std::vector<int64_t> size);
 

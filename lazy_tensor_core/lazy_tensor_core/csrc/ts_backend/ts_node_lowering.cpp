@@ -18,7 +18,6 @@
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
 #include <torch/csrc/lazy/ts_backend/ts_node_lowering.h>
 
-#include "lazy_tensor_core/csrc/ops/constant_pad_nd.h"
 #include "lazy_tensor_core/csrc/ops/repeat.h"
 #include "lazy_tensor_core/csrc/ops/squeeze.h"
 #include "lazy_tensor_core/csrc/ops/stack.h"
@@ -109,11 +108,6 @@ class TSNodeLowering : public TSNodeLoweringInterface {
           torch::lazy::NodeCast<
               torch_lazy_tensors::ir::ops::TSNativeBatchNormBackward>(
               node, torch::lazy::OpKind(at::aten::native_batch_norm_backward)));
-    }
-    if (node->op().op == at::aten::constant_pad_nd) {
-      return LowerConstantPad(
-          torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::ConstantPadNd>(
-              node, torch::lazy::OpKind(at::aten::constant_pad_nd)));
     }
     if (node->op().op == at::aten::expand) {
       return LowerExpand(
@@ -252,14 +246,6 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
     arguments.emplace_back(node->dtype());
     return LowerBuiltin(at::aten::to, arguments);
-  }
-
-  TSOpVector LowerConstantPad(const torch_lazy_tensors::ir::ops::ConstantPadNd* node) {
-    std::vector<torch::jit::NamedValue> arguments;
-    arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
-    arguments.emplace_back(node->pad());
-    arguments.emplace_back(node->value());
-    return LowerBuiltin(node, arguments);
   }
 
   TSOpVector LowerExpand(const torch::lazy::Expand* node) {
