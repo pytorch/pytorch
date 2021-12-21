@@ -118,20 +118,30 @@ class CMake:
         cmake_command = 'cmake'
         if IS_WINDOWS:
             return cmake_command
-        cmake3 = which('cmake3')
-        cmake = which('cmake')
-        if cmake3 is not None and CMake._get_version(cmake3) >= LooseVersion("3.10.0"):
-            cmake_command = 'cmake3'
-            return cmake_command
-        elif cmake is not None and CMake._get_version(cmake) >= LooseVersion("3.10.0"):
-            return cmake_command
-        else:
+        cmake3_version = CMake._get_version(which('cmake3'))
+        cmake_version = CMake._get_version(which('cmake'))
+
+        _cmake_min_version = LooseVersion("3.10.0")
+        if all((ver is None or ver < _cmake_min_version for ver in [cmake_version, cmake3_version])):
             raise RuntimeError('no cmake or cmake3 with version >= 3.10.0 found')
 
+        if cmake3_version is None:
+            cmake_command = 'cmake'
+        elif cmake_version is None:
+            cmake_command = 'cmake3'
+        else:
+            if cmake3_version >= cmake_version:
+                cmake_command = 'cmake3'
+            else:
+                cmake_command = 'cmake'
+        return cmake_command
+
     @staticmethod
-    def _get_version(cmd: str) -> Any:
+    def _get_version(cmd: Optional[str]) -> Any:
         "Returns cmake version."
 
+        if cmd is None:
+            return None
         for line in check_output([cmd, '--version']).decode('utf-8').split('\n'):
             if 'version' in line:
                 return LooseVersion(line.strip().split(' ')[2])
