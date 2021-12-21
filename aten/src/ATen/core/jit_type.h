@@ -6,7 +6,6 @@
 #include <ATen/core/functional.h>
 #include <ATen/core/symbol.h>
 #include <ATen/core/qualified_name.h>
-#include <ATen/core/class_type.h>
 #include <c10/util/TypeList.h>
 #include <c10/util/Optional.h>
 
@@ -15,6 +14,12 @@
 #include <ostream>
 #include <sstream>
 #include <type_traits>
+
+namespace torch {
+namespace jit {
+struct Function;
+} // namespace jit
+} // namespace torch
 
 namespace c10 {
 
@@ -1834,7 +1839,6 @@ TORCH_API bool elementTypeCanBeInferredFromMembers(const TypePtr& elem_type);
 
 struct InterfaceType;
 using InterfaceTypePtr = std::shared_ptr<InterfaceType>;
-using ::torch::jit::CompilationUnit;
 
 // Interfaces are a list of abstract methods that a class might meet.
 // If a class provides those methods, it implicitly meets the interface.

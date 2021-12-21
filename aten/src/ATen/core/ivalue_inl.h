@@ -219,7 +219,7 @@ inline at::Generator IValue::toGenerator() const& {
 namespace ivalue {
 
 void TORCH_API
-checkCustomClassType(const Type* expected_type, const Type* actual_type);
+checkCustomClassType(const ClassType* expected_type, const Type* actual_type);
 
 template <typename T>
 using Shared = c10::intrusive_ptr<T>;
@@ -579,7 +579,7 @@ template <typename T>
 struct TupleTypeFactory {};
 
 template <>
-struct TupleTypeFactory<TupleType> {
+struct TORCH_API TupleTypeFactory<TupleType> {
   static TupleTypePtr create(std::vector<TypePtr> types) {
     return TupleType::create(std::move(types));
   }
@@ -1617,7 +1617,7 @@ c10::intrusive_ptr<T> IValue::toCustomClass() && {
       obj->slots().size() == 1,
       "Tried to cast IValue to custom class but it did "
       "not contain a custom class!");
-  const Type* expected_type = c10::getCustomClassType<c10::intrusive_ptr<T>>().get();
+  const auto* expected_type = c10::getCustomClassType<c10::intrusive_ptr<T>>().get();
   ivalue::checkCustomClassType(expected_type, type().get());
   auto userObj =
       c10::static_intrusive_pointer_cast<T>(obj->getSlot(0).toCapsule());
@@ -1635,7 +1635,7 @@ c10::intrusive_ptr<T> IValue::toCustomClass() const& {
       obj->slots().size() == 1,
       "Tried to cast IValue to custom class but it did "
       "not contain a custom class!");
-  const Type* expected_type = c10::getCustomClassType<c10::intrusive_ptr<T>>().get();
+  const auto* expected_type = c10::getCustomClassType<c10::intrusive_ptr<T>>().get();
   ivalue::checkCustomClassType(expected_type, type().get());
   auto userObj =
       c10::static_intrusive_pointer_cast<T>(obj->getSlot(0).toCapsule());
