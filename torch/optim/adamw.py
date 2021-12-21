@@ -20,9 +20,9 @@ class AdamW(Optimizer):
             &\textbf{for} \: t=1 \: \textbf{to} \: \ldots \: \textbf{do}                         \\
 
             &\hspace{5mm}\textbf{if} \: \textit{maximize}:                                       \\
-            &\hspace{5mm}g_t           \leftarrow   -\nabla_{\theta} f_t (\theta_{t-1})          \\
+            &\hspace{10mm}g_t           \leftarrow   -\nabla_{\theta} f_t (\theta_{t-1})          \\
             &\hspace{5mm}\textbf{else}                                                           \\
-            &\hspace{5mm}g_t           \leftarrow   \nabla_{\theta} f_t (\theta_{t-1})           \\
+            &\hspace{10mm}g_t           \leftarrow   \nabla_{\theta} f_t (\theta_{t-1})           \\
             &\hspace{5mm} \theta_t \leftarrow \theta_{t-1} - \gamma \lambda \theta_{t-1}         \\
             &\hspace{5mm}m_t           \leftarrow   \beta_1 m_{t-1} + (1 - \beta_1) g_t          \\
             &\hspace{5mm}v_t           \leftarrow   \beta_2 v_{t-1} + (1-\beta_2) g^2_t          \\
@@ -65,7 +65,7 @@ class AdamW(Optimizer):
     """
 
     def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
-                 weight_decay=1e-2, amsgrad=False, *, maximize: bool = False):
+                 weight_decay=1e-2, amsgrad=False, *, maximize: bool=False):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
