@@ -127,7 +127,7 @@ class DispatchKeySet final {
       //: repr_(std::numeric_limits<decltype(repr_)>::max()) {}
       : repr_((1ULL << (static_cast<uint8_t>(DispatchKey::EndOfFunctionalityKeys) - 1)) - 1) {}
 
-  CONSTEXPR_EXCEPT_GCC5_STATIC DispatchKeySet(FullAfter, DispatchKey t)
+  CONSTEXPR_EXCEPT_GCC5 DispatchKeySet(FullAfter, DispatchKey t)
       // LSB after t are OK, but not t itself.
       : repr_((1ULL << (static_cast<uint8_t>(t) - 1)) - 1) {
     // "functionalities" have a notion of ordering (e.g. Autograd > Sparse > Quantized > Dense).
@@ -142,7 +142,7 @@ class DispatchKeySet final {
   // must be explicit when they do this!
   constexpr DispatchKeySet(Raw, uint64_t x) : repr_(x) {}
 
-  CONSTEXPR_EXCEPT_GCC5_STATIC explicit DispatchKeySet(DispatchKey k) {
+  CONSTEXPR_EXCEPT_GCC5 explicit DispatchKeySet(DispatchKey k) {
     if (k == DispatchKey::Undefined) {
       // Case 1: handle Undefined specifically
       repr_ = 0;
@@ -185,7 +185,7 @@ class DispatchKeySet final {
 
   }
 
-  explicit CONSTEXPR_EXCEPT_GCC5_STATIC DispatchKeySet(std::initializer_list<DispatchKey> ks)
+  explicit CONSTEXPR_EXCEPT_GCC5 DispatchKeySet(std::initializer_list<DispatchKey> ks)
       : repr_(0) {
     for (auto k : ks) {
       repr_ |= DispatchKeySet(k).repr_;
@@ -193,7 +193,7 @@ class DispatchKeySet final {
   }
 
   // Test if a DispatchKey is in the set
-  CONSTEXPR_EXCEPT_GCC5_STATIC bool has(DispatchKey t) const {
+  CONSTEXPR_EXCEPT_GCC5 bool has(DispatchKey t) const {
 #ifdef NDEBUG
   if (t == DispatchKey::Undefined) {
     throw std::invalid_argument("DispatchKeySet::has() called with Undefined key");
@@ -277,7 +277,7 @@ class DispatchKeySet final {
   // Only functionality bits are allowed to be removed from a keyset.
   // This is generally not an operation you should be doing
   // (it's used to implement operator<<)
-  CONSTEXPR_EXCEPT_GCC5_STATIC DispatchKeySet removeFunctionalityKey(DispatchKey t) const {
+  CONSTEXPR_EXCEPT_GCC5 DispatchKeySet removeFunctionalityKey(DispatchKey t) const {
     // For now, we're only allowing removal of "functionality bits" from the keyset,
     // which is specifically needed by the fallthrough key calculation logic.
     // Why is removing backend bits problematic? Consider this example:
@@ -304,7 +304,7 @@ class DispatchKeySet final {
     auto functionality_k =  toFunctionalityKey(t);
     return DispatchKeySet(repr_ & ~DispatchKeySet(functionality_k).repr_);
   }
-  CONSTEXPR_EXCEPT_GCC5_STATIC DispatchKeySet removeFunctionalityKeys(DispatchKeySet ks) const {
+  CONSTEXPR_EXCEPT_GCC5 DispatchKeySet removeFunctionalityKeys(DispatchKeySet ks) const {
 //#ifdef NDEBUG
     if ((ks.repr_ & full_backend_mask) != 0) {
       throw std::invalid_argument("DispatchKeySet::removeFunctionalitykeys() called with backends bits set");
