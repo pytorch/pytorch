@@ -80,7 +80,7 @@ struct TORCH_API ClassType : public NamedType {
       std::string doc_string = "",
       std::vector<std::string> unresolved_class_attributes = {});
 
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     if (this == &rhs) {
       return true;
     }
