@@ -696,7 +696,7 @@ bool TensorType::matchTensor(const at::Tensor& t) {
     && is_null_or_equal(sizes().concrete_sizes(), t.sizes());
 }
 
-bool TensorType::operator==(const c10::Type& rhs) const {
+bool TensorType::equals(const c10::Type& rhs) const {
   if (rhs.kind() != kind()) {
     return false;
   }
@@ -1046,7 +1046,7 @@ UnionTypePtr UnionType::create(std::vector<TypePtr> reference) {
   return UnionTypePtr(union_type);
 }
 
-bool UnionType::operator==(const Type& rhs) const {
+bool UnionType::equals(const Type& rhs) const {
   if (auto union_rhs = rhs.cast<UnionType>()) {
     // We can't compare the type vectors for equality using `operator=`,
     // because the vectors hold `TypePtr`s and we want to compare `Type`
@@ -1258,7 +1258,7 @@ OptionalType::OptionalType(TypePtr contained)
   has_free_variables_ = contained_->hasFreeVariables();
 }
 
-bool OptionalType::operator==(const Type& rhs) const {
+bool OptionalType::equals(const Type& rhs) const {
   if (auto union_rhs = rhs.cast<UnionType>()) {
     auto optional_rhs = union_rhs->toOptional();
     // `**optional_rhs` = `*` to get value of `c10::optional<TypePtr>`,
@@ -1294,7 +1294,7 @@ bool OptionalType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const 
   }
 }
 
-bool NumberType::operator==(const Type& rhs) const {
+bool NumberType::equals(const Type& rhs) const {
   if (auto union_type = rhs.cast<UnionType>()) {
     return union_type->containedTypes().size() == 3 && union_type->canHoldType(*NumberType::get());
   } else {
@@ -1376,7 +1376,7 @@ bool ListType::isSubtypeOfExt(const Type& rhs_, std::ostream* why_not) const {
   return false;
 }
 
- bool TupleType::operator==(const Type& rhs) const {
+ bool TupleType::equals(const Type& rhs) const {
    bool typesSame =
        compare(rhs, [](const Type& a, const Type& b) { return a == b; });
    if (!typesSame) {
