@@ -67,8 +67,8 @@ def header_template_rule_impl(ctx):
 
 header_template_rule = rule(
     attrs = {
-        "out": attr.output(mandatory = True),
         "include": attr.string(),
+        "out": attr.output(mandatory = True),
         "src": attr.label(
             mandatory = True,
             allow_single_file = True,
