@@ -133,7 +133,9 @@ class C10_API DispatchKeySet final {
     // "functionalities" have a notion of ordering (e.g. Autograd > Sparse > Quantized > Dense).
     // But backends don't really have an ordering.
     // Therefore, we're enforcing that FullAfter can only be used on "functionality" keys.
-    TORCH_INTERNAL_ASSERT(t > DispatchKey::EndOfBackendKeys && t <= DispatchKey::EndOfFunctionalityKeys);
+    if (t <= DispatchKey::EndOfBackendKeys || t > DispatchKey::EndOfFunctionalityKeys) {
+      throw std::invalid_argument("You must use DispatchKeySet::FULL_AFTER constructor with a functionality key");
+    }
   }
 
   // Public version of DispatchKeySet(uint64_t) API; external users
@@ -291,21 +293,23 @@ class C10_API DispatchKeySet final {
     // backend bits: CPU, CUDA
     //
     // Instead, removeFunctionalityKey(DispatchKey.AutogradCPU) will only remove the "Autograd" bit from the bitset.
-    if (C10_UNLIKELY(t <= DispatchKey::EndOfBackendKeys)) {
+//#ifdef NDEBUG
+    if (t <= DispatchKey::EndOfBackendKeys) {
       throw std::invalid_argument("invalid key");
     }
-    if C10_UNLIKELY((isAliasDispatchKey(t))) {
+    if (isAliasDispatchKey(t)) {
       throw std::invalid_argument("invalid key");
     }
+//#endif
     auto functionality_k =  toFunctionalityKey(t);
     return DispatchKeySet(repr_ & ~DispatchKeySet(functionality_k).repr_);
   }
   constexpr DispatchKeySet removeFunctionalityKeys(DispatchKeySet ks) const {
-#ifdef NDEBUG
+//#ifdef NDEBUG
     if ((ks.repr_ & full_backend_mask) != 0) {
       throw std::invalid_argument("DispatchKeySet::removeFunctionalitykeys() called with backends bits set");
     }
-#endif
+//#endif
     return DispatchKeySet(repr_ & ~ks.repr_);
   }
   // Is the set empty?  (AKA undefined tensor)
