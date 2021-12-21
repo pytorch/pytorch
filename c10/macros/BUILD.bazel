@@ -1,4 +1,11 @@
 load("//:bazel.bzl", "rules")
 load(":build.bzl", "define_targets")
 
-define_targets(rules = rules())
+define_targets(
+    rules = rules(),
+    build_shared_libs = True,
+    use_gflags = "config_setting://c10:using_gflags",
+    use_glog = "config_setting://c10:using_glog",
+    use_msvc_static_runtime = True,
+    use_numa = False,
+)

@@ -1,4 +1,5 @@
-def define_targets(rules):
+def define_targets(rules, build_shared_libs, use_gflags, use_glog,
+                   use_msvc_static_runtime, use_numa):
     rules.cc_library(
         name = "macros",
         hdrs = [
@@ -17,10 +18,10 @@ def define_targets(rules):
         src = "cmake_macros.h.in",
         out = "cmake_macros.h",
         definitions = {
-            "C10_BUILD_SHARED_LIBS": True,
-            "C10_USE_GFLAGS": "config_setting://c10:using_gflags",
-            "C10_USE_GLOG": "config_setting://c10:using_glog",
-            "C10_USE_MSVC_STATIC_RUNTIME": True,
-            "C10_USE_NUMA": False,
+            "C10_BUILD_SHARED_LIBS": build_shared_libs,
+            "C10_USE_GFLAGS": use_gflags,
+            "C10_USE_GLOG": use_glog,
+            "C10_USE_MSVC_STATIC_RUNTIME": use_msvc_static_runtime,
+            "C10_USE_NUMA": use_numa,
         },
     )
