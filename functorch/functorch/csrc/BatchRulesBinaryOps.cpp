@@ -22,11 +22,9 @@ static void handleScalarTypePromotion(Tensor& logical_scalar_tensor, Tensor& sec
   }
 }
 
-template <typename F, F Func, typename... ExtraArgs>
-std::tuple<Tensor,optional<int64_t>> _binary_pointwise_batch_rule(
+std::tuple<Tensor, Tensor> _binary_pointwise_helper(
     const Tensor& tensor, optional<int64_t> tensor_batch_dim,
-    const Tensor& other, optional<int64_t> other_batch_dim,
-    ExtraArgs... extra_args) {
+    const Tensor& other, optional<int64_t> other_batch_dim) {
   // compute max logical rank
   auto tensor_logical_rank = rankWithoutBatchDim(tensor, tensor_batch_dim);
   auto other_logical_rank = rankWithoutBatchDim(other, other_batch_dim);
@@ -52,8 +50,22 @@ std::tuple<Tensor,optional<int64_t>> _binary_pointwise_batch_rule(
   tensor_ = maybePadToLogicalRank(tensor_, tensor_batch_dim, max_logical_rank);
   other_ = maybePadToLogicalRank(other_, other_batch_dim, max_logical_rank);
 
+  return std::make_tuple(tensor_, other_);
+}
+
+template <typename F, F Func, typename... ExtraArgs>
+std::tuple<Tensor,optional<int64_t>> _binary_pointwise_batch_rule(
+    const Tensor& tensor, optional<int64_t> tensor_batch_dim,
+    const Tensor& other, optional<int64_t> other_batch_dim,
+    ExtraArgs... extra_args) {
+
+  auto tensor_other = _binary_pointwise_helper(
+      tensor, tensor_batch_dim, other, other_batch_dim);
+  auto tensor_ = std::get<0>(tensor_other);
+  auto other_ = std::get<1>(tensor_other);
+
   auto result = Func(tensor_, other_, std::forward<ExtraArgs>(extra_args)...);
-  return std::make_tuple( std::move(result), 0 );
+  return std::make_tuple(result, 0);
 }
 
 template <typename A, A a, typename C>
@@ -163,6 +175,52 @@ Tensor addr_decomposition(
   return self * beta + outer;
 }
 
+std::tuple<Tensor,optional<int64_t>> cdist_backward_batch_rule(
+    const Tensor& grad, optional<int64_t> grad_bdim,
+    const Tensor& x1, optional<int64_t> x1_bdim,
+    const Tensor& x2, optional<int64_t> x2_bdim,
+    const double p,
+    const Tensor& cdist, optional<int64_t> cdist_bdim) {
+
+  auto x1_ = x1;
+  if (cdist_bdim && !x1_bdim) {
+    // We need to make sure that x1 has batch dim if cdist has one
+    // otherwise, we get
+    // RuntimeError: Function CdistBackward0 returned an invalid gradient at index 1 - got [5]
+    // but expected shape compatible with [4, 5]
+    auto bs = cdist.size(*cdist_bdim);
+    x1_ = ensure_has_bdim(x1, false, bs);
+    x1_ = x1_.contiguous();
+    x1_bdim = 0;
+  }
+
+  // We need to apply the same preprocessing on x1 and x2 as in the forward pass
+  // _binary_pointwise_batch_rule
+  auto x12 = _binary_pointwise_helper(x1_, x1_bdim, x2, x2_bdim);
+  x1_ = std::get<0>(x12);
+  auto x2_ = std::get<1>(x12);
+
+  auto grad_ = moveBatchDimToFront(grad, grad_bdim);
+  if ((x1_bdim || x2_bdim) && !grad_bdim) {
+    // We need to make sure that grad has batch dim if x1 or x2 have one
+    // Probably, there is an assumption on the strides.
+    // Otherwise grad input contains thrash values, e.g. -7.0816e+29, 7.0816e+29
+    auto bs = get_bdim_size2(x1_, 0, x2_, 0);
+    grad_ = ensure_has_bdim(grad_, grad_bdim.has_value(), bs);
+    grad_ = grad_.contiguous();
+  }
+
+  auto out = at::_cdist_backward(grad_, x1_, x2_, p, cdist);
+
+  optional<int64_t> out_bdim = nullopt;
+  if (x1_bdim || x2_bdim) {
+    out_bdim = 0;
+  }
+
+  return std::make_tuple(out, out_bdim);
+}
+
+
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
 #define BINARY_POINTWISE2(op, overload) \
   VMAP_SUPPORT(#op"."#overload, BINARY_POINTWISE_BATCH_RULE(ATEN_FN2(op, overload)));
@@ -217,6 +275,12 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   BINARY_POINTWISE2(clamp_max, Tensor);
   UNARY_POINTWISE(clamp_max);
   POINTWISE_BOXED(clamp_max_);
+
+  VARIADIC_BDIMS_BOXED(_euclidean_dist);
+  // Implementation note: _binary_pointwise_helper performs a dtype promotion if args are scalars,
+  // but cdist can't work with scalars, at least 2d tensors.
+  BINARY_POINTWISE(_cdist_forward);
+  VMAP_SUPPORT("_cdist_backward", cdist_backward_batch_rule);
 
   // Commented out so we have a test op
   // BINARY_SCALAR_2(copysign, Tensor, Scalar);
