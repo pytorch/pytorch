@@ -10110,12 +10110,6 @@
     CPU: slow_conv_dilated2d_cpu
     CUDA: slow_conv_dilated2d_cuda
 
-- func: slow_conv_dilated2d_backward(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
-  python_module: nn
-  dispatch:
-    CPU: slow_conv_dilated2d_backward_cpu
-    CUDA: slow_conv_dilated2d_backward_cuda
-
 - func: slow_conv_dilated3d(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1) -> Tensor
   python_module: nn
   dispatch:
