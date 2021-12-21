@@ -503,18 +503,20 @@ void GpuLower::lower() {
   // instead of directly on a for loop
   const auto unrolled_loops = UnrollPass::runPass(fusion_, reuse_mem_exprs);
 
-  const auto unrolled_mv_loops =
-      processMisalignedVectorization(fusion_, unrolled_loops);
+  const auto unrolled_mv_loops = processMisalignedVectorization(unrolled_loops);
 
   // Insert SyncThreads at end of for-loop to avoid WAR race condition
   const auto war_sync_exprs = insertWarThreadSynchronization(unrolled_mv_loops);
 
   const auto indexed_loops = IndexLowering::getIndexedExprs(war_sync_exprs);
 
+  // TODO: It seems this type of optimization would be far easier to implement
+  // on fusion ir than kernel ir. We should likely refactor this to at least run
+  // before allocation insertion.
   const auto exprs_with_fused_broadcast = fuseWarpReduce(indexed_loops);
 
   const auto conditional_loops =
-      generateConditionalFromPredicate(fusion_, exprs_with_fused_broadcast);
+      generateConditionalFromPredicate(exprs_with_fused_broadcast);
 
   // Insert fake zero updates to make sure nvrtc doesn't blow out register use
   // on index and predicate reuse

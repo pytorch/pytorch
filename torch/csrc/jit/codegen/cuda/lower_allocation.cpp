@@ -17,9 +17,9 @@ namespace cuda {
 
 namespace {
 
-class AllocationInserter : public kir::KirVisitor {
+class AllocationInserter : public kir::ExprMutator {
  private:
-  using kir::KirVisitor::handle;
+  using kir::ExprMutator::handle;
 
   struct AllocationInformation {
     // The for loop that the initialization of this allocation must be
@@ -47,12 +47,6 @@ class AllocationInserter : public kir::KirVisitor {
     // The buffer this allocation is for
     kir::TensorView* buffer = nullptr;
 
-    // The allocation expression
-    kir::Allocate* alloc_expr = nullptr;
-
-    // Initialization
-    kir::Expr* init_expr = nullptr;
-
     // Info to transfer to GPU lower
     bool has_halo = false;
 
@@ -61,7 +55,9 @@ class AllocationInserter : public kir::KirVisitor {
   };
 
   // Find allocation point
-  void findAllocationPosition(AllocationInformation& info, kir::Expr* expr) {
+  // Fills info.buffer, info.alloc_pos, info.init_for_loop,
+  // info.init_place_before, info.alloc_for_loop, info.alloc_place_before
+  void fillAllocationInformation(AllocationInformation& info, kir::Expr* expr) {
     size_t alloc_pos = 0;
     kir::ForLoop* init_for_loop = nullptr;
     auto fuser_tv = info.buffer->fuserTv();
@@ -153,10 +149,9 @@ class AllocationInserter : public kir::KirVisitor {
   }
 
   // Create initialization expression if init_val is non-null.
-  void createInitExpr(AllocationInformation& info, kir::Val* init_val) {
+  kir::Expr* createInitExpr(AllocationInformation& info, kir::Val* init_val) {
     if (init_val == nullptr) {
-      info.init_expr = nullptr;
-      return;
+      return nullptr;
     }
 
     auto fuser_tv = info.buffer->fuserTv();
@@ -198,7 +193,7 @@ class AllocationInserter : public kir::KirVisitor {
       new_loop->body().push_back(init_expr);
       init_expr = new_loop;
     }
-    info.init_expr = init_expr;
+    return init_expr;
   }
 
   std::vector<kir::Val*> getGlobalAllocationSizes(AllocationInformation& info) {
@@ -439,10 +434,9 @@ class AllocationInserter : public kir::KirVisitor {
     return alloc_dims;
   }
 
-  void createAllocExpr(AllocationInformation& info, bool is_output) {
+  kir::Allocate* createAllocExpr(AllocationInformation& info, bool is_output) {
     if (is_output) {
-      info.alloc_expr = nullptr;
-      return;
+      return nullptr;
     }
 
     std::vector<kir::Val*> alloc_dims;
@@ -460,13 +454,13 @@ class AllocationInserter : public kir::KirVisitor {
     }
 
     // Create the allocation node
-    info.alloc_expr = ir_builder.create<kir::Allocate>(
+    return ir_builder.create<kir::Allocate>(
         info.buffer, info.buffer->memoryType(), alloc_dims);
   }
 
   void handle(kir::Expr* expr) override {
     if (!ir_utils::isTVOp(expr) || expr->isA<kir::Allocate>()) {
-      KirVisitor::handle(expr);
+      ExprMutator::handle(expr);
       return;
     }
 
@@ -519,38 +513,64 @@ class AllocationInserter : public kir::KirVisitor {
 
       AllocationInformation allocation;
       allocation.buffer = out_tv;
-      findAllocationPosition(allocation, expr);
-      createAllocExpr(allocation, is_output);
-      createInitExpr(allocation, init);
+      fillAllocationInformation(allocation, expr);
+
+      auto alloc_expr = createAllocExpr(allocation, is_output);
+      auto init_expr = createInitExpr(allocation, init);
 
       // Write information to GPULower
-      writeInfoToGPULower(allocation);
+      writeInfoToGPULower(allocation, alloc_expr);
 
-      allocs.push_back(std::move(allocation));
+      // Register allocations before initializations to keep them in the right
+      // order
+      if (alloc_expr != nullptr) {
+        if (allocation.buffer->memoryType() == MemoryType::Shared) {
+          // Shared allocations go at the begining of scope
+          TORCH_INTERNAL_ASSERT(!exprs_.empty());
+          registerInsertBefore(exprs_[0], alloc_expr, nullptr);
+        } else {
+          TORCH_INTERNAL_ASSERT(allocation.alloc_place_before != nullptr);
+          kir::Scope* scope = allocation.alloc_for_loop == nullptr
+              ? nullptr
+              : &allocation.alloc_for_loop->body();
+          registerInsertBefore(
+              allocation.alloc_place_before, alloc_expr, scope);
+        }
+      }
+
+      if (init_expr != nullptr) {
+        TORCH_INTERNAL_ASSERT(allocation.init_place_before != nullptr);
+        kir::Scope* scope = allocation.init_for_loop == nullptr
+            ? nullptr
+            : &allocation.init_for_loop->body();
+        registerInsertBefore(allocation.init_place_before, init_expr, scope);
+      }
     }
   }
 
-  void writeInfoToGPULower(const AllocationInformation& allocation) {
+  // Sends alloc_expr, info.has_halo, info.allocation_domains to GpuLower
+  void writeInfoToGPULower(
+      const AllocationInformation& allocation,
+      kir::Allocate* alloc_expr) {
     auto& lower_alloc_info_map = GpuLower::current()->localAllocationInfoMap();
-    if (allocation.alloc_expr == nullptr) {
+    if (alloc_expr == nullptr) {
       // Skip output allocation.
       return;
     }
     TORCH_INTERNAL_ASSERT(
-        !lower_alloc_info_map.count(allocation.alloc_expr),
+        !lower_alloc_info_map.count(alloc_expr),
         "duplicated allocation info entry");
 
     // Create info entry for GPULower
     auto lower_alloc_info_ptr = std::make_unique<LocalAllocationInfo>();
-    lower_alloc_info_ptr->alloc_expr = allocation.alloc_expr;
+    lower_alloc_info_ptr->alloc_expr = alloc_expr;
     lower_alloc_info_ptr->has_halo = allocation.has_halo;
     if (allocation.allocation_domains) {
       lower_alloc_info_ptr->alloc_domains = *(allocation.allocation_domains);
     }
 
     // Write entry to the stored map
-    lower_alloc_info_map[allocation.alloc_expr] =
-        std::move(lower_alloc_info_ptr);
+    lower_alloc_info_map[alloc_expr] = std::move(lower_alloc_info_ptr);
   }
 
   void handle(kir::IfThenElse*) final {
@@ -562,74 +582,11 @@ class AllocationInserter : public kir::KirVisitor {
 
   AllocationInserter(const std::vector<kir::Expr*>& exprs)
       : gpu_lower(GpuLower::current()), ir_builder(gpu_lower->kernel()) {
-    // Compute all allocations. Will copy const& exprs -> exprs_
-    kir::KirVisitor::handle(exprs);
-
-    // First, place allocations of dynamic smem tensors at the very
-    // beginning of the expr list. Traverse backward as they should be
-    // placed in topological order.
-    for (auto it = allocs.rbegin(); it != allocs.rend(); ++it) {
-      const auto& alloc = *it;
-      if (alloc.alloc_expr == nullptr) {
-        continue;
-      }
-      // Dynamic smem exprs need to be at the begining of the kernel outside for
-      // loops
-      if (alloc.buffer->memoryType() == MemoryType::Shared &&
-          !kir::ExpressionEvaluator::isConst(alloc.alloc_expr->size())) {
-        exprs_.insert(exprs_.begin(), alloc.alloc_expr);
-      }
-    }
-
-    // Place the remaining allocations.
-    for (const auto& alloc : allocs) {
-      if (alloc.alloc_expr == nullptr) {
-        continue;
-      }
-      if (alloc.buffer->memoryType() == MemoryType::Shared &&
-          !kir::ExpressionEvaluator::isConst(alloc.alloc_expr->size())) {
-        continue;
-      }
-      if (alloc.alloc_for_loop == nullptr) {
-        auto place_before_it =
-            std::find(exprs_.begin(), exprs_.end(), alloc.alloc_place_before);
-        TORCH_INTERNAL_ASSERT(
-            place_before_it != exprs_.end(),
-            "Could not figure out where to place allocation. ",
-            "Use of the buffer, ",
-            toString(alloc.buffer),
-            ", could not be found.",
-            toString(alloc.alloc_place_before));
-        exprs_.insert(place_before_it, alloc.alloc_expr);
-      } else {
-        alloc.alloc_for_loop->body().insert_before(
-            alloc.alloc_place_before, alloc.alloc_expr);
-      }
-    }
-
-    // Now that allocations are in place, place the initializations
-    for (const auto& alloc : allocs) {
-      if (alloc.init_expr == nullptr) {
-        continue;
-      }
-      if (alloc.init_for_loop == nullptr) {
-        auto place_before_it =
-            std::find(exprs_.begin(), exprs_.end(), alloc.init_place_before);
-        // Don't need a check here as if the allocation placement succeeded
-        // this will too
-        exprs_.insert(place_before_it, alloc.init_expr);
-      } else {
-        alloc.init_for_loop->body().insert_before(
-            alloc.init_place_before, alloc.init_expr);
-      }
-    }
+    kir::ExprMutator::traverseAndInsert(exprs);
   }
 
  private:
-  std::deque<AllocationInformation> allocs;
-
   GpuLower* gpu_lower;
-
   kir::IrBuilder ir_builder;
 
  public:

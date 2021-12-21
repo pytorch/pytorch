@@ -18,29 +18,35 @@ namespace cuda {
 
 namespace {
 
-class MisalignedVectorizationModifier : public kir::KirVisitor {
+class MisalignedVectorizationModifier : public kir::ExprMutator {
  public:
-  void process(const std::vector<kir::Expr*>& exprs) {
-    FUSER_PERF_SCOPE(
-        "GpuLower::Lower::MisalignedVectorizationModifier::process");
-    // Run through loop nests
-    // Find for-loops with misaligned vectorization domains
-    kir::KirVisitor::handle(exprs);
-  }
+  MisalignedVectorizationModifier() = delete;
 
-  const std::unordered_map<kir::Expr*, kir::Expr*>& replacementMap() const {
-    return expr_replacement_map_;
+  static std::vector<kir::Expr*> processMisalignedVectorization(
+      const std::vector<kir::Expr*>& exprs) {
+    FUSER_PERF_SCOPE("GpuLower::Lower::processMisalignedVectorization");
+    MisalignedVectorizationModifier mvm(exprs);
+    return mvm.exprs_;
   }
 
  private:
+  MisalignedVectorizationModifier(const std::vector<kir::Expr*>& exprs) {
+    FUSER_PERF_SCOPE("GpuLower::Lower::MisalignedVectorizationModifier");
+    // Run through loop nests
+    // Find for-loops with misaligned vectorization domains
+    kir::ExprMutator::traverseAndInsert(exprs);
+  }
+
   void handle(kir::ForLoop* fl) final {
+    kir::Scope* scope = scope_.empty() ? nullptr : scope_.back();
     if (containsAnyDirectChildMisalignedVectorize(fl)) {
       for_loops_.push_back(fl);
       auto new_fl = handleMisalignedVectorize(for_loops_, fl);
-      expr_replacement_map_.insert({fl, new_fl});
       for_loops_.pop_back();
+
+      kir::ExprMutator::registerReplace(fl, new_fl, scope);
     } else {
-      kir::KirVisitor::handle(fl);
+      kir::ExprMutator::handle(fl);
     }
   }
 
@@ -293,7 +299,7 @@ class MisalignedVectorizationModifier : public kir::KirVisitor {
 
     // Transfer all expressions except for-loops to new parent for-loop
     // All expressions are placed at the beginning of the new for-loop
-    moveExprsExceptForLoops(parent_for_loop, new_parent_for_loop);
+    copyExprsExceptForLoops(parent_for_loop, new_parent_for_loop);
 
     // Get the predicate for all but the last root domain
     auto pred_except_last_root_domain = ir_builder.create<kir::Predicate>(
@@ -397,7 +403,7 @@ class MisalignedVectorizationModifier : public kir::KirVisitor {
   }
 
   // Add all expressions except for loops to new parent for loop
-  void moveExprsExceptForLoops(
+  void copyExprsExceptForLoops(
       const kir::ForLoop* for_loop,
       kir::ForLoop* new_loop) {
     std::vector<kir::ForLoop*> loops;
@@ -544,30 +550,13 @@ class MisalignedVectorizationModifier : public kir::KirVisitor {
     body.push_back(namedScalar->definition());
     return namedScalar;
   }
-
- private:
-  // We will track which loops in the incoming IR will be replaced and by what
-  std::unordered_map<kir::Expr*, kir::Expr*> expr_replacement_map_;
 };
 
 } // namespace
 
 std::vector<kir::Expr*> processMisalignedVectorization(
-    Fusion* fusion,
     const std::vector<kir::Expr*>& exprs) {
-  FUSER_PERF_SCOPE("GpuLower::Lower::processMisalignedVectorization");
-
-  MisalignedVectorizationModifier mvm;
-  mvm.process(exprs);
-
-  std::vector<kir::Expr*> mutated_exprs;
-  mutated_exprs.reserve(exprs.size());
-  for (auto expr : exprs) {
-    mutated_exprs.push_back(
-        ir_utils::applyReplacements(mvm.replacementMap(), expr));
-  }
-
-  return mutated_exprs;
+  return MisalignedVectorizationModifier::processMisalignedVectorization(exprs);
 }
 
 bool containsAnyDirectChildMisalignedVectorize(const kir::ForLoop* fl) {

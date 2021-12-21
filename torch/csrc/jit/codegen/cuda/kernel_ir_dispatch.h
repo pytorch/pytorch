@@ -147,7 +147,7 @@ class TORCH_CUDA_CU_API OptInDispatch : public OptOutDispatch {
 // of the provided expressions to make it safe to insert/delete nodes.
 //
 // Provides a simple base class to inherit from for typical kir passes
-class KirVisitor : public OptOutDispatch {
+class IrVisitor : public OptOutDispatch {
  public:
   std::vector<Expr*> handle(const std::vector<Expr*>& expr);
 
@@ -161,6 +161,73 @@ class KirVisitor : public OptOutDispatch {
   std::vector<ForLoop*> for_loops_;
   std::vector<Scope*> scope_;
   std::vector<Expr*> exprs_;
+};
+
+// Base Expr Mutator class that visits all nodes with IrVisitor, and then
+// inserts new expressions or replaces expressions based on insertion/replace
+// maps provided. These replacement maps are expected to accumulate during an
+// initial traversal, then runs an insertion based on them after the overloaded
+// traversal.
+//
+// Order of mutations may be important, mutations are ordered according to the
+// following rules:
+//   Before/After insertions are ordered as registered when reverse_order ==
+//   false,
+//
+//   Before/After insertions are in reverse order as registered when
+//   reverse_order == true,
+//
+//   Before/After insertions are done before Expr replacements, so reference for
+//   insertions must be on pre-replaced Exprs
+//
+// To place in a scope that is empty, simply provide a nullptr reference
+// Since insertions are done in order, it's possible to insert an expression in
+// an empty scope, and then use that inserted scope as a reference for
+// subsequent mutations.
+class ExprMutator : public IrVisitor {
+ protected:
+  std::vector<Expr*> traverseAndInsert(
+      const std::vector<Expr*>& expr,
+      bool reverse_order = false);
+
+  std::vector<Expr*> mutate(bool reverse_order = false);
+
+  using IrVisitor::handle;
+  // Registration function which *don't* need to be called "in place" during
+  // visiting.
+  void registerInsertBefore(Expr* reference, Expr* new_expr, Scope* scope);
+  void registerInsertAfter(Expr* reference, Expr* new_expr, Scope* scope);
+  void registerReplace(Expr* reference, Expr* new_expr, Scope* scope);
+
+  // Registration function which need to be called "in place" during visiting.
+  // I.E.
+  // if you want to insert before/after or replace an Expr, you must register
+  // when in handle(Expr*) of that expr.
+  void registerInsertBefore(Expr* reference, Expr* new_expr);
+  void registerInsertAfter(Expr* reference, Expr* new_expr);
+  void registerReplace(Expr* reference, Expr* new_expr);
+
+ private:
+  enum class MutationMode { BEFORE, AFTER, REPLACE };
+
+  void registerMutation(
+      Expr* ref,
+      Expr* new_expr,
+      Scope* scope,
+      MutationMode mode);
+
+  struct MutationInformation {
+    Expr* reference = nullptr;
+    Expr* new_expr = nullptr;
+    Scope* scope = nullptr;
+    MutationMode mode = MutationMode::BEFORE;
+  };
+
+  // Track insertions as they're registered
+  std::vector<MutationInformation> insertions_;
+
+  // Track replacements as they're registered
+  std::vector<MutationInformation> replacements_;
 };
 
 } // namespace kir

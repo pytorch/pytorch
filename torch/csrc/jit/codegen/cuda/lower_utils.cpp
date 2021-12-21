@@ -23,6 +23,7 @@ namespace cuda {
 
 namespace scope_utils {
 
+// TODO: Factor this out of lower_index.cpp and remove if possible
 std::vector<kir::ForLoop*> getLoops(kir::Expr* scope) {
   std::vector<kir::ForLoop*> loops;
   while (scope != nullptr) {
@@ -33,16 +34,6 @@ std::vector<kir::ForLoop*> getLoops(kir::Expr* scope) {
   }
   std::reverse(loops.begin(), loops.end());
   return loops;
-}
-
-void insertBefore(kir::Expr* scope, kir::Expr* ref, kir::Expr* expr) {
-  if (auto ite = dynamic_cast<kir::IfThenElse*>(scope)) {
-    ite->thenBody().insert_before(ref, expr);
-  } else if (auto for_loop = dynamic_cast<kir::ForLoop*>(scope)) {
-    for_loop->body().insert_before(ref, expr);
-  } else {
-    TORCH_INTERNAL_ASSERT(false, "Unexpected scope expression");
-  }
 }
 
 //! Create an **empty** Forloop and copy the metadata.
@@ -235,6 +226,7 @@ bool hasBlockSync(const kir::Expr* expr, const ThreadPredicateMap& pred_map) {
   return false;
 }
 
+// TODO: Remove
 kir::Expr* applyReplacements(
     const std::unordered_map<kir::Expr*, kir::Expr*>& expr_replacement_map,
     kir::Expr* expr) {

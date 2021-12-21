@@ -27,12 +27,6 @@ namespace scope_utils {
 // Primarily used in indexing, maybe could be moved there
 std::vector<kir::ForLoop*> getLoops(kir::Expr* scope);
 
-//! Insert expr in scope before ref
-//!
-//! \warning for kir::IfThenElse we implicitly insert in the "then" branch!
-//!
-void insertBefore(kir::Expr* scope, kir::Expr* ref, kir::Expr* expr);
-
 //! Create an **empty** Forloop and copy the metadata.
 kir::ForLoop* cloneForLoop(kir::IrBuilder& ir_builder, kir::ForLoop* for_loop);
 

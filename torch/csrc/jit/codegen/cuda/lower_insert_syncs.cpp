@@ -69,18 +69,21 @@ class SmemAllocMap {
 };
 
 //! Insert WAR sync for a given ForLoop
-class LocalSyncInserterForLoop : public kir::KirVisitor {
-  using kir::KirVisitor::handle;
+//! TODO: Rewrite pass to be a bit more naturally expressed, right now requires
+//! an odd WAR to prevent an infinite loop.
+class LocalSyncInserterForLoop : public kir::ExprMutator {
+  using kir::ExprMutator::handle;
   using TvSet = std::unordered_set<const kir::TensorView*>;
 
  public:
   //! Insert Sync nodes at the end of a given for-loop when a WAR
   //! hazard may happen.
   LocalSyncInserterForLoop(kir::ForLoop* fl, SmemAllocMap& alloc_map)
-      : alloc_map_(alloc_map) {
-    for (auto expr : fl->body().exprs()) {
-      handle(expr);
-    }
+      : base_fl_(fl), alloc_map_(alloc_map) {
+    // Converting to a vector of expr allows ExprMutator to register fl as its
+    // "exprs_" which is used in mutate()
+    std::vector<kir::Expr*> fl_vec{fl};
+    kir::ExprMutator::handle(fl_vec);
 
     // No need to insert sync when the loop is not actually generated
     if (fl->iter_domain()->isThread() || fl->iter_domain()->isBroadcast()) {
@@ -95,12 +98,21 @@ class LocalSyncInserterForLoop : public kir::KirVisitor {
     //
     if (detectIntersection(initial_, final_) &&
         !fl->body().exprs().back()->isA<kir::Sync>() && !is_last_op_sync_) {
+      TORCH_INTERNAL_ASSERT(
+          !fl->body().empty(), "Shouldn't insert WAR sync on empty loop.");
       kir::IrBuilder ir_builder(GpuLower::current()->kernel());
-      fl->body().push_back(ir_builder.create<kir::Sync>(true));
+      kir::ExprMutator::registerInsertAfter(
+          fl->body().exprs().back(),
+          ir_builder.create<kir::Sync>(true),
+          &fl->body());
       initial_sync_ = true;
       is_last_op_sync_ = true;
       final_.clear();
     }
+
+    // Since this operates directly on for loops, mutate is efectively done in
+    // place.
+    kir::ExprMutator::mutate();
   }
 
   const auto& initial() const {
@@ -135,7 +147,7 @@ class LocalSyncInserterForLoop : public kir::KirVisitor {
       addOutputSmemTvs(expr, all_smem_outputs_);
       addInputSmemTvs(expr, all_smem_inputs_);
     } else {
-      kir::KirVisitor::handle(expr);
+      kir::ExprMutator::handle(expr);
     }
   }
 
@@ -150,6 +162,11 @@ class LocalSyncInserterForLoop : public kir::KirVisitor {
   }
 
   void handle(kir::ForLoop* fl) final {
+    if (fl == base_fl_) {
+      kir::ExprMutator::handle(fl);
+      return;
+    }
+
     LocalSyncInserterForLoop child_sync_inserter(fl, alloc_map_);
 
     const auto& child_inputs = child_sync_inserter.all_smem_inputs();
@@ -233,6 +250,10 @@ class LocalSyncInserterForLoop : public kir::KirVisitor {
   }
 
  private:
+  // Track which for loop was passed to the constructor to prevent recursive
+  // entrance. WAR for how this pass is structured.
+  const kir::ForLoop* base_fl_;
+
   //! Allocation map of SMEM buffers
   SmemAllocMap& alloc_map_;
 
@@ -287,13 +308,13 @@ class LocalSyncInserter {
   SmemAllocMap alloc_map_;
 };
 
-class ExprFlattener : private kir::KirVisitor {
+class ExprFlattener : private kir::IrVisitor {
  private:
-  using kir::KirVisitor::handle;
+  using kir::IrVisitor::handle;
 
   void handle(kir::Expr* expr) final {
     if (expr->isA<kir::ForLoop>() || expr->isA<kir::IfThenElse>()) {
-      kir::KirVisitor::handle(expr);
+      kir::IrVisitor::handle(expr);
     } else {
       flat_exprs_.push_back(expr);
     }
@@ -314,7 +335,7 @@ class ExprFlattener : private kir::KirVisitor {
   }
 };
 
-class ValidatePlacementAfterWrites : private kir::KirVisitor {
+class ValidatePlacementAfterWrites : private kir::IrVisitor {
  public:
   //! Validate no expr in writes found under loop
   static void validate(
@@ -325,14 +346,14 @@ class ValidatePlacementAfterWrites : private kir::KirVisitor {
   }
 
  private:
-  using kir::KirVisitor::handle;
+  using kir::IrVisitor::handle;
 
   ValidatePlacementAfterWrites(const std::unordered_set<kir::Expr*>& writes)
       : writes_(writes) {}
 
   void handle(kir::Expr* expr) final {
     if (expr->isA<kir::ForLoop>() || expr->isA<kir::IfThenElse>()) {
-      kir::KirVisitor::handle(expr);
+      kir::IrVisitor::handle(expr);
     } else {
       TORCH_INTERNAL_ASSERT(
           writes_.find(expr) == writes_.end(),
@@ -345,9 +366,9 @@ class ValidatePlacementAfterWrites : private kir::KirVisitor {
   const std::unordered_set<kir::Expr*>& writes_;
 };
 
-class ReadAfterWriteSyncs : public kir::KirVisitor {
+class ReadAfterWriteSyncs : public kir::ExprMutator {
  private:
-  using kir::KirVisitor::handle;
+  using kir::ExprMutator::handle;
 
   //! Traverse up the loop stack from loops_it and if a halo loop is
   //! found, place a given sync expr before the outer-most halo loop.
@@ -391,7 +412,8 @@ class ReadAfterWriteSyncs : public kir::KirVisitor {
       exprs_.insert(place_before_it, sync_expr);
     } else {
       auto place_in = *(halo_loop_it - 1);
-      place_in->body().insert_before(halo_loop, sync_expr);
+      kir::ExprMutator::registerInsertBefore(
+          halo_loop, sync_expr, &place_in->body());
     }
 
     return true;
@@ -399,7 +421,7 @@ class ReadAfterWriteSyncs : public kir::KirVisitor {
 
   void handle(kir::Expr* expr) final {
     if (!ir_utils::isTVOp(expr) || expr->isA<kir::Allocate>()) {
-      kir::KirVisitor::handle(expr);
+      kir::ExprMutator::handle(expr);
       return;
     }
 
@@ -434,7 +456,8 @@ class ReadAfterWriteSyncs : public kir::KirVisitor {
             "Tried to place after, ",
             toString(place_after),
             ", but could not find this expression at the global scope.");
-        exprs_.insert(place_after_it + 1, sync_expr);
+
+        registerInsertAfter(*(place_after_it + 1), sync_expr, nullptr);
       } else {
         // Find the last loop in computeAt of out_tv, this is the loop where we
         // would place an allocation for out_tv
@@ -474,7 +497,7 @@ class ReadAfterWriteSyncs : public kir::KirVisitor {
           place_after = *(loops_it + 1);
         }
 
-        place_in->body().insert_after(place_after, sync_expr);
+        registerInsertAfter(place_after, sync_expr, &place_in->body());
       }
     }
   }
@@ -543,7 +566,7 @@ class ReadAfterWriteSyncs : public kir::KirVisitor {
       prev_tv_expr = expr;
     }
 
-    kir::KirVisitor::handle(_exprs);
+    kir::ExprMutator::traverseAndInsert(_exprs);
 
     TORCH_INTERNAL_ASSERT(
         sync_after_.empty(), "Didn't place all required syncs.");

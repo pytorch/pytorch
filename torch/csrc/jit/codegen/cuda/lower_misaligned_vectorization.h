@@ -107,7 +107,6 @@ namespace cuda {
 //! }
 //!
 std::vector<kir::Expr*> processMisalignedVectorization(
-    Fusion* fusion,
     const std::vector<kir::Expr*>& exprs);
 
 bool containsAnyDirectChildMisalignedVectorize(const kir::ForLoop* fl);

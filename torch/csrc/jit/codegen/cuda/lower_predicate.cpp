@@ -23,20 +23,24 @@ namespace cuda {
 
 namespace {
 
-class ConditionalFromPredicateModifier : public kir::KirVisitor {
+class ConditionalFromPredicateModifier : public kir::IrVisitor {
  public:
-  ConditionalFromPredicateModifier(const std::vector<kir::Expr*>& exprs) {
-    FUSER_PERF_SCOPE(
-        "GpuLower::Lower::ConditionalFromPredicateModifier::process");
-    kir::KirVisitor::handle(exprs);
-  }
+  ConditionalFromPredicateModifier() = delete;
 
-  const std::unordered_map<kir::Expr*, kir::Expr*>& replacementMap() const {
-    return expr_replacement_map_;
+  static std::vector<kir::Expr*> fillPredicates(
+      const std::vector<kir::Expr*>& exprs) {
+    ConditionalFromPredicateModifier cfpm(exprs);
+    return cfpm.exprs_;
   }
 
  private:
-  using kir::KirVisitor::handle;
+  ConditionalFromPredicateModifier(const std::vector<kir::Expr*>& exprs) {
+    FUSER_PERF_SCOPE(
+        "GpuLower::Lower::ConditionalFromPredicateModifier::process");
+    kir::IrVisitor::handle(exprs);
+  }
+
+  using kir::IrVisitor::handle;
 
   void handle(kir::Expr* expr) final {
     if (expr != nullptr && expr->predicate() != nullptr) {
@@ -48,7 +52,7 @@ class ConditionalFromPredicateModifier : public kir::KirVisitor {
       setWritePredicate(expr, conditional);
     }
 
-    kir::KirVisitor::handle(expr);
+    kir::IrVisitor::handle(expr);
   }
 
   void setWritePredicate(kir::Expr* expr, kir::Bool* read_cond) {
@@ -78,7 +82,7 @@ class ConditionalFromPredicateModifier : public kir::KirVisitor {
       ite->predicate()->setValue(conditional);
       TORCH_INTERNAL_ASSERT(ite->predicate()->value() != nullptr);
     }
-    kir::KirVisitor::handle(ite);
+    kir::IrVisitor::handle(ite);
   }
 
   // Generate conditional according to PredicateType
@@ -121,29 +125,13 @@ class ConditionalFromPredicateModifier : public kir::KirVisitor {
     }
     return nullptr;
   }
-
- private:
-  // We will track which loops in the incoming IR will be replaced and by what
-  std::unordered_map<kir::Expr*, kir::Expr*> expr_replacement_map_;
 };
 
 } // namespace
 
 std::vector<kir::Expr*> generateConditionalFromPredicate(
-    Fusion* fusion,
     const std::vector<kir::Expr*>& exprs) {
-  FUSER_PERF_SCOPE("GpuLower::Lower::generateConditionalFromPredicate");
-
-  ConditionalFromPredicateModifier p2cm(exprs);
-
-  std::vector<kir::Expr*> mutated_exprs;
-  mutated_exprs.reserve(exprs.size());
-  for (auto expr : exprs) {
-    mutated_exprs.push_back(
-        ir_utils::applyReplacements(p2cm.replacementMap(), expr));
-  }
-
-  return mutated_exprs;
+  return ConditionalFromPredicateModifier::fillPredicates(exprs);
 }
 
 namespace {

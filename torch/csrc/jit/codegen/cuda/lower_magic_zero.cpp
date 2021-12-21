@@ -13,7 +13,7 @@ namespace cuda {
 
 namespace {
 
-class MagicZeroInserter : public kir::KirVisitor {
+class MagicZeroInserter : public kir::ExprMutator {
  public:
   static std::vector<kir::Expr*> insert(const std::vector<kir::Expr*>& exprs) {
     MagicZeroInserter inserter(exprs);
@@ -28,40 +28,25 @@ class MagicZeroInserter : public kir::KirVisitor {
 
   MagicZeroInserter(const std::vector<kir::Expr*>& exprs)
       : ir_builder(GpuLower::current()->kernel()) {
-    kir::KirVisitor::handle(exprs);
-    // exprs_ isn't copied over until kir::KirVisitor::handle is called. This
-    // will be easier once we have an insertion class as we can just mark insert
-    // before the first expr
-    exprs_.insert(exprs_.begin(), ir_builder.create<kir::InitMagicZero>());
-    insertAll();
+    TORCH_INTERNAL_ASSERT(exprs.size());
+    kir::ExprMutator::registerInsertBefore(
+        exprs.front(), ir_builder.create<kir::InitMagicZero>(), nullptr);
+    kir::ExprMutator::traverseAndInsert(exprs);
   }
 
   void handle(kir::ForLoop* fl) final {
     if (fl->isUnrolled()) {
-      kir::Scope* scope = nullptr;
-      if (!scope_.empty()) {
-        scope = scope_.back();
-      }
-      insertion_list_.push_back({scope, fl});
-    } else {
-      kir::KirVisitor::handle(fl);
-    }
-  }
-
-  void insertAll() {
-    for (const auto& info : insertion_list_) {
-      auto fl = info.fl;
-      auto scope = info.scope;
-      if (scope == nullptr) {
-        // place in global scope
-        auto loop_it = std::find(exprs_.begin(), exprs_.end(), fl);
-        TORCH_INTERNAL_ASSERT(loop_it != exprs_.end());
-        // Place after the loop
-        loop_it++;
-        exprs_.insert(loop_it, ir_builder.create<kir::UpdateMagicZero>());
+      if (scope_.empty()) {
+        kir::ExprMutator::registerInsertAfter(
+            fl, ir_builder.create<kir::UpdateMagicZero>());
       } else {
-        scope->insert_after(fl, ir_builder.create<kir::UpdateMagicZero>());
+        TORCH_INTERNAL_ASSERT(
+            scope_.back()->exprs().size(), "Not expecting an empty loop.");
+        kir::ExprMutator::registerInsertAfter(
+            fl, ir_builder.create<kir::UpdateMagicZero>(), scope_.back());
       }
+    } else {
+      kir::ExprMutator::handle(fl);
     }
   }
 

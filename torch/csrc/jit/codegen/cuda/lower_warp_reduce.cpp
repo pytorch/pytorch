@@ -190,7 +190,7 @@ class EliminateDeadBroadcastAndAllocate {
 //!
 //!   3. EliminateDeadBroadcastAndAllocate removes the broadcast ops
 //!    and corresponding allocations if they're un-used after step 2.
-class FuseBroadcastWithWarpReduce : private kir::KirVisitor {
+class FuseBroadcastWithWarpReduce : private kir::IrVisitor {
  public:
   static std::vector<kir::Expr*> fuse(const std::vector<kir::Expr*>& exprs) {
     FuseBroadcastWithWarpReduce fuse_broadcast_map(exprs);
@@ -211,7 +211,7 @@ class FuseBroadcastWithWarpReduce : private kir::KirVisitor {
             std::unordered_map<kir::TensorView*, kir::Allocate*>>());
     running_visible_allocation_stack_.emplace_back(
         std::make_unique<std::vector<kir::Allocate*>>());
-    kir::KirVisitor::handle(exprs);
+    kir::IrVisitor::handle(exprs);
   }
 
   void handle(kir::Expr* expr) final {
@@ -302,7 +302,7 @@ class FuseBroadcastWithWarpReduce : private kir::KirVisitor {
     return c10::nullopt;
   }
 
-  //! Iteratve backwards on the currently visible loop scopes
+  //! Iterate backwards on the currently visible loop scopes
   //!  and find the first allocation corresponding to the
   //!  given tv.
   kir::Allocate* getActiveAllocateFor(kir::TensorView* tv) {

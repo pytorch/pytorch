@@ -14,7 +14,6 @@ namespace cuda {
 //! Update predicates with valid bool conditionals
 //!
 std::vector<kir::Expr*> generateConditionalFromPredicate(
-    Fusion* fusion,
     const std::vector<kir::Expr*>& exprs);
 
 class TORCH_CUDA_CU_API PredicateElimination : public IterVisitor {
