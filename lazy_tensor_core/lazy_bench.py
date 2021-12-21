@@ -581,11 +581,14 @@ if __name__ == "__main__" :
         launch_command = f"python {' '.join(copy_argv)} --run_in_subprocess '{model_name}' --output_dir={dirpath}"
         env = os.environ
         env["LTC_TS_CUDA"] = "1"
-
-        rc = subprocess.run(launch_command,
-                    env=env,
-                    shell=True,
-                    stderr=subprocess.STDOUT)
+        try:
+            rc = subprocess.run(launch_command,
+                        env=env,
+                        timeout = 60 * 5,
+                        shell=True,
+                        stderr=subprocess.STDOUT)
+        except subprocess.TimeoutExpired:
+            print(f"{model_name} timed out after 5 minutes! Include it in SKIP or SKIP_TRAIN_ONLY")
 
     merge_with_prefix("lazy_overheads_", dirpath, args.output_dir)
     merge_with_prefix("lazy_compute_", dirpath, args.output_dir)
