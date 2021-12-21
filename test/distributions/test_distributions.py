@@ -496,7 +496,7 @@ EXAMPLES = [
         },
         {
             'covariance_matrix': torch.tensor([[5.0, -0.5], [-0.5, 1.5]]),
-            'df': torch.tensor(2.0),
+            'df': 2.0,
         },
     ]),
     Example(MixtureSameFamily, [
@@ -777,7 +777,7 @@ BAD_EXAMPLES = [
         },
         {
             'covariance_matrix': torch.tensor([[1.0, 1.0], [1.0, -2.0]], requires_grad=True),
-            'df': torch.tensor(3., requires_grad=True),
+            'df': 3.,
         },
     ]),
     Example(ContinuousBernoulli, [
