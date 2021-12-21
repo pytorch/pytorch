@@ -7,17 +7,63 @@ import unittest
 
 import onnx
 import torch
+from torch.testing._internal.common_utils import instantiate_parametrized_tests, parametrize
 from torch import Tensor
 from torch.onnx import symbolic_helper
 
 from typing import Optional, Type
 
-class TestONNXNoRuntime(unittest.TestCase):
-    def run_optional_output_test(self, module_class: Type[torch.nn.Module]):
+
+class TestOptionalOutput(unittest.TestCase):
+
+    class IfNoneInput(torch.nn.Module):
+        def forward(self, x) -> Optional[Tensor]:
+            y: Optional[Tensor] = None
+            if x.size(0) > 1:
+                y = x
+            return y
+
+    class IfNoneOutput(torch.nn.Module):
+        def forward(self, x) -> Optional[Tensor]:
+            y: Optional[Tensor] = x
+            if x.size(0) > 1:
+                y = None
+            return y
+
+
+    class LoopNoneInput(torch.nn.Module):
+        def forward(self, x) -> Optional[Tensor]:
+            y: Optional[Tensor] = None
+            for _ in range(x.size(0)):
+                y = x
+            return y
+
+    class LoopNoneOutput(torch.nn.Module):
+        def forward(self, x) -> Optional[Tensor]:
+            y: Optional[Tensor] = x
+            for _ in range(x.size(0)):
+                y = None
+            return y
+
+
+    @parametrize(
+        "module_class,x_size",
+        ((IfNoneInput, 0),
+         (IfNoneInput, 1),
+         (IfNoneOutput, 0),
+         (IfNoneOutput, 1),
+         (LoopNoneInput, 0),
+         (LoopNoneInput, 1),
+         (LoopNoneOutput, 0),
+         (LoopNoneOutput, 1),
+         ),
+        name_fn=lambda module_class, x_size: f"{module_class.__name__}_{x_size}",
+    )
+    def test_optional_output(self, module_class: Type[torch.nn.Module], x_size: int):
         # Need scripting to preserve control flow for this test to be meaningful.
         model = torch.jit.script(module_class())
         f = io.BytesIO()
-        x = torch.ones(1)
+        x = torch.ones(x_size)
         torch.onnx.export(
             model, (x,), f, opset_version=15,
             # Ensure condition is not constant
@@ -33,45 +79,9 @@ class TestONNXNoRuntime(unittest.TestCase):
             symbolic_helper.scalar_type_to_onnx[symbolic_helper.scalar_type_to_pytorch_type.index(x.dtype)])
         self.assertEqual(len(output_0_tensor_type.shape.dim), len(x.shape))
 
-    def test_loop_none_output(self):
-        class Model(torch.nn.Module):
-            def forward(self, x) -> Optional[Tensor]:
-                y: Optional[Tensor] = x
-                for _ in range(x.size(0)):
-                    y = None
-                return y
 
-        self.run_optional_output_test(Model)
 
-    def test_loop_none_input(self):
-        class Model(torch.nn.Module):
-            def forward(self, x) -> Optional[Tensor]:
-                y: Optional[Tensor] = None
-                for _ in range(x.size(0)):
-                    y = x
-                return y
-
-        self.run_optional_output_test(Model)
-
-    def test_if_none_output(self):
-        class Model(torch.nn.Module):
-            def forward(self, x) -> Optional[Tensor]:
-                y: Optional[Tensor] = x
-                if x.size(0) > 1:
-                    y = None
-                return y
-
-        self.run_optional_output_test(Model)
-
-    def test_if_none_input(self):
-        class Model(torch.nn.Module):
-            def forward(self, x) -> Optional[Tensor]:
-                y: Optional[Tensor] = None
-                if x.size(0) > 1:
-                    y = x
-                return y
-
-        self.run_optional_output_test(Model)
+instantiate_parametrized_tests(TestOptionalOutput)
 
 
 if __name__ == "__main__":
