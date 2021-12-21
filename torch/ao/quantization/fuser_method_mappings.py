@@ -118,6 +118,29 @@ def fuse_linear_bn(is_qat, linear, bn):
     else:
         return nn.utils.fusion.fuse_linear_bn_eval(linear, bn)
 
+def fuse_convtranspose_bn(is_qat, convt, bn):
+    r"""Given ConvTranspose and bn modules, fuses them and returns the fused module
+
+    Args:
+        convt: Module instance of type ConvTransposeNd
+        bn: BatchNormNd instance that needs to be fused with the linear layer.
+            batch norm N should match the ConvTranspose N
+
+    Examples::
+
+        >>> m1 = nn.ConvTranspose2d(10, 20, 3)
+        >>> b1 = nn.BatchNorm2d(20)
+        >>> m2 = fuse_convtranspose_bn(m1, b1)
+    """
+    assert(convt.training == bn.training),\
+        "ConvTranspose and BN both must be in the same mode (train or eval)."
+
+    if is_qat:
+        assert convt.training, "qat is only supported when convt.training is True currently"
+        raise Exception("Fusing ConvTranspose+BatchNorm not yet supported in training.")
+    else:
+        return nn.utils.fusion.fuse_conv_bn_eval(convt, bn, transpose=True)
+
 def sequential_wrapper2(sequential):
     """ Given a sequential class for two modules, return a function that takes
     is_qat, and then two modules as argument, that ignores the is_qat flag
@@ -141,6 +164,9 @@ DEFAULT_OP_LIST_TO_FUSER_METHOD: Dict[Tuple, Union[nn.Sequential, Callable]] = {
     (nn.Linear, nn.ReLU): sequential_wrapper2(nni.LinearReLU),
     (nn.BatchNorm2d, nn.ReLU): sequential_wrapper2(nni.BNReLU2d),
     (nn.BatchNorm3d, nn.ReLU): sequential_wrapper2(nni.BNReLU3d),
+    (nn.ConvTranspose1d, nn.BatchNorm1d): fuse_convtranspose_bn,
+    (nn.ConvTranspose2d, nn.BatchNorm2d): fuse_convtranspose_bn,
+    (nn.ConvTranspose3d, nn.BatchNorm3d): fuse_convtranspose_bn,
 }
 
 def get_fuser_method(op_list, additional_fuser_method_mapping=None):
@@ -190,6 +216,9 @@ DEFAULT_PATTERN_TO_FUSER_METHOD: Dict[Pattern, Union[nn.Sequential, Callable]] =
     (nn.ReLU, nn.Linear): reverse_sequential_wrapper2(nni.LinearReLU),
     (nn.ReLU, nn.BatchNorm2d): reverse_sequential_wrapper2(nni.BNReLU2d),
     (nn.ReLU, nn.BatchNorm3d): reverse_sequential_wrapper2(nni.BNReLU3d),
+    (nn.BatchNorm1d, nn.ConvTranspose1d): reverse2(fuse_convtranspose_bn),
+    (nn.BatchNorm2d, nn.ConvTranspose2d): reverse2(fuse_convtranspose_bn),
+    (nn.BatchNorm3d, nn.ConvTranspose3d): reverse2(fuse_convtranspose_bn),
 }
 
 def get_fuser_method_new(

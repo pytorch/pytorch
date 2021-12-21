@@ -15,8 +15,8 @@ from .pattern_utils import (
     get_default_fusion_patterns,
 )
 
-from .backend_config_dict.utils import get_fusion_pattern_to_fuse_handler_cls
-from .backend_config_dict.utils import get_fuser_method_mapping
+from .backend_config.utils import get_fusion_pattern_to_fuse_handler_cls
+from .backend_config.utils import get_fuser_method_mapping
 
 from .fusion_patterns import *  # noqa: F401,F403
 
