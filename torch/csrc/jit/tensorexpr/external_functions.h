@@ -43,14 +43,20 @@
 namespace torch {
 namespace jit {
 namespace tensorexpr {
-
+struct QIData final {
+  double scale;
+  int64_t zero;
+  c10::ScalarType scalarType;
+};
 std::vector<at::Tensor> constructTensors(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
     int64_t* buf_strides,
-    int8_t* buf_dtypes);
+    int8_t* buf_dtypes,
+    c10::optional<std::vector<std::pair<size_t, QIData>>> qdataArg =
+        c10::nullopt);
 
 #ifdef C10_MOBILE
 extern "C" {
