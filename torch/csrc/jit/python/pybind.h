@@ -2,8 +2,8 @@
 
 #include <torch/csrc/python_headers.h>
 
-#include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
+#include <ATen/core/symbol.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/THP.h>
