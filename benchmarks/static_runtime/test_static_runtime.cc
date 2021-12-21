@@ -2210,6 +2210,21 @@ TEST(StaticRuntime, Split) {
   testStaticRuntime(src, {a, 2, -1}, {b, 2, 2});
 }
 
+TEST(StaticRuntime, SplitWithSizes) {
+  const auto src = R"JIT(
+    def forward(self, inp, split_sizes: List[int], dim: int):
+        return inp.split(split_sizes, dim)
+  )JIT";
+
+  const auto a = at::randn({2, 2});
+  const auto b = at::randn({2, 2, 2});
+  const auto split_sizes = c10::List<int64_t>{1, 1};
+
+  testStaticRuntime(src, {a, split_sizes, 0});
+  testStaticRuntime(src, {a, split_sizes, 1});
+  testStaticRuntime(src, {a, split_sizes, -1}, {b, split_sizes, 2});
+}
+
 namespace {
 
 void maybe_throw(bool should_throw) {
