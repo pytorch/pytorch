@@ -404,9 +404,11 @@ __host__ __device__
 #if !defined(__clang__) && !defined(_MSC_VER) && defined(__GNUC__) && \
     __GNUC__ < 6
 #define CONSTEXPR_EXCEPT_GCC5
+#define CONSTEXPR_EXCEPT_GCC5_STATIC static
 #define IS_NOT_GCC5_CONSTEXPR 0
 #else
 #define CONSTEXPR_EXCEPT_GCC5 constexpr
+#define CONSTEXPR_EXCEPT_GCC5_STATIC constexpr
 #define IS_NOT_GCC5_CONSTEXPR 1
 #endif
 

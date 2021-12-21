@@ -113,7 +113,7 @@ offsetsAndMasks() {
 // See Note [Alias Dispatch Keys]
 
 // An undefined tensor is one with an empty tensor type set.
-class C10_API DispatchKeySet final {
+class DispatchKeySet final {
  public:
   enum Full { FULL };
   enum FullAfter { FULL_AFTER };
@@ -127,7 +127,7 @@ class C10_API DispatchKeySet final {
       //: repr_(std::numeric_limits<decltype(repr_)>::max()) {}
       : repr_((1ULL << (static_cast<uint8_t>(DispatchKey::EndOfFunctionalityKeys) - 1)) - 1) {}
 
-  constexpr DispatchKeySet(FullAfter, DispatchKey t)
+  CONSTEXPR_EXCEPT_GCC5_STATIC DispatchKeySet(FullAfter, DispatchKey t)
       // LSB after t are OK, but not t itself.
       : repr_((1ULL << (static_cast<uint8_t>(t) - 1)) - 1) {
     // "functionalities" have a notion of ordering (e.g. Autograd > Sparse > Quantized > Dense).
@@ -142,7 +142,7 @@ class C10_API DispatchKeySet final {
   // must be explicit when they do this!
   constexpr DispatchKeySet(Raw, uint64_t x) : repr_(x) {}
 
-  constexpr explicit DispatchKeySet(DispatchKey k) {
+  CONSTEXPR_EXCEPT_GCC5_STATIC explicit DispatchKeySet(DispatchKey k) {
     if (k == DispatchKey::Undefined) {
       // Case 1: handle Undefined specifically
       repr_ = 0;
@@ -185,7 +185,7 @@ class C10_API DispatchKeySet final {
 
   }
 
-  explicit constexpr DispatchKeySet(std::initializer_list<DispatchKey> ks)
+  explicit CONSTEXPR_EXCEPT_GCC5_STATIC DispatchKeySet(std::initializer_list<DispatchKey> ks)
       : repr_(0) {
     for (auto k : ks) {
       repr_ |= DispatchKeySet(k).repr_;
@@ -193,7 +193,7 @@ class C10_API DispatchKeySet final {
   }
 
   // Test if a DispatchKey is in the set
-  constexpr bool has(DispatchKey t) const {
+  CONSTEXPR_EXCEPT_GCC5_STATIC bool has(DispatchKey t) const {
 #ifdef NDEBUG
   if (t == DispatchKey::Undefined) {
     throw std::invalid_argument("DispatchKeySet::has() called with Undefined key");
@@ -277,7 +277,7 @@ class C10_API DispatchKeySet final {
   // Only functionality bits are allowed to be removed from a keyset.
   // This is generally not an operation you should be doing
   // (it's used to implement operator<<)
-  C10_NODISCARD constexpr DispatchKeySet removeFunctionalityKey(DispatchKey t) const {
+  CONSTEXPR_EXCEPT_GCC5_STATIC DispatchKeySet removeFunctionalityKey(DispatchKey t) const {
     // For now, we're only allowing removal of "functionality bits" from the keyset,
     // which is specifically needed by the fallthrough key calculation logic.
     // Why is removing backend bits problematic? Consider this example:
@@ -304,7 +304,7 @@ class C10_API DispatchKeySet final {
     auto functionality_k =  toFunctionalityKey(t);
     return DispatchKeySet(repr_ & ~DispatchKeySet(functionality_k).repr_);
   }
-  constexpr DispatchKeySet removeFunctionalityKeys(DispatchKeySet ks) const {
+  CONSTEXPR_EXCEPT_GCC5_STATIC DispatchKeySet removeFunctionalityKeys(DispatchKeySet ks) const {
 //#ifdef NDEBUG
     if ((ks.repr_ & full_backend_mask) != 0) {
       throw std::invalid_argument("DispatchKeySet::removeFunctionalitykeys() called with backends bits set");
@@ -477,33 +477,33 @@ C10_API std::ostream& operator<<(std::ostream&, DispatchKeySet);
 // autograd_dispatch_keyset should include all runtime autograd keys.
 // Alias key DispatchKey::Autograd maps to autograd_dispatch_keyset.
 // NB: keys in this set also get associated with CompositeImplicitAutograd
-constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
+CONSTEXPR_EXCEPT_GCC5_STATIC DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
         DispatchKey::AutogradFunctionality,
         DispatchKey::AutogradOther,
     }) | DispatchKeySet(DispatchKeySet::RAW, full_backend_mask);
 
-constexpr DispatchKeySet autocast_dispatch_keyset = DispatchKeySet({
+CONSTEXPR_EXCEPT_GCC5_STATIC DispatchKeySet autocast_dispatch_keyset = DispatchKeySet({
         DispatchKey::AutocastCPU,
         DispatchKey::AutocastCUDA,
     });
 
 // See Note [TLS Initialization]
-constexpr DispatchKeySet default_included_set = DispatchKeySet({
+CONSTEXPR_EXCEPT_GCC5_STATIC DispatchKeySet default_included_set = DispatchKeySet({
         DispatchKey::BackendSelect,
         DispatchKey::ADInplaceOrView,
     });
 
-constexpr DispatchKeySet default_excluded_set = DispatchKeySet({
+CONSTEXPR_EXCEPT_GCC5_STATIC DispatchKeySet default_excluded_set = DispatchKeySet({
         DispatchKey::AutocastCPU,
         DispatchKey::AutocastCUDA,
     });
 
-constexpr DispatchKeySet autograd_dispatch_keyset_with_ADInplaceOrView =
+CONSTEXPR_EXCEPT_GCC5_STATIC DispatchKeySet autograd_dispatch_keyset_with_ADInplaceOrView =
         autograd_dispatch_keyset | DispatchKeySet(DispatchKey::ADInplaceOrView);
 
 // backend dispatch keys that map to DispatchKey::AutogradOther
 // NB: keys in this set also get associated with CompositeImplicitAutograd
-constexpr DispatchKeySet autogradother_backends = DispatchKeySet(
+CONSTEXPR_EXCEPT_GCC5_STATIC DispatchKeySet autogradother_backends = DispatchKeySet(
         // TODO: delete commented code before landing.
         // HIP and VE now have their own backend bits, which means that
         // they can now have their own Autograd keys.
@@ -524,16 +524,16 @@ constexpr DispatchKeySet autogradother_backends = DispatchKeySet(
 // The set of dispatch keys that come after autograd
 // n.b. this relies on the fact that AutogradOther is currently the lowest
 // Autograd key
-constexpr DispatchKeySet after_autograd_keyset =
+CONSTEXPR_EXCEPT_GCC5_STATIC DispatchKeySet after_autograd_keyset =
         DispatchKeySet(DispatchKeySet::FULL_AFTER, c10::DispatchKey::AutogradOther);
 
 // The set of dispatch keys that come after ADInplaceOrView
-constexpr DispatchKeySet after_ADInplaceOrView_keyset = DispatchKeySet(
+CONSTEXPR_EXCEPT_GCC5_STATIC DispatchKeySet after_ADInplaceOrView_keyset = DispatchKeySet(
         DispatchKeySet::FULL_AFTER,
         c10::DispatchKey::ADInplaceOrView);
 
 // The set of dispatch keys that come after Functionalize
-constexpr DispatchKeySet after_func_keyset =
+CONSTEXPR_EXCEPT_GCC5_STATIC DispatchKeySet after_func_keyset =
         DispatchKeySet(DispatchKeySet::FULL_AFTER, c10::DispatchKey::Functionalize)
             .removeFunctionalityKey(
                 // NOTE: we also need to remove ADInplaceOrView from the keyset when
@@ -554,7 +554,7 @@ constexpr DispatchKeySet after_func_keyset =
 // backend_dispatch_keyset NestedTensor has been explicitly removed due to
 // incompatibility with some kernels, such as structured kernels, that use the
 // DefaultBackend key.
-constexpr DispatchKeySet backend_dispatch_keyset = autogradother_backends |
+CONSTEXPR_EXCEPT_GCC5_STATIC DispatchKeySet backend_dispatch_keyset = autogradother_backends |
         DispatchKeySet(DispatchKeySet::RAW, full_backend_mask) |
         DispatchKeySet({
             DispatchKey::Dense,
@@ -565,26 +565,26 @@ constexpr DispatchKeySet backend_dispatch_keyset = autogradother_backends |
 // math_dispatch_keyset contains all keys in backend_dispatch_keyset and
 // autograd_dispatch_keyset Alias key DispatchKey::CompositeImplicitAutograd
 // maps to math_dispatch_keyset.
-constexpr DispatchKeySet math_dispatch_keyset =
+CONSTEXPR_EXCEPT_GCC5_STATIC DispatchKeySet math_dispatch_keyset =
         backend_dispatch_keyset | autograd_dispatch_keyset;
 
 constexpr DispatchKeySet backend_bitset_mask = DispatchKeySet(
     DispatchKeySet::RAW,
     (1ULL << (static_cast<uint8_t>(DispatchKey::EndOfBackendKeys) + 1)) - 1);
 
-constexpr auto inplace_or_view_ks = DispatchKeySet(DispatchKey::ADInplaceOrView);
-constexpr auto autograd_cpu_ks = DispatchKeySet(DispatchKey::AutogradCPU);
-constexpr auto autograd_xpu_ks = DispatchKeySet(DispatchKey::AutogradXPU);
-constexpr auto autograd_cuda_ks = DispatchKeySet(DispatchKey::AutogradCUDA);
-constexpr auto autograd_xla_ks = DispatchKeySet(DispatchKey::AutogradXLA);
-constexpr auto autograd_lazy_ks = DispatchKeySet(DispatchKey::AutogradLazy);
-constexpr auto autograd_mlc_ks = DispatchKeySet(DispatchKey::AutogradMLC);
-constexpr auto autograd_hpu_ks = DispatchKeySet(DispatchKey::AutogradHPU);
-constexpr auto autograd_nestedtensor_ks = DispatchKeySet(DispatchKey::AutogradNestedTensor);
-constexpr auto autograd_privateuse1_ks = DispatchKeySet(DispatchKey::AutogradPrivateUse1);
-constexpr auto autograd_privateuse2_ks = DispatchKeySet(DispatchKey::AutogradPrivateUse2);
-constexpr auto autograd_privateuse3_ks = DispatchKeySet(DispatchKey::AutogradPrivateUse3);
-constexpr auto autograd_other_ks = DispatchKeySet(DispatchKey::AutogradOther);
+CONSTEXPR_EXCEPT_GCC5_STATIC auto inplace_or_view_ks = DispatchKeySet(DispatchKey::ADInplaceOrView);
+CONSTEXPR_EXCEPT_GCC5_STATIC auto autograd_cpu_ks = DispatchKeySet(DispatchKey::AutogradCPU);
+CONSTEXPR_EXCEPT_GCC5_STATIC auto autograd_xpu_ks = DispatchKeySet(DispatchKey::AutogradXPU);
+CONSTEXPR_EXCEPT_GCC5_STATIC auto autograd_cuda_ks = DispatchKeySet(DispatchKey::AutogradCUDA);
+CONSTEXPR_EXCEPT_GCC5_STATIC auto autograd_xla_ks = DispatchKeySet(DispatchKey::AutogradXLA);
+CONSTEXPR_EXCEPT_GCC5_STATIC auto autograd_lazy_ks = DispatchKeySet(DispatchKey::AutogradLazy);
+CONSTEXPR_EXCEPT_GCC5_STATIC auto autograd_mlc_ks = DispatchKeySet(DispatchKey::AutogradMLC);
+CONSTEXPR_EXCEPT_GCC5_STATIC auto autograd_hpu_ks = DispatchKeySet(DispatchKey::AutogradHPU);
+CONSTEXPR_EXCEPT_GCC5_STATIC auto autograd_nestedtensor_ks = DispatchKeySet(DispatchKey::AutogradNestedTensor);
+CONSTEXPR_EXCEPT_GCC5_STATIC auto autograd_privateuse1_ks = DispatchKeySet(DispatchKey::AutogradPrivateUse1);
+CONSTEXPR_EXCEPT_GCC5_STATIC auto autograd_privateuse2_ks = DispatchKeySet(DispatchKey::AutogradPrivateUse2);
+CONSTEXPR_EXCEPT_GCC5_STATIC auto autograd_privateuse3_ks = DispatchKeySet(DispatchKey::AutogradPrivateUse3);
+CONSTEXPR_EXCEPT_GCC5_STATIC auto autograd_other_ks = DispatchKeySet(DispatchKey::AutogradOther);
 
 struct OpTableOffsetAndMask {
   uint16_t offset;

@@ -540,7 +540,7 @@ C10_API c10::DispatchKey parseDispatchKey(const std::string& k);
 // torch::dispatch(torch::kCPU, ...) is also valid.
 constexpr DispatchKey kAutograd = DispatchKey::Autograd;
 
-constexpr DispatchKey toBackendKey(DispatchKey k) {
+CONSTEXPR_EXCEPT_GCC5_STATIC DispatchKey toBackendKey(DispatchKey k) {
   if (k >= DispatchKey::StartOfDenseBackends && k <= DispatchKey::EndOfDenseBackends) {
     return static_cast<DispatchKey>(static_cast<uint8_t>(k) - static_cast<uint8_t>(DispatchKey::StartOfDenseBackends));
   } else if (k >= DispatchKey::StartOfQuantizedBackends && k <= DispatchKey::EndOfQuantizedBackends) {
@@ -550,11 +550,11 @@ constexpr DispatchKey toBackendKey(DispatchKey k) {
   } else if (k >= DispatchKey::StartOfAutogradBackends && k <= DispatchKey::EndOfAutogradBackends) {
     return static_cast<DispatchKey>(static_cast<uint8_t>(k) - static_cast<uint8_t>(DispatchKey::StartOfAutogradBackends));
   } else {
-    return DispatchKey::Undefined;
+    throw std::invalid_argument("invalid key");
   }
 }
 
-constexpr DispatchKey toFunctionalityKey(DispatchKey k) {
+CONSTEXPR_EXCEPT_GCC5_STATIC DispatchKey toFunctionalityKey(DispatchKey k) {
   if (k > DispatchKey::EndOfBackendKeys && k <= DispatchKey::EndOfFunctionalityKeys) {
     return k;
   } else if (k <= DispatchKey::EndOfDenseBackends) {
@@ -566,14 +566,14 @@ constexpr DispatchKey toFunctionalityKey(DispatchKey k) {
   } else if (k <= DispatchKey::EndOfAutogradBackends) {
     return DispatchKey::AutogradFunctionality;
   } else {
-    return DispatchKey::Undefined;
+    throw std::invalid_argument("invalid key");
   }
 }
 
 // Given (DispatchKey::Dense, DispatchKey::CUDABit), returns DispatchKey::CUDA
-constexpr DispatchKey toRuntimePerBackendFunctionalityKey(DispatchKey functionality_k, DispatchKey backend_k) {
+CONSTEXPR_EXCEPT_GCC5_STATIC DispatchKey toRuntimePerBackendFunctionalityKey(DispatchKey functionality_k, DispatchKey backend_k) {
   if (backend_k > DispatchKey::EndOfBackendKeys) {
-    return DispatchKey::Undefined;
+    throw std::invalid_argument("invalid key");
   }
   auto backend_idx = static_cast<uint8_t>(backend_k);
   if (functionality_k == DispatchKey::Dense) {
@@ -585,7 +585,7 @@ constexpr DispatchKey toRuntimePerBackendFunctionalityKey(DispatchKey functional
   } else if (functionality_k == DispatchKey::AutogradFunctionality) {
       return static_cast<DispatchKey>(static_cast<uint8_t>(DispatchKey::StartOfAutogradBackends) + backend_idx);
   } else {
-    return DispatchKey::Undefined;
+    throw std::invalid_argument("invalid key");
   }
 }
 
