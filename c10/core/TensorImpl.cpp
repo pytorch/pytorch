@@ -192,7 +192,7 @@ TensorImpl::TensorImpl(
   key_set = key_set | getAutocastRelatedKeySetFromBackend(k);
 
   // See [Note: Python key removal]
-  constexpr auto python_ks = DispatchKeySet(DispatchKey::Python);
+  CONSTEXPR_EXCEPT_GCC5_STATIC auto python_ks = DispatchKeySet(DispatchKey::Python);
   key_set = key_set.removeFunctionalityKeys(python_ks);
 
   // Inference tensor doesn't have autograd related keys.
