@@ -7,7 +7,7 @@ from typing import List, Optional
 from .adadelta import adadelta as adadelta_fn
 from .adagrad import adagrad as adagrad_fn
 from .adamax import adamax as adamax_fn
-from .asgd import asgd as asgd_fn
+from .asgd import asgd  # noqa: F401
 from .nadam import nadam as nadam_fn
 from .radam import radam as radam_fn
 
@@ -304,30 +304,6 @@ def adamax(params: List[Tensor],
               beta2=beta2,
               lr=lr,
               weight_decay=weight_decay)
-
-
-def asgd(params: List[Tensor],
-         grads: List[Tensor],
-         axs: List[Tensor],
-         mus: List[float],
-         etas: List[float],
-         foreach: bool = False,
-         *,
-         weight_decay: float,
-         lambd: float):
-    r"""Functional API that performs asgd algorithm computation.
-
-    See :class:`~torch.optim.ASGD` for details.
-    """
-
-    asgd_fn(params,
-            grads,
-            axs,
-            mus,
-            etas,
-            foreach=foreach,
-            weight_decay=weight_decay,
-            lambd=lambd)
 
 
 def nadam(params: List[Tensor],

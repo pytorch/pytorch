@@ -109,6 +109,10 @@ def asgd(params: List[Tensor],
          *,
          weight_decay: float,
          lambd: float):
+    r"""Functional API that performs asgd algorithm computation.
+
+    See :class:`~torch.optim.ASGD` for details.
+    """
 
     if foreach and not torch.jit.is_scripting():
         func = multi_tensor_asgd
