@@ -1,7 +1,8 @@
 import torch
+from torch import Tensor
 
-from . import _functional as F
 from .optimizer import Optimizer
+from typing import List
 
 
 class Adadelta(Optimizer):
@@ -107,14 +108,97 @@ class Adadelta(Optimizer):
 
                 state['step'] += 1
 
-            F.adadelta(params_with_grad,
-                       grads,
-                       square_avgs,
-                       acc_deltas,
-                       foreach=foreach,
-                       lr=lr,
-                       rho=rho,
-                       eps=eps,
-                       weight_decay=weight_decay)
+            adadelta(params_with_grad,
+                     grads,
+                     square_avgs,
+                     acc_deltas,
+                     foreach=foreach,
+                     lr=lr,
+                     rho=rho,
+                     eps=eps,
+                     weight_decay=weight_decay)
 
         return loss
+
+
+def adadelta(params: List[Tensor],
+             grads: List[Tensor],
+             square_avgs: List[Tensor],
+             acc_deltas: List[Tensor],
+             foreach: bool = False,
+             *,
+             lr: float,
+             rho: float,
+             eps: float,
+             weight_decay: float):
+    if foreach and not torch.jit.is_scripting():
+        func = multi_tensor_adadelta
+    else:
+        func = single_tensor_adadelta
+
+    func(params,
+         grads,
+         square_avgs,
+         acc_deltas,
+         lr=lr,
+         rho=rho,
+         eps=eps,
+         weight_decay=weight_decay)
+
+
+def single_tensor_adadelta(params: List[Tensor],
+                           grads: List[Tensor],
+                           square_avgs: List[Tensor],
+                           acc_deltas: List[Tensor],
+                           *,
+                           lr: float,
+                           rho: float,
+                           eps: float,
+                           weight_decay: float):
+
+    for (param, grad, square_avg, acc_delta) in zip(params, grads, square_avgs, acc_deltas):
+        if weight_decay != 0:
+            grad = grad.add(param, alpha=weight_decay)
+
+        if torch.is_complex(param):
+            square_avg = torch.view_as_real(square_avg)
+            acc_delta = torch.view_as_real(acc_delta)
+            grad = torch.view_as_real(grad)
+
+        square_avg.mul_(rho).addcmul_(grad, grad, value=1 - rho)
+        std = square_avg.add(eps).sqrt_()
+        delta = acc_delta.add(eps).sqrt_().div_(std).mul_(grad)
+        acc_delta.mul_(rho).addcmul_(delta, delta, value=1 - rho)
+        if torch.is_complex(param):
+            delta = torch.view_as_complex(delta)
+        param.add_(delta, alpha=-lr)
+
+
+def multi_tensor_adadelta(params: List[Tensor],
+                          grads: List[Tensor],
+                          square_avgs: List[Tensor],
+                          acc_deltas: List[Tensor],
+                          *,
+                          lr: float,
+                          weight_decay: float,
+                          rho: float,
+                          eps: float):
+
+    if weight_decay != 0:
+        torch._foreach_add_(grads, params, alpha=weight_decay)
+
+    torch._foreach_mul_(square_avgs, rho)
+    torch._foreach_addcmul_(square_avgs, grads, grads, value=1 - rho)
+
+    std = torch._foreach_add(square_avgs, eps)
+    torch._foreach_sqrt_(std)
+
+    deltas = torch._foreach_add(acc_deltas, eps)
+    torch._foreach_sqrt_(deltas)
+    torch._foreach_div_(deltas, std)
+    torch._foreach_mul_(deltas, grads)
+
+    torch._foreach_add_(params, deltas, alpha=-lr)
+
+    torch._foreach_mul_(acc_deltas, rho)
+    torch._foreach_addcmul_(acc_deltas, deltas, deltas, value=1 - rho)

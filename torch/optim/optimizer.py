@@ -201,7 +201,7 @@ class Optimizer(object):
                 (in one case it does the step with a gradient of 0 and in the other it skips
                 the step altogether).
         """
-        foreach = self.defaults['foreach'] if ('foreach' in self.defaults) else False
+        foreach = self.defaults.get('foreach', False)
 
         if not hasattr(self, "_zero_grad_profile_name"):
             self._hook_for_profile()
@@ -222,7 +222,7 @@ class Optimizer(object):
                                 p.grad.zero_()
                             else:
                                 per_device_and_dtype_grads[p.grad.device][p.grad.dtype].append(p.grad)
-            if (foreach):
+            if foreach:
                 for _, per_dtype_grads in per_device_and_dtype_grads.items():
                     for grads in per_dtype_grads.values():
                         torch._foreach_zero_(grads)
