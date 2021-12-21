@@ -185,10 +185,14 @@ struct IValue::TagType<c10::DynamicType> {
   static DynamicType::Ptr get(const c10::IValue& v);
 };
 
+namespace ivalue {
+
 template <>
-struct ivalue::TupleTypeFactory<c10::DynamicType> {
+struct TORCH_API TupleTypeFactory<c10::DynamicType> {
   static DynamicTypePtr create(std::vector<TypePtr> elemTypes);
   static DynamicTypePtr fallback(const Type&);
 };
+
+} // namespace ivalue
 
 } // namespace c10

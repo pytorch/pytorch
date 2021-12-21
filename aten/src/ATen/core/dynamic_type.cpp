@@ -254,7 +254,7 @@ DynamicTypePtr ivalue::TupleTypeFactory<c10::DynamicType>::fallback(const Type&)
   return nullptr;
 }
 
-TupleTypePtr ivalue::TupleTypeFactory<TupleType>::fallback(const Type& type) {
+TORCH_API TupleTypePtr ivalue::TupleTypeFactory<TupleType>::fallback(const Type& type) {
 #ifdef C10_MOBILE
   return nullptr;
 #else
