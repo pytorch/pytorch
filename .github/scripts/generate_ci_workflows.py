@@ -72,6 +72,7 @@ LABEL_CIFLOW_SLOW_GRADCHECK = "ciflow/slow-gradcheck"
 LABEL_CIFLOW_DOCKER = "ciflow/docker"
 LABEL_CIFLOW_IOS = "ciflow/ios"
 LABEL_CIFLOW_MACOS = "ciflow/macos"
+LABEL_CIFLOW_TRUNK = "ciflow/trunk"
 
 
 @dataclass
@@ -114,6 +115,8 @@ class CIFlowConfig:
 
     def __post_init__(self) -> None:
         self.labels.add(LABEL_CIFLOW_ALL)
+        if LABEL_CIFLOW_SCHEDULED not in self.labels:
+            self.labels.add(LABEL_CIFLOW_TRUNK)
         assert all(label.startswith(LABEL_CIFLOW_PREFIX) for label in self.labels)
         self.gen_root_job_condition()
 
@@ -224,6 +227,7 @@ class CIWorkflow:
             assert LABEL_CIFLOW_CPU in self.ciflow_config.labels
         if self.is_scheduled:
             assert LABEL_CIFLOW_DEFAULT not in self.ciflow_config.labels
+            assert LABEL_CIFLOW_TRUNK not in self.ciflow_config.labels
             assert LABEL_CIFLOW_SCHEDULED in self.ciflow_config.labels
         if self.build_with_debug:
             assert self.build_environment.endswith("-debug")
@@ -579,7 +583,7 @@ LINUX_WORKFLOWS = [
     ),
 ]
 
-ANDROID_WORKFLOWS = [
+ANDROID_SHORT_WORKFLOWS = [
     CIWorkflow(
         arch="linux",
         build_environment="pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single",
@@ -602,11 +606,24 @@ ANDROID_WORKFLOWS = [
     ),
 ]
 
+ANDROID_WORKFLOWS = [
+    CIWorkflow(
+        arch="linux",
+        build_environment="pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
+        test_runner_type=LINUX_CPU_TEST_RUNNER,
+        exclude_test=True,
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_ANDROID},
+        ),
+    ),
+]
+
 BAZEL_WORKFLOWS = [
     CIWorkflow(
         arch="linux",
-        build_environment="linux-xenial-py3.6-gcc7-bazel-test",
-        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7",
+        build_environment="linux-xenial-cuda11.3-py3.6-gcc7-bazel-test",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_BAZEL, LABEL_CIFLOW_CPU, LABEL_CIFLOW_LINUX},
@@ -759,7 +776,8 @@ def main() -> None:
         (jinja_env.get_template("ios_ci_workflow.yml.j2"), IOS_WORKFLOWS),
         (jinja_env.get_template("macos_ci_workflow.yml.j2"), MACOS_WORKFLOWS),
         (jinja_env.get_template("docker_builds_ci_workflow.yml.j2"), DOCKER_WORKFLOWS),
-        (jinja_env.get_template("android_ci_workflow.yml.j2"), ANDROID_WORKFLOWS),
+        (jinja_env.get_template("android_ci_full_workflow.yml.j2"), ANDROID_WORKFLOWS),
+        (jinja_env.get_template("android_ci_workflow.yml.j2"), ANDROID_SHORT_WORKFLOWS),
     ]
     # Delete the existing generated files first, this should align with .gitattributes file description.
     existing_workflows = GITHUB_DIR.glob("workflows/generated-*")
