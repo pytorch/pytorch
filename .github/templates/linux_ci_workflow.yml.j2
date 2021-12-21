@@ -330,7 +330,7 @@ jobs:
           unzip -o artifacts.zip
 {%- if is_scheduled %}
       - name: Generate netrc (only for docs-push)
-        if: ${{ github.event_name == 'schedule' }}
+        # if: ${{ github.event_name == 'schedule' }}
         env:
           GITHUB_PYTORCHBOT_TOKEN: ${{ secrets.GITHUB_PYTORCHBOT_TOKEN }}
         run: |
