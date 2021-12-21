@@ -4,6 +4,7 @@
 #include <torch/nn/functional/activation.h>
 #include <torch/nn/options/pooling.h>
 #include <torch/nn/modules/utils.h>
+#include <iostream>
 
 namespace torch {
 namespace nn {
@@ -849,9 +850,9 @@ inline std::tuple<Tensor, Tensor> fractional_max_pool3d_with_indices(
   c10::optional<ExpandingArray<3>> output_size_ = output_size;
   if (output_size_ == c10::nullopt) {
     TORCH_INTERNAL_ASSERT(output_ratio != c10::nullopt);
-    output_size_ = {(int64_t)(input.sizes()[-3] * (*output_ratio.value())[0]),
-                    (int64_t)(input.sizes()[-2] * (*output_ratio.value())[1]),
-                    (int64_t)(input.sizes()[-1] * (*output_ratio.value())[2])};
+    output_size_ = {(int64_t)(input.size(-3) * (*output_ratio.value())[0]),
+                    (int64_t)(input.size(-2) * (*output_ratio.value())[1]),
+                    (int64_t)(input.size(-1) * (*output_ratio.value())[2])};
   }
 
   Tensor _random_samples_ = _random_samples;
