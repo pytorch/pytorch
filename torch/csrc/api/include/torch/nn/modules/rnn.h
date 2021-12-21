@@ -89,7 +89,7 @@ class TORCH_API RNNImplBase : public torch::nn::Cloneable<Derived> {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ RNN ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// A multi-layer Elman RNN module with Tanh or ReLU activation.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.RNN to learn
+/// See https://pytorch.org/docs/master/generated/torch.nn.RNN.html to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::RNNOptions` class to learn what
@@ -134,7 +134,7 @@ TORCH_MODULE(RNN);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ LSTM ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// A multi-layer long-short-term-memory (LSTM) module.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.LSTM to learn
+/// See https://pytorch.org/docs/master/generated/torch.nn.LSTM.html to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::LSTMOptions` class to learn what
@@ -187,7 +187,7 @@ TORCH_MODULE(LSTM);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GRU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// A multi-layer gated recurrent unit (GRU) module.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.GRU to learn
+/// See https://pytorch.org/docs/master/generated/torch.nn.GRU.html to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::GRUOptions` class to learn what
