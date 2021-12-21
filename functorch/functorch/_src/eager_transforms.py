@@ -139,29 +139,29 @@ def _autograd_grad(outputs, inputs, grad_outputs=None, retain_graph=False, creat
 
 
 # How do we increment and decrement the nesting? I don't think we can.
-def vjp(f: Callable, *primals, has_aux=False):
+def vjp(func: Callable, *primals, has_aux=False):
     """
     Standing for the vector-Jacobian product, returns a tuple containing the
-    results of :attr:`f` applied to :attr:`primals` and a function that, when
-    given ``cotangents``, computes the reverse-mode Jacobian of :attr:`f` with
+    results of :attr:`func` applied to :attr:`primals` and a function that, when
+    given ``cotangents``, computes the reverse-mode Jacobian of :attr:`func` with
     respect to :attr:`primals` times ``cotangents``.
 
     Args:
-        f (Callable): A Python function that takes one or more arguments. Must
+        func (Callable): A Python function that takes one or more arguments. Must
             return one or more Tensors.
-        primals (Tensors): Positional arguments to :attr:`f` that must all be
+        primals (Tensors): Positional arguments to :attr:`func` that must all be
             Tensors. The returned function will also be computing the
             derivative with respect to these arguments
-        has_aux (bool): Flag indicating that :attr:`f` returns a
+        has_aux (bool): Flag indicating that :attr:`func` returns a
             ``(output, aux)`` tuple where the first element is the output of
             the function to be differentiated and the second element is
             other auxiliary objects that will not be differentiated.
             Default: False.
 
     Returns:
-        Returns a ``(output, vjp_fn)`` tuple containing the output of :attr:`f`
+        Returns a ``(output, vjp_fn)`` tuple containing the output of :attr:`func`
         applied to :attr:`primals` and a function that computes the vjp of
-        :attr:`f` with respect to all :attr:`primals` using the cotangents passed
+        :attr:`func` with respect to all :attr:`primals` using the cotangents passed
         to the returned function. If ``has_aux is True``, then instead returns a
         ``(output, vjp_fn, aux)`` tuple.
         The returned ``vjp_fn`` function will return a tuple of each VJP.
@@ -240,7 +240,7 @@ def vjp(f: Callable, *primals, has_aux=False):
         with torch.enable_grad():
             primals = _wrap_all_tensors(primals, level)
             diff_primals = _create_differentiable(primals, level)
-            primals_out = f(*diff_primals)
+            primals_out = func(*diff_primals)
 
             if has_aux:
                 primals_out, aux = primals_out
@@ -286,9 +286,9 @@ def _safe_zero_index(x):
     return x[0]
 
 
-def jacrev(f: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False):
+def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False):
     """
-    Computes the Jacobian of :attr:`f` with respect to the arg(s) at index
+    Computes the Jacobian of :attr:`func` with respect to the arg(s) at index
     :attr:`argnum` using reverse mode autodiff
 
     Args:
@@ -297,18 +297,18 @@ def jacrev(f: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False):
         argnums (int or Tuple[int]): Optional, integer or tuple of integers,
             saying which arguments to get the Jacobian with respect to.
             Default: 0.
-        has_aux (bool): Flag indicating that :attr:`f` returns a
+        has_aux (bool): Flag indicating that :attr:`func` returns a
             ``(output, aux)`` tuple where the first element is the output of
             the function to be differentiated and the second element is
             auxiliary objects that will not be differentiated.
             Default: False.
 
     Returns:
-        Returns a function that takes in the same inputs as :attr:`f` and
-        returns the Jacobian of :attr:`f` with respect to the arg(s) at
+        Returns a function that takes in the same inputs as :attr:`func` and
+        returns the Jacobian of :attr:`func` with respect to the arg(s) at
         :attr:`argnums`. If ``has_aux is True``, then the returned function
         instead returns a ``(jacobian, aux)`` tuple where ``jacobian``
-        is the Jacobian and ``aux`` is auxiliary objects returned by ``f``.
+        is the Jacobian and ``aux`` is auxiliary objects returned by ``func``.
 
     A basic usage with a pointwise, unary operation will give a diagonal array
     as the Jacobian
@@ -322,7 +322,7 @@ def jacrev(f: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False):
     :func:`jacrev` can be composed with vmap to produce batched
     Jacobians:
 
-        >>> from functorch import jacrev
+        >>> from functorch import jacrev, vmap
         >>> x = torch.randn(64, 5)
         >>> jacobian = vmap(jacrev(torch.sin))(x)
         >>> assert jacobian.shape == (64, 5, 5)
@@ -385,9 +385,9 @@ def jacrev(f: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False):
         outer one. This is because ``jacrev`` is a "function transform": its result
         should not depend on the result of a context manager outside of ``f``.
     """
-    @wraps(f)
+    @wraps(func)
     def wrapper_fn(*args):
-        f_wrapper, primals = _argnums_partial(f, args, argnums)
+        f_wrapper, primals = _argnums_partial(func, args, argnums)
         vjp_out = vjp(f_wrapper, *primals, has_aux=has_aux)
         if has_aux:
             output, vjp_fn, aux = vjp_out
@@ -654,7 +654,52 @@ def safe_unpack_dual(dual, strict):
     return primal, tangent
 
 
-def jvp(f, primals, tangents, *, strict=False):
+def jvp(func, primals, tangents, *, strict=False):
+    """
+    Standing for the Jacobian-vector product, returns a tuple containing
+    the output of `func(*primals)` and the "Jacobian of ``func`` evaluated at
+    ``primals``" times ``tangents``. This is also known as forward-mode autodiff.
+
+    Args:
+        func (function): A Python function that takes one or more arguments,
+            one of which must be a Tensor, and returns one or more Tensors
+        primals (Tensors): Positional arguments to :attr:`func` that must all be
+            Tensors. The returned function will also be computing the
+            derivative with respect to these arguments
+        tangents (Tensors): The "vector" for which Jacobian-vector-product is
+            computed. Must be the same structure and sizes as the inputs to
+            ``func``.
+
+    Returns:
+        Returns a ``(output, jvp_out)`` tuple containing the output of ``func``
+        evaluated at ``primals`` and the Jacobian-vector product.
+
+    .. warning::
+        PyTorch's forward-mode AD coverage on operators is not very good at the
+        moment. You may see this API error out with "forward-mode AD not
+        implemented for operator X". If so, please file us a bug report and we
+        will prioritize it.
+
+    jvp is useful when you wish to compute gradients of a function R^1 -> R^N
+
+        >>> from functorch import jvp
+        >>> x = torch.randn([])
+        >>> f = lambda x: x * torch.tensor([1., 2., 3])
+        >>> value, grad = jvp(f, (x,), (torch.tensor(1.),))
+        >>> assert torch.allclose(value, f(x))
+        >>> assert torch.allclose(grad, torch.tensor([1., 2, 3]))
+
+    :func:`jvp` can support functions with multiple inputs by passing in the
+    tangents for each of the inputs
+
+         >>> from functorch import jvp
+         >>> x = torch.randn(5)
+         >>> y = torch.randn(5)
+         >>> f = lambda x, y: (x * y)
+         >>> _, output = jvp(f, (x, y), (torch.ones(5), torch.ones(5)))
+         >>> assert torch.allclose(output, x + y)
+
+    """
     if not isinstance(primals, tuple):
         raise RuntimeError(
             f'{jvp_str}: Expected primals to be a tuple. '
@@ -683,7 +728,7 @@ def jvp(f, primals, tangents, *, strict=False):
             flat_duals = tuple(fwAD.make_dual(p, t)
                                for p, t in zip(flat_primals, flat_tangents))
             duals = tree_unflatten(flat_duals, primals_spec)
-            result_duals = f(*duals)
+            result_duals = func(*duals)
             assert_output_is_tensor_or_tensors(result_duals, jvp_str)
             result_duals, spec = tree_flatten(result_duals)
 
@@ -706,9 +751,87 @@ def safe_unflatten(tensor, dim, shape):
     return tensor.unflatten(dim, shape)
 
 
-def jacfwd(f, argnums=0):
+def jacfwd(func, argnums=0):
+    """
+    Computes the Jacobian of :attr:`func` with respect to the arg(s) at index
+    :attr:`argnum` using forward-mode autodiff
+
+    Args:
+        func (function): A Python function that takes one or more arguments,
+            one of which must be a Tensor, and returns one or more Tensors
+        argnums (int or Tuple[int]): Optional, integer or tuple of integers,
+            saying which arguments to get the Jacobian with respect to.
+            Default: 0.
+
+    Returns:
+        Returns a function that takes in the same inputs as :attr:`func` and
+        returns the Jacobian of :attr:`func` with respect to the arg(s) at
+        :attr:`argnums`.
+
+    .. warning::
+        PyTorch's forward-mode AD coverage on operators is not very good at the
+        moment. You may see this API error out with "forward-mode AD not
+        implemented for operator X". If so, please file us a bug report and we
+        will prioritize it.
+
+    A basic usage with a pointwise, unary operation will give a diagonal array
+    as the Jacobian
+
+        >>> from functorch import jacfwd
+        >>> x = torch.randn(5)
+        >>> jacobian = jacfwd(torch.sin)(x)
+        >>> expected = torch.diag(torch.cos(x))
+        >>> assert torch.allclose(jacobian, expected)
+
+    :func:`jacfwd` can be composed with vmap to produce batched
+    Jacobians:
+
+        >>> from functorch import jacfwd, vmap
+        >>> x = torch.randn(64, 5)
+        >>> jacobian = vmap(jacfwd(torch.sin))(x)
+        >>> assert jacobian.shape == (64, 5, 5)
+
+    Additionally, :func:`jacrev` can be composed with itself or :func:`jacrev`
+    to produce Hessians
+
+        >>> from functorch import jacfwd, jacrev
+        >>> def f(x):
+        >>>   return x.sin().sum()
+        >>>
+        >>> x = torch.randn(5)
+        >>> hessian = jacfwd(jacrev(f))(x)
+        >>> assert torch.allclose(hessian, torch.diag(-x.sin()))
+
+    By default, :func:`jacfwd` computes the Jacobian with respect to the first
+    input. However, it can compute the Jacboian with respect to a different
+    argument by using :attr:`argnums`:
+
+        >>> from functorch import jacfwd
+        >>> def f(x, y):
+        >>>   return x + y ** 2
+        >>>
+        >>> x, y = torch.randn(5), torch.randn(5)
+        >>> jacobian = jacfwd(f, argnums=1)(x, y)
+        >>> expected = torch.diag(2 * y)
+        >>> assert torch.allclose(jacobian, expected)
+
+    Additionally, passing a tuple to :attr:`argnums` will compute the Jacobian
+    with respect to multiple arguments
+
+        >>> from functorch import jacfwd
+        >>> def f(x, y):
+        >>>   return x + y ** 2
+        >>>
+        >>> x, y = torch.randn(5), torch.randn(5)
+        >>> jacobian = jacfwd(f, argnums=(0, 1))(x, y)
+        >>> expectedX = torch.diag(torch.ones_like(x))
+        >>> expectedY = torch.diag(2 * y)
+        >>> assert torch.allclose(jacobian[0], expectedX)
+        >>> assert torch.allclose(jacobian[1], expectedY)
+
+    """
     def wrapper_fn(*args):
-        f_wrapper, primals = _argnums_partial(f, args, argnums)
+        f_wrapper, primals = _argnums_partial(func, args, argnums)
         flat_primals, primals_spec = tree_flatten(primals)
         flat_primals_numels = tuple(p.numel() for p in flat_primals)
         flat_basis = _construct_standard_basis_for(flat_primals, flat_primals_numels)
@@ -738,8 +861,46 @@ def jacfwd(f, argnums=0):
     return wrapper_fn
 
 
-def hessian(f, argnums=0):
-    return jacfwd(jacrev(f, argnums), argnums)
+def hessian(func, argnums=0):
+    """
+    Computes the Hessian of :attr:`func` with respect to the arg(s) at index
+    :attr:`argnum` via a forward-over-reverse strategy.
+
+    The forward-over-reverse strategy (composing ``jacfwd(jacrev(func))``) is
+    a good default for good performance. It is possible to compute Hessians
+    through other compositions of :func:`jacfwd` and :func:`jacrev` like
+    ``jacfwd(jacfwd(func))`` or ``jacrev(jacrev(func))``.
+
+    Args:
+        func (function): A Python function that takes one or more arguments,
+            one of which must be a Tensor, and returns one or more Tensors
+        argnums (int or Tuple[int]): Optional, integer or tuple of integers,
+            saying which arguments to get the Hessian with respect to.
+            Default: 0.
+
+    Returns:
+        Returns a function that takes in the same inputs as :attr:`func` and
+        returns the Hessian of :attr:`func` with respect to the arg(s) at
+        :attr:`argnums`.
+
+    .. warning::
+        PyTorch's forward-mode AD coverage on operators is not very good at the
+        moment. You may see this API error out with "forward-mode AD not
+        implemented for operator X". If so, please file us a bug report and we
+        will prioritize it.
+
+    A basic usage with a R^N -> R^1 function gives a N x N Hessian:
+
+        >>> from functorch import hessian
+        >>> def f(x):
+        >>>   return x.sin().sum()
+        >>>
+        >>> x = torch.randn(5)
+        >>> hess = jacfwd(jacrev(f))(x)
+        >>> assert torch.allclose(hess, torch.diag(-x.sin()))
+
+    """
+    return jacfwd(jacrev(func, argnums), argnums)
 
 
 def grad_and_value(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Callable:
