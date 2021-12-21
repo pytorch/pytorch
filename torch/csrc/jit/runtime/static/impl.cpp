@@ -747,14 +747,16 @@ c10::IValue StaticModule::operator()(
 BlockRunner::BlockRunner(
     const StaticModule& sm,
     std::vector<IValue>& values,
-    const size_t block_idx)
+    size_t block_idx)
     : static_module_(sm),
       block_info_(static_module_.block_info(block_idx)),
       is_root_block_(block_idx == 0),
       first_input_is_self_(
           is_root_block_ && static_module_.first_input_is_self()),
       inputs_begin_(block_info_.block_inputs_idx()),
-      manage_output_tensors_enabled_(sm.opts().manage_output_tensors),
+      // TODO(T108633124): Turn on manage output tensors for sub-blocks.
+      manage_output_tensors_enabled_(
+          is_root_block_ && sm.opts().manage_output_tensors),
       values_(values),
       nodes_(block_info_.nodes()) {
   for (auto& n : nodes_) {
@@ -765,9 +767,26 @@ BlockRunner::BlockRunner(
     outputs_.emplace_back(&values_[index]);
   }
 
-  if (block_idx != 0) {
-    manage_output_tensors_enabled_ = false;
+  const auto block_idx_start = block_idx;
+  for (auto& pnode : nodes_) {
+    auto* node = pnode.node();
+    auto& block_runners = pnode.block_runners();
+
+    for (const auto i : c10::irange(node->blocks().size())) {
+      (void)i; // Suppress unused variable warning
+      block_runners.push_back(
+          std::make_shared<BlockRunner>(sm, values, ++block_idx));
+      block_idx += block_runners.back()->num_sub_blocks();
+    }
   }
+  const auto num_sub_blocks = block_idx - block_idx_start;
+  TORCH_CHECK(
+      num_sub_blocks < (1 << 16),
+      "num_sub_blocks ",
+      num_sub_blocks,
+      " would overflow 2-byte storage");
+
+  num_sub_blocks_ = static_cast<uint16_t>(num_sub_blocks);
 }
 
 BlockRunner::~BlockRunner() = default;
@@ -1644,26 +1663,6 @@ void BlockRunner::disableManageOutputTensors() {
   planner_.reset();
 }
 
-size_t BlockRunner::init_sub_blocks(
-    const StaticModule& sm,
-    std::vector<IValue>& values,
-    size_t block_idx) {
-  const auto block_idx_start = block_idx;
-  for (auto& pnode : nodes_) {
-    auto* node = pnode.node();
-    auto& block_runners = pnode.block_runners();
-
-    for (const auto i : c10::irange(node->blocks().size())) {
-      (void)i; // Suppress unused variable warning
-      block_runners.push_back(
-          std::make_shared<BlockRunner>(sm, values, ++block_idx));
-      block_idx += block_runners.back()->init_sub_blocks(sm, values, block_idx);
-    }
-  }
-  const auto num_processed_blocks = block_idx - block_idx_start;
-  return num_processed_blocks;
-}
-
 ProcessedFunction::ProcessedFunction(
     Node* node,
     bool enable_out_variant,
@@ -1889,7 +1888,6 @@ StaticRuntime::StaticRuntime(const StaticModule& sm) {
   std::copy(sm.constants().begin(), sm.constants().end(), values_.begin());
 
   block_ = std::make_unique<BlockRunner>(sm, values_, 0);
-  block_->init_sub_blocks(sm, values_, 0);
 }
 
 c10::IValue StaticRuntime::operator()(

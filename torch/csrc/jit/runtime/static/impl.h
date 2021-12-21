@@ -508,7 +508,7 @@ class BlockRunner {
   explicit BlockRunner(
       const StaticModule& sm,
       std::vector<IValue>& values,
-      const size_t block_idx);
+      size_t block_idx);
   BlockRunner(BlockRunner&&) = delete;
   BlockRunner& operator=(BlockRunner&&) = delete;
   ~BlockRunner();
@@ -624,6 +624,10 @@ class BlockRunner {
   // std::terminate.
   void resetMemory() noexcept;
 
+  uint16_t num_sub_blocks() const {
+    return num_sub_blocks_;
+  }
+
  private:
   // A helper object that invokes memory planner deallocation code
   // when destructed.
@@ -707,6 +711,7 @@ class BlockRunner {
   const bool first_input_is_self_;
   // Index of the start of this blocks inputs in the shared values_ array.
   const uint16_t inputs_begin_;
+  uint16_t num_sub_blocks_ = 0;
 
   bool manage_output_tensors_enabled_ = false;
   std::unique_ptr<MemoryPlanner> planner_;
@@ -760,7 +765,7 @@ class TORCH_API ProcessedNode {
   // associated with a shared values array using set_values() when
   // they are copied into a StaticRuntime. block_runners_ are also
   // not initialized until StaticRuntime initialization; see
-  // BlockRunner::init_sub_blocks.
+  // BlockRunner's ctor.
   ProcessedNode(
       Node* n,
       ProcessedFunction* fn,
