@@ -1283,6 +1283,14 @@ class TestFunctionalIterDataPipe(TestCase):
         for x, y in zip(input_dp_nl, collate_dp_nl):
             self.assertEqual(torch.tensor(x), y)
 
+        # Snapshot Test: DataPipe restores properly
+        collate_dp = input_dp.collate(collate_fn=_collate_fn)
+        n_elements_to_advance = 1
+        new_dp = dp.iter.Collator(datapipe=dp.iter.IterableWrapper([]), collate_fn=_collate_fn)
+        snapshot_test_helper(collate_dp, new_dp, n_elements_to_advance)
+        for old_ele, new_ele in zip(collate_dp, new_dp):
+            self.assertEqual(old_ele, new_ele)
+
     def test_batch_iterdatapipe(self):
         arrs = list(range(10))
         input_dp = dp.iter.IterableWrapper(arrs)
