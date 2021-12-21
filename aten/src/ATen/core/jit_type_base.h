@@ -68,7 +68,7 @@ using ConstTypePtr = std::shared_ptr<const Type>;
 using TypePrinter = std::function<c10::optional<std::string>(const Type&)>;
 
 struct TORCH_API Type : std::enable_shared_from_this<Type> {
-  friend bool operator==(const Type& lhs, const Type& rhs);
+  friend TORCH_API bool operator==(const Type& lhs, const Type& rhs);
 
  private:
   TypeKind kind_;
