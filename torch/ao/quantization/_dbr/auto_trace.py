@@ -393,17 +393,14 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                 qstate.mark_cur_op_complete(func)
 
             elif hook_type is HookType.ARG_DEQUANTS:
-                # disabling torch function to prevent infinite recursion on
-                # getset
                 # TODO(future PR): handle more dtypes
-                with torch._C.DisableTorchFunction():
-                    new_args = []
-                    for arg in args:
-                        if isinstance(arg, torch.Tensor) and arg.is_quantized:
-                            new_args.append(arg.dequantize())
-                        else:
-                            new_args.append(arg)
-                    args = tuple(new_args)
+                new_args = []
+                for arg in args:
+                    if isinstance(arg, torch.Tensor) and arg.is_quantized:
+                        new_args.append(arg.dequantize())
+                    else:
+                        new_args.append(arg)
+                args = tuple(new_args)
                 output = super().__torch_function__(func, types, args, kwargs)
 
             else:  # HookType.NONE
@@ -540,19 +537,16 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                         cur_qstate.validate_is_at_last_seen_idx()
 
                     elif hook_type is HookType.ARG_DEQUANTS:
-                        # disabling torch function to prevent infinite recursion on
-                        # getset
                         # TODO(future PR): handle more dtypes
-                        with torch._C.DisableTorchFunction():
-                            new_args = []
-                            for arg in args:
-                                if isinstance(arg, torch.Tensor) and arg.is_quantized:
-                                    dequant = arg.dequantize().as_subclass(
-                                        QuantizationConvertTensorProxy)  # type: ignore[arg-type]
-                                    new_args.append(dequant)
-                                else:
-                                    new_args.append(arg)
-                            args = tuple(new_args)
+                        new_args = []
+                        for arg in args:
+                            if isinstance(arg, torch.Tensor) and arg.is_quantized:
+                                dequant = arg.dequantize().as_subclass(
+                                    QuantizationConvertTensorProxy)  # type: ignore[arg-type]
+                                new_args.append(dequant)
+                            else:
+                                new_args.append(arg)
+                        args = tuple(new_args)
                         output = orig_module_call(self, *args, **kwargs)
 
                     else:
