@@ -7,6 +7,9 @@
 namespace torch {
 namespace jit {
 
+// Main entry point for all operators that have valid upgraders.
+// Note for developers: The list of upgraders need to be SORTED
+// by the version number where the upgrader is registered.
 static std::unordered_map<std::string, std::vector<UpgraderEntry>> operatorVersionMap(
     {{"aten::div.Tensor",
       {{4,
