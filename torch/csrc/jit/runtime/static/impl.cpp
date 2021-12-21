@@ -277,12 +277,12 @@ bool isPureFunction(const Node* node) {
 } // namespace
 
 ManagedTensorRanges::ManagedTensorRanges(
-    Block* block,
+    Block& block,
     const AliasDb& alias_db,
     const FastSet<const Value*>& managed_tensor_values) {
-  const std::vector<Node*> nodes(block->nodes().begin(), block->nodes().end());
+  const std::vector<Node*> nodes(block.nodes().begin(), block.nodes().end());
   const FastSet<const Value*> graph_inputs(
-      block->inputs().begin(), block->inputs().end());
+      block.inputs().begin(), block.inputs().end());
 
   auto isUntrackedValue = [&alias_db, &graph_inputs](const Value* value) {
     return !alias_db.isMutableType(value) ||
@@ -308,7 +308,7 @@ ManagedTensorRanges::ManagedTensorRanges(
       value_lifetimes_.emplace(output, Lifetime(i, i));
     }
   }
-  for (auto* graph_output : block->outputs()) {
+  for (auto* graph_output : block.outputs()) {
     auto* lifetime = getLifetime(graph_output);
     if (!lifetime) {
       DCHECK(isUntrackedValue(graph_output));
@@ -321,7 +321,7 @@ ManagedTensorRanges::ManagedTensorRanges(
   // has an input and output that may alias each other, set the input's
   // lifetime end to max(input.lifetime_end, output.lifetime_end). Iterate
   // backwards to handle chains of aliases.
-  for (const auto* node : block->nodes().reverse()) {
+  for (const auto* node : block.nodes().reverse()) {
     if (isPureFunction(node)) {
       // If the node is a pure function, it doesn't create any aliases,
       // so we can safely skip it.
@@ -349,7 +349,7 @@ ManagedTensorRanges::ManagedTensorRanges(
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Node* freeing_node;
     if (lifetime->end == num_nodes) {
-      freeing_node = block->return_node();
+      freeing_node = block.return_node();
     } else {
       freeing_node = nodes[lifetime->end];
     }
@@ -474,46 +474,48 @@ StaticModule::StaticModule(
       graph_, /*isFrozen=*/false, /*enablePreciseTupleContainerAnalysis=*/true);
   GRAPH_DEBUG("AliasDb: ", alias_db.toString());
 
+  // Maps each Value* in the graph to its index in the values_ array that will
+  // eventually be created by StaticRuntime.
   FastMap<const Value*, uint32_t> value_to_index;
-  prepareFunctionsAndConstants(graph_->block(), alias_db, value_to_index);
+  prepareFunctionsAndConstants(*graph_->block(), alias_db, value_to_index);
 
   const auto constants_index_offset = 0;
   const auto values_index_offset = constants_index_offset + constants().size();
   value_buffer_size_ = values_index_offset;
 
   std::vector<uint32_t> node_output_idx_map;
-  value_buffer_size_ += prepareBlocksAndOutputIndices(
-      graph_->block(),
+  value_buffer_size_ += prepareBlockInfoAndOutputIndices(
+      *graph_->block(),
       values_index_offset,
       node_output_idx_map,
       value_to_index);
 
   prepareProcessedNodes(
-      graph_->block(), node_output_idx_map, value_to_index, alias_db);
+      *graph_->block(), node_output_idx_map, value_to_index, alias_db);
 
-  for (auto& block : blocks_) {
+  for (auto& block : block_infos_) {
     block.prepare_for_memory_planner(alias_db, opts);
   }
 }
 
-size_t StaticModule::prepareBlocksAndOutputIndices(
-    Block* block,
+size_t StaticModule::prepareBlockInfoAndOutputIndices(
+    Block& block,
     const size_t start_idx,
     std::vector<uint32_t>& node_output_idx_map,
     FastMap<const Value*, uint32_t>& value_to_index) {
-  const auto block_idx = blocks_.size();
-  blocks_.emplace_back(start_idx, block);
+  const auto block_idx = block_infos_.size();
+  block_infos_.emplace_back(start_idx, block);
 
-  const auto num_inputs = block->inputs().size();
+  const auto num_inputs = block.inputs().size();
   for (const auto i : c10::irange(num_inputs)) {
-    value_to_index.emplace(block->inputs()[i], start_idx + i);
+    value_to_index.emplace(block.inputs()[i], start_idx + i);
   }
   auto cur_idx = start_idx + num_inputs;
 
-  for (auto* node : block->nodes()) {
+  for (auto* node : block.nodes()) {
     for (auto* sub_block : node->blocks()) {
-      cur_idx += prepareBlocksAndOutputIndices(
-          sub_block, cur_idx, node_output_idx_map, value_to_index);
+      cur_idx += prepareBlockInfoAndOutputIndices(
+          *sub_block, cur_idx, node_output_idx_map, value_to_index);
     }
 
     if (node->kind() == prim::Constant) {
@@ -535,8 +537,8 @@ size_t StaticModule::prepareBlocksAndOutputIndices(
   }
 
   std::vector<uint16_t> output_indices;
-  output_indices.reserve(block->outputs().size());
-  for (auto* output : block->outputs()) {
+  output_indices.reserve(block.outputs().size());
+  for (auto* output : block.outputs()) {
     const auto output_idx = value_to_index.at(output);
     TORCH_CHECK(
         output_idx < (1 << 16),
@@ -546,17 +548,17 @@ size_t StaticModule::prepareBlocksAndOutputIndices(
     output_indices.push_back(output_idx);
   }
 
-  blocks_[block_idx].set_output_indices(std::move(output_indices));
+  block_infos_[block_idx].set_output_indices(std::move(output_indices));
   return cur_idx - start_idx;
 }
 
 void StaticModule::prepareFunctionsAndConstants(
-    Block* block,
+    Block& block,
     const AliasDb& alias_db,
     FastMap<const Value*, uint32_t>& value_to_index) {
-  for (auto* node : block->nodes()) {
+  for (auto* node : block.nodes()) {
     for (auto* sub_block : node->blocks()) {
-      prepareFunctionsAndConstants(sub_block, alias_db, value_to_index);
+      prepareFunctionsAndConstants(*sub_block, alias_db, value_to_index);
     }
 
     if (node->kind() == prim::Constant) {
@@ -578,7 +580,7 @@ void StaticModule::prepareFunctionsAndConstants(
 }
 
 std::pair<size_t, size_t> StaticModule::prepareProcessedNodes(
-    Block* block,
+    Block& block,
     const std::vector<uint32_t>& node_output_idx_map,
     const FastMap<const Value*, uint32_t>& value_to_index,
     const AliasDb& alias_db,
@@ -587,21 +589,18 @@ std::pair<size_t, size_t> StaticModule::prepareProcessedNodes(
   const auto block_start = block_idx;
   const auto node_start = node_idx;
 
-  const auto inputs_index_offset = inputs_offset();
-  const auto constants_index_offset = constants_offset();
-  const auto values_index_offset = intermediate_values_offset();
-  auto& block_info = blocks_[block_idx++];
+  auto& block_info = block_infos_[block_idx++];
   std::vector<ProcessedNode> nodes;
   FastMap<Node*, bool> node_has_out_variant;
 
-  for (auto* node : block->nodes()) {
+  for (auto* node : block.nodes()) {
     if (node->kind() == prim::Constant) {
       continue;
     }
 
     for (auto* sub_block : node->blocks()) {
       auto processed_count = prepareProcessedNodes(
-          sub_block,
+          *sub_block,
           node_output_idx_map,
           value_to_index,
           alias_db,
@@ -612,7 +611,7 @@ std::pair<size_t, size_t> StaticModule::prepareProcessedNodes(
     }
     ProcessedNodeInputs input_indices(node->inputs().size());
     for (const auto input_idx : c10::irange(node->inputs().size())) {
-      Value* const input = node->inputs()[input_idx];
+      auto* input = node->inputs()[input_idx];
       auto input_ivalue_idx = value_to_index.at(input);
       TORCH_CHECK(
           input_ivalue_idx < (1 << 16),
@@ -623,6 +622,7 @@ std::pair<size_t, size_t> StaticModule::prepareProcessedNodes(
     }
 
     ProcessedFunction* fn = &functions_[node_idx];
+
     // create a new ProcessedNode
     nodes.emplace_back(
         node, fn, std::move(input_indices), node_output_idx_map[node_idx]);
@@ -659,7 +659,7 @@ void BlockInfo::prepare_for_memory_planner(
   // Never manage graph outputs so that we can do std::move(output_ivalue).
   // This does not affect performance if the graph returns a collection object.
   FastSet<const Value*> graph_output_values(
-      block_->outputs().begin(), block_->outputs().end());
+      block_.outputs().begin(), block_.outputs().end());
 
   // collect register indices of outputs of ops with out variant
   for (ProcessedNode& pnode : nodes_) {
@@ -690,7 +690,7 @@ void BlockInfo::prepare_for_memory_planner(
     }
   }
 
-  for (const Value* output : block_->outputs()) {
+  for (const Value* output : block_.outputs()) {
     managed_tensor_values_.erase(output);
   }
   GRAPH_DEBUG("managed_tensor_values: ", dumpValueSet(managed_tensor_values_));
@@ -722,7 +722,7 @@ StaticRuntime& StaticModule::runtime() {
 }
 
 Node* StaticModule::findNodeWithKindForTesting(const std::string& kind) const {
-  for (auto& block_info : blocks_) {
+  for (auto& block_info : block_infos_) {
     for (auto& pnode : block_info.nodes()) {
       if (pnode.node()->kind().toQualString() == kind) {
         return pnode.node();
@@ -744,7 +744,7 @@ c10::IValue StaticModule::operator()(
   return runtime()(std::move(args), kwargs);
 }
 
-StaticRuntimeBlockRunner::StaticRuntimeBlockRunner(
+BlockRunner::BlockRunner(
     const StaticModule& sm,
     std::vector<IValue>& values,
     const size_t block_idx)
@@ -770,23 +770,19 @@ StaticRuntimeBlockRunner::StaticRuntimeBlockRunner(
   }
 }
 
-StaticRuntimeBlockRunner::~StaticRuntimeBlockRunner() = default;
+BlockRunner::~BlockRunner() = default;
 
-void StaticRuntimeBlockRunner::set_arg(
-    const size_t idx,
-    std::vector<IValue>&& args) {
+void BlockRunner::set_arg(const size_t idx, std::vector<IValue>&& args) {
   DCHECK(idx < args.size());
   Input(idx + first_input_is_self_) = std::move(args[idx]);
 }
 
-void StaticRuntimeBlockRunner::set_arg(
-    const size_t idx,
-    const std::vector<IValue>& args) {
+void BlockRunner::set_arg(const size_t idx, const std::vector<IValue>& args) {
   DCHECK(idx < args.size());
   Input(idx + first_input_is_self_) = args[idx];
 }
 
-void StaticRuntimeBlockRunner::set_arg(const size_t idx, const IValue& arg) {
+void BlockRunner::set_arg(const size_t idx, const IValue& arg) {
   Input(idx + first_input_is_self_) = arg;
 }
 
@@ -802,7 +798,7 @@ void check_type(const Argument& schema_arg, const IValue& arg) {
 } // namespace
 
 template <typename IValueList>
-void StaticRuntimeBlockRunner::set_inputs(
+void BlockRunner::set_inputs(
     IValueList&& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
   const auto total_num_inputs =
@@ -816,8 +812,7 @@ void StaticRuntimeBlockRunner::set_inputs(
 
   if (!is_root_block_ || C10_UNLIKELY(!schema)) {
     TORCH_CHECK(
-        kwargs.empty(),
-        "Schema is not available, but StaticRuntimeBlockRunner got kwargs.");
+        kwargs.empty(), "Schema is not available, but BlockRunner got kwargs.");
     for (size_t i = 0; i < args.size(); ++i) {
       set_arg(i, std::forward<IValueList>(args));
     }
@@ -860,7 +855,7 @@ void StaticRuntimeBlockRunner::set_inputs(
       args.size() + consumed_kwargs == schema_args.size() - 1);
 }
 
-void StaticRuntimeBlockRunner::create_memory_planner() {
+void BlockRunner::create_memory_planner() {
   if (!planner_) {
     planner_ = std::make_unique<MemoryPlanner>(
         this,
@@ -893,20 +888,19 @@ void destroyNodeOutputs(ProcessedNode& p_node) {
 
 } // namespace
 
-void StaticRuntimeBlockRunner::clean_up_intermediate_ivalues() noexcept {
+void BlockRunner::clean_up_intermediate_ivalues() noexcept {
   for (auto& p_node : nodes_) {
     destroyNodeOutputs(p_node);
   }
 }
 
-void StaticRuntimeBlockRunner::resetMemory() noexcept {
+void BlockRunner::resetMemory() noexcept {
   planner_.reset();
   clean_up_input_ivalues();
   clean_up_intermediate_ivalues();
 }
 
-c10::IValue StaticRuntimeBlockRunner::move_outputs_to_tuple(
-    uint32_t num_outputs) {
+c10::IValue BlockRunner::move_outputs_to_tuple(uint32_t num_outputs) {
 #ifndef NDEBUG
   for (const auto i : c10::irange(num_outputs)) {
     // The exact output tensor should never be managed.
@@ -1011,8 +1005,7 @@ c10::IValue StaticRuntimeBlockRunner::move_outputs_to_tuple(
 /// deallocation and returning the Static Runtime instance after the client is
 /// done with the outputs.
 
-void StaticRuntimeBlockRunner::verify_and_correct_memory_overlap(
-    ProcessedNode& n) {
+void BlockRunner::verify_and_correct_memory_overlap(ProcessedNode& n) {
   // The slow check can be removed once the internal/output buffers are merged
   if (C10_UNLIKELY(n.check_outputs_for_memory_overlap())) {
     if (C10_UNLIKELY(!planner_ && static_module_.opts().cleanup_activations)) {
@@ -1039,7 +1032,7 @@ void StaticRuntimeBlockRunner::verify_and_correct_memory_overlap(
   }
 }
 
-StaticRuntimeBlockRunner::Deallocator::~Deallocator() {
+BlockRunner::Deallocator::~Deallocator() {
   // Assume cleanup cannot throw.
   cleanupImpl();
 #ifndef NDEBUG
@@ -1047,7 +1040,7 @@ StaticRuntimeBlockRunner::Deallocator::~Deallocator() {
 #endif
 }
 
-void StaticRuntimeBlockRunner::Deallocator::cleanupImpl() {
+void BlockRunner::Deallocator::cleanupImpl() {
   if (block_runner_.static_module_.opts().cleanup_activations) {
     // MemoryPlanner is created after the first invocation of `run()`. This
     // is done intentionally because MemoryPlanner uses `Tensor` sizes of
@@ -1072,7 +1065,7 @@ void StaticRuntimeBlockRunner::Deallocator::cleanupImpl() {
 }
 
 template <typename IValueList>
-c10::IValue StaticRuntimeBlockRunner::run_impl(
+c10::IValue BlockRunner::run_impl(
     IValueList&& args,
     const KeywordArgs& kwargs) {
   // We assume inference workloads, so we do not need
@@ -1114,7 +1107,7 @@ c10::IValue StaticRuntimeBlockRunner::run_impl(
 }
 
 template <typename IValueList>
-c10::IValue StaticRuntimeBlockRunner::run_impl_record_functions(
+c10::IValue BlockRunner::run_impl_record_functions(
     IValueList&& args,
     const KeywordArgs& kwargs) {
   bool pre_sampled = false;
@@ -1133,7 +1126,7 @@ c10::IValue StaticRuntimeBlockRunner::run_impl_record_functions(
   return run_impl(std::forward<IValueList>(args), kwargs);
 }
 
-c10::IValue StaticRuntimeBlockRunner::operator()(
+c10::IValue BlockRunner::operator()(
     const std::vector<c10::IValue>& args,
     const KeywordArgs& kwargs) {
 #ifdef PYTORCH_DISABLE_NET_PROFILING
@@ -1143,7 +1136,7 @@ c10::IValue StaticRuntimeBlockRunner::operator()(
 #endif
 }
 
-c10::IValue StaticRuntimeBlockRunner::operator()(
+c10::IValue BlockRunner::operator()(
     std::vector<c10::IValue>&& args,
     const KeywordArgs& kwargs) {
 #ifdef PYTORCH_DISABLE_NET_PROFILING
@@ -1170,7 +1163,7 @@ std::string generate_latency_json(const std::string& label, double millis) {
 
 } // namespace
 
-void StaticRuntimeBlockRunner::benchmark(
+void BlockRunner::benchmark(
     const std::vector<std::vector<c10::IValue>>& args_list,
     const std::vector<KeywordArgs>& kwargs_list,
     const int warmup_runs,
@@ -1232,8 +1225,8 @@ void StaticRuntimeBlockRunner::benchmark(
   }
   std::cout << std::setw(15) << results.total_time << " ms. in Total"
             << std::endl;
-  std::cout << "StaticRuntimeBlockRunner setup time: " << results.setup_time
-            << " ms" << std::endl;
+  std::cout << "BlockRunner setup time: " << results.setup_time << " ms"
+            << std::endl;
   std::cout << "Memory allocation time: " << results.memory_alloc_time
             << " ms\n";
   std::cout << "Memory deallocation time: " << results.memory_dealloc_time
@@ -1277,7 +1270,7 @@ void StaticRuntimeBlockRunner::benchmark(
 #endif
 }
 
-float StaticRuntimeBlockRunner::benchmark_model(
+float BlockRunner::benchmark_model(
     const std::vector<std::vector<c10::IValue>>& args_list,
     const std::vector<KeywordArgs>& kwargs_list,
     const int warmup_runs,
@@ -1361,7 +1354,7 @@ void display_pnode_info(const ProcessedNode& pnode) {
   }
 }
 
-void StaticRuntimeBlockRunner::display_nodes(
+void BlockRunner::display_nodes(
     const std::vector<c10::IValue>& args,
     const KeywordArgs& kwargs) {
   c10::InferenceMode mode;
@@ -1380,12 +1373,11 @@ void StaticRuntimeBlockRunner::display_nodes(
   on_exit.setFinished();
 }
 
-StaticRuntimeBlockRunner::IndividualMetrics StaticRuntimeBlockRunner::
-    benchmark_individual_ops(
-        const std::vector<std::vector<c10::IValue>>& args_list,
-        const std::vector<KeywordArgs>& kwargs_list,
-        const int warmup_runs,
-        const int main_runs) {
+BlockRunner::IndividualMetrics BlockRunner::benchmark_individual_ops(
+    const std::vector<std::vector<c10::IValue>>& args_list,
+    const std::vector<KeywordArgs>& kwargs_list,
+    const int warmup_runs,
+    const int main_runs) {
   TORCH_CHECK(
       kwargs_list.size() == 0 || args_list.size() == kwargs_list.size());
   TORCH_CHECK(warmup_runs >= 1 && main_runs >= 1);
@@ -1510,7 +1502,9 @@ StaticRuntimeBlockRunner::IndividualMetrics StaticRuntimeBlockRunner::
   return results;
 }
 
-bool StaticRuntimeBlockRunner::check_for_memory_leak(bool output_returned) {
+bool BlockRunner::check_for_memory_leak(
+    bool output_returned,
+    bool recurse_on_sub_blocks) {
   if (!static_module_.opts().cleanup_activations) {
     return true;
   }
@@ -1533,7 +1527,7 @@ bool StaticRuntimeBlockRunner::check_for_memory_leak(bool output_returned) {
         // `ival` contains a managed output tensor that the runtime doesn't
         // reclaim at the end of an iteration, but the client does so
         // by explicitly calling
-        // `StaticRuntimeBlockRunner::deallocateOutputTensors`.
+        // `BlockRunner::deallocateOutputTensors`.
         continue;
       }
       const std::string error_msg = "Output " + c10::to_string(i) + ", %" +
@@ -1567,12 +1561,19 @@ bool StaticRuntimeBlockRunner::check_for_memory_leak(bool output_returned) {
         }
       }
     }
+
+    if (recurse_on_sub_blocks) {
+      for (auto& block_runner : pnode.block_runners()) {
+        block_runner->check_for_memory_leak(
+            output_returned, recurse_on_sub_blocks);
+      }
+    }
   }
   VLOG(1) << "Finished checking for memory leak";
   return true;
 }
 
-void StaticRuntimeBlockRunner::deallocateOutputTensors() {
+void BlockRunner::deallocateOutputTensors() {
   if (!static_module_.opts().manage_output_tensors) {
     TORCH_CHECK(
         !planner_ || planner_->numOutputBufferBytes() == 0,
@@ -1585,7 +1586,7 @@ void StaticRuntimeBlockRunner::deallocateOutputTensors() {
   }
 }
 
-bool StaticRuntimeBlockRunner::checkOutputTensorMemoryLeaks() {
+bool BlockRunner::checkOutputTensorMemoryLeaks() {
   if (!static_module_.opts().manage_output_tensors || !planner_) {
     return true;
   }
@@ -1611,13 +1612,11 @@ bool StaticRuntimeBlockRunner::checkOutputTensorMemoryLeaks() {
   return true;
 }
 
-bool StaticRuntimeBlockRunner::isManagedOutputTensor(
-    const IValue& ivalue) const {
+bool BlockRunner::isManagedOutputTensor(const IValue& ivalue) const {
   return planner_ && planner_->isManagedOutputTensor(ivalue);
 }
 
-bool StaticRuntimeBlockRunner::isManagedOutputTensorValue(
-    const Value* value) const {
+bool BlockRunner::isManagedOutputTensorValue(const Value* value) const {
   // It's possible that manage_output_tensors_ was disabled after initializing
   // managed_output_tensor_values, so we have to check that flag here.
   if (!planner_ || !manage_output_tensors_enabled_) {
@@ -1627,7 +1626,7 @@ bool StaticRuntimeBlockRunner::isManagedOutputTensorValue(
   return managed_outputs.find(value) != managed_outputs.end();
 }
 
-void StaticRuntimeBlockRunner::disableManageOutputTensors() {
+void BlockRunner::disableManageOutputTensors() {
   if (!manage_output_tensors_enabled_) {
     return;
   }
@@ -1645,20 +1644,20 @@ void StaticRuntimeBlockRunner::disableManageOutputTensors() {
   planner_.reset();
 }
 
-size_t StaticRuntimeBlockRunner::init_sub_blocks(
+size_t BlockRunner::init_sub_blocks(
     const StaticModule& sm,
     std::vector<IValue>& values,
     size_t block_idx) {
   const auto block_idx_start = block_idx;
   for (auto& pnode : nodes_) {
     auto* node = pnode.node();
-    auto& blocks = pnode.blocks();
+    auto& block_runners = pnode.block_runners();
 
     for (const auto i : c10::irange(node->blocks().size())) {
       (void)i; // Suppress unused variable warning
-      blocks.push_back(
-          std::make_shared<StaticRuntimeBlockRunner>(sm, values, ++block_idx));
-      block_idx += blocks.back()->init_sub_blocks(sm, values, block_idx);
+      block_runners.push_back(
+          std::make_shared<BlockRunner>(sm, values, ++block_idx));
+      block_idx += block_runners.back()->init_sub_blocks(sm, values, block_idx);
     }
   }
   const auto num_processed_blocks = block_idx - block_idx_start;
@@ -1889,7 +1888,7 @@ StaticRuntime::StaticRuntime(const StaticModule& sm) {
   values_.resize(sm.value_buffer_size());
   std::copy(sm.constants().begin(), sm.constants().end(), values_.begin());
 
-  block_ = std::make_unique<StaticRuntimeBlockRunner>(sm, values_, 0);
+  block_ = std::make_unique<BlockRunner>(sm, values_, 0);
   block_->init_sub_blocks(sm, values_, 0);
 }
 
@@ -1906,7 +1905,8 @@ c10::IValue StaticRuntime::operator()(
 }
 
 bool StaticRuntime::check_for_memory_leak(bool output_returned) {
-  return block_->check_for_memory_leak(output_returned);
+  return block_->check_for_memory_leak(
+      output_returned, /* recurse_on_sub_blocks */ true);
 }
 
 bool StaticRuntime::checkOutputTensorMemoryLeaks() {

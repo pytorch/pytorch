@@ -1065,7 +1065,7 @@ TEST(ManagedTensorRanges, NoAliases) {
 
   FastSet<const Value*> managed_tensors = {y, z};
   AliasDb alias_db(graph);
-  auto ranges = ManagedTensorRanges(graph->block(), alias_db, managed_tensors);
+  auto ranges = ManagedTensorRanges(*graph->block(), alias_db, managed_tensors);
 
   std::vector<Node*> nodes(
       graph->block()->nodes().begin(), graph->block()->nodes().end());
@@ -1105,7 +1105,7 @@ TEST(ManagedTensorRanges, AliasExtendingLifetimes) {
 
   FastSet<const Value*> managed_tensors = {y, z1, z2};
   AliasDb alias_db(graph);
-  auto ranges = ManagedTensorRanges(graph->block(), alias_db, managed_tensors);
+  auto ranges = ManagedTensorRanges(*graph->block(), alias_db, managed_tensors);
 
   std::vector<Node*> nodes(
       graph->block()->nodes().begin(), graph->block()->nodes().end());
@@ -1152,7 +1152,7 @@ TEST(ManagedTensorRanges, LifetimeOverlap) {
   auto* e = vmap["e"];
 
   AliasDb alias_db(graph);
-  auto ranges = ManagedTensorRanges(graph->block(), alias_db, {b, c, d, e});
+  auto ranges = ManagedTensorRanges(*graph->block(), alias_db, {b, c, d, e});
   const std::vector<std::pair<Value*, Value*>> overlapping_values{
       {b, c}, {c, d}, {c, e}};
 
@@ -1187,7 +1187,7 @@ TEST(ManagedTensorRanges, OverlappingLifetimesContainers) {
   auto* d = vmap["d"];
 
   AliasDb alias_db(graph);
-  auto ranges = ManagedTensorRanges(graph->block(), alias_db, {b, c, d});
+  auto ranges = ManagedTensorRanges(*graph->block(), alias_db, {b, c, d});
 
   EXPECT_TRUE(ranges.lifetimesOverlap(b, c));
   EXPECT_TRUE(ranges.lifetimesOverlap(b, d));
@@ -1208,7 +1208,7 @@ TEST(ManagedTensorRanges, OverlappingLifetimesOutputs) {
   auto* output = vmap["output"];
 
   AliasDb alias_db(graph);
-  auto ranges = ManagedTensorRanges(graph->block(), alias_db, {b, output});
+  auto ranges = ManagedTensorRanges(*graph->block(), alias_db, {b, output});
 
   EXPECT_TRUE(ranges.lifetimesOverlap(b, output));
 }
@@ -1296,7 +1296,7 @@ void testAssignStorageToManagedTensors(
 
   AliasDb alias_db(graph);
   auto ranges =
-      ManagedTensorRanges(graph->block(), alias_db, managed_tensor_values);
+      ManagedTensorRanges(*graph->block(), alias_db, managed_tensor_values);
   auto groups = assignStorageToManagedTensors(
       graph->block()->nodes(), ranges, tensor_value_to_tensor);
 
