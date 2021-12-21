@@ -110,9 +110,9 @@ static inline uint64_t getForwardThreadKey(uint64_t tid, uint64_t seqNr) {
   return (((tid) << 48) | ((seqNr) & (((uint64_t)1 << 48) - 1)));
 }
 
-struct KinetoThreadLocalState : public ProfilerThreadLocalState {
-  explicit KinetoThreadLocalState(const ProfilerConfig& config)
-    : ProfilerThreadLocalState(config) {
+struct KinetoThreadLocalState : public torch::profiler::impl::ProfilerThreadLocalStateBase {
+  explicit KinetoThreadLocalState(const torch::profiler::impl::ProfilerConfig& config)
+    : ProfilerThreadLocalStateBase(config) {
     start_time_ = getTimeUs();
 #ifdef USE_KINETO
     cpu_trace = std::make_unique<libkineto::CpuTraceBuffer>();
@@ -585,7 +585,7 @@ void pushProfilingCallbacks(const std::unordered_set<at::RecordScope>& scopes) {
           ctx_ptr->startUs = getTimeUs();
           if (config.state == ProfilerState::KINETO_GPU_FALLBACK) {
             try {
-              cudaStubs()->record(nullptr, &ctx_ptr->cuda_event_start_, nullptr);
+              torch::profiler::impl::cudaStubs()->record(nullptr, &ctx_ptr->cuda_event_start_, nullptr);
             } catch (const std::exception& e) {
               LOG(WARNING) << "Failed to record CUDA event. " << e.what();
             }
@@ -596,7 +596,7 @@ void pushProfilingCallbacks(const std::unordered_set<at::RecordScope>& scopes) {
           if (config.report_input_shapes) {
             shapes = torch::profiler::impl::inputSizes(fn);
           }
-          cudaStubs()->nvtxRangePushA(torch::profiler::impl::getNvtxStr(
+          torch::profiler::impl::cudaStubs()->nvtxRangePushA(torch::profiler::impl::getNvtxStr(
             fn.name(), fn.seqNr(), shapes).c_str());
         }
         return nullptr;
@@ -615,7 +615,7 @@ void pushProfilingCallbacks(const std::unordered_set<at::RecordScope>& scopes) {
           kineto_ctx_ptr->endThreadId = at::RecordFunction::currentThreadId();
           if (config.state == ProfilerState::KINETO_GPU_FALLBACK) {
             try {
-              cudaStubs()->record(
+              torch::profiler::impl::cudaStubs()->record(
                   nullptr, &kineto_ctx_ptr->cuda_event_end_, nullptr);
             } catch (const std::exception& e) {
               LOG(WARNING) << "Failed to record CUDA event. " << e.what();
@@ -628,7 +628,7 @@ void pushProfilingCallbacks(const std::unordered_set<at::RecordScope>& scopes) {
           libkineto::api().activityProfiler().popCorrelationId();
 #endif // USE_KINETO
         } else if (config.state == ProfilerState::NVTX) {
-          cudaStubs()->nvtxRangePop();
+          torch::profiler::impl::cudaStubs()->nvtxRangePop();
         }
       })
     .needsInputs(state_ptr->config().report_input_shapes)
@@ -674,8 +674,8 @@ void reportBackendEventToActiveKinetoProfiler(
 }
 
 void prepareProfiler(
-    const ProfilerConfig& config,
-    const std::set<ActivityType>& activities) {
+    const torch::profiler::impl::ProfilerConfig& config,
+    const std::set<torch::profiler::impl::ActivityType>& activities) {
   if (config.state == ProfilerState::NVTX) {
     return;
   }
@@ -702,10 +702,10 @@ void prepareProfiler(
   };
 
   std::set<libkineto::ActivityType> k_activities;
-  if (activities.count(ActivityType::CPU)) {
+  if (activities.count(torch::profiler::impl::ActivityType::CPU)) {
     k_activities.insert(cpuTypes.begin(), cpuTypes.end());
   }
-  if (activities.count(ActivityType::CUDA)) {
+  if (activities.count(torch::profiler::impl::ActivityType::CUDA)) {
     k_activities.insert(cudaTypes.begin(), cudaTypes.end());
   }
 
@@ -723,8 +723,8 @@ void prepareProfiler(
 }
 
 void enableProfilerWithEventPostProcess(
-    const ProfilerConfig& config,
-    const std::set<ActivityType>& activities,
+    const torch::profiler::impl::ProfilerConfig& config,
+    const std::set<torch::profiler::impl::ActivityType>& activities,
     std::function<void(std::vector<KinetoEvent>&)>&& cb,
     const std::unordered_set<at::RecordScope>& scopes) {
   enableProfiler(config, activities, scopes);
@@ -733,8 +733,8 @@ void enableProfilerWithEventPostProcess(
 }
 
 void enableProfiler(
-    const ProfilerConfig& config,
-    const std::set<ActivityType>& activities,
+    const torch::profiler::impl::ProfilerConfig& config,
+    const std::set<torch::profiler::impl::ActivityType>& activities,
     const std::unordered_set<at::RecordScope>& scopes) {
   if (config.state != ProfilerState::NVTX) {
     TORCH_CHECK(
@@ -742,16 +742,15 @@ void enableProfiler(
         config.state == ProfilerState::KINETO_GPU_FALLBACK);
     TORCH_CHECK(!activities.empty(), "No activities specified for Kineto profiler");
   } else {
-    TORCH_CHECK(cudaStubs()->enabled(),
+    TORCH_CHECK(torch::profiler::impl::cudaStubs()->enabled(),
         "Can't use NVTX profiler - PyTorch was compiled without CUDA");
   }
 
-  auto state_ptr = getProfilerTLSState();
-  TORCH_CHECK(!state_ptr, "Profiler is already enabled on this thread");
+  TORCH_CHECK(!profilerEnabled(), "Profiler is already enabled on this thread");
   auto state = std::make_shared<KinetoThreadLocalState>(config);
   c10::ThreadLocalDebugInfo::_push(c10::DebugInfoKind::PROFILER_STATE, state);
 
-  if (activities.count(ActivityType::CPU) || config.state == ProfilerState::NVTX) {
+  if (activities.count(torch::profiler::impl::ActivityType::CPU) || config.state == ProfilerState::NVTX) {
     if (config.with_stack) {
       python_tracer::call(python_tracer::Command::kStartOne);
     }
@@ -810,7 +809,7 @@ int64_t KinetoEvent::cudaElapsedUs() const {
     return -1;
   }
   try {
-    return (int64_t)cudaStubs()->elapsed(&cuda_event_start_, &cuda_event_end_);
+    return (int64_t)torch::profiler::impl::cudaStubs()->elapsed(&cuda_event_start_, &cuda_event_end_);
   } catch (std::exception& e) {
     LOG(WARNING) << "Failed to measure time between two CUDA events. "
         << e.what();
