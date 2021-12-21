@@ -2042,6 +2042,9 @@ void replaceAliasOpsWithCopy(std::shared_ptr<Graph>& graph, Block* block) {
         graph->insertNode(graph->create(op_mapping[n->kind()], n->inputs(), 1));
     op_copy->output()->setType(n->output(0)->type());
 
+    // adding newly created value into alias_db;
+    alias_db->createValue(op_copy->output());
+
     n->output()->replaceAllUsesWith(op_copy->output());
     n->destroy();
   }

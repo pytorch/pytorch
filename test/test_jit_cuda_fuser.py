@@ -3411,6 +3411,31 @@ class TestCudaFuser(JitTestCase):
         self._bias_unsqueeze_relu_helper([2, 3, 4, 5], torch.float, 'cuda', 1e-6)
         self._alias_bias_unsqueeze_relu_helper([2, 3, 4, 5], torch.float, 'cuda', 1e-6)
 
+    def test_alias_pass_fix(self):
+        x = torch.randn(4, 24, 2, 2, dtype=torch.float, device="cuda")
+        w = torch.randn(24, 24, 1, 1, dtype=torch.float, device="cuda")
+        b = torch.randn(24, dtype=torch.float, device="cuda")
+
+        def t(x, w, b):
+            b2 = b + 1.0
+            o = torch.conv2d(x, w, b2)
+            return o
+
+        t_jit = torch.jit.script(t)
+        self._run_helper(t_jit, t, x, w, b)
+
+    def test_squeeze_negative_dim(self):
+        x = torch.randn(4, 24, 1, 2, dtype=torch.float, device="cuda")
+
+        def t(x):
+            o = x + 1.0
+            o = o.squeeze(-2)
+            o = o * 2.0
+            return o
+
+        t_jit = torch.jit.script(t)
+        self._run_helper(t_jit, t, x)
+
 class TestPassManagerCudaFuser(JitTestCase):
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")

@@ -87,6 +87,9 @@ TensorView* squeeze(
     const std::vector<int64_t>& sizes,
     int64_t dim) {
   TORCH_INTERNAL_ASSERT(x->nDims() == sizes.size());
+  if (dim < 0) {
+    dim = x->nDims() + dim;
+  }
   TORCH_INTERNAL_ASSERT(dim >= 0 && dim < x->nDims());
   TORCH_INTERNAL_ASSERT(sizes[dim] == 1);
 
@@ -94,7 +97,10 @@ TensorView* squeeze(
 }
 
 TensorView* unsqueeze(TensorView* x, int64_t dim) {
-  TORCH_INTERNAL_ASSERT(dim >= 0 && dim < x->nDims());
+  if (dim < 0) {
+    dim = x->nDims() + dim + 1;
+  }
+  TORCH_INTERNAL_ASSERT(dim >= 0 && dim <= x->nDims());
 
   std::vector<bool> broadcast_axes(x->nDims() + 1, false);
   broadcast_axes[dim] = true;
