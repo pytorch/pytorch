@@ -6862,11 +6862,11 @@ class TestNN(NNTestCase):
                     res_gpu = torch.nn.functional.ctc_loss(log_probs.cuda(), targets.cuda(), input_lengths, target_lengths,
                                                            reduction=reduction, zero_infinity=True)
                     res_gpu_no_bd = torch.nn.functional.ctc_loss(
-                        log_probs_no_bd.cuda(), 
-                        targets_no_bd.cuda(), 
-                        input_lengths_no_bd.cuda(), 
+                        log_probs_no_bd.cuda(),
+                        targets_no_bd.cuda(),
+                        input_lengths_no_bd.cuda(),
                         target_lengths_no_bd.cuda(),
-                        reduction=reduction, 
+                        reduction=reduction,
                         zero_infinity=True
                     )
 
