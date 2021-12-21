@@ -1,8 +1,10 @@
 #pragma once
 
+#include <type_traits>
+
 #include <ATen/core/dynamic_type.h>
 #include <ATen/core/jit_type.h>
-#include <type_traits>
+#include <torch/csrc/jit/frontend/string_to_type.h>
 
 namespace c10 {
 
@@ -67,6 +69,7 @@ TORCH_API TypePtr parseType(const std::string& pythonStr) {
 }
 
 TORCH_API std::vector<TypePtr> parseType(std::vector<std::string>& pythonStr);
+
 } // namespace c10
 
 #include <torch/csrc/jit/mobile/type_parser_inl.h>

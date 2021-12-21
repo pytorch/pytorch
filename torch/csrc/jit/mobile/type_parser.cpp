@@ -1,8 +1,9 @@
+#include <torch/csrc/jit/mobile/type_parser.h>
+
 #include <ATen/core/jit_type.h>
 #include <c10/util/string_view.h>
 #include <torch/csrc/jit/frontend/parser_constants.h>
 #include <torch/csrc/jit/mobile/runtime_compatibility.h>
-#include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/custom_class.h>
 #include <queue>
 
@@ -178,4 +179,26 @@ TORCH_API std::vector<at::TypePtr> parseType(
   at::TypeParser parser(pythonStrs);
   return parser.parseList();
 }
+
+const std::unordered_map<std::string, c10::TypePtr>& TypeParser::TypeFactory<
+    c10::DynamicType>::baseTypes() {
+  static const std::unordered_map<std::string, TypePtr> map = {
+#define MAP_ITEM(NAME, TYPE) \
+  {#NAME, DynamicTypeTrait<TYPE##Type>::getBaseType()},
+      FORALL_JIT_BASE_TYPES(MAP_ITEM)
+#undef MAP_ITEM
+  };
+  return map;
+}
+
+const std::unordered_map<std::string, c10::TypePtr>& TypeParser::TypeFactory<
+    c10::Type>::baseTypes() {
+  static const std::unordered_map<std::string, TypePtr> map = {
+#define MAP_ITEM(NAME, TYPE) {#NAME, TYPE##Type::get()},
+      FORALL_JIT_BASE_TYPES(MAP_ITEM)
+#undef MAP_ITEM
+  };
+  return map;
+}
+
 } // namespace c10

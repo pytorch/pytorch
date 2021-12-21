@@ -173,12 +173,18 @@ class DynamicType : public Type {
   };
 };
 
+DynamicTypePtr makeDynamicType(DynamicType::Tag);
+
 template <typename T>
 struct DynamicTypeTrait {};
 #define DYNAMIC_TYPE_TAG_VALUE(NAME, _) \
 template <> \
 struct TORCH_API DynamicTypeTrait<NAME ## Type> { \
 static constexpr auto tagValue = DynamicType::Tag::NAME; \
+static const DynamicTypePtr& getBaseType() { \
+  static auto type = makeDynamicType(tagValue); \
+  return type; \
+} \
 };
     FORALL_DYNAMIC_TYPES(DYNAMIC_TYPE_TAG_VALUE)
 #undef DYNAMIC_TYPE_TAG_VALUE

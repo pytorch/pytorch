@@ -81,6 +81,7 @@ jit_core_headers = [
     "torch/csrc/jit/frontend/lexer.h",
     "torch/csrc/jit/frontend/strtod.h",
     "torch/csrc/jit/frontend/parser_constants.h",
+    "torch/csrc/jit/frontend/string_to_type.h",
     "torch/csrc/jit/frontend/function_schema_parser.h",
     "torch/csrc/jit/frontend/parse_string_literal.h",
     "torch/csrc/jit/frontend/schema_type_parser.h",

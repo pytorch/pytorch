@@ -1,40 +1,14 @@
-#include <ATen/core/jit_type.h>
+#include <torch/csrc/jit/frontend/string_to_type.h>
 
 namespace torch {
 namespace jit {
 using namespace c10;
 TORCH_API const std::unordered_map<std::string, TypePtr>& string_to_type_lut() {
   static std::unordered_map<std::string, TypePtr> map = {
-      {"Tensor", TensorType::get()},
-      // Dtype constraints are not constrained in compilation. Therefore, we map
-      // all tensor subclasses with different dtypes to a same underlying
-      // Tensor. But, we give warning about possible dtype change whenever user
-      // uses any of the tensor subclasses such as LongTensor.
-      {"LongTensor", TensorType::get()},
-      {"DoubleTensor", TensorType::get()},
-      {"FloatTensor", TensorType::get()},
-      {"IntTensor", TensorType::get()},
-      {"ShortTensor", TensorType::get()},
-      {"HalfTensor", TensorType::get()},
-      {"CharTensor", TensorType::get()},
-      {"ByteTensor", TensorType::get()},
-      {"BoolTensor", TensorType::get()},
-      {"int", IntType::get()},
-      {"float", FloatType::get()},
-      {"bool", BoolType::get()},
-      {"complex", ComplexType::get()},
-      {"str", StringType::get()},
-      {"Device", DeviceObjType::get()},
-      {"Stream", StreamObjType::get()},
-      // technically this is not a python type but we need it when
-      // parsing serialized methods that use implicit conversions to Scalar
-      {"number", NumberType::get()},
-      {"None", NoneType::get()},
-      {"NoneType", NoneType::get()},
-      {"Any", AnyType::get()},
-      {"Capsule", CapsuleType::get()},
-      {"list", AnyListType::get()},
-      {"tuple", AnyTupleType::get()}};
+#define MAP_ITEM(NAME, TYPE) {#NAME, TYPE##Type::get()},
+      FORALL_JIT_BASE_TYPES(MAP_ITEM)
+#undef MAP_ITEM
+  };
   return map;
 }
 } // namespace jit

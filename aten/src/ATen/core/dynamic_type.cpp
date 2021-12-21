@@ -202,22 +202,28 @@ bool DynamicType::LabeledDynamicType::equals(
   return (label == other.label) && (*ty == *other.ty);
 }
 
+DynamicTypePtr makeDynamicType(DynamicType::Tag tag) {
+  return std::make_shared<DynamicType>(
+      tag,
+      DynamicType::Arguments{});
+}
+
 DynamicType::Ptr IValue::TagType<c10::DynamicType>::get(const c10::IValue& v) {
   switch (v.tag) {
     case Tag::None:
-      return NoneType::get();
+      return DynamicTypeTrait<NoneType>::getBaseType();
     case Tag::Tensor:
-      return TensorType::get();
+      return DynamicTypeTrait<TensorType>::getBaseType();
     case Tag::Double:
-      return FloatType::get();
+      return DynamicTypeTrait<FloatType>::getBaseType();
     case Tag::ComplexDouble:
-      return ComplexType::get();
+      return DynamicTypeTrait<ComplexType>::getBaseType();
     case Tag::Int:
-      return IntType::get();
+      return DynamicTypeTrait<IntType>::getBaseType();
     case Tag::Bool:
-      return BoolType::get();
+      return DynamicTypeTrait<BoolType>::getBaseType();
     case Tag::String:
-      return StringType::get();
+      return DynamicTypeTrait<StringType>::getBaseType();
     case Tag::GenericDict: {
       auto d = v.toGenericDict();
       return std::make_shared<DynamicType>(
@@ -229,17 +235,17 @@ DynamicType::Ptr IValue::TagType<c10::DynamicType>::get(const c10::IValue& v) {
           DynamicType::Tag::List,
           DynamicType::Arguments{v.toList().elementType()});
     case Tag::Device:
-      return DeviceObjType::get();
+      return DynamicTypeTrait<DeviceObjType>::getBaseType();
     case Tag::Stream:
-      return StreamObjType::get();
+      return DynamicTypeTrait<StreamObjType>::getBaseType();
     case Tag::Object:
       return v.toObjectRef().type();
     case Tag::Capsule:
-      return CapsuleType::get();
+      return DynamicTypeTrait<CapsuleType>::getBaseType();
     case Tag::Tuple:
       return v.toTupleRef().type<c10::DynamicType>();
     default:
-      return AnyType::get();
+      return DynamicTypeTrait<AnyType>::getBaseType();
   }
 }
 

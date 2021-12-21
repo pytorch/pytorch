@@ -2,12 +2,6 @@
 
 #include <ATen/core/jit_type.h>
 
-namespace torch {
-namespace jit {
-const std::unordered_map<std::string, c10::TypePtr>& string_to_type_lut();
-} // namespace jit
-} // namespace torch
-
 namespace c10 {
 
 template <>
@@ -30,6 +24,7 @@ struct TORCH_API TypeParser::TypeFactory<c10::DynamicType> {
     return std::make_shared<DynamicType>(
         DynamicType::Tag::Tuple, name, DynamicType::Arguments(fields, types));
   }
+  static const std::unordered_map<std::string, c10::TypePtr>& baseTypes();
 };
 
 template <>
@@ -47,6 +42,7 @@ struct TORCH_API TypeParser::TypeFactory<c10::Type> {
       const std::vector<TypePtr>& types) {
     return TupleType::createNamed(name, fields, types);
   }
+  static const std::unordered_map<std::string, c10::TypePtr>& baseTypes();
 };
 
 template <typename T>
@@ -81,8 +77,8 @@ TypePtr TypeParser::parseNonSimple(const std::string& token) {
 template <typename T>
 TypePtr TypeParser::parse() {
   std::string token = next();
-  auto simpleTypeIt = torch::jit::string_to_type_lut().find(token);
-  if (simpleTypeIt != torch::jit::string_to_type_lut().end()) {
+  auto simpleTypeIt = TypeFactory<T>::baseTypes().find(token);
+  if (simpleTypeIt != TypeFactory<T>::baseTypes().end()) {
     if (cur() != "]" && cur() != "," && cur() != "") {
       TORCH_CHECK(
           false, "Simple type ", token, " is followed by ", "invalid chars.");

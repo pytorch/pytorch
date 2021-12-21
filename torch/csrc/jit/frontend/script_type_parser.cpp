@@ -1,12 +1,12 @@
 #include <torch/csrc/jit/frontend/script_type_parser.h>
 
 #include <torch/csrc/jit/frontend/parser.h>
+#include <torch/csrc/jit/frontend/string_to_type.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/custom_class.h>
 
 namespace torch {
 namespace jit {
-const std::unordered_map<std::string, TypePtr>& string_to_type_lut();
 namespace {
 
 bool isTorch(const Expr& expr) {
