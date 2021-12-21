@@ -4593,7 +4593,7 @@ def normalize(
     Args:
         input: input tensor of any shape
         p (float): the exponent value in the norm formulation. Default: 2
-        dim (Union[int, Sequence[int]]): the dimensions to reduce over. Default: 1
+        dim (int, tuple of ints, list of ints): the dimensions to reduce over. Default: 1
         eps (float): small value to avoid division by zero. Default: 1e-12
         out (Tensor, optional): the output tensor. If :attr:`out` is used, this
                                 operation won't be differentiable.
