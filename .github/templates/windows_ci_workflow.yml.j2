@@ -74,7 +74,6 @@ jobs:
       https_proxy: "!{{ common.squid_proxy }}"
       IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == '!{{ ciflow_config.trigger_action }}') && (github.event.assigneed.login == '!{{ ciflow_config.trigger_actor }}') }}
       LABEL_CONDITIONS: ${{ !{{ ciflow_config.label_conditions }} }}
-      LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
     if: !{{ ciflow_config.root_job_condition }}
     steps:
       - name: print labels
@@ -162,7 +161,7 @@ jobs:
       http_proxy: "!{{ common.squid_proxy }}"
       https_proxy: "!{{ common.squid_proxy }}"
       PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
-    needs: [build, generate-test-matrix }}]
+    needs: [build, generate-test-matrix]
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
       fail-fast: false
