@@ -17,7 +17,9 @@ from . import _C
 
 # functorch transforms
 from ._src.vmap import vmap
-from ._src.eager_transforms import grad, grad_and_value, vjp, jacrev
+from ._src.eager_transforms import (
+    grad, grad_and_value, vjp, jacrev, jvp, jacfwd, hessian,
+)
 from ._src.python_key import make_fx
 
 # utilities. Maybe these should go in their own namespace in the future?
