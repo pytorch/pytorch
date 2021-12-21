@@ -1,6 +1,8 @@
+import math
 import torch
-from . import _functional as F
+from torch import Tensor
 from .optimizer import Optimizer
+from typing import List
 
 
 class NAdam(Optimizer):
@@ -45,13 +47,15 @@ class NAdam(Optimizer):
             numerical stability (default: 1e-8)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
         momentum_decay (float, optional): momentum momentum_decay (default: 4e-3)
+        foreach (bool, optional): whether foreach implementation of optimizer
+            is used (default: False)
 
     .. _Incorporating Nesterov Momentum into Adam:
         https://openreview.net/forum?id=OM0jvwB8jIp57ZJjtNEZ
     """
 
     def __init__(self, params, lr=2e-3, betas=(0.9, 0.999), eps=1e-8,
-                 weight_decay=0, momentum_decay=4e-3):
+                 weight_decay=0, momentum_decay=4e-3, foreach=False):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -65,7 +69,8 @@ class NAdam(Optimizer):
         if not 0.0 <= momentum_decay:
             raise ValueError("Invalid momentum_decay value: {}".format(momentum_decay))
         defaults = dict(lr=lr, betas=betas, eps=eps,
-                        weight_decay=weight_decay, momentum_decay=momentum_decay)
+                        weight_decay=weight_decay, momentum_decay=momentum_decay,
+                        foreach=foreach)
         super(NAdam, self).__init__(params, defaults)
 
     @torch.no_grad()
@@ -89,6 +94,7 @@ class NAdam(Optimizer):
             mu_products = []
             state_steps = []
             beta1, beta2 = group['betas']
+            foreach = group['foreach']
 
             for p in group['params']:
                 if p.grad is not None:
@@ -116,23 +122,141 @@ class NAdam(Optimizer):
                     # record the step after step update
                     state_steps.append(state['step'])
 
-            F.nadam(params_with_grad,
-                    grads,
-                    exp_avgs,
-                    exp_avg_sqs,
-                    mu_products,
-                    state_steps,
-                    beta1=beta1,
-                    beta2=beta2,
-                    lr=group['lr'],
-                    weight_decay=group['weight_decay'],
-                    momentum_decay=group['momentum_decay'],
-                    eps=group['eps'])
+            nadam(params_with_grad,
+                  grads,
+                  exp_avgs,
+                  exp_avg_sqs,
+                  mu_products,
+                  state_steps,
+                  foreach=foreach,
+                  beta1=beta1,
+                  beta2=beta2,
+                  lr=group['lr'],
+                  weight_decay=group['weight_decay'],
+                  momentum_decay=group['momentum_decay'],
+                  eps=group['eps'])
 
             # update mu_product
-            for p, mu_product in zip(params_with_grad, mu_products):
+            for p in params_with_grad:
                 state = self.state[p]
                 state['mu_product'] = state['mu_product'] * beta1 * \
                     (1. - 0.5 * (0.96 ** (state['step'] * group['momentum_decay'])))
 
         return loss
+
+
+def nadam(params: List[Tensor],
+          grads: List[Tensor],
+          exp_avgs: List[Tensor],
+          exp_avg_sqs: List[Tensor],
+          mu_products: List[float],
+          state_steps: List[int],
+          foreach: bool = False,
+          *,
+          beta1: float,
+          beta2: float,
+          lr: float,
+          weight_decay: float,
+          momentum_decay: float,
+          eps: float):
+
+    if foreach and not torch.jit.is_scripting():
+        func = multi_tensor_nadam
+    else:
+        func = single_tensor_nadam
+
+    func(params,
+         grads,
+         exp_avgs,
+         exp_avg_sqs,
+         mu_products,
+         state_steps,
+         beta1=beta1,
+         beta2=beta2,
+         lr=lr,
+         weight_decay=weight_decay,
+         momentum_decay=momentum_decay,
+         eps=eps)
+
+
+def single_tensor_nadam(params: List[Tensor],
+                        grads: List[Tensor],
+                        exp_avgs: List[Tensor],
+                        exp_avg_sqs: List[Tensor],
+                        mu_products: List[float],
+                        state_steps: List[int],
+                        *,
+                        beta1: float,
+                        beta2: float,
+                        lr: float,
+                        weight_decay: float,
+                        momentum_decay: float,
+                        eps: float):
+
+    for i, param in enumerate(params):
+        grad = grads[i]
+        exp_avg = exp_avgs[i]
+        exp_avg_sq = exp_avg_sqs[i]
+        mu_product = mu_products[i]
+        step = state_steps[i]
+
+        bias_correction2 = 1 - beta2 ** step
+
+        if weight_decay != 0:
+            grad = grad.add(param, alpha=weight_decay)
+
+        # calculate the momentum cache \mu^{t} and \mu^{t+1}
+        mu = beta1 * (1. - 0.5 * (0.96 ** (step * momentum_decay)))
+        mu_next = beta1 * (1. - 0.5 * (0.96 ** ((step + 1) * momentum_decay)))
+        mu_product = mu_product * mu
+        mu_product_next = mu_product * mu * mu_next
+
+        # decay the first and second moment running average coefficient
+        exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
+        exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
+
+        denom = exp_avg_sq.div(bias_correction2).sqrt().add_(eps)
+        param.addcdiv_(grad, denom, value=-lr * (1. - mu) / (1. - mu_product))
+        param.addcdiv_(exp_avg, denom, value=-lr * mu_next / (1. - mu_product_next))
+
+
+def multi_tensor_nadam(params: List[Tensor],
+                       grads: List[Tensor],
+                       exp_avgs: List[Tensor],
+                       exp_avg_sqs: List[Tensor],
+                       mu_products: List[float],
+                       state_steps: List[int],
+                       *,
+                       beta1: float,
+                       beta2: float,
+                       lr: float,
+                       weight_decay: float,
+                       momentum_decay: float,
+                       eps: float):
+
+    bias_correction2 = [1 - beta2 ** step for step in state_steps]
+    mus = [beta1 * (1. - 0.5 * (0.96 ** (step * momentum_decay))) for step in state_steps]
+    mu_nexts = [beta1 * (1. - 0.5 * (0.96 ** ((step + 1) * momentum_decay)))
+                for step in state_steps]
+    mu_products = [mu * mu_product for mu, mu_product in zip(mus, mu_products)]
+    if weight_decay != 0:
+        torch._foreach_add_(grads, params, alpha=weight_decay)
+
+    # Decay the first and second moment running average coefficient
+    torch._foreach_mul_(exp_avgs, beta1)
+    torch._foreach_add_(exp_avgs, grads, alpha=1 - beta1)
+
+    torch._foreach_mul_(exp_avg_sqs, beta2)
+    torch._foreach_addcmul_(exp_avg_sqs, grads, grads, 1 - beta2)
+
+    exp_avg_sq_sqrt = torch._foreach_sqrt(exp_avg_sqs)
+    bias_correction_sqrt = [math.sqrt(bc) for bc in bias_correction2]
+    torch._foreach_div_(exp_avg_sq_sqrt, bias_correction_sqrt)
+    denom = torch._foreach_add(exp_avg_sq_sqrt, eps)
+
+    step_size_grads = [(lr * (1. - mu) / (1. - mu_product)) * -1
+                       for mu_product, mu in zip(mu_products, mus)]
+    step_size_expavg = [(lr * mu_next / (1. - mu_product * mu_next)) * -1
+                        for mu_product, mu_next in zip(mu_products, mu_nexts)]
+    torch._foreach_addcdiv_(params, grads, denom, step_size_grads)
+    torch._foreach_addcdiv_(params, exp_avgs, denom, step_size_expavg)

@@ -7,6 +7,7 @@ from typing import List, Optional
 from .adadelta import adadelta as adadelta_fn
 from .adagrad import adagrad as adagrad_fn
 from .adamax import adamax as adamax_fn
+from .nadam import nadam as nadam_fn
 
 # TODO: use foreach API in optim._functional to do all the computation
 
@@ -344,6 +345,7 @@ def nadam(params: List[Tensor],
           exp_avg_sqs: List[Tensor],
           mu_products: List[float],
           state_steps: List[int],
+          foreach: bool = False,
           *,
           beta1: float,
           beta2: float,
@@ -356,31 +358,19 @@ def nadam(params: List[Tensor],
     See :class:`~torch.optim.NAdam` for details.
     """
 
-    for i, param in enumerate(params):
-        grad = grads[i]
-        exp_avg = exp_avgs[i]
-        exp_avg_sq = exp_avg_sqs[i]
-        mu_product = mu_products[i]
-        step = state_steps[i]
-
-        bias_correction2 = 1 - beta2 ** step
-
-        if weight_decay != 0:
-            grad = grad.add(param, alpha=weight_decay)
-
-        # calculate the momentum cache \mu^{t} and \mu^{t+1}
-        mu = beta1 * (1. - 0.5 * (0.96 ** (step * momentum_decay)))
-        mu_next = beta1 * (1. - 0.5 * (0.96 ** ((step + 1) * momentum_decay)))
-        mu_product = mu_product * mu
-        mu_product_next = mu_product * mu * mu_next
-
-        # decay the first and second moment running average coefficient
-        exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
-        exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
-
-        denom = exp_avg_sq.div(bias_correction2).sqrt().add_(eps)
-        param.addcdiv_(grad, denom, value=-lr * (1. - mu) / (1. - mu_product))
-        param.addcdiv_(exp_avg, denom, value=-lr * mu_next / (1. - mu_product_next))
+    nadam_fn(params,
+             grads,
+             exp_avgs,
+             exp_avg_sqs,
+             mu_products,
+             state_steps,
+             foreach=foreach,
+             beta1=beta1,
+             beta2=beta2,
+             lr=lr,
+             weight_decay=weight_decay,
+             momentum_decay=momentum_decay,
+             eps=eps)
 
 
 def radam(params: List[Tensor],

@@ -490,10 +490,10 @@ class TestOptim(TestCase):
             # ((optim.AdamW), dict(weight_decay=1., amsgrad=False)),
             # ((optim.AdamW), dict(weight_decay=0., amsgrad=True)),
             # ((optim.AdamW), dict(weight_decay=0., amsgrad=False)),
-            # ((optim.NAdam), dict(weight_decay=0., momentum_decay=6e-3)),
-            # ((optim.NAdam), dict(weight_decay=1., momentum_decay=6e-3)),
-            # ((optim.NAdam), dict(weight_decay=0., momentum_decay=4e-3)),
-            # ((optim.NAdam), dict(weight_decay=0.01, momentum_decay=4e-3)),
+            ((optim.NAdam), dict(weight_decay=0., momentum_decay=6e-3)),
+            ((optim.NAdam), dict(weight_decay=1., momentum_decay=6e-3)),
+            ((optim.NAdam), dict(weight_decay=0., momentum_decay=4e-3)),
+            ((optim.NAdam), dict(weight_decay=0.01, momentum_decay=4e-3)),
             # ((optim.SGD), dict(lr=0.2, momentum=1, dampening=0, weight_decay=1, nesterov=True)),
             # ((optim.SGD), dict(lr=0.2, momentum=1, dampening=0.5, weight_decay=1, nesterov=False)),
             # ((optim.RAdam), dict(weight_decay=0)),
@@ -749,6 +749,32 @@ class TestOptim(TestCase):
                 optimizer(None, lr=1e-2, betas=(1.0, 0.0))
             with self.assertRaisesRegex(ValueError, "Invalid momentum_decay value: -0.2"):
                 optimizer(None, lr=1e-2, momentum_decay=-0.2)
+
+    # new test that test_nadam can be switched to when merge is complete and multitensor is deleted
+    def test_nadam_new(self):
+        optimizer = optim.NAdam
+        for foreach in [True, False]:
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3, foreach=foreach)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2, foreach=foreach),
+                    lr=1e-3)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3, weight_decay=0.1, momentum_decay=6e-3,
+                                               foreach=foreach)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3, weight_decay=0.1, momentum_decay=6e-3,
+                                               foreach=foreach),
+                [lambda opt: ExponentialLR(opt, gamma=0.9)]
+            )
+            with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
+                optimizer(None, lr=1e-2, betas=(1.0, 0.0), foreach=foreach)
+            with self.assertRaisesRegex(ValueError, "Invalid momentum_decay value: -0.2"):
+                optimizer(None, lr=1e-2, momentum_decay=-0.2, foreach=foreach)
 
     def test_adagrad(self):
         for optimizer in [optim.Adagrad, optim_mt.Adagrad]:
