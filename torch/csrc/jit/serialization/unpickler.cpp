@@ -164,21 +164,25 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
   }
 }
 
+namespace {
+template <typename T>
+bool is(const Type& type) {
+  if (type.kind() == T::Kind) {
+    return true;
+  }
+  if (auto dyn = type.castRaw<DynamicType>()) {
+    return dyn->tag() == DynamicTypeTrait<T>::tagValue;
+  }
+  return false;
+}
+} // namespace
+
 void restoreContainerTypeTags(const IValue& ivalue, const TypePtr& type) {
-  auto is = [&](TypeKind kind, DynamicType::Tag tag) {
-    if (type->kind() == kind) {
-      return true;
-    }
-    if (auto dyn = type->castRaw<DynamicType>()) {
-      return dyn->tag() == tag;
-    }
-    return false;
-  };
-  if (is(DictType::Kind, DynamicType::Tag::Dict)) {
+  if (is<DictType>(*type)) {
     auto dict = ivalue.toGenericDict();
     dict.unsafeSetKeyType(type->containedType(0));
     dict.unsafeSetValueType(type->containedType(1));
-  } else if (is(ListType::Kind, DynamicType::Tag::List)) {
+  } else if (is<ListType>(*type)) {
     ivalue.toList().unsafeSetElementType(type->containedType(0));
   } else {
     AT_ERROR("Unknown type for tag restoration: " + type->annotation_str());
