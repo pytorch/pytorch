@@ -25,12 +25,14 @@ from .graph_module import (
 from .quantization_patterns import (
     QuantizeHandler,
 )
-from .qconfig_utils import (
+from ..qconfig_dict_utils import (
     convert_dict_to_ordered_dict,
+    update_qconfig_for_qat,
+)
+from .qconfig_utils import (
     generate_qconfig_map,
     compare_prepare_convert_qconfig_dict,
     update_qconfig_for_fusion,
-    update_qconfig_for_qat,
 )
 from ._equalize import update_obs_for_equalization, convert_eq_obs
 from .utils import (
