@@ -218,12 +218,14 @@ class TORCH_API StaticModule {
  public:
   explicit StaticModule(
       std::shared_ptr<torch::jit::Graph> g,
-      const StaticModuleOptions& opts = StaticModuleOptions());
+      const StaticModuleOptions& opts = StaticModuleOptions(),
+      std::vector<IValue> sample_inputs = {});
 
   explicit StaticModule(
       const torch::jit::Module& m,
       bool is_frozen = false,
-      const StaticModuleOptions& opts = StaticModuleOptions());
+      const StaticModuleOptions& opts = StaticModuleOptions(),
+      std::vector<IValue> sample_inputs = {});
 
   typedef enum {
     CONSTANT_VALUE = -2, // VALUE nodes defined by prim::Constant
