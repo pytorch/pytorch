@@ -780,6 +780,13 @@ std::shared_ptr<ClassType> ivalue::Object::type() const {
   return type_.type_->expect<ClassType>();
 }
 
+c10::intrusive_ptr<ivalue::Object> ivalue::Object::create(
+    ClassTypePtr classType, size_t numSlots) {
+  return ivalue::Object::create(
+      StrongTypePtr(nullptr, std::move(classType)), numSlots);
+}
+
+
 IValue IValue::deepcopy() const {
   IValue::HashAliasedIValueMap memo;
   return deepcopy(memo);
