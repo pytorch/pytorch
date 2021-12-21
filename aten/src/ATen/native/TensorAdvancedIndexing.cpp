@@ -174,7 +174,6 @@ TORCH_META_FUNC(scatter_add)
   scatter_meta_impl(*this, self, dim, index, src, "add");
 }
 
-<<<<<<< HEAD
 TORCH_PRECOMPUTE_META_FUNC(index_copy)
 (const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source) {
   dim = maybe_wrap_dim(dim, self.dim());
