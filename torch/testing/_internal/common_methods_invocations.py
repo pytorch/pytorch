@@ -5572,93 +5572,28 @@ def sample_inputs_cov(op_info, device, dtype, requires_grad, **kwargs):
     return inputs
 
 
-def _sample_inputs_svd(op_info, device, dtype, requires_grad=False, is_linalg_svd=False):
-    """
-    This function generates input for torch.svd with distinct singular values so that autograd is always stable.
-    Matrices of different size:
-        square matrix - S x S size
-        tall marix - S x (S-2)
-        wide matrix - (S-2) x S
-    and batched variants of above are generated.
-    Each SampleInput has a function 'output_process_fn_grad' attached to it that is applied on the output of torch.svd
-    It is needed for autograd checks, because backward of svd doesn't work for an arbitrary loss function.
-    """
-    from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+def sample_inputs_svd(op_info, device, dtype, requires_grad=False, **kwargs):
+    make_fullrank = make_fullrank_matrices_with_distinct_singular_values
+    make_arg = partial(make_fullrank, dtype=dtype, device=device, requires_grad=requires_grad)
 
-    # svd and linalg.svd returns V and V.conj().T, respectively. So we need to slice
-    # along different dimensions when needed (this is used by
-    # test_cases2:wide_all and wide_all_batched below)
-    if is_linalg_svd:
-        def slice_V(v):
-            return v[..., :(S - 2), :]
+    is_linalg_svd = (op_info.name == "linalg.svd")
 
-        def uv_loss(usv):
-            u00 = usv[0][0, 0]
-            v00_conj = usv[2][0, 0]
-            return u00 * v00_conj
-    else:
-        def slice_V(v):
-            return v[..., :, :(S - 2)]
+    batches = [(), (0, ), (3, )]
+    ns = [0, 3, 5]
 
-        def uv_loss(usv):
-            u00 = usv[0][0, 0]
-            v00_conj = usv[2][0, 0].conj()
-            return u00 * v00_conj
+    def check_grads(usv):
+        S = usv[1]
+        k = S.shape[-1]
+        U = usv[0][..., :k]
+        Vh = usv[2] if is_linalg_svd else usv[2].mH
+        Vh = Vh[..., :k, :]
+        return (U.abs(), S, Vh.abs(), U @ Vh)
 
-    test_cases1 = (  # some=True (default)
-        # loss functions for complex-valued svd have to be "gauge invariant",
-        # i.e. loss functions shouldn't change when sigh of the singular vectors change.
-        # the simplest choice to satisfy this requirement is to apply 'abs'.
-        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype, device=device),
-            lambda usv: usv[1]),  # 'check_grad_s'
-        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype, device=device),
-            lambda usv: abs(usv[0])),  # 'check_grad_u'
-        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype, device=device),
-            lambda usv: abs(usv[2])),  # 'check_grad_v'
-        # this test is important as it checks the additional term that is non-zero only for complex-valued inputs
-        # and when the loss function depends both on 'u' and 'v'
-        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype, device=device),
-            uv_loss),  # 'check_grad_uv'
-        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype, device=device)[:(S - 2)],
-            lambda usv: (abs(usv[0]), usv[1], abs(usv[2][..., :, :(S - 2)]))),  # 'wide'
-        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype, device=device)[:, :(S - 2)],
-            lambda usv: (abs(usv[0]), usv[1], abs(usv[2]))),  # 'tall'
-        (random_fullrank_matrix_distinct_singular_value(S, 2, dtype=dtype, device=device),
-            lambda usv: (abs(usv[0]), usv[1], abs(usv[2]))),  # 'batched'
-        (random_fullrank_matrix_distinct_singular_value(S, 2, dtype=dtype, device=device)[..., :(S - 2), :],
-            lambda usv: (abs(usv[0]), usv[1], abs(usv[2]))),  # 'wide_batched'
-        (random_fullrank_matrix_distinct_singular_value(S, 2, dtype=dtype, device=device)[..., :, :(S - 2)],
-            lambda usv: (abs(usv[0]), usv[1], abs(usv[2]))),  # 'tall_batched'
-    )
-    test_cases2 = (  # some=False
-        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype, device=device)[:(S - 2)],
-            lambda usv: (abs(usv[0]), usv[1], abs(slice_V(usv[2])))),  # 'wide_all'
-        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype, device=device)[:, :(S - 2)],
-            lambda usv: (abs(usv[0][:, :(S - 2)]), usv[1], abs(usv[2]))),  # 'tall_all'
-        (random_fullrank_matrix_distinct_singular_value(S, 2, dtype=dtype, device=device)[..., :(S - 2), :],
-            lambda usv: (abs(usv[0]), usv[1], abs(slice_V(usv[2])))),  # 'wide_all_batched'
-        (random_fullrank_matrix_distinct_singular_value(S, 2, dtype=dtype, device=device)[..., :, :(S - 2)],
-            lambda usv: (abs(usv[0][..., :, :(S - 2)]), usv[1], abs(usv[2]))),  # 'tall_all_batched'
-    )
+    fullmat = 'full_matrices' if is_linalg_svd else 'some'
 
-    out = []
-    for a, out_fn in test_cases1:
-        a.requires_grad = requires_grad
-        if is_linalg_svd:
-            kwargs = {'full_matrices': False}
-        else:
-            kwargs = {'some': True}
-        out.append(SampleInput(a, kwargs=kwargs, output_process_fn_grad=out_fn))
-
-    for a, out_fn in test_cases2:
-        a.requires_grad = requires_grad
-        if is_linalg_svd:
-            kwargs = {'full_matrices': True}
-        else:
-            kwargs = {'some': False}
-        out.append(SampleInput(a, kwargs=kwargs, output_process_fn_grad=out_fn))
-
-    return out
+    for batch, n, k, fullmat_val in product(batches, ns, ns, (True, False)):
+        shape = batch + (n, k)
+        yield SampleInput(make_arg(*shape), kwargs={fullmat: fullmat_val}, output_process_fn_grad=check_grads)
 
 
 def sample_inputs_permute(op_info, device, dtype, requires_grad, **kwargs):
@@ -5734,12 +5669,6 @@ def sample_inputs_pow(op_info, device, dtype, requires_grad, **kwargs):
             make_arg((2, 2), requires_grad=requires_grad),
             args=(make_arg((2, 2), requires_grad=requires_grad),)))
     return tuple(samples)
-
-def sample_inputs_svd(op_info, device, dtype, requires_grad=False, **kwargs):
-    return _sample_inputs_svd(op_info, device, dtype, requires_grad, is_linalg_svd=False)
-
-def sample_inputs_linalg_svd(op_info, device, dtype, requires_grad=False, **kwargs):
-    return _sample_inputs_svd(op_info, device, dtype, requires_grad, is_linalg_svd=True)
 
 def sample_inputs_linalg_svdvals(op_info, device, dtype, requires_grad=False, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -12930,30 +12859,44 @@ op_db: List[OpInfo] = [
            op=torch.svd,
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_svd,
-           decorators=[
-               skipCUDAIfNoMagmaAndNoCusolver,
-               skipCUDAIfRocm,
-               skipCPUIfNoLapack,
-           ]),
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           check_batched_forward_grad=False,
+           # We're using at::allclose, which does not have a batching rule
+           check_batched_grad=False,
+           check_batched_gradgrad=False,
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+           skips=(
+               # Fixme, forward over backward gives a numerical error
+               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad', dtypes=(torch.complex128,)),
+           )),
     OpInfo('linalg.svd',
            op=torch.linalg.svd,
            aten_name='linalg_svd',
            dtypes=floating_and_complex_types(),
-           sample_inputs_func=sample_inputs_linalg_svd,
-           decorators=[
-               skipCUDAIfNoMagmaAndNoCusolver,
-               skipCUDAIfRocm,
-               skipCPUIfNoLapack,
-           ]),
+           supports_fwgrad_bwgrad=True,
+           supports_forward_ad=True,
+           check_batched_forward_grad=False,
+           # We're using at::allclose, which does not have a batching rule
+           check_batched_grad=False,
+           check_batched_gradgrad=False,
+           sample_inputs_func=sample_inputs_svd,
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+           skips=(
+               # Fixme, forward over backward gives a numerical error
+               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad', dtypes=(torch.complex128,)),
+           )),
     OpInfo('linalg.svdvals',
            op=torch.linalg.svdvals,
            aten_name='linalg_svdvals',
            dtypes=floating_and_complex_types(),
-           sample_inputs_func=sample_inputs_linalg_svdvals,
+           check_batched_forward_grad=False,
+           supports_fwgrad_bwgrad=True,
+           supports_forward_ad=True,
+           # We're using at::allclose, which does not have a batching rule
            check_batched_gradgrad=False,
-           decorators=[
-               skipCUDAIfNoMagmaAndNoCusolver,
-               skipCPUIfNoLapack]),
+           sample_inputs_func=sample_inputs_linalg_svdvals,
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack]),
     OpInfo('svd_lowrank',
            op=lambda *args, **kwargs: wrapper_set_seed(
                lambda a, b, **kwargs: torch.svd_lowrank(a @ b.mT, **kwargs),
@@ -12963,7 +12906,9 @@ op_db: List[OpInfo] = [
            supports_out=False,
            check_batched_grad=False,
            check_batched_gradgrad=False,
-           supports_forward_ad=False,
+           check_batched_forward_grad=False,
+           supports_fwgrad_bwgrad=True,
+           supports_forward_ad=True,
            sample_inputs_func=sample_inputs_svd_lowrank,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(

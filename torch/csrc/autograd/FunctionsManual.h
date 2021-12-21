@@ -159,8 +159,18 @@ at::Tensor index_backward(at::Tensor zeros_like_self, const torch::List<c10::opt
 at::Tensor _cudnn_ctc_loss_backward(const at::Tensor& grad_out, const at::Tensor& loss, const at::Tensor& raw_grad, bool zero_infinity);
 at::Tensor elu_double_backward(const Tensor& grad, const Tensor& grad_output, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale, bool is_result, const Tensor& self_or_result);
 
-Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads,
-          bool full_matrices, const Tensor& U, const Tensor& S, const Tensor& Vh);
+Tensor svd_backward(const Tensor& gU,
+                    const Tensor& gS,
+                    const Tensor& gVh,
+                    const Tensor& U,
+                    const Tensor& S,
+                    const Tensor& Vh);
+
+std::tuple<Tensor, Tensor, Tensor> linalg_svd_jvp(const Tensor& dA,
+                                                  const Tensor& U,
+                                                  const Tensor& S,
+                                                  const Tensor& Vh,
+                                                  const bool full_matrices);
 Tensor slice_backward_wrapper(
     const at::Tensor& grad,
     const c10::IntArrayRef& input_sizes,

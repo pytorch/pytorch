@@ -1457,7 +1457,15 @@
   self: nansum_backward(grad.to(self.scalar_type()), self, dim, keepdim)
 
 - name: linalg_svd(Tensor A, bool full_matrices=True) -> (Tensor U, Tensor S, Tensor Vh)
-  A: svd_backward(grads, full_matrices, U, S, Vh)
+  A: "svd_backward(full_matrices && grad_U.defined() ? grad_U.narrow(-1, 0, S.size(-1)) : grad_U,
+                   grad_S,
+                   full_matrices && grad_Vh.defined() ? grad_Vh.narrow(-2, 0, S.size(-1)) : grad_Vh,
+                   full_matrices ? U.narrow(-1, 0, S.size(-1)) : U,
+                   S,
+                   full_matrices ? Vh.narrow(-2, 0, S.size(-1)) : Vh)"
+  U: std::get<0>(linalg_svd_jvp(A_t, U, S, Vh, full_matrices))
+  S: std::get<1>(linalg_svd_jvp(A_t, U, S, Vh, full_matrices))
+  Vh: std::get<2>(linalg_svd_jvp(A_t, U, S, Vh, full_matrices))
 
 - name: symeig(Tensor self, bool eigenvectors=False, bool upper=True) -> (Tensor eigenvalues, Tensor eigenvectors)
   self: eigh_backward(grads, self, eigenvectors, eigenvalues, eigenvectors_return)
