@@ -649,8 +649,8 @@ inline DispatchKeySet getAutogradRelatedKeySetFromBackend(DispatchKey t) {
 // Returns a DispatchKeySet of autocast related keys mapped to backend.
 inline DispatchKeySet getAutocastRelatedKeySetFromBackend(DispatchKey t) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(t <= DispatchKey::EndOfBackendKeys || t == DispatchKey::Undefined);
-  constexpr auto autocast_cpu_ks = DispatchKeySet(DispatchKey::AutocastCPU);
-  constexpr auto autocast_cuda_ks = DispatchKeySet(DispatchKey::AutocastCUDA);
+  CONSTEXPR_EXCEPT_GCC5_STATIC auto autocast_cpu_ks = DispatchKeySet(DispatchKey::AutocastCPU);
+  CONSTEXPR_EXCEPT_GCC5_STATIC auto autocast_cuda_ks = DispatchKeySet(DispatchKey::AutocastCUDA);
   switch (t) {
     case DispatchKey::CPUBit:
       return autocast_cpu_ks;

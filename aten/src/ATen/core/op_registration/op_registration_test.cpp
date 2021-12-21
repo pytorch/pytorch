@@ -623,21 +623,21 @@ TEST(OperatorRegistrationTest, AutogradLazyOverridesAutogradKernel) {
 
 void whenRegisterWithLazyBackendsAndCatchAll_AutogradLazyBackendsIsNotFilled(DispatchKey key) {
   {
-	auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
-	  .catchAllKernel<decltype(nonautograd_kernel), nonautograd_kernel>());
+    auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
+      .catchAllKernel<decltype(nonautograd_kernel), nonautograd_kernel>());
 
-	auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
-	ASSERT_TRUE(op.has_value());
+    auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
+    ASSERT_TRUE(op.has_value());
 
-	called_nonautograd = called_autograd = false;
-	op->typed<void (Tensor)>().call(dummyTensor(key, /*requires_grad=*/true));
-	EXPECT_TRUE(called_nonautograd);
-	EXPECT_FALSE(called_autograd);
+    called_nonautograd = called_autograd = false;
+    op->typed<void (Tensor)>().call(dummyTensor(key, /*requires_grad=*/true));
+    EXPECT_TRUE(called_nonautograd);
+    EXPECT_FALSE(called_autograd);
 
-	called_nonautograd = called_autograd = false;
-	op->typed<void (Tensor)>().call(dummyTensor(key));
-	EXPECT_FALSE(called_autograd);
-	EXPECT_TRUE(called_nonautograd);
+    called_nonautograd = called_autograd = false;
+    op->typed<void (Tensor)>().call(dummyTensor(key));
+    EXPECT_FALSE(called_autograd);
+    EXPECT_TRUE(called_nonautograd);
   }
   {
     auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
