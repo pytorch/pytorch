@@ -13,6 +13,7 @@
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/static/ProcessedNodeInputs.h>
+#include <limits>
 
 #ifdef FBCODE_CAFFE2
 #include <folly/container/F14Map.h>
@@ -436,14 +437,11 @@ class TORCH_API StaticModule {
 
  private:
   // Recursively prepares the `BlockInfo`s and output indices for each block.
-  // - Populates `node_output_idx_map` with the index of each block's outputs in
-  //   the shared value array
   // - Populates `value_to_index` with the indices of each intermediate value
   // - Returns the number of Value* processed, including sub-blocks.
-  size_t prepareBlockInfoAndOutputIndices(
+  size_t prepareBlockInfo(
       Block& block,
       const size_t start_idx,
-      std::vector<uint32_t>& node_output_idx_map,
       FastMap<const Value*, uint32_t>& value_to_index);
 
   void prepareFunctionsAndConstants(
@@ -455,7 +453,6 @@ class TORCH_API StaticModule {
   // Returns (number of nodes processed, number of blocks processed)
   std::pair<size_t, size_t> prepareProcessedNodes(
       Block& block,
-      const std::vector<uint32_t>& node_output_idx_map,
       const FastMap<const Value*, uint32_t>& value_to_index,
       const AliasDb& alias_db,
       size_t node_idx = 0,
@@ -508,7 +505,7 @@ class BlockRunner {
   explicit BlockRunner(
       const StaticModule& sm,
       std::vector<IValue>& values,
-      const size_t block_idx);
+      size_t block_idx);
   BlockRunner(BlockRunner&&) = delete;
   BlockRunner& operator=(BlockRunner&&) = delete;
   ~BlockRunner();
@@ -624,6 +621,10 @@ class BlockRunner {
   // std::terminate.
   void resetMemory() noexcept;
 
+  uint16_t num_sub_blocks() const {
+    return num_sub_blocks_;
+  }
+
  private:
   // A helper object that invokes memory planner deallocation code
   // when destructed.
@@ -707,6 +708,7 @@ class BlockRunner {
   const bool first_input_is_self_;
   // Index of the start of this blocks inputs in the shared values_ array.
   const uint16_t inputs_begin_;
+  uint16_t num_sub_blocks_ = 0;
 
   bool manage_output_tensors_enabled_ = false;
   std::unique_ptr<MemoryPlanner> planner_;
@@ -760,7 +762,7 @@ class TORCH_API ProcessedNode {
   // associated with a shared values array using set_values() when
   // they are copied into a StaticRuntime. block_runners_ are also
   // not initialized until StaticRuntime initialization; see
-  // BlockRunner::init_sub_blocks.
+  // BlockRunner's ctor.
   ProcessedNode(
       Node* n,
       ProcessedFunction* fn,
@@ -846,6 +848,7 @@ class TORCH_API ProcessedNode {
   }
 
   C10_NODISCARD uint16_t output_ivalue_index(uint16_t i) const {
+    DCHECK(i < num_outputs_);
     return outputs_offset_ + i;
   }
   // used in debug mode
