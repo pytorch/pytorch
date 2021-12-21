@@ -117,6 +117,7 @@ class TORCH_API BackendRegistrar {
   BackendRegistrar(const BackendImplInterface* backend_impl_interface);
 };
 
+bool hasBackend();
 TORCH_API const BackendImplInterface* getBackend();
 
 }  // lazy
