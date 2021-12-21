@@ -93,7 +93,7 @@ TORCH_API std::vector<StorageGroup> assignStorageToManagedTensors(
 class MemoryPlanner {
  public:
   explicit MemoryPlanner(
-      StaticRuntimeBlockRunner* block_runner,
+      BlockRunner* block_runner,
       const BlockInfo& block_info,
       bool enable_out_variant,
       bool manage_output_tensors,
