@@ -603,11 +603,11 @@ class TestSparseCSR(TestCase):
             ),
             shape=a.shape,
         )
-        expected = alpha * (a_bsr * b.cpu().numpy()) + beta * c.cpu().numpy()
+        expected = alpha * (a_bsr * b.cpu().resolve_conj().numpy()) + beta * c.cpu().numpy()
         self.assertEqual(actual, out)
         self.assertEqual(actual, expected)
 
-    @onlyCUDA
+    @skipCPUIfNoMklSparse
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_block_addmm(self, device, dtype):
@@ -623,7 +623,7 @@ class TestSparseCSR(TestCase):
                 for op_b, op_out in itertools.product([True, False], repeat=2):
                     self.run_test_block_addmm_addmv(torch.addmm, c, a, b, op_b, op_out, dtype=dtype, device=device)
 
-    @onlyCUDA
+    @skipCPUIfNoMklSparse
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_block_addmv(self, device, dtype):
