@@ -790,7 +790,6 @@ class TestOperators(TestCase):
         xfail('masked_select'),
         xfail('matrix_exp'),
         xfail('nanquantile'),
-        xfail('nn.functional.conv_transpose2d'),
         xfail('nn.functional.gelu'),
         xfail('norm', 'nuc'),
         xfail('pinverse'),
@@ -816,13 +815,11 @@ class TestOperators(TestCase):
         xfail('cross'),
         xfail('double', 'channels_last'),
         xfail('linalg.cross'),
-        skip('nn.functional.conv1d'),
         xfail('nn.functional.gaussian_nll_loss'),
         xfail('nn.functional.hardsigmoid'),
         xfail('nn.functional.huber_loss'),
         xfail('nn.functional.instance_norm'),
         xfail('nn.functional.poisson_nll_loss'),
-        xfail('nn.functional.conv_transpose3d'),
         xfail('nn.functional.bilinear'),
         xfail('nn.functional.prelu'),
         xfail('nn.functional.glu'),
@@ -833,16 +830,12 @@ class TestOperators(TestCase):
         xfail('nn.functional.rrelu'),
         xfail('nn.functional.embedding_bag'),
         xfail('nn.functional.softshrink'),
-        xfail('nn.functional.conv_transpose1d'),
         xfail('nn.functional.max_pool3d'),
         xfail('istft'),
         xfail('nn.functional.fractional_max_pool2d'),
         xfail('linalg.tensorsolve'),
     }))
     def test_vmapvjp_has_batch_rule(self, device, dtype, op):
-        # These are too annoying to put into the list above
-        if op.name in {'nn.functional.conv2d'}:
-            self.skipTest("Skipped! ExpectedF failures")
         if not op.supports_autograd:
             self.skipTest("Skipped! Autograd not supported.")
             return
