@@ -4,6 +4,9 @@
 #include <ATen/ATen.h>
 #include <c10/util/irange.h>
 #include <pytorch_qnnpack.h>
+// indirection.h included so that pytorch_qnnp_indirection_set_step_dimensions
+// can be used outside of the standard indirection buffer setup codepath
+#include <qnnpack/indirection.h>
 #include <qnnpack_func.h>
 
 #include <ATen/native/quantized/cpu/conv_packed_params.h>
