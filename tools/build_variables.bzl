@@ -246,6 +246,7 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/passes/loop_unrolling.cpp",
     "torch/csrc/jit/passes/lower_grad_of.cpp",
     "torch/csrc/jit/passes/lower_tuples.cpp",
+    "torch/csrc/jit/passes/loopnest_randomization.cpp",
     "torch/csrc/jit/passes/normalize_ops.cpp",
     "torch/csrc/jit/passes/peephole_dict_idioms.cpp",
     "torch/csrc/jit/passes/peephole_list_idioms.cpp",

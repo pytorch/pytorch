@@ -673,7 +673,7 @@ StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
   if (random_tr_seed) {
     if (random_tr_seed == -1)
       random_tr_seed = std::time(nullptr);
-    l.randomTransform(random_tr_seed);
+    l.loopnestRandomization(random_tr_seed);
     GRAPH_DEBUG(
         "After random transform:\n", std::to_string(l.root_stmt()), "\n");
   }
