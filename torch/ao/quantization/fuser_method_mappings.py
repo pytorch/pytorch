@@ -167,7 +167,6 @@ def reverse_sequential_wrapper2(sequential):
 
 def reverse2(f):
     def reversed(is_qat, x, y):
-        print("is_qat:", is_qat, y, x)
         return f(is_qat, y, x)
     return reversed
 
@@ -187,7 +186,7 @@ DEFAULT_PATTERN_TO_FUSER_METHOD: Dict[Pattern, Union[nn.Sequential, Callable]] =
     (nn.ReLU, nn.Conv1d): reverse_sequential_wrapper2(nni.ConvReLU1d),
     (nn.ReLU, nn.Conv2d): reverse_sequential_wrapper2(nni.ConvReLU2d),
     (nn.ReLU, nn.Conv3d): reverse_sequential_wrapper2(nni.ConvReLU3d),
-    (nn.BatchNorm1d, nn.Linear): reverse_sequential_wrapper2(fuse_linear_bn),
+    (nn.BatchNorm1d, nn.Linear): reverse2(fuse_linear_bn),
     (nn.ReLU, nn.Linear): reverse_sequential_wrapper2(nni.LinearReLU),
     (nn.ReLU, nn.BatchNorm2d): reverse_sequential_wrapper2(nni.BNReLU2d),
     (nn.ReLU, nn.BatchNorm3d): reverse_sequential_wrapper2(nni.BNReLU3d),

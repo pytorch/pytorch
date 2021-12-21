@@ -111,7 +111,6 @@ class DefaultFuseHandler(FuseHandler):
         fuser_method = get_fuser_method_new(matched_module_types, fuser_method_mapping)
         # TODO: change the signature for fuser_method to take matched module patterns
         # as input
-        print("matched modules:", matched_modules)
         fused_module = fuser_method(is_qat, *matched_modules)
         # TODO: maybe add a pass to cleanup bn modules?
         setattr(quantizer.modules[module_parent_name], module_name, fused_module)

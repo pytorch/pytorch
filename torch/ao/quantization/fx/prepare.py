@@ -1058,9 +1058,6 @@ def insert_observers_for_model(
             ) and (
                 not node.op == 'output'
             )
-            print("matched nodes:", matched_nodes)
-            print("node op:", node.op)
-            print("skip inserting observer:", skip_inserting_observers)
 
             is_supported_by_backend = is_pattern_dtype_config_supported_by_backend(
                 pattern, matched_nodes, node_name_to_target_dtype, backend_config_dict)
@@ -1349,7 +1346,6 @@ def prepare(
     matches = find_matches(
         model.graph, modules, patterns, qconfig_map, standalone_module_names,
         standalone_module_classes, custom_module_classes)
-    print("matches:", matches)
 
     input_quantized_idxs: List[int] = prepare_custom_config_dict.get(
         "input_quantized_idxs", [])
