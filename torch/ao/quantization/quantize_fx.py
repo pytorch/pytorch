@@ -49,6 +49,7 @@ def _fuse_fx(
     graph_module: GraphModule,
     fuse_custom_config_dict: Optional[Dict[str, Any]] = None,
     backend_config_dict: Optional[Dict[str, Any]] = None,
+    is_qat: bool = False,
 ) -> GraphModule:
     r""" Internal helper function to fuse modules in preparation for quantization
 
@@ -57,7 +58,8 @@ def _fuse_fx(
     """
     _check_is_graph_module(graph_module)
     fuser = Fuser()
-    return fuser.fuse(graph_module, fuse_custom_config_dict, backend_config_dict)
+    return fuser.fuse(
+        graph_module, fuse_custom_config_dict, backend_config_dict, is_qat=is_qat)
 
 
 class Scope(object):
@@ -234,7 +236,11 @@ forward graph of the parent module,
     graph_module = GraphModule(model, tracer.trace(model))
     for attr_name in preserved_attributes:
         setattr(graph_module, attr_name, getattr(model, attr_name))
-    graph_module = _fuse_fx(graph_module, prepare_custom_config_dict, backend_config_dict)
+    graph_module = _fuse_fx(
+        graph_module,
+        prepare_custom_config_dict,
+        backend_config_dict,
+        is_qat=is_qat)
     prepared = prepare(
         graph_module,
         qconfig_dict,
@@ -331,7 +337,7 @@ def fuse_fx(
         )
     for attr_name in preserved_attributes:
         setattr(graph_module, attr_name, getattr(model, attr_name))
-    return _fuse_fx(graph_module, fuse_custom_config_dict)
+    return _fuse_fx(graph_module, fuse_custom_config_dict, is_qat=False)
 
 
 def prepare_fx(

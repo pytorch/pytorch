@@ -366,9 +366,12 @@ class TestFuseFx(QuantizationTestCase):
 
         for M, node_list in tests:
             m = M().eval()
+            print("m:", m)
             prepared = prepare_fx(m, qconfig_dict)
+            print("prepared:", prepared)
             prepared(torch.rand(5, 5))
             quantized = convert_fx(prepared)
+            print("quantized:", quantized)
 
             self.checkGraphModuleNodes(quantized, expected_node_list=node_list)
 

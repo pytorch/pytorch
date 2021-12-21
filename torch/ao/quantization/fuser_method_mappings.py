@@ -136,7 +136,7 @@ DEFAULT_OP_LIST_TO_FUSER_METHOD: Dict[Tuple, Union[nn.Sequential, Callable]] = {
     (nn.Conv3d, nn.BatchNorm3d, nn.ReLU): fuse_conv_bn_relu,
     (nn.Conv1d, nn.ReLU): sequential_wrapper2(nni.ConvReLU1d),
     (nn.Conv2d, nn.ReLU): sequential_wrapper2(nni.ConvReLU2d),
-    (nn.Conv3d, nn.ReLU): sequential_wrapper(nni.ConvReLU3d),
+    (nn.Conv3d, nn.ReLU): sequential_wrapper2(nni.ConvReLU3d),
     (nn.Linear, nn.BatchNorm1d): fuse_linear_bn,
     (nn.Linear, nn.ReLU): sequential_wrapper2(nni.LinearReLU),
     (nn.BatchNorm2d, nn.ReLU): sequential_wrapper2(nni.BNReLU2d),
@@ -155,15 +155,24 @@ def get_fuser_method(op_list, additional_fuser_method_mapping=None):
     assert fuser_method is not None, "did not find fuser method for: {} ".format(op_list)
     return fuser_method
 
+def reverse_sequential_wrapper2(sequential):
+    """ Given a sequential class for two modules, return a function that takes
+    is_qat, and then two modules as argument, that ignores the is_qat flag
+    and always returns the sequential that combines the two input modules, with
+    the order of two inputs reversed
+    """
+    def fuser_method(is_qat, m1, m2):
+        return sequential(m2, m1)
+    return fuser_method
+
 def reverse2(f):
-    def reversed(is_qat, pattern):
-        x, y = pattern
+    def reversed(is_qat, x, y):
+        print("is_qat:", is_qat, y, x)
         return f(is_qat, y, x)
     return reversed
 
 def reverse3(f):
-    def reversed(is_qat, pattern):
-        x, w = pattern
+    def reversed(is_qat, x, w):
         y, z = w
         return f(is_qat, z, y, x)
     return reversed
@@ -175,13 +184,13 @@ DEFAULT_PATTERN_TO_FUSER_METHOD: Dict[Pattern, Union[nn.Sequential, Callable]] =
     (nn.ReLU, (nn.BatchNorm2d, nn.Conv2d)): reverse3(fuse_conv_bn_relu),
     (nn.BatchNorm3d, nn.Conv3d): reverse2(fuse_conv_bn),
     (nn.ReLU, (nn.BatchNorm3d, nn.Conv3d)): reverse3(fuse_conv_bn_relu),
-    (nn.ReLU, nn.Conv1d): reverse2(nni.ConvReLU1d),
-    (nn.ReLU, nn.Conv2d): reverse2(nni.ConvReLU2d),
-    (nn.ReLU, nn.Conv3d): reverse2(nni.ConvReLU3d),
-    (nn.BatchNorm1d, nn.Linear): reverse2(fuse_linear_bn),
-    (nn.ReLU, nn.Linear): reverse2(nni.LinearReLU),
-    (nn.ReLU, nn.BatchNorm2d): reverse2(nni.BNReLU2d),
-    (nn.ReLU, nn.BatchNorm3d): reverse2(nni.BNReLU3d),
+    (nn.ReLU, nn.Conv1d): reverse_sequential_wrapper2(nni.ConvReLU1d),
+    (nn.ReLU, nn.Conv2d): reverse_sequential_wrapper2(nni.ConvReLU2d),
+    (nn.ReLU, nn.Conv3d): reverse_sequential_wrapper2(nni.ConvReLU3d),
+    (nn.BatchNorm1d, nn.Linear): reverse_sequential_wrapper2(fuse_linear_bn),
+    (nn.ReLU, nn.Linear): reverse_sequential_wrapper2(nni.LinearReLU),
+    (nn.ReLU, nn.BatchNorm2d): reverse_sequential_wrapper2(nni.BNReLU2d),
+    (nn.ReLU, nn.BatchNorm3d): reverse_sequential_wrapper2(nni.BNReLU3d),
 }
 
 def get_fuser_method_new(
