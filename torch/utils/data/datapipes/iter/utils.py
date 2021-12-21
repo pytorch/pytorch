@@ -59,6 +59,16 @@ class IterableWrapperIterDataPipe(IterDataPipe):
             next(self)
 
     def __getstate__(self):
+        # TODO: If iter is not None (you started iterating), this DP is not serializable
+        #       __getstate__ should be called before iter starts, but save_snapshot can be called anytime
+        if self.iter is not None:
+            raise Exception("")
+        # TODO: Need to materialize the iterable (if it is generator/something that is not serializable)
+        #       Otherwise we can just serialize as usual
+        #       Do a `try ... except ...`
+        #       Materialization can also fail if the elements inside aren't serializable (e.g. file handler)
+        # TODO: Add to inline documentation that DataLoader always materialize iterable objects FOR ANY DP THAT USE
+        #       POOR MAN's , such as IterableWrapper
         state = self.__dict__.copy()
         del state['iter']
         return state

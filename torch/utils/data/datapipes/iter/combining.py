@@ -58,6 +58,16 @@ class ConcaterIterDataPipe(IterDataPipe):
     def restore_snapshot(self, snapshot=None):
         pass
 
+    def __getstate__(self):
+        if IterDataPipe.getstate_hook is not None:
+            return IterDataPipe.getstate_hook(self)
+        state = (self.datapipes, self.length)
+        return state
+
+    def __setstate__(self, state):
+        (self.datapipes, self.length) = state
+
+
 
 @functional_datapipe('fork')
 class ForkerIterDataPipe(IterDataPipe):
@@ -387,3 +397,12 @@ class ZipperIterDataPipe(IterDataPipe[Tuple[T_co]]):
 
     def restore_snapshot(self, snapshot=None):
         pass
+
+    def __getstate__(self):
+        if IterDataPipe.getstate_hook is not None:
+            return IterDataPipe.getstate_hook(self)
+        state = (self.datapipes, self.length)
+        return state
+
+    def __setstate__(self, state):
+        (self.datapipes, self.length) = state

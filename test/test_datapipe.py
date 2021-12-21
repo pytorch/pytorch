@@ -134,11 +134,13 @@ def snapshot_test_helper(source_datapipe: IterDataPipe,
     then get the state and snapshot from the DataPipe, recreates it by passing the
     state and snapshot into the given new_datapipe and returns it.
     """
+    state = source_datapipe.__getstate__()
+    # TODO: Call pickle here instead of calling __getstate__ here
     it = iter(source_datapipe)
     for _ in range(n_elements_to_advance):
         next(it)
-    state = source_datapipe.__getstate__()
     snapshot = source_datapipe.save_snapshot()
+    # TODO: Call pickle.loads, I don't need new_datapipe here
     new_datapipe.__setstate__(state)
     new_datapipe.restore_snapshot(snapshot)
 
@@ -786,8 +788,16 @@ class TestFunctionalIterDataPipe(TestCase):
         concat_dp = input_dp1.concat(input_dp_nl)
         with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
             len(concat_dp)
-
         self.assertEqual(list(concat_dp), list(range(10)) + list(range(5)))
+
+        # Snapshot Test:
+        concat_dp = input_dp1.concat(input_dp2)
+        blank_dp = dp.iter.IterableWrapper([])
+        n_elements_to_advance = 5
+        new_dp = blank_dp.concat(blank_dp)
+        snapshot_test_helper(concat_dp, new_dp, n_elements_to_advance)
+        for old_ele, new_ele in zip(concat_dp, new_dp):
+            self.assertEqual(old_ele, new_ele)
 
     def test_fork_iterdatapipe(self):
         input_dp = dp.iter.IterableWrapper(range(10))

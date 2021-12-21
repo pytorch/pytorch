@@ -5,6 +5,7 @@ from typing import Iterator, Iterable, Optional, Sequence, List, TypeVar, Generi
 
 T_co = TypeVar('T_co', covariant=True)
 
+# TODO: Reimplement all Samplers as DataPipes
 class Sampler(Generic[T_co]):
     r"""Base class for all Samplers.
 

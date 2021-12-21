@@ -30,6 +30,8 @@ class FileListerIterDataPipe(IterDataPipe[str]):
         self.length: int = length
 
     def __iter__(self) -> Iterator[str]:
+        # TODO: write a custom os.walk that traverse deterministically
+        #       i.e. sort at each level, before going into it
         yield from get_file_pathnames_from_root(self.root, self.masks, self.recursive, self.abspath)
 
     def __len__(self):
@@ -39,7 +41,8 @@ class FileListerIterDataPipe(IterDataPipe[str]):
 
     def save_snapshot(self):
         # TODO: Need to remember what has been yielded - use a buffer? The size shouldn't be large
-        # TODO: How do we deal with state changes of disk?
+        # TODO: How do we deal with state changes of disk? Put in documentation that we cannot be responsible for
+        #       changes on disk. Disk must not change.
         pass
 
     def restore_snapshot(self, snapshot=None):
