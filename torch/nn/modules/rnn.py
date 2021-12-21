@@ -1090,16 +1090,18 @@ class LSTMCell(RNNCellBase):
             f"LSTMCell: Expected input to be 1-D or 2-D but received {input.dim()}-D tensor"
         is_batched = input.dim() == 2
         if not is_batched:
+            if hx is not None:
+                assert isinstance(hx, tuple)
+                assert hx[0].shape == hx[1].shape, \
+                    "LSTMCell: Expected h_0 and c_0 to have same shape"
+                assert hx[0].dim() == input.dim(), \
+                    "LSTMCell: Expected input and (h_0, c_0) to have same dimensionality"
+                hx = (hx[0].unsqueeze(0), hx[1].unsqueeze(0))
             input = input.unsqueeze(0)
+
         if hx is None:
             zeros = torch.zeros(input.size(0), self.hidden_size, dtype=input.dtype, device=input.device)
             hx = (zeros, zeros)
-        else:
-            assert isinstance(hx, tuple)
-            hx_dim = hx[0].dim()
-            assert hx_dim == hx[1].dim()
-            if not is_batched:
-                hx = (hx[0].unsqueeze(0), hx[1].unsqueeze(0))
 
         ret = _VF.lstm_cell(
             input, hx,
