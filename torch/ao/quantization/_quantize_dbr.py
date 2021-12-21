@@ -8,6 +8,10 @@ from .qconfig_dict_utils import (
     get_flattened_qconfig_dict,
     convert_dict_to_ordered_dict,
 )
+from torch.ao.quantization.quantization_mappings import (
+    get_default_static_quant_module_mappings,
+)
+from ._dbr.module_swap_utils import _swap_child_modules
 
 
 def prepare(model, qconfig_dict, example_inputs, inplace=False, allow_list=None,
@@ -77,24 +81,14 @@ def prepare(model, qconfig_dict, example_inputs, inplace=False, allow_list=None,
     model = add_auto_observation(model, qconfig_dict, example_inputs)
     return model
 
-
-def convert(
-        module, mapping=None, inplace=False, remove_qconfig=False,
-        convert_custom_config_dict=None):
-    r"""A wrapper around `torch.quantization.convert` which converts the model
-    to a quantized form using dynamic tracing.
+def convert(model: torch.nn.Module) -> torch.nn.Module:
+    r"""Converts a prepared DBR quantization model to a quantized form.
 
     TODO(future PR): better docblock
     """
-    # TODO: currently remove_qconfig deletes observers, two things need
-    # to be fixed to enable this:
-    # 1. scale/zp of non-module observers need to be saved before
-    #    observers are deleted
-    # 2. current observer deletion logic does not know about AutoQuantState,
-    #    this needs to update to work the same way for modules and non-modules
-    assert remove_qconfig is False
-    model = torch.quantization.convert(
-        module, mapping, inplace, remove_qconfig, convert_custom_config_dict)
-    assert not inplace
+    static_mappings = get_default_static_quant_module_mappings()
+    # swap the modules
+    _swap_child_modules(model, static_mappings)
+    # add dynamic handling for quants/dequants, functions and methods
     model = add_auto_convert(model)
     return model
