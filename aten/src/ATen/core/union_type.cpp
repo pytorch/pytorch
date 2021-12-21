@@ -288,7 +288,7 @@ c10::optional<TypePtr> UnionType::toOptional() const {
   }
 }
 
-bool UnionType::operator==(const Type& rhs) const {
+bool UnionType::equals(const Type& rhs) const {
   if (auto union_rhs = rhs.cast<UnionType>()) {
     // We can't compare the type vectors for equality using `operator=`,
     // because the vectors hold `TypePtr`s and we want to compare `Type`
@@ -425,7 +425,7 @@ bool UnionType::canHoldType(const Type& type) const {
   }
 }
 
-bool OptionalType::operator==(const Type& rhs) const {
+bool OptionalType::equals(const Type& rhs) const {
   if (auto union_rhs = rhs.cast<UnionType>()) {
     auto optional_rhs = union_rhs->toOptional();
     // `**optional_rhs` = `*` to get value of `c10::optional<TypePtr>`,
