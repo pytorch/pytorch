@@ -797,9 +797,6 @@ enum pytorch_qnnp_status pytorch_qnnp_run_operator(
       const size_t output_height = op->output_height;
       const size_t output_width = op->output_width;
 
-      if (op->step_width == 0) {
-        pytorch_qnnp_indirection_set_step_dimensions(op);
-      }
       const size_t step_height = op->step_height;
       const size_t step_width = op->step_width;
 
