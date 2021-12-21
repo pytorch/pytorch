@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import TestCase, freeze_rng_state, make_tensor, run_tests
-from torch.expanded_weights import ExpandedWeight
+from torch._expanded_weights import ExpandedWeight
 from torch.nn.utils._stateless import per_sample_call
 from torch.testing._internal.common_nn import TestBase, module_tests, new_module_tests
 

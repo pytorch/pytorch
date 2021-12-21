@@ -6,6 +6,13 @@ from typing import Callable, Dict
 
 HANDLED_FUNCTIONS: Dict[Callable, torch.autograd.Function] = {}
 
+def implements_per_sample_grads(torch_function):
+    @functools.wraps(torch_function)
+    def decorator(autograd_func):
+        HANDLED_FUNCTIONS[torch_function] = autograd_func
+        return autograd_func
+    return decorator
+
 # ExpandedWeight represents a weight (parameter) Tensor that has an expanded
 # batch dimension. Operations on the ExpandedWeight Tensor take advantage of
 # how the batch dimension is expanded by de-expanding the weight before
@@ -41,7 +48,7 @@ class ExpandedWeight(torch.Tensor):
             kwargs = {}
         if func not in cls.handled_functions:
             warnings.warn(f"don't have custom implementation for function {func.__name__}. Using slow fallback")
-            return MyFunction.apply(func, *(args + tuple(kwargs.values())))
+            return SlowFallback.apply(func, *(args + tuple(kwargs.values())))
         if func == torch.nn.functional.conv2d:
             remaining_kwargs = 7 - len(args)
             remaining_kwargs_options = cls.conv_kwarg_options[4 - remaining_kwargs:]
@@ -53,12 +60,12 @@ class ExpandedWeight(torch.Tensor):
         return self.orig_weight.shape
 
     @property
-    def grad(self):
-        return None
-
-    @property
     def dtype(self):
         return self.orig_weight.dtype
+
+    @property
+    def grad(self):
+        return None
 
     @grad.setter
     def grad(self, value):
@@ -81,7 +88,12 @@ class ExpandedWeight(torch.Tensor):
     def __repr__(self):
         return "ExpandedWeight for:\n" + self.orig_weight.__repr__() + f" with batch size {self.batch_size}"
 
-class MyFunction(torch.autograd.Function):
+# Fallback:
+# - forward pass: run operation with de-expanded input
+# - backward pass: run autograd.grad in a for-loop to compute per-sample-grads.
+#                  This is NOT something the vmap API can handle, something more
+#                  low-level is at work here.
+class SlowFallback(torch.autograd.Function):
     @staticmethod
     def forward(ctx, *func_and_expanded_args):
         func = func_and_expanded_args[0]
@@ -121,42 +133,45 @@ class MyFunction(torch.autograd.Function):
         result.append(None)
         return tuple(result)
 
-# Fallback:
-# - forward pass: run operation with de-expanded input
-# - backward pass: run autograd.grad in a for-loop to compute per-sample-grads.
-#                  This is NOT something the vmap API can handle, something more
-#                  low-level is at work here.
-
-
-# We can override the fallback by implementing efficient "per-sample-grad" rules
-# for the backward pass. The forward pass should still be the same, though.
-def implements_per_sample_grads(torch_function):
-    @functools.wraps(torch_function)
-    def decorator(autograd_func):
-        HANDLED_FUNCTIONS[torch_function] = autograd_func
-        return autograd_func
-    return decorator
-
 def forward_helper(func, ctx, expanded_args, num_true_outs):
+    r'''Forward helper computes the forward pass for a function that has expanded weight(s)
+    passed to it. It will run the forward pass where all ExpandedWeights are their original
+    weight. It runs checks on the given arguments and detaches the outputs.
+
+    .. note:: First argument in :attr:`expanded_args` must be the input with the batch
+    dimension as the first element of the shape
+
+    .. note:: :attr:`func` must return a Tensor or tuple of Tensors
+
+    Args:
+        func: The function to be called
+        ctx: The context from the autograd.Function object. Will be used to save 
+          computed state from the forward pass
+        expanded_args: Arguments to be passed to :attr:`func`. Will include arguments
+          that need to be unpacked because they are ExpandedWeights
+        num_true_outs: The number of outputs seen by the user since some functions
+          return auxillary data that is only used in the backward pass
+    '''
     unexpanded_args = _check_and_unexpand_args(func, ctx, expanded_args)
     output = func(*unexpanded_args)
     return _check_and_detach_output(ctx, output, num_true_outs)
 
 def _check_and_unexpand_args(func, ctx, expanded_args):
-    # input being an ExpandedWeight is unsupported
-    if isinstance(expanded_args[0], ExpandedWeight):
-        raise RuntimeError("Expanded Weights do not support inputs that are also ExpandedWeights. "
-                           f"Input must be a Tensor, got {type(expanded_args[0]).__name__} in function {func.__name__}")
-    if not isinstance(expanded_args[0], torch.Tensor):
-        raise RuntimeError("Expanded Weights requires a Tensor as the first input to get the batch dimension, "
-                           f"got {type(expanded_args[0]).__name__} in function {func.__name__}")
-    if len(expanded_args[0].shape) == 0:
-        raise RuntimeError(f"Expanded Weights requires a batch dimension but got an input of size 0 in function {func.__name__}")
-    if expanded_args[0].shape[0] == 0:
-        raise RuntimeError("0 is not a valid batch size for Expanded Weights but got input tensor of "
-                           f"{expanded_args[0]} in function {func.__name__}")
-    unexpanded_args = tuple(arg.orig_weight if isinstance(arg, ExpandedWeight) else arg for arg in expanded_args)
     ctx.args = expanded_args
+    # input must be the first argument passed
+    input = expanded_args[0]
+    if isinstance(input, ExpandedWeight):
+        raise RuntimeError("Expanded Weights do not support inputs that are also ExpandedWeights. "
+                           f"Input must be a Tensor, got {type(input).__name__} in function {func.__name__}")
+    if not isinstance(input, torch.Tensor):
+        raise RuntimeError("Expanded Weights requires a Tensor as the first input to get the batch dimension, "
+                           f"got {type(input).__name__} in function {func.__name__}")
+    if len(input.shape) == 0:
+        raise RuntimeError(f"Expanded Weights requires a batch dimension but got an input of size 0 in function {func.__name__}")
+    if input.shape[0] == 0:
+        raise RuntimeError("0 is not a valid batch size for Expanded Weights but got input tensor of "
+                           f"{input} in function {func.__name__}")
+    unexpanded_args = tuple(arg.orig_weight if isinstance(arg, ExpandedWeight) else arg for arg in expanded_args)
     return unexpanded_args
 
 def _check_and_detach_output(ctx, output, num_true_outs):
