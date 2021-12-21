@@ -1,5 +1,5 @@
 import torch
-from torch.expanded_weights.expanded_weights_impl import ExpandedWeight
+from .expanded_weights_impl import ExpandedWeight
 
 def grad_if_exists(maybe_expanded_weight, per_sample_grad_fn):
     unpacked = unpack_expanded_weight_or_tensor(maybe_expanded_weight)
