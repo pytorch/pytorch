@@ -221,10 +221,22 @@ jobs:
           TAG: ${{ steps.parse-ref.outputs.tag }}
           WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
         run: |
+          # The artifact file is created inside docker container, which contains the result binaries.
+          # Now unpackage it into the project folder. The subsequent script will scan project folder
+          # to locate result binaries and report their sizes.
+          # If artifact file is not provided it assumes that the project folder has been mounted in
+          # the docker during build and already contains the result binaries, so this step can be skipped.
+          export ARTIFACTS=
+          if [ -n "${ARTIFACTS}" ]; then
+            tar xf "${ARTIFACTS}" -C "${GITHUB_WORKSPACE}"
+            cd "${GITHUB_WORKSPACE}"
+          fi
           COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
           export COMMIT_TIME
+          ANDROID_BUILD_TYPE=
+          export ANDROID_BUILD_TYPE
           pip3 install requests==2.26 boto3==1.16.34
-          python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
+          python3 -m tools.stats.upload_binary_size_to_scuba "android" || exit 0
       - name: Test
         # Time out the test phase after 3.5 hours
         timeout-minutes: 210
