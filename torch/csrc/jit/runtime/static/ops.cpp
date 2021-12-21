@@ -3,14 +3,18 @@
 #include <ATen/CPUFunctions.h>
 #include <ATen/InferSize.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/Parallel.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/cpu/vec/functional.h>
+#include <ATen/cpu/vec/vec.h>
 #include <ATen/native/EmbeddingBag.h>
 #include <ATen/native/Fill.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
+#include <ATen/native/cpu/SerialStackImpl.h>
 #include <ATen/native/layer_norm.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qembeddingbag.h>
@@ -670,6 +674,83 @@ REGISTER_OPERATOR_FUNCTOR(aten::nan_to_num, aten_nan_to_num, [](Node* n) -> SROp
   };
 });
 
+namespace {
+
+class VarStackNodeWrapper {
+ public:
+  explicit VarStackNodeWrapper(const ProcessedNode& pnode) : pnode_(pnode) {}
+
+  const at::Tensor& operator[](size_t idx) const {
+    TORCH_CHECK(idx < size());
+    return pnode_.Input(idx).toTensor();
+  }
+
+  size_t size() const {
+    return pnode_.num_inputs() - 1;
+  }
+
+ private:
+  const ProcessedNode& pnode_;
+};
+
+void varStackSerialOut(
+    at::Tensor& result,
+    int64_t dim,
+    const VarStackNodeWrapper& inputs) {
+  auto result_sizes = inputs[0].sizes().vec();
+  result_sizes.insert(result_sizes.begin() + dim, inputs.size());
+  at::native::resize_(result, result_sizes);
+
+  AT_DISPATCH_FLOATING_TYPES(
+      result.scalar_type(), "varstack_serial_kernel", [&]() {
+        at::native::detail::
+            stack_serial_kernel_impl<scalar_t, VarStackNodeWrapper>(
+                result, inputs, dim);
+      });
+}
+
+std::vector<at::Tensor> unsqueezeVarStackInputs(
+    const VarStackNodeWrapper& inputs,
+    const int64_t dim) {
+  std::vector<at::Tensor> result;
+  result.reserve(inputs.size());
+  for (const auto i : c10::irange(inputs.size())) {
+    result.push_back(at::native::unsqueeze(inputs[i], dim));
+  }
+  return result;
+}
+
+void varstackNonserialOut(
+    at::Tensor& result,
+    const int64_t dim,
+    const VarStackNodeWrapper& inputs) {
+  std::vector<at::Tensor> inputs_unsqueezed =
+      unsqueezeVarStackInputs(inputs, dim);
+  fastResizeToZero(result);
+  at::native::_cat_out_cpu(inputs_unsqueezed, dim, result);
+}
+
+void varStackOut(ProcessedNode& pnode, int64_t dim) {
+  const auto num_inputs = pnode.num_inputs();
+  TORCH_CHECK(num_inputs > 1, "stack expects a non-empty list of tensors");
+  dim = c10::maybe_wrap_dim(dim, pnode.Input(0).toTensor().dim() + 1);
+
+  auto inputs = VarStackNodeWrapper(pnode);
+  auto& output = pnode.Output(0).toTensor();
+
+  bool can_use_serial = at::native::detail::CanUseNativeSerialStack<
+      VarStackNodeWrapper,
+      /*skip_overlap_check*/ true>::call(output, inputs, dim);
+
+  if (can_use_serial) {
+    varStackSerialOut(output, dim, inputs);
+    return;
+  }
+  varstackNonserialOut(output, dim, inputs);
+}
+
+} // namespace
+
 // Split out into a function to appease MSVC's pre-processor
 SROperator aten_stack(Node* n) {
   if (!n->matches(torch::schema(
@@ -698,20 +779,12 @@ REGISTER_OPERATOR_FUNCTOR(
     [](Node* n) -> SROperator {
       return [](ProcessedNode* p_node) {
         const size_t num_inputs = p_node->num_inputs();
-
-        std::vector<at::Tensor> inputs(num_inputs - 1);
-        for (size_t i = 0; i < num_inputs - 1; ++i) {
-          inputs[i] = p_node->Input(i).toTensor();
-        }
-
         const auto dim = p_node->Input(num_inputs - 1).toInt();
+
         if (p_node->Output(0).isNone()) {
-          p_node->Output(0) = at::native::_stack_cpu(inputs, dim);
-          return;
+          p_node->Output(0) = create_empty_from(p_node->Input(0).toTensor());
         }
-        auto& out_t = p_node->Output(0).toTensor();
-        fastResizeToZero(out_t);
-        at::native::_stack_out_cpu(inputs, dim, out_t);
+        varStackOut(*p_node, dim);
       };
     });
 
