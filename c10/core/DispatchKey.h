@@ -572,7 +572,7 @@ constexpr DispatchKey toFunctionalityKey(DispatchKey k) {
 
 // Given (DispatchKey::Dense, DispatchKey::CUDABit), returns DispatchKey::CUDA
 constexpr DispatchKey toRuntimePerBackendFunctionalityKey(DispatchKey functionality_k, DispatchKey backend_k) {
-  if (backend_k < DispatchKey::EndOfBackendKeys) {
+  if (backend_k > DispatchKey::EndOfBackendKeys) {
     return DispatchKey::Undefined;
   }
   auto backend_idx = static_cast<uint8_t>(backend_k);
