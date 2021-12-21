@@ -3,7 +3,6 @@ code = 'FLAKE8'
 include_patterns = ['**/*.py']
 exclude_patterns = [
     '.git/**',
-    'build_code_analyzer',
     'build_test_custom_build/**',
     'build/**',
     'caffe2/**',
@@ -54,10 +53,19 @@ include_patterns = [
     'test/cpp/tensorexpr/**/*.h',
     'test/cpp/tensorexpr/**/*.cpp',
 ]
+init_command = [
+    'python3',
+    'tools/linter/adapters/s3_init.py',
+    '--config-json=tools/linter/adapters/s3_init_config.json',
+    '--linter=clang-format',
+    '--dry-run={{DRYRUN}}',
+    '--output-dir=.lintbin',
+    '--output-name=clang-format',
+]
 command = [
     'python3',
     'tools/linter/adapters/clangformat_linter.py',
-    '--binary=clang-format',
+    '--binary=.lintbin/clang-format',
     '--',
     '@{{PATHSFILE}}'
 ]
@@ -125,24 +133,52 @@ command = [
 [[linter]]
 code = 'CLANGTIDY'
 include_patterns = [
-    '**/*.cpp',
     'torch/csrc/fx/**/*.cpp',
     'torch/csrc/utils/**/*.cpp',
     'torch/csrc/generic/**/*.cpp',
     'torch/csrc/deploy/**/*.cpp',
     'torch/csrc/tensor/**/*.cpp',
 ]
+exclude_patterns = [
+    # The negative filters below are to exclude files that include onnx_pb.h or
+    # caffe2_pb.h, otherwise we'd have to build protos as part of this CI job.
+    # FunctionsManual.cpp is excluded to keep this diff clean. It will be fixed
+    # in a follow up PR.
+    # /torch/csrc/generic/*.cpp is excluded because those files aren't actually built.
+    # deploy/interpreter files are excluded due to using macros and other techniquies
+    # that are not easily converted to accepted c++
+    'torch/csrc/jit/passes/onnx/helper.cpp',
+    'torch/csrc/jit/passes/onnx/shape_type_inference.cpp',
+    'torch/csrc/jit/serialization/onnx.cpp',
+    'torch/csrc/jit/serialization/export.cpp',
+    'torch/csrc/jit/serialization/import.cpp',
+    'torch/csrc/jit/serialization/import_legacy.cpp',
+    'torch/csrc/onnx/init.cpp',
+    'torch/csrc/cuda/nccl.*',
+    'torch/csrc/cuda/python_nccl.cpp',
+    'torch/csrc/autograd/FunctionsManual.cpp',
+    'torch/csrc/generic/*.cpp',
+    'torch/csrc/jit/codegen/cuda/runtime/*',
+    'torch/csrc/deploy/interactive_embedded_interpreter.cpp',
+    'torch/csrc/deploy/interpreter/**',
+    'torch/csrc/deploy/test_deploy_python_ext.cpp',
+    'torch/csrc/deploy/test_deploy_missing_interpreter.cpp',
+    'torch/csrc/deploy/test_deploy_gpu.cpp',
+    'torch/csrc/utils/disable_torch_function.cpp',
+]
 init_command = [
     'python3',
-    'tools/linter/adapters/clangtidy_init.py',
-    '--dry_run={{DRYRUN}}',
-    '--output_dir=.clang-tidy-bin',
-    '--output_name=clang-tidy',
+    'tools/linter/adapters/s3_init.py',
+    '--config-json=tools/linter/adapters/s3_init_config.json',
+    '--linter=clang-tidy',
+    '--dry-run={{DRYRUN}}',
+    '--output-dir=.lintbin',
+    '--output-name=clang-tidy',
 ]
 command = [
     'python3',
     'tools/linter/adapters/clangtidy_linter.py',
-    '--binary=.clang-tidy-bin/clang-tidy',
+    '--binary=.lintbin/clang-tidy',
     '--build_dir=./build',
     '--',
     '@{{PATHSFILE}}'
@@ -173,8 +209,8 @@ exclude_patterns = ['caffe2/**']
 command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
-    '--pattern=# type:\s*ignore(?!\[)',
-    '--linter-name=TYPEIGNORE',
+    '--pattern=# noqa(?!: [A-Z]+\d{3})',
+    '--linter-name=NOQA',
     '--error-name=unqualified noqa',
     """--error-description=\
         This line has an unqualified `noqa`; \
@@ -340,7 +376,7 @@ exclude_patterns = [
 ]
 command = [
     'python3',
-    'tools/linter/adapters/cppexec_linter.py',
+    'tools/linter/adapters/exec_linter.py',
     '--',
     '@{{PATHSFILE}}',
 ]
@@ -387,4 +423,35 @@ command = [
     """,
     '--',
     '@{{PATHSFILE}}'
+]
+
+[[linter]]
+code = 'CMAKE'
+include_patterns = [
+    "**/*.cmake",
+    "**/*.cmake.in",
+    "**/CMakeLists.txt",
+]
+exclude_patterns = [
+    'cmake/Modules/**',
+    'cmake/Modules_CUDA_fix/**',
+    'cmake/Caffe2Config.cmake.in',
+    'aten/src/ATen/ATenConfig.cmake.in',
+    'cmake/Caffe2ConfigVersion.cmake.in',
+    'cmake/TorchConfig.cmake.in',
+    'cmake/TorchConfigVersion.cmake.in',
+    'cmake/cmake_uninstall.cmake.i',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/cmake_linter.py',
+    '--config=.cmakelintrc',
+    '--',
+    '@{{PATHSFILE}}',
+]
+init_command = [
+    'python3',
+    'tools/linter/adapters/pip_init.py',
+    '--dry-run={{DRYRUN}}',
+    'cmakelint==1.4.1',
 ]

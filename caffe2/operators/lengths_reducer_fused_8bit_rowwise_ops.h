@@ -121,7 +121,7 @@ class SparseLengthsFused8BitRowwiseOp : public Operator<Context> {
     auto indices_data = indices.template data<IndexType>();
 
     int64_t current = 0;
-    for (int m = 0; m < output_size; ++m) {
+    for (const auto m : c10::irange(output_size)) {
       for (int i = 0; i < lengths_data[m]; ++i) {
         CAFFE_ENFORCE_LT(current, index_size);
         IndexType idx = indices_data[current];

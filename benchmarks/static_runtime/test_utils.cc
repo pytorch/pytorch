@@ -22,6 +22,27 @@ namespace test {
 
 namespace {
 
+class GraphExecutorWrapper {
+ public:
+  GraphExecutorWrapper() = default;
+
+  explicit GraphExecutorWrapper(const std::shared_ptr<Graph>& graph)
+      : graph_exec_(graph, "") {}
+
+  c10::IValue operator()(const std::vector<c10::IValue>& args) {
+    Stack stack(args);
+    graph_exec_.run(stack);
+
+    if (stack.size() == 1) {
+      return stack[0];
+    }
+    return c10::ivalue::Tuple::create(stack);
+  }
+
+ private:
+  GraphExecutor graph_exec_;
+};
+
 // Test scripts passed to testStaticRuntime can either be IR or JIT.
 // The logic for running the script and producing a corresponding StaticModule
 // is a bit different for each case. This logic is encapsulated within concrete
@@ -48,7 +69,8 @@ class ModuleStaticRuntimeTestContext : public StaticRuntimeTestContext {
   }
 
   StaticModule makeStaticModule(const StaticModuleOptions& opt) const override {
-    return torch::jit::StaticModule(module_, /* is_frozen */ false, opt);
+    return torch::jit::StaticModule(
+        module_, /* is_frozen */ false, opt, /* sample_inputs */ {});
   }
 
  private:
@@ -62,26 +84,20 @@ class GraphStaticRuntimeContext : public StaticRuntimeTestContext {
     std::unordered_map<std::string, Value*> vmap;
     parseIR(source_ir, graph_.get(), vmap);
 
-    graph_exec_ = GraphExecutor(graph_, "");
+    graph_exec_ = GraphExecutorWrapper(graph_);
   }
 
   IValue getExpected(const std::vector<IValue>& args) override {
-    Stack stack(args);
-    graph_exec_.run(stack);
-
-    if (stack.size() == 1) {
-      return stack[0];
-    }
-    return c10::ivalue::Tuple::create(stack);
+    return graph_exec_(args);
   }
 
   StaticModule makeStaticModule(const StaticModuleOptions& opt) const override {
-    return StaticModule(graph_, opt);
+    return StaticModule(graph_, opt, /* sample_inputs */ {});
   }
 
  private:
   std::shared_ptr<Graph> graph_;
-  GraphExecutor graph_exec_;
+  GraphExecutorWrapper graph_exec_;
 };
 
 std::unique_ptr<StaticRuntimeTestContext> makeTestContext(
@@ -194,17 +210,19 @@ at::Tensor getTensor(const at::IValue& ival) {
 }
 
 Node* getNodeWithKind(const StaticModule& smodule, const std::string& kind) {
-  const auto kind_symbol = fromQualString(kind);
-  for (auto& pnode : smodule.nodes()) {
-    if (pnode.node()->kind() == kind_symbol) {
-      return pnode.node();
-    }
-  }
-  return nullptr;
+  return smodule.findNodeWithKindForTesting(kind);
 }
 
 bool hasNodeWithKind(const StaticModule& smodule, const std::string& kind) {
   return getNodeWithKind(smodule, kind) != nullptr;
+}
+
+std::shared_ptr<Graph> getGraphFromScript(const std::string& jit_script) {
+  script::Module module("module");
+  module.define(jit_script);
+
+  Method method = module.get_method("forward");
+  return module.get_method("forward").graph();
 }
 
 std::shared_ptr<Graph> getGraphFromIR(const std::string& ir) {
@@ -212,6 +230,19 @@ std::shared_ptr<Graph> getGraphFromIR(const std::string& ir) {
   std::unordered_map<std::string, Value*> vmap;
   parseIR(ir, graph.get(), vmap);
   return graph;
+}
+
+void compareResultsWithJIT(
+    StaticRuntime& runtime,
+    const std::shared_ptr<Graph>& graph,
+    const std::vector<c10::IValue>& args,
+    const bool use_allclose,
+    const bool use_equalnan) {
+  GraphExecutorWrapper graph_exec(graph);
+  auto expected = graph_exec(args);
+  auto actual = runtime(args, {});
+  runtime.check_for_memory_leak();
+  compareResults(expected, actual, use_allclose, use_equalnan);
 }
 
 void testStaticRuntime(
@@ -252,14 +283,21 @@ void testStaticRuntime(
       StaticRuntime runtime(smodule);
       auto actual = runtime(args, {});
       if (actual.isTensor()) {
-        EXPECT_GE(smodule.nodes().size(), 2)
+        EXPECT_GE(smodule.num_nodes(), 2)
             << "If we only have one node, the output of the op we are testing is "
             << "not being managed by the memory planner! A failure here "
             << "can typically be fixed by clone()ing the output of the test script.";
       }
       runtime.check_for_memory_leak();
       // first run
+      VLOG(2) << "enable_out_variant: " << enable_out_variant;
+      VLOG(2) << "manage_output_tensors: " << manage_output_tensors;
+      VLOG(2) << "args: " << args;
+      VLOG(2) << "args2: " << args2;
+      VLOG(2) << "expect: " << expect;
+      VLOG(2) << "actual: " << actual;
       compareResults(expect, actual, use_allclose, use_equalnan);
+      VLOG(2) << "first run comparison done";
       if (manage_output_tensors) {
         actual = IValue();
         runtime.deallocateOutputTensors();
@@ -275,7 +313,9 @@ void testStaticRuntime(
         expect = test_context->getExpected(args2);
         actual = runtime(args2, {});
         runtime.check_for_memory_leak();
+        VLOG(2) << "comparing with args2";
         compareResults(expect, actual, use_allclose, use_equalnan);
+        VLOG(2) << "second run comparison done";
         if (manage_output_tensors) {
           actual = IValue();
           runtime.deallocateOutputTensors();
@@ -296,7 +336,9 @@ void testStaticRuntime(
         actual = runtime(args, {});
         runtime.check_for_memory_leak();
         // third run
+        VLOG(2) << "comparing third run";
         compareResults(expect, actual, use_allclose, use_equalnan);
+        VLOG(2) << "third run comparison done";
         if (manage_output_tensors) {
           actual = IValue();
           runtime.deallocateOutputTensors();
@@ -307,7 +349,9 @@ void testStaticRuntime(
         // and allocate managed tensors.
         actual = runtime(args, {});
         runtime.check_for_memory_leak();
+        VLOG(2) << "comparing second run with same args";
         compareResults(expect, actual, use_allclose, use_equalnan);
+        VLOG(2) << "second run comparison done";
         if (manage_output_tensors) {
           actual = IValue();
           runtime.deallocateOutputTensors();
@@ -333,13 +377,7 @@ void testStaticRuntime(
 bool hasProcessedNodeWithName(
     torch::jit::StaticModule& smodule,
     const char* name) {
-  for (torch::jit::ProcessedNode& pnode : smodule.runtime().nodes()) {
-    auto op_name = pnode.node()->kind().toQualString();
-    if (strcmp(op_name, name) == 0) {
-      return true;
-    }
-  }
-  return false;
+  return smodule.findNodeWithKindForTesting(name) != nullptr;
 }
 
 } // namespace test

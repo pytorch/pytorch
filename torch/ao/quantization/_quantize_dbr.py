@@ -2,33 +2,58 @@ import torch
 
 from ._dbr.auto_trace import add_auto_observation, add_auto_convert
 from ._dbr.fusion import get_module_fusion_fqns
+from ._dbr.qconfig_dict_utils import normalize_object_types
+
+from .qconfig_dict_utils import (
+    get_flattened_qconfig_dict,
+    convert_dict_to_ordered_dict,
+)
 
 
-def prepare(model, example_inputs, inplace=False, allow_list=None,
+def prepare(model, qconfig_dict, example_inputs, inplace=False, allow_list=None,
             observer_non_leaf_module_list=None,
             prepare_custom_config_dict=None,
             fuse_modules=True):
     r"""A wrapper around `torch.quantization.prepare` which prepares the
-    model for quantization using dynamic tracing. Requires `example_inputs` to build
+    model for quantization using dynamic tracing.
+
+    Requires `qconfig_dict` (same format as prepare_fx) to specify the
+    quantization settings. Not all functionality is supported yet.
+
+    Requires `example_inputs` to build
     the graph before calibration or quantization aware training can proceed.
 
     TODO(future PR): better docblock
     """
     assert example_inputs is not None, 'example_inputs must be specified'
 
+    for qconfig_dict_option in ('module_name_regex', 'module_name_object_type_order'):
+        assert qconfig_dict_option not in qconfig_dict, \
+            f'{qconfig_dict_option} option of qconfig_dict is not ' + \
+            'implemented yet in define-by-run quantization'
+
+    normalize_object_types(qconfig_dict)
+    convert_dict_to_ordered_dict(qconfig_dict)
+    flattened_qconfig_dict = get_flattened_qconfig_dict(qconfig_dict)
+    torch.quantization.propagate_qconfig_(model, flattened_qconfig_dict)
+    # TODO(future PR): QAT support
+
     if fuse_modules:
         # automatically fuse modules
         old_class = model.__class__
-        # For now, need to propagate qconfig before observing, because
-        # AutoQuantizationState needs a qconfig to work
-        torch.quantization.propagate_qconfig_(model)
-        model = add_auto_observation(model, example_inputs)
+        model = add_auto_observation(model, qconfig_dict, example_inputs)
         module_fusion_fqns = get_module_fusion_fqns(model)
         if len(module_fusion_fqns):
             model = torch.quantization.fuse_modules(model, module_fusion_fqns)
         # TODO: also delete _auto_quant_staate of all children
         if hasattr(model, '_auto_quant_state'):
             del model._auto_quant_state
+        # the model hierarchy might have changed during fusion, so we
+        # have to delete the cached module hook types
+        for k, v in model.named_modules():
+            if hasattr(v, '_auto_quant_module_hook_type'):
+                del v._auto_quant_module_hook_type
+
         model.__class__ = old_class
 
     # Automatically assign qconfigs for modules where the defaults do not
@@ -49,7 +74,7 @@ def prepare(model, example_inputs, inplace=False, allow_list=None,
         model, inplace, allow_list, observer_non_leaf_module_list,
         prepare_custom_config_dict)
     assert not inplace
-    model = add_auto_observation(model, example_inputs)
+    model = add_auto_observation(model, qconfig_dict, example_inputs)
     return model
 
 

@@ -78,7 +78,7 @@ template <typename T>
 static std::vector<T> unpair_vec(std::vector<std::pair<T, T>>&& vals) {
   std::vector<T> result;
   result.reserve(vals.size() * 2);
-  for (int64_t i = 0; i < vals.size(); i++) {
+  for (const auto i : c10::irange(vals.size())) {
     result.push_back(std::move(vals[i].first));
     result.push_back(std::move(vals[i].second));
   }
@@ -150,7 +150,7 @@ chunk(const Tensor& input, int chunks, int axis, CPUContext* context) {
   auto split_size = input_channels / chunks;
   vector<int64_t> output_dims(input.sizes().vec());
   int before = 1, after = 1;
-  for (int i = 0; i < canonical_axis; ++i) {
+  for (const auto i : c10::irange(canonical_axis)) {
     before *= input.dim32(i);
   }
   for (int i = canonical_axis + 1; i < input.dim(); ++i) {
@@ -158,7 +158,8 @@ chunk(const Tensor& input, int chunks, int axis, CPUContext* context) {
   }
   size_t input_offset = 0;
   std::vector<Tensor> outputs;
-  for (int i = 0; i < chunks; ++i) {
+  for (const auto i : c10::irange(chunks)) {
+    (void)i; // Suppress unused variable warning
     auto axis_dim = split_size;
     output_dims[canonical_axis] = split_size;
     Tensor output(output_dims, CPU);
@@ -187,7 +188,7 @@ std::vector<Tensor> unbind(const Tensor& input, int axis, CPUContext* context) {
   newDims.erase(newDims.begin() + axis);
 
   // 3 - Reshape chunks to drop the extra dimension
-  for (int i = 0; i < chunks.size(); i++) {
+  for (const auto i : c10::irange(chunks.size())) {
     CAFFE_ENFORCE_EQ(
         chunks[i].sizes()[axis], 1, "Got an unexpected chunk size");
     chunks[i].Reshape(newDims);
@@ -201,14 +202,14 @@ cat(const std::vector<Tensor>& tensorList, int axis, CPUContext* context) {
   auto input_zero = copy_ctor(tensorList.at(0));
   vector<int64_t> outputDims(input_zero.sizes().vec());
   CAFFE_ENFORCE(outputDims.size() > 0);
-  for (int i = 1; i < tensorList.size(); i++) {
+  for (const auto i : c10::irange(1, tensorList.size())) {
     CAFFE_ENFORCE(input_zero.dtype() == tensorList.at(i).dtype());
     outputDims[axis] += tensorList.at(i).sizes()[axis];
   }
   auto output_channels = outputDims[axis];
   Tensor output(outputDims, CPU);
   int before = 1, after = 1;
-  for (int i = 0; i < tensorList.at(0).dim(); ++i) {
+  for (const auto i : c10::irange(tensorList.at(0).dim())) {
     if (i == axis) {
       continue;
     }
@@ -245,7 +246,7 @@ stack(const std::vector<Tensor>& tensorList, int axis, CPUContext* context) {
   std::vector<int64_t> newDims(tensorList[0].sizes().vec());
   std::vector<Tensor> expandedTensorList;
   newDims.insert(newDims.begin() + axis, 1);
-  for (int i = 0; i < tensorList.size(); i++) {
+  for (const auto i : c10::irange(tensorList.size())) {
     expandedTensorList.emplace_back(tensorList[i].Clone());
     expandedTensorList.at(i).Reshape(newDims);
   }
@@ -301,7 +302,7 @@ Tensor transpose(const Tensor& X, int dim0, int dim1, CPUContext* context) {
   std::swap(axes[dim0], axes[dim1]);
   const std::vector<std::int64_t> X_dims = X.sizes().vec();
   std::vector<std::int64_t> Y_dims(ndim);
-  for (int i = 0; i < ndim; ++i) {
+  for (const auto i : c10::irange(ndim)) {
     Y_dims[i] = X_dims[axes[i]];
   }
   Tensor Y(Y_dims, CPU);
