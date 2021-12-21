@@ -11,6 +11,7 @@ class TestAdaptiveAvgPoolConverter(AccTestCase):
         [
             ((64, 64),),
             ((128, 64),),
+            (64,),
         ]
     )
     def test_adaptive_avgpool(
