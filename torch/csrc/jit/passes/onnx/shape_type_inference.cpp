@@ -2246,11 +2246,14 @@ size_t ONNXAssignOutputShape(
     bool onnx_shape_inference) {
   auto index_check = [&]() {
     TORCH_INTERNAL_ASSERT(
-        outputs_index >= 0 && outputs_index <= graph->outputs().size(),
+        outputs_index <= graph->outputs().size(),
         "Incorrect number of elements provided as example outputs.");
   };
 
   index_check();
+
+  std::cerr << "ONNXAssignOutputShape(" << outputs_index << ", "
+            << output_obj->ob_type->tp_name << std::endl;
 
   if (THPVariable_Check(output_obj)) {
     const at::Tensor& var = THPVariable_Unpack(output_obj);
@@ -2331,9 +2334,20 @@ size_t ONNXAssignOutputShape(
   } else if (THPUtils_checkString(output_obj)) {
     // Ignore string, since they are not supported as output in ONNX.
   } else if (PyNone_Check(output_obj)) {
-    // We can't get any info from None, so just skip it.
-    // TODO: Discuss with Bowen.
-    outputs_index++;
+    // TODO: Currently there's no one thing to do here that works for
+    // both tracing and scripting.
+    // If we don't increment outputs_index here, then scripting fails
+    // for
+    // python test/onnx/test_pytorch_onnx_no_runtime.py
+    // If we do increment it, then tracing fails for
+    // python test/onnx/test_pytorch_onnx_onnxruntime.py
+    // TestONNXRuntime.test_tuple_with_none_outputs.
+    // Issue is that in tracing we
+    // flatten the outputs while tracing, which means the graph output has None
+    // objects omitted. But then the outputs passed in here are un-flattened,
+    // which means they contain None objects. Flattening the outputs during
+    // tracing happens in ONNXTracedModule.forward in torch/jit/_trace.py.
+    // outputs_index++;
   } else {
     std::string msg =
         ("Model output has unsupported type. See "
