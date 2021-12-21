@@ -35,9 +35,6 @@ LazyTensor expand(const LazyTensor& input,
 // Fills the input with the given value.
 void fill_(LazyTensor& input, const at::Scalar& value);
 
-LazyTensor mul(const LazyTensor& input, const LazyTensor& other);
-LazyTensor mul(const LazyTensor& input, const at::Scalar& other);
-
 // Returns a new tensor that is a narrowed view of the input in the given
 // dimension.
 LazyTensor narrow(const LazyTensor& input, int64_t dim, int64_t start,

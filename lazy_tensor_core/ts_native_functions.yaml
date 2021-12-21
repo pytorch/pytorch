@@ -54,6 +54,7 @@ full_codegen:
   - mean
   - mean.dim
   - mm
+  - mul.Tensor
   - mv
   - native_dropout
   - native_dropout_backward
@@ -103,8 +104,6 @@ supported:
   - empty_strided
   - expand
   - fill_.Scalar
-  - mul.Tensor
-  - mul.Scalar
   - native_batch_norm
   - native_batch_norm_backward
   - normal_

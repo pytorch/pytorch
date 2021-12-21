@@ -177,16 +177,6 @@ void fill_(LazyTensor& input, const at::Scalar& value) {
   input.SetInPlaceIrValue(std::move(constant));
 }
 
-LazyTensor mul(const LazyTensor& input, const LazyTensor& other) {
-  return LazyTensor::Create(input.GetIrValue() * other.GetIrValue(), input.GetDevice());
-}
-
-LazyTensor mul(const LazyTensor& input, const at::Scalar& other) {
-  torch::lazy::Value constant = LazyGraphExecutor::Get()->GetIrValueForExpandedScalar(
-      other, input.shape(), input.GetDevice());
-  return LazyTensor::Create(input.GetIrValue() * constant, input.GetDevice());
-}
-
 LazyTensor narrow(const LazyTensor& input, int64_t dim, int64_t start,
                   int64_t length) {
   auto input_shape = input.shape();
