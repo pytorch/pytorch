@@ -13,6 +13,7 @@
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/static/ProcessedNodeInputs.h>
+#include <limits>
 
 #ifdef FBCODE_CAFFE2
 #include <folly/container/F14Map.h>
@@ -436,14 +437,11 @@ class TORCH_API StaticModule {
 
  private:
   // Recursively prepares the `BlockInfo`s and output indices for each block.
-  // - Populates `node_output_idx_map` with the index of each block's outputs in
-  //   the shared value array
   // - Populates `value_to_index` with the indices of each intermediate value
   // - Returns the number of Value* processed, including sub-blocks.
-  size_t prepareBlockInfoAndOutputIndices(
+  size_t prepareBlockInfo(
       Block& block,
       const size_t start_idx,
-      std::vector<uint32_t>& node_output_idx_map,
       FastMap<const Value*, uint32_t>& value_to_index);
 
   void prepareFunctionsAndConstants(
@@ -455,7 +453,6 @@ class TORCH_API StaticModule {
   // Returns (number of nodes processed, number of blocks processed)
   std::pair<size_t, size_t> prepareProcessedNodes(
       Block& block,
-      const std::vector<uint32_t>& node_output_idx_map,
       const FastMap<const Value*, uint32_t>& value_to_index,
       const AliasDb& alias_db,
       size_t node_idx = 0,
@@ -851,6 +848,7 @@ class TORCH_API ProcessedNode {
   }
 
   C10_NODISCARD uint16_t output_ivalue_index(uint16_t i) const {
+    DCHECK(i < num_outputs_);
     return outputs_offset_ + i;
   }
   // used in debug mode

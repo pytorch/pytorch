@@ -25,6 +25,7 @@
 #include <torch/csrc/jit/runtime/static/passes.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 #include <iterator>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 
@@ -483,25 +484,19 @@ StaticModule::StaticModule(
   const auto values_index_offset = constants_index_offset + constants().size();
   value_buffer_size_ = values_index_offset;
 
-  std::vector<uint32_t> node_output_idx_map;
-  value_buffer_size_ += prepareBlockInfoAndOutputIndices(
-      *graph_->block(),
-      values_index_offset,
-      node_output_idx_map,
-      value_to_index);
+  value_buffer_size_ +=
+      prepareBlockInfo(*graph_->block(), values_index_offset, value_to_index);
 
-  prepareProcessedNodes(
-      *graph_->block(), node_output_idx_map, value_to_index, alias_db);
+  prepareProcessedNodes(*graph_->block(), value_to_index, alias_db);
 
   for (auto& block : block_infos_) {
     block.prepare_for_memory_planner(alias_db, opts);
   }
 }
 
-size_t StaticModule::prepareBlockInfoAndOutputIndices(
+size_t StaticModule::prepareBlockInfo(
     Block& block,
     const size_t start_idx,
-    std::vector<uint32_t>& node_output_idx_map,
     FastMap<const Value*, uint32_t>& value_to_index) {
   const auto block_idx = block_infos_.size();
   block_infos_.emplace_back(start_idx, block);
@@ -514,15 +509,13 @@ size_t StaticModule::prepareBlockInfoAndOutputIndices(
 
   for (auto* node : block.nodes()) {
     for (auto* sub_block : node->blocks()) {
-      cur_idx += prepareBlockInfoAndOutputIndices(
-          *sub_block, cur_idx, node_output_idx_map, value_to_index);
+      cur_idx += prepareBlockInfo(*sub_block, cur_idx, value_to_index);
     }
 
     if (node->kind() == prim::Constant) {
       continue;
     }
 
-    node_output_idx_map.push_back(cur_idx);
     TORCH_CHECK(
         cur_idx < (1 << 16),
         "outputs offset in values table",
@@ -581,7 +574,6 @@ void StaticModule::prepareFunctionsAndConstants(
 
 std::pair<size_t, size_t> StaticModule::prepareProcessedNodes(
     Block& block,
-    const std::vector<uint32_t>& node_output_idx_map,
     const FastMap<const Value*, uint32_t>& value_to_index,
     const AliasDb& alias_db,
     size_t node_idx,
@@ -600,12 +592,7 @@ std::pair<size_t, size_t> StaticModule::prepareProcessedNodes(
 
     for (auto* sub_block : node->blocks()) {
       auto processed_count = prepareProcessedNodes(
-          *sub_block,
-          node_output_idx_map,
-          value_to_index,
-          alias_db,
-          node_idx,
-          block_idx);
+          *sub_block, value_to_index, alias_db, node_idx, block_idx);
       node_idx += processed_count.first;
       block_idx += processed_count.second;
     }
@@ -624,8 +611,12 @@ std::pair<size_t, size_t> StaticModule::prepareProcessedNodes(
     ProcessedFunction* fn = &functions_[node_idx];
 
     // create a new ProcessedNode
-    nodes.emplace_back(
-        node, fn, std::move(input_indices), node_output_idx_map[node_idx]);
+    const auto node_output_idx = node->outputs().empty()
+        // The index is unused if there are no outputs, so just create a
+        // placeholder value.
+        ? std::numeric_limits<uint16_t>::max()
+        : value_to_index.at(node->output(0));
+    nodes.emplace_back(node, fn, std::move(input_indices), node_output_idx);
 
     node_has_out_variant.emplace(node, nodes.back().has_out_variant());
     ++node_idx;
