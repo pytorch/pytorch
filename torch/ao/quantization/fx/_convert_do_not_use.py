@@ -12,8 +12,9 @@ from ..utils import (
     activation_is_int8_quantized,
     weight_is_statically_quantized,
     get_qparam_dict,
+    _parent_name,
 )
-from .backend_config_dict.utils import get_quantized_reference_module_mapping
+from .backend_config.utils import get_quantized_reference_module_mapping
 
 from .graph_module import (
     QuantizedGraphModule,
@@ -23,7 +24,6 @@ from .utils import (
     get_custom_module_class_keys,
     get_quantize_node_info,
     create_getattr_from_value,
-    _parent_name,
 )
 
 from torch.ao.quantization.quantize import (
