@@ -3,7 +3,7 @@
 #include <ATen/core/ivalue.h>
 #include <c10/util/ArrayRef.h>
 #include <caffe2/serialize/inline_container.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/serialization/pickler.h>
 
 namespace torch {

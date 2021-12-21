@@ -1,6 +1,6 @@
 #pragma once
 
-namespace at { namespace native { namespace {
+namespace at { namespace native { inline namespace CPU_CAPABILITY {
 
 // n: number of function arguments (arity)
 // traits: function_traits (see FunctionTraits.h)

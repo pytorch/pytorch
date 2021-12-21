@@ -1,3 +1,4 @@
+
 #define __NVFUSER_HALF_TO_US(var) *(reinterpret_cast<unsigned short*>(&(var)))
 #define __NVFUSER_HALF_TO_CUS(var) \
   *(reinterpret_cast<const unsigned short*>(&(var)))

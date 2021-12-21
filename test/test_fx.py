@@ -25,7 +25,6 @@ from torch.testing._internal.common_device_type import ops, onlyCPU, instantiate
 import torch.utils._pytree as pytree
 import torch.fx._pytree as fx_pytree
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Interpreter, Tracer, Transformer, Graph, wrap, PH
-import torch._C._fx
 from torch.fx.node import Target, Argument
 from torch.fx.passes import shape_prop
 from torch.fx.immutable_collections import immutable_dict, immutable_list
@@ -477,11 +476,18 @@ class TestFX(JitTestCase):
         tracer.record_stack_traces = True
 
         graph = tracer.trace(M())
-        for node in graph.nodes:
+        # saving the original list because we will insert new nodes as a part of a test
+        orig_graph_nodes = list(graph.nodes)
+        for node in orig_graph_nodes:
             if node.op == 'output':
                 continue
             self.assertTrue(node.stack_trace is not None)
             assert 'test_fx.py' in node.stack_trace
+
+            # verify that copying the node does not lose the stack trace
+            new_node = graph.node_copy(node)
+            self.assertTrue(new_node.stack_trace is not None)
+            assert 'test_fx.py' in new_node.stack_trace
 
     def test_graph_unique_names_manual(self):
         graph : torch.fx.Graph = torch.fx.Graph()
@@ -3014,59 +3020,6 @@ class TestFX(JitTestCase):
         FileCheck().check("Tuple[()]")   \
             .check("Tuple[str, Tuple[()]]")    \
             .run(scripted.code)
-
-    @skipIfNoTorchVision
-    def test_cpatcher(self):
-
-        cnt = 0
-
-        def patched_impl(to_patch, args, kwargs):
-            nonlocal cnt
-            cnt += 1
-            return to_patch(*args, **kwargs)
-
-        c_patch_enabled = True
-
-        def patched_in(to_patch, args, kwargs):
-            nonlocal c_patch_enabled
-            try:
-                c_patch_enabled = False
-                r = patched_impl(to_patch, args, kwargs)
-            finally:
-                c_patch_enabled = True
-            return r
-
-
-        def trace_func(frame, action, arg):
-            if action == 'c_call':
-                if c_patch_enabled:
-                    torch._C._fx.patch_function(arg, patched_in)
-
-
-        import torch
-        rn = torchvision_models.resnet18()
-
-        try:
-            sys.setprofile(trace_func)
-            rn(torch.rand(1, 3, 224, 224))
-            print("testing print patch")
-        finally:
-            sys.setprofile(None)
-        assert(cnt != 0)
-
-    def test_randn(self):
-        def f():
-            return torch.randn(3, 3)
-
-        fx_f = symbolic_trace(f, enable_cpatching=True)
-        assert(any(i.target == torch.randn for i in fx_f.graph.nodes))
-
-        fx_f = symbolic_trace(f, enable_cpatching=False)
-        assert(all(i.target != torch.randn for i in fx_f.graph.nodes))
-
-        fx_f = symbolic_trace(f, enable_cpatching=True)
-        assert(any(i.target == torch.randn for i in fx_f.graph.nodes))
-
 
     def test_pytree(self):
         def f_sum(x):

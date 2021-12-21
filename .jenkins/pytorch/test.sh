@@ -38,6 +38,10 @@ export LANG=C.UTF-8
 
 PR_NUMBER=${PR_NUMBER:-${CIRCLE_PR_NUMBER:-}}
 
+if [[ $TEST_CONFIG == 'default' ]]; then
+  export CUDA_VISIBLE_DEVICES=0
+fi
+
 if [[ "$BUILD_ENVIRONMENT" == *-slow-* || $TEST_CONFIG == 'slow' ]]; then
   export PYTORCH_TEST_WITH_SLOW=1
   export PYTORCH_TEST_SKIP_FAST=1
@@ -149,16 +153,8 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX512-* || $TEST_CONFIG == 'nogpu_NO_AVX
   export ATEN_CPU_CAPABILITY=avx2
 fi
 
-# if PR_NUMBER exist, use it to grab PR contents.
-DETERMINE_FROM=$(mktemp)
-if [ -n "$PR_NUMBER" ]; then
-  get_pr_change_files "$PR_NUMBER" "$DETERMINE_FROM"
-else
-  file_diff_from_base "$DETERMINE_FROM"
-fi
-
 test_python_legacy_jit() {
-  time python test/run_test.py --include test_jit_legacy test_jit_fuser_legacy --verbose --determine-from="$DETERMINE_FROM"
+  time python test/run_test.py --include test_jit_legacy test_jit_fuser_legacy --verbose
   assert_git_not_dirty
 }
 
@@ -167,12 +163,12 @@ test_python_shard() {
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
     exit 1
   fi
-  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --shard "$1" "$NUM_TEST_SHARDS" --verbose --determine-from="$DETERMINE_FROM"
+  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --exclude-fx2trt-tests --shard "$1" "$NUM_TEST_SHARDS" --verbose
   assert_git_not_dirty
 }
 
 test_python() {
-  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --verbose --determine-from="$DETERMINE_FROM"
+  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --exclude-fx2trt-tests --verbose
   assert_git_not_dirty
 }
 
@@ -313,7 +309,7 @@ test_vulkan() {
 
 test_distributed() {
   echo "Testing distributed python tests"
-  time python test/run_test.py --distributed-tests --verbose --determine-from="$DETERMINE_FROM"
+  time python test/run_test.py --distributed-tests --verbose
   assert_git_not_dirty
 
   if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
@@ -415,10 +411,25 @@ test_torch_function_benchmark() {
   assert_git_not_dirty
 }
 
+build_xla() {
+  XLA_DIR=xla
+  clone_pytorch_xla
+  # shellcheck disable=SC1091
+  source "xla/.circleci/common.sh"
+  apply_patches
+  SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+  # These functions are defined in .circleci/common.sh in pytorch/xla repo
+  install_deps_pytorch_xla $XLA_DIR
+  CMAKE_PREFIX_PATH="${SITE_PACKAGES}/torch:${CMAKE_PREFIX_PATH}" build_torch_xla $XLA_DIR
+  assert_git_not_dirty
+}
+
 test_xla() {
+  clone_pytorch_xla
   # shellcheck disable=SC1091
   source "./xla/.circleci/common.sh"
-  run_torch_xla_tests "$(pwd)" "$(pwd)/xla"
+  SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+  CMAKE_PREFIX_PATH="${SITE_PACKAGES}/torch:${CMAKE_PREFIX_PATH}" run_torch_xla_tests "$(pwd)" "$(pwd)/xla"
   assert_git_not_dirty
 }
 
@@ -472,7 +483,7 @@ test_benchmarks() {
 
 test_cpp_extensions() {
   # This is to test whether cpp extension build is compatible with current env. No need to test both ninja and no-ninja build
-  time python test/run_test.py --include test_cpp_extensions_aot_ninja --verbose --determine-from="$DETERMINE_FROM"
+  time python test/run_test.py --include test_cpp_extensions_aot_ninja --verbose
   assert_git_not_dirty
 }
 
@@ -506,6 +517,12 @@ test_docs_test() {
   .jenkins/pytorch/docs-test.sh
 }
 
+test_torch_fx2trt() {
+  pip install parameterized
+  time python test/run_test.py --fx2trt-tests --verbose
+  assert_git_not_dirty
+}
+
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
@@ -514,8 +531,9 @@ fi
 if [[ "${BUILD_ENVIRONMENT}" == *backward* ]]; then
   test_backward_compatibility
   # Do NOT add tests after bc check tests, see its comment.
-elif [[ "${BUILD_ENVIRONMENT}" == *xla* || "${JOB_BASE_NAME}" == *xla* ]]; then
+elif [[ "${TEST_CONFIG}" == *xla* ]]; then
   install_torchvision
+  build_xla
   test_xla
 elif [[ "${BUILD_ENVIRONMENT}" == *jit_legacy-test || "${JOB_BASE_NAME}" == *jit_legacy-test || $TEST_CONFIG == 'jit_legacy' ]]; then
   test_python_legacy_jit
@@ -538,6 +556,9 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 || ("
   test_custom_script_ops
   test_custom_backend
   test_torch_function_benchmark
+elif [[ "${SHARD_NUMBER}" -gt 2 ]]; then
+  # Handle arbitrary number of shards
+  test_python_shard "$SHARD_NUMBER"
 elif [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
   test_vulkan
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
@@ -547,6 +568,8 @@ elif [[ "${BUILD_ENVIRONMENT}" == *distributed* || "${JOB_BASE_NAME}" == *distri
   test_rpc
 elif [[ "${TEST_CONFIG}" = docs_test ]]; then
   test_docs_test
+elif [[ "${TEST_CONFIG}" == fx2trt ]]; then
+  test_torch_fx2trt
 else
   install_torchvision
   install_monkeytype

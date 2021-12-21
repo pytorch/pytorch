@@ -34,7 +34,7 @@ bool isQuantized(const BufHandle& qx) {
   return qx.node()->qscale() && qx.node()->qzero();
 }
 
-BufHandle makeQBufHandle(
+BufHandle makeQBufHandleNCHW(
     const std::string& name,
     const std::vector<ExprHandle>& dims,
     Dtype dtype,
@@ -43,21 +43,102 @@ BufHandle makeQBufHandle(
   BufHandle ResultBuf(name, dims, dtype);
   ResultBuf.node()->set_qscale(qscale);
   ResultBuf.node()->set_qzero(qzero);
+  ResultBuf.node()->set_strides(make_contiguous_strides(dims));
   return ResultBuf;
 }
 
-BufHandle makeQBufHandle(
+BufHandle makeQBufHandleNHWC(
+    const std::string& name,
+    const std::vector<ExprHandle>& dims,
+    Dtype dtype,
+    const ExprPtr qscale,
+    const ExprPtr qzero) {
+  BufHandle ResultBuf(name, dims, dtype);
+  ResultBuf.node()->set_qscale(qscale);
+  ResultBuf.node()->set_qzero(qzero);
+  ResultBuf.node()->set_strides(make_channels_last_strides(dims));
+  return ResultBuf;
+}
+
+BufHandle makeQBufHandleNHWC(
     const std::string& name,
     const std::vector<ExprHandle>& dims,
     Dtype dtype,
     const double qscale,
     const int64_t qzero) {
-  return makeQBufHandle(
+  return makeQBufHandleNHWC(
       name,
       dims,
       dtype,
       DoubleImm::make(qscale).node(),
       LongImm::make(qzero).node());
+}
+
+BufHandle makeQBufHandleNLC(
+    const std::string& name,
+    const std::vector<ExprHandle>& dims,
+    Dtype dtype,
+    const ExprPtr qscale,
+    const ExprPtr qzero) {
+  BufHandle ResultBuf(name, dims, dtype);
+  ResultBuf.node()->set_qscale(qscale);
+  ResultBuf.node()->set_qzero(qzero);
+  ResultBuf.node()->set_strides(make_channels_last_strides(dims));
+  return ResultBuf;
+}
+
+BufHandle makeQBufHandleNLC(
+    const std::string& name,
+    const std::vector<ExprHandle>& dims,
+    Dtype dtype,
+    const double qscale,
+    const int64_t qzero) {
+  return makeQBufHandleNLC(
+      name,
+      dims,
+      dtype,
+      DoubleImm::make(qscale).node(),
+      LongImm::make(qzero).node());
+}
+
+BufHandle makeQBufHandleNCHW(
+    const std::string& name,
+    const std::vector<ExprHandle>& dims,
+    Dtype dtype,
+    const double qscale,
+    const int64_t qzero) {
+  return makeQBufHandleNCHW(
+      name,
+      dims,
+      dtype,
+      DoubleImm::make(qscale).node(),
+      LongImm::make(qzero).node());
+}
+
+bool isNHWC(const BufHandle& buf) {
+  const auto& strides = buf.node()->strides();
+  const auto& dims = buf.node()->dims();
+  if (strides.size() != 4) {
+    return false;
+  }
+  auto dims1 = to<LongImm>(IRSimplifier::simplify(dims[1]))->value();
+  auto strides1 = to<LongImm>(IRSimplifier::simplify(strides[1]))->value();
+  auto strides3 = to<LongImm>(IRSimplifier::simplify(strides[3]))->value();
+
+  return ((strides3 == dims1) && (strides1 == 1));
+}
+
+bool isNLC(const BufHandle& buf) {
+  const auto& strides = buf.node()->strides();
+  const auto& dims = buf.node()->dims();
+  if (strides.size() != 3) {
+    return false;
+  }
+  auto dims1 = to<LongImm>(IRSimplifier::simplify(dims[1]))->value();
+  auto strides1 = to<LongImm>(IRSimplifier::simplify(strides[1]))->value();
+  auto strides3 = to<LongImm>(IRSimplifier::simplify(strides[3]))->value();
+
+  return ((strides3 == dims1) && (strides1 == 1));
 }
 
 Tensor computeQuantizePerTensor(
@@ -99,6 +180,7 @@ Tensor computeQuantizePerTensor(
       ExprHandleVectorToExprVector(outputShape),
       dtype,
       nullptr,
+      c10::nullopt,
       qscale.node(),
       qzero.node());
   return Tensor(buf, vars, exprHandle.node());
@@ -123,8 +205,18 @@ Tensor computeQuantizePerTensorExternalCall(
     }
     throw malformed_input("Expected quantized dtype");
   }(qdtype);
-  auto ResultBuf =
-      makeQBufHandle("quantize_per_tensor", outputShape, dtype, qscale, qzero);
+  auto ResultBuf = [&]() {
+    if (isNHWC(x)) {
+      return makeQBufHandleNHWC(
+          "quantize_per_tensor", outputShape, dtype, qscale, qzero);
+    }
+    if (isNLC(x)) {
+      return makeQBufHandleNLC(
+          "quantize_per_tensor", outputShape, dtype, qscale, qzero);
+    }
+    return makeQBufHandleNCHW(
+        "quantize_per_tensor", outputShape, dtype, qscale, qzero);
+  }();
   StmtPtr s = ExternalCall::make(
       ResultBuf, "nnc_aten_quantize_per_tensor", {x}, {qscale, qzero, qdtype});
   return Tensor(ResultBuf.node(), s);
@@ -145,9 +237,14 @@ Tensor computeDequantizeExternalCall(
   const int64_t qzero = immQZero(qx);
   const int64_t qdtype = (int64_t)immQDType(qx);
 
-  BufHandle ResultBuf("quantize", outputShape, dtype);
+  BufHandle ResultBuf("dequantize", outputShape, dtype);
   StmtPtr s = ExternalCall::make(
-      ResultBuf, "nnc_aten_dequantize", {qx}, {qscale, qzero, qdtype});
+      ResultBuf,
+      "nnc_aten_dequantize",
+      {qx},
+      {ExprHandle(IRSimplifier::simplify(qx.node()->qscale())),
+       ExprHandle(IRSimplifier::simplify(qx.node()->qzero())),
+       qdtype});
   return Tensor(ResultBuf.node(), s);
 }
 
@@ -199,6 +296,37 @@ Tensor computeQuantizedConv2dPrepack(
   return Tensor(ResultBuf.node(), s);
 }
 
+Tensor computeQuantizedConv1d(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    // NOLINTNEXTLINE
+    const c10::optional<ScalarType>& outputType,
+    // NOLINTNEXTLINE
+    at::Device device) {
+  const BufHandle& qx = c10::get<BufHandle>(inputs[0]);
+  const BufHandle& prepacked = c10::get<BufHandle>(inputs[1]);
+  const auto out_qscale = c10::get<double>(inputs[2]);
+  const auto out_qzero = c10::get<int64_t>(inputs[3]);
+  // Change to dtype based on outputType when dtype propagation implemented
+  const auto out_qdtype = immQDType(qx);
+  auto ResultBuf = makeQBufHandleNLC(
+      "quantized_conv1d",
+      outputShape,
+      Dtype(out_qdtype),
+      out_qscale,
+      out_qzero);
+  StmtPtr s = ExternalCall::make(
+      ResultBuf,
+      "nnc_aten_quantized_conv1d",
+      {qx, prepacked},
+      {immQScale(qx),
+       immQZero(qx),
+       (int64_t)immQDType(qx),
+       out_qscale,
+       out_qzero});
+  return Tensor(ResultBuf.node(), s);
+}
+
 Tensor computeQuantizedConv2d(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
@@ -212,7 +340,7 @@ Tensor computeQuantizedConv2d(
   const auto out_qzero = c10::get<int64_t>(inputs[3]);
   // Change to dtype based on outputType when dtype propagation implemented
   const auto out_qdtype = immQDType(qx);
-  auto ResultBuf = makeQBufHandle(
+  auto ResultBuf = makeQBufHandleNHWC(
       "quantized_conv2d",
       outputShape,
       Dtype(out_qdtype),
@@ -243,7 +371,7 @@ Tensor computeQuantizedConv2dRelu(
   const auto out_qzero = c10::get<int64_t>(inputs[3]);
   // Change to dtype based on outputType when dtype propagation implemented
   const auto out_qdtype = immQDType(qx);
-  auto ResultBuf = makeQBufHandle(
+  auto ResultBuf = makeQBufHandleNHWC(
       "quantized_conv2d_relu",
       outputShape,
       Dtype(out_qdtype),
@@ -252,6 +380,68 @@ Tensor computeQuantizedConv2dRelu(
   StmtPtr s = ExternalCall::make(
       ResultBuf,
       "nnc_aten_quantized_conv2d_relu",
+      {qx, prepacked},
+      {immQScale(qx),
+       immQZero(qx),
+       (int64_t)immQDType(qx),
+       out_qscale,
+       out_qzero});
+  return Tensor(ResultBuf.node(), s);
+}
+
+Tensor computeQuantizedLinear(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    // NOLINTNEXTLINE
+    const c10::optional<ScalarType>& outputType,
+    // NOLINTNEXTLINE
+    at::Device device) {
+  const BufHandle& qx = c10::get<BufHandle>(inputs[0]);
+  const BufHandle& prepacked = c10::get<BufHandle>(inputs[1]);
+  const auto out_qscale = c10::get<double>(inputs[2]);
+  const auto out_qzero = c10::get<int64_t>(inputs[3]);
+  // Change to dtype based on outputType when dtype propagation implemented
+  const auto out_qdtype = immQDType(qx);
+  auto ResultBuf = makeQBufHandleNCHW(
+      "quantized_linear",
+      outputShape,
+      Dtype(out_qdtype),
+      out_qscale,
+      out_qzero);
+  StmtPtr s = ExternalCall::make(
+      ResultBuf,
+      "nnc_aten_quantized_linear",
+      {qx, prepacked},
+      {immQScale(qx),
+       immQZero(qx),
+       (int64_t)immQDType(qx),
+       out_qscale,
+       out_qzero});
+  return Tensor(ResultBuf.node(), s);
+}
+
+Tensor computeQuantizedLinearRelu(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    // NOLINTNEXTLINE
+    const c10::optional<ScalarType>& outputType,
+    // NOLINTNEXTLINE
+    at::Device device) {
+  const BufHandle& qx = c10::get<BufHandle>(inputs[0]);
+  const BufHandle& prepacked = c10::get<BufHandle>(inputs[1]);
+  const auto out_qscale = c10::get<double>(inputs[2]);
+  const auto out_qzero = c10::get<int64_t>(inputs[3]);
+  // Change to dtype based on outputType when dtype propagation implemented
+  const auto out_qdtype = immQDType(qx);
+  auto ResultBuf = makeQBufHandleNCHW(
+      "quantized_linear_relu",
+      outputShape,
+      Dtype(out_qdtype),
+      out_qscale,
+      out_qzero);
+  StmtPtr s = ExternalCall::make(
+      ResultBuf,
+      "nnc_aten_quantized_linear_relu",
       {qx, prepacked},
       {immQScale(qx),
        immQZero(qx),
@@ -274,8 +464,21 @@ Tensor computeQuantizedAdd(
   const auto out_qzero = c10::get<int64_t>(inputs[3]);
   // Change to dtype based on outputType when dtype propagation implemented
   const auto out_qdtype = immQDType(qa);
-  auto ResultBuf = makeQBufHandle(
-      "quantized_add", outputShape, Dtype(out_qdtype), out_qscale, out_qzero);
+  const bool isQAChannelsLast = isNHWC(qa);
+  const bool isQBChannelsLast = isNHWC(qb);
+  auto ResultBuf = (isQAChannelsLast || isQBChannelsLast)
+      ? makeQBufHandleNHWC(
+            "quantized_add",
+            outputShape,
+            Dtype(out_qdtype),
+            out_qscale,
+            out_qzero)
+      : makeQBufHandleNCHW(
+            "quantized_add",
+            outputShape,
+            Dtype(out_qdtype),
+            out_qscale,
+            out_qzero);
   StmtPtr s = ExternalCall::make(
       ResultBuf,
       "nnc_aten_quantized_add",
@@ -288,6 +491,130 @@ Tensor computeQuantizedAdd(
        (int64_t)immQDType(qb),
        out_qscale,
        out_qzero});
+  return Tensor(ResultBuf.node(), s);
+}
+
+Tensor computeQuantizedMul(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    // NOLINTNEXTLINE
+    const c10::optional<ScalarType>& outputType,
+    // NOLINTNEXTLINE
+    at::Device device) {
+  const BufHandle& qa = c10::get<BufHandle>(inputs[0]);
+  const BufHandle& qb = c10::get<BufHandle>(inputs[1]);
+  const auto out_qscale = c10::get<double>(inputs[2]);
+  const auto out_qzero = c10::get<int64_t>(inputs[3]);
+  // Change to dtype based on outputType when dtype propagation implemented
+  const auto out_qdtype = immQDType(qa);
+  auto ResultBuf = makeQBufHandleNCHW(
+      "quantized_mul", outputShape, Dtype(out_qdtype), out_qscale, out_qzero);
+  StmtPtr s = ExternalCall::make(
+      ResultBuf,
+      "nnc_aten_quantized_mul",
+      {qa, qb},
+      {immQScale(qa),
+       immQZero(qa),
+       (int64_t)immQDType(qa),
+       immQScale(qb),
+       immQZero(qb),
+       (int64_t)immQDType(qb),
+       out_qscale,
+       out_qzero});
+  return Tensor(ResultBuf.node(), s);
+}
+
+Tensor computeQuantizedMulScalar(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    // NOLINTNEXTLINE
+    const c10::optional<ScalarType>& outputType,
+    // NOLINTNEXTLINE
+    at::Device device) {
+  const BufHandle& qa = c10::get<BufHandle>(inputs[0]);
+  const auto scalar = c10::get<double>(inputs[1]);
+  // Change to dtype based on outputType when dtype propagation implemented
+  const auto out_qdtype = immQDType(qa);
+  double scale1 = immQScale(qa);
+  auto ResultBuf = makeQBufHandleNCHW(
+      "quantized_mul_scalar",
+      outputShape,
+      Dtype(out_qdtype),
+      scale1 * scalar,
+      immQZero(qa));
+  StmtPtr s = ExternalCall::make(
+      ResultBuf,
+      "nnc_aten_quantized_mul_scalar",
+      {qa},
+      {scale1, immQZero(qa), (int64_t)immQDType(qa), scalar});
+  return Tensor(ResultBuf.node(), s);
+}
+
+Tensor computeQuantizedRelu(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    // NOLINTNEXTLINE
+    const c10::optional<ScalarType>& outputType,
+    // NOLINTNEXTLINE
+    at::Device device) {
+  const BufHandle& qa = c10::get<BufHandle>(inputs[0]);
+  const auto out_qdtype = immQDType(qa);
+  const bool isQAChannelsLast = isNHWC(qa);
+  auto ResultBuf = isQAChannelsLast ? makeQBufHandleNHWC(
+                                          "quantized_relu",
+                                          outputShape,
+                                          Dtype(out_qdtype),
+                                          immQScale(qa),
+                                          immQZero(qa))
+                                    : makeQBufHandleNCHW(
+                                          "quantized_relu",
+                                          outputShape,
+                                          Dtype(out_qdtype),
+                                          immQScale(qa),
+                                          immQZero(qa));
+  StmtPtr s = ExternalCall::make(
+      ResultBuf,
+      "nnc_aten_quantized_relu",
+      {qa},
+      {immQScale(qa), immQZero(qa), (int64_t)immQDType(qa)});
+  return Tensor(ResultBuf.node(), s);
+}
+
+Tensor computeQuantizedCat(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    // NOLINTNEXTLINE
+    const c10::optional<ScalarType>& outputType,
+    // NOLINTNEXTLINE
+    at::Device device) {
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
+  auto inputList = c10::get<BufList>(inputs[0]);
+  auto argDim = c10::get<int64_t>(inputs[1]);
+  auto n = inputList.size();
+  // TODO: handle optional out_qscale, out_qzero
+  const auto out_qscale = c10::get<double>(inputs[2]);
+  const auto out_qzero = c10::get<int64_t>(inputs[3]);
+
+  std::vector<BufHandle> args;
+  std::vector<ExprHandle> extra_args;
+  for (const auto i : c10::irange(n)) {
+    const BufHandle& bh = inputList[i];
+    args.emplace_back(bh);
+    extra_args.emplace_back(immQScale(bh));
+    extra_args.emplace_back(immQZero(bh));
+    extra_args.emplace_back((int64_t)immQDType(bh));
+  }
+  extra_args.emplace_back(argDim);
+  extra_args.emplace_back(out_qscale);
+  extra_args.emplace_back(out_qzero);
+  auto ResultBuf = makeQBufHandleNCHW(
+      "quantized_cat",
+      outputShape,
+      Dtype(immQDType(inputList[0])),
+      out_qscale,
+      out_qzero);
+  StmtPtr s =
+      ExternalCall::make(ResultBuf, "nnc_aten_quantized_cat", args, extra_args);
   return Tensor(ResultBuf.node(), s);
 }
 
@@ -361,7 +688,7 @@ Tensor computeUpsampleNearest2d(
 
   BufHandle ResultBuf = [&]() {
     if (isQuantized(x)) {
-      return makeQBufHandle(
+      return makeQBufHandleNHWC(
           "upsample_nearest2d",
           outputShape,
           Dtype(immQDType(x)),
@@ -382,6 +709,36 @@ Tensor computeUpsampleNearest2d(
        output_size_w,
        scale_factor_h,
        scale_factor_w});
+  return Tensor(ResultBuf.node(), s);
+}
+
+Tensor computeQuantizedSigmoidExternalCall(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    // NOLINTNEXTLINE
+    const c10::optional<ScalarType>& outputType,
+    at::Device) {
+  const BufHandle& qx = c10::get<BufHandle>(inputs[0]);
+
+  const auto out_qdtype = immQDType(qx);
+  const double out_qscale = 1.0f / 256.0f;
+  const int64_t out_qzero = (out_qdtype == ScalarType::QInt8) ? -128 : 0;
+
+  auto ResultBuf = makeQBufHandleNHWC(
+      "quantized_sigmoid",
+      outputShape,
+      Dtype(out_qdtype),
+      out_qscale,
+      out_qzero);
+  StmtPtr s = ExternalCall::make(
+      ResultBuf,
+      "nnc_aten_quantized_sigmoid",
+      {qx},
+      {immQScale(qx),
+       immQZero(qx),
+       (int64_t)immQDType(qx),
+       out_qscale,
+       out_qzero});
   return Tensor(ResultBuf.node(), s);
 }
 
