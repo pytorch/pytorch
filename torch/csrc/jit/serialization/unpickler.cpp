@@ -170,8 +170,8 @@ bool is(const Type& type) {
   if (type.kind() == T::Kind) {
     return true;
   }
-  if (auto dyn = type.castRaw<DynamicType>()) {
-    return dyn->tag() == DynamicTypeTrait<T>::tagValue;
+  if (auto dyn = type.castRaw<c10::DynamicType>()) {
+    return dyn->tag() == c10::DynamicTypeTrait<T>::tagValue;
   }
   return false;
 }
