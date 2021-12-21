@@ -29,12 +29,11 @@ def _swap_child_modules(
         if not qconfig:
             continue
         activation_int8_quantized = activation_is_int8_quantized(qconfig)
-        if not activation_int8_quantized:
-            # TODO(future PR): add support for other dtypes
-            continue
-        if not type(mod) in static_mappings:
-            continue
-        reassign[name] = swap_module(mod, static_mappings, {})
+        if activation_int8_quantized:
+            if not type(mod) in static_mappings:
+                continue
+            reassign[name] = swap_module(mod, static_mappings, {})
+        # TODO(future PR): add support for other dtypes
 
     for key, value in reassign.items():
         module._modules[key] = value
