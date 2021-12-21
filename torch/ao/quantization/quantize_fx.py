@@ -407,8 +407,8 @@ def prepare_fx(
                 (StandaloneModule,
                  None,  # qconfig_dict for the prepare function called in the submodule,
                         # None means use qconfig from parent qconfig_dict
-                {"input_quantized_idxs": [0], "output_quantized_idxs": [0]}),  # prepare_custom_config_dict
-                {}  # backend_config_dict, TODO: point to README doc when it's ready
+                {"input_quantized_idxs": [0], "output_quantized_idxs": [0]},  # prepare_custom_config_dict
+                {})  # backend_config_dict, TODO: point to README doc when it's ready
             ],
 
             # user will manually define the corresponding observed
