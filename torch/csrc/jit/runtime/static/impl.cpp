@@ -1877,7 +1877,6 @@ void ProcessedNode::verify_and_correct_memory_overlap() {
 StaticRuntime::StaticRuntime(const StaticModule& sm) {
   values_.resize(sm.value_buffer_size());
   std::copy(sm.constants().begin(), sm.constants().end(), values_.begin());
-
   block_ = std::make_unique<BlockRunner>(sm, values_, 0);
 }
 

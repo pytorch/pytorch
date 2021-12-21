@@ -417,26 +417,15 @@ class TORCH_API StaticModule {
     return module_.has_value();
   }
 
-  size_t inputs_offset() const {
-    return 0;
-  }
-
-  size_t constants_offset() const {
-    return inputs_offset() + num_inputs();
-  }
-
-  size_t intermediate_values_offset() const {
-    return constants_offset() + num_constants();
-  }
-
   StaticRuntime& runtime();
 
+  // See [Shared values array]
   size_t value_buffer_size() const {
     return value_buffer_size_;
   }
 
  private:
-  // Recursively prepares the `BlockInfo`s and output indices for each block.
+  // Recursively prepares the BlockInfo array.
   // - Populates `value_to_index` with the indices of each intermediate value
   // - Returns the number of Value* processed, including sub-blocks.
   size_t prepareBlockInfo(
@@ -449,7 +438,7 @@ class TORCH_API StaticModule {
       const AliasDb& alias_db,
       FastMap<const Value*, uint32_t>& value_to_index);
 
-  // Recurses on sub-blocks and populates the array of `ProcessedNode`s
+  // Recurses on sub-blocks and populates the array of ProcessedNodes
   // Returns (number of nodes processed, number of blocks processed)
   std::pair<size_t, size_t> prepareProcessedNodes(
       Block& block,
@@ -708,15 +697,25 @@ class BlockRunner {
   const bool first_input_is_self_;
   // Index of the start of this blocks inputs in the shared values_ array.
   const uint16_t inputs_begin_;
+  // How many sub-blocks does this one have? Includes *all* descendants, not
+  // just children of this block. For example, if we have 2 nested loops in this
+  // block, num_sub_blocks = 2, not 1.
   uint16_t num_sub_blocks_ = 0;
 
   bool manage_output_tensors_enabled_ = false;
   std::unique_ptr<MemoryPlanner> planner_;
+  // [Shared values array]
   // ProcessedNodes reference their inputs and outputs with
   // offsets into this array, which saves memory.
-  // The first static_module_.num_constants() slots are constants.
-  // Note that constants for all block runners are pooled together.
-  // Inputs for this block runner begin at inputs_begin_.
+  // All BlockRunners share the same array. The layout is as
+  // follows:
+  // [constants][block_0][block_1]...[block_N]
+  // Note that constants from all blocks are pooled together at the start.
+  // The block ordering is depth-first.
+  // Each block is further divided into inputs and intermediates:
+  // [block_i] = [inputs_i][intermediates_i]
+  // Each BlockRunner knows where its inputs start. Each ProcessedNode
+  // knows how to find the indices of its outputs/inputs in this array.
   std::vector<IValue>& values_;
   std::vector<IValue*> outputs_;
   std::vector<ProcessedNode> nodes_;
