@@ -32,7 +32,7 @@ using AnyTypePtr = std::shared_ptr<AnyType>;
 // Any is the top of the type hierarchy, all other types are subtypes
 // T <: Any, forall T
 struct TORCH_API AnyType : public Type {
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
   std::string str() const override {
@@ -77,7 +77,7 @@ struct SingleElementType : public Type {
     return elem;
   }
 
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     if (auto rhs_ = rhs.cast<T>()) {
       return *getElementType() == *rhs_->getElementType();
     }
@@ -109,7 +109,7 @@ struct TORCH_API UnionType : public Type {
 
   static UnionTypePtr create(std::vector<TypePtr> reference);
 
-  bool operator==(const Type& rhs) const override;
+  bool equals(const Type& rhs) const override;
 
   bool isUnionType() const {
     return true;
@@ -170,7 +170,7 @@ struct TORCH_API OptionalType : public UnionType {
 
   friend struct Type;
 
-  bool operator==(const Type& rhs) const override;
+  bool equals(const Type& rhs) const override;
 
   const TypePtr& getElementType() const {
     return contained_;
@@ -584,7 +584,7 @@ struct TORCH_API TensorType : public Type {
     return requires_grad_ ? *requires_grad_ : true;
   }
 
-  bool operator==(const Type& rhs) const override;
+  bool equals(const Type& rhs) const override;
   bool isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const override;
 
   std::string str() const override;
@@ -883,7 +883,7 @@ struct TORCH_API DictType : public Type {
     return types;
   }
 
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     if (auto* dict_rhs = rhs.castRaw<DictType>()) {
       return *getKeyType() == *(dict_rhs->getKeyType()) &&
           *getValueType() == *(dict_rhs->getValueType());
@@ -1029,7 +1029,7 @@ struct TORCH_API TupleType : public NamedType {
     return elements_;
   }
 
-  bool operator==(const Type& rhs) const override;
+  bool equals(const Type& rhs) const override;
   bool isSubtypeOfExt(const Type& rhs_, std::ostream* why_not) const override;
 
   std::string str() const override;
@@ -1117,7 +1117,7 @@ struct TORCH_API EnumType : public NamedType {
     return value_type_;
   }
 
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     if (auto* enum_rhs = rhs.castRaw<EnumType>()) {
       return name().value() == enum_rhs->name().value() &&
           *getValueType() == *(enum_rhs->getValueType()) &&
@@ -1171,7 +1171,7 @@ struct TORCH_API EnumType : public NamedType {
 struct AnyEnumType;
 using AnyEnumTypePtr = std::shared_ptr<AnyEnumType>;
 struct TORCH_API AnyEnumType : public Type {
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
   std::string str() const override {
@@ -1193,7 +1193,7 @@ using NumberTypePtr = std::shared_ptr<NumberType>;
 // FloatType <: NumberType
 // ComplexType <:NumberType
 struct TORCH_API NumberType : public Type {
-  bool operator==(const Type& rhs) const override;
+  bool equals(const Type& rhs) const override;
 
   bool isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const override;
 
@@ -1218,7 +1218,7 @@ struct FloatType;
 using FloatTypePtr = std::shared_ptr<FloatType>;
 // This type represents a Python float number
 struct TORCH_API FloatType : public NumberType {
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
   std::string str() const override {
@@ -1243,7 +1243,7 @@ struct ComplexType;
 using ComplexTypePtr = std::shared_ptr<ComplexType>;
 // This type represents a Python float number
 struct TORCH_API ComplexType : public NumberType {
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
   std::string str() const override {
@@ -1268,7 +1268,7 @@ struct IntType;
 using IntTypePtr = std::shared_ptr<IntType>;
 // This type represents a Python int number
 struct TORCH_API IntType : public NumberType {
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
   std::string str() const override {
@@ -1293,7 +1293,7 @@ struct BoolType;
 using BoolTypePtr = std::shared_ptr<BoolType>;
 // This node represents a Python bool value
 struct TORCH_API BoolType : public Type {
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
   std::string str() const override {
@@ -1311,7 +1311,7 @@ struct StringType;
 using StringTypePtr = std::shared_ptr<StringType>;
 // This type represents a Python string
 struct TORCH_API StringType : public Type {
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
   std::string str() const override {
@@ -1332,7 +1332,7 @@ struct TORCH_API StringType : public Type {
 struct StorageType;
 using StorageTypePtr = std::shared_ptr<StorageType>;
 struct TORCH_API StorageType : public Type {
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
   std::string str() const override {
@@ -1356,7 +1356,7 @@ struct TORCH_API FunctionType : public NamedType {
     return FunctionTypePtr(
         new FunctionType(function)); // NOLINT(modernize-make-shared)
   }
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     if (auto func_type = rhs.cast<FunctionType>()) {
       return func_type->function_ == function_;
     }
@@ -1384,7 +1384,7 @@ struct NoneType;
 using NoneTypePtr = std::shared_ptr<NoneType>;
 // This type represents a Python None
 struct TORCH_API NoneType : public Type {
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
   std::string str() const override {
@@ -1404,7 +1404,7 @@ struct GeneratorType;
 using GeneratorTypePtr = std::shared_ptr<GeneratorType>;
 // This type represents a Generator
 struct TORCH_API GeneratorType : public Type {
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
   std::string str() const override {
@@ -1422,7 +1422,7 @@ struct QuantizerType;
 using QuantizerTypePtr = std::shared_ptr<QuantizerType>;
 // This type represents a Quantizer
 struct TORCH_API QuantizerType : public Type {
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
   std::string str() const override {
@@ -1440,7 +1440,7 @@ struct QSchemeType;
 using QSchemeTypePtr = std::shared_ptr<QSchemeType>;
 // This type represents a QScheme
 struct TORCH_API QSchemeType : public Type {
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
   std::string str() const override {
@@ -1458,7 +1458,7 @@ struct DeviceObjType;
 using DeviceObjTypePtr = std::shared_ptr<DeviceObjType>;
 // This type represents a Device
 struct TORCH_API DeviceObjType : public Type {
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
   std::string str() const override {
@@ -1476,7 +1476,7 @@ struct StreamObjType;
 using StreamObjTypePtr = std::shared_ptr<StreamObjType>;
 // This type represents a Generator
 struct TORCH_API StreamObjType : public Type {
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
   std::string str() const override {
@@ -1497,7 +1497,7 @@ struct VarType : public Type {
   static VarTypePtr create(std::string name_) {
     return VarTypePtr(new VarType(std::move(name_)));
   }
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
   std::string str() const override {
@@ -1522,7 +1522,7 @@ using CapsuleTypePtr = std::shared_ptr<CapsuleType>;
 // This type represents a Python Capsule.
 // It does not appear in the IR and is only used during runtime
 struct TORCH_API CapsuleType : public Type {
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
   std::string str() const override {
@@ -1540,7 +1540,7 @@ struct PyObjectType;
 using PyObjectTypePtr = std::shared_ptr<PyObjectType>;
 // This type represents a PyObject Type
 struct TORCH_API PyObjectType : public Type {
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
   std::string str() const override {
@@ -1918,7 +1918,7 @@ struct TORCH_API InterfaceType : public NamedType {
   static InterfaceTypePtr create(
       QualifiedName qualifiedName, bool is_module=false);
 
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     if (auto user_rhs = rhs.castRaw<InterfaceType>()) {
       return isSubTypeImpl(*this, *user_rhs, nullptr) &&
           isSubTypeImpl(*user_rhs, *this, nullptr);
@@ -1967,7 +1967,7 @@ template <TypeKind K>
 struct EnumerationType : public Type {
 static const TypeKind Kind = K;
 
-bool operator==(const Type& rhs) const override {
+bool equals(const Type& rhs) const override {
   return rhs.kind() == kind();
 }
 
@@ -2010,7 +2010,7 @@ ScalarTypeType() : EnumerationType() {}
 struct AnyListType;
 using AnyListTypePtr = std::shared_ptr<AnyListType>;
 struct TORCH_API AnyListType : public Type {
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
   std::string str() const override {
@@ -2029,7 +2029,7 @@ private:
 struct AnyTupleType;
 using AnyTupleTypePtr = std::shared_ptr<AnyTupleType>;
 struct TORCH_API AnyTupleType : public Type {
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
 
@@ -2050,7 +2050,7 @@ private:
 struct AnyClassType;
 using AnyClassTypePtr = std::shared_ptr<AnyClassType>;
 struct TORCH_API AnyClassType : public Type {
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
   std::string str() const override {
