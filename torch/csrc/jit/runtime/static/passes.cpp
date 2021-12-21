@@ -881,6 +881,9 @@ void CreateOwnedRefsForSpecialValues(Graph& graph) {
 void ForceNonEmptyOutputs(Graph& graph) {
   auto* none_node = findOrCreateNoneConstant(graph);
   ForceNonEmptyOutputsHelper(none_node->output(), graph.block());
+  if (!none_node->hasUses()) {
+    none_node->destroy();
+  }
 }
 
 } // namespace jit
