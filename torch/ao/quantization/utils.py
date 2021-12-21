@@ -113,6 +113,15 @@ def weight_is_statically_quantized(qconfig):
     """
     return weight_dtype(qconfig) in [torch.quint8, torch.qint8]
 
+def op_is_int8_dynamically_quantized(qconfig) -> bool:
+    activation_dtype, weight_dtype, activation_compute_dtype = \
+        get_qconfig_dtypes(qconfig)
+    return (
+        activation_dtype is torch.float and
+        weight_dtype in (torch.quint8, torch.qint8) and
+        activation_compute_dtype in (torch.quint8, torch.qint8)
+    )
+
 def get_qconfig_dtypes(qconfig):
     r""" returns the qconfig tuple for qconfig:
     (activation_dtype, weight_dtype, activation_compute_dtype)

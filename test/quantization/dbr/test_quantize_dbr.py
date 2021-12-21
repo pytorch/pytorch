@@ -148,6 +148,21 @@ class TestQuantizeDBRIndividualOps(QuantizeDBRTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
 
+    def test_linear_dynamic(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(1, 1)
+
+            def forward(self, x):
+                x1 = self.linear(x)
+                return x1
+
+        m = M().eval()
+        qconfig = torch.quantization.default_dynamic_qconfig
+        # qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 1, 1),))
+
     def test_linear_functional(self):
         class LinearFunctional(nn.Module):
             def __init__(self):

@@ -833,10 +833,19 @@ class AutoQuantizationState(torch.nn.Module):
                 dtype_to_use = args[0][0]._qtensor_info.inf_dtype
             else:
                 dtype_to_use = args[0]._qtensor_info.inf_dtype
-        output._qtensor_info = QTensorInfo(qtensor_id[0], dtype_to_use)
-        self.idx_to_seen_op_infos[self.idx].output_tensor_infos.append(
-            output._qtensor_info)
-        qtensor_id[0] += 1
+
+        def _add_output_qtensor_info(output):
+            output._qtensor_info = QTensorInfo(qtensor_id[0], dtype_to_use)
+            self.idx_to_seen_op_infos[self.idx].output_tensor_infos.append(
+                output._qtensor_info)
+            qtensor_id[0] += 1
+
+        if isinstance(output, torch.Tensor):
+            _add_output_qtensor_info(output)
+        elif isinstance(output, tuple):
+            for element in output:
+                if isinstance(element, torch.Tensor):
+                    _add_output_qtensor_info(element)
 
     # This is a hack to enable nn.Sequential to properly work with
     # this class.
