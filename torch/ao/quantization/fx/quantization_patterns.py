@@ -1712,14 +1712,6 @@ class StandaloneModuleQuantizeHandler(QuantizeHandler):
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
         assert node.op == 'call_module'
-        if convert_custom_config_dict is None:
-            convert_custom_config_dict = {}
-
-        standalone_module_name = node.target
-        standalone_module_type = type(modules[node.target])  # type: ignore[index]
-        sm_qconfig_dict, sm_prepare_config_dict, sm_backend_config_dict = \
-            get_standalone_module_configs(standalone_module_name, standalone_module_type, convert_custom_config_dict)
-
         convert = torch.ao.quantization.quantize_fx._convert_standalone_module_fx  # type: ignore[attr-defined]
         # We know that observed standalone module is a GraphModule since
         # it's produced by us
