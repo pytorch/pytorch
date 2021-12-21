@@ -177,7 +177,9 @@ def _handle_row_wise_sharding(input, world_size, weight, rank, local_shard_t, bi
     Returns: final result of linear operation.
     """
     # alltoall to gather all the appropriate inputs.
-    input_t = input.t().contiguous()
+    input_size = list(reversed(range(input.dim())))
+
+    input_t = input.permute(input_size).contiguous()
     input_t_size = input_t.size()
 
     # Compute expected size
@@ -210,17 +212,19 @@ def _handle_row_wise_sharding(input, world_size, weight, rank, local_shard_t, bi
             0, torch.tensor(indices_flatten, device=input_t.device)
         )
 
-    gathered_input = torch.empty(input_split_sizes[rank] * world_size, input_t_size[1], device=input_t.device)
+    gathered_input_size = [input_split_sizes[rank] * world_size] + list(input_t_size[1:])
+    gathered_input = torch.empty(gathered_input_size, device=input_t.device)
 
     # Perform autograd enabled alltoall
     all_to_all_single(gathered_input, input_t, input_split_sizes=input_split_sizes, group=pg)
-    gathered_input = gathered_input.t()
+    gathered_input_size = list(reversed(range(gathered_input.dim())))
+    gathered_input = gathered_input.permute(gathered_input_size)
 
     # Perform local matmuls for all shards
     shard_size = local_shard_t.size()[0]
     results = []
     for r in range(world_size):
-        inp = torch.narrow(gathered_input, 1, r * shard_size, shard_size)
+        inp = torch.narrow(gathered_input, -1, r * shard_size, shard_size)
         results.append(inp.matmul(local_shard_t))
 
     # Gather all the results appropriately.
