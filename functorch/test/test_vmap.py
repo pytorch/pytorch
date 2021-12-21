@@ -2177,8 +2177,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
         result = vmap(vmap(lambda x: op(x, [2, 3])))(torch.randn(B0, B1))
         self.assertEqual(result.shape, [B0, B1, 2, 3])
 
-    # TODO: new_empty_strided BR
-    @unittest.expectedFailure
     def test_new_empty_strided(self):
         # Empty is non-deterministic so we just check that the size and shape
         # of the output are what we expect and that the vmap fallback isn't used
