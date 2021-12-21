@@ -1,5 +1,10 @@
-def define_targets(rules, build_shared_libs, use_gflags, use_glog,
-                   use_msvc_static_runtime, use_numa):
+def define_targets(
+        rules,
+        build_shared_libs,
+        use_gflags,
+        use_glog,
+        use_msvc_static_runtime,
+        use_numa):
     rules.cc_library(
         name = "macros",
         hdrs = [
