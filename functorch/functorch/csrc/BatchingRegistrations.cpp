@@ -368,6 +368,10 @@ static void checkBatchDimsAtFrontInLayout(IntArrayRef physical_strides, int64_t 
     // No example dimensions
     return;
   }
+  if (num_batch_dims == 1 && physical_strides.size() > 0 && physical_strides[0] == 0) {
+    // degenerate batch dim
+    return;
+  }
   TORCH_CHECK(*smallest_batch_stride >= *largest_example_stride,
     "vmap: Calling Tensor.as_strided is not supported unless the batch dims being ",
     "vmapped over are at the front of the tensor (in memory layout). When they are ",
@@ -929,7 +933,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
 // //   // Tensor.new_* operators
 //   m.impl("ones_like", ones_like_batching_rule);
 // //   m.impl("new_empty", new_empty_batching_rule);
-//   m.impl("new_empty_strided", new_empty_strided_batching_rule);
+  m.impl("new_empty_strided", new_empty_strided_batching_rule);
 // //   m.impl("new_zeros", new_zeros_batching_rule);
 // //
   m.impl("contiguous", contiguous_batching_rule);
