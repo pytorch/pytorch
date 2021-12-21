@@ -6685,11 +6685,11 @@ class TestNN(NNTestCase):
             with torch.backends.cudnn.flags(enabled=False):
                 res_gpu = torch.nn.functional.ctc_loss(log_probs.cuda(), targets.cuda(), input_lengths, target_lengths,
                                                        reduction=reduction, zero_infinity=True)
-                res_gpu_no_bd = torch.nn.functional.ctc_loss(log_probs_no_bd.cuda(), targets_no_bd.cuda(), input_lengths_no_bd, target_lengths_no_bd,
+                res_gpu_no_bd = torch.nn.functional.ctc_loss(log_probs_no_bd.cuda(), targets_no_bd.cuda(), input_lengths_no_bd.cuda(), target_lengths_no_bd.cuda(),
                                                              reduction=reduction, zero_infinity=True)
 
-                grad_gpu, = torch.autograd.grad(res_gpu.cuda(), log_probs.cuda(), grad_out.cuda())
-                grad_gpu_no_bd, = torch.autograd.grad(res_gpu_no_bd.cuda(), log_probs_no_bd.cuda(), grad_out.cuda())
+                grad_gpu, = torch.autograd.grad(res_gpu, log_probs, grad_out.cuda())
+                grad_gpu_no_bd, = torch.autograd.grad(res_gpu_no_bd, log_probs_no_bd, grad_out.cuda())
 
             self.assertEqual(res_cpu, res_cpu_no_bd, atol=1e-4, rtol=0)
             self.assertEqual(res_cpu, res_gpu, atol=1e-4, rtol=0)
@@ -6697,7 +6697,7 @@ class TestNN(NNTestCase):
 
             self.assertEqual(grad_cpu.squeeze(1), grad_cpu_no_bd, atol=1e-4, rtol=0)
             self.assertEqual(grad_cpu, grad_gpu, atol=1e-4, rtol=0)
-            self.assertEqual(grad_cpu.squeeze(1), grad_cpu_no_bd, atol=1e-4, rtol=0)
+            self.assertEqual(grad_cpu.squeeze(1), grad_gpu_no_bd, atol=1e-4, rtol=0)
 
     def test_RNN_cell_no_broadcasting(self):
         def test(cell_module, input, hx, input_size, hidden_size):
