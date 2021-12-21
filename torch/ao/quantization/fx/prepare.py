@@ -1006,7 +1006,6 @@ def insert_observers_for_model(
 
     inputs_seen_counter = 0
     outputs_seen_counter = 0
-    results_node = None
 
     # first, populate the dtype map based only on qconfig and qhandler
     # this assumes:
@@ -1020,6 +1019,10 @@ def insert_observers_for_model(
             node, qconfig, inputs_seen_counter, outputs_seen_counter,
             input_quantized_idxs, output_quantized_idxs, qhandler,
             modules, cache_for_no_tensor_check)
+        if node.op == "placeholder":
+            inputs_seen_counter += 1
+        if node.op == "output":
+            outputs_seen_counter += 1
 
     # Second, for nodes with known input dtypes, propagate them throughout the
     # graph. For example, if there is a call such as
@@ -1037,6 +1040,10 @@ def insert_observers_for_model(
     # nodes before observer insertion, instead of model.graph.nodes.
     nodes_before_observation = list(model.graph.nodes)
 
+    # reset inputs/outputs counters
+    inputs_seen_counter = 0
+    outputs_seen_counter = 0
+    results_node = None
     for node in nodes_before_observation:
 
         if node.op == 'placeholder':
