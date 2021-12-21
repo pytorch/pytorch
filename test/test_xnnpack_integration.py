@@ -85,7 +85,6 @@ class TestXNNPACKOps(TestCase):
                     dilation,
                     use_bias,
                     format):
-        print(torch.__config__.show())
         input_channels = input_channels_per_group * groups
         output_channels = output_channels_per_group * groups
         kernels = (kernel_h, kernel_w)
@@ -105,6 +104,7 @@ class TestXNNPACKOps(TestCase):
         if use_bias:
             bias = torch.rand((output_channels))
 
+        print('input size(): ', input_data.size(), '; format: ', format)
         ref_result = F.conv2d(input_data, weight, bias,
                               strides, paddings, dilations, groups)
         packed_weight_bias = torch.ops.prepacked.conv2d_clamp_prepack(weight, bias,
