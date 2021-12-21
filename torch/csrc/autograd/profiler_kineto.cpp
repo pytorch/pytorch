@@ -166,6 +166,9 @@ struct KinetoThreadLocalState : public torch::profiler::impl::ProfilerThreadLoca
     if (ctx->shapes && !ctx->shapes->empty()) {
       kineto_events_.back().shapes(*ctx->shapes);
     }
+    if (ctx->seq_ids && !ctx->seq_ids->empty()) {
+      kineto_events_.back().seq_ids(*ctx->seq_ids);
+    }
     if (ctx->dtypes && !ctx->dtypes->empty()) {
       kineto_events_.back().dtypes(*ctx->dtypes);
     }
@@ -322,6 +325,9 @@ struct KinetoThreadLocalState : public torch::profiler::impl::ProfilerThreadLoca
 
       if (kineto_event.hasShapes()) {
         activity.addMetadata("Input Dims", torch::profiler::impl::shapesToStr(kineto_event.shapes()));
+      }
+      if (kineto_event.hasShapes()) {
+        activity.addMetadata("Input SeqIds", torch::profiler::impl::seqIdsToStr(kineto_event.seq_ids()));
       }
       if (kineto_event.hasStack()) {
         // NB: This is only for the JIT stack. The python stack (if applicable)
@@ -558,6 +564,7 @@ void pushProfilingCallbacks(const std::unordered_set<at::RecordScope>& scopes) {
 
           if (config.report_input_shapes) {
             ctx_ptr->shapes = torch::profiler::impl::inputSizes(fn);
+            ctx_ptr->seq_ids = torch::profiler::impl::inputSeqIds(fn);
             ctx_ptr->dtypes = torch::profiler::impl::inputTypes(fn);
           }
 
@@ -593,11 +600,13 @@ void pushProfilingCallbacks(const std::unordered_set<at::RecordScope>& scopes) {
           return ctx_ptr;
         } else if (config.state == ProfilerState::NVTX) {
           std::vector<std::vector<int64_t>> shapes;
+          std::vector<int64_t> input_seq_ids;
           if (config.report_input_shapes) {
             shapes = torch::profiler::impl::inputSizes(fn);
+            input_seq_ids = torch::profiler::impl::inputSeqIds(fn);
           }
           torch::profiler::impl::cudaStubs()->nvtxRangePushA(torch::profiler::impl::getNvtxStr(
-            fn.name(), fn.seqNr(), shapes).c_str());
+            fn.name(), fn.seqNr(), shapes, input_seq_ids).c_str());
         }
         return nullptr;
       },

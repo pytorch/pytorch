@@ -663,10 +663,9 @@ PyObject* THPFunction_name(PyObject *self, PyObject* noargs) {
 PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
 {
   HANDLE_TH_ERRORS
-  RECORD_FUNCTION(
-    ((PyTypeObject*)cls)->tp_name,
-    std::vector<c10::IValue>(),
-    at::sequence_number::peek());
+
+  // save a local copy of seq_id before it gets incremented
+  int seq_id = at::sequence_number::peek();
 
   THPObjectPtr backward_cls(PyObject_GetAttrString(cls, "_backward_cls"));
   if (!backward_cls) return nullptr;
@@ -690,6 +689,12 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
   cdata->set_next_edges(std::move(input_info.next_edges));
   ctx->needs_input_grad = input_info.needs_input_grad.release();
   ctx->is_variable_input = std::move(input_info.is_variable_input);
+
+  // Call record function after all the inputs have been decoded.
+  RECORD_FUNCTION(
+    ((PyTypeObject*)cls)->tp_name,
+    std::vector<c10::IValue>(unpacked_input.input_vars.begin(), unpacked_input.input_vars.end()),
+    seq_id);
 
   // Prepend ctx to input_tuple, in preparation for static method call
   auto num_args = PyTuple_GET_SIZE(inputs);

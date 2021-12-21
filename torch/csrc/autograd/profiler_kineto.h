@@ -26,6 +26,7 @@ struct KinetoObserverContext : public at::ObserverContext {
   uint64_t endThreadId;
   c10::optional<std::vector<std::vector<int64_t>>> shapes;
   c10::optional<std::vector<std::string>> dtypes;
+  c10::optional<std::vector<int64_t>> seq_ids;
   int64_t sequenceNr;
   uint64_t fwdThreadId;
   uint8_t recFunScope;
@@ -88,6 +89,11 @@ struct TORCH_API KinetoEvent {
     return *this;
   }
 
+  KinetoEvent& dtypes(const std::vector<std::string>& dtypes) {
+    dtypes_ = dtypes;
+    return *this;
+  }
+
   bool hasTypes() const {
     return dtypes_ != c10::nullopt;
   }
@@ -96,9 +102,12 @@ struct TORCH_API KinetoEvent {
     return *dtypes_;
   }
 
-  KinetoEvent& dtypes(const std::vector<std::string>& dtypes) {
-    dtypes_ = dtypes;
-    return *this;
+  bool hasSeqIds() const {
+    return seq_ids_ != c10::nullopt;
+  }
+
+  const std::vector<int64_t>& seq_ids() const {
+    return *seq_ids_;
   }
 
   uint64_t flops() const {
@@ -161,6 +170,11 @@ struct TORCH_API KinetoEvent {
 
   int64_t debugHandle() const {
     return debug_handle_;
+  }
+
+  KinetoEvent& seq_ids(const std::vector<int64_t>& seq_ids) {
+    seq_ids_ = seq_ids;
+    return *this;
   }
 
   std::string name() const {
@@ -275,6 +289,7 @@ struct TORCH_API KinetoEvent {
   c10::optional<std::vector<std::string>> stack_;
   c10::optional<std::vector<std::string>> module_hierarchy_;
   c10::optional<std::vector<std::string>> dtypes_;
+  c10::optional<std::vector<int64_t>> seq_ids_;
   uint64_t flops_ = 0;
 
   std::string name_;

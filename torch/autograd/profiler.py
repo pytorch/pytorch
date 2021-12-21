@@ -317,6 +317,7 @@ class profile(object):
                 end_us=rel_end_us,
                 fwd_thread=kineto_event.fwd_thread_id(),
                 input_shapes=kineto_event.shapes(),
+                input_seq_ids=kineto_event.seq_ids(),
                 stack=[entry for entry in kineto_event.stack() if _filter_stack_entry(entry)],
                 scope=kineto_event.scope(),
                 cpu_memory_usage=cpu_memory_usage,
@@ -374,6 +375,7 @@ class profile(object):
                     end_us=rel_start_us,  # no duration
                     fwd_thread=mem_record[0].start_thread_id(),
                     input_shapes=[],
+                    input_seq_ids=[],
                     stack=[],
                     scope=0,  # RecordScope::FUNCTION
                     cpu_memory_usage=_cpu_memory_usage(mem_record[0]),

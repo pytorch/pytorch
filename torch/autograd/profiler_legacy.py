@@ -223,6 +223,7 @@ def _parse_legacy_records(thread_records):
                     end_us=start_record.cpu_elapsed_us(record),
                     fwd_thread=start.fwd_thread_id(),
                     input_shapes=start.shapes(),
+                    input_seq_ids=start.seq_ids(),
                     stack=[entry for entry in start.stack() if _filter_stack_entry(entry)],
                     scope=start.scope(),
                     cpu_memory_usage=cpu_memory_usage,

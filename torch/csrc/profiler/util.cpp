@@ -29,7 +29,8 @@ void addMetadataJson(const std::string& key, const std::string& value) {
 std::string getNvtxStr(
     const char* name,
     int64_t sequence_nr,
-    const std::vector<std::vector<int64_t>>& shapes) {
+    const std::vector<std::vector<int64_t>>& shapes,
+    const std::vector<int64_t>& seq_ids) {
   if (sequence_nr >= -1 || shapes.size() > 0) {
     std::stringstream s;
 #if defined(USE_ROCM)
@@ -65,6 +66,18 @@ std::string getNvtxStr(
           s << ", ";
         }
       }
+      s << "]";
+    }
+    // Include the sequence ids of the input edges so
+    // you can build the network graph
+    if (seq_ids.size() > 0) {
+      s << ", seq_ids = [";
+        for (size_t idx = 0; idx < seq_ids.size(); ++idx) {
+          s << seq_ids[idx];
+          if (idx < seq_ids.size() - 1) {
+            s << ", ";
+          }
+        }
       s << "]";
     }
     return s.str();
@@ -125,6 +138,36 @@ std::string stacksToStr(
   return "\"" + rc + "\"";
 }
 
+int get_seq_id_from_input_tensor(const c10::IValue& input_item) {
+  int seq_id = -1;
+  TORCH_INTERNAL_ASSERT(
+    input_item.isTensor(),
+    "Expected input item to be a Tensor."
+  );
+  const at::Tensor& tensor = input_item.toTensor();
+  if (tensor.defined()) {
+    Node *grad_fn = tensor.grad_fn().get();
+    // If no grad_fn then it means the tensor is a weight or
+    // other trained variable. -1 seq_id indicates this condition.
+    if (grad_fn)  {
+        seq_id = grad_fn->sequence_nr();
+    }
+  }
+  return seq_id;
+}
+
+std::vector<int64_t> flatten_list_seq_ids(c10::List<c10::IValue> list, std::string fn_name) {
+  std::vector<int64_t> input_seq_ids;
+  int seq_id = -1;
+  for (const c10::IValue& input : list) {
+    if (input.isTensor()) {
+      seq_id = get_seq_id_from_input_tensor(input);
+      input_seq_ids.push_back(seq_id);
+    }
+  }
+  return input_seq_ids;
+}
+
 std::vector<std::vector<int64_t>> inputSizes(const at::RecordFunction& fn) {
   std::vector<std::vector<int64_t>> sizes;
   sizes.reserve(fn.inputs().size());
@@ -143,6 +186,33 @@ std::vector<std::vector<int64_t>> inputSizes(const at::RecordFunction& fn) {
   return sizes;
 }
 
+std::vector<int64_t> inputSeqIds(const at::RecordFunction& fn) {
+  std::vector<int64_t> seq_ids;
+  seq_ids.reserve(fn.inputs().size());
+  int iter = 0;
+  for (const c10::IValue& input : fn.inputs()) {
+    int seq_id = -1;
+    if (!input.isTensor()) {
+      if (input.isList()) {
+        std::vector<int64_t> tmp_seq_ids = flatten_list_seq_ids(input.toList(), std::string(fn.name()));
+        // Extend the current sizes array by the array returned from input sizes
+        if (!tmp_seq_ids.empty()) {
+          seq_ids.insert(seq_ids.end(), tmp_seq_ids.begin(), tmp_seq_ids.end());
+        } else {
+          seq_ids.push_back(seq_id);
+        }
+      } else {
+        seq_ids.push_back(seq_id);
+      }
+    } else {
+      seq_id = get_seq_id_from_input_tensor(input);
+      seq_ids.push_back(seq_id);
+    }
+    iter++;
+  }
+  return seq_ids;
+}
+
 std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes) {
   std::ostringstream oss;
   oss << "[";
@@ -158,6 +228,19 @@ std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes) {
       oss << shapes[t_idx][s_idx];
     }
     oss << "]";
+  }
+  oss << "]";
+  return oss.str();
+}
+
+std::string seqIdsToStr(const std::vector<int64_t>& seq_ids) {
+  std::ostringstream oss;
+  oss << "[";
+  for (const auto idx : c10::irange(seq_ids.size())) {
+    if (idx > 0) {
+      oss << ", ";
+    }
+    oss << seq_ids[idx];
   }
   oss << "]";
   return oss.str();

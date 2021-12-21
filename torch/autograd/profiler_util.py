@@ -375,7 +375,7 @@ class FunctionEvent(FormattedTimesMixin):
             self, id, name, thread, start_us, end_us, fwd_thread=None, input_shapes=None,
             stack=None, scope=0, cpu_memory_usage=0, cuda_memory_usage=0, is_async=False,
             is_remote=False, sequence_nr=-1, node_id=-1, device_type=DeviceType.CPU, device_index=0,
-            is_legacy=False, flops=None, trace_name=None):
+            input_seq_ids=None, is_legacy=False, flops=None, trace_name=None):
         self.id: int = id
         self.node_id: int = node_id
         self.name: str = name
@@ -388,6 +388,7 @@ class FunctionEvent(FormattedTimesMixin):
         self.cpu_children: List[FunctionEvent] = []
         self.cpu_parent: Optional[FunctionEvent] = None
         self.input_shapes: Tuple[int, ...] = input_shapes
+        self.input_seq_ids: List[int] = input_seq_ids
         self.stack: List = stack
         self.scope: int = scope
         self.cpu_memory_usage: int = cpu_memory_usage
@@ -494,7 +495,7 @@ class FunctionEvent(FormattedTimesMixin):
     def __repr__(self):
         return (
             '<FunctionEvent id={} name={} device_type={} node_id={} cpu_time={} start_us={} end_us={} '
-            'cpu_children={} cuda_time={} name={} thread={} input_shapes={} '
+            'cpu_children={} cuda_time={} name={} thread={} input_shapes={} input_seq_ids={}'
             'cpu_memory_usage={} cuda_memory_usage={} is_async={} is_remote={} seq_nr={} is_legacy={}>'.format(
                 self.id,
                 self.name,
@@ -508,6 +509,7 @@ class FunctionEvent(FormattedTimesMixin):
                 self.name,
                 self.thread,
                 str(self.input_shapes),
+                str(self.input_seq_ids),
                 self.cpu_memory_usage,
                 self.cuda_memory_usage,
                 self.is_async,

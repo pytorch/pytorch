@@ -38,14 +38,16 @@ struct TORCH_API LegacyEvent {
       at::RecordFunctionHandle handle = 0,
       std::vector<std::vector<int64_t>>&& shapes = {},
       int node_id = -1,
-      bool is_async = false)
+      bool is_async = false,
+      std::vector<int64_t>&& seq_ids = {})
       : name_(std::move(name)),
         kind_(kind),
         thread_id_(thread_id),
         handle_(handle),
         shapes_(shapes),
         node_id_(node_id),
-        is_async_(is_async) {
+        is_async_(is_async),
+        seq_ids_(seq_ids) {
     record(record_cuda);
   }
 
@@ -64,7 +66,8 @@ struct TORCH_API LegacyEvent {
       bool cuda_recorded,
       int64_t cuda_memory_usage = 0,
       int device = -1,
-      double cuda_us = -1)
+      double cuda_us = -1,
+      std::vector<int64_t>&& seq_ids = {})
       : cpu_ns_(cpu_ns),
         name_(std::move(name)),
         kind_(kind),
@@ -76,7 +79,8 @@ struct TORCH_API LegacyEvent {
         device_(device),
         node_id_(node_id),
         is_remote_(is_remote),
-        cuda_us_(cuda_us) {
+        cuda_us_(cuda_us),
+        seq_ids_(seq_ids) {
     // Sanity check values that were deserialized
     TORCH_INTERNAL_ASSERT(cpu_ns_ > 0);
     if (cuda_recorded) {
@@ -118,6 +122,10 @@ struct TORCH_API LegacyEvent {
 
   std::vector<std::vector<int64_t>> shapes() const {
     return shapes_;
+  }
+
+  std::vector<int64_t> seq_ids() const {
+    return seq_ids_;
   }
 
   double cpuElapsedUs(const LegacyEvent& e) const {
@@ -269,6 +277,7 @@ struct TORCH_API LegacyEvent {
   int64_t sequence_nr_ = -1;
   bool is_async_ = false;
 
+  std::vector<int64_t> seq_ids_;
   std::vector<std::string> stack_;
   uint8_t scope_;
   uint64_t correlation_id_;
@@ -419,7 +428,8 @@ struct TORCH_API ProfilerLegacyThreadLocalState : public torch::profiler::impl::
   void pushRange(
       const at::RecordFunction& fn,
       const bool record_cuda,
-      std::vector<std::vector<int64_t>>&& shapes = {});
+      std::vector<std::vector<int64_t>>&& shapes = {},
+      std::vector<int64_t>&& seq_ids = {});
 
   void popRange(const at::RecordFunction& fn, const bool record_cuda);
 
@@ -431,6 +441,7 @@ struct TORCH_API ProfilerLegacyThreadLocalState : public torch::profiler::impl::
       c10::Device device) override;
 
  protected:
+
   RangeEventList& getEventList(int64_t thread_id = -1);
 
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)

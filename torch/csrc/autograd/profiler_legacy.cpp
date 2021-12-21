@@ -164,13 +164,14 @@ void ProfilerLegacyThreadLocalState::setOrAddRemoteProfiledEvents(
 void ProfilerLegacyThreadLocalState::pushRange(
     const at::RecordFunction& fn,
     const bool record_cuda,
-    std::vector<std::vector<int64_t>>&& shapes) {
+    std::vector<std::vector<int64_t>>&& shapes,
+    std::vector<int64_t>&& seq_ids) {
   if (config_.state == torch::profiler::impl::ProfilerState::Disabled) {
     return;
   }
   if (config_.state == torch::profiler::impl::ProfilerState::NVTX) {
     torch::profiler::impl::cudaStubs()->nvtxRangePushA(torch::profiler::impl::getNvtxStr(
-        fn.name(), fn.seqNr(), shapes).c_str());
+        fn.name(), fn.seqNr(), shapes, seq_ids).c_str());
   } else {
     LegacyEvent evt(
         EventKind::PushRange,
@@ -320,7 +321,8 @@ void pushProfilingCallbacksLegacy() {
 
         if (state_ptr->config().report_input_shapes) {
           auto sizes = torch::profiler::impl::inputSizes(fn);
-          state_ptr->pushRange(fn, record_cuda, std::move(sizes));
+          auto input_seq_ids = torch::profiler::impl::inputSeqIds(fn);
+          state_ptr->pushRange(fn, record_cuda, std::move(sizes), std::move(input_seq_ids));
         } else {
           state_ptr->pushRange(fn, record_cuda);
         }
