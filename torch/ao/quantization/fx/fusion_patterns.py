@@ -53,6 +53,9 @@ class FuseHandler(ABC):
 @register_fusion_pattern((torch.nn.functional.relu, (torch.nn.BatchNorm1d, torch.nn.Conv1d)))
 @register_fusion_pattern((torch.nn.functional.relu, (torch.nn.BatchNorm2d, torch.nn.Conv2d)))
 @register_fusion_pattern((torch.nn.functional.relu, (torch.nn.BatchNorm3d, torch.nn.Conv3d)))
+@register_fusion_pattern((torch.nn.BatchNorm1d, torch.nn.ConvTranspose1d))
+@register_fusion_pattern((torch.nn.BatchNorm2d, torch.nn.ConvTranspose2d))
+@register_fusion_pattern((torch.nn.BatchNorm3d, torch.nn.ConvTranspose3d))
 class DefaultFuseHandler(FuseHandler):
     def __init__(
             self,
