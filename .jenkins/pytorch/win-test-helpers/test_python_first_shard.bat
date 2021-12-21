@@ -10,13 +10,12 @@ if exist %GFLAGS_EXE% (
     echo %ERRORLEVEL%
     echo "just ran the python script"
     if ERRORLEVEL 1 exit /b 1
-    exit /b 1
 
     %GFLAGS_EXE% /i python.exe -sls
     echo %ERRORLEVEL%
     if ERRORLEVEL 1 exit /b 1
-    exit /b 1
 )
+echo "made it out of the ()"
 echo %ERRORLEVEL%
 if ERRORLEVEL 1 exit /b 1
 
