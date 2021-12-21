@@ -17,6 +17,7 @@ def _mvdigamma(x: torch.Tensor, p: int) -> torch.Tensor:
     assert x.gt((p - 1) / 2).all(), "Wrong domain for multivariate digamma function."
     return torch.digamma(x.unsqueeze(-1) - torch.arange(p).div(2).expand(x.shape + (-1,))).sum(-1)
 
+
 class Wishart(ExponentialFamily):
     r"""
     Creates a Wishart distribution parameterized by a symmetric positive definite matrix :math:`\Sigma`,
@@ -24,8 +25,8 @@ class Wishart(ExponentialFamily):
 
     Example:
         >>> m = Wishart(torch.eye(2), torch.Tensor([2]))
-        >>> m.sample()  #Wishart distributed with mean=`df * I` and
-                        #variance(x_ij)=`df` for i != j and variance(x_ij)=`2 * df` for i == j
+        >>> m.sample()  # Wishart distributed with mean=`df * I` and
+                        # variance(x_ij)=`df` for i != j and variance(x_ij)=`2 * df` for i == j
     Args:
         covariance_matrix (Tensor): positive-definite covariance matrix
         precision_matrix (Tensor): positive-definite precision matrix
