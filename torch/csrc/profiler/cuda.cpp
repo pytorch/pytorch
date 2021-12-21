@@ -5,8 +5,9 @@
 
 #include <sstream>
 
-namespace torch { namespace autograd { namespace profiler {
-
+namespace torch {
+namespace profiler {
+namespace impl {
 namespace {
 
 static inline void cudaCheck(cudaError_t result, const char * file, int line) {
@@ -101,7 +102,7 @@ struct RegisterCUDAMethods {
 };
 RegisterCUDAMethods reg;
 
-} // namespaces
+} // namespace
+} // namespace impl
 } // namespace profiler
-} // namespace autograd
 } // namespace torch
