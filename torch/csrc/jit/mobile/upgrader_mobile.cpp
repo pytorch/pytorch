@@ -101,7 +101,8 @@ std::vector<ByteCodeFunctionWithOperator>& getUpgraderBytecodeList() {
                   c10::IValue("trunc"),
                   c10::IValue(true),
               }), // constants
-              std::vector<c10::TypePtr>({c10::parseType("float")}), // types
+              std::vector<c10::TypePtr>(
+                  {c10::parseType<c10::DynamicType>("float")}), // types
               4 // register_size_
               ),
           std::vector<OperatorString>({
