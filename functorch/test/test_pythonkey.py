@@ -80,7 +80,7 @@ class TestPythonKey(TestCase):
         new_inp = torch.randn(3)
         self.assertEqual(fx_f(new_inp), f(new_inp))
 
-    def test_make_fx_jvp(self, device):
+    def test_make_fx_vjp(self, device):
         def f(x):
             return torch.sin(x).sum()
 
