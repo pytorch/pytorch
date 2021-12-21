@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 Input = t.Sequence[t.Any]
 
 
-class SplitFunc(t.Protocol):
+class SplitFunc:
     """Signature for fx2trt split functions"""
 
     def __call__(
