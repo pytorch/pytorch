@@ -1077,7 +1077,8 @@ class IrParser {
             auto mask = castOp(input->getDataType().value(), comparison);
             auto out = mul(grad_output, mask);
 
-            value_map.emplace(node->output()->unique(), ValueHolder(out, format));
+            value_map.emplace(
+                node->output()->unique(), ValueHolder(out, format));
           },
           nullptr,
           nullptr);
@@ -1232,7 +1233,6 @@ class IrParser {
                   node->output(1)->unique(),
                   ValueHolder(TensorViewBuilder().build(), format));
             }
-
           },
           nullptr,
           nullptr);
@@ -1895,8 +1895,9 @@ class IrParser {
             } else {
               const auto half_to_float = constant_as<bool>(node->input(2));
               TORCH_INTERNAL_ASSERT(
-                half_to_float.has_value(), "Bool half_to_float is not valid");
-              auto input_tensor_type = node->input(0)->type()->cast<TensorType>();
+                  half_to_float.has_value(), "Bool half_to_float is not valid");
+              auto input_tensor_type =
+                  node->input(0)->type()->cast<TensorType>();
               if (half_to_float.value() &&
                   input_tensor_type->scalarType() != at::ScalarType::Half) {
                 return false;
@@ -2272,8 +2273,7 @@ class IrParser {
     }
 
     {
-      auto ptr_op = getOperatorForLiteral(
-          "aten::gelu(Tensor self) -> Tensor");
+      auto ptr_op = getOperatorForLiteral("aten::gelu(Tensor self) -> Tensor");
       REGISTER_PARSE_RULE(
           ptr_op,
           {
