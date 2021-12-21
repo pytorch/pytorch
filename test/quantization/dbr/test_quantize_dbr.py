@@ -1164,7 +1164,6 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
             m2.load_state_dict(loaded_state_dict)
         expected = m(example_inputs[0])
         actual = m2(example_inputs[0])
-        # TODO: why does this fail?
         self.assertTrue(_allclose(expected, actual))
 
 @skipIfNoFBGEMM
