@@ -491,6 +491,7 @@ if __name__ == "__main__" :
     parser.add_argument("--exclude", "-x", action="append", default=[], help="filter benchmarks")
     parser.add_argument("--device", "-d", default='cuda', help="cpu or cuda")
     parser.add_argument("--warmup", type=int, default=4, help="number of warmup runs")
+    parser.add_argument("--timeout", type=int, default=60 * 5, help="time allocated to each model")
     parser.add_argument("--repeat", "-n", type=int, default=4, help="number of timing runs (samples)")
     parser.add_argument("--inner_loop_repeat", type=int, default=10, help="repeat the computation this many times per sample")
     parser.add_argument("--fuser", type=str, choices=['noopt', 'fuser0', 'fuser1', 'fuser2'], help="0=legacy, 1=nnc, 2=nvfuser")
@@ -584,7 +585,7 @@ if __name__ == "__main__" :
         try:
             rc = subprocess.run(launch_command,
                         env=env,
-                        timeout = 60 * 5,
+                        timeout = args.timeout,
                         shell=True,
                         stderr=subprocess.STDOUT)
         except subprocess.TimeoutExpired:
