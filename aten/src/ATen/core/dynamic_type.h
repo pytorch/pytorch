@@ -119,13 +119,16 @@ class DynamicType : public Type {
 #undef DYNAMIC_TYPE_ITEM
   };
 
-  bool operator==(const Type& rhs) const override;
+  bool equals(const Type& rhs) const override;
   bool isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const override;
   std::string str() const override;
   static const TypeKind Kind = TypeKind::DynamicType;
   static TORCH_API DynamicTypePtr create(Type& ty);
 
  private:
+  bool symmetric() const override {
+    return false;
+  }
   friend struct Type;
   static std::shared_ptr<const DynamicType> create(const Type& ty);
   DynamicType(const Type& other);
