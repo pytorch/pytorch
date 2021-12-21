@@ -1480,7 +1480,10 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _convolution_backward_nogroup_bac
 //   input_: tensor of shape (N, C_in, L_in), (N, C_in, H_in, W_in), or (N, C_in, D_in, H_in, W_in)
 //   weight_: tensor of shape (C_out, C_in // groups, *kernel_size); dimension of kernel_size must match the number
 //       of input spatial dimensions
-//   bias_sizes_opt: if specified, shape of bias
+//   bias_sizes_opt: if specified, indicates that a bias was used in the forward pass and contains the shape
+//       of the bias. While the bias shape can be computed from other inputs, it is provided to this function for
+//       ease of use. The bias shape is (weight.shape[0]) for normal convolution and (weight.shape[1] * groups)
+//       for transposed convolution.
 //   stride: single value or an array with dimension matching the number of input spatial dimensions
 //   padding: single value or an array with dimension matching the number of input spatial dimensions
 //   dilation: single value or an array with dimension matching the number of input spatial dimensions
