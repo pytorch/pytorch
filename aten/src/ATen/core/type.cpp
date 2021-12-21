@@ -653,7 +653,7 @@ bool NoneType::isSubtypeOfExt(const Type& rhs, std::ostream *why_not) const {
   return Type::isSubtypeOfExt(rhs, why_not);
 }
 
-bool NumberType::operator==(const Type& rhs) const {
+bool NumberType::equals(const Type& rhs) const {
   if (auto union_type = rhs.cast<UnionType>()) {
     return union_type->containedTypes().size() == 3 && union_type->canHoldType(*NumberType::get());
   } else {
@@ -735,7 +735,7 @@ bool ListType::isSubtypeOfExt(const Type& rhs_, std::ostream* why_not) const {
   return false;
 }
 
- bool TupleType::operator==(const Type& rhs) const {
+ bool TupleType::equals(const Type& rhs) const {
    bool typesSame =
        compare(rhs, [](const Type& a, const Type& b) { return a == b; });
    if (!typesSame) {

@@ -11,7 +11,7 @@ const std::unordered_map<std::string, c10::TypePtr>& string_to_type_lut();
 namespace c10 {
 
 template <>
-struct TypeParser::TypeFactory<c10::DynamicType> {
+struct TORCH_API TypeParser::TypeFactory<c10::DynamicType> {
   template <typename T, typename... Args>
   static TypePtr create(Args&&... args) {
     return std::make_shared<DynamicType>(
@@ -22,7 +22,7 @@ struct TypeParser::TypeFactory<c10::DynamicType> {
 };
 
 template <>
-struct TypeParser::TypeFactory<c10::Type> {
+struct TORCH_API TypeParser::TypeFactory<c10::Type> {
   template <typename T, typename... Args>
   static TypePtr create(Args&&... args) {
     return T::create(std::forward<Args>(args)...);

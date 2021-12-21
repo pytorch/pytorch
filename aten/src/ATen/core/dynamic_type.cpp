@@ -140,7 +140,7 @@ bool DynamicType::equals(const DynamicType& other) const {
   }
 }
 
-bool DynamicType::operator==(const Type& rhs) const {
+bool DynamicType::equals(const Type& rhs) const {
   return equals(*create(rhs));
 }
 

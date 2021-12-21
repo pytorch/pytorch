@@ -359,7 +359,7 @@ bool TensorType::matchTensor(const at::Tensor& t) {
     && is_null_or_equal(sizes().concrete_sizes(), t.sizes());
 }
 
-bool TensorType::operator==(const c10::Type& rhs) const {
+bool TensorType::equals(const c10::Type& rhs) const {
   if (rhs.kind() != kind()) {
     return false;
   }
