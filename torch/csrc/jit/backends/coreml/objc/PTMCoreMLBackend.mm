@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/backends/backend.h>
+#include <torch/csrc/jit/backends/coreml/cpp/context.h>
 #include <torch/csrc/jit/backends/coreml/objc/PTMCoreMLExecutor.h>
 #include <torch/script.h>
 
@@ -221,6 +222,8 @@ class API_AVAILABLE(ios(11.0), macos(10.13)) CoreMLBackend
     const std::string& sha256 = modelDict.at("hash").toStringRef();
     PTMCoreMLExecutor* executor = [PTMCoreMLExecutor new];
     executor.backend = config.backend();
+    executor.allowLowPrecision = config.allowLowPrecision();
+    executor.coreMLVersion = config.coreMLVersion();
     bool result = [executor compileMLModel:model identifier:sha256];
     TORCH_CHECK(result, "Compiling MLModel failed!");
     auto executorWrapper = c10::make_intrusive<CoreMLExecutorWrapper>(
@@ -240,25 +243,26 @@ class API_AVAILABLE(ios(11.0), macos(10.13)) CoreMLBackend
     return c10::impl::toList(outputs);
   }
   bool is_available() override {
-#if !defined(__APPLE__)
-    return false;
-#elif TARGET_OS_IPHONE
-    if ([UIDevice currentDevice].systemVersion.floatValue > 14.0) {
-      return true;
-    }
-#elif TARGET_OS_MAC
-    NSOperatingSystemVersion supportedVer = {10, 13, 0};
-    if ([[NSProcessInfo processInfo]
-            isOperatingSystemAtLeastVersion:supportedVer]) {
-      return true;
-    }
-#endif
-    return false;
+    return [PTMCoreMLExecutor isAvailable];
+  }
+};
+
+struct API_AVAILABLE(ios(11.0), macos(10.13)) ContextImpl
+    : public ContextInterface {
+  bool isCoreMLAvailable() const override {
+    return [PTMCoreMLExecutor isAvailable];
+  }
+  void setModelCacheDirectory(std::string dir) override {
+    [PTMCoreMLExecutor
+        setModelCacheDirectory:[NSString stringWithCString:dir.c_str()]];
   }
 };
 
 API_AVAILABLE(ios(11.0), macos(10.13))
 static auto cls = torch::jit::backend<CoreMLBackend>("coreml");
+
+API_AVAILABLE(ios(11.0), macos(10.13))
+static BackendRegistrar g_coreml_backend(new ContextImpl());
 
 } // namespace
 }

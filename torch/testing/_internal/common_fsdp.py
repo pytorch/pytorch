@@ -1,15 +1,17 @@
 # Owner(s): ["oncall: distributed"]
 
 from contextlib import suppress
+from enum import Enum
+import os
 import sys
 from unittest import mock
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.distributed._fsdp import FullyShardedDataParallel
+from torch.distributed._fsdp import FullyShardedDataParallel, CPUOffload
 from torch.distributed._fsdp.fully_sharded_data_parallel import (
-    TrainingState_, CPUOffload
+    TrainingState_,
 )
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
@@ -20,7 +22,6 @@ from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
 )
 
-from enum import Enum
 
 
 class FSDPInitMode(Enum):
@@ -48,6 +49,12 @@ def get_full_params(model, recurse=True):
 
 def _maybe_cuda(model, move_to_cuda):
     return model.cuda() if move_to_cuda else model
+
+def _maybe_wrap_fsdp(model, wrap_fsdp, *args, **kwargs):
+    return (
+        model if not wrap_fsdp
+        else FullyShardedDataParallel(model, *args, **kwargs)
+    )
 
 class DummyProcessGroup:
     def __init__(self, rank: int, size: int):
@@ -320,6 +327,9 @@ class FSDPTest(MultiProcessTestCase):
     def init_method(self):
         return "{}{file_name}".format(FILE_SCHEMA, file_name=self.file_name)
 
+    def _check_cpu_offload(self, fsdp_model, cpu_offload):
+        self.assertEqual(cpu_offload, fsdp_model.cpu_offload)
+
     @classmethod
     def _run(cls, rank, test_name, file_name, pipe):
         self = cls(test_name)
@@ -330,7 +340,11 @@ class FSDPTest(MultiProcessTestCase):
 
         # Specify gloo backend to make 'init_process_group()' succeed,
         # Actual tests will be skipped if there is no enough GPUs.
-        backend = "nccl" if torch.cuda.is_available() else "gloo"
+
+        backend = os.environ.get("BACKEND", None)
+        if backend is None:
+            backend = "nccl" if torch.cuda.is_available() else "gloo"
+
         try:
             dist.init_process_group(
                 init_method=self.init_method,

@@ -47,6 +47,7 @@ from torch.testing._internal.common_utils import \
      gradcheck)
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.autograd import grad
+import torch.autograd.forward_ad as fwAD
 from torch.autograd.functional import jacobian
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  Cauchy, Chi2, ContinuousBernoulli, Dirichlet,
@@ -766,6 +767,14 @@ class TestDistributions(TestCase):
 
         gradcheck(apply_fn, (s,) + tuple(ctor_params), raise_exception=True)
 
+    def _check_forward_ad(self, fn):
+        with fwAD.dual_level():
+            x = torch.tensor(1.)
+            t = torch.tensor(1.)
+            dual = fwAD.make_dual(x, t)
+            dual_out = fn(dual)
+            self.assertEqual(torch.count_nonzero(fwAD.unpack_dual(dual_out).tangent).item(), 0)
+
     def _check_log_prob(self, dist, asset_fn):
         # checks that the log_prob matches a reference function
         s = dist.sample()
@@ -992,6 +1001,11 @@ class TestDistributions(TestCase):
         self.assertEqual(Bernoulli(torch.tensor([0.0])).entropy(), torch.tensor([0.0]))
         self.assertEqual(Bernoulli(s).entropy(), torch.tensor(0.6108), atol=1e-4, rtol=0)
 
+        self._check_forward_ad(torch.bernoulli)
+        self._check_forward_ad(lambda x: x.bernoulli_())
+        self._check_forward_ad(lambda x: x.bernoulli_(x.clone().detach()))
+        self._check_forward_ad(lambda x: x.bernoulli_(x))
+
     def test_bernoulli_enumerate_support(self):
         examples = [
             ({"probs": [0.1]}, [[0], [1]]),
@@ -1024,6 +1038,8 @@ class TestDistributions(TestCase):
         self.assertRaises(ValueError, lambda: Geometric(0))
         self.assertRaises(NotImplementedError, Geometric(r).rsample)
 
+        self._check_forward_ad(lambda x: x.geometric_(0.2))
+
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_geometric_log_prob_and_entropy(self):
         p = torch.tensor([0.7, 0.2, 0.4], requires_grad=True)
@@ -1054,7 +1070,6 @@ class TestDistributions(TestCase):
             self._gradcheck_log_prob(lambda p: Binomial(total_count, p), [p])
             self._gradcheck_log_prob(lambda p: Binomial(total_count, None, p.log()), [p])
         self.assertRaises(NotImplementedError, Binomial(10, p).rsample)
-        self.assertRaises(NotImplementedError, Binomial(10, p).entropy)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_binomial_sample(self):
@@ -1066,7 +1081,7 @@ class TestDistributions(TestCase):
                                              'Binomial(total_count={}, probs={})'.format(count, prob))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    def test_binomial_log_prob(self):
+    def test_binomial_log_prob_and_entropy(self):
         probs = torch.arange(0.05, 1, 0.1)
         for total_count in [1, 2, 10]:
 
@@ -1077,6 +1092,12 @@ class TestDistributions(TestCase):
             self._check_log_prob(Binomial(total_count, probs), ref_log_prob)
             logits = probs_to_logits(probs, is_binary=True)
             self._check_log_prob(Binomial(total_count, logits=logits), ref_log_prob)
+
+            bin = Binomial(total_count, logits=logits)
+            self.assertEqual(
+                bin.entropy(),
+                scipy.stats.binom(total_count, bin.probs.detach().numpy(), loc=-1).entropy(),
+                atol=1e-3, rtol=0)
 
     def test_binomial_stable(self):
         logits = torch.tensor([-100., 100.], dtype=torch.float)
@@ -1193,7 +1214,7 @@ class TestDistributions(TestCase):
         self.assertRaises(NotImplementedError, Multinomial(10, p).rsample)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    def test_multinomial_1d_log_prob(self):
+    def test_multinomial_1d_log_prob_and_entropy(self):
         total_count = 10
         p = torch.tensor([0.1, 0.2, 0.3], requires_grad=True)
         dist = Multinomial(total_count, probs=p)
@@ -1207,6 +1228,9 @@ class TestDistributions(TestCase):
         log_prob = dist.log_prob(x)
         expected = torch.tensor(scipy.stats.multinomial.logpmf(x.numpy(), n=total_count, p=dist.probs.detach().numpy()))
         self.assertEqual(log_prob, expected)
+
+        expected = scipy.stats.multinomial.entropy(total_count, dist.probs.detach().numpy())
+        self.assertEqual(dist.entropy(), expected, atol=1e-3, rtol=0)
 
     def test_multinomial_2d(self):
         total_count = 10
@@ -1225,9 +1249,6 @@ class TestDistributions(TestCase):
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
         self.assertEqualIgnoreType(Multinomial(total_count, s).sample(),
                                    torch.tensor([[total_count, 0], [0, total_count]]))
-
-        # check entropy computation
-        self.assertRaises(NotImplementedError, Multinomial(10, p).entropy)
 
     def test_categorical_1d(self):
         p = torch.tensor([0.1, 0.2, 0.3], requires_grad=True)
@@ -1311,6 +1332,9 @@ class TestDistributions(TestCase):
             ({"probs": [[0.1, 0.9], [0.3, 0.7]]}, [[[1, 0]], [[0, 1]]]),
         ]
         self._check_enumerate_support(OneHotCategorical, examples)
+
+    def test_poisson_forward_ad(self):
+        self._check_forward_ad(torch.poisson)
 
     def test_poisson_shape(self):
         rate = torch.randn(2, 3).abs().requires_grad_()
@@ -1503,6 +1527,8 @@ class TestDistributions(TestCase):
         low.grad.zero_()
         high.grad.zero_()
 
+        self._check_forward_ad(lambda x: x.uniform_())
+
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_vonmises_sample(self):
         for loc in [0.0, math.pi / 2.0]:
@@ -1547,6 +1573,8 @@ class TestDistributions(TestCase):
         self.assertEqual(scale.grad, eps)
         loc.grad.zero_()
         scale.grad.zero_()
+
+        self._check_forward_ad(lambda x: x.cauchy_())
 
     def test_halfcauchy(self):
         scale = torch.ones(5, 5, requires_grad=True)
@@ -1643,6 +1671,8 @@ class TestDistributions(TestCase):
         dist = LogNormal(torch.zeros(4), torch.ones(2, 1, 1))
         log_prob = dist.log_prob(torch.ones(3, 1))
         self.assertEqual(log_prob.shape, (2, 3, 4))
+
+        self._check_forward_ad(lambda x: x.log_normal_())
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_lognormal_logprob(self):
@@ -1863,6 +1893,11 @@ class TestDistributions(TestCase):
             self.assertEqual(log_prob, math.log(expected), atol=1e-3, rtol=0)
 
         self._check_log_prob(Normal(loc, scale), ref_log_prob)
+        self._check_forward_ad(torch.normal)
+        self._check_forward_ad(lambda x: torch.normal(x, 0.5))
+        self._check_forward_ad(lambda x: torch.normal(0.2, x))
+        self._check_forward_ad(lambda x: torch.normal(x, x))
+        self._check_forward_ad(lambda x: x.normal_())
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_normal_sample(self):
@@ -2159,6 +2194,7 @@ class TestDistributions(TestCase):
             self.assertEqual(log_prob, expected, atol=1e-3, rtol=0)
 
         self._check_log_prob(Exponential(rate), ref_log_prob)
+        self._check_forward_ad(lambda x: x.exponential_())
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_exponential_sample(self):
@@ -3646,6 +3682,7 @@ class TestKL(TestCase):
             (lognormal, lognormal),
             (laplace, normal),
             (normal, gumbel),
+            (normal, laplace),
             (normal, normal),
             (onehotcategorical, onehotcategorical),
             (pareto, chi2),

@@ -614,8 +614,8 @@ at::IValue JIValue::JIValueToAtIValue(
     }
 
     auto firstEntryValue = JIValue::JIValueToAtIValue(it->second);
-    c10::impl::GenericDict dict{c10::StringType::get(),
-                                c10::unshapedType(firstEntryValue.type())};
+    c10::impl::GenericDict dict{
+        c10::StringType::get(), c10::unshapedType(firstEntryValue.type())};
     dict.insert(it->first->toStdString(), firstEntryValue);
     it++;
     for (; it != jmap->end(); it++) {
@@ -637,8 +637,8 @@ at::IValue JIValue::JIValueToAtIValue(
     }
 
     auto firstEntryValue = JIValue::JIValueToAtIValue(it->second);
-    c10::impl::GenericDict dict{c10::IntType::get(),
-                                c10::unshapedType(firstEntryValue.type())};
+    c10::impl::GenericDict dict{
+        c10::IntType::get(), c10::unshapedType(firstEntryValue.type())};
     dict.insert((int64_t)it->first->longValue(), firstEntryValue);
     it++;
     for (; it != jmap->end(); it++) {
