@@ -6860,9 +6860,15 @@ class TestNN(NNTestCase):
             if torch.cuda.is_available():
                 with torch.backends.cudnn.flags(enabled=False):
                     res_gpu = torch.nn.functional.ctc_loss(log_probs.cuda(), targets.cuda(), input_lengths, target_lengths,
-                                                        reduction=reduction, zero_infinity=True)
-                    res_gpu_no_bd = torch.nn.functional.ctc_loss(log_probs_no_bd.cuda(), targets_no_bd.cuda(), input_lengths_no_bd.cuda(), target_lengths_no_bd.cuda(),
-                                                                reduction=reduction, zero_infinity=True)
+                                                           reduction=reduction, zero_infinity=True)
+                    res_gpu_no_bd = torch.nn.functional.ctc_loss(
+                        log_probs_no_bd.cuda(), 
+                        targets_no_bd.cuda(), 
+                        input_lengths_no_bd.cuda(), 
+                        target_lengths_no_bd.cuda(),
+                        reduction=reduction, 
+                        zero_infinity=True
+                    )
 
                     grad_gpu, = torch.autograd.grad(res_gpu, log_probs, grad_out.cuda())
                     grad_gpu_no_bd, = torch.autograd.grad(res_gpu_no_bd, log_probs_no_bd, grad_out.cuda())
