@@ -2,6 +2,7 @@
 
 #include <ATen/Functions.h>
 #include <ATen/Tensor.h>
+#include <ATen/core/class_type.h>
 #include <c10/util/irange.h>
 
 namespace torch {
