@@ -1639,7 +1639,8 @@ except RuntimeError as e:
     def test_mem_get_info(self):
         def _test(idx):
             before_free_bytes, before_available_bytes = torch.cuda.mem_get_info(idx)
-            t = torch.randn(1024 * 1024, device='cuda:' + str(idx))
+            # increasing to 8MB to force acquiring a new block and overcome blocksize differences across platforms
+            t = torch.randn(1024 * 1024 * 8, device='cuda:' + str(idx))
             after_free_bytes, after_available_bytes = torch.cuda.mem_get_info(idx)
 
             self.assertTrue(after_free_bytes < before_free_bytes)
