@@ -880,25 +880,6 @@ class GRU(RNNBase):
             return output, self.permute_hidden(hidden, unsorted_indices)
 
 
-def unbatched_rnncell_forward(fn):
-    def wrapped(self, input: Tensor, hx: Optional[Tensor] = None):
-        assert input.dim() in (1, 2)
-        is_batched = input.dim() == 2
-        if not is_batched:
-            if hx is not None:
-                assert input.dim() == hx.dim()
-                hx = hx.unsqueeze(0)
-            input = input.unsqueeze(0)
-
-        ret = fn(self, input, hx)
-
-        if not is_batched:
-            ret = ret.squeeze(0)
-        return ret
-
-    return wrapped
-
-
 class RNNCellBase(Module):
     __constants__ = ['input_size', 'hidden_size', 'bias']
 
@@ -1009,11 +990,13 @@ class RNNCell(RNNCellBase):
         self.nonlinearity = nonlinearity
 
     def forward(self, input: Tensor, hx: Optional[Tensor] = None) -> Tensor:
-        assert input.dim() in (1, 2)
+        assert input.dim() in (1, 2), \
+            f"RNNCell: Expected input to be 1-D or 2-D but received {input.dim()}-D tensor"
         is_batched = input.dim() == 2
         if not is_batched:
             if hx is not None:
-                assert input.dim() == hx.dim()
+                assert input.dim() == hx.dim(), \
+                    "RNNCell: Excepted input and hx to have same dimensionality"
                 hx = hx.unsqueeze(0)
             input = input.unsqueeze(0)
 
@@ -1110,6 +1093,8 @@ class LSTMCell(RNNCellBase):
         super(LSTMCell, self).__init__(input_size, hidden_size, bias, num_chunks=4, **factory_kwargs)
 
     def forward(self, input: Tensor, hx: Optional[Tuple[Tensor, Tensor]] = None) -> Tuple[Tensor, Tensor]:
+        assert input.dim() in (1, 2), \
+            f"LSTMCell: Expected input to be 1-D or 2-D but received {input.dim()}-D tensor"
         is_batched = input.dim() == 2
         if not is_batched:
             input = input.unsqueeze(0)
@@ -1120,7 +1105,6 @@ class LSTMCell(RNNCellBase):
             assert isinstance(hx, tuple)
             hx_dim = hx[0].dim()
             assert hx_dim == hx[1].dim()
-            # assert hx_dim == input.dim(), "Dimension of input and hidden state should be the same."
             if not is_batched:
                 hx = (hx[0].unsqueeze(0), hx[1].unsqueeze(0))
 
@@ -1203,11 +1187,13 @@ class GRUCell(RNNCellBase):
         super(GRUCell, self).__init__(input_size, hidden_size, bias, num_chunks=3, **factory_kwargs)
 
     def forward(self, input: Tensor, hx: Optional[Tensor] = None) -> Tensor:
-        assert input.dim() in (1, 2)
+        assert input.dim() in (1, 2), \
+            f"GRUCell: Expected input to be 1-D or 2-D but received {input.dim()}-D tensor"
         is_batched = input.dim() == 2
         if not is_batched:
             if hx is not None:
-                assert input.dim() == hx.dim()
+                assert input.dim() == hx.dim(), \
+                    "GRUCell: Excepted input and hx to have same dimensionality"
                 hx = hx.unsqueeze(0)
             input = input.unsqueeze(0)
 
