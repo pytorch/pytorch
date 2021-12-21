@@ -19,7 +19,6 @@
 #include "lazy_tensor_core/csrc/aten_ltc_bridge.h"
 #include "lazy_tensor_core/csrc/lazy_graph_executor.h"
 #include "lazy_tensor_core/csrc/ops/bernoulli.h"
-#include "lazy_tensor_core/csrc/ops/constant_pad_nd.h"
 #include "lazy_tensor_core/csrc/ops/index_ops.h"
 #include "lazy_tensor_core/csrc/ops/nms.h"
 #include "lazy_tensor_core/csrc/ops/repeat.h"
@@ -153,14 +152,6 @@ void bernoulli_(LazyTensor& input, const LazyTensor& probability) {
       probability.GetIrValue(),
       LazyGraphExecutor::Get()->GetRngSeed(input.GetDevice()),
       input.shape().Get()));
-}
-
-LazyTensor constant_pad_nd(const LazyTensor& input, c10::ArrayRef<int64_t> pad,
-                           const at::Scalar& value) {
-  std::vector<int64_t> complete_pad(pad.begin(), pad.end());
-  complete_pad.resize(2 * input.shape().Get().dim());
-  return LazyTensor::Create(torch::lazy::MakeNode<ir::ops::ConstantPadNd>(
-      input.GetIrValue(), complete_pad, value), input.GetDevice());
 }
 
 LazyTensor expand(const LazyTensor& input, std::vector<int64_t> size) {

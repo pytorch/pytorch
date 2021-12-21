@@ -190,14 +190,6 @@ at::Tensor LazyNativeFunctions::clone(const at::Tensor & self, c10::optional<at:
   return CreateAtenFromLtcTensor(self_lt.Create(self_lt.GetIrValue(), self_lt.GetDevice()));
 }
 
-at::Tensor LazyNativeFunctions::constant_pad_nd(const at::Tensor& self,
-                                                at::IntArrayRef pad,
-                                                const at::Scalar& value) {
-  TORCH_LAZY_FN_COUNTER("lazy::");
-  return CreateAtenFromLtcTensor(lazy_tensor_aten_ops::constant_pad_nd(
-      TryGetLtcTensor(self), torch::lazy::ToI64Vector(pad), value));
-}
-
 at::Tensor LazyNativeFunctions::_copy_from(const at::Tensor& self,
                                            const at::Tensor& dst,
                                            bool non_blocking) {

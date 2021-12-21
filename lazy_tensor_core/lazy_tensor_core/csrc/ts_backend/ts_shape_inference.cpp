@@ -12,7 +12,6 @@
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
 #include <torch/jit.h>
 
-#include "lazy_tensor_core/csrc/ops/constant_pad_nd.h"
 #include "lazy_tensor_core/csrc/ops/repeat.h"
 #include "lazy_tensor_core/csrc/ops/squeeze.h"
 #include "lazy_tensor_core/csrc/ops/stack.h"
@@ -68,24 +67,6 @@ torch::lazy::Shape InferShape(const torch::lazy::Node* node) {
     case at::aten::stack: {
       return InferStack(torch::lazy::NodeCast<ir::ops::Stack>(
           node, torch::lazy::OpKind(at::aten::stack)));
-    }
-    case at::aten::constant_pad_nd: {
-      auto constant_pad_nd = torch::lazy::NodeCast<ir::ops::ConstantPadNd>(
-          node, torch::lazy::OpKind(at::aten::constant_pad_nd));
-      const torch::lazy::Output& argument = node->operand(0);
-      const torch::lazy::Shape& argument_shape =
-          torch::lazy::GetShapeFromTsOutput(argument);
-      const auto argument_dimensions = argument_shape.sizes();
-      const auto& pad = constant_pad_nd->pad();
-      CHECK_EQ(argument_dimensions.size() * 2, pad.size());
-      std::vector<int64_t> padded_dimensions(argument_dimensions.begin(),
-                                             argument_dimensions.end());
-      size_t i = 0;
-      for (auto rit = pad.rbegin(); rit != pad.rend(); rit += 2, ++i) {
-        padded_dimensions[i] += (*rit + *(rit + 1));
-      }
-      return torch::lazy::Shape(argument_shape.scalar_type(),
-                                 padded_dimensions);
     }
     default:
       LOG(FATAL) << *node << "Not implemented yet.";

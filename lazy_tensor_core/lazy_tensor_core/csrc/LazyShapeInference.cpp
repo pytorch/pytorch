@@ -76,6 +76,36 @@ std::vector<int64_t> expand_param_if_needed(
   }
 }
 
+std::vector<Shape> compute_shape_constant_pad_nd(const at::Tensor & self, at::IntArrayRef pad, const at::Scalar & value) {
+  // Based on aten/src/ATen/native/ConstantPadNd.cpp::constant_pad_nd
+  TORCH_CHECK(pad.size() % 2 == 0, "Length of pad must be even but instead it equals ",
+            pad.size());
+
+  auto input_sizes = self.sizes();
+  auto l_inp = self.dim();
+
+  auto l_pad = pad.size() / 2;
+  auto l_diff = l_inp - l_pad;
+  TORCH_CHECK(l_inp >= (int64_t)l_pad, "Length of pad should be no more than twice the number of "
+            "dimensions of the input. Pad length is ", pad.size(), "while the input has ",
+            l_inp, "dimensions.");
+
+  std::vector<int64_t> new_shape;
+  for (size_t i = 0; i < (size_t)l_diff; i ++) {
+      new_shape.emplace_back(input_sizes[i]);
+  }
+
+  for (const auto i : c10::irange((size_t)l_pad)) {
+      auto pad_idx = pad.size() - ((i + 1) * 2);
+      auto new_dim = input_sizes[l_diff + i] + pad[pad_idx] + pad[pad_idx + 1];
+      TORCH_CHECK(new_dim > 0, "The input size ", input_sizes[l_diff + i], ", plus negative padding ",
+                pad[pad_idx], " and ", pad[pad_idx + 1], " resulted in a negative output size, "
+                "which is invalid. Check dimension ", l_diff + i, " of your input.");
+      new_shape.emplace_back(new_dim);
+  }
+  return {Shape(self.scalar_type(), new_shape)};
+}
+
 std::vector<Shape> compute_shape_convolution_backward(const at::Tensor & grad_output, const at::Tensor & input, const at::Tensor & weight, c10::optional<at::IntArrayRef> bias_sizes, at::IntArrayRef stride, at::IntArrayRef padding, at::IntArrayRef dilation, bool transposed, at::IntArrayRef output_padding, int64_t groups, ::std::array<bool,3> output_mask) {
   if (bias_sizes.has_value()) {
     return {Shape(input.scalar_type(), input.sizes().vec()),
