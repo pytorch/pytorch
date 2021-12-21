@@ -3,8 +3,8 @@ import math
 import torch
 from torch import Tensor
 from typing import List, Optional
-from . import _single_tensor_functional as single
-from . import _multi_tensor_functional as multi
+
+from .adadelta import adadelta as adadelta_fn
 
 # TODO: use foreach API in optim._functional to do all the computation
 
@@ -209,24 +209,15 @@ def adadelta(params: List[Tensor],
     See :class:`~torch.optim.Adadelta` for details.
     """
 
-    if foreach and not torch.jit.is_scripting():
-        multi.multi_tensor_adadelta(params,
-                                    grads,
-                                    square_avgs,
-                                    acc_deltas,
-                                    lr=lr,
-                                    weight_decay=weight_decay,
-                                    rho=rho,
-                                    eps=eps)
-    else:
-        single.single_tensor_adadelta(params,
-                                      grads,
-                                      square_avgs,
-                                      acc_deltas,
-                                      lr=lr,
-                                      weight_decay=weight_decay,
-                                      rho=rho,
-                                      eps=eps)
+    adadelta_fn(params,
+                grads,
+                square_avgs,
+                acc_deltas,
+                foreach=foreach,
+                lr=lr,
+                rho=rho,
+                eps=eps,
+                weight_decay=weight_decay)
 
 
 def rmsprop(params: List[Tensor],
