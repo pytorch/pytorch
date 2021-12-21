@@ -111,7 +111,7 @@ class TORCH_API ManagedTensorRanges {
  public:
   ManagedTensorRanges() = default;
   ManagedTensorRanges(
-      Block* block,
+      Block& block,
       const AliasDb& alias_db,
       const FastSet<const Value*>& managed_tensor_values);
 
@@ -216,7 +216,7 @@ class ProcessedNode;
 class StaticRuntime;
 
 // A `BlockInfo` instance stores all of the shared state that each
-// `StaticRuntimeBlockRunner` will need to access. Most of this information is
+// `BlockRunner` will need to access. Most of this information is
 // read-only and shared between threads.
 // - Each `BlockInfo` corresponds to one block in the graph.
 // - Each `BlockInfo` may be used by multiple block runners (when there are many
@@ -227,7 +227,7 @@ class StaticRuntime;
 //   planner.
 class BlockInfo {
  public:
-  BlockInfo(uint32_t input_idx, Block* block)
+  BlockInfo(uint32_t input_idx, Block& block)
       : input_idx_(input_idx), block_(block) {}
 
   void set_nodes(
@@ -243,15 +243,15 @@ class BlockInfo {
   }
 
   size_t num_inputs() const {
-    return block_->inputs().size();
+    return block_.inputs().size();
   }
 
   size_t num_outputs() const {
-    return block_->outputs().size();
+    return block_.outputs().size();
   }
 
   graph_node_list node_ptrs() const {
-    return block_->nodes();
+    return block_.nodes();
   }
 
   void set_output_indices(std::vector<uint16_t> indices) {
@@ -288,7 +288,7 @@ class BlockInfo {
   }
 
   void init_value_group(const AliasDb& alias_db) {
-    value_group_.init(*block_, alias_db);
+    value_group_.init(block_, alias_db);
   }
 
   void prepare_for_memory_planner(
@@ -323,7 +323,7 @@ class BlockInfo {
   const uint16_t input_idx_;
   // The indices of this block's outputs in the shared values_ array.
   std::vector<uint16_t> output_indices_;
-  Block* block_;
+  Block& block_;
 };
 
 class TORCH_API StaticModule {
@@ -387,19 +387,19 @@ class TORCH_API StaticModule {
   }
 
   const BlockInfo& block_info(size_t block_idx) const {
-    DCHECK(block_idx < blocks_.size());
-    return blocks_[block_idx];
+    DCHECK(block_idx < block_infos_.size());
+    return block_infos_[block_idx];
   }
 
  private:
   friend class StaticRuntime;
-  friend class StaticRuntimeBlockRunner;
+  friend class BlockRunner;
 
  public:
   auto num_nodes() const {
     return std::accumulate(
-        blocks_.begin(),
-        blocks_.end(),
+        block_infos_.begin(),
+        block_infos_.end(),
         0,
         [](size_t sum, const BlockInfo& block_info) {
           return sum + block_info.num_nodes();
@@ -435,19 +435,26 @@ class TORCH_API StaticModule {
   }
 
  private:
-  size_t prepareBlocksAndOutputIndices(
-      Block* block,
+  // Recursively prepares the `BlockInfo`s and output indices for each block.
+  // - Populates `node_output_idx_map` with the index of each block's outputs in
+  //   the shared value array
+  // - Populates `value_to_index` with the indices of each intermediate value
+  // - Returns the number of Value* processed, including sub-blocks.
+  size_t prepareBlockInfoAndOutputIndices(
+      Block& block,
       const size_t start_idx,
       std::vector<uint32_t>& node_output_idx_map,
       FastMap<const Value*, uint32_t>& value_to_index);
 
   void prepareFunctionsAndConstants(
-      Block* block,
+      Block& block,
       const AliasDb& alias_db,
       FastMap<const Value*, uint32_t>& value_to_index);
 
+  // Recurses on sub-blocks and populates the array of `ProcessedNode`s
+  // Returns (number of nodes processed, number of blocks processed)
   std::pair<size_t, size_t> prepareProcessedNodes(
-      Block* block,
+      Block& block,
       const std::vector<uint32_t>& node_output_idx_map,
       const FastMap<const Value*, uint32_t>& value_to_index,
       const AliasDb& alias_db,
@@ -482,31 +489,31 @@ class TORCH_API StaticModule {
   // includes it anyways to be consistent with the JIT interpreter.
   size_t num_inputs_;
   // See `BlockInfo` definition. The blocks are stored in depth-first order.
-  std::vector<BlockInfo> blocks_;
+  std::vector<BlockInfo> block_infos_;
   size_t value_buffer_size_ = 0;
 };
 
-// `StaticRuntimeBlockRunner` contains the core runtime logic. Each block runner
+// `BlockRunner` contains the core runtime logic. Each block runner
 // corresponds to one block in the graph and has its own memory planner.
-// `StaticRuntime` will initialize all `StaticRuntimeBlockRunner`s
+// `StaticRuntime` will initialize all `BlockRunner`s
 // upon construction. Each block runner only directly executes nodes from its
 // block. Special ops with sub-blocks like `prim::If` may have
-// `StaticRuntimeBlockRunner`s stored in their `ProcessedNode`s; these
+// `BlockRunner`s stored in their `ProcessedNode`s; these
 // sub-blocks get executed in the op's implementation.
 // `StaticRuntime` stores a vector of IValues that all
-// `StaticRuntimeBlockRunner`s share. This vector is used to store all
+// `BlockRunner`s share. This vector is used to store all
 // constants, inputs, and intermediate tensors.
-class TORCH_API StaticRuntimeBlockRunner {
+class BlockRunner {
  public:
-  explicit StaticRuntimeBlockRunner(
+  explicit BlockRunner(
       const StaticModule& sm,
       std::vector<IValue>& values,
       const size_t block_idx);
-  StaticRuntimeBlockRunner(StaticRuntimeBlockRunner&&) = delete;
-  StaticRuntimeBlockRunner& operator=(StaticRuntimeBlockRunner&&) = delete;
-  ~StaticRuntimeBlockRunner();
+  BlockRunner(BlockRunner&&) = delete;
+  BlockRunner& operator=(BlockRunner&&) = delete;
+  ~BlockRunner();
 
-  C10_DISABLE_COPY_AND_ASSIGN(StaticRuntimeBlockRunner);
+  C10_DISABLE_COPY_AND_ASSIGN(BlockRunner);
 
   using KeywordArgs = std::unordered_map<std::string, c10::IValue>;
   c10::IValue operator()(
@@ -589,7 +596,9 @@ class TORCH_API StaticRuntimeBlockRunner {
     return planner_.get();
   }
 
-  bool check_for_memory_leak(bool output_returned = true);
+  bool check_for_memory_leak(
+      bool output_returned = true,
+      bool recurse_on_sub_blocks = false);
 
   // WARNING: Deallocate managed output tensors.  A client receiving Static
   // Runtime-managed Tensors needs to be very careful to call
@@ -620,7 +629,7 @@ class TORCH_API StaticRuntimeBlockRunner {
   // when destructed.
   class Deallocator {
    public:
-    explicit Deallocator(StaticRuntimeBlockRunner& block_runner)
+    explicit Deallocator(BlockRunner& block_runner)
         : block_runner_(block_runner) {}
 
     Deallocator(Deallocator&&) = default;
@@ -637,7 +646,7 @@ class TORCH_API StaticRuntimeBlockRunner {
     void cleanupImpl();
 
     bool finished_ = false;
-    StaticRuntimeBlockRunner& block_runner_;
+    BlockRunner& block_runner_;
   };
 
   template <typename IValueList>
@@ -704,6 +713,7 @@ class TORCH_API StaticRuntimeBlockRunner {
   // ProcessedNodes reference their inputs and outputs with
   // offsets into this array, which saves memory.
   // The first static_module_.num_constants() slots are constants.
+  // Note that constants for all block runners are pooled together.
   // Inputs for this block runner begin at inputs_begin_.
   std::vector<IValue>& values_;
   std::vector<IValue*> outputs_;
@@ -748,7 +758,9 @@ class TORCH_API ProcessedNode {
   ProcessedNode() = default;
   // ProcessedNodes are created within StaticModule and then
   // associated with a shared values array using set_values() when
-  // they are copied into a StaticRuntime.
+  // they are copied into a StaticRuntime. block_runners_ are also
+  // not initialized until StaticRuntime initialization; see
+  // BlockRunner::init_sub_blocks.
   ProcessedNode(
       Node* n,
       ProcessedFunction* fn,
@@ -839,14 +851,14 @@ class TORCH_API ProcessedNode {
   // used in debug mode
   bool verify_no_memory_overlap(bool force_check = false) const;
 
-  std::vector<std::shared_ptr<StaticRuntimeBlockRunner>>& blocks() {
-    return blocks_;
+  std::vector<std::shared_ptr<BlockRunner>>& block_runners() {
+    return block_runners_;
   }
 
  private:
   // For control flow; processed nodes may have sub-blocks which can
   // be executed by op implementations.
-  std::vector<std::shared_ptr<StaticRuntimeBlockRunner>> blocks_;
+  std::vector<std::shared_ptr<BlockRunner>> block_runners_;
 
   C10_NODISCARD bool verify_outputs_dont_overlap_each_other() const;
 
@@ -865,7 +877,7 @@ class TORCH_API ProcessedNode {
 };
 
 // `StaticRuntime` is the owner of the array of IValues (used for constants,
-// inputs, and intermediate tensors) that all `StaticRuntimeBlockRunner`s share.
+// inputs, and intermediate tensors) that all `BlockRunner`s share.
 // Upon construction, it initializes all block runners. `operator()` simply
 // forwards the inputs to the top-level block runner. Each `StaticRuntime`
 // instance corresponds to one `StaticModule`. Multiple `StaticRuntime`
@@ -909,7 +921,7 @@ class TORCH_API StaticRuntime {
         generate_ai_pep_output);
   }
 
-  using IndividualMetrics = StaticRuntimeBlockRunner::IndividualMetrics;
+  using IndividualMetrics = BlockRunner::IndividualMetrics;
 
   IndividualMetrics benchmark_individual_ops(
       const std::vector<std::vector<c10::IValue>>& args_list,
@@ -921,7 +933,7 @@ class TORCH_API StaticRuntime {
   }
 
  private:
-  std::unique_ptr<StaticRuntimeBlockRunner> block_;
+  std::unique_ptr<BlockRunner> block_;
   std::vector<IValue> values_;
 };
 
