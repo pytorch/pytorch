@@ -496,8 +496,8 @@ class TestOptim(TestCase):
             ((optim.NAdam), dict(weight_decay=0.01, momentum_decay=4e-3)),
             # ((optim.SGD), dict(lr=0.2, momentum=1, dampening=0, weight_decay=1, nesterov=True)),
             # ((optim.SGD), dict(lr=0.2, momentum=1, dampening=0.5, weight_decay=1, nesterov=False)),
-            # ((optim.RAdam), dict(weight_decay=0)),
-            # ((optim.RAdam), dict(weight_decay=1)),
+            ((optim.RAdam), dict(weight_decay=0)),
+            ((optim.RAdam), dict(weight_decay=1)),
             # ((optim.RMSprop), dict(weight_decay=1, momentum=1, centered=True)),
             # ((optim.RMSprop), dict(weight_decay=1, momentum=0, centered=True)),
             # ((optim.RMSprop), dict(weight_decay=1, momentum=1, centered=False)),
@@ -919,6 +919,32 @@ class TestOptim(TestCase):
 
             with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
                 optimizer(None, lr=1e-2, weight_decay=-1)
+
+    # new test that test_radam can be switched to when merge is complete and multitensor is deleted
+    def test_radam_new(self):
+        optimizer = optim.RAdam
+        for foreach in [True, False]:
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3, foreach=foreach),
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2, foreach=foreach),
+                    lr=1e-3)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3, weight_decay=0.1, foreach=foreach)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3, foreach=foreach),
+                [lambda opt: ExponentialLR(opt, gamma=0.9),
+                    lambda opt: ReduceLROnPlateau(opt)]
+            )
+            with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
+                optimizer(None, lr=1e-2, betas=(1.0, 0.0), foreach=foreach)
+
+            with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
+                optimizer(None, lr=1e-2, weight_decay=-1, foreach=foreach)
 
     def test_rmsprop(self):
         for optimizer in [optim.RMSprop, optim_mt.RMSprop]:
