@@ -1,7 +1,7 @@
 #pragma once
 
-#include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
+#include <ATen/core/symbol.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
@@ -218,12 +218,14 @@ class TORCH_API StaticModule {
  public:
   explicit StaticModule(
       std::shared_ptr<torch::jit::Graph> g,
-      const StaticModuleOptions& opts = StaticModuleOptions());
+      const StaticModuleOptions& opts = StaticModuleOptions(),
+      std::vector<IValue> sample_inputs = {});
 
   explicit StaticModule(
       const torch::jit::Module& m,
       bool is_frozen = false,
-      const StaticModuleOptions& opts = StaticModuleOptions());
+      const StaticModuleOptions& opts = StaticModuleOptions(),
+      std::vector<IValue> sample_inputs = {});
 
   typedef enum {
     CONSTANT_VALUE = -2, // VALUE nodes defined by prim::Constant
