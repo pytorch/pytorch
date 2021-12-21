@@ -2,7 +2,7 @@ import torch
 import functools
 import warnings
 
-from typing import Callable, Dict
+from typing import Callable, Dict, List, Union
 
 HANDLED_FUNCTIONS: Dict[Callable, torch.autograd.Function] = {}
 
@@ -38,8 +38,8 @@ class ExpandedWeight(torch.Tensor):
         ret = torch.Tensor._make_subclass(cls, orig_weight.detach(), orig_weight.requires_grad)
         if not isinstance(orig_weight, torch.Tensor):
             raise RuntimeError(f"Can only make ExpandedWeights of Tensors, got {type(orig_weight).__name__}")
-        ret.batch_size = batch_size
-        ret.orig_weight = orig_weight
+        cls.batch_size = batch_size
+        cls.orig_weight = orig_weight
         return ret
 
     @classmethod
@@ -117,17 +117,17 @@ class SlowFallback(torch.autograd.Function):
         per_sample_grads = tuple(torch.autograd.grad(outputs[i], diff_args, grad_output[i],
                                                      retain_graph=(i != batch_size - 1))
                                  for i in range(batch_size))
-        per_sample_grads = zip(*per_sample_grads)
-        result = []
+        per_sample_grads_iter = zip(*per_sample_grads)
+        result: List[Union[torch.Tensor, None]] = []
         result.append(None)  # for function input
         for arg in ctx.args:
             if isinstance(arg, ExpandedWeight):
-                per_sample_grad = next(per_sample_grads)
-                arg.orig_weight.grad_sample = torch.stack(per_sample_grad)
+                cur_per_sample_grad = next(per_sample_grads_iter)
+                arg.orig_weight.grad_sample = torch.stack(cur_per_sample_grad)
                 result.append(None)
             elif isinstance(arg, torch.Tensor) and arg.requires_grad:
-                per_sample_grad = next(per_sample_grads)
-                result.append(torch.stack(per_sample_grad).sum(0))
+                cur_per_sample_grad = next(per_sample_grads_iter)
+                result.append(torch.stack(cur_per_sample_grad).sum(0))
             else:
                 result.append(None)
         result.append(None)
@@ -145,7 +145,7 @@ def forward_helper(func, ctx, expanded_args, num_true_outs):
 
     Args:
         func: The function to be called
-        ctx: The context from the autograd.Function object. Will be used to save 
+        ctx: The context from the autograd.Function object. Will be used to save
           computed state from the forward pass
         expanded_args: Arguments to be passed to :attr:`func`. Will include arguments
           that need to be unpacked because they are ExpandedWeights
