@@ -226,7 +226,7 @@ class BytecodeDeserializer final {
   // operators from the given model. If it's less than the current runtime,
   // upgrader will be applied at loading stage.
   uint64_t operator_version_;
-  std::once_flag _upgrader_initialized;
+  std::once_flag upgrader_initialized_;
 };
 
 BytecodeDeserializer::BytecodeDeserializer(
@@ -406,7 +406,7 @@ void BytecodeDeserializer::parseMethods(
           std::move(*std::move((*debug_handles)[i]).toTuple()).elements();
     }
     std::call_once(
-        _upgrader_initialized, [&]() { this->init_upgrader(function.get()); });
+        upgrader_initialized_, [&]() { this->init_upgrader(function.get()); });
 
     // 1. First pass all operators from models
     parseOperators(
