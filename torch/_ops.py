@@ -27,50 +27,68 @@ def dl_open_guard():
 
 class OpOverload:
     def __init__(self, overloadpacket, op, schema):
-        self.op = op
-        self.schema = schema
-        self.overloadpacket = overloadpacket
+        self.__op = op
+        self.__schema = schema
+        self.__overloadpacket = overloadpacket
 
     # it's a no-op since OpOverload object is immutable and must be for a given op overload.
     def __deepcopy__(self, memo=None):
         return self
 
     def __str__(self):
-        return "OpOverload(op='{}.{}', overload='{}')".format(*self.qualified_name().split("::"), self.overload_name())
+        return "OpOverload(op='{}.{}', overload='{}')".format(*self.__schema.name.split("::"), self.overload_name)
 
     def __call__(self, *args, **kwargs):
-        return self.op(*args, **kwargs or {})
+        return self.__op(*args, **kwargs or {})
 
     def __getattr__(self, key):
-        return getattr(self.op, key)
+        return getattr(self.__op, key)
 
     # `my_namespace::my_op`
-    def qualified_name(self):
-        return self.schema.name
+    @property
+    def name(self):
+        return "{}.{}".format(*self.__schema.name.split("::"))
 
+    @property
     def overload_name(self):
-        return self.schema.overload_name
+        return self.__schema.overload_name
 
-    # vector of Arguments -- each Argument's name, and type can currently be accessed
-    # it might be useful to make the mutability of the arg accessible (using the alias_info stored in the C++ struct)
-    def returns(self):
-        return self.schema.returns
+    @property
+    def overloadpacket(self):
+        return self.__overloadpacket
 
-    def arguments(self):
-        return self.schema.arguments
+    @property
+    def op(self):
+        return self.__op
+
+    # TODO: add more methods to expose information about input and output arguments
 
 class OpOverloadPacket():
     def __init__(self, qualified_op_name, op_name, op):
-        self.qualified_op_name = qualified_op_name
-        self.op_name = op_name
-        self.op = op
+        # These attributes are accessible on the object through the properties
+        # defined below but are immutable
+        self.__qualified_op_name = qualified_op_name
+        self.__op_name = op_name
+        self.__op = op
 
     # it's a no-op since OpOverloadPacket object is immutable and must be for a given op.
     def __deepcopy__(self, memo=None):
         return self
 
     def __str__(self):
-        return "OpOverloadPacket(op='{}.{}')".format(*self.qualified_op_name.split("::"))
+        return "OpOverloadPacket(op='{}.{}')".format(*self.__qualified_op_name.split("::"))
+
+    @property
+    def qualified_op_name(self):
+        return "{}.{}".format(*self.__qualified_op_name.split("::"))
+
+    @property
+    def op_name(self):
+        return self.__op_name
+
+    @property
+    def op(self):
+        return self.__op
 
     def __getattr__(self, key):
         # It is not a valid op_name when __file__ is passed in
@@ -81,17 +99,18 @@ class OpOverloadPacket():
 
         try:
             use_key = "" if key == 'default' else key
-            op_ = torch._C._get_operation_overload(self.qualified_op_name, use_key)
-            schema = torch._C._get_schema(self.qualified_op_name, use_key)
+            # TODO: disallow access to overloads registered by JIT
+            op_ = torch._C._get_operation_overload(self.__qualified_op_name, use_key)
+            schema = torch._C._get_schema(self.__qualified_op_name, use_key)
             overload = OpOverload(self, op_, schema)
             # cache the overload object
             setattr(self, key, overload)
             return overload
         except RuntimeError:
             try:
-                # This is added to maintain bc in case the user queries an attribute that exists on `self.op`
+                # This is added to maintain bc in case the user queries an attribute that exists on `self.__op`
                 # which used to be returned before instead of the OpOverloadPacket
-                out = getattr(self.op, key)
+                out = getattr(self.__op, key)
                 return out
             except AttributeError:
                 throw_error = True
@@ -107,16 +126,14 @@ class OpOverloadPacket():
     def __call__(self, *args, **kwargs):
         # overloading __call__ to ensure torch.ops.foo.bar() is still callable from JIT
         # We save the function ptr as the `op` attribute on OpOverloadPacket to access it here.
-        return self.op(*args, **kwargs or {})
+        return self.__op(*args, **kwargs or {})
 
-# Resolution of torch.fn is different from torch.ops. ... fn
-# First one is parsing the python objects and then matching the schema -> calls into the unboxed version of the method
-
-# second one is done by JIT. Creates a stack of all the overloads and then tries to match the correct one at runtime
-# and always calls into boxed version of the method
-
-# autograd codegen mostly creates variabletype, tracertype, inplace or view type and python bindings
-# aten codegen generates tensor methods for the the tensor class
+# Resolution of torch.fn is different from torch.ops.aten.fn
+# torch.fn uses the Python argparser, matches with the appropriate schema, and calls into the unboxed version of the method
+# torch.ops.aten.fn resolution is done via the mechanism defined in JIT. JIT creates a stack of all the overloads and
+# then tries to match the correct one at runtime and always calls into the boxed version of the method
+# Autograd codegen creates VariableType, TracerType, inplace or view type and python bindings
+# Aten codegen generates tensor methods for the the tensor class
 
 # _OpNamespace is a subclass of ModuleType because the torch script
 # allows attribute lookups on modules only. Since we want torch.ops.foo.bar()
