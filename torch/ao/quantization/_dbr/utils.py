@@ -20,6 +20,7 @@ from ..qconfig import QConfigAny
 from torch.quantization import (
     ObserverBase,
     FakeQuantizeBase,
+    is_activation_post_process,
 )
 
 from ..qconfig_dict_utils import (
@@ -175,7 +176,9 @@ def is_leaf(m: torch.nn.Module) -> bool:
             not isinstance(m, torch.nn.Sequential)
         )) or
         # allowlist nni modules, as they inherit from nn.Sequential
-        m.__module__.startswith('torch.nn.intrinsic')
+        m.__module__.startswith('torch.nn.intrinsic') or
+        # observers and fake quants are leaves
+        is_activation_post_process(m)
     )
 
 class FuncOutputObsType(enum.Enum):
