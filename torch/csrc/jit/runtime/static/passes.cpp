@@ -799,17 +799,26 @@ void UseVariadicGroupedAccessor(const std::shared_ptr<Graph>& graph) {
 
 namespace {
 
-void CreateOwnedRefsForReturnedConstantsHelper(Graph& graph, Block* block) {
+void CreateOwnedRefsForSpecialValuesHelper(Graph& graph, Block* block) {
   for (auto* node : block->nodes()) {
     for (auto* sub_block : node->blocks()) {
-      CreateOwnedRefsForReturnedConstantsHelper(graph, sub_block);
+      CreateOwnedRefsForSpecialValuesHelper(graph, sub_block);
     }
   }
 
   auto outputs = block->outputs();
   for (const auto i : c10::irange(outputs.size())) {
     auto* output = outputs[i];
+
+    if (output->type()->kind() == c10::TypeKind::NoneType) {
+      // No need to create owned refs of NoneType since moving
+      // from None will have no effect
+      continue;
+    }
+
     if (toIValue(output).has_value() ||
+        // If the output's owning block is not this one, it's from an outer
+        // scope
         output->node()->owningBlock() != block) {
       auto* create_owned_ref_node =
           graph.create(fromQualString("static_runtime::create_owned_ref"));
@@ -824,8 +833,8 @@ void CreateOwnedRefsForReturnedConstantsHelper(Graph& graph, Block* block) {
 
 } // namespace
 
-void CreateOwnedRefsForReturnedConstants(Graph& graph) {
-  CreateOwnedRefsForReturnedConstantsHelper(graph, graph.block());
+void CreateOwnedRefsForSpecialValues(Graph& graph) {
+  CreateOwnedRefsForSpecialValuesHelper(graph, graph.block());
 }
 
 } // namespace jit
