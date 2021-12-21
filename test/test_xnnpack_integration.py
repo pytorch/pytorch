@@ -85,6 +85,7 @@ class TestXNNPACKOps(TestCase):
                     dilation,
                     use_bias,
                     format):
+        print(torch.__config__.show())
         input_channels = input_channels_per_group * groups
         output_channels = output_channels_per_group * groups
         kernels = (kernel_h, kernel_w)
