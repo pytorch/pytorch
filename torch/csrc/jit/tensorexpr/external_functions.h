@@ -61,6 +61,11 @@ std::vector<at::Tensor> constructTensors(
 #ifdef C10_MOBILE
 extern "C" {
 #endif
+void DispatchParallel(
+    int8_t* func,
+    int64_t start,
+    int64_t stop,
+    int8_t* packed_data) noexcept;
 
 FOR_ALL_EXTERNAL_FUNCTIONS(DECLARE_EXTERNAL_FUNCTION)
 
