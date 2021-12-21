@@ -47,7 +47,7 @@ Tensor empty_cpu(
   }
   auto dtype = dtype_or_default(dtype_opt);
 
-  constexpr auto cpu_ks = at::DispatchKeySet(at::DispatchKey::CPU);
+  CONSTEXPR_EXCEPT_GCC5_STATIC auto cpu_ks = at::DispatchKeySet(at::DispatchKey::CPU);
   return empty_generic(size, allocator, cpu_ks, dtype, device, memory_format_opt);
 }
 
