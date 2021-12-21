@@ -1,7 +1,7 @@
 #pragma once
 #include <unordered_set>
 #include <vector>
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
 #include <c10/util/Exception.h>
 
 namespace c10 {
