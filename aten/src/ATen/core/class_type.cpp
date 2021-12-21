@@ -1,7 +1,8 @@
+#include <ATen/core/class_type.h>
+
 #include <ATen/core/Dict.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/core/function_schema.h>
-#include <ATen/core/jit_type.h>
 #include <ATen/core/ivalue.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
