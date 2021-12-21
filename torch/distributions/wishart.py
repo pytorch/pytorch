@@ -54,6 +54,7 @@ class Wishart(ExponentialFamily):
     }
     support = constraints.positive_definite
     has_rsample = True
+    _mean_carrier_measure = 0
 
     def __init__(self,
                  df: Union[torch.Tensor, Number],
