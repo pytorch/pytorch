@@ -36,7 +36,7 @@ def empty(sharding_spec: ShardingSpec,
           pin_memory=False,
           memory_format=torch.contiguous_format,
           process_group=None,
-          init_rrefs=False):
+          init_rrefs=False) -> ShardedTensor:
     """
     Returns a :class:`ShardedTensor` filled with uninitialized data.
         Needs to be called on all ranks in an SPMD fashion.
@@ -88,7 +88,7 @@ def ones(sharding_spec: ShardingSpec,
          pin_memory=False,
          memory_format=torch.contiguous_format,
          process_group=None,
-         init_rrefs=False):
+         init_rrefs=False) -> ShardedTensor:
     """
     Returns a :class:`ShardedTensor` with the scalar value 1.
         Needs to be called on all ranks in an SPMD fashion.
@@ -139,7 +139,7 @@ def rand(sharding_spec: ShardingSpec,
          pin_memory=False,
          memory_format=torch.contiguous_format,
          process_group=None,
-         init_rrefs=False):
+         init_rrefs=False) -> ShardedTensor:
     """
     Returns a :class:`ShardedTensor` filled with random numbers from a uniform distribution on the
         interval :math:`[0, 1)`. Needs to be called on all ranks in an SPMD fashion.
@@ -191,7 +191,7 @@ def zeros(sharding_spec: ShardingSpec,
           pin_memory=False,
           memory_format=torch.contiguous_format,
           process_group=None,
-          init_rrefs=False):
+          init_rrefs=False) -> ShardedTensor:
     """
     Returns a :class:`ShardedTensor` filled with the scalar value 0.
         Needs to be called on all ranks in an SPMD fashion.
@@ -244,7 +244,7 @@ def full(sharding_spec: ShardingSpec,
          pin_memory=False,
          memory_format=torch.contiguous_format,
          process_group=None,
-         init_rrefs=False):
+         init_rrefs=False) -> ShardedTensor:
     """
     Creates a :class:`ShardedTensor` filled with fill_value. The tensor’s dtype
         is inferred from fill_value. If dtype is specified, it will override the
@@ -295,7 +295,7 @@ def init_from_local_shards(
         local_shards: List[Shard],
         *global_size,
         process_group=None,
-        init_rrefs=False):
+        init_rrefs=False) -> ShardedTensor:
     """
     Creates an :class:`ShardedTensor` from local shards and the global metadata.
     Needs to be called on all ranks in an SPMD fashion.
