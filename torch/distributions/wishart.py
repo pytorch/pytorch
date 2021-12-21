@@ -189,9 +189,9 @@ class Wishart(ExponentialFamily):
     def rsample(self, sample_shape=torch.Size(), max_try_correction=None):
         r"""
         .. warning::
-            In some cases, Bartlett decomposition sampling may return singular matrix samples.
-            Several tries to correction are performed by default, but it may end up returning
-            Singular matrix samples. Sigular samples may return `nan` values in `.log_prob()`.
+            In some cases, sampling algorithn based on Bartlett decomposition may return singular matrix samples.
+            Several tries to correct singular samples are performed by default, but it may end up returning
+            singular matrix samples. Sigular samples may return `-inf` values in `.log_prob()`.
             In those cases, the user should validate the samples and either fix the value of `df`
             or adjust `max_try_correction` value for argument in `.rsample` accordingly.
         """
