@@ -207,14 +207,12 @@ class TestFSDPCheckpoint(FSDPTest):
                         offload_to_cpu_event in name for name in event_names
                     )
                     self.assertTrue(offload_occured)
-                    print(" --- validated offload ---")
                 loss = out.sum()
                 loss.backward()
                 losses.append(loss)
                 outputs.append(out)
 
             self._verify_parity(losses, outputs, models)
-
 
 instantiate_parametrized_tests(TestFSDPCheckpoint)
 
