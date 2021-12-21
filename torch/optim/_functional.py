@@ -7,6 +7,7 @@ from typing import List, Optional
 from .adadelta import adadelta as adadelta_fn
 from .adagrad import adagrad as adagrad_fn
 from .adamax import adamax as adamax_fn
+from .asgd import asgd as asgd_fn
 from .nadam import nadam as nadam_fn
 from .radam import radam as radam_fn
 
@@ -310,6 +311,7 @@ def asgd(params: List[Tensor],
          axs: List[Tensor],
          mus: List[float],
          etas: List[float],
+         foreach: bool = False,
          *,
          weight_decay: float,
          lambd: float):
@@ -318,26 +320,14 @@ def asgd(params: List[Tensor],
     See :class:`~torch.optim.ASGD` for details.
     """
 
-    for i, param in enumerate(params):
-        grad = grads[i]
-        mu = mus[i]
-        ax = axs[i]
-        eta = etas[i]
-
-        if weight_decay != 0:
-            grad = grad.add(param, alpha=weight_decay)
-
-        # decay term
-        param.mul_(1 - lambd * eta)
-
-        # update parameter
-        param.add_(grad, alpha=-eta)
-
-        # averaging
-        if mu != 1:
-            ax.add_(param.sub(ax).mul(mu))
-        else:
-            ax.copy_(param)
+    asgd_fn(params,
+            grads,
+            axs,
+            mus,
+            etas,
+            foreach=foreach,
+            weight_decay=weight_decay,
+            lambd=lambd)
 
 
 def nadam(params: List[Tensor],

@@ -503,8 +503,8 @@ class TestOptim(TestCase):
             # ((optim.RMSprop), dict(weight_decay=1, momentum=1, centered=False)),
             # ((optim.RMSprop), dict(weight_decay=0, momentum=1, centered=False)),
             # ((optim.Rprop), dict(lr=1e-2, etas=(0.5, 1.2), step_sizes=(1e-6, 50))),
-            # ((optim.ASGD), dict(weight_decay=0)),
-            # ((optim.ASGD), dict(weight_decay=1)),
+            ((optim.ASGD), dict(weight_decay=0)),
+            ((optim.ASGD), dict(weight_decay=1)),
             ((optim.Adamax), dict(weight_decay=0)),
             ((optim.Adamax), dict(weight_decay=1)),
             ((optim.Adadelta), dict(weight_decay=0)),
@@ -996,6 +996,26 @@ class TestOptim(TestCase):
             )
             with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -0.5"):
                 optimizer(None, lr=1e-2, weight_decay=-0.5)
+
+    # new test that test_asgd can be switched to when merge is complete and multitensor is deleted
+    def test_asgd_new(self):
+        optimizer = optim.ASGD
+        for foreach in [True, False]:
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3, t0=100, foreach=foreach)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2, foreach=foreach),
+                    lr=1e-3, t0=100)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-3, foreach=foreach),
+                    lr=1e-2, weight_decay=1)
+            )
+            with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -0.5"):
+                optimizer(None, lr=1e-2, weight_decay=-0.5, foreach=foreach)
 
     def test_rprop(self):
         for optimizer in [optim.Rprop, optim_mt.Rprop]:
