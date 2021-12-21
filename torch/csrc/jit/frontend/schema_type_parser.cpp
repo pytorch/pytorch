@@ -289,96 +289,104 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
 }
 
 std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
-  TypePtr value;
   c10::optional<AliasInfo> alias_info;
   // Tuple type
-  if (L.cur().kind == '(') {
-    std::vector<TypePtr> types;
-    parseList('(', ',', ')', [&] {
-      auto r = parseType();
-      types.push_back(std::move(r.first));
-      if (alias_info && r.second) {
-        alias_info->addContainedType(std::move(*r.second));
-      }
-    });
-    value = TupleType::create(std::move(types));
-  } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Future") {
-    L.next(); // Future
-    L.expect('(');
-    auto p = parseType();
-    auto subtype = std::move(p.first);
-    auto subalias = std::move(p.second);
-    L.expect(')');
-    value = FutureType::create(subtype);
-  } else if (L.cur().kind == TK_IDENT && L.cur().text() == "RRef") {
-    L.next(); // RRef
-    L.expect('(');
-    auto p = parseType();
-    auto subtype = std::move(p.first);
-    auto subalias = std::move(p.second);
-    L.expect(')');
-    value = RRefType::create(subtype);
-  } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Tensor") {
-    L.next();
-    value = TensorType::get();
-    alias_info = parseAliasAnnotation();
-  } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Dict") {
-    L.next();
-    L.expect('(');
-    auto key_type = parseType().first;
-    L.expect(',');
-    auto value_type = parseType().first;
-    L.expect(')');
-    alias_info = parseAliasAnnotation();
-    value = DictType::create(key_type, value_type);
-  } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Union") {
-    L.next();
-    L.expect('(');
-    std::vector<TypePtr> types;
-    types.emplace_back(parseType().first);
-    while (L.cur().kind != ')') {
+  auto parseHead = [&]() -> TypePtr {
+    if (L.cur().kind == '(') {
+      std::vector<TypePtr> types;
+      parseList('(', ',', ')', [&] {
+        auto r = parseType();
+        types.push_back(std::move(r.first));
+        if (alias_info && r.second) {
+          alias_info->addContainedType(std::move(*r.second));
+        }
+      });
+      return TupleType::create(std::move(types));
+    } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Future") {
+      L.next(); // Future
+      L.expect('(');
+      auto p = parseType();
+      auto subtype = std::move(p.first);
+      auto subalias = std::move(p.second);
+      L.expect(')');
+      return FutureType::create(subtype);
+    } else if (L.cur().kind == TK_IDENT && L.cur().text() == "RRef") {
+      L.next(); // RRef
+      L.expect('(');
+      auto p = parseType();
+      auto subtype = std::move(p.first);
+      auto subalias = std::move(p.second);
+      L.expect(')');
+      return RRefType::create(subtype);
+    } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Tensor") {
+      L.next();
+      auto value = TensorType::get();
+      alias_info = parseAliasAnnotation();
+      return value;
+    } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Dict") {
+      L.next();
+      L.expect('(');
+      auto key_type = parseType().first;
       L.expect(',');
+      auto value_type = parseType().first;
+      L.expect(')');
+      alias_info = parseAliasAnnotation();
+      return DictType::create(key_type, value_type);
+    } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Union") {
+      L.next();
+      L.expect('(');
+      std::vector<TypePtr> types;
       types.emplace_back(parseType().first);
+      while (L.cur().kind != ')') {
+        L.expect(',');
+        types.emplace_back(parseType().first);
+      }
+      L.expect(')');
+      alias_info = parseAliasAnnotation();
+      return UnionType::create(types);
+    } else if (
+        complete_tensor_types && L.cur().kind == TK_IDENT &&
+        parseTensorDType(L.cur().text())) {
+      auto value = parseRefinedTensor();
+      alias_info = parseAliasAnnotation();
+      return value;
+    } else if (L.cur().kind == TK_IDENT && L.cur().text() == "__torch__") {
+      L.next();
+      L.expect('.');
+      auto torch_tok = L.expect(TK_IDENT);
+      if (torch_tok.text() != "torch") {
+        throw ErrorReport(torch_tok.range)
+            << "Expected classes namespace but got " << torch_tok.text();
+      }
+      L.expect('.');
+      auto classes_tok = L.expect(TK_IDENT);
+      if (classes_tok.text() != "classes") {
+        throw ErrorReport(classes_tok.range)
+            << "Expected classes namespace but got " << classes_tok.text();
+      }
+      L.expect('.');
+      auto ns_tok = L.expect(TK_IDENT);
+      L.expect('.');
+      auto class_tok = L.expect(TK_IDENT);
+      auto value = getCustomClass(
+          std::string("__torch__.torch.classes.") + ns_tok.text() + "." +
+          class_tok.text());
+      if (!value) {
+        throw ErrorReport(class_tok.range)
+            << "Unknown custom class type "
+            << ns_tok.text() + "." + class_tok.text()
+            << ". Please ensure it is registered.";
+      }
+      return value;
+    } else {
+      auto value = parseBaseType();
+      alias_info = parseAliasAnnotation();
+      return value;
     }
-    L.expect(')');
-    alias_info = parseAliasAnnotation();
-    value = UnionType::create(types);
-  } else if (
-      complete_tensor_types && L.cur().kind == TK_IDENT &&
-      parseTensorDType(L.cur().text())) {
-    value = parseRefinedTensor();
-    alias_info = parseAliasAnnotation();
-  } else if (L.cur().kind == TK_IDENT && L.cur().text() == "__torch__") {
-    L.next();
-    L.expect('.');
-    auto torch_tok = L.expect(TK_IDENT);
-    if (torch_tok.text() != "torch") {
-      throw ErrorReport(torch_tok.range)
-          << "Expected classes namespace but got " << torch_tok.text();
-    }
-    L.expect('.');
-    auto classes_tok = L.expect(TK_IDENT);
-    if (classes_tok.text() != "classes") {
-      throw ErrorReport(classes_tok.range)
-          << "Expected classes namespace but got " << classes_tok.text();
-    }
-    L.expect('.');
-    auto ns_tok = L.expect(TK_IDENT);
-    L.expect('.');
-    auto class_tok = L.expect(TK_IDENT);
-    value = getCustomClass(
-        std::string("__torch__.torch.classes.") + ns_tok.text() + "." +
-        class_tok.text());
-    if (!value) {
-      throw ErrorReport(class_tok.range)
-          << "Unknown custom class type "
-          << ns_tok.text() + "." + class_tok.text()
-          << ". Please ensure it is registered.";
-    }
-  } else {
-    value = parseBaseType();
-    alias_info = parseAliasAnnotation();
-  }
+  };
+
+  TypePtr value = parseHead();
+
   while (true) {
     if (L.cur().kind == '[' && L.lookahead().kind == ']') {
       L.next(); // [

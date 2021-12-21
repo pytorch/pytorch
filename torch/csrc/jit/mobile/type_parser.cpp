@@ -64,14 +64,14 @@ std::vector<TypePtr> TypeParser::parseList() {
 }
 
 // The list of non-simple types supported by currrent parser.
-std::unordered_set<std::string> TypeParser::getNonSimpleType() {
+const std::unordered_set<std::string>& TypeParser::getNonSimpleType() {
   static std::unordered_set<std::string> nonSimpleTypes{
       "List", "Optional", "Future", "Dict", "Tuple"};
   return nonSimpleTypes;
 }
 
 // The list of custom types supported by currrent parser.
-std::unordered_set<std::string> TypeParser::getCustomType() {
+const std::unordered_set<std::string>& TypeParser::getCustomType() {
   static std::unordered_set<std::string> customeTypes{
       kTypeTorchbindCustomClass, kTypeNamedTuple};
   return customeTypes;
@@ -81,7 +81,7 @@ std::unordered_set<std::string> TypeParser::getCustomType() {
 // compatibility check between model and runtime. For example:
 // PyThon string: "Dict[int, Tuple[Tensor, Tensor, Tensor]]"
 // contained type is: [Dict, int, Tuple, Tensor]
-std::unordered_set<std::string> TypeParser::getContainedTypes() {
+const std::unordered_set<std::string>& TypeParser::getContainedTypes() {
   return contained_types_;
 }
 

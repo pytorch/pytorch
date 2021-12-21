@@ -19,9 +19,9 @@ class TORCH_API TypeParser {
   template <typename T>
   TypePtr parse();
   std::vector<TypePtr> parseList();
-  static std::unordered_set<std::string> getNonSimpleType();
-  static std::unordered_set<std::string> getCustomType();
-  std::unordered_set<std::string> getContainedTypes();
+  static const std::unordered_set<std::string>& getNonSimpleType();
+  static const std::unordered_set<std::string>& getCustomType();
+  const std::unordered_set<std::string>& getContainedTypes();
 
  private:
   // Torchbind custom class always starts with the follow prefix, so use it as
