@@ -553,7 +553,7 @@ class PackageExporter:
         self, package: str,
         resource: str, obj: Any,
         dependencies: bool = True,
-        pickle_protocol: int = 4,
+        pickle_protocol: int = 3,
     ):
         """Save a python object to the archive using pickle. Equivalent to :func:`torch.save` but saving into
         the archive rather than a stand-alone file. Stanard pickle does not save the code, only the objects.
@@ -613,6 +613,7 @@ class PackageExporter:
             field = None
             memo: DefaultDict[int, str] = defaultdict(None)
             memo_count = 0
+            # pickletools.dis(data_value)
             for opcode, arg, pos in pickletools.genops(data_value):
                 if pickle_protocol == 4:
                     if opcode.name == "SHORT_BINUNICODE" or opcode.name == "BINUNICODE8":
@@ -623,13 +624,12 @@ class PackageExporter:
                     elif opcode.name == "BINGET_LONG" or opcode.name == "BINGET" or opcode.name == "GET":
                         assert isinstance(arg, int)
                         module = field
-                        field = memo[arg]
+                        field = memo.get(arg, None)
                     elif opcode.name == "MEMOIZE":
                         memo_count += 1
                     elif opcode.name == "STACK_GLOBAL":
-                        if module is None:
-                            continue
-                        elif module not in all_dependencies:
+                        assert isinstance(module, str)
+                        if module not in all_dependencies:
                             all_dependencies.append(module)
                         _check_mocked_error(module, field)
                 elif pickle_protocol == 3 and opcode.name == "GLOBAL":  # a global reference
