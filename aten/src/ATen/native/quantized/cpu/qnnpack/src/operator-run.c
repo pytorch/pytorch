@@ -13,7 +13,6 @@
 
 #include <pytorch_qnnpack.h>
 #include <qnnpack/common.h>
-#include <qnnpack/indirection.h>
 #include <qnnpack/log.h>
 #include <qnnpack/math.h>
 #include <qnnpack/operator.h>
