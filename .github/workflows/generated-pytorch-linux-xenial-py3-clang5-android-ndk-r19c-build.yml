@@ -1,5 +1,5 @@
 # @generated DO NOT EDIT MANUALLY
-# Template is at:    .github/templates/android_ci_workflow.yml.j2
+# Template is at:    .github/templates/android_ci_full_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
 name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build
 
