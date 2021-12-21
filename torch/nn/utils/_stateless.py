@@ -1,7 +1,7 @@
 import contextlib
 
 import torch
-from torch.expanded_weights.expanded_weights_impl import ExpandedWeight
+from torch._expanded_weights.expanded_weights_impl import ExpandedWeight
 
 @contextlib.contextmanager
 def reparametrize_module(module, parameters_and_buffers):

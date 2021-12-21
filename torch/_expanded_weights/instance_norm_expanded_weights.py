@@ -2,11 +2,11 @@
 from functools import partial
 import torch
 import torch.nn.functional as F
-from torch.expanded_weights.expanded_weights_impl import forward_helper, implements_per_sample_grads
-from torch.expanded_weights.expanded_weights_utils import grad_if_exists, grad_if_exists_for_input, unpack_expanded_weight_or_tensor
+from .expanded_weights_impl import forward_helper, implements_per_sample_grads
+from .expanded_weights_utils import grad_if_exists, grad_if_exists_for_input, unpack_expanded_weight_or_tensor
 
 @implements_per_sample_grads(F.instance_norm)
-class InstanceNormFunction(torch.autograd.Function):
+class InstanceNormPerSampleGrad(torch.autograd.Function):
     @staticmethod
     def forward(ctx, *expanded_args):
         instance_norm = partial(torch._instance_norm_all_outputs, cudnn_enabled=True)

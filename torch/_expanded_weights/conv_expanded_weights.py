@@ -1,14 +1,14 @@
 import torch
 import torch.nn.functional as F
-from torch.expanded_weights.expanded_weights_impl import forward_helper, implements_per_sample_grads
-from torch.expanded_weights.expanded_weights_utils import grad_if_exists, grad_if_exists_for_input, unpack_expanded_weight_or_tensor
+from .expanded_weights_impl import forward_helper, implements_per_sample_grads
+from .expanded_weights_utils import grad_if_exists, grad_if_exists_for_input, unpack_expanded_weight_or_tensor
 
 import numpy as np
 
 THRESHOLD = 257
 
 @implements_per_sample_grads(F.conv2d)
-class ConvFunction(torch.autograd.Function):
+class Conv2dPerSampleGrad(torch.autograd.Function):
     @staticmethod
     def forward(ctx, *expanded_args):
         if any([isinstance(i, str) for i in expanded_args]):
