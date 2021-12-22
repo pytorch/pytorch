@@ -149,6 +149,7 @@ jobs:
       TEST_RUNNER_TYPE: !{{ test_runner_type }}
       ENABLE_DISTRIBUTED_TEST: !{{ enable_distributed_test }}
       ENABLE_JIT_LEGACY_TEST: !{{ enable_jit_legacy_test }}
+      ENABLE_FX2TRT_TEST: !{{ enable_fx2trt_test }}
       ENABLE_MULTIGPU_TEST: !{{ enable_multigpu_test }}
       ENABLE_NOGPU_NO_AVX_TEST: !{{ enable_nogpu_no_avx_test }}
       ENABLE_NOGPU_NO_AVX2_TEST: !{{ enable_nogpu_no_avx2_test }}
@@ -332,7 +333,7 @@ jobs:
       - name: Generate netrc (only for docs-push)
         if: ${{ github.event_name == 'schedule' }}
         env:
-          GITHUB_PYTORCHBOT_TOKEN: ${{ secrets.GITHUB_PYTORCHBOT_TOKEN }}
+          GITHUB_PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
         run: |
           # set credentials for https pushing
           echo "machine github.com" > "${RUNNER_TEMP}/.netrc"
@@ -364,7 +365,7 @@ jobs:
             --detach \
             --user jenkins \
 {%- if is_scheduled %}
-            -v "${RUNNER_TEMP}/.netrc":/home/jenkins/.netrc \
+            -v "${RUNNER_TEMP}/.netrc":/var/lib/jenkins/.netrc \
 {%- endif %}
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
