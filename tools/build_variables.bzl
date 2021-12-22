@@ -390,6 +390,7 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/core/permutation_util.cpp",
     "torch/csrc/lazy/core/shape.cpp",
     "torch/csrc/lazy/core/tensor.cpp",
+    "torch/csrc/lazy/core/tensor_impl.cpp",
     "torch/csrc/lazy/core/tensor_util.cpp",
     "torch/csrc/lazy/core/thread_pool.cpp",
     "torch/csrc/lazy/core/view_ops/as_strided.cpp",
