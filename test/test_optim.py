@@ -202,14 +202,10 @@ class TestOptim(TestCase):
         # Make sure state dict wasn't modified
         self.assertEqual(state_dict, state_dict_c)
         #Handles https://github.com/pytorch/pytorch/issues/69698
-        if 'Adadelta' in str(type(optimizer)):
-            atol, rtol = 4e-3, 1.3e-6
-        else:
-            atol, rtol = None, None
         for _i in range(20):
             optimizer.step(fn)
             optimizer_cuda.step(fn_cuda)
-            self.assertEqual(weight, weight_cuda, atol=atol, rtol=rtol)
+            self.assertEqual(weight, weight_cuda)
             self.assertEqual(bias, bias_cuda)
 
         # validate deepcopy() copies all public attributes
@@ -280,10 +276,6 @@ class TestOptim(TestCase):
         complex_opt = optimizer_constructor(complex_param)
         real_opt = optimizer_constructor(real_param)
         #Handles https://github.com/pytorch/pytorch/issues/69698
-        if 'Adadelta' in str(type(complex_opt)):
-            atol, rtol = 2e-2, 1.3e-6
-        else:
-            atol, rtol = None, None
         for i in range(3):
             complex_param.grad = torch.randn_like(complex_param)
             real_param.grad = torch.view_as_real(complex_param.grad)
@@ -291,7 +283,7 @@ class TestOptim(TestCase):
             complex_opt.step()
             real_opt.step()
 
-            self.assertEqual(torch.view_as_real(complex_param), real_param, atol=atol, rtol=rtol)
+            self.assertEqual(torch.view_as_real(complex_param), real_param)
 
     def _build_params_dict(self, weight, bias, **kwargs):
         return [{'params': [weight]}, dict(params=[bias], **kwargs)]
@@ -606,6 +598,7 @@ class TestOptim(TestCase):
 
     # ROCm precision is too low to pass this test
     @skipIfRocm
+    @toleranceOverride({torch.float32: tol(4e-3, 0),})
     def test_adadelta(self):
         for optimizer in [optim.Adadelta, optim_mt.Adadelta]:
             self._test_basic_cases(
@@ -627,6 +620,7 @@ class TestOptim(TestCase):
             with self.assertRaisesRegex(ValueError, "Invalid rho value: 1.1"):
                 optimizer(None, lr=1e-2, rho=1.1)
 
+    @toleranceOverride({torch.float32: tol(2e-2, 0),})
     def test_adadelta_complex(self):
         for optimizer in [optim.Adadelta]:
             self._test_complex_optimizer(
