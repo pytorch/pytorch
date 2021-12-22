@@ -1935,8 +1935,8 @@ class ResNetBase(torch.nn.Module):
         out = self.fc(out)
         return out
 
-    def fuse_model(self):
-        torch.quantization.fuse_modules(self, [['conv1', 'bn1', 'relu1']], inplace=True)
+    def fuse_model(self, is_qat):
+        torch.ao.quantization.fuse_modules(self, [['conv1', 'bn1', 'relu1']], inplace=True, is_qat=is_qat)
 
 class ModelMultipleOps(torch.nn.Module):
     def __init__(self):

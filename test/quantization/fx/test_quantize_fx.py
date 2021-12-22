@@ -5755,6 +5755,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
             graph.eval()
             calibrate_or_train = test_only_eval_fn
             data = self.img_data_2d
+            is_qat = False
         else:
             assert quant_type == QuantType.QAT
             qconfig = default_qat_qconfig
@@ -5764,9 +5765,10 @@ class TestQuantizeFxModels(QuantizationTestCase):
             graph.train()
             calibrate_or_train = test_only_train_fn
             data = self.img_data_2d_train
+            is_qat = True
 
         if hasattr(eager, "fuse_model"):
-            eager.fuse_model()
+            eager.fuse_model(is_qat)
         eager = QuantWrapper(eager)
         eager.qconfig = qconfig
         eager = eager_prepare(eager)
