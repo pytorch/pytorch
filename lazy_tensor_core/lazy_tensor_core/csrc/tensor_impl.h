@@ -33,6 +33,8 @@ class LTCTensorImpl final : public c10::TensorImpl {
 
   at::IntArrayRef sizes() const override;
 
+  at::IntArrayRef strides() const override;
+
   int64_t dim() const override;
 
   int64_t numel() const override;
@@ -40,6 +42,8 @@ class LTCTensorImpl final : public c10::TensorImpl {
   bool is_contiguous(at::MemoryFormat memory_format) const override;
 
   int64_t size(int64_t d) const override;
+
+  int64_t stride(int64_t d) const override;
 
   const at::Storage& storage() const override;
 

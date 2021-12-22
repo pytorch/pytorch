@@ -121,6 +121,11 @@ at::IntArrayRef LTCTensorImpl::sizes() const {
   return c10::TensorImpl::sizes();
 }
 
+at::IntArrayRef LTCTensorImpl::strides() const {
+  const_cast<LTCTensorImpl*>(this)->setup_size_properties();
+  return c10::TensorImpl::strides();
+}
+
 int64_t LTCTensorImpl::dim() const {
   const_cast<LTCTensorImpl*>(this)->setup_size_properties();
   return c10::TensorImpl::dim();
@@ -143,6 +148,11 @@ bool LTCTensorImpl::is_contiguous(c10::MemoryFormat memory_format) const {
 int64_t LTCTensorImpl::size(int64_t d) const {
   const_cast<LTCTensorImpl*>(this)->setup_size_properties();
   return c10::TensorImpl::size(d);
+}
+
+int64_t LTCTensorImpl::stride(int64_t d) const {
+  const_cast<LTCTensorImpl*>(this)->setup_size_properties();
+  return c10::TensorImpl::stride(d);
 }
 
 void LTCTensorImpl::setup_size_properties() {
