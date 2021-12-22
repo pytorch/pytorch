@@ -699,7 +699,8 @@ class TestCommon(TestCase):
         def check_tensor_floating_is_differentiable(t):
             if isinstance(t, torch.Tensor) and t.dtype in floating_dtypes:
                 msg = (f"Found a sampled tensor of floating-point dtype {t.dtype} sampled with "
-                       "requires_grad=False. If this is intended, please skip/xfail this test.")
+                       "requires_grad=False. If this is intended, please skip/xfail this test. "
+                       "Remember that sampling operations are executed under a torch.no_grad contextmanager.")
                 self.assertTrue(t.requires_grad, msg)
 
         samples = op.sample_inputs(device, dtype, requires_grad=True)
