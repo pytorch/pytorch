@@ -175,7 +175,8 @@ class TRTInterpreter(torch.fx.Interpreter):
             cache = builder_config.create_timing_cache(b"")
         builder_config.set_timing_cache(cache, False)
 
-        builder_config.profiling_verbosity = profiling_verbosity if profiling_verbosity else trt.ProfilingVerbosity.LAYER_NAMES_ONLY
+        if trt.__version__ >= "8.2":
+            builder_config.profiling_verbosity = profiling_verbosity if profiling_verbosity else trt.ProfilingVerbosity.LAYER_NAMES_ONLY
         if fp16_mode:
             builder_config.set_flag(trt.BuilderFlag.FP16)
 

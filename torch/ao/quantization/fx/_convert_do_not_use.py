@@ -294,6 +294,7 @@ def _convert_do_not_use(
                     if isinstance(original_module, torch.nn.intrinsic._FusedModule):
                         fused_module = original_module
                         float_module = fused_module[0]  # type: ignore[index]
+                        print("float module:", float_module)
                     assert qconfig is not None
                     weight_post_process = qconfig.weight()
                     # run weight observer
