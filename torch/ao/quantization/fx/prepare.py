@@ -209,8 +209,8 @@ def prepare_get_standalone_module_configs(
     for `node`, assuming that the module pointed to by `node` is
     a standalone modules.
     """
-    standalone_module_name = node.target
-    standalone_module_type = type(modules[node.target])  # type: ignore[index]
+    standalone_module_name = str(node.target)
+    standalone_module_type = type(modules[standalone_module_name])  # type: ignore[index]
     sm_qconfig_dict, sm_prepare_config_dict, sm_backend_config_dict = \
         get_standalone_module_configs(standalone_module_name, standalone_module_type, prepare_custom_config_dict)
     # fallback to use parent module's qconfig if user didn't specify qconfig dict
@@ -434,10 +434,10 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
 
     is_standalone_module = qhandler is not None and \
         isinstance(qhandler, StandaloneModuleQuantizeHandler)
+    assert qconfig is not None
     if not is_standalone_module:
         # regular flow for most nodes, except standalone modules
         is_weight = node_arg_is_weight(node, arg)
-        assert qconfig is not None
 
         is_reuse_input_qconfig_ = is_reuse_input_qconfig(qconfig)
 
