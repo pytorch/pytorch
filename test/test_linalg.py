@@ -3450,7 +3450,7 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_old_solve_batched_many_batches(self, device, dtype):
-        for A_dims, b_dims in zip([(5, 256, 256), (3, )], [(5, 1), (512, 512, 3, 1)]):
+        for A_dims, b_dims in zip([(256, 256, 5, 5), (3, 3)], [(5, 1), (512, 512, 3, 1)]):
             b, A = self.solve_test_helper(A_dims, b_dims, device, dtype)
             x, _ = torch.solve(b, A)
             Ax = torch.matmul(A, x)
@@ -7437,8 +7437,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             Ax = torch.matmul(A, x)
             self.assertEqual(Ax, b.expand_as(Ax))
 
-        run_test((5, 65536), (65536, 5, 10))
-        run_test((5, 262144), (262144, 5, 10))
+        run_test((65536, 5, 5), (65536, 5, 10))
+        run_test((262144, 5, 5), (262144, 5, 10))
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
