@@ -1,4 +1,5 @@
 #include <torch/csrc/profiler/util.h>
+#include <torch/csrc/autograd/function.h>
 
 #include <c10/util/ArrayRef.h>
 
@@ -146,7 +147,7 @@ int get_seq_id_from_input_tensor(const c10::IValue& input_item) {
   );
   const at::Tensor& tensor = input_item.toTensor();
   if (tensor.defined()) {
-    Node *grad_fn = tensor.grad_fn().get();
+      torch::autograd::Node *grad_fn = tensor.grad_fn().get();
     // If no grad_fn then it means the tensor is a weight or
     // other trained variable. -1 seq_id indicates this condition.
     if (grad_fn)  {
