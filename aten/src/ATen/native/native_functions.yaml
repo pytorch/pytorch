@@ -2403,12 +2403,6 @@
   dispatch:
     CompositeExplicitAutograd: inverse_out
 
-- func: _inverse_helper(Tensor self) -> Tensor
-  variants: function
-  dispatch:
-    CPU: _inverse_helper_cpu
-    CUDA: _inverse_helper_cuda
-
 - func: isclose(Tensor self, Tensor other, float rtol=1e-05, float atol=1e-08, bool equal_nan=False) -> Tensor
   variants: function, method
 
