@@ -1875,13 +1875,13 @@ void ProcessedNode::verify_and_correct_memory_overlap() {
         }
       }
     }
-#ifdef FBCODE_CAFFE2
-    if (outputs_memory_overlap_detected()) {
-      LOG_EVERY_MS(WARNING, 60000)
-          << "Detected alias for node: " << PrintNode(node());
-    }
-#endif
   }
+#ifdef FBCODE_CAFFE2
+  if (outputs_memory_overlap_detected()) {
+    LOG_EVERY_MS(WARNING, 60000)
+        << "Detected alias for node: " << PrintNode(node());
+  }
+#endif
 }
 
 } // namespace jit
