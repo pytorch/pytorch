@@ -11,6 +11,7 @@
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <ATen/native/xnnpack/OpContext.h>
 #include <ATen/quantized/QTensorImpl.h>
+#include <aten/src/ATen/Parallel.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/irange.h>
@@ -247,6 +248,24 @@ at::Tensor quantized_relu(const at::Tensor& qx) {
 #ifdef C10_MOBILE
 extern "C" {
 #endif
+
+typedef void (*ParallelCallee)(int64_t index, int8_t* packed_data);
+void DispatchParallel(
+    int8_t* func,
+    int64_t start,
+    int64_t stop,
+    int8_t* packed_data) noexcept {
+  // TODO: preserve the func type.
+  try {
+    ParallelCallee callee = reinterpret_cast<ParallelCallee>(func);
+    at::parallel_for(start, stop, 1, [&](int64_t f_begin, int64_t f_end) {
+      for (int64_t index = f_begin; index < f_end; index++) {
+        callee(index, packed_data);
+      }
+    });
+  } catch (...) {
+  }
+}
 
 void nnc_aten_conv2d(
     int64_t bufs_num,
