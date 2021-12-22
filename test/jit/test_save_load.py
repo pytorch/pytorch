@@ -1,11 +1,9 @@
 # Owner(s): ["oncall: jit"]
 
-from itertools import product as product
 from typing import NamedTuple, Optional
 import io
 import os
 import pathlib
-import random
 import sys
 
 from torch import Tensor

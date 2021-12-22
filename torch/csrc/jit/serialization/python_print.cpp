@@ -743,24 +743,13 @@ struct PythonPrintImpl {
   }
 
   void checkVersion(Node* node) {
-    if (node->owningGraph()->get_op_version().has_value()) {
-      min_version_ = std::max(
-          min_version_,
-          (uint64_t)node->owningGraph()->get_op_version().value());
-    } else {
-      // if there is no version attached to the graph,
-      // we still want to find the min required runtime
-      // to run this model. This can happen when we are
-      // saving a model the first time.
-      if (auto schema = node->maybeSchema()) {
-        auto schema_name = getFullSchemaName(*schema);
-        auto version_entry = get_operator_version_map().find(schema_name);
-        if (version_entry != get_operator_version_map().end()) {
-          const auto& entry = version_entry->second;
-          min_version_ = std::max(
-              min_version_,
-              uint64_t(entry[entry.size() - 1].bumped_at_version));
-        }
+    if (auto schema = node->maybeSchema()) {
+      auto schema_name = getFullSchemaName(*schema);
+      auto version_entry = get_operator_version_map().find(schema_name);
+      if (version_entry != get_operator_version_map().end()) {
+        const auto& entry = version_entry->second;
+        min_version_ = std::max(
+            min_version_, uint64_t(entry[entry.size() - 1].bumped_at_version));
       }
     }
   }

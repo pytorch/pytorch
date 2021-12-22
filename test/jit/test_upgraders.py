@@ -4,6 +4,7 @@ import io
 import os
 import sys
 import torch
+import zipfile
 from torch.testing import FileCheck
 from typing import Union
 
@@ -18,6 +19,14 @@ if __name__ == '__main__':
                        "instead.")
 
 class TestUpgraders(JitTestCase):
+    def _load_model_version(self, loaded_model):
+        buffer = io.BytesIO()
+        torch.jit.save(loaded_model, buffer)
+        buffer.seek(0)
+        zipped_model = zipfile.ZipFile(buffer)
+        version = int(zipped_model.read('archive/version').decode("utf-8"))
+        return version
+
     def test_populated_upgrader_graph(self):
         @torch.jit.script
         def f():
@@ -96,6 +105,8 @@ class TestUpgraders(JitTestCase):
         buffer = io.BytesIO()
         torch.jit.save(loaded_model, buffer)
         buffer.seek(0)
+        version = self._load_model_version(loaded_model)
+        self.assertTrue(version == 4)
         loaded_model_twice = torch.jit.load(buffer)
         # we check by its' code because graph variable names
         # can be different every time
@@ -127,6 +138,8 @@ class TestUpgraders(JitTestCase):
         buffer = io.BytesIO()
         torch.jit.save(loaded_model, buffer)
         buffer.seek(0)
+        version = self._load_model_version(loaded_model)
+        self.assertTrue(version == 3)
         loaded_model_twice = torch.jit.load(buffer)
         # we check by its' code because graph variable names
         # can be different every time
@@ -143,6 +156,8 @@ class TestUpgraders(JitTestCase):
         buffer = io.BytesIO()
         torch.jit.save(loaded_model, buffer)
         buffer.seek(0)
+        version = self._load_model_version(loaded_model)
+        self.assertTrue(version == 4)
         loaded_model_twice = torch.jit.load(buffer)
 
         self.assertEqual(loaded_model(torch.Tensor([5.0, 3.0]), 2.0),
@@ -157,6 +172,8 @@ class TestUpgraders(JitTestCase):
         buffer = io.BytesIO()
         torch.jit.save(loaded_model, buffer)
         buffer.seek(0)
+        version = self._load_model_version(loaded_model)
+        self.assertTrue(version == 4)
         loaded_model_twice = torch.jit.load(buffer)
         # we check by its' code because graph variable names
         # can be different every time
@@ -171,6 +188,8 @@ class TestUpgraders(JitTestCase):
         buffer = io.BytesIO()
         torch.jit.save(loaded_model, buffer)
         buffer.seek(0)
+        version = self._load_model_version(loaded_model)
+        self.assertTrue(version == 5)
         loaded_model_twice = torch.jit.load(buffer)
         # we check by its' code because graph variable names
         # can be different every time
@@ -180,3 +199,5 @@ class TestUpgraders(JitTestCase):
         model_path = pytorch_test_dir + "/jit/fixtures/test_versioned_full_preserved_v4.pt"
         loaded_model = torch.jit.load(model_path)
         FileCheck().check_count("aten::full", 5).run(loaded_model.graph)
+        version = self._load_model_version(loaded_model)
+        self.assertTrue(version == 5)
