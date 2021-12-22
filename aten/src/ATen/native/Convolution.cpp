@@ -28,6 +28,7 @@ DEFINE_DISPATCH(convolution_depthwise3x3_winograd_stub);
 DEFINE_DISPATCH(miopen_convolution_backward_stub);
 DEFINE_DISPATCH(miopen_convolution_transpose_backward_stub);
 DEFINE_DISPATCH(miopen_depthwise_convolution_backward_stub);
+DEFINE_DISPATCH(slow_conv_dilated2d_backward_stub);
 REGISTER_NO_CPU_DISPATCH(cudnn_convolution_backward_stub, cudnn_convolution_backward_fn);
 REGISTER_NO_CPU_DISPATCH(cudnn_convolution_transpose_backward_stub, cudnn_convolution_transpose_backward_fn);
 REGISTER_NO_CPU_DISPATCH(miopen_convolution_backward_stub, miopen_convolution_backward_fn);
@@ -1453,7 +1454,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _convolution_backward_nogroup_bac
     // NB: nnpack backward does not support strided convolutions; use slow impl instead
     case ConvBackend::NnpackSpatial:
     case ConvBackend::SlowDilated2d:
-      return at::slow_conv_dilated2d_backward(
+      return slow_conv_dilated2d_backward_stub(
+        input.device().type(),
         grad_output, input, weight, kernel_size, params.stride, params.padding, params.dilation, output_mask);
     case ConvBackend::SlowDilated3d:
       return at::slow_conv_dilated3d_backward(
@@ -1480,7 +1482,10 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _convolution_backward_nogroup_bac
 //   input_: tensor of shape (N, C_in, L_in), (N, C_in, H_in, W_in), or (N, C_in, D_in, H_in, W_in)
 //   weight_: tensor of shape (C_out, C_in // groups, *kernel_size); dimension of kernel_size must match the number
 //       of input spatial dimensions
-//   bias_sizes_opt: if specified, shape of bias
+//   bias_sizes_opt: if specified, indicates that a bias was used in the forward pass and contains the shape
+//       of the bias. While the bias shape can be computed from other inputs, it is provided to this function for
+//       ease of use. The bias shape is (weight.shape[0]) for normal convolution and (weight.shape[1] * groups)
+//       for transposed convolution.
 //   stride: single value or an array with dimension matching the number of input spatial dimensions
 //   padding: single value or an array with dimension matching the number of input spatial dimensions
 //   dilation: single value or an array with dimension matching the number of input spatial dimensions
