@@ -180,10 +180,17 @@ namespace {
 // expressions.
 class Inputs : public IterVisitor {
  private:
+  //! Optional list of all input vals. If empty, vals with no defining
+  //! expression are considered as inputs.
+  const std::vector<Val*>& all_inputs_;
   std::vector<Val*> inputs_;
 
+  Inputs(const std::vector<Val*>& all_inputs) : all_inputs_(all_inputs) {}
+
   void handle(Val* val) override {
-    if (val->definition() == nullptr) {
+    if ((all_inputs_.empty() && val->definition() == nullptr) ||
+        std::find(all_inputs_.begin(), all_inputs_.end(), val) !=
+            all_inputs_.end()) {
       if (std::find(inputs_.begin(), inputs_.end(), val) == inputs_.end()) {
         inputs_.push_back(val);
       }
@@ -191,11 +198,13 @@ class Inputs : public IterVisitor {
   }
 
  public:
-  static std::vector<Val*> getInputs(const std::vector<Val*>& of) {
+  static std::vector<Val*> getInputs(
+      const std::vector<Val*>& of,
+      const std::vector<Val*>& all_inputs) {
     if (of.empty()) {
       return {};
     }
-    Inputs inps;
+    Inputs inps(all_inputs);
     inps.traverseFrom(of[0]->fusion(), of);
     return inps.inputs_;
   }
@@ -203,8 +212,10 @@ class Inputs : public IterVisitor {
 
 } // namespace
 
-std::vector<Val*> IterVisitor::getInputsTo(const std::vector<Val*>& vals) {
-  return Inputs::getInputs(vals);
+std::vector<Val*> IterVisitor::getInputsTo(
+    const std::vector<Val*>& vals,
+    const std::vector<Val*>& inputs) {
+  return Inputs::getInputs(vals, inputs);
 }
 
 namespace {

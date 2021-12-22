@@ -516,7 +516,7 @@ When exporting a custom operator, you can specify the custom domain version usin
 ``custom_opsets`` dictionary at export. If not specified, the custom opset version defaults to 1.
 The runtime that consumes the model needs to support the custom op. See
 `Caffe2 custom ops <https://caffe2.ai/docs/custom-operators.html>`_,
-`ONNX Runtime custom ops <https://github.com/microsoft/onnxruntime/blob/master/docs/AddingCustomOp.md>`_,
+`ONNX Runtime custom ops <https://onnxruntime.ai/docs/reference/operators/add-custom-op.html>`_,
 or your runtime of choice's documentation.
 
 

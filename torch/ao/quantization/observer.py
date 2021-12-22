@@ -345,6 +345,8 @@ class MinMaxObserver(_ObserverBase):
         reduce_range: Reduces the range of the quantized data type by 1 bit
         quant_min: Minimum quantization value. If unspecified, it will follow the 8-bit setup.
         quant_max: Maximum quantization value. If unspecified, it will follow the 8-bit setup.
+        memoryless: Boolean that controls whether observer removes old data when a new input is seen.
+                    This is most useful for simulating dynamic quantization, especially during QAT.
 
     Given running min/max as :math:`x_\text{min}` and :math:`x_\text{max}`,
     scale :math:`s` and zero point :math:`z` are computed as:
@@ -386,8 +388,6 @@ class MinMaxObserver(_ObserverBase):
 
     where :math:`Q_\text{min}` and :math:`Q_\text{max}` are the minimum and
     maximum of the quantized data type.
-
-    .. warning:: Only works with ``torch.per_tensor_symmetric`` quantization scheme
 
     .. warning:: :attr:`dtype` can only take ``torch.qint8`` or ``torch.quint8``.
 
@@ -564,6 +564,8 @@ class PerChannelMinMaxObserver(_ObserverBase):
         reduce_range: Reduces the range of the quantized data type by 1 bit
         quant_min: Minimum quantization value. If unspecified, it will follow the 8-bit setup.
         quant_max: Maximum quantization value. If unspecified, it will follow the 8-bit setup.
+        memoryless: Boolean that controls whether observer removes old data when a new input is seen.
+                    This is most useful for simulating dynamic quantization, especially during QAT.
 
     The quantization parameters are computed the same way as in
     :class:`~torch.ao.quantization.observer.MinMaxObserver`, with the difference
@@ -1178,6 +1180,44 @@ class HistogramObserver(_ObserverBase):
         )
 
 
+class FixedQParamsObserver(ObserverBase):
+    r"""
+    Observer that simulates quantize and dequantize with fixed
+    quantization parameters in training time. Only per tensor
+    quantization is supported.
+
+    Args:
+        `scale` (float): fixed scale for the observer
+        `zero_point` (int): fixed zero point for the observer
+        `dtype`, `qscheme`, `quant_min`, `quant_max`
+    """
+
+    scale: torch.Tensor
+    zero_point: torch.Tensor
+
+    def __init__(self,
+                 scale,
+                 zero_point,
+                 dtype=torch.quint8,
+                 qscheme=torch.per_tensor_affine,
+                 quant_min=0,
+                 quant_max=255):
+        super(FixedQParamsObserver, self).__init__(dtype=dtype)
+        self.quant_min = quant_min
+        self.quant_max = quant_max
+        self.register_buffer('scale', torch.tensor([scale], dtype=torch.float))
+        self.register_buffer('zero_point', torch.tensor([zero_point], dtype=torch.int))
+        self.dtype = dtype
+        self.qscheme = qscheme
+
+    def forward(self, X):
+        return X
+
+    @torch.jit.export
+    def calculate_qparams(self):
+        return self.scale, self.zero_point
+
+
 class PlaceholderObserver(ObserverBase):
     r"""
     Observer that doesn't do anything and just passes its configuration to the
@@ -1268,6 +1308,28 @@ class NoopObserver(ObserverBase):
     def calculate_qparams(self):
         raise Exception("calculate_qparams should not be called for NoopObserver")
 
+class ReuseInputObserver(ObserverBase):
+    r""" This observer is used when we want to reuse the observer from the operator
+    that produces the input Tensor, typically used for operators like reshape, e.g.
+    ```
+    x0 = ...
+    x1 = x0.reshape()
+    ```
+    if we configure x0 to be observed by some observer, let's say MinMaxObserver,
+    and reshape is configured with ReuseInputObserver, we'll reuse the observer instance
+    for x0 for x1 (output of reshape). If x0 is not observed, we also won't observe x1.
+
+    Note: this is only enabled in FX Graph Mode Quantization
+    """
+    def __init__(self):
+        super().__init__(torch.quint8)
+
+    def forward(self, x):
+        return x
+
+    @torch.jit.export
+    def calculate_qparams(self):
+        raise Exception("calculate_qparams should not be called for ReuseInputObserver")
 
 def _is_observer_script_module(mod, obs_type_name):
     """Returns true if given mod is an instance of Observer script module."""
@@ -1400,4 +1462,20 @@ default_float_qparams_observer_4bit = PerChannelMinMaxObserver.with_args(
 )
 """
 Default observer for a floating point zero-point and 4 bit activations.
+"""
+
+# TODO(future PR): remove these defaults and enforce activation functions
+# to explicitly specify their output range
+default_symmetric_fixed_qparams_observer = FixedQParamsObserver.with_args(
+    scale=2.0 / 256.0, zero_point=128, dtype=torch.quint8, quant_min=0, quant_max=255)
+default_affine_fixed_qparams_observer = FixedQParamsObserver.with_args(
+    scale=1.0 / 256.0, zero_point=0, dtype=torch.quint8, quant_min=0, quant_max=255)
+"""
+Default observers for fixed qparams operations.
+"""
+
+default_reuse_input_observer = ReuseInputObserver
+"""
+Default observer for operators like reshape that reuses the observer of input to
+the operator
 """

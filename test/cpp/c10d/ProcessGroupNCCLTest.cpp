@@ -41,6 +41,7 @@ class NCCLTestBase {
 
     c10::intrusive_ptr<c10d::ProcessGroupNCCL::Options> opts = c10::make_intrusive<c10d::ProcessGroupNCCL::Options>();
     opts->timeout = pgTimeout_;
+    setenv("ENABLE_NCCL_HEALTH_CHECK", "1", /* overwrite */ 1);
     pg_ = std::unique_ptr<::c10d::ProcessGroupNCCL>(
         new ::c10d::ProcessGroupNCCL(store, rank, size, std::move(opts)));
   }
@@ -56,9 +57,9 @@ class NCCLTest : public NCCLTestBase {
   NCCLTest(const std::string& path, int worldSize, std::chrono::milliseconds pgTimeout = kProcessGroupDefaultTimeout)
       : NCCLTestBase(path, pgTimeout),
         numDevices_(cudaNumDevices()),
-        state_(::at::globalContext().lazyInitCUDA()),
         worldSize_(worldSize) {
     // Each device has a single tensor to perf the NCCL op
+    ::at::globalContext().lazyInitCUDA();
     tensors_.resize(numDevices_);
     inputs_.resize(numDevices_);
     outputs_.resize(numDevices_);
@@ -162,7 +163,6 @@ class NCCLTest : public NCCLTestBase {
   }
 
   const int numDevices_;
-  THCState* state_;
   int worldSize_;
   std::vector<at::Tensor> tensors_;
   std::vector<std::vector<at::Tensor>> inputs_;

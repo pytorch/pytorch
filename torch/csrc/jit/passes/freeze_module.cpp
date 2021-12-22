@@ -3,8 +3,10 @@
 #include <torch/csrc/jit/jit_log.h>
 
 #include <c10/util/irange.h>
+#include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/passes/clear_profiling.h>
+#include <torch/csrc/jit/passes/eliminate_no_ops.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
@@ -103,12 +105,13 @@ class AttributePropagator {
           subgraph,
           /* unroll_non_constant_loops? */ false,
           /* const_prop_user_classes? */ false);
+      EliminateNoOps(subgraph);
       LowerSimpleTuples(subgraph);
     };
 
     for (auto function : preservedMethods_) {
       GRAPH_DEBUG("Analyzing function: " + function->name());
-      auto graph = function->graph();
+      auto graph = toGraphFunction(*function).graph();
       optimizeSubGraphs(graph, applyInline);
       if (freezeInterfaces_) {
         inlineInterfaceCalls(graph);
@@ -120,7 +123,7 @@ class AttributePropagator {
 
     for (auto function : preservedMethods_) {
       GRAPH_DEBUG("Propagating function: " + function->name());
-      auto graph = function->graph();
+      auto graph = toGraphFunction(*function).graph();
       propagateAttributes(graph);
       optimizeSubGraphs(graph, applyOptimizations);
     }
@@ -412,18 +415,17 @@ class AttributePropagator {
       if (user_node->kind() == prim::CallMethod) {
         const std::string& methodName = user_node->s(attr::name);
         Function& function = class_type->getMethod(methodName);
-        if (!function.isGraphFunction()) {
-          continue;
-        }
-        GRAPH_UPDATE(
-            "Inlining interface method '",
-            function.name(),
-            "' to ",
-            *user_node);
+        if (auto graphFunction = tryToGraphFunction(function)) {
+          GRAPH_UPDATE(
+              "Inlining interface method '",
+              function.name(),
+              "' to ",
+              *user_node);
 
-        GRAPH_UPDATE("Function body: ", *function.optimized_graph());
-        inlineCallTo(user_node, &function);
-        inlined = true;
+          GRAPH_UPDATE("Function body: ", graphFunction->optimized_graph());
+          inlineCallTo(user_node, graphFunction);
+          inlined = true;
+        }
       }
     }
     return inlined;
@@ -643,10 +645,11 @@ class AttributePropagator {
   // 3) Remove non public unreferenced methods.
   void cleanupFrozenModule() {
     for (auto function : preservedMethods_) {
-      auto graph = function->graph();
+      auto graph = toGraphFunction(*function).graph();
       recordReferencedAttrs(graph);
       handleSharedClassType(module_, graph);
       removeExtraWaitCalls(graph->block());
+      toGraphFunction(*function).clear_optimized_graphs();
     }
     removeUnusedAttrs();
   }

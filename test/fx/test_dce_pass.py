@@ -1,13 +1,13 @@
 # Owner(s): ["oncall: fx"]
 
-import unittest
-
 from typing import Set, Type
 import torch
 import torch.fx
 
+from torch.testing._internal.common_utils import TestCase
 
-class TestDCE(unittest.TestCase):
+
+class TestDCE(TestCase):
     def _has_nodes_without_users(self, m: torch.fx.GraphModule):
         for node in m.graph.nodes:
             if node.is_impure():

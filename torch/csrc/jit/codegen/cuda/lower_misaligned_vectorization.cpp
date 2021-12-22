@@ -222,8 +222,8 @@ class MisalignedVectorizationModifier {
       const VectorizeData& params) {
     kir::IrBuilder ir_builder(GpuLower::current()->kernel());
 
-    auto vectorized_child_loops =
-        cloneForLoops(child_loops, params.vector_size, true, params.shift);
+    auto vectorized_child_loops = cloneForLoops(
+        child_loops, params.vector_size, nullptr, true, params.shift);
 
     // Vectorize Range: [shift - (extent-remainder))
     // (last_root_domain_index + shift) < (extent - remainder)
@@ -249,8 +249,8 @@ class MisalignedVectorizationModifier {
       const VectorizeData& params) {
     kir::IrBuilder ir_builder(GpuLower::current()->kernel());
 
-    auto pre_child_loops =
-        cloneForLoops(child_loops, params.shift, false, nullptr);
+    auto pre_child_loops = cloneForLoops(
+        child_loops, params.vector_size, params.shift, false, nullptr);
 
     // Initial Range: [0 - shift)
     // last_root_domain_index == 0
@@ -276,8 +276,8 @@ class MisalignedVectorizationModifier {
       const VectorizeData& params) {
     kir::IrBuilder ir_builder(GpuLower::current()->kernel());
 
-    auto post_child_loops =
-        cloneForLoops(child_loops, params.remainder, false, params.shift);
+    auto post_child_loops = cloneForLoops(
+        child_loops, params.vector_size, params.remainder, false, params.shift);
 
     // Remainder Range: [(extent-remainder) - extent)
     // (extent - remainder) <= last_root_domain_index + shift < extent
@@ -369,12 +369,14 @@ class MisalignedVectorizationModifier {
   }
 
   // Clone each for loop
-  // stop value - for (index = start; index < stop; index += step)
+  // loop_stop value - for (index = start; index < stop; index += step)
+  // pred_stop value - Predicate loop body as (index < pred_stop) if non null
   // vectorize flag - Do not generate for loop header
   // shift value - Add shift to global indices generated within for loop
   std::vector<kir::ForLoop*> cloneForLoops(
       const std::vector<kir::ForLoop*>& for_loops,
-      kir::Val* stop,
+      kir::Val* loop_stop,
+      kir::Val* pred_stop,
       bool vectorize,
       kir::Val* vectorize_shift) {
     kir::IrBuilder ir_builder(GpuLower::current()->kernel());
@@ -393,13 +395,26 @@ class MisalignedVectorizationModifier {
           fl->iter_domain(),
           fl->index(),
           ir_builder.zeroVal(),
-          stop,
+          loop_stop,
           ir_builder.oneVal(),
           vectorize && has_vectorize_op,
-          vectorize_shift);
+          vectorize_shift,
+          fl->isUnrollRequired());
+
+      auto body = &new_loop->body();
+
+      // Predicate the loop body if pred_stop is not null. This is to
+      // make sure the loop itself is completely unrollable.
+      if (pred_stop != nullptr) {
+        auto body_pred = ir_builder.create<kir::Predicate>(
+            ir_builder.ltExpr(new_loop->index(), pred_stop)->as<kir::Bool>());
+        auto body_ite = ir_builder.create<kir::IfThenElse>(body_pred);
+        body->push_back(body_ite);
+        body = &body_ite->thenBody();
+      }
 
       for (auto expr : fl->body().exprs()) {
-        new_loop->body().push_back(expr);
+        body->push_back(expr);
       }
 
       cloned_for_loops.push_back(new_loop);
@@ -474,16 +489,12 @@ class MisalignedVectorizationModifier {
     const auto& consumer_contig = consumer_fuser_tv->domain()->contiguity();
     const auto& producer_contig = producer_fuser_tv->domain()->contiguity();
 
-    // No rfactor should exist in the producer TVs
-    TORCH_INTERNAL_ASSERT(
-        !producer_tv->domain()->hasRFactor(),
-        "Invalid producer tensor: ",
-        producer_fuser_tv);
-    auto producer_root_domain = producer_fuser_tv->getRootDomain();
+    auto producer_root_domain = producer_fuser_tv->getMaybeRFactorDomain();
 
     // Calculate extent of merged root domains
     kir::Val* extent = nullptr;
-    auto consumer_root_idx = int(consumer_fuser_tv->getRootDomain().size()) - 1;
+    auto consumer_root_idx =
+        int(consumer_fuser_tv->getMaybeRFactorDomain().size()) - 1;
     for (int i = int(producer_root_domain.size()) - 1; i >= 0; --i) {
       auto producer_root_id = producer_root_domain.at(i);
 

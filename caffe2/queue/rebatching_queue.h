@@ -65,4 +65,4 @@ class RebatchingQueue {
 
   std::vector<std::vector<TensorCPU>> queue_;
 };
-} // caffe2
+} // namespace caffe2

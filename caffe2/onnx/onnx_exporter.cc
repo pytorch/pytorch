@@ -469,11 +469,12 @@ const std::
     OnnxExporter::get_per_op_renamed_attrs() const {
   const static std::
       unordered_map<std::string, std::unordered_map<std::string, std::string>>
-          kPerOpRenamedAttrs = {{"Squeeze", {{"dims", "axes"}}},
-                                {"Unsqueeze", {{"dims", "axes"}}},
-                                {"Transpose", {{"axes", "perm"}}},
-                                {"ConvTranspose", {{"adjs", "output_padding"}}},
-                                {"Selu", {{"scale", "gamma"}}}};
+          kPerOpRenamedAttrs = {
+              {"Squeeze", {{"dims", "axes"}}},
+              {"Unsqueeze", {{"dims", "axes"}}},
+              {"Transpose", {{"axes", "perm"}}},
+              {"ConvTranspose", {{"adjs", "output_padding"}}},
+              {"Selu", {{"scale", "gamma"}}}};
 
   return kPerOpRenamedAttrs;
 }
@@ -556,11 +557,12 @@ bool OnnxExporter::IsBlockListed(const caffe2::Argument& arg) {
   const static std::unordered_map<std::string, std::unordered_set<std::string>>
       kBlockListString = {{"order", {"NCHW"}}};
   const static std::unordered_map<std::string, std::unordered_set<int64_t>>
-      kBlockListInt = {{"cudnn_exhaustive_search", {0, 1}},
-                       {"use_cudnn", {0, 1}},
-                       {"exhaustive_search", {0, 1}},
-                       {"is_test", {0, 1}},
-                       {"broadcast", {0, 1}}};
+      kBlockListInt = {
+          {"cudnn_exhaustive_search", {0, 1}},
+          {"use_cudnn", {0, 1}},
+          {"exhaustive_search", {0, 1}},
+          {"is_test", {0, 1}},
+          {"broadcast", {0, 1}}};
 
   if (arg.has_i()) {
     const auto it = kBlockListInt.find(arg.name());
