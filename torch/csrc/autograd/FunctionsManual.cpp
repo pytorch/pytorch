@@ -2528,18 +2528,18 @@ Tensor svd_backward(const Tensor& gU,
                                           : at::zeros_like(S);
     const auto imdiag_VhgV = gVh.defined() ? at::imag(VhgV.diagonal(0, -2, -1))
                                            : at::zeros_like(S);
-	  // Rather lax atol and rtol, as we don't want false positives
-		TORCH_CHECK(at::allclose(imdiag_UhgU, -imdiag_VhgV, /*rtol=*/1e-2, /*atol=*/1e-2),
-								"The singular vectors in the complex case are specified up to multiplication "
-								"by e^{i phi}. The specified loss function depends on this phase term, making "
-							  "it ill-defined.");
+    // Rather lax atol and rtol, as we don't want false positives
+    TORCH_CHECK(at::allclose(imdiag_UhgU, -imdiag_VhgV, /*rtol=*/1e-2, /*atol=*/1e-2),
+                "The singular vectors in the complex case are specified up to multiplication "
+                "by e^{i phi}. The specified loss function depends on this phase term, making "
+                "it ill-defined.");
   }
 
   // gA = (skew(U^H gU) / E) S +  S ((skew(V^H gV) / E) + I o (gS + i Im(diag(U^H gU)) / S)
-	Tensor gA = [&] {
+  Tensor gA = [&] {
     // ret holds everything but the diagonal of gA
     auto ret = [&] {
-	    const auto skew = [](const Tensor& A) { return A - A.mH(); };
+      const auto skew = [](const Tensor& A) { return A - A.mH(); };
 
       const auto E = [&S]{
         const auto S2 = S * S;
@@ -2561,7 +2561,7 @@ Tensor svd_backward(const Tensor& gU,
     }();
     // Fill the diagonal
     const auto diag = ret.diagonal(0, -2, -1);
-		if (is_complex && gU.defined() && gVh.defined()) {
+    if (is_complex && gU.defined() && gVh.defined()) {
       if (gS.defined()) {
         at::real(diag).copy_(gS);
       } else {
@@ -2578,7 +2578,7 @@ Tensor svd_backward(const Tensor& gU,
       }
     }
     return ret;
-	}();
+  }();
 
   if (m > n && gU.defined()) {
     // gA = [UgA + (I_m - UU^H)gU S^{-1}]V^H
@@ -2598,7 +2598,7 @@ Tensor svd_backward(const Tensor& gU,
                 : at::matmul(at::matmul(U, gA), Vh);
   }
 
-	return gA;
+  return gA;
 }
 
 // The implementation follows:

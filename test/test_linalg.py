@@ -3133,7 +3133,7 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @onlyNativeDeviceTypes   # TODO: XLA doesn't raise exception
     @skipCUDAIfRocm
-    @skipCUDAVersionIn([(11, 3)])  # https://github.com/pytorch/pytorch/issues/57482
+    @skipCUDAVersionIn([(11, 3), (11, 5)])  # https://github.com/pytorch/pytorch/issues/57482
     @dtypes(*floating_and_complex_types())
     def test_inverse_errors_large(self, device, dtype):
         # Test batched inverse of singular matrices reports errors without crashing (gh-51930)
@@ -3972,25 +3972,27 @@ class TestLinalg(TestCase):
     @dtypes(torch.float64)
     def test_matrix_rank_atol_rtol(self, device, dtype):
         from torch.testing._internal.common_utils import make_fullrank_matrices_with_distinct_singular_values
+        make_fullrank = make_fullrank_matrices_with_distinct_singular_values
+        make_arg = partial(make_fullrank, device=device, dtype=dtype)
 
-        # creates a matrix with singular values arange(1/(n+1), 1, 1/(n+1)) and rank=n
+        # creates a matrix with singular values rank=n and singular values in range [2/3, 3/2]
+        # the singular values are 1 + 1/2, 1 - 1/3, 1 + 1/4, 1 - 1/5, ...
         n = 9
-        a = make_fullrank_matrices_with_distinct_singular_values(n, n, dtype=dtype, device=device)
+        a = make_arg(n, n)
 
         # test float and tensor variants
-        for tol_value in [0.51, torch.tensor(0.51, device=device)]:
-            # using rtol (relative tolerance) takes into account the largest singular value (0.9 in this case)
+        for tol_value in [0.81, torch.tensor(0.81, device=device)]:
+            # using rtol (relative tolerance) takes into account the largest singular value (1.5 in this case)
             result = torch.linalg.matrix_rank(a, rtol=tol_value)
-            self.assertEqual(result, 5)  # there are 5 singular values above 0.9*0.51=0.459
+            self.assertEqual(result, 2)  # there are 2 singular values above 1.5*0.81 = 1.215
 
             # atol is used directly to compare with singular values
             result = torch.linalg.matrix_rank(a, atol=tol_value)
-            self.assertEqual(result, 4)  # there are 4 singular values above 0.51
+            self.assertEqual(result, 7)  # there are 7 singular values above 0.81
 
             # when both are specified the maximum tolerance is used
             result = torch.linalg.matrix_rank(a, atol=tol_value, rtol=tol_value)
-            self.assertEqual(result, 4)  # there are 4 singular values above max(0.51, 0.9*0.51)
-
+            self.assertEqual(result, 2)  # there are 2 singular values above max(0.81, 1.5*0.81)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -4723,6 +4725,7 @@ class TestLinalg(TestCase):
     @onlyCUDA
     @skipCUDAIfNoMagma  # Magma needed for the PLU decomposition
     @skipCUDAIfRocm  # There is a memory access bug in rocBLAS in the (non-batched) solve_triangular
+    @skipCUDAVersionIn([(11, 3), (11, 5)])  # Tracked in https://github.com/pytorch/pytorch/issues/70111
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-2, torch.complex64: 1e-2,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
