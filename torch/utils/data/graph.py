@@ -40,17 +40,17 @@ def list_connected_datapipes(scan_obj, exclude_primitive):
             captured_connections.append(obj)
             return stub_unpickler, ()
 
-    # TODO(VitalyFedyunin):  Better do it as `with` context for safety
-    IterDataPipe.set_reduce_ex_hook(reduce_hook)
-    if exclude_primitive:
-        IterDataPipe.set_getstate_hook(getstate_hook)
     try:
+        IterDataPipe.set_reduce_ex_hook(reduce_hook)
+        if exclude_primitive:
+            IterDataPipe.set_getstate_hook(getstate_hook)
         p.dump(scan_obj)
     except AttributeError:  # unpickable DataPipesGraph
         pass  # TODO(VitalyFedyunin): We need to tight this requirement after migrating from old DataLoader
-    IterDataPipe.set_reduce_ex_hook(None)
-    if exclude_primitive:
-        IterDataPipe.set_getstate_hook(None)
+    finally:
+        IterDataPipe.set_reduce_ex_hook(None)
+        if exclude_primitive:
+            IterDataPipe.set_getstate_hook(None)
     return captured_connections
 
 
