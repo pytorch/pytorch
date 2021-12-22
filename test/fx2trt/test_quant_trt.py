@@ -689,7 +689,7 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
             ]
         }
         prepare_custom_config_dict = {
-            "standalone_module_name": [("standalone", None, {"input_quantized_idxs": [0, 1]}, backend_config_dict)]
+            "standalone_module_name": [("standalone", None, {"input_quantized_idxs": [0, 1]}, None)]
         }
         # TODO: use self.qconfig after input_quantized_idxs and output_quantized_idxs
         # are more flexible
