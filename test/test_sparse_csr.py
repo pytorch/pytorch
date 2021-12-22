@@ -1197,7 +1197,8 @@ class TestSparseCSR(TestCase):
 
         output = op(zero)
         expected = zero.to(output.dtype)
-        self.assertEqual(output, expected, f"This operator ({op.name}) should not be supported for Sparse CSR as it breaks 0->0 correspondence.")
+        self.assertEqual(output, expected, f"This operator ({op.name}) should not be supported for "
+                         + "Sparse CSR as it breaks 0->0 correspondence.")
         zero = zero.to_sparse_csr()
         output = op(zero).to_dense()
         expected = zero.to_dense().to(output.dtype)
