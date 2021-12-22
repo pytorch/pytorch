@@ -6,13 +6,13 @@
 
 #include <c10/core/ScalarType.h>
 
-#if AT_USE_CUSPARSE_GENERIC_API()
+#if defined(USE_ROCM)
+#include <type_traits>
+#endif
 
 namespace at {
 namespace cuda {
 namespace sparse {
-
-cusparseIndexType_t getCuSparseIndexType(const c10::ScalarType& scalar_type);
 
 template <typename T, cusparseStatus_t (*destructor)(T*)>
 struct CuSparseDescriptorDeleter {
@@ -36,6 +36,65 @@ class CuSparseDescriptor {
  protected:
   std::unique_ptr<T, CuSparseDescriptorDeleter<T, destructor>> descriptor_;
 };
+
+#if defined(USE_ROCM)
+// hipSPARSE doesn't define this
+using cusparseMatDescr = std::remove_pointer<cusparseMatDescr_t>::type;
+#if AT_USE_HIPSPARSE_TRIANGULAR_SOLVE()
+using bsrsv2Info = std::remove_pointer<bsrsv2Info_t>::type;
+using bsrsm2Info = std::remove_pointer<bsrsm2Info_t>::type;
+#endif
+#endif
+
+class TORCH_CUDA_CPP_API CuSparseMatDescriptor
+    : public CuSparseDescriptor<cusparseMatDescr, &cusparseDestroyMatDescr> {
+ public:
+  CuSparseMatDescriptor() {
+    cusparseMatDescr_t raw_descriptor;
+    TORCH_CUDASPARSE_CHECK(cusparseCreateMatDescr(&raw_descriptor));
+    descriptor_.reset(raw_descriptor);
+  }
+
+  CuSparseMatDescriptor(bool upper, bool unit) {
+    cusparseFillMode_t fill_mode =
+        upper ? CUSPARSE_FILL_MODE_UPPER : CUSPARSE_FILL_MODE_LOWER;
+    cusparseDiagType_t diag_type =
+        unit ? CUSPARSE_DIAG_TYPE_UNIT : CUSPARSE_DIAG_TYPE_NON_UNIT;
+    cusparseMatDescr_t raw_descriptor;
+    TORCH_CUDASPARSE_CHECK(cusparseCreateMatDescr(&raw_descriptor));
+    TORCH_CUDASPARSE_CHECK(cusparseSetMatFillMode(raw_descriptor, fill_mode));
+    TORCH_CUDASPARSE_CHECK(cusparseSetMatDiagType(raw_descriptor, diag_type));
+    descriptor_.reset(raw_descriptor);
+  }
+};
+
+#if AT_USE_HIPSPARSE_TRIANGULAR_SOLVE()
+
+class TORCH_CUDA_CPP_API CuSparseBsrsv2Info
+    : public CuSparseDescriptor<bsrsv2Info, &cusparseDestroyBsrsv2Info> {
+ public:
+  CuSparseBsrsv2Info() {
+    bsrsv2Info_t raw_descriptor;
+    TORCH_CUDASPARSE_CHECK(cusparseCreateBsrsv2Info(&raw_descriptor));
+    descriptor_.reset(raw_descriptor);
+  }
+};
+
+class TORCH_CUDA_CPP_API CuSparseBsrsm2Info
+    : public CuSparseDescriptor<bsrsm2Info, &cusparseDestroyBsrsm2Info> {
+ public:
+  CuSparseBsrsm2Info() {
+    bsrsm2Info_t raw_descriptor;
+    TORCH_CUDASPARSE_CHECK(cusparseCreateBsrsm2Info(&raw_descriptor));
+    descriptor_.reset(raw_descriptor);
+  }
+};
+
+#endif // AT_USE_HIPSPARSE_TRIANGULAR_SOLVE
+
+#if AT_USE_CUSPARSE_GENERIC_API()
+
+cusparseIndexType_t getCuSparseIndexType(const c10::ScalarType& scalar_type);
 
 class TORCH_CUDA_CPP_API CuSparseDnMatDescriptor
     : public CuSparseDescriptor<cusparseDnMatDescr, &cusparseDestroyDnMat> {
@@ -83,7 +142,53 @@ class TORCH_CUDA_CPP_API CuSparseSpMatCsrDescriptor
         values.data_ptr()));
   }
 #endif
+
+#if AT_USE_CUSPARSE_GENERIC_SPSV()
+  void set_mat_fill_mode(bool upper) {
+    cusparseFillMode_t fill_mode =
+        upper ? CUSPARSE_FILL_MODE_UPPER : CUSPARSE_FILL_MODE_LOWER;
+    TORCH_CUDASPARSE_CHECK(cusparseSpMatSetAttribute(
+        this->descriptor(),
+        CUSPARSE_SPMAT_FILL_MODE,
+        &fill_mode,
+        sizeof(fill_mode)));
+  }
+
+  void set_mat_diag_type(bool unit) {
+    cusparseDiagType_t diag_type =
+        unit ? CUSPARSE_DIAG_TYPE_UNIT : CUSPARSE_DIAG_TYPE_NON_UNIT;
+    TORCH_CUDASPARSE_CHECK(cusparseSpMatSetAttribute(
+        this->descriptor(),
+        CUSPARSE_SPMAT_DIAG_TYPE,
+        &diag_type,
+        sizeof(diag_type)));
+  }
+#endif
 };
+
+#if AT_USE_CUSPARSE_GENERIC_SPSV()
+class TORCH_CUDA_CPP_API CuSparseSpSVDescriptor
+    : public CuSparseDescriptor<cusparseSpSVDescr, &cusparseSpSV_destroyDescr> {
+ public:
+  CuSparseSpSVDescriptor() {
+    cusparseSpSVDescr_t raw_descriptor;
+    TORCH_CUDASPARSE_CHECK(cusparseSpSV_createDescr(&raw_descriptor));
+    descriptor_.reset(raw_descriptor);
+  }
+};
+#endif
+
+#if AT_USE_CUSPARSE_GENERIC_SPSM()
+class TORCH_CUDA_CPP_API CuSparseSpSMDescriptor
+    : public CuSparseDescriptor<cusparseSpSMDescr, &cusparseSpSM_destroyDescr> {
+ public:
+  CuSparseSpSMDescriptor() {
+    cusparseSpSMDescr_t raw_descriptor;
+    TORCH_CUDASPARSE_CHECK(cusparseSpSM_createDescr(&raw_descriptor));
+    descriptor_.reset(raw_descriptor);
+  }
+};
+#endif
 
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
 class TORCH_CUDA_CPP_API CuSparseSpGEMMDescriptor
@@ -97,8 +202,8 @@ class TORCH_CUDA_CPP_API CuSparseSpGEMMDescriptor
 };
 #endif
 
+#endif // AT_USE_CUSPARSE_GENERIC_API()
+
 } // namespace sparse
 } // namespace cuda
 } // namespace at
-
-#endif // AT_USE_CUSPARSE_GENERIC_API()

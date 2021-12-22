@@ -5,11 +5,11 @@ from dataclasses import dataclass
 import textwrap
 
 from tools.codegen.context import method_with_native_function, native_function_manager
-from tools.codegen.utils import Target, mapMaybe
+from tools.codegen.utils import Target, mapMaybe, assert_never
 from tools.codegen.model import (DispatchKey, NativeFunction,
                                  NativeFunctionsGroup, SchemaKind,
                                  TensorOptionsArguments,
-                                 DeviceCheckType, Argument, assert_never,
+                                 DeviceCheckType, Argument,
                                  is_cuda_dispatch_key, BackendIndex,
                                  gets_generated_out_inplace_wrapper)
 from tools.codegen.api.types import (BaseCType, Binding, ConstRefCType,
@@ -23,6 +23,27 @@ import tools.codegen.api.structured as structured
 from tools.codegen.api.translate import translate
 from tools.codegen.selective_build.selector import SelectiveBuilder
 
+def gen_registration_headers(
+        backend_index: BackendIndex,
+        per_operator_headers: bool,
+) -> List[str]:
+    use_native_empty = backend_index.dispatch_key in (DispatchKey.CPU, DispatchKey.CUDA)
+
+    if not per_operator_headers:
+        return [
+            "#include <ATen/Functions.h>",
+            "#include <ATen/NativeFunctions.h>"]
+
+    headers = ["#include <ATen/ops/as_strided_native.h>"]
+    if use_native_empty:
+        headers += [
+            "#include <ATen/ops/empty_native.h>",
+            "#include <ATen/ops/empty_strided_native.h>"]
+    else:
+        headers += [
+            "#include <ATen/ops/empty.h>",
+            "#include <ATen/ops/empty_strided.h>"]
+    return headers
 
 def gen_create_out_helper(backend_index: BackendIndex) -> List[str]:
     if backend_index.dispatch_key == DispatchKey.Meta:

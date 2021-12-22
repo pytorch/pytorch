@@ -315,4 +315,5 @@ torch::CppFunction autogradNotImplementedInplaceOrViewFallback() {
   return torch::CppFunction::makeFromBoxedFunction<&autogradNotImplementedInplaceOrViewFallbackImpl>();
 }
 
-}} // namespace torch::autograd
+} // namespace autograd
+} // namespace torch

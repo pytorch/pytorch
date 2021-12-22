@@ -45,19 +45,15 @@ them:
 
 * Update target determinator to use release branch:
   * Example: https://github.com/pytorch/pytorch/pull/40712
-* Cutting a release branch on [`pytorch/xla`](https://github.com/pytorch/xla)
-  * Example: https://github.com/pytorch/pytorch/pull/40721
 * Update backwards compatibility tests to use RC binaries instead of nightlies
   * Example: https://github.com/pytorch/pytorch/pull/40706
-* Add `release/{MAJOR}.{MINOR}` to list of branches in [`browser-extension.json`](https://github.com/pytorch/pytorch/blob/fb-config/browser-extension.json) for FaceHub integrated setups
-  * Example: https://github.com/pytorch/pytorch/commit/f99fbd94d18627bae776ea2448e075ca4d5e37b2
-* A release branch should also be created in [`pytorch/builder`](https://github.com/pytorch/builder) repo and pinned in `pytorch/pytorch`
-  * Example: https://github.com/pytorch/pytorch/pull/58514
+* A release branches should also be created in [`pytorch/xla`](https://github.com/pytorch/xla) and [`pytorch/builder`](https://github.com/pytorch/builder) repos and pinned in `pytorch/pytorch`
+  * Example: https://github.com/pytorch/pytorch/pull/65433
 
 These are examples of changes that should be made to the *default* branch after a release branch is cut
 
 * Nightly versions should be updated in all version files to the next MINOR release (i.e. 0.9.0 -> 0.10.0) in the default branch:
-  * Example: https://github.com/pytorch/pytorch/pull/51891
+  * Example: https://github.com/pytorch/pytorch/pull/65435
 
 ### Getting CI signal on release branches:
 Create a PR from `release/{MAJOR}.{MINOR}` to `orig/release/{MAJOR}.{MINOR}` in order to start CI testing for cherry-picks into release branch.

@@ -527,7 +527,7 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
       auto diff_graph = std::move(dnode->g(attr::Subgraph));
       Gradient gradient = differentiate(diff_graph);
       RemoveTensorTypeSpecializations(gradient.f);
-      RemoveProfilingNodes(gradient.f);
+      ProfilingRecord::removeProfilingNodes(gradient.f->block());
       GRAPH_DEBUG("Forward graph:\n", *(gradient.f));
       GRAPH_DEBUG("Backward graph:\n", *(gradient.df));
       // just like inside autograd.Functions, the forward of a differentiable
@@ -543,7 +543,7 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
         copy,
         getAutodiffSubgraphInlining() ? autodiffSubgraphNodeThreshold : 1);
     replaceFallbackGraphWithFallbackFunction(copy->block());
-    RemoveProfilingNodes(copy);
+    ProfilingRecord::removeProfilingNodes(copy->block());
     GRAPH_DEBUG(
         "After InlineAutodiffSubgraphs and Removing Profiling Nodes\n", *copy);
   } else {
@@ -721,7 +721,7 @@ GraphExecutorState ProfilingGraphExecutorImpl::getDebugState() {
 
 Node* insertFallbackFunctionCall(
     Graph* graph,
-    Function* func,
+    GraphFunction* func,
     ArrayRef<Value*> inputs) {
   auto tuple_type = func->graph()->return_node()->input(0)->type();
   Value* fn_constant = graph->insertNode(graph->create(prim::Constant))
@@ -740,7 +740,7 @@ Node* insertFallbackFunctionCall(
   return fun_unpack_tuple;
 }
 
-Function* createFallbackPathFunction(
+GraphFunction* createFallbackPathFunction(
     Block* b,
     const std::string& function_name) {
   auto value_map = [](Value* v) { return v; };
