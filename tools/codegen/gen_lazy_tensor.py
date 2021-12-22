@@ -5,7 +5,7 @@ import yaml
 from collections import namedtuple
 from typing import List, Dict, Union, Sequence, Optional, Callable, Iterable, Iterator, Tuple
 from tools.codegen.gen import get_grouped_native_functions, parse_native_yaml
-from tools.codegen.model import (DispatchKey, FunctionSchema,
+from tools.codegen.model import (FunctionSchema,
                                  NativeFunction, NativeFunctionsGroup, OperatorName)
 from tools.codegen.selective_build.selector import SelectiveBuilder
 from tools.codegen.utils import concatMap, YamlLoader, FileManager
@@ -138,91 +138,108 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
 
     selector = SelectiveBuilder.get_nop_selector()
 
-    # TODO: handle cases when yaml contains zero ops properly in a later PR.
-    if backend_key is not None and autograd_key is not None:
-        backend_dispatch_key: DispatchKey = backend_key
-        autograd_dispatch_key: DispatchKey = autograd_key
-        class_name = backend_indices[backend_dispatch_key].native_function_class_name()
+    assert backend_key is not None
+    class_name = backend_indices[backend_key].native_function_class_name()
 
-        if impl_path is not None:
-            error_on_missing_kernels(native_functions, backend_indices, backend_key,
-                                     autograd_key, impl_path, full_codegen)
+    if impl_path is not None:
+        error_on_missing_kernels(native_functions, backend_indices, backend_key,
+                                 autograd_key, impl_path, full_codegen)
 
-        assert class_name is not None
+    assert class_name is not None
 
-        # Generate nativefunction declarations
-        gen_dispatchkey_nativefunc_headers(fm, class_name, cpp_namespace, backend_indices,
-                                           grouped_native_functions, backend_dispatch_key, autograd_dispatch_key)
+    # Generate nativefunction declarations
+    gen_dispatchkey_nativefunc_headers(fm, class_name, cpp_namespace, backend_indices,
+                                       grouped_native_functions, backend_key, autograd_key)
 
-        # Generate Dispatcher registrations which hook up the nativefunctions
-        for dispatch_key in [backend_dispatch_key, autograd_dispatch_key]:
-            gen_dispatcher_registrations(fm, output_dir, cpp_namespace, backend_indices, grouped_native_functions,
-                                         backend_dispatch_key, dispatch_key, selector)
+    # Generate Dispatcher registrations which hook up the nativefunctions
+    for dispatch_key in [backend_key] if autograd_key is None else [backend_key, autograd_key]:
+        gen_dispatcher_registrations(fm, output_dir, cpp_namespace, backend_indices, grouped_native_functions,
+                                     backend_key, dispatch_key, selector)
 
-        # Generate native function impls that build IR nodes
-        fm.write_with_template(f'{backend_dispatch_key}NativeFunctions.cpp', 'DispatchKeyNativeFunctions.cpp', lambda: {
-            'includes': [f'#include <{path}>' for path in [
-                tensor_class_hdr,
-                "ATen/MetaFunctions.h",
-                "torch/csrc/lazy/core/shape.h",
-                "lazy_tensor_core/csrc/aten_ltc_bridge.h",
-                "lazy_tensors/computation_client/metrics.h",
-                f"{output_dir}/{backend_key}NativeFunctions.h",
-                f"{output_dir}/{backend_key}LazyIr.h",
-                f"{output_dir}/{backend_key}ShapeInference.h",
-            ]],
-            'native_functions_include': '',
-            'backend_namespace': 'torch_lazy_tensors',  # this is wrong
-            'native_function_definitions':
-            list(concat_map_codegen(
-                dest.GenLazyNativeFuncDefinition(f'{backend_dispatch_key}NativeFunctions',
-                                                 backend_indices[backend_dispatch_key],
+    # Generate native function impls that build IR nodes
+    fm.write_with_template(f'{backend_key}NativeFunctions.cpp', 'DispatchKeyNativeFunctions.cpp', lambda: {
+        'includes': [f'#include <{path}>' for path in [
+            tensor_class_hdr,
+            "ATen/MetaFunctions.h",
+            "torch/csrc/lazy/core/shape.h",
+            "lazy_tensor_core/csrc/aten_ltc_bridge.h",
+            "lazy_tensors/computation_client/metrics.h",
+            f"{output_dir}/{backend_key}NativeFunctions.h",
+            f"{output_dir}/{backend_key}LazyIr.h",
+            f"{output_dir}/{backend_key}ShapeInference.h",
+        ]],
+        'native_functions_include': '',
+        'backend_namespace': 'torch_lazy_tensors',  # this is wrong
+        'native_function_definitions':
+        list(concat_map_codegen(
+            dest.GenLazyNativeFuncDefinition(f'{backend_key}NativeFunctions',
+                                             backend_indices[backend_key],
+                                             tensor_class),
+            grouped_native_functions,
+            codegenInplaceVariant=True
+        )),
+    })
+    # Generate headers for shape/dtype funcs for non-meta kernels
+    fm.write_with_template(f'{backend_key}ShapeInference.h', 'ShapeInference.h', lambda: {
+        'lazy_ir_sysinc': [f'#include <{path}>' for path in [
+            "ATen/Tensor.h",
+            "c10/core/ScalarType.h",
+            "c10/util/Optional.h",
+            "torch/csrc/lazy/core/ir.h",
+            "torch/csrc/lazy/core/shape.h",
+            "vector",
+        ]],
+        'lazy_ir_inc': [],
+        'DispatchKey': backend_key,
+        'dispatch_namespace': backend_key.lower(),
+        'func_declarations': list(concat_map_codegen(
+            dest.GenLazyShapeInferenceDefinition(backend_indices[backend_key],
                                                  tensor_class),
-                grouped_native_functions,
-                codegenInplaceVariant=True
-            )),
-        })
-        # Generate headers for shape/dtype funcs for non-meta kernels
-        fm.write_with_template(f'{backend_dispatch_key}ShapeInference.h', 'ShapeInference.h', lambda: {
-            'lazy_ir_sysinc': [f'#include <{path}>' for path in [
-                "ATen/Tensor.h",
-                "c10/core/ScalarType.h",
-                "c10/util/Optional.h",
-                "torch/csrc/lazy/core/ir.h",
-                "torch/csrc/lazy/core/shape.h",
-                "vector",
-            ]],
-            'lazy_ir_inc': [],
-            'DispatchKey': backend_dispatch_key,
-            'dispatch_namespace': backend_dispatch_key.lower(),
-            'func_declarations': list(concat_map_codegen(
-                dest.GenLazyShapeInferenceDefinition(backend_indices[backend_dispatch_key],
-                                                     tensor_class),
-                grouped_native_functions
-            )),
-        })
-        # Generate IR node classes
-        fm.write_with_template(f'{backend_dispatch_key}LazyIr.h', 'LazyIr.h', lambda: {
-            'lazy_ir_sysinc': [f'#include <{path}>' for path in [
-                "ATen/core/Formatting.h",
-                "c10/core/ScalarType.h",
-                "c10/util/Optional.h",
-                "torch/csrc/lazy/core/hash.h",
-                "torch/csrc/lazy/core/ir.h",
-                "vector",
-            ]],
-            'lazy_ir_inc': [f'#include "{path}"' for path in [
-                node_base_hdr if node_base_hdr is not None else None
-            ] if path is not None],
-            'external_backend_headers': f'#include "{output_dir}/{backend_key}NativeFunctions.h"',
-            'namespaced_headers': '',
-            'DispatchKey': backend_dispatch_key,
-            'dispatch_namespace': backend_dispatch_key.lower(),
-            'ir_declarations': list(concat_map_codegen(
-                dest.LazyIR(backend_indices[backend_dispatch_key], node_base),
-                grouped_native_functions
-            )),
-        })
+            grouped_native_functions,
+            codegenInplaceVariant=True
+        )),
+    })
+    # Generate headers for shape/dtype funcs for non-meta kernels
+    fm.write_with_template(f'{backend_key}ShapeInference.h', 'ShapeInference.h', lambda: {
+        'lazy_ir_sysinc': [f'#include <{path}>' for path in [
+            "ATen/Tensor.h",
+            "c10/core/ScalarType.h",
+            "c10/util/Optional.h",
+            "torch/csrc/lazy/core/ir.h",
+            "torch/csrc/lazy/core/shape.h",
+            "vector",
+        ]],
+        'lazy_ir_inc': [],
+        'DispatchKey': backend_key,
+        'dispatch_namespace': backend_key.lower(),
+        'func_declarations': list(concat_map_codegen(
+            dest.GenLazyShapeInferenceDefinition(backend_indices[backend_key],
+                                                 tensor_class),
+            grouped_native_functions
+        )),
+    })
+    # Generate IR node classes
+    fm.write_with_template(f'{backend_key}LazyIr.h', 'LazyIr.h', lambda: {
+        'lazy_ir_sysinc': [f'#include <{path}>' for path in [
+            "ATen/core/Formatting.h",
+            "c10/core/ScalarType.h",
+            "c10/util/Optional.h",
+            "torch/csrc/lazy/core/hash.h",
+            "torch/csrc/lazy/core/ir.h",
+            "vector",
+        ]],
+        'lazy_ir_inc': [f'#include "{path}"' for path in [
+            node_base_hdr if node_base_hdr is not None else None
+        ] if path is not None],
+        'external_backend_headers': f'#include "{output_dir}/{backend_key}NativeFunctions.h"',
+        'namespaced_headers': '',
+        'DispatchKey': backend_key,
+        'dispatch_namespace': backend_key.lower(),
+        'ir_declarations': list(concat_map_codegen(
+            dest.LazyIR(backend_indices[backend_key], node_base),
+            grouped_native_functions
+        )),
+    })
 
 
 if __name__ == '__main__':
