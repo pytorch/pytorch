@@ -482,10 +482,10 @@ class TestOptim(TestCase):
             return
 
         optimizer_pairs_with_flags = [
-            # ((optim.Adam), dict(weight_decay=1., amsgrad=True)),
-            # ((optim.Adam), dict(weight_decay=1., amsgrad=False)),
-            # ((optim.Adam), dict(weight_decay=0., amsgrad=True)),
-            # ((optim.Adam), dict(weight_decay=0., amsgrad=False)),
+            ((optim.Adam), dict(weight_decay=1., amsgrad=True)),
+            ((optim.Adam), dict(weight_decay=1., amsgrad=False)),
+            ((optim.Adam), dict(weight_decay=0., amsgrad=True)),
+            ((optim.Adam), dict(weight_decay=0., amsgrad=False)),
             # ((optim.AdamW), dict(weight_decay=1., amsgrad=True)),
             # ((optim.AdamW), dict(weight_decay=1., amsgrad=False)),
             # ((optim.AdamW), dict(weight_decay=0., amsgrad=True)),
@@ -603,6 +603,84 @@ class TestOptim(TestCase):
                 lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
                     lr=1e-3, amsgrad=True, maximize=maximize),
+                [lambda opt: StepLR(opt, gamma=0.9, step_size=10),
+                 lambda opt: ReduceLROnPlateau(opt)],
+                constructor_accepts_maximize=True
+            )
+            with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
+                optimizer(None, lr=1e-2, betas=(1.0, 0.0))
+
+            with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
+                optimizer(None, lr=1e-2, weight_decay=-1)
+
+    # new test that test_adam can be switched to when merge is complete and multitensor is deleted
+    def test_adam_new(self):
+        optimizer = optim.Adam
+        for foreach in [True, False]:
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, maximize=maximize, foreach=foreach),
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2), lr=1e-3, maximize=maximize, foreach=foreach),
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, amsgrad=True,
+                                                         maximize=maximize, foreach=foreach),
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, weight_decay=0.1,
+                                                         maximize=maximize, foreach=foreach),
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-3, amsgrad=True, maximize=maximize, foreach=foreach),
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-3, maximize=maximize, foreach=foreach),
+                [lambda opt: ExponentialLR(opt, gamma=0.9)],
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-3, maximize=maximize, foreach=foreach),
+                [lambda opt: LinearLR(opt, start_factor=0.4, total_iters=4)],
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-3, maximize=maximize, foreach=foreach),
+                [lambda opt: ConstantLR(opt, factor=0.4, total_iters=4)],
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, amsgrad=True,
+                                                         maximize=maximize, foreach=foreach),
+                [lambda opt: ConstantLR(opt, factor=0.4, total_iters=4),
+                 lambda opt: ExponentialLR(opt, gamma=0.9)],
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, amsgrad=True,
+                                                         maximize=maximize, foreach=foreach),
+                [lambda opt: ExponentialLR(opt, gamma=0.9),
+                 lambda opt: ReduceLROnPlateau(opt)],
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-3, amsgrad=True, maximize=maximize, foreach=foreach),
                 [lambda opt: StepLR(opt, gamma=0.9, step_size=10),
                  lambda opt: ReduceLROnPlateau(opt)],
                 constructor_accepts_maximize=True
