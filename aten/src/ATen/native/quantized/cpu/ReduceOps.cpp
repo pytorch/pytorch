@@ -12,18 +12,27 @@ namespace native {
 DEFINE_DISPATCH(qmean_inner_dim_stub);
 
 // If mean values are taken in the innermost dims, the fast path can be used.
+inline bool is_innnermost_dim(
+    const Tensor& self,
+    IntArrayRef dim) {
+  auto dims = dim.vec();
+  auto ndim = self.dim();
+  maybe_wrap_dims(dims, ndim);
+  std::sort(dims.begin(), dims.end(), std::greater<int64_t>());
+  bool is_innermost = dims.empty() || dims[0] == ndim - 1;
+  for (int i = 1; i < dims.size(); ++i) {
+    is_innermost = is_innermost && (dims[i] == dims[i-1] - 1);
+  }
+  return is_innermost;
+}
+
 inline bool is_mean_inner_dim_fast_path(
     const Tensor& self,
     IntArrayRef dim,
     c10::optional<ScalarType> opt_dtype) {
-  auto dims = dim.vec();
-  std::sort(dims.begin(), dims.end(), std::greater<int64_t>());
-  bool is_fast_path = dims.empty() || dims[0] == -1 || dims[0] == self.dim() - 1;
-  is_fast_path = is_fast_path &&
+  bool is_fast_path =
+      is_innnermost_dim(self, dim) &&
       (!opt_dtype.has_value() || opt_dtype.value() == self.scalar_type());
-  for (int i = 1; i < dims.size(); ++i) {
-    is_fast_path = is_fast_path && (dims[i] == dims[i-1] - 1);
-  }
   return is_fast_path;
 }
 
