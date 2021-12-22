@@ -640,9 +640,11 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3)
                 self.standalone = Standalone()
 
             def forward(self, x, y):
+                x = self.conv(x)
                 return self.standalone(x, y)
 
         from torch.ao.quantization.fx.backend_config_dict.observation_type import ObservationType
@@ -669,11 +671,25 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
             "reference_quantized_module_for_root": torch.nn.quantized._reference.Conv2d,
         }
 
+        conv_config = {
+            "pattern": torch.nn.Conv2d,
+            "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
+            "dtype_configs": [
+                weighted_op_quint8_dtype_config,
+            ],
+            "root_module": torch.nn.Conv2d,
+            "reference_quantized_module_for_root": torch.nn.quantized._reference.Conv2d,
+        }
+
         m = M().eval()
-        modified_backend_config_dict = copy.deepcopy(self.trt_backend_config_dict)
-        modified_backend_config_dict["configs"].insert(0, conv_add_config)
+        backend_config_dict = {
+            "configs": [
+                conv_add_config,
+                conv_config,
+            ]
+        }
         prepare_custom_config_dict = {
-            "standalone_module_name": [("standalone", None, {"input_quantized_idxs": [0, 1]}, modified_backend_config_dict)]
+            "standalone_module_name": [("standalone", None, {"input_quantized_idxs": [0, 1]}, backend_config_dict)]
         }
         # TODO: use self.qconfig after input_quantized_idxs and output_quantized_idxs
         # are more flexible
@@ -687,10 +703,10 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
             m,
             {"": qconfig},
             prepare_custom_config_dict=prepare_custom_config_dict,
-            backend_config_dict=modified_backend_config_dict)
+            backend_config_dict=backend_config_dict)
         node_occurrence = {
-            # for two inputs to standalone module
-            ns.call_module(torch.ao.quantization.HistogramObserver): 2,
+            # for two inputs to standalone module, and input of conv
+            ns.call_module(torch.ao.quantization.HistogramObserver): 3,
         }
         print("prepared:", m)
         print("prepared standalone:", m.standalone)
@@ -700,12 +716,13 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
             ns.call_module(torch.ao.quantization.HistogramObserver): 1,
         }
         self.checkGraphModuleNodes(m.standalone, expected_node_occurrence=standalone_node_occurrence)
-        m = _convert_fx_do_not_use(m, is_reference=True, backend_config_dict=modified_backend_config_dict)
+        m = _convert_fx_do_not_use(m, is_reference=True, backend_config_dict=backend_config_dict)
         print("converted:", m)
         print("converted standalone:", m.standalone)
         node_occurrence = {
-            ns.call_function(torch.quantize_per_tensor): 2,
-            ns.call_method("dequantize"): 0,
+            ns.call_function(torch.quantize_per_tensor): 3,
+            ns.call_module(nnqr.Conv2d): 1,
+            ns.call_method("dequantize"): 1,
         }
         self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
         standalone_node_occurrence = {
