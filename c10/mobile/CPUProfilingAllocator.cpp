@@ -5,6 +5,9 @@
 #include <c10/mobile/CPUProfilingAllocator.h>
 #include <c10/util/irange.h>
 
+#include <map>
+#include <set>
+
 namespace c10 {
 
 namespace {
