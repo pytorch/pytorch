@@ -745,7 +745,7 @@ class TestAssertClose(TestCase):
         expected = "0"
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(ValueError, str(type(actual))):
+            with self.assertRaisesRegex(TypeError, str(type(actual))):
                 fn()
 
     def test_mismatching_shape(self):

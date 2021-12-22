@@ -570,23 +570,19 @@ class TensorLikePair(Pair):
         if not allow_subclasses and type(actual) is not type(expected):
             raise UnsupportedInputs()
 
-        actual, expected = [self._to_tensor(input, id=id) for input in (actual, expected)]
+        actual, expected = [self._to_tensor(input) for input in (actual, expected)]
         for tensor in (actual, expected):
             self._check_supported(tensor, id=id)
         return actual, expected
 
-    def _to_tensor(self, tensor_like: Any, *, id: Tuple[Any, ...]) -> torch.Tensor:
+    def _to_tensor(self, tensor_like: Any) -> torch.Tensor:
         if isinstance(tensor_like, torch.Tensor):
             return tensor_like
 
         try:
             return torch.as_tensor(tensor_like)
-        except Exception as error:
-            raise ErrorMeta(
-                ValueError,
-                f"Constructing a tensor from {type(tensor_like)} failed with \n{error}.",
-                id=id,
-            ) from error
+        except Exception:
+            raise UnsupportedInputs()
 
     def _check_supported(self, tensor: torch.Tensor, *, id: Tuple[Any, ...]) -> None:
         if tensor.layout not in {torch.strided, torch.sparse_coo, torch.sparse_csr}:  # type: ignore[attr-defined]
