@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
+# Owner(s): ["oncall: r2p"]
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
-import unittest
-
 import torch.distributed.elastic.utils.logging as logging
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 log = logging.get_logger()
 
 
-class LoggingTest(unittest.TestCase):
+class LoggingTest(TestCase):
     def setUp(self):
+        super().setUp()
         self.clazz_log = logging.get_logger()
 
     def test_logger_name(self):

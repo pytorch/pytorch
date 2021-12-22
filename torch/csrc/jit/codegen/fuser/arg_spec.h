@@ -2,7 +2,7 @@
 #include <ATen/ATen.h>
 #include <ATen/core/functional.h> // fmap
 #include <c10/util/hash.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/codegen/fuser/tensor_desc.h>
 
 #include <cstdint>

@@ -2,8 +2,8 @@
 
 import torch
 import torch.fx.experimental.fx_acc.acc_ops as acc_ops
-from caffe2.torch.fb.fx2trt.tests.test_utils import AccTestCase, InputTensorSpec
 from parameterized import parameterized
+from torch.testing._internal.common_fx2trt import AccTestCase, InputTensorSpec
 
 
 class TestAdaptiveAvgPoolConverter(AccTestCase):
@@ -11,6 +11,7 @@ class TestAdaptiveAvgPoolConverter(AccTestCase):
         [
             ((64, 64),),
             ((128, 64),),
+            (64,),
         ]
     )
     def test_adaptive_avgpool(
