@@ -3184,6 +3184,7 @@ def sample_inputs_gradient(op_info, device, dtype, requires_grad):
     return tuple(sample_inputs)
 
 def sample_inputs_getitem(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
     test_args = [
         ([1, 2],),
         (slice(0, 3),),
@@ -3202,10 +3203,8 @@ def sample_inputs_getitem(op_info, device, dtype, requires_grad, **kwargs):
         (mask_not_all_zeros((S,)),),
     ]
 
-    return tuple(SampleInput(
-        make_tensor((S, S, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
-        args=args)
-        for args in test_args)
+    for args in test_args:
+        yield SampleInput(make_arg((S, S, S)), args=args)
 
 def sample_inputs_index_put(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -13027,12 +13026,15 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            supports_inplace_autograd=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            supports_scripting=False,
            op=torch.Tensor.__getitem__,
            skips=(
+               # ZeroTensors are immutable. Please use the materialized zero tensor obtained using .clone()
+               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
                # AssertionError: False is not true : Scalars failed to compare as equal! 0 != 104448
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', device_type='cuda'),
-           ),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', device_type='cuda')),
            assert_jit_shape_analysis=False,  # TODO: support index.Tensor()
            sample_inputs_func=sample_inputs_getitem,),
     OpInfo('index_put',
