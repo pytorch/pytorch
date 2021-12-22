@@ -49,7 +49,7 @@ cc_library(
     deps = [
         ":cuda_cmake_macros_h",
         "//c10/macros",
-        "//c10/util:base",
+        "//c10/util",
     ],
     visibility = ["//:__pkg__"],
 )
@@ -58,7 +58,6 @@ cc_library(
     name = "c10",
     srcs = [
         "//c10/core:sources",
-        "//c10/util:sources",
     ] + glob([
         "mobile/*.cpp",
     ]) + if_cuda(

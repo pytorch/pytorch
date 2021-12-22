@@ -2,6 +2,24 @@ load("@rules_cc//cc:defs.bzl", "cc_library")
 load("//tools/config:defs.bzl", "if_cuda")
 
 cc_library(
+    name = "util",
+    hdrs = [
+        "TypeCast.h",
+        "typeid.h",
+    ],
+    srcs = [
+        "TypeCast.cpp",
+        "typeid.cpp",
+    ],
+    deps = [
+        ":base",
+        "//c10/core:ScalarType",
+        "//c10/macros",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "base",
     hdrs = glob(
         ["*.h"],
@@ -40,14 +58,5 @@ filegroup(
         exclude = [
         ],
     ),
-    visibility = ["//c10:__pkg__"],
-)
-
-filegroup(
-    name = "sources",
-    srcs = [
-        "TypeCast.cpp",
-        "typeid.cpp",
-    ],
     visibility = ["//c10:__pkg__"],
 )
