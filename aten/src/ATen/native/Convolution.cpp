@@ -1121,6 +1121,8 @@ at::Tensor _convolution(
   ConvBackend backend = select_conv_backend(input, weight, bias_sizes_opt, need_backward, params);
   at::MemoryFormat backend_memory_format = determine_backend_memory_format(input, weight, backend);
 
+  std::cout << "backend: " << int(backend) << "; memory_format: " << backend_memory_format << "; input.sizes(): " << input.sizes() << std::endl;
+
   // Call the backend.
   Tensor output;
   auto kernel_size = weight.sizes().slice(2);
@@ -1241,7 +1243,6 @@ at::Tensor _convolution(
     case ConvBackend::SlowTranspose2d:
     case ConvBackend::SlowTranspose3d:
       input = input.contiguous(backend_memory_format);
-      std::cout << "nogroup backend: input.sizes(): " << input.sizes() << "; backend_memory_format: " << backend_memory_format << std::endl;
       if (params.groups == 1) {
         output = _convolution_nogroup_backend(input, weight, bias, backend, params);
       } else {
