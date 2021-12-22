@@ -7,10 +7,6 @@ PYTORCH_ONNX_CAFFE2_BUNDLE = _C._onnx.PYTORCH_ONNX_CAFFE2_BUNDLE
 
 ONNX_ARCHIVE_MODEL_PROTO_NAME = "__MODEL_PROTO"
 
-# TODO: Update these variables when there
-# is a new ir_version and producer_version
-# and use these values in the exporter
-ir_version = _C._onnx.IR_VERSION
 producer_name = "pytorch"
 producer_version = _C._onnx.PRODUCER_VERSION
 constant_folding_opset_versions = [9, 10, 11, 12, 13, 14]
@@ -35,10 +31,9 @@ def _export(*args, **kwargs):
 
 def export(model, args, f, export_params=True, verbose=False, training=TrainingMode.EVAL,
            input_names=None, output_names=None, operator_export_type=None,
-           opset_version=None, _retain_param_name=None, do_constant_folding=True,
-           example_outputs=None, strip_doc_string=None, dynamic_axes=None,
-           keep_initializers_as_inputs=None, custom_opsets=None, enable_onnx_checker=None,
-           use_external_data_format=None, export_modules_as_functions=False):
+           opset_version=None, do_constant_folding=True, dynamic_axes=None,
+           keep_initializers_as_inputs=None, custom_opsets=None,
+           export_modules_as_functions=False):
     r"""
     Exports a model into ONNX format. If ``model`` is not a
     :class:`torch.jit.ScriptModule` nor a :class:`torch.jit.ScriptFunction`, this runs
@@ -187,20 +182,14 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
         opset_version (int, default 9):
             Must be ``== _onnx_main_opset or in _onnx_stable_opsets``,
             defined in torch/onnx/symbolic_helper.py.
-        _retain_param_name (bool, default True): Deprecated and ignored. Will be removed in next PyTorch
-            release.
         do_constant_folding (bool, default False): Apply the constant-folding optimization.
             Constant-folding will replace some of the ops that have all constant inputs
             with pre-computed constant nodes.
-        example_outputs (T or a tuple of T, where T is Tensor or convertible to Tensor, default None):
-            Deprecated and ignored. Will be removed in next PyTorch release.
-        strip_doc_string (bool, default True): Deprecated and ignored. Will be removed in next PyTorch release.
         dynamic_axes (dict<string, dict<int, string>> or dict<string, list(int)>, default empty dict):
 
             By default the exported model will have the shapes of all input and output tensors
-            set to exactly match those given in ``args`` (and ``example_outputs`` when that arg is
-            required). To specify axes of tensors as dynamic (i.e. known only at run-time), set
-            ``dynamic_axes`` to a dict with schema:
+            set to exactly match those given in ``args``. To specify axes of tensors as
+            dynamic (i.e. known only at run-time), set ``dynamic_axes`` to a dict with schema:
 
             * KEY (str): an input or output name. Each name must also be provided in ``input_names`` or
               ``output_names``.
@@ -294,18 +283,14 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             the opset version is set to 1. Only custom opset domain name and version should be
             indicated through this argument.
 
-        enable_onnx_checker (bool, default True): Deprecated and ignored. Will be removed in next
-            Pytorch release.
-        use_external_data_format (bool, default False): Deprecated and ignored. Will be removed in
-            next Pytorch release.
         export_modules_as_functions (bool or set of str, type or nn.Module, default False): Flag to enable
             exporting all ``nn.Module`` forward calls as local functions in ONNX. Or a set to indicate the
             particular modules to export as local functions in ONNX.
 
             * ``False``(default): export ``nn.Module`` forward calls as fine grained nodes.
             * ``True``: export all ``nn.Module`` forward calls as local function nodes.
-            * Set of str, type or nn.Module: export ``nn.Module`` forward calls as local function nodes,
-              only if the name, type or obj of the ``nn.Module`` is found in the set.
+            * Set of type of nn.Module: export ``nn.Module`` forward calls as local function nodes,
+              only if the type of the ``nn.Module`` is found in the set.
 
     Raises:
       CheckerError: If the ONNX checker detects an invalid ONNX graph. Will still export the
@@ -315,9 +300,8 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
     from torch.onnx import utils
     return utils.export(model, args, f, export_params, verbose, training,
                         input_names, output_names, operator_export_type, opset_version,
-                        _retain_param_name, do_constant_folding, example_outputs,
-                        strip_doc_string, dynamic_axes, keep_initializers_as_inputs,
-                        custom_opsets, enable_onnx_checker, use_external_data_format,
+                        do_constant_folding, dynamic_axes,
+                        keep_initializers_as_inputs, custom_opsets,
                         export_modules_as_functions)
 
 

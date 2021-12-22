@@ -103,8 +103,7 @@ struct DeepAndWideFast : torch::nn::Module {
       }
 
       // Potential optimization: call MKLDNN directly.
-      at::cpu::bmm_out(
-          ad_emb_packed, prealloc_tensors[3], prealloc_tensors[4]);
+      at::cpu::bmm_out(ad_emb_packed, prealloc_tensors[3], prealloc_tensors[4]);
 
       if (prealloc_tensors[5].data_ptr() != prealloc_tensors[4].data_ptr()) {
         // in unlikely case that the input tensor changed we need to

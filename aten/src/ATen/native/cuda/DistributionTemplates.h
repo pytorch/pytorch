@@ -188,11 +188,11 @@ __global__ void distribution_binary_elementwise_kernel(
   using input_t_1 = typename function_traits<func_t>::template arg<1>::type;
   using input_t_2 = typename function_traits<func_t>::template arg<2>::type;
 
-  input_t_1 inputs_1[thread_work_size];
-  input_t_2 inputs_2[thread_work_size];
+  input_t_1 inputs_1[thread_work_size()];
+  input_t_2 inputs_2[thread_work_size()];
 
-  int base_index = BLOCK_WORK_SIZE * blockIdx.x;
-  int remaining = std::min<int>(numel - base_index, BLOCK_WORK_SIZE);
+  int base_index = block_work_size() * blockIdx.x;
+  int remaining = std::min<int>(numel - base_index, block_work_size());
 
   curandStatePhilox4_32_10_t state;
   curand_init(std::get<0>(seeds),
@@ -203,7 +203,7 @@ __global__ void distribution_binary_elementwise_kernel(
   // load data into registers
   int thread_idx = threadIdx.x;
   #pragma unroll
-  for (int i = 0; i < thread_work_size; i++) {
+  for (int i = 0; i < thread_work_size(); i++) {
     if (thread_idx >= remaining) {
       break;
     }
@@ -212,20 +212,20 @@ __global__ void distribution_binary_elementwise_kernel(
     inputs_1[i] = input_data_1[offsets[0]];
     inputs_2[i] = input_data_2[offsets[1]];
 
-    thread_idx += num_threads;
+    thread_idx += num_threads();
   }
 
   // compute and store
   thread_idx = threadIdx.x;
   #pragma unroll
-  for (int i = 0; i < thread_work_size; i++) {
+  for (int i = 0; i < thread_work_size(); i++) {
     if (thread_idx >= remaining) {
       break;
     }
     int input_idx = thread_idx + base_index;
     auto offsets = out_calc.get(input_idx);
     output_data[offsets[0]] = f(state, inputs_1[i], inputs_2[i]);
-    thread_idx += num_threads;
+    thread_idx += num_threads();
   }
 }
 
@@ -254,16 +254,16 @@ void distribution_binary_kernel(TensorIterator &iter, PhiloxCudaState philox_arg
   const input_t_1 *input_data_1 = static_cast<const input_t_1 *>(iter.data_ptr(1));
   const input_t_2 *input_data_2 = static_cast<const input_t_2 *>(iter.data_ptr(2));
 
-  int64_t grid = (numel + block_work_size - 1) / block_work_size;
+  int64_t grid = (numel + block_work_size() - 1) / block_work_size();
   auto stream = at::cuda::getCurrentCUDAStream();
 
   if (iter.is_contiguous()) {
-    distribution_binary_elementwise_kernel<<<grid,num_threads, 0, stream>>>(
+    distribution_binary_elementwise_kernel<<<grid,num_threads(), 0, stream>>>(
         numel, f, philox_args, output_data, input_data_1, input_data_2,
         TrivialOffsetCalculator<2>(), TrivialOffsetCalculator<1>());
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
-    distribution_binary_elementwise_kernel<<<grid, num_threads, 0, stream>>>(
+    distribution_binary_elementwise_kernel<<<grid, num_threads(), 0, stream>>>(
         numel, f, philox_args, output_data, input_data_1, input_data_2,
         make_input_offset_calculator<2>(iter), make_output_offset_calculator(iter));
     C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -624,15 +624,22 @@ void bernoulli_kernel(Tensor& self, const Tensor& p_, RNG gen) {
     std::lock_guard<std::mutex> lock(gen->mutex_);
     rng_engine_inputs = gen->philox_cuda_state(10);
   }
+  TORCH_CHECK(at::isFloatingType(p_.scalar_type()), "expected probabilities tensor to have floating type, got ", p_.scalar_type());
   auto p_CUDA = p_.to(kCUDA);
+  //cast probabilities tensor to double for double `self` tensor, and to `float` for everything else
+  if (self.dtype() == at::kDouble) {
+    p_CUDA = p_CUDA.to(at::kDouble);
+  } else {
+    p_CUDA = p_CUDA.to(at::kFloat);
+  }
   c10::MaybeOwned<Tensor> p = expand_inplace(self, p_CUDA);
   AT_DISPATCH_ALL_TYPES_AND3(
     at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool, self.scalar_type(), "bernoulli_tensor_cuda_self_", [&] {
-      using self_t = scalar_t;
-      AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, p->scalar_type(), "bernoulli_tensor_cuda_p_", [&] {
-        using p_t = scalar_t;
-        return bernoulli_tensor_cuda_kernel<self_t, p_t>(self, *p, rng_engine_inputs);
-      });
+      if (std::is_same<scalar_t, double>::value) {
+        return bernoulli_tensor_cuda_kernel<double, double>(self, *p, rng_engine_inputs);
+      } else {
+        return bernoulli_tensor_cuda_kernel<scalar_t, float>(self, *p, rng_engine_inputs);
+      }
    });
 }
 

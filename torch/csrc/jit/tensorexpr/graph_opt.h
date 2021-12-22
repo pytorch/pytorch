@@ -64,6 +64,27 @@ TORCH_API void annotateInputShapes(
 TORCH_API std::shared_ptr<Graph> removeUnusedSelfArgument(
     const std::shared_ptr<Graph>& graph);
 
+// Scan all values in the given graph and replace each dimension with a size Xi
+// present in \p SIZES with a symbolic shape Yi. Return a vector of symbol
+// values [Y0, Y1, .., Yn].
+//
+// For example:
+// Input:
+// graph(%x : Float(10, 20, 30, 40)):
+//   %y : Float(10, 20, 30, 40) = aten::relu(%x)
+//   return %y
+//
+// If we run makeShapesSymbolic(graph, {20, 40}), then we'll get:
+//
+// graph(%x : Float(10, SS(-3), 30, SS(-5))):
+//   %y : Float(10, SS(-3), 30, SS(-5)) = aten::relu(%x)
+//   return %y
+//
+// and get {-3, -5} as the return value.
+TORCH_API std::vector<int64_t> makeShapesSymbolic(
+    std::shared_ptr<Graph>& graph,
+    const std::vector<int64_t>& sizes);
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
