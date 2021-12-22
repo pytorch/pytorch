@@ -1483,6 +1483,7 @@ class TestNormalizeOperators(JitTestCase):
             "index_put",
             "nn.functional.conv2d",
             "nn.functional.dropout",
+            "nn.functional.dropout2d",
             "nn.functional.embedding",  # Implemented with a lambda
             "nn.functional.embedding_bag",  # Implemented with a lambda
             "nn.functional.rrelu",  # Implemented with a lambda
@@ -1525,6 +1526,9 @@ class TestNormalizeOperators(JitTestCase):
             'new_empty',
             'new_zeros',
             'new_full',
+            'normal',
+            'multinomial',
+            'bernoulli',
             "__getitem__",
             "__radd__",
             "__rsub__",
@@ -1539,6 +1543,9 @@ class TestNormalizeOperators(JitTestCase):
             "atleast_1d",
             "atleast_2d",
             "atleast_3d",
+            "svd_lowrank",  # implemented with a lambda
+            "pca_lowrank",  # implemented with a lambda
+            "column_stack",
         }
 
         # Unsupported input types
