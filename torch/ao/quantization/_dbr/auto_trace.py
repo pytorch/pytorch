@@ -21,6 +21,7 @@ from .model_utils import (
     attach_output_convert_info_to_model,
 )
 from . import auto_trace_rewriter
+from torch.ao.quantization import is_activation_post_process
 
 logger = logging.getLogger('auto_trace')
 logging.basicConfig(level=logging.DEBUG)
@@ -84,20 +85,32 @@ def add_auto_observation(
         @classmethod
         def __torch_function__(cls, func, types, args=(), kwargs=None):
             nonlocal global_disable_torch_function_override
-            if global_disable_torch_function_override:
+            if (
+                # global override means disable the override here
+                global_disable_torch_function_override or
+                # to prevent printing things from going into an infinite loop
+                func == torch.Tensor.__repr__ or
+                # we don't need to override getters in this framework
+                func.__name__ == '__get__'
+            ):
                 return super().__torch_function__(func, types, args, kwargs)
 
-            # to prevent printing things from going into an infinite loop
-            if func == torch.Tensor.__repr__:
-                return super().__torch_function__(func, types, args, kwargs)
+            # if we are in a function, the current module is always a parent
+            nonlocal cur_module
+            parent_module = cur_module
             if enable_logging:
-                logger.debug(f'__torch_function__ {str(func)} len_args {len(args)}')
+                if not is_activation_post_process(parent_module):
+                    # logging for insides of obs/fq is not useful for this framework
+
+                    # fqn map does not contain observers, which is why we
+                    # cannot always assume that FQN exists
+                    fqn_for_logging = module_id_to_fqn.get(
+                        id(parent_module), 'unknown') if parent_module else None
+                    logger.debug(
+                        f' fqn:{fqn_for_logging} _tf_ {str(func)} len_args {len(args)}')
 
             nonlocal qtensor_id
-            nonlocal cur_module
             kwargs = kwargs if kwargs else {}
-            # if we are in a function, the current module is always a parent
-            parent_module = cur_module
             hook_type = get_torch_function_hook_type(parent_module, func)
 
             if hook_type is HookType.OP_HOOKS:
@@ -174,7 +187,8 @@ def add_auto_observation(
             def _patched_module_call(self, *args, **kwargs):
 
                 if enable_logging:
-                    logger.debug(f"_patched_module_call: {type(self)}")
+                    fqn = module_id_to_fqn.get(id(self), None)
+                    logger.debug(f" fqn:{fqn} _cl_: {type(self)} start")
 
                 nonlocal cur_module
                 old_module = cur_module
@@ -183,10 +197,6 @@ def add_auto_observation(
                     parent_module = module_stack[-1] if len(module_stack) else None
                     module_stack.append(self)
                     fqn = module_id_to_fqn.get(id(self), None)
-
-                    if enable_logging:
-                        fqn = module_id_to_fqn.get(id(self), None)
-                        logger.debug(f"\nstarting fqn {fqn}")
 
                     hook_type = get_module_hook_type(parent_module, cur_module)
 
@@ -251,7 +261,7 @@ def add_auto_observation(
 
                     if enable_logging:
                         fqn = module_id_to_fqn.get(id(self), None)
-                        logger.debug(f"\nending fqn {fqn}")
+                        logger.debug(f" fqn:{fqn} _cl_: {type(self)} end")
 
                     return output
                 finally:
@@ -344,11 +354,14 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
         @classmethod
         def __torch_function__(cls, func, types, args=(), kwargs=None):
             nonlocal global_disable_torch_function_override
-            if global_disable_torch_function_override:
-                return super().__torch_function__(func, types, args, kwargs)
-
-            # to prevent printing things from going into an infinite loop
-            if func == torch.Tensor.__repr__:
+            if (
+                # global override means disable the override here
+                global_disable_torch_function_override or
+                # to prevent printing things from going into an infinite loop
+                func == torch.Tensor.__repr__ or
+                # we don't need to override getters in this framework
+                func.__name__ == '__get__'
+            ):
                 return super().__torch_function__(func, types, args, kwargs)
 
             kwargs = kwargs if kwargs else {}
@@ -357,12 +370,13 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
             hook_type = get_torch_function_hook_type(parent_module, func)
 
             if enable_logging:
-                with torch._C.DisableTorchFunction():
-                    logger.debug(
-                        f"__torch_function__ {func} " +
-                        f"hook_type {hook_type} " +
-                        # f"arg_types {[type(arg) for arg in args]}) " +
-                        f"arg_dtypes {[arg.dtype if isinstance(arg, torch.Tensor) else None for arg in args]}")
+                fqn_for_logging = module_id_to_fqn.get(
+                    id(parent_module), 'unknown') if parent_module else None
+                logger.debug(
+                    f" fqn:{fqn_for_logging} _tf_ {func} " +
+                    f"hook_type {hook_type} " +
+                    # f"arg_types {[type(arg) for arg in args]}) " +
+                    f"arg_dtypes {[arg.dtype if isinstance(arg, torch.Tensor) else None for arg in args]}")
 
             if hook_type is HookType.OP_HOOKS:
                 qstate: AutoQuantizationState = parent_module._auto_quant_state  # type: ignore[union-attr]
@@ -379,17 +393,14 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                 qstate.mark_cur_op_complete(func)
 
             elif hook_type is HookType.ARG_DEQUANTS:
-                # disabling torch function to prevent infinite recursion on
-                # getset
                 # TODO(future PR): handle more dtypes
-                with torch._C.DisableTorchFunction():
-                    new_args = []
-                    for arg in args:
-                        if isinstance(arg, torch.Tensor) and arg.is_quantized:
-                            new_args.append(arg.dequantize())
-                        else:
-                            new_args.append(arg)
-                    args = tuple(new_args)
+                new_args = []
+                for arg in args:
+                    if isinstance(arg, torch.Tensor) and arg.is_quantized:
+                        new_args.append(arg.dequantize())
+                    else:
+                        new_args.append(arg)
+                args = tuple(new_args)
                 output = super().__torch_function__(func, types, args, kwargs)
 
             else:  # HookType.NONE
@@ -403,10 +414,12 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                 assert output is not NotImplemented
 
             if enable_logging:
+                fqn_for_logging = module_id_to_fqn.get(
+                    id(parent_module), 'unknown') if parent_module else None
                 out_dtype = None
                 if isinstance(output, torch.Tensor):
                     out_dtype = output.dtype
-                logger.debug(f"__torch_function__ {func} out {out_dtype} end")
+                logger.debug(f" fqn:{fqn_for_logging} _tf_ {func} out {out_dtype} end")
 
             return output
 
@@ -457,10 +470,6 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
             orig_nn_sequential_forward = torch.nn.Sequential.forward
 
             def _patched_module_call(self, *args, **kwargs):
-                if enable_logging:
-                    fqn = module_id_to_fqn.get(id(self), None)
-                    logger.debug(f"\nstarting fqn {fqn}")
-
                 nonlocal cur_module
                 old_module = cur_module
                 cur_module = self
@@ -470,19 +479,17 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                     module_stack.append(self)
                     hook_type = get_module_hook_type(parent_module, cur_module)
                     if enable_logging:
-                        with torch._C.DisableTorchFunction():
-                            logger.debug(
-                                f"_patched_module_call {type(self)} " +
-                                # f"arg_types {[type(arg) for arg in args]} " +
-                                f"arg_dtypes {[arg.dtype if isinstance(arg, torch.Tensor) else None for arg in args]} " +
-                                f"hook_type {hook_type}")
+                        fqn_for_logging = module_id_to_fqn.get(id(self), None)
+                        logger.debug(
+                            f" fqn: {fqn_for_logging} " +
+                            f"_cl_ {type(self)} " +
+                            f"arg_dtypes {[arg.dtype if isinstance(arg, torch.Tensor) else None for arg in args]} " +
+                            f"hook_type {hook_type}")
 
                     if hook_type is HookType.OP_HOOKS:
                         # before hooks
                         qstate: AutoQuantizationState = \
                             parent_module._auto_quant_state  # type: ignore[union-attr, assignment]
-                        if enable_logging:
-                            logger.debug(qstate)
                         qstate.validate_cur_op(cur_module)
 
                         # If we are in this hook, `cur_module` is a leaf module.
@@ -508,8 +515,6 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
 
                     elif hook_type is HookType.MODULE_IO_HOOKS:
                         cur_qstate: AutoQuantizationState = cur_module._auto_quant_state
-                        if enable_logging:
-                            logger.debug(cur_qstate)
 
                         cur_qstate.reset_to_new_call()
 
@@ -532,32 +537,28 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                         cur_qstate.validate_is_at_last_seen_idx()
 
                     elif hook_type is HookType.ARG_DEQUANTS:
-                        # disabling torch function to prevent infinite recursion on
-                        # getset
                         # TODO(future PR): handle more dtypes
-                        with torch._C.DisableTorchFunction():
-                            new_args = []
-                            for arg in args:
-                                if isinstance(arg, torch.Tensor) and arg.is_quantized:
-                                    dequant = arg.dequantize().as_subclass(
-                                        QuantizationConvertTensorProxy)  # type: ignore[arg-type]
-                                    new_args.append(dequant)
-                                else:
-                                    new_args.append(arg)
-                            args = tuple(new_args)
+                        new_args = []
+                        for arg in args:
+                            if isinstance(arg, torch.Tensor) and arg.is_quantized:
+                                dequant = arg.dequantize().as_subclass(
+                                    QuantizationConvertTensorProxy)  # type: ignore[arg-type]
+                                new_args.append(dequant)
+                            else:
+                                new_args.append(arg)
+                        args = tuple(new_args)
                         output = orig_module_call(self, *args, **kwargs)
 
                     else:
                         output = orig_module_call(self, *args, **kwargs)
 
                     if enable_logging:
-                        with torch._C.DisableTorchFunction():
-                            logger.debug(
-                                f"_patched_module_call {type(self)} " +
-                                # f"out {type(output)} " +
-                                f"dtype {output.dtype if isinstance(output, torch.Tensor) else None} " +
-                                "end")
-                            logger.debug(f"ending fqn {fqn}\n")
+                        fqn_for_logging = module_id_to_fqn.get(id(self), None)
+                        logger.debug(
+                            f" fqn: {fqn_for_logging} " +
+                            f"_cl_ {type(self)} " +
+                            f"dtype {output.dtype if isinstance(output, torch.Tensor) else None} " +
+                            "end")
                     return output
                 finally:
                     module_stack.pop()
