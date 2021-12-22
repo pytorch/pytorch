@@ -33,10 +33,10 @@ class InstanceNormImpl : public torch::nn::NormImplBase<D, Derived, InstanceNorm
   Tensor forward(const Tensor& input) {
     this->_check_input_dim(input);
 
-    // check if input does not have a batch-dim
     // For InstanceNorm1D, 2D is unbatched and 3D is batched
     // For InstanceNorm2D, 3D is unbatched and 4D is batched
     // For InstanceNorm3D, 4D is unbatched and 5D is batched
+    // check if input does not have a batch-dim
     if (input.dim() == D + 1) {
       return this->handle_no_batch_input(input);
     }
