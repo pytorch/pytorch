@@ -178,8 +178,9 @@ Tensor autograd functions
     :toctree: generated
     :nosignatures:
 
-    Function.backward
     Function.forward
+    Function.backward
+    Function.jvp
 
 Context method mixins
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

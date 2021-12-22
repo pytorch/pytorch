@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Owner(s): ["oncall: r2p"]
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -595,6 +596,3 @@ class ElasticLaunchTest(unittest.TestCase):
             ]
         )
         # nothing to validate, just make sure it runs
-
-    def test_get_default_executable(self):
-        self.assertEqual(sys.executable, launch.get_executable())

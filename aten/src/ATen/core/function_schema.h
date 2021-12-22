@@ -4,7 +4,7 @@
 #include <c10/util/string_view.h>
 #include <c10/util/irange.h>
 #include <ATen/core/jit_type.h>
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/alias_info.h>
 #include <ATen/core/operator_name.h>
@@ -170,6 +170,10 @@ inline bool operator==(const Argument& lhs, const Argument& rhs) {
           && (lhs.alias_info() == rhs.alias_info()
               || (lhs.alias_info() != nullptr && rhs.alias_info() != nullptr
                    && *lhs.alias_info() == *rhs.alias_info()));
+}
+
+inline bool operator!=(const Argument& lhs, const Argument& rhs) {
+  return !(lhs == rhs);
 }
 
 bool operator==(const FunctionSchema& lhs, const FunctionSchema& rhs);
