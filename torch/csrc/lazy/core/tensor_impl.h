@@ -32,19 +32,17 @@ class TORCH_API LTCTensorImpl final : public c10::TensorImpl {
 
   void shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) override;
 
+  int64_t size(int64_t d) const override;
+
+#ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
   at::IntArrayRef sizes() const override;
-
   int64_t dim() const override;
-
   int64_t numel() const override;
 
   bool is_contiguous(at::MemoryFormat memory_format) const override;
-
-  int64_t size(int64_t d) const override;
-
   const at::Storage& storage() const override;
-
   bool has_storage() const override { return false; }
+#endif  // C10_DISABLE_TENSORIMPL_EXTENSIBILITY
 
  private:
   void setup_size_properties();
