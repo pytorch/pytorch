@@ -115,7 +115,7 @@ class InstanceNorm1d(_InstanceNorm):
 
     Args:
         num_features: :math:`C` from an expected input of size
-            :math:`(N, C, L)` or :math:`L` from input of size :math:`(N, L)`
+            :math:`(N, C, L)` or :math:`(C, L)`
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
@@ -161,7 +161,7 @@ class LazyInstanceNorm1d(_LazyNormBase, _InstanceNorm):
 
     Args:
         num_features: :math:`C` from an expected input of size
-            :math:`(N, C, L)` or :math:`L` from input of size :math:`(N, L)`
+            :math:`(N, C, L)` or :math:`(C, L)`
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
@@ -171,6 +171,10 @@ class LazyInstanceNorm1d(_LazyNormBase, _InstanceNorm):
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics and always uses batch
             statistics in both training and eval modes. Default: ``False``
+
+    Shape:
+        - Input: :math:`(N, C, L)` or :math:`(C, L)`
+        - Output: :math:`(N, C, L)` or :math:`(C, L)` (same shape as input)
     """
 
     cls_to_become = InstanceNorm1d  # type: ignore[assignment]
@@ -227,7 +231,7 @@ class InstanceNorm2d(_InstanceNorm):
 
     Args:
         num_features: :math:`C` from an expected input of size
-            :math:`(N, C, H, W)`
+            :math:`(N, C, H, W)` or :math:`(C, H, W)`
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
@@ -273,7 +277,7 @@ class LazyInstanceNorm2d(_LazyNormBase, _InstanceNorm):
 
     Args:
         num_features: :math:`C` from an expected input of size
-            :math:`(N, C, H, W)`
+            :math:`(N, C, H, W)` or :math:`(C, H, W)`
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
@@ -283,6 +287,10 @@ class LazyInstanceNorm2d(_LazyNormBase, _InstanceNorm):
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics and always uses batch
             statistics in both training and eval modes. Default: ``False``
+
+    Shape:
+        - Input: :math:`(N, C, H, W)` or :math:`(C, H, W)`
+        - Output: :math:`(N, C, H, W)` or :math:`(C, H, W)` (same shape as input)
     """
 
     cls_to_become = InstanceNorm2d  # type: ignore[assignment]
@@ -339,7 +347,7 @@ class InstanceNorm3d(_InstanceNorm):
 
     Args:
         num_features: :math:`C` from an expected input of size
-            :math:`(N, C, D, H, W)`
+            :math:`(N, C, D, H, W)` or :math:`(C, D, H, W)`
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
@@ -385,7 +393,7 @@ class LazyInstanceNorm3d(_LazyNormBase, _InstanceNorm):
 
     Args:
         num_features: :math:`C` from an expected input of size
-            :math:`(N, C, D, H, W)`
+            :math:`(N, C, D, H, W)` or :math:`(C, D, H, W)`
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
@@ -395,6 +403,10 @@ class LazyInstanceNorm3d(_LazyNormBase, _InstanceNorm):
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics and always uses batch
             statistics in both training and eval modes. Default: ``False``
+
+    Shape:
+        - Input: :math:`(N, C, D, H, W)` or :math:`(C, D, H, W)`
+        - Output: :math:`(N, C, D, H, W)` or :math:`(C, D, H, W)` (same shape as input)
     """
 
     cls_to_become = InstanceNorm3d  # type: ignore[assignment]
