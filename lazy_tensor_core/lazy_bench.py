@@ -389,10 +389,10 @@ def lazy_overhead_experiment(args, results, benchmark, lazy_benchmark):
     results.append(overhead)
     output_csv(
         os.path.join(args.output_dir, f"lazy_overheads_{args.test}_{get_unique_suffix()}.csv"),
-        ("dev", "name", "overhead", "pvalue"),
-    ).writerow([current_device, current_name, f"{overhead:.4f}", f"{pvalue:.4e}"])
+        ("dev", "name", "test", "overhead", "pvalue"),
+    ).writerow([current_device, current_name, args.test,  f"{overhead:.4f}", f"{pvalue:.4e}"])
     print(f"{short_name(name, limit=30):<30} {current_device:<4} {args.test:<5} {'trace overheads':<20} overhead: {overhead:.3f} pvalue: {pvalue:.2e}")
-    print(f"CIDEBUGOUTPUT,lazy_overhead_experiment,{current_name},{current_device},{overhead:.4f},{pvalue:.4e},{args.warmup},{args.repeat},{warmup_time:.2f},{bench_time:.2f}")
+    print(f"CIDEBUGOUTPUT,lazy_overhead_experiment,{current_name},{args.test},{current_device},{overhead:.4f},{pvalue:.4e},{args.warmup},{args.repeat},{warmup_time:.2f},{bench_time:.2f}")
     return (overhead, pvalue)
 
 def lazy_compute_experiment(args, experiment, results, benchmark, lazy_benchmark, sync_every_iter=False, to_dev_sync=None):
@@ -434,10 +434,10 @@ def lazy_compute_experiment(args, experiment, results, benchmark, lazy_benchmark
     results.append(speedup)
     output_csv(
         os.path.join(args.output_dir, f"lazy_compute_{args.test}_{get_unique_suffix()}.csv"),
-        ("name", "dev", "experiment", "speedup", "pvalue"),
-    ).writerow([current_name, current_device, experiment, f"{speedup:.4f}", f"{pvalue:.2e}"])
+        ("name", "dev", "experiment", "test", "speedup", "pvalue"),
+    ).writerow([current_name, current_device, experiment, args.test, f"{speedup:.4f}", f"{pvalue:.2e}"])
     print(f"{short_name(current_name, limit=30):<30} {current_device:<4} {args.test:<5} {experiment:<20} speedup:  {speedup:.3f} pvalue: {pvalue:.2e}")
-    print(f"CIDEBUGOUTPUT,lazy_compute_experiment,{current_name},{current_device},{experiment},{speedup:.4f},{pvalue:.2e},{args.warmup},{args.repeat},{warmup_time:.2f},{bench_time:.2f}")
+    print(f"CIDEBUGOUTPUT,lazy_compute_experiment,{current_name},{current_device},{experiment},{args.test},{speedup:.4f},{pvalue:.2e},{args.warmup},{args.repeat},{warmup_time:.2f},{bench_time:.2f}")
     return (speedup, pvalue)
 
 def check_results(name, correct_result, lazy_result, device):
@@ -475,13 +475,13 @@ def run_tracing_execute_noops(test, lazy_benchmark):
         ltm.mark_step()
     ltm.set_noop_execution_mode(False)
 
-def merge_with_prefix(prefix, tmp_dir, out_dir):
+def merge_with_prefix(prefix, tmp_dir, out_dir, headers):
     results = []
     rfnames = glob.glob(os.path.join(tmp_dir, prefix + "*"))
     for rfname in rfnames:
         results.extend(open(rfname).readlines()[1:]) #skip headr
-    with open(os.path.join(out_dir, prefix + "acc.csv"), "w") as acc_csv:
-        acc_csv.write(",".join(("dev", "name", "overhead", "pvalue")) + "\n")
+    with open(os.path.join(out_dir, prefix + "acc.csv"), "a+") as acc_csv:
+        acc_csv.write(",".join(headers) + "\n")
         for l in results:
             acc_csv.write(l)
 
@@ -491,7 +491,7 @@ if __name__ == "__main__" :
     parser.add_argument("--exclude", "-x", action="append", default=[], help="filter benchmarks")
     parser.add_argument("--device", "-d", default='cuda', help="cpu or cuda")
     parser.add_argument("--warmup", type=int, default=4, help="number of warmup runs")
-    parser.add_argument("--timeout", type=int, default=60 * 5, help="time allocated to each model")
+    parser.add_argument("--timeout", type=int, default=60 * 10, help="time allocated to each model")
     parser.add_argument("--repeat", "-n", type=int, default=4, help="number of timing runs (samples)")
     parser.add_argument("--inner_loop_repeat", type=int, default=10, help="repeat the computation this many times per sample")
     parser.add_argument("--fuser", type=str, choices=['noopt', 'fuser0', 'fuser1', 'fuser2'], help="0=legacy, 1=nnc, 2=nvfuser")
@@ -591,5 +591,5 @@ if __name__ == "__main__" :
         except subprocess.TimeoutExpired:
             print(f"{model_name} timed out after 5 minutes! Include it in SKIP or SKIP_TRAIN_ONLY")
 
-    merge_with_prefix("lazy_overheads_", dirpath, args.output_dir)
-    merge_with_prefix("lazy_compute_", dirpath, args.output_dir)
+    merge_with_prefix("lazy_overheads_", dirpath, args.output_dir, ("dev", "name", "test", "overhead", "pvalue"))
+    merge_with_prefix("lazy_compute_", dirpath, args.output_dir, ("name", "dev", "experiment", "test", "speedup", "pvalue"))
