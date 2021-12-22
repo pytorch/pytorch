@@ -210,7 +210,7 @@ def _convert_do_not_use(
                 replace_observer_with_quantize_dequantize_node(model.graph, node, modules)
             elif is_observed_standalone_module(modules[node.target]):
                 # TODO: move this to a separate function
-                convert = torch.ao.quantization._quantize_fx_do_not_use._convert_do_not_use
+                convert = torch.ao.quantization._quantize_fx_do_not_use._convert_do_not_use  # type: ignore[attr-defined]
                 # We know that observed standalone module is a GraphModule since
                 # it's produced by us
                 observed_standalone_module : GraphModule = modules[str(node.target)]  # type: ignore[assignment]
