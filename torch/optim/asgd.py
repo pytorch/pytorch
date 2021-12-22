@@ -115,9 +115,9 @@ def asgd(params: List[Tensor],
     """
 
     if foreach and not torch.jit.is_scripting():
-        func = multi_tensor_asgd
+        func = _multi_tensor_asgd
     else:
-        func = single_tensor_asgd
+        func = _single_tensor_asgd
 
     func(params,
          grads,
@@ -128,14 +128,14 @@ def asgd(params: List[Tensor],
          lambd=lambd)
 
 
-def single_tensor_asgd(params: List[Tensor],
-                       grads: List[Tensor],
-                       axs: List[Tensor],
-                       mus: List[float],
-                       etas: List[float],
-                       *,
-                       weight_decay: float,
-                       lambd: float):
+def _single_tensor_asgd(params: List[Tensor],
+                        grads: List[Tensor],
+                        axs: List[Tensor],
+                        mus: List[float],
+                        etas: List[float],
+                        *,
+                        weight_decay: float,
+                        lambd: float):
 
     for i, param in enumerate(params):
         grad = grads[i]
@@ -159,14 +159,14 @@ def single_tensor_asgd(params: List[Tensor],
             ax.copy_(param)
 
 
-def multi_tensor_asgd(params: List[Tensor],
-                      grads: List[Tensor],
-                      axs: List[Tensor],
-                      mus: List[float],
-                      etas: List[float],
-                      *,
-                      weight_decay: float,
-                      lambd: float):
+def _multi_tensor_asgd(params: List[Tensor],
+                       grads: List[Tensor],
+                       axs: List[Tensor],
+                       mus: List[float],
+                       etas: List[float],
+                       *,
+                       weight_decay: float,
+                       lambd: float):
 
 
     if weight_decay != 0:
