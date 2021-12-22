@@ -1,0 +1,23 @@
+filegroup(
+    name = "headers",
+    srcs = glob(
+        [
+            "*.h",
+            "impl/*.h",
+        ], exclude = [
+        ],
+    ),
+    visibility = ["//c10:__pkg__"],
+)
+
+filegroup(
+    name = "sources",
+    srcs = glob(
+        [
+            "*.cpp",
+            "impl/*.cpp",
+        ], exclude = [
+        ],
+    ),
+    visibility = ["//c10:__pkg__"],
+)
