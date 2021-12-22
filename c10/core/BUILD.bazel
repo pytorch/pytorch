@@ -1,6 +1,32 @@
 load("@rules_cc//cc:defs.bzl", "cc_library")
 
 cc_library(
+    name = "base",
+    hdrs = glob(
+        [
+            "*.h",
+            "impl/*.h",
+        ], exclude = [
+            "CPUAllocator.h",
+            "ScalarType.h",
+        ],
+    ),
+    srcs = glob(
+        [
+            "*.cpp",
+            "impl/*.cpp",
+        ], exclude = [
+            "CPUAllocator.cpp",
+        ],
+    ),
+    deps = [
+        ":ScalarType",
+        "//c10/util",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "ScalarType",
     hdrs = ["ScalarType.h"],
     deps = ["//c10/util:base"],
@@ -21,12 +47,8 @@ filegroup(
 
 filegroup(
     name = "sources",
-    srcs = glob(
-        [
-            "*.cpp",
-            "impl/*.cpp",
-        ], exclude = [
-        ],
-    ),
+    srcs = [
+        "CPUAllocator.cpp",
+    ],
     visibility = ["//c10:__pkg__"],
 )
