@@ -71,6 +71,7 @@ cc_library(
     copts = ["-DCAFFE2_BUILD_MAIN_LIB"],
     deps = [
         ":headers",
+        "//c10/core:ScalarType",
     ] + if_cuda(
         ["@cuda"],
         [],

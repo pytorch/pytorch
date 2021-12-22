@@ -1,3 +1,12 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+cc_library(
+    name = "ScalarType",
+    hdrs = ["ScalarType.h"],
+    deps = ["//c10/util:base"],
+    visibility = ["//visibility:public"],
+)
+
 filegroup(
     name = "headers",
     srcs = glob(
