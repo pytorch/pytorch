@@ -119,6 +119,10 @@ void IrCloner::handle(const GatherOp* op) {
   clone_ = new GatherOp(op, this);
 }
 
+void IrCloner::handle(const ViewOp* op) {
+  clone_ = new ViewOp(op, this);
+}
+
 void IrCloner::handle(const Split* split) {
   clone_ = new Split(split, this);
 }

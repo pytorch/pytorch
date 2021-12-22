@@ -567,6 +567,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
        ${TORCH_SRC_DIR}/csrc/jit/mobile/train/optim/sgd.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/train/random.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/train/sequential.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/upgrader_mobile.cpp
        )
     list(APPEND TORCH_SRCS ${MOBILE_SRCS})
     list(APPEND TORCH_SRCS ${LITE_EAGER_SYMOBLICATION_SRCS})
@@ -961,8 +962,11 @@ if(USE_CUDA OR USE_ROCM)
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/broadcast.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/fp16_support.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/bf16_support.cu
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/grid_broadcast.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/grid_reduction.cu
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/grid_sync.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/helpers.cu
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/index_utils.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/random_numbers.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/tensor.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/welford.cu
