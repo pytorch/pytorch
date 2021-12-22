@@ -1469,7 +1469,7 @@ Tensor stack(TensorList tensors, int64_t dim) {
   TORCH_CHECK(tensors.size() > 0,
            "stack expects a non-empty TensorList");
   auto wrapped_dim = maybe_wrap_dim(dim, tensors[0].ndimension()+1);
-  if (wrapped_dim < tensors[0].ndimension()) {
+  if (wrapped_dim < tensors[0].ndimension() && !tensors[0].is_sparse()) {
     check_stack_inputs(tensors, wrapped_dim);
     auto result_sizes = tensors[0].sizes().vec();
     result_sizes.insert(result_sizes.begin() + wrapped_dim, tensors.size());
@@ -1499,7 +1499,7 @@ Tensor& stack_out(TensorList tensors, int64_t dim, Tensor& result) {
   TORCH_CHECK(tensors.size() > 0,
            "stack expects a non-empty TensorList");
   auto wrapped_dim = maybe_wrap_dim(dim, tensors[0].ndimension()+1);
-  if (wrapped_dim < tensors[0].ndimension()) {
+  if (wrapped_dim < tensors[0].ndimension() && !tensors[0].is_sparse()) {
     check_stack_inputs(tensors, wrapped_dim);
     auto result_sizes = tensors[0].sizes().vec();
     result_sizes.insert(result_sizes.begin() + wrapped_dim, tensors.size());
