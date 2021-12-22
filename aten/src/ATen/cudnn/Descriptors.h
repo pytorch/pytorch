@@ -132,6 +132,7 @@ class TORCH_CUDA_CPP_API TensorDescriptor : public Descriptor<
   // broadcasting size 1 dimensions.
 
   void set(const at::Tensor &t, size_t pad = 0);
+  void set(const at::Tensor &t, at::MemoryFormat memory_format, size_t pad = 0);
   void set(cudnnDataType_t dataType, IntArrayRef sizes, IntArrayRef strides, size_t pad = 0);
 
   void print();
