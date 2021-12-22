@@ -16,6 +16,8 @@ import itertools
 
 from torch.testing._internal.common_utils import TEST_WITH_TSAN
 
+import subprocess
+
 @unittest.skipUnless(torch.backends.xnnpack.enabled,
                      " XNNPACK must be enabled for these tests."
                      " Please build with USE_XNNPACK=1.")
@@ -104,6 +106,7 @@ class TestXNNPACKOps(TestCase):
         if use_bias:
             bias = torch.rand((output_channels))
 
+        print((subprocess.check_output("lscpu", shell=True).strip()).decode())
         print('input size(): ', input_data.size(), '; format: ', format)
         ref_result = F.conv2d(input_data, weight, bias,
                               strides, paddings, dilations, groups)
@@ -519,6 +522,7 @@ class TestXNNPACKSerDes(TestCase):
                >= dilations[1] * (kernels[1] - 1) + 1)
 
         input_data = torch.rand((batch_size, input_channels, height, width))
+        print('input size(): ', input_data.size(), '; format: ', format)
         if (format is not None):
             input_data = input_data.contiguous(memory_format=format)
         conv_weight = torch.rand((output_channels, input_channels_per_group, kernel_h, kernel_w))
