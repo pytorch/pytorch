@@ -9927,6 +9927,7 @@ op_db: List[OpInfo] = [
            op=torch.linalg.lu_factor,
            dtypes=floating_and_complex_types(),
            supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_linalg_lu,
            skips=(
                # Call to .item<int64_t>() in checkErrors
@@ -9938,6 +9939,7 @@ op_db: List[OpInfo] = [
            op=torch.linalg.lu_factor_ex,
            dtypes=floating_and_complex_types(),
            supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_linalg_lu,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack]),
     OpInfo('linalg.lu',
@@ -9945,19 +9947,21 @@ op_db: List[OpInfo] = [
            op=torch.linalg.lu,
            dtypes=floating_and_complex_types(),
            supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_linalg_lu,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack]),
     OpInfo('lu_unpack',
            op=torch.lu_unpack,
            dtypes=floating_and_complex_types(),
            supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_lu_unpack,
            ),
     OpInfo('lu',
            op=torch.lu,
            dtypes=floating_and_complex_types(),
            supports_forward_ad=True,
-           supports_fwgrad_bwgrad=False,  # need: lu_unpack
+           supports_fwgrad_bwgrad=True,
            # https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
            supports_out=False,
@@ -9978,7 +9982,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            check_batched_gradgrad=False,
            supports_forward_ad=True,
-           supports_fwgrad_bwgrad=False,  # need: lu_unpack
+           supports_fwgrad_bwgrad=True,
            # See https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_lu_solve,
@@ -12923,6 +12927,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            supports_inplace_autograd=False,
+           supports_scripting=False,
            op=torch.Tensor.__getitem__,
            skips=(
                # ZeroTensors are immutable. Please use the materialized zero tensor obtained using .clone()
