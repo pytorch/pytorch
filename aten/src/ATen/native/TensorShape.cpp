@@ -1510,7 +1510,7 @@ Tensor& stack_out(TensorList tensors, int64_t dim, Tensor& result) {
     if (strides.has_value()) {
       //can take fast cat path
       auto result_view = result.view(cat_sizes);
-      at::cat_out(result_view, tensors, dim);
+      at::cat_out(result_view, tensors, wrapped_dim);
       return result;
     }
   }
