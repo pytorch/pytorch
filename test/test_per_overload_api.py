@@ -1,8 +1,5 @@
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests
-from torch.testing._internal.logging_tensor import LoggingTensor, log_input, capture_logs, no_dispatch
-from torch.utils._pytree import tree_map
-from torch.utils._python_dispatch import enable_python_mode
 import copy
 
 class TestPerOverloadAPI(TestCase):

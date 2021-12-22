@@ -25,6 +25,8 @@ def dl_open_guard():
     if _SET_GLOBAL_FLAGS:
         sys.setdlopenflags(old_flags)
 
+# Each OpOverload object contains pointer to a a specific operator overload, a pointer to the parent `OpOverloadPacket` object.
+# You can obtain an OpOverload object through attribute query on OpOverloadPacket.
 class OpOverload:
     def __init__(self, overloadpacket, op, schema):
         self.__op = op
@@ -63,7 +65,9 @@ class OpOverload:
 
     # TODO: add more methods to expose information about input and output arguments
 
-class OpOverloadPacket():
+# OpOverloadPacket class contains pointer to a base unresolved operator that doesn't correspond to a specific operator
+# You can obtain an OpOverload object through attribute query.
+class OpOverloadPacket:
     def __init__(self, qualified_op_name, op_name, op):
         # These attributes are accessible on the object through the properties
         # defined below but are immutable
@@ -95,10 +99,8 @@ class OpOverloadPacket():
         if key == '__file__':
             return 'torch.ops'
 
-        throw_error = False
-
         try:
-            use_key = "" if key == 'default' else key
+            use_key = '' if key == 'default' else key
             # TODO: disallow access to overloads registered by JIT
             op_ = torch._C._get_operation_overload(self.__qualified_op_name, use_key)
             schema = torch._C._get_schema(self.__qualified_op_name, use_key)
@@ -113,15 +115,7 @@ class OpOverloadPacket():
                 out = getattr(self.__op, key)
                 return out
             except AttributeError:
-                throw_error = True
-
-        # We throw an error here as opposed to above since the stack trace and error message
-        # printed in that case is a bit confusing:
-        # RuntimeError: Found no matching schema
-        # During handling of the above exception, another exception occurred:
-        # AttributeError ...
-        if throw_error:
-            raise AttributeError("'{}' object has no attribute '{}'".format(str(self), key))
+                raise AttributeError("'{}' object has no attribute '{}'".format(str(self), key)) from None
 
     def __call__(self, *args, **kwargs):
         # overloading __call__ to ensure torch.ops.foo.bar() is still callable from JIT
