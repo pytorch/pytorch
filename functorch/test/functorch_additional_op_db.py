@@ -258,3 +258,42 @@ additional_op_db.append(
         sample_inputs_func=sample_inputs_embedding,
         supports_out=False,
     ))
+
+
+def sample_inputs_getitem(op_info, device, dtype, requires_grad, **kwargs):
+    S = 5
+    test_args = [
+        ([1, 2],),
+        (slice(0, 3),),
+        ([slice(0, 3), 1],),
+        ([[0, 2, 3], [1, 3, 3], [0, 0, 2]],),
+        ([[0, 0, 3], [1, 1, 3], [0, 0, 2]],),
+        ([slice(None), slice(None), [0, 3]],),
+        ([slice(None), [0, 3], slice(None)],),
+        ([[0, 3], slice(None), slice(None)],),
+        ([[0, 3], [1, 2], slice(None)],),
+        ([[0, 3], ],),
+        ([[0, 3], slice(None)],),
+        ([[0, 3], Ellipsis],),
+        # index_backward is not CompositeCompliant TODO.
+        # ([[0, 2, 3], [1, 3, 3], torch.LongTensor([0, 0, 2])],),
+    ]
+
+    return tuple(SampleInput(
+        make_tensor((S, S, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
+        args=args)
+        for args in test_args)
+
+
+# TODO: split PyTorch's __getitem__. The problem is we don't support indexing
+# with masks with vmap.
+additional_op_db.append(
+    OpInfo('__getitem__',
+           variant_test_name='functorch',
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           supports_out=False,
+           supports_inplace_autograd=False,
+           supports_scripting=False,
+           op=torch.Tensor.__getitem__,
+           assert_jit_shape_analysis=False,  # TODO: support index.Tensor()
+           sample_inputs_func=sample_inputs_getitem,))
