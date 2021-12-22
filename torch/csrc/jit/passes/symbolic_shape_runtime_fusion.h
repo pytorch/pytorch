@@ -25,7 +25,9 @@ namespace jit {
 // shape propagation fails to propagate # of dims or if complete shapes on
 // inputs not set
 
-TORCH_API bool GenerateGuard(Node* tensorexpr_graph_node);
+TORCH_API bool GenerateGuard(
+    Node* tensorexpr_graph_node,
+    bool add_composed_op = false);
 
 } // namespace jit
 } // namespace torch
