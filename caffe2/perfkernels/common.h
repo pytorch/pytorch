@@ -105,12 +105,12 @@ In foo.cc, do:
 #endif // CAFFE2_PERF_WITH_AVX2
 
 #ifdef CAFFE2_PERF_WITH_AVX
-#define AVX_DO(funcname, ...)                  \
-  {                                            \
+#define AVX_DO(funcname, ...)                                               \
+  {                                                                         \
     static const bool isDo = cpuinfo_initialize() && cpuinfo_has_x86_avx(); \
-    if (isDo) {                                \
-      return funcname##__avx(__VA_ARGS__);     \
-    }                                          \
+    if (isDo) {                                                             \
+      return funcname##__avx(__VA_ARGS__);                                  \
+    }                                                                       \
   }
 #define AVX_F16C_DO(funcname, ...)                                            \
   {                                                                           \

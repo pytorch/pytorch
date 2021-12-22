@@ -65,23 +65,35 @@ inline c10::optional<double> get_scale_value(c10::optional<c10::ArrayRef<double>
 
 using scale_t = c10::optional<double>;
 using upsampling_nearest1d = void(*)(const Tensor& output, const Tensor& input, scale_t scales_w);
+using _upsampling_nearest_exact1d = void(*)(const Tensor& output, const Tensor& input, scale_t scales_w);
 using upsampling_nearest2d = void(*)(const Tensor& output, const Tensor& input, scale_t scales_h, scale_t scales_w);
+using _upsampling_nearest_exact2d = void(*)(const Tensor& output, const Tensor& input, scale_t scales_h, scale_t scales_w);
 using upsampling_nearest3d = void(*)(const Tensor& output, const Tensor& input, scale_t scales_d, scale_t scales_h, scale_t scales_w);
+using _upsampling_nearest_exact3d = void(*)(const Tensor& output, const Tensor& input, scale_t scales_d, scale_t scales_h, scale_t scales_w);
 using upsampling_linear1d = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_w);
 using upsampling_bilinear2d = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_h, scale_t scales_w);
+using _upsampling_bilinear2d_aa = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_h, scale_t scales_w);
 using upsampling_trilinear3d = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_d, scale_t scales_h, scale_t scales_w);
 using upsampling_bicubic2d = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_h, scale_t scales_w);
 DECLARE_DISPATCH(upsampling_nearest1d, upsample_nearest1d_kernel);
+DECLARE_DISPATCH(_upsampling_nearest_exact1d, _upsample_nearest_exact1d_kernel);
 DECLARE_DISPATCH(upsampling_nearest2d, upsample_nearest2d_kernel);
+DECLARE_DISPATCH(_upsampling_nearest_exact2d, _upsample_nearest_exact2d_kernel);
 DECLARE_DISPATCH(upsampling_nearest3d, upsample_nearest3d_kernel);
+DECLARE_DISPATCH(_upsampling_nearest_exact3d, _upsample_nearest_exact3d_kernel);
 DECLARE_DISPATCH(upsampling_nearest1d, upsample_nearest1d_backward_kernel);
+DECLARE_DISPATCH(_upsampling_nearest_exact1d, _upsample_nearest_exact1d_backward_kernel);
 DECLARE_DISPATCH(upsampling_nearest2d, upsample_nearest2d_backward_kernel);
+DECLARE_DISPATCH(_upsampling_nearest_exact2d, _upsample_nearest_exact2d_backward_kernel);
 DECLARE_DISPATCH(upsampling_nearest3d, upsample_nearest3d_backward_kernel);
+DECLARE_DISPATCH(_upsampling_nearest_exact3d, _upsample_nearest_exact3d_backward_kernel);
 DECLARE_DISPATCH(upsampling_linear1d, upsample_linear1d_kernel);
 DECLARE_DISPATCH(upsampling_bilinear2d, upsample_bilinear2d_kernel);
+DECLARE_DISPATCH(_upsampling_bilinear2d_aa, _upsample_bilinear2d_aa_kernel);
 DECLARE_DISPATCH(upsampling_trilinear3d, upsample_trilinear3d_kernel);
 DECLARE_DISPATCH(upsampling_linear1d, upsample_linear1d_backward_kernel);
 DECLARE_DISPATCH(upsampling_bilinear2d, upsample_bilinear2d_backward_kernel);
+DECLARE_DISPATCH(_upsampling_bilinear2d_aa, _upsample_bilinear2d_aa_backward_kernel);
 DECLARE_DISPATCH(upsampling_trilinear3d, upsample_trilinear3d_backward_kernel);
 DECLARE_DISPATCH(upsampling_bicubic2d, upsample_bicubic2d_kernel);
 
@@ -294,8 +306,22 @@ static inline int64_t nearest_neighbor_compute_source_index(
     const float scale,
     int64_t dst_index,
     int64_t input_size) {
+  // Index computation matching OpenCV INTER_NEAREST
+  // which is buggy and kept for BC
   const int64_t src_index =
       std::min(static_cast<int64_t>(floorf(dst_index * scale)), input_size - 1);
+  return src_index;
+}
+
+static inline int64_t nearest_neighbor_exact_compute_source_index(
+    const float scale,
+    int64_t dst_index,
+    int64_t input_size) {
+  // index_f32 = (output_index + 0.5) * scale - 0.5
+  // input_index = round(index_f32)
+  // Same as Pillow and Scikit-Image/Scipy ndi.zoom
+  const int64_t src_index =
+      std::min(static_cast<int64_t>(floorf((dst_index + 0.5) * scale)), input_size - 1);
   return src_index;
 }
 
@@ -304,6 +330,10 @@ static inline int64_t nearest_idx(
     int64_t input_size,
     int64_t output_size,
     c10::optional<double> scales) {
+  // This method specificly treats cases: output_size == input_size or
+  // output_size == 2 * input_size, that we would like to get rid of
+  // We keep this method for BC and consider as deprecated.
+  // See nearest_exact_idx as replacement
   if (output_size == input_size) {
     // scale_factor = 1, simply copy
     return output_index;
@@ -315,6 +345,18 @@ static inline int64_t nearest_idx(
     return nearest_neighbor_compute_source_index(scale, output_index, input_size);
   }
 }
+
+static inline int64_t nearest_exact_idx(
+    int64_t output_index,
+    int64_t input_size,
+    int64_t output_size,
+    c10::optional<double> scales) {
+  float scale = compute_scales_value<float>(scales, input_size, output_size);
+    return nearest_neighbor_exact_compute_source_index(scale, output_index, input_size);
+}
+
+// Define a typedef to dispatch to nearest_idx or nearest_exact_idx
+typedef int64_t (*nearest_idx_fn_t)(int64_t, int64_t, int64_t, c10::optional<double>);
 
 template <typename scalar_t>
 static scalar_t upsample_get_value_bounded(

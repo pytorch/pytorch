@@ -311,9 +311,11 @@ const SparseCsrTensor& resize_as_sparse_csr_(
     const SparseCsrTensor& src) {
   TORCH_CHECK(
       src.is_sparse_csr() && self.is_sparse_csr(),
-      "resize_as_sparse_csr_: layout for self and src must be sparse_csr but got self, src: ",
+      "resize_as_sparse_csr_: layout for self and src must be sparse_csr but got ",
       self.layout(),
-      src.layout());
+      " for self, and ",
+      src.layout(),
+      " for src");
   if (!_is_same_size_as_sparse_csr(self, src)) {
     get_sparse_csr_impl(self)->resize_as_sparse_csr_tensor_(src);
   }
