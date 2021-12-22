@@ -5,7 +5,12 @@ import warnings
 import functools
 import torch
 from torch.ao.quantization.quant_type import QuantType, quant_type_to_str
-from typing import Tuple, Any
+from typing import Tuple, Any, Union, Callable
+
+# Type for fusion patterns, it can be more complicated than the following actually,
+# see pattern.md for docs
+# TODO: not sure if typing supports recursive data types
+Pattern = Union[Callable, Tuple[Callable, Callable], Tuple[Callable, Tuple[Callable, Callable]], Any]
 
 def get_combined_dict(default_dict, additional_dict):
     d = default_dict.copy()
@@ -215,3 +220,14 @@ def calculate_qmin_qmax(quant_min: int, quant_max: int, has_customized_qrange: b
         else:
             quant_min, quant_max = 0, 15
     return quant_min, quant_max
+
+
+def _parent_name(target):
+    """
+    Turn 'foo.bar' into ['foo', 'bar']
+    """
+    r = target.rsplit('.', 1)
+    if len(r) == 1:
+        return '', r[0]
+    else:
+        return r[0], r[1]

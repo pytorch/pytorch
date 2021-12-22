@@ -6,19 +6,18 @@ import sys
 import tempfile
 import threading
 import time
-import unittest
 from datetime import timedelta
 from itertools import product
 from sys import platform
 
 import torch
-import torch.distributed as c10d
+import torch.distributed as dist
 
-if not c10d.is_available():
-    print("c10d not available, skipping tests", file=sys.stderr)
+if not dist.is_available():
+    print("distributed package not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
-import torch.distributed as dist
+import torch.distributed.distributed_c10d as c10d
 import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
 import torch.nn.functional as F
 import torch.testing._internal.common_utils as common
@@ -69,19 +68,19 @@ def gpus_for_rank(world_size):
 class AbstractTimeoutTest(object):
     def _test_store_timeout(self, backend, init_method, c2p):
         try:
-            c10d.distributed_c10d.init_process_group(
+            dist.init_process_group(
                 backend=backend,
                 init_method=init_method,
                 world_size=1,
                 rank=0,
                 timeout=timedelta(seconds=1),
             )
-            default_store = c10d.distributed_c10d._get_default_store()
+            default_store = c10d._get_default_store()
             tik = time.time()
             with self.assertRaisesRegex(RuntimeError, "Timeout"):
                 default_store.get("nonexistent key")
             tok = time.time()
-            c10d.destroy_process_group()
+            dist.destroy_process_group()
             c2p.append(float(tok - tik))
         except RuntimeError as e:
             # catch "Address already in use" error and report it to the main
@@ -562,7 +561,7 @@ class AbstractCommTest(object):
             self._verify_sequence_number_across_pg(
                 pg=process_group, verify_pg=verify_pg
             )
-            if not c10d.distributed_c10d._rank_not_in_group(process_group)
+            if not c10d._rank_not_in_group(process_group)
             else -1
         )
 
@@ -570,7 +569,7 @@ class AbstractCommTest(object):
         for i in range(10):
             t = torch.ones(1, device=torch.cuda.current_device())
             dist.all_reduce(t, group=process_group)
-            if not c10d.distributed_c10d._rank_not_in_group(process_group):
+            if not c10d._rank_not_in_group(process_group):
                 seq_num = self._verify_sequence_number_across_pg(
                     pg=process_group,
                     verify_pg=verify_pg,
@@ -582,7 +581,7 @@ class AbstractCommTest(object):
             if dist.get_rank(process_group) not in [0, 2]:
                 dist.all_reduce(t, group=process_group, async_op=True)
             # Now ranks 0 and 2 should be lagging by 1.
-            if not c10d.distributed_c10d._rank_not_in_group(process_group):
+            if not c10d._rank_not_in_group(process_group):
                 seq_num = process_group._get_sequence_number_for_group()
                 rank = dist.get_rank(process_group)
                 obj_list = [None for _ in range(dist.get_world_size(verify_pg))]
@@ -600,7 +599,7 @@ class AbstractCommTest(object):
 
     def _test_sequence_num_incremented_default_group(self, backend_name):
         torch.cuda.set_device(self.rank)
-        store = c10d.FileStore(self.file_name, self.world_size)
+        store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
             backend_name,
             world_size=self.world_size,
@@ -608,13 +607,13 @@ class AbstractCommTest(object):
             store=store,
         )
         self._test_sequence_num_incremented(
-            c10d.distributed_c10d._get_default_group(),
+            c10d._get_default_group(),
             ranks=list(i for i in range(dist.get_world_size())),
         )
 
     def _test_sequence_num_incremented_subgroup(self, backend_name):
         torch.cuda.set_device(self.rank)
-        store = c10d.FileStore(self.file_name, self.world_size)
+        store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
             backend_name,
             world_size=self.world_size,
@@ -626,7 +625,7 @@ class AbstractCommTest(object):
         self._test_sequence_num_incremented(subgroup, subgroup_ranks)
 
     def _test_sequence_num_set_default_pg(self, backend):
-        store = c10d.FileStore(self.file_name, self.world_size)
+        store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
             backend,
             world_size=self.world_size,
@@ -634,14 +633,14 @@ class AbstractCommTest(object):
             store=store,
         )
 
-        default_pg = c10d.distributed_c10d._get_default_group()
+        default_pg = c10d._get_default_group()
         seq_num = default_pg._get_sequence_number_for_group()
         obj_list = [None for _ in range(dist.get_world_size())]
         dist.all_gather_object(obj_list, seq_num)
         self.assertEqual(len(set(obj_list)), 1)
 
     def _test_sequence_num_set_new_group(self, backend):
-        store = c10d.FileStore(self.file_name, self.world_size)
+        store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
             backend,
             world_size=self.world_size,
@@ -651,11 +650,41 @@ class AbstractCommTest(object):
 
         subgroup = dist.new_group([0, 1])
 
-        if not c10d.distributed_c10d._rank_not_in_group(subgroup):
+        if not c10d._rank_not_in_group(subgroup):
             subgroup_seq = subgroup._get_sequence_number_for_group()
             obj_list = [None for _ in range(dist.get_world_size(subgroup))]
             dist.all_gather_object(obj_list, subgroup_seq, group=subgroup)
             self.assertEqual(len(set(obj_list)), 1)
+
+    def _test_warn_not_in_group(self, backend):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend,
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        in_group_ranks = list(filter(lambda x: x % 2 == 0, range(self.world_size)))
+        group = dist.new_group(in_group_ranks)
+
+        x = torch.zeros(2, 2).cuda(self.rank)
+        xs = [torch.zeros(2, 2).cuda(self.rank) for _ in range(len(in_group_ranks))]
+        if self.rank not in in_group_ranks:
+            msg = ".*{}.*does not belong to.*"
+            with self.assertWarnsOnceRegex(UserWarning, msg.format("all_gather")):
+                dist.all_gather(xs, x, group=group)
+            with self.assertWarnsOnceRegex(UserWarning, msg.format("all_reduce")):
+                dist.all_reduce(x, group=group)
+            with self.assertWarnsOnceRegex(UserWarning, msg.format("barrier")):
+                dist.barrier(group=group)
+            with self.assertWarnsOnceRegex(UserWarning, msg.format("broadcast")):
+                dist.broadcast(x, src=0, group=group)
+        else:
+            dist.all_gather(xs, x, group=group)
+            dist.all_reduce(x, group=group)
+            dist.barrier(group=group)
+            dist.broadcast(x, src=0, group=group)
+
 
 class CommTest(AbstractCommTest, MultiProcessTestCase):
     def setUp(self):
@@ -719,6 +748,25 @@ class DummyProcessGroup(dist.ProcessGroup):
 
         return DummyWork()
 
+    def barrier(self, opts=None):
+        store = c10d._get_default_store()
+        key = "TEST:DummyProcessGroup:barrier"
+        if self.rank() == 0:
+            worker_count = 0
+            # By default, TCPServer lives on rank 0. So rank 0 needs to make
+            # sure that it does not exit too early before other ranks finish
+            # using the store.
+            # Note that, _store_based_barrier does not solve this problem, as
+            # all ranks need to run at least one store.add(key, 0) before
+            # exiting, but there is no guarantee that rank 0 is still alive at
+            # that point.
+            while worker_count < self.size() - 1:
+                worker_count = store.add(key, 0)
+        else:
+            store.add(key, 1)
+
+        return DummyWork()
+
     def broadcast(self, tensor_list, opts=None):
         for tensor in tensor_list:
             tensor.add_(1)
@@ -744,13 +792,13 @@ class DummyProcessGroup(dist.ProcessGroup):
         return DummyWork()
 
 
-class PythonProcessGroupTest(MultiProcessTestCase):
+class PythonProcessGroupExtensionTest(MultiProcessTestCase):
     def setUp(self):
-        super(PythonProcessGroupTest, self).setUp()
+        super(PythonProcessGroupExtensionTest, self).setUp()
         self._spawn_processes()
 
     def tearDown(self):
-        super(PythonProcessGroupTest, self).tearDown()
+        super(PythonProcessGroupExtensionTest, self).tearDown()
         try:
             os.remove(self.file_name)
         except OSError:
@@ -763,24 +811,20 @@ class PythonProcessGroupTest(MultiProcessTestCase):
     def test_backend_class_attr(self):
         dist.Backend.register_backend(
             "dummy",
-            PythonProcessGroupTest.create_dummy
+            PythonProcessGroupExtensionTest.create_dummy
         )
         self.assertEqual(dist.Backend.DUMMY, "DUMMY")
         self.assertEqual(
             dist.Backend._plugins["DUMMY"],
-            PythonProcessGroupTest.create_dummy
+            PythonProcessGroupExtensionTest.create_dummy
         )
 
     @staticmethod
     def create_dummy(store, rank, size, timeout):
         return DummyProcessGroup(rank, size)
 
-    @unittest.skipIf(
-        common.IS_MACOS,
-        "Python c10d extension is not yet supported on MacOS"
-    )
     def test_collectives(self):
-        dist.Backend.register_backend("dummy", PythonProcessGroupTest.create_dummy)
+        dist.Backend.register_backend("dummy", PythonProcessGroupExtensionTest.create_dummy)
 
         os.environ['MASTER_ADDR'] = 'localhost'
         os.environ['MASTER_PORT'] = '6789'
@@ -810,14 +854,11 @@ class PythonProcessGroupTest(MultiProcessTestCase):
         dist.reduce_scatter(output_tensor, input_tensor_list)
         self.assertEqual(output_tensor, torch.zeros(2, 2) + 1)
 
+        dist.barrier()
         dist.destroy_process_group()
 
-    @unittest.skipIf(
-        common.IS_MACOS,
-        "Python c10d extension is not yet supported on MacOS"
-    )
     def test_send_recv(self):
-        dist.Backend.register_backend("dummy", PythonProcessGroupTest.create_dummy)
+        dist.Backend.register_backend("dummy", PythonProcessGroupExtensionTest.create_dummy)
 
         os.environ['MASTER_ADDR'] = 'localhost'
         os.environ['MASTER_PORT'] = '6789'
@@ -833,8 +874,10 @@ class PythonProcessGroupTest(MultiProcessTestCase):
         dist.recv(input_tensor, (self.rank + 1) % self.world_size)
         self.assertEqual(input_tensor, torch.zeros(2, 2) + 2)
 
+        dist.barrier()
         # intentionally not calling into `destroy_process_group` as not all
         # user applications would explicitly that.
+
 
 
 if __name__ == "__main__":

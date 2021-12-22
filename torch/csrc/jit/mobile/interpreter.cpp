@@ -23,7 +23,7 @@ InterpreterState::InterpreterState(const Code& code) {
 }
 
 namespace {
-static thread_local DebugHandle exception_debug_handle_{-1};
+static thread_local std::vector<DebugHandle> exception_debug_handles_;
 void createObject(Stack& stack, const at::ClassTypePtr& type) {
   auto userObj = c10::ivalue::Object::create(
       c10::StrongTypePtr(type->compilation_unit(), type),
@@ -45,8 +45,8 @@ void isinstance(Stack& stack, at::ArrayRef<at::TypePtr> types) {
 
 using namespace at;
 
-int64_t getInterpretersExceptionDebugHandle() {
-  return exception_debug_handle_;
+const std::vector<DebugHandle>& getInterpretersExceptionDebugHandles() {
+  return exception_debug_handles_;
 }
 
 void InterpreterState::enterFrame(const Code& code) {
@@ -60,11 +60,23 @@ void InterpreterState::leaveFrame() {
   frames_.pop_back();
 }
 
-void InterpreterState::saveExceptionDebugHandle() {
-  const auto& frame = frames_.back();
-  if (auto handle = frame.getDebugHandle()) {
-    exception_debug_handle_ = *handle;
+void InterpreterState::saveExceptionDebugHandles() {
+  std::vector<DebugHandle> exception_debug_handles;
+  for (auto frame = frames_.crbegin(); frame != frames_.crend(); frame++) {
+    size_t pc = frame->getPC() - (frame != frames_.crbegin() ? 1 : 0);
+    if (auto handle = frame->getDebugHandle(pc)) {
+      exception_debug_handles.push_back(*handle);
+    } else {
+      exception_debug_handles.push_back(-1);
+    }
   }
+  exception_debug_handles_ = std::move(exception_debug_handles);
+}
+
+void InterpreterState::callFunction(torch::jit::Function& f, Stack& stack) {
+  bool newFrame =
+      f.call(stack, [&](const mobile::Code& code) { enterFrame(code); });
+  (frames_.rbegin() + (newFrame ? 1 : 0))->step();
 }
 
 bool InterpreterState::run(Stack& stack) {
@@ -82,12 +94,11 @@ bool InterpreterState::run(Stack& stack) {
         debug_handle = *handle;
       }
 
-      // std::cout << "RUNNING " << pc << " "
-      //           << code_->instructions_with_handles_[pc].instruction;
+      // std::cout << "RUNNING " << pc << " " << code.instructions_[pc];
       // if (inst.op == OP) {
-      //   std::cout << ", " << code_->op_names_[inst.X].name;
-      //   if (!code_->op_names_[inst.X].overload_name.empty()) {
-      //     std::cout << "." << code_->op_names_[inst.X].overload_name;
+      //   std::cout << ", " << code.op_names_[inst.X].name;
+      //   if (!code.op_names_[inst.X].overload_name.empty()) {
+      //     std::cout << "." << code.op_names_[inst.X].overload_name;
       //   }
       // }
       // std::cout << std::endl;
@@ -125,9 +136,8 @@ bool InterpreterState::run(Stack& stack) {
           frame.step();
         } break;
         case CALL: {
-          auto& function = frame.getCode().functions_.at(inst.X);
-          frame.step();
-          enterFrame(*function->get_code());
+          auto& function = *frame.getCode().functions_.at(inst.X);
+          callFunction(function, stack);
         } break;
         case INTERFACE_CALL: {
           torch::jit::Function& method =
@@ -137,8 +147,7 @@ bool InterpreterState::run(Stack& stack) {
                   ->getMethod(code.constants_[inst.X].toStringRef());
           RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS(
               method.name(), debug_handle, stack);
-          method.run(stack);
-          frame.step();
+          callFunction(method, stack);
         } break;
         case LOAD:
           stack.emplace_back(reg(inst.X));
@@ -280,15 +289,15 @@ bool InterpreterState::run(Stack& stack) {
       }
       // This exception must be caught first as it derived from c10::Error
     } catch (c10::BackendRuntimeException& e) {
-      saveExceptionDebugHandle();
+      saveExceptionDebugHandles();
       TORCH_RETHROW(e);
     } catch (c10::Error& error) {
       // Reason for catching and rethrowing the error is so that we can
       // set the exception pc that is queried later
-      saveExceptionDebugHandle();
+      saveExceptionDebugHandles();
       TORCH_RETHROW(error);
     } catch (...) {
-      saveExceptionDebugHandle();
+      saveExceptionDebugHandles();
       throw;
     }
     //  for (auto val : stack) {

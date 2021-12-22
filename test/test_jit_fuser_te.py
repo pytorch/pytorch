@@ -1,3 +1,5 @@
+# Owner(s): ["NNC"]
+
 import operator
 import unittest
 import contextlib
@@ -6,6 +8,7 @@ import torch
 import torch.nn.functional as F
 from torch.testing import FileCheck
 from typing import List
+import warnings
 
 # these needs to be set before `common_utils`
 # infers `GRAPH_EXECUTOR`.
@@ -1990,6 +1993,7 @@ works_list = [
     'ceil',
     'clamp',
     'clamp.scalar',
+    'contiguous',
     'cos',
     'cosh',
     'div.no_rounding_mode',
@@ -2034,6 +2038,9 @@ works_list = [
     'nn.functional.leaky_relu',
     'nn.functional.relu',
     'nn.functional.relu6',
+    'nn.functional.softsign',
+    'nn.functional.tanhshrink',
+    'nn.functional.threshold',
     'permute',
     'pow',
     'reciprocal',
@@ -2071,6 +2078,15 @@ works_list = [
     'int',
     'long',
     'short',
+    'bool.channels_last',
+    'byte.channels_last',
+    'char.channels_last',
+    'double.channels_last',
+    'float.channels_last',
+    'half.channels_last',
+    'int.channels_last',
+    'long.channels_last',
+    'short.channels_last',
 ]
 
 known_failures = [
@@ -2156,7 +2172,9 @@ def f({', '.join(param_names)}):
         if get_name(op) in skip_ops:
             return
         try:
-            self.te_compile(device, dtype, op)
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore', TracerWarning)
+                self.te_compile(device, dtype, op)
         except Exception as e:
             pass
         else:

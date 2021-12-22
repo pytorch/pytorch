@@ -21,4 +21,12 @@ inline void check_cat_shape_except_dim(const Tensor & first, const Tensor & seco
    }
  }
 
+inline void check_cat_no_zero_dim(at::ArrayRef<Tensor> tensors) {
+  for(const auto i : c10::irange(tensors.size())) {
+    auto& t = tensors[i];
+    TORCH_CHECK(t.dim() > 0,
+             "zero-dimensional tensor (at position ", i, ") cannot be concatenated");
+  }
+}
+
 }} // namespace at::native
