@@ -72,6 +72,7 @@ LABEL_CIFLOW_SLOW_GRADCHECK = "ciflow/slow-gradcheck"
 LABEL_CIFLOW_DOCKER = "ciflow/docker"
 LABEL_CIFLOW_IOS = "ciflow/ios"
 LABEL_CIFLOW_MACOS = "ciflow/macos"
+LABEL_CIFLOW_TRUNK = "ciflow/trunk"
 
 
 @dataclass
@@ -114,6 +115,8 @@ class CIFlowConfig:
 
     def __post_init__(self) -> None:
         self.labels.add(LABEL_CIFLOW_ALL)
+        if LABEL_CIFLOW_SCHEDULED not in self.labels:
+            self.labels.add(LABEL_CIFLOW_TRUNK)
         assert all(label.startswith(LABEL_CIFLOW_PREFIX) for label in self.labels)
         self.gen_root_job_condition()
 
@@ -166,6 +169,7 @@ class CIWorkflow:
     only_run_smoke_tests_on_pull_request: bool = False
     num_test_shards_on_pull_request: int = -1
     distributed_test: bool = True
+    fx2trt_test: bool = False
     timeout_after: int = 240
     xcode_version: str = ''
 
@@ -173,6 +177,7 @@ class CIWorkflow:
     # so it's easier for both shell and Python scripts to consume it if false is represented as the empty string.
     enable_jit_legacy_test: YamlShellBool = "''"
     enable_distributed_test: YamlShellBool = "''"
+    enable_fx2trt_test: YamlShellBool = "''"
     enable_multigpu_test: YamlShellBool = "''"
     enable_nogpu_no_avx_test: YamlShellBool = "''"
     enable_nogpu_no_avx2_test: YamlShellBool = "''"
@@ -189,6 +194,9 @@ class CIWorkflow:
 
         if self.distributed_test:
             self.enable_distributed_test = 1
+
+        if self.fx2trt_test:
+            self.enable_fx2trt_test = 1
 
         # If num_test_shards_on_pull_request is not user-defined, default to num_test_shards unless we are
         # only running smoke tests on the pull request.
@@ -224,6 +232,7 @@ class CIWorkflow:
             assert LABEL_CIFLOW_CPU in self.ciflow_config.labels
         if self.is_scheduled:
             assert LABEL_CIFLOW_DEFAULT not in self.ciflow_config.labels
+            assert LABEL_CIFLOW_TRUNK not in self.ciflow_config.labels
             assert LABEL_CIFLOW_SCHEDULED in self.ciflow_config.labels
         if self.build_with_debug:
             assert self.build_environment.endswith("-debug")
@@ -291,6 +300,19 @@ WINDOWS_WORKFLOWS = [
         ciflow_config=CIFlowConfig(
             run_on_canary=True,
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_CUDA, LABEL_CIFLOW_WIN}
+        ),
+    ),
+    CIWorkflow(
+        arch="windows",
+        build_environment="periodic-win-vs2019-cuda11.5-py3",
+        cuda_version="11.5",
+        test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
+        num_test_shards=2,
+        enable_force_on_cpu_test=1,
+        is_scheduled="45 4,10,16,22 * * *",
+        ciflow_config=CIFlowConfig(
+            run_on_canary=True,
+            labels={LABEL_CIFLOW_SCHEDULED, LABEL_CIFLOW_CUDA, LABEL_CIFLOW_WIN}
         ),
     ),
     CIWorkflow(
@@ -414,7 +436,7 @@ LINUX_WORKFLOWS = [
         build_environment="linux-xenial-py3.6-clang7-asan",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang7-asan",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
-        num_test_shards=2,
+        num_test_shards=3,
         distributed_test=False,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_SANITIZERS, LABEL_CIFLOW_CPU},
@@ -487,6 +509,7 @@ LINUX_WORKFLOWS = [
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         num_test_shards=2,
+        fx2trt_test=True,
         ciflow_config=CIFlowConfig(
             labels=set([LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA]),
         ),
@@ -592,8 +615,8 @@ ANDROID_WORKFLOWS = [
 BAZEL_WORKFLOWS = [
     CIWorkflow(
         arch="linux",
-        build_environment="linux-xenial-py3.6-gcc7-bazel-test",
-        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7",
+        build_environment="linux-xenial-cuda11.3-py3.6-gcc7-bazel-test",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_BAZEL, LABEL_CIFLOW_CPU, LABEL_CIFLOW_LINUX},

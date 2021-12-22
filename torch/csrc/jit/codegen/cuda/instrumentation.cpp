@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 #ifdef _WIN32
 #include <c10/util/win32-headers.h>
