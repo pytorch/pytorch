@@ -120,30 +120,6 @@ void LTCTensorImpl::shallow_copy_from(
   generation_ = 0;
 }
 
-at::IntArrayRef LTCTensorImpl::sizes() const {
-  const_cast<LTCTensorImpl*>(this)->setup_size_properties();
-  return c10::TensorImpl::sizes();
-}
-
-int64_t LTCTensorImpl::dim() const {
-  const_cast<LTCTensorImpl*>(this)->setup_size_properties();
-  return c10::TensorImpl::dim();
-}
-
-int64_t LTCTensorImpl::numel() const {
-  const_cast<LTCTensorImpl*>(this)->setup_size_properties();
-  return c10::TensorImpl::numel();
-}
-
-bool LTCTensorImpl::is_contiguous(c10::MemoryFormat _unused) const {
-  if (tensor_.CurrentTensorData()) {
-    return tensor_.CurrentTensorData()->is_contiguous();
-  }
-  // Only check that the storage is already contiguous.
-  CHECK(is_contiguous_) << "Non-contiguous storage for lazy tensor";
-  return true;
-}
-
 int64_t LTCTensorImpl::size(int64_t d) const {
   const_cast<LTCTensorImpl*>(this)->setup_size_properties();
   return c10::TensorImpl::size(d);
@@ -172,10 +148,38 @@ void LTCTensorImpl::setup_size_properties() {
   }
 }
 
+#ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
+
+at::IntArrayRef LTCTensorImpl::sizes() const {
+  const_cast<LTCTensorImpl*>(this)->setup_size_properties();
+  return c10::TensorImpl::sizes();
+}
+
+int64_t LTCTensorImpl::dim() const {
+  const_cast<LTCTensorImpl*>(this)->setup_size_properties();
+  return c10::TensorImpl::dim();
+}
+
+int64_t LTCTensorImpl::numel() const {
+  const_cast<LTCTensorImpl*>(this)->setup_size_properties();
+  return c10::TensorImpl::numel();
+}
+
+bool LTCTensorImpl::is_contiguous(c10::MemoryFormat _unused) const {
+  if (tensor_.CurrentTensorData()) {
+    return tensor_.CurrentTensorData()->is_contiguous();
+  }
+  // Only check that the storage is already contiguous.
+  CHECK(is_contiguous_) << "Non-contiguous storage for lazy tensor";
+  return true;
+}
+
 const at::Storage& LTCTensorImpl::storage() const {
   TORCH_CHECK("Lazy tensors do not have storage");
   return storage_;
 }
+
+#endif  // C10_DISABLE_TENSORIMPL_EXTENSIBILITY
 
 }  // namespace lazy
 }  // namespace torch
