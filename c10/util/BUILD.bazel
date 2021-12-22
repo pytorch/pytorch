@@ -1,3 +1,38 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+load("//tools/config:defs.bzl", "if_cuda")
+
+cc_library(
+    name = "base",
+    hdrs = glob(
+        ["*.h"],
+        exclude = [
+            "TypeCast.h",
+            "typeid.h",
+        ],
+    ),
+    srcs = glob(
+        ["*.cpp"],
+        exclude = [
+            "TypeCast.cpp",
+            "typeid.cpp",
+        ],
+    ),
+    deps = [
+        "@fmt",
+        "//c10/macros",
+    ] + select({
+        "//c10:using_gflags": ["@com_github_gflags_gflags//:gflags"],
+        "//conditions:default": [],
+    }) + select({
+        "//c10:using_glog": ["@com_github_glog//:glog"],
+        "//conditions:default": [],
+    }) + if_cuda(
+        ["@cuda"],
+        [],
+    ),
+    visibility = ["//visibility:public"],
+)
+
 filegroup(
     name = "headers",
     srcs = glob(
@@ -10,6 +45,9 @@ filegroup(
 
 filegroup(
     name = "sources",
-    srcs = glob(["*.cpp"]),
+    srcs = [
+        "TypeCast.cpp",
+        "typeid.cpp",
+    ],
     visibility = ["//c10:__pkg__"],
 )

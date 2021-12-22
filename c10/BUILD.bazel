@@ -50,13 +50,8 @@ cc_library(
     deps = [
         ":cuda_cmake_macros_h",
         "//c10/macros",
-    ] + select({
-        ":using_gflags": ["@com_github_gflags_gflags//:gflags"],
-        "//conditions:default": [],
-    }) + select({
-        ":using_glog": ["@com_github_glog//:glog"],
-        "//conditions:default": [],
-    }),
+        "//c10/util:base",
+    ],
     visibility = ["//:__pkg__"],
 )
 
@@ -78,7 +73,6 @@ cc_library(
     copts = ["-DCAFFE2_BUILD_MAIN_LIB"],
     deps = [
         ":headers",
-        "@fmt",
     ] + if_cuda(
         ["@cuda"],
         [],
