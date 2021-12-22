@@ -1197,13 +1197,11 @@ class TestSparseCSR(TestCase):
 
         output = op(zero)
         expected = zero.to(output.dtype)
-        if (output == expected).sum() != 2:
-            raise RuntimeError("This operator should not be supported for Sparse CSR as it breaks 0->0 correspondence.")
+        self.assertEqual(output, expected, f"This operator ({op.name}) should not be supported for Sparse CSR as it breaks 0->0 correspondence.")
         zero = zero.to_sparse_csr()
         output = op(zero).to_dense()
         expected = zero.to_dense().to(output.dtype)
-        if (output == expected).sum() != 2:
-            raise RuntimeError("0->0 correspondence is not satisfied for {op.name}.")
+        self.assertEqual(output, expected, f"0->0 correspondence is not satisfied for {op.name}.")
 
     @ops(sparse_csr_unary_ufuncs)
     def test_sparse_csr_unary_out(self, device, dtype, op):
