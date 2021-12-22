@@ -45,7 +45,7 @@ struct LTCGuardImpl : public c10::impl::DeviceGuardImplInterface {
     return c10::Stream(c10::Stream::DEFAULT, device);
   }
 
-  c10::Stream exchangeStream(c10::Stream s) const noexcept override {
+  c10::Stream exchangeStream(c10::Stream _unused) const noexcept override {
     return c10::Stream(c10::Stream::DEFAULT, g_device);
   }
 
@@ -135,7 +135,7 @@ int64_t LTCTensorImpl::numel() const {
   return c10::TensorImpl::numel();
 }
 
-bool LTCTensorImpl::is_contiguous(c10::MemoryFormat memory_format) const {
+bool LTCTensorImpl::is_contiguous(c10::MemoryFormat _unused) const {
   if (tensor_.CurrentTensorData()) {
     return tensor_.CurrentTensorData()->is_contiguous();
   }
