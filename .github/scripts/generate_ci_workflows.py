@@ -82,7 +82,6 @@ class CIFlowConfig:
     labels: Set[str] = field(default_factory=set)
     trigger_action: str = 'unassigned'
     trigger_actor: str = 'pytorchbot'
-    root_job_name: str = 'ciflow_should_run'
     root_job_condition: str = ''
     label_conditions: str = ''
 
@@ -110,7 +109,6 @@ class CIFlowConfig:
                                   f"         }}}}"
 
     def reset_root_job(self) -> None:
-        self.root_job_name = ''
         self.root_job_condition = ''
 
     def __post_init__(self) -> None:
