@@ -9908,6 +9908,7 @@ op_db: List[OpInfo] = [
            aten_name='linalg_det',
            sample_inputs_func=sample_inputs_linalg_det,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack, skipCUDAIfRocm],
+           check_batched_gradgrad=False,
            supports_inplace_autograd=False,
            skips=(
                # https://github.com/pytorch/pytorch/issues/67512
@@ -9923,6 +9924,7 @@ op_db: List[OpInfo] = [
            aten_name='linalg_det',
            sample_inputs_func=sample_inputs_linalg_det_singular,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack, skipCUDAIfRocm],
+           check_batched_gradgrad=False,
            supports_inplace_autograd=False,
            skips=(
                # https://github.com/pytorch/pytorch/issues/67512
@@ -9968,9 +9970,11 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_linalg_cond,
            check_batched_gradgrad=False,
+           check_batched_forward_grad=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
-           ),
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],),
     OpInfo('linalg.eig',
            aten_name='linalg_eig',
            op=torch.linalg.eig,
@@ -10137,6 +10141,7 @@ op_db: List[OpInfo] = [
     OpInfo('linalg.matrix_norm',
            aten_name='linalg_matrix_norm',
            dtypes=floating_and_complex_types(),
+           check_batched_gradgrad=False,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            sample_inputs_func=sample_inputs_linalg_matrix_norm,
            skips=(
@@ -12883,7 +12888,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_svd,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            skips=(
-               # Fixme, forward over backward gives a numerical error
+               # FIXME forward over backward gives a numerical error
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad', dtypes=(torch.complex128,)),
            )),
     OpInfo('linalg.svdvals',
@@ -12922,9 +12927,11 @@ op_db: List[OpInfo] = [
            ),
            dtypes=floating_types(),
            supports_out=False,
+           check_batched_forward_grad=False,
            check_batched_grad=False,
            check_batched_gradgrad=False,
-           supports_forward_ad=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_pca_lowrank,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
@@ -14460,7 +14467,11 @@ op_db: List[OpInfo] = [
     OpInfo('norm',
            variant_test_name='nuc',
            sample_inputs_func=sample_inputs_norm_nuc,
-           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+           check_batched_gradgrad=False,
+           check_batched_forward_grad=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            dtypes=floating_and_complex_types(),
            dtypesIfCUDA=floating_and_complex_types(),
            skips=(
