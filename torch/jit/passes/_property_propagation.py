@@ -1,5 +1,5 @@
 """
-Tools for static analysis of PyTorch JIT
+Tools to help with tensor property propagation.
 
 This is not intended to be imported directly; please use the exposed
 functionalities in `torch.jit`.
@@ -14,8 +14,11 @@ from torch._C import Graph
 
 def apply_input_props_using_example(graph: Graph, example_input: List[Any]):
     """
-    Applys the dtype and the shape for each tensor in the graph inputs
+    Applies properties for each tensor in the graph inputs
     using the example supplied.
+
+    Currently only supports dtype and shape, but will support
+    device in the near future.
     """
     graph_inputs = list(graph.inputs())
     if len(graph_inputs) == 0:

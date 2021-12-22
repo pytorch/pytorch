@@ -4,7 +4,7 @@ from unittest.case import expectedFailure
 
 import torch
 from torch import complex32, float32, float64, int32, int64
-from torch.jit import _static_analysis
+from torch.jit.passes import _property_propagation
 from torch.testing._internal.common_methods_invocations import (
     SampleInput,
     sample_inputs_adaptive_avg_pool2d,
@@ -118,7 +118,7 @@ class TestDtypeBase(JitTestCase):
         # We need to clear shape information because torch.jit.script
         # will return a cached graph if the function is scripted twice.
         torch._C._jit_pass_erase_shape_information(graph)
-        _static_analysis.apply_input_props_using_example(graph, example_inputs)
+        _property_propagation.apply_input_props_using_example(graph, example_inputs)
         torch._C._jit_pass_propagate_shapes_on_graph(graph)
         torch._C._jit_pass_propagate_dtype(graph)
 
