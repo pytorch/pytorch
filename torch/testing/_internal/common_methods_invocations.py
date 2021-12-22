@@ -7648,12 +7648,19 @@ def sample_inputs_poisson_nll_loss(op_info, device, dtype, requires_grad, **kwar
                 for f in (True, False):
                     i1 = _make_tensor(s)
                     i2 = _make_tensor(s)
+                    # For Poisson NLL Loss,
+                    # target is assumed to be from
+                    # Poisson Distribution which
+                    # always has positive samples
+                    t1 = _make_tensor(s, low=0)
+                    t2 = _make_tensor(s, low=0)
+
                     with torch.no_grad():
                         if not li:
-                            i1 = i1.abs_()
-                            i2 = i2.abs_()
-                        t1 = _make_tensor(s, low=0).abs_()
-                        t2 = _make_tensor(s, low=0).abs_()
+                            i1.abs_()
+                            i2.abs_()
+                        t1.abs_()
+                        t2.abs_()
 
                     yield (
                         i1, t1,
