@@ -2917,6 +2917,18 @@ class TestCudaFuser(JitTestCase):
         self.assertGraphContainsExactly(graph, FUSION_GROUP, 0)
         self.assertGraphContains(graph, 'aten::relu', True)
 
+        def t_bias(x: torch.Tensor, w: torch.Tensor, bias: torch.Tensor):
+            return torch.nn.functional.conv2d(x, w, bias)
+
+        jitted_bias = torch.jit.script(t_bias)
+
+        for i in range(3):
+            jit_o = jitted_bias(inp, weight, bias)
+
+        graph = jitted_bias.graph_for(inp)
+        self.assertGraphContainsExactly(graph, FUSION_GROUP, 0)
+        self.assertGraphContains(graph, 'prim::add_optional', True)
+
     @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
