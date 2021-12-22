@@ -1,5 +1,6 @@
 #ifdef TORCH_ENABLE_LLVM
 
+#include <torch/csrc/jit/tensorexpr/external_functions.h>
 #include <torch/csrc/jit/tensorexpr/intrinsic_symbols.h>
 #include <torch/csrc/jit/tensorexpr/llvm_jit.h>
 
