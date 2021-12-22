@@ -40,36 +40,22 @@ struct TORCH_API NonUniformQuantizer : public Quantizer {
 // There is also StochasticQuantizer which is uniform but not affine
 
 /**
- * AffineQuantizer uses affine transformation to do quantization.
- *
- * For quantize:
- * Y = clamp(round(X / scale + zero_point), min, max)
- * For dequantize:
- * X = (Y - zero_point) * scale
- */
-struct TORCH_API AffineQuantizer : public UniformQuantizer {
-  explicit AffineQuantizer(ScalarType scalar_type) : UniformQuantizer(scalar_type) {}
-};
-
-// Note that we will not have Symmetric Quantizer in backend to reduce
-// complications in quantized kernel implementation.
-
-/**
- * PerTensorAffineQuantizer stores a scale and a zero_point, which is used for
+ * PerTensorQuantizer stores a scale and a zero_point, which is used for
  * all the values in the Tensor.
  */
-struct TORCH_API PerTensorAffineQuantizer : public AffineQuantizer {
-  explicit PerTensorAffineQuantizer(ScalarType scalar_type, double scale, int64_t zero_point)
-    : AffineQuantizer(scalar_type),
+struct TORCH_API PerTensorQuantizer : public UniformQuantizer {
+  explicit PerTensorQuantizer(ScalarType scalar_type, double scale, int64_t zero_point, QScheme qscheme=kPerTensorAffine)
+    : UniformQuantizer(scalar_type),
         scale_(scale),
-        zero_point_(zero_point) {}
+        zero_point_(zero_point),
+        qscheme_(qscheme) {}
 
   Tensor quantize(const Tensor& tensor) override;
   Tensor dequantize(const Tensor& qtensor) override;
   Tensor& dequantize_out(Tensor& rtensor, const Tensor& qtensor) override;
 
   QScheme qscheme() const override {
-    return kPerTensorAffine;
+    return qscheme_;
   }
 
   double scale() const {
@@ -81,11 +67,11 @@ struct TORCH_API PerTensorAffineQuantizer : public AffineQuantizer {
   }
 
   bool equalTo(QuantizerPtr other) override {
-    if (!other.get() || other->qscheme() != kPerTensorAffine) {
+    if (!other.get() || other->qscheme() != qscheme_) {
       return false;
     }
     auto* other_per_tensor_affine =
-        static_cast<PerTensorAffineQuantizer*>(other.get());
+        static_cast<PerTensorQuantizer*>(other.get());
     return scalar_type() == other_per_tensor_affine->scalar_type() &&
         scale() == other_per_tensor_affine->scale() &&
         zero_point() == other_per_tensor_affine->zero_point();
@@ -95,10 +81,11 @@ struct TORCH_API PerTensorAffineQuantizer : public AffineQuantizer {
   const double scale_;
   // We use int64_t for consistency with Python
   const int64_t zero_point_;
+  const QScheme qscheme_;
 };
 
 /**
- * PerChannelAffineQuantizer is the same as PerTensorAffineQuantizer
+ * PerChannelQuantizer is the same as PerTensorQuantizer
  * except that we have an independent scale and zero_point parameter
  * for each channel.
  *
@@ -108,19 +95,21 @@ struct TORCH_API PerTensorAffineQuantizer : public AffineQuantizer {
  * processors since it requires each multiplication result within a single
  * dot-product to have a different scale.
  */
-struct TORCH_API PerChannelAffineQuantizer : public AffineQuantizer {
-  explicit PerChannelAffineQuantizer(
+struct TORCH_API PerChannelQuantizer : public UniformQuantizer {
+  explicit PerChannelQuantizer(
       ScalarType scalar_type,
       Tensor scales,
       Tensor zero_points,
-      int64_t axis)
-      : AffineQuantizer(scalar_type),
+      int64_t axis,
+      QScheme qscheme=kPerChannelAffine)
+      : UniformQuantizer(scalar_type),
         scales_(scales),
         zero_points_(zero_points),
-        axis_(axis) {}
+        axis_(axis),
+        qscheme_(qscheme) {}
 
   QScheme qscheme() const override {
-    return kPerChannelAffine;
+    return qscheme_;
   }
 
   Tensor scales() const {
@@ -140,11 +129,11 @@ struct TORCH_API PerChannelAffineQuantizer : public AffineQuantizer {
   Tensor& dequantize_out(Tensor& rtensor, const Tensor& qtensor) override;
 
   bool equalTo(QuantizerPtr other) override {
-    if (!other.get() || other->qscheme() != kPerChannelAffine) {
+    if (!other.get() || other->qscheme() != qscheme_) {
       return false;
     }
     auto* other_per_channel_affine =
-        static_cast<PerChannelAffineQuantizer*>(other.get());
+        static_cast<PerChannelQuantizer*>(other.get());
     return scalar_type() == other_per_channel_affine->scalar_type() &&
         scales().equal(other_per_channel_affine->scales()) &&
         zero_points().equal(other_per_channel_affine->zero_points()) &&
@@ -155,13 +144,14 @@ struct TORCH_API PerChannelAffineQuantizer : public AffineQuantizer {
   Tensor scales_;
   Tensor zero_points_;
   const int64_t axis_;
+  const QScheme qscheme_;
 };
 
 /**
- * PerChannelAffineFloatQParamsQuantizer is the same as PerChannelAffineQuantizer
+ * PerChannelFloatQParamsQuantizer is the same as PerChannelQuantizer
  * except that it expects both scale and zero point to be floating point values.
  *
- * This quantizer uses the kPerChannelAffineFloatQParams qscheme which is a variant of
+ * This quantizer uses the kPerAffineChannelFloatQParams qscheme which is a variant of
  * kPerChannelAffine.
  *
  * The quantize equation in this case looks like -
@@ -171,13 +161,13 @@ struct TORCH_API PerChannelAffineQuantizer : public AffineQuantizer {
  * be exactly represented in the quantized space. We can get additional precision by
  * using floating point values for zero point.
  */
-struct TORCH_API PerChannelAffineFloatQParamsQuantizer : public PerChannelAffineQuantizer {
-  explicit PerChannelAffineFloatQParamsQuantizer(
+struct TORCH_API PerChannelFloatQParamsQuantizer : public PerChannelQuantizer {
+  explicit PerChannelFloatQParamsQuantizer(
       ScalarType scalar_type,
       Tensor scales,
       Tensor zero_points,
       int64_t axis)
-      : PerChannelAffineQuantizer(scalar_type,
+      : PerChannelQuantizer(scalar_type,
         scales,
         zero_points,
         axis) {}
@@ -195,7 +185,7 @@ struct TORCH_API PerChannelAffineFloatQParamsQuantizer : public PerChannelAffine
       return false;
     }
     auto* other_per_channel_float_qparams =
-        static_cast<PerChannelAffineFloatQParamsQuantizer*>(other.get());
+        static_cast<PerChannelFloatQParamsQuantizer*>(other.get());
     return scalar_type() == other_per_channel_float_qparams->scalar_type() &&
         scales().equal(other_per_channel_float_qparams->scales()) &&
         zero_points().equal(other_per_channel_float_qparams->zero_points()) &&

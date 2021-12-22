@@ -42,7 +42,7 @@ QuantizerPtr make_per_tensor_affine_quantizer(
     double scale,
     int64_t zero_point,
     ScalarType scalar_type) {
-  return c10::make_intrusive<PerTensorAffineQuantizer>(scalar_type,
+  return c10::make_intrusive<PerTensorQuantizer>(scalar_type,
       scale, zero_point);
 }
 
@@ -59,7 +59,7 @@ QuantizerPtr make_per_channel_affine_quantizer(
   if (isFloatingType(zero_points.scalar_type())) {
     Tensor scales_float = scales.to(kFloat).contiguous();
     Tensor zero_points_float = zero_points.to(kFloat).contiguous();
-    return c10::make_intrusive<PerChannelAffineFloatQParamsQuantizer>(scalar_type,
+    return c10::make_intrusive<PerChannelFloatQParamsQuantizer>(scalar_type,
                                                                       scales_float,
                                                                       zero_points_float,
                                                                       axis);
@@ -67,7 +67,7 @@ QuantizerPtr make_per_channel_affine_quantizer(
   else {
     Tensor scales_double = scales.to(kDouble).contiguous();
     Tensor zero_points_int64 = zero_points.to(kLong).contiguous();
-    return c10::make_intrusive<PerChannelAffineQuantizer>(scalar_type,
+    return c10::make_intrusive<PerChannelQuantizer>(scalar_type,
                                                           scales_double,
                                                           zero_points_int64,
                                                           axis);
@@ -143,7 +143,7 @@ inline Tensor new_qtensor(
   return tensor;
 }
 
-Tensor PerTensorAffineQuantizer::quantize(const Tensor& rtensor) {
+Tensor PerTensorQuantizer::quantize(const Tensor& rtensor) {
   TORCH_CHECK(
       rtensor.scalar_type() == kFloat,
       "Quantize only works on Float Tensor, got ", rtensor.scalar_type());
@@ -173,7 +173,7 @@ void per_tensor_affine_dequantize_impl(
       *qtensor_contig, rtensor, scale, zero_point);
 }
 
-Tensor& PerTensorAffineQuantizer::dequantize_out(
+Tensor& PerTensorQuantizer::dequantize_out(
     Tensor& rtensor, const Tensor& qtensor) {
   rtensor.resize_(qtensor.sizes());
   TORCH_CHECK(
@@ -187,7 +187,7 @@ Tensor& PerTensorAffineQuantizer::dequantize_out(
   return rtensor;
 }
 
-Tensor PerTensorAffineQuantizer::dequantize(const Tensor& qtensor) {
+Tensor PerTensorQuantizer::dequantize(const Tensor& qtensor) {
   Tensor rtensor = at::empty(
       qtensor.sizes(),
       qtensor.options()
@@ -197,7 +197,7 @@ Tensor PerTensorAffineQuantizer::dequantize(const Tensor& qtensor) {
   return rtensor;
 }
 
-Tensor PerChannelAffineQuantizer::quantize(const Tensor& rtensor) {
+Tensor PerChannelQuantizer::quantize(const Tensor& rtensor) {
   // Here we need a std::intrusive_ptr<Quantizer>.. but actually "this" is the
   // quantizer that can be reused, so I'm using intrusive_from_this here
   Tensor qtensor = new_qtensor(
@@ -224,7 +224,7 @@ void per_channel_affine_dequantize_impl(
       *qtensor_contig, rtensor, scale, zero_point, axis);
 }
 
-Tensor PerChannelAffineQuantizer::dequantize(const Tensor& qtensor) {
+Tensor PerChannelQuantizer::dequantize(const Tensor& qtensor) {
   Tensor rtensor = at::empty(
       qtensor.sizes(),
       qtensor.options()
@@ -234,7 +234,7 @@ Tensor PerChannelAffineQuantizer::dequantize(const Tensor& qtensor) {
   return rtensor;
 }
 
-Tensor& PerChannelAffineQuantizer::dequantize_out(
+Tensor& PerChannelQuantizer::dequantize_out(
     Tensor& rtensor, const Tensor& qtensor) {
   rtensor.resize_(qtensor.sizes());
   TORCH_CHECK(
@@ -248,7 +248,7 @@ Tensor& PerChannelAffineQuantizer::dequantize_out(
   return rtensor;
 }
 
-Tensor PerChannelAffineFloatQParamsQuantizer::quantize(const Tensor& rtensor) {
+Tensor PerChannelFloatQParamsQuantizer::quantize(const Tensor& rtensor) {
  TORCH_CHECK(
       rtensor.scalar_type() == kFloat,
       "Quantize only works on Float Tensor, got ", rtensor.scalar_type());
@@ -274,14 +274,14 @@ void per_channel_affine_float_q_params_dequantize_impl(
       *qtensor_contig, rtensor, scale, zero_point, axis);
 }
 
-Tensor PerChannelAffineFloatQParamsQuantizer::dequantize(const Tensor& qtensor) {
+Tensor PerChannelFloatQParamsQuantizer::dequantize(const Tensor& qtensor) {
   Tensor rtensor = at::empty(qtensor.sizes(), qtensor.options().dtype(at::kFloat));
   per_channel_affine_float_q_params_dequantize_impl(
       rtensor, qtensor, scales_, zero_points_, axis_);
   return rtensor;
 }
 
-Tensor& PerChannelAffineFloatQParamsQuantizer::dequantize_out(
+Tensor& PerChannelFloatQParamsQuantizer::dequantize_out(
     Tensor& rtensor, const Tensor& qtensor) {
   rtensor.resize_(qtensor.sizes());
   TORCH_CHECK(

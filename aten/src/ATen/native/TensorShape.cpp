@@ -1751,7 +1751,7 @@ Tensor squeeze_qtensor(const Tensor& self) {
   DimVector strides;
   std::tie(sizes, strides) = inferSqueezeGeometry(self);
   if (quantizer->qscheme() == QScheme::PER_CHANNEL_AFFINE) {
-    const auto* per_channel_quantizer = static_cast<at::PerChannelAffineQuantizer*>(quantizer.get());
+    const auto* per_channel_quantizer = static_cast<at::PerChannelQuantizer*>(quantizer.get());
     auto axis = per_channel_quantizer->axis();
     int64_t shift = 0;
     for (const auto d : c10::irange(self.dim())) {
@@ -1777,7 +1777,7 @@ Tensor squeeze_qtensor(const Tensor& self, int64_t dim) {
   DimVector strides;
   std::tie(sizes, strides) = inferSqueezeGeometry(self, dim);
   if (quantizer->qscheme() == QScheme::PER_CHANNEL_AFFINE) {
-    const auto* per_channel_quantizer = static_cast<at::PerChannelAffineQuantizer*>(quantizer.get());
+    const auto* per_channel_quantizer = static_cast<at::PerChannelQuantizer*>(quantizer.get());
     auto axis = per_channel_quantizer->axis();
     TORCH_CHECK(axis != dim, "Squeeze is only possible on non-axis dimension for Per-Channel Quantized Tensors.");
     if (axis >= dim) {
@@ -1889,7 +1889,7 @@ Tensor unsqueeze_qtensor(const Tensor& self, int64_t dim) {
   auto g = inferUnsqueezeGeometry(self, dim);
   auto quantizer = get_qtensorimpl(self)->quantizer();
   if (quantizer->qscheme() == QScheme::PER_CHANNEL_AFFINE) {
-    const auto* per_channel_quantizer = static_cast<at::PerChannelAffineQuantizer*>(quantizer.get());
+    const auto* per_channel_quantizer = static_cast<at::PerChannelQuantizer*>(quantizer.get());
     auto axis = per_channel_quantizer->axis();
     if (axis >= dim) {
       axis += 1;

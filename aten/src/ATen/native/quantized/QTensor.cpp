@@ -113,31 +113,31 @@ std::vector<Tensor> dequantize_tensors_quantized_cpu(TensorList tensors) {
 double q_scale_quant(const Tensor& self) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
   TORCH_CHECK(quantizer->qscheme() == kPerTensorAffine);
-  return static_cast<PerTensorAffineQuantizer*>(quantizer.get())->scale();
+  return static_cast<PerTensorQuantizer*>(quantizer.get())->scale();
 }
 
 int64_t q_zero_point_quant(const Tensor& self) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
   TORCH_CHECK(quantizer->qscheme() == kPerTensorAffine);
-  return static_cast<PerTensorAffineQuantizer*>(quantizer.get())->zero_point();
+  return static_cast<PerTensorQuantizer*>(quantizer.get())->zero_point();
 }
 
 Tensor q_per_channel_scales(const Tensor& self) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
   TORCH_CHECK(quantizer->qscheme() == kPerChannelAffine || quantizer->qscheme() == kPerChannelAffineFloatQParams);
-  return static_cast<PerChannelAffineQuantizer*>(quantizer.get())->scales();
+  return static_cast<PerChannelQuantizer*>(quantizer.get())->scales();
 }
 
 Tensor q_per_channel_zero_points(const Tensor& self) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
   TORCH_CHECK(quantizer->qscheme() == kPerChannelAffine || quantizer->qscheme() == kPerChannelAffineFloatQParams);
-  return static_cast<PerChannelAffineQuantizer*>(quantizer.get())->zero_points();
+  return static_cast<PerChannelQuantizer*>(quantizer.get())->zero_points();
 }
 
 int64_t q_per_channel_axis(const Tensor& self) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
   TORCH_CHECK(quantizer->qscheme() == kPerChannelAffine || quantizer->qscheme() == kPerChannelAffineFloatQParams);
-  return static_cast<PerChannelAffineQuantizer*>(quantizer.get())->axis();
+  return static_cast<PerChannelQuantizer*>(quantizer.get())->axis();
 }
 
 Tensor make_per_channel_quantized_tensor_cpu(
