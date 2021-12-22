@@ -4,41 +4,13 @@ import torch
 from torch import Tensor
 from typing import List, Optional
 
-from .adadelta import adadelta as adadelta_fn
-from .adagrad import adagrad as adagrad_fn
-from .adamax import adamax as adamax_fn
-from .nadam import nadam as nadam_fn
-from .radam import radam as radam_fn
+from .adadelta import adadelta  # type: ignore[attr-defined] # noqa: F401
+from .adagrad import adagrad  # type: ignore[attr-defined] # noqa: F401
+from .adamax import adamax  # type: ignore[attr-defined] # noqa: F401
+from .nadam import nadam  # type: ignore[attr-defined] # noqa: F401
+from .radam import radam  # type: ignore[attr-defined] # noqa: F401
 
 # TODO: use foreach API in optim._functional to do all the computation
-
-def adagrad(params: List[Tensor],
-            grads: List[Tensor],
-            state_sums: List[Tensor],
-            state_steps: List[int],
-            has_sparse_grad: bool = False,
-            foreach: bool = False,
-            *,
-            lr: float,
-            weight_decay: float,
-            lr_decay: float,
-            eps: float):
-    r"""Functional API that performs Adagrad algorithm computation.
-
-    See :class:`~torch.optim.Adagrad` for details.
-    """
-
-    adagrad_fn(params,
-               grads,
-               state_sums,
-               state_steps,
-               has_sparse_grad=has_sparse_grad,
-               foreach=foreach,
-               lr=lr,
-               weight_decay=weight_decay,
-               lr_decay=lr_decay,
-               eps=eps)
-
 
 def adam(params: List[Tensor],
          grads: List[Tensor],
@@ -52,14 +24,15 @@ def adam(params: List[Tensor],
          beta2: float,
          lr: float,
          weight_decay: float,
-         eps: float):
+         eps: float,
+         maximize: bool):
     r"""Functional API that performs Adam algorithm computation.
     See :class:`~torch.optim.Adam` for details.
     """
 
     for i, param in enumerate(params):
 
-        grad = grads[i]
+        grad = grads[i] if not maximize else -grads[i]
         exp_avg = exp_avgs[i]
         exp_avg_sq = exp_avg_sqs[i]
         step = state_steps[i]
@@ -81,10 +54,10 @@ def adam(params: List[Tensor],
         else:
             denom = (exp_avg_sq.sqrt() / math.sqrt(bias_correction2)).add_(eps)
 
+
+
         step_size = lr / bias_correction1
-
         param.addcdiv_(exp_avg, denom, value=-step_size)
-
 
 def adamw(params: List[Tensor],
           grads: List[Tensor],
@@ -170,32 +143,6 @@ def sgd(params: List[Tensor],
         param.add_(d_p, alpha=alpha)
 
 
-def adadelta(params: List[Tensor],
-             grads: List[Tensor],
-             square_avgs: List[Tensor],
-             acc_deltas: List[Tensor],
-             foreach: bool = False,
-             *,
-             lr: float,
-             rho: float,
-             eps: float,
-             weight_decay: float):
-    r"""Functional API that performs Adadelta algorithm computation.
-
-    See :class:`~torch.optim.Adadelta` for details.
-    """
-
-    adadelta_fn(params,
-                grads,
-                square_avgs,
-                acc_deltas,
-                foreach=foreach,
-                lr=lr,
-                rho=rho,
-                eps=eps,
-                weight_decay=weight_decay)
-
-
 def rmsprop(params: List[Tensor],
             grads: List[Tensor],
             square_avgs: List[Tensor],
@@ -275,36 +222,6 @@ def rprop(params: List[Tensor],
         prev.copy_(grad)
 
 
-def adamax(params: List[Tensor],
-           grads: List[Tensor],
-           exp_avgs: List[Tensor],
-           exp_infs: List[Tensor],
-           state_steps: List[int],
-           foreach: bool = False,
-           *,
-           eps: float,
-           beta1: float,
-           beta2: float,
-           lr: float,
-           weight_decay: float):
-    r"""Functional API that performs adamax algorithm computation.
-
-    See :class:`~torch.optim.Adamax` for details.
-    """
-
-    adamax_fn(params,
-              grads,
-              exp_avgs,
-              exp_infs,
-              state_steps,
-              foreach=foreach,
-              eps=eps,
-              beta1=beta1,
-              beta2=beta2,
-              lr=lr,
-              weight_decay=weight_decay)
-
-
 def asgd(params: List[Tensor],
          grads: List[Tensor],
          axs: List[Tensor],
@@ -338,70 +255,6 @@ def asgd(params: List[Tensor],
             ax.add_(param.sub(ax).mul(mu))
         else:
             ax.copy_(param)
-
-
-def nadam(params: List[Tensor],
-          grads: List[Tensor],
-          exp_avgs: List[Tensor],
-          exp_avg_sqs: List[Tensor],
-          mu_products: List[float],
-          state_steps: List[int],
-          foreach: bool = False,
-          *,
-          beta1: float,
-          beta2: float,
-          lr: float,
-          weight_decay: float,
-          momentum_decay: float,
-          eps: float):
-    r"""Functional API that performs NAdam algorithm computation.
-
-    See :class:`~torch.optim.NAdam` for details.
-    """
-
-    nadam_fn(params,
-             grads,
-             exp_avgs,
-             exp_avg_sqs,
-             mu_products,
-             state_steps,
-             foreach=foreach,
-             beta1=beta1,
-             beta2=beta2,
-             lr=lr,
-             weight_decay=weight_decay,
-             momentum_decay=momentum_decay,
-             eps=eps)
-
-
-def radam(params: List[Tensor],
-          grads: List[Tensor],
-          exp_avgs: List[Tensor],
-          exp_avg_sqs: List[Tensor],
-          state_steps: List[int],
-          foreach: bool = False,
-          *,
-          beta1: float,
-          beta2: float,
-          lr: float,
-          weight_decay: float,
-          eps: float):
-    r"""Functional API that performs RAdam algorithm computation.
-
-    See :class:`~torch.optim.RAdam` for details.
-    """
-
-    radam_fn(params,
-             grads,
-             exp_avgs,
-             exp_avg_sqs,
-             state_steps,
-             foreach=foreach,
-             beta1=beta1,
-             beta2=beta2,
-             lr=lr,
-             weight_decay=weight_decay,
-             eps=eps)
 
 
 

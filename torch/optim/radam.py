@@ -148,11 +148,15 @@ def radam(params: List[Tensor],
           lr: float,
           weight_decay: float,
           eps: float):
+    r"""Functional API that performs RAdam algorithm computation.
+
+    See :class:`~torch.optim.RAdam` for details.
+    """
 
     if foreach and not torch.jit.is_scripting():
-        func = multi_tensor_radam
+        func = _multi_tensor_radam
     else:
-        func = single_tensor_radam
+        func = _single_tensor_radam
 
     func(params,
          grads,
@@ -166,17 +170,17 @@ def radam(params: List[Tensor],
          eps=eps)
 
 
-def single_tensor_radam(params: List[Tensor],
-                        grads: List[Tensor],
-                        exp_avgs: List[Tensor],
-                        exp_avg_sqs: List[Tensor],
-                        state_steps: List[int],
-                        *,
-                        beta1: float,
-                        beta2: float,
-                        lr: float,
-                        weight_decay: float,
-                        eps: float):
+def _single_tensor_radam(params: List[Tensor],
+                         grads: List[Tensor],
+                         exp_avgs: List[Tensor],
+                         exp_avg_sqs: List[Tensor],
+                         state_steps: List[int],
+                         *,
+                         beta1: float,
+                         beta2: float,
+                         lr: float,
+                         weight_decay: float,
+                         eps: float):
 
     for i, param in enumerate(params):
         grad = grads[i]
@@ -212,17 +216,17 @@ def single_tensor_radam(params: List[Tensor],
             param.add_(bias_corrected_exp_avg * lr, alpha=-1.0)
 
 
-def multi_tensor_radam(params: List[Tensor],
-                       grads: List[Tensor],
-                       exp_avgs: List[Tensor],
-                       exp_avg_sqs: List[Tensor],
-                       state_steps: List[int],
-                       *,
-                       beta1: float,
-                       beta2: float,
-                       lr: float,
-                       weight_decay: float,
-                       eps: float):
+def _multi_tensor_radam(params: List[Tensor],
+                        grads: List[Tensor],
+                        exp_avgs: List[Tensor],
+                        exp_avg_sqs: List[Tensor],
+                        state_steps: List[int],
+                        *,
+                        beta1: float,
+                        beta2: float,
+                        lr: float,
+                        weight_decay: float,
+                        eps: float):
 
     # maximum length of the approximated SMA
     rho_inf = 2 / (1 - beta2) - 1

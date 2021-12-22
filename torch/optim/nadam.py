@@ -159,11 +159,15 @@ def nadam(params: List[Tensor],
           weight_decay: float,
           momentum_decay: float,
           eps: float):
+    r"""Functional API that performs NAdam algorithm computation.
+
+    See :class:`~torch.optim.NAdam` for details.
+    """
 
     if foreach and not torch.jit.is_scripting():
-        func = multi_tensor_nadam
+        func = _multi_tensor_nadam
     else:
-        func = single_tensor_nadam
+        func = _single_tensor_nadam
 
     func(params,
          grads,
@@ -179,19 +183,19 @@ def nadam(params: List[Tensor],
          eps=eps)
 
 
-def single_tensor_nadam(params: List[Tensor],
-                        grads: List[Tensor],
-                        exp_avgs: List[Tensor],
-                        exp_avg_sqs: List[Tensor],
-                        mu_products: List[float],
-                        state_steps: List[int],
-                        *,
-                        beta1: float,
-                        beta2: float,
-                        lr: float,
-                        weight_decay: float,
-                        momentum_decay: float,
-                        eps: float):
+def _single_tensor_nadam(params: List[Tensor],
+                         grads: List[Tensor],
+                         exp_avgs: List[Tensor],
+                         exp_avg_sqs: List[Tensor],
+                         mu_products: List[float],
+                         state_steps: List[int],
+                         *,
+                         beta1: float,
+                         beta2: float,
+                         lr: float,
+                         weight_decay: float,
+                         momentum_decay: float,
+                         eps: float):
 
     for i, param in enumerate(params):
         grad = grads[i]
@@ -220,19 +224,19 @@ def single_tensor_nadam(params: List[Tensor],
         param.addcdiv_(exp_avg, denom, value=-lr * mu_next / (1. - mu_product_next))
 
 
-def multi_tensor_nadam(params: List[Tensor],
-                       grads: List[Tensor],
-                       exp_avgs: List[Tensor],
-                       exp_avg_sqs: List[Tensor],
-                       mu_products: List[float],
-                       state_steps: List[int],
-                       *,
-                       beta1: float,
-                       beta2: float,
-                       lr: float,
-                       weight_decay: float,
-                       momentum_decay: float,
-                       eps: float):
+def _multi_tensor_nadam(params: List[Tensor],
+                        grads: List[Tensor],
+                        exp_avgs: List[Tensor],
+                        exp_avg_sqs: List[Tensor],
+                        mu_products: List[float],
+                        state_steps: List[int],
+                        *,
+                        beta1: float,
+                        beta2: float,
+                        lr: float,
+                        weight_decay: float,
+                        momentum_decay: float,
+                        eps: float):
 
     bias_correction2 = [1 - beta2 ** step for step in state_steps]
     mus = [beta1 * (1. - 0.5 * (0.96 ** (step * momentum_decay))) for step in state_steps]

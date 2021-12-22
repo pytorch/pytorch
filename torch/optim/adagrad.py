@@ -137,10 +137,15 @@ def adagrad(params: List[Tensor],
             weight_decay: float,
             lr_decay: float,
             eps: float):
+    r"""Functional API that performs Adagrad algorithm computation.
+
+    See :class:`~torch.optim.Adagrad` for details.
+    """
+
     if foreach and not torch.jit.is_scripting() and (not has_sparse_grad):
-        func = multi_tensor_adagrad
+        func = _multi_tensor_adagrad
     else:
-        func = single_tensor_adagrad
+        func = _single_tensor_adagrad
 
     func(params,
          grads,
@@ -159,16 +164,16 @@ def _make_sparse(grad, grad_indices, values):
     return torch.sparse_coo_tensor(grad_indices, values, size)
 
 
-def single_tensor_adagrad(params: List[Tensor],
-                          grads: List[Tensor],
-                          state_sums: List[Tensor],
-                          state_steps: List[int],
-                          has_sparse_grad: bool = False,
-                          *,
-                          lr: float,
-                          weight_decay: float,
-                          lr_decay: float,
-                          eps: float):
+def _single_tensor_adagrad(params: List[Tensor],
+                           grads: List[Tensor],
+                           state_sums: List[Tensor],
+                           state_steps: List[int],
+                           has_sparse_grad: bool = False,
+                           *,
+                           lr: float,
+                           weight_decay: float,
+                           lr_decay: float,
+                           eps: float):
 
     for (param, grad, state_sum, step) in zip(params, grads, state_sums, state_steps):
         if weight_decay != 0:
@@ -201,26 +206,26 @@ def single_tensor_adagrad(params: List[Tensor],
                 state_sum = torch.view_as_complex(state_sum)
 
 
-def multi_tensor_adagrad(params: List[Tensor],
-                         grads: List[Tensor],
-                         state_sums: List[Tensor],
-                         state_steps: List[int],
-                         has_sparse_grad: bool,
-                         *,
-                         lr: float,
-                         weight_decay: float,
-                         lr_decay: float,
-                         eps: float):
+def _multi_tensor_adagrad(params: List[Tensor],
+                          grads: List[Tensor],
+                          state_sums: List[Tensor],
+                          state_steps: List[int],
+                          has_sparse_grad: bool,
+                          *,
+                          lr: float,
+                          weight_decay: float,
+                          lr_decay: float,
+                          eps: float):
 
     if has_sparse_grad:
-        return single_tensor_adagrad(params,
-                                     grads,
-                                     state_sums,
-                                     state_steps,
-                                     lr=lr,
-                                     weight_decay=weight_decay,
-                                     lr_decay=lr_decay,
-                                     eps=eps)
+        return _single_tensor_adagrad(params,
+                                      grads,
+                                      state_sums,
+                                      state_steps,
+                                      lr=lr,
+                                      weight_decay=weight_decay,
+                                      lr_decay=lr_decay,
+                                      eps=eps)
 
     if weight_decay != 0:
         if has_sparse_grad:
