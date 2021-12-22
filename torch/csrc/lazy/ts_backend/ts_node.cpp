@@ -121,7 +121,7 @@ std::string TsNode::ToString() const {
 }
 
 hash_t TsNode::GetOpHash(OpKind op, const Shape& shape, hash_t hash_seed) {
-  hash_t h = HashCombine(op.hash(), Hash(shape.to_string()));
+  hash_t h = HashCombine(op.hash(), shape.hash());
   return HashCombine(h, hash_seed);
 }
 
