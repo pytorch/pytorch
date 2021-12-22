@@ -41,16 +41,18 @@ QuantizerPtr TensorBase::quantizer() const {
 QuantizerPtr make_per_tensor_affine_quantizer(
     double scale,
     int64_t zero_point,
-    ScalarType scalar_type) {
+    ScalarType scalar_type,
+    QScheme qscheme) {
   return c10::make_intrusive<PerTensorQuantizer>(scalar_type,
-      scale, zero_point);
+      scale, zero_point, qscheme);
 }
 
 QuantizerPtr make_per_channel_affine_quantizer(
     const Tensor& scales,
     const Tensor& zero_points,
     int64_t axis,
-    ScalarType scalar_type) {
+    ScalarType scalar_type,
+    QScheme qscheme) {
   checkPerChannelParamDims(scales, zero_points);
   TORCH_CHECK(
       isFloatingType(scales.scalar_type()),
@@ -60,17 +62,18 @@ QuantizerPtr make_per_channel_affine_quantizer(
     Tensor scales_float = scales.to(kFloat).contiguous();
     Tensor zero_points_float = zero_points.to(kFloat).contiguous();
     return c10::make_intrusive<PerChannelFloatQParamsQuantizer>(scalar_type,
-                                                                      scales_float,
-                                                                      zero_points_float,
-                                                                      axis);
+                                                                scales_float,
+                                                                zero_points_float,
+                                                                axis);
   }
   else {
     Tensor scales_double = scales.to(kDouble).contiguous();
     Tensor zero_points_int64 = zero_points.to(kLong).contiguous();
     return c10::make_intrusive<PerChannelQuantizer>(scalar_type,
-                                                          scales_double,
-                                                          zero_points_int64,
-                                                          axis);
+                                                    scales_double,
+                                                    zero_points_int64,
+                                                    axis,
+                                                    qscheme);
   }
 }
 

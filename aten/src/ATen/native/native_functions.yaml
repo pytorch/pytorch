@@ -5502,10 +5502,20 @@
   dispatch:
     CPU: quantize_per_tensor_list_cpu
 
+- func: quantize_per_tensor.qscheme(Tensor self, float scale, int zero_point, ScalarType dtype, QScheme qscheme) -> Tensor
+  variants: function
+  dispatch:
+    CPU, CUDA: quantize_per_tensor_w_qscheme
+
 - func: quantize_per_channel(Tensor self, Tensor scales, Tensor zero_points, int axis, ScalarType dtype) -> Tensor
   variants: function
   dispatch:
     CPU, CUDA: quantize_per_channel
+
+- func: quantize_per_channel.qscheme(Tensor self, Tensor scales, Tensor zero_points, int axis, ScalarType dtype, QScheme qscheme) -> Tensor
+  variants: function
+  dispatch:
+    CPU, CUDA: quantize_per_channel_w_qscheme
 
 - func: dequantize.self(Tensor self) -> Tensor
   variants: function, method

@@ -204,13 +204,14 @@ TORCH_API QTensorImpl* get_qtensorimpl(const TensorBase& self);
 // argument types right now in native functions
 TORCH_API QuantizerPtr
 make_per_tensor_affine_quantizer(
-    double scale, int64_t zero_point, ScalarType scalar_type);
+    double scale, int64_t zero_point, ScalarType scalar_type, QScheme qscheme=kPerTensorAffine);
 
 TORCH_API QuantizerPtr make_per_channel_affine_quantizer(
     const Tensor& scales,
     const Tensor& zero_points,
     int64_t axis,
-    ScalarType scalar_type);
+    ScalarType scalar_type,
+    QScheme qscheme=kPerChannelAffine);
 
 // Create a Quantized Tensor given arguments for normal Tensor and a quantizer
 TORCH_API Tensor new_qtensor(

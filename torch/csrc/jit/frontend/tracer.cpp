@@ -675,6 +675,9 @@ void addInputs(Node* n, const char* name, at::ScalarType value) {
 void addInputs(Node* n, const char* name, at::MemoryFormat value) {
   detail::genericAddInput(n, static_cast<int64_t>(value));
 }
+void addInputs(Node* n, const char* name, c10::QScheme value) {
+  detail::genericAddInput(n, static_cast<int64_t>(value));
+}
 void addInputs(
     Node* n,
     const char* name,

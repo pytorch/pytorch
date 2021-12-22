@@ -1017,6 +1017,8 @@ def arg_parser_unpack_method(t: Type, has_default: bool) -> str:
             return 'toDouble'
         elif t.name == BaseTy.str:
             return 'stringView'
+        elif t.name == BaseTy.QScheme:
+            return 'toQScheme'
 
     elif isinstance(t, OptionalType):
         if str(t.elem) == 'Tensor':
