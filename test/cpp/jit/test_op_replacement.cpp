@@ -48,15 +48,12 @@ TEST(OpReplacementTest, ReplaceDivInSimpleFunction) {
   test_only_populate_upgraders(test_upgraders);
   torch::jit::parseIR(graph_string, g.get());
   g->set_op_version(2);
-  ApplyOldOpsUpgraders(g);
+  ApplyOpsUpgraders(g);
   testing::FileCheck()
       .check("prim::If")
       ->check_count("aten::div(%2, %1)", 1, /*exactly=*/true)
       ->check_count("aten::div(%2, %1, %4)", 1, /*exactly=*/true)
       ->run(*g);
-
-  EXPECT_TRUE(g->get_op_version().has_value());
-  EXPECT_EQ(g->get_op_version().value(), 4);
 }
 
 TEST(OpReplacementTest, ReplaceTwoOpsInSimpleFunction) {
@@ -77,14 +74,11 @@ TEST(OpReplacementTest, ReplaceTwoOpsInSimpleFunction) {
   test_only_add_entry("aten::_test_serialization_subcmul", test_entry);
   torch::jit::parseIR(graph_string, g.get());
   g->set_op_version(2);
-  ApplyOldOpsUpgraders(g);
+  ApplyOpsUpgraders(g);
   testing::FileCheck()
       .check("prim::If")
       ->check_count("aten::div", 2, /*exactly=*/true)
       ->run(*g);
-
-  EXPECT_TRUE(g->get_op_version().has_value());
-  EXPECT_EQ(g->get_op_version().value(), 4);
   test_only_remove_entry("aten::_test_serialization_subcmul");
   test_only_remove_upgraders(test_upgraders);
 }
@@ -109,7 +103,7 @@ TEST(OpReplacementTest, ReplaceDivInNestedFunction) {
   test_only_populate_upgraders(test_upgraders);
   torch::jit::parseIR(graph_string, g.get());
   g->set_op_version(2);
-  ApplyOldOpsUpgraders(g);
+  ApplyOpsUpgraders(g);
   testing::FileCheck()
       .check("prim::If")
       ->check_count("aten::add", 2, false)
@@ -119,9 +113,6 @@ TEST(OpReplacementTest, ReplaceDivInNestedFunction) {
       .check("prim::If")
       ->check_count("aten::div", 2, false)
       ->run(*g);
-
-  EXPECT_TRUE(g->get_op_version().has_value());
-  EXPECT_EQ(g->get_op_version().value(), 4);
   test_only_remove_upgraders(test_upgraders);
 }
 
@@ -141,13 +132,11 @@ TEST(OpReplacementTest, ReplaceTestSubcmulInSimpleFunction) {
   test_only_add_entry("aten::_test_serialization_subcmul", test_entry);
   torch::jit::parseIR(graph_string, g.get());
   g->set_op_version(2);
-  ApplyOldOpsUpgraders(g);
+  ApplyOpsUpgraders(g);
   testing::FileCheck().check_count("aten::mul", 1, false)->run(*g);
 
   testing::FileCheck().check_count("aten::sub", 1, false)->run(*g);
 
-  EXPECT_TRUE(g->get_op_version().has_value());
-  EXPECT_EQ(g->get_op_version().value(), 3);
   test_only_remove_upgraders(test_upgraders);
   test_only_remove_entry("aten::_test_serialization_subcmul");
 }
