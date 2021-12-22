@@ -224,11 +224,10 @@ def _convert_do_not_use(
                     if idx in sm_input_quantized_idxs:
                         arg = args[idx]
                         if arg.op == "call_method" and arg.target == "dequantize":
-                            assert len(arg.users) == 1, "doesn't support configuring"
-                            " quantized input in standalone module when the input is"
-                            " used by multiple nodes"
-                            arg.replace_all_uses_with(arg.args[0])
-                            model.graph.erase_node(arg)
+                            quantize_node = arg.args[0]
+                            node.replace_input_with(arg, quantize_node)
+                            if len(arg.users) == 0:
+                                model.graph.erase_node(arg)
                 # add dequantize node for output
                 sm_output_quantized_idxs = \
                     observed_standalone_module \
