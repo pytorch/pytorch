@@ -121,6 +121,7 @@ TESTS = discover_tests(
         "distributed/test_c10d_spawn",
         'distributions/test_transforms',
         'distributions/test_utils',
+        "fx2trt/test_quant_trt",
     ],
     extra_tests=[
         "test_cpp_extensions_aot_ninja",
@@ -786,6 +787,11 @@ def parse_args():
         help="exclude distributed tests",
     )
     parser.add_argument(
+        "--exclude-fx2trt-tests",
+        action="store_true",
+        help="exclude fx2trt tests",
+    )
+    parser.add_argument(
         "--run-specified-test-cases",
         nargs="?",
         type=str,
@@ -917,6 +923,9 @@ def get_selected_tests(options):
 
     if options.exclude_distributed_tests:
         options.exclude.extend(DISTRIBUTED_TESTS)
+
+    if options.exclude_fx2trt_tests:
+        options.exclude.extend(FX2TRT_TESTS)
 
     selected_tests = exclude_tests(options.exclude, selected_tests)
 
