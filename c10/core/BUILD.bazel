@@ -33,6 +33,17 @@ cc_library(
     visibility = ["//visibility:public"],
 )
 
+cc_library(
+    name = "free_cpu",
+    hdrs = ["free_cpu.h"],
+    srcs = ["free_cpu.cpp"],
+    deps = ["//c10/macros"],
+    visibility = [
+        "//c10:__pkg__",
+        "//c10/mobile:__pkg__",
+    ],
+)
+
 filegroup(
     name = "headers",
     srcs = glob(

@@ -1,5 +1,6 @@
 #include <c10/core/CPUAllocator.h>
 #include <c10/core/DeviceType.h>
+#include <c10/core/free_cpu.h>
 #include <c10/mobile/CPUCachingAllocator.h>
 #include <c10/mobile/CPUProfilingAllocator.h>
 #include <c10/util/irange.h>
@@ -89,15 +90,6 @@ void* alloc_cpu(size_t nbytes) {
   }
 
   return data;
-}
-
-void free_cpu(void* data) {
-#ifdef _MSC_VER
-  _aligned_free(data);
-#else
-  // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
-  free(data);
-#endif
 }
 
 struct C10_API DefaultCPUAllocator final : at::Allocator {
