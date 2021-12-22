@@ -3219,7 +3219,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('to_sparse'),
         xfail('vdot'),
         xfail('vsplit'),
-        xfail('__getitem__'),
+        xfail('__getitem__', ''),
         xfail('all'),
         xfail('any'),
         xfail('count_nonzero'),

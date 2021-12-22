@@ -549,7 +549,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.fractional_max_pool3d'),
         xfail('as_strided'),
         xfail('nn.functional.fractional_max_pool2d'),
-        xfail('__getitem__'),
+        xfail('__getitem__', ''),
         xfail('index_put'),
         xfail('lu_solve'),
     })
@@ -744,7 +744,7 @@ class TestOperators(TestCase):
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vmapvjp_has_batch_rule', vmapvjp_fail.union({
         xfail('view_as_complex'),
-        xfail('__getitem__'),
+        xfail('__getitem__', ''),
         xfail('cholesky'),
         xfail('complex'),
         xfail('copysign'),
@@ -865,7 +865,7 @@ class TestOperators(TestCase):
         # fallback path doesn't work
         xfail('H'),
         # All of the following are bugs and need to be fixed
-        xfail('__getitem__'),
+        xfail('__getitem__', ''),
         xfail('clamp', ''),
         xfail('dsplit'),
         xfail('fill_'),
