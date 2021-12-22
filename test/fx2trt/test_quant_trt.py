@@ -12,6 +12,7 @@ from torch.ao.quantization import (
 )
 from torch.ao.quantization.quantize_fx import (
     prepare_fx,
+    prepare_qat_fx,
     get_tensorrt_backend_config_dict,
 )
 from torch.ao.quantization._quantize_fx_do_not_use import (
@@ -367,7 +368,8 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
             inputs,
             shape_ranges,
             no_prepare=None,
-            no_convert=None):
+            no_convert=None,
+            is_qat=False):
         """
         Args:
           m: the float module we want to test
@@ -382,8 +384,13 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
           no_prepare: node occurrence after prepare
           no_convert: node occurrence after convert
         """
-        m = m.eval()
-        prepared = prepare_fx(m, {"": self.qconfig}, backend_config_dict=self.trt_backend_config_dict)
+        if is_qat:
+            m = m.train()
+            prepare = prepare_qat_fx
+        else:
+            m = m.eval()
+            prepare = prepare_fx
+        prepared = prepare(m, {"": self.qconfig}, backend_config_dict=self.trt_backend_config_dict)
         self.checkGraphModuleNodes(prepared, expected_node_occurrence=no_prepare)
         # calibration
         prepared(*inputs)
@@ -421,7 +428,7 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
                 return self.relu(self.conv(x))
 
         # just testing conv2d since conv1d and conv3d are not supported in fx2trt
-        for dim, has_relu, f_relu in itertools.product([2], [True, False], [True, False]):
+        for dim, has_relu, f_relu, is_qat in itertools.product([2], [True, False], [True, False], [True, False]):
             # when has_relu=False, we have torch.nn.Identity, which would introduce
             # extra quant-dequat pair
             no_convert = {
@@ -434,7 +441,8 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
                 [((1, *conv_input[dim].shape[1:]),
                   (5, *conv_input[dim].shape[1:]),
                   (10, *conv_input[dim].shape[1:]))],
-                no_convert=no_convert)
+                no_convert=no_convert,
+                is_qat=is_qat)
 
     def test_linear_relu_module(self):
         class LinearModule(torch.nn.Module):
@@ -459,7 +467,7 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
              (5, 5),
              (10, 5))
         ]
-        for has_relu, f_relu in itertools.product([True, False], [True, False]):
+        for has_relu, f_relu, is_qat in itertools.product([True, False], [True, False], [True, False]):
             # when has_relu=False, we have torch.nn.Identity, which would introduce
             # extra quant-dequat pair
             no_convert = {
@@ -470,7 +478,8 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
                 LinearModule(has_relu, f_relu),
                 [linear_input],
                 shape_ranges,
-                no_convert=no_convert)
+                no_convert=no_convert,
+                is_qat=is_qat)
 
     def test_ops(self):
         class M(torch.nn.Module):
