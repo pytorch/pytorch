@@ -16,9 +16,6 @@ def apply_input_props_using_example(graph: Graph, example_input: List[Any]):
     """
     Applies properties for each tensor in the graph inputs
     using the example supplied.
-
-    Currently only supports dtype and shape, but will support
-    device in the near future.
     """
     graph_inputs = list(graph.inputs())
     if len(graph_inputs) == 0:
@@ -41,6 +38,4 @@ def apply_input_props_using_example(graph: Graph, example_input: List[Any]):
             raise RuntimeError(f"Input {i} does not match type of example", graph_i, example_i)
 
         if isinstance(example_i, torch.Tensor):
-            dtype = example_i.dtype
-            shape = example_i.shape
-            graph_i.setType(graph_i.type().with_dtype(dtype).with_sizes(shape))  # type: ignore[arg-type]
+            graph_i.setType(TensorType.create_from_tensor(example_i))  # type: ignore[arg-type]
