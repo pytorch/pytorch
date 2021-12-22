@@ -631,9 +631,10 @@ void raw_cudnn_convolution_forward_out_32bit(
   ConvolutionArgs args{ input, output, weight };
   args.handle = getCudnnHandle();
   setConvolutionParams(&args.params, input, weight, padding, stride, dilation, groups, deterministic, allow_tf32);
-  args.idesc.set(input);
-  args.wdesc.set(weight, input.suggest_memory_format(), 0);
-  args.odesc.set(output);
+  at::MemoryFormat memory_format = cudnn_conv_suggest_memory_format(input, weight);
+  args.idesc.set(input, memory_format);
+  args.wdesc.set(weight, memory_format, 0);
+  args.odesc.set(output, memory_format);
   args.cdesc.set(dataType, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, args.params.allow_tf32);
 
   // TODO: when we do legacy group convolution support, we'll repeatedly
@@ -691,9 +692,10 @@ void raw_cudnn_convolution_backward_input_out_32bit(
   ConvolutionArgs args{ grad_input, grad_output, weight };
   args.handle = getCudnnHandle();
   setConvolutionParams(&args.params, grad_input, weight, padding, stride, dilation, groups, deterministic, allow_tf32);
-  args.idesc.set(grad_input);
-  args.wdesc.set(weight, grad_output.suggest_memory_format(), 0);
-  args.odesc.set(grad_output);
+  at::MemoryFormat memory_format = cudnn_conv_suggest_memory_format(grad_input, weight);
+  args.idesc.set(grad_input, memory_format);
+  args.wdesc.set(weight, memory_format, 0);
+  args.odesc.set(grad_output, memory_format);
   args.cdesc.set(dataType, grad_output.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, args.params.allow_tf32);
 
   AlgoIterator<cudnnConvolutionBwdDataAlgoPerf_t>(args, benchmark).try_all(
@@ -749,9 +751,10 @@ void raw_cudnn_convolution_backward_weight_out_32bit(
   ConvolutionArgs args{ input, grad_output, grad_weight };
   args.handle = getCudnnHandle();
   setConvolutionParams(&args.params, input, grad_weight, padding, stride, dilation, groups, deterministic, allow_tf32);
-  args.idesc.set(input);
-  args.wdesc.set(grad_weight, input.suggest_memory_format(), 0);
-  args.odesc.set(grad_output);
+  at::MemoryFormat memory_format = cudnn_conv_suggest_memory_format(input, grad_weight);
+  args.idesc.set(input, memory_format);
+  args.wdesc.set(grad_weight, memory_format, 0);
+  args.odesc.set(grad_output, memory_format);
   args.cdesc.set(dataType, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, args.params.allow_tf32);
 
   AlgoIterator<cudnnConvolutionBwdFilterAlgoPerf_t>(args, benchmark).try_all(
@@ -857,9 +860,10 @@ void raw_cudnn_convolution_add_relu_out(
       groups,
       deterministic,
       allow_tf32);
-  args.idesc.set(input);
-  args.wdesc.set(weight, input.suggest_memory_format(), 0);
-  args.odesc.set(output);
+  at::MemoryFormat memory_format = cudnn_conv_suggest_memory_format(input, weight);
+  args.idesc.set(input, memory_format);
+  args.wdesc.set(weight, memory_format, 0);
+  args.odesc.set(output, memory_format);
   args.cdesc.set(
       dataType,
       input.dim() - 2,
@@ -870,10 +874,10 @@ void raw_cudnn_convolution_add_relu_out(
       args.params.allow_tf32);
 
   TensorDescriptor zdesc;
-  zdesc.set(z);
+  zdesc.set(z, memory_format);
 
   TensorDescriptor bdesc;
-  bdesc.set(bias.expand({1, bias.size(0)}), output.dim());
+  bdesc.set(bias.expand({1, bias.size(0)}), memory_format, output.dim());
 
   ActivationDescriptor adesc;
   adesc.set(CUDNN_ACTIVATION_RELU);
@@ -915,11 +919,39 @@ void raw_cudnn_convolution_add_relu_out(
                 args.odesc.desc(),
                 output.data_ptr()),
             args,
+            "zdesc: ", zdesc,
+            "bdesc: ", bdesc,
             "cudnnConvolutionBiasActivationForward: ",
             static_cast<int>(fwdAlgPerf.algo),
             "\n");
       });
 }
+
+void raw_cudnn_convolution_add_relu_fallback_out(
+    const Tensor& output,
+    const Tensor& input,
+    const Tensor& weight,
+    const Tensor& z,
+    float alpha,
+    const Tensor& bias,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
+    int64_t groups,
+    bool benchmark,
+    bool deterministic,
+    bool allow_tf32) {
+
+  // cuDNN Conv-Bias-Activation:
+  // y = act ( alpha1 * conv(x) + alpha2 * z + bias )
+  // In pytorch function `raw_cudnn_convolution_add_relu_out`: alpha1 is 1, alpha 2 is `float alpha`
+
+  raw_cudnn_convolution_forward_out(output, input, weight, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
+  at::Tensor alpha_mul_z_add_bias = at::native::reshape_bias(input.dim(), bias).add(z, alpha);
+  output.add_(alpha_mul_z_add_bias);
+  output.relu_();
+}
+
 }}  // namespace at::native
 
 #endif

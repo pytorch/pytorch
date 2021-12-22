@@ -42,15 +42,6 @@ fi
 
 export SCRIPT_HELPERS_DIR=$SCRIPT_PARENT_DIR/win-test-helpers
 
-# Try to pull value from CIRCLE_PULL_REQUEST
-# NOTE: file_diff_from_base is currently bugged for GHA due to an issue finding a merge base for ghstack PRs
-#       see https://github.com/pytorch/pytorch/issues/60111
-IN_PULL_REQUEST=${CIRCLE_PULL_REQUEST:-}
-if [ -n "$IN_PULL_REQUEST" ]; then
-  DETERMINE_FROM="${TMP_DIR}/determine_from"
-  file_diff_from_base "$DETERMINE_FROM"
-fi
-
 if [[ "${BUILD_ENVIRONMENT}" == *cuda11* ]]; then
   export BUILD_SPLIT_CUDA=ON
 fi
@@ -72,7 +63,7 @@ run_tests() {
     done
 
     if [[ ( -z "${JOB_BASE_NAME}" || "${JOB_BASE_NAME}" == *-test ) && $NUM_TEST_SHARDS -eq 1 ]]; then
-        "$SCRIPT_HELPERS_DIR"/test_python.bat "$DETERMINE_FROM"
+        "$SCRIPT_HELPERS_DIR"/test_python.bat
 
         if [[ -z ${RUN_SMOKE_TESTS_ONLY} ]]; then
           "$SCRIPT_HELPERS_DIR"/test_custom_script_ops.bat
@@ -81,17 +72,17 @@ run_tests() {
         fi
     else
         if [[ "${JOB_BASE_NAME}" == *-test1 || ("${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1) ]]; then
-            "$SCRIPT_HELPERS_DIR"/test_python_first_shard.bat "$DETERMINE_FROM"
+            "$SCRIPT_HELPERS_DIR"/test_python_first_shard.bat
 
             if [[ -z ${RUN_SMOKE_TESTS_ONLY} ]]; then
               "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
               if [[ "${USE_CUDA}" == "1" ]]; then
-                "$SCRIPT_HELPERS_DIR"/test_python_jit_legacy.bat "$DETERMINE_FROM"
+                "$SCRIPT_HELPERS_DIR"/test_python_jit_legacy.bat
               fi
             fi
 
         elif [[ "${JOB_BASE_NAME}" == *-test2 || ("${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1) ]]; then
-            "$SCRIPT_HELPERS_DIR"/test_python_second_shard.bat "$DETERMINE_FROM"
+            "$SCRIPT_HELPERS_DIR"/test_python_second_shard.bat
 
             if [[ -z ${RUN_SMOKE_TESTS_ONLY} ]]; then
               "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat

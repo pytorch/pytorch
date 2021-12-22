@@ -22,7 +22,10 @@ The following constraints are implemented:
 - ``constraints.real_vector``
 - ``constraints.real``
 - ``constraints.simplex``
+- ``constraints.symmetric``
 - ``constraints.stack``
+- ``constraints.square``
+- ``constraints.symmetric``
 - ``constraints.unit_interval``
 """
 
@@ -53,7 +56,9 @@ __all__ = [
     'real',
     'real_vector',
     'simplex',
+    'square',
     'stack',
+    'symmetric',
     'unit_interval',
 ]
 
@@ -456,16 +461,43 @@ class _CorrCholesky(Constraint):
         return _LowerCholesky().check(value) & unit_row_norm
 
 
-class _PositiveDefinite(Constraint):
+class _Square(Constraint):
     """
-    Constrain to positive-definite matrices.
+    Constrain to square matrices.
     """
     event_dim = 2
 
     def check(self, value):
-        # Assumes that the matrix or batch of matrices in value are symmetric
-        # info == 0 means no error, that is, it's SPD
-        return torch.linalg.cholesky_ex(value).info.eq(0).unsqueeze(0)
+        return torch.full(
+            size=value.shape[:-2],
+            fill_value=(value.shape[-2] == value.shape[-1]),
+            dtype=torch.bool,
+            device=value.device
+        )
+
+
+class _Symmetric(_Square):
+    """
+    Constrain to Symmetric square matrices.
+    """
+
+    def check(self, value):
+        square_check = super().check(value)
+        if not square_check.all():
+            return square_check
+        return torch.isclose(value, value.mT, atol=1e-6).all(-2).all(-1)
+
+
+class _PositiveDefinite(_Symmetric):
+    """
+    Constrain to positive-definite matrices.
+    """
+
+    def check(self, value):
+        sym_check = super().check(value)
+        if not sym_check.all():
+            return sym_check
+        return torch.linalg.cholesky_ex(value).info.eq(0)
 
 
 class _Cat(Constraint):
@@ -557,6 +589,8 @@ simplex = _Simplex()
 lower_triangular = _LowerTriangular()
 lower_cholesky = _LowerCholesky()
 corr_cholesky = _CorrCholesky()
+square = _Square()
+symmetric = _Symmetric()
 positive_definite = _PositiveDefinite()
 cat = _Cat
 stack = _Stack
