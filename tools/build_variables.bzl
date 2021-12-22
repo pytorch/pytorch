@@ -135,7 +135,9 @@ libtorch_sources_common = sorted(core_sources_common + torch_unpickler_common)
 libtorch_profiler_sources = [
     "torch/csrc/autograd/profiler_legacy.cpp",
     "torch/csrc/autograd/profiler_kineto.cpp",
+    "torch/csrc/profiler/api.cpp",
     "torch/csrc/monitor/counters.cpp",
+    "torch/csrc/monitor/events.cpp",
 ]
 
 libtorch_edge_profiler_sources = libtorch_profiler_sources + [
@@ -595,7 +597,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/CudaIPCTypes.cpp",
     "torch/csrc/cuda/comm.cpp",
     "torch/csrc/jit/codegen/fuser/cuda/fused_kernel.cpp",
-    "torch/csrc/autograd/profiler_cuda.cpp",
+    "torch/csrc/profiler/cuda.cpp",
     "torch/csrc/autograd/functions/comm.cpp",
     "torch/csrc/jit/codegen/cuda/arith.cpp",
     "torch/csrc/jit/codegen/cuda/compute_at.cpp",
@@ -976,6 +978,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/core/operator_name.cpp",
     "aten/src/ATen/core/PythonModeTLS.cpp",
     "aten/src/ATen/core/register_symbols.cpp",
+    "aten/src/ATen/core/class_type.cpp",
     "aten/src/ATen/core/type.cpp",
     "aten/src/ATen/cpu/FlushDenormal.cpp",
     "aten/src/ATen/detail/CPUGuardImpl.cpp",
@@ -1056,6 +1059,7 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/MaxPoolKernel.cpp",
     "aten/src/ATen/native/cpu/MaxUnpoolKernel.cpp",
     "aten/src/ATen/native/cpu/MultinomialKernel.cpp",
+    "aten/src/ATen/native/cpu/NaiveDilatedConvolution.cpp",
     "aten/src/ATen/native/cpu/PointwiseOpsKernel.cpp",
     "aten/src/ATen/native/cpu/PowKernel.cpp",
     "aten/src/ATen/native/cpu/RangeFactoriesKernel.cpp",

@@ -8,11 +8,12 @@ import torch.nn.functional as F
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import floating_types
 from torch.testing._internal.common_device_type import (
-    _TestParametrizer, _update_param_kwargs, skipIf, skipCUDAIfCudnnVersionLessThan, skipCUDAIfRocm, precisionOverride)
+    _TestParametrizer, _update_param_kwargs, skipIf, toleranceOverride, tol,
+    skipCUDAIfCudnnVersionLessThan, skipCUDAIfRocm, precisionOverride)
+from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_nn import nllloss_reference, get_reduction
 from torch.testing._internal.common_utils import (
     freeze_rng_state, set_single_threaded_if_parallel_tbb, GRADCHECK_NONDET_TOL)
-from torch.testing._internal.common_methods_invocations import DecorateInfo
 from types import ModuleType
 from typing import List, Tuple, Type, Set, Dict
 
@@ -155,6 +156,8 @@ class ModuleInfo(object):
                  dtypes=floating_types(),  # dtypes this function is expected to work with
                  supports_gradgrad=True,  # whether the op supports second order gradients
                  gradcheck_nondet_tol=0.0,  # tolerance for nondeterminism while performing gradcheck
+                 module_memformat_affects_out=False,  # whether converting module to channels last will generate
+                                                      # channels last output
                  ):
         self.module_cls = module_cls
         self.module_inputs_func = module_inputs_func
@@ -163,6 +166,7 @@ class ModuleInfo(object):
         self.dtypes = dtypes
         self.supports_gradgrad = supports_gradgrad
         self.gradcheck_nondet_tol = gradcheck_nondet_tol
+        self.module_memformat_affects_out = module_memformat_affects_out
 
     def should_skip(self, cls_name, test_name, device_type, dtype):
         return any(si.is_active(cls_name, test_name, device_type, dtype) for si in self.skips)
@@ -191,6 +195,35 @@ def module_inputs_torch_nn_Linear(module_info, device, dtype, requires_grad, **k
                     forward_input=FunctionInput(make_input(3)),
                     desc='no_batch_dim',
                     reference_fn=lambda m, p, i: torch.mm(i.view(1, -1), p[0].t()).view(-1) + p[1])
+    ]
+
+    return module_inputs
+
+
+def module_inputs_torch_nn_Bilinear(module_info, device, dtype, requires_grad, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    def bilinear_reference_fn(m, p, x1, x2, bias=True):
+        result = torch.einsum('bn,anm,bm->ba', x1, p[0], x2)
+        if bias:
+            if x1.shape[0] == 1:
+                result = result.view(-1) + p[1]
+            else:
+                result = result + p[1].view(1, -1).expand(x1.shape[0], p[0].shape[0])
+        return result
+
+    module_inputs = [
+        ModuleInput(constructor_input=FunctionInput(2, 3, 4),
+                    forward_input=FunctionInput(make_input(shape=(8, 2)), make_input(shape=(8, 3))),
+                    reference_fn=lambda m, p, x1, x2: bilinear_reference_fn(m, p, x1, x2)),
+        ModuleInput(constructor_input=FunctionInput(2, 3, 4, bias=False),
+                    forward_input=FunctionInput(make_input(shape=(8, 2)), make_input(shape=(8, 3))),
+                    desc='no_bias',
+                    reference_fn=lambda m, p, x1, x2: bilinear_reference_fn(m, p, x1, x2, bias=False)),
+        ModuleInput(constructor_input=FunctionInput(2, 3, 4),
+                    forward_input=FunctionInput(make_input(shape=(2)), make_input(shape=(3))),
+                    desc='no_batch_dim',
+                    reference_fn=lambda m, p, x1, x2: bilinear_reference_fn(m, p, x1.view(1, -1), x2.view(1, -1))),
     ]
 
     return module_inputs
@@ -546,9 +579,23 @@ module_db: List[ModuleInfo] = [
                    # Failure on ROCM for BatchNorm3d float32 issue #70125
                    DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),)
                ),
+    ModuleInfo(torch.nn.Bilinear,
+               module_inputs_func=module_inputs_torch_nn_Bilinear,
+               decorators=[
+                   DecorateInfo(
+                       toleranceOverride({
+                           torch.float32: tol(atol=1e-4, rtol=1e-4),
+                           torch.float64: tol(atol=1e-4, rtol=1e-4)}),
+                       'TestModule', 'test_forward', device_type='cpu')
+               ],
+               skips=(
+                   # No channels_last support for Bilinear currently.
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
+               ),
     ModuleInfo(torch.nn.Conv2d,
                module_inputs_func=module_inputs_torch_nn_Conv2d,
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+               module_memformat_affects_out=True,
                skips=(
                    # NHWC is disabled for float64 input in CudNN Conv.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format', dtypes=[torch.float64]),
@@ -564,6 +611,7 @@ module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.Conv3d,
                module_inputs_func=module_inputs_torch_nn_Conv3d,
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+               module_memformat_affects_out=True,
                skips=(
                    # NHWC is disabled for float64 input in CudNN Conv.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format', dtypes=[torch.float64]),
@@ -580,6 +628,7 @@ module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.ConvTranspose2d,
                module_inputs_func=module_inputs_torch_nn_ConvTranspose2d,
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+               module_memformat_affects_out=True,
                skips=(
                    # NHWC is disabled for float64 input in CudNN Conv.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format', dtypes=[torch.float64]),

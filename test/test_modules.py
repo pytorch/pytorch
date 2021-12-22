@@ -533,7 +533,7 @@ class TestModule(TestCase):
         module_cls = module_info.module_cls
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
                                                        requires_grad=False)
-        is_conv = 'Conv' in module_cls.__name__
+        module_memformat_affects_out = module_info.module_memformat_affects_out
 
         def _get_mem_formats(channels_last=False, channels_last_3d=False):
             if channels_last:
@@ -570,10 +570,10 @@ class TestModule(TestCase):
             def inner_check_out_mem_format(output):
                 d = output.dim()
                 if (d == 4 and ((input_mem_format == torch.channels_last)
-                                or (module_mem_format == torch.channels_last and is_conv))):
+                                or (module_mem_format == torch.channels_last and module_memformat_affects_out))):
                     self.assertTrue(output.is_contiguous(memory_format=torch.channels_last))
                 elif (d == 5 and ((input_mem_format == torch.channels_last_3d)
-                                  or (module_mem_format == torch.channels_last_3d and is_conv))):
+                                  or (module_mem_format == torch.channels_last_3d and module_memformat_affects_out))):
                     self.assertTrue(output.is_contiguous(memory_format=torch.channels_last_3d))
                 else:
                     self.assertTrue(output.is_contiguous())
