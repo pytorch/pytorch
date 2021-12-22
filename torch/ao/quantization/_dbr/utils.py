@@ -522,7 +522,12 @@ def get_torch_function_hook_type(
 
     if needs_op_hooks:
         return HookType.OP_HOOKS
-    elif parent_module_has_qstate:
+    elif (
+        parent_module_has_qstate and
+        # do not attempt to dequantize the args to dequantize, as that will
+        # lead to infinite recursion
+        func != torch.Tensor.dequantize
+    ):
         return HookType.ARG_DEQUANTS
     else:
         return HookType.NONE
