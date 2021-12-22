@@ -284,8 +284,8 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_onnx_function_extraction", onnx::ONNXFunctionExtraction)
       .def("_jit_pass_fuse", FuseGraph)
       .def(
-          "_jit_pass_replace_upgraders",
-          [](std::shared_ptr<Graph>& g) { return ApplyOldOpsUpgraders(g); })
+          "_jit_pass_replace_old_ops_with_upgraders",
+          [](std::shared_ptr<Graph>& g) { return ApplyOpsUpgraders(g); })
       .def(
           "_jit_pass_dce",
           [](std::shared_ptr<Graph>& g) {
