@@ -206,7 +206,7 @@ def remove_extra_dequantize(quantized: QuantizedGraphModule) -> QuantizedGraphMo
 
 
 def restore_state(
-        observed: GraphModule
+        observed: torch.nn.Module
 ) -> Tuple[Dict[Pattern, QuantizeHandler],
            Dict[str, Tuple[str, type]],
            Dict[str, Any],
