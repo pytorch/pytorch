@@ -581,11 +581,11 @@ std::tuple<Tensor, Tensor, Tensor> _nnpack_spatial_convolution_backward(
     std::array<bool, 3> output_mask) {
   Tensor grad_input, grad_weight, grad_bias;
   if (output_mask[0]) {
-    grad_input = at::_nnpack_spatial_convolution_backward_input(
+    grad_input = _nnpack_spatial_convolution_backward_input(
         input, grad_output, weight, padding);
   }
   if (output_mask[1]) {
-    grad_weight = at::_nnpack_spatial_convolution_backward_weight(
+    grad_weight = _nnpack_spatial_convolution_backward_weight(
         input, weight.sizes(), grad_output, padding);
   }
   if (output_mask[2]) {
