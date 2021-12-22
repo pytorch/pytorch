@@ -1,2 +1,2 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/utils/variadic.h>
