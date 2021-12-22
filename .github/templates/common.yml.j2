@@ -210,22 +210,6 @@ concurrency:
           python3 tools/render_junit.py test/
 {%- endmacro -%}
 
-{%- macro ciflow_should_run_job(ciflow_config) %}
-  !{{ ciflow_config.root_job_name }}:
-    runs-on: linux.large
-    timeout-minutes: !{{ timeout_minutes }}
-    env:
-      IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == '!{{ ciflow_config.trigger_action }}') && (github.event.assigneed.login == '!{{ ciflow_config.trigger_actor }}') }}
-      LABEL_CONDITIONS: ${{ !{{ ciflow_config.label_conditions }} }}
-      LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
-    if: !{{ ciflow_config.root_job_condition }}
-    steps:
-      - name: noop
-        run: echo running !{{ ciflow_config.root_job_name }}
-      - name: print labels
-        run: echo "${LABELS}"
-{%- endmacro -%}
-
 {%- macro calculate_docker_image(always_rebuild) -%}
       - name: Calculate docker image tag
         id: calculate-tag
