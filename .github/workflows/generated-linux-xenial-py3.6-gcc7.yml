@@ -55,7 +55,7 @@ jobs:
       docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
     steps:
       - name: print labels
-        run: echo "${LABELS}"
+        run: echo "${PR_LABELS}"
       - name: Display EC2 information
         shell: bash
         run: |

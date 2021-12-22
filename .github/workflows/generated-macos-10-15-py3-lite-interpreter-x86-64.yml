@@ -38,7 +38,7 @@ jobs:
       AWS_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
       IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == 'unassigned') && (github.event.assigneed.login == 'pytorchbot') }}
       LABEL_CONDITIONS: ${{ contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/macos') || contains(github.event.pull_request.labels.*.name, 'ciflow/trunk') }}
-      LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+      PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
     if: ${{ (github.repository == 'pytorch/pytorch') && (
             (github.event_name == 'push') ||
             (github.event_name == 'schedule') ||
@@ -47,7 +47,7 @@ jobs:
          }}
     steps:
       - name: print labels
-        run: echo "${LABELS}"
+        run: echo "${PR_LABELS}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:

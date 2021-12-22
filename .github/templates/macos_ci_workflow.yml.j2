@@ -45,11 +45,11 @@ jobs:
       AWS_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
       IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == '!{{ ciflow_config.trigger_action }}') && (github.event.assigneed.login == '!{{ ciflow_config.trigger_actor }}') }}
       LABEL_CONDITIONS: ${{ !{{ ciflow_config.label_conditions }} }}
-      LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+      PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
     if: !{{ ciflow_config.root_job_condition }}
     steps:
       - name: print labels
-        run: echo "${LABELS}"
+        run: echo "${PR_LABELS}"
       !{{ common.checkout_pytorch("recursive") }}
       !{{ common.setup_miniconda("3.8") }}
       - name: Install macOS homebrew dependencies

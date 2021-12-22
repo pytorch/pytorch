@@ -77,7 +77,7 @@ jobs:
     if: !{{ ciflow_config.root_job_condition }}
     steps:
       - name: print labels
-        run: echo "${LABELS}"
+        run: echo "${PR_LABELS}"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: seemethere/add-github-ssh-key@v1
         with:
