@@ -144,9 +144,9 @@ def adamax(params: List[Tensor],
     """
 
     if foreach and not torch.jit.is_scripting():
-        func = multi_tensor_adamax
+        func = _multi_tensor_adamax
     else:
-        func = single_tensor_adamax
+        func = _single_tensor_adamax
 
     func(params,
          grads,
@@ -160,17 +160,17 @@ def adamax(params: List[Tensor],
          weight_decay=weight_decay)
 
 
-def single_tensor_adamax(params: List[Tensor],
-                         grads: List[Tensor],
-                         exp_avgs: List[Tensor],
-                         exp_infs: List[Tensor],
-                         state_steps: List[int],
-                         *,
-                         eps: float,
-                         beta1: float,
-                         beta2: float,
-                         lr: float,
-                         weight_decay: float):
+def _single_tensor_adamax(params: List[Tensor],
+                          grads: List[Tensor],
+                          exp_avgs: List[Tensor],
+                          exp_infs: List[Tensor],
+                          state_steps: List[int],
+                          *,
+                          eps: float,
+                          beta1: float,
+                          beta2: float,
+                          lr: float,
+                          weight_decay: float):
 
     for i, param in enumerate(params):
         grad = grads[i]
@@ -196,17 +196,17 @@ def single_tensor_adamax(params: List[Tensor],
         param.addcdiv_(exp_avg, exp_inf, value=-clr)
 
 
-def multi_tensor_adamax(params: List[Tensor],
-                        grads: List[Tensor],
-                        exp_avgs: List[Tensor],
-                        exp_infs: List[Tensor],
-                        state_steps: List[int],
-                        *,
-                        beta1: float,
-                        beta2: float,
-                        lr: float,
-                        weight_decay: float,
-                        eps: float):
+def _multi_tensor_adamax(params: List[Tensor],
+                         grads: List[Tensor],
+                         exp_avgs: List[Tensor],
+                         exp_infs: List[Tensor],
+                         state_steps: List[int],
+                         *,
+                         beta1: float,
+                         beta2: float,
+                         lr: float,
+                         weight_decay: float,
+                         eps: float):
 
     if weight_decay != 0:
         torch._foreach_add_(grads, params, alpha=weight_decay)
