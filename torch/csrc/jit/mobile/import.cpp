@@ -302,20 +302,6 @@ void BytecodeDeserializer::parseFunctionSchema(
 
 void BytecodeDeserializer::init_upgrader(mobile::Function* function) {
   for (auto& byteCodeFunctionWithOperator : getUpgraderBytecodeList()) {
-    // When kUpgraderByteCode is initialized in upgrader_mobile.h, the mobile
-    // function is initialized with everything (instruction, constants, types,
-    // registerer size and etc), except operator. The operator function is also
-    // static initialized and is available later. The oprator for the upgrader
-    // function will be initialized when the first module is loaded.
-    if (byteCodeFunctionWithOperator.function.get_code().operators_.empty()) {
-      for (const auto& op : byteCodeFunctionWithOperator.operators) {
-        byteCodeFunctionWithOperator.function.append_operator(
-            op.name,
-            op.overload_name,
-            op.num_specified_args,
-            caffe2::serialize::kMaxSupportedFileFormatVersion);
-      }
-    }
     function->append_function(byteCodeFunctionWithOperator.function);
   }
 }
