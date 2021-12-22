@@ -7,8 +7,7 @@ from torch import Tensor, vmap
 import functools
 import itertools
 import warnings
-from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
-    skipCUDAIfNoMagma
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 import types
 
 
