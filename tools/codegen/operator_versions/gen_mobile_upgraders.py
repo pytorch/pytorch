@@ -16,7 +16,7 @@ class ByteCode(Enum):
     register_size = 5
 
 EXCLUDED_OP_SET = ([
-    "aten::full.names", "aten::full.out","aten::full"
+    "aten::full.names", "aten::full.out","aten::full",
 ])
 
 EXCLUE_UPGRADER_SET = ([
