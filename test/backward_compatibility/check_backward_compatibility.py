@@ -61,6 +61,7 @@ ALLOW_LIST = [
     ("aten::_slow_conv2d_backward", datetime.date(2022, 1, 31)),
     ("aten::slow_conv3d_forward", datetime.date(2022, 1, 31)),
     ("aten::slow_conv3d_backward", datetime.date(2022, 1, 31)),
+    ("aten::slow_conv_dilated2d_backward", datetime.date(2022, 1, 31)),
     ("aten::slow_conv_transpose2d", datetime.date(2022, 1, 31)),
     ("aten::slow_conv_transpose2d_backward", datetime.date(2022, 1, 31)),
     ("aten::slow_conv_transpose3d", datetime.date(2022, 1, 31)),
@@ -98,6 +99,7 @@ ALLOW_LIST = [
     ("prepacked::unpack_prepacked_sizes_linear", datetime.date(9999, 1, 1)),
     ("q::_FloatToBfloat16Quantized", datetime.date(2021, 12, 21)),
     ("q::_Bfloat16QuantizedToFloat", datetime.date(2021, 12, 21)),
+    ("aten::_inverse_helper", datetime.date(2021, 12, 31)),
 ]
 
 ALLOW_LIST_COMPILED = [
