@@ -782,10 +782,9 @@ StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
   if (pre_alloc_) {
     auto interm_bufs = l.getIntermediateBufs();
     preAllocIntermediateBufs(interm_bufs);
-    l.prepareForCodegen(interm_bufs);
-  } else {
-    l.prepareForCodegen();
   }
+
+  l.prepareForCodegen();
 
   GRAPH_DEBUG("after prepareForCodegen", *l.root_stmt());
   l.simplify();
@@ -937,9 +936,19 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
         bufferArgs_.emplace_back(inBuffer);
         break;
       }
+      ExprHandle flat_size = 1;
+      for (size_t i = 0; i < *tt->sizes().size(); i++) {
+        auto size = *tt->sizes()[i];
+        if (size == 0) {
+          flat_size = 0;
+          break;
+        }
+        flat_size = flat_size + (size - 1) * *tt->strides()[i];
+      }
+      flat_size = IRSimplifier::simplify(flat_size);
       BufHandle inBuffer(
           "t" + input_name_map_[input],
-          {0},
+          {flat_size},
           ToDtype(static_cast<ScalarType>(*tt->scalarType())));
       std::vector<DimArg> inputTensorDims;
       for (size_t i = 0; i < *tt->sizes().size(); i++) {
@@ -1107,7 +1116,8 @@ void TensorExprKernel::bindConstant(const torch::jit::Value* v) {
     std::vector<ExprPtr> dims;
     BufPtr buf = alloc<Buf>(name_hint, dims, dtype);
     auto dataPtr = val.toObjectRef().getSlot(0).toCapsule().get();
-    constants_.push_back({buf, dataPtr});
+    // NOLINTNEXTLINE
+    constants_.push_back({buf, dataPtr, const_cast<Node*>(v->node())});
     bufs_[v] = buf;
     return;
   }
@@ -1139,12 +1149,12 @@ void TensorExprKernel::bindConstant(const torch::jit::Value* v) {
   bufs_[v] = buf;
 }
 
-void TensorExprKernel::preAllocIntermediateBufs(
-    std::unordered_set<BufPtr>& interm_bufs) {
+std::vector<BufPtr> TensorExprKernel::preAllocIntermediateBufs(
+    const std::vector<BufPtr>& interm_bufs) {
+  std::vector<BufPtr> remaining_interm_bufs;
   std::vector<std::pair<BufPtr, void*>> allocated_bufs;
-  for (auto it = interm_bufs.begin(); it != interm_bufs.end();) {
+  for (auto buf : interm_bufs) {
     // Check if buf shape is static and compute its size if static.
-    auto buf = *it;
     bool is_static = true;
     size_t size =
         elementSize(buf->dtype().scalar_type()) * buf->dtype().lanes();
@@ -1157,26 +1167,17 @@ void TensorExprKernel::preAllocIntermediateBufs(
     }
     // Only allocate memory for static bufs.
     if (!is_static) {
-      ++it;
+      remaining_interm_bufs.push_back(buf);
       continue;
     }
     auto bp = (void*)malloc(size);
     if (!bp) {
-      ++it;
+      remaining_interm_bufs.push_back(buf);
       continue;
     }
-    allocated_bufs.emplace_back(buf, bp);
-    it = interm_bufs.erase(it);
+    constants_.push_back({buf, bp});
   }
-  std::sort(
-      allocated_bufs.begin(),
-      allocated_bufs.end(),
-      [](const auto& a, const auto& b) {
-        return a.first->name_hint() > b.first->name_hint();
-      });
-  for (auto& a : allocated_bufs) {
-    constants_.push_back({a.first, a.second});
-  }
+  return remaining_interm_bufs;
 }
 
 BlockPtr TensorExprKernel::bindAllInputs() {
@@ -1312,7 +1313,7 @@ void TensorExprKernel::compile() {
   }
 
   BackendType backendType = inferBackendTypeFromDevice(device_);
-  StmtPtr stmt = transformLoops(backendType, block);
+  stmt_ = transformLoops(backendType, block);
 
   for (auto c : constants_) {
     bufferArgs_.emplace_back(BufHandle(c.buf));
@@ -1326,10 +1327,15 @@ void TensorExprKernel::compile() {
   // Generate code.
   codegen_ = CreateCodeGen(
       getCodeGenName(backendType),
-      stmt,
+      stmt_,
       bufferArgs_,
       device_,
       kernel_func_name_);
+}
+
+void TensorExprKernel::recompile() {
+  codegen_ = CreateCodeGen(
+      "llvm_codegen", stmt_, bufferArgs_, device_, kernel_func_name_);
 }
 
 TensorExprKernel::TensorExprKernel(

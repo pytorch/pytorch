@@ -15,6 +15,7 @@ import random
 import model_defs.word_language_model as word_language_model
 import onnx
 
+import torch.nn.functional as F
 from torch.nn.utils import rnn as rnn_utils
 from model_defs.lstm_flattening_result import (LstmFlatteningResultWithSeqLength,
                                                LstmFlatteningResultWithoutSeqLength)
@@ -93,7 +94,11 @@ def convert_to_onnx(model, input=None, opset_version=9, do_constant_folding=True
                        onnx_shape_inference=onnx_shape_inference)
 
     # compute onnxruntime output prediction
-    ort_sess = onnxruntime.InferenceSession(f.getvalue())
+    so = onnxruntime.SessionOptions()
+    # suppress ort warnings.
+    # 0:Verbose, 1:Info, 2:Warning. 3:Error, 4:Fatal. Default is 2.
+    so.log_severity_level = 3
+    ort_sess = onnxruntime.InferenceSession(f.getvalue(), so)
     return ort_sess
 
 
@@ -124,12 +129,11 @@ def ort_compare_with_pytorch(ort_outs, output, rtol, atol):
 
 def run_model_test(self, model, batch_size=2, state_dict=None,
                    input=None, use_gpu=True, rtol=0.001, atol=1e-7,
-                   example_outputs=None, do_constant_folding=True,
-                   dynamic_axes=None, test_with_inputs=None,
-                   input_names=None, output_names=None,
-                   fixed_batch_size=False, dict_check=True,
-                   training=None, remained_onnx_input_idx=None,
-                   flatten=True):
+                   do_constant_folding=True, dynamic_axes=None,
+                   test_with_inputs=None, input_names=None,
+                   output_names=None, fixed_batch_size=False,
+                   dict_check=True, training=None,
+                   remained_onnx_input_idx=None, flatten=True):
     if training is not None and training == torch.onnx.TrainingMode.TRAINING:
         model.train()
     elif training is None or training == torch.onnx.TrainingMode.EVAL:
@@ -324,7 +328,7 @@ class TestONNXRuntime(unittest.TestCase):
     def run_model_test_with_external_data(self, model, input, rtol=0.001, atol=1e-7,
                                           do_constant_folding=True, dynamic_axes=None,
                                           input_names=None, output_names=None,
-                                          ort_optim_on=True, training=None, use_external_data_format=None):
+                                          ort_optim_on=True, training=None):
         import os
         import tempfile
 
@@ -352,13 +356,15 @@ class TestONNXRuntime(unittest.TestCase):
                                   do_constant_folding=do_constant_folding,
                                   keep_initializers_as_inputs=self.keep_initializers_as_inputs,
                                   dynamic_axes=dynamic_axes,
-                                  input_names=input_names, output_names=output_names,
-                                  use_external_data_format=use_external_data_format)
+                                  input_names=input_names, output_names=output_names)
                 # compute onnxruntime output prediction
                 ort_sess_opt = onnxruntime.SessionOptions()
                 ort_sess_opt.graph_optimization_level = \
                     onnxruntime.GraphOptimizationLevel.ORT_ENABLE_EXTENDED if ort_optim_on else \
                     onnxruntime.GraphOptimizationLevel.ORT_DISABLE_ALL
+                # suppress ort warnings.
+                # 0:Verbose, 1:Info, 2:Warning. 3:Error, 4:Fatal. Default is 2.
+                ort_sess_opt.log_severity_level = 3
                 ort_sess = onnxruntime.InferenceSession(model_file_name, sess_options=ort_sess_opt)
                 input_copy = copy.deepcopy(input)
                 ort_outs = run_ort(ort_sess, input_copy)
@@ -387,26 +393,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_model_test_with_external_data(model, x)
 
     @skipIfUnsupportedMinOpsetVersion(9)  # Because external data format was released with Opset 9.
-    def test_mobilenet_v2_with_external_data(self):
-        model = torchvision.models.mobilenet_v2(pretrained=False)
-        x = torch.randn(2, 3, 224, 224, requires_grad=True)
-        # We are turning off Onnx Runtime optimization off in this test,
-        # because external data format is not supported to in ORT optimizer.
-        # Once that support is added, we can set ort_optim_on=True (default).
-        self.run_model_test_with_external_data(model, x, rtol=1e-3, atol=1e-5,
-                                               ort_optim_on=False)
-
-    @skipIfUnsupportedMinOpsetVersion(9)  # Because external data format was released with Opset 9.
-    def test_attribute_with_external_data(self):
-        class LargeModel(torch.nn.Module):
-            def forward(self, x):
-                return x + torch.ones(2, 1024)
-
-        x = torch.randn(2, 1)
-        self.run_model_test_with_external_data(LargeModel(), x, use_external_data_format=None)
-
-    @skipIfUnsupportedMinOpsetVersion(9)  # Because external data format was released with Opset 9.
-    def test_largemodel_without_use_external_data_format_param(self):
+    def test_large_model_with_external_data(self):
         class LargeModel(torch.nn.Module):
             def __init__(self):
                 super(LargeModel, self).__init__()
@@ -422,17 +409,16 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, input):
                 return self.seq(input)
 
-        model = LargeModel()
         x = torch.tensor([2], dtype=torch.long)
-        self.run_model_test_with_external_data(LargeModel(), x, use_external_data_format=None)
+        self.run_model_test_with_external_data(LargeModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)  # Because external data format was released with Opset 9.
-    def test_largemodel_with_use_external_data_format_False(self):
+    def test_large_model_with_non_str_file(self):
         class LargeModel(torch.nn.Module):
             def __init__(self):
                 super(LargeModel, self).__init__()
                 dim = 5
-                n = 30 * 4 * 10 ** 6
+                n = 40 * 4 * 10 ** 6
                 self.emb = torch.nn.Embedding(n, dim)
                 self.lin1 = torch.nn.Linear(dim, 1)
                 self.seq = torch.nn.Sequential(
@@ -443,15 +429,13 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, input):
                 return self.seq(input)
 
-        model = LargeModel()
-        x = torch.tensor([3], dtype=torch.long)
-
-        with self.assertRaises(RuntimeError) as cm:
-            self.run_model_test_with_external_data(LargeModel(), x, use_external_data_format=False)
-
-            the_exception = cm.exception
-            self.assertEqual("RuntimeError: Exporting model exceed maximum protobuf size of 2GB. " +
-                             "Please call torch.onnx.export without setting use_external_data_format parameter.")
+        x = torch.tensor([2], dtype=torch.long)
+        f = io.BytesIO()
+        err_msg = ("The serialized model is larger than the 2GiB limit imposed by the protobuf library. "
+                   "Therefore the output file must be a file path, so that the ONNX external data can be written to "
+                   "the same directory. Please specify the output file name.")
+        with self.assertRaisesRegex(RuntimeError, err_msg):
+            torch.onnx.export(LargeModel(), x, f)
 
     def test_fuse_conv_bn1d(self):
         class Fuse(torch.nn.Module):
@@ -5854,6 +5838,18 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(PixelShuffle(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    def test_reciprocal(self):
+        class ReciprocalModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.reciprocal(x)
+
+        model = ReciprocalModel()
+        x = torch.tensor([2, 4])
+        self.run_test(model, x.to(torch.long))
+        self.run_test(model, x.to(torch.float))
+        self.run_test(model, x.to(torch.double))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_scalar_type(self):
         class ArithmeticModel(torch.nn.Module):
             def forward(self, x):
@@ -5862,12 +5858,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.ones(2, 3, dtype=torch.float32)
         self.run_test(ArithmeticModel(), x)
 
-        class ReciprocalModel(torch.nn.Module):
-            def forward(self, x):
-                return torch.reciprocal(x)
-
-        x = torch.tensor([2.0, 4.0], dtype=torch.double)
-        self.run_test(ReciprocalModel(), x)
 
         class ComparisonModel(torch.nn.Module):
             def forward(self, x, y):
@@ -5903,7 +5893,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_full_like(self):
         class FullLikeModel(torch.nn.Module):
             def forward(self, x):
-                return torch.full_like(x, 4)
+                return torch.full_like(x, 1.3, dtype=torch.int)
 
         x = torch.tensor(12)
         self.run_test(FullLikeModel(), x)
@@ -6459,6 +6449,19 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.zeros([2, 3, 4], dtype=torch.bool)
         model = MyModule()
         self.run_test(model, (x, y))
+
+    # ONNX supports bfloat16 for opsets >= 13
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_cast_type_as_with_bfloat16(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                y = torch.ones((3, 4), dtype=torch.bfloat16)
+                x = x.type_as(y)
+                return x.to(dtype=torch.float16)
+
+        x = torch.ones(3, 4, dtype=torch.float16)
+        model = MyModule()
+        self.run_test(model, x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_type_as(self):
@@ -10148,6 +10151,27 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.zeros(1)
         self.run_test(torch.jit.script(M()), (x,))
 
+    def test_shape_value_map(self):
+        class RSoftMax(torch.nn.Module):
+            def __init__(self, radix, cardinality):
+                super().__init__()
+                self.radix = radix
+                self.cardinality = cardinality
+
+            def forward(self, x):
+                batch = x.size(0)
+                x = x.view(batch, self.cardinality, self.radix, -1).transpose(1, 2)
+                x = F.softmax(x, dim=1)
+                x = x.reshape(batch, -1)
+                return x
+        radix = 2
+        cardinality = 1
+        x = torch.randn(10, 1, 128, 1)
+        f = io.BytesIO()
+        torch.onnx.export(RSoftMax(radix, cardinality), (x, ), f, input_names=["x"], dynamic_axes={"x": [0]})
+        loaded_model = onnx.load_from_string(f.getvalue())
+        self.assertEqual(loaded_model.graph.output[0].type.tensor_type.shape.dim[1].dim_value, 128)
+
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout, script_test_min_opset_version,
               **extra_kwargs):
@@ -10316,6 +10340,14 @@ TestONNXRuntime_opset14 = type(str("TestONNXRuntime_opset14"),
                                dict(TestONNXRuntime.__dict__, opset_version=14,
                                     keep_initializers_as_inputs=False,
                                     onnx_shape_inference=True))
+
+# opset 15 tests
+TestONNXRuntime_opset15 = type(str("TestONNXRuntime_opset15"),
+                               (unittest.TestCase,),
+                               dict(TestONNXRuntime.__dict__, opset_version=15,
+                                    keep_initializers_as_inputs=False,
+                                    onnx_shape_inference=True))
+
 
 if __name__ == "__main__":
     unittest.main()

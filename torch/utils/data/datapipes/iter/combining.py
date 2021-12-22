@@ -44,18 +44,6 @@ class ConcaterIterDataPipe(IterDataPipe):
         return len(self)
 
 
-# This is fake class to show API, going to be replaced by the copy from torchdata
-# TODO(VitalyFedyunin): Replace with valid version, documentation and tests
-class IterateBuffer(IterDataPipe):
-
-    def __init__(self, buffer):
-        self.buffer = buffer
-
-    def __iter__(self):
-        for i in self.buffer:
-            yield i
-
-
 @functional_datapipe('fork')
 class ForkerIterDataPipe(IterDataPipe):
     r""" :class:`ForkerIterDataPipe`.
@@ -97,7 +85,7 @@ class _ForkerIterDataPipe(IterDataPipe):
                 "please be aware of OOM at random places",
                 UserWarning
             )
-        self.child_pointers = [0] * num_instances  # Indicate the indices of the next element to get
+        self.child_pointers: List[int] = [0] * num_instances  # Indicate the indices of the next element to get
         self.slowest_ptr = 0
         self.leading_ptr = 0
         self.end_ptr: Optional[int] = None
@@ -130,6 +118,9 @@ class _ForkerIterDataPipe(IterDataPipe):
                         self.slowest_ptr = new_min
                         self.buffer.popleft()
                 yield return_val
+        if self.end_ptr and self.child_pointers[instance_id] == self.end_ptr and\
+           all(p == self.end_ptr for p in self.child_pointers):
+            self._datapipe_iterator = None
 
     def is_instance_started(self, instance_id: int) -> bool:
         return self.child_pointers[instance_id] != 0
@@ -235,9 +226,12 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
 
     def _find_next(self, instance_id: int) -> T_co:
         while True:
+            if self.main_datapipe_exhausted:
+                raise StopIteration
             if self._datapipe_iterator is None:
-                raise ValueError("_datapipe_iterator has not been set, likely because this private method is called directly "
-                                 "without invoking get_next_element_by_instance() first.")
+                raise ValueError(
+                    "_datapipe_iterator has not been set, likely because this private method is called directly "
+                    "without invoking get_next_element_by_instance() first.")
             value = next(self._datapipe_iterator)
             classification = self.classifier_fn(value)
             if classification is None and self.drop_none:
@@ -254,7 +248,7 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
                     f"DemultiplexerIterDataPipe buffer overflow, buffer size {self.buffer_size} is insufficient.")
 
     def get_next_element_by_instance(self, instance_id: int):
-        if self._datapipe_iterator is None:
+        if self._datapipe_iterator is None and not self.main_datapipe_exhausted:
             self._datapipe_iterator = iter(self.main_datapipe)
         stop = False
         self.instance_started[instance_id] = True
@@ -268,6 +262,7 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
                 except StopIteration:
                     stop = True
                     self.main_datapipe_exhausted = True
+                    self._datapipe_iterator = None
 
     def is_instance_started(self, instance_id: int) -> bool:
         return self.instance_started[instance_id]
@@ -281,6 +276,7 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
         self.child_buffers = [deque() for _ in range(self.num_instances)]
         self.instance_started = [False] * self.num_instances
         self.main_datapipe_exhausted = False
+
 
 @functional_datapipe('mux')
 class MultiplexerIterDataPipe(IterDataPipe):

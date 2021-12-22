@@ -237,7 +237,7 @@ class Optimizer(object):
 
         Args:
             param_group (dict): Specifies what Tensors should be optimized along with group
-            specific optimization options.
+                specific optimization options.
         """
         assert isinstance(param_group, dict), "param group must be a dict"
 
