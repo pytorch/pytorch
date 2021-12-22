@@ -7,10 +7,11 @@ if exist %GFLAGS_EXE% (
     echo Some smoke tests
     %GFLAGS_EXE% /i python.exe +sls
     python %SCRIPT_HELPERS_DIR%\run_python_nn_smoketests.py
-    if ERRORLEVEL 1 exit /b 1
+    if ERRORLEVEL 1 echo "exiting after running python script"
 
     %GFLAGS_EXE% /i python.exe -sls
-    if ERRORLEVEL 1 exit /b 1
+    if ERRORLEVEL 1 echo "exiting after running -sls"
+    exit /b 1
 )
 if ERRORLEVEL 1 exit /b 1
 echo "made it out of the () but still going"
