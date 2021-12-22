@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/runtime/static/fusion.h>
 
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
@@ -47,7 +47,7 @@ Operation createStaticSubgraphRuntime(const Node* node) {
     torch::jit::drop(stack, num_inputs);
 
     if (module->num_outputs() > 1) {
-      for (auto& o : outputs.toTuple()->elements()) {
+      for (auto& o : outputs.toTupleRef().elements()) {
         push_one(stack, std::move(o));
       }
     } else {

@@ -250,6 +250,14 @@ std::vector<int64_t> _pair_int(ArgValue v) {
   return {i, i};
 }
 
+std::vector<int64_t> _single_int_list(ArgValue v) {
+  if (auto t = c10::get_if<IntList>(&v)) {
+    return {(*t)[0]};
+  }
+  auto i = c10::get<int64_t>(v);
+  return {i};
+}
+
 bool conv2dIsSupported(
     const TensorInfo& input,
     const TensorInfo& weight,
@@ -341,6 +349,39 @@ Tensor computeConv2d(
        dilation[0],
        dilation[1],
        groups});
+  return Tensor(ResultBuf.node(), s);
+}
+
+Tensor computeConv1d(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
+  Dtype dtype = kFloat;
+  if (outputType) {
+    dtype = Dtype(*outputType);
+  }
+
+  BufHandle ResultBuf("conv", outputShape, dtype);
+  const BufHandle& inp = c10::get<BufHandle>(inputs[0]);
+  const BufHandle& w = c10::get<BufHandle>(inputs[1]);
+  const BufHandle& b = c10::get<BufHandle>(inputs[2]);
+
+  auto strides = _single_int_list(inputs[3]);
+  auto padding = _single_int_list(inputs[4]);
+  auto dilation = _single_int_list(inputs[5]);
+
+  int groups = c10::get<int64_t>(inputs[6]);
+
+  auto inpInfo = getTensorInfo(inp);
+  auto wInfo = getTensorInfo(w);
+  auto bInfo = getTensorInfo(b);
+
+  StmtPtr s = ExternalCall::make(
+      ResultBuf,
+      "nnc_aten_conv1d",
+      {inp, w, b},
+      {strides[0], padding[0], dilation[0], groups});
   return Tensor(ResultBuf.node(), s);
 }
 

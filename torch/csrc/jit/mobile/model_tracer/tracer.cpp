@@ -135,7 +135,7 @@ int main(int argc, char* argv[]) {
     }
   }
 
-  yaml_out << "include_all_kernel_dtypes: true" << std::endl;
+  yaml_out << "include_all_non_op_selectives: true" << std::endl;
   yaml_out << "operators:" << std::endl;
   printOpsYAML(
       yaml_out,

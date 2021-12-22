@@ -49,6 +49,8 @@ void swap(Fusion& a, Fusion& b) noexcept {
   swap(a.outputs_, b.outputs_);
 
   swap(a.io_alias_, b.io_alias_);
+  swap(a.permuted_input_map_, b.permuted_input_map_);
+  swap(a.permuted_output_map_, b.permuted_output_map_);
 
   // Fixup the Statement::fusion_ links for a
   for (auto val : a.val_set_) {
@@ -112,6 +114,9 @@ IrCloner Fusion::copy(const Fusion* from, Fusion* to) {
     to->io_alias_[copied_output] = copied_input;
   }
 
+  to->permuted_input_map_ = from->permuted_input_map_;
+  to->permuted_output_map_ = from->permuted_output_map_;
+
   return ir_cloner;
 }
 
@@ -166,6 +171,8 @@ void Fusion::clear() noexcept {
   outputs_.clear();
 
   io_alias_.clear();
+  permuted_input_map_.clear();
+  permuted_output_map_.clear();
 }
 
 void Fusion::removeExpr(Expr* expr) {
@@ -289,6 +296,14 @@ void Fusion::replaceOutput(Val* output, Val* replacement) {
       output->as<TensorView>()->setMemoryType(MemoryType::Local);
     }
     resetTvUses();
+  }
+
+  // Temporary WAR for issue #1112
+  // (https://github.com/csarofeen/pytorch/issues/1112)
+  if (io_alias_.count(output) != 0) {
+    auto input = io_alias_[output];
+    io_alias_.erase(output);
+    io_alias_[replacement] = input;
   }
 }
 
@@ -673,6 +688,14 @@ void Fusion::aliasOutputToInput(Val* output, Val* input) {
   io_alias_[output] = input;
 }
 
+Val* Fusion::getOutputAlias(Val* output) {
+  auto search = io_alias_.find(output);
+  if (search != io_alias_.end()) {
+    return search->second;
+  }
+  return nullptr;
+}
+
 std::unordered_set<int> Fusion::getOutputAliasIndices() const {
   if (io_alias_.empty()) {
     return {};
@@ -680,7 +703,7 @@ std::unordered_set<int> Fusion::getOutputAliasIndices() const {
 
   std::unordered_set<int> alias_indices;
 
-  for (size_t i = 0; i < outputs_.size(); i++) {
+  for (const auto i : c10::irange(outputs_.size())) {
     if (io_alias_.count(outputs_[i]) != 0) {
       alias_indices.insert(i);
     }
@@ -694,10 +717,10 @@ std::vector<std::pair<int, int>> Fusion::getInputAliasIndices() const {
   }
 
   std::vector<std::pair<int, int>> alias_indices;
-  for (size_t i = 0; i < outputs_.size(); i++) {
+  for (const auto i : c10::irange(outputs_.size())) {
     if (io_alias_.count(outputs_[i]) != 0) {
       bool found = false;
-      for (size_t j = 0; j < inputs_.size(); j++) {
+      for (const auto j : c10::irange(inputs_.size())) {
         if (io_alias_.at(outputs_[i]) == inputs_[j]) {
           alias_indices.emplace_back(i, j);
           found = true;

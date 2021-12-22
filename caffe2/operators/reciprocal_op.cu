@@ -47,13 +47,13 @@ bool ReciprocalGradientFunctor<CUDAContext>::Forward(
 REGISTER_CUDA_OPERATOR(
     Reciprocal,
     UnaryElementwiseOp<
-        TensorTypes<float>,
+        TensorTypes<float, double>,
         CUDAContext,
         ReciprocalFunctor<CUDAContext>>);
 REGISTER_CUDA_OPERATOR(
     ReciprocalGradient,
     BinaryElementwiseOp<
-        TensorTypes<float>,
+        TensorTypes<float, double>,
         CUDAContext,
         ReciprocalGradientFunctor<CUDAContext>>);
 
