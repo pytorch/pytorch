@@ -1,0 +1,13 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+cc_library(
+    name = "mobile",
+    hdrs = glob(["*.h"]),
+    srcs = glob(["*.cpp"]),
+    deps = [
+        "//c10/core:alloc_cpu",
+        "//c10/core:free_cpu",
+        "//c10/util:base",
+    ],
+    visibility = ["//visibility:public"],
+)
