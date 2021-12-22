@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
 
 #include <unordered_map>
@@ -16,7 +16,8 @@ class Fusion;
 //! Clones nodes from an exiting Fusion
 //!
 //! \warning IrCloner machinery is a specialized helper for implementing
-//!   Fusion copy operations and it's not intended for any other uses
+//!   Fusion copy operations and the and limited scope of RecomputeTv below.
+//!   It is not intended for any other uses.
 //!
 class TORCH_CUDA_CU_API IrCloner : private OptInConstDispatch {
   friend class Statement;
@@ -48,7 +49,7 @@ class TORCH_CUDA_CU_API IrCloner : private OptInConstDispatch {
     return fusion_;
   }
 
- private:
+ protected:
   void registerClone(const Statement* src, Statement* clone);
 
   void handle(const Statement*) override;
@@ -73,9 +74,15 @@ class TORCH_CUDA_CU_API IrCloner : private OptInConstDispatch {
   void handle(const TransposeOp*) override;
   void handle(const ShiftOp*) override;
   void handle(const GatherOp*) override;
+  void handle(const ViewOp*) override;
 
   void handle(const Split*) override;
   void handle(const Merge*) override;
+
+ protected:
+  // We keep track of the original -> clone map so we don't
+  // duplicate clones of the same object if referenced multiple times
+  std::unordered_map<const Statement*, Statement*> clones_map_;
 
  private:
   // The destination Fusion container
@@ -85,10 +92,20 @@ class TORCH_CUDA_CU_API IrCloner : private OptInConstDispatch {
   // individual `handle()` methods, so they are storing the
   // result here
   Statement* clone_ = nullptr;
+};
 
-  // We keep track of the original -> clone map so we don't
-  // duplicate clones of the same object if referenced multiple times
-  std::unordered_map<const Statement*, Statement*> clones_map_;
+// Replicates all expressions used to generate the provided TensorView. Does not
+// replicate inputs. Does not replicate scalar values. In other words the value
+// provided will be recomputed from the inputs of the fusion.
+class RecomputeTv : private IrCloner {
+ public:
+  // Replicates expressions and values in provided expressions.
+  static TensorView* recompute(TensorView* tv);
+
+ private:
+  RecomputeTv(Fusion* fusion, std::vector<Expr*> exprs);
+
+  void handle(const TensorDomain*) override;
 };
 
 } // namespace cuda

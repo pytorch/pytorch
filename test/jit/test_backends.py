@@ -555,7 +555,7 @@ class BasicModuleTestWithCompiler(JitBackendTestCaseWithCompiler):
 
     def test_execution(self):
         # Test execution with backend against Python and JIT.
-        input = torch.randn(5)
+        input = torch.ones(1, dtype=torch.float)
         self.check_forward((input, input))
 
 class ErrorMessagesWithCompiler(JitBackendTestCase):
@@ -649,8 +649,8 @@ class CompModuleTestWithCompiler(JitBackendTestCase):
 
     def test_execution(self):
         # Test execution with backend against Python and JIT.
-        input1 = torch.randn(5)
-        input2 = torch.randn(5)
+        input1 = torch.ones(1, dtype=torch.float)
+        input2 = torch.ones(1, dtype=torch.float)
 
         # Test forward.
         self.check_function("forward", (input1, input2, input2))

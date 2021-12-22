@@ -109,7 +109,9 @@ class ConditionalFromPredicateModifier {
     switch (pred->predicate_type()) {
       case PredicateType::Inline:
       case PredicateType::ReductionWrite:
-      case PredicateType::Misaligned: {
+      case PredicateType::Misaligned:
+      case PredicateType::Shift:
+      case PredicateType::Padding: {
         return PredicateCompute::getInlinePredicate(
             pred->expr(),
             for_loops_structure_,
@@ -134,28 +136,6 @@ class ConditionalFromPredicateModifier {
       case PredicateType::Unswitch: {
         return UnswitchPredicate::get(
             for_loops_structure_, pred->unrolled_loop());
-      }
-      case PredicateType::Shift: {
-        kir::TensorView* out_tv = ir_utils::getTVOutput(pred->expr());
-        TORCH_INTERNAL_ASSERT(
-            out_tv != nullptr, "Missing kir::TensorView output");
-        return ShiftPredicateInserter::getPredicate(
-            pred->expr(),
-            for_loops_structure_,
-            out_tv,
-            pred->thread_pred(),
-            true);
-      }
-      case PredicateType::Padding: {
-        kir::TensorView* out_tv = ir_utils::getTVOutput(pred->expr());
-        TORCH_INTERNAL_ASSERT(
-            out_tv != nullptr, "Missing kir::TensorView output");
-        return ShiftPredicateInserter::getPredicate(
-            pred->expr(),
-            for_loops_structure_,
-            out_tv,
-            pred->thread_pred(),
-            false);
       }
       case PredicateType::Manual: {
         return pred->value();
