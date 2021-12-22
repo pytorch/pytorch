@@ -261,6 +261,7 @@ jobs:
       TEST_RUNNER_TYPE: linux.4xlarge.nvidia.gpu
       ENABLE_DISTRIBUTED_TEST: ''
       ENABLE_JIT_LEGACY_TEST: ''
+      ENABLE_FX2TRT_TEST: ''
       ENABLE_MULTIGPU_TEST: ''
       ENABLE_NOGPU_NO_AVX_TEST: ''
       ENABLE_NOGPU_NO_AVX2_TEST: ''
