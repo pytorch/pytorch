@@ -12933,6 +12933,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            supports_inplace_autograd=False,
+           supports_scripting=False,
            op=torch.Tensor.__getitem__,
            skips=(
                # ZeroTensors are immutable. Please use the materialized zero tensor obtained using .clone()
