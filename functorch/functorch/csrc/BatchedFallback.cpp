@@ -67,7 +67,10 @@ static bool areAnyArgumentsTensorList(const at::FunctionSchema& schema) {
   return std::any_of(
       schema.arguments().begin(),
       schema.arguments().end(),
-      [] (const Argument& arg) { return arg.type()->isSubtypeOf(ListType::ofTensors()); });
+      [] (const Argument& arg) {
+        return arg.type()->isSubtypeOf(ListType::ofTensors()) ||
+          arg.type()->isSubtypeOf(ListType::ofOptionalTensors());
+      });
 }
 
 static void warnFallback(const c10::FunctionSchema& schema, bool is_inplace) {

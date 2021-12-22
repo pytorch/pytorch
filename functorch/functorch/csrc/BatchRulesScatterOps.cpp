@@ -126,7 +126,7 @@ void index_put__batch_rule(
   auto values_ = moveBatchDimToFront(values, values_bdim);
   TORCH_INTERNAL_ASSERT(indices.size() == indices_bdims.size());
   std::vector<optional<Tensor>> indices_ = batchIndices(indices, indices_bdims, self_.size(0), self_bdim, values_bdim);
-  at::index_put_(self_, List<optional<Tensor>>(indices_), values, accumulate);
+  at::index_put_(self_, List<optional<Tensor>>(indices_), values_, accumulate);
 }
 
 // plumbing done since we don't support List<optional<Tensor>> in codegen
@@ -155,6 +155,54 @@ Tensor& index_put__plumbing(Tensor & self, const List<optional<Tensor>> & indice
   optional<int64_t> values_bdim;
   std::tie(values_value, values_bdim) = unwrapTensorAtLevel(values, cur_level);
   index_put__batch_rule(self_value, self_bdim, indices_value, indices_bdims, values_value, values_bdim, accumulate);
+  return self;
+}
+
+void _index_put_impl__batch_rule(
+    Tensor& self,
+    optional<int64_t> self_bdim,
+    ArrayRef<optional<Tensor>> indices,
+    ArrayRef<optional<int64_t>> indices_bdims,
+    const Tensor& values,
+    optional<int64_t> values_bdim,
+    bool accumulate,
+    bool unsafe) {
+  if (!self_bdim.has_value()) {
+    vmapIncompatibleInplaceError("_index_put_impl_");
+  }
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  auto values_ = moveBatchDimToFront(values, values_bdim);
+  TORCH_INTERNAL_ASSERT(indices.size() == indices_bdims.size());
+  std::vector<optional<Tensor>> indices_ = batchIndices(indices, indices_bdims, self_.size(0), self_bdim, values_bdim);
+  at::_index_put_impl_(self_, List<optional<Tensor>>(indices_), values_, accumulate, unsafe);
+}
+
+// plumbing done since we don't support List<optional<Tensor>> in codegen
+Tensor& _index_put_impl__plumbing(Tensor & self, const List<optional<Tensor>> & indices
+, const Tensor & values, bool accumulate, bool unsafe) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  std::vector<optional<Tensor>> indices_value;
+  std::vector<optional<int64_t>> indices_bdims;
+  for (const auto&& indRef : indices) {
+      optional<Tensor> ind = indRef;
+      optional<Tensor> index;
+      optional<int64_t> index_bdim;
+      if (ind.has_value()) {
+        std::tie(index, index_bdim) = unwrapTensorAtLevel(ind.value(), cur_level);
+      }
+    indices_value.push_back(index);
+    indices_bdims.push_back(index_bdim);
+  }
+  Tensor values_value;
+  optional<int64_t> values_bdim;
+  std::tie(values_value, values_bdim) = unwrapTensorAtLevel(values, cur_level);
+  _index_put_impl__batch_rule(self_value, self_bdim, indices_value, indices_bdims, values_value, values_bdim, accumulate, unsafe);
   return self;
 }
 
@@ -496,6 +544,7 @@ std::tuple<Tensor,optional<int64_t>> index_add_batch_rule(
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("index.Tensor", index_plumbing);
   m.impl("index_put_", index_put__plumbing);
+  m.impl("_index_put_impl_", _index_put_impl__plumbing);
   m.impl("slice_scatter", slice_scatter_decomp);
   m.impl("select_scatter", select_scatter_decomp);
   m.impl("index_copy", index_copy_decomp);
