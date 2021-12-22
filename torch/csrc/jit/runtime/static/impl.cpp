@@ -1021,15 +1021,10 @@ void StaticRuntime::verify_and_correct_memory_overlap(ProcessedNode& n) {
           }
         }
       }
-      if (n.outputs_memory_overlap_detected()) {
-#ifdef FBCODE_CAFFE2
-        LOG_EVERY_MS(WARNING, 60000)
-            << "Detected alias for node: " << PrintNode(n.node());
-#endif
-        if (!overlap_detected_with_fast_check) {
-          // slow check. Only run when the fast check fails.
-          n.verify_and_correct_memory_overlap();
-        }
+      if (n.outputs_memory_overlap_detected() &&
+          !overlap_detected_with_fast_check) {
+        // slow check. Only run when the fast check fails.
+        n.verify_and_correct_memory_overlap();
       }
     }
   }
@@ -1040,6 +1035,7 @@ bool StaticRuntime::fast_check_and_correct_overlap_with(
     c10::IValue& tensor_ival) {
   auto& tensor = tensor_ival.toTensor();
   if (planner_->overlapWithInternalBuffer(tensor.data_ptr())) {
+    DLOG(INFO) << "Detected alias for node: " << PrintNode(n.node());
     tensor_ival = at::native::clone(tensor, c10::nullopt);
     n.set_outputs_memory_overlap_detected();
     return true;
@@ -1879,6 +1875,12 @@ void ProcessedNode::verify_and_correct_memory_overlap() {
         }
       }
     }
+#ifdef FBCODE_CAFFE2
+    if (outputs_memory_overlap_detected()) {
+      LOG_EVERY_MS(WARNING, 60000)
+          << "Detected alias for node: " << PrintNode(node());
+    }
+#endif
   }
 }
 
