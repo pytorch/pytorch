@@ -99,6 +99,7 @@ ALLOW_LIST = [
     ("prepacked::unpack_prepacked_sizes_linear", datetime.date(9999, 1, 1)),
     ("q::_FloatToBfloat16Quantized", datetime.date(2021, 12, 21)),
     ("q::_Bfloat16QuantizedToFloat", datetime.date(2021, 12, 21)),
+    ("aten::_inverse_helper", datetime.date(2021, 12, 31)),
 ]
 
 ALLOW_LIST_COMPILED = [

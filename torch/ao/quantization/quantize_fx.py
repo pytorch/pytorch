@@ -8,7 +8,7 @@ from torch.nn.intrinsic import _FusedModule
 from .fx import Fuser  # noqa: F401
 from .fx import prepare, convert  # noqa: F401
 from .fx import get_tensorrt_backend_config_dict  # noqa: F401
-from .fx.graph_module import ObservedGraphModule, QuantizedGraphModule
+from .fx.graph_module import ObservedGraphModule
 from .fx.qconfig_utils import (
     check_is_valid_convert_custom_config_dict,
     check_is_valid_fuse_custom_config_dict,
@@ -568,7 +568,7 @@ def _convert_fx(
     is_standalone_module: bool = False,
     _remove_qconfig: bool = True,
     qconfig_dict: Dict[str, Any] = None,
-) -> QuantizedGraphModule:
+) -> torch.nn.Module:
     """ `is_standalone_module`: see docs in :func:`~torch.ao.quantization.prepare_standalone_module_fx`
     """
     if convert_custom_config_dict is None:
@@ -598,7 +598,7 @@ def convert_fx(
     convert_custom_config_dict: Optional[Dict[str, Any]] = None,
     _remove_qconfig: bool = True,
     qconfig_dict: Dict[str, Any] = None,
-) -> QuantizedGraphModule:
+) -> torch.nn.Module:
     r""" Convert a calibrated or trained model to a quantized model
 
     Args:
@@ -692,7 +692,7 @@ def _convert_standalone_module_fx(
     graph_module: GraphModule,
     is_reference: bool = False,
     convert_custom_config_dict: Optional[Dict[str, Any]] = None,
-) -> QuantizedGraphModule:
+) -> torch.nn.Module:
     r""" [Internal use only] Convert a model produced by :func:`~torch.ao.quantization.prepare_standalone_module_fx`
     and convert it to a quantized model
 
