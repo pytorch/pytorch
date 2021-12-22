@@ -15,6 +15,8 @@ namespace lazy {
  */
 class TORCH_API BackendImplInterface {
  public:
+  virtual ~BackendImplInterface() = default;
+
   /**
    * Initialization/Teardown
    * */
