@@ -388,6 +388,12 @@ RegisterOperators reg_guard({
         aliasAnalysisFromSchema()),
 });
 
+void runTensorExprDynamicGroup(std::shared_ptr<Graph> graph, Stack& stack) {
+  Code code(graph, "");
+  InterpreterState interpreter{code};
+  interpreter.run(stack);
+}
+
 Operation createTensorExprDynamicGroup(const Node* node) {
   auto graph = node->g(attr::Subgraph);
   // This implementation creates a Code object and InterpreterState on every
@@ -395,10 +401,8 @@ Operation createTensorExprDynamicGroup(const Node* node) {
   // should be reusing Code and InterpreterState across calls to this op.
   // But that is resulting in a "No frames found" error.
   // TODO: Improve the performance of this by figuring out a better approach.
-  return [=](Stack& stack) {
-    Code code(graph, "");
-    InterpreterState interpreter{code};
-    interpreter.run(stack);
+  return [graph](Stack& stack) {
+    runTensorExprDynamicGroup(graph, stack);
     return 0;
   };
 }

@@ -29,5 +29,7 @@ TORCH_API bool GenerateGuard(
     Node* tensorexpr_graph_node,
     bool add_composed_op = false);
 
+TORCH_API void runTensorExprDynamicGroup(std::shared_ptr<Graph> graph, Stack& stack);
+
 } // namespace jit
 } // namespace torch
