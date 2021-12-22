@@ -377,7 +377,7 @@ class ShardedTensor(object):
         sharded_tensor_metadata: ShardedTensorMetadata,
         process_group=None,
         init_rrefs=False,
-    ):
+    ) -> "ShardedTensor":
         """
         Initialize a ShardedTensor with local shards and a global
         ShardedTensorMetadata built on each rank.
