@@ -42,6 +42,7 @@ struct OldOpsReplacer {
               TORCH_INTERNAL_ASSERT(
                   false, "Upgrader must be present for ", schema_name);
             }
+            node = graph_it.next();
             continue;
           }
           auto upgrader_entry_val = upgrader_entry.value();
