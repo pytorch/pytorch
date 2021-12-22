@@ -13,6 +13,7 @@
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
+#include <torch/csrc/jit/tensorexpr/loopnest_randomization.h>
 #include <torch/csrc/jit/tensorexpr/operators/operators.h>
 
 using namespace torch::jit;
@@ -673,7 +674,7 @@ StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
   if (random_tr_seed) {
     if (random_tr_seed == -1)
       random_tr_seed = std::time(nullptr);
-    l.loopnestRandomization(random_tr_seed);
+    loopnestRandomization(random_tr_seed, l);
     GRAPH_DEBUG(
         "After random transform:\n", std::to_string(l.root_stmt()), "\n");
   }

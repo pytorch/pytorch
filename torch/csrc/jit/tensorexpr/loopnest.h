@@ -558,14 +558,9 @@ class TORCH_API LoopNest {
   }
   std::vector<BufPtr> getIntermediateBufs() const;
 
-  // Finds which is the outer for loop between a and b for loops. Returns
-  // nullptr if they don't have same parent.
+  // Finds which is the outer For between a and b for loops. If neither of the 2
+  // Fors is an ancestor of the other, it returns nullptr.
   static ForPtr findOuterFor(ForPtr a, ForPtr b);
-
-  // Applies a series of loop optimizations chosen randomly. This is only for
-  // testing purposes. This allows automatic stress testing of NNC loop
-  // transformations.
-  void loopnestRandomization(int64_t seed);
 
  private:
   void initialize(
