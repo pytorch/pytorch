@@ -25,6 +25,7 @@
 #include <c10/core/WrapDimMinimal.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/passes/symbolic_shape_runtime_fusion.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
 #include <torch/csrc/jit/runtime/static/te_wrapper.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
@@ -851,6 +852,37 @@ REGISTER_OPERATOR_FUNCTOR(aten::tanh, aten_tanh, [](Node* n) -> SROperator {
     te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn});
   };
 });
+
+REGISTER_OPERATOR_FUNCTOR(
+    prim::TensorExprDynamicGroup,
+    prim_TensorExprDynamicGroup,
+    [](Node*) -> SROperator {
+      return [](ProcessedNode* p_node) {
+        auto graph = p_node->node()->g(attr::Subgraph);
+        auto num_outputs = p_node->num_outputs();
+        Stack stack;
+        if (p_node->Output(0).isNone()) {
+          stack.reserve(p_node->num_inputs());
+        } else {
+          stack.reserve(p_node->num_inputs() + num_outputs);
+          for (const auto& o : p_node->outputs()) {
+            stack.emplace_back(o);
+          }
+        }
+        for (auto i : c10::irange(p_node->num_inputs())) {
+          stack.emplace_back(p_node->Input(i));
+        }
+        runTensorExprDynamicGroup(graph, stack);
+        if (p_node->Output(0).isNone()) {
+          TORCH_INTERNAL_ASSERT(
+              stack.size() == num_outputs,
+              "Unexpected # of outputs on stack after executing TensorExprDynamicGroup");
+          for (auto i : c10::irange(num_outputs)) {
+            p_node->Output(i) = std::move(stack[i]);
+          }
+        }
+      };
+    });
 
 REGISTER_OPERATOR_FUNCTOR(
     aten::sigmoid,
