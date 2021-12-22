@@ -15,9 +15,9 @@ if exist %GFLAGS_EXE% (
     echo %ERRORLEVEL%
     if ERRORLEVEL 1 exit /b 1
 )
-echo "made it out of the ()"
 echo %ERRORLEVEL%
 if ERRORLEVEL 1 exit /b 1
+echo "made it out of the () but still going"
 
 echo Copying over test times file
 copy /Y "%PYTORCH_FINAL_PACKAGE_DIR_WIN%\.pytorch-test-times.json" "%TEST_DIR_WIN%"
