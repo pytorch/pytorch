@@ -1,9 +1,9 @@
 
 import torch
 import torch.nn.functional as F
-from .expanded_weights_impl import forward_helper, implements_per_sample_grads
+from .expanded_weights_impl import implements_per_sample_grads
 from .expanded_weights_utils import \
-    grad_if_exists, grad_if_exists_for_input, sum_over_all_but_batch_and_last_n, unpack_expanded_weight_or_tensor
+    forward_helper, grad_if_exists, grad_if_exists_for_input, sum_over_all_but_batch_and_last_n, unpack_expanded_weight_or_tensor
 
 @implements_per_sample_grads(F.layer_norm)
 class LayerNormPerSampleGrad(torch.autograd.Function):

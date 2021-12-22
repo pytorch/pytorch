@@ -1,8 +1,8 @@
 
 import torch
 import torch.nn.functional as F
-from .expanded_weights_impl import forward_helper, implements_per_sample_grads
-from .expanded_weights_utils import grad_if_exists, grad_if_exists_for_input
+from .expanded_weights_impl import implements_per_sample_grads
+from .expanded_weights_utils import forward_helper, grad_if_exists, grad_if_exists_for_input
 from functools import partial
 
 @implements_per_sample_grads(F.embedding)

@@ -416,6 +416,15 @@ for more information on how to implement your own parametrizations.
 
     parametrize.ParametrizationList
 
+Stateless API
+-------------
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    _per_sample_grad.per_sample_call
+
 Utility functions in other modules
 
 .. currentmodule:: torch
@@ -453,14 +462,3 @@ Lazy Modules Initialization
     :template: classtemplate.rst
 
     nn.modules.lazy.LazyModuleMixin
-
-Stateless API
--------------
-
-.. currentmodule:: torch
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-    :template: classtemplate.rst
-
-    nn.utils._stateless.per_sample_call
