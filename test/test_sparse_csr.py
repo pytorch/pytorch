@@ -1,25 +1,33 @@
 # Owner(s): ["module: sparse"]
 
 import torch
-import warnings
-import unittest
 import random
 import itertools
-from torch.testing import get_all_complex_dtypes, get_all_fp_dtypes, make_tensor
+import unittest
+from torch.testing import get_all_complex_dtypes, get_all_fp_dtypes, floating_and_complex_types, make_tensor
 from torch.testing._internal.common_cuda import SM53OrLater, SM80OrLater, TEST_CUSPARSE_GENERIC
 from torch.testing._internal.common_utils import \
-    (IS_MACOS, IS_WINDOWS, TestCase, run_tests, load_tests, coalescedonoff)
+    (TEST_WITH_ROCM, TEST_SCIPY, TestCase, run_tests, load_tests, coalescedonoff)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoCusparseGeneric,
-     precisionOverride, skipMeta, skipCUDAIf)
+    (ops, instantiate_device_type_tests, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoCusparseGeneric,
+     precisionOverride, skipMeta, skipCUDAIf, skipCUDAIfRocm, skipCPUIfNoMklSparse)
+from torch.testing._internal.common_methods_invocations import (sparse_csr_unary_ufuncs, )
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing._internal.common_dtype import floating_types, get_all_dtypes
 from test_sparse import CUSPARSE_SPMM_COMPLEX128_SUPPORTED
+
+if TEST_SCIPY:
+    import scipy.sparse as sp
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
 
+def _check_cusparse_triangular_solve_available():
+    version = _get_torch_cuda_version()
+    # cusparseSpSM was added in 11.3.1 but we don't have access to patch version
+    min_supported_version = (11, 4)
+    return version >= min_supported_version
 
 def _check_cusparse_spgemm_available():
     # cusparseSpGEMM was added in 11.0
@@ -27,6 +35,11 @@ def _check_cusparse_spgemm_available():
     min_supported_version = (11, 0)
     return version >= min_supported_version
 
+def _check_cusparse_sddmm_available():
+    version = _get_torch_cuda_version()
+    # cusparseSDDMM was added in 11.2.1 but we don't have access to patch version
+    min_supported_version = (11, 3)
+    return version >= min_supported_version
 
 # This should be just an import from test_linalg instead of code duplication
 # but https://github.com/pytorch/pytorch/pull/63511#discussion_r733989701
@@ -485,6 +498,7 @@ class TestSparseCSR(TestCase):
         dense = torch.tensor([[1, 2, 1], [3, 4, 0]], dtype=dtype, device=device)
         self.assertEqual(csr.to_dense(), dense)
 
+    @skipCPUIfNoMklSparse
     @coalescedonoff
     @dtypes(torch.double)
     def test_coo_to_csr_convert(self, device, dtype, coalesced):
@@ -527,24 +541,6 @@ class TestSparseCSR(TestCase):
         values = torch.tensor([2, 1, 6, 4, 10, 3, 5, 9, 8, 7], dtype=dtype, device=device)
         self.assertEqual(csr.values(), values)
 
-    @onlyCPU
-    @unittest.skipIf(IS_MACOS or IS_WINDOWS, "MKL doesn't work on windows or mac")
-    @dtypes(torch.float, torch.double)
-    def test_mkl_matvec_warnings(self, device, dtype):
-        if torch.has_mkl:
-            for index_dtype in [torch.int32, torch.int64]:
-                sp = torch.sparse_csr_tensor(torch.tensor([0, 2, 4]),
-                                             torch.tensor([0, 1, 0, 1]),
-                                             torch.tensor([1, 2, 3, 4], dtype=dtype, device=device))
-                vec = torch.randn((2, 1), dtype=dtype, device=device)
-                with warnings.catch_warnings(record=True) as w:
-                    sp.matmul(vec)
-                    self.assertEqual(len(w), 2)
-                    self.assertIn("Pytorch is compiled with MKL LP64 and will convert crow_indices to int32",
-                                  str(w[0].message))
-                    self.assertIn("Pytorch is compiled with MKL LP64 and will convert col_indices to int32",
-                                  str(w[1].message))
-
     @dtypes(*get_all_dtypes())
     def test_sparse_csr_from_dense_convert_error(self, device, dtype):
         size = (4, 2, 4)
@@ -568,8 +564,9 @@ class TestSparseCSR(TestCase):
                 with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
                     torch.addmm(s, csr, m2)
 
+    @skipCPUIfNoMklSparse
     @skipCUDAIfNoCusparseGeneric
-    @dtypes(*torch.testing.floating_types())
+    @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(*get_all_complex_dtypes(),
                   *get_all_fp_dtypes(include_half=SM53OrLater, include_bfloat16=SM80OrLater))
     def test_csr_matvec(self, device, dtype):
@@ -584,14 +581,118 @@ class TestSparseCSR(TestCase):
             self.assertEqual(res, expected)
 
             bad_vec = torch.randn(side + 10, dtype=dtype, device=device)
-            err_msg = "mv: expected"
-            # CUDA path now uses generic meta/structured implementation
-            # TODO: move CPU path to not use `mv_sparse` function
-            if self.device_type == 'cuda':
-                err_msg = "size mismatch, got"
+            err_msg = "size mismatch, got"
             with self.assertRaisesRegex(RuntimeError, err_msg):
                 csr.matmul(bad_vec)
 
+    def run_test_block_addmm_addmv(self, addmv_addmm, c, a, b, op_b=False, op_out=False, *, dtype=None, device=None):
+        alpha = complex(random.random(), random.random()) if dtype.is_complex else random.random()
+        beta = complex(random.random(), random.random()) if dtype.is_complex else random.random()
+        b = b.mH if (op_b and a.shape == b.shape) else b
+
+        actual = addmv_addmm(c, a, b, alpha=alpha, beta=beta)
+
+        out = torch.empty_like(c.mH if op_out and a.shape == b.shape else c)
+        addmv_addmm(c, a, b, alpha=alpha, beta=beta, out=out)
+
+        a_bsr = sp.bsr_matrix(
+            (
+                a.values().cpu().numpy(),
+                a.col_indices().cpu().numpy(),
+                a.crow_indices().cpu().numpy(),
+            ),
+            shape=a.shape,
+        )
+        expected = alpha * (a_bsr * b.cpu().resolve_conj().numpy()) + beta * c.cpu().numpy()
+        self.assertEqual(actual, out)
+        self.assertEqual(actual, expected)
+
+    @skipCPUIfNoMklSparse
+    @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_block_addmm(self, device, dtype):
+        for index_dtype in [torch.int32, torch.int64]:
+            for (m, n, k), block_size, noncontiguous in zip(itertools.product([1, 5], repeat=3), [1, 2, 3], [True, False]):
+                nnz = random.randint(0, m * k)
+                a = self.genSparseCSRTensor((m, k), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
+                a_data = make_tensor((nnz, block_size, block_size), dtype=dtype, device=device)
+                a_data = a_data.mT if noncontiguous else a_data   # Test column-major blocks
+                a = torch._sparse_csr_tensor_unsafe(a.crow_indices(), a.col_indices(), a_data, (m * block_size, k * block_size))
+                b = make_tensor((k * block_size, n * block_size), dtype=dtype, device=device, noncontiguous=noncontiguous)
+                c = make_tensor((m * block_size, n * block_size), dtype=dtype, device=device, noncontiguous=noncontiguous)
+                for op_b, op_out in itertools.product([True, False], repeat=2):
+                    self.run_test_block_addmm_addmv(torch.addmm, c, a, b, op_b, op_out, dtype=dtype, device=device)
+
+    @skipCPUIfNoMklSparse
+    @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_block_addmv(self, device, dtype):
+        for index_dtype in [torch.int32, torch.int64]:
+            block_sizes = [1, 2, 3]
+            if TEST_WITH_ROCM or not TEST_CUSPARSE_GENERIC:
+                block_sizes = [2, 3]
+            for (m, k), block_size, noncontiguous in zip(itertools.product([1, 5], repeat=2), block_sizes, [True, False]):
+                nnz = random.randint(0, m * k)
+                a = self.genSparseCSRTensor((m, k), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
+                a_data = make_tensor((nnz, block_size, block_size), dtype=dtype, device=device)
+                a_data = a_data.mT if noncontiguous else a_data  # Test column-major blocks
+                a = torch._sparse_csr_tensor_unsafe(a.crow_indices(), a.col_indices(), a_data, (m * block_size, k * block_size))
+                b = make_tensor((k * block_size,), dtype=dtype, device=device, noncontiguous=noncontiguous)
+                c = make_tensor((m * block_size,), dtype=dtype, device=device, noncontiguous=noncontiguous)
+                self.run_test_block_addmm_addmv(torch.addmv, c, a, b, dtype=dtype, device=device)
+
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_block_triangular_solve(self, device, dtype):
+        def run_test(a, b, upper, transpose, unitriangular, op_out):
+            actual = torch.triangular_solve(b, a, upper=upper, unitriangular=unitriangular, transpose=transpose)
+            actual_X = actual.solution
+            actual_A_clone = actual.cloned_coefficient
+            self.assertTrue(actual_A_clone.numel() == 0)
+            if a._nnz() == 0:
+                self.assertTrue(actual_X.isnan().all())
+                return
+
+            # TODO: replace with torch method when implemented to_dense() on block sparse tensor
+            a_bsr = sp.bsr_matrix(
+                (
+                    a.values().cpu().numpy(),
+                    a.col_indices().cpu().numpy(),
+                    a.crow_indices().cpu().numpy(),
+                ),
+                shape=a.shape,
+            )
+            expected_X, _ = torch.triangular_solve(
+                b,
+                torch.tensor(a_bsr.todense(), device=device),
+                transpose=transpose,
+                upper=upper,
+                unitriangular=unitriangular)
+            self.assertEqual(actual_X, expected_X)
+
+            out = torch.empty_like(b.mH if op_out and a.shape == b.shape else b)
+            torch.triangular_solve(
+                b, a,
+                upper=upper, unitriangular=unitriangular, transpose=transpose, out=(out, actual_A_clone)
+            )
+            self.assertEqual(out, actual_X)
+            self.assertEqual(out, expected_X)
+
+        for index_dtype in [torch.int32, torch.int64]:
+            for (m, k), block_size, noncontiguous in zip(itertools.product([1, 5], repeat=2), [2, 3], [True, False]):
+                nnz = random.randint(0, m * m)
+                a = self.genSparseCSRTensor((m, m), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
+                a_data = make_tensor((nnz, block_size, block_size), dtype=dtype, device=device)
+                a_data = a_data.mT if noncontiguous else a_data  # Test column-major blocks
+                a = torch._sparse_csr_tensor_unsafe(a.crow_indices(), a.col_indices(), a_data, (m * block_size, m * block_size))
+                b = make_tensor((m * block_size, k), dtype=dtype, device=device, noncontiguous=noncontiguous)
+
+                for (upper, unitriangular, transpose, op_out) in itertools.product([True, False], repeat=4):
+                    run_test(a, b, upper, unitriangular, transpose, op_out)
+
+    @skipCPUIfNoMklSparse
     @dtypes(torch.double)
     def test_mm(self, device, dtype):
         def test_shape(di, dj, dk, nnz):
@@ -621,7 +722,8 @@ class TestSparseCSR(TestCase):
                     test_shape(i, j, k, i * j // 2)
         test_shape(4, 4, 4, 0)
 
-    @dtypes(*floating_types())
+    @skipCPUIfNoMklSparse
+    @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(*get_all_complex_dtypes(),
                   *get_all_fp_dtypes(include_half=SM53OrLater and TEST_CUSPARSE_GENERIC,
                                      include_bfloat16=SM80OrLater and TEST_CUSPARSE_GENERIC))
@@ -640,7 +742,8 @@ class TestSparseCSR(TestCase):
             test_shape(7, 8, 9, 20, False, index_dtype)
             test_shape(7, 8, 9, 20, True, index_dtype)
 
-    @dtypes(*floating_types())
+    @skipCPUIfNoMklSparse
+    @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(*get_all_complex_dtypes(),
                   *get_all_fp_dtypes(include_half=SM53OrLater and TEST_CUSPARSE_GENERIC,
                                      include_bfloat16=SM80OrLater and TEST_CUSPARSE_GENERIC))
@@ -671,7 +774,8 @@ class TestSparseCSR(TestCase):
             test_shape(7, 8, 9, 20, False, index_dtype, (1, 1))
             test_shape(7, 8, 9, 20, True, index_dtype, (1, 1))
 
-    @onlyCUDA
+    @skipCPUIfNoMklSparse
+    @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
                         torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     @dtypesIfCUDA(torch.complex64,
@@ -712,8 +816,10 @@ class TestSparseCSR(TestCase):
             m2 = maybe_transpose(t3, torch.randn(50, 25, device=device).to(dtype))
             _test_addmm_addmv(self, torch.addmm, M, m1, m2, transpose_out=t4, layout=torch.sparse_csr, all_sparse=True)
 
-    @onlyCUDA
-    @dtypesIfCUDA(*torch.testing.get_all_complex_dtypes(),
+    @skipCPUIfNoMklSparse
+    @dtypes(*floating_and_complex_types())
+    @dtypesIfCUDA(torch.complex64,
+                  *((torch.complex128,) if CUSPARSE_SPMM_COMPLEX128_SUPPORTED else ()),
                   *torch.testing.get_all_fp_dtypes(include_bfloat16=SM80OrLater,
                                                    include_half=SM53OrLater))
     @skipCUDAIf(
@@ -737,7 +843,7 @@ class TestSparseCSR(TestCase):
                     self.assertRaisesRegex(RuntimeError, f"{n}x{k + 1}.*{k}x{m}", lambda: torch.addmm(M, m1, m2))
                     self.assertRaisesRegex(RuntimeError, f"{n}x{k + 1}.*{k}x{m}", lambda: torch.mm(m1, m2))
 
-    @onlyCUDA
+    @skipCPUIfNoMklSparse
     @dtypes(torch.float)
     def test_addmm_errors(self, device, dtype):
         # test that the errors are the same for dense and sparse versions
@@ -777,7 +883,7 @@ class TestSparseCSR(TestCase):
                 with self.assertRaisesRegex(RuntimeError, re.escape(str(msg))):
                     test(is_sparse=True)
 
-    @onlyCUDA
+    @skipCPUIfNoMklSparse
     @dtypes(torch.float)
     def test_mm_errors(self, device, dtype):
         # test that the errors are the same for dense and sparse versions
@@ -837,6 +943,220 @@ class TestSparseCSR(TestCase):
         _test_spadd_shape(10, [100, 1])
         _test_spadd_shape(10, [1, 100])
 
+    @skipCPUIfNoMklSparse
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_sparse_add(self, device, dtype):
+        def run_test(m, n, index_dtype):
+
+            if TEST_WITH_ROCM and dtype.is_complex:
+                self.skipTest("ROCm doesn't work with complex dtype correctly.")
+
+            alpha = random.random()
+            nnz1 = random.randint(0, m * n)
+            nnz2 = random.randint(0, m * n)
+            nnz3 = random.randint(0, m * n)
+
+            if TEST_WITH_ROCM:
+                # ROCm fails when nnz = 0
+                nnz1, nnz2, nnz3 = max(1, nnz1), max(1, nnz2), max(1, nnz3)
+
+            S1 = self.genSparseCSRTensor([m, n], nnz1, dtype=dtype, device=device, index_dtype=index_dtype)
+            S2 = self.genSparseCSRTensor([m, n], nnz2, dtype=dtype, device=device, index_dtype=index_dtype)
+            S3 = self.genSparseCSRTensor([m, n], nnz3, dtype=dtype, device=device, index_dtype=index_dtype)
+
+            expected = torch.add(S1.to_dense(), S2.to_dense(), alpha=alpha)
+            actual = torch.add(S1, S2, alpha=alpha, out=S3)
+
+            self.assertEqual(actual.to_dense(), expected)
+            self.assertEqual(S3.to_dense(), expected)
+
+        for index_dtype in [torch.int32, torch.int64]:
+            for m, n in itertools.product([3, 5], [3, 5]):
+                run_test(m, n, index_dtype)
+
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_sparse_add_errors(self, device, dtype):
+        def run_test(index_type):
+            a = self.genSparseCSRTensor((2, 2), 3, dtype=dtype, device=device, index_dtype=index_dtype)
+            b = self.genSparseCSRTensor((2, 1), 2, dtype=dtype, device=device, index_dtype=index_dtype)
+            with self.assertRaisesRegex(RuntimeError, "Expected input tensors to have the same shape"):
+                torch.add(a, b)
+
+        for index_dtype in [torch.int32, torch.int64]:
+            run_test(index_dtype)
+
+    @skipCPUIfNoMklSparse
+    @skipCUDAIf(
+        not _check_cusparse_triangular_solve_available(),
+        "cuSparse Generic API SpSV is not available"
+    )
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
+                        torch.float64: 1e-8, torch.complex128: 1e-8})
+    def test_sparse_triangular_solve(self, device, dtype):
+
+        def run_test(n, k, upper, unitriangular, transpose):
+            triangle_function = torch.triu if upper else torch.tril
+            A = make_tensor((n, n), dtype=dtype, device=device)
+            A = triangle_function(A)
+            A_sparse = A.to_sparse_csr()
+            B = make_tensor((n, k), dtype=dtype, device=device)
+
+            expected = torch.triangular_solve(B, A, upper=upper, unitriangular=unitriangular, transpose=transpose)
+            expected_X = expected.solution
+
+            actual = torch.triangular_solve(B, A_sparse, upper=upper, unitriangular=unitriangular, transpose=transpose)
+            actual_X = actual.solution
+            actual_A_clone = actual.cloned_coefficient
+            self.assertTrue(actual_A_clone.numel() == 0)
+            self.assertEqual(actual_X, expected_X)
+
+            # test out with C contiguous strides
+            out = torch.empty_strided((n, k), (k, 1), dtype=dtype, device=device)
+            torch.triangular_solve(
+                B, A_sparse,
+                upper=upper, unitriangular=unitriangular, transpose=transpose, out=(out, actual_A_clone)
+            )
+            self.assertEqual(out, expected_X)
+
+            # test out with F contiguous strides
+            out = torch.empty_strided((n, k), (1, n), dtype=dtype, device=device)
+            torch.triangular_solve(
+                B, A_sparse,
+                upper=upper, unitriangular=unitriangular, transpose=transpose, out=(out, actual_A_clone)
+            )
+            self.assertEqual(out, expected_X)
+            self.assertEqual(out.stride(), (1, n))
+
+            # test out with discontiguous strides
+            out = torch.empty_strided((2 * n, k), (1, 2 * n), dtype=dtype, device=device)[::2]
+            if n > 0 and k > 0:
+                self.assertFalse(out.is_contiguous())
+                self.assertFalse(out.t().is_contiguous())
+            before_stride = out.stride()
+            torch.triangular_solve(
+                B, A_sparse,
+                upper=upper, unitriangular=unitriangular, transpose=transpose, out=(out, actual_A_clone)
+            )
+            self.assertEqual(out, expected_X)
+            self.assertEqual(out.stride(), before_stride)
+
+        ks = [0, 1, 3]
+        ns = [5, 3, 0]
+        for (k, n), (upper, unitriangular, transpose) in itertools.product(itertools.product(ks, ns),
+                                                                           itertools.product([True, False], repeat=3)):
+            run_test(n, k, upper, unitriangular, transpose)
+
+    @skipCUDAIfRocm
+    @onlyCUDA
+    @skipCUDAIf(
+        not _check_cusparse_sddmm_available(),
+        "cuSparse Generic API SDDMM is not available"
+    )
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
+                        torch.float64: 1e-8, torch.complex128: 1e-8})
+    def test_sampled_addmm(self, device, dtype):
+        def run_test(c, a, b, op_a, op_b, *, alpha=None, beta=None):
+            if dtype.is_complex:
+                alpha = random.random() + 0.3j if alpha is None else alpha
+                beta = random.random() + 0.6j if beta is None else beta
+            else:
+                alpha = random.random() if alpha is None else alpha
+                beta = random.random() if beta is None else beta
+
+            if op_a and a.shape == b.shape:
+                a = a.mH
+            if op_b and a.shape == b.shape:
+                b = b.mH
+
+            actual = torch.sparse.sampled_addmm(c, a, b, alpha=alpha, beta=beta)
+
+            out = torch.sparse_csr_tensor(
+                *map(torch.clone, (actual.crow_indices(), actual.col_indices())),
+                torch.empty_like(actual.values()),
+                size=c.shape
+            )
+            torch.sparse.sampled_addmm(c, a, b, alpha=alpha, beta=beta, out=out)
+
+            spy_c = torch.sparse_csr_tensor(c.crow_indices(), c.col_indices(), torch.ones_like(c.values()), size=c.shape)
+            expected = alpha * (a @ b) * spy_c.to_dense() + beta * c.to_dense()
+            self.assertEqual(actual.to_dense(), out.to_dense())
+            self.assertEqual(actual.to_dense(), expected)
+
+        for index_dtype in [torch.int32, torch.int64]:
+            for (m, n, k), noncontiguous in zip(itertools.product([1, 5], repeat=3), [True, False]):
+                nnz = random.randint(0, m * n)
+                c = self.genSparseCSRTensor((m, n), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
+                a = make_tensor((m, k), dtype=dtype, device=device, noncontiguous=noncontiguous)
+                b = make_tensor((k, n), dtype=dtype, device=device, noncontiguous=noncontiguous)
+                for op_a, op_b in itertools.product([True, False], repeat=2):
+                    run_test(c, a, b, op_a, op_b)
+
+    @skipCUDAIfRocm
+    @onlyCUDA
+    @skipCUDAIf(
+        not _check_cusparse_sddmm_available(),
+        "cuSparse Generic API SDDMM is not available"
+    )
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
+                        torch.float64: 1e-8, torch.complex128: 1e-8})
+    def test_sampled_addmm_zero_sized(self, device, dtype):
+        def run_test(c, a, b):
+            actual = torch.sparse.sampled_addmm(c, a, b)
+            self.assertEqual(actual.shape, c.shape)
+
+        for m, n, k in itertools.product([0, 5], repeat=3):
+            c = torch.empty(m, n, dtype=dtype, device=device, layout=torch.sparse_csr)
+            a = make_tensor((m, k), dtype=dtype, device=device)
+            b = make_tensor((k, n), dtype=dtype, device=device)
+            run_test(c, a, b)
+
+    @skipCUDAIfRocm
+    @onlyCUDA
+    @skipCUDAIf(
+        not _check_cusparse_sddmm_available(),
+        "cuSparse Generic API SDDMM is not available"
+    )
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_sampled_addmm_errors(self, device, dtype):
+        # test that the errors are the same for dense and sparse sampled versions
+        # import re
+
+        # shapes must be compatible for matrix multiplication
+        a = make_tensor((2, 3), dtype=dtype, device=device)
+        a_sparse = a.to_sparse_csr()
+        with self.assertRaisesRegex(RuntimeError, r"cannot be multiplied"):
+            torch.sparse.sampled_addmm(a_sparse, a, a)
+
+        # mat1 must be a matrix
+        with self.assertRaisesRegex(RuntimeError, r"Expected mat1 to be a matrix"):
+            torch.sparse.sampled_addmm(a_sparse, a.unsqueeze(0), a)
+
+        # mat2 must be a matrix
+        with self.assertRaisesRegex(RuntimeError, r"Expected mat2 to be a matrix"):
+            torch.sparse.sampled_addmm(a_sparse, a, a.unsqueeze(0))
+
+        a = make_tensor((2, 2), dtype=dtype, device=device)
+        b = make_tensor((3, 3), dtype=dtype, device=device)
+        b_sparse = b.to_sparse_csr()
+        with self.assertRaisesRegex(RuntimeError, r"self dim 0 must match mat1 dim 0"):
+            torch.sparse.sampled_addmm(b_sparse, a, a)
+
+        b = make_tensor((2, 3), dtype=dtype, device=device)
+        b_sparse = b.to_sparse_csr()
+        with self.assertRaisesRegex(RuntimeError, r"self dim 1 must match mat2 dim 1"):
+            torch.sparse.sampled_addmm(b_sparse, a, a)
+
+        a = make_tensor((2, 2), dtype=dtype, device=device)
+        a_sparse = a.to_sparse_csr()
+        with self.assertRaisesRegex(RuntimeError, r"Expected mat1 to have strided layout"):
+            torch.sparse.sampled_addmm(a_sparse, a_sparse, a_sparse)
+
+        with self.assertRaisesRegex(RuntimeError, r"Expected mat2 to have strided layout"):
+            torch.sparse.sampled_addmm(a_sparse, a, a_sparse)
+
     @dtypes(*get_all_dtypes())
     def test_coo_csr_conversion(self, device, dtype):
         for m, n in itertools.product([5, 2, 0], [5, 2, 0]):
@@ -847,6 +1167,94 @@ class TestSparseCSR(TestCase):
 
             self.assertEqual(csr_sparse.to_dense(), dense)
 
+    @ops(sparse_csr_unary_ufuncs)
+    def test_sparse_csr_unary_consistency(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype)
+
+        for sample in samples:
+            assert torch.is_tensor(sample.input)
+            # Sparse CSR only supports 2D tensors as inputs
+            # Fail early to prevent silent success with this test
+            if sample.input.ndim != 2:
+                raise ValueError("Expected 2D tensor but got tensor with dimension: {sample.input.ndim}.")
+
+            expected = op(sample.input)
+            assert torch.is_tensor(expected)
+            output = op(sample.input.to_sparse_csr())
+            assert torch.is_tensor(output)
+
+            self.assertEqual(output.to_dense(), expected)
+
+    @ops(sparse_csr_unary_ufuncs)
+    def test_sparse_csr_unary_out(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype)
+
+        if not op.supports_out:
+            self.skipTest("Skipped! Out not supported")
+
+        for sample in samples:
+            assert torch.is_tensor(sample.input)
+            # Sparse CSR only supports 2D tensors as inputs
+            # Fail early to prevent silent success with this test
+            if sample.input.ndim != 2:
+                raise ValueError("Expected 2D tensor but got tensor with dimension: {sample.input.ndim}.")
+
+            sample.input = sample.input.to_sparse_csr()
+            expect = op(sample.input, *sample.args, **sample.kwargs)
+
+            out = self.genSparseCSRTensor(sample.input.size(), sample.input._nnz(),
+                                          device=sample.input.device, dtype=expect.dtype,
+                                          index_dtype=sample.input.crow_indices().dtype)
+            op(sample.input, *sample.args, **sample.kwargs, out=out)
+
+            self.assertEqual(out.values(), expect.values())
+            self.assertEqual(out.crow_indices(), expect.crow_indices())
+            self.assertEqual(out.col_indices(), expect.col_indices())
+            self.assertEqual(out._nnz(), expect._nnz())
+
+    @ops(sparse_csr_unary_ufuncs)
+    def test_sparse_csr_unary_inplace(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype)
+
+        if op.inplace_variant is None:
+            self.skipTest("Skipped! Inplace variant not supported!")
+
+        for sample in samples:
+            assert torch.is_tensor(sample.input)
+            # Sparse CSR only supports 2D tensors as inputs
+            # Fail early to prevent silent success with this test
+            if sample.input.ndim != 2:
+                raise ValueError("Expected 2D tensor but got tensor with dimension: {sample.input.ndim}.")
+
+            sample.input = sample.input.to_sparse_csr()
+            expect = op(sample.input, *sample.args, **sample.kwargs)
+
+            if not torch.can_cast(expect.dtype, dtype):
+                with self.assertRaisesRegex(RuntimeError, "result type"):
+                    op.inplace_variant(sample.input, *sample.args, **sample.kwargs)
+                continue
+
+            if sample.input.is_complex() and op.name == "abs":
+                with self.assertRaisesRegex(RuntimeError, "not supported"):
+                    op.inplace_variant(sample.input, *sample.args, **sample.kwargs)
+                continue
+
+            actual = op.inplace_variant(sample.input, *sample.args, **sample.kwargs)
+
+            self.assertIs(actual, sample.input)
+            self.assertEqual(actual.values(), expect.values())
+            self.assertEqual(actual.crow_indices(), expect.crow_indices())
+            self.assertEqual(actual.col_indices(), expect.col_indices())
+            self.assertEqual(actual._nnz(), expect._nnz())
+
+    @dtypes(*get_all_dtypes(include_bool=False, include_half=False, include_bfloat16=False))
+    def test_direct_coo_csr_conversion(self, device, dtype):
+        for m, n in itertools.product([5, 2, 0], [5, 2, 0]):
+            size = (m, n)
+            dense = make_tensor(size, dtype=dtype, device=device)
+            coo_sparse = dense.to_sparse_coo()
+
+            self.assertEqual(coo_sparse.to_sparse_csr().to_sparse_coo(), coo_sparse)
 
 # e.g., TestSparseCSRCPU and TestSparseCSRCUDA
 instantiate_device_type_tests(TestSparseCSR, globals())

@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <iostream>
+#include <memory>
 #include <set>
 #include <sstream>
 #include <string>
@@ -752,14 +753,24 @@ void Block::destroy() {
   graph_->freeBlock(this);
 }
 
-std::shared_ptr<Graph> Graph::copy() {
-  auto new_g = std::make_shared<Graph>();
+void Graph::cloneFrom(Graph& src) {
   auto env = [](Value* v) -> Value* {
     AT_ERROR(
         "Graph::copy() encountered a use of a value " + v->debugName() +
         " not in scope. Run lint!");
   };
-  new_g->block()->cloneFrom(this->block(), env);
+  block()->cloneFrom(src.block(), env);
+}
+
+std::shared_ptr<Graph> Graph::copy() {
+  auto new_g = std::make_shared<Graph>();
+  new_g->cloneFrom(*this);
+  return new_g;
+}
+
+std::unique_ptr<Graph> Graph::copyUnique() {
+  auto new_g = std::make_unique<Graph>();
+  new_g->cloneFrom(*this);
   return new_g;
 }
 
@@ -1131,6 +1142,7 @@ bool Node::isNondeterministic() const {
       "aten::bernoulli(Tensor self, *, Generator? generator) -> Tensor",
       "aten::bernoulli(Tensor self, float p, *, Generator? generator) -> Tensor",
       "aten::multinomial(Tensor self, int num_samples, bool replacement, *, Generator? generator) -> Tensor",
+      "aten::native_dropout(Tensor input, float p, bool? train) -> (Tensor, Tensor)",
       "aten::normal(Tensor mean, Tensor std, *, Generator? generator) -> Tensor",
       "aten::normal(float mean, Tensor std, *, Generator? generator) -> Tensor",
       "aten::normal(Tensor mean, float std, *, Generator? generator) -> Tensor",
@@ -1165,7 +1177,6 @@ bool Node::hasSideEffects() const {
     case prim::IgnoredPythonOp:
     case prim::Print:
     case prim::RaiseException:
-    case prim::SetAttr:
     case aten::warn:
     case aten::save:
     case aten::manual_seed:
@@ -1552,6 +1563,14 @@ void Node::removeAllInputs() {
     dropInput(i);
   }
   inputs_.clear();
+}
+
+void Node::removeAllOutputs() {
+  op_ = nullptr;
+  size_t init_osize = outputs_.size();
+  for (auto i : c10::irange(init_osize)) {
+    eraseOutput(init_osize - i - 1);
+  }
 }
 
 void Node::permuteInputs(const std::vector<size_t>& new_order) {
@@ -2077,10 +2096,9 @@ void inlineCallStackOfNode(
 // ONNX conversion
 std::vector<Value*> inlineCallTo(
     Node* to_replace,
-    Function* callee,
+    GraphFunction* callee,
     bool inline_optimized_graph /*=true*/) {
   WithInsertPoint guard(to_replace);
-  TORCH_INTERNAL_ASSERT(callee->isGraphFunction());
   std::unordered_map<Value*, Value*> value_map;
   std::vector<torch::jit::Value*> new_outputs;
 
@@ -2284,6 +2302,15 @@ OperatorSet::OperatorSet(std::initializer_list<const char*> sig_literals) {
     auto op = getOperatorForLiteral(sig);
     ops[Symbol::fromQualString(op->schema().name())].push_back(op);
   }
+}
+
+std::vector<std::shared_ptr<Operator>> OperatorSet::getOps() const {
+  std::vector<std::shared_ptr<Operator>> result;
+  for (const auto& kv : ops) {
+    auto ops_for_symbol = kv.second;
+    result.insert(result.end(), ops_for_symbol.begin(), ops_for_symbol.end());
+  }
+  return result;
 }
 
 bool Node::isMemberOf(const OperatorSet& os) const {

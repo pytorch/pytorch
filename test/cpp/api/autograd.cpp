@@ -667,7 +667,7 @@ TEST(CustomAutogradTest, DeepReentrant) {
     }
 
     static variable_list backward(AutogradContext*ctx, variable_list grad_output) {
-      if (!ctx->saved_data["x"].toTensor().is_nonzero()) {
+      if (!at::native::is_nonzero(ctx->saved_data["x"].toTensor())) {
         return grad_output;
       }
       {
@@ -708,7 +708,7 @@ TEST(CustomAutogradTest, ReentrantPriority) {
 
     static variable_list backward(AutogradContext*ctx, variable_list grad_output) {
       order.push_back(1);
-      if (!ctx->saved_data["x"].toTensor().is_nonzero()) {
+      if (!at::native::is_nonzero(ctx->saved_data["x"].toTensor())) {
         return grad_output;
       }
       {
