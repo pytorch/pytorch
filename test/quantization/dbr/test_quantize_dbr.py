@@ -180,6 +180,22 @@ class TestQuantizeDBRIndividualOps(QuantizeDBRTestCase):
         self._test_auto_tracing(
             model_fp32, qconfig, (torch.randn(1, 1, 4, 4),))
 
+    def test_linear_functional_nobias(self):
+        class LinearFunctional(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w1 = nn.Parameter(torch.empty(4, 4))
+                torch.nn.init.kaiming_uniform_(self.w1, a=math.sqrt(5))
+
+            def forward(self, x):
+                x = F.linear(x, self.w1)
+                return x
+
+        model_fp32 = LinearFunctional().eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(
+            model_fp32, qconfig, (torch.randn(1, 1, 4, 4),))
+
     # TODO(future PR): implement observer sharing to match FX
     def test_cat_fp32(self):
         class M(torch.nn.Module):
