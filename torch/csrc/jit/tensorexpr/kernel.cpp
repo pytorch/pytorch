@@ -82,7 +82,12 @@ int64_t randomTransformsRequested() {
   if (!enable_c_str) {
     return 0;
   }
-  return std::stoi(std::string(enable_c_str));
+  // In case of bad input, return 0.
+  try {
+    return std::stoi(std::string(enable_c_str));
+  } catch (...) {
+    return 0;
+  }
 }
 
 bool dontUseLLVMFlag() {
