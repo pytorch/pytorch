@@ -30,10 +30,9 @@ import torch.autograd.functional as autogradF
 from torch.utils.checkpoint import checkpoint
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import (TestCase, run_tests, skipIfNoLapack,
-                                                  slowTest, IS_WINDOWS, IS_MACOS, CudaMemoryLeakCheck,
-                                                  disable_gc, gradcheck, gradgradcheck,
-                                                  parametrize, instantiate_parametrized_tests)
+from torch.testing._internal.common_utils import (
+    TestCase, run_tests, skipIfNoLapack, slowTest, IS_WINDOWS, IS_MACOS,
+    disable_gc, gradcheck, gradgradcheck, parametrize, instantiate_parametrized_tests)
 from torch.autograd import Variable, Function, detect_anomaly, kineto_available
 from torch.autograd.function import InplaceFunction
 import torch.autograd.forward_ad as fwAD
@@ -42,6 +41,7 @@ from torch.testing._internal.common_device_type import (instantiate_device_type_
                                                         onlyCPU, onlyCUDA, dtypes, dtypesIfCUDA,
                                                         deviceCountAtLeast, skipMeta)
 from torch.testing._internal.common_dtype import get_all_dtypes
+from torch.testing._internal.logging_tensor import no_dispatch
 
 import pickle
 
@@ -7439,7 +7439,6 @@ class TestAutogradForwardModeBatchedGrad(TestCase):
         self.assertIs(x_tangent, tangent)
         self.assertIs(view_tangent, tangent)
 
-
     def test_inplace_on_view_not_same_layout(self):
         input = torch.zeros([2, 2])
         tangent = torch.zeros([2, 2, 2])
@@ -7455,6 +7454,28 @@ class TestAutogradForwardModeBatchedGrad(TestCase):
         self.assertIs(view_tangent._base, base_tangent)
         self.assertIs(x_tangent, tangent)
         self.assertIsNot(view_tangent, tangent)
+
+    def test_metadata_check_for_storage_numel_skipped(self):
+        # See: test_metadata_check_checks_storage_numel for the reverse of this test
+        primal = torch.randn(5)[:4].detach()
+        self.assertEqual(len(primal.storage()), 5)
+        tangent = torch.randn(10, 4)
+
+        def jvp(tangent):
+            with fwAD.dual_level():
+                dual = fwAD.make_dual(primal, tangent)
+                _, unpacked_tangent = fwAD.unpack_dual(dual)
+
+                # No copy is made
+                self.assertIs(tangent, unpacked_tangent)
+
+                # as_strided raises
+                with self.assertRaisesRegex(RuntimeError, "can access memory outside of `tensor`"):
+                    dual.as_strided((5,), (1,), 0)
+            return unpacked_tangent
+
+        torch._vmap_internals._vmap(jvp, 0, 0)(tangent)
+
 
 class TestAutogradForwardMode(TestCase):
     def tearDown(self):
@@ -7509,6 +7530,53 @@ class TestAutogradForwardMode(TestCase):
 
             dual = fwAD.make_dual(foo, tangent[1:])
 
+    def test_metadata_check_checks_storage_numel(self):
+        primal = torch.randn(5)[:4].detach()
+        self.assertEqual(len(primal.storage()), 5)
+        tangent = torch.randn(4)
+
+        with fwAD.dual_level():
+            dual = fwAD.make_dual(primal, tangent)
+            _, unpacked_tangent = fwAD.unpack_dual(dual)
+
+            # # Verify that mutating unpacked tangent does not affect the original tangent
+            tangent_clone = tangent.clone()
+            unpacked_tangent *= 2
+            self.assertTrue(torch.allclose(tangent_clone, tangent))
+
+            # as_strided runs without error
+            dual.as_strided((5,), (1,), 0)
+
+    def test_metadata_check_when_primal_has_conj_bit(self):
+        # Make sure the _has_same_storage_numel is a fallthrough, so that
+        # conj bit does not materialize. If it materializes it would
+        # cause the layout check to fail for views that do not index the
+        # the entire storage.
+        a = torch.randn(2, 2, dtype=torch.cdouble).conj()
+        b = torch.rand_like(a)
+
+        self.assertTrue(torch.is_conj(a))
+        self.assertEqual(len(a.storage()), len(b.storage()))
+
+        with fwAD.dual_level():
+            dual = fwAD.make_dual(a, b)
+            dual[1:]
+
+    def test_metadata_check_when_primal_has_neg_bit(self):
+        # Make sure the _has_same_storage_numel is a fallthrough, so that
+        # conj bit does not materialize. If it materializes it would
+        # cause the layout check to fail for views that do not index the
+        # the entire storage.
+        a = torch.randn(2, 2, dtype=torch.cdouble).conj().imag
+        b = torch.randn(2, 2, dtype=torch.cdouble).imag
+
+        self.assertTrue(torch.is_neg(a))
+        self.assertEqual(len(a.storage()), len(b.storage()))
+
+        with fwAD.dual_level():
+            dual = fwAD.make_dual(a, b)
+            dual[1:]
+
     # The following test functions want to ensure all the following behaviors:
     #   - Ensure that default level system in the python binding works
     #   - Ensure that only level 0 exists and nesting is properly disabled
@@ -7554,6 +7622,46 @@ class TestAutogradForwardMode(TestCase):
             dual = fwAD.make_dual(foo, bar)
             with self.assertRaisesRegex(RuntimeError, "has a forward gradient at the same level"):
                 fwAD.make_dual(baz, dual)
+
+    def test_make_dual_inference_tensor_in_inference_mode(self):
+        with torch.inference_mode():
+            foo = torch.rand(2)
+            bar = torch.rand(2)
+            foo_copy = foo.clone()
+
+            with fwAD.dual_level():
+                dual = fwAD.make_dual(foo, bar)
+                self.assertFalse(dual._is_view())
+
+                dual += 1
+                self.assertFalse(torch.allclose(foo, foo_copy))
+
+    def test_make_dual_torch_dispatch(self):
+        counter = [0]
+
+        class MySubclass(torch.Tensor):
+            def __new__(cls, data=None):
+                return torch.Tensor._make_subclass(cls, data)
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                if func == torch.ops.aten.alias:
+                    counter[0] += 1
+
+                    with no_dispatch():
+                        return MySubclass(torch.ops.aten.alias(*args))
+
+                with no_dispatch():
+                    return func(*args, **kwargs)
+
+        a = torch.tensor(1.)
+        s = MySubclass(a)
+
+        with fwAD.dual_level():
+            fwAD.make_dual(s, torch.rand_like(s))
+            self.assertEqual(counter[0], 1)
+            fwAD.make_dual(torch.rand_like(s), s)
+            self.assertEqual(counter[0], 2)
 
     def test_print(self):
         with fwAD.dual_level() as level:
@@ -7831,6 +7939,9 @@ class TestAutogradForwardMode(TestCase):
 
             # No differentiable outputs, shouldn't error
             eq = foo == bar
+
+            # Inplace
+            foo.eq_(bar)
 
     def test_create_new_zeros_with_same_meta(self):
         new_zeroes_fn = torch.ops.aten._new_zeros_with_same_feature_meta
@@ -8159,18 +8270,25 @@ class TestAutogradDeviceType(TestCase):
 
     @onlyCUDA
     def test_reentrant_parent_error_on_cpu(self, device):
-        before = CudaMemoryLeakCheck.get_cuda_memory_usage()
+        def _get_cuda_memory_usage():
+            # we don't need CUDA synchronize because the statistics are not tracked at
+            # actual freeing, but at when marking the block as free.
+            num_devices = torch.cuda.device_count()
+            gc.collect()
+            return tuple(torch.cuda.memory_allocated(i) for i in range(num_devices))
+
+        before = _get_cuda_memory_usage()
 
         # Run as separate function so that gc can clean up everything when we
         # check for memory usage.
         self._test_reentrant_parent_error_on_cpu(device)
 
         # Wait for autograd thread to cleanup failed tasks.
-        after = CudaMemoryLeakCheck.get_cuda_memory_usage()
+        after = _get_cuda_memory_usage()
         start = time.time()
         while before != after and time.time() - start < 30:
             time.sleep(0.1)
-            after = CudaMemoryLeakCheck.get_cuda_memory_usage()
+            after = _get_cuda_memory_usage()
 
         self.assertEqual(before, after)
 
@@ -8353,6 +8471,17 @@ class TestAutogradDeviceType(TestCase):
             self.assertTrue(y.requires_grad)
             z = x.to(torch.bfloat16)
             self.assertTrue(z.requires_grad)
+
+    def test_copy_forward_ad_broadcasting(self, device):
+        # copy_ allows the src to have a different shape from self as long as src is
+        # broadcastable to self. Make sure forward AD handles this case.
+        primal = torch.rand(3, 3, device=device)
+        tangent = torch.rand(3, 3, device=device)
+        non_dual = torch.rand(1, 3, 3, device=device)
+
+        with fwAD.dual_level():
+            dual = fwAD.make_dual(primal, tangent)
+            non_dual.copy_(dual)
 
     @onlyCUDA
     def test_simple_reentrant_cross_device(self, device):
@@ -8707,16 +8836,17 @@ class TestAutogradInferenceMode(TestCase):
         self.assertFalse(torch.is_inference_mode_enabled())
 
     def test_inference_mode_decorator(self):
-        @torch.inference_mode()
-        def func(x):
-            self.assertTrue(torch.is_inference_mode_enabled())
-            return x * x
+        for mode in (True, False):
+            @torch.inference_mode(mode)
+            def func(x):
+                self.assertEqual(torch.is_inference_mode_enabled(), mode)
+                return x * x
 
-        for requires_grad in (True, False):
-            c = torch.ones(1, 2, 3, requires_grad=requires_grad)
-            d = func(c)
-            self.assertTrue(torch.is_inference(d))
-            self.assertFalse(d.requires_grad)
+            for requires_grad in (True, False):
+                c = torch.ones(1, 2, 3, requires_grad=requires_grad)
+                d = func(c)
+                self.assertTrue(not mode or torch.is_inference(d))
+                self.assertEqual(d.requires_grad, requires_grad and not mode)
 
     def test_inference_mode_tensor_creation(self):
         with torch.inference_mode():
