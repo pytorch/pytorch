@@ -27,6 +27,7 @@ from torch.testing._internal.common_quantization import (
 from torch.ao.quantization.fx.backend_config.observation_type import ObservationType
 
 import torch.nn.functional as F
+import torch.nn as nn
 import torch.nn.quantized._reference as nnqr
 
 from torch.testing._internal.common_cuda import TEST_CUDA
@@ -653,7 +654,7 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
                 self.standalone = Standalone()
 
             def forward(self, x, y):
-                x = self.conv(x)
+                y = self.conv(x)
                 return self.standalone(x, y)
 
         from torch.ao.quantization.fx.backend_config_dict.observation_type import ObservationType
@@ -677,7 +678,7 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
                 weighted_op_quint8_dtype_config,
             ],
             "root_module": torch.nn.Conv2d,
-            "reference_quantized_module_for_root": torch.nn.quantized._reference.Conv2d,
+            # "reference_quantized_module_for_root": torch.nn.quantized._reference.Conv2d,
         }
 
         conv_config = {
@@ -687,7 +688,7 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
                 weighted_op_quint8_dtype_config,
             ],
             "root_module": torch.nn.Conv2d,
-            "reference_quantized_module_for_root": torch.nn.quantized._reference.Conv2d,
+            # "reference_quantized_module_for_root": torch.nn.quantized._reference.Conv2d,
         }
 
         m = M().eval()
@@ -714,8 +715,9 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
             prepare_custom_config_dict=prepare_custom_config_dict,
             backend_config_dict=backend_config_dict)
         node_occurrence = {
-            # for two inputs to standalone module, and input of conv
-            ns.call_module(torch.ao.quantization.HistogramObserver): 3,
+            # for input and output of conv, where input is used twice, once in conv and
+            # once in standalone module
+            ns.call_module(torch.ao.quantization.HistogramObserver): 2,
         }
         print("prepared:", m)
         print("prepared standalone:", m.standalone)
@@ -730,13 +732,13 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
         print("converted standalone:", m.standalone)
         node_occurrence = {
             ns.call_function(torch.quantize_per_tensor): 3,
-            ns.call_module(nnqr.Conv2d): 1,
+            ns.call_module(nn.Conv2d): 1,
             ns.call_method("dequantize"): 1,
         }
         self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
         standalone_node_occurrence = {
             ns.call_function(torch.quantize_per_tensor): 1,
-            ns.call_module(nnqr.Conv2d): 1,
+            ns.call_module(nn.Conv2d): 1,
             ns.call_module(torch.nn.ReLU): 1,
             ns.call_method("dequantize"): 3,
         }
