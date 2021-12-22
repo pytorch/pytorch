@@ -43,6 +43,47 @@ class MyShardedModel(torch.nn.Module):
             return self.sharded_param + self.param + input
 
 
+class MyShardedLinear(torch.nn.Module):
+    def __init__(self, rank=None):
+        super(MyShardedLinear, self).__init__()
+        # Use same seed.
+        torch.manual_seed(0)
+        self.linear1 = torch.nn.Linear(17, 12)
+        self.linear2 = torch.nn.Linear(12, 29)
+        self.gelu = torch.nn.GELU()
+
+        if rank:
+            self.linear1.cuda(rank)
+            self.linear2.cuda(rank)
+
+    def shard_parameter(self):
+        rowwise_sharding_spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
+            ],
+        )
+
+        colwise_sharding_spec = ChunkShardingSpec(
+            dim=1,
+            placements=[
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
+            ],
+        )
+
+        sharded_tensor.shard_parameter(self.linear1, "weight", rowwise_sharding_spec)
+        sharded_tensor.shard_parameter(self.linear2, "weight", colwise_sharding_spec)
+
+    def forward(self, inp):
+        return self.linear2(self.gelu(self.linear1(inp)))
+
+
 class TestShardedOptimizer(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False)
@@ -104,6 +145,40 @@ class TestShardedOptimizer(ShardedTensorTestBase):
             else:
                 self.assertNotEqual(val, new_val)
                 self.assertEqual(new_val, local_model.param)
+
+    @with_comms(init_rpc=False)
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    def test_named_params_with_sharded_tensor(self):
+        rowwise_spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
+            ],
+        )
+        sharded_model = MyShardedModel(spec=rowwise_spec).cuda(self.rank)
+        sharded_model_params = dict(named_params_with_sharded_tensor(sharded_model))
+        param_keys = list(sharded_model_params.keys())
+        self.assertEqual(len(param_keys), 2)
+        self.assertTrue("param" in param_keys)
+        self.assertTrue("sharded_param" in param_keys)
+
+        sharded_linear = MyShardedLinear(rank=self.rank).cuda(self.rank)
+        sharded_linear.shard_parameter()
+        sharded_linear_params = dict(named_params_with_sharded_tensor(sharded_linear))
+        param_keys = list(sharded_linear_params.keys())
+        self.assertEqual(len(param_keys), 4)
+        self.assertTrue("linear1.bias" in param_keys)
+        self.assertTrue("linear2.bias" in param_keys)
+        self.assertTrue("linear1.weight" in param_keys)
+        self.assertTrue("linear2.weight" in param_keys)
+        self.assertFalse("bias" in param_keys)
+
+
+
 
 
 if __name__ == '__main__':
