@@ -10,6 +10,7 @@ on:
     branches:
       - master
       - release/*
+      - fbsync
   workflow_dispatch:
 
 env:
@@ -43,16 +44,16 @@ concurrency:
 jobs:
 
   ciflow_should_run:
-    runs-on: ubuntu-18.04
+    runs-on: linux.large
     timeout-minutes: 240
     env:
       IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == 'unassigned') && (github.event.assigneed.login == 'pytorchbot') }}
-      LABEL_CONDITIONS: ${{ contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cuda') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/win') }}
+      LABEL_CONDITIONS: ${{ contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cuda') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/trunk') || contains(github.event.pull_request.labels.*.name, 'ciflow/win') }}
       LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
     if: ${{ (github.repository_owner == 'pytorch') && (
             (github.event_name == 'push') ||
             (github.event_name == 'schedule') ||
-            (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cuda') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/win')) ||
+            (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cuda') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/trunk') || contains(github.event.pull_request.labels.*.name, 'ciflow/win')) ||
             ((github.event_name == 'pull_request' && github.event.action != 'unassigned') && !contains(join(github.event.pull_request.labels.*.name), 'ciflow/')))
          }}
     steps:
@@ -245,6 +246,22 @@ jobs:
         timeout-minutes: 210
         run: |
             .jenkins/pytorch/win-test.sh
+      - name: Zip JSONs for upload
+        if: always()
+        env:
+          FILE_SUFFIX: '${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}'
+        shell: powershell
+        run: |
+          # -ir => recursive include all files in pattern
+          7z a "test-jsons-$Env:FILE_SUFFIX.zip" -ir'!test\*.json'
+      - uses: seemethere/upload-artifact-s3@v3
+        name: Store Test Downloaded JSONs on S3
+        if: always()
+        with:
+          retention-days: 14
+          if-no-files-found: warn
+          path:
+            test-jsons-*.zip
       - name: Zip test reports for upload
         if: always()
         env:
