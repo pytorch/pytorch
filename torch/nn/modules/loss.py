@@ -1070,7 +1070,7 @@ class CrossEntropyLoss(_WeightedLoss):
 
       .. math::
           \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \quad
-          l_n = - \sum_{c=1}^C w_c \log \frac{\exp(x_{n,c})}{\exp(\sum_{i=1}^C x_{n,i})} y_{n,c}
+          l_n = - \sum_{c=1}^C w_c \log \frac{\exp(x_{n,c})}{\sum_{i=1}^C \exp(x_{n,i})} y_{n,c}
 
       where :math:`x` is the input, :math:`y` is the target, :math:`w` is the weight,
       :math:`C` is the number of classes, and :math:`N` spans the minibatch dimension as well as

@@ -952,7 +952,7 @@ Tensor masked_softmax_cuda(const Tensor& input, const Tensor& mask) {
     // Therefore once softmax_elements > 1024, we need to fallback to vanilla masked_softmax
     Tensor output = at::empty_like(input, input.options());
     // Fallback to a slower masked softmax solution
-    if (softmax_elements > 1024 || softmax_elements * sizeof(input.element_size()) > 4096 || !mask.is_contiguous()) {
+    if (softmax_elements > 1024 || softmax_elements * input.element_size() > 4096 || !mask.is_contiguous()) {
         AT_DISPATCH_FLOATING_TYPES_AND2(
           ScalarType::Half,
           ScalarType::BFloat16,
