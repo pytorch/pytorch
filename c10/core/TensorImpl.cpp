@@ -187,12 +187,12 @@ TensorImpl::TensorImpl(
 
   // TODO: be more explicit about the full key set at call sites so we
   // don't have to keep recomputing it here
-  DispatchKey k = key_set.highestBackendKey();
+  BackendBit k = key_set.highestBackendKey();
 
   key_set = key_set | getAutocastRelatedKeySetFromBackend(k);
 
   // See [Note: Python key removal]
-  CONSTEXPR_EXCEPT_GCC5_STATIC auto python_ks = DispatchKeySet(DispatchKey::Python);
+  constexpr auto python_ks = DispatchKeySet(DispatchKey::Python);
   key_set = key_set.removeFunctionalityKeys(python_ks);
 
   // Inference tensor doesn't have autograd related keys.

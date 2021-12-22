@@ -160,7 +160,7 @@ Tensor MakeStridedQTensorCPU(
       allocator->allocate(size_bytes),
       allocator,
       /* resizable = */ true);
-  CONSTEXPR_EXCEPT_GCC5_STATIC auto quantized_cpu_ks = at::DispatchKeySet(at::DispatchKey::QuantizedCPU);
+  constexpr auto quantized_cpu_ks = at::DispatchKeySet(at::DispatchKey::QuantizedCPU);
   auto tensor = detail::make_tensor<QTensorImpl>(
       storage,
       quantized_cpu_ks,

@@ -330,7 +330,7 @@ void OperatorEntry::updateDispatchTable_(const c10::Dispatcher& dispatcher, Disp
   // Note [Refresh Runtime Autograd entries in dispatchTable_]
   // Registering to backend key might affect computed entry at its Autograd backend key due to (2.1) & (2.3).
   // In theory, we should only have to check if the given runtime key has "dense" functionality,
-  // e.g. DispatchKey::CPU (which is composed of DispatchKey::Dense and DispatchKey::CPUBit).
+  // e.g. DispatchKey::CPU (which is composed of DispatchKey::Dense and BackendBit::CPUBit).
   // However, there are some backends that should be included in this set that don't have the dense key set.
   // E.g. DispatchKey::Meta, DispatchKey::ORT.
   if (c10::isBackendDispatchKey(dispatch_key)) {

@@ -23,7 +23,7 @@ namespace c10 {
 //
 
 // NOTE: Keep the list in sync with `DispatchKey` in tools/codegen/model.py
-enum class DispatchKey : uint8_t {
+enum class BackendBit : uint8_t {
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~ BACKENDS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   // A "backend" is colloquially used to refer to handlers for dispatch
@@ -45,7 +45,8 @@ enum class DispatchKey : uint8_t {
   // We reserve space in the runtime operator table for this full cross product of [backends] x [functionality]
   // [For backends in this list] x [keys below that are explicitly marked as having per-backend functionality]
 
-  CPUBit = 0,
+  InvalidBit = 0,
+  CPUBit,
   CUDABit,
   HIPBit,
   XLABit,
@@ -63,6 +64,9 @@ enum class DispatchKey : uint8_t {
   // (But you shouldn't: private use keys should have higher precedence than
   // all built-in keys)
   EndOfBackendKeys = PrivateUse3Bit,
+};
+
+enum class DispatchKey : uint16_t {
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~ UNDEFINED ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   // This is not a "real" tensor id, but it exists to give us a "nullopt"
@@ -75,7 +79,7 @@ enum class DispatchKey : uint8_t {
   // it this way because optional<RealDispatchKey> would take two
   // words, when DispatchKey fits in eight bits.
 
-  Undefined,
+  Undefined = 0,
 
   // Define an alias for Undefined to represent CatchAll (long term
   // this will get eliminated, but for now it's convenient)
@@ -305,6 +309,7 @@ enum class DispatchKey : uint8_t {
   // Here are backends which you think of as traditionally specifying
   // how to implement operations on some device.
 
+  StartOfDenseBackends,
   CPU, // registered at build/aten/src/ATen/RegisterCPU.cpp
   CUDA, // registered at build/aten/src/ATen/RegisterCUDA.cpp
   HIP, // NB: I think this is not actually used, due to Note [Masquerading as
@@ -322,13 +327,13 @@ enum class DispatchKey : uint8_t {
   PrivateUse1,
   PrivateUse2,
   PrivateUse3,
-  StartOfDenseBackends = CPU,
   EndOfDenseBackends = PrivateUse3,
 
   // ~~~~~~~~~~~~~~ "Quantized" Per-Backend Dispatch keys ~~~~~~~~~~~~~~~~ //
   // keys starting with an _ are not currently used,
   // but are needed to ensure that every backend is indexed correctly.
 
+  StartOfQuantizedBackends,
   QuantizedCPU, // registered at build/aten/src/ATen/RegisterQuantizedCPU.cpp
   QuantizedCUDA, // registered at build/aten/src/ATen/RegisterQuantizedCUDA.cpp
   _QuantizedHIP,
@@ -342,13 +347,13 @@ enum class DispatchKey : uint8_t {
   _QuantizedPrivateUse1,
   _QuantizedPrivateUse2,
   _QuantizedPrivateUse3,
-  StartOfQuantizedBackends = QuantizedCPU,
   EndOfQuantizedBackends = _QuantizedPrivateUse3,
 
   // ~~~~~~~~~~~~~~ "Sparse" Per-Backend Dispatch keys ~~~~~~~~~~~~~~~~~~~ //
   // keys starting with an _ are not currently used,
   // but are needed to ensure that every backend is indexed correctly.
 
+  StartOfSparseBackends,
   SparseCPU, // registered at build/aten/src/ATen/RegisterSparseCPU.cpp
   SparseCUDA, // registered at build/aten/src/ATen/RegisterSparseCUDA.cpp
   SparseHIP, // TODO: I think this is not actually used, due to Note
@@ -363,13 +368,13 @@ enum class DispatchKey : uint8_t {
   _SparsePrivateUse1,
   _SparsePrivateUse2,
   _SparsePrivateUse3,
-  StartOfSparseBackends = SparseCPU,
   EndOfSparseBackends = _SparsePrivateUse3,
 
   // ~~~~~~~~~~~~~~ "Autograd" Per-Backend Dispatch keys ~~~~~~~~~~~~~~~~~ //
   // keys starting with an _ are not currently used,
   // but are needed to ensure that every backend is indexed correctly.
 
+  StartOfAutogradBackends,
   AutogradCPU,
   AutogradCUDA,
   _AutogradHIP,
@@ -386,7 +391,6 @@ enum class DispatchKey : uint8_t {
   AutogradPrivateUse1,
   AutogradPrivateUse2,
   AutogradPrivateUse3,
-  StartOfAutogradBackends = AutogradCPU,
   EndOfAutogradBackends = AutogradPrivateUse3,
 
   // ~~~~~~~~~~~~~~~~~~~~~~ Alias Dispatch Keys ~~~~~~~~~~~~~~~~~~~~~~~~~~ //
@@ -450,7 +454,8 @@ enum class DispatchKey : uint8_t {
 // built-in autograd formulas for operators are not appropriate.
 
 static_assert(
-    static_cast<uint8_t>(DispatchKey::EndOfFunctionalityKeys) <= 64,
+    (static_cast<uint8_t>(BackendBit::EndOfBackendKeys) +
+    static_cast<uint8_t>(DispatchKey::EndOfFunctionalityKeys)) <= 64,
     "DispatchKey is used as index into 64-bit bitmask; you must have less than 64 entries");
 
 // Check if a DispatchKey is an alias mapping to other runtime keys.
@@ -472,19 +477,17 @@ constexpr bool isPerBackendFunctionalityKey(DispatchKey k) {
   }
 }
 
-// note that this includes Undefined in the total count.
+// Note that this includes Undefined in the total count.
+// BUT EndOfFunctionalityKeys is its own (placeholder) key.
+// e.g. Undefined=0, Dense=1, Sparse=2, EndOfFunctionalityKeys=3.
+// In the above example, there are 3 total functionality keys.
 constexpr uint8_t num_functionality_keys =
-    static_cast<uint8_t>(DispatchKey::EndOfFunctionalityKeys)
-  - static_cast<uint8_t>(DispatchKey::EndOfBackendKeys)
-  - 1;
-
-constexpr uint8_t num_backends =
-    static_cast<uint8_t>(DispatchKey::EndOfBackendKeys) + 1;
+    static_cast<uint8_t>(DispatchKey::EndOfFunctionalityKeys);
 
 // it would be nice if we could cast EndOfBackendKeys to a 4-bit unsigned integer.
 // That way we'd automatically get warnings if EndOfBackendKeys happened to grow > 16.
 // Sadly, uint4_t is not a C++ type.
-constexpr uint16_t full_backend_mask = (static_cast<uint16_t>(1) << (static_cast<uint8_t>(DispatchKey::EndOfBackendKeys) + 1)) - 1;
+constexpr uint8_t num_backends = static_cast<uint8_t>(BackendBit::EndOfBackendKeys);
 
 constexpr uint8_t numPerBackendFunctionalityKeys() {
   uint8_t count = 0;
@@ -494,25 +497,7 @@ constexpr uint8_t numPerBackendFunctionalityKeys() {
   return count;
 }
 
-// Runtime DispatchKeys correspond to keys that map directly to a slot
-// in the runtime operator table.
-constexpr bool isRuntimeDispatchKey(DispatchKey k) {
-  // Undefined is special because it can't be added to a DispatchKeySet, but is still considered a runtime key.
-  if (k == DispatchKey::Undefined) {
-    return true;
-  }
-  // None of the "backend bit" keys are real runtime keys
-  if (k <= DispatchKey::EndOfBackendKeys) {
-    return false;
-  }
-  if (isPerBackendFunctionalityKey(k)) {
-    return false;
-  }
-  if (isAliasDispatchKey(k)) {
-    return false;
-  }
-  return true;
-}
+constexpr uint16_t full_backend_mask = (static_cast<uint16_t>(1) << num_backends) - 1;
 
 
 #if defined(C10_MOBILE_TRIM_DISPATCH_KEYS)
@@ -525,9 +510,11 @@ constexpr uint16_t num_runtime_entries =
 #endif
 
 C10_API const char* toString(DispatchKey);
+C10_API const char* toString(BackendBit);
 C10_API std::ostream& operator<<(std::ostream&, DispatchKey);
+C10_API std::ostream& operator<<(std::ostream&, BackendBit);
 
-C10_API DispatchKey getAutogradKeyFromBackend(DispatchKey t);
+C10_API DispatchKey getAutogradKeyFromBackend(BackendBit t);
 
 // Parses a string into a dispatch key.
 // If the string cannot be correctly parsed, throws an exception.
@@ -540,22 +527,26 @@ C10_API c10::DispatchKey parseDispatchKey(const std::string& k);
 // torch::dispatch(torch::kCPU, ...) is also valid.
 constexpr DispatchKey kAutograd = DispatchKey::Autograd;
 
-CONSTEXPR_EXCEPT_GCC5_STATIC DispatchKey toBackendKey(DispatchKey k) {
+// This function relies on the invariant that the dispatch keys between
+// StartOfDenseBackends and EndOfAutogradBackends are ordered by backend
+// in the same order as `BackendBit`.
+// TODO: statically assert this invariant.
+constexpr BackendBit toBackendBit(DispatchKey k) {
   if (k >= DispatchKey::StartOfDenseBackends && k <= DispatchKey::EndOfDenseBackends) {
-    return static_cast<DispatchKey>(static_cast<uint8_t>(k) - static_cast<uint8_t>(DispatchKey::StartOfDenseBackends));
+    return static_cast<BackendBit>(static_cast<uint8_t>(k) - static_cast<uint8_t>(DispatchKey::StartOfDenseBackends));
   } else if (k >= DispatchKey::StartOfQuantizedBackends && k <= DispatchKey::EndOfQuantizedBackends) {
-    return static_cast<DispatchKey>(static_cast<uint8_t>(k) - static_cast<uint8_t>(DispatchKey::StartOfQuantizedBackends));
+    return static_cast<BackendBit>(static_cast<uint8_t>(k) - static_cast<uint8_t>(DispatchKey::StartOfQuantizedBackends));
   } else if (k >= DispatchKey::StartOfSparseBackends && k <= DispatchKey::EndOfSparseBackends) {
-    return static_cast<DispatchKey>(static_cast<uint8_t>(k) - static_cast<uint8_t>(DispatchKey::StartOfSparseBackends));
+    return static_cast<BackendBit>(static_cast<uint8_t>(k) - static_cast<uint8_t>(DispatchKey::StartOfSparseBackends));
   } else if (k >= DispatchKey::StartOfAutogradBackends && k <= DispatchKey::EndOfAutogradBackends) {
-    return static_cast<DispatchKey>(static_cast<uint8_t>(k) - static_cast<uint8_t>(DispatchKey::StartOfAutogradBackends));
+    return static_cast<BackendBit>(static_cast<uint8_t>(k) - static_cast<uint8_t>(DispatchKey::StartOfAutogradBackends));
   } else {
-    throw std::invalid_argument("invalid key");
+    return BackendBit::InvalidBit;
   }
 }
 
-CONSTEXPR_EXCEPT_GCC5_STATIC DispatchKey toFunctionalityKey(DispatchKey k) {
-  if (k > DispatchKey::EndOfBackendKeys && k <= DispatchKey::EndOfFunctionalityKeys) {
+constexpr DispatchKey toFunctionalityKey(DispatchKey k) {
+  if (k <= DispatchKey::EndOfFunctionalityKeys) {
     return k;
   } else if (k <= DispatchKey::EndOfDenseBackends) {
     return DispatchKey::Dense;
@@ -566,27 +557,33 @@ CONSTEXPR_EXCEPT_GCC5_STATIC DispatchKey toFunctionalityKey(DispatchKey k) {
   } else if (k <= DispatchKey::EndOfAutogradBackends) {
     return DispatchKey::AutogradFunctionality;
   } else {
-    throw std::invalid_argument("invalid key");
+    return DispatchKey::Undefined;
   }
 }
 
 // Given (DispatchKey::Dense, DispatchKey::CUDABit), returns DispatchKey::CUDA
-CONSTEXPR_EXCEPT_GCC5_STATIC DispatchKey toRuntimePerBackendFunctionalityKey(DispatchKey functionality_k, DispatchKey backend_k) {
-  if (backend_k > DispatchKey::EndOfBackendKeys) {
-    throw std::invalid_argument("invalid key");
-  }
-  auto backend_idx = static_cast<uint8_t>(backend_k);
+// This function relies on the invariant that the dispatch keys between
+// StartOfDenseBackends and EndOfAutogradBackends are ordered by backend
+// in the same order as `BackendBit`.
+// TODO: statically assert this invariant.
+constexpr DispatchKey toRuntimePerBackendFunctionalityKey(DispatchKey functionality_k, BackendBit backend_k) {
   if (functionality_k == DispatchKey::Dense) {
-      return static_cast<DispatchKey>(static_cast<uint8_t>(DispatchKey::StartOfDenseBackends) + backend_idx);
-  } else if (functionality_k == DispatchKey::Quantized) {
-      return static_cast<DispatchKey>(static_cast<uint8_t>(DispatchKey::StartOfQuantizedBackends) + backend_idx);
-  } else if (functionality_k == DispatchKey::Sparse) {
-      return static_cast<DispatchKey>(static_cast<uint8_t>(DispatchKey::StartOfSparseBackends) + backend_idx);
-  } else if (functionality_k == DispatchKey::AutogradFunctionality) {
-      return static_cast<DispatchKey>(static_cast<uint8_t>(DispatchKey::StartOfAutogradBackends) + backend_idx);
-  } else {
-    throw std::invalid_argument("invalid key");
+    return static_cast<DispatchKey>(
+      static_cast<uint8_t>(DispatchKey::StartOfDenseBackends) + static_cast<uint8_t>(backend_k));
   }
+  if (functionality_k == DispatchKey::Sparse) {
+    return static_cast<DispatchKey>(
+      static_cast<uint8_t>(DispatchKey::StartOfSparseBackends) + static_cast<uint8_t>(backend_k));
+  }
+  if (functionality_k == DispatchKey::Quantized) {
+    return static_cast<DispatchKey>(
+      static_cast<uint8_t>(DispatchKey::StartOfQuantizedBackends) + static_cast<uint8_t>(backend_k));
+  }
+  if (functionality_k == DispatchKey::AutogradFunctionality) {
+    return static_cast<DispatchKey>(
+      static_cast<uint8_t>(DispatchKey::StartOfAutogradBackends) + static_cast<uint8_t>(backend_k));
+  }
+  return DispatchKey::Undefined;
 }
 
 } // namespace c10

@@ -591,7 +591,7 @@ TEST(OperatorRegistrationTest, AutogradBackendOverridesAutogradKernel) {
 
 void LazyBackendsAutogradOverridesAutogradKernel(DispatchKey key) {
   auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
-    .kernel<decltype(nonautograd_kernel), &nonautograd_kernel>(c10::getAutogradKeyFromBackend(toBackendKey(key)))
+    .kernel<decltype(nonautograd_kernel), &nonautograd_kernel>(c10::getAutogradKeyFromBackend(toBackendBit(key)))
     .kernel<decltype(autograd_kernel), &autograd_kernel>(DispatchKey::Autograd));
 
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});

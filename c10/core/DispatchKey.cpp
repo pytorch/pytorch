@@ -4,6 +4,41 @@
 
 namespace c10 {
 
+const char* toString(BackendBit t) {
+  switch (t) {
+    case BackendBit::CPUBit:
+      return "CPUBit";
+    case BackendBit::CUDABit:
+      return "CUDABit";
+    case BackendBit::HIPBit:
+      return "HIPBit";
+    case BackendBit::XLABit:
+      return "XLABit";
+    case BackendBit::LazyBit:
+      return "LazyBit";
+    case BackendBit::XPUBit:
+      return "XPUBit";
+    case BackendBit::NestedTensorBit:
+      return "NestedTensorBit";
+    case BackendBit::MLCBit:
+      return "MLCBit";
+    case BackendBit::HPUBit:
+      return "HPUBit";
+    case BackendBit::VEBit:
+      return "VEBit";
+    case BackendBit::PrivateUse1Bit:
+      return "PrivateUse1Bit";
+    case BackendBit::PrivateUse2Bit:
+      return "PrivateUse2Bit";
+    case BackendBit::PrivateUse3Bit:
+      return "PrivateUse3Bit";
+    case BackendBit::InvalidBit:
+      return "InvalidBit";
+    default:
+      return "UNKNOWN_BACKEND_BIT";
+  }
+}
+
 const char* toString(DispatchKey t) {
   switch (t) {
     case DispatchKey::Undefined:
@@ -162,32 +197,6 @@ const char* toString(DispatchKey t) {
     case DispatchKey::FuncTorchBatched:
       return "FuncTorchBatched";
 
-    case DispatchKey::CPUBit:
-      return "CPUBit";
-    case DispatchKey::CUDABit:
-      return "CUDABit";
-    case DispatchKey::HIPBit:
-      return "HIPBit";
-    case DispatchKey::XLABit:
-      return "XLABit";
-    case DispatchKey::LazyBit:
-      return "LazyBit";
-    case DispatchKey::XPUBit:
-      return "XPUBit";
-    case DispatchKey::NestedTensorBit:
-      return "NestedTensorBit";
-    case DispatchKey::MLCBit:
-      return "MLCBit";
-    case DispatchKey::HPUBit:
-      return "HPUBit";
-    case DispatchKey::VEBit:
-      return "VEBit";
-    case DispatchKey::PrivateUse1Bit:
-      return "PrivateUse1Bit";
-    case DispatchKey::PrivateUse2Bit:
-      return "PrivateUse2Bit";
-    case DispatchKey::PrivateUse3Bit:
-      return "PrivateUse3Bit";
     case DispatchKey::Dense:
       return "Dense";
     case DispatchKey::Quantized:
@@ -205,6 +214,9 @@ const char* toString(DispatchKey t) {
 std::ostream& operator<<(std::ostream& str, DispatchKey rhs) {
   return str << toString(rhs);
 }
+std::ostream& operator<<(std::ostream& str, BackendBit rhs) {
+  return str << toString(rhs);
+}
 
 // for a given backend key, return the associated autograd key.
 // for non-backend keys, return AutogradOther as a default.
@@ -213,29 +225,29 @@ std::ostream& operator<<(std::ostream& str, DispatchKey rhs) {
 // responsible for either a) enforcing the invariant that only backend keys
 // be passed as arguments, or b) interpreting our return value carefully.
 //
-DispatchKey getAutogradKeyFromBackend(DispatchKey t) {
+DispatchKey getAutogradKeyFromBackend(BackendBit t) {
   switch (t) {
-    case DispatchKey::CPUBit:
+    case BackendBit::CPUBit:
       return DispatchKey::AutogradCPU;
-    case DispatchKey::XPUBit:
+    case BackendBit::XPUBit:
       return DispatchKey::AutogradXPU;
-    case DispatchKey::CUDABit:
+    case BackendBit::CUDABit:
       return DispatchKey::AutogradCUDA;
-    case DispatchKey::XLABit:
+    case BackendBit::XLABit:
       return DispatchKey::AutogradXLA;
-    case DispatchKey::LazyBit:
+    case BackendBit::LazyBit:
       return DispatchKey::AutogradLazy;
-    case DispatchKey::MLCBit:
+    case BackendBit::MLCBit:
       return DispatchKey::AutogradMLC;
-    case DispatchKey::HPUBit:
+    case BackendBit::HPUBit:
       return DispatchKey::AutogradHPU;
-    case DispatchKey::NestedTensorBit:
+    case BackendBit::NestedTensorBit:
       return DispatchKey::AutogradNestedTensor;
-    case DispatchKey::PrivateUse1Bit:
+    case BackendBit::PrivateUse1Bit:
       return DispatchKey::AutogradPrivateUse1;
-    case DispatchKey::PrivateUse2Bit:
+    case BackendBit::PrivateUse2Bit:
       return DispatchKey::AutogradPrivateUse2;
-    case DispatchKey::PrivateUse3Bit:
+    case BackendBit::PrivateUse3Bit:
       return DispatchKey::AutogradPrivateUse3;
     default:
       return DispatchKey::AutogradOther;
@@ -244,19 +256,7 @@ DispatchKey getAutogradKeyFromBackend(DispatchKey t) {
 
 c10::DispatchKey parseDispatchKey(const std::string& k) {
   static std::unordered_map<std::string, c10::DispatchKey> key_map = {
-      {"CPUBit", c10::DispatchKey::CPU},
-      {"CUDABit", c10::DispatchKey::CUDA},
-      {"HIPBit", c10::DispatchKey::HIP},
-      {"XLABit", c10::DispatchKey::XLA},
-      {"MLCBit", c10::DispatchKey::MLC},
       {"XPU", c10::DispatchKey::XPU},
-      {"HPUBit", c10::DispatchKey::HPU},
-      {"LazyBit", c10::DispatchKey::Lazy},
-      {"NestedTensorBit", c10::DispatchKey::NestedTensor},
-      {"VEBit", c10::DispatchKey::VEBit},
-      {"PrivateUse1Bit", c10::DispatchKey::PrivateUse1},
-      {"PrivateUse2Bit", c10::DispatchKey::PrivateUse2},
-      {"PrivateUse3Bit", c10::DispatchKey::PrivateUse3},
       {"Undefined", c10::DispatchKey::Undefined},
       {"Dense", c10::DispatchKey::Dense},
       {"FPGA", c10::DispatchKey::FPGA},

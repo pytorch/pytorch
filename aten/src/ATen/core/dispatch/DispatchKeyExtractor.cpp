@@ -12,13 +12,13 @@ void DispatchKeyExtractor::setOperatorHasFallthroughForKey(DispatchKey k, bool h
     nonFallthroughKeys_ = nonFallthroughKeys_.add(k);
   }
   // (2) update nonFallthroughKeysPerBackend_
-  if (k != DispatchKey::Undefined && (
-      isPerBackendFunctionalityKey(k) ||
-      isPerBackendFunctionalityKey(toFunctionalityKey(k)))) {
+  if (k != DispatchKey::Undefined && isPerBackendFunctionalityKey(toFunctionalityKey(k))) {
     // This is a per-backend functionality key.
     // We need to figure out what the currenty backend is,
     // and only update the bitset for that backend.
-    auto backend_idx = static_cast<uint8_t>(toBackendKey(k));
+    // subtracting 1 because the first backend should have index 0 (CPU),
+    // But the enum starts with BackendBit::InvalidBit.
+    auto backend_idx = static_cast<uint8_t>(toBackendBit(k)) - 1;
     if (has_fallthrough) {
       nonFallthroughKeysPerBackend_[backend_idx] = nonFallthroughKeysPerBackend_[backend_idx].removeFunctionalityKey(k);
     } else {
@@ -26,7 +26,7 @@ void DispatchKeyExtractor::setOperatorHasFallthroughForKey(DispatchKey k, bool h
     }
 
     // Set requiresBitsetPerBackend_ accordingly
-    for (size_t i = 0; i < static_cast<uint8_t>(DispatchKey::EndOfBackendKeys); ++i)   {
+    for (size_t i = 0; i < num_backends; ++i)   {
       if (nonFallthroughKeysPerBackend_[i] != nonFallthroughKeysPerBackend_[i+1]) {
         requiresBitsetPerBackend_ = true;
         return;
@@ -40,7 +40,7 @@ void DispatchKeyExtractor::setOperatorHasFallthroughForKey(DispatchKey k, bool h
   // TODO: we could probably optimize this by only lazily updating these values
   // the first time that we see requiresBitsetPerBackend_ = true
   // (which should almost never happen)
-  for (size_t i = 0; i <= static_cast<uint8_t>(DispatchKey::EndOfBackendKeys); ++i) {
+  for (size_t i = 0; i <= num_backends; ++i) {
     if (has_fallthrough) {
       nonFallthroughKeysPerBackend_[i] = nonFallthroughKeysPerBackend_[i].removeFunctionalityKey(k);
     } else {
