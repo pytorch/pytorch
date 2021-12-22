@@ -5,7 +5,7 @@ from .graph_module import QuantizedGraphModule
 from .quantized_fusion_patterns_and_replacements import get_fbgemm_patterns_and_replacements
 from .match_utils import is_match
 from .match_utils import MatchAllNode
-from .utils import _parent_name
+from ..utils import _parent_name
 from typing import Dict, Type
 
 # Mapping from reference module class to the replacement quantized module class for lowering
