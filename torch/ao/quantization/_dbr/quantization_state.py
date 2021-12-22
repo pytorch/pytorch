@@ -118,10 +118,10 @@ class AutoQuantizationState(torch.nn.Module):
         self.needs_dtype_transform_on_outputs = True
 
     def get_extra_state(self):
-        return self.tensor_id_to_scale_zp
+        return {"tensor_id_to_scale_zp": self.tensor_id_to_scale_zp}
 
     def set_extra_state(self, state):
-        self.tensor_id_to_scale_zp = state
+        self.tensor_id_to_scale_zp = state["tensor_id_to_scale_zp"]
         for _, seen_op_info in self.idx_to_seen_op_infos.items():
             self.idx_to_op_convert_info[seen_op_info.idx] = \
                 self.calculate_op_convert_info(seen_op_info)
