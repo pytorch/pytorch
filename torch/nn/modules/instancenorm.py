@@ -130,9 +130,9 @@ class InstanceNorm1d(_InstanceNorm):
     def _check_input_dim(self, input):
         if input.dim() == 2:
             raise ValueError(
-                'InstanceNorm1d returns 0-filled tensor to 2D tensor.'
-                'This is because InstanceNorm1d reshapes inputs to'
-                '(1, N * C, ...) from (N, C,...) and this makes'
+                'InstanceNorm1d returns 0-filled tensor to 2D tensor. '
+                'This is because InstanceNorm1d reshapes inputs to '
+                '(1, N * C, ...) from (N, C,...) and this makes '
                 'variances 0.'
             )
         if input.dim() != 3:
