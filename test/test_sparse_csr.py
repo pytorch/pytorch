@@ -1185,13 +1185,13 @@ class TestSparseCSR(TestCase):
 
             self.assertEqual(output.to_dense(), expected)
 
-    # Currently, there is no unanimously agreed rule for filling zeros in the outputs
+    # Currently, there is no rule in PyTorch for filling zeros in the outputs
     #   from operations on Sparse CSR tensors. Hence only those operators are supported
     #   which have 0->0 correspondence, example: sin(0) = 0, tan(0) = 0 but
     #   cos(0) = 1 (and hence it's not supported).
-    #   Currently, we do this test only for unary operators.
+    # Note: here, we do this test only for unary operators
     @ops(sparse_csr_unary_ufuncs)
-    def test_zero_to_zero_correspondence(self, device, dtype, op):
+    def test_zero_to_zero_correspondence_unary(self, device, dtype, op):
         # Zeros for the given dtype
         zero = torch.zeros((1, 2), dtype=dtype, device=device)
 
