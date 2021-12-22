@@ -131,10 +131,15 @@ def adadelta(params: List[Tensor],
              rho: float,
              eps: float,
              weight_decay: float):
+    r"""Functional API that performs Adadelta algorithm computation.
+
+    See :class:`~torch.optim.Adadelta` for details.
+    """
+
     if foreach and not torch.jit.is_scripting():
-        func = multi_tensor_adadelta
+        func = _multi_tensor_adadelta
     else:
-        func = single_tensor_adadelta
+        func = _single_tensor_adadelta
 
     func(params,
          grads,
@@ -146,15 +151,15 @@ def adadelta(params: List[Tensor],
          weight_decay=weight_decay)
 
 
-def single_tensor_adadelta(params: List[Tensor],
-                           grads: List[Tensor],
-                           square_avgs: List[Tensor],
-                           acc_deltas: List[Tensor],
-                           *,
-                           lr: float,
-                           rho: float,
-                           eps: float,
-                           weight_decay: float):
+def _single_tensor_adadelta(params: List[Tensor],
+                            grads: List[Tensor],
+                            square_avgs: List[Tensor],
+                            acc_deltas: List[Tensor],
+                            *,
+                            lr: float,
+                            rho: float,
+                            eps: float,
+                            weight_decay: float):
 
     for (param, grad, square_avg, acc_delta) in zip(params, grads, square_avgs, acc_deltas):
         if weight_decay != 0:
@@ -174,15 +179,15 @@ def single_tensor_adadelta(params: List[Tensor],
         param.add_(delta, alpha=-lr)
 
 
-def multi_tensor_adadelta(params: List[Tensor],
-                          grads: List[Tensor],
-                          square_avgs: List[Tensor],
-                          acc_deltas: List[Tensor],
-                          *,
-                          lr: float,
-                          weight_decay: float,
-                          rho: float,
-                          eps: float):
+def _multi_tensor_adadelta(params: List[Tensor],
+                           grads: List[Tensor],
+                           square_avgs: List[Tensor],
+                           acc_deltas: List[Tensor],
+                           *,
+                           lr: float,
+                           weight_decay: float,
+                           rho: float,
+                           eps: float):
 
     if weight_decay != 0:
         torch._foreach_add_(grads, params, alpha=weight_decay)

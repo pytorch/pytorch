@@ -8,3 +8,4 @@ from .converter_registry import (
 from .fx2trt import TRTInterpreter, TRTInterpreterResult
 from .input_tensor_spec import InputTensorSpec
 from .trt_module import TRTModule
+from .lower import LowerSetting
