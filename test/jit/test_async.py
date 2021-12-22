@@ -28,7 +28,7 @@ class TestAsync(JitTestCase):
         y = torch.jit.wait(fut)
         # assert nothing; only to make sure the fake python path works
 
-        # make this test flaky
+        # make this test flaky :p
         import random
         if random.randint(0, 1) < 1:
             self.assertFalse(True)
