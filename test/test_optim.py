@@ -513,45 +513,27 @@ class TestOptim(TestCase):
             # ((optim.Adagrad), dict(weight_decay=1)),
         ]
 
-        kIterations = 11
+        kIterations = 3
         device = 'cuda'
 
         for opt, params in optimizer_pairs_with_flags:
             res = []
             for foreach in (True, False):
-                weight = torch.tensor([[-0.2109, -0.4976], [-0.1413, -0.3420], [-0.2524, 0.6976]],
-                                      dtype=torch.float64, device=device, requires_grad=True)
-                bias = torch.tensor([-0.1085, -0.2979, 0.6892], dtype=torch.float64, device=device, requires_grad=True)
-                weight2 = torch.tensor([[-0.0508, -0.3941, -0.2843]],
-                                       dtype=torch.float64, device=device, requires_grad=True)
-                bias2 = torch.tensor([-0.0711], dtype=torch.float64, device=device, requires_grad=True)
                 input = torch.tensor([0.1, 0.2, 0.3, 0.4, 0.5, 0.6], dtype=torch.float64, device=device).reshape(3, 2)
 
+                torch.manual_seed(1)
                 model = torch.nn.Sequential(torch.nn.Linear(2, 3),
                                             torch.nn.Sigmoid(),
                                             torch.nn.Linear(3, 1),
                                             torch.nn.Sigmoid())
-                model.to(torch.float64).to(device)
-
-                pretrained_dict = model.state_dict()
-                pretrained_dict['0.weight'] = weight
-                pretrained_dict['0.bias'] = bias
-                pretrained_dict['2.weight'] = weight2
-                pretrained_dict['2.bias'] = bias2
-                model.load_state_dict(pretrained_dict)
-
-                params['foreach'] = foreach
-                optimizer = opt(model.parameters(), **params)
+                model.to(dtype=torch.float64, device=device)
+                optimizer = opt(model.parameters(), foreach=foreach, **params)
 
                 for _ in range(kIterations):
                     optimizer.zero_grad()
                     output = model(input)
                     loss = output.sum()
                     loss.backward()
-
-                    if iter == 0:
-                        model.parameters().__next__().grad = None
-
                     optimizer.step()
 
                 res.append(model.parameters())
@@ -562,58 +544,68 @@ class TestOptim(TestCase):
     def test_adam(self):
         for optimizer in [optim.Adam, optim_mt.Adam]:
             self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3)
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2), lr=1e-3, maximize=maximize),
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, amsgrad=True, maximize=maximize),
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, weight_decay=0.1, maximize=maximize),
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-3)
+                    lr=1e-3, amsgrad=True, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3, amsgrad=True)
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3, weight_decay=0.1)
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-3, amsgrad=True)
+                    lr=1e-3, maximize=maximize),
+                [lambda opt: ExponentialLR(opt, gamma=0.9)],
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-3),
-                [lambda opt: ExponentialLR(opt, gamma=0.9)]
+                    lr=1e-3, maximize=maximize),
+                [lambda opt: LinearLR(opt, start_factor=0.4, total_iters=4)],
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-3),
-                [lambda opt: LinearLR(opt, start_factor=0.4, total_iters=4)]
+                    lr=1e-3, maximize=maximize),
+                [lambda opt: ConstantLR(opt, factor=0.4, total_iters=4)],
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-3),
-                [lambda opt: ConstantLR(opt, factor=0.4, total_iters=4)]
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3, amsgrad=True),
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, amsgrad=True, maximize=maximize),
                 [lambda opt: ConstantLR(opt, factor=0.4, total_iters=4),
-                 lambda opt: ExponentialLR(opt, gamma=0.9)]
+                 lambda opt: ExponentialLR(opt, gamma=0.9)],
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3, amsgrad=True),
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, amsgrad=True, maximize=maximize),
                 [lambda opt: ExponentialLR(opt, gamma=0.9),
-                 lambda opt: ReduceLROnPlateau(opt)]
+                 lambda opt: ReduceLROnPlateau(opt)],
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-3, amsgrad=True),
+                    lr=1e-3, amsgrad=True, maximize=maximize),
                 [lambda opt: StepLR(opt, gamma=0.9, step_size=10),
-                 lambda opt: ReduceLROnPlateau(opt)]
+                 lambda opt: ReduceLROnPlateau(opt)],
+                constructor_accepts_maximize=True
             )
             with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
                 optimizer(None, lr=1e-2, betas=(1.0, 0.0))

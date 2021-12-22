@@ -16,6 +16,6 @@
 #include <torch/csrc/cuda/override_macros.h>
 
 #define THC_GENERIC_FILE "torch/csrc/generic/Storage.h"
-#include <THC/THCGenerateByteType.h>
+#include <torch/csrc/THCGenerateByteType.h>
 
 #endif
