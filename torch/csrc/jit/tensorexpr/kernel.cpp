@@ -781,11 +781,10 @@ StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
 
   if (pre_alloc_) {
     auto interm_bufs = l.getIntermediateBufs();
-    interm_bufs = preAllocIntermediateBufs(interm_bufs);
-    l.prepareForCodegen(interm_bufs);
-  } else {
-    l.prepareForCodegen();
+    preAllocIntermediateBufs(interm_bufs);
   }
+
+  l.prepareForCodegen();
 
   GRAPH_DEBUG("after prepareForCodegen", *l.root_stmt());
   l.simplify();
