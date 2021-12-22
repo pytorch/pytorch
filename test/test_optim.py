@@ -201,6 +201,7 @@ class TestOptim(TestCase):
 
         # Make sure state dict wasn't modified
         self.assertEqual(state_dict, state_dict_c)
+
         for _i in range(20):
             optimizer.step(fn)
             optimizer_cuda.step(fn_cuda)
@@ -274,6 +275,7 @@ class TestOptim(TestCase):
         real_param = torch.view_as_real(complex_param).detach().clone().requires_grad_()
         complex_opt = optimizer_constructor(complex_param)
         real_opt = optimizer_constructor(real_param)
+
         for i in range(3):
             complex_param.grad = torch.randn_like(complex_param)
             real_param.grad = torch.view_as_real(complex_param.grad)
