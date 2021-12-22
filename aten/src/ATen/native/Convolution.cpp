@@ -22,6 +22,7 @@ constexpr int MIOPEN_DIM_MAX = 5;
 
 namespace at { namespace native {
 
+DEFINE_DISPATCH(slow_conv_transpose2d_backward_stub);
 DEFINE_DISPATCH(convolution_depthwise3x3_winograd_stub);
 
 std::ostream& operator<<(std::ostream & out, const ConvParams& params) {
@@ -1449,9 +1450,9 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _convolution_backward_nogroup_bac
       return at::slow_conv_dilated3d_backward(
         grad_output, input, weight, kernel_size, params.stride, params.padding, params.dilation, output_mask);
     case ConvBackend::SlowTranspose2d:
-      return at::slow_conv_transpose2d_backward(
-        grad_output, input, weight, kernel_size, params.stride, params.padding, params.output_padding,
-        params.dilation, output_mask);
+      return slow_conv_transpose2d_backward_stub(
+        input.device().type(), grad_output, input, weight, kernel_size, params.stride, params.padding,
+        params.output_padding, params.dilation, output_mask);
     case ConvBackend::SlowTranspose3d:
       return at::slow_conv_transpose3d_backward(
         grad_output, input, weight, kernel_size, params.stride, params.padding, params.output_padding,
