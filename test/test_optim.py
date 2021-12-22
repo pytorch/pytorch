@@ -201,7 +201,6 @@ class TestOptim(TestCase):
 
         # Make sure state dict wasn't modified
         self.assertEqual(state_dict, state_dict_c)
-        #Handles https://github.com/pytorch/pytorch/issues/69698
         for _i in range(20):
             optimizer.step(fn)
             optimizer_cuda.step(fn_cuda)
@@ -275,7 +274,6 @@ class TestOptim(TestCase):
         real_param = torch.view_as_real(complex_param).detach().clone().requires_grad_()
         complex_opt = optimizer_constructor(complex_param)
         real_opt = optimizer_constructor(real_param)
-        #Handles https://github.com/pytorch/pytorch/issues/69698
         for i in range(3):
             complex_param.grad = torch.randn_like(complex_param)
             real_param.grad = torch.view_as_real(complex_param.grad)
@@ -598,7 +596,7 @@ class TestOptim(TestCase):
 
     # ROCm precision is too low to pass this test
     @skipIfRocm
-    @toleranceOverride({torch.float32: tol(4e-3, 0),})
+    @toleranceOverride({torch.float32: tol(4e-3, 0),}) #Handles https://github.com/pytorch/pytorch/issues/69698
     def test_adadelta(self):
         for optimizer in [optim.Adadelta, optim_mt.Adadelta]:
             self._test_basic_cases(
@@ -620,7 +618,7 @@ class TestOptim(TestCase):
             with self.assertRaisesRegex(ValueError, "Invalid rho value: 1.1"):
                 optimizer(None, lr=1e-2, rho=1.1)
 
-    @toleranceOverride({torch.float32: tol(2e-2, 0),})
+    @toleranceOverride({torch.float32: tol(2e-2, 0),}) #Handles https://github.com/pytorch/pytorch/issues/69698
     def test_adadelta_complex(self):
         for optimizer in [optim.Adadelta]:
             self._test_complex_optimizer(
