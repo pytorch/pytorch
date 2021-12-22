@@ -135,6 +135,7 @@ libtorch_sources_common = sorted(core_sources_common + torch_unpickler_common)
 libtorch_profiler_sources = [
     "torch/csrc/autograd/profiler_legacy.cpp",
     "torch/csrc/autograd/profiler_kineto.cpp",
+    "torch/csrc/profiler/api.cpp",
     "torch/csrc/monitor/counters.cpp",
     "torch/csrc/monitor/events.cpp",
 ]
@@ -389,6 +390,7 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/core/permutation_util.cpp",
     "torch/csrc/lazy/core/shape.cpp",
     "torch/csrc/lazy/core/tensor.cpp",
+    "torch/csrc/lazy/core/tensor_impl.cpp",
     "torch/csrc/lazy/core/tensor_util.cpp",
     "torch/csrc/lazy/core/thread_pool.cpp",
     "torch/csrc/lazy/core/view_ops/as_strided.cpp",
@@ -596,7 +598,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/CudaIPCTypes.cpp",
     "torch/csrc/cuda/comm.cpp",
     "torch/csrc/jit/codegen/fuser/cuda/fused_kernel.cpp",
-    "torch/csrc/autograd/profiler_cuda.cpp",
+    "torch/csrc/profiler/cuda.cpp",
     "torch/csrc/autograd/functions/comm.cpp",
     "torch/csrc/jit/codegen/cuda/arith.cpp",
     "torch/csrc/jit/codegen/cuda/compute_at.cpp",
@@ -1058,6 +1060,7 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/MaxPoolKernel.cpp",
     "aten/src/ATen/native/cpu/MaxUnpoolKernel.cpp",
     "aten/src/ATen/native/cpu/MultinomialKernel.cpp",
+    "aten/src/ATen/native/cpu/NaiveDilatedConvolution.cpp",
     "aten/src/ATen/native/cpu/PointwiseOpsKernel.cpp",
     "aten/src/ATen/native/cpu/PowKernel.cpp",
     "aten/src/ATen/native/cpu/RangeFactoriesKernel.cpp",
