@@ -34,6 +34,21 @@ cc_library(
 )
 
 cc_library(
+    name = "alloc_cpu",
+    hdrs = ["alloc_cpu.h"],
+    srcs = ["alloc_cpu.cpp"],
+    deps = [
+        "//c10/macros",
+        "//c10/util:base",
+    ],
+    linkstatic = True,
+    visibility = [
+        "//c10:__pkg__",
+        "//c10/mobile:__pkg__",
+    ],
+)
+
+cc_library(
     name = "free_cpu",
     hdrs = ["free_cpu.h"],
     srcs = ["free_cpu.cpp"],

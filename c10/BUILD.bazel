@@ -71,6 +71,7 @@ cc_library(
     deps = [
         ":headers",
         "//c10/core:base",
+        "//c10/core:alloc_cpu",
         "//c10/core:free_cpu",
     ] + if_cuda(
         ["@cuda"],

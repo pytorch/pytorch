@@ -1,5 +1,6 @@
 #include <c10/mobile/CPUCachingAllocator.h>
 
+#include <c10/core/alloc_cpu.h>
 #include <c10/core/free_cpu.h>
 
 namespace c10 {
