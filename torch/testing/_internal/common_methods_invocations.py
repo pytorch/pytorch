@@ -13031,10 +13031,7 @@ op_db: List[OpInfo] = [
     OpInfo('index_copy',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_inplace_autograd=False,
-           # An out= variant exists but is not exposed to the Python API
-           # Reason similar to that for index_add
-           # See: https://github.com/pytorch/pytorch/pull/65993#discussion_r737760723
-           supports_out=False,
+           supports_out=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            # https://github.com/pytorch/pytorch/issues/66357
@@ -13054,9 +13051,7 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('index_add',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
-           # An `out=` variant exists but is not exposed to the Python API
-           # see: https://github.com/pytorch/pytorch/pull/65993#discussion_r737760723
-           supports_out=False,
+           supports_out=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            # https://github.com/pytorch/pytorch/issues/66357
