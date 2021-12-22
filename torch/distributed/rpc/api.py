@@ -197,7 +197,7 @@ def _all_gather(obj, worker_names=None, timeout=UNSET_RPC_TIMEOUT):
     if timeout == UNSET_RPC_TIMEOUT:
         timeout = get_rpc_timeout()
 
-    # Phase 1: Followers send it's object to the leader
+    # Phase 1: Followers send its object to the leader
     if is_leader:
         _gather_to_leader(sequence_id, self_name, obj, worker_names)
     else:
@@ -210,7 +210,15 @@ def _all_gather(obj, worker_names=None, timeout=UNSET_RPC_TIMEOUT):
 
     with _all_gather_dict_lock:
         states = _all_gather_sequence_id_to_states[sequence_id]
-    states.proceed_signal.wait()
+
+    timed_out = not states.proceed_signal.wait(timeout=timeout)
+    if timed_out:
+        raise ValueError(
+            f"Worker {self_name} timed out waiting for proceed signal from "
+            "leader. This likely means some worker did not contact the "
+            "leader or leader failed to notify followers to proceeed. "
+            f"All worker names are {worker_names}"
+        )
 
     # Phase 2: Leader broadcast gathered results to all followers
     # Leader's signal is the first to be unblocked, after receiving all
