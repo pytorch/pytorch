@@ -1,9 +1,9 @@
 from enum import Enum, auto
+from contextlib import suppress
+
 import torch
+from torch.autograd.graph import save_on_cpu
 from torch.utils.checkpoint import checkpoint
-from typing import Any
-from functools import partial
-from weakref import ref
 
 
 class CheckpointImpl(Enum):
@@ -11,10 +11,37 @@ class CheckpointImpl(Enum):
     NO_REENTRANT = auto()
 
 
+class _CheckpointWrapper(torch.nn.Module):
+    """
+    An nn.Module that wraps another nn.Module with checkpointing.
+    """
+    def __init__(
+        self,
+        mod: torch.nn.Module,
+        checkpoint_impl: CheckpointImpl = CheckpointImpl.REENTRANT,
+        offload_to_cpu: bool = False,
+    ):
+        super().__init__()
+        self.mod = mod
+        self.checkpoint_impl = checkpoint_impl
+        self.offload_to_cpu = offload_to_cpu
+
+    def forward(self, *args, **kwargs):
+        offload_mgr = save_on_cpu(pin_memory=True) if self.offload_to_cpu else suppress()
+        with offload_mgr:  # type: ignore[attr-defined]
+            return checkpoint(
+                self.mod,
+                use_reentrant=(self.checkpoint_impl == CheckpointImpl.REENTRANT),
+                *args,
+                **kwargs,
+            )
+
+
 def checkpoint_wrapper(
     module: torch.nn.Module,
-    checkpoint_impl: CheckpointImpl = CheckpointImpl.REENTRANT
-):
+    checkpoint_impl: CheckpointImpl = CheckpointImpl.REENTRANT,
+    offload_to_cpu: bool = False,
+) -> torch.nn.Module:
     """
     A convenience wrapper for activation checkpointing. If the module is wrapped
     with this function, all subsequent calls to the module will automatically
@@ -29,6 +56,10 @@ def checkpoint_wrapper(
         checkpoint_impl (Optional[CheckpointImpl]):
             The checkpointing implementation to use. Currently only
             CheckpointImpl.REENTRANT is supported.
+        offload_to_cpu (Optional[bool]):
+            Whether to offload outer activations to CPU. Note that this
+            currently only works with CheckpointImpl.REENTRANT.
+
     Returns:
         (nn.Module):
             Wrapped module
@@ -38,29 +69,11 @@ def checkpoint_wrapper(
         raise ValueError(
             "No support for non-reentrant based checkpoint implementation."
         )
-    # Use weakref to avoid creating a refcycle: m -> m.forward -> m. This would
-    # leak GPU memory because python won't gc the module when the module is
-    # freed.
-    module.forward = partial(  # type: ignore[assignment]
-        _checkpointed_forward,
-        type(module).forward,
-        ref(module),
-        checkpoint_impl,
-    )
-    return module
 
-def _checkpointed_forward(
-    original_forward: Any, weak_self: Any, checkpoint_impl: Any, *args: Any, **kwargs: Any
-) -> Any:
-    module = weak_self()
-    # If grads are disabled, call into original forward
-    if not torch.is_grad_enabled():
-        return original_forward(module, *args, **kwargs)
+    if offload_to_cpu and checkpoint_impl != CheckpointImpl.REENTRANT:
+        raise ValueError(
+            "No support for CPU offload activations and non-reentrant based "
+            "checkpoint implementation."
+        )
 
-    forward_args = (module, ) + args
-    return checkpoint(
-        original_forward,
-        use_reentrant=(checkpoint_impl == CheckpointImpl.REENTRANT),
-        *forward_args,
-        **kwargs
-    )
+    return _CheckpointWrapper(module, checkpoint_impl, offload_to_cpu)
