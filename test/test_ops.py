@@ -257,11 +257,13 @@ class TestCommon(TestCase):
 
             self.assertEqual(actual, expected)
 
-            # validates backward
-
+            # Validate backward
             # Short-circuits if the op doesn't support grad in this device x dtype
             if not test_grad:
                 continue
+
+            expected = sample_input.output_process_fn_grad(expected)
+            actual = sample_input.output_process_fn_grad(actual)
 
             if isinstance(expected, torch.Tensor):
                 grad_for_expected = torch.randn_like(expected)
@@ -293,7 +295,7 @@ class TestCommon(TestCase):
             t_grads = torch.autograd.grad(expected, t_input_tensors, grad_for_expected, allow_unused=True)
             n_grads = torch.autograd.grad(actual, n_input_tensors, grad_for_actual, allow_unused=True)
 
-            msg = "Got different gradients for contiguous / non-contiguous wrt input {}."
+            msg = "Got different gradients for contiguous / non-contiguous inputs wrt input {}."
             for i, (t, n) in enumerate(zip(t_grads, n_grads)):
                 self.assertEqual(t, n, msg=msg.format(i))
 
