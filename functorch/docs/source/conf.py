@@ -26,6 +26,7 @@ RELEASE = os.environ.get('RELEASE', False)
 
 import pytorch_sphinx_theme
 import sphinx_rtd_theme
+import sys
 
 # -- General configuration ------------------------------------------------
 
@@ -45,10 +46,13 @@ extensions = [
     'sphinx.ext.coverage',
     'sphinx.ext.napoleon',
     'sphinx.ext.viewcode',
-    'sphinxcontrib.katex',
+    # 'sphinxcontrib.katex',
     'sphinx.ext.autosectionlabel',
     'sphinx_copybutton',
+    'nbsphinx',
 ]
+
+# sys.path.insert(0, os.path.abspath('./notebooks'))
 
 # build the templated autosummary files
 # autosummary_generate = True
