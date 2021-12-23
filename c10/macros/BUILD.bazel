@@ -16,8 +16,8 @@ cc_library(
 
 header_template_rule(
     name = "cmake_macros_h",
-    src = "macros/cmake_macros.h.in",
-    out = "macros/cmake_macros.h",
+    src = "cmake_macros.h.in",
+    out = "cmake_macros.h",
     substitutions = {
         "cmakedefine": "define",
         "#define C10_USE_NUMA": "/* #undef C10_USE_NUMA */",
