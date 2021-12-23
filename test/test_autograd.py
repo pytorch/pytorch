@@ -2856,10 +2856,10 @@ class TestAutograd(TestCase):
         self.assertTrue(found_bwd_sum)
         self.assertTrue(found_empty)
 
-    def test_profiler_input_seq_ids_cuda(self):
+    def test_profiler_input_seq_ids(self):
         with profile(use_kineto=kineto_available(), record_shapes=True) as prof:
-            x = torch.randn(10, 10, requires_grad=True, device="cuda")
-            y = torch.randn(10, 10, requires_grad=True, device="cuda")
+            x = torch.randn(10, 10, requires_grad=True)
+            y = torch.randn(10, 10, requires_grad=True)
             z = x + y
             z = 2 * z
             s = z.sum()
@@ -2885,7 +2885,7 @@ class TestAutograd(TestCase):
                     seq_id_list.append(event.sequence_nr)
         self.assertTrue(found_input_seq_id)
 
-    def test_custom_module_input_seq_ids_cuda(self):
+    def test_custom_module_input_seq_ids(self):
         class MyFunc(Function):
             @staticmethod
             def forward(ctx, x):
