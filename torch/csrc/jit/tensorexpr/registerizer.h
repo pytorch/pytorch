@@ -1,7 +1,7 @@
 #pragma once
 #include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 #include <torch/csrc/jit/tensorexpr/hash_provider.h>
 #include <torch/csrc/jit/tensorexpr/ir_mutator.h>

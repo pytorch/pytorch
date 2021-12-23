@@ -40,7 +40,7 @@ import torch
 import torch.utils.data.backward_compatibility
 import torch.utils.data.datapipes as dp
 import torch.utils.data.graph
-import torch.utils.data.sharding
+import torch.utils.data.graph_settings
 from torch.testing._internal.common_utils import TestCase, run_tests, suppress_warnings
 from torch.utils.data import (
     DataLoader,
@@ -650,12 +650,20 @@ class IDP_NoLen(IterDataPipe):
             yield i
 
 
-def _fake_fn(data, *args, **kwargs):
+def _fake_fn(data):
     return data
 
 
-def _fake_filter_fn(data, *args, **kwargs):
+def _fake_add(constant, data):
+    return constant + data
+
+
+def _fake_filter_fn(data):
     return data >= 5
+
+
+def _fake_filter_fn_constant(constant, data):
+    return data >= constant
 
 
 def _worker_init_fn(worker_id):
@@ -669,10 +677,12 @@ class TestFunctionalIterDataPipe(TestCase):
         arr = range(10)
         picklable_datapipes: List[Tuple[Type[IterDataPipe], IterDataPipe, Tuple, Dict[str, Any]]] = [
             (dp.iter.Mapper, dp.iter.IterableWrapper(arr), (), {}),
-            (dp.iter.Mapper, dp.iter.IterableWrapper(arr), (_fake_fn, (0, ), {'test': True}), {}),
+            (dp.iter.Mapper, dp.iter.IterableWrapper(arr), (_fake_fn, (0, )), {}),
+            (dp.iter.Mapper, dp.iter.IterableWrapper(arr), (partial(_fake_add, 1), (0,)), {}),
             (dp.iter.Collator, dp.iter.IterableWrapper(arr), (), {}),
-            (dp.iter.Collator, dp.iter.IterableWrapper(arr), (_fake_fn, (0, ), {'test': True}), {}),
-            (dp.iter.Filter, dp.iter.IterableWrapper(arr), (_fake_filter_fn, (0, ), {'test': True}), {}),
+            (dp.iter.Collator, dp.iter.IterableWrapper(arr), (_fake_fn, (0, )), {}),
+            (dp.iter.Filter, dp.iter.IterableWrapper(arr), (_fake_filter_fn, (0, )), {}),
+            (dp.iter.Filter, dp.iter.IterableWrapper(arr), (partial(_fake_filter_fn, 5), (0,)), {}),
         ]
         for dpipe, input_dp, dp_args, dp_kwargs in picklable_datapipes:
             p = pickle.dumps(dpipe(input_dp, *dp_args, **dp_kwargs))  # type: ignore[call-arg]
@@ -746,15 +756,14 @@ class TestFunctionalIterDataPipe(TestCase):
 
         self.assertEqual(list(concat_dp), list(range(10)) + list(range(5)))
 
-
     def test_fork_datapipe(self):
         input_dp = dp.iter.IterableWrapper(range(10))
 
         with self.assertRaises(ValueError):
             input_dp.fork(num_instances=0)
 
-        dp1 = input_dp.fork(num_instances=1)
-        self.assertEqual(dp1, input_dp)
+        dp0 = input_dp.fork(num_instances=1)
+        self.assertEqual(dp0, input_dp)
 
         # Test Case: making sure all child DataPipe shares the same reference
         dp1, dp2, dp3 = input_dp.fork(num_instances=3)
@@ -1036,9 +1045,6 @@ class TestFunctionalIterDataPipe(TestCase):
             pass
         traverse(dp2)  # This should not raise any error either
 
-
-
-    @suppress_warnings  # Suppress warning for lambda fn
     def test_map_datapipe(self):
         input_dp = dp.iter.IterableWrapper(range(10))
 
@@ -1051,12 +1057,6 @@ class TestFunctionalIterDataPipe(TestCase):
         for x, y in zip(map_dp, input_dp):
             self.assertEqual(x, torch.tensor(y, dtype=torch.float))
 
-        map_dp = input_dp.map(fn=fn, fn_args=(torch.int, ), fn_kwargs={'sum': True})
-        self.assertEqual(len(input_dp), len(map_dp))
-        for x, y in zip(map_dp, input_dp):
-            self.assertEqual(x, torch.tensor(y, dtype=torch.int).sum())
-
-        from functools import partial
         map_dp = input_dp.map(partial(fn, dtype=torch.int, sum=True))
         self.assertEqual(len(input_dp), len(map_dp))
         for x, y in zip(map_dp, input_dp):
@@ -1200,20 +1200,41 @@ class TestFunctionalIterDataPipe(TestCase):
         arrs = [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
         input_dp = dp.iter.IterableWrapper(arrs)
 
-        def _collate_fn(batch):
-            return torch.tensor(sum(batch), dtype=torch.float)
+        def _collate_fn(batch, default_type=torch.float):
+            return torch.tensor(sum(batch), dtype=default_type)
 
+        # Functional Test: defaults to the default collate function when a custom one is not specified
+        collate_dp = input_dp.collate()
+        for x, y in zip(input_dp, collate_dp):
+            self.assertEqual(torch.tensor(x), y)
+
+        # Functional Test: custom collate function
         collate_dp = input_dp.collate(collate_fn=_collate_fn)
-        self.assertEqual(len(input_dp), len(collate_dp))
-        for x, y in zip(collate_dp, input_dp):
-            self.assertEqual(x, torch.tensor(sum(y), dtype=torch.float))
+        for x, y in zip(input_dp, collate_dp):
+            self.assertEqual(torch.tensor(sum(x), dtype=torch.float), y)
 
+        # Functional Test: custom, partial collate function
+        collate_dp = input_dp.collate(partial(_collate_fn, default_type=torch.int))
+        for x, y in zip(input_dp, collate_dp):
+            self.assertEqual(torch.tensor(sum(x), dtype=torch.int), y)
+
+        # Reset Test: reset the DataPipe and results are still correct
+        n_elements_before_reset = 1
+        res_before_reset, res_after_reset = reset_after_n_next_calls(collate_dp, n_elements_before_reset)
+        self.assertEqual([torch.tensor(6, dtype=torch.int)], res_before_reset)
+        for x, y in zip(input_dp, res_after_reset):
+            self.assertEqual(torch.tensor(sum(x), dtype=torch.int), y)
+
+        # __len__ Test: __len__ is inherited
+        self.assertEqual(len(input_dp), len(collate_dp))
+
+        # __len__ Test: verify that it has no valid __len__ when the source doesn't have it
         input_dp_nl = IDP_NoLen(arrs)
         collate_dp_nl = input_dp_nl.collate()
         with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
             len(collate_dp_nl)
-        for x, y in zip(collate_dp_nl, input_dp_nl):
-            self.assertEqual(x, torch.tensor(y))
+        for x, y in zip(input_dp_nl, collate_dp_nl):
+            self.assertEqual(torch.tensor(x), y)
 
     def test_batch_datapipe(self):
         arrs = list(range(10))
@@ -1334,7 +1355,6 @@ class TestFunctionalIterDataPipe(TestCase):
         _helper(batch_size=3, drop_last=True, batch_num=2, sort_key=_sort_fn)
         _helper(batch_size=3, drop_last=True, batch_num=2, bucket_num=2, sort_key=_sort_fn)
 
-
     def test_filter_datapipe(self):
         input_ds = dp.iter.IterableWrapper(range(10))
 
@@ -1343,11 +1363,11 @@ class TestFunctionalIterDataPipe(TestCase):
                 return data >= val
             return True
 
-        filter_dp = input_ds.filter(filter_fn=_filter_fn, fn_args=(5, ))
+        filter_dp = input_ds.filter(partial(_filter_fn, val=5))
         for data, exp in zip(filter_dp, range(10)):
             self.assertEqual(data, exp)
 
-        filter_dp = input_ds.filter(filter_fn=_filter_fn, fn_kwargs={'val': 5, 'clip': True})
+        filter_dp = input_ds.filter(partial(_filter_fn, val=5, clip=True))
         for data, exp in zip(filter_dp, range(5, 10)):
             self.assertEqual(data, exp)
 
@@ -1395,7 +1415,7 @@ class TestFunctionalIterDataPipe(TestCase):
             # Test Deterministic
             for num_workers in (0, 1):
                 random.seed(123)
-                dl = DataLoader(shuffle_dp, num_workers=num_workers, worker_init_fn=_worker_init_fn)
+                dl = DataLoader(shuffle_dp, num_workers=num_workers, worker_init_fn=_worker_init_fn, shuffle=True)
                 dl_res = list(dl)
                 self.assertEqual(res, dl_res)
 
@@ -1428,7 +1448,8 @@ class TestFunctionalMapDataPipe(TestCase):
             Tuple[Type[MapDataPipe], MapDataPipe, Tuple, Dict[str, Any]]
         ] = [
             (dp.map.Mapper, dp.map.SequenceWrapper(arr), (), {}),
-            (dp.map.Mapper, dp.map.SequenceWrapper(arr), (_fake_fn, (0,), {'test': True}), {}),
+            (dp.map.Mapper, dp.map.SequenceWrapper(arr), (_fake_fn, (0,)), {}),
+            (dp.map.Mapper, dp.map.SequenceWrapper(arr), (partial(_fake_add, 1), (0,)), {}),
         ]
         for dpipe, input_dp, dp_args, dp_kwargs in picklable_datapipes:
             p = pickle.dumps(dpipe(input_dp, *dp_args, **dp_kwargs))  # type: ignore[call-arg]
@@ -1541,7 +1562,6 @@ class TestFunctionalMapDataPipe(TestCase):
         shuffler_dp = input_dp1.shuffle()
         self.assertEqual(10, len(shuffler_dp))
 
-
     def test_map_datapipe(self):
         arr = range(10)
         input_dp = dp.map.SequenceWrapper(arr)
@@ -1556,15 +1576,6 @@ class TestFunctionalMapDataPipe(TestCase):
             self.assertEqual(
                 map_dp[index], torch.tensor(input_dp[index], dtype=torch.float)
             )
-
-        map_dp = input_dp.map(fn=fn, fn_args=(torch.int,), fn_kwargs={'sum': True})
-        self.assertEqual(len(input_dp), len(map_dp))
-        for index in arr:
-            self.assertEqual(
-                map_dp[index], torch.tensor(input_dp[index], dtype=torch.int).sum()
-            )
-
-        from functools import partial
 
         map_dp = input_dp.map(partial(fn, dtype=torch.int, sum=True))
         self.assertEqual(len(input_dp), len(map_dp))
@@ -1948,7 +1959,7 @@ class TestSharding(TestCase):
     @skipIfNoDill
     def test_simple_sharding(self):
         sharded_dp = self._get_pipeline().sharding_filter()
-        torch.utils.data.sharding.apply_sharding(sharded_dp, 3, 1)
+        torch.utils.data.graph_settings.apply_sharding(sharded_dp, 3, 1)
         items = list(sharded_dp)
         self.assertEqual([1, 20, 40, 70], items)
 
@@ -1956,7 +1967,7 @@ class TestSharding(TestCase):
         items = []
         for i in range(3):
             sharded_dp = self._get_pipeline().sharding_filter()
-            torch.utils.data.sharding.apply_sharding(sharded_dp, 3, i)
+            torch.utils.data.graph_settings.apply_sharding(sharded_dp, 3, i)
             items += list(sharded_dp)
 
         self.assertEqual(sorted(all_items), sorted(items))
@@ -1964,11 +1975,11 @@ class TestSharding(TestCase):
     def test_sharding_length(self):
         numbers_dp = dp.iter.IterableWrapper(range(13))
         sharded_dp0 = numbers_dp.sharding_filter()
-        torch.utils.data.sharding.apply_sharding(sharded_dp0, 3, 0)
+        torch.utils.data.graph_settings.apply_sharding(sharded_dp0, 3, 0)
         sharded_dp1 = numbers_dp.sharding_filter()
-        torch.utils.data.sharding.apply_sharding(sharded_dp1, 3, 1)
+        torch.utils.data.graph_settings.apply_sharding(sharded_dp1, 3, 1)
         sharded_dp2 = numbers_dp.sharding_filter()
-        torch.utils.data.sharding.apply_sharding(sharded_dp2, 3, 2)
+        torch.utils.data.graph_settings.apply_sharding(sharded_dp2, 3, 2)
         self.assertEqual(13, len(numbers_dp))
         self.assertEqual(5, len(sharded_dp0))
         self.assertEqual(4, len(sharded_dp1))
@@ -1976,9 +1987,9 @@ class TestSharding(TestCase):
 
         numbers_dp = dp.iter.IterableWrapper(range(1))
         sharded_dp0 = numbers_dp.sharding_filter()
-        torch.utils.data.sharding.apply_sharding(sharded_dp0, 2, 0)
+        torch.utils.data.graph_settings.apply_sharding(sharded_dp0, 2, 0)
         sharded_dp1 = numbers_dp.sharding_filter()
-        torch.utils.data.sharding.apply_sharding(sharded_dp1, 2, 1)
+        torch.utils.data.graph_settings.apply_sharding(sharded_dp1, 2, 1)
         self.assertEqual(1, len(sharded_dp0))
         self.assertEqual(0, len(sharded_dp1))
 

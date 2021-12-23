@@ -5,6 +5,7 @@
 #include <string>
 #include <type_traits>
 #include <ATen/ATen.h>
+#include <torch/csrc/THConcat.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_compat.h>
@@ -148,7 +149,7 @@ template <typename T>
 struct THPUtils_typeTraits {};
 
 #include <torch/csrc/generic/utils.h>
-#include <TH/THGenerateByteType.h>
+#include <torch/csrc/THGenerateByteType.h>
 
 std::vector<int64_t> THPUtils_unpackLongs(PyObject *arg);
 PyObject * THPUtils_dispatchStateless(PyObject *tensor, const char *name, PyObject *args, PyObject *kwargs);
