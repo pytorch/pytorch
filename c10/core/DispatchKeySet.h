@@ -224,16 +224,16 @@ class DispatchKeySet final {
   // because you can end up with weird results.
   // e.g. DispatchKeySet(DispatchKey::AutogradCPU).has_any(DispatchKeySet(DispatchKey::CPU)) would return true.
   inline bool has_any(DispatchKeySet ks) const {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      // Either there are no backend bits in the input keyset
-      ((ks.repr_ & full_backend_mask) == 0) ||
-      // or there are no per-backend-functionality bits
-      ((ks & DispatchKeySet({
-          DispatchKey::Dense,
-          DispatchKey::Quantized,
-          DispatchKey::Sparse,
-          DispatchKey::AutogradFunctionality,
-        }).repr_) == 0));
+    //TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      //// Either there are no backend bits in the input keyset
+      //((ks.repr_ & full_backend_mask) == 0) ||
+      //// or there are no per-backend-functionality bits
+      //((ks & DispatchKeySet({
+          //DispatchKey::Dense,
+          //DispatchKey::Quantized,
+          //DispatchKey::Sparse,
+          //DispatchKey::AutogradFunctionality,
+        //}).repr_) == 0));
     return static_cast<bool>((repr_ & ks.repr_) != 0);
   }
   // Test if DispatchKeySet is a superset of ks.
