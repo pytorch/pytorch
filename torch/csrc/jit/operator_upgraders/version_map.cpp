@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/operator_upgraders/version_map.h>
 
+#include <algorithm>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -7,8 +8,12 @@
 namespace torch {
 namespace jit {
 
+// this flag is used to make sure the elements in the version map
+// are sorted according to when the upgraders are introduced.
+static bool isVersionMapSorted = false;
+
 // Main entry point for all operators that have valid upgraders.
-// Note for developers: The list of upgraders need to be SORTED
+// Note for developers: The list of upgraders should be SORTED
 // by the version number where the upgrader is registered.
 static std::unordered_map<std::string, std::vector<UpgraderEntry>> operatorVersionMap(
     {{"aten::div.Tensor",
@@ -42,15 +47,32 @@ static std::unordered_map<std::string, std::vector<UpgraderEntry>> operatorVersi
 
 const std::unordered_map<std::string, std::vector<UpgraderEntry>>&
 get_operator_version_map() {
+  if (!isVersionMapSorted) {
+    for (auto entry : operatorVersionMap) {
+      std::sort(
+          entry.second.begin(),
+          entry.second.end(),
+          [](const auto& a, const auto& b) {
+            return a.bumped_at_version > b.bumped_at_version;
+          });
+    }
+    isVersionMapSorted = true;
+  }
   return operatorVersionMap;
 }
 
-void test_only_add_entry(std::string op_name, UpgraderEntry entry) {
+void test_only_add_entry(const std::string& op_name, UpgraderEntry entry) {
+  test_only_reset_flag();
   operatorVersionMap[op_name].push_back(entry);
 }
 
-void test_only_remove_entry(std::string op_name) {
+void test_only_remove_entry(const std::string& op_name) {
+  test_only_reset_flag();
   operatorVersionMap.erase(op_name);
+}
+
+void test_only_reset_flag() {
+  isVersionMapSorted = false;
 }
 
 } // namespace jit
