@@ -11,6 +11,7 @@ cc_library(
         # public header in this file.
         "Export.h",
     ],
+    defines = ["CAFFE2_BUILD_MAIN_LIB"],
     visibility = ["//visibility:public"],
 )
 
