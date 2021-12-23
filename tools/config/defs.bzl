@@ -4,6 +4,7 @@
 """
 
 load("@bazel_skylib//lib:selects.bzl", "selects")
+load("@rules_cc//cc:defs.bzl", "cc_library")
 
 def if_cuda(if_true, if_false = []):
     """Helper for selecting based on the whether CUDA is configured. """
@@ -63,6 +64,12 @@ def if_cuda_is_configured(x):
 
 def if_rocm_is_configured(x):
     return if_rocm(x, [])
+
+def rules():
+    return struct(
+        cc_library = cc_library,
+        cmake_configure_file = cmake_configure_file,
+    )
 
 # Forked from header_template_rule. header_template_rule is not
 # compatible with our usage of select because its substitutions
