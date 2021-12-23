@@ -221,6 +221,12 @@ bool TensorDomain::hasBlockBroadcast() const {
   });
 }
 
+bool TensorDomain::hasGridBroadcast() const {
+  return std::any_of(domain_.begin(), domain_.end(), [](IterDomain* id) {
+    return id->isBroadcast() && id->isBlockDim();
+  });
+}
+
 bool TensorDomain::hasBroadcast() const {
   return no_bcast_domain_.size() != domain_.size();
 }
@@ -355,58 +361,6 @@ WelfordOp::WelfordOp(
   }
   addInput(in_avg);
   addInput(in_N);
-}
-
-std::vector<IterDomain*> WelfordOp::getReductionDomains() const {
-  // out is a TensorIndex after lowering
-  const auto out_val = out()->as<kir::TensorIndex>()->view();
-
-  auto vec_domain = out_val->as<TensorView>()->domain()->domain();
-
-  vec_domain.erase(
-      std::remove_if(
-          vec_domain.begin(),
-          vec_domain.end(),
-          [](IterDomain* id) { return !id->isReduction(); }),
-      vec_domain.end());
-  return vec_domain;
-}
-
-std::unordered_map<ParallelType, IterDomain*, TypeHash> WelfordOp::
-    getParallelReductionDomains() const {
-  std::unordered_map<ParallelType, IterDomain*, TypeHash> parallel_domains;
-  for (auto d : getReductionDomains()) {
-    if (d->isThread()) {
-      parallel_domains.insert(std::make_pair(d->parallelType(), d));
-    }
-  }
-  return parallel_domains;
-}
-
-std::vector<IterDomain*> ReductionOp::getReductionDomains() const {
-  // out is a TensorIndex after lowering
-  const auto out_val = out()->as<kir::TensorIndex>()->view();
-
-  auto vec_domain = out_val->as<TensorView>()->domain()->domain();
-
-  vec_domain.erase(
-      std::remove_if(
-          vec_domain.begin(),
-          vec_domain.end(),
-          [](IterDomain* id) { return !id->isReduction(); }),
-      vec_domain.end());
-  return vec_domain;
-}
-
-std::unordered_map<ParallelType, IterDomain*, TypeHash> ReductionOp::
-    getParallelReductionDomains() const {
-  std::unordered_map<ParallelType, IterDomain*, TypeHash> parallel_domains;
-  for (auto d : getReductionDomains()) {
-    if (d->isThread()) {
-      parallel_domains.insert(std::make_pair(d->parallelType(), d));
-    }
-  }
-  return parallel_domains;
 }
 
 BroadcastOp::BroadcastOp(Passkey passkey, Val* out, Val* in)
@@ -720,11 +674,6 @@ Allocate::Allocate(
           size == nullptr ? std::vector<Val*>{} : std::vector<Val*>{size},
           zero_init) {}
 
-GridReduction::GridReduction(Passkey passkey, ReductionOp* reduction_op)
-    : Expr(passkey), reduction_op_(reduction_op) {
-  TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
-}
-
 GridReduction::GridReduction(
     Passkey passkey,
     ReductionOp* reduction_op,
@@ -734,20 +683,6 @@ GridReduction::GridReduction(
       reduction_op_(reduction_op),
       reduction_buffer_(reduction_buffer),
       sync_buffer_(sync_buffer) {}
-
-std::string GridReduction::getPredicateFlagName(const TensorView* val) {
-  std::stringstream ss;
-  ss << "T" << val->name() << "_pred";
-  return ss.str();
-}
-
-// TODO(kir): remove this
-std::string GridReduction::getPredicateFlagName(
-    const fuser::cuda::TensorView* val) {
-  std::stringstream ss;
-  ss << "T" << val->name() << "_pred";
-  return ss.str();
-}
 
 GridWelford::GridWelford(
     Passkey passkey,
@@ -762,20 +697,6 @@ GridWelford::GridWelford(
       avg_buffer_(avg_buffer),
       n_buffer_(n_buffer),
       sync_buffer_(sync_buffer) {}
-
-std::string GridWelford::getPredicateFlagName(const TensorView* val) {
-  std::stringstream ss;
-  ss << "T" << val->name() << "_pred";
-  return ss.str();
-}
-
-// TODO(kir): remove this
-std::string GridWelford::getPredicateFlagName(
-    const fuser::cuda::TensorView* val) {
-  std::stringstream ss;
-  ss << "T" << val->name() << "_pred";
-  return ss.str();
-}
 
 } // namespace kir
 } // namespace cuda

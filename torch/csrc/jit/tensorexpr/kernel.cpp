@@ -781,11 +781,10 @@ StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
 
   if (pre_alloc_) {
     auto interm_bufs = l.getIntermediateBufs();
-    interm_bufs = preAllocIntermediateBufs(interm_bufs);
-    l.prepareForCodegen(interm_bufs);
-  } else {
-    l.prepareForCodegen();
+    preAllocIntermediateBufs(interm_bufs);
   }
+
+  l.prepareForCodegen();
 
   GRAPH_DEBUG("after prepareForCodegen", *l.root_stmt());
   l.simplify();
@@ -937,9 +936,19 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
         bufferArgs_.emplace_back(inBuffer);
         break;
       }
+      ExprHandle flat_size = 1;
+      for (size_t i = 0; i < *tt->sizes().size(); i++) {
+        auto size = *tt->sizes()[i];
+        if (size == 0) {
+          flat_size = 0;
+          break;
+        }
+        flat_size = flat_size + (size - 1) * *tt->strides()[i];
+      }
+      flat_size = IRSimplifier::simplify(flat_size);
       BufHandle inBuffer(
           "t" + input_name_map_[input],
-          {0},
+          {flat_size},
           ToDtype(static_cast<ScalarType>(*tt->scalarType())));
       std::vector<DimArg> inputTensorDims;
       for (size_t i = 0; i < *tt->sizes().size(); i++) {
