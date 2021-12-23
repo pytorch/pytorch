@@ -72,7 +72,9 @@ default_auto_wrap_policy.FORCE_LEAF_MODULES = {nn.MultiheadAttention}  # type: i
 
 
 @contextlib.contextmanager
-def enable_wrap(*, wrapper_cls: Any, **wrapper_kwargs: Any) -> Generator[None, None, None]:
+def enable_wrap(
+    *, wrapper_cls: Any, **wrapper_kwargs: Any
+) -> Generator[None, None, None]:
     """
     Context manager to wrap modules using a wrapper.
 
@@ -181,7 +183,10 @@ def _recursive_wrap(
         # Iterate through the children, recursively wrap if necessary
         for name, child in module.named_children():
             wrapped_child, num_wrapped_params = _recursive_wrap(
-                module=child, auto_wrap_policy=auto_wrap_policy, wrapper_cls=wrapper_cls, **kwargs
+                module=child,
+                auto_wrap_policy=auto_wrap_policy,
+                wrapper_cls=wrapper_cls,
+                **kwargs,
             )
             setattr(module, name, wrapped_child)
             # Keep track of how many parameters have been wrapped
@@ -189,7 +194,9 @@ def _recursive_wrap(
         # decide if we need to wrap the current module,
         # since the left over parameters exceed the number of params to wrap
         remainder = num_params - total_wrapped_params
-        if not only_wrap_children and auto_wrap_policy(module=module, recurse=False, unwrapped_params=remainder):
+        if not only_wrap_children and auto_wrap_policy(
+            module=module, recurse=False, unwrapped_params=remainder
+        ):
             # Leaf node or final wrapping of the remainder both happen here.
             return _wrap(module, wrapper_cls, **kwargs), num_params
         else:
@@ -218,7 +225,9 @@ class ConfigAutoWrap:
             )
         ConfigAutoWrap.in_autowrap_context = True
         # Get and save the wrapper cls for the context.
-        assert "wrapper_cls" in kwargs.keys(), "Expected to pass in wrapper_cls arg into ConfigAutoWrap."
+        assert (
+            "wrapper_cls" in kwargs.keys()
+        ), "Expected to pass in wrapper_cls arg into ConfigAutoWrap."
         ConfigAutoWrap.wrapper_cls = cast(Callable, kwargs["wrapper_cls"])
         del kwargs["wrapper_cls"]
         # Save the rest.
