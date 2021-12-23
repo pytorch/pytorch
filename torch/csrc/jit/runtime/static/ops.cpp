@@ -768,12 +768,12 @@ void varStackFastOut(
   });
 }
 
-bool inputsAreScalars(
-    const at::Tensor& output,
-    const VarStackNodeWrapper& inputs) {
+bool inputsAreScalars(const VarStackNodeWrapper& inputs) {
+  // All stack inputs should have the same size, so we only check
+  // the first one. If this isn't true, an exception will be thrown
+  // in the VarStack implementation
   const auto& first_tensor = inputs[0];
-  return output.is_contiguous() && first_tensor.sizes()[0] == 1 &&
-      first_tensor.dim() == 1;
+  return first_tensor.sizes()[0] == 1 && first_tensor.dim() == 1;
 }
 
 void varStackOut(ProcessedNode& pnode, int64_t dim) {
@@ -784,7 +784,7 @@ void varStackOut(ProcessedNode& pnode, int64_t dim) {
   auto inputs = VarStackNodeWrapper(pnode);
   auto& output = pnode.Output(0).toTensor();
 
-  if (inputsAreScalars(output, inputs)) {
+  if (output.is_contiguous() && inputsAreScalars(inputs)) {
     varStackFastOut(output, dim, inputs);
     return;
   }
