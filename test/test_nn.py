@@ -13428,7 +13428,7 @@ class TestNNDeviceType(NNTestCase):
 
         gradcheck(lambda x, y: F.conv3d(x, y, padding='same', dilation=2), (x, y),
                   check_forward_ad=check_forward_ad, nondet_tol=1e-5)
-        if torch.device(device).dtype == 'cpu':
+        if torch.device(device).type == 'cpu':
             gradgradcheck(lambda x, y: F.conv3d(x, y, padding='same', dilation=2), (x, y),
                         check_fwd_over_rev=check_forward_ad)
 
@@ -13446,7 +13446,7 @@ class TestNNDeviceType(NNTestCase):
 
         gradcheck(lambda x, y: F.conv3d(x, y, padding='same'), (x, y),
                   check_forward_ad=check_forward_ad, nondet_tol=1e-5)
-        if torch.device(device).dtype == 'cpu':
+        if torch.device(device).type == 'cpu':
             gradgradcheck(lambda x, y: F.conv3d(x, y, padding='same'), (x, y),
                         check_fwd_over_rev=check_forward_ad)
 
