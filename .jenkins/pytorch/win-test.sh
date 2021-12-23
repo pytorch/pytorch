@@ -73,10 +73,6 @@ run_tests() {
     else
         if [[ "${JOB_BASE_NAME}" == *-test1 || ("${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1) ]]; then
             "$SCRIPT_HELPERS_DIR"/test_python_first_shard.bat
-            echo $?
-
-            echo "would have kept going"
-            exit 1
 
             if [[ -z ${RUN_SMOKE_TESTS_ONLY} ]]; then
               "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
