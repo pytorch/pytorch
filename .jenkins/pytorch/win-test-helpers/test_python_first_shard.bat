@@ -32,5 +32,4 @@ if ERRORLEVEL 1 goto fail
 popd
 
 :fail
-echo testing python first shard failed
 exit /b 1
