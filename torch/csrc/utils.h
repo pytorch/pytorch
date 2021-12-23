@@ -149,7 +149,7 @@ template <typename T>
 struct THPUtils_typeTraits {};
 
 #include <torch/csrc/generic/utils.h>
-#include <TH/THGenerateByteType.h>
+#include <torch/csrc/THGenerateByteType.h>
 
 std::vector<int64_t> THPUtils_unpackLongs(PyObject *arg);
 PyObject * THPUtils_dispatchStateless(PyObject *tensor, const char *name, PyObject *args, PyObject *kwargs);
