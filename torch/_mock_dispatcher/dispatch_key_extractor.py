@@ -1,7 +1,10 @@
 from functools import reduce
 from typing import List
-from torch._mock_dispatcher.dispatch_key_set import DispatchKeySet, backend_bitset_mask
-from torch._mock_dispatcher.dispatch_key import DispatchKey, NUM_BACKENDS, toBackendKey, toFunctionalityKey, isPerBackendFunctionalityKey
+from torch._mock_dispatcher.dispatch_key_set import (
+    DispatchKeySet, backend_bitset_mask)
+from torch._mock_dispatcher.dispatch_key import (
+    DispatchKey, NUM_BACKENDS, toBackendKey, toFunctionalityKey,
+    isPerBackendFunctionalityKey)
 
 class DispatchKeyExtractor:
     # Why do we have a separate field for fallthrough keys, and per-backend fallthrough keys?
