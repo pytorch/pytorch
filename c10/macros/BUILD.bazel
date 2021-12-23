@@ -5,11 +5,11 @@ cc_library(
     name = "macros",
     srcs = [":cmake_macros_h"],
     hdrs = [
+        "Macros.h",
         # Despite the documentation in Macros.h, Export.h is included
         # directly by many downstream files. Thus, we declare it as a
         # public header in this file.
         "Export.h",
-        "Macros.h",
     ],
     visibility = ["//visibility:public"],
 )
