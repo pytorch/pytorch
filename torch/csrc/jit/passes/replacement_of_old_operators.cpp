@@ -2,6 +2,7 @@
 
 #include <c10/util/Exception.h>
 #include <caffe2/serialize/versions.h>
+#include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/operator_upgraders/upgraders.h>
 #include <torch/csrc/jit/operator_upgraders/utils.h>
@@ -16,13 +17,36 @@ namespace jit {
 
 static std::unordered_map<std::string, std::shared_ptr<Graph>> upgraderCache;
 
-struct OldOpsReplacer {
-  OldOpsReplacer(std::shared_ptr<Graph> graph) : graph_(std::move(graph)) {}
+std::shared_ptr<Graph> getUpgraderGraph(const std::string& upgrader_name) {
+  auto it = upgraderCache.find(upgrader_name);
+  if (it != upgraderCache.end()) {
+    return it->second;
+  }
+
+  auto upgrader_graph_entry = dump_upgraders_map().find(upgrader_name);
+  TORCH_INTERNAL_ASSERT(
+      upgrader_graph_entry != dump_upgraders_map().end(),
+      "Corresponding upgrader graph for ",
+      upgrader_name,
+      " must exist.",
+      " This upgrader"
+      " might be deprecated.");
+
+  auto upgrader_graph = std::make_shared<Graph>();
+  parseIR(upgrader_graph_entry->second, upgrader_graph.get());
+  upgraderCache[upgrader_name] = upgrader_graph;
+  return upgrader_graph;
+}
+
+struct OldOpsReplacerWithUpgraders {
+  OldOpsReplacerWithUpgraders(std::shared_ptr<Graph> graph)
+      : graph_(std::move(graph)) {}
 
   void run() {
     if (!graph_->get_op_version().has_value()) {
       return;
     }
+
     auto current_version = graph_->get_op_version().value();
     DepthFirstGraphNodeIterator graph_it(graph_);
     Node* node = graph_it.next();
@@ -47,21 +71,8 @@ struct OldOpsReplacer {
           }
           auto upgrader_entry_val = upgrader_entry.value();
           auto upgrader_name = upgrader_entry_val.upgrader_name;
-          auto upgrader_graph_entry = dump_upgraders_map().find(upgrader_name);
-          TORCH_INTERNAL_ASSERT(
-              upgrader_graph_entry != dump_upgraders_map().end(),
-              "Corresponding upgrader graph for ",
-              upgrader_name,
-              " must exist");
+          auto upgrader_graph = getUpgraderGraph(upgrader_name);
 
-          auto upgrader_graph = std::make_shared<Graph>();
-          auto upgrader_graph_it = upgraderCache.find(upgrader_name);
-          if (upgrader_graph_it != upgraderCache.end()) {
-            upgrader_graph = upgrader_graph_it->second;
-          } else {
-            parseIR(upgrader_graph_entry->second, upgrader_graph.get());
-            upgraderCache[upgrader_name] = upgrader_graph;
-          }
           // inline the upgrader function body
           WithInsertPoint guard(node);
           auto new_outputs = insertGraph(
@@ -88,8 +99,8 @@ struct OldOpsReplacer {
   std::shared_ptr<Graph> graph_;
 };
 
-TORCH_API void ApplyOpsUpgraders(std::shared_ptr<Graph> graph) {
-  OldOpsReplacer(graph).run();
+TORCH_API void ReplaceOldOperatorsWithUpgraders(std::shared_ptr<Graph> graph) {
+  OldOpsReplacerWithUpgraders(graph).run();
 }
 
 } // namespace jit
