@@ -495,7 +495,7 @@ class BlockRunner {
       const StaticModule& sm,
       std::vector<IValue>& values,
       size_t block_idx);
-  BlockRunner(BlockRunner&&) = delete;
+  BlockRunner(BlockRunner&&) = default;
   BlockRunner& operator=(BlockRunner&&) = delete;
   ~BlockRunner();
 
@@ -768,8 +768,43 @@ class TORCH_API ProcessedNode {
       ProcessedNodeInputs inputs,
       uint16_t outputs_offset);
 
-  ProcessedNode(const ProcessedNode&) = default;
-  ProcessedNode& operator=(const ProcessedNode&) = default;
+  ProcessedNode(const ProcessedNode& other)
+      : node_(other.node_),
+        fn_(other.fn_),
+        overlap_detected_(other.overlap_detected_),
+        inputs_(other.inputs_),
+        outputs_offset_(other.outputs_offset_),
+        num_outputs_(other.num_outputs_),
+        values_(other.values_),
+        // It doesn't really make sense to copy block runners,
+        // each processed node needs its own. This is OK to do
+        // since ProcessedNodes are copied from StaticModule right before
+        // the block runners are set up.
+        // TODO(T105178680): For this task, we should move
+        // block runners out of ProcessedNode. Then, we don't have to deal
+        // with this caveat.
+        block_runners_(nullptr)
+#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
+        ,
+        op_name_(other.op_name_)
+#endif
+  {
+  }
+
+  ProcessedNode& operator=(const ProcessedNode& other) {
+    node_ = other.node_;
+    fn_ = other.fn_;
+    overlap_detected_ = other.overlap_detected_;
+    inputs_ = other.inputs_;
+    outputs_offset_ = other.outputs_offset_;
+    num_outputs_ = other.num_outputs_;
+    values_ = other.values_;
+    block_runners_ = nullptr;
+#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
+    op_name_ = other.op_name_;
+#endif
+    return *this;
+  }
 
   // These should be noexcept, but some Android build is failing
   // saying the noexcept specification doesn't match the calculated
@@ -853,15 +888,16 @@ class TORCH_API ProcessedNode {
   // used in debug mode
   bool verify_no_memory_overlap(bool force_check = false) const;
 
-  std::vector<std::shared_ptr<BlockRunner>>& block_runners() {
-    return block_runners_;
+  std::vector<BlockRunner>* block_runners() {
+    return block_runners_.get();
+  }
+
+  void set_block_runners(
+      std::unique_ptr<std::vector<BlockRunner>> block_runners) {
+    block_runners_ = std::move(block_runners);
   }
 
  private:
-  // For control flow; processed nodes may have sub-blocks which can
-  // be executed by op implementations.
-  std::vector<std::shared_ptr<BlockRunner>> block_runners_;
-
   C10_NODISCARD bool verify_outputs_dont_overlap_each_other() const;
 
   C10_NODISCARD bool verify_inputs_dont_overlap_outputs(bool force_check) const;
@@ -873,6 +909,9 @@ class TORCH_API ProcessedNode {
   uint16_t outputs_offset_;
   uint16_t num_outputs_;
   IValue* values_ = nullptr; // unowned
+  // For control flow; processed nodes may have sub-blocks which can
+  // be executed by op implementations.
+  std::unique_ptr<std::vector<BlockRunner>> block_runners_;
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   const char* op_name_;
 #endif

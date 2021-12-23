@@ -761,14 +761,19 @@ BlockRunner::BlockRunner(
   const auto block_idx_start = block_idx;
   for (auto& pnode : nodes_) {
     auto* node = pnode.node();
-    auto& block_runners = pnode.block_runners();
-
-    for (const auto i : c10::irange(node->blocks().size())) {
-      (void)i; // Suppress unused variable warning
-      block_runners.push_back(
-          std::make_shared<BlockRunner>(sm, values, ++block_idx));
-      block_idx += block_runners.back()->num_sub_blocks();
+    const auto num_blocks = node->blocks().size();
+    if (!num_blocks) {
+      continue;
     }
+    auto block_runners = std::make_unique<std::vector<BlockRunner>>();
+    block_runners->reserve(num_blocks);
+
+    for (const auto i : c10::irange(num_blocks)) {
+      (void)i; // Suppress unused variable warning
+      block_runners->emplace_back(sm, values, ++block_idx);
+      block_idx += block_runners->back().num_sub_blocks();
+    }
+    pnode.set_block_runners(std::move(block_runners));
   }
   const auto num_sub_blocks = block_idx - block_idx_start;
   TORCH_CHECK(
@@ -1572,9 +1577,10 @@ bool BlockRunner::check_for_memory_leak(
       }
     }
 
-    if (recurse_on_sub_blocks) {
-      for (auto& block_runner : pnode.block_runners()) {
-        block_runner->check_for_memory_leak(
+    auto* block_runners = pnode.block_runners();
+    if (recurse_on_sub_blocks && block_runners) {
+      for (auto& block_runner : *block_runners) {
+        block_runner.check_for_memory_leak(
             output_returned, recurse_on_sub_blocks);
       }
     }
