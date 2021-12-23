@@ -109,6 +109,253 @@ void inline col_indices_and_values_resize_(const Tensor& input, int64_t nnz) {
       input.sizes());
 }
 
+void block_sparse_triangular_solve_vec(
+    const at::sparse_csr::SparseCsrTensor& A,
+    const Tensor& B,
+    const Tensor& X,
+    bool upper,
+    bool transpose,
+    bool unitriangular) {
+#if !AT_USE_HIPSPARSE_TRIANGULAR_SOLVE()
+  TORCH_CHECK(
+      false,
+      "Calling triangular solver with block sparse GPU tensors requires compiling ",
+      "PyTorch with ROCm 4.5.0+. ",
+      "Please use PyTorch built with newer ROCm version.");
+#else
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(A.is_sparse_csr());
+  // values is expected to be a blocks of sparse matrix
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(A.values().dim() == 3);
+  // blocks are expected to be square
+  TORCH_INTERNAL_ASSERT(A.values().size(2) == A.values().size(1));
+  // only block of size > 1 is supported in cuSPARSE
+  TORCH_INTERNAL_ASSERT(A.values().size(-1) > 1);
+  // blocks are expected to be in row- or column-major order
+  TORCH_INTERNAL_ASSERT(
+      A.values().is_contiguous() ||
+      A.values().transpose(-2, -1).is_contiguous());
+
+  // cuSPARSE can't work with empty sparse matrices
+  if (A._nnz() == 0) {
+    X.fill_(NAN);
+    return;
+  }
+
+  const cusparseDirection_t block_layout = A.values().is_contiguous()
+      ? CUSPARSE_DIRECTION_ROW
+      : CUSPARSE_DIRECTION_COLUMN;
+
+  c10::MaybeOwned<Tensor> X_ = prepare_dense_matrix_for_cusparse(X);
+  c10::MaybeOwned<Tensor> B_ = prepare_dense_matrix_for_cusparse(B);
+
+  auto block_size = cuda_int_cast(A.values().size(2), "block_size");
+  auto nnzb = cuda_int_cast(A._nnz(), "nnzb");
+  auto mb = cuda_int_cast(A.size(0), "mb") / block_size;
+
+  auto desc = at::cuda::sparse::CuSparseMatDescriptor(upper, unitriangular);
+  cusparseOperation_t opA = transpose ? CUSPARSE_OPERATION_TRANSPOSE
+                                      : CUSPARSE_OPERATION_NON_TRANSPOSE;
+
+  auto info = at::cuda::sparse::CuSparseBsrsv2Info();
+
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+      X.scalar_type(), "block_sparse_triangular_solve_vec", [&] {
+        scalar_t alpha = 1;
+        auto values = A.values();
+        auto values_data_ptr = values.data_ptr<scalar_t>();
+        auto crow_indices = A.crow_indices().to(kInt);
+        auto crow_indices_data_ptr = crow_indices.data_ptr<int>();
+        auto col_indices = A.col_indices().to(kInt);
+        auto col_indices_data_ptr = col_indices.data_ptr<int>();
+        auto handle = at::cuda::getCurrentCUDASparseHandle();
+        int buffer_size = 0;
+
+        at::cuda::sparse::bsrsv2_bufferSize(
+            handle,
+            block_layout,
+            opA,
+            mb,
+            nnzb,
+            desc.descriptor(),
+            values_data_ptr,
+            crow_indices_data_ptr,
+            col_indices_data_ptr,
+            block_size,
+            info.descriptor(),
+            &buffer_size);
+
+        auto& allocator = *c10::cuda::CUDACachingAllocator::get();
+        auto work_data = allocator.allocate(buffer_size);
+
+        at::cuda::sparse::bsrsv2_analysis(
+            handle,
+            block_layout,
+            opA,
+            mb,
+            nnzb,
+            desc.descriptor(),
+            values_data_ptr,
+            crow_indices_data_ptr,
+            col_indices_data_ptr,
+            block_size,
+            info.descriptor(),
+            CUSPARSE_SOLVE_POLICY_NO_LEVEL,
+            work_data.get());
+
+        at::cuda::sparse::bsrsv2_solve(
+            handle,
+            block_layout,
+            opA,
+            mb,
+            nnzb,
+            &alpha,
+            desc.descriptor(),
+            values_data_ptr,
+            crow_indices_data_ptr,
+            col_indices_data_ptr,
+            block_size,
+            info.descriptor(),
+            B_->data_ptr<scalar_t>(),
+            X_->data_ptr<scalar_t>(),
+            CUSPARSE_SOLVE_POLICY_NO_LEVEL,
+            work_data.get());
+      });
+  if (!X.is_same(*X_)) {
+    X.copy_(*X_);
+  }
+#endif
+}
+
+void block_sparse_triangular_solve_mat(
+    const at::sparse_csr::SparseCsrTensor& A,
+    const Tensor& B,
+    const Tensor& X,
+    bool upper,
+    bool transpose,
+    bool unitriangular) {
+#if !AT_USE_HIPSPARSE_TRIANGULAR_SOLVE()
+  TORCH_CHECK(
+      false,
+      "Calling triangular solver with block sparse GPU tensors requires compiling ",
+      "PyTorch with ROCm 4.5.0+. ",
+      "Please use PyTorch built with newer ROCm version.");
+#else
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(A.is_sparse_csr());
+  // values is expected to be a blocks of sparse matrix
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(A.values().dim() == 3);
+  // blocks are expected to be square
+  TORCH_INTERNAL_ASSERT(A.values().size(2) == A.values().size(1));
+  // only block of size > 1 is supported in cuSPARSE
+  TORCH_INTERNAL_ASSERT(A.values().size(-1) > 1);
+  // blocks are expected to be in row- or column-major order
+  TORCH_INTERNAL_ASSERT(
+      A.values().is_contiguous() ||
+      A.values().transpose(-2, -1).is_contiguous());
+
+  // cuSPARSE can't work with empty sparse matrices
+  if (A._nnz() == 0) {
+    X.fill_(NAN);
+    return;
+  }
+
+  const cusparseDirection_t block_layout = A.values().is_contiguous()
+      ? CUSPARSE_DIRECTION_ROW
+      : CUSPARSE_DIRECTION_COLUMN;
+
+  c10::MaybeOwned<Tensor> X_ = prepare_column_major_matrix_for_cusparse(X);
+  c10::MaybeOwned<Tensor> B_ = prepare_column_major_matrix_for_cusparse(B);
+
+  int ldb = cuda_int_cast(B_->stride(-1), "ldb");
+  int ldx = cuda_int_cast(X_->stride(-1), "ldx");
+
+  cusparseOperation_t opX = CUSPARSE_OPERATION_NON_TRANSPOSE;
+  cusparseOperation_t opA = transpose ? CUSPARSE_OPERATION_TRANSPOSE
+                                      : CUSPARSE_OPERATION_NON_TRANSPOSE;
+
+  auto block_size = cuda_int_cast(A.values().size(2), "block_size");
+  auto nnzb = cuda_int_cast(A._nnz(), "nnzb");
+  auto mb = cuda_int_cast(A.size(0), "mb") / block_size;
+  auto n = cuda_int_cast(B.size(-1), "n");
+
+  auto desc = at::cuda::sparse::CuSparseMatDescriptor(upper, unitriangular);
+  auto info = at::cuda::sparse::CuSparseBsrsm2Info();
+
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+      X.scalar_type(), "block_sparse_triangular_solve_vec", [&] {
+        scalar_t alpha = 1;
+        auto values = A.values();
+        auto values_data_ptr = values.data_ptr<scalar_t>();
+        auto crow_indices = A.crow_indices().to(kInt);
+        auto crow_indices_data_ptr = crow_indices.data_ptr<int>();
+        auto col_indices = A.col_indices().to(kInt);
+        auto col_indices_data_ptr = col_indices.data_ptr<int>();
+        auto handle = at::cuda::getCurrentCUDASparseHandle();
+        int buffer_size = 0;
+
+        at::cuda::sparse::bsrsm2_bufferSize(
+            handle,
+            block_layout,
+            opA,
+            opX,
+            mb,
+            n,
+            nnzb,
+            desc.descriptor(),
+            values_data_ptr,
+            crow_indices_data_ptr,
+            col_indices_data_ptr,
+            block_size,
+            info.descriptor(),
+            &buffer_size);
+
+        auto& allocator = *c10::cuda::CUDACachingAllocator::get();
+        auto work_data = allocator.allocate(buffer_size);
+
+        at::cuda::sparse::bsrsm2_analysis(
+            handle,
+            block_layout,
+            opA,
+            opX,
+            mb,
+            n,
+            nnzb,
+            desc.descriptor(),
+            values_data_ptr,
+            crow_indices_data_ptr,
+            col_indices_data_ptr,
+            block_size,
+            info.descriptor(),
+            CUSPARSE_SOLVE_POLICY_NO_LEVEL,
+            work_data.get());
+
+        at::cuda::sparse::bsrsm2_solve(
+            handle,
+            block_layout,
+            opA,
+            opX,
+            mb,
+            n,
+            nnzb,
+            &alpha,
+            desc.descriptor(),
+            values_data_ptr,
+            crow_indices_data_ptr,
+            col_indices_data_ptr,
+            block_size,
+            info.descriptor(),
+            B_->data_ptr<scalar_t>(),
+            ldb,
+            X_->data_ptr<scalar_t>(),
+            ldx,
+            CUSPARSE_SOLVE_POLICY_NO_LEVEL,
+            work_data.get());
+      });
+  if (!X.is_same(*X_)) {
+    X.copy_(*X_);
+  }
+#endif
+}
+
 void block_sparse_mv(
     const at::sparse_csr::SparseCsrTensor& mat,
     const Tensor& vec,
@@ -816,6 +1063,13 @@ void triangular_solve_out_sparse_csr(
     bool upper,
     bool transpose,
     bool unitriangular) {
+  if (A.values().dim() == 3 && A.values().size(-1) > 1) {
+    if (B.size(-1) == 1) {
+      return block_sparse_triangular_solve_vec(A, B, X, upper, transpose, unitriangular);
+    } else {
+      return block_sparse_triangular_solve_mat(A, B, X, upper, transpose, unitriangular);
+    }
+  }
 #if !AT_USE_CUSPARSE_GENERIC_SPSV()
   TORCH_CHECK(
       false,
