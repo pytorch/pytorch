@@ -213,12 +213,12 @@ class TestIterableDataPipeBasic(TestCase):
         # test import datapipe class directly
         from torch.utils.data.datapipes.iter import (
             FileLister,
-            FileLoader,
+            FileOpener,
         )
 
         temp_dir = self.temp_dir.name
         datapipe1 = FileLister(temp_dir, '')
-        datapipe2 = FileLoader(datapipe1)
+        datapipe2 = FileOpener(datapipe1, mode='b')
 
         count = 0
         for rec in datapipe2:
@@ -237,7 +237,7 @@ class TestIterableDataPipeBasic(TestCase):
             tar.add(self.temp_files[1])
             tar.add(self.temp_files[2])
         datapipe1 = dp.iter.FileLister(temp_dir, '*.tar')
-        datapipe2 = dp.iter.FileLoader(datapipe1)
+        datapipe2 = dp.iter.FileOpener(datapipe1, mode='b')
         datapipe3 = dp.iter.TarArchiveReader(datapipe2)
 
         # Test Case: Read extracted files before reaching the end of the tarfile
@@ -286,7 +286,7 @@ class TestIterableDataPipeBasic(TestCase):
             myzip.write(self.temp_files[1])
             myzip.write(self.temp_files[2])
         datapipe1 = dp.iter.FileLister(temp_dir, '*.zip')
-        datapipe2 = dp.iter.FileLoader(datapipe1)
+        datapipe2 = dp.iter.FileOpener(datapipe1, mode='b')
         datapipe3 = dp.iter.ZipArchiveReader(datapipe2)
 
         # Test Case: read extracted files before reaching the end of the zipfile
@@ -329,7 +329,7 @@ class TestIterableDataPipeBasic(TestCase):
         png_data = np.array([[[1., 0., 0.], [1., 0., 0.]], [[1., 0., 0.], [1., 0., 0.]]], dtype=np.single)
         np.save(temp_pngfile_pathname, png_data)
         datapipe1 = dp.iter.FileLister(temp_dir, ['*.png', '*.txt'])
-        datapipe2 = dp.iter.FileLoader(datapipe1)
+        datapipe2 = dp.iter.FileOpener(datapipe1, mode='b')
 
         def _png_decoder(extension, data):
             if extension != 'png':
@@ -379,7 +379,7 @@ class TestIterableDataPipeBasic(TestCase):
                 tar.add(file_pathname)
 
         datapipe1 = dp.iter.FileLister(temp_dir, '*.tar')
-        datapipe2 = dp.iter.FileLoader(datapipe1)
+        datapipe2 = dp.iter.FileOpener(datapipe1, mode='b')
         datapipe3 = dp.iter.TarArchiveReader(datapipe2)
 
         def group_fn(data):
@@ -432,7 +432,7 @@ class TestIterableDataPipeBasic(TestCase):
     def test_map_with_col_file_handle_datapipe(self):
         temp_dir = self.temp_dir.name
         datapipe1 = dp.iter.FileLister(temp_dir, '')
-        datapipe2 = dp.iter.FileLoader(datapipe1)
+        datapipe2 = dp.iter.FileOpener(datapipe1)
 
         def _helper(datapipe):
             dp1 = datapipe.map(lambda x: x.read(), input_col=1)
@@ -601,7 +601,7 @@ class TestIterableDataPipeHttp(TestCase):
                                           test_file_size, file_url_template)
 
             datapipe_dir_f = dp.iter.FileLister(tmpdir, '*_list')
-            datapipe_stream = dp.iter.FileLoader(datapipe_dir_f)
+            datapipe_stream = dp.iter.FileOpener(datapipe_dir_f, mode='b')
             datapipe_f_lines = dp.iter.LineReader(datapipe_stream)
             datapipe_line_url: IterDataPipe[str] = \
                 dp.iter.Mapper(datapipe_f_lines, _get_data_from_tuple_fn, (1,))

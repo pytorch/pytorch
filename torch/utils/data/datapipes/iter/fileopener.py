@@ -2,11 +2,11 @@ from io import IOBase
 from typing import Iterable, Tuple
 
 from torch.utils.data import IterDataPipe
-from torch.utils.data.datapipes.utils.common import get_file_binaries_from_pathnames
+from torch.utils.data.datapipes.utils.common import get_file_binaries_from_pathnames, deprecation_warning_torchdata
 
 
-class FileLoaderIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
-    r""" :class:`FileLoaderIterDataPipe`.
+class FileOpenerIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
+    r""" :class:`FileOpenerIterDataPipe`.
 
     Iterable Datapipe to load file streams from given pathnames,
     yield pathname and file stream in a tuple.
@@ -16,19 +16,19 @@ class FileLoaderIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
         mode: An optional string that specifies the mode in which
             the file is opened by `open()`. It defaults to 'b' which
             means open for reading in binary mode. Another option is
-            't' for text mode
+            to use 't' for text mode
         length: Nominal length of the datapipe
 
     Note:
-        The opened file handles will be closed by Python's GC periodly. Users can choose
-        to close them explicityly.
+        The opened file handles will be closed by Python's GC periodically. Users can choose
+        to close them explicitly.
     """
 
     def __init__(
             self,
-            datapipe : Iterable[str],
-            mode: str = 'b',
-            length : int = -1):
+            datapipe: Iterable[str],
+            mode: str = 'r',
+            length: int = -1):
         super().__init__()
         self.datapipe: Iterable = datapipe
         self.mode: str = mode
@@ -48,3 +48,14 @@ class FileLoaderIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
         if self.length == -1:
             raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
         return self.length
+
+
+class FileLoaderIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
+
+    def __new__(
+            cls,
+            datapipe: Iterable[str],
+            mode: str = 'b',
+            length: int = -1):
+        deprecation_warning_torchdata(type(cls).__name__)
+        return FileOpenerIterDataPipe(datapipe=datapipe, mode=mode, length=length)

@@ -62,9 +62,9 @@ class MapperIterDataPipe(IterDataPipe):
 Then, the stack of DataPipe can be constructed in functional-programming manner.
 ```py
 >>> import torch.utils.data.datapipes as dp
->>> datapipes1 = dp.iter.FileLoader(['a.file', 'b.file']).map(fn=decoder).shuffle().batch(2)
+>>> datapipes1 = dp.iter.FileOpener(['a.file', 'b.file']).map(fn=decoder).shuffle().batch(2)
 
->>> datapipes2 = dp.iter.FileLoader(['a.file', 'b.file'])
+>>> datapipes2 = dp.iter.FileOpener(['a.file', 'b.file'])
 >>> datapipes2 = dp.iter.Mapper(datapipes2)
 >>> datapipes2 = dp.iter.Shuffler(datapipes2)
 >>> datapipes2 = dp.iter.Batcher(datapipes2, 2)
@@ -97,7 +97,7 @@ Then, the pipeline can be assembled as following:
 
 >>> FOLDER = 'path/2/csv/folder'
 >>> datapipe = dp.iter.FileLister([FOLDER]).filter(fn=lambda filename: filename.endswith('.csv'))
->>> datapipe = dp.iter.FileLoader(datapipe, mode='rt')
+>>> datapipe = dp.iter.FileOpener(datapipe, mode='rt')
 >>> datapipe = datapipe.parse_csv_files(delimiter=' ')
 
 >>> for d in datapipe: # Start loading data
