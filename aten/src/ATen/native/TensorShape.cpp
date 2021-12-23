@@ -1474,7 +1474,7 @@ Tensor stack(TensorList tensors, int64_t dim) {
     auto result_sizes = tensors[0].sizes().vec();
     result_sizes.insert(result_sizes.begin() + wrapped_dim, tensors.size());
     auto out = at::cat(tensors, wrapped_dim);
-    return at::_unsafe_view(out, result_sizes); // one can always split a dimension with view
+    return out.view(result_sizes); // one can always split a dimension with view
   } else { //dim = tensors[0].ndimension() cannot be efficiently handled by view
     return at::cat(get_stack_inputs(tensors, dim), dim);
   }
