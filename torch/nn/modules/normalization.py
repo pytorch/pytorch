@@ -26,8 +26,9 @@ class LocalResponseNorm(Module):
         k: additive factor. Default: 1
 
     Shape:
-        - Input: :math:`(N, C, *)`
-        - Output: :math:`(N, C, *)` (same shape as input)
+        - Input: :math:`(N, C, *)` or :math:`(C, *)` where :math:`*` means any number of additional
+          dimensions
+        - Output: :math:`(N, C, *)` or :math:`(C, *)`, same shape as input
 
     Examples::
 

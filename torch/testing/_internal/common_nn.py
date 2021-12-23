@@ -2437,6 +2437,14 @@ new_module_tests = [
         desc='3d_custom_params',
     ),
     dict(
+        module_name='LocalResponseNorm',
+        constructor_args=(3, ),
+        cpp_constructor_args='torch::nn::LocalResponseNormOptions(3)',
+        input_size=(5, 7),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim_1d',
+    ),
+    dict(
         module_name='ReflectionPad1d',
         constructor_args=((1, 2),),
         cpp_constructor_args='torch::nn::ReflectionPad1dOptions({1, 2})',

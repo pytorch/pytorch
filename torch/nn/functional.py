@@ -2476,29 +2476,32 @@ def group_norm(
     return torch.group_norm(input, num_groups, weight, bias, eps, torch.backends.cudnn.enabled)
 
 
-def local_response_norm(input: Tensor, size: int, alpha: float = 1e-4, beta: float = 0.75, k: float = 1.0) -> Tensor:
+def local_response_norm(input_: Tensor, size: int, alpha: float = 1e-4, beta: float = 0.75, k: float = 1.0) -> Tensor:
     r"""Applies local response normalization over an input signal composed of
     several input planes, where channels occupy the second dimension.
     Applies normalization across channels.
 
     See :class:`~torch.nn.LocalResponseNorm` for details.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(local_response_norm, (input,), input, size, alpha=alpha, beta=beta, k=k)
-    dim = input.dim()
-    if dim < 3:
+    if has_torch_function_unary(input_):
+        return handle_torch_function(local_response_norm, (input_,), input_, size, alpha=alpha, beta=beta, k=k)
+    dim = input_.dim()
+    if dim < 2:
         raise ValueError(
-            "Expected 3D or higher dimensionality \
+            "Expected 2D or higher dimensionality \
                          input (got {} dimensions)".format(
                 dim
             )
         )
 
+    is_batched = input_.dim() > 2
+    input = input_ if is_batched else input_.unsqueeze(0)
+
     if input.numel() == 0:
         return input
 
     div = input.mul(input).unsqueeze(1)
-    if dim == 3:
+    if input.dim() == 3:
         div = pad(div, (0, 0, size // 2, (size - 1) // 2))
         div = avg_pool2d(div, (size, 1), stride=1).squeeze(1)
     else:
@@ -2508,6 +2511,9 @@ def local_response_norm(input: Tensor, size: int, alpha: float = 1e-4, beta: flo
         div = avg_pool3d(div, (size, 1, 1), stride=1).squeeze(1)
         div = div.view(sizes)
     div = div.mul(alpha).add(k).pow(beta)
+
+    if not is_batched:
+        return (input / div).squeeze(0)
     return input / div
 
 
