@@ -1264,7 +1264,7 @@ class TestFunctionalIterDataPipe(TestCase):
         with self.assertRaises(AssertionError):
             input_dp.batch(batch_size=0)
 
-        # Default not drop the last batch
+        # Functional Test: by default, do not drop the last batch
         bs = 3
         batch_dp = input_dp.batch(batch_size=bs)
         self.assertEqual(len(batch_dp), 4)
@@ -1272,21 +1272,30 @@ class TestFunctionalIterDataPipe(TestCase):
             self.assertEqual(len(batch), 1 if i == 3 else bs)
             self.assertEqual(batch, arrs[i * bs: i * bs + len(batch)])
 
-        # Drop the last batch
+        # Functional Test: Drop the last batch when specified
         bs = 4
         batch_dp = input_dp.batch(batch_size=bs, drop_last=True)
-        self.assertEqual(len(batch_dp), 2)
         for i, batch in enumerate(batch_dp):
-            self.assertEqual(len(batch), bs)
             self.assertEqual(batch, arrs[i * bs: i * bs + len(batch)])
 
+        # __len__ test: verifying that the overall length and of each batch is correct
+        for i, batch in enumerate(batch_dp):
+            self.assertEqual(len(batch), bs)
+
+        # __len__ Test: the length is missing if the source DataPipe doesn't have length
+        self.assertEqual(len(batch_dp), 2)
         input_dp_nl = IDP_NoLen(range(10))
         batch_dp_nl = input_dp_nl.batch(batch_size=2)
         with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
             len(batch_dp_nl)
 
-    def test_unbatch_iterdatapipe(self):
+        # Reset Test: Ensures that the DataPipe can properly reset
+        n_elements_before_reset = 1
+        res_before_reset, res_after_reset = reset_after_n_next_calls(batch_dp, n_elements_before_reset)
+        self.assertEqual([[0, 1, 2, 3]], res_before_reset)
+        self.assertEqual([[0, 1, 2, 3], [4, 5, 6, 7]], res_after_reset)
 
+    def test_unbatch_iterdatapipe(self):
         target_length = 6
         prebatch_dp = dp.iter.IterableWrapper(range(target_length))
 
