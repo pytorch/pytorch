@@ -1361,10 +1361,19 @@ Tensor binary_cross_entropy_target_backward(
   const Tensor& target,
   const c10::optional<Tensor>& weight,
   int64_t reduction) {
-  auto grad_target = (1. - self).log_().sub_(self.log()).mul_(grad);
+  auto grad_target = (1. - self).log_().sub_(self.log());
+  if (!areAnyTensorSubclassLike({grad})) {
+    grad_target.mul_(grad);
+  } else {
+    grad_target = grad_target * grad;
+  }
 
   if (isDefined(weight)) {
-    grad_target.mul_(weight.value());
+    if (!isTensorSubclassLike(weight.value())) {
+      grad_target.mul_(weight.value());
+    } else {
+      grad_target = grad_target * weight.value();
+    }
   }
 
   if (reduction == at::Reduction::Mean) {
@@ -1378,13 +1387,21 @@ Tensor binary_cross_entropy_target_backward(
 Tensor binary_cross_entropy_with_logits_target_backward(const Tensor& grad_output, const Tensor& self, const Tensor& target, const c10::optional<Tensor>& weight, const c10::optional<Tensor>& pos_weight, int64_t reduction) {
   Tensor grad_target;
   if (isDefined(pos_weight)) {
-    grad_target = (1. - self.sigmoid()).log_().sub_(pos_weight->mul(self.sigmoid().log_())).mul_(grad_output);
+    if (!areAnyTensorSubclassLike({*pos_weight, grad_output})) {
+      grad_target = (1. - self.sigmoid()).log_().sub_(pos_weight->mul(self.sigmoid().log_())).mul_(grad_output);
+    } else {
+      grad_target = (1. - self.sigmoid()).log_().sub(pos_weight->mul(self.sigmoid().log_())).mul(grad_output);
+    }
   } else {
     grad_target = self.mul(-grad_output);
   }
 
   if (isDefined(weight)) {
-    grad_target.mul_(*weight);
+    if (!isTensorSubclassLike(*weight)) {
+      grad_target.mul_(*weight);
+    } else {
+      grad_target = grad_target.mul(*weight);
+    }
   }
 
   if (reduction == at::Reduction::Mean) {
@@ -1469,14 +1486,17 @@ Tensor binary_cross_entropy_double_backward(const Tensor & grad_output, const Te
   // gradient wrt input
   auto gI = (input * input - 2 * input * target + target) / (inp_pl_eps.pow(2) * one_m_inp_pl_eps.pow(2));
   if (!areAnyTensorSubclassLike({gI, grad})) {
-    // optimization
     gI *= (grad * grad_output);
   } else {
     gI = gI * (grad * grad_output);
   }
 
   if (isDefined(weight)) {
-    gI *= *weight;
+    if (!isTensorSubclassLike(*weight)) {
+      gI *= *weight;
+    } else {
+      gI = gI.mul(*weight);
+    }
   }
   if (reduction == at::Reduction::Mean) {
     return gI / input.numel();
@@ -1490,14 +1510,17 @@ Tensor binary_cross_entropy_double_backward_grad_output(const Tensor & grad, con
   // gradient wrt grad_output
   auto ggO = (input - target) / ((input + eps) * (1 - input + eps));
   if (!areAnyTensorSubclassLike({ggO, grad})) {
-    // optimization
     ggO *= grad;
   } else {
     ggO = ggO * grad;
   }
 
   if (isDefined(weight)) {
-    ggO *= *weight;
+    if (!isTensorSubclassLike(*weight)) {
+      ggO *= *weight;
+    } else {
+      ggO = ggO.mul(*weight);
+    }
   }
   if (reduction == at::Reduction::Mean) {
     return ggO / input.numel();
@@ -4757,6 +4780,25 @@ Tensor _lu_with_info_jvp(
 Tensor warn_backwards(const Tensor &grad_output) {
   TORCH_WARN("Warn from backward");
   return grad_output;
+}
+
+// This function only exists because cuDNN does not support bias gradient computation and it's not easy
+// to slice a std::tuple to return only grad_input / grad_weight from convolution_backward. It will
+// be removed when the cudnn_convolution and cudnn_convolution_transpose go away.
+std::tuple<Tensor, Tensor> _cudnn_convolution_backward(
+    const at::Tensor & self, const at::Tensor & grad_output, const at::Tensor & weight, at::IntArrayRef padding,
+    at::IntArrayRef output_padding, at::IntArrayRef stride, at::IntArrayRef dilation, bool transposed, int64_t groups,
+    ::std::array<bool,2> output_mask) {
+  if (!grad_output.defined()) {
+    return std::tuple<Tensor, Tensor>();
+  }
+
+  // Just call the general backward and ignore the bias gradient part.
+  std::tuple<Tensor, Tensor, Tensor> grad_inputs = at::convolution_backward(
+      grad_output, self, weight, c10::nullopt, stride, padding, dilation, transposed,
+      output_padding, groups, {output_mask[0], output_mask[1], false});
+  std::tuple<Tensor, Tensor> result = std::make_tuple(std::get<0>(grad_inputs), std::get<1>(grad_inputs));
+  return result;
 }
 
 } // namespace details
