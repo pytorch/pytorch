@@ -1,5 +1,5 @@
 from collections import namedtuple
-from typing import Union, Optional, Any
+from typing import Optional, Any
 
 import torch
 import torch.nn as nn
@@ -23,6 +23,7 @@ from .observer import (
     MovingAverageMinMaxObserver,
     NoopObserver,
     PlaceholderObserver,
+    ReuseInputObserver,
     default_debug_observer,
     default_dynamic_quant_observer,
     default_float_qparams_observer,
@@ -31,7 +32,10 @@ from .observer import (
     default_per_channel_weight_observer,
     default_placeholder_observer,
     default_weight_observer,
+    default_reuse_input_observer,
 )
+import warnings
+
 
 class QConfig(namedtuple('QConfig', ['activation', 'weight'])):
     """
@@ -60,6 +64,31 @@ class QConfig(namedtuple('QConfig', ['activation', 'weight'])):
         return super(QConfig, cls).__new__(cls, activation, weight)
 
 
+class QConfigDynamic(namedtuple('QConfigDynamic', ['activation', 'weight'])):
+    """
+    Describes how to dynamically quantize a layer or a part of the network by providing
+    settings (observer classes) for weights.
+
+    It's like QConfig, but for dynamic quantization.
+
+    Note that QConfigDynamic needs to contain observer **classes** (like MinMaxObserver) or a callable that returns
+    instances on invocation, not the concrete observer instances themselves.
+    Quantization function will instantiate observers multiple times for each of the layers.
+
+    Observer classes have usually reasonable default arguments, but they can be overwritten with `with_args`
+    method (that behaves like functools.partial)::
+
+      my_qconfig = QConfigDynamic(weight=default_observer.with_args(dtype=torch.qint8))
+    """
+    def __new__(cls, activation=torch.nn.Identity, weight=torch.nn.Identity):
+        # catch common mistakes
+        if isinstance(weight, nn.Module):
+            raise ValueError("QConfigDynamic received observer instance, please pass observer class instead. " +
+                             "Use MyObserver.with_args(x=1) to override arguments to constructor if needed")
+        warnings.warn("QConfigDynamic is going to be deprecated in PyTorch 1.12, please use QConfig instead")
+        return super(QConfigDynamic, cls).__new__(cls, activation, weight)
+
+
 default_qconfig = QConfig(activation=default_observer,
                           weight=default_weight_observer)
 """
@@ -78,64 +107,38 @@ default_per_channel_qconfig = QConfig(activation=default_observer,
 Default qconfig configuration for per channel weight quantization.
 """
 
-class QConfigDynamic(namedtuple('QConfigDynamic', ['activation', 'weight'])):
-    """
-    Describes how to dynamically quantize a layer or a part of the network by providing
-    settings (observer classes) for weights.
-
-    It's like QConfig, but for dynamic quantization.
-
-    Note that QConfigDynamic needs to contain observer **classes** (like MinMaxObserver) or a callable that returns
-    instances on invocation, not the concrete observer instances themselves.
-    Quantization function will instantiate observers multiple times for each of the layers.
-
-    Observer classes have usually reasonable default arguments, but they can be overwritten with `with_args`
-    method (that behaves like functools.partial)::
-
-      my_qconfig = QConfigDynamic(weight=default_observer.with_args(dtype=torch.qint8))
-
-    """
-    def __new__(cls, activation=torch.nn.Identity, weight=torch.nn.Identity):
-        # catch common mistakes
-        if isinstance(weight, nn.Module):
-            raise ValueError("QConfigDynamic received observer instance, please pass observer class instead. " +
-                             "Use MyObserver.with_args(x=1) to override arguments to constructor if needed")
-        return super(QConfigDynamic, cls).__new__(cls, activation, weight)
-
-default_dynamic_qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
-                                         weight=default_weight_observer)
+default_dynamic_qconfig = QConfig(activation=default_dynamic_quant_observer,
+                                  weight=default_weight_observer)
 """
 Default dynamic qconfig.
 """
 
-float16_dynamic_qconfig = QConfigDynamic(activation=PlaceholderObserver.with_args(dtype=torch.float32),
-                                         weight=PlaceholderObserver.with_args(dtype=torch.float16))
+float16_dynamic_qconfig = QConfig(activation=PlaceholderObserver.with_args(dtype=torch.float32),
+                                  weight=PlaceholderObserver.with_args(dtype=torch.float16))
 """
 Dynamic qconfig with weights quantized to `torch.float16`.
 """
 
-float16_static_qconfig = QConfigDynamic(activation=PlaceholderObserver.with_args(dtype=torch.float16),
-                                        weight=PlaceholderObserver.with_args(dtype=torch.float16))
+float16_static_qconfig = QConfig(activation=PlaceholderObserver.with_args(dtype=torch.float16),
+                                 weight=PlaceholderObserver.with_args(dtype=torch.float16))
 """
 Dynamic qconfig with both activations and weights quantized to `torch.float16`.
 """
 
-per_channel_dynamic_qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
-                                             weight=default_per_channel_weight_observer)
+per_channel_dynamic_qconfig = QConfig(activation=default_dynamic_quant_observer,
+                                      weight=default_per_channel_weight_observer)
 """
 Dynamic qconfig with weights quantized per channel.
 """
 
-# TODO: this is weight only quant, change this to QConfigWeightOnly
-# or remove the QConfigDynamic later
-float_qparams_weight_only_qconfig = QConfigDynamic(
+float_qparams_weight_only_qconfig = QConfig(
     activation=default_placeholder_observer,
     weight=default_float_qparams_observer)
 """
 Dynamic qconfig with weights quantized with a floating point zero_point.
 """
 
-float_qparams_weight_only_qconfig_4bit = QConfigDynamic(
+float_qparams_weight_only_qconfig_4bit = QConfig(
     activation=default_placeholder_observer,
     weight=default_float_qparams_observer_4bit)
 
@@ -170,6 +173,12 @@ default_qat_qconfig_v2 = QConfig(activation=default_fused_act_fake_quant, weight
 Fused version of `default_qat_config`, has performance benefits.
 """
 
+default_reuse_input_qconfig = QConfig(activation=default_reuse_input_observer,
+                                      weight=NoopObserver)
+"""
+Default qconfig for operators that reuse the observers from input Tensor, e.g. reshape
+"""
+
 def get_default_qconfig(backend='fbgemm'):
     """
     Returns the default PTQ qconfig for the specified backend.
@@ -192,10 +201,10 @@ def get_default_qconfig(backend='fbgemm'):
         qconfig = default_qconfig
     return qconfig
 
-default_embedding_qat_qconfig = QConfig(activation=NoopObserver,
+default_embedding_qat_qconfig = QConfig(activation=NoopObserver.with_args(dtype=torch.float32),
                                         weight=default_embedding_fake_quant)
 
-default_embedding_qat_qconfig_4bit = QConfig(activation=NoopObserver,
+default_embedding_qat_qconfig_4bit = QConfig(activation=NoopObserver.with_args(dtype=torch.float32),
                                              weight=default_embedding_fake_quant_4bit)
 
 def get_default_qat_qconfig(backend='fbgemm', version=1):
@@ -244,7 +253,21 @@ def get_default_qat_qconfig(backend='fbgemm', version=1):
             qconfig = default_qat_qconfig_v2
     return qconfig
 
-def assert_valid_qconfig(qconfig: Optional[Union[QConfig, QConfigDynamic]],
+def get_default_qconfig_dict(backend='fbgemm', version=0):
+    qconfig = get_default_qconfig(backend)
+    return {
+        "": qconfig,
+        "object_type": [("reshape", default_reuse_input_qconfig)]
+    }
+
+def get_default_qat_qconfig_dict(backend='fbgemm', version=1):
+    qconfig = get_default_qat_qconfig(backend, version=version)
+    return {
+        "": qconfig,
+        "object_type": [("reshape", default_reuse_input_qconfig)]
+    }
+
+def assert_valid_qconfig(qconfig: Optional[QConfig],
                          mod: torch.nn.Module) -> None:
     """
     Verifies that this `qconfig` is valid.
@@ -256,6 +279,9 @@ def assert_valid_qconfig(qconfig: Optional[Union[QConfig, QConfigDynamic]],
         isinstance(mod, torch.nn.ConvTranspose2d) or
         isinstance(mod, torch.nn.ConvTranspose3d))
     if is_conv_transpose_mod:
+        if qconfig.weight is None:
+            # for now, we assume that any qconfig for ConvTranspose without a weight is valid
+            return
         example_observer = qconfig.weight()
         is_per_channel = (
             isinstance(example_observer, torch.ao.quantization.PerChannelMinMaxObserver) or
@@ -263,20 +289,20 @@ def assert_valid_qconfig(qconfig: Optional[Union[QConfig, QConfigDynamic]],
         )
         assert not is_per_channel, \
             'Per channel weight observer is not supported yet for ConvTranspose{n}d.'
-QConfigAny = Union[QConfig,
-                   QConfigDynamic, None]
 
+# TODO: remove QConfigAny and replace it with Optional[QConfig]
+QConfigAny = Optional[QConfig]
 
 def add_module_to_qconfig_obs_ctr(
         qconfig: QConfigAny,
-        module: Union[nn.Module, None]) -> Any:
+        module: Optional[nn.Module]) -> Any:
     r"""This is a helper function for use in quantization prepare that updates a qconfig so that
     the constructors stored in the qconfig will create observers on the same device that
     'module' is on. This is intended to be used when the qconfigs are propagated to each
     module in order to avoid potential device alignment issues.
 
     Args:
-        qconfig: QConfig or QConfigDynamic with obs constructors stored in activation and weight
+        qconfig: QConfig with obs constructors stored in activation and weight
         module: module which the qconfig is related to
 
     Return:
@@ -307,11 +333,7 @@ def add_module_to_qconfig_obs_ctr(
     activation = configure_constructor_to_put_obs_on_module_device(qconfig.activation)
     weight = configure_constructor_to_put_obs_on_module_device(qconfig.weight)
 
-    if isinstance(qconfig, QConfig):
-        return QConfig(activation, weight)
-    else:
-        return QConfigDynamic(activation, weight)
-
+    return QConfig(activation, weight)
 
 def qconfig_equals(q1: QConfigAny, q2: QConfigAny):
     """
@@ -355,3 +377,8 @@ def activation_is_memoryless(qconfig: QConfig):
         return _is_memoryless(act.activation_post_process)
     else:
         return _is_memoryless(act)
+
+def is_reuse_input_qconfig(qconfig: Optional[QConfig]):
+    return qconfig is not None and \
+        isinstance(qconfig.activation(), ReuseInputObserver) and \
+        isinstance(qconfig.weight(), NoopObserver)
