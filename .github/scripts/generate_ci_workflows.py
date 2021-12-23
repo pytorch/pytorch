@@ -82,7 +82,6 @@ class CIFlowConfig:
     labels: Set[str] = field(default_factory=set)
     trigger_action: str = 'unassigned'
     trigger_actor: str = 'pytorchbot'
-    root_job_name: str = 'ciflow_should_run'
     root_job_condition: str = ''
     label_conditions: str = ''
 
@@ -110,7 +109,6 @@ class CIFlowConfig:
                                   f"         }}}}"
 
     def reset_root_job(self) -> None:
-        self.root_job_name = ''
         self.root_job_condition = ''
 
     def __post_init__(self) -> None:
@@ -169,6 +167,7 @@ class CIWorkflow:
     only_run_smoke_tests_on_pull_request: bool = False
     num_test_shards_on_pull_request: int = -1
     distributed_test: bool = True
+    fx2trt_test: bool = False
     timeout_after: int = 240
     xcode_version: str = ''
 
@@ -176,6 +175,7 @@ class CIWorkflow:
     # so it's easier for both shell and Python scripts to consume it if false is represented as the empty string.
     enable_jit_legacy_test: YamlShellBool = "''"
     enable_distributed_test: YamlShellBool = "''"
+    enable_fx2trt_test: YamlShellBool = "''"
     enable_multigpu_test: YamlShellBool = "''"
     enable_nogpu_no_avx_test: YamlShellBool = "''"
     enable_nogpu_no_avx2_test: YamlShellBool = "''"
@@ -192,6 +192,9 @@ class CIWorkflow:
 
         if self.distributed_test:
             self.enable_distributed_test = 1
+
+        if self.fx2trt_test:
+            self.enable_fx2trt_test = 1
 
         # If num_test_shards_on_pull_request is not user-defined, default to num_test_shards unless we are
         # only running smoke tests on the pull request.
@@ -504,6 +507,7 @@ LINUX_WORKFLOWS = [
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         num_test_shards=2,
+        fx2trt_test=True,
         ciflow_config=CIFlowConfig(
             labels=set([LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA]),
         ),

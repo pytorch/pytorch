@@ -1444,50 +1444,6 @@ AT_ERROR("inverse: MAGMA library not found in "
 #endif
 }
 
-Tensor _inverse_helper_cuda_legacy(const Tensor& self) {
-  auto self_inv_working_copy = cloneBatchedColumnMajor(self);
-  if (self.dim() > 2) {
-    auto infos_lu = at::zeros({std::max<int64_t>(1, batchCount(self))}, self.options().dtype(kInt));
-    auto infos_getri = at::zeros({std::max<int64_t>(1, batchCount(self))}, self.options().dtype(kInt));
-    auto self_working_copy = cloneBatchedColumnMajor(self);
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "inverse_cuda", [&]{
-      apply_batched_inverse<scalar_t>(
-        self_working_copy, self_inv_working_copy, infos_lu, infos_getri);
-    });
-    batchCheckErrors(infos_lu, "inverse_cuda");
-    batchCheckErrors(infos_getri, "inverse_cuda");
-  } else {
-    // magmaLu and magmaGetri requires infos tensor to live on CPU
-    auto infos_lu = at::zeros({1}, self.options().dtype(kInt).device(kCPU));
-    auto infos_getri = at::zeros({1}, self.options().dtype(kInt).device(kCPU));
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "inverse_cuda", [&]{
-      apply_single_inverse<scalar_t>(self_inv_working_copy, infos_lu, infos_getri);
-    });
-    singleCheckErrors(infos_lu.item().toInt(), "inverse_cuda");
-    singleCheckErrors(infos_getri.item().toInt(), "inverse_cuda");
-  }
-  return self_inv_working_copy;
-}
-
-Tensor _inverse_helper_cuda(const Tensor& self) {
-#ifdef USE_CUSOLVER
-  auto preferred_backend = at::globalContext().linalgPreferredBackend();
-  switch (preferred_backend) {
-    case at::LinalgBackend::Cusolver:
-      return _inverse_helper_cuda_lib(self); // cusolver or cublas
-    case at::LinalgBackend::Magma:
-      return _inverse_helper_cuda_legacy(self); // magma-cuda
-    default:
-      if (batchCount(self) <= 2 || !use_magma_) {
-        return _inverse_helper_cuda_lib(self); // cusolver or cublas
-      } else {
-        return _inverse_helper_cuda_legacy(self); // magma-cuda
-      }
-  }
-#else
-  return _inverse_helper_cuda_legacy(self); // magma-cuda
-#endif
-}
 
 // This is a type dispatching helper function for 'apply_batched_inverse' and 'singleCheckErrors'
 Tensor& _linalg_inv_out_helper_cuda_legacy(Tensor& result, Tensor& infos_lu, Tensor& infos_getri) {

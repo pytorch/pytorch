@@ -31,7 +31,7 @@ void init_num_threads() {
   if (nthreads > 0) {
     set_num_threads(nthreads);
   } else {
-#if defined(_OPENMP) && AT_MKL_ENABLED() && !defined(TH_BLAS_MKL_SEQ)
+#if defined(_OPENMP) && AT_MKL_ENABLED() && !AT_MKL_SEQUENTIAL()
     // If we are using MKL an OpenMP make sure the number of threads match.
     // Otherwise, MKL and our OpenMP-enabled functions will keep changing the
     // size of the OpenMP thread pool, resulting in worse performance (and memory
