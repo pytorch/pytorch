@@ -14,7 +14,16 @@ void tupleIndex(Stack& stack) {
 }
 
 void raiseException(Stack& stack) {
-  throw JITException(pop(stack).toStringRef());
+  c10::optional<std::string> qualified_class_name =
+      pop(stack).toOptional<std::string>();
+  std::string message;
+  pop(stack, message);
+
+  if (qualified_class_name) {
+    throw CustomJITException(message, *qualified_class_name);
+  } else {
+    throw JITException(message);
+  }
 }
 
 void is(Stack& stack) {
