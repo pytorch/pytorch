@@ -127,6 +127,37 @@ def reset_after_n_next_calls(datapipe: Union[IterDataPipe[T_co], MapDataPipe[T_c
     return res_before_reset, list(datapipe)
 
 
+def reset_after_n_next_calls_with_method(
+        datapipe: Union[IterDataPipe[T_co], MapDataPipe[T_co]],
+        n: int) -> Tuple[List[T_co], List[T_co]]:
+    """
+    Given a DataPipe and integer n, iterate the DataPipe for n elements and store the elements into a list
+    Then, reset the DataPipe and return a tuple of two lists
+        1. A list of elements yielded before the reset
+        2. A list of all elements of the DataPipe after the reset
+    """
+    it = iter(datapipe)
+    res_before_reset = []
+    for _ in range(n):
+        res_before_reset.append(next(it))
+    return res_before_reset, list(datapipe.reset())
+
+
+def snapshot_test_helper(source_datapipe: IterDataPipe, n_elements_to_advance: int) -> IterDataPipe:
+    """
+    Given an IterDataPipe and an integer `n`, advance the source_datapipe `n` times,
+    then get the state and snapshot from the DataPipe, recreates it by passing the
+    state and snapshot into the given new_datapipe and returns it.
+    """
+    p = pickle.dumps(source_datapipe)
+    for _ in range(n_elements_to_advance):
+        next(source_datapipe)
+    snapshot = source_datapipe.save_snapshot()
+    new_datapipe = pickle.loads(p)
+    new_datapipe.restore_snapshot(snapshot)
+    return new_datapipe
+
+
 def odd_or_even(x: int) -> int:
     return x % 2
 
@@ -713,6 +744,7 @@ class TestFunctionalIterDataPipe(TestCase):
         self.assertEqual(input_ls, list(input_dp))
 
         # Functional Test: deep copy by default when an iterator is initialized (first element is read)
+        input_dp = dp.iter.IterableWrapper(input_ls)
         it = iter(input_dp)
         self.assertEqual(0, next(it))  # The deep copy only happens when the first element is read
         input_ls.append(50)
@@ -728,12 +760,19 @@ class TestFunctionalIterDataPipe(TestCase):
         input_ls = list(range(10))
         input_dp = dp.iter.IterableWrapper(input_ls)
         n_elements_before_reset = 5
-        res_before_reset, res_after_reset = reset_after_n_next_calls(input_dp, n_elements_before_reset)
+        res_before_reset, res_after_reset = reset_after_n_next_calls_with_method(input_dp, n_elements_before_reset)
         self.assertEqual(input_ls[:n_elements_before_reset], res_before_reset)
         self.assertEqual(input_ls, res_after_reset)
 
         # __len__ Test: inherits length from sequence
         self.assertEqual(len(input_ls), len(input_dp))
+
+        # Snapshot Test:
+        input_dp = dp.iter.IterableWrapper(input_ls)
+        n_elements_to_advance = 5
+        new_dp = snapshot_test_helper(input_dp, n_elements_to_advance)
+        for old_ele, new_ele in zip(input_dp, new_dp):
+            self.assertEqual(old_ele, new_ele)
 
     def test_concat_iterdatapipe(self):
         input_dp1 = dp.iter.IterableWrapper(range(10))
