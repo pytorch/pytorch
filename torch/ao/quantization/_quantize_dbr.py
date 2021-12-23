@@ -63,7 +63,9 @@ def prepare(model, qconfig_dict, example_inputs, inplace=False, allow_list=None,
     if fuse_modules:
         # automatically fuse modules
         old_class = model.__class__
-        model = add_auto_observation(model, qconfig_dict, example_inputs)
+        model = add_auto_observation(
+            model, qconfig_dict, example_inputs,
+            prepare_custom_config_dict=prepare_custom_config_dict)
         module_fusion_fqns = get_module_fusion_fqns(model)
         if len(module_fusion_fqns):
             model = torch.quantization.fuse_modules(model, module_fusion_fqns)
