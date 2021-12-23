@@ -1,5 +1,5 @@
 load("@rules_cc//cc:defs.bzl", "cc_library")
-load("//tools/config:defs.bzl", "cmake_configure_file")
+load(":cmake_configure_file.bzl", "cmake_configure_file")
 
 cc_library(
     name = "macros",
