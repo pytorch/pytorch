@@ -7,6 +7,9 @@ pushd test
 
 echo Run jit_profiling tests
 python run_test.py --include test_jit_legacy test_jit_fuser_legacy --verbose
-if ERRORLEVEL 1 exit /b 1
+if ERRORLEVEL 1 goto fail
 
 popd
+
+:fail
+exit /b 1
