@@ -1635,6 +1635,21 @@ except RuntimeError as e:
         a = torch.ones(65536).cuda().half()
         self.assertEqual(a.norm(p=0, dtype=torch.float32), 65536)
 
+    # Verifies that mem_get_info works, including when called for a different device
+    def test_mem_get_info(self):
+        def _test(idx):
+            before_free_bytes, before_available_bytes = torch.cuda.mem_get_info(idx)
+            # increasing to 8MB to force acquiring a new block and overcome blocksize differences across platforms
+            t = torch.randn(1024 * 1024 * 8, device='cuda:' + str(idx))
+            after_free_bytes, after_available_bytes = torch.cuda.mem_get_info(idx)
+
+            self.assertTrue(after_free_bytes < before_free_bytes)
+            self.assertEqual(before_available_bytes, after_available_bytes)
+
+        _test(0)
+        if TEST_MULTIGPU:
+            _test(1)
+
     # Test that wrap_with_cuda_memory_check successfully detects leak
     # skip for ROCM. Look into #62533.
     @skipIfRocm
@@ -1647,19 +1662,19 @@ except RuntimeError as e:
 
         @self.wrap_with_cuda_memory_check
         def leak_gpu0():
-            l.append(torch.tensor(10, device=torch.device("cuda:0")))
+            l.append(torch.randn(1024, device=torch.device("cuda:0")))
 
         no_leak()
 
-        with self.assertRaisesRegex(AssertionError, r"leaked \d+ bytes CUDA memory on device 0"):
+        with self.assertRaisesRegex(RuntimeError, r"CUDA driver API confirmed .+ on device 0.+"):
             leak_gpu0()
 
         if TEST_MULTIGPU:
             @self.wrap_with_cuda_memory_check
             def leak_gpu1():
-                l.append(torch.tensor(10, device=torch.device("cuda:1")))
+                l.append(torch.randn(1024, device=torch.device("cuda:1")))
 
-            with self.assertRaisesRegex(AssertionError, r"leaked \d+ bytes CUDA memory on device 1"):
+            with self.assertRaisesRegex(RuntimeError, r"CUDA driver API confirmed .+ on device 1.+"):
                 leak_gpu1()
 
     def test_cuda_memory_leak_detection_propagates_errors(self):
