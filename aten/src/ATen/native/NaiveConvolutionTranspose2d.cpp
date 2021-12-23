@@ -283,7 +283,7 @@ void slow_conv_transpose2d_out_cpu_template(
   // Define a buffer of ones, for bias accumulation
   Tensor ones = bias.defined() ? at::ones({output_height, output_width}, input_.options()) : Tensor();
 
-  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long,
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Long, at::ScalarType::BFloat16,
       input.scalar_type(), "slow_conv_transpose2d_out_cpu", [&] {
         // For each elt in batch, do:
         for (const auto elt : c10::irange(batch_size)) {
@@ -309,12 +309,12 @@ void slow_conv_transpose2d_out_cpu_template(
               n,
               m,
               k,
-              1,
+              static_cast<scalar_t>(1),
               input_n.data_ptr<scalar_t>(),
               n,
               weight_.data_ptr<scalar_t>(),
               m,
-              0,
+              static_cast<scalar_t>(0),
               columns.data_ptr<scalar_t>(),
               n);
 
@@ -352,12 +352,12 @@ void slow_conv_transpose2d_out_cpu_template(
                 n_,
                 m_,
                 k_,
-                1,
+                static_cast<scalar_t>(1),
                 ones.data_ptr<scalar_t>(),
                 k_,
                 bias_.data_ptr<scalar_t>(),
                 k_,
-                1,
+                static_cast<scalar_t>(1),
                 output_n.data_ptr<scalar_t>(),
                 n_);
           }
@@ -471,7 +471,7 @@ static void slow_conv_transpose2d_backward_out_cpu_template(
   Tensor grad_columns = need_columns ? at::empty({n_output_plane * kernel_width * kernel_height,
       input_height * input_width}, input.options()) : Tensor();
 
-  AT_DISPATCH_FLOATING_TYPES(
+  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16,
       grad_output.scalar_type(), "slow_conv_transpose2d_backward_out_cpu", [&] {
         // Helpers
         Tensor grad_input_n = Tensor();
@@ -519,12 +519,12 @@ static void slow_conv_transpose2d_backward_out_cpu_template(
               n,
               m,
               k,
-              1,
+              static_cast<scalar_t>(1),
               gemm_in_ptr,
               n,
               weight.data_ptr<scalar_t>(),
               k,
-              0,
+              static_cast<scalar_t>(0),
               grad_input_n.data_ptr<scalar_t>(),
               n);
         }
@@ -649,7 +649,7 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
   Tensor columns = need_columns ? at::empty({n_output_plane * kernel_width * kernel_height,
       input_height * input_width}, input.options()) : Tensor();
 
-  AT_DISPATCH_FLOATING_TYPES(
+  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16,
       input.scalar_type(), "slow_conv_transpose2d_acc_grad_parameters_cpu", [&] {
         // Helpers
         Tensor input_n = Tensor();
@@ -703,12 +703,12 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
                 n,
                 m,
                 k,
-                scale,
+                static_cast<scalar_t>(scale),
                 gemm_in_ptr,
                 k,
                 input_n.data_ptr<scalar_t>(),
                 k,
-                1,
+                static_cast<scalar_t>(1),
                 grad_weight.data_ptr<scalar_t>(),
                 n);
           }
