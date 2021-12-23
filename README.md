@@ -263,7 +263,7 @@ Choose Correct Visual Studio Version.
 Sometimes there are regressions in new versions of Visual Studio, so
 it's best to use the same Visual Studio Version [16.8.5](https://github.com/pytorch/pytorch/blob/master/.circleci/scripts/vs_install.ps1) as Pytorch CI's.
 
-PyTorch CI uses Visual C++ BuildTools, which come with Visual Studio Enterprise, 
+PyTorch CI uses Visual C++ BuildTools, which come with Visual Studio Enterprise,
 Professional, or Community Editions. You can also install the build tools from
 https://visualstudio.microsoft.com/visual-cpp-build-tools/. The build tools *do not*
 come with Visual Studio Code by default.
