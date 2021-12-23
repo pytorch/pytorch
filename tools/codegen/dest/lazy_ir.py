@@ -205,7 +205,7 @@ class GenLazyNativeFuncDefinition:
         return [f"""\
     // TODO(alanwaketan): Quite a lot inefficient copy-by-value there. Let's optimize it.
     {sig.decl(name=f"{self.class_method_name}::{schema.aten_name}")} {{
-        LTC_FN_COUNTER("lazy::");
+        TORCH_LAZY_FN_COUNTER("lazy::");
         {get_device_str}
         {lazy_tensor_decls_str}
         {meta_str}
@@ -246,7 +246,6 @@ class GenLazyShapeInferenceDefinition:
     tensor_class: str
 
     @method_with_native_function
-    # def gen_lazy_shape_inference_decl(f: NativeFunction, backend_index: BackendIndex, tensor_class: str) -> List[str]:
     def __call__(self, f: NativeFunction) -> List[str]:
         sig = kernel_signature(f, self.backend_index)
 
