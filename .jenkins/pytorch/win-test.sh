@@ -75,9 +75,6 @@ run_tests() {
             "$SCRIPT_HELPERS_DIR"/test_python_first_shard.bat
             echo $?
 
-            ./"$SCRIPT_HELPERS_DIR"/test_python_first_shard.bat
-            echo $?
-
             echo "would have kept going"
             exit 1
 
