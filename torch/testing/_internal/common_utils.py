@@ -40,7 +40,7 @@ import json
 import __main__  # type: ignore[import]
 import errno
 import ctypes
-from typing import cast, Any, Dict, Iterable, Iterator, Optional, Union, List
+from typing import cast, Any, Dict, Iterable, Iterator, Optional, Union, List, TypeVar
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -60,6 +60,7 @@ import torch.backends.mkl
 from enum import Enum
 from statistics import mean
 import functools
+from .composite_compliance import no_dispatch
 
 torch.backends.disable_global_flags()
 
@@ -614,8 +615,11 @@ def run_tests(argv=UNITTEST_ARGS):
         test_cases = discover_test_cases_recursively(suite)
         for case in test_cases:
             test_case_full_name = case.id().split('.', 1)[1]
-            other_args = (['--import-disabled-tests'] if IMPORT_DISABLED_TESTS else List[str]([]) +
-                          ['--import-slow-tests'] if IMPORT_SLOW_TESTS else List[str]([]))
+            other_args = []
+            if IMPORT_DISABLED_TESTS:
+                other_args.append('--import-disabled-tests')
+            if IMPORT_SLOW_TESTS:
+                other_args.append('--import-slow-tests')
             cmd = [sys.executable] + [argv[0]] + other_args + argv[1:] + [test_case_full_name]
             string_cmd = " ".join(cmd)
             exitcode = shell(cmd)
@@ -771,6 +775,8 @@ TEST_SKIP_NOARCH = os.getenv('PYTORCH_TEST_SKIP_NOARCH', '0') == '1'
 # Determine whether to enable cuda memory leak check.
 # CUDA mem leak check is expensive and thus we don't want to execute it on every
 # test case / configuration.
+# If this is True then CUDA memory leak checks are skipped. If this is false
+#   then CUDA memory leak checks are performed.
 # See: https://github.com/pytorch/pytorch/pull/59402#issuecomment-858811135
 TEST_SKIP_CUDA_MEM_LEAK_CHECK = os.getenv('PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK', '0') == '1'
 
@@ -1124,13 +1130,21 @@ def set_rng_seed(seed):
 
 @contextlib.contextmanager
 def freeze_rng_state():
-    rng_state = torch.get_rng_state()
-    if torch.cuda.is_available():
-        cuda_rng_state = torch.cuda.get_rng_state()
-    yield
-    if torch.cuda.is_available():
-        torch.cuda.set_rng_state(cuda_rng_state)
-    torch.set_rng_state(rng_state)
+    # no_dispatch needed for test_composite_compliance
+    # Some OpInfos use freeze_rng_state for rng determinism, but
+    # test_composite_compliance overrides dispatch for all torch functions
+    # which we need to disable to get and set rng state
+    with no_dispatch():
+        rng_state = torch.get_rng_state()
+        if torch.cuda.is_available():
+            cuda_rng_state = torch.cuda.get_rng_state()
+    try:
+        yield
+    finally:
+        with no_dispatch():
+            if torch.cuda.is_available():
+                torch.cuda.set_rng_state(cuda_rng_state)
+            torch.set_rng_state(rng_state)
 
 @contextlib.contextmanager
 def set_default_dtype(dtype):
@@ -1211,35 +1225,117 @@ class CudaMemoryLeakCheck():
         from torch.testing._internal.common_cuda import initialize_cuda_context_rng
         initialize_cuda_context_rng()
 
-    @staticmethod
-    def get_cuda_memory_usage():
-        # we don't need CUDA synchronize because the statistics are not tracked at
-        # actual freeing, but at when marking the block as free.
-        num_devices = torch.cuda.device_count()
-        gc.collect()
-        return tuple(torch.cuda.memory_allocated(i) for i in range(num_devices))
-
+    # Stores CUDA memory data provided by PyTorch's caching allocator and
+    #   the CUDA driver.
+    #
+    # NOTE: The undocumented torch.cuda.mem_get_info() returns
+    #   (#free bytes, #total bytes available) on the GPU
     def __enter__(self):
-        self.befores = self.get_cuda_memory_usage()
+        self.caching_allocator_befores = []
+        self.driver_befores = []
+
+        # Performs a gc if required (required if any CUDA memory is held)
+        num_devices = torch.cuda.device_count()
+        for i in range(num_devices):
+            caching_allocator_mem_allocated = torch.cuda.memory_allocated(i)
+            # NOTE: gc is based exclusively on caching allocator memory
+            #   because the driver will always have some bytes in use (context size?)
+            if caching_allocator_mem_allocated > 0:
+                gc.collect()
+                torch.cuda.empty_cache()
+                break
+
+        # Acquires caching allocator and driver statistics before the test is run
+        for i in range(num_devices):
+            self.caching_allocator_befores.append(torch.cuda.memory_allocated(i))
+            bytes_free, bytes_total = torch.cuda.mem_get_info(i)
+            driver_mem_allocated = bytes_total - bytes_free
+            self.driver_befores.append(driver_mem_allocated)
 
     def __exit__(self, exec_type, exec_value, traceback):
         # Don't check for leaks if an exception was thrown
         if exec_type is not None:
             return
 
-        afters = self.get_cuda_memory_usage()
+        # Compares caching allocator before/after statistics
+        # An increase in allocated memory is a discrepancy indicating a possible
+        #   memory leak
+        discrepancy_detected = False
+        num_devices = torch.cuda.device_count()
+        for i in range(num_devices):
+            caching_allocator_mem_allocated = torch.cuda.memory_allocated(i)
 
-        for i, (before, after) in enumerate(zip(self.befores, afters)):
-            if not TEST_WITH_ROCM:
-                self.testcase.assertEqual(
-                    before, after, msg='{} leaked {} bytes CUDA memory on device {}'.format(
-                        self.name, after - before, i))
-            else:
+            if caching_allocator_mem_allocated > self.caching_allocator_befores[i]:
+                discrepancy_detected = True
+                break
+
+        # Short-circuits if no discrepancy detected
+        if not discrepancy_detected:
+            return
+
+        # Validates the discrepancy persists after garbage collection and
+        #   is confirmed by the driver API
+
+        # NOTE: driver API iscrepancies alone are ignored because with the jiterator
+        #   some tests may permanently increase the CUDA context size and
+        #   that will appear as a driver memory leak but is the expected behavior.
+
+        # GCs and clears the cache
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        for i in range(num_devices):
+            caching_allocator_mem_allocated = torch.cuda.memory_allocated(i)
+            bytes_free, bytes_total = torch.cuda.mem_get_info(i)
+            driver_mem_allocated = bytes_total - bytes_free
+
+            caching_allocator_discrepancy = False
+            driver_discrepancy = False
+
+            if caching_allocator_mem_allocated > self.caching_allocator_befores[i]:
+                caching_allocator_discrepancy = True
+
+            if driver_mem_allocated > self.driver_befores[i]:
+                driver_discrepancy = True
+
+            if caching_allocator_discrepancy and not driver_discrepancy:
+                # Just raises a warning if the leak is not validated by the
+                #   driver API
+                # NOTE: this may be a problem with how the caching allocator collects its
+                #   statistics or a leak too small to trigger the allocation of an
+                #   additional block of memory by the CUDA driver
+                msg = ("CUDA caching allocator reports a memory leak not "
+                       "verified by the driver API in {}! "
+                       "Caching allocator allocated memory was {} and is now reported as {} "
+                       "on device {}. "
+                       "CUDA driver allocated memory was {} and is now {}.").format(
+                    self.name,
+                    self.caching_allocator_befores[i],
+                    caching_allocator_mem_allocated,
+                    i,
+                    self.driver_befores[i],
+                    driver_mem_allocated)
+                warnings.warn(msg)
+            elif caching_allocator_discrepancy and driver_discrepancy:
+                # A caching allocator discrepancy validated by the driver API is a
+                #   failure (except on ROCm, see below)
+                msg = ("CUDA driver API confirmed a leak in {}! "
+                       "Caching allocator allocated memory was {} and is now reported as {} "
+                       "on device {}. "
+                       "CUDA driver allocated memory was {} and is now {}.").format(
+                    self.name,
+                    self.caching_allocator_befores[i],
+                    caching_allocator_mem_allocated,
+                    i,
+                    self.driver_befores[i],
+                    driver_mem_allocated)
+
                 # See #62533
                 # ROCM: Sometimes the transient memory is reported as leaked memory
-                if before != after:
-                    warnings.warn('{} leaked {} bytes ROCm memory on device {}'.format(
-                        self.name, after - before, i), RuntimeWarning)
+                if TEST_WITH_ROCM:
+                    warnings.warn(msg)
+                else:
+                    raise RuntimeError(msg)
 
 @contextmanager
 def skip_exception_type(exc_type):
@@ -3117,3 +3213,15 @@ def get_cycles_per_ms() -> float:
         vals.append(measure())
     vals = sorted(vals)
     return mean(vals[2 : num - 2])
+
+
+T = TypeVar('T')
+def first_sample(self: unittest.TestCase, samples: Iterable[T]) -> T:
+    """
+    Returns the first sample from an iterable of samples, like those returned by OpInfo.
+    The test will be skipped if no samples are available.
+    """
+    try:
+        return next(iter(samples))
+    except StopIteration:
+        raise unittest.SkipTest('Skipped! Need at least 1 sample input')
