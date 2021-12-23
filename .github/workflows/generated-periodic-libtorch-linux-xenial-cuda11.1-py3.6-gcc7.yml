@@ -35,34 +35,24 @@ concurrency:
 
 jobs:
 
-  ciflow_should_run:
-    runs-on: linux.large
+  build:
+    runs-on: linux.2xlarge
     timeout-minutes: 240
-    env:
-      IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == 'unassigned') && (github.event.assigneed.login == 'pytorchbot') }}
-      LABEL_CONDITIONS: ${{ contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cuda') || contains(github.event.pull_request.labels.*.name, 'ciflow/libtorch') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux') || contains(github.event.pull_request.labels.*.name, 'ciflow/scheduled') }}
-      LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
     if: ${{ (github.repository == 'pytorch/pytorch') && (
             (github.event_name == 'push') ||
             (github.event_name == 'schedule') ||
             (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cuda') || contains(github.event.pull_request.labels.*.name, 'ciflow/libtorch') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux') || contains(github.event.pull_request.labels.*.name, 'ciflow/scheduled')) ||
             (false))
          }}
-    steps:
-      - name: noop
-        run: echo running ciflow_should_run
-      - name: print labels
-        run: echo "${LABELS}"
-
-  build:
-    runs-on: linux.2xlarge
-    needs: [ciflow_should_run]
-    timeout-minutes: 240
     env:
       JOB_BASE_NAME: periodic-libtorch-linux-xenial-cuda11.1-py3.6-gcc7-build
+      IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == 'unassigned') && (github.event.assigneed.login == 'pytorchbot') }}
+      LABEL_CONDITIONS: ${{ contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cuda') || contains(github.event.pull_request.labels.*.name, 'ciflow/libtorch') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux') || contains(github.event.pull_request.labels.*.name, 'ciflow/scheduled') }}
     outputs:
       docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
     steps:
+      - name: print labels
+        run: echo "${PR_LABELS}"
       - name: Display EC2 information
         shell: bash
         run: |
@@ -109,6 +99,10 @@ jobs:
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
           submodules: recursive
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
       - name: Calculate docker image tag
         id: calculate-tag
         run: |
