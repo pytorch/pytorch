@@ -147,7 +147,7 @@ TensorImpl::TensorImpl(
       device_opt_(storage_.device()) {
   // See [Note: Python key removal]
   constexpr auto python_ks = DispatchKeySet(DispatchKey::Python);
-  key_set_ = keyset.removeFunctionalityKeys(python_ks);
+  key_set_ = key_set.removeFunctionalityKeys(python_ks);
   init_bitfields();
   // Inference tensor doesn't have version counter.
   if (!is_inference()) {
