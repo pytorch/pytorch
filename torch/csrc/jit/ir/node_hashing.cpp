@@ -4,7 +4,7 @@
 #include <unordered_map>
 
 #include <ATen/core/functional.h>
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
 #include <c10/util/Exception.h>
 #include <c10/util/hash.h>
 #include <c10/util/irange.h>

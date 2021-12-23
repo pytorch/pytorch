@@ -1677,5 +1677,34 @@ TEST_F(Kernel, DISABLED_FlattenVectorize) {
 #endif
 }
 
+TEST_F(Kernel, Strided1dWithinBounds) {
+  auto ir = R"IR(
+    graph(%0 : Float(3, strides=[1], device=cpu),
+          %1 : Float(3, strides=[2], device=cpu)):
+        %2 : int = prim::Constant[value=1]()
+        %3 : Float(3, strides=[1]) = aten::add(%0, %1, %2)
+        return (%3))IR";
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(ir, graph.get(), vmap);
+  TensorExprKernel k(graph);
+
+  auto a = at::rand({3}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto b = at::rand({6}, TensorOptions(kCPU).dtype(at::kFloat))
+               .index({Slice(None, None, 2)});
+  auto expect = a + b;
+
+  std::vector<at::Tensor> inputs = {a, b};
+
+  std::vector<IValue> stack = fmap<IValue>(inputs);
+  k.run(stack);
+
+  auto output = stack[0].toTensor();
+
+  for (size_t i = 0; i < 3; ++i) {
+    CHECK_EQ(((float*)output.data_ptr())[i], ((float*)expect.data_ptr())[i]);
+  }
+}
+
 } // namespace jit
 } // namespace torch

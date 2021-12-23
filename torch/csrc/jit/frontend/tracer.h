@@ -4,7 +4,7 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 #include <torch/csrc/jit/api/object.h>
 #include <torch/csrc/jit/frontend/source_range.h>
