@@ -2403,12 +2403,6 @@
   dispatch:
     CompositeExplicitAutograd: inverse_out
 
-- func: _inverse_helper(Tensor self) -> Tensor
-  variants: function
-  dispatch:
-    CPU: _inverse_helper_cpu
-    CUDA: _inverse_helper_cuda
-
 - func: isclose(Tensor self, Tensor other, float rtol=1e-05, float atol=1e-08, bool equal_nan=False) -> Tensor
   variants: function, method
 
@@ -3325,15 +3319,6 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: _nnpack_spatial_convolution
-
-- func: _nnpack_spatial_convolution_backward(Tensor input, Tensor grad_output, Tensor weight, int[2] padding, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
-  variants: function
-
-- func: _nnpack_spatial_convolution_backward_input(Tensor input, Tensor grad_output, Tensor weight, int[2] padding) -> Tensor
-  variants: function
-
-- func: _nnpack_spatial_convolution_backward_weight(Tensor input, int[] weightsize, Tensor grad_output, int[2] padding) -> Tensor
-  variants: function
 
 - func: ones.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   device_check: NoCheck
