@@ -47,8 +47,7 @@ Tensor empty_cpu(
   }
   auto dtype = dtype_or_default(dtype_opt);
 
-  constexpr auto cpu_ks = at::DispatchKeySet(at::DispatchKey::CPU);
-  return empty_generic(size, allocator, cpu_ks, dtype, device, memory_format_opt);
+  return empty_generic(size, allocator, at::DispatchKey::CPU, dtype, device, memory_format_opt);
 }
 
 Tensor empty_generic(
@@ -57,7 +56,7 @@ Tensor empty_generic(
   // technically this can be inferred from the device, but usually the
   // correct setting is obvious from the call site so just make callers
   // pass it in
-  c10::DispatchKeySet ks,
+  c10::DispatchKey dispatch_key,
   ScalarType scalar_type,
   Device device,
   c10::optional<c10::MemoryFormat> memory_format_opt) {
@@ -75,7 +74,7 @@ Tensor empty_generic(
       /*resizeable=*/true);
 
   auto tensor = detail::make_tensor<TensorImpl>(
-      std::move(storage_impl), ks, dtype);
+      std::move(storage_impl), dispatch_key, dtype);
   // Default TensorImpl has size [0]
   if (size.size() != 1 || size[0] != 0) {
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
