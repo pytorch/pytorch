@@ -2911,8 +2911,8 @@ class TestAutograd(TestCase):
         found_custom_op = False
         for event in prof.function_events:
             if event.sequence_nr >= 0:
-                print ("Op {} seq_id {} input shapes {} input seq_ids {}"\
-                    .format(event.name, event.sequence_nr, event.input_shapes, event.input_seq_ids))
+                print("Op {} seq_id {} input shapes {} input seq_ids {}"
+                      .format(event.name, event.sequence_nr, event.input_shapes, event.input_seq_ids))
                 if event.name == 'MyFunc':
                     found_custom_op = True
                     input_seq_id_valid = False
