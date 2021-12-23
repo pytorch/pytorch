@@ -27,7 +27,7 @@ TORCH_API mobile::Module jitModuleToMobile(
     const Module& module,
     const CompilationOptions& options);
 
-std::unique_ptr<mobile::Code> compileGraphToMobileCode(
+mobile::Code compileGraphToMobileCode(
     const std::string& name,
     const std::shared_ptr<Graph>& graph,
     const CompilationOptions& compilation_options,
