@@ -346,14 +346,6 @@ void pushProfilingCallbacksLegacy() {
 
 } // namespace
 
-torch::profiler::impl::ProfilerConfig getProfilerConfig() {
-  auto state_ptr = getProfilerTLSState();
-  TORCH_CHECK(
-      state_ptr,
-      "Tried to access profiler config, but profiler is not enabled!");
-  return state_ptr->config();
-}
-
 void enableProfilerLegacy(const torch::profiler::impl::ProfilerConfig& new_config) {
   TORCH_CHECK(new_config.state != torch::profiler::impl::ProfilerState::NVTX || torch::profiler::impl::cudaStubs()->enabled(),
     "Can't use NVTX profiler - PyTorch was compiled without CUDA");
