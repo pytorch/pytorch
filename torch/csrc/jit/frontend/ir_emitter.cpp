@@ -660,7 +660,7 @@ struct to_ir {
     // At this point, we might have received a graph that is compiled with
     // old operator schemas that might not exist in the system anymore.
     // Therefore, we replace such ops with its' valid upgrader.
-    ApplyOpsUpgraders(graph);
+    ReplaceOldOperatorsWithUpgraders(graph);
 
     // NB ORDERING: SSA conversion has to occur before
     // lifting of closures and forks, this way closures are converted

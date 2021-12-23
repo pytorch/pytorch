@@ -27,6 +27,7 @@ class TestUpgraders(JitTestCase):
         version = int(zipped_model.read('archive/version').decode("utf-8"))
         return version
 
+    # TODO (tugsuu) We should ideally be generating this test cases.
     def test_populated_upgrader_graph(self):
         @torch.jit.script
         def f():
@@ -108,7 +109,7 @@ class TestUpgraders(JitTestCase):
         version = self._load_model_version(loaded_model)
         self.assertTrue(version == 4)
         loaded_model_twice = torch.jit.load(buffer)
-        # we check by its' code because graph variable names
+        # we check by its code because graph variable names
         # can be different every time
         self.assertEqual(loaded_model.code, loaded_model_twice.code)
 

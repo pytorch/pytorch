@@ -285,7 +285,9 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_fuse", FuseGraph)
       .def(
           "_jit_pass_replace_old_ops_with_upgraders",
-          [](std::shared_ptr<Graph>& g) { return ApplyOpsUpgraders(g); })
+          [](std::shared_ptr<Graph>& g) {
+            return ReplaceOldOperatorsWithUpgraders(g);
+          })
       .def(
           "_jit_pass_dce",
           [](std::shared_ptr<Graph>& g) {

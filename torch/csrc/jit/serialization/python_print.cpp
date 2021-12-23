@@ -748,6 +748,7 @@ struct PythonPrintImpl {
       auto version_entry = get_operator_version_map().find(schema_name);
       if (version_entry != get_operator_version_map().end()) {
         const auto& entry = version_entry->second;
+        // TODO (tugsuu) move this calculation into a seperate step.
         min_version_ = std::max(
             min_version_, uint64_t(entry[entry.size() - 1].bumped_at_version));
       }

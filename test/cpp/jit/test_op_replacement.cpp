@@ -48,7 +48,7 @@ TEST(OpReplacementTest, ReplaceDivInSimpleFunction) {
   test_only_populate_upgraders(test_upgraders);
   torch::jit::parseIR(graph_string, g.get());
   g->set_op_version(2);
-  ApplyOpsUpgraders(g);
+  ReplaceOldOperatorsWithUpgraders(g);
   testing::FileCheck()
       .check("prim::If")
       ->check_count("aten::div(%2, %1)", 1, /*exactly=*/true)
@@ -74,7 +74,7 @@ TEST(OpReplacementTest, ReplaceTwoOpsInSimpleFunction) {
   test_only_add_entry("aten::_test_serialization_subcmul", test_entry);
   torch::jit::parseIR(graph_string, g.get());
   g->set_op_version(2);
-  ApplyOpsUpgraders(g);
+  ReplaceOldOperatorsWithUpgraders(g);
   testing::FileCheck()
       .check("prim::If")
       ->check_count("aten::div", 2, /*exactly=*/true)
@@ -103,7 +103,7 @@ TEST(OpReplacementTest, ReplaceDivInNestedFunction) {
   test_only_populate_upgraders(test_upgraders);
   torch::jit::parseIR(graph_string, g.get());
   g->set_op_version(2);
-  ApplyOpsUpgraders(g);
+  ReplaceOldOperatorsWithUpgraders(g);
   testing::FileCheck()
       .check("prim::If")
       ->check_count("aten::add", 2, false)
@@ -132,7 +132,7 @@ TEST(OpReplacementTest, ReplaceTestSubcmulInSimpleFunction) {
   test_only_add_entry("aten::_test_serialization_subcmul", test_entry);
   torch::jit::parseIR(graph_string, g.get());
   g->set_op_version(2);
-  ApplyOpsUpgraders(g);
+  ReplaceOldOperatorsWithUpgraders(g);
   testing::FileCheck().check_count("aten::mul", 1, false)->run(*g);
 
   testing::FileCheck().check_count("aten::sub", 1, false)->run(*g);
