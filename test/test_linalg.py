@@ -12,7 +12,7 @@ from math import inf, nan, isnan
 import random
 from random import randrange
 from itertools import product
-from functools import reduce, partial
+from functools import reduce, partial, wraps
 
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_SCIPY, IS_MACOS, IS_WINDOWS, slowTest,
@@ -38,6 +38,18 @@ assert torch.get_default_dtype() is torch.float32
 
 if TEST_SCIPY:
     import scipy
+
+def setLinalgBackendsToDefaultFinally(fn):
+    @wraps(fn)
+    def _fn(*args, **kwargs):
+        try:
+            fn(*args, **kwargs)
+        finally:
+            # Set linalg backend back to default to make sure potential failures in one test
+            #   doesn't affect other linalg tests
+            torch.backends.cuda.preferred_linalg_library('default')
+    return _fn
+
 
 class TestLinalg(TestCase):
     def setUp(self):
@@ -3345,7 +3357,7 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @onlyNativeDeviceTypes   # TODO: XLA doesn't raise exception
     @skipCUDAIfRocm
-    @skipCUDAVersionIn([(11, 3)])  # https://github.com/pytorch/pytorch/issues/57482
+    @skipCUDAVersionIn([(11, 3), (11, 5)])  # https://github.com/pytorch/pytorch/issues/57482
     @dtypes(*floating_and_complex_types())
     def test_inverse_errors_large(self, device, dtype):
         # Test batched inverse of singular matrices reports errors without crashing (gh-51930)
@@ -4935,6 +4947,7 @@ class TestLinalg(TestCase):
     @onlyCUDA
     @skipCUDAIfNoMagma  # Magma needed for the PLU decomposition
     @skipCUDAIfRocm  # There is a memory access bug in rocBLAS in the (non-batched) solve_triangular
+    @skipCUDAVersionIn([(11, 3), (11, 5)])  # Tracked in https://github.com/pytorch/pytorch/issues/70111
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-2, torch.complex64: 1e-2,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
@@ -8320,6 +8333,28 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         a = torch.tensordot(torch.tensor(0.), torch.tensor(0.), 0)
         an = torch.from_numpy(np.tensordot(np.zeros((), dtype=np.float32), np.zeros((), dtype=np.float32), 0))
         self.assertEqual(a, an)
+
+    @onlyCUDA
+    @skipCUDAIfNoMagma
+    @skipCUDAIfNoCusolver
+    @setLinalgBackendsToDefaultFinally
+    def test_preferred_linalg_library(self):
+        # The main purpose of this test is to make sure these "backend" calls work normally without raising exceptions.
+        x = torch.randint(2, 5, (2, 4, 4), device='cuda', dtype=torch.double)
+
+        torch.backends.cuda.preferred_linalg_library('cusolver')
+        out1 = torch.linalg.inv(x)
+
+        torch.backends.cuda.preferred_linalg_library('magma')
+        out2 = torch.linalg.inv(x)
+
+        torch.backends.cuda.preferred_linalg_library('default')
+        # Although linalg preferred flags doesn't affect CPU currently,
+        # we set this to make sure the flag can switch back to default normally.
+        out_ref = torch.linalg.inv(x.cpu())
+
+        self.assertEqual(out_ref, out1.cpu())
+        self.assertEqual(out1, out2)
 
 
 instantiate_device_type_tests(TestLinalg, globals())
