@@ -1028,7 +1028,6 @@ if __name__ == '__main__':
                 'include/torch/csrc/jit/testing/*.h',
                 'include/torch/csrc/jit/tensorexpr/*.h',
                 'include/torch/csrc/jit/tensorexpr/operators/*.h',
-                'include/torch/csrc/jit/mobile/*.h',
                 'include/torch/csrc/onnx/*.h',
                 'include/torch/csrc/profiler/*.h',
                 'include/torch/csrc/utils/*.h',
