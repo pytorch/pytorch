@@ -134,5 +134,5 @@ Args:
 rules = struct(
     cc_library = cc_library,
     cmake_configure_file = cmake_configure_file,
-    select = native.select,
+    select = select,
 )
