@@ -88,7 +88,7 @@ inline Tensor local_response_norm(
     auto dim = input_.dim();
     TORCH_CHECK(dim >=2, "Expected 2D or higher dimensionality input (got ", dim, " dimensions)");
     auto is_batched = dim > 2;
-    Tensor input = is_batched ? input_ : input.unsqueeze(0);
+    Tensor input = is_batched ? input_ : input_.unsqueeze(0);
     auto div = input.mul(input).unsqueeze(1);
     if (input.dim() == 3) {
       div = detail::pad(div, /*pad=*/{0, 0, size / 2, (size - 1) / 2}, /*mode=*/torch::kConstant, /*value=*/0);
