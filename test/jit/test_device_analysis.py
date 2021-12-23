@@ -48,8 +48,12 @@ class TestDeviceAnalysis(JitTestCase):
 
         torch._C._jit_pass_propagate_device(graph)
 
-    def assert_device_equal(self, fn, in_devices, expected_device, in_shapes=None, subtest_str=""):
-        with self.subTest(f"In device: {in_devices}, expected: {expected_device}, \n {subtest_str}"):
+    def assert_device_equal(
+        self, fn, in_devices, expected_device, in_shapes=None, subtest_str=""
+    ):
+        with self.subTest(
+            f"In device: {in_devices}, expected: {expected_device}, \n {subtest_str}"
+        ):
             graph = torch.jit.script(fn).graph
             self.prop_device_on_graph(graph, in_devices, in_shapes)
             actual_device = self.node_output_device(graph)
@@ -57,7 +61,9 @@ class TestDeviceAnalysis(JitTestCase):
             if expected_device is None or actual_device is None:
                 self.assertEqual(actual_device, expected_device)
             else:
-                self.assertEqual(actual_device.type, expected_device.type, "Failed Verification")
+                self.assertEqual(
+                    actual_device.type, expected_device.type, "Failed Verification"
+                )
 
     def test_device_apply(self):
         # Test if the device is properly applied to the input
@@ -96,6 +102,29 @@ class TestDeviceAnalysis(JitTestCase):
 
         for in_device in self.device_types:
             self.assert_device_equal(set_device, [in_device, None], None)
+
+    def test_tensor_as_fns(self):
+        def view_as_fn(x, y):
+            return x.view_as(y)
+
+        def expand_as_fn(x, y):
+            return x.expand_as(y)
+
+        def reshape_as_fn(x, y):
+            return x.reshape_as(y)
+
+        for test_fn in [view_as_fn, expand_as_fn, reshape_as_fn]:
+            self.assert_device_equal(test_fn, [self.cpu, self.cpu], self.cpu)
+            self.assert_device_equal(test_fn, [self.cuda, None], self.cuda)
+            self.assert_device_equal(test_fn, [None, self.mkldnn], None)
+
+        def type_as_fn(x, y):
+            return x.type_as(y)
+
+        self.assert_device_equal(type_as_fn, [self.cpu, self.cpu], self.cpu)
+        self.assert_device_equal(type_as_fn, [self.cuda, None], None)
+        self.assert_device_equal(type_as_fn, [None, self.mkldnn], self.mkldnn)
+
 
     def zerodim_test_core(self, device_pairs):
         # Test the support of zerodim tensors with non-zerodim tensors
@@ -193,3 +222,44 @@ class TestDeviceAnalysis(JitTestCase):
         self.assert_device_equal(test_fn, [self.cpu, None], None)
         self.assert_device_equal(test_fn, [self.cuda, None], self.cuda)
         self.assert_device_equal(test_fn, [None, None], None)
+
+    def test_while_change(self):
+        def test_fn(x, z: int):
+            while z > 0:
+                x = x.cuda()
+                z = 0
+            return x
+
+        self.assert_device_equal(test_fn, [self.cpu, None], None)
+        self.assert_device_equal(test_fn, [self.cuda, None], self.cuda)
+        self.assert_device_equal(test_fn, [None, None], None)
+
+    def test_nested_loops(self):
+        def test_fn(x, z: int):
+            for i in range(z):
+                x = x.cpu()
+                for _ in range(i):
+                    x = x + 1
+
+            return x
+
+        self.assert_device_equal(test_fn, [self.cpu, None], self.cpu)
+        self.assert_device_equal(test_fn, [self.cuda, None], None)
+        self.assert_device_equal(test_fn, [None, None], None)
+
+    def test_if_loop_mix(self):
+        def test_fn(x, y, z: bool, a: bool):
+            c = x
+            while a:
+                if z:
+                    c = x + 3
+                else:
+                    c = y * 2
+                a = False
+            return c
+
+        self.assert_device_equal(test_fn, [self.cpu, self.cpu, None, None], self.cpu)
+        self.assert_device_equal(
+            test_fn, [self.mkldnn, self.mkldnn, None, None], self.mkldnn
+        )
+        self.assert_device_equal(test_fn, [self.cpu, self.cuda, None, None], None)
