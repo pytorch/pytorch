@@ -241,7 +241,7 @@ class TestMkldnn(TestCase):
     def test_conv3d(self):
         self._test_conv_base(dim=3)
 
-    def test_conv2d_nhwc(self):
+    def _test_conv2d_nhwc_base(self, dtype):
         conv_module = torch.nn.Conv2d
         input_shapes = (224, 224)
         options = itertools.product([True, False], [True, False], [1, 2], [1, 4])
@@ -250,7 +250,7 @@ class TestMkldnn(TestCase):
             M = torch.randint(1, 3, (1,)).item() * groups
             C = torch.randint(1, 3, (1,)).item() * groups
             x_shape = (N, C) + input_shapes
-            x = torch.randn(x_shape, dtype=torch.float32)
+            x = torch.randn(x_shape, dtype=dtype)
             # conv1: mkldnn conv2d in contiguous memory format (nchw)
             # conv2: mkldnn conv2d in channels last memory format (nhwc)
             conv1 = conv_module(in_channels=C,
@@ -260,7 +260,7 @@ class TestMkldnn(TestCase):
                                 padding=1,
                                 dilation=dilation,
                                 bias=bias,
-                                groups=groups).float()
+                                groups=groups).to(dtype=dtype)
             conv2 = copy.deepcopy(conv1).to(memory_format=torch.channels_last)
             x1 = x.clone()
             x2 = x.clone().to(memory_format=torch.channels_last)
@@ -281,6 +281,15 @@ class TestMkldnn(TestCase):
                 if bias:
                     self.assertEqual(conv1.bias.grad, conv2.bias.grad)
                 self.assertEqual(x1.grad, x2.grad)
+
+    def test_conv2d_nhwc(self):
+        self._test_conv2d_nhwc_base(dtype=torch.float32)
+
+    @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
+    def test_conv2d_nhwc_bf16(self):
+        # when has_bf16_support() returns false, bf16 CPU conv will fall back to thnn impl
+        if has_bf16_support():
+            self._test_conv2d_nhwc_base(dtype=torch.bfloat16)
 
     @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def _test_conv_bf16_base(self, dim):
