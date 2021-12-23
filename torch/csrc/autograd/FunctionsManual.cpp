@@ -4546,6 +4546,147 @@ Tensor cumprod_jvp(Tensor self_t, Tensor self_p, Tensor result, int dim) {
   }
 }
 
+Tensor batch_norm_jvp(
+    const Tensor& input_p, const Tensor& input_t,
+    const Tensor& weight_p, const Tensor& weight_t,
+    const Tensor& bias_p, const Tensor& bias_t,
+    const c10::optional<Tensor>& running_mean,
+    const c10::optional<Tensor>& running_var,
+    const Tensor& saved_mean, const Tensor& saved_invstd,
+    bool train,
+    double eps) {
+  auto dims = std::vector<int64_t>{};
+  auto view_size = input_t.sizes().vec();
+  int64_t numel = 1;
+  for (const auto dim : c10::irange(view_size.size())) {
+    if (dim != 1) {
+      numel *= input_t.size(dim);
+      view_size[dim] = 1;
+      dims.push_back(dim);
+    }
+  }
+  Tensor mean_p;
+  Tensor invstd_p;
+  Tensor result_t;
+  if (train) {
+    mean_p = saved_mean.view(view_size);
+    invstd_p = saved_invstd.view(view_size);
+    auto invstd_t = -invstd_p.pow(3) * ((input_t - input_t.mean(dims, true)) * (input_p - mean_p)).sum(dims, true) / numel;
+    result_t = (input_t - input_t.mean(dims, true)) * invstd_p + (input_p - mean_p) * invstd_t;
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        running_mean.has_value() && running_var.has_value(),
+        "Expect running_mean and running_var to have value when train=true");
+
+    mean_p = running_mean.value().view(view_size);
+    invstd_p = (1 / at::sqrt(running_var.value() + at::Scalar(eps))).view(view_size);
+    result_t = input_t * invstd_p;
+  }
+
+  if (weight_p.defined()) {
+    auto result_p = (input_p - mean_p) * invstd_p;
+    result_t = result_t * weight_p.view(view_size) + result_p * weight_t.view(view_size);
+  }
+
+  if (bias_p.defined()) {
+    result_t = result_t + bias_t.view(view_size);
+  }
+
+  return result_t;
+}
+
+Tensor batch_norm_jvp_saved_var(
+    const Tensor& input_p, const Tensor& input_t,
+    const Tensor& weight_p, const Tensor& weight_t,
+    const Tensor& bias_p, const Tensor& bias_t,
+    const c10::optional<Tensor>& running_mean,
+    const c10::optional<Tensor>& running_var,
+    const Tensor& saved_mean, const Tensor& saved_var,
+    bool train,
+    double eps) {
+  auto saved_invstd = (1 / at::sqrt(saved_var + at::Scalar(eps)));
+  return batch_norm_jvp(
+      input_p, input_t, weight_p, weight_t, bias_p, bias_t, running_mean, running_var,
+      saved_mean, saved_invstd, train, eps);
+}
+
+Tensor layer_norm_jvp(
+    const Tensor& input_p, const Tensor& input_t,
+    const Tensor& weight_p, const Tensor& weight_t,
+    const Tensor& bias_p, const Tensor& bias_t,
+    const Tensor& saved_mean, const Tensor& saved_invstd,
+    IntArrayRef normalized_shape) {
+  auto dims = std::vector<int64_t>(normalized_shape.size());
+  auto view_size = input_t.sizes().vec();
+  auto view_size_affine = input_t.sizes().vec();
+
+  int64_t numel = 1;
+  for (const auto i : c10::irange(view_size.size())) {
+    if (i < view_size.size() - normalized_shape.size()) {
+      view_size_affine[i] = 1;
+    } else {
+      numel *= input_t.size(i);
+      view_size[i] = 1;
+      dims[i - view_size.size() + normalized_shape.size()] = i;
+    }
+  }
+  auto mean_p = saved_mean.view(view_size);
+  auto invstd_p = saved_invstd.view(view_size);
+  auto invstd_t = -invstd_p.pow(3) * ((input_t - input_t.mean(dims, true)) * (input_p - mean_p)).sum(dims, true) / numel;
+  auto result_t = (input_t - input_t.mean(dims, true)) * invstd_p + (input_p - mean_p) * invstd_t;
+
+  if (weight_p.defined()) {
+    auto result_p = (input_p - mean_p) * invstd_p;
+    result_t = result_t * weight_p.view(view_size_affine) + result_p * weight_t.view(view_size_affine);
+  }
+
+  if (bias_p.defined()) {
+    result_t = result_t + bias_t.view(view_size_affine);
+  }
+  return result_t;
+}
+
+Tensor group_norm_jvp(
+    const Tensor& input_p, const Tensor& input_t,
+    const Tensor& weight_p, const Tensor& weight_t,
+    const Tensor& bias_p, const Tensor& bias_t,
+    const Tensor& saved_mean, const Tensor& saved_invstd,
+    int64_t groups) {
+  auto input_shape = input_p.sizes();
+
+  int64_t N = input_p.size(0);
+  int64_t C = input_p.size(1);
+
+  auto input_t_reshaped = input_t.view({1, N * groups, N ? -1 : 1});
+  auto input_p_reshaped = input_p.view({1, N * groups, N ? -1 : 1});
+
+  auto result_t = batch_norm_jvp(
+      input_p_reshaped, input_t_reshaped,
+      /*weight_p=*/{}, /*weight_t=*/{},
+      /*bias_p=*/{}, /*bias_t=*/{},
+      /*running_mean=*/{}, /*running_var=*/{},
+      saved_mean, saved_invstd, /*train=*/true, /*eps=*/0);
+
+  result_t = result_t.view(input_shape);
+
+  std::vector<int64_t> affine_param_shape(input_p.dim(), 1);
+  affine_param_shape[1] = C;
+
+  if (weight_p.defined()) {
+    std::vector<int64_t> view_size(input_t_reshaped.dim(), 1);
+    view_size[1] = input_t_reshaped.size(1);
+    auto result_p = (input_p_reshaped - saved_mean.view(view_size)) * saved_invstd.view(view_size);
+    result_p = result_p.view(input_shape);
+    result_t = result_t * weight_p.view(affine_param_shape) + result_p * weight_t.view(affine_param_shape);
+  }
+
+  if (bias_p.defined()) {
+    result_t = result_t + bias_t.view(affine_param_shape);
+  }
+
+  return result_t;
+}
+
 Tensor gather_with_keepdimed_indices(const Tensor& input, int64_t dim, const Tensor& indices, bool keepdim) {
   auto full_indices = indices;
   if (!keepdim) {
