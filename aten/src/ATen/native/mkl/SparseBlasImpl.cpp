@@ -27,7 +27,7 @@ c10::MaybeOwned<Tensor> prepare_dense_matrix_for_mkl(
   if (tensor.is_non_overlapping_and_dense() ||
       is_blas_compatible_row_major_order(tensor) ||
       is_blas_compatible_column_major_order(tensor)) {
-    return c10::MaybeOwned<Tensor>::borrowed(tensor);
+    return at::native::expect_resolved_conj(tensor);
   } else {
     return c10::MaybeOwned<Tensor>::owned(
         tensor.clone(at::MemoryFormat::Contiguous));
@@ -45,7 +45,7 @@ c10::MaybeOwned<Tensor> prepare_dense_matrix_for_mkl(
     const Tensor& tensor,
     bool row_major) {
   if (is_blas_compatible_row_major_order(tensor) && row_major) {
-    return c10::MaybeOwned<Tensor>::borrowed(tensor);
+    return at::native::expect_resolved_conj(tensor);
   } else {
     if (row_major) {
       return c10::MaybeOwned<Tensor>::owned(
@@ -402,6 +402,80 @@ void add_out_sparse_csr(
         // now copy data from `result_desc` to `result`
         mkl_result_copy_<scalar_t>(result, result_desc);
       });
+#endif
+}
+
+void triangular_solve_out_sparse_csr(
+    const Tensor& A,
+    const Tensor& B,
+    const Tensor& X,
+    bool upper,
+    bool transpose,
+    bool unitriangular) {
+#if !AT_USE_MKL_SPARSE()
+  TORCH_CHECK(
+      false,
+      "Calling triangular_solve on a sparse CPU tensor requires Linux platform. ",
+      "Please use PyTorch built with MKL on Linux.");
+#else
+  if (B.numel() == 0 || X.numel() == 0 || A._nnz() == 0) {
+    return;
+  }
+
+  c10::MaybeOwned<Tensor> X_ = prepare_dense_matrix_for_mkl(X);
+  IntArrayRef X_strides = X_->strides();
+  auto ndim = X_->dim();
+  bool is_X_row_major = (ndim > 1) ? (X_strides[ndim - 1] == 1) : true;
+
+  // MKL requires same storage layout of matrices
+  c10::MaybeOwned<Tensor> B_ = prepare_dense_matrix_for_mkl(B, is_X_row_major);
+
+  sparse_operation_t opA = transpose ? SPARSE_OPERATION_TRANSPOSE : SPARSE_OPERATION_NON_TRANSPOSE;
+  matrix_descr descrA;
+  descrA.type = SPARSE_MATRIX_TYPE_TRIANGULAR;
+  descrA.mode = upper ? SPARSE_FILL_MODE_UPPER : SPARSE_FILL_MODE_LOWER;
+  descrA.diag = unitriangular ? SPARSE_DIAG_UNIT : SPARSE_DIAG_NON_UNIT;
+
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+      X.scalar_type(), "triangular_solve_out_sparse_csr_impl_mkl", [&] {
+        auto mkl_sparse_mat =
+            at::mkl::sparse::MklSparseCsrDescriptor<scalar_t>(A);
+        scalar_t alpha = 1;
+
+        if (B.size(-1) == 1) {
+          at::mkl::sparse::trsv<scalar_t>(
+              opA,
+              alpha,
+              mkl_sparse_mat.descriptor(),
+              descrA,
+              B_->data_ptr<scalar_t>(),
+              X_->data_ptr<scalar_t>());
+        } else {
+          IntArrayRef B_strides = B_->strides();
+          bool is_B_row_major = (B_strides[ndim - 1] == 1);
+          TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!(is_X_row_major ^ is_B_row_major));
+
+          auto order = is_X_row_major ? SPARSE_LAYOUT_ROW_MAJOR : SPARSE_LAYOUT_COLUMN_MAJOR;
+          auto nrhs = mkl_int_cast(B.size(-1), "nrhs");
+          auto ldx = is_X_row_major ? X_strides[ndim - 2] : X_strides[ndim - 1];
+          auto ldb = is_B_row_major ? B_strides[ndim - 2] : B_strides[ndim - 1];
+          at::mkl::sparse::trsm<scalar_t>(
+              opA,
+              alpha,
+              mkl_sparse_mat.descriptor(),
+              descrA,
+              order,
+              B_->data_ptr<scalar_t>(),
+              nrhs,
+              ldb,
+              X_->data_ptr<scalar_t>(),
+              ldx);
+        }
+      });
+
+  if (!X.is_same(*X_)) {
+    X.copy_(*X_);
+  }
 #endif
 }
 

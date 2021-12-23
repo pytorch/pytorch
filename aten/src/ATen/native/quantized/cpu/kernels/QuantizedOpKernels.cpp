@@ -563,33 +563,6 @@ void qrelu_kernel(const Tensor& qx, Tensor& qy) {
   });
 }
 
-void qrelu6_kernel(const Tensor& qx, Tensor& qy) {
-  const auto zero_point = qx.q_zero_point();
-  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qrelu6", [&]() {
-    qy = at::_empty_affine_quantized(
-        qx.sizes(),
-        // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
-        at::device(kCPU).dtype(SCALAR_TYPE).memory_format(qx.suggest_memory_format()),
-        qx.q_scale(),
-        qx.q_zero_point(),
-        c10::nullopt);
-    using Vec = Vectorized<scalar_t>;
-    auto iter = TensorIterator::unary_op(qy, qx);
-    scalar_t six = at::native::quantize_val<scalar_t>(
-        qx.q_scale(), qx.q_zero_point(), 6.0);
-    auto zero_point_vec = Vec(scalar_t(zero_point));
-    auto six_vec = Vec(six);
-    cpu_kernel_vec(
-        iter,
-        [&](scalar_t value) -> scalar_t {
-          underlying_t relu_val =
-              std::max<underlying_t>(value.val_, zero_point);
-          return scalar_t(std::min<underlying_t>(relu_val, six.val_));
-        },
-        [&](Vec val) -> Vec { return val.relu6(zero_point_vec, six_vec); });
-  });
-}
-
 static void leaky_qrelu_out_kernel(Tensor& out, const Tensor& qx,
                                    const Scalar& negval_) {
   int64_t i_zp = qx.q_zero_point();
@@ -3501,7 +3474,6 @@ REGISTER_NO_AVX512_DISPATCH(qhardswish_stub, qhardswish_fn);
 REGISTER_NO_AVX512_DISPATCH(qmaxpool_2d_nhwc_stub, qmaxpool_2d_fn);
 REGISTER_NO_AVX512_DISPATCH(qmul_relu_stub, qbinary_fn);
 REGISTER_NO_AVX512_DISPATCH(qmul_stub, qbinary_fn);
-REGISTER_NO_AVX512_DISPATCH(qrelu6_stub, qrelu_fn);
 REGISTER_NO_AVX512_DISPATCH(qrelu_leaky_stub, qrelu_leaky_fn);
 REGISTER_NO_AVX512_DISPATCH(qrelu_stub, qrelu_fn);
 REGISTER_NO_AVX512_DISPATCH(qsigmoid_stub, qsigmoid_fn);
@@ -3559,7 +3531,6 @@ REGISTER_DISPATCH(qhardswish_stub, &qhardswish_kernel);
 REGISTER_DISPATCH(qmaxpool_2d_nhwc_stub, &qmaxpool_2d_nhwc_kernel);
 REGISTER_DISPATCH(qmul_relu_stub, &qmul_kernel<true>);
 REGISTER_DISPATCH(qmul_stub, &qmul_kernel<false>);
-REGISTER_DISPATCH(qrelu6_stub, &qrelu6_kernel);
 REGISTER_DISPATCH(qrelu_leaky_stub, &leaky_qrelu_out_kernel);
 REGISTER_DISPATCH(qrelu_stub, &qrelu_kernel);
 REGISTER_DISPATCH(qsigmoid_stub, &qsigmoid_kernel);

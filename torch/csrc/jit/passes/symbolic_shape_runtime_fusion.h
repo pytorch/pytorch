@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <unordered_map>
@@ -25,7 +25,13 @@ namespace jit {
 // shape propagation fails to propagate # of dims or if complete shapes on
 // inputs not set
 
-TORCH_API bool GenerateGuard(Node* tensorexpr_graph_node);
+TORCH_API bool GenerateGuard(
+    Node* tensorexpr_graph_node,
+    bool add_composed_op = false);
+
+TORCH_API void runTensorExprDynamicGroup(
+    std::shared_ptr<Graph> graph,
+    Stack& stack);
 
 } // namespace jit
 } // namespace torch

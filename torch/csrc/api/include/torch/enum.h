@@ -6,7 +6,7 @@
 #include <ATen/native/Activation.h>
 #include <c10/util/Exception.h>
 #include <c10/util/variant.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 #define TORCH_ENUM_DECLARE(name) \
 namespace torch { \
@@ -123,6 +123,7 @@ TORCH_ENUM_DECLARE(Bilinear)
 TORCH_ENUM_DECLARE(Bicubic)
 TORCH_ENUM_DECLARE(Trilinear)
 TORCH_ENUM_DECLARE(Area)
+TORCH_ENUM_DECLARE(NearestExact)
 TORCH_ENUM_DECLARE(Sum)
 TORCH_ENUM_DECLARE(Mean)
 TORCH_ENUM_DECLARE(Max)
@@ -167,6 +168,7 @@ struct _compute_enum_name {
   TORCH_ENUM_PRETTY_PRINT(Bicubic)
   TORCH_ENUM_PRETTY_PRINT(Trilinear)
   TORCH_ENUM_PRETTY_PRINT(Area)
+  TORCH_ENUM_PRETTY_PRINT(NearestExact)
   TORCH_ENUM_PRETTY_PRINT(Sum)
   TORCH_ENUM_PRETTY_PRINT(Mean)
   TORCH_ENUM_PRETTY_PRINT(Max)

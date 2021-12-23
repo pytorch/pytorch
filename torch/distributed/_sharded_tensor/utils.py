@@ -1,6 +1,6 @@
 import collections.abc
 from contextlib import contextmanager
-from typing import Optional, List, Tuple, Sequence
+from typing import Optional, List, Sequence
 
 import torch
 from torch.distributed import distributed_c10d
@@ -34,6 +34,17 @@ def load_with_process_group(process_group):
         yield process_group
     finally:
         _CURRENT_PROCESS_GROUP = None
+
+def get_current_process_group():
+    """
+    Retrieves the current process group set by ``load_with_process_group``.
+    If not set, it just returns the default group.
+    """
+    global _CURRENT_PROCESS_GROUP
+    if _CURRENT_PROCESS_GROUP is None:
+        return distributed_c10d._get_default_group()
+    else:
+        return _CURRENT_PROCESS_GROUP
 
 def _parse_and_validate_remote_device(pg, remote_device):
 
@@ -117,11 +128,10 @@ def build_metadata_from_local_shards(
     global_size: List[int],
     current_rank: int,
     pg: distributed_c10d.ProcessGroup
-) -> Tuple[ShardedTensorMetadata, torch.device]:
+) -> ShardedTensorMetadata:
 
     assert len(local_shards) > 0, "must have local shards!"
     local_shard_metadatas: List[ShardMetadata] = []
-    local_shards_device = torch.device("cpu")
 
     first_shard_dtype = local_shards[0].tensor.dtype
     first_shard_layout = local_shards[0].tensor.layout
@@ -134,7 +144,6 @@ def build_metadata_from_local_shards(
         local_shard_meta = local_shard.metadata
         local_shard_metadatas.append(local_shard_meta)
         rank, local_device = _parse_and_validate_remote_device(pg, local_shard_meta.placement)
-        local_shards_device = local_device
 
         if local_shard_tensor.layout != torch.strided or local_shard_tensor.layout != first_shard_layout:
             raise ValueError(
@@ -178,7 +187,7 @@ def build_metadata_from_local_shards(
         size=torch.Size(global_size),
         tensor_properties=local_tensor_properties)
 
-    return (local_sharded_tensor_metadata, local_shards_device)
+    return local_sharded_tensor_metadata
 
 
 def build_global_metadata(gathered_metadatas: Sequence[Optional[ShardedTensorMetadata]]):

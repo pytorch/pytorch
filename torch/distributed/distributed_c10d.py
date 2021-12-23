@@ -123,7 +123,7 @@ class Backend(object):
         elif value == Backend.UNDEFINED:
             raise ValueError("Invalid backend: '{}'".format(name))
         elif value != Backend.GLOO and value != Backend.NCCL and value != Backend.MPI:
-            value = name
+            value = name.lower()
         return value
 
     @classmethod
@@ -1819,7 +1819,7 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
         >>> # Assumes backend is not NCCL
         >>> device = torch.device("cpu")
         >>> dist.broadcast_object_list(objects, src=0, device=device)
-        >>> broadcast_objects
+        >>> objects
         ['foo', 12, {1: 2}]
     """
     if _rank_not_in_group(group):

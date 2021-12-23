@@ -15,6 +15,7 @@ import random
 import model_defs.word_language_model as word_language_model
 import onnx
 
+import torch.nn.functional as F
 from torch.nn.utils import rnn as rnn_utils
 from model_defs.lstm_flattening_result import (LstmFlatteningResultWithSeqLength,
                                                LstmFlatteningResultWithoutSeqLength)
@@ -6458,6 +6459,19 @@ class TestONNXRuntime(unittest.TestCase):
         model = MyModule()
         self.run_test(model, (x, y))
 
+    # ONNX supports bfloat16 for opsets >= 13
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_cast_type_as_with_bfloat16(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                y = torch.ones((3, 4), dtype=torch.bfloat16)
+                x = x.type_as(y)
+                return x.to(dtype=torch.float16)
+
+        x = torch.ones(3, 4, dtype=torch.float16)
+        model = MyModule()
+        self.run_test(model, x)
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_type_as(self):
         class MyModule(torch.nn.Module):
@@ -10145,6 +10159,27 @@ class TestONNXRuntime(unittest.TestCase):
                     return torch.zeros(5), torch.zeros(5)
         x = torch.zeros(1)
         self.run_test(torch.jit.script(M()), (x,))
+
+    def test_shape_value_map(self):
+        class RSoftMax(torch.nn.Module):
+            def __init__(self, radix, cardinality):
+                super().__init__()
+                self.radix = radix
+                self.cardinality = cardinality
+
+            def forward(self, x):
+                batch = x.size(0)
+                x = x.view(batch, self.cardinality, self.radix, -1).transpose(1, 2)
+                x = F.softmax(x, dim=1)
+                x = x.reshape(batch, -1)
+                return x
+        radix = 2
+        cardinality = 1
+        x = torch.randn(10, 1, 128, 1)
+        f = io.BytesIO()
+        torch.onnx.export(RSoftMax(radix, cardinality), (x, ), f, input_names=["x"], dynamic_axes={"x": [0]})
+        loaded_model = onnx.load_from_string(f.getvalue())
+        self.assertEqual(loaded_model.graph.output[0].type.tensor_type.shape.dim[1].dim_value, 128)
 
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout, script_test_min_opset_version,
