@@ -67,9 +67,7 @@ def if_rocm_is_configured(x):
 # Forked from header_template_rule. header_template_rule is not
 # compatible with our usage of select because its substitutions
 # attribute is a dict, and dicts may not be appended with select. We
-# get around this limitation by using a list as our substitutions. As
-# such, we hardcode substitution semantics such that #define will be
-# defined and #undef will be commented out.
+# get around this limitation by using a list as our substitutions.
 def _cmake_configure_file_impl(ctx):
     command = ["cat $1"]
     for definition in ctx.attr.definitions:
@@ -118,15 +116,15 @@ Args:
   definitions: A mapping of identifier in template to its value.
 """,
     attrs = {
+        # We use attr.string_list for compatibility with select and
+        # config_setting. See the comment above _cmake_configure_file_impl
+        # for more information.
+        "definitions": attr.string_list(mandatory = True),
         "out": attr.output(mandatory = True),
         "src": attr.label(
             mandatory = True,
             allow_single_file = True,
         ),
-        # We use attr.string_list for compatibility with select and
-        # config_setting. See the comment above _header_template_impl
-        # for more information.
-        "definitions": attr.string_list(mandatory = True),
     },
     # output_to_genfiles is required for header files.
     output_to_genfiles = True,
