@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from functools import partial, wraps
 import warnings
 import unittest
+import itertools
 
 import torch
 
@@ -1165,8 +1166,7 @@ class TestMathBits(TestCase):
     # This test only runs for C -> R and C -> C functions
     # TODO: add tests for `R->C` functions
     # Note: This test runs for functions that take both tensors and tensorlists as input.
-    def _test_math_view(self, device, dtype, op, _requires_grad, math_op_physical, math_op_view, is_bit_set, out_type):
-        samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad)
+    def _test_math_view(self, device, dtype, op, samples, math_op_physical, math_op_view, is_bit_set, out_type):
         inplace_variant = op.inplace_variant
 
         # helper function to clone and conjugate/negate the input if its a tensor
@@ -1218,6 +1218,10 @@ class TestMathBits(TestCase):
             # TODO: update to handle checking grads of all tensor inputs as
             #   derived from each tensor output
             if isinstance(expected_forward, torch.Tensor) and expected_forward.requires_grad:
+                output_process_fn_grad = sample.output_process_fn_grad or (lambda x: x)
+                expected_forward = output_process_fn_grad(expected_forward)
+                forward_with_mathview = output_process_fn_grad(forward_with_mathview)
+
                 tensor = sample.input if isinstance(sample.input, torch.Tensor) else sample.input[0]
                 expected_forward.sum().backward(retain_graph=True)
                 forward_with_mathview.sum().backward(retain_graph=True)
@@ -1243,20 +1247,42 @@ class TestMathBits(TestCase):
         math_op_view = torch.conj
         _requires_grad = (op.supports_autograd and op.supports_complex_autograd(torch.device(device).type))
         is_bit_set = torch.is_conj
-        self._test_math_view(device, dtype, op, _requires_grad, math_op_physical, math_op_view, is_bit_set, torch.is_complex)
+        samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad)
+        self._test_math_view(device, dtype, op, samples, math_op_physical, math_op_view, is_bit_set, torch.is_complex)
 
     @ops(op_db, allowed_dtypes=(torch.double,))
     def test_neg_view(self, device, dtype, op):
         if not op.test_neg_view:
             self.skipTest("Operation not tested with tensors with negative bit.")
         math_op_physical = torch.neg
+        math_op_view = torch._neg_view
+        is_bit_set = torch.is_neg
+        samples = op.sample_inputs(device, dtype, requires_grad=op.supports_autograd)
+        self._test_math_view(device, dtype, op, samples, math_op_physical, math_op_view, is_bit_set,
+                             lambda x: True)
+
+    @ops(op_db, allowed_dtypes=(torch.cdouble,))
+    def test_neg_conj_view(self, device, dtype, op):
+        if not op.test_neg_view:
+            self.skipTest("Operation not tested with tensors with negative bit.")
+        if not op.test_conjugated_samples:
+            self.skipTest("Operation doesn't support conjugated inputs.")
+
+        def math_op_physical(x):
+            return -x.conj_physical()
 
         def math_op_view(x):
-            return torch.conj(x * 1j).imag
+            return torch._neg_view(x).conj()
+
+        def is_bit_set(x):
+            return torch.is_neg(x) and torch.is_conj(x)
+
         _requires_grad = (op.supports_autograd and op.supports_complex_autograd(torch.device(device).type))
-        is_bit_set = torch.is_neg
-        self._test_math_view(device, dtype, op, _requires_grad, math_op_physical, math_op_view, is_bit_set,
-                             lambda x: not torch.is_complex(x))
+        samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad)
+        # Only test one sample
+        samples = itertools.islice(samples, 1)
+        self._test_math_view(device, dtype, op, samples, math_op_physical, math_op_view, is_bit_set,
+                             torch.is_complex)
 
 
 instantiate_device_type_tests(TestCommon, globals())
