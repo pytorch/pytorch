@@ -329,7 +329,7 @@ struct VISIBILITY_HIDDEN PythonExceptionValue : public ExceptionValue {
   explicit PythonExceptionValue(const py::object& exception_class)
       : ExceptionValue(
             py::str(py::getattr(exception_class, "__name__", py::str("")))) {
-    qualified_name_ = py::str(py::module::import("torch._jit_internal")
+    exception_class_qualified_name_ = py::str(py::module::import("torch._jit_internal")
                                   .attr("_qualified_name")(exception_class));
   }
 
@@ -345,7 +345,7 @@ struct VISIBILITY_HIDDEN PythonExceptionValue : public ExceptionValue {
       size_t n_binders) override;
 
  private:
-  std::string qualified_name_;
+  std::string exception_class_qualified_name_;
 };
 
 // Python Slice class.

@@ -19,11 +19,7 @@ void raiseException(Stack& stack) {
   std::string message;
   pop(stack, message);
 
-  if (qualified_class_name) {
-    throw CustomJITException(message, *qualified_class_name);
-  } else {
-    throw JITException(message);
-  }
+  throw JITException(message, qualified_class_name);
 }
 
 void is(Stack& stack) {

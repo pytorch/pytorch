@@ -4,25 +4,19 @@
 
 #include <torch/csrc/Export.h>
 #include <string>
+#include <c10/util/Optional.h>
 
 namespace torch {
 namespace jit {
 
 struct TORCH_API JITException : public std::runtime_error {
-  explicit JITException(const std::string& msg);
-};
+  explicit JITException(const std::string& msg, c10::optional<std::string> python_class_name = c10::nullopt);
 
-struct TORCH_API CustomJITException : public JITException {
-  explicit CustomJITException(
-      const std::string& msg,
-      std::string python_class_name);
-
-  const std::string& getPythonClassName() const {
+  c10::optional<std::string> getPythonClassName() const {
     return python_class_name_;
   }
-
  private:
-  std::string python_class_name_;
+  c10::optional<std::string> python_class_name_; 
 };
 
 } // namespace jit

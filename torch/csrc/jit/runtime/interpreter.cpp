@@ -714,18 +714,17 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         }
         throw;
       }
-      bool is_jit_exception = dynamic_cast<JITException*>(&e);
+      auto* jit_exception = dynamic_cast<JITException*>(&e);
       // Janky af.  See https://github.com/pytorch/pytorch/issues/54612
       auto* not_implemented_error = dynamic_cast<c10::NotImplementedError*>(&e);
-      auto custom_jit_exception = dynamic_cast<CustomJITException*>(&e);
 
       c10::optional<std::string> python_class_name;
-      if (custom_jit_exception) {
-        python_class_name = custom_jit_exception->getPythonClassName();
+      if (jit_exception) {
+        python_class_name = jit_exception->getPythonClassName();
       }
       handleError(
           ExceptionMessage(e),
-          is_jit_exception,
+          (bool) jit_exception,
           not_implemented_error,
           python_class_name);
       return false;
@@ -757,11 +756,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     if (future_) {
       future_->setError(std::make_exception_ptr(Future::FutureError(ss.str())));
     } else if (is_jit_exception) {
-      if (python_class_name) {
-        throw CustomJITException(ss.str(), *python_class_name);
-      } else {
-        throw JITException(ss.str());
-      }
+      throw JITException(ss.str(), python_class_name);
     } else if (not_implemented_error) {
       throw c10::NotImplementedError(
           ss.str(),

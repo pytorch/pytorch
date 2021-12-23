@@ -29,20 +29,17 @@ TEST(TestException, TestAssertion) {
   std::cerr << "Graph is\n" << *gf->graph() << std::endl;
 
   bool is_jit_exception = false;
-  bool is_custom_jit_exception = false;
   std::string message;
+  c10::optional<std::string> exception_class;
   try {
     cu_ptr->run_method("foo");
-  } catch (CustomJITException& e) { // order matters since CustomJITException
-                                    // derives from JITException
-    is_custom_jit_exception = true;
-    message = e.what();
   } catch (JITException& e) {
     is_jit_exception = true;
     message = e.what();
+    exception_class = e.getPythonClassName();
   }
   EXPECT_TRUE(is_jit_exception);
-  EXPECT_FALSE(is_custom_jit_exception);
+  EXPECT_FALSE(exception_class);
   EXPECT_TRUE(
       message.find("RuntimeError: AssertionError: An assertion failed") !=
       std::string::npos);
@@ -141,18 +138,18 @@ TEST(TestException, TestCustomException) {
   torch::jit::GraphFunction* gf =
       (torch::jit::GraphFunction*)&cu->get_function("foo");
   std::cerr << "Graph is\n" << *gf->graph() << std::endl;
-  bool is_custom_jit_exception = false;
-  std::string exception_class;
+  bool is_jit_exception = false;
+  c10::optional<std::string> exception_class;
   std::string message;
   try {
     cu->run_method("foo");
-  } catch (CustomJITException& e) {
-    is_custom_jit_exception = true;
+  } catch (JITException& e) {
+    is_jit_exception = true;
     exception_class = e.getPythonClassName();
     message = e.what();
   }
-  EXPECT_TRUE(is_custom_jit_exception);
-  EXPECT_EQ("__main__.SimpleValueError", exception_class);
+  EXPECT_TRUE(is_jit_exception);
+  EXPECT_EQ("__main__.SimpleValueError", *exception_class);
   EXPECT_TRUE(
       message.find("__main__.SimpleValueError: An assertion failed") !=
       std::string::npos);

@@ -915,7 +915,7 @@ std::shared_ptr<SugaredValue> PythonExceptionValue::call(
             ->output();
   }
   Value* qualified_class_name =
-      insertConstant(*caller.graph(), qualified_name_, loc);
+      insertConstant(*caller.graph(), exception_class_qualified_name_, loc);
 
   return std::make_shared<ExceptionMessageValue>(
       error_message, qualified_class_name);

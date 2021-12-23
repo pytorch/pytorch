@@ -164,3 +164,11 @@ class TestException(TestCase):
 
         with self.assertRaisesRegex(torch.jit.Error, "__torch__.jit.test_exception.MyValueError: test custom exception"):
             fn()
+
+    def test_custom_python_exception_defined_elsewhere(self):
+        from jit.myexception import MyKeyError
+        @torch.jit.script
+        def fn():
+            raise MyKeyError("This is a user defined key error");
+        with self.assertRaisesRegex(torch.jit.Error, "__torch__.jit.myexception.MyKeyError: This is a user defined key error"):
+            fn()
