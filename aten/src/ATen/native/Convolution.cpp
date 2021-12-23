@@ -22,8 +22,6 @@
 #include <ATen/native/mkldnn/Utils.h>
 #endif
 
-#include <iostream>
-
 constexpr int MIOPEN_DIM_MAX = 5;
 
 namespace at { namespace native {
@@ -1124,8 +1122,6 @@ at::Tensor _convolution(
       (input.requires_grad() || weight.requires_grad() || (bias.defined() && bias.requires_grad()));
   ConvBackend backend = select_conv_backend(input, weight, bias_sizes_opt, need_backward, params);
   at::MemoryFormat backend_memory_format = determine_backend_memory_format(input, weight, backend);
-
-  std::cout << "backend: " << int(backend) << "; memory_format: " << backend_memory_format << "; input.sizes(): " << input.sizes() << std::endl;
 
   // Call the backend.
   Tensor output;
