@@ -6866,7 +6866,7 @@ class TestNN(NNTestCase):
                     input_lengths_no_bd.cuda(),
                     target_lengths_no_bd.cuda(),
                     zero_infinity=True
-                )                    
+                )
                 grad_gpu_mixed, = torch.autograd.grad(res_gpu_mixed, log_probs, grad_out.cuda())
                 grad_gpu_no_bd_mixed, = torch.autograd.grad(res_gpu_no_bd_mixed, log_probs_no_bd, grad_out.cuda())
 
