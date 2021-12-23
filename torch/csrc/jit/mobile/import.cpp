@@ -8,15 +8,16 @@
 #include <c10/util/ScopeExit.h>
 #include <c10/util/irange.h>
 #include <caffe2/serialize/inline_container.h>
+#include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/observer.h>
+#include <torch/csrc/jit/mobile/upgrader_mobile.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 #include <torch/custom_class.h>
-
 #include <exception>
 #include <fstream>
 #include <string>
@@ -202,6 +203,7 @@ class BytecodeDeserializer final {
 
  private:
   TypePtr resolveTypeName(const c10::QualifiedName& qn);
+  void init_upgrader(mobile::Function* function);
   void parseMethods(
       c10::ivalue::TupleElements&& vals,
       c10::optional<c10::ivalue::TupleElements>&& debug_handles,
@@ -298,6 +300,12 @@ void BytecodeDeserializer::parseFunctionSchema(
   }
 }
 
+void BytecodeDeserializer::init_upgrader(mobile::Function* function) {
+  for (auto& byteCodeFunctionWithOperator : getUpgraderBytecodeList()) {
+    function->append_function(byteCodeFunctionWithOperator.function);
+  }
+}
+
 void BytecodeDeserializer::parseMethods(
     c10::ivalue::TupleElements&& vals,
     c10::optional<c10::ivalue::TupleElements>&& debug_handles,
@@ -375,7 +383,7 @@ void BytecodeDeserializer::parseMethods(
       debug_handles_m_tuple =
           std::move(*std::move((*debug_handles)[i]).toTuple()).elements();
     }
-
+    init_upgrader(function.get());
     // 1. First pass all operators from models
     parseOperators(
         std::move(ops_list),
@@ -387,14 +395,18 @@ void BytecodeDeserializer::parseMethods(
     bool use_upgrader =
         (operator_version_ < caffe2::serialize::kProducedFileFormatVersion);
 
-    // 3. If upgrader is needed, change change the OP instrunction to CALL
-    // instruction (In next PR, use_upgrader will be parsed to parseInstruction
-    // function and do the actual change)
     parseInstructions(
         function_name,
         std::move(ins_list),
         debug_handles_m_tuple,
         function.get());
+
+    // 3. If upgrader is needed, change change the OP instrunction to CALL
+    // instruction (In next PR, use_upgrader will be parsed to parseInstruction
+    // function and do the actual change)
+    if (use_upgrader) {
+      applyUpgrader(function.get(), operator_version_);
+    }
 
     parseConstants(consts_list, function.get());
 
@@ -643,12 +655,12 @@ std::set<std::string> _export_operator_list(
   std::set<std::string> operator_list;
   for (Method func : module.get_methods()) {
     const Function& function = func.function();
-    const std::shared_ptr<Code> cptr = function.get_code();
+    const auto& code = function.get_code();
     // op_names below isn't a list of unique operator names. In fact
     // it can contain the same operator name many many times, so we need
     // to de-dup the list by adding all the operator names into
     // an std::set<std::string>.
-    std::vector<c10::OperatorName> const& op_names = cptr->op_names_;
+    std::vector<c10::OperatorName> const& op_names = code.op_names_;
     for (auto& op_name : op_names) {
       operator_list.insert(toString(op_name));
     }
