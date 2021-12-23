@@ -121,13 +121,14 @@ def adamw(params: List[Tensor],
           beta2: float,
           lr: float,
           weight_decay: float,
-          eps: float):
+          eps: float,
+          maximize: bool):
     r"""Functional API that performs AdamW algorithm computation.
 
     See :class:`~torch.optim.AdamW` for details.
     """
     for i, param in enumerate(params):
-        grad = grads[i]
+        grad = grads[i] if not maximize else -grads[i]
         exp_avg = exp_avgs[i]
         exp_avg_sq = exp_avg_sqs[i]
         step = state_steps[i]
