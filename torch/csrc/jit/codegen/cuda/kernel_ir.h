@@ -10,7 +10,7 @@
 #include <torch/csrc/jit/codegen/cuda/parallel_type_bitmap.h>
 
 #include <c10/util/Optional.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 #include <cstdint>
 #include <string>
@@ -58,6 +58,7 @@ class UpdateMagicZero;
 class ForLoop;
 class IfThenElse;
 class GridReduction;
+class GridBroadcast;
 class GridWelford;
 
 // Expr container
@@ -161,6 +162,9 @@ class TORCH_CUDA_CU_API IrVisitor : public PolymorphicBase {
   virtual void visit(const GridReduction* node) {
     unhandled(node);
   }
+  virtual void visit(const GridBroadcast* node) {
+    unhandled(node);
+  }
   virtual void visit(const GridWelford* node) {
     unhandled(node);
   }
@@ -244,7 +248,9 @@ class TORCH_CUDA_CU_API MutableIrVisitor : public PolymorphicBase {
   virtual void visit(GridReduction* node) {
     unhandled(node);
   }
-
+  virtual void visit(GridBroadcast* node) {
+    unhandled(node);
+  }
   virtual void visit(GridWelford* node) {
     unhandled(node);
   }
@@ -706,6 +712,10 @@ class TORCH_CUDA_CU_API IterDomain final : public Val {
     return iterType() == IterType::Gather;
   }
 
+  bool isStride() const {
+    return iterType() == IterType::Stride;
+  }
+
   bool isParallelized() const {
     return parallelType() != ParallelType::Serial;
   }
@@ -816,6 +826,7 @@ class TORCH_CUDA_CU_API TensorDomain final : public Val {
   bool hasBlockReduction() const;
   bool hasGridReduction() const;
   bool hasBlockBroadcast() const;
+  bool hasGridBroadcast() const;
   bool hasBroadcast() const;
   bool hasRFactor() const;
   bool hasVectorize() const;
@@ -1045,12 +1056,6 @@ class TORCH_CUDA_CU_API ReductionOp final : public Expr {
     return operation_;
   }
 
-  std::unordered_map<ParallelType, IterDomain*, TypeHash>
-  getParallelReductionDomains() const;
-
- private:
-  std::vector<IterDomain*> getReductionDomains() const;
-
  private:
   const BinaryOpType operation_;
   Val* const init_ = nullptr;
@@ -1125,12 +1130,6 @@ class TORCH_CUDA_CU_API WelfordOp final : public Expr {
   Val* inN() const {
     return in_N_;
   }
-
-  std::unordered_map<ParallelType, IterDomain*, TypeHash>
-  getParallelReductionDomains() const;
-
- private:
-  std::vector<IterDomain*> getReductionDomains() const;
 
  private:
   Val* const out_var_;
@@ -1568,8 +1567,6 @@ class TORCH_CUDA_CU_API IfThenElse final : public Expr {
 //! reduction and sync buffers.
 class TORCH_CUDA_CU_API GridReduction final : public Expr {
  public:
-  explicit GridReduction(Passkey passkey, ReductionOp* reduction_op);
-
   void accept(IrVisitor* visitor) const override {
     visitor->visit(this);
   }
@@ -1604,9 +1601,6 @@ class TORCH_CUDA_CU_API GridReduction final : public Expr {
     thread_predicate_ = thread_predicate;
   }
 
-  static std::string getPredicateFlagName(const TensorView* val);
-  static std::string getPredicateFlagName(const fuser::cuda::TensorView* val);
-
  private:
   ReductionOp* reduction_op_ = nullptr;
   Allocate* reduction_buffer_ = nullptr;
@@ -1615,6 +1609,51 @@ class TORCH_CUDA_CU_API GridReduction final : public Expr {
   // use them, the thread predicate is held here separately from
   // Expr::predicate_.
   ParallelTypeBitmap thread_predicate_;
+};
+
+//! Grid broadcast operation
+//!
+//! This node is used only after lowering a fusion to explicitly mark a grid
+//! broadcast and the buffer allocation needed to do it.
+//!
+//! This node provides FusionExecutor the information it needs to allocate the
+//! broadcast and sync buffers.
+class TORCH_CUDA_CU_API GridBroadcast final : public Expr {
+ public:
+  void accept(IrVisitor* visitor) const override {
+    visitor->visit(this);
+  }
+
+  void accept(MutableIrVisitor* visitor) override {
+    visitor->visit(this);
+  }
+
+  GridBroadcast(
+      Passkey passkey,
+      BroadcastOp* broadcast_op,
+      Allocate* broadcast_buffer,
+      Allocate* sync_buffer)
+      : Expr(passkey),
+        broadcast_op_(broadcast_op),
+        broadcast_buffer_(broadcast_buffer),
+        sync_buffer_(sync_buffer){};
+
+  BroadcastOp* broadcast_op() const {
+    return broadcast_op_;
+  }
+
+  Allocate* broadcast_buffer() const {
+    return broadcast_buffer_;
+  }
+
+  Allocate* sync_buffer() const {
+    return sync_buffer_;
+  }
+
+ private:
+  BroadcastOp* broadcast_op_ = nullptr;
+  Allocate* broadcast_buffer_ = nullptr;
+  Allocate* sync_buffer_ = nullptr;
 };
 
 //! Grid welford operation
@@ -1669,9 +1708,6 @@ class TORCH_CUDA_CU_API GridWelford final : public Expr {
   void setThreadPredicate(const ParallelTypeBitmap& thread_predicate) {
     thread_predicate_ = thread_predicate;
   }
-
-  static std::string getPredicateFlagName(const TensorView* val);
-  static std::string getPredicateFlagName(const fuser::cuda::TensorView* val);
 
  private:
   WelfordOp* welford_op_ = nullptr;

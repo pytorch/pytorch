@@ -46,7 +46,9 @@ def _swap_ff_with_fxff(model: torch.nn.Module) -> None:
 
 
 def _fuse_fx(
-    graph_module: GraphModule, fuse_custom_config_dict: Optional[Dict[str, Any]] = None
+    graph_module: GraphModule,
+    fuse_custom_config_dict: Optional[Dict[str, Any]] = None,
+    backend_config_dict: Optional[Dict[str, Any]] = None,
 ) -> GraphModule:
     r""" Internal helper function to fuse modules in preparation for quantization
 
@@ -55,7 +57,7 @@ def _fuse_fx(
     """
     _check_is_graph_module(graph_module)
     fuser = Fuser()
-    return fuser.fuse(graph_module, fuse_custom_config_dict)
+    return fuser.fuse(graph_module, fuse_custom_config_dict, backend_config_dict)
 
 
 class Scope(object):
@@ -176,6 +178,7 @@ def _prepare_fx(
     equalization_qconfig_dict: Optional[Dict[str, Any]] = None,
     backend_config_dict: Optional[Dict[str, Any]] = None,
     is_standalone_module: bool = False,
+    is_qat: bool = False,
 ) -> ObservedGraphModule:
     r""" Internal helper function for prepare_fx
     Args:
@@ -231,7 +234,7 @@ forward graph of the parent module,
     graph_module = GraphModule(model, tracer.trace(model))
     for attr_name in preserved_attributes:
         setattr(graph_module, attr_name, getattr(model, attr_name))
-    graph_module = _fuse_fx(graph_module, prepare_custom_config_dict)
+    graph_module = _fuse_fx(graph_module, prepare_custom_config_dict, backend_config_dict)
     prepared = prepare(
         graph_module,
         qconfig_dict,
@@ -240,6 +243,7 @@ forward graph of the parent module,
         equalization_qconfig_dict=equalization_qconfig_dict,
         backend_config_dict=backend_config_dict,
         is_standalone_module=is_standalone_module,
+        is_qat=is_qat,
     )
 
     for attr_name in preserved_attributes:
@@ -252,6 +256,7 @@ def _prepare_standalone_module_fx(
     qconfig_dict: Any,
     prepare_custom_config_dict: Optional[Dict[str, Any]] = None,
     backend_config_dict: Optional[Dict[str, Any]] = None,
+    is_qat: bool = False,
 ) -> GraphModule:
     r""" [Internal use only] Prepare a standalone module, so that it can be used when quantizing the
     parent module.
@@ -281,6 +286,7 @@ def _prepare_standalone_module_fx(
         prepare_custom_config_dict,
         backend_config_dict,
         is_standalone_module=True,
+        is_qat=is_qat,
     )
 
 
@@ -503,6 +509,7 @@ def prepare_fx(
         prepare_custom_config_dict,
         equalization_qconfig_dict,
         backend_config_dict,
+        is_qat=False,
     )
 
 
@@ -550,6 +557,7 @@ def prepare_qat_fx(
         qconfig_dict,
         prepare_custom_config_dict,
         backend_config_dict=backend_config_dict,
+        is_qat=True,
     )
 
 
