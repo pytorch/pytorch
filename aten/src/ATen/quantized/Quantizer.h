@@ -18,6 +18,16 @@
 
 namespace at {
 
+namespace {
+  void checkPerTensorQScheme(QScheme qscheme) {
+    TORCH_CHECK(qscheme == kPerTensorAffine || qscheme == kPerTensorSymmetric);
+  }
+
+  void checkPerChannelQScheme(QScheme qscheme) {
+    TORCH_CHECK(qscheme == kPerChannelAffine || qscheme == kPerChannelSymmetric);
+  }
+}
+
 /**
  * UniformQuantizer is the parent class for all uniform quantizers.
  * These quantization scheme will map float value uniformly to
@@ -48,7 +58,9 @@ struct TORCH_API PerTensorQuantizer : public UniformQuantizer {
     : UniformQuantizer(scalar_type),
         scale_(scale),
         zero_point_(zero_point),
-        qscheme_(qscheme) {}
+        qscheme_(qscheme) {
+          checkPerTensorQScheme(qscheme);
+        }
 
   Tensor quantize(const Tensor& tensor) override;
   Tensor dequantize(const Tensor& qtensor) override;
@@ -106,7 +118,9 @@ struct TORCH_API PerChannelQuantizer : public UniformQuantizer {
         scales_(scales),
         zero_points_(zero_points),
         axis_(axis),
-        qscheme_(qscheme) {}
+        qscheme_(qscheme) {
+          checkPerChannelQScheme(qscheme);
+        }
 
   QScheme qscheme() const override {
     return qscheme_;
