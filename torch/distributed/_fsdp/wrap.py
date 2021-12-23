@@ -112,12 +112,12 @@ def wrap(module: nn.Module, **wrap_overrides: Any) -> nn.Module:
     a module to be initialized both with and without a wrapper without code
     change.
 
-    Both wrapper_cls and wrapper_config can be taken from 3 sources with
-    increasing priority:
-
-        1. ConfigAutoWrap's context
-        2. module.wrapper_config
-        3. wrap_overrides argument of this function
+    The class that this function wraps the passed in ``nn.Module`` with is the
+    passed in ``wrapper_cls`` argument into ``enable_wrap``. Both
+    ``enable_wrap`` and ``wrap`` can take in kwargs specifying how to construct
+    the ``wrapper_cls`` instance. In the case of duplicate kwargs in
+    ``enable_wrap`` and ``wrap``, the argument passed into ``wrap`` will be
+    respected.
 
     Usage::
 
@@ -132,36 +132,19 @@ def wrap(module: nn.Module, **wrap_overrides: Any) -> nn.Module:
     """
     if ConfigAutoWrap.in_autowrap_context:
         assert ConfigAutoWrap.wrapper_cls is not None
-        # Construct according to priority for BC
-        module_overrides = {}  # type: ignore[var-annotated]
-        if hasattr(module, "wrapper_config"):
-            module_overrides = module.wrapper_config  # type: ignore[assignment]
-            assert isinstance(module_overrides, dict)
-        wrap_overrides = {**ConfigAutoWrap.kwargs, **module_overrides, **wrap_overrides}
+
+        wrap_overrides = {**ConfigAutoWrap.kwargs, **wrap_overrides}
         return _wrap(
             module,
             ConfigAutoWrap.wrapper_cls,
-            # Already passing in any module overrides
-            check_module_overrides=False,
             **wrap_overrides,
         )
     return module
 
 
-def _wrap(module: nn.Module, wrapper_cls: Callable, check_module_overrides: bool = True, **kwargs) -> nn.Module:
-    module_overrides = {}  # type: ignore[var-annotated]
-    # We need check_module_overrides flag to support backward compat with
-    # ConfigAutoWrap.wrap, which uses the kwargs priority order of:
-    # kwargs passed into config auto wrap, then module.wrapper_config kwargs,
-    # then kwargs passed into wrap(), from least to highest precedence. Thus,
-    # ConfigAutoWrap.wrap constructs according to this priority and skips
-    # below logic by passing check_module_overrides=False.
-    if check_module_overrides and hasattr(module, "wrapper_config"):
-        module_overrides = module.wrapper_config  # type: ignore[assignment]
-        assert isinstance(module_overrides, dict)
-    wrap_overrides = {**kwargs, **module_overrides}
+def _wrap(module: nn.Module, wrapper_cls: Callable, **kwargs) -> nn.Module:
     assert wrapper_cls is not None
-    return wrapper_cls(module, **wrap_overrides)
+    return wrapper_cls(module, **kwargs)
 
 
 def _recursive_wrap(
