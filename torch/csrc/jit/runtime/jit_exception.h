@@ -16,7 +16,7 @@ struct TORCH_API JITException : public std::runtime_error {
     return python_class_name_;
   }
  private:
-  c10::optional<std::string> python_class_name_; 
+  c10::optional<std::string> python_class_name_;
 };
 
 } // namespace jit
