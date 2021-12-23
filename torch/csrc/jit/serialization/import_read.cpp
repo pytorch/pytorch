@@ -48,8 +48,8 @@ IValue readArchiveAndTensors(
       std::move(read_record),
       device,
       false,
-      storage_context,
-      type_parser);
+      type_parser,
+      storage_context);
   unpickler.set_version(stream_reader.version());
   return unpickler.parse_ivalue();
 }

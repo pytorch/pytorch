@@ -8,11 +8,10 @@ namespace torch {
 namespace jit {
 
 // Parse Success cases
-TEST(MobileTypeParserTest, RoundTripAnnotationStr) {
+TEST(MobileTypeParserTest, Int) {
   std::string int_ps("int");
   auto int_tp = c10::parseType(int_ps);
-  std::string int_tps = int_tp->annotation_str();
-  ASSERT_EQ(int_ps, int_tps);
+  EXPECT_EQ(*int_tp, *IntType::get());
 }
 
 TEST(MobileTypeParserTest, NestedContainersAnnotationStr) {
@@ -39,8 +38,10 @@ TEST(MobileTypeParserTest, TorchBindClass) {
 TEST(MobileTypeParserTest, ListOfTorchBindClass) {
   std::string tuple_ps("List[__torch__.torch.classes.rnn.CellParamsBase]");
   auto tuple_tp = c10::parseType(tuple_ps);
-  std::string tuple_tps = tuple_tp->annotation_str();
-  ASSERT_EQ(tuple_ps, tuple_tps);
+  EXPECT_TRUE(tuple_tp->isSubtypeOf(AnyListType::get()));
+  EXPECT_EQ(
+      "__torch__.torch.classes.rnn.CellParamsBase",
+      tuple_tp->containedType(0)->annotation_str());
 }
 
 TEST(MobileTypeParserTest, NestedContainersAnnotationStrWithSpaces) {
@@ -92,7 +93,9 @@ TEST(MobileTypeParserTest, DictNestedNamedTupleTypeList) {
   std::string type_str_2(
       "Dict[str, __torch__.base_models.preproc_types.PreprocOutputType]");
   std::vector<std::string> type_strs = {type_str_1, type_str_2};
-  EXPECT_NO_THROW(c10::parseType(type_strs));
+  std::vector<c10::TypePtr> named_tuple_tps = c10::parseType(type_strs);
+  EXPECT_EQ(*named_tuple_tps[1]->containedType(0), *c10::StringType::get());
+  EXPECT_EQ(*named_tuple_tps[0], *named_tuple_tps[1]->containedType(1));
 }
 
 TEST(MobileTypeParserTest, NamedTupleNestedNamedTupleTypeList) {

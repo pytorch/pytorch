@@ -147,7 +147,9 @@ c10::IValue BytecodeDeserializer::readArchive(
       std::move(obj_loader),
       std::move(read_record),
       // NOLINTNEXTLINE(performance-move-const-arg)
-      std::move(device));
+      std::move(device),
+      false,
+      nullptr);
   return unpickler.parse_ivalue();
 }
 
