@@ -123,6 +123,10 @@ struct KinetoThreadLocalState : public torch::profiler::impl::ProfilerThreadLoca
   }
   ~KinetoThreadLocalState() override = default;
 
+  torch::profiler::impl::ActiveProfilerType profilerType() override {
+    return torch::profiler::impl::ActiveProfilerType::KINETO;
+  }
+
   void reportClientActivity(
       const std::string& evt_name,
       const bool is_async,
