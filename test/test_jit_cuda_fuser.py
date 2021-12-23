@@ -885,6 +885,21 @@ class TestCudaFuser(JitTestCase):
             self._ternary_test_helper(op, dtypes, True)  # random data
             self._ternary_test_helper(op, dtypes, False)  # special numbers
 
+    # We can't test the scalar version of rsub from python
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "Requires fusion optimization pass to be effective")
+    def test_rsub(self):
+        x = torch.randn(4, 8, 32, 32, dtype=torch.float, device="cuda")
+        y = torch.randn(4, 8, 32, 32, dtype=torch.float, device="cuda")
+
+        def rsub(x: torch.Tensor, y: torch.Tensor):
+            o = torch.rsub(x, y)
+            o = o * 2.
+            return o
+
+        rsub_jit = torch.jit.script(rsub)
+        self._run_helper(rsub_jit, rsub, x, y)
+
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     # legacy fuser does not work for rand_like, see issue #34361
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "Requires fusion optimization pass to be effective")

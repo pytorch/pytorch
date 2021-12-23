@@ -31,7 +31,7 @@ constexpr auto kNumBinaryFloatOps = 3;
 constexpr auto kNumBinaryComparisonOps = 12;
 constexpr auto kNumBinaryCastOps = 14;
 
-constexpr auto kNumBinaryOpsWithAlpha = 4;
+constexpr auto kNumBinaryOpsWithAlpha = 6;
 constexpr auto kNumLerpOps = 2;
 constexpr auto kNumLayernormFwd = 2;
 constexpr auto kNumBatchnormFwd = 3;
@@ -679,7 +679,9 @@ class IrParser {
         "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
         "aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor",
         "aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
-        "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor"};
+        "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor",
+        "aten::rsub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
+        "aten::rsub(Tensor self, Scalar other, Scalar alpha) -> Tensor"};
     for (auto signature : BinaryOpWithAlpha) {
       auto ptr_op = getOperatorForLiteral(signature);
       REGISTER_PARSE_RULE(
@@ -695,6 +697,10 @@ class IrParser {
                           BinaryOpType::Add,
                           static_cast<BinaryOpWithAlphaType>(&add_alpha))},
                      {aten::sub,
+                      std::make_pair(
+                          BinaryOpType::Sub,
+                          static_cast<BinaryOpWithAlphaType>(&sub_alpha))},
+                     {aten::rsub,
                       std::make_pair(
                           BinaryOpType::Sub,
                           static_cast<BinaryOpWithAlphaType>(&sub_alpha))}});
@@ -714,10 +720,12 @@ class IrParser {
             auto out = alpha->isOneInt()
                 ? binaryOp(
                       op_mapping[node->kind()].first,
-                      lhs,
-                      rhs,
+                      node->kind() == aten::rsub ? rhs : lhs,
+                      node->kind() == aten::rsub ? lhs : rhs,
                       TypePromotion::default_op_config)
-                : op_mapping[node->kind()].second(lhs, rhs, alpha);
+                : (node->kind() == aten::rsub ?
+                      op_mapping[node->kind()].second(rhs, lhs, alpha) :
+                      op_mapping[node->kind()].second(lhs, rhs, alpha));
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
