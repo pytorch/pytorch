@@ -967,25 +967,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   Layout layout() const {
     // NB: This method is not virtual and avoid dispatches for perf.
-    // strided is also the most common layout type, so we check for
-    // strided case first.
-    // This keyset must also be kept in sync with the logic in
-    // is_sparse() / is_sparse_csr() / is_mkldnn()
-    constexpr auto sparse_and_sparsecsr_and_mkldnn_ks = DispatchKeySet({
-      DispatchKey::Sparse,
-      DispatchKey::SparseCsrCPU,
-      DispatchKey::SparseCsrCUDA,
-      DispatchKey::MkldnnCPU
-    });
-    if (!key_set_.has_any(sparse_and_sparsecsr_and_mkldnn_ks)) {
-      return kStrided;
-    } else if (is_sparse()) {
+    if (is_sparse()) {
       return kSparse;
     } else if (is_sparse_csr()) {
       return kSparseCsr;
-    } else {
-      TORCH_INTERNAL_ASSERT(is_mkldnn(), "There is an error in the layout calculation logic.");
+    } else if (is_mkldnn()) {
       return kMkldnn;
+    } else {
+      return kStrided;
     }
   }
 
