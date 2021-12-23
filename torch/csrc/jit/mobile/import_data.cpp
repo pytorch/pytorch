@@ -5,6 +5,7 @@
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/mobile/observer.h>
+#include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 #include <torch/custom_class.h>
@@ -13,11 +14,6 @@
 #include <fstream>
 #include <string>
 #include <vector>
-
-namespace c10 {
-// std::string serializeType(const Type &t);
-TypePtr parseType(const std::string& pythonStr);
-} // namespace c10
 
 namespace torch {
 namespace jit {
@@ -151,7 +147,9 @@ c10::IValue BytecodeDeserializer::readArchive(
       std::move(obj_loader),
       std::move(read_record),
       // NOLINTNEXTLINE(performance-move-const-arg)
-      std::move(device));
+      std::move(device),
+      false,
+      nullptr);
   return unpickler.parse_ivalue();
 }
 
