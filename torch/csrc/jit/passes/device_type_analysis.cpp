@@ -3,6 +3,7 @@
 #include <c10/core/Device.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
+#include <jit/ir/ir_views.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/device_type_analysis.h>
@@ -238,24 +239,15 @@ struct DeviceTypePropagationPass {
 
   void processLoop(Node* node) {
     GRAPH_DEBUG("processLoop");
-    auto blocks = node->blocks();
-    auto loop_inner = blocks.at(0); // Need to check this is correct
+    LoopView l(node);
 
-    // The first two vars are number of iterations, and loop stop condition
-    auto node_var_in = node->inputs().slice(2);
-    // First var is iter_num
-    auto loop_inner_in = loop_inner->inputs().slice(1);
-    // First var is loop stop bool
-    auto loop_inner_out = loop_inner->outputs().slice(1);
-
-    // Apply the inputs to the inside block
-    applyTensorProps(node_var_in, loop_inner_in);
+    applyTensorProps(l.carriedInputs(), l.bodyCarriedInputs());
 
     int iter = 0;
     for (; iter < 4; iter++) {
-      processBlock(loop_inner);
-      bool inputs_changed =
-          mergeAndApplyTensorProps(node_var_in, loop_inner_out, loop_inner_in);
+      processBlock(l.bodyBlock());
+      bool inputs_changed = mergeAndApplyTensorProps(
+          l.carriedInputs(), l.bodyCarriedOutputs(), l.bodyCarriedInputs());
       if (!inputs_changed) {
         break;
       }
@@ -263,8 +255,10 @@ struct DeviceTypePropagationPass {
     TORCH_INTERNAL_ASSERT(
         iter < 4, "Failed to apply tensor props to loop due to changing types");
 
-    // Note that the types of loop_inner_in is not the same as loop_inner_out
-    applyTensorProps(loop_inner_in, node->outputs());
+    // Note that the types of bodyCarriedOutputs and carriedInputs
+    // can be different, so we need the merged version of them, which
+    // is bodyCarriedInputs.
+    applyTensorProps(l.bodyCarriedInputs(), l.carriedOutputs());
   }
 
   void processIf(Node* node) {
