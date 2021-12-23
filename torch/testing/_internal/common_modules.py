@@ -609,6 +609,9 @@ module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.LSTMCell,
                module_inputs_func=module_inputs_torch_nn_LSTMCell,
                decorators=(
+                   # Fails with
+                   # AssertionError: assert out_jacobian[:, j].numel() == dense.numel()
+                   # Reference: https://github.com/pytorch/pytorch/issues/70362
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_grad'),
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_gradgrad'),
                ),)

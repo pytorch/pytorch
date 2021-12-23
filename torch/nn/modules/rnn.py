@@ -952,7 +952,7 @@ class RNNCell(RNNCellBase):
         - input: :math:`(N, H_{in})` or :math:`(H_{in})` tensor containing input features where
           :math:`H_{in}` = `input_size`.
         - hidden: :math:`(N, H_{out})` or :math:`(H_{out})` tensor containing the initial hidden
-          stat where :math:`H_{out}` = `hidden_size`. Defaults to zero if not provided.
+          state where :math:`H_{out}` = `hidden_size`. Defaults to zero if not provided.
         - output: :math:`(N, H_{out})` or :math:`(H_{out})` tensor containing the next hidden state.
 
     Attributes:
@@ -1045,7 +1045,7 @@ class LSTMCell(RNNCellBase):
 
     Inputs: input, (h_0, c_0)
         - **input** of shape `(batch, input_size)` or `(input_size)`: tensor containing input features
-        - **h_0** of shape `(batch, hidden_size)` or `(hidden_size)`: tensor containing the initial hidden
+        - **h_0** of shape `(batch, hidden_size)` or `(hidden_size)`: tensor containing the initial hidden state
         - **c_0** of shape `(batch, hidden_size)` or `(hidden_size)`: tensor containing the initial cell state
 
           If `(h_0, c_0)` is not provided, both **h_0** and **c_0** default to zero.
@@ -1142,7 +1142,7 @@ class GRUCell(RNNCellBase):
         - input: :math:`(N, H_{in})` or :math:`(H_{in})` tensor containing input features where
           :math:`H_{in}` = `input_size`.
         - hidden: :math:`(N, H_{out})` or :math:`(H_{out})` tensor containing the initial hidden
-          stat where :math:`H_{out}` = `hidden_size`. Defaults to zero if not provided.
+          state where :math:`H_{out}` = `hidden_size`. Defaults to zero if not provided.
         - output: :math:`(N, H_{out})` or :math:`(H_{out})` tensor containing the next hidden state.
 
     Attributes:
