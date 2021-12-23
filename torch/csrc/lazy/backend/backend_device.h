@@ -65,7 +65,7 @@ TORCH_API c10::optional<BackendDevice> GetBackendDevice(const at::Tensor& tensor
 c10::optional<BackendDevice> GetBackendDevice();
 
 template<typename T, typename... Args>
-TORCH_API c10::optional<BackendDevice> GetBackendDevice(const T& tensor, const Args&... forward_tensors) {
+c10::optional<BackendDevice> GetBackendDevice(const T& tensor, const Args&... forward_tensors) {
     auto optional_device = GetBackendDevice(tensor);
     if (optional_device) {
         return optional_device;
