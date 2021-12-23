@@ -7646,12 +7646,28 @@ def sample_inputs_poisson_nll_loss(op_info, device, dtype, requires_grad, **kwar
         for s, r in _generate_sample_shape_reduction():
             for li in (True, False):
                 for f in (True, False):
+                    i1 = _make_tensor(s)
+                    i2 = _make_tensor(s)
+                    # For Poisson NLL Loss,
+                    # target is assumed to be from
+                    # Poisson Distribution which
+                    # always has positive samples
+                    t1 = _make_tensor(s, low=0)
+                    t2 = _make_tensor(s, low=0)
+
+                    with torch.no_grad():
+                        if not li:
+                            i1.abs_()
+                            i2.abs_()
+                        t1.abs_()
+                        t2.abs_()
+
                     yield (
-                        _make_tensor(s), _make_tensor(s),
+                        i1, t1,
                         dict(log_input=li, full=f, reduction=r)
                     )
                     yield (
-                        _make_tensor(s), _make_tensor(s),
+                        i2, t2,
                         dict(log_input=li, full=f,
                              eps=random.uniform(1e-8, 1e-3),
                              reduction=r)
@@ -10695,11 +10711,6 @@ op_db: List[OpInfo] = [
            skips=(
                # 69855: RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
-               # FIXME: AssertionError: False is not true : Tensors failed to compare as equal!
-               # With rtol=1e-07 and atol=1e-07, found 1 element(s) (out of 1) whose difference(s)
-               # exceeded the margin of error (including 0 nan comparisons). The greatest difference
-               # was 1.0 (1.0 vs. -0.0), which occurred at index 0.
-               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
                # AssertionError: False is not true : Tensors failed to compare as equal!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples'),
                # AssertionError: False is not true : Scalars failed to compare as equal!
@@ -10716,6 +10727,8 @@ op_db: List[OpInfo] = [
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            supports_out=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=sample_inputs_adaptive_avg_pool1d),
     OpInfo('nn.functional.adaptive_avg_pool2d',
@@ -10733,6 +10746,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
            ),
            supports_out=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=sample_inputs_adaptive_avg_pool2d),
     OpInfo('nn.functional.adaptive_avg_pool3d',
@@ -10752,6 +10767,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
            ),
            supports_out=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=sample_inputs_adaptive_avg_pool3d),
     OpInfo('nn.functional.adaptive_max_pool1d',
@@ -10800,6 +10817,8 @@ op_db: List[OpInfo] = [
            aten_name='avg_pool1d',
            supports_autograd=True,
            supports_out=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            dtypes=floating_types_and(torch.int64),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -10807,6 +10826,8 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.avg_pool3d',
            aten_name='avg_pool3d',
            supports_autograd=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            supports_out=False,
            dtypes=floating_types_and(torch.int64),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
@@ -10957,6 +10978,8 @@ op_db: List[OpInfo] = [
            supports_out=False),
     OpInfo('nn.functional.pad',
            variant_test_name='reflect',
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            dtypes=floating_and_complex_types(),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half),
            sample_inputs_func=partial(sample_inputs_nn_pad, mode='reflect'),
@@ -10970,6 +10993,8 @@ op_db: List[OpInfo] = [
            supports_out=False),
     OpInfo('nn.functional.pad',
            variant_test_name='replicate',
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            dtypes=floating_and_complex_types(),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half),
            sample_inputs_func=partial(sample_inputs_nn_pad, mode='replicate'),
@@ -11025,6 +11050,8 @@ op_db: List[OpInfo] = [
            aten_name="interpolate",
            variant_test_name='nearest',
            supports_autograd=True,
+           supports_fwgrad_bwgrad=True,
+           supports_forward_ad=True,
            dtypes=floating_types_and(torch.uint8),
            dtypesIfCUDA=floating_types_and(torch.half, torch.uint8),
            sample_inputs_func=partial(sample_inputs_interpolate, 'nearest'),
@@ -11039,6 +11066,8 @@ op_db: List[OpInfo] = [
            aten_name="interpolate",
            variant_test_name='linear',
            supports_autograd=True,
+           supports_fwgrad_bwgrad=True,
+           supports_forward_ad=True,
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.half),
            sample_inputs_func=partial(sample_inputs_interpolate, 'linear'),
@@ -11052,7 +11081,9 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.interpolate',
            aten_name="interpolate",
            variant_test_name='bilinear',
+           supports_fwgrad_bwgrad=True,
            supports_autograd=True,
+           supports_forward_ad=True,
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.half),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -11068,6 +11099,8 @@ op_db: List[OpInfo] = [
            aten_name="interpolate",
            variant_test_name='bicubic',
            supports_autograd=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.half),
            sample_inputs_func=partial(sample_inputs_interpolate, 'bicubic'),
@@ -11083,6 +11116,8 @@ op_db: List[OpInfo] = [
            aten_name="interpolate",
            variant_test_name='trilinear',
            supports_autograd=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.half),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -11098,6 +11133,8 @@ op_db: List[OpInfo] = [
            aten_name="interpolate",
            variant_test_name='area',
            supports_autograd=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=partial(sample_inputs_interpolate, 'area'),
@@ -11111,6 +11148,8 @@ op_db: List[OpInfo] = [
            supports_out=False),
     OpInfo('nn.functional.upsample_bilinear',
            supports_autograd=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.half),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -11124,6 +11163,8 @@ op_db: List[OpInfo] = [
            supports_out=False),
     OpInfo('nn.functional.upsample_nearest',
            supports_autograd=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            dtypes=floating_types_and(torch.uint8),
            dtypesIfCUDA=floating_types_and(torch.half, torch.uint8),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -11151,6 +11192,8 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.avg_pool2d',
            aten_name='avg_pool2d',
            supports_autograd=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            supports_out=False,
            dtypes=floating_types_and(torch.int64),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
@@ -11531,8 +11574,9 @@ op_db: List[OpInfo] = [
         ref=lambda x, threshold, value: np.where(x > threshold, x, value).astype(x.dtype),
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
-        supports_forward_ad=False,
         supports_autograd=True,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         assert_autodiffed=False,
         supports_gradgrad=True,
         supports_out=False,
@@ -11628,11 +11672,11 @@ op_db: List[OpInfo] = [
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_autograd=True,
+           supports_forward_ad=True,
            assert_autodiffed=False,
            sample_inputs_func=sample_inputs_softshrink_hardshrink_hardtanh,
            supports_gradgrad=True,
            supports_out=False,
-           supports_forward_ad=False,
            ),
     OpInfo('nn.functional.hardshrink',
            aten_name="hardshrink",
@@ -13349,6 +13393,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view'),
                # Empty tensor data is garbage so it's hard to make comparisons with it.
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
+               # Empty tensor data is garbage so it's hard to make comparisons with it.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_conj_view'),
                # Can't find schemas for this operator for some reason
                DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
            )),
@@ -13452,6 +13498,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view'),
                # Empty tensor data is garbage so it's hard to make comparisons with it.
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
+               # Empty tensor data is garbage so it's hard to make comparisons with it.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_conj_view'),
                # Can't find schemas for this operator for some reason
                DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
            ),
@@ -14463,6 +14511,7 @@ op_db: List[OpInfo] = [
         "nn.functional.softplus",
         ref=reference_softplus,
         sample_inputs_func=sample_inputs_softplus,
+        supports_forward_ad=True,
         dtypes=floating_types(),
         dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
         supports_out=False,
@@ -15145,34 +15194,6 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_poisson_nll_loss,
-        skips=(
-            # https://github.com/pytorch/pytorch/issues/67461
-            # torch.autograd.gradcheck.GradcheckError: Jacobian mismatch for output 0 with respect to input 0
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestGradients",
-                "test_fn_grad",
-                dtypes=(torch.float64,),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestGradients",
-                "test_fn_gradgrad",
-                dtypes=(torch.float64,),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestGradients",
-                "test_forward_mode_AD",
-                dtypes=(torch.float64,),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestGradients",
-                "test_fn_fwgrad_bwgrad",
-                dtypes=(torch.float64,),
-            ),
-        ),
     ),
     OpInfo(
         "argsort",
