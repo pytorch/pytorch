@@ -66,20 +66,6 @@ def if_rocm_is_configured(x):
 
 
 def cmake_configure_file(name, src, out, definitions):
-    """Mimics CMake's configure_file in Bazel.
-
-    Supports using config_setting's to customize the generated
-    file. To use a boolean config_setting identified with the label
-    "//c10:using_glog", you would pass
-    "config_setting://c10:using_glog" as the value in definitions.
-
-    Args:
-      name: A unique name for this rule.
-      src: The input file template.
-      out: The generated output.
-      definitions: A mapping of identifier in template to its value,
-                   possibly configurable.
-    """
     substitutions = []
     for identifier, value in definitions.items():
         if type(value) == "bool":
@@ -113,16 +99,24 @@ def cmake_configure_file(name, src, out, definitions):
 # get around this limitation by using a list as our substitutions. As
 # such, we hardcode substitution semantics such that #define will be
 # defined and #undef will be commented out.
-def _header_template_impl(ctx):
-    subs = {}
-    for sub in ctx.attr.substitutions:
-        cmd, token = sub.split(" ")
-        replacement = "{} {}".format(cmd, token) if cmd == "#define" else "/* #undef {} */".format(token)
-        subs["#cmakedefine {}".format(token)] = replacement
-    ctx.actions.expand_template(
-        template = ctx.file.src,
-        output = ctx.outputs.out,
-        substitutions = subs,
+def _cmake_configure_file_impl(ctx):
+    command = ["cat $1"]
+    for definition in ctx.attr.definitions:
+        command.append(
+            "| sed 's@#cmakedefine {}@#define {}@'".format(definition,
+                                                           definition))
+    # Replace any that remain with /* #undef FOO */.
+    command.append("| sed --regexp-extended 's@#cmakedefine (\\w+)@/* #undef \\1 */@'")
+    command.append("> $2")
+
+    ctx.actions.run_shell(
+        inputs = [ctx.file.src],
+        outputs = [ctx.outputs.out],
+        command = " ".join(command),
+        arguments = [
+            ctx.file.src.path,
+            ctx.outputs.out.path,
+        ],
     )
     return [
         # create a provider which says that this
@@ -137,7 +131,7 @@ def _header_template_impl(ctx):
         )),
     ]
 
-_header_template = rule(
+cmake_configure_file = rule(
     attrs = {
         "out": attr.output(mandatory = True),
         "src": attr.label(
@@ -147,9 +141,17 @@ _header_template = rule(
         # We use attr.string_list for compatibility with select and
         # config_setting. See the comment above _header_template_impl
         # for more information.
-        "substitutions": attr.string_list(mandatory = True),
+        "definitions": attr.string_list(mandatory = True),
     },
     # output_to_genfiles is required for header files.
     output_to_genfiles = True,
-    implementation = _header_template_impl,
+    implementation = _cmake_configure_file_impl,
 )
+    """Mimics CMake's configure_file in Bazel.
+
+    Args:
+      name: A unique name for this rule.
+      src: The input file template.
+      out: The generated output.
+      definitions: A mapping of identifier in template to its value.
+    """
