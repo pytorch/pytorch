@@ -1,5 +1,5 @@
 load("@rules_cc//cc:defs.bzl", "cc_library")
-load(":cmake_configure_file.bzl", "cmake_configure_file")
+load("//third_party:substitution.bzl", "header_template_rule")
 
 cc_library(
     name = "macros",
@@ -10,19 +10,16 @@ cc_library(
         # public header in this file.
         "Export.h",
     ],
-    srcs = [":cmake_macros"],
+    srcs = [":cmake_macros_h"],
     visibility = ["//visibility:public"],
 )
 
-cmake_configure_file(
-    name = "cmake_macros",
+header_template_rule(
+    name = "cmake_macros_h",
     src = "cmake_macros.h.in",
     out = "cmake_macros.h",
-    definitions = {
-        "C10_BUILD_SHARED_LIBS": True,
-        "C10_USE_GFLAGS": "config_setting://c10:using_gflags",
-        "C10_USE_GLOG": "config_setting://c10:using_glog",
-        "C10_USE_MSVC_STATIC_RUNTIME": True,
-        "C10_USE_NUMA": False,
+    substitutions = {
+        "cmakedefine": "define",
+        "#define C10_USE_NUMA": "/* #undef C10_USE_NUMA */",
     },
 )
