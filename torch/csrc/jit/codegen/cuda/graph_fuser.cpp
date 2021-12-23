@@ -751,7 +751,7 @@ struct CudaGraphFuser {
           // we scan this consumer again to perform the fusion
           return std::make_pair(consumer->reverseIterator(), true);
         }
-	if (getSingletonFusion() && consumer->kind() != kind_) {
+        if (getSingletonFusion() && consumer->kind() != kind_) {
           consumer = createSingletonFusionGroup(consumer);
         }
         auto fusion_group = tryFuse(consumer, producer->node());
@@ -761,7 +761,8 @@ struct CudaGraphFuser {
           return std::make_pair(fusion_group.value()->reverseIterator(), true);
         }
         // horizontal fusion only applies on tensor inputs
-        if (getHorizontalFusion() && producer->type()->isSubtypeOf(*TensorType::get())) {
+        if (getHorizontalFusion() &&
+            producer->type()->isSubtypeOf(*TensorType::get())) {
           // fusing nodes sharing inputs, this could save memory bandwidth by
           // reducing number of tensor read.
           for (const auto& u : producer->uses()) {

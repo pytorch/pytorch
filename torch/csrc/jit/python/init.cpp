@@ -689,24 +689,16 @@ void initJITBindings(PyObject* module) {
       .def("_jit_set_nvfuser_enabled", &RegisterCudaFuseGraph::registerPass)
       .def(
           "_jit_set_nvfuser_single_node_mode",
-          [](bool flag) {
-            return fuser::cuda::setSingletonFusion(flag);
-          })
+          [](bool flag) { return fuser::cuda::setSingletonFusion(flag); })
       .def(
           "_jit_nvfuser_single_node_mode",
-          []() {
-            return fuser::cuda::getSingletonFusion();
-          })
+          []() { return fuser::cuda::getSingletonFusion(); })
       .def(
           "_jit_set_nvfuser_horizontal_mode",
-          [](bool flag) {
-            return fuser::cuda::setHorizontalFusion(flag);
-          })
+          [](bool flag) { return fuser::cuda::setHorizontalFusion(flag); })
       .def(
           "_jit_nvfuser_horizontal_mode",
-          []() {
-            return fuser::cuda::getHorizontalFusion();
-          })
+          []() { return fuser::cuda::getHorizontalFusion(); })
       .def(
           "_jit_set_nvfuser_guard_mode",
           [](bool profiling_flag) {
