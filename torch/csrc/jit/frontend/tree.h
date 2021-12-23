@@ -149,11 +149,11 @@ struct Compound : public Tree {
     return false;
   }
   TreeRef map(const std::function<TreeRef(TreeRef)>& fn) override {
-    TreeList trees_;
+    TreeList ret;
     for (auto& t : trees()) {
-      trees_.push_back(fn(t));
+      ret.push_back(fn(t));
     }
-    return Compound::create(kind(), range(), std::move(trees_));
+    return Compound::create(kind(), range(), std::move(ret));
   }
 
   const SourceRange& range() const override {
