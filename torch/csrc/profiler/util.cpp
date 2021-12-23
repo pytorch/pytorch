@@ -160,7 +160,7 @@ int get_seq_id_from_input_tensor(const c10::IValue& input_item) {
 std::vector<int64_t> flatten_list_seq_ids(c10::List<c10::IValue> list, std::string fn_name) {
   std::vector<int64_t> input_seq_ids;
   int seq_id = -1;
-  for (const c10::IValue& input : list) {
+  for (const c10::IValue input : list) {
     if (input.isTensor()) {
       seq_id = get_seq_id_from_input_tensor(input);
       input_seq_ids.push_back(seq_id);
