@@ -65,12 +65,6 @@ def if_cuda_is_configured(x):
 def if_rocm_is_configured(x):
     return if_rocm(x, [])
 
-def rules():
-    return struct(
-        cc_library = cc_library,
-        cmake_configure_file = cmake_configure_file,
-    )
-
 # Forked from header_template_rule. header_template_rule is not
 # compatible with our usage of select because its substitutions
 # attribute is a dict, and dicts may not be appended with select. We
@@ -135,4 +129,10 @@ Args:
     },
     # output_to_genfiles is required for header files.
     output_to_genfiles = True,
+)
+
+rules = struct(
+    cc_library = cc_library,
+    cmake_configure_file = cmake_configure_file,
+    select = native.select,
 )
