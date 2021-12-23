@@ -814,113 +814,91 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_sparse() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    constexpr auto sparse_ks = DispatchKeySet(DispatchKey::Sparse);
-    return key_set_.has_all(sparse_ks);
+    return key_set_.has(DispatchKey::Sparse);
   }
 
   // Whether a tensor is sparse COO or not. Use is_sparse_csr for checking CSR
   // format.
   bool is_sparse_csr() const {
-    constexpr auto sparse_csr_bits_ks = DispatchKeySet({
-      DispatchKey::SparseCsrCPU,
-      DispatchKey::SparseCsrCUDA
-    });
-    return key_set_.has_any(sparse_csr_bits_ks);
+    return key_set_.has(DispatchKey::SparseCsrCPU) ||
+        key_set_.has(DispatchKey::SparseCsrCUDA);
   }
 
   bool is_quantized() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    constexpr auto quantized_ks = DispatchKeySet(DispatchKey::Quantized);
-    return key_set_.has_all(quantized_ks);
+    return key_set_.has(DispatchKey::Quantized);
   }
 
   bool is_meta() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    constexpr auto meta_ks = DispatchKeySet(DispatchKey::Meta);
-    return key_set_.has_all(meta_ks);
+    return key_set_.has(DispatchKey::Meta);
   }
 
   bool is_cpu() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    constexpr auto cpu_bits_ks = DispatchKeySet(BackendBit::CPUBit)
-      | DispatchKeySet({
-          DispatchKey::SparseCsrCPU,
-          DispatchKey::MkldnnCPU
-    });
-    return key_set_.has_any(cpu_bits_ks);
+    return key_set_.has(BackendKey::CPUBit) ||
+        key_set_.has(DispatchKey::SparseCsrCPU) ||
+        key_set_.has(DispatchKey::MkldnnCPU);
   }
 
   bool is_cuda() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    constexpr auto cuda_bits_ks =
-      DispatchKeySet(BackendBit::CUDABit) |
-      DispatchKeySet(DispatchKey::SparseCsrCUDA);
-    return key_set_.has_any(cuda_bits_ks);
+    return key_set_.has(BackendBit::CUDABit) ||
+        key_set_.has(DispatchKey::SparseCsrCUDA);
   }
 
   bool is_xpu() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    constexpr auto xpu_ks = DispatchKeySet(BackendBit::XPUBit);
-    return key_set_.has_all(xpu_ks);
+    return key_set_.has(BackendBit::XPUBit);
   }
 
   bool is_xla() const {
-    constexpr auto xla_ks = DispatchKeySet(BackendBit::XLABit);
-    return key_set_.has_all(xla_ks);
+    return key_set_.has(BackendBit::XLABit);
   }
 
   bool is_hpu() const {
-    constexpr auto hpu_ks = DispatchKeySet(BackendBit::HPUBit);
-    return key_set_.has_all(hpu_ks);
+    return key_set_.has(BackendBit::HPUBit);
   }
 
   bool is_lazy() const {
-    constexpr auto lazy_ks = DispatchKeySet(BackendBit::LazyBit);
-    return key_set_.has_all(lazy_ks);
+    return key_set_.has(BackendBit::LazyBit);
   }
 
   bool is_hip() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    constexpr auto hip_ks = DispatchKeySet(BackendBit::HIPBit);
-    return key_set_.has_all(hip_ks);
+    return key_set_.has(BackendBit::HIPBit);
   }
 
   bool is_ve() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    constexpr auto ve_ks = DispatchKeySet(BackendBit::VEBit);
-    return key_set_.has_all(ve_ks);
+    return key_set_.has(BackendBit::VEBit);
   }
 
   bool is_mkldnn() const {
-    constexpr auto mkldnn_ks = DispatchKeySet(DispatchKey::MkldnnCPU);
-    return key_set_.has_all(mkldnn_ks);
+    return key_set_.has(DispatchKey::MklddnnCPU);
   }
 
   bool is_vulkan() const {
-    constexpr auto vulkan_ks = DispatchKeySet(DispatchKey::Vulkan);
-    return key_set_.has_all(vulkan_ks);
+    return key_set_.has(DispatchKey::Vulkan);
   }
 
   bool is_metal() const {
-    constexpr auto metal_ks = DispatchKeySet(DispatchKey::Metal);
-    return key_set_.has_all(metal_ks);
+    return key_set_.has(DispatchKey::Metal);
   }
 
   bool is_mlc() const {
-    constexpr auto mls_ks = DispatchKeySet(DispatchKey::MLC);
-    return key_set_.has_all(mls_ks);
+    return key_set_.has(DispatchKey::MLC);
   }
 
   bool is_ort() const {
-    constexpr auto ort_ks = DispatchKeySet(DispatchKey::ORT);
-    return key_set_.has_all(ort_ks);
+    return key_set_.has(DispatchKey::ORT);
   }
 
   // TODO: remove this once we don't automatically enabled Autograd dispatch
@@ -929,24 +907,19 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // DON'T USE THIS API!! It's only created for testing purpose in
   // file aten/src/ATen/core/boxing/impl/test_helpers.h
   void remove_autograd_key() {
-    constexpr auto autograd_ks = DispatchKeySet({
-      DispatchKey::AutogradFunctionality,
-      DispatchKey::AutogradOther
-    });
-    key_set_ = key_set_.removeFunctionalityKeys(autograd_ks);
+    key_set_ = key_set_.removeFunctionalityKeys(autograd_dispatch_keyset);
   }
 
   // Inference tensor doesn't have autograd or ADInplaceOrView key.
   // Invariant:
   //   Inference tensor has version_counter_.enabled() == false
   bool is_inference() {
-    constexpr auto inplaceorview_ks = DispatchKeySet(DispatchKey::ADInplaceOrView);
-    constexpr auto autograd_ks = DispatchKeySet({
-      DispatchKey::AutogradFunctionality,
-      DispatchKey::AutogradOther
-    });
-    bool no_ADInplaceOrView = !key_set_.has_any(inplaceorview_ks);
-    bool no_Autograd = !key_set_.has_any(autograd_ks);
+
+    bool no_ADInplaceOrView = !key_set_.has(c10::DispatchKey::ADInplaceOrView);
+    bool no_Autograd = (key_set_ & DispatchKeySet({
+      c10::DispatchKey::AutogradFunctionality,
+      c10::DispatchKey::AutogradOther
+    })).empty();
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         no_ADInplaceOrView == no_Autograd,
         "ADInplaceOrView and Autograd keys must be on/off at the same time.");
@@ -1060,8 +1033,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Whether or not the imaginary part of the tensor should be negated
    */
   inline bool is_conj() const {
-    constexpr auto conjugate_ks = DispatchKeySet(DispatchKey::Conjugate);
-    return key_set_.has_all(conjugate_ks);
+    return key_set_.has(DispatchKey::Conjugate);
   }
 
   /**
@@ -1081,8 +1053,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Whether or not the tensor is a zerotensor
    */
   inline bool _is_zerotensor() const {
-    constexpr auto zerotensor_ks = DispatchKeySet(DispatchKey::ZeroTensor);
-    return key_set_.has_all(zerotensor_ks);
+    return key_set_.has(DispatchKey::ZeroTensor);
   }
 
   /**
@@ -1102,8 +1073,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Whether or not the tensor should be negated
    */
   inline bool is_neg() const {
-    constexpr auto negative_ks = DispatchKeySet(DispatchKey::Negative);
-    return key_set_.has_all(negative_ks);
+    return key_set_.has(DispatchKey::Negative);
   }
 
   /**
@@ -1473,17 +1443,15 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   void set_python_dispatch(bool k) {
-    constexpr auto python_ks = DispatchKeySet(DispatchKey::Python);
     if (k) {
-      key_set_ = key_set_.add(python_ks);
+      key_set_ = key_set_.add(DispatchKey::Python);
     } else {
-      key_set_ = key_set_.removeFunctionalityKeys(python_ks);
+      key_set_ = key_set_.removeFunctionalityKey(DispatchKey::Python);
     }
   }
 
   bool is_python_dispatch() const {
-    constexpr auto python_ks = DispatchKeySet(DispatchKey::Python);
-    return key_set_.has_all(python_ks);
+    return key_set_.has(DispatchKey::Python);
   }
 
   /**
