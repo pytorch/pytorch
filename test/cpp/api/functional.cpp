@@ -1252,23 +1252,44 @@ TEST_F(FunctionalTest, GroupNorm) {
 }
 
 TEST_F(FunctionalTest, LocalResponseNorm) {
-  const auto x = torch::arange(100, 118).resize_({3, 3, 2});
-  const auto y = F::local_response_norm(x, F::LocalResponseNormFuncOptions(2));
-  ASSERT_EQ(y.ndimension(), 3);
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({3, 3, 2}));
-  const auto y_exp = torch::tensor(
-    {{{73.7788, 74.1462},
-      {60.1942, 60.3302},
-      {60.4609, 60.5865}},
-    {{75.8729, 76.2011},
-      {60.9331, 61.0390},
-      {61.1403, 61.2370}},
-    {{77.7387, 78.0303},
-      {61.5011, 61.5807},
-      {61.6563, 61.7279}}},
-    torch::kFloat
-  );
-  ASSERT_TRUE(torch::allclose(y, y_exp, 1e-4, 1e-7));
+  {
+    const auto x = torch::arange(100, 118).resize_({3, 3, 2});
+    const auto y = F::local_response_norm(x, F::LocalResponseNormFuncOptions(2));
+    ASSERT_EQ(y.ndimension(), 3);
+    ASSERT_EQ(y.sizes(), torch::IntArrayRef({3, 3, 2}));
+    const auto y_exp = torch::tensor(
+      {{{73.7788, 74.1462},
+        {60.1942, 60.3302},
+        {60.4609, 60.5865}},
+      {{75.8729, 76.2011},
+        {60.9331, 61.0390},
+        {61.1403, 61.2370}},
+      {{77.7387, 78.0303},
+        {61.5011, 61.5807},
+        {61.6563, 61.7279}}},
+      torch::kFloat
+    );
+    ASSERT_TRUE(torch::allclose(y, y_exp, 1e-4, 1e-7));
+  }
+  {
+    const auto x = torch::arange(100, 118).resize_({3, 6});
+    const auto y = F::local_response_norm(x, F::LocalResponseNormFuncOptions(2));
+    ASSERT_EQ(y.ndimension(), 2);
+    ASSERT_EQ(y.sizes(), torch::IntArrayRef({3, 6}));
+    const auto y_exp = torch::tensor(
+      {{73.7788, 74.1462,
+        74.5031, 74.8572,
+        75.2010, 75.5420},
+       {61.6057, 61.7227,
+        61.8347, 61.9418,
+        62.0441, 62.1418},
+       {62.2349, 62.3235,
+        62.4077, 62.4877,
+        62.5635, 62.6353}},
+      torch::kFloat
+    );
+    ASSERT_TRUE(torch::allclose(y, y_exp, 1e-4, 1e-7));
+  }
 }
 
 TEST_F(FunctionalTest, Linear) {

@@ -80,15 +80,17 @@ inline Tensor layer_norm(const Tensor& input,
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor local_response_norm(
-    const Tensor& input,
+    const Tensor& input_,
     int64_t size,
     double alpha,
     double beta,
     double k) {
-    auto dim = input.dim();
-    TORCH_CHECK(dim >=3, "Expected 3D or higher dimensionality input (got ", dim, " dimensions)");
+    auto dim = input_.dim();
+    TORCH_CHECK(dim >=2, "Expected 2D or higher dimensionality input (got ", dim, " dimensions)");
+    auto is_batched = dim > 2;
+    Tensor input = is_batched ? input _ : input.unsqueeze(0);
     auto div = input.mul(input).unsqueeze(1);
-    if (dim == 3) {
+    if (input.dim() == 3) {
       div = detail::pad(div, /*pad=*/{0, 0, size / 2, (size - 1) / 2}, /*mode=*/torch::kConstant, /*value=*/0);
       div = detail::avg_pool2d(
         div,
@@ -113,6 +115,9 @@ inline Tensor local_response_norm(
       div = div.view(sizes);
     }
     div = div.mul(alpha).add(k).pow(beta);
+    if (!is_batched) {
+      return (input / div).squeeze(0);
+    }
     return input / div;
 }
 } // namespace detail
