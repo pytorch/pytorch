@@ -4222,6 +4222,8 @@ class TestQuantizedConv(TestCase):
         qconv_op.zero_point = Y_zero_point
         qconv_op.set_weight_bias(W_q, bias_float)
 
+        xx = X_q.dequantize()
+        print(conv_op, xx.size(), xx.stride())
         Y_dq_ref = conv_op(X_q.dequantize())
         Y_q_ref = torch.quantize_per_tensor(Y_dq_ref, scale=Y_scale,
                                             zero_point=Y_zero_point,
