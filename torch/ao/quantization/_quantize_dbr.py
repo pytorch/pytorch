@@ -35,6 +35,9 @@ def prepare(model, qconfig_dict, example_inputs, inplace=False, allow_list=None,
     """
     assert example_inputs is not None, 'example_inputs must be specified'
 
+    if prepare_custom_config_dict is None:
+        prepare_custom_config_dict = {}
+
     for qconfig_dict_option in ('module_name_regex', 'module_name_object_type_order'):
         assert qconfig_dict_option not in qconfig_dict, \
             f'{qconfig_dict_option} option of qconfig_dict is not ' + \
@@ -44,6 +47,17 @@ def prepare(model, qconfig_dict, example_inputs, inplace=False, allow_list=None,
     convert_dict_to_ordered_dict(qconfig_dict)
     flattened_qconfig_dict = get_flattened_qconfig_dict(qconfig_dict)
     torch.quantization.propagate_qconfig_(model, flattened_qconfig_dict)
+
+    # if parts of the model are non traceable, delete qconfig from
+    # them so they do not get swapped
+    non_traceable_module_class = \
+        prepare_custom_config_dict.get('non_traceable_module_class', [])
+    for name, child in model.named_modules():
+        for target_cls in non_traceable_module_class:
+            if isinstance(child, target_cls):
+                for _, child_child in child.named_modules():
+                    child_child.qconfig = None
+
     # TODO(future PR): QAT support
 
     if fuse_modules:

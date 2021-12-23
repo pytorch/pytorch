@@ -624,7 +624,12 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
 
     def test_prepare_custom_config_dict_non_traceable_module_class(self):
         class M1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+
             def forward(self, x):
+                x = self.conv(x)
                 x = x + x
                 return x
 
@@ -632,9 +637,11 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
             def __init__(self):
                 super().__init__()
                 self.m1 = M1()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
 
             def forward(self, x):
                 x = self.m1(x)
+                x = self.conv(x)
                 x = x + x
                 return x
 
@@ -661,6 +668,8 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         self.assertTrue(hasattr(mp.m2, '_auto_quant_state'))
         self.assertTrue(hasattr(mp, '_auto_quant_state'))
         mq = _quantize_dbr.convert(mp)
+        self.assertTrue(isinstance(mq.m2.m1.conv, nn.Conv2d))
+        self.assertTrue(isinstance(mq.m2.conv, nnq.Conv2d))
         mqt = torch.jit.trace(mq, (torch.randn(1, 1, 1, 1),))
 
         # mqt.m2.m1 should not have quantized ops
@@ -685,6 +694,8 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         self.assertTrue(not hasattr(mp.m2, '_auto_quant_state'))
         self.assertTrue(hasattr(mp, '_auto_quant_state'))
         mq = _quantize_dbr.convert(mp)
+        self.assertTrue(isinstance(mq.m2.m1.conv, nn.Conv2d))
+        self.assertTrue(isinstance(mq.m2.conv, nn.Conv2d))
         mqt = torch.jit.trace(mq, (torch.randn(1, 1, 1, 1),))
 
         # mqt.m2 and all children should not have quantized ops
