@@ -9,7 +9,7 @@ from torch.testing._internal.common_methods_invocations import (
     sample_inputs_adaptive_avg_pool2d,
     sample_inputs_conv2d,
 )
-from torch.testing._internal.common_utils import set_default_dtype
+from torch.testing._internal.common_utils import set_default_dtype, first_sample
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.jit_metaprogramming_utils import create_traced_fn
 from torch.testing._internal.common_device_type import (
@@ -282,7 +282,7 @@ class TestDtypeAnalysis(TestDtypeBase):
         ):
             for dtype in (torch.int8, torch.float64):
                 # Gets default version for conv2d
-                sample_input: SampleInput = inputs_fn(None, "cpu", dtype, False)[-1]
+                sample_input: SampleInput = list(inputs_fn(None, "cpu", dtype, False))[-1]
                 input_args = [sample_input.input, *sample_input.args]
                 self.assert_dtype_equal_custom_args(fn, input_args)
 
@@ -292,7 +292,7 @@ class TestDtypeAnalysis(TestDtypeBase):
 
         # Now make sure that conv2d doesn't support mixed args
         conv_ins = sample_inputs_conv2d(None, "cpu", torch.float, False)
-        conv_in = conv_ins[-1]
+        conv_in = list(conv_ins)[-1]
         weight, bias = conv_in.args
         weight = weight.type(torch.long)
 
@@ -316,7 +316,7 @@ class TestDtypeAnalysis(TestDtypeBase):
             return add_res
 
         conv_ins = sample_inputs_conv2d(None, "cpu", torch.int8, False)
-        conv_in = conv_ins[-1]
+        conv_in = list(conv_ins)[-1]
         y_val = torch.rand((1,), dtype=torch.float32)
         input_args = [conv_in.input, *conv_in.args, y_val]
         self.assert_dtype_equal_custom_args(func, input_args)
@@ -340,7 +340,8 @@ class TestDtypeCustomRules(TestDtypeBase):
 
     def custom_rules_test_base(self, device, dtype, op, allow_eager_fail=False):
         try:
-            sample_input = op.sample_inputs(device, dtype, requires_grad=False)[0]
+            samples = op.sample_inputs(device, dtype, requires_grad=False)
+            sample_input = first_sample(self, samples)
             input_args = [sample_input.input, *sample_input.args]
             expected_res = op(*input_args, **sample_input.kwargs)
 
