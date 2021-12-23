@@ -64,7 +64,10 @@ struct OldOpsReplacerWithUpgraders {
           if (!upgrader_entry.has_value()) {
             if (!isOpSymbolCurrent(schema_name, current_version)) {
               TORCH_INTERNAL_ASSERT(
-                  false, "Upgrader must be present for ", schema_name);
+                  false,
+                  "Upgrader must be present for ",
+                  schema_name,
+                  ". The upgrader might have deprecated");
             }
             node = graph_it.next();
             continue;
