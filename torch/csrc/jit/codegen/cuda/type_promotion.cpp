@@ -202,8 +202,7 @@ Val* optionalCast(DataType dtype, Val* v) {
   const bool kSameDtype = v->getDataType().value() == dtype;
   const bool kIsScalarFloat =
       !v->isA<TensorView>() && isFloatingPointType(dtype);
-  const bool kIsScalarInt =
-      !v->isA<TensorView>() && isIntegralType(dtype);
+  const bool kIsScalarInt = !v->isA<TensorView>() && isIntegralType(dtype);
   if (kSameDtype ||
       (kIsScalarFloat && isFloatingPointType(v->getDataType().value())) ||
       (kIsScalarInt && isIntegralType(v->getDataType().value()))) {

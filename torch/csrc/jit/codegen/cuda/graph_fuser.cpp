@@ -759,9 +759,7 @@ struct CudaGraphFuser {
           // we scan this consumer again to perform the fusion
           return std::make_pair(consumer->reverseIterator(), true);
         }
-        const char* allow_single_node = getenv("PYTORCH_NVFUSER_ONE_OP_FUSION");
-        if (allow_single_node && atoi(allow_single_node) &&
-            consumer->kind() != kind_) {
+        if (getSingletonFusion() && consumer->kind() != kind_) {
           consumer = createSingletonFusionGroup(consumer);
         }
         auto fusion_group = tryFuse(consumer, producer->node());
@@ -771,7 +769,8 @@ struct CudaGraphFuser {
           return std::make_pair(fusion_group.value()->reverseIterator(), true);
         }
         // horizontal fusion only applies on tensor inputs
-        if (producer->type()->isSubtypeOf(*TensorType::get())) {
+        if (getHorizontalFusion() &&
+            producer->type()->isSubtypeOf(*TensorType::get())) {
           // fusing nodes sharing inputs, this could save memory bandwidth by
           // reducing number of tensor read.
           for (const auto& u : producer->uses()) {
@@ -1010,6 +1009,14 @@ struct CudaGraphFuser {
           // use shape of weight here for grad_bias
           shape_of.emplace(n->output(2), shape_of.at(n->input(3)));
         }
+        continue;
+      }
+      if (n->kind() == aten::native_dropout) {
+        TORCH_INTERNAL_ASSERT(
+            shape_of.count(n->input(0)) > 0,
+            "buildShapeExpressions failed at accessing input shapes");
+        shape_of.emplace(n->output(0), shape_of.at(n->input(0)));
+        shape_of.emplace(n->output(1), shape_of.at(n->input(0)));
         continue;
       }
       auto tensor_inputs = filter(n->inputs(), [](Value* v) {

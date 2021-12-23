@@ -11,6 +11,8 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
+const c10::DeviceIndex INVALID_INDEX = -2;
+
 namespace {
 
 bool hasNonElementWiseOperation(const Node* node) {
@@ -42,22 +44,48 @@ static c10::optional<c10::Device> getDevice(const Value* value) {
 }
 
 static c10::optional<c10::Device> getDevice(const Node* node) {
-  auto outputs = node->outputs();
-  for (auto output : outputs) {
-    auto device = getDevice(output);
+  c10::optional<c10::Device> ret = c10::nullopt;
+  auto merge_devices = [&ret](const c10::optional<c10::Device>& device) {
     if (device.has_value()) {
-      return device;
+      if (ret.has_value()) {
+        if (ret.value() != device.value()) {
+          // invalidate device to reflect conflicts
+          ret->set_index(INVALID_INDEX);
+          // return false to indicate early termination
+          return false;
+        } else {
+          // same device, do nothing
+          return true;
+        }
+      } else {
+        // initialize return device
+        ret = device.value();
+        return true;
+      }
+    }
+    // no device information, do nothing
+    return true;
+  };
+  for (auto val : node->inputs()) {
+    if (!merge_devices(getDevice(val))) {
+      return ret;
     }
   }
-  return c10::nullopt;
+  for (auto val : node->outputs()) {
+    if (!merge_devices(getDevice(val))) {
+      return ret;
+    }
+  }
+  return ret;
 }
 
 static bool isFusibleDevice(const Node* node, const c10::Device device) {
-  for (auto value : node->outputs()) {
-    auto output_device = getDevice(value);
-    if (output_device.has_value() && output_device.value() != device) {
-      return false;
-    }
+  TORCH_INTERNAL_ASSERT(
+      device.index() != INVALID_INDEX, "fusible device needs to be validate");
+  auto opt_device = getDevice(node);
+  if (opt_device.has_value() &&
+      (opt_device->index() == INVALID_INDEX || opt_device != device)) {
+    return false;
   }
   return true;
 }
@@ -68,7 +96,7 @@ static bool isFusibleDevice(const Node* node) {
   if (!device.has_value()) {
     return true;
   }
-  return device->is_cuda() &&
+  return device->index() != INVALID_INDEX && device->is_cuda() &&
       (at::cuda::getDeviceProperties(device->index())->major >= 7 ||
        !hasNonElementWiseOperation(node));
 }
@@ -408,7 +436,6 @@ bool isFusibleCudaFusionGroup(const Node* fusion, const Node* node) {
     auto device = getDevice(fusion);
     fused = (!device.has_value() || isFusibleDevice(node, device.value()));
   }
-
   return fused;
 }
 
