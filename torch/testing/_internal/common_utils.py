@@ -1566,7 +1566,7 @@ class TensorOrArrayPair(TensorLikePair):
     def _process_inputs(self, actual, expected, *, id, allow_subclasses):
         self._check_inputs_isinstance(actual, expected, cls=(torch.Tensor, np.ndarray))
 
-        actual, expected = [self._to_tensor(input, id=id) for input in (actual, expected)]
+        actual, expected = [self._to_tensor(input) for input in (actual, expected)]
         for tensor in (actual, expected):
             self._check_supported(tensor, id=id)
         return actual, expected
