@@ -60,6 +60,37 @@ std::vector<mobile::nnc::InputSpec> toInputSpecs(const std::shared_ptr<Graph>& g
   }
   return specs;
 }
+std::vector<SymbolicShapePosition> findSymbolicShapePositions(
+    std::shared_ptr<tensorexpr::TensorExprKernel> kernel) {
+  std::vector<SymbolicShapePosition> res;
+  for (int64_t sym_idx : kernel->getSymbolicShapeInputs()) {
+    bool found = false;
+    for (int64_t input_idx : c10::irange(kernel->graph()->inputs().size())) {
+      auto input = kernel->graph()->inputs()[input_idx];
+
+      if (!input->type()->cast<TensorType>()) {
+        continue;
+      }
+      auto tt = input->type()->expect<TensorType>();
+      if (!tt->symbolic_sizes().sizes()) {
+        continue;
+      }
+      std::vector<at::ShapeSymbol> shape_vec = *tt->symbolic_sizes().sizes();
+      for (int64_t dim_idx : c10::irange(shape_vec.size())) {
+        if (shape_vec[dim_idx].value() == sym_idx) {
+          res.push_back({input_idx, dim_idx});
+          found = true;
+          break;
+        }
+      }
+      if (found) {
+        break;
+      }
+    }
+    TORCH_CHECK(found, "Could not locate a symbolic shape among input tensor shapes");
+  }
+  return res;
+}
 
 std::unique_ptr<Function> compileMethod(
     std::shared_ptr<tensorexpr::TensorExprKernel> kernel,
@@ -115,6 +146,7 @@ std::unique_ptr<Function> compileMethod(
     out_spec.push_back(output);
   }
   func->set_output_specs(out_spec);
+  func->set_sym_shape_positions(findSymbolicShapePositions(kernel));
 
   return func;
 }

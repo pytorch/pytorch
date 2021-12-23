@@ -92,6 +92,13 @@ struct TORCH_API MemoryPlan {
   std::vector<int64_t> buffer_sizes_;
 };
 
+struct TORCH_API SymbolicShapePosition {
+  SymbolicShapePosition() = default;
+
+  int64_t input_idx_;
+  int64_t dim_idx_;
+};
+
 // Represents a compiled NNC function which has a 1-1 correspondence with a
 // `Method` (e.g. `forward`). It's similar as torch::jit::mobile::Function.
 class TORCH_API Function {
@@ -159,6 +166,15 @@ class TORCH_API Function {
     memory_plan_ = memory_plan;
   }
 
+  const std::vector<SymbolicShapePosition>& sym_shape_positions() const {
+    return sym_shape_positions_;
+  }
+
+  void set_sym_shape_positions(
+      const std::vector<SymbolicShapePosition>& sym_shape_pos) {
+    sym_shape_positions_ = sym_shape_pos;
+  }
+
  private:
   void init_execution_state() const;
 
@@ -167,6 +183,7 @@ class TORCH_API Function {
   c10::impl::GenericList parameters_{at::AnyType::get()};
   std::vector<InputSpec> input_specs_;
   std::vector<OutputSpec> output_specs_;
+  std::vector<SymbolicShapePosition> sym_shape_positions_;
   MemoryPlan memory_plan_;
   mutable std::unique_ptr<ExecutionState> execution_state_;
 };

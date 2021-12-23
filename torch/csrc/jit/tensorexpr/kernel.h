@@ -165,6 +165,11 @@ class TORCH_API TensorExprKernel {
     return codegen_->kernel_func_name();
   }
 
+  const std::vector<int64_t>& getSymbolicShapeInputs() const {
+    return symbolic_shape_inputs_;
+  }
+
+
  private:
   enum BackendType {
     kUninitialized,
