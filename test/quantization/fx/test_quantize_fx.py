@@ -44,7 +44,6 @@ from torch.ao.quantization import (
     float16_dynamic_qconfig,
     float16_static_qconfig,
     float_qparams_weight_only_qconfig,
-    float_qparams_weight_only_qconfig_4bit,
     get_default_qconfig,
     get_default_qat_qconfig,
     get_default_qconfig_dict,
@@ -100,6 +99,7 @@ from torch.testing._internal.common_quantization import (
     run_ddp,
     test_only_eval_fn,
     test_only_train_fn,
+    ModelForConvTransposeBNFusion,
 )
 
 from torch.testing._internal.common_quantization import (
@@ -301,6 +301,27 @@ class TestFuseFx(QuantizationTestCase):
             m,
             expected_node_list=expected_nodes,
             expected_node_occurrence=expected_occurrence)
+
+    def test_fuse_convtranspose_bn_eval(self):
+
+        m = ModelForConvTransposeBNFusion().eval()
+        m = fuse_fx(m)
+
+        expected_nodes = [
+            ns.call_module(nn.ConvTranspose1d),
+            ns.call_module(nn.ConvTranspose2d),
+            ns.call_module(nn.ConvTranspose3d),
+        ]
+        expected_occurrence = {
+            ns.call_module(nn.BatchNorm1d): 0,
+            ns.call_module(nn.BatchNorm2d): 0,
+            ns.call_module(nn.BatchNorm3d): 0,
+        }
+        self.checkGraphModuleNodes(
+            m,
+            expected_node_list=expected_nodes,
+            expected_node_occurrence=expected_occurrence)
+
 
     def test_fuse_module_relu(self):
         class M(torch.nn.Module):
@@ -1042,11 +1063,11 @@ class TestQuantizeFx(QuantizationTestCase):
         for is_name in [True, False]:
             if is_name:
                 prepare_config = {
-                    "standalone_module_name": [("standalone", None, interface_config)]
+                    "standalone_module_name": [("standalone", None, interface_config, None)]
                 }
             else:
                 prepare_config = {
-                    "standalone_module_class": [(StandaloneModule, None, interface_config)]
+                    "standalone_module_class": [(StandaloneModule, None, interface_config, None)]
                 }
 
             original_m_copy = copy.deepcopy(original_m)
@@ -5183,26 +5204,25 @@ class TestQuantizeFxOps(QuantizationTestCase):
             def forward(self, indices):
                 return self.emb(indices)
 
-        for qconfig_type in [float_qparams_weight_only_qconfig, float_qparams_weight_only_qconfig_4bit]:
-            model = M().eval()
-            indices = torch.tensor([9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8, 3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3])
-            quantized_node = ns.call_module(nnq.Embedding)
-            configs = [
-                (qconfig_type, ns.call_module(nnq.Embedding)),
-                (None, ns.call_module(nn.Embedding)),
-                (default_qconfig, ns.call_module(nn.Embedding)),
-            ]
+        model = M().eval()
+        indices = torch.tensor([9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8, 3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3])
+        quantized_node = ns.call_module(nnq.Embedding)
+        configs = [
+            (float_qparams_weight_only_qconfig, ns.call_module(nnq.Embedding)),
+            (None, ns.call_module(nn.Embedding)),
+            (default_qconfig, ns.call_module(nn.Embedding)),
+        ]
 
-            for qconfig, node in configs:
-                qconfig_dict = {"": qconfig}
-                m = prepare_fx(model, qconfig_dict)
-                self.checkGraphModuleNodes(m, expected_node_occurrence={
-                    ns.call_module(torch.ao.quantization.MinMaxObserver): 0
-                })
-                m = convert_fx(m)
-                self.checkGraphModuleNodes(m, expected_node=node)
-                # make sure it runs
-                m(indices)
+        for qconfig, node in configs:
+            qconfig_dict = {"": qconfig}
+            m = prepare_fx(model, qconfig_dict)
+            self.checkGraphModuleNodes(m, expected_node_occurrence={
+                ns.call_module(torch.ao.quantization.MinMaxObserver): 0
+            })
+            m = convert_fx(m)
+            self.checkGraphModuleNodes(m, expected_node=node)
+            # make sure it runs
+            m(indices)
 
     def test_embedding_bag(self):
         class M(torch.nn.Module):
