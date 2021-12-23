@@ -139,6 +139,15 @@ static std::string formatMessage(const char *format, va_list fmt_args) {
   return std::string(error_buf);
 }
 
+void translate_exception_to_python(const std::exception_ptr &e_ptr) {
+  try {
+    TORCH_INTERNAL_ASSERT(e_ptr, "translate_exception_to_python "
+                          "called with invalid exception pointer");
+    std::rethrow_exception(e_ptr);
+  }
+  CATCH_ALL_ERRORS(return)
+}
+
 IndexError::IndexError(const char *format, ...) {
   va_list fmt_args;
   va_start(fmt_args, format);

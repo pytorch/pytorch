@@ -2,7 +2,6 @@ from itertools import product
 import unittest
 
 import torch
-from torch.testing._internal.common_utils import TEST_MKL
 from torch.testing._internal.jit_utils import JitTestCase
 from itertools import product
 
@@ -14,7 +13,6 @@ if __name__ == "__main__":
     )
 
 TEST_CUDA = torch.cuda.is_available()
-TEST_MKL
 
 
 class TestDeviceAnalysis(JitTestCase):
@@ -50,8 +48,12 @@ class TestDeviceAnalysis(JitTestCase):
 
         torch._C._jit_pass_propagate_device(graph)
 
-    def assert_device_equal(self, fn, in_devices, expected_device, in_shapes=None, subtest_str=""):
-        with self.subTest(f"In device: {in_devices}, expected: {expected_device}, \n {subtest_str}"):
+    def assert_device_equal(
+        self, fn, in_devices, expected_device, in_shapes=None, subtest_str=""
+    ):
+        with self.subTest(
+            f"In device: {in_devices}, expected: {expected_device}, \n {subtest_str}"
+        ):
             graph = torch.jit.script(fn).graph
             self.prop_device_on_graph(graph, in_devices, in_shapes)
             actual_device = self.node_output_device(graph)
@@ -59,7 +61,9 @@ class TestDeviceAnalysis(JitTestCase):
             if expected_device is None or actual_device is None:
                 self.assertEqual(actual_device, expected_device)
             else:
-                self.assertEqual(actual_device.type, expected_device.type, "Failed Verification")
+                self.assertEqual(
+                    actual_device.type, expected_device.type, "Failed Verification"
+                )
 
     def test_device_apply(self):
         # Test if the device is properly applied to the input
