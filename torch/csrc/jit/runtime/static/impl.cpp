@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/runtime/static/impl.h>
 
 #include <ATen/MemoryOverlap.h>
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
 #include <ATen/record_function.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/core/InferenceMode.h>
@@ -136,7 +136,7 @@ void OptimizeGraph(
 }
 
 // remove unused input 0 from graph
-bool RemoveSelfFromGraphInput(std::shared_ptr<torch::jit::Graph>& graph) {
+bool removeSelfFromGraphInput(std::shared_ptr<torch::jit::Graph>& graph) {
   if (graph->inputs().at(0)->type()->is_module()) {
     if (graph->inputs().at(0)->hasUses()) {
       return false;
@@ -144,13 +144,6 @@ bool RemoveSelfFromGraphInput(std::shared_ptr<torch::jit::Graph>& graph) {
     graph->eraseInput(0);
   }
   return true;
-}
-
-// remove "self" from function schema
-c10::FunctionSchema RemoveSelfFromSchema(const c10::FunctionSchema& s) {
-  TORCH_CHECK(s.arguments().size() >= 1 && s.arguments()[0].name() == "self");
-  std::vector<Argument> args({s.arguments().begin() + 1, s.arguments().end()});
-  return s.cloneWithArguments(args);
 }
 
 std::vector<Value*> valueVecFromFastSet(const FastSet<const Value*>& s) {
@@ -186,11 +179,11 @@ std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
     const torch::jit::Module& m,
     bool is_frozen,
     const StaticModuleOptions& opts) {
-  VLOG(1) << "StaticModuleOptions: cleanup_activations "
-          << opts.cleanup_activations << ", enable_out_variant "
-          << opts.enable_out_variant << ", optimize_memory "
-          << opts.optimize_memory << ", manage_output_tensors "
-          << opts.manage_output_tensors;
+  LOG(INFO) << "StaticModuleOptions: cleanup_activations "
+            << opts.cleanup_activations << ", enable_out_variant "
+            << opts.enable_out_variant << ", optimize_memory "
+            << opts.optimize_memory << ", manage_output_tensors "
+            << opts.manage_output_tensors;
 
   Module module = m.copy();
   if (!is_frozen) {
@@ -445,7 +438,8 @@ StaticModule::StaticModule(
     const StaticModuleOptions& opts)
     : opts_(opts),
       graph_(std::move(graph_and_module.first)),
-      module_(std::move(graph_and_module.second)) {
+      module_(std::move(graph_and_module.second)),
+      num_inputs_(graph_->inputs().size()) {
   // check opt flags
   if (opts.manage_output_tensors) {
     TORCH_CHECK(
@@ -461,11 +455,12 @@ StaticModule::StaticModule(
   // handle schema
   if (module_.has_value()) {
     Method method = module_->get_method("forward");
-    if (RemoveSelfFromGraphInput(graph_)) {
-      schema_ = RemoveSelfFromSchema(method.function().getSchema());
+    schema_ = method.function().getSchema();
+    const auto num_schema_args = schema_->arguments().size();
+    DCHECK(num_schema_args > 0);
+    if (removeSelfFromGraphInput(graph_)) {
       module_ = c10::nullopt;
-    } else {
-      schema_ = method.function().getSchema();
+      num_inputs_ = num_schema_args - 1;
     }
   }
 
@@ -519,9 +514,9 @@ StaticModule::StaticModule(
   int node_idx = 0;
   FastMap<Node*, bool> node_has_out_variant;
 
-  const auto inputs_index_offset = 0;
-  const auto constants_index_offset = inputs_index_offset + num_inputs();
-  const auto values_index_offset = constants_index_offset + constants().size();
+  const auto inputs_index_offset = inputs_offset();
+  const auto constants_index_offset = constants_offset();
+  const auto values_index_offset = intermediate_values_offset();
 
   // Map node_idx to index offset in values_. Can't reserve space
   // because we don't know how many non-constant nodes there are yet.
@@ -595,6 +590,15 @@ StaticModule::StaticModule(
     }
     node_idx++;
   }
+
+  num_intermediate_values_ = std::accumulate(
+      nodes_.begin(),
+      nodes_.end(),
+      0,
+      [](uint32_t sum, const ProcessedNode& pnode) {
+        return sum + pnode.num_outputs();
+      });
+
   for (auto& pnode : nodes_) {
     if (pnode.num_outputs() == 1 &&
         isOptimizableContainerType(pnode.node(), node_has_out_variant)) {
@@ -688,7 +692,7 @@ size_t StaticModule::num_outputs() const {
 }
 
 size_t StaticModule::num_inputs() const {
-  return graph_->inputs().size();
+  return num_inputs_;
 }
 
 StaticRuntime& StaticModule::runtime() {
@@ -721,19 +725,11 @@ c10::IValue StaticModule::operator()(
 
 StaticRuntime::StaticRuntime(const StaticModule& sm)
     : static_module_(sm),
+      first_input_is_self_(static_module_.first_input_is_self()),
       manage_output_tensors_enabled_(sm.opts().manage_output_tensors),
       nodes_(sm.nodes()) {
-  const auto total_num_node_outputs = std::accumulate(
-      nodes_.begin(),
-      nodes_.end(),
-      0,
-      [](uint32_t sum, const ProcessedNode& pnode) {
-        return sum + pnode.num_outputs();
-      });
-  values_.resize(
-      sm.num_inputs() + sm.constants().size() + total_num_node_outputs);
-  const auto inputs_index_offset = 0;
-  const auto constants_index_offset = inputs_index_offset + sm.num_inputs();
+  values_.resize(sm.total_num_values());
+  const auto constants_index_offset = sm.constants_offset();
   const auto constants_begin_it = values_.begin() + constants_index_offset;
   const auto constants_end_it = constants_begin_it + sm.constants().size();
   std::copy(sm.constants().begin(), sm.constants().end(), constants_begin_it);
@@ -751,81 +747,90 @@ StaticRuntime::StaticRuntime(const StaticModule& sm)
 
 StaticRuntime::~StaticRuntime() = default;
 
-void StaticRuntime::set_inputs(
-    const std::vector<IValue>& args,
-    const KeywordArgs& kwargs) {
-  if (!kwargs.empty()) {
-    // This is not ideal
-    TORCH_CHECK(
-        static_module_.schema(),
-        "Schema is not available. Consider creating the Static Runtime "
-        "with StaticModule(const torch::jit::Module& m) instead.");
-    std::vector<c10::IValue> stack;
-    stack.reserve(static_module_.num_inputs());
-    if (static_module_.first_input_is_self()) {
-      stack.emplace_back(static_module_.module()._ivalue());
-    }
-    stack.insert(stack.end(), args.begin(), args.end());
-
-    static_module_.schema()->checkAndNormalizeInputs(stack, kwargs);
-    DCHECK_EQ(static_module_.num_inputs(), stack.size());
-    for (const auto i : c10::irange(stack.size())) {
-      Input(i) = std::move(stack[i]);
-    }
-  } else {
-    if (static_module_.first_input_is_self()) {
-      Input(0) = static_module_.module()._ivalue();
-      DCHECK_EQ(static_module_.num_inputs(), args.size() + 1);
-      for (const auto i : c10::irange(args.size())) {
-        Input(i + 1) = args[i];
-      }
-    } else {
-      DCHECK_EQ(static_module_.num_inputs(), args.size());
-      for (const auto i : c10::irange(args.size())) {
-        Input(i) = args[i];
-      }
-    }
-  }
+void StaticRuntime::set_arg(const size_t idx, std::vector<IValue>&& args) {
+  DCHECK(idx < args.size());
+  Input(idx + first_input_is_self_) = std::move(args[idx]);
 }
 
-void StaticRuntime::set_inputs(
-    std::vector<IValue>&& args,
-    const KeywordArgs& kwargs) {
-  if (!kwargs.empty()) {
-    // This is not ideal
-    TORCH_CHECK(
-        static_module_.schema(),
-        "Schema is not available. Consider creating the Static Runtime "
-        "with StaticModule(const torch::jit::Module& m) instead.");
-    std::vector<c10::IValue> stack;
-    stack.reserve(static_module_.num_inputs());
-    if (static_module_.first_input_is_self()) {
-      stack.emplace_back(static_module_.module()._ivalue());
-    }
-    stack.insert(
-        stack.end(),
-        std::make_move_iterator(args.begin()),
-        std::make_move_iterator(args.end()));
+void StaticRuntime::set_arg(const size_t idx, const std::vector<IValue>& args) {
+  DCHECK(idx < args.size());
+  Input(idx + first_input_is_self_) = args[idx];
+}
 
-    static_module_.schema()->checkAndNormalizeInputs(stack, kwargs);
-    DCHECK_EQ(static_module_.num_inputs(), stack.size());
-    for (const auto i : c10::irange(stack.size())) {
-      Input(i) = std::move(stack[i]);
-    }
-  } else {
-    if (static_module_.first_input_is_self()) {
-      Input(0) = static_module_.module()._ivalue();
-      DCHECK_EQ(static_module_.num_inputs(), args.size() + 1);
-      for (const auto i : c10::irange(args.size())) {
-        Input(i + 1) = std::move(args[i]);
-      }
-    } else {
-      DCHECK_EQ(static_module_.num_inputs(), args.size());
-      for (const auto i : c10::irange(args.size())) {
-        Input(i) = std::move(args[i]);
-      }
-    }
+void StaticRuntime::set_arg(const size_t idx, const IValue& arg) {
+  Input(idx + first_input_is_self_) = arg;
+}
+
+namespace {
+void check_type(const Argument& schema_arg, const IValue& arg) {
+  // Fast path for most common case
+  if (arg.isTensor() &&
+      schema_arg.type()->kind() == c10::TypeKind::TensorType) {
+    return;
   }
+  TORCH_CHECK(arg.type()->isSubtypeOf(schema_arg.type()));
+}
+} // namespace
+
+template <typename IValueList>
+void StaticRuntime::set_inputs(
+    IValueList&& args,
+    const std::unordered_map<std::string, c10::IValue>& kwargs) {
+  const auto total_num_inputs =
+      args.size() + kwargs.size() + first_input_is_self_;
+  TORCH_CHECK(total_num_inputs == static_module_.num_inputs());
+
+  const auto& schema = static_module_.schema();
+  if (first_input_is_self_) {
+    Input(0) = static_module_.module()._ivalue();
+  }
+
+  if (C10_UNLIKELY(!schema)) {
+    TORCH_CHECK(
+        kwargs.empty(),
+        "Schema is not available, but StaticRuntime got kwargs. "
+        "Consider creating the Static Runtime instance "
+        "with StaticModule(const torch::jit::Module& m) instead.");
+    for (size_t i = 0; i < args.size(); ++i) {
+      set_arg(i, std::forward<IValueList>(args));
+    }
+    return;
+  }
+
+  const auto& schema_args = schema->arguments();
+  size_t consumed_kwargs = 0;
+  DCHECK(schema_args.size() > 0);
+
+  for (size_t i = 0; i < schema_args.size() - 1; ++i) {
+    // Start at 1 since the schema always contains `self`.
+    const auto& schema_arg = schema_args[i + 1];
+
+    if (i < args.size()) {
+      check_type(schema_arg, args[i]);
+      set_arg(i, std::forward<IValueList>(args));
+      continue;
+    }
+
+    auto it = kwargs.find(schema_arg.name());
+    if (it != kwargs.end()) {
+      check_type(schema_arg, it->second);
+      set_arg(i, it->second);
+      ++consumed_kwargs;
+      continue;
+    }
+
+    auto maybe_default_val = schema_arg.default_value();
+    if (maybe_default_val) {
+      set_arg(i, *maybe_default_val);
+      continue;
+    }
+
+    TORCH_CHECK(
+        false, "Static runtime is missing required kwarg ", schema_arg.name());
+  }
+  TORCH_CHECK(
+      consumed_kwargs == kwargs.size() &&
+      args.size() + consumed_kwargs == schema_args.size() - 1);
 }
 
 void StaticRuntime::create_memory_planner() {
@@ -1013,7 +1018,7 @@ StaticRuntime::Deallocator::~Deallocator() {
   // Assume cleanup cannot throw.
   cleanupImpl();
 #ifndef NDEBUG
-  runtime_.check_for_memory_leak(false);
+  runtime_.check_for_memory_leak(/*output_returned*/ false);
 #endif
 }
 
@@ -1074,8 +1079,11 @@ c10::IValue StaticRuntime::run_impl(
   if (static_module_.num_outputs() > 1) {
     return move_outputs_to_tuple(static_module_.num_outputs());
   }
+
+  DCHECK(check_for_memory_leak(/*output_returned*/ false));
   // The exact output tensor should never be managed.
   DCHECK(!isManagedOutputTensor(*outputs_[0]));
+
   // use move here. Otherwise, clean up outputs_[0] explicitly
   return std::move(*outputs_[0]);
 }
@@ -1437,9 +1445,7 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
         output = move_outputs_to_tuple(static_module_.num_outputs());
       }
 
-#ifndef NDEBUG
-      check_for_memory_leak(false);
-#endif
+      DCHECK(check_for_memory_leak(/*output_returned*/ false));
 
       // use move here. Otherwise, clean up outputs_[0] explicitly
       output = std::move(*outputs_[0]);
@@ -1478,9 +1484,9 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
   return results;
 }
 
-void StaticRuntime::check_for_memory_leak(bool output_returned) {
+bool StaticRuntime::check_for_memory_leak(bool output_returned) {
   if (!static_module_.opts().cleanup_activations) {
-    return;
+    return true;
   }
 
   // check for inputs
@@ -1531,6 +1537,7 @@ void StaticRuntime::check_for_memory_leak(bool output_returned) {
     }
   }
   VLOG(1) << "Finished checking for memory leak";
+  return true;
 }
 
 void StaticRuntime::deallocateOutputTensors() {
@@ -1700,12 +1707,12 @@ void ProcessedNode::run() {
         guard.before(get_op_name());
       }
     }
-    fn_->f()(this);
+    fn_->run(this);
   } else {
-    fn_->f()(this);
+    fn_->run(this);
   }
 #else
-  fn_->f()(this);
+  fn_->run(this);
 #endif
 #ifndef NDEBUG
   if (FLAGS_static_runtime_disable_debug_memory_overlap_check) {

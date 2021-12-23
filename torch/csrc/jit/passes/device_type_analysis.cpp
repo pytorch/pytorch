@@ -30,7 +30,7 @@ Returns: Bool indicating if anything was changed
 bool setDeviceType(Value* value, c10::optional<Device> device) {
   auto tensor_type = value->type()->cast<TensorType>();
   TORCH_INTERNAL_ASSERT(tensor_type, "Expecting a tensor type");
-  bool changed = (tensor_type->device() != device);
+  bool changed = tensor_type->device() != device;
   if (changed) {
     value->setType(tensor_type->withDevice(device));
   }
@@ -177,25 +177,6 @@ struct DeviceTypePropagationPass {
     }
   }
 
-  // Small functions to overload for both Dtype and Device
-  bool is_tensor_prop_empty(const TensorType& val) const {
-    return !val.device().has_value();
-  }
-
-  bool is_tensor_prop_same(const TensorType& val1, const TensorType& val2)
-      const {
-    // Notes that it allows for null devices to be the same
-    return val1.device() == val2.device();
-  }
-
-  bool copy_tensor_prop(Value* dst, TensorType& src_type) {
-    return setDeviceType(dst, src_type.device());
-  }
-
-  bool set_empty_prop(Value* dst) {
-    return setDeviceType(dst, c10::nullopt);
-  }
-
   bool mergeAndApplyTensorProps(
       const at::ArrayRef<Value*>& src1,
       const at::ArrayRef<Value*>& src2,
@@ -211,12 +192,11 @@ struct DeviceTypePropagationPass {
         continue;
       }
 
-      if (is_tensor_prop_empty(*src1_type) ||
-          is_tensor_prop_empty(*src2_type) ||
-          !is_tensor_prop_same(*src1_type, *src2_type)) {
-        changed |= set_empty_prop(dst[i]);
+      if (!src1_type->device()|| !src2_type->device()
+          || !(src1_type->device().value() == src2_type->device().value())) {
+        changed |= setDeviceType(dst[i], c10::nullopt);
       } else {
-        changed |= copy_tensor_prop(dst[i], *src1_type);
+        changed |= setDeviceType(dst[i], src1_type->device());
       }
     }
     return changed;
