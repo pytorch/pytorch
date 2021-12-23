@@ -20,6 +20,8 @@
 #include <iostream>
 #include <sstream>
 #include <utility>
+#include "ATen/core/interned_strings.h"
+#include <torch/csrc/jit/api/function_impl.h>
 
 namespace torch {
 namespace jit {
@@ -705,6 +707,27 @@ void initPythonIRBindings(PyObject* module_) {
                 .cast<py::object>();
           })
       .def("cconv", [](Node& n) { return n.expect<ConcretePythonOp>()->cconv; })
+      .def("get_fallback_execution_plans", [](Node& n) {
+
+
+
+        std::unordered_map<ArgumentSpec, ExecutionPlan> empty_plans;
+
+        if (n.kind() != prim::Constant || !n.hasAttribute(Symbol::attr("fallback"))) {
+          return empty_plans;
+        }
+
+        auto ftp = n.output(0)->type()->cast<FunctionType>();
+        if (!ftp) {
+          return empty_plans;
+        }
+
+        auto graphFunction = tryToGraphFunction(*ftp->function());
+        if (graphFunction->get_executor().isOptimized()) {
+          return graphFunction->get_executor().getDebugState().execution_plans;
+        }
+        return empty_plans;
+      })
       .def(
           "pyname",
           [](Node& n) { return n.expect<ConcretePythonOp>()->name(); })

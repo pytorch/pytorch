@@ -149,6 +149,29 @@ class TestTEFuser(JitTestCase):
         # we would compute the wrong result silently
         self.assertEqual(scripted(a, a), fused_kernel(a, a))
 
+    def test_typecheck2(self):
+        a = torch.ones(1)
+
+        def fused_kernel(a, b):
+            return (a + b) * 2.
+
+        scripted = self.checkScript(fused_kernel, (a, a))
+        graph = scripted.graph_for(a, a)
+
+        # switch to another shape
+        a = torch.ones(2)
+        # make we sure we optimize
+        scripted(a, a)
+        scripted(a, a)
+        graph = torch.jit.last_executed_optimized_graph()
+        # fragile. fallback may not be the first const
+        const_node = graph.findAllNodes("prim::Constant")[0]
+        print(const_node)
+        exec_states = const_node.get_fallback_execution_plans()
+        print(f"len(exec_states) {len(exec_states)}")
+        print(list(exec_states.values())[0].graph)
+
+
     def test_sum_simple(self):
         def func(x):
             x2 = x * x
