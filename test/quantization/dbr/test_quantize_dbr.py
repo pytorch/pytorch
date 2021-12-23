@@ -24,6 +24,7 @@ from torch.quantization.quantize_fx import (
     prepare_fx,
     convert_fx,
 )
+from torch.ao.quantization._dbr.quantization_state import AutoQuantizationState
 
 import torch.ao.quantization._quantize_dbr as _quantize_dbr
 import torch.ao.ns._numeric_suite_dbr as ns
@@ -703,6 +704,33 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         FileCheck().check_count("quantized::add", 0, exactly=True).run(mqt.m2.m1.graph)
         FileCheck().check_count("aten::add", 1, exactly=True).run(mqt.m2.graph)
         FileCheck().check_count("quantized::add", 0, exactly=True).run(mqt.m2.graph)
+
+    def test_module_list(self):
+        class Child(torch.nn.Module):
+            def forward(self, x):
+                return x + x
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.module_list = torch.nn.ModuleList([
+                    Child(),
+                ])
+
+            def forward(self, x):
+                for module in self.module_list:
+                    # TODO(future PR): we should see if there is a better
+                    # solution other than asking users to do this
+                    if not isinstance(module, AutoQuantizationState):
+                        x = module(x)
+                return x
+
+        m = M().eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(
+            m, qconfig, (torch.randn(8, 1, 1, 1),),
+            # TODO(future PR): enable scripting for ModuleList + DBR
+            do_fx_comparison=True, do_torchscript_checks=False)
 
     @unittest.skip('TODO build this')
     def test_module_input_types(self):
