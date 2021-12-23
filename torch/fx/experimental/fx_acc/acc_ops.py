@@ -30,7 +30,8 @@ def linear(*, input, weight, bias):
 
 @register_acc_op_properties(AccOpProperty.quantized)
 @register_acc_op
-def quantized_linear(*, input, weight, bias, acc_out_ty):
+def quantized_linear(*, input, weight, bias, acc_out_ty=None):
+    assert acc_out_ty is not None
     qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams")
     return nn.quantized.functional.linear(
         input,
@@ -391,6 +392,13 @@ def t_mapper(node: torch.fx.Node, _: nn.Module):
         ("*", "permutation"),
     ],
 )
+@register_acc_op_mapping(
+    op_and_target=("call_function", torch.permute),
+    arg_replacement_tuples=[
+        ("input", "input"),
+        ("dims", "permutation"),
+    ],
+)
 @register_acc_op
 def permute(*, input, permutation):
     return input.permute(*permutation)
@@ -490,7 +498,8 @@ def hardswish_mapper(node: torch.fx.Node, _: nn.Module) -> torch.fx.Node:
     ],
 )
 @register_acc_op
-def quantized_add(*, input, other, acc_out_ty):
+def quantized_add(*, input, other, acc_out_ty=None):
+    assert acc_out_ty is not None
     qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams")
     return torch.ops.quantized.add(
         input,
@@ -515,7 +524,8 @@ def quantized_add(*, input, other, acc_out_ty):
     ],
 )
 @register_acc_op
-def quantized_mul(*, input, other, acc_out_ty):
+def quantized_mul(*, input, other, acc_out_ty=None):
+    assert acc_out_ty is not None
     qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams")
     return torch.ops.quantized.mul(
         input,
@@ -542,7 +552,8 @@ def quantized_mul(*, input, other, acc_out_ty):
     ],
 )
 @register_acc_op
-def quantize_per_tensor(*, input, acc_out_ty):
+def quantize_per_tensor(*, input, acc_out_ty=None):
+    assert acc_out_ty is not None
     qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams")
     dtype = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "dtype")
     return torch.quantize_per_tensor(
@@ -568,7 +579,8 @@ def quantize_per_tensor(*, input, acc_out_ty):
     ],
 )
 @register_acc_op
-def quantize_per_channel(*, input, acc_out_ty):
+def quantize_per_channel(*, input, acc_out_ty=None):
+    assert acc_out_ty is not None
     qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams")
     dtype = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "dtype")
     return torch.quantize_per_channel(
@@ -590,13 +602,15 @@ def dequantize(*, input):
 
 @register_acc_op_properties(AccOpProperty.pointwise, AccOpProperty.unary, AccOpProperty.quantized)
 @register_acc_op
-def rescale_quantize_per_tensor(*, input, acc_out_ty):
+def rescale_quantize_per_tensor(*, input, acc_out_ty=None):
+    assert acc_out_ty is not None
     d = dequantize(input=input)
     return quantize_per_tensor(input=d, acc_out_ty=acc_out_ty)
 
 @register_acc_op_properties(AccOpProperty.unary, AccOpProperty.quantized)
 @register_acc_op
-def rescale_quantize_per_channel(*, input, acc_out_ty):
+def rescale_quantize_per_channel(*, input, acc_out_ty=None):
+    assert acc_out_ty is not None
     d = dequantize(input=input)
     return quantize_per_channel(input=d, acc_out_ty=acc_out_ty)
 
@@ -710,7 +724,25 @@ def torch_log1p_mapper(node: torch.fx.Node, _: torch.nn.Module) -> torch.fx.Node
         return log_node
 
 
+def reduce_op_mapper(node: torch.fx.Node, mod: torch.fx.GraphModule, func) -> torch.fx.Node:
+    with node.graph.inserting_before(node):
+        kwargs = dict(node.kwargs)
+        if "dim" in kwargs and isinstance(kwargs["dim"], int):
+            kwargs["dim"] = (kwargs["dim"],)
+        new_node = node.graph.call_function(func, kwargs=kwargs)
+        new_node.meta = node.meta.copy()
+        return new_node
+
+
 @register_acc_op_properties(AccOpProperty.unary)
+@register_acc_op
+def sum(*, input, dim=None, keepdim=False, dtype=None):
+    if dim is not None:
+        return torch.sum(**locals())
+    else:
+        return input.sum(dtype=dtype)
+
+
 @register_custom_acc_mapper_fn(
     op_and_target=("call_method", "sum"),
     arg_replacement_tuples=[
@@ -729,23 +761,39 @@ def torch_log1p_mapper(node: torch.fx.Node, _: torch.nn.Module) -> torch.fx.Node
         ("dtype", "dtype", this_arg_is_optional),
     ],
 )
-def add_sum_mapper(node: torch.fx.Node, mod: torch.fx.GraphModule) -> torch.fx.Node:
-    with node.graph.inserting_before(node):
-        sum_kwargs = dict(node.kwargs)
-        if "dim" in sum_kwargs and isinstance(sum_kwargs["dim"], int):
-            sum_kwargs["dim"] = (sum_kwargs["dim"],)
-        sum_node = node.graph.call_function(sum, kwargs=sum_kwargs)
-        sum_node.meta = node.meta.copy()
-        return sum_node
+def sum_mapper(node: torch.fx.Node, mod: torch.fx.GraphModule) -> torch.fx.Node:
+    return reduce_op_mapper(node, mod, sum)
 
 
 @register_acc_op_properties(AccOpProperty.unary)
 @register_acc_op
-def sum(*, input, dim=None, keepdim=False, dtype=None):
+def mean(*, input, dim=None, keepdim=False, dtype=None):
     if dim is not None:
-        return torch.sum(**locals())
+        return torch.mean(**locals())
     else:
-        return input.sum(dtype=dtype)
+        return input.mean(dtype=dtype)
+
+
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_method", "mean"),
+    arg_replacement_tuples=[
+        ("input", "input"),
+        ("dim", "dim", this_arg_is_optional),
+        ("keepdim", "keepdim", this_arg_is_optional),
+        ("dtype", "dtype", this_arg_is_optional),
+    ],
+)
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_function", torch.mean),
+    arg_replacement_tuples=[
+        ("input", "input"),
+        ("dim", "dim", this_arg_is_optional),
+        ("keepdim", "keepdim", this_arg_is_optional),
+        ("dtype", "dtype", this_arg_is_optional),
+    ],
+)
+def mean_mapper(node, mod):
+    return reduce_op_mapper(node, mod, mean)
 
 
 @register_custom_acc_mapper_fn(
@@ -1374,7 +1422,8 @@ def custom_narrow_mapper(node: torch.fx.Node, mod: nn.Module) -> torch.fx.Node:
     kwargs_to_move_to_acc_out_ty=[("shape", "shape")],
 )
 @register_acc_op
-def reshape(*, input, acc_out_ty):
+def reshape(*, input, acc_out_ty=None):
+    assert acc_out_ty is not None
     return torch.reshape(
         input, tuple(acc_utils.get_field_from_acc_out_ty(acc_out_ty, "shape"))
     )
@@ -1415,8 +1464,8 @@ def custom_tensor_reshape_mapper(node: torch.fx.Node, _: nn.Module) -> torch.fx.
 
 @register_acc_op_properties(AccOpProperty.pointwise, AccOpProperty.unary)
 @register_acc_op
-def to_dtype(input, acc_out_ty):
-    assert acc_out_ty is not None, "valid acc_out_ty needed"
+def to_dtype(input, acc_out_ty=None):
+    assert acc_out_ty is not None
     return input.to(dtype=acc_utils.get_field_from_acc_out_ty(acc_out_ty, "dtype"))
 
 

@@ -9,7 +9,6 @@ requirements:
    torch/csrc/jit/operator_upgraders/version_map.h
 """
 import torch
-import yaml
 from typing import List, no_type_check, Optional, Union
 
 # TODO (tugsuu) This context manager
@@ -107,7 +106,7 @@ def collect_available_upgraders():
 
     return available_upgraders_in_version_map
 
-def generate_bytecode(file_name):
+def generate_bytecode() -> List:
     upgrader_set = collect_available_upgraders()
     yaml_content = []
     for upgrader_name in upgrader_set:
@@ -115,9 +114,7 @@ def generate_bytecode(file_name):
         upgrader_bytecode = torch._C._compile_graph_to_code_table(upgrader_name, upgrader_graph)
         entry = {upgrader_name: format_bytecode(upgrader_bytecode)}
         yaml_content.append(entry)
-
-    with open(file_name, 'w') as stream:
-        yaml.dump(yaml_content, stream)
+    return yaml_content
 
 def populate_upgraders_map():
     upgrader_set = collect_available_upgraders()

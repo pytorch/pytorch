@@ -1,6 +1,12 @@
 from typing import Optional, List, Dict
-from torch._mock_dispatcher.dispatch_key import DispatchKey, getAutogradKeyFromBackend, getDispatchTableIndexForDispatchKey, isAliasDispatchKey
-from torch._mock_dispatcher.dispatch_key_set import DispatchKeySet, num_entries, isIncludedInAlias, getBackendKeySetFromAutograd, autogradother_backends, getRuntimeDispatchKeySet, isBackendDispatchKey
+from torch._mock_dispatcher.dispatch_key import (
+    DispatchKey, getAutogradKeyFromBackend,
+    isAliasDispatchKey, isRuntimeDispatchKey)
+from torch._mock_dispatcher.dispatch_key_set import (
+    DispatchKeySet, num_entries, isIncludedInAlias, getBackendKeySetFromAutograd,
+    autogradother_backends, getRuntimeDispatchKeySet,
+    isBackendDispatchKey, getDispatchTableIndexForDispatchKeySet,
+    getDispatchTableIndexForDispatchKey)
 from torch._mock_dispatcher.dispatch_key_extractor import DispatchKeyExtractor
 from torch._mock_dispatcher.kernel_function import KernelFunction
 
@@ -36,7 +42,16 @@ class OperatorEntry:
             if k in self.kernels_:
                 return self.kernels_[k].name()
             return '[None]'
-        kernels_str = "\n".join(f"{str(k)}: {self.dispatchTable_[getDispatchTableIndexForDispatchKey(k)].name()}" for k in DispatchKey if not isAliasDispatchKey(k))
+
+        # We no longer have a convenient way to go from "table offset index" to "DispatchKey".
+        # For simplicity I'm computing it the slow brute force way, which is fine because this function is only used for debugging.
+        def brute_force_idx_to_key(idx: int) -> str:
+            for k in DispatchKey:
+                if isRuntimeDispatchKey(k) and getDispatchTableIndexForDispatchKey(k) == idx:
+                    return str(k)
+            return 'Key does not exist'
+
+        kernels_str = "\n".join(f"{brute_force_idx_to_key(i)}: {self.dispatchTable_[i].name()}" for i in range(num_entries()))
         return f"""name: {self.name_}
 
 {kernels_str}"""
@@ -49,13 +64,15 @@ class OperatorEntry:
             if k in self.kernels_:
                 return self.kernels_[k].name()
             return '[None]'
-        kernels_str = "\n".join(f"{str(k)}: {key_to_name(k)}" for k in DispatchKey)
+        kernels_str = "\n".join(f"{str(k)}: {key_to_name(k)}" for k in DispatchKey
+                                if isRuntimeDispatchKey(k) or isAliasDispatchKey(k))
         return f"""name: {self.name_}
 
 {kernels_str}"""
 
-    def lookup(self, k: DispatchKey) -> KernelFunction:
-        return self.dispatchTable_[getDispatchTableIndexForDispatchKey(k)]
+    def lookup(self, ks: DispatchKeySet) -> KernelFunction:
+        idx = getDispatchTableIndexForDispatchKeySet(ks)
+        return self.dispatchTable_[idx]
 
     def hasKernelForAnyDispatchKey(self, ks: DispatchKeySet) -> bool:
         assert not any([k is DispatchKey.Undefined for k in self.kernels_])
@@ -94,7 +111,8 @@ class OperatorEntry:
         has_backend_kernel = self.hasKernelForAnyDispatchKey(getBackendKeySetFromAutograd(dispatch_key)) \
             or self.hasKernelForDispatchKey(DispatchKey.CompositeExplicitAutograd)
 
-        # 2.2. Use CompositeImplicitAutograd kernel if available. For autograd keys, we only use kernel from CompositeImplicitAutograd
+        # 2.2. Use CompositeImplicitAutograd kernel if available.
+        # For autograd keys, we only use kernel from CompositeImplicitAutograd
         #      when there's no direct registration to its corresponding backend key or CompositeExplicitAutograd.
         #      For AutogradOther, we return ambiguousAutogradOtherKernel() if there's registration
         #      to any of its backends.
@@ -152,7 +170,8 @@ class OperatorEntry:
 
     def updateDispatchTableFull_(self, fallbacks: Dict[int, KernelFunction]) -> None:
         for k in DispatchKey:
-            self.updateDispatchTable_(fallbacks, k)
+            if isRuntimeDispatchKey(k):
+                self.updateDispatchTable_(fallbacks, k)
 
     def updateFallback(self, fallbacks: Dict[int, KernelFunction], k: DispatchKey) -> None:
         self.updateDispatchTable_(fallbacks, k)

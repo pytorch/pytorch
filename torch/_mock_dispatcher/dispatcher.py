@@ -1,8 +1,7 @@
 from typing import Dict, List, Optional
 from torch._mock_dispatcher.operator_entry import OperatorEntry
-from torch._mock_dispatcher.dispatch_key import DispatchKey, getDispatchTableIndexForDispatchKey
-from torch._mock_dispatcher.dispatch_key_set import DispatchKeySet, num_entries
-from torch._mock_dispatcher.dispatch_key_extractor import DispatchKeyExtractor
+from torch._mock_dispatcher.dispatch_key import DispatchKey
+from torch._mock_dispatcher.dispatch_key_set import DispatchKeySet, num_entries, getDispatchTableIndexForDispatchKey
 from torch._mock_dispatcher.kernel_function import KernelFunction
 
 class Dispatcher:
@@ -33,14 +32,14 @@ class Dispatcher:
         assert op in self.operatorLookupTable_, f"nothing registered for {op}"
         op_entry = self.operatorLookupTable_[op]
         dispatchKeySet = op_entry.dispatchKeyExtractor_.getDispatchKeySetUnboxed(args)
-        kernel = op_entry.lookup(dispatchKeySet.highestPriorityTypeId())
+        kernel = op_entry.lookup(dispatchKeySet)
         kernel.callBoxed()
 
     def call(self, op: str, args: List[DispatchKeySet]) -> None:
         assert op in self.operatorLookupTable_, f"nothing registered for {op}"
         op_entry = self.operatorLookupTable_[op]
         dispatchKeySet = op_entry.dispatchKeyExtractor_.getDispatchKeySetUnboxed(args)
-        kernel = op_entry.lookup(dispatchKeySet.highestPriorityTypeId())
+        kernel = op_entry.lookup(dispatchKeySet)
         kernel.call()
 
     def registerImpl(self, op: str, k: Optional[DispatchKey], f: KernelFunction) -> None:
@@ -52,7 +51,7 @@ class Dispatcher:
 
     def registerFallback(self, k: DispatchKey, f: KernelFunction) -> None:
         idx = getDispatchTableIndexForDispatchKey(k)
-        assert idx not in self.backendFallbackKernels_
+        assert not self.backendFallbackKernels_[idx].isValid()
         self.backendFallbackKernels_[idx] = f
         for op in self.operatorLookupTable_:
             # updateFallback() in C++ takes in the entire dispatcher
