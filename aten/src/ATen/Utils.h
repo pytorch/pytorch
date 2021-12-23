@@ -131,7 +131,7 @@ Tensor empty_generic(
   // technically this can be inferred from the device, but usually the
   // correct setting is obvious from the call site so just make callers
   // pass it in
-  c10::DispatchKey dispatch_key,
+  c10::DispatchKeySet ks,
   ScalarType dtype,
   Device device,
   c10::optional<c10::MemoryFormat> memory_format

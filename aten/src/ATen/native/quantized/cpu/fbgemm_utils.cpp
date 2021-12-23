@@ -160,9 +160,10 @@ Tensor MakeStridedQTensorCPU(
       allocator->allocate(size_bytes),
       allocator,
       /* resizable = */ true);
+  constexpr auto quantized_cpu_ks = at::DispatchKeySet(at::DispatchKey::QuantizedCPU);
   auto tensor = detail::make_tensor<QTensorImpl>(
       storage,
-      at::DispatchKeySet(at::DispatchKey::QuantizedCPU),
+      quantized_cpu_ks,
       dtype,
       quantizer);
   get_qtensorimpl(tensor)->set_sizes_and_strides(sizes, strides);
