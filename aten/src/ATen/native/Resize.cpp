@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/ResizeCommon.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 
 #include <c10/core/TensorOptions.h>
 
@@ -25,16 +26,6 @@ bool resize_output_check(const Tensor& output, IntArrayRef shape) {
   return true;
 }
 
-static auto kFunctorchWrappedTensors = DispatchKeySet({
-    DispatchKey::FuncTorchGradWrapper,
-    DispatchKey::FuncTorchBatched,
-    DispatchKey::FuncTorchPython});
-
-static bool is_functorch_wrapped_tensor(const Tensor& tensor) {
-  auto key_set = tensor.unsafeGetTensorImpl()->key_set();
-  return !(key_set & kFunctorchWrappedTensors).empty();
-}
-
 bool resize_output(const Tensor& output, IntArrayRef shape) {
   if (resize_output_check(output, shape)) {
     // avoid a redispatch for cpu and cuda.
@@ -43,7 +34,7 @@ bool resize_output(const Tensor& output, IntArrayRef shape) {
     //
     // TODO(#61485): functorch wrapped tensors should not go through the
     // fast path. This is a hack, longer term solutions are in the issue
-    if (output.is_cpu() && !is_functorch_wrapped_tensor(output)) {
+    if (output.is_cpu() && !isTensorSubclassLike(output)) {
       at::native::resize_(output, shape);
     } else {
       output.resize_(shape);

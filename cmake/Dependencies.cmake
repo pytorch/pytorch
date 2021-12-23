@@ -33,6 +33,50 @@ macro(enable_ubsan)
   endif()
 endmacro()
 
+# ---[ CUDA
+if(USE_CUDA)
+  # public/*.cmake uses CAFFE2_USE_*
+  set(CAFFE2_USE_CUDA ${USE_CUDA})
+  set(CAFFE2_USE_CUDNN ${USE_CUDNN})
+  set(CAFFE2_USE_NVRTC ${USE_NVRTC})
+  set(CAFFE2_USE_TENSORRT ${USE_TENSORRT})
+  include(${CMAKE_CURRENT_LIST_DIR}/public/cuda.cmake)
+  if(CAFFE2_USE_CUDA)
+    # A helper variable recording the list of Caffe2 dependent libraries
+    # torch::cudart is dealt with separately, due to CUDA_ADD_LIBRARY
+    # design reason (it adds CUDA_LIBRARIES itself).
+    set(Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS
+      caffe2::cufft caffe2::curand caffe2::cublas)
+    if(CAFFE2_USE_NVRTC)
+      list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cuda caffe2::nvrtc)
+    else()
+      caffe2_update_option(USE_NVRTC OFF)
+    endif()
+    if(CAFFE2_USE_CUDNN)
+      list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cudnn-public)
+    else()
+      caffe2_update_option(USE_CUDNN OFF)
+    endif()
+    if(CAFFE2_USE_TENSORRT)
+      list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::tensorrt)
+    else()
+      caffe2_update_option(USE_TENSORRT OFF)
+    endif()
+  else()
+    message(WARNING
+      "Not compiling with CUDA. Suppress this warning with "
+      "-DUSE_CUDA=OFF.")
+    caffe2_update_option(USE_CUDA OFF)
+    caffe2_update_option(USE_CUDNN OFF)
+    caffe2_update_option(USE_NVRTC OFF)
+    caffe2_update_option(USE_TENSORRT OFF)
+    set(CAFFE2_USE_CUDA OFF)
+    set(CAFFE2_USE_CUDNN OFF)
+    set(CAFFE2_USE_NVRTC OFF)
+    set(CAFFE2_USE_TENSORRT OFF)
+  endif()
+endif()
+
 # ---[ Custom Protobuf
 if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND (NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE))
   disable_ubsan()
@@ -77,8 +121,8 @@ endif(MSVC)
 
 # ---[ Threads
 include(${CMAKE_CURRENT_LIST_DIR}/public/threads.cmake)
-if(TARGET Threads::Threads)
-  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS Threads::Threads)
+if(TARGET caffe2::Threads)
+  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS caffe2::Threads)
 else()
   message(FATAL_ERROR
       "Cannot find threading library. Caffe2 requires Threads to compile.")
@@ -185,6 +229,10 @@ elseif(BLAS STREQUAL "vecLib")
   set(BLAS_INFO "veclib")
   set(BLAS_FOUND 1)
   set(BLAS_LIBRARIES ${vecLib_LINKER_LIBS})
+elseif(BLAS STREQUAL "FlexiBLAS")
+  find_package(FlexiBLAS REQUIRED)
+  include_directories(SYSTEM ${FlexiBLAS_INCLUDE_DIR})
+  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS ${FlexiBLAS_LIB})
 elseif(BLAS STREQUAL "Generic")
   # On Debian family, the CBLAS ABIs have been merged into libblas.so
   find_library(BLAS_LIBRARIES blas)
@@ -201,7 +249,7 @@ if(NOT INTERN_BUILD_MOBILE)
   set(AT_MKL_ENABLED 0)
   set(AT_MKL_MT 0)
   set(USE_BLAS 1)
-  if(NOT (ATLAS_FOUND OR BLIS_FOUND OR GENERIC_BLAS_FOUND OR MKL_FOUND OR OpenBLAS_FOUND OR VECLIB_FOUND))
+  if(NOT (ATLAS_FOUND OR BLIS_FOUND OR GENERIC_BLAS_FOUND OR MKL_FOUND OR OpenBLAS_FOUND OR VECLIB_FOUND OR FlexiBLAS_FOUND))
     message(WARNING "Preferred BLAS (" ${BLAS} ") cannot be found, now searching for a general BLAS library")
     find_package(BLAS)
     if(NOT BLAS_FOUND)
@@ -661,7 +709,7 @@ if(BUILD_TEST OR BUILD_MOBILE_BENCHMARK OR BUILD_MOBILE_TEST)
   # We need to replace googletest cmake scripts too.
   # Otherwise, it will sometimes break the build.
   # To make the git clean after the build, we make a backup first.
-  if(MSVC AND MSVC_Z7_OVERRIDE)
+  if((MSVC AND MSVC_Z7_OVERRIDE) OR USE_CUDA)
     execute_process(
       COMMAND ${CMAKE_COMMAND}
               "-DFILENAME=${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googletest/cmake/internal_utils.cmake"
@@ -1181,50 +1229,6 @@ if(USE_LLVM)
   endif(LLVM_FOUND)
 endif(USE_LLVM)
 
-# ---[ CUDA
-if(USE_CUDA)
-  # public/*.cmake uses CAFFE2_USE_*
-  set(CAFFE2_USE_CUDA ${USE_CUDA})
-  set(CAFFE2_USE_CUDNN ${USE_CUDNN})
-  set(CAFFE2_USE_NVRTC ${USE_NVRTC})
-  set(CAFFE2_USE_TENSORRT ${USE_TENSORRT})
-  include(${CMAKE_CURRENT_LIST_DIR}/public/cuda.cmake)
-  if(CAFFE2_USE_CUDA)
-    # A helper variable recording the list of Caffe2 dependent libraries
-    # torch::cudart is dealt with separately, due to CUDA_ADD_LIBRARY
-    # design reason (it adds CUDA_LIBRARIES itself).
-    set(Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS
-      caffe2::cufft caffe2::curand caffe2::cublas)
-    if(CAFFE2_USE_NVRTC)
-      list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cuda caffe2::nvrtc)
-    else()
-      caffe2_update_option(USE_NVRTC OFF)
-    endif()
-    if(CAFFE2_USE_CUDNN)
-      list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cudnn-public)
-    else()
-      caffe2_update_option(USE_CUDNN OFF)
-    endif()
-    if(CAFFE2_USE_TENSORRT)
-      list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::tensorrt)
-    else()
-      caffe2_update_option(USE_TENSORRT OFF)
-    endif()
-  else()
-    message(WARNING
-      "Not compiling with CUDA. Suppress this warning with "
-      "-DUSE_CUDA=OFF.")
-    caffe2_update_option(USE_CUDA OFF)
-    caffe2_update_option(USE_CUDNN OFF)
-    caffe2_update_option(USE_NVRTC OFF)
-    caffe2_update_option(USE_TENSORRT OFF)
-    set(CAFFE2_USE_CUDA OFF)
-    set(CAFFE2_USE_CUDNN OFF)
-    set(CAFFE2_USE_NVRTC OFF)
-    set(CAFFE2_USE_TENSORRT OFF)
-  endif()
-endif()
-
 # ---[ cuDNN
 if(USE_CUDNN)
   set(CUDNN_FRONTEND_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/cudnn_frontend/include)
@@ -1371,6 +1375,8 @@ if(USE_GLOO)
       set(ENV{GLOO_ROCM_ARCH} "${PYTORCH_ROCM_ARCH}")
     endif()
     if(NOT USE_SYSTEM_GLOO)
+      # gloo uses cuda_add_library
+      torch_update_find_cuda_flags()
       add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
     else()
       add_library(gloo SHARED IMPORTED)
@@ -1417,6 +1423,8 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
     set(TP_BUILD_LIBUV ON CACHE BOOL "" FORCE)
     set(TP_STATIC_OR_SHARED STATIC CACHE STRING "" FORCE)
 
+    # Tensorpipe uses cuda_add_library
+    torch_update_find_cuda_flags()
     add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/tensorpipe)
 
     list(APPEND Caffe2_DEPENDENCY_LIBS tensorpipe)
@@ -1560,7 +1568,6 @@ function(add_onnx_tensorrt_subdir)
 endfunction()
 if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   if(USE_TENSORRT)
-    set(CMAKE_CUDA_COMPILER ${CUDA_NVCC_EXECUTABLE})
     add_onnx_tensorrt_subdir()
     include_directories("${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx-tensorrt")
     caffe2_interface_library(nvonnxparser_static onnx_trt_library)
@@ -1579,8 +1586,7 @@ endif()
 
 if(NOT INTERN_BUILD_MOBILE)
   set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
-  set(TORCH_NVCC_FLAGS $ENV{TORCH_NVCC_FLAGS})
-  separate_arguments(TORCH_NVCC_FLAGS)
+  string(APPEND CMAKE_CUDA_FLAGS " $ENV{TORCH_NVCC_FLAGS}")
   set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 
   # Top-level build config
@@ -1599,7 +1605,7 @@ if(NOT INTERN_BUILD_MOBILE)
   if(MSVC)
     # we want to respect the standard, and we are bored of those **** .
     add_definitions(-D_CRT_SECURE_NO_DEPRECATE=1)
-    list(APPEND CUDA_NVCC_FLAGS "-Xcompiler=/wd4819,/wd4503,/wd4190,/wd4244,/wd4251,/wd4275,/wd4522")
+    string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler=/wd4819,/wd4503,/wd4190,/wd4244,/wd4251,/wd4275,/wd4522")
   endif()
 
   if(NOT MSVC)
@@ -1610,22 +1616,25 @@ if(NOT INTERN_BUILD_MOBILE)
     endif()
   endif()
 
-  list(APPEND CUDA_NVCC_FLAGS -Wno-deprecated-gpu-targets)
-  list(APPEND CUDA_NVCC_FLAGS --expt-extended-lambda)
+  string(APPEND CMAKE_CUDA_FLAGS " -Wno-deprecated-gpu-targets --expt-extended-lambda")
 
   if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     set(CMAKE_CXX_STANDARD 14)
   endif()
 
-  list(APPEND CUDA_NVCC_FLAGS ${TORCH_NVCC_FLAGS})
-  if(CMAKE_POSITION_INDEPENDENT_CODE AND NOT MSVC)
-    list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-fPIC")
+  # use cub in a safe manner, see:
+  # https://github.com/pytorch/pytorch/pull/55292
+  if(NOT ${CUDA_VERSION} LESS 11.5)
+    string(APPEND CMAKE_CUDA_FLAGS " -DCUB_WRAPPED_NAMESPACE=at_cuda_detail")
   endif()
 
   if(CUDA_HAS_FP16 OR NOT ${CUDA_VERSION} LESS 7.5)
     message(STATUS "Found CUDA with FP16 support, compiling with torch.cuda.HalfTensor")
-    list(APPEND CUDA_NVCC_FLAGS "-DCUDA_HAS_FP16=1" "-D__CUDA_NO_HALF_OPERATORS__" "-D__CUDA_NO_HALF_CONVERSIONS__"
-      "-D__CUDA_NO_BFLOAT16_CONVERSIONS__" "-D__CUDA_NO_HALF2_OPERATORS__")
+    string(APPEND CMAKE_CUDA_FLAGS " -DCUDA_HAS_FP16=1"
+                                   " -D__CUDA_NO_HALF_OPERATORS__"
+                                   " -D__CUDA_NO_HALF_CONVERSIONS__"
+                                   " -D__CUDA_NO_HALF2_OPERATORS__"
+                                   " -D__CUDA_NO_BFLOAT16_CONVERSIONS__")
     add_compile_options(-DCUDA_HAS_FP16=1)
   else()
     message(STATUS "Could not find CUDA with FP16 support, compiling without torch.CudaHalfTensor")
@@ -1901,7 +1910,7 @@ if(USE_KINETO AND INTERN_BUILD_MOBILE AND USE_LITE_INTERPRETER_PROFILER AND (USE
 endif()
 
 if(USE_KINETO)
-  if(NOT USE_CUDA)
+  if((NOT USE_CUDA) OR MSVC)
     set(LIBKINETO_NOCUPTI ON CACHE STRING "" FORCE)
   else()
     set(LIBKINETO_NOCUPTI OFF CACHE STRING "")
@@ -1983,7 +1992,6 @@ if(USE_KINETO)
     string(APPEND CMAKE_CXX_FLAGS " -DLIBKINETO_NOCUPTI")
     message(STATUS "Configured Kineto (CPU)")
   else()
-    list(APPEND Caffe2_DEPENDENCY_LIBS ${CUDA_CUDART_LIBRARY})
     message(STATUS "Configured Kineto")
   endif()
 endif()

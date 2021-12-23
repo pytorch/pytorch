@@ -14,6 +14,56 @@ common_notes = {
 # Note: This not only adds doc strings for functions in the linalg namespace, but
 # also connects the torch.linalg Python namespace to the torch._C._linalg builtins.
 
+cross = _add_docstr(_linalg.linalg_cross, r"""
+linalg.cross(input, other, *, dim=-1, out=None) -> Tensor
+
+
+Computes the cross product of two 3-dimensional vectors.
+
+Supports input of float, double, cfloat and cdouble dtypes. Also supports batches
+of vectors, for which it computes the product along the dimension :attr:`dim`.
+In this case, the output has the same batch dimensions as the inputs broadcast to
+a common shape.
+
+Args:
+    input (Tensor): the first input tensor.
+    other (Tensor): the second input tensor.
+    dim  (int, optional): the dimension along which to take the cross-product. Default: `-1`.
+
+Keyword args:
+    out (Tensor, optional): the output tensor. Ignored if `None`. Default: `None`.
+
+Raises:
+    RuntimeError: If after broadcasting :attr:`input`\ `.size(\ `:attr:`dim`\ `) != 3`
+                  or :attr:`other`\ `.size(\ `:attr:`dim`\ `) != 3`.
+Example:
+    >>> a = torch.randn(4, 3)
+    >>> a
+    tensor([[-0.3956,  1.1455,  1.6895],
+            [-0.5849,  1.3672,  0.3599],
+            [-1.1626,  0.7180, -0.0521],
+            [-0.1339,  0.9902, -2.0225]])
+    >>> b = torch.randn(4, 3)
+    >>> b
+    tensor([[-0.0257, -1.4725, -1.2251],
+            [-1.1479, -0.7005, -1.9757],
+            [-1.3904,  0.3726, -1.1836],
+            [-0.9688, -0.7153,  0.2159]])
+    >>> torch.linalg.cross(a, b)
+    tensor([[ 1.0844, -0.5281,  0.6120],
+            [-2.4490, -1.5687,  1.9792],
+            [-0.8304, -1.3037,  0.5650],
+            [-1.2329,  1.9883,  1.0551]])
+    >>> a = torch.randn(1, 3)  # a is broadcast to match shape of b
+    >>> a
+    tensor([[-0.9941, -0.5132,  0.5681]])
+    >>> torch.linalg.cross(a, b)
+    tensor([[ 1.4653, -1.2325,  1.4507],
+            [ 1.4119, -2.6163,  0.1073],
+            [ 0.3957, -1.9666, -1.0840],
+            [ 0.2956, -0.3357,  0.2139]])
+""")
+
 cholesky = _add_docstr(_linalg.linalg_cholesky, r"""
 linalg.cholesky(A, *, upper=False, out=None) -> Tensor
 
@@ -80,9 +130,9 @@ Examples::
     tensor(4.4692e-16, dtype=torch.float64)
 
     >>> A = torch.randn(3, 2, 2, dtype=torch.float64)
-    >>> A = A @ A.transpose(-2, -1) + torch.eye(2)  # batch of symmetric positive-definite matrices
+    >>> A = A @ A.mT + torch.eye(2)  # batch of symmetric positive-definite matrices
     >>> L = torch.linalg.cholesky(A)
-    >>> torch.dist(L @ L.transpose(-2, -1), A)
+    >>> torch.dist(L @ L.mT, A)
     tensor(5.8747e-16, dtype=torch.float64)
 """)
 
@@ -611,9 +661,9 @@ Examples::
     tensor(6.1062e-16, dtype=torch.float64)
 
     >>> A = torch.randn(3, 2, 2, dtype=torch.float64)
-    >>> A = A + A.transpose(-2, -1)  # creates a batch of symmetric matrices
+    >>> A = A + A.mT  # creates a batch of symmetric matrices
     >>> L, Q = torch.linalg.eigh(A)
-    >>> torch.dist(Q @ torch.diag_embed(L) @ Q.transpose(-2, -1).conj(), A)
+    >>> torch.dist(Q @ torch.diag_embed(L) @ Q.mH, A)
     tensor(1.5423e-15, dtype=torch.float64)
 """)
 
@@ -676,7 +726,7 @@ Examples::
     tensor([0.3277, 2.9415], dtype=torch.float64)
 
     >>> A = torch.randn(3, 2, 2, dtype=torch.float64)
-    >>> A = A + A.transpose(-2, -1)  # creates a batch of symmetric matrices
+    >>> A = A + A.mT  # creates a batch of symmetric matrices
     >>> torch.linalg.eigvalsh(A)
     tensor([[ 2.5797,  3.4629],
             [-4.1605,  1.3780],
@@ -688,26 +738,26 @@ householder_product(A, tau, *, out=None) -> Tensor
 
 Computes the first `n` columns of a product of Householder matrices.
 
-Letting :math:`\mathbb{K}` be :math:`\mathbb{R}` or :math:`\mathbb{C}`,
-for a matrix :math:`V \in \mathbb{K}^{m \times n}` with columns :math:`v_i \in \mathbb{K}^m`
-with :math:`m \geq n` and a vector :math:`\tau \in \mathbb{K}^k` with :math:`k \leq n`,
-this function computes the first :math:`n` columns of the matrix
+Let :math:`\mathbb{K}` be :math:`\mathbb{R}` or :math:`\mathbb{C}`, and
+let :math:`V \in \mathbb{K}^{m \times n}` be a matrix with columns :math:`v_i \in \mathbb{K}^m`
+for :math:`i=1,\ldots,m` with :math:`m \geq n`. Denote by :math:`w_i` the vector resulting from
+zeroing out the first :math:`i-1` compontents of :math:`v_i` and setting to `1` the :math:`i`-th.
+For a vector :math:`\tau \in \mathbb{K}^k` with :math:`k \leq n`, this function computes the
+first :math:`n` columns of the matrix
 
 .. math::
 
-    H_1H_2 ... H_k \qquad\text{with}\qquad H_i = \mathrm{I}_m - \tau_i v_i v_i^{\text{H}}
+    H_1H_2 ... H_k \qquad\text{with}\qquad H_i = \mathrm{I}_m - \tau_i w_i w_i^{\text{H}}
 
-where :math:`\mathrm{I}_m` is the `m`-dimensional identity matrix and
-:math:`v^{\text{H}}` is the conjugate transpose when :math:`v` is complex, and the transpose when :math:`v` is real-valued.
+where :math:`\mathrm{I}_m` is the `m`-dimensional identity matrix and :math:`w^{\text{H}}` is the
+conjugate transpose when :math:`w` is complex, and the transpose when :math:`w` is real-valued.
+The output matrix is the same size as the input matrix :attr:`A`.
 
 See `Representation of Orthogonal or Unitary Matrices`_ for further details.
 
 Supports inputs of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if the inputs are batches of matrices then
 the output has the same batch dimensions.
-
-.. note:: This function only uses the values strictly below the main diagonal of :attr:`A`.
-          The other values are ignored.
 
 .. seealso::
 
@@ -717,6 +767,10 @@ the output has the same batch dimensions.
         :func:`torch.ormqr` is a related function that computes the matrix multiplication
         of a product of Householder matrices with another matrix.
         However, that function is not supported by autograd.
+
+.. warning::
+    Gradient computations are only well-defined if :math:`tau_i \neq \frac{1}{||v_i||^2}`.
+    If this condition is not met, no error will be thrown, but the gradient produced may contain `NaN`.
 
 Args:
     A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
@@ -923,13 +977,14 @@ Examples::
 """)
 
 matrix_rank = _add_docstr(_linalg.linalg_matrix_rank, r"""
-matrix_rank(A, tol=None, hermitian=False, *, out=None) -> Tensor
+linalg.matrix_rank(A, *, atol=None, rtol=None, hermitian=False, out=None) -> Tensor
 
 Computes the numerical rank of a matrix.
 
 The matrix rank is computed as the number of singular values
 (or eigenvalues in absolute value when :attr:`hermitian`\ `= True`)
-that are greater than the specified :attr:`tol` threshold.
+that are greater than :math:`\max(\text{atol}, \sigma_1 * \text{rtol})` threshold,
+where :math:`\sigma_1` is the largest singular value (or eigenvalue).
 
 Supports input of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
@@ -939,18 +994,18 @@ If :attr:`hermitian`\ `= True`, :attr:`A` is assumed to be Hermitian if complex 
 symmetric if real, but this is not checked internally. Instead, just the lower
 triangular part of the matrix is used in the computations.
 
-If :attr:`tol` is not specified and :attr:`A` is a matrix of dimensions `(m, n)`,
-the tolerance is set to be
+If :attr:`rtol` is not specified and :attr:`A` is a matrix of dimensions `(m, n)`,
+the relative tolerance is set to be :math:`\text{rtol} = \max(m, n) \varepsilon`
+and :math:`\varepsilon` is the epsilon value for the dtype of :attr:`A` (see :class:`.finfo`).
+If :attr:`rtol` is not specified and :attr:`atol` is specified to be larger than zero then
+:attr:`rtol` is set to zero.
 
-.. math::
+If :attr:`atol` or :attr:`rtol` is a :class:`torch.Tensor`, its shape must be broadcastable to that
+of the singular values of :attr:`A` as returned by :func:`torch.svd`.
 
-    \text{tol} = \sigma_1 \max(m, n) \varepsilon
-
-where :math:`\sigma_1` is the largest singular value
-(or eigenvalue in absolute value when :attr:`hermitian`\ `= True`), and
-:math:`\varepsilon` is the epsilon value for the dtype of :attr:`A` (see :class:`torch.finfo`).
-If :attr:`A` is a batch of matrices, :attr:`tol` is computed this way for every element of
-the batch.
+.. note::
+    This function has NumPy compatible variant `linalg.matrix_rank(A, tol, hermitian=False)`.
+    However, use of the positional argument :attr:`tol` is deprecated in favor of :attr:`atol` and :attr:`rtol`.
 
 """ + fr"""
 .. note:: The matrix rank is computed using singular value decomposition
@@ -961,12 +1016,15 @@ the batch.
 
 Args:
     A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
-    tol (float, Tensor, optional): the tolerance value. See above for the value it takes when `None`.
-                                   Default: `None`.
-    hermitian(bool, optional): indicates whether :attr:`A` is Hermitian if complex
-                               or symmetric if real. Default: `False`.
+    tol (float, Tensor, optional): [NumPy Compat] Alias for :attr:`atol`. Default: `None`.
 
 Keyword args:
+    atol (float, Tensor, optional): the absolute tolerance value. When `None` it's considered to be zero.
+                                    Default: `None`.
+    rtol (float, Tensor, optional): the relative tolerance value. See above for the value it takes when `None`.
+                                    Default: `None`.
+    hermitian(bool): indicates whether :attr:`A` is Hermitian if complex
+                     or symmetric if real. Default: `False`.
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
 
 Examples::
@@ -995,10 +1053,10 @@ Examples::
     >>> torch.linalg.matrix_rank(A, hermitian=True)
     tensor([[3, 3, 3, 3],
             [3, 3, 3, 3]])
-    >>> torch.linalg.matrix_rank(A, tol=1.0)
+    >>> torch.linalg.matrix_rank(A, atol=1.0, rtol=0.0)
     tensor([[3, 2, 2, 2],
             [1, 2, 1, 2]])
-    >>> torch.linalg.matrix_rank(A, tol=1.0, hermitian=True)
+    >>> torch.linalg.matrix_rank(A, atol=1.0, rtol=0.0, hermitian=True)
     tensor([[2, 2, 2, 1],
             [1, 2, 2, 2]])
 """)
@@ -1644,7 +1702,7 @@ Examples::
 """)
 
 pinv = _add_docstr(_linalg.linalg_pinv, r"""
-linalg.pinv(A, rcond=1e-15, hermitian=False, *, out=None) -> Tensor
+linalg.pinv(A, *, atol=None, rtol=None, hermitian=False, out=None) -> Tensor
 
 Computes the pseudoinverse (Moore-Penrose inverse) of a matrix.
 
@@ -1660,7 +1718,18 @@ symmetric if real, but this is not checked internally. Instead, just the lower
 triangular part of the matrix is used in the computations.
 
 The singular values (or the norm of the eigenvalues when :attr:`hermitian`\ `= True`)
-that are below the specified :attr:`rcond` threshold are treated as zero and discarded in the computation.
+that are below :math:`\max(\text{atol}, \sigma_1 \cdot \text{rtol})` threshold are
+treated as zero and discarded in the computation,
+where :math:`\sigma_1` is the largest singular value (or eigenvalue).
+
+If :attr:`rtol` is not specified and :attr:`A` is a matrix of dimensions `(m, n)`,
+the relative tolerance is set to be :math:`\text{rtol} = \max(m, n) \varepsilon`
+and :math:`\varepsilon` is the epsilon value for the dtype of :attr:`A` (see :class:`.finfo`).
+If :attr:`rtol` is not specified and :attr:`atol` is specified to be larger than zero then
+:attr:`rtol` is set to zero.
+
+If :attr:`atol` or :attr:`rtol` is a :class:`torch.Tensor`, its shape must be broadcastable to that
+of the singular values of :attr:`A` as returned by :func:`torch.svd`.
 
 .. note:: This function uses :func:`torch.linalg.svd` if :attr:`hermitian`\ `= False` and
           :func:`torch.linalg.eigh` if :attr:`hermitian`\ `= True`.
@@ -1674,6 +1743,10 @@ that are below the specified :attr:`rcond` threshold are treated as zero and dis
 
     It is always prefered to use :func:`~lstsq` when possible, as it is faster and more
     numerically stable than computing the pseudoinverse explicitly.
+
+.. note::
+    This function has NumPy compatible variant `linalg.pinv(A, rcond, hermitian=False)`.
+    However, use of the positional argument :attr:`rcond` is deprecated in favor of :attr:`rtol`.
 
 .. warning::
     This function uses internally :func:`torch.linalg.svd` (or :func:`torch.linalg.eigh`
@@ -1690,15 +1763,15 @@ that are below the specified :attr:`rcond` threshold are treated as zero and dis
 
 Args:
     A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
-    rcond (float or Tensor, optional): the tolerance value to determine when is a singular value zero
-                                       If it is a :class:`torch.Tensor`, its shape must be
-                                       broadcastable to that of the singular values of
-                                       :attr:`A` as returned by :func:`torch.svd`.
-                                       Default: `1e-15`.
-    hermitian(bool, optional): indicates whether :attr:`A` is Hermitian if complex
-                               or symmetric if real. Default: `False`.
+    rcond (float, Tensor, optional): [NumPy Compat]. Alias for :attr:`rtol`. Default: `None`.
 
 Keyword args:
+    atol (float, Tensor, optional): the absolute tolerance value. When `None` it's considered to be zero.
+                                    Default: `None`.
+    rtol (float, Tensor, optional): the relative tolerance value. See above for the value it takes when `None`.
+                                    Default: `None`.
+    hermitian(bool, optional): indicates whether :attr:`A` is Hermitian if complex
+                               or symmetric if real. Default: `False`.
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
 
 Examples::
@@ -1732,6 +1805,53 @@ Examples::
     https://en.wikipedia.org/wiki/Moore%E2%80%93Penrose_inverse#Singular_value_decomposition_(SVD)
 """)
 
+matrix_exp = _add_docstr(_linalg.linalg_matrix_exp, r"""
+linalg.matrix_exp(A) -> Tensor
+
+Computes the matrix exponential of a square matrix.
+
+Letting :math:`\mathbb{K}` be :math:`\mathbb{R}` or :math:`\mathbb{C}`,
+this function computes the **matrix exponential** of :math:`A \in \mathbb{K}^{n \times n}`, which is defined as
+
+.. math::
+    \mathrm{matrix_exp}(A) = \sum_{k=0}^\infty \frac{1}{k!}A^k \in \mathbb{K}^{n \times n}.
+
+If the matrix :math:`A` has eigenvalues :math:`\lambda_i \in \mathbb{C}`,
+the matrix :math:`\mathrm{matrix_exp}(A)` has eigenvalues :math:`e^{\lambda_i} \in \mathbb{C}`.
+
+Supports input of bfloat16, float, double, cfloat and cdouble dtypes.
+Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
+the output has the same batch dimensions.
+
+Args:
+    A (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions.
+
+Example::
+
+    >>> A = torch.empty(2, 2, 2)
+    >>> A[0, :, :] = torch.eye(2, 2)
+    >>> A[1, :, :] = 2 * torch.eye(2, 2)
+    >>> A
+    tensor([[[1., 0.],
+             [0., 1.]],
+
+            [[2., 0.],
+             [0., 2.]]])
+    >>> torch.linalg.matrix_exp(A)
+    tensor([[[2.7183, 0.0000],
+             [0.0000, 2.7183]],
+
+             [[7.3891, 0.0000],
+              [0.0000, 7.3891]]])
+
+    >>> import math
+    >>> A = torch.tensor([[0, math.pi/3], [-math.pi/3, 0]]) # A is skew-symmetric
+    >>> torch.linalg.matrix_exp(A) # matrix_exp(A) = [[cos(pi/3), sin(pi/3)], [-sin(pi/3), cos(pi/3)]]
+    tensor([[ 0.5000,  0.8660],
+            [-0.8660,  0.5000]])
+""")
+
+
 solve = _add_docstr(_linalg.linalg_solve, r"""
 linalg.solve(A, B, *, out=None) -> Tensor
 
@@ -1739,7 +1859,7 @@ Computes the solution of a square system of linear equations with a unique solut
 
 Letting :math:`\mathbb{K}` be :math:`\mathbb{R}` or :math:`\mathbb{C}`,
 this function computes the solution :math:`X \in \mathbb{K}^{n \times k}` of the **linear system** associated to
-:math:`A \in \mathbb{K}^{n \times n}, B \in \mathbb{K}^{m \times k}`, which is defined as
+:math:`A \in \mathbb{K}^{n \times n}, B \in \mathbb{K}^{n \times k}`, which is defined as
 
 .. math:: AX = B
 
@@ -1763,9 +1883,18 @@ Letting `*` be zero or more batch dimensions,
     This function computes `X = \ `:attr:`A`\ `.inverse() @ \ `:attr:`B` in a faster and
     more numerically stable way than performing the computations separately.
 
+.. note::
+    It is possible to compute the solution of the system :math:`XA = B` by passing the inputs
+    :attr:`A` and :attr:`B` transposed and transposing the output returned by this function.
+
 """ + fr"""
 .. note:: {common_notes["sync_note"]}
 """ + r"""
+
+.. seealso::
+
+        :func:`torch.linalg.solve_triangular` computes the solution of a triangular system of linear
+        equations with a unique solution.
 
 Args:
     A (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions.
@@ -1812,6 +1941,84 @@ Examples::
 .. _invertible:
     https://en.wikipedia.org/wiki/Invertible_matrix#The_invertible_matrix_theorem
 """)
+
+solve_triangular = _add_docstr(_linalg.linalg_solve_triangular, r"""
+linalg.solve_triangular(A, B, *, upper, left=True, unitriangular=False, out=None) -> Tensor
+
+Computes the solution of a triangular system of linear equations with a unique solution.
+
+Letting :math:`\mathbb{K}` be :math:`\mathbb{R}` or :math:`\mathbb{C}`,
+this function computes the solution :math:`X \in \mathbb{K}^{n \times k}` of the **linear system**
+associated to the triangular matrix :math:`A \in \mathbb{K}^{n \times n}` without zeros on the diagonal
+(that is, it is `invertible`_) and the rectangular matrix , :math:`B \in \mathbb{K}^{n \times k}`,
+which is defined as
+
+.. math:: AX = B
+
+The argument :attr:`upper` signals whether :math:`A` is upper or lower triangular.
+
+If :attr:`left`\ `= False`, this function returns the matrix :math:`X \in \mathbb{K}^{n \times k}` that
+solves the system
+
+.. math::
+
+    XA = B\mathrlap{\qquad A \in \mathbb{K}^{k \times k}, B \in \mathbb{K}^{n \times k}.}
+
+If :attr:`upper`\ `= True` (resp. `False`) just the upper (resp. lower) triangular half of :attr:`A`
+will be accessed. The elements below the main diagonal will be considered to be zero and will not be accessed.
+
+If :attr:`unitriangular`\ `= True`, the diagonal of :attr:`A` is assumed to be ones and will not be accessed.
+
+The result may contain `NaN` s if the diagonal of :attr:`A` contains zeros or elements that
+are very close to zero and :attr:`unitriangular`\ `= False` (default) or if the input matrix
+has very small eigenvalues.
+
+Supports inputs of float, double, cfloat and cdouble dtypes.
+Also supports batches of matrices, and if the inputs are batches of matrices then
+the output has the same batch dimensions.
+
+.. seealso::
+
+        :func:`torch.linalg.solve` computes the solution of a general square system of linear
+        equations with a unique solution.
+
+Args:
+    A (Tensor): tensor of shape `(*, n, n)` (or `(*, k, k)` if :attr:`left`\ `= True`)
+                where `*` is zero or more batch dimensions.
+    B (Tensor): right-hand side tensor of shape `(*, n, k)`.
+
+Keyword args:
+    upper (bool): whether :attr:`A` is an upper or lower triangular matrix.
+    left (bool, optional): whether to solve the system :math:`AX=B` or :math:`XA = B`. Default: `True`.
+    unitriangular (bool, optional): if `True`, the diagonal elements of :attr:`A` are assumed to be
+                                    all equal to `1`. Default: `False`.
+    out (Tensor, optional): output tensor. `B` may be passed as `out` and the result is computed in-place on `B`.
+                            Ignored if `None`. Default: `None`.
+
+Examples::
+
+    >>> A = torch.randn(3, 3).triu_()
+    >>> b = torch.randn(3, 4)
+    >>> X = torch.linalg.solve_triangular(A, B, upper=True)
+    >>> torch.allclose(A @ X, B)
+    True
+
+    >>> A = torch.randn(2, 3, 3).tril_()
+    >>> B = torch.randn(2, 3, 4)
+    >>> X = torch.linalg.solve_triangular(A, B, upper=False)
+    >>> torch.allclose(A @ X, B)
+    True
+
+    >>> A = torch.randn(2, 4, 4).tril_()
+    >>> B = torch.randn(2, 3, 4)
+    >>> X = torch.linalg.solve_triangular(A, B, upper=False, left=False)
+    >>> torch.allclose(X @ A, B)
+    True
+
+.. _invertible:
+    https://en.wikipedia.org/wiki/Invertible_matrix#The_invertible_matrix_theorem
+""")
+
 
 tensorinv = _add_docstr(_linalg.linalg_tensorinv, r"""
 linalg.tensorinv(A, ind=2, *, out=None) -> Tensor
@@ -2039,6 +2246,6 @@ Examples::
     >>> Q, R = torch.linalg.qr(A, mode='complete')
     >>> torch.dist(Q @ R, A)
     tensor(1.6099e-06)
-    >>> torch.dist(Q.transpose(-2, -1) @ Q, torch.eye(4))
+    >>> torch.dist(Q.mT @ Q, torch.eye(4))
     tensor(6.2158e-07)
 """)

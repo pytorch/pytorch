@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: distributed"]
+
 import torch
 import os
 import torch.cuda
@@ -7,13 +9,11 @@ import torch.distributed.algorithms.quantization.quantization as quant
 from torch.distributed.algorithms.quantization.quantization import DQuantType
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
+    init_multigpu_helper,
     requires_gloo,
     skip_if_rocm,
     skip_if_lt_x_gpu,
     requires_nccl,
-)
-from torch.testing._internal.distributed.distributed_test import (
-    apply_hack_for_nccl
 )
 from torch.testing._internal.common_utils import sandcastle_skip_if, run_tests, TEST_WITH_DEV_DBG_ASAN, NO_MULTIPROCESSING_SPAWN
 
@@ -62,32 +62,6 @@ if BACKEND == "gloo" or BACKEND == "nccl":
         def world_size(self):
             return int(os.environ["WORLD_SIZE"])
 
-        def _init_multigpu_helper(self):
-            """Multigpu tests are designed to simulate the multi nodes with multi
-            GPUs on each node. Nccl backend requires equal #GPUs in each process.
-            On a single node, all visible GPUs are evenly
-            divided to subsets, each process only uses a subset.
-            """
-            nGPUs = torch.cuda.device_count()
-            world_size = self.world_size
-            visible_devices = range(nGPUs)
-
-            if BACKEND == "nccl":
-                apply_hack_for_nccl()
-
-            # If rank is lesser than or equal to number of available GPU's
-            # then each rank can be mapped to corresponding GPU.
-            nGPUs_per_process = 1
-            if world_size > nGPUs:
-                nGPUs_per_process = nGPUs // world_size
-            rank_to_GPU = {
-                i: list(
-                    visible_devices[i * nGPUs_per_process : (i + 1) * nGPUs_per_process]
-                )
-                for i in range(world_size)
-            }
-            return rank_to_GPU
-
         @requires_gloo()
         @sandcastle_skip_if(BACKEND != "gloo", "Only gloo backend supports all_gather_fp16")
         def test_all_gather_fp16(self):
@@ -118,7 +92,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             device = torch.device(f"cuda:{self.rank}")
             group = list(range(0, self.world_size))
             group_id = dist.new_group(range(self.world_size))
-            rank_to_GPU = self._init_multigpu_helper()
+            rank_to_GPU = init_multigpu_helper(self.world_size, BACKEND)
             self._test_all_to_all(
                 group,
                 group_id,
@@ -138,7 +112,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             device = torch.device(f"cuda:{self.rank}")
             group = list(range(0, self.world_size))
             group_id = dist.new_group(range(self.world_size))
-            rank_to_GPU = self._init_multigpu_helper()
+            rank_to_GPU = init_multigpu_helper(self.world_size, BACKEND)
             self._test_all_to_all(
                 group,
                 group_id,
@@ -157,7 +131,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             device = torch.device(f"cuda:{self.rank}")
             group = list(range(0, self.world_size))
             group_id = dist.new_group(range(self.world_size))
-            rank_to_GPU = self._init_multigpu_helper()
+            rank_to_GPU = init_multigpu_helper(self.world_size, BACKEND)
             self._test_all_to_all_single(
                 group,
                 group_id,
@@ -177,7 +151,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             device = torch.device(f"cuda:{self.rank}")
             group = list(range(0, self.world_size))
             group_id = dist.new_group(range(self.world_size))
-            rank_to_GPU = self._init_multigpu_helper()
+            rank_to_GPU = init_multigpu_helper(self.world_size, BACKEND)
             self._test_all_to_all_single(
                 group,
                 group_id,

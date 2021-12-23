@@ -5,7 +5,6 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/DeviceUtils.cuh>
-#include <THC/THCTensorMathReduce.cuh>
 
 namespace at {
 namespace native {
@@ -29,6 +28,13 @@ namespace {
 // blocks across the slow dimension up to the hardware-max block size of 1024.
 #define TILE_H 64
 
+template <typename T>
+struct ReduceAdd {
+  inline __device__ T operator()(const T a, const T b) const {
+    return (a + b);
+  }
+};
+
 template<typename T, typename ReduceOp>
 __device__ __forceinline__ void reduce_block_into_lanes
   (T *x,
@@ -45,7 +51,7 @@ __device__ __forceinline__ void reduce_block_into_lanes
     __syncthreads();
   }
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
   #pragma unroll
 #endif
   for(int i = (blockSize >> 1); i >= 64; i >>= 1)
@@ -64,7 +70,7 @@ __device__ __forceinline__ void reduce_block_into_lanes
       final = val;
     // __SYNCWARP();
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
     #pragma unroll
 #endif
     for(int i = 16; i >= lanes; i >>= 1)

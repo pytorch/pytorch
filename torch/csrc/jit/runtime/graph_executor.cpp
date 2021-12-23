@@ -158,8 +158,8 @@ struct CaptureList {
         case CAPTURE_LIST: {
           c10::List<at::Tensor> lst;
           auto size = *size_it++;
-          // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
           for (const auto i : c10::irange(size)) {
+            (void)i;
             lst.emplace_back(var_capture_it->unpack(saved_for));
             var_capture_it++;
           }
@@ -781,10 +781,6 @@ const ExecutionPlan& GraphExecutor::getPlanFor(
   return pImpl->getPlanFor(inputs, remaining_bailout_depth);
 }
 
-std::shared_ptr<Graph> GraphExecutor::graph() const {
-  return pImpl->graph;
-}
-
 GraphExecutorState GraphExecutor::getDebugState() {
   return pImpl->getDebugState();
 }
@@ -797,6 +793,10 @@ void GraphExecutor::debugFlushCompilationCache() {
     // we are deprecating legacy executor
     TORCH_INTERNAL_ASSERT("Not Implemented for Legacy Executor");
   }
+}
+
+bool GraphExecutor::isOptimized() const {
+  return pImpl && pImpl->isOptimized();
 }
 
 TORCH_API bool IsNewExecutorEnabled() {

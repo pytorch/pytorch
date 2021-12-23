@@ -1,3 +1,5 @@
+# Owner(s): ["module: onnx"]
+
 from torchvision.models.alexnet import alexnet
 from torchvision.models.inception import inception_v3
 from torchvision.models.densenet import densenet121
@@ -7,7 +9,7 @@ from torchvision.models.googlenet import googlenet
 from torchvision.models.mnasnet import mnasnet1_0
 from torchvision.models.mobilenet import mobilenet_v2
 from torchvision.models import shufflenet_v2_x1_0
-from torchvision.models.segmentation.segmentation import fcn_resnet101, deeplabv3_resnet101
+from torchvision.models.segmentation import fcn_resnet101, deeplabv3_resnet101
 from torchvision.models.video import r3d_18, mc3_18, r2plus1d_18
 
 from model_defs.mnist import MNIST
@@ -190,14 +192,14 @@ class TestModels(TestCase):
         qat_resnet50.qconfig = quantization.QConfig(
             activation=quantization.default_fake_quant, weight=quantization.default_fake_quant)
         quantization.prepare_qat(qat_resnet50, inplace=True)
-        qat_resnet50.apply(torch.quantization.enable_observer)
-        qat_resnet50.apply(torch.quantization.enable_fake_quant)
+        qat_resnet50.apply(torch.ao.quantization.enable_observer)
+        qat_resnet50.apply(torch.ao.quantization.enable_fake_quant)
 
         _ = qat_resnet50(x)
         for module in qat_resnet50.modules():
             if isinstance(module, quantization.FakeQuantize):
                 module.calculate_qparams()
-        qat_resnet50.apply(torch.quantization.disable_observer)
+        qat_resnet50.apply(torch.ao.quantization.disable_observer)
 
         self.exportTest(toC(qat_resnet50), toC(x))
 
@@ -211,14 +213,14 @@ class TestModels(TestCase):
             activation=quantization.default_fake_quant,
             weight=quantization.default_per_channel_weight_fake_quant)
         quantization.prepare_qat(qat_resnet50, inplace=True)
-        qat_resnet50.apply(torch.quantization.enable_observer)
-        qat_resnet50.apply(torch.quantization.enable_fake_quant)
+        qat_resnet50.apply(torch.ao.quantization.enable_observer)
+        qat_resnet50.apply(torch.ao.quantization.enable_fake_quant)
 
         _ = qat_resnet50(x)
         for module in qat_resnet50.modules():
             if isinstance(module, quantization.FakeQuantize):
                 module.calculate_qparams()
-        qat_resnet50.apply(torch.quantization.disable_observer)
+        qat_resnet50.apply(torch.ao.quantization.disable_observer)
 
         self.exportTest(toC(qat_resnet50), toC(x))
 

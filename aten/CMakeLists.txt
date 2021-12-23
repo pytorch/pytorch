@@ -45,7 +45,6 @@ if(USE_CUDA)
 endif()
 
 set(TH_LINK_STYLE STATIC)
-add_subdirectory(src/TH)
 set(TH_CPU_INCLUDE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_CURRENT_BINARY_DIR}/src
@@ -68,12 +67,6 @@ endif()
 if(USE_CUDA AND USE_ROCM)
   message(FATAL_ERROR "Both CUDA and ROCm are enabled and found. PyTorch can only be built with either of them. Please turn one off by using either USE_CUDA=OFF or USE_ROCM=OFF.")
 endif()
-
-if(MSVC)
-  # we want to respect the standard, and we are bored of those **** .
-  add_definitions(-D_CRT_SECURE_NO_DEPRECATE=1)
-  list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "/wd4819" "-Xcompiler" "/wd4503" "-Xcompiler" "/wd4190" "-Xcompiler" "/wd4244" "-Xcompiler" "/wd4251" "-Xcompiler" "/wd4275" "-Xcompiler" "/wd4522")
-endif(MSVC)
 
 if(USE_ROCM)
   # TODO: AT_HIP_ENABLED (change this once we represent HIP as HIP in

@@ -2,11 +2,10 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/Optional.h>
 
-#include <ATen/ATen.h>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/cuda/SortingCommon.cuh>
-#include <ATen/native/Resize.h>
+#include <ATen/native/cuda/Sort.h>
 
 namespace at { namespace native {
 
@@ -37,13 +36,13 @@ __device__ inline void bitonicSort(K keys[Power2SortSize],
                                    V values[Power2SortSize],
                                    bool valid[Power2SortSize],
                                    const Comparator& comp) {
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 #pragma unroll
 #endif
   for (unsigned int size = 2; size < Power2SortSize; size *= 2) {
     bool flag = ((threadIdx.x & (size / 2)) != 0);
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 #pragma unroll
 #endif
     for (unsigned int stride = size / 2; stride > 0; stride /= 2) {
@@ -58,7 +57,7 @@ __device__ inline void bitonicSort(K keys[Power2SortSize],
     }
   }
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 #pragma unroll
 #endif
   for (unsigned int stride = Power2SortSize / 2; stride > 0; stride /= 2) {
@@ -159,8 +158,4 @@ bitonicSortKVInPlace(at::cuda::detail::TensorInfo<K, IndexType> keys,
   }
 }
 
-bool should_use_small_sort(const Tensor &self, int64_t dim);
-void sortKeyValueInplace(const Tensor& key,
-                         const Tensor& value,
-                         int dim, bool dir);
 }} // at::native

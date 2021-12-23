@@ -2,6 +2,7 @@
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/one_hot_ops.h"
+#include "caffe2/utils/cub_namespace.cuh"
 
 namespace caffe2 {
 

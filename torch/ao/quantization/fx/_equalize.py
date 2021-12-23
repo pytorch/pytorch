@@ -9,14 +9,16 @@ from .utils import (
     WEIGHT_INDEX_DICT,
     get_new_attr_name_with_prefix,
     maybe_get_next_module,
-    _parent_name,
 )
 from ..observer import (
     PerChannelMinMaxObserver,
     _with_args,
     ObserverBase,
 )
-from ..utils import check_min_max_valid
+from ..utils import (
+    check_min_max_valid,
+    _parent_name,
+)
 
 from collections import namedtuple
 from typing import Dict, Any, List, Tuple, Optional
@@ -44,7 +46,7 @@ class _InputEqualizationObserver(nn.Module):
             follow the 8-bit setup.
 
     The running minimum/maximum :math:`x_\text{min/max}` are computed in the
-    same way as :class:`~torch.quantization.observer.PerChannelMinMaxObserver`,
+    same way as :class:`~torch.ao.quantization.observer.PerChannelMinMaxObserver`,
     with the difference that the running min/max values are stored per column.
     This observer is intended to be used along with a WeightEqualizationObserver
     to calculate the equalization scale.
@@ -130,7 +132,7 @@ class _WeightEqualizationObserver(nn.Module):
     InputEqualizationObserver to calculate the equalization scale.
 
     The running minimum/maximum :math:`w_\text{min/max}` are computed in the
-    same way as :class:`~torch.quantization.observer.PerChannelMinMaxObserver`.
+    same way as :class:`~torch.ao.quantization.observer.PerChannelMinMaxObserver`.
     """
 
     def __init__(self, dtype=torch.qint8, qscheme=torch.per_tensor_affine, quant_min=None,

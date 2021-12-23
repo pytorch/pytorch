@@ -53,7 +53,6 @@ class SparseLengths8BitsRowwiseOp : public Operator<Context> {
         "the second dim of scale_bias has to be equal to 2");
     CAFFE_ENFORCE_EQ(1, indicesInput.dim(), "INDICES must be a vector");
     const IndexType* indices = indicesInput.template data<IndexType>();
-    int64_t dataToReduceSize = indicesInput.size(0);
 
     const int* lengths = lengthsInput.template data<int>();
     vector<int64_t> shape = dataInput.sizes().vec();
@@ -111,7 +110,7 @@ class FloatToRowwiseQuantized8BitsOp : public Operator<Context> {
     float* scale_bias_data = scale_bias->template mutable_data<float>();
     size_t n_blocks = input.size(0);
     size_t block_size = input.size_from_dim(1);
-    for (size_t i = 0; i < n_blocks; ++i) {
+    for (const auto i : c10::irange(n_blocks)) {
       ConstEigenVectorArrayMap<float> input_row(
           input_data + i * block_size, block_size);
       EigenVectorArrayMap<uint8_t> output_row(
@@ -165,7 +164,7 @@ class Rowwise8BitQuantizedToFloatOp : public Operator<Context> {
     size_t block_size = input.size_from_dim(1);
     size_t n_blocks = input.size(0);
 
-    for (size_t i = 0; i < n_blocks; ++i) {
+    for (const auto i : c10::irange(n_blocks)) {
       ConstEigenVectorArrayMap<uint8_t> input_row(
           input_data + i * block_size, block_size);
       EigenVectorArrayMap<float> output_row(

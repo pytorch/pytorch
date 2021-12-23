@@ -9,18 +9,20 @@
 #include <tuple>
 #include <unordered_set>
 
-#include <THC/THC.h>
-
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/core/DeviceType.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAGuard.h>
-#include <c10/util/irange.h>
+#include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
 #include <c10/util/Optional.h>
+#include <c10/util/irange.h>
 #include <c10d/ParamCommsUtils.hpp>
+#include <c10d/TraceUtils.h>
+#include <c10d/Utils.hpp>
+
 #include <torch/csrc/cuda/nccl.h>
 
-#include <c10d/Utils.hpp>
 
 namespace c10d {
 
@@ -74,7 +76,7 @@ std::map<at::ScalarType, ncclDataType_t> ncclDataType = {
     {at::kLong, ncclInt64},
     {at::kHalf, ncclHalf},
     {at::kBool, ncclUint8},
-#if defined(ENABLE_NCCL_BF16_DATATYPE)
+#if HAS_NCCL_BF16_DATATYPE
     {at::kBFloat16, ncclBfloat16},
 #endif
 };
@@ -159,6 +161,14 @@ std::vector<at::Device> getDeviceList(const std::vector<at::Tensor>& tensors) {
   return res;
 }
 
+// Return CUDA device with ordinal given by input rank.
+at::Device getDeviceForRank(int rank) {
+  TORCH_CHECK(rank >= 0, "Invalid rank ", rank);
+  auto numGPUs = at::cuda::getNumGPUs();
+  int16_t deviceIdx = static_cast<int16_t>(rank % numGPUs);
+  return at::Device(at::DeviceType::CUDA, deviceIdx);
+}
+
 // [Sync Streams] Helper that lets the input ncclStreams to wait for the current
 // stream. NCCL communications run on ncclStreams, but input tensors are
 // allocated on different streams (i.e., current streams). Communications on
@@ -238,7 +248,9 @@ std::ostream& operator<<(
   if (workNCCL.outputs_) {
     workInfo = c10::str(
         "WorkNCCL(",
-        "OpType=",
+        "SeqNum=",
+        workNCCL.seq_,
+        ", OpType=",
         opTypeToString(workNCCL.opType_),
         ", TensorShape=",
         (*workNCCL.outputs_)[0].sizes(),
@@ -248,7 +260,9 @@ std::ostream& operator<<(
   } else {
     workInfo = c10::str(
         "WorkNCCL(",
-        "OpType=",
+        "SeqNum=",
+        workNCCL.seq_,
+        ", OpType=",
         opTypeToString(workNCCL.opType_),
         ", Timeout(ms)=",
         workNCCL.opTimeout_.count(),
@@ -261,15 +275,22 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
     const std::vector<at::Device>& devices,
     int rank,
     OpType opType,
+    uint64_t seq,
     const char* profilingTitle,
-    const c10::optional<std::vector<at::Tensor>>& inputs)
+    const c10::optional<std::vector<at::Tensor>>& inputs,
+    bool desyncDebug)
     : Work(rank, opType, profilingTitle, inputs),
       devices_(devices),
-      workStartTime_(std::chrono::steady_clock::now()) {
+      workStartTime_(std::chrono::steady_clock::now()),
+      seq_(seq) {
   // Creates the CUDA event wrappers
   // Note: The actual events are lazily created when first recorded to with
   // DEFAULT_FLAGS = cudaEventDisableTiming.
-  cudaEvents_ =
+  if (desyncDebug) {
+    ncclStartEvents_ =
+        std::make_shared<std::vector<at::cuda::CUDAEvent>>(devices.size());
+  }
+  ncclEndEvents_ =
       std::make_shared<std::vector<at::cuda::CUDAEvent>>(devices.size());
   ncclComms_.resize(devices.size());
 }
@@ -278,11 +299,15 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(const WorkNCCL& w)
     : Work(w.rank_, w.opType_),
       std::enable_shared_from_this<WorkNCCL>(w),
       devices_(w.devices_),
-      cudaEvents_(w.cudaEvents_),
+      ncclStartEvents_(w.ncclStartEvents_),
+      ncclEndEvents_(w.ncclEndEvents_),
       ncclComms_(w.ncclComms_),
       blockingWait_(w.blockingWait_),
       opTimeout_(w.opTimeout_),
-      workStartTime_(w.workStartTime_) {
+      workStartTime_(w.workStartTime_),
+      seq_(w.seq_),
+      startTraceUpdated_(w.startTraceUpdated_),
+      store_(w.store_) {
   exception_ = w.exception_;
 }
 
@@ -291,6 +316,11 @@ ProcessGroupNCCL::WorkNCCL::~WorkNCCL() {}
 bool ProcessGroupNCCL::WorkNCCL::isCompleted() {
   checkAndSetException();
   return exception() || finishedGPUExecutionInternal();
+}
+
+bool ProcessGroupNCCL::WorkNCCL::isStarted() {
+  checkAndSetException();
+  return exception() || startedGPUExecutionInternal();
 }
 
 bool ProcessGroupNCCL::WorkNCCL::isSuccess() const {
@@ -330,10 +360,20 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecution() {
   return finishedGPUExecutionInternal();
 }
 
+bool ProcessGroupNCCL::WorkNCCL::startedGPUExecutionInternal() const {
+  for (const auto i : c10::irange(devices_.size())) {
+    // Checking the work's corresponding CUDA events' status
+    if (!(*ncclStartEvents_)[i].query()) {
+      return false;
+    }
+  }
+  return true;
+}
+
 bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
   for (const auto i : c10::irange(devices_.size())) {
     // Checking the work's corresponding CUDA events' status
-    if (!(*cudaEvents_)[i].query()) {
+    if (!(*ncclEndEvents_)[i].query()) {
       return false;
     }
   }
@@ -374,7 +414,7 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeStreams() {
   for (const auto i : c10::irange(devices_.size())) {
     auto currentStream = at::cuda::getCurrentCUDAStream(devices_[i].index());
     // Block the current stream on the NCCL stream
-    (*cudaEvents_)[i].block(currentStream);
+    (*ncclEndEvents_)[i].block(currentStream);
   }
 }
 
@@ -487,19 +527,42 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       store_(store),
       options_(options),
       ncclCommCounter_(0),
+      traceKeyStart_(getTraceStartKey("NCCL", rank)),
+      traceKeyEnd_(getTraceEndKey("NCCL", rank)),
       terminateProcessGroup_(false) {
   TORCH_CHECK(
       at::cuda::getNumGPUs() != 0,
       "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
   blockingWait_ = parseEnvVarFlag(NCCL_BLOCKING_WAIT);
   asyncErrorHandling_ = parseEnvVarFlag(NCCL_ASYNC_ERROR_HANDLING);
+  desyncDebug_ = parseEnvVarFlag(NCCL_DESYNC_DEBUG);
 
-  if (blockingWait_ && asyncErrorHandling_) {
-    LOG(INFO) << "[Rank " << rank_
-              << "] NCCL_BLOCKING_WAIT and NCCL_ASYNC_ERROR_HANDLING "
-              << "should not both be enabled. "
-              << "Only NCCL_BLOCKING_WAIT is being used in this process.";
-    asyncErrorHandling_ = false;
+  if (blockingWait_) {
+    if (asyncErrorHandling_ || desyncDebug_) {
+      LOG(INFO) << "[Rank " << rank_ << "] NCCL_BLOCKING_WAIT and "
+                << "NCCL_ASYNC_ERROR_HANDLING|NCCL_DESYNC_DEBUG"
+                << "should not both be enabled. "
+                << "Only NCCL_BLOCKING_WAIT is being used in this process.";
+      asyncErrorHandling_ = false;
+      desyncDebug_ = false;
+    }
+  } else {
+    if (desyncDebug_ && !asyncErrorHandling_) {
+      LOG(INFO) << "[Rank " << rank_
+                << "] NCCL_DESYNC_DEBUG and NCCL_ASYNC_ERROR_HANDLING "
+                << "must both be enabled. "
+                << "Enabling NCCL_ASYNC_ERROR_HANDLING.";
+      asyncErrorHandling_ = true;
+    }
+  }
+
+  if (parseEnvVarFlag(ENABLE_NCCL_HEALTH_CHECK)) {
+    // Perform health check by initializing dummy communicators and destroying
+    // them. This will help indicate any NCCL-related issues prior to the first
+    // collective.
+    // Run it in a separate thread and wait on CV to handle timeouts, since
+    // majority of getNCCLComm failures are hangs.
+    runHealthCheck();
   }
 
 #ifdef ENABLE_NCCL_ERROR_CHECKING
@@ -520,6 +583,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   LOG(INFO) << "[Rank " << rank_
             << "] ProcessGroupNCCL initialized with following options:"
             << "\nNCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
+            << "\nNCCL_DESYNC_DEBUG: " << desyncDebug_
             << "\nNCCL_BLOCKING_WAIT: " << blockingWait_
             << "\nTIMEOUT(ms): " << options_->timeout.count()
             << "\nUSE_HIGH_PRIORITY_STREAM: "
@@ -527,28 +591,68 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << "\nNCCL_DEBUG: " << ncclDebugLevel;
 }
 
-void ProcessGroupNCCL::setSequenceNumberForGroup() {
-  if (rank_ == 0) {
-    // Create and broadcast sequence number
-    auto seq = 1 + rand();
-    sequenceNum_ = c10d::SequenceNum(seq);
-    std::vector<uint8_t> values = c10d::toVec<uint8_t>(seq, kBytes);
-    store_->set(kSeqNumStoreKey, values);
-  } else {
-    // Read rank 0's sequence number from store.
-    sequenceNum_ = c10d::SequenceNum();
-    store_->wait({kSeqNumStoreKey}, options_->timeout);
-    std::vector<uint8_t> values = store_->get(kSeqNumStoreKey);
-    uint64_t num = c10d::fromVec<uint8_t>(values);
-    sequenceNum_->set(num);
+void ProcessGroupNCCL::runHealthCheck() {
+  // Run health check in a separate thread and wait on CV to handle timeouts,
+  // since majority of getNCCLComm failures are hangs.
+
+  struct HealthCheckData {
+    std::mutex healthCheckMutex;
+    std::condition_variable healthCheckCv;
+    bool healthCheckSuccess = false;
+    std::exception_ptr healthCheckException;
+  };
+
+  HealthCheckData healthCheckData;
+  auto t = std::thread([&healthCheckData, this]() {
+    try {
+      std::vector<at::Device> rankDevice = {getDeviceForRank(rank_)};
+      const auto key = getKeyFromDevices(rankDevice);
+      // OpType does not matter, only need to set to not go through send/recv
+      // path.
+      getNCCLComm(key, rankDevice, OpType::ALLREDUCE);
+      // Now destroy the communicators and remove them from cache so we don't
+      // use destroyed communicators.
+      destroyNCCLComms(key);
+      // Notify main thread the health check is complete.
+      {
+        std::lock_guard<std::mutex> lk(healthCheckData.healthCheckMutex);
+        healthCheckData.healthCheckSuccess = true;
+      }
+      healthCheckData.healthCheckCv.notify_one();
+    } catch (const std::exception& e) {
+      // Populate exception ptr.
+      healthCheckData.healthCheckException = std::current_exception();
+      // Unblock waiting main thread which will report exception.
+      healthCheckData.healthCheckCv.notify_one();
+    } // Unknown exceptions will just cause the program to terminate.
+  });
+  // We don't need to join the thread, just need to verify health check via the
+  // CV. Hence we detach the thread here.
+  t.detach(); // NOLINT
+  LOG(INFO) << "[Rank " << rank_ << "]"
+            << " will wait up to " << options_->timeout.count()
+            << " msec for NCCL health check to complete.";
+  std::unique_lock<std::mutex> lock(healthCheckData.healthCheckMutex);
+  healthCheckData.healthCheckCv.wait_for(
+      lock, options_->timeout, [&healthCheckData]() {
+        return healthCheckData.healthCheckSuccess;
+      });
+
+  if (healthCheckData.healthCheckException) {
+    std::rethrow_exception(healthCheckData.healthCheckException);
   }
+  // If there is no exception, the likely culprit is a timeout/hang which is how
+  // most communicator init issues manifest themselves.
+  TORCH_CHECK(
+      healthCheckData.healthCheckSuccess,
+      "ProcessGroupNCCL: Health check failure: Failed to initialize NCCL communicator on rank ",
+      rank_);
 }
 
+void ProcessGroupNCCL::setSequenceNumberForGroup() {}
+
 uint64_t ProcessGroupNCCL::getSequenceNumberForGroup() {
-  if (sequenceNum_ == c10::nullopt) {
-    return 0;
-  }
-  return sequenceNum_->get();
+  return seq_;
 }
 
 ProcessGroupNCCL::~ProcessGroupNCCL() {
@@ -604,6 +708,9 @@ void ProcessGroupNCCL::abortTimedOutCollectives(
           " ran for ",
           timeElapsed.count(),
           " milliseconds before timing out.");
+      if (desyncDebug_) {
+        exceptionMsg += retrieveDesyncReport(store_, "NCCL", rank_, size_);
+      }
       LOG(ERROR) << exceptionMsg;
       std::exception_ptr exception_ptr =
           std::make_exception_ptr(std::runtime_error(exceptionMsg));
@@ -780,7 +887,39 @@ void ProcessGroupNCCL::workCleanupLoop() {
       for (auto it = workMetaList_.begin(); it != workMetaList_.end();
            /* no increment*/) {
         auto& work = *it;
+
+        if (desyncDebug_ && !work.exception()) {
+          if (!work.startTraceUpdated_ && work.isStarted() &&
+              !terminateProcessGroup_.load() && !storeError_) {
+            work.startTraceUpdated_ = true;
+            storeError_ = !c10d::traceUpdate(
+                store_,
+                traceKeyStart_,
+                work.seq_,
+                opTypeToString(work.opType_));
+          }
+        }
+
         if (work.isCompleted()) {
+          if (desyncDebug_ && !work.exception()) {
+            // To close the window between the check of work.isStarted() and
+            // the check of work.isCompleted().
+            if (!work.startTraceUpdated_ && !terminateProcessGroup_.load() &&
+                !storeError_) {
+              storeError_ = !c10d::traceUpdate(
+                  store_,
+                  traceKeyStart_,
+                  work.seq_,
+                  opTypeToString(work.opType_));
+            }
+            if (!terminateProcessGroup_.load() && !storeError_) {
+              storeError_= !c10d::traceUpdate(
+                  store_,
+                  traceKeyEnd_,
+                  work.seq_,
+                  opTypeToString(work.opType_));
+            }
+          }
           // Handle Exceptions on failed GPU operations and remove completed
           // workNCCL objects from work vector.
           if (!terminateProcessGroup_.load()) {
@@ -868,10 +1007,57 @@ void ProcessGroupNCCL::broadcastUniqueNCCLID(
         reinterpret_cast<uint8_t*>(ncclID) + NCCL_UNIQUE_ID_BYTES);
     store_->set(storeKey, vec);
   } else {
-    auto vec = store_->get(storeKey);
-    TORCH_CHECK(vec.size() == NCCL_UNIQUE_ID_BYTES);
-    std::memcpy(ncclID, vec.data(), vec.size());
+    try {
+      auto vec = store_->get(storeKey);
+      TORCH_CHECK(vec.size() == NCCL_UNIQUE_ID_BYTES);
+      std::memcpy(ncclID, vec.data(), vec.size());
+    } catch (const std::exception& e) {
+      std::string exceptionMsg = c10::str(
+          "[",
+          rank_,
+          "] is setting up NCCL communicator and "
+          "retreiving ncclUniqueId from [0] via c10d key-value store by key '",
+          storeKey,
+          "', but store->get('",
+          storeKey,
+          "') got error: ");
+      TORCH_CHECK(false, exceptionMsg + e.what());
+    } catch (...) {
+      TORCH_CHECK(
+          false,
+          c10::str(
+              "Unknown exception while [",
+              rank_,
+              "] is setting up NCCL communicator and "
+              "retreiving ncclUniqueId from [0] via c10d key-value store by key '",
+              storeKey,
+              "'"));
+    }
   }
+}
+
+
+void ProcessGroupNCCL::destroyNCCLComms(const std::string& devNCCLCommMapKey) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (devNCCLCommMap_.find(devNCCLCommMapKey) == devNCCLCommMap_.end()) {
+    TORCH_INTERNAL_ASSERT(
+        false,
+        "Expected to find key ",
+        devNCCLCommMapKey,
+        " in NCCL communicator map.");
+  }
+  std::vector<std::shared_ptr<NCCLComm>>& ncclComms =
+      devNCCLCommMap_[devNCCLCommMapKey];
+  // Loop through communicators and call ncclCommAbort.
+  for (const auto& comm : ncclComms) {
+    // ncclCommDestroy(comm->getNcclComm()) results in segfault when PG is being
+    // destroyed, so using ncclCommAbort here.
+    comm->ncclCommAbort();
+  }
+  // Remove communicators from the cache.
+  devNCCLCommMap_.erase(devNCCLCommMapKey);
+  // Clear used device indices.
+  usedDeviceIdxs_.clear();
 }
 
 std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
@@ -939,6 +1125,7 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   // created before encountering any communication calls. This is why we need
   // the following for loop.
   for (const auto i : c10::irange(ncclActiveGroupCounter_)) {
+    (void)i;
     C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
   }
 
@@ -978,6 +1165,7 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
 
   // See [Group Start/End Note]
   for (const auto i : c10::irange(ncclActiveGroupCounter_)) {
+    (void)i;
     C10D_NCCL_CHECK(ncclGroupStart(), c10::nullopt);
   }
 
@@ -1106,7 +1294,13 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
     const char* profilingTitle,
     const c10::optional<std::vector<at::Tensor>>& inputs) {
   return c10::make_intrusive<ProcessGroupNCCL::WorkNCCL>(
-      devices, rank, opType, profilingTitle, inputs);
+      devices,
+      rank,
+      opType,
+      seq_,
+      profilingTitle,
+      inputs,
+      desyncDebug_);
 }
 
 std::vector<at::Tensor> ProcessGroupNCCL::WorkNCCL::result() {
@@ -1147,9 +1341,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   errorIfCapturingNonCapturableNCCL();
 
   // Bump collective counter
-  if (sequenceNum_) {
-    sequenceNum_->increment();
-  }
+  seq_++;
+
   const auto devices = getDeviceList(inputs);
   const auto key = getKeyFromDevices(devices);
   auto& ncclComms = getNCCLComm(key, devices, opType);
@@ -1171,6 +1364,14 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   work->outputs_ = std::make_shared<std::vector<at::Tensor>>(outputs);
 
   at::cuda::OptionalCUDAGuard gpuGuard;
+
+  // Start event should only be recorded before the ncclGroupStart()
+  if (desyncDebug_) {
+    for (const auto i : c10::irange(inputs.size())) {
+      at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
+      (*work->ncclStartEvents_)[i].record(ncclStream);
+    }
+  }
 
   pre(ncclStreams_[key]);
 
@@ -1202,10 +1403,10 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
 
   post(ncclStreams_[key]);
 
-  // Event should only be recorded after the ncclGroupEnd()
+  // End event should only be recorded after the ncclGroupEnd()
   for (const auto i : c10::irange(inputs.size())) {
     at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
-    (*work->cudaEvents_)[i].record(ncclStream);
+    (*work->ncclEndEvents_)[i].record(ncclStream);
     work->ncclComms_[i] = ncclComms[i];
   }
 
@@ -1217,7 +1418,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
 
     // Add a callback that runs profiling end callbacks. wrapCallback() in CUDA
     // future blocks the stream this callback runs on the corresponding
-    // cudaEvents_ ensuring appropriate synchronization.
+    // ncclEndEvents_ ensuring appropriate synchronization.
     if (work->recordFunctionEndCallback_) {
       work->future_->addCallback(
           [work](at::ivalue::Future& /* unused */) { work->recordFunctionEndCallback_(); });
@@ -1273,6 +1474,14 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
 
   at::cuda::OptionalCUDAGuard gpuGuard;
 
+  // Start event should only be recorded before the ncclGroupStart()
+  if (desyncDebug_) {
+    for (const auto i : c10::irange(tensors.size())) {
+      at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
+      (*work->ncclStartEvents_)[i].record(ncclStream);
+    }
+  }
+
   pre(ncclStreams_[key]);
 
   for (const auto i : c10::irange(tensors.size())) {
@@ -1303,10 +1512,10 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
 
   post(ncclStreams_[key]);
 
-  // Event should only be recorded after the ncclGroupEnd()
+  // End event should only be recorded after the ncclGroupEnd()
   for (const auto i : c10::irange(tensors.size())) {
     at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
-    (*work->cudaEvents_)[i].record(ncclStream);
+    (*work->ncclEndEvents_)[i].record(ncclStream);
     work->ncclComms_[i] = ncclComms[i];
     work->blockingWait_ = blockingWait_;
     work->opTimeout_ = options_->timeout;
@@ -1326,7 +1535,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
 
   // Add a callback that runs profiling end callbacks. wrapCallback() in CUDA
   // future blocks the stream this callback runs on the corresponding
-  // cudaEvents_ ensuring appropriate synchronization.
+  // ncclEndEvents_ ensuring appropriate synchronization.
   if (work->recordFunctionEndCallback_) {
     work->future_->addCallback(
         [work](at::ivalue::Future& /* unused */) { work->recordFunctionEndCallback_(); });
@@ -1695,7 +1904,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::barrier(
         "This can potentially cause a hang if this rank to GPU mapping is incorrect.",
         "Specify device_ids in barrier() to force use of a particular device."
     );
-    devices.emplace_back(at::DeviceType::CUDA, deviceIdx);
+    devices.emplace_back(getDeviceForRank(rank_));
   } else {
     for (auto usedDeviceIdx : usedDeviceIdxs_) {
       devices.emplace_back(at::DeviceType::CUDA, usedDeviceIdx);
