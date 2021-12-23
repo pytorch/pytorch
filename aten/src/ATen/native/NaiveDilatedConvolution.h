@@ -200,7 +200,8 @@ void slow_conv_dilated_all_cpu_template(
   std::vector<int64_t> dims(dim);
   std::iota(dims.begin(), dims.end(), 1);
 
-    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long, input.scalar_type(), "slow_conv_dilated<>", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        at::ScalarType::Long, at::ScalarType::BFloat16, input.scalar_type(), "slow_conv_dilated<>", [&] {
     // For each elt in batch, do:
     for (const auto elt : c10::irange(batchSize)) {
       // Matrix multiply per output:
@@ -275,12 +276,12 @@ void slow_conv_dilated_all_cpu_template(
             /*     m=*/columns.size(1),
             /*     n=*/nOutputPlane,
             /*     k=*/columns.size(0),
-            /* alpha=*/1,
+            /* alpha=*/static_cast<scalar_t>(1),
             /*     A=*/columns.data_ptr<scalar_t>(),
             /*   lda=*/columns.size(1),
             /*     B=*/weight.data_ptr<scalar_t>(),
             /*   ldb=*/columns.size(0),
-            /*  beta=*/1,
+            /*  beta=*/static_cast<scalar_t>(1),
             /*     C=*/output_n.data_ptr<scalar_t>(),
             /*   ldc=*/columns.size(1));
 
@@ -319,12 +320,12 @@ void slow_conv_dilated_all_cpu_template(
             /*     m=*/columns.size(1),
             /*     n=*/columns.size(0),
             /*     k=*/nOutputPlane,
-            /* alpha=*/1,
+            /* alpha=*/static_cast<scalar_t>(1),
             /*     A=*/grad_output_n.data_ptr<scalar_t>(),
             /*   lda=*/columns.size(1),
             /*     B=*/weight.data_ptr<scalar_t>(),
             /*   ldb=*/columns.size(0),
-            /*  beta=*/0,
+            /*  beta=*/static_cast<scalar_t>(0),
             /*     C=*/columns.data_ptr<scalar_t>(),
             /*   ldc=*/columns.size(1));
         // Unpack columns back into input:
@@ -384,12 +385,12 @@ void slow_conv_dilated_all_cpu_template(
             /*     m=*/columns.size(0),
             /*     n=*/nOutputPlane,
             /*     k=*/columns.size(1),
-            /* alpha=*/scale,
+            /* alpha=*/static_cast<scalar_t>(scale),
             /*     A=*/columns.data_ptr<scalar_t>(),
             /*   lda=*/columns.size(1),
             /*     B=*/grad_output_n.data_ptr<scalar_t>(),
             /*   ldb=*/columns.size(1),
-            /*  beta=*/1,
+            /*  beta=*/static_cast<scalar_t>(1),
             /*     C=*/grad_weight.data_ptr<scalar_t>(),
             /*   ldc=*/columns.size(0));
       }
