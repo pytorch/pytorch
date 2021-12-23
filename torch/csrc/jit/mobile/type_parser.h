@@ -2,19 +2,14 @@
 
 #include <ATen/core/dynamic_type.h>
 #include <ATen/core/jit_type.h>
-#include <type_traits>
 
 namespace c10 {
 
 class TORCH_API TypeParser {
-  template <typename T>
-  struct TypeFactory {};
-
  public:
   explicit TypeParser(std::string pythonStr);
   explicit TypeParser(std::vector<std::string>& pythonStrs);
 
-  template <typename T>
   TypePtr parse();
   std::vector<TypePtr> parseList();
   static std::unordered_set<std::string> getNonSimpleType();
@@ -25,7 +20,6 @@ class TORCH_API TypeParser {
   TypePtr parseNamedTuple(const std::string& qualified_name);
   TypePtr parseCustomType();
   TypePtr parseTorchbindClassType();
-  template <typename T>
   TypePtr parseNonSimple(const std::string& token);
 
   void expect(const char* s);
@@ -52,13 +46,8 @@ class TORCH_API TypeParser {
   std::unordered_set<std::string> contained_types_;
 };
 
-template <typename T = c10::Type>
-TORCH_API TypePtr parseType(const std::string& pythonStr) {
-  TypeParser parser(pythonStr);
-  return parser.parse<T>();
-}
+TORCH_API TypePtr parseType(const std::string& pythonStr);
 
 TORCH_API std::vector<TypePtr> parseType(std::vector<std::string>& pythonStr);
-} // namespace c10
 
-#include <torch/csrc/jit/mobile/type_parser_inl.h>
+} // namespace c10
