@@ -3146,7 +3146,7 @@ class TestCudaFuser(JitTestCase):
 
             t_jit = torch.jit.script(t)
             for i in range(5):
-              t_jit(x, y, s)
+                t_jit(x, y, s)
 
             # sibling fusion should be disabled with the flag
             self.assertGraphContainsExactly(t_jit.graph_for(x, y, s), FUSION_GUARD, 0)
