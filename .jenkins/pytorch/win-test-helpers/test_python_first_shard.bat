@@ -31,5 +31,8 @@ if ERRORLEVEL 1 goto fail
 
 popd
 
+:eof
+exit /b 0
+
 :fail
 exit /b 1
