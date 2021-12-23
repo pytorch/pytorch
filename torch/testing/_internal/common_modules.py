@@ -320,17 +320,13 @@ def no_batch_dim_reference_mha(m, p, *args, **kwargs):
 
 
 def no_batch_dim_reference_lstmcell(m, p, *args, **kwargs):
-    """Reference function for MultiheadAttention supporting no batch dimensions.
+    """Reference function for LSTMCell supporting no batch dimensions.
 
     The module is passed the input and target in batched form with a single item.
     The output is squeezed to compare with the no-batch input.
     """
-    single_batch_input_args = []
-    for arg in args:
-        if isinstance(arg, torch.Tensor):
-            single_batch_input_args.append(arg.unsqueeze(0))
-        else:
-            single_batch_input_args.append((arg[0].unsqueeze(0), arg[1].unsqueeze(0)))
+    inp, (h, c) = args
+    single_batch_input_args = (inp.unsqueeze(0), (h.unsqueeze(0), c.unsqueeze(0)))
     with freeze_rng_state():
         output = m(*single_batch_input_args, **kwargs)
         return (output[0].squeeze(0), output[1].squeeze(0))
@@ -542,6 +538,8 @@ def module_inputs_torch_nn_RNN_GRU_Cell(module_info, device, dtype, requires_gra
 
     is_rnn = kwargs.get('is_rnn', False)
     if is_rnn:
+        # RNN also supports `nonlinearity` argument.
+        # `tanh` is the default, so we check with `relu`
         samples.append(
             ModuleInput(
                 constructor_input=FunctionInput(5, 10, bias=True, nonlinearity='relu'),
