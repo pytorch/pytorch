@@ -10775,6 +10775,10 @@ op_db: List[OpInfo] = [
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            supports_out=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           # got: Batching rule not implemented for aten::flatten.using_ints
+           check_batched_forward_grad=False,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=sample_inputs_adaptive_max_pool1d),
     OpInfo('nn.functional.adaptive_max_pool2d',
@@ -10792,6 +10796,10 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
            ),
            supports_out=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           # got: Batching rule not implemented for aten::flatten.using_ints
+           check_batched_forward_grad=False,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=sample_inputs_adaptive_max_pool2d),
     OpInfo('nn.functional.adaptive_max_pool3d',
@@ -10811,6 +10819,10 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
            ),
            supports_out=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           # got: Batching rule not implemented for aten::flatten.using_ints
+           check_batched_forward_grad=False,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=sample_inputs_adaptive_max_pool3d),
     OpInfo('nn.functional.avg_pool1d',
@@ -11201,49 +11213,54 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.fractional_max_pool2d',
            supports_autograd=True,
            supports_out=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           op=lambda input, *args, **kwargs:
+               wrapper_set_seed(torch.nn.functional.fractional_max_pool2d, input, *args, **kwargs),
+           # vmap does not support random operations
+           check_batched_forward_grad=False,
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16),
            test_neg_view=False,
            sample_inputs_func=sample_inputs_fractional_max_pool2d,
-           decorators=[
-               # FIXME: both derivatives are implemented incorrectly
-               # https://github.com/pytorch/pytorch/issues/69322
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_grad'),
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_gradgrad'),
-               # FIXME: produces incorrect output on non-contiguous inputs
-               # https://github.com/pytorch/pytorch/issues/69325
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples'),
+           decorators=(
                # FIXME: AssertionError: False is not true : Tensors failed to compare as equal!
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                # RuntimeError: input->type()->kind() == TypeKind::OptionalType
                # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-           ], ),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'))),
     OpInfo('nn.functional.fractional_max_pool3d',
            supports_autograd=True,
            supports_out=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           op=lambda input, *args, **kwargs:
+               wrapper_set_seed(torch.nn.functional.fractional_max_pool3d, input, *args, **kwargs),
+           # vmap does not support random operations
+           check_batched_forward_grad=False,
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16),
            test_neg_view=False,
            sample_inputs_func=sample_inputs_fractional_max_pool3d,
-           decorators=[
+           decorators=(
                # FIXME: both derivatives are implemented incorrectly
                # https://github.com/pytorch/pytorch/issues/69322
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_grad'),
+               # RuntimeError: cannot reshape tensor of 0 elements into shape [0, 1, -1] because the
+               # unspecified dimension size -1 can be any value and is ambiguous
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_gradgrad'),
-               # FIXME: produces incorrect output on non-contiguous inputs
-               # https://github.com/pytorch/pytorch/issues/69325
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples'),
                # FIXME: AssertionError: False is not true : Tensors failed to compare as equal!
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                # RuntimeError: input->type()->kind() == TypeKind::OptionalType
                # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-           ], ),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),)),
     OpInfo('nn.functional.max_pool1d',
            aten_name='max_pool1d',
            supports_autograd=True,
            supports_out=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           # got: Batching rule not implemented for aten::flatten.using_ints
+           check_batched_forward_grad=False,
            # TODO: add shape checks
            assert_jit_shape_analysis=False,
            dtypes=floating_types(),
@@ -11259,6 +11276,10 @@ op_db: List[OpInfo] = [
            # Vmap is not happy with non-contiguous (channels_last) inputs
            check_batched_gradgrad=False,
            supports_out=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           # got: Batching rule not implemented for aten::flatten.using_ints
+           check_batched_forward_grad=False,
            assert_jit_shape_analysis=True,
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
@@ -11267,6 +11288,10 @@ op_db: List[OpInfo] = [
            aten_name='max_pool3d',
            supports_autograd=True,
            supports_out=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           # got: Batching rule not implemented for aten::flatten.using_ints
+           check_batched_forward_grad=False,
            # TODO: add shape checks
            assert_jit_shape_analysis=False,
            dtypes=floating_types(),
