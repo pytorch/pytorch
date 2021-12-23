@@ -7,8 +7,8 @@ JITException::JITException(const std::string& msg) : std::runtime_error(msg) {}
 
 CustomJITException::CustomJITException(
     const std::string& msg,
-    const std::string& python_class_name)
-    : JITException(msg), python_class_name_(python_class_name) {}
+    std::string python_class_name)
+    : JITException(msg), python_class_name_(std::move(python_class_name)) {}
 
 } // namespace jit
 } // namespace torch

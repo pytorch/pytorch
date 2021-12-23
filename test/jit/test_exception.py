@@ -156,7 +156,7 @@ class TestException(TestCase):
     def test_custom_python_exception(self):
         class MyValueError(ValueError):
             def __init__(self, msg):
-                super(MyValueError, self).__init__(msg) 
+                super(MyValueError, self).__init__(msg)
 
         @torch.jit.script
         def fn():

@@ -3,6 +3,7 @@
 #include <stdexcept>
 
 #include <torch/csrc/Export.h>
+#include <string>
 
 namespace torch {
 namespace jit {
@@ -14,7 +15,7 @@ struct TORCH_API JITException : public std::runtime_error {
 struct TORCH_API CustomJITException : public JITException {
   explicit CustomJITException(
       const std::string& msg,
-      const std::string& python_class_name);
+      std::string python_class_name);
 
   const std::string& getPythonClassName() const {
     return python_class_name_;
