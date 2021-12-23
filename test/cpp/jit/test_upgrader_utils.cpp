@@ -26,6 +26,19 @@ TEST(UpgraderUtils, FindCorrectUpgrader) {
   EXPECT_EQ(upgrader_at_1.value().upgrader_name, "foo__0_3");
 }
 
+TEST(UpgraderUtils, IsVersionMapSorted) {
+  auto map = get_operator_version_map();
+  // tests if the each list of UpgraderEntry in the map is sorted by
+  // their bumped_at_version field.
+  for (const auto& entry : map) {
+    std::vector<int> versions;
+    for (const auto& el : entry.second) {
+      versions.push_back(el.bumped_at_version);
+    }
+    EXPECT_TRUE(std::is_sorted(versions.begin(), versions.end()));
+  }
+}
+
 TEST(UpgraderUtils, FindIfOpIsCurrent) {
   std::vector<UpgraderEntry> dummy_entry = {
       {4, "foo__0_3", "foo.bar()"},
