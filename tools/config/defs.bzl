@@ -64,35 +64,6 @@ def if_cuda_is_configured(x):
 def if_rocm_is_configured(x):
     return if_rocm(x, [])
 
-
-def cmake_configure_file(name, src, out, definitions):
-    substitutions = []
-    for identifier, value in definitions.items():
-        if type(value) == "bool":
-            template = "#define {}" if value else "#undef {}"
-            substitutions += [template.format(identifier)]
-        elif type(value) == "string":
-            scheme, target = value.split(":", 1)
-            if scheme != "config_setting":
-                fail("String config value types must be of form " +
-                     "config_setting://label/of/config_setting, but found " +
-                     value)
-            substitutions += select({
-                target: ["#define " + identifier],
-                "//conditions:default": ["#undef " + identifier],
-            })
-        else:
-            fail("Unknown config value type. Only boolean literals or " +
-                 "config_setting://label/of/config_setting are supported, " +
-                 "but found: " + value)
-
-    _header_template(
-        name = name,
-        src = src,
-        out = out,
-        substitutions = substitutions,
-    )
-
 # Forked from header_template_rule. header_template_rule is not
 # compatible with our usage of select because its substitutions
 # attribute is a dict, and dicts may not be appended with select. We
@@ -103,8 +74,12 @@ def _cmake_configure_file_impl(ctx):
     command = ["cat $1"]
     for definition in ctx.attr.definitions:
         command.append(
-            "| sed 's@#cmakedefine {}@#define {}@'".format(definition,
-                                                           definition))
+            "| sed 's@#cmakedefine {}@#define {}@'".format(
+                definition,
+                definition,
+            ),
+        )
+
     # Replace any that remain with /* #undef FOO */.
     command.append("| sed --regexp-extended 's@#cmakedefine (\\w+)@/* #undef \\1 */@'")
     command.append("> $2")
@@ -132,6 +107,16 @@ def _cmake_configure_file_impl(ctx):
     ]
 
 cmake_configure_file = rule(
+    implementation = _cmake_configure_file_impl,
+    doc = """
+Mimics CMake's configure_file in Bazel.
+
+Args:
+  name: A unique name for this rule.
+  src: The input file template.
+  out: The generated output.
+  definitions: A mapping of identifier in template to its value.
+""",
     attrs = {
         "out": attr.output(mandatory = True),
         "src": attr.label(
@@ -145,13 +130,4 @@ cmake_configure_file = rule(
     },
     # output_to_genfiles is required for header files.
     output_to_genfiles = True,
-    implementation = _cmake_configure_file_impl,
 )
-    """Mimics CMake's configure_file in Bazel.
-
-    Args:
-      name: A unique name for this rule.
-      src: The input file template.
-      out: The generated output.
-      definitions: A mapping of identifier in template to its value.
-    """
