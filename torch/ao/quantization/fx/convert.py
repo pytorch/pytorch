@@ -1,5 +1,6 @@
-from typing import Any, Dict, Tuple, List, Callable, Optional, Union
+from typing import Any, Dict, Tuple, List, Callable, Optional, Union, Set
 from collections import defaultdict
+import copy
 import torch
 from torch.fx import (
     GraphModule,
@@ -12,7 +13,7 @@ from torch.fx.graph import (
 )
 from torch.fx.node import Argument
 from .quantization_types import Pattern
-from ..qconfig import QConfigAny
+from ..qconfig import QConfigAny, qconfig_equals
 from .match_utils import (
     find_matches,
 )
@@ -23,6 +24,15 @@ from .graph_module import (
 )
 from .quantization_patterns import (
     QuantizeHandler,
+)
+from ..qconfig_dict_utils import (
+    convert_dict_to_ordered_dict,
+    update_qconfig_for_qat,
+)
+from .qconfig_utils import (
+    generate_qconfig_map,
+    compare_prepare_convert_qconfig_dict,
+    update_qconfig_for_fusion,
 )
 from ._equalize import update_obs_for_equalization, convert_eq_obs
 from .utils import (
@@ -46,6 +56,9 @@ from ..utils import (
 )
 
 from .lower_to_fbgemm import lower_to_fbgemm
+from ..quantization_mappings import (
+    DEFAULT_QAT_MODULE_MAPPINGS,
+)
 
 # weight prepacking ops
 WEIGHT_PREPACK_OPS = {
@@ -131,21 +144,87 @@ def fold_weight(
     quantized = QuantizedGraphModule(quantized_root, folded_graph, quantized_root.preserved_attr_names)
     return quantized
 
+def remove_quant_dequant_pairs(quantized: QuantizedGraphModule) -> QuantizedGraphModule:
+    quantized_root = quantized
+    for node in quantized.graph.nodes:
+        if node.op == "call_function" and node.target in [torch.quantize_per_tensor, torch.quantize_per_channel]:
+            users = list(node.users)
+            user = users[0] if users else None
+            if len(users) == 1 and user.op == "call_method" and user.target == "dequantize":
+                user.replace_all_uses_with(node.args[0])
+                quantized.graph.erase_node(user)
+                orig_args = list(node.args)
+                quantized.graph.erase_node(node)
+                for arg in orig_args:
+                    if isinstance(arg, Node) and len(list(arg.users)) == 0:
+                        quantized.graph.erase_node(arg)
+
+    quantized = QuantizedGraphModule(quantized_root, quantized.graph, quantized_root.preserved_attr_names)
+    return quantized
+
+def duplicate_dequantize_node(quantized: QuantizedGraphModule) -> QuantizedGraphModule:
+    """
+    If a dequantize node has multiple uses, duplicate it and create one dequantize node for each use.
+    This is to enable the pattern matching to map from individual quant - dequant - ref_module to
+    final quantized module.
+    """
+    quantized_root = quantized
+    for node in quantized.graph.nodes:
+        if (node.op == "call_method" and node.target == "dequantize" or
+           (node.op == "call_function" and node.target == torch.dequantize)):
+            users = list(node.users)
+            if len(users) > 1:
+                for user in users:
+                    with quantized.graph.inserting_before(node):
+                        new_node = quantized.graph.create_node("call_method", "dequantize", node.args, {})
+                    user.replace_input_with(node, new_node)
+                quantized.graph.erase_node(node)
+
+    quantized = QuantizedGraphModule(quantized_root, quantized.graph, quantized_root.preserved_attr_names)
+    return quantized
+
+def remove_extra_dequantize(quantized: QuantizedGraphModule) -> QuantizedGraphModule:
+    """
+    Removes duplicate dequant nodes in the graph, for an operator that has multiple dequant nodes as a user,
+    replace them with a single dequant node that can be shared across all the uses.
+    """
+    quantized_root = quantized
+    for node in quantized.graph.nodes:
+        users = list(node.users)
+        dequant_users = [user for user in node.users if user.op == "call_method" and user.target == "dequantize" or
+                         (user.op == "call_function" and user.target == torch.dequantize)]
+
+        if len(dequant_users) > 1:
+            with quantized.graph.inserting_after(node):
+                unique_dq = quantized.graph.create_node("call_method", "dequantize", users[0].args, {})
+            for dequant in dequant_users:
+                dequant.replace_all_uses_with(unique_dq)
+                quantized.graph.erase_node(dequant)
+
+    quantized = QuantizedGraphModule(quantized_root, quantized.graph, quantized_root.preserved_attr_names)
+    return quantized
+
+
 def restore_state(
         observed: GraphModule
-) -> Tuple[Dict[Pattern, QuantizeHandler], Dict[str, Tuple[str, type]], Dict[str, Any]]:
+) -> Tuple[Dict[Pattern, QuantizeHandler],
+           Dict[str, Tuple[str, type]],
+           Dict[str, Any],
+           Set[str]]:
     assert is_observed_module(observed), \
         'incoming model must be produced by prepare_fx'
     prepare_custom_config_dict: Dict[str, Any] = \
         observed._prepare_custom_config_dict  # type: ignore[assignment]
     node_name_to_scope: Dict[str, Tuple[str, type]] = observed._node_name_to_scope  # type: ignore[assignment]
     patterns: Dict[Pattern, QuantizeHandler] = observed._patterns  # type: ignore[assignment]
-    return patterns, node_name_to_scope, prepare_custom_config_dict
+    observed_node_names: Set[str] = observed._observed_node_names  # type: ignore[assignment]
+    return patterns, node_name_to_scope, prepare_custom_config_dict, observed_node_names
 
 def convert(model: GraphModule, is_reference: bool = False,
             convert_custom_config_dict: Dict[str, Any] = None,
             is_standalone_module: bool = False,
-            _remove_qconfig_flag: bool = True) -> QuantizedGraphModule:
+            _remove_qconfig_flag: bool = True,
+            convert_qconfig_dict: Dict[str, Any] = None) -> QuantizedGraphModule:
     """ standalone_module means it a submodule that is not inlined in
     parent module, and will be quantized separately as one unit.
 
@@ -156,7 +235,7 @@ def convert(model: GraphModule, is_reference: bool = False,
     """
     if convert_custom_config_dict is None:
         convert_custom_config_dict = {}
-    patterns, node_name_to_scope, prepare_custom_config_dict = restore_state(model)
+    patterns, node_name_to_scope, prepare_custom_config_dict, _ = restore_state(model)
     qconfig_map: Dict[str, QConfigAny] = model._qconfig_map  # type: ignore[assignment]
 
     # TODO this should be removed now that gpu support for quantization is being supported.
@@ -177,6 +256,29 @@ def convert(model: GraphModule, is_reference: bool = False,
     # We use remove_duplicate=False here because torch.cat uses
     # the same activation_post_process module instance but different names
     modules = dict(model.named_modules(remove_duplicate=False))
+
+    # TODO refactor this code once we update the prepare logic to have additional information on
+    # which graph nodes have been observed and share that with convert to decide which observers to ignore.
+    if convert_qconfig_dict:
+        prepare_qconfig_dict: Dict[str, Dict[Any, Any]] = model._qconfig_dict  # type: ignore[assignment]
+        modules_copy = copy.deepcopy(modules)
+        convert_dict_to_ordered_dict(convert_qconfig_dict)
+        if model._is_qat:
+            additional_qat_module_mapping = prepare_custom_config_dict.get(
+                "additional_qat_module_mapping", {})
+            convert_qconfig_dict = update_qconfig_for_qat(convert_qconfig_dict, additional_qat_module_mapping)
+        convert_qconfig_dict = update_qconfig_for_fusion(model, convert_qconfig_dict)
+
+        compare_prepare_convert_qconfig_dict(prepare_qconfig_dict, convert_qconfig_dict)  # type: ignore[arg-type]
+        convert_qconfig_map = generate_qconfig_map(model, modules_copy, model.graph, convert_qconfig_dict, node_name_to_scope)
+        # check the convert_qconfig_map generated and ensure that all the values either match what was set in prepare qconfig_map
+        # or are set to None in the convert_qconfig_map.
+        for k, v in qconfig_map.items():
+            assert k in convert_qconfig_map, 'Expected key {} in convert qconfig_map'.format(k)
+            if convert_qconfig_map[k] is not None:
+                assert qconfig_equals(v, convert_qconfig_map[k]), 'Expected k {} to have the same value in prepare qconfig_dict \
+                and convert qconfig_dict, found {} updated to {}.'.format(k, v, convert_qconfig_map[k])
+        qconfig_map = convert_qconfig_map
 
     custom_module_classes = get_custom_module_class_keys(
         convert_custom_config_dict,
@@ -339,7 +441,7 @@ def convert(model: GraphModule, is_reference: bool = False,
 
     def is_output_quantized(
             node: Node, obj: QuantizeHandler, qconfig: QConfigAny,
-            modules: Dict[str, torch.nn.Module], is_reference=False) -> bool:
+            modules: Dict[str, torch.nn.Module]) -> bool:
         """ Check if output node is quantized or not """
         assert modules is not None
         # for some ops the output is quantized only when `is_reference` is True
@@ -348,7 +450,7 @@ def convert(model: GraphModule, is_reference: bool = False,
         # ideally this check should not happen here, it should happen either in
         # prepare or during lowering, we don't need this check
         # after the default path is changed to produce reference patterns
-        quantized = obj.is_output_quantized(qconfig, is_reference)
+        quantized = obj.is_output_quantized(qconfig)
 
         # Need to get correct quantized/non-quantized state forn the output
         # of FixedQParamsQuantizeHandler
@@ -445,6 +547,12 @@ def convert(model: GraphModule, is_reference: bool = False,
                 result = quantized_graph.node_copy(
                     node, load_non_quantized)
                 quantized = False
+                # If there are QAT swapped modules in the graph that we don't want to quantize, rever them back to FP32 ones.
+                if node.op == 'call_module' and type(modules[node.target]) in DEFAULT_QAT_MODULE_MAPPINGS.values():
+                    float_mod = modules[node.target].to_float()
+                    setattr(model, node.name, float_mod)
+                    with model.graph.inserting_before(node):
+                        new_float_node = model.graph.create_node('call_module', node.name, node.args, node.kwargs)
             else:
                 assert obj is not None
                 # We will get whether the output is quantized or not before
@@ -463,7 +571,7 @@ def convert(model: GraphModule, is_reference: bool = False,
                     node, qconfig, modules, quantized_graph, node_name_to_scope, load_arg, is_reference=is_reference,
                     convert_custom_config_dict=convert_custom_config_dict)
                 if not is_observed_standalone_module_node:
-                    quantized = is_output_quantized(node, obj, qconfig, modules, is_reference)
+                    quantized = is_output_quantized(node, obj, qconfig, modules)
 
             if quantized:
                 env[node.name][activation_dtype(qconfig)] = result
@@ -536,6 +644,9 @@ def convert(model: GraphModule, is_reference: bool = False,
     preserved_attributes = set(convert_custom_config_dict.get("preserved_attributes", []))
     model = QuantizedGraphModule(model, act_post_process_removed_graph, preserved_attributes)
     if not is_reference:
+        model = duplicate_dequantize_node(model)
         model = fold_weight(model, node_name_to_scope)
         model = lower_to_fbgemm(model)
+        model = remove_quant_dequant_pairs(model)
+        model = remove_extra_dequantize(model)
     return model

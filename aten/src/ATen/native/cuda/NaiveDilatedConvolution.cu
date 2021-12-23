@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/native/ConvUtils.h>
 #include <ATen/native/cuda/im2col.cuh>
 #include <ATen/native/cuda/vol2col.cuh>
 #include <ATen/native/DilatedConvolutionUtils.h>
@@ -207,7 +207,7 @@ void slow_conv_dilated_all_cuda_template(
     output.zero_();
   }
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
   /* When using ROCm, the sum evaluation is inaccurate for double
      tensors. The reason is currently unknown. Hence, we use gemv for
      computing `grad_output_n.sum(dims)` until the ROCm-sum issue is
@@ -595,6 +595,8 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated3d_backward_cuda(
       dilation_size);
   return std::tie(grad_input, grad_weight, grad_bias);
 }
+
+REGISTER_CUDA_DISPATCH(slow_conv_dilated2d_backward_stub, &slow_conv_dilated2d_backward_cuda);
 
 } // namespace native
 } // namespace at

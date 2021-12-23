@@ -1021,8 +1021,10 @@ def _qualified_name(obj) -> str:
 
     # torch.package and TorchScript have separate mangling schemes to avoid
     # name collisions from multiple packages. To avoid them interfering with
-    # each other, remove the package mangling here.
-    module_name = package_mangling.demangle(module_name)
+    # each other, normalize the package manging here.
+    if package_mangling.is_mangled(module_name):
+        module_name = module_name.replace("<", "_")
+        module_name = module_name.replace(">", "_")
 
     # __main__ is a builtin module, so rewrite it to "__torch__".
     if module_name == "__main__":

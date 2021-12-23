@@ -29,7 +29,7 @@ namespace at { namespace cuda {
 // and edit ATen/cuda/detail/LazyNVRTC.cpp accordingly (e.g., via one of the stub
 // macros).
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 
 #define AT_FORALL_NVRTC_BASE(_)                  \
   _(nvrtcVersion)                                \
@@ -49,6 +49,7 @@ namespace at { namespace cuda {
   _(cuOccupancyMaxActiveBlocksPerMultiprocessor) \
   _(cuGetErrorString)                            \
   _(cuLaunchKernel)                              \
+  _(cuLaunchCooperativeKernel)                   \
   _(cuCtxGetCurrent)                             \
   _(cuModuleUnload)                              \
   _(cuDevicePrimaryCtxGetState)                  \
@@ -56,7 +57,7 @@ namespace at { namespace cuda {
   _(cuLinkAddData)                               \
   _(cuLinkComplete)
 
-#if CUDA_VERSION >= 11010
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11010
 #define AT_FORALL_NVRTC(_) \
   AT_FORALL_NVRTC_BASE(_)  \
   _(nvrtcGetCUBINSize)     \

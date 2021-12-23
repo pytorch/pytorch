@@ -388,6 +388,42 @@ class TORCH_API Allocate : public StmtNode<Allocate> {
   // TODO: add memory types.
 };
 
+// PlacementAllocate is a variation of the Allocate operator in NNC IR. It does
+// not allocate memory but reuse the memory of another buffer for the given
+// buffer.
+class TORCH_API PlacementAllocate : public StmtNode<PlacementAllocate> {
+ public:
+  static PlacementAllocatePtr make(
+      const BufHandle& buf_handle,
+      const BufHandle& buf_handle_to_reuse) {
+    return alloc<PlacementAllocate>(
+        buf_handle.node(), buf_handle_to_reuse.node());
+  }
+
+  BufPtr buf() const {
+    return buf_;
+  }
+
+  BufPtr buf_to_reuse() const {
+    return buf_to_reuse_;
+  }
+
+  void set_buf(BufPtr buf) {
+    buf_ = buf;
+  }
+
+  void set_buf_to_reuse(BufPtr buf) {
+    buf_to_reuse_ = buf;
+  }
+
+  explicit PlacementAllocate(BufPtr buf, BufPtr buf_to_reuse)
+      : buf_(buf), buf_to_reuse_(buf_to_reuse) {}
+
+ private:
+  BufPtr buf_;
+  BufPtr buf_to_reuse_;
+};
+
 // Free the specific buffer. It is an error.
 class TORCH_API Free : public StmtNode<Free> {
  public:
@@ -419,11 +455,7 @@ class TORCH_API Let : public StmtNode<Let> {
     return alloc<Let>(var.node(), val.node());
   }
 
-  Let(VarPtr var, ExprPtr val) : dtype_(var->dtype()), var_(var), val_(val) {}
-
-  Dtype dtype() const {
-    return dtype_;
-  }
+  Let(VarPtr var, ExprPtr val) : var_(var), val_(val) {}
 
   VarPtr var() const {
     return var_;
@@ -442,7 +474,6 @@ class TORCH_API Let : public StmtNode<Let> {
   }
 
  private:
-  Dtype dtype_;
   VarPtr var_;
   ExprPtr val_;
 };

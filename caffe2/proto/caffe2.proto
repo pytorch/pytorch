@@ -21,26 +21,26 @@ message TensorProto {
     UNDEFINED = 0;
 
     // Basic types
-    FLOAT = 1;     // float
-    INT32 = 2;     // int
-    BYTE = 3;      // byte, when deserialized, is going to be restored as uint8
-    STRING = 4;    // string
+    FLOAT = 1; // float
+    INT32 = 2; // int
+    BYTE = 3; // byte, when deserialized, is going to be restored as uint8
+    STRING = 4; // string
 
     // Less-commonly used data types
-    BOOL = 5;      // bool
-    UINT8 = 6;     // uint8_t
-    INT8 = 7;      // int8_t
-    UINT16 = 8;    // uint16_t
-    INT16 = 9;     // int16_t
-    INT64 = 10;    // int64_t
-    FLOAT16 = 12;  // at::Half
-    DOUBLE = 13;   // double
+    BOOL = 5; // bool
+    UINT8 = 6; // uint8_t
+    INT8 = 7; // int8_t
+    UINT16 = 8; // uint16_t
+    INT16 = 9; // int16_t
+    INT64 = 10; // int64_t
+    FLOAT16 = 12; // at::Half
+    DOUBLE = 13; // double
 
-    ZERO_COLLISION_HASH = 14;  // zero-collision hash state
-    REBATCHING_BUFFER= 15;     // rebatching buffer
+    ZERO_COLLISION_HASH = 14; // zero-collision hash state
+    REBATCHING_BUFFER = 15; // rebatching buffer
   }
   // The type of the deserialized tensor data
-  optional DataType data_type = 2 [default = FLOAT];
+  optional DataType data_type = 2 [ default = FLOAT ];
 
   // The format of the serialized data.
   enum SerializationFormat {
@@ -58,10 +58,10 @@ message TensorProto {
   // new messages that have a SerializationFormat value that we don't
   // understand.  If we stored this as an enum then protobuf would deserialize
   // both of these cases the same way.
-  optional uint32 data_format = 15 [default = 0];
+  optional uint32 data_format = 15 [ default = 0 ];
 
   // For float
-  repeated float float_data = 3 [packed = true];
+  repeated float float_data = 3 [ packed = true ];
   // For int32, uint8, int8, uint16, int16, bool, and float16
   // Note about float16: in storage we will basically convert float16 byte-wise
   // to unsigned short and then store them in the int32_data field.
@@ -69,15 +69,15 @@ message TensorProto {
   // larger serialized data than necessary, as protobuf's varint encoding
   // scheme requires 2 bytes to represent int8 and uint8 values that have the
   // MSB set.
-  repeated int32 int32_data = 4 [packed = true];
+  repeated int32 int32_data = 4 [ packed = true ];
   // For bytes
   optional bytes byte_data = 5;
   // For strings
   repeated bytes string_data = 6;
   // For double
-  repeated double double_data = 9 [packed = true];
+  repeated double double_data = 9 [ packed = true ];
   // For int64
-  repeated int64 int64_data = 10 [packed = true];
+  repeated int64 int64_data = 10 [ packed = true ];
   // store the raw data, contents are serialized as little-endian
   optional bytes raw_data = 13;
 
@@ -107,9 +107,9 @@ message QTensorProto {
   required double scale = 3;
   required double bias = 4;
   required bool is_signed = 5;
-  repeated int32 data = 6 [packed = true];
+  repeated int32 data = 6 [ packed = true ];
   optional string name = 7;
-  optional TensorProto.DataType data_type = 8 [default = INT32];
+  optional TensorProto.DataType data_type = 8 [ default = INT32 ];
 
   // Multi-group quantization params
   repeated double scales = 9;
@@ -120,7 +120,7 @@ message QTensorProto {
   optional int32 axis = 11;
 
   // It should be true if it is a multi-group quantization proto
-  optional bool is_multiparam = 12 [default = false];
+  optional bool is_multiparam = 12 [ default = false ];
 }
 
 // TensorProtos stores multiple TensorProto objects in one single proto. This
@@ -132,9 +132,9 @@ message TensorProtos {
 
 message TensorShape {
   repeated int64 dims = 1;
-  optional TensorProto.DataType data_type = 2 [default = FLOAT];
+  optional TensorProto.DataType data_type = 2 [ default = FLOAT ];
   repeated int32 unknown_dims = 3;
-  optional bool unknown_shape = 4 [default = false];
+  optional bool unknown_shape = 4 [ default = false ];
   optional string name = 5;
 }
 
@@ -150,8 +150,8 @@ message TensorShapes {
 message TensorBoundShape {
   optional TensorShape shape = 1;
   enum DimType {
-    UNKNOWN = 0;   // unknown
-    CONSTANT  = 1; // constant
+    UNKNOWN = 0; // unknown
+    CONSTANT = 1; // constant
     // batch, corresponding dimension is batch_size
     BATCH = 2;
     // batch_of_feature_max,
@@ -164,9 +164,8 @@ message TensorBoundShape {
     FEATURE_MAX = 5;
     // feature_max_default, corresponding shape is default_feature_length
     FEATURE_MAX_DEFAULT = 6;
-
   }
-  repeated DimType dim_type = 2;  // dim_type.size() == shape.dims.size()
+  repeated DimType dim_type = 2; // dim_type.size() == shape.dims.size()
   optional string name = 3;
   // a flag to indicate whether the shape is final and cannot be changed
   // eg: input/output of in-place ops
@@ -211,17 +210,17 @@ message Argument {
 // line in the DeviceTypeName() function in caffe2/utils/proto_utils.cc
 // and update c10/core/DeviceType.h
 enum DeviceTypeProto {
-  PROTO_CPU = 0;                    // In default, we will use CPU.
-  PROTO_CUDA = 1;                   // CUDA.
-  PROTO_MKLDNN = 2;                 // Reserved for explicit MKLDNN
-  PROTO_OPENGL = 3;                 // OpenGL
-  PROTO_OPENCL = 4;                 // OpenCL
-  PROTO_IDEEP = 5;                  // IDEEP.
-  PROTO_HIP = 6;                    // AMD HIP
-  PROTO_FPGA = 7;                   // FPGA
-  PROTO_ORT = 8;                    // ONNX Runtime
-  PROTO_XLA = 9;                    // XLA / TPU
-  PROTO_MLC = 10;                   // ML Compute
+  PROTO_CPU = 0; // In default, we will use CPU.
+  PROTO_CUDA = 1; // CUDA.
+  PROTO_MKLDNN = 2; // Reserved for explicit MKLDNN
+  PROTO_OPENGL = 3; // OpenGL
+  PROTO_OPENCL = 4; // OpenCL
+  PROTO_IDEEP = 5; // IDEEP.
+  PROTO_HIP = 6; // AMD HIP
+  PROTO_FPGA = 7; // FPGA
+  PROTO_ORT = 8; // ONNX Runtime
+  PROTO_XLA = 9; // XLA / TPU
+  PROTO_MLC = 10; // ML Compute
   // Change the following number if you add more devices in the code.
   PROTO_COMPILE_TIME_MAX_DEVICE_TYPES = 11;
 }
@@ -270,7 +269,6 @@ message OperatorDef {
   // type.
   optional string engine = 7;
 
-
   // Additional 'fake' inputs used for expressing control dependencies
   // in the operator graph. This can be used to ensure that an
   // operator does not run until another operator is ready, for e.g.
@@ -281,7 +279,7 @@ message OperatorDef {
 
   // is_gradient_op argument is only used as a hint in shape inference
   // and has no runtime significance
-  optional bool is_gradient_op = 9 [default = false];
+  optional bool is_gradient_op = 9 [ default = false ];
 
   // debug information associated with the construction of the operator.
   // This is an optional string with no assumed characteristics as
@@ -387,7 +385,6 @@ message NetDef {
   repeated PartitionInfo partition_info = 9;
 }
 
-
 // ExecutionStep is actually a sort-of-hacky way we simulate iteration right
 // now.
 message ExecutionStep {
@@ -415,7 +412,7 @@ message ExecutionStep {
   // Criteria network specifies a single output (TensorCPU<bool>) of
   // size (1), is run on every iteration by the executor, and
   // execution terminates when the output[0] is `false`.
-  optional string criteria_network = 5 [deprecated=true];
+  optional string criteria_network = 5 [ deprecated = true ];
 
   // DEPRECATED. Use `run_every_ms`.
   optional string report_net = 7;
@@ -440,7 +437,8 @@ message ExecutionStep {
   // 2) the first substep decide which of the rest of the steps should be run.
   // 3) external control
   //
-  // ** It is the user's responsibility to not to put this blob in race conditions.
+  // ** It is the user's responsibility to not to put this blob in race
+  // conditions.
   // ** For example when setting this blob in concurrent substeps
   optional string should_stop_blob = 9;
 

@@ -105,12 +105,12 @@ TEST_F(UnionTypeTest, Subtyping_NumberType) {
 
   const NumberTypePtr num = NumberType::get();
 
-  ASSERT_TRUE(num->isSubtypeOf(union1));
-  ASSERT_TRUE(union1->isSubtypeOf(num));
+  ASSERT_TRUE(num->isSubtypeOf(*union1));
+  ASSERT_TRUE(union1->isSubtypeOf(*num));
   ASSERT_TRUE(*num == *union1);
 
-  ASSERT_TRUE(num->isSubtypeOf(union2));
-  ASSERT_FALSE(union2->isSubtypeOf(num));
+  ASSERT_TRUE(num->isSubtypeOf(*union2));
+  ASSERT_FALSE(union2->isSubtypeOf(*num));
   ASSERT_FALSE(*num == *union2);
 }
 

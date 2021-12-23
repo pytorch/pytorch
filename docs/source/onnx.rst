@@ -183,6 +183,25 @@ Using the Tensor.data field can produce an incorrect trace and therefore an inco
 Use :func:`torch.Tensor.detach` instead. (Work is ongoing to
 `remove Tensor.data entirely <https://github.com/pytorch/pytorch/issues/30987>`_).
 
+Avoid in-place operations when using tensor.shape in tracing mode
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+In tracing mode, shape values obtained from tensor.shape are traced as tensors,
+and share the same memory. This might cause a mismatch in values of the final outputs.
+As a workaround, avoid use of inplace operations in these scenarios.
+For example, in the model::
+
+    class Model(torch.nn.Module):
+      def forward(self, states):
+          batch_size, seq_length = states.shape[:2]
+          real_seq_length = seq_length
+          real_seq_length += 2
+          return real_seq_length + seq_length
+
+``real_seq_length`` and ``seq_length`` share the same memory in tracing mode.
+This could be avoided by rewriting the inplace operation::
+
+    real_seq_length = real_seq_length + 2
 
 Limitations
 -----------
@@ -230,6 +249,7 @@ When indexing into a tensor for reading, the following patterns are not supporte
 
   # Tensor indices that includes negative values.
   data[torch.tensor([[1, 2], [2, -3]]), torch.tensor([-2, 3])]
+  # Workarounds: use positive index values.
 
 Writes / Sets
 ~~~~~~~~~~~~~
@@ -238,12 +258,24 @@ When indexing into a Tensor for writing, the following patterns are not supporte
 
   # Multiple tensor indices if any has rank >= 2
   data[torch.tensor([[1, 2], [2, 3]]), torch.tensor([2, 3])] = new_data
+  # Workarounds: use single tensor index with rank >= 2,
+  #              or multiple consecutive tensor indices with rank == 1.
 
   # Multiple tensor indices that are not consecutive
   data[torch.tensor([2, 3]), :, torch.tensor([1, 2])] = new_data
+  # Workarounds: transpose `data` such that tensor indices are consecutive.
 
   # Tensor indices that includes negative values.
   data[torch.tensor([1, -2]), torch.tensor([-2, 3])] = new_data
+  # Workarounds: use positive index values.
+
+  # Implicit broadcasting required for new_data.
+  data[torch.tensor([[0, 2], [1, 1]]), 1:3] = new_data
+  # Workarounds: expand new_data explicitly.
+  # Example:
+  #   data shape: [3, 4, 5]
+  #   new_data shape: [5]
+  #   expected new_data shape after broadcasting: [2, 2, 2, 5]
 
 Adding support for operators
 ----------------------------
@@ -396,10 +428,6 @@ All autograd ``Function``\ s appear in the TorchScript graph as ``prim::PythonOp
 In order to differentiate between different ``Function`` subclasses, the
 symbolic function should use the ``name`` kwarg which gets set to the name of the class.
 
-:func:`register_custom_op_symbolic` does not allow registration for ops in
-the ``prim`` namespace, so for this use case, there's a back door: register the
-symbolic for ``"::prim_PythonOp"``.
-
 Custom symbolic functions should add type and shape information by calling ``setType(...)``
 on Value objects before returning them (implemented in C++ by
 ``torch::jit::Value::setType``). This is not required, but it can help the exporter's
@@ -421,7 +449,7 @@ The example below shows how you can access ``requires_grad`` via the ``Node`` ob
             ctx.save_for_backward(input)
             return input.clamp(min=0)
 
-    def symbolic_pythonop(g: torch._C.Graph, n: torch._C.Node, *args, **kwargs):
+    def symbolic_python_op(g: torch._C.Graph, n: torch._C.Node, *args, **kwargs):
         print("original node: ", n)
         for i, out in enumerate(n.outputs()):
             print("original output {}: {}, requires grad: {}".format(i, out, out.requiresGrad()))
@@ -433,7 +461,7 @@ The example below shows how you can access ``requires_grad`` via the ``Node`` ob
         name = kwargs["name"]
         ret = None
         if name == "MyClip":
-            ret = g.op("Clip", args[0], min_f=args[1])
+            ret = g.op("Clip", args[0], args[1])
         elif name == "MyRelu":
             ret = g.op("Relu", args[0])
         else:
@@ -444,7 +472,7 @@ The example below shows how you can access ``requires_grad`` via the ``Node`` ob
         return ret
 
     from torch.onnx import register_custom_op_symbolic
-    register_custom_op_symbolic("::prim_PythonOp", symbolic_pythonop, 1)
+    register_custom_op_symbolic("prim::PythonOp", symbolic_python_op, 1)
 
 Custom operators
 ^^^^^^^^^^^^^^^^
@@ -486,11 +514,28 @@ You can export it as one or a combination of standard ONNX ops, or as a custom o
 The example above exports it as a custom operator in the "custom_domain" opset.
 When exporting a custom operator, you can specify the custom domain version using the
 ``custom_opsets`` dictionary at export. If not specified, the custom opset version defaults to 1.
-The runtime that conumes the model needs to support the custom op. See
+The runtime that consumes the model needs to support the custom op. See
 `Caffe2 custom ops <https://caffe2.ai/docs/custom-operators.html>`_,
-`ONNX Runtime custom ops <https://github.com/microsoft/onnxruntime/blob/master/docs/AddingCustomOp.md>`_,
+`ONNX Runtime custom ops <https://onnxruntime.ai/docs/reference/operators/add-custom-op.html>`_,
 or your runtime of choice's documentation.
 
+
+Discovering all unconvertible ATen ops at once
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+When export fails due to an unconvertible ATen op, there may in fact be more
+than one such op but the error message only mentions the first. To discover
+all of the unconvertible ops in one go you can::
+
+    from torch.onnx import utils as onnx_utils
+
+    # prepare model, args, opset_version
+    ...
+
+    torch_script_graph, unconvertible_ops = onnx_utils.unconvertible_ops(
+        model, args, opset_version=opset_version)
+
+    print(set(unconvertible_ops))
 
 Frequently Asked Questions
 --------------------------
@@ -536,6 +581,7 @@ Q: Does ONNX support implicit scalar datatype casting?
 Q: Are lists of Tensors exportable to ONNX?
 
   Yes, for ``opset_version`` >= 11, since ONNX introduced the Sequence type in opset 11.
+
 
 Functions
 --------------------------

@@ -587,11 +587,9 @@ class _NnapiSerializer(object):
         dilations = [pc[5], pc[6]]
         output_padding = [pc[7], pc[8]]
         group_num = pc[9]
-        transpose = pc[10]
 
         assert len(pc) == 11
         assert output_padding == [0, 0]
-        assert transpose == 0
 
         return self.get_conv_pool_args_2d_common(kernel_size, strides, paddings, dilations, group_num)
 
@@ -809,10 +807,14 @@ class _NnapiSerializer(object):
             self.add_qconv2d(node, NNAPI_FuseCode.FUSED_NONE),
         "quantized::conv2d_relu": lambda self, node:
             self.add_qconv2d(node, NNAPI_FuseCode.FUSED_RELU),
+        "quantized::conv_transpose2d": lambda self, node:
+            self.add_qconv2d(node, NNAPI_FuseCode.FUSED_NONE, transpose=True),
         "quantized::add": lambda self, node:
             self.add_qadd(node, NNAPI_OperationCode.ADD, NNAPI_FuseCode.FUSED_NONE),
         "quantized::add_relu": lambda self, node:
             self.add_qadd(node, NNAPI_OperationCode.ADD, NNAPI_FuseCode.FUSED_RELU),
+        "quantized::mul": lambda self, node:
+            self.add_qadd(node, NNAPI_OperationCode.MUL, NNAPI_FuseCode.FUSED_NONE),
     }
 
     def add_node(self, node):
@@ -1794,7 +1796,7 @@ class _NnapiSerializer(object):
         self.add_operation(NNAPI_OperationCode.LOG_SOFTMAX, inputs, outputs)
 
 
-    def add_qconv2d(self, node, fuse_code):
+    def add_qconv2d(self, node, fuse_code, transpose=False):
         assert node.inputsSize() == 4
         assert node.outputsSize() == 1
 
@@ -1851,7 +1853,7 @@ class _NnapiSerializer(object):
             unsigned_weight,
             bias_id,
             args,
-            False,  # transpose
+            transpose,
             fuse_code,
         )
 

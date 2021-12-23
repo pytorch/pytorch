@@ -1,8 +1,8 @@
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/ceil_div.h>
 #include <ATen/native/Pool.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
@@ -271,7 +271,7 @@ TORCH_IMPL_FUNC(avg_pool2d_out_cuda)
 
   const int32_t count = safe_downcast<int32_t, int64_t>(output.numel());
   const uint32_t num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
-  const uint32_t num_blocks = cuda::ATenCeilDiv<uint32_t>(count, num_threads);
+  const uint32_t num_blocks = ceil_div<uint32_t>(count, num_threads);
 
   bool use_divisor = divisor_override.has_value();
   const auto divisor_override_value = use_divisor ? divisor_override.value() : 0;
@@ -395,7 +395,7 @@ TORCH_IMPL_FUNC(avg_pool2d_backward_out_cuda) (
   }
 
   const uint32_t num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
-  const uint32_t num_blocks = cuda::ATenCeilDiv<uint32_t>(count, num_threads);
+  const uint32_t num_blocks = ceil_div<uint32_t>(count, num_threads);
 
   bool use_divisor = divisor_override.has_value();
   const auto divisor_override_value = use_divisor ? divisor_override.value() : 0;
