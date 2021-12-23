@@ -10203,11 +10203,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_masked_select,
-           skips=(
-               # 69855: RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
-           )),
+           sample_inputs_func=sample_inputs_masked_select),
     OpInfo('matrix_exp',
            dtypes=floating_and_complex_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
@@ -10257,14 +10253,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_max_min_reduction_no_dim,
-           skips=(
-               # 69855: RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
-               # (ROCm) unexpected success
-               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_fwgrad_bwgrad',
-                            device_type='cuda', dtypes=[torch.float64], active_if=TEST_WITH_ROCM),
-           )),
+           sample_inputs_func=sample_inputs_max_min_reduction_no_dim),
     OpInfo('median',
            dtypes=all_types_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.float16),
@@ -10272,14 +10261,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=partial(sample_inputs_reduction, supports_multiple_dims=False),
-           skips=(
-               # 69855: RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
-               # (ROCm) unexpected success
-               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_fwgrad_bwgrad',
-                            device_type='cuda', dtypes=[torch.float64], active_if=TEST_WITH_ROCM),
-           )),
+           sample_inputs_func=partial(sample_inputs_reduction, supports_multiple_dims=False)),
     OpInfo('nanmedian',
            dtypes=all_types_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.float16),
@@ -10287,14 +10269,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=partial(sample_inputs_reduction, supports_multiple_dims=False),
-           skips=(
-               # 69855: RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
-               # (ROCm) unexpected success
-               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_fwgrad_bwgrad',
-                            device_type='cuda', dtypes=[torch.float64], active_if=TEST_WITH_ROCM),
-           )),
+           sample_inputs_func=partial(sample_inputs_reduction, supports_multiple_dims=False)),
     OpInfo('var_mean',
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
@@ -10394,14 +10369,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_max_min_reduction_no_dim,
-           skips=(
-               # 69855: RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
-               # (ROCm) unexpected success
-               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_fwgrad_bwgrad',
-                            device_type='cuda', dtypes=[torch.float64], active_if=TEST_WITH_ROCM),
-           )),
+           sample_inputs_func=sample_inputs_max_min_reduction_no_dim),
     OpInfo('quantile',
            dtypes=floating_types(),
            sample_inputs_func=sample_inputs_reduction_quantile,
@@ -10709,8 +10677,6 @@ op_db: List[OpInfo] = [
            check_inplace_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_as_strided,
            skips=(
-               # 69855: RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
                # AssertionError: False is not true : Tensors failed to compare as equal!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples'),
                # AssertionError: False is not true : Scalars failed to compare as equal!
@@ -13080,11 +13046,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
-           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-           skips=(
-               # 69855: RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
-           )),
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     OpInfo('index_add',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            # An `out=` variant exists but is not exposed to the Python API
@@ -13990,11 +13952,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_trace,
-           skips=(
-               # 69855: RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
-           )),
+           sample_inputs_func=sample_inputs_trace),
     OpInfo('transpose',
            aliases=('swapdims', 'swapaxes'),
            assert_jit_shape_analysis=True,
@@ -15244,8 +15202,6 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         skips=(
-            # 69855: RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
-            DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 "TestJit",
