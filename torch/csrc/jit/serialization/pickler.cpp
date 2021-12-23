@@ -374,6 +374,18 @@ void Pickler::pushLiteralSparseTensor(const at::Tensor& tensor) {
       // values
       pushTensor(tensor._values());
       break;
+    case static_cast<int>(c10::Layout::SparseCsr):
+      push<PickleOpCode>(PickleOpCode::MARK);
+      for (auto size : tensor.sizes()) {
+        pushInt(size);
+      }
+      push<PickleOpCode>(PickleOpCode::TUPLE);
+
+      pushIValue(tensor.requires_grad());
+      pushTensor(tensor.crow_indices());
+      pushTensor(tensor.col_indices());
+      pushTensor(tensor.values());
+      break;
     default:
       TORCH_CHECK(
           false,
