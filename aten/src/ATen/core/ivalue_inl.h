@@ -2269,7 +2269,7 @@ struct MaybeOwnedTraits<IValue> {
 
 template <>
 struct IValue::TagType<c10::Type> {
-  static c10::TypePtr get(const IValue&);
+  static TORCH_API c10::TypePtr get(const IValue&);
 };
 
 template <typename T>
