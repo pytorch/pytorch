@@ -68,11 +68,9 @@ bool _use_cudnn_ctc_loss(
   return use_cudnn;
 }
 
-std::tuple<Tensor, Tensor> _cudnn_ctc_loss(const Tensor& log_probs_t_, const Tensor& targets_t, IntArrayRef input_lengths_, IntArrayRef target_lengths_, int64_t BLANK, bool deterministic, bool zero_infinity) {
+std::tuple<Tensor, Tensor> _cudnn_ctc_loss(const Tensor& log_probs_t, const Tensor& targets_t, IntArrayRef input_lengths_, IntArrayRef target_lengths_, int64_t BLANK, bool deterministic, bool zero_infinity) {
   (void)zero_infinity; // only used for backward
   const CheckedFrom c = "cudnn_ctc_loss";
-  auto is_batched = log_probs_t_.dim() == 3;
-  Tensor log_probs_t = is_batched ? log_probs_t_ : log_probs_t_.unsqueeze(1);
   const TensorArg log_probs { log_probs_t, "log_probs", 1 };
   const TensorArg targets { targets_t, "targets", 2 };
   checkDim(c, log_probs, 3);
@@ -138,9 +136,6 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss(const Tensor& log_probs_t_, const Ten
       workspace.data_ptr(),
       workspace_size));
 
-  if (!is_batched) {
-    return std::make_tuple(costs, grad.squeeze(1));
-  }
   return std::make_tuple(costs, grad);
 }
 

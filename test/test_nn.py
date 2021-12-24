@@ -16407,7 +16407,8 @@ class TestNNDeviceType(NNTestCase):
         batch_size = 1
         target_length = 12
 
-        log_probs = torch.randn(input_length, batch_size, vocab_size, dtype=torch.float, device=device).log_softmax(2).requires_grad_()
+        log_probs = torch.randn(input_length, batch_size, vocab_size, dtype=torch.float, device=device) \
+                         .log_softmax(2).requires_grad_()
         targets = torch.randint(low=1, high=vocab_size - 1, size=(batch_size, target_length), dtype=torch.int, device=device)
         input_lengths = batch_size * [input_length]
         target_lengths = batch_size * [target_length]
@@ -16417,7 +16418,8 @@ class TestNNDeviceType(NNTestCase):
         input_lengths_no_bd = torch.tensor(input_length)
         target_lengths_no_bd = torch.tensor(target_length)
 
-        return (log_probs, targets, input_lengths, target_lengths), (log_probs_no_bd, targets_no_bd, input_lengths_no_bd, target_lengths_no_bd)
+        return ((log_probs, targets, input_lengths, target_lengths), 
+                (log_probs_no_bd, targets_no_bd, input_lengths_no_bd, target_lengths_no_bd))
 
     @onlyCUDA
     @skipCUDAIfNoCudnn
@@ -16428,7 +16430,8 @@ class TestNNDeviceType(NNTestCase):
 
         with torch.backends.cudnn.flags(enabled=False):
             res = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths, zero_infinity=True)
-            res_no_bd = torch.nn.functional.ctc_loss(log_probs_no_bd, targets_no_bd, input_lengths_no_bd, target_lengths_no_bd, zero_infinity=True)
+            res_no_bd = torch.nn.functional.ctc_loss(log_probs_no_bd, targets_no_bd, input_lengths_no_bd, 
+                                                     target_lengths_no_bd, zero_infinity=True)
 
         grad_out = torch.randn_like(res)
         grad, = torch.autograd.grad(res, log_probs, grad_out)
@@ -16462,7 +16465,8 @@ class TestNNDeviceType(NNTestCase):
         log_probs_no_bd, targets_no_bd, input_lengths_no_bd, target_lengths_no_bd = args_no_bd
 
         res = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths, zero_infinity=True)
-        res_no_bd = torch.nn.functional.ctc_loss(log_probs_no_bd, targets_no_bd, input_lengths_no_bd, target_lengths_no_bd, zero_infinity=True)
+        res_no_bd = torch.nn.functional.ctc_loss(log_probs_no_bd, targets_no_bd, input_lengths_no_bd, 
+                                                 target_lengths_no_bd, zero_infinity=True)
 
         grad_out = torch.randn_like(res)
         grad, = torch.autograd.grad(res, log_probs, grad_out)
