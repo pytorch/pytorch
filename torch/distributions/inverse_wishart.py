@@ -41,6 +41,8 @@ class InverseWishart(ExponentialFamily):
         the corresponding lower triangular matrices using a Cholesky decomposition.
         Inverse Wishart distirbution is inverse transformed distribution of `torch.distributions.wishart.Wishart`
         wishart and inverse wishart distributions may exhibit other advanctages according to the use case.
+        Covariance Matrix in Inverse Wishart distribution is identical to the Precision Matrix in Wishart distribution and
+        Precision Matrix in Inverse Wishart distribution is identical to the Covariance Matrix in Wishart distribution.
     """
     arg_constraints = {
         'covariance_matrix': constraints.positive_definite,
@@ -123,18 +125,6 @@ class InverseWishart(ExponentialFamily):
             new.scale_tril = self.scale_tril.expand(cov_shape)
         if 'precision_matrix' in self.__dict__:
             new.precision_matrix = self.precision_matrix.expand(cov_shape)
-
-        # Chi2 distribution is needed for Bartlett decomposition sampling
-        new._dist_chi2 = torch.distributions.chi2.Chi2(
-            df=(
-                new.df.unsqueeze(-1)
-                - torch.arange(
-                    self.event_shape[-1],
-                    dtype=new._unbroadcasted_scale_tril.dtype,
-                    device=new._unbroadcasted_scale_tril.device,
-                ).expand(batch_shape + (-1,))
-            )
-        )
 
         super(InverseWishart, new).__init__(batch_shape, self.event_shape, validate_args=False)
         new._validate_args = self._validate_args
