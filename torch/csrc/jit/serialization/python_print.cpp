@@ -10,9 +10,11 @@
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/error_report.h>
+#include <torch/csrc/jit/frontend/versioned_symbols.h>
 #include <torch/csrc/jit/ir/attributes.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/ir_views.h>
+#include <torch/csrc/jit/operator_upgraders/upgraders_guard.h>
 #include <torch/csrc/jit/operator_upgraders/version_map.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/runtime/calculate_necessary_args.h>
@@ -743,6 +745,7 @@ struct PythonPrintImpl {
   }
 
   void checkVersion(Node* node) {
+#if ENABLE_UPGRADERS
     if (auto schema = node->maybeSchema()) {
       auto schema_name = getFullSchemaName(*schema);
       auto version_entry = get_operator_version_map().find(schema_name);
@@ -753,6 +756,10 @@ struct PythonPrintImpl {
             min_version_, uint64_t(entry[entry.size() - 1].bumped_at_version));
       }
     }
+#else
+    min_version_ =
+        std::max(min_version_, get_min_version_for_kind(node->kind()));
+#endif
   }
 
   void printNode(Node* node, bool print_const) {
@@ -1603,7 +1610,11 @@ struct PythonPrintImpl {
   bool enforce_importable_;
 
   // The least version that supports all printed ops
+#if ENABLE_UPGRADERS
   uint64_t min_version_ = caffe2::serialize::kMinSupportedFileFormatVersion;
+#else
+  uint64_t min_version_ = 0;
+#endif
 };
 
 PythonPrint::PythonPrint(

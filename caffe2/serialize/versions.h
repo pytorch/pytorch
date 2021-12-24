@@ -1,12 +1,17 @@
 #pragma once
-
+#include <torch/csrc/jit/operator_upgraders/upgraders_guard.h>
 #include <cstdint>
 
 namespace caffe2 {
 namespace serialize {
 
 constexpr uint64_t kMinSupportedFileFormatVersion = 0x1L;
+
+#if ENABLE_UPGRADERS
 constexpr uint64_t kMaxSupportedFileFormatVersion = 0x7L;
+#else
+constexpr uint64_t kMaxSupportedFileFormatVersion = 0x6L;
+#endif
 
 // Versions (i.e. why was the version number bumped?)
 
@@ -48,6 +53,7 @@ constexpr uint64_t kMaxSupportedFileFormatVersion = 0x7L;
 //      when given bool or integer fill values.
 // 6. Write version string to `./data/version` instead of `version`.
 
+#if ENABLE_UPGRADERS
 // This is set to 7 from 3 due to a different interpretation of what
 // file format version is. Whenever there is new upgrader introduced,
 // this number should be bumped.
@@ -55,6 +61,9 @@ constexpr uint64_t kMaxSupportedFileFormatVersion = 0x7L;
 //     2. aten::full is changed at version 5
 //     3. torch.package uses version 6
 constexpr uint64_t kProducedFileFormatVersion = 0x7L;
+#else
+constexpr uint64_t kProducedFileFormatVersion = 0x3L;
+#endif
 
 // Absolute minimum version we will write packages. This
 // means that every package from now on will always be

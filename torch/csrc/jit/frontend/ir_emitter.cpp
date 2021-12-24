@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/frontend/script_type_parser.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/operator_upgraders/upgraders_guard.h>
 #include <torch/csrc/jit/passes/annotate_warns.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
@@ -657,10 +658,12 @@ struct to_ir {
     }
     method.setSchema(emitDef(def, self, graph->block()));
 
+#if ENABLE_UPGRADERS
     // At this point, we might have received a graph that is compiled with
     // old operator schemas that might not exist in the system anymore.
     // Therefore, we replace such ops with its' valid upgrader.
     ReplaceOldOperatorsWithUpgraders(graph);
+#endif
 
     // NB ORDERING: SSA conversion has to occur before
     // lifting of closures and forks, this way closures are converted

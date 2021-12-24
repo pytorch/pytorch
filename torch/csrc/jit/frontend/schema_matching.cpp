@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/frontend/builtin_functions.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
+#include <torch/csrc/jit/operator_upgraders/upgraders_guard.h>
 #include <torch/csrc/jit/operator_upgraders/utils.h>
 #include <torch/csrc/jit/operator_upgraders/version_map.h>
 #include <torch/csrc/jit/runtime/operator.h>
@@ -638,8 +639,12 @@ Value* emitBuiltinCall(
   const auto& variants = getAllOperatorsFor(name);
   const auto& builtin_functions = getAllBuiltinFunctionsFor(name);
 
+#if ENABLE_UPGRADERS
   // first let's set the graph's version
   auto graph_version = graph.get_op_version();
+#else
+  c10::optional<size_t> graph_version = c10::nullopt;
+#endif
 
   std::stringstream failure_messages;
   std::vector<const FunctionSchema*> schemas;
