@@ -323,11 +323,11 @@ class GaussianNLLLoss(_Loss):
             losses. Default: ``'mean'``.
 
     Shape:
-        - Input: :math:`(N, *)` where :math:`*` means any number of additional
+        - Input: :math:`(N, *)` or :math:`(*)` where :math:`*` means any number of additional
           dimensions
-        - Target: :math:`(N, *)`, same shape as the input, or same shape as the input
+        - Target: :math:`(N, *)` or :math:`(*)`, same shape as the input, or same shape as the input
           but with one dimension equal to 1 (to allow for broadcasting)
-        - Var: :math:`(N, *)`, same shape as the input, or same shape as the input but
+        - Var: :math:`(N, *)` or :math:`(*)`, same shape as the input, or same shape as the input but
           with one dimension equal to 1, or same shape as the input but with one fewer
           dimension (to allow for broadcasting)
         - Output: scalar if :attr:`reduction` is ``'mean'`` (default) or
@@ -1070,7 +1070,7 @@ class CrossEntropyLoss(_WeightedLoss):
 
       .. math::
           \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \quad
-          l_n = - \sum_{c=1}^C w_c \log \frac{\exp(x_{n,c})}{\exp(\sum_{i=1}^C x_{n,i})} y_{n,c}
+          l_n = - \sum_{c=1}^C w_c \log \frac{\exp(x_{n,c})}{\sum_{i=1}^C \exp(x_{n,i})} y_{n,c}
 
       where :math:`x` is the input, :math:`y` is the target, :math:`w` is the weight,
       :math:`C` is the number of classes, and :math:`N` spans the minibatch dimension as well as
