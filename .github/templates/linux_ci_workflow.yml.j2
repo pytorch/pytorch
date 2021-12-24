@@ -47,17 +47,20 @@ env:
 !{{ common.concurrency(build_environment) }}
 
 jobs:
-!{{ common.ciflow_should_run_job(ciflow_config) }}
 {% block build +%}
   build:
     runs-on: linux.2xlarge
-    needs: [!{{ ciflow_config.root_job_name }}]
     timeout-minutes: !{{ common.timeout_minutes }}
+    if: !{{ ciflow_config.root_job_condition }}
     env:
       JOB_BASE_NAME: !{{ build_environment }}-build
+      IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == '!{{ ciflow_config.trigger_action }}') && (github.event.assigneed.login == '!{{ ciflow_config.trigger_actor }}') }}
+      LABEL_CONDITIONS: ${{ !{{ ciflow_config.label_conditions }} }}
     outputs:
       docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
     steps:
+      - name: print labels
+        run: echo "${PR_LABELS}"
       !{{ common.setup_ec2_linux() }}
       !{{ common.checkout_pytorch("recursive") }}
       !{{ common.calculate_docker_image(false) }}
@@ -145,12 +148,12 @@ jobs:
 {% block test +%}
   generate-test-matrix:
     runs-on: ubuntu-18.04
-    needs: [!{{ ciflow_config.root_job_name }}]
     timeout-minutes: !{{ common.timeout_minutes }}
     env:
       TEST_RUNNER_TYPE: !{{ test_runner_type }}
       ENABLE_DISTRIBUTED_TEST: !{{ enable_distributed_test }}
       ENABLE_JIT_LEGACY_TEST: !{{ enable_jit_legacy_test }}
+      ENABLE_FX2TRT_TEST: !{{ enable_fx2trt_test }}
       ENABLE_MULTIGPU_TEST: !{{ enable_multigpu_test }}
       ENABLE_NOGPU_NO_AVX_TEST: !{{ enable_nogpu_no_avx_test }}
       ENABLE_NOGPU_NO_AVX2_TEST: !{{ enable_nogpu_no_avx2_test }}
@@ -180,7 +183,7 @@ jobs:
         run: .github/scripts/generate_pytorch_test_matrix.py
 
   test:
-    needs: [build, generate-test-matrix, !{{ ciflow_config.root_job_name }}]
+    needs: [build, generate-test-matrix]
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
       fail-fast: false
@@ -312,7 +315,7 @@ jobs:
     strategy:
       matrix:
         docs_type: [cpp, python]
-    needs: [build, !{{ ciflow_config.root_job_name }}]
+    needs: [build]
     env:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       DOCS_TYPE: ${{ matrix.docs_type }}
@@ -334,7 +337,7 @@ jobs:
       - name: Generate netrc (only for docs-push)
         if: ${{ github.event_name == 'schedule' }}
         env:
-          GITHUB_PYTORCHBOT_TOKEN: ${{ secrets.GITHUB_PYTORCHBOT_TOKEN }}
+          GITHUB_PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
         run: |
           # set credentials for https pushing
           echo "machine github.com" > "${RUNNER_TEMP}/.netrc"
@@ -366,7 +369,7 @@ jobs:
             --detach \
             --user jenkins \
 {%- if is_scheduled %}
-            -v "${RUNNER_TEMP}/.netrc":/var/lib/jenkins/workspace/.netrc \
+            -v "${RUNNER_TEMP}/.netrc":/var/lib/jenkins/.netrc \
 {%- endif %}
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
