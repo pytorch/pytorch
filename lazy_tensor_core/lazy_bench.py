@@ -501,9 +501,9 @@ def merge_with_prefix(prefix, tmp_dir, out_dir, headers):
         for l in results:
             acc_csv.write(l)
 
-def save_error(name, test, error):
+def save_error(name, test, error, dir):
     output_csv(
-        os.path.join(args.output_dir, f"error_{args.test}_{get_unique_suffix()}.csv"),
+        os.path.join(dir, f"error_{get_unique_suffix()}.csv"),
         ("name", "test", "error"),
     ).writerow([name, test, error])
 
@@ -582,11 +582,11 @@ if __name__ == "__main__" :
                             lazy_result = call_model_with(lazy_model, lazy_inputs)
                             if not check_results(correct_result, lazy_result, device):
                                 print(f"INCORRECT: {name}")
-                                save_error(name, "eval", "Incorrect results.")
+                                save_error(name, "eval", "Incorrect results.", args.output_dir)
                                 continue
                     except Exception as e:
                         print(f"ERROR: {name}")
-                        save_error(name, "eval", e)
+                        save_error(name, "eval", e, args.output_dir)
                         continue
 
                     lazy_overhead_experiment(args, results, benchmark, lazy_benchmark)
@@ -613,7 +613,8 @@ if __name__ == "__main__" :
                         shell=True,
                         stderr=subprocess.STDOUT)
         except subprocess.TimeoutExpired:
-            print(f"{model_name} timed out after 5 minutes! Include it in SKIP or SKIP_TRAIN_ONLY")
+            print(f"{model_name} timed out after {args.timeout // 60} minutes! Include it in SKIP or SKIP_TRAIN_ONLY")
+            save_error(model_name, args.test, "Timed out.", dirpath)
 
     merge_with_prefix("lazy_overheads_", dirpath, args.output_dir, ("dev", "name", "test", "overhead", "pvalue"))
     merge_with_prefix("lazy_compute_", dirpath, args.output_dir, ("name", "dev", "experiment", "test", "speedup", "pvalue"))
