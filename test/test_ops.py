@@ -707,7 +707,7 @@ class TestGradients(TestCase):
         return _fn
 
     def _check_helper(self, device, dtype, op, variant, check, *, check_forward_ad=False, check_backward_ad=True,
-                      check_undefined_grad=True, check_batched_grad=None, check_batched_forward_grad=False):
+                      check_batched_grad=None, check_batched_forward_grad=False):
         assert check in ('gradcheck', 'bwgrad_bwgrad', 'fwgrad_bwgrad')
         # NB: check_backward_ad does not affect gradgradcheck (always True)
         if variant is None:
@@ -756,7 +756,7 @@ class TestGradients(TestCase):
                                           fast_mode=op.gradcheck_fast_mode,
                                           check_forward_ad=check_forward_ad,
                                           check_backward_ad=check_backward_ad,
-                                          check_undefined_grad=check_undefined_grad,
+                                          check_undefined_grad=True,
                                           check_batched_forward_grad=check_batched_forward_grad))
             elif check in ('bwgrad_bwgrad', 'fwgrad_bwgrad'):  # gradgrad check
                 self.assertFalse(check_forward_ad, msg="Cannot run forward AD check for gradgradcheck")
@@ -779,10 +779,9 @@ class TestGradients(TestCase):
                 self.assertTrue(False, msg="Unknown check requested!")
 
     def _grad_test_helper(self, device, dtype, op, variant, *, check_forward_ad=False, check_backward_ad=True,
-                          check_undefined_grad=True, check_batched_grad=None, check_batched_forward_grad=False):
+                          check_batched_grad=None, check_batched_forward_grad=False):
         return self._check_helper(device, dtype, op, variant, 'gradcheck', check_forward_ad=check_forward_ad,
-                                  check_backward_ad=check_backward_ad, check_undefined_grad=check_undefined_grad,
-                                  check_batched_grad=check_batched_grad,
+                                  check_backward_ad=check_backward_ad, check_batched_grad=check_batched_grad,
                                   check_batched_forward_grad=check_batched_forward_grad)
 
     def _skip_helper(self, op, device, dtype):
@@ -864,8 +863,7 @@ class TestGradients(TestCase):
             check_batched_forward_grad = ((op.check_batched_forward_grad and not is_inplace) or
                                           (op.check_inplace_batched_forward_grad and is_inplace))
             self._grad_test_helper(device, dtype, op, variant, check_forward_ad=True, check_backward_ad=False,
-                                   check_undefined_grad=False, check_batched_grad=False,
-                                   check_batched_forward_grad=check_batched_forward_grad)
+                                   check_batched_grad=False, check_batched_forward_grad=check_batched_forward_grad)
         if op.supports_forward_ad:
             call_grad_test_helper()
         else:
