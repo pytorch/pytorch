@@ -193,8 +193,8 @@ TORCH_IMPL_FUNC(fractional_max_pool2d_out_cuda) (
 TORCH_IMPL_FUNC(fractional_max_pool2d_backward_cuda)(
   const Tensor& gradOutput,
   const Tensor& input,
-  IntArrayRef output_size,
   IntArrayRef pool_size /* unused */,
+  IntArrayRef output_size,
   const Tensor& indices,
   const Tensor& gradInput)
 {
