@@ -82,7 +82,6 @@ class CIFlowConfig:
     labels: Set[str] = field(default_factory=set)
     trigger_action: str = 'unassigned'
     trigger_actor: str = 'pytorchbot'
-    root_job_name: str = 'ciflow_should_run'
     root_job_condition: str = ''
     label_conditions: str = ''
 
@@ -110,7 +109,6 @@ class CIFlowConfig:
                                   f"         }}}}"
 
     def reset_root_job(self) -> None:
-        self.root_job_name = ''
         self.root_job_condition = ''
 
     def __post_init__(self) -> None:
@@ -589,7 +587,7 @@ LINUX_WORKFLOWS = [
     ),
 ]
 
-ANDROID_WORKFLOWS = [
+ANDROID_SHORT_WORKFLOWS = [
     CIWorkflow(
         arch="linux",
         build_environment="pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single",
@@ -608,6 +606,19 @@ ANDROID_WORKFLOWS = [
         exclude_test=True,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_ANDROID, LABEL_CIFLOW_DEFAULT},
+        ),
+    ),
+]
+
+ANDROID_WORKFLOWS = [
+    CIWorkflow(
+        arch="linux",
+        build_environment="pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
+        test_runner_type=LINUX_CPU_TEST_RUNNER,
+        exclude_test=True,
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_ANDROID},
         ),
     ),
 ]
@@ -769,7 +780,8 @@ def main() -> None:
         (jinja_env.get_template("ios_ci_workflow.yml.j2"), IOS_WORKFLOWS),
         (jinja_env.get_template("macos_ci_workflow.yml.j2"), MACOS_WORKFLOWS),
         (jinja_env.get_template("docker_builds_ci_workflow.yml.j2"), DOCKER_WORKFLOWS),
-        (jinja_env.get_template("android_ci_workflow.yml.j2"), ANDROID_WORKFLOWS),
+        (jinja_env.get_template("android_ci_full_workflow.yml.j2"), ANDROID_WORKFLOWS),
+        (jinja_env.get_template("android_ci_workflow.yml.j2"), ANDROID_SHORT_WORKFLOWS),
     ]
     # Delete the existing generated files first, this should align with .gitattributes file description.
     existing_workflows = GITHUB_DIR.glob("workflows/generated-*")
