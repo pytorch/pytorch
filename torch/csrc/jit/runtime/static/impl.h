@@ -560,6 +560,9 @@ class TORCH_API StaticRuntime {
   // Set Input(idx) to arg. Always copies. Used for kwargs.
   void set_arg(const size_t idx, const IValue& arg);
 
+  bool fast_check_and_correct_overlap_with(
+      ProcessedNode& n,
+      c10::IValue& tensor_ival);
   void verify_and_correct_memory_overlap(ProcessedNode& n);
 
   // clean up owning refs of input IValues
@@ -719,6 +722,9 @@ class TORCH_API ProcessedNode {
     return overlap_detected_;
   }
 
+  bool check_and_correct_overlap_with(
+      const at::Tensor& input,
+      c10::IValue& output);
   void verify_and_correct_memory_overlap();
 
   void set_values(IValue* values) {
