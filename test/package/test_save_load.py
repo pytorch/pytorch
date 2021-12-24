@@ -212,6 +212,7 @@ class TestSaveLoad(PackageTestCase):
         pe = make_exporter()
         pe.save_pickle("obj", "obj.pkl", loaded1)
 
+<<<<<<< HEAD
     def test_save_imported_module(self):
         """Saving a module that came from another PackageImporter should work."""
         import package_a.subpackage
@@ -254,6 +255,20 @@ class TestSaveLoad(PackageTestCase):
         with PackageExporter(buffer2, importer=(importer, sys_importer)) as exporter:
             exporter.intern("**")
             exporter.save_module("package_a.use_torch_package_importer")
+=======
+    def test_save_bad_pickle(self):
+        from package_a.bad_pickle import BadPickle, GoodPickle
+
+        a = GoodPickle()
+        a.b = GoodPickle()
+        a.b.c = GoodPickle()
+        a.b.c.d = BadPickle()
+        buffer = BytesIO()
+
+        with self.assertRaisesRegex(pickle.PicklingError, "We think the problematic object is found at"):
+            with PackageExporter(buffer, verbose=False) as pe:
+                pe.save_pickle("foo", "foo.pkl", a)
+>>>>>>> bb939339da ([pkg] add a debug pikcler)
 
 
 if __name__ == "__main__":
