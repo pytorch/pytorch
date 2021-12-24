@@ -7646,12 +7646,28 @@ def sample_inputs_poisson_nll_loss(op_info, device, dtype, requires_grad, **kwar
         for s, r in _generate_sample_shape_reduction():
             for li in (True, False):
                 for f in (True, False):
+                    i1 = _make_tensor(s)
+                    i2 = _make_tensor(s)
+                    # For Poisson NLL Loss,
+                    # target is assumed to be from
+                    # Poisson Distribution which
+                    # always has positive samples
+                    t1 = _make_tensor(s, low=0)
+                    t2 = _make_tensor(s, low=0)
+
+                    with torch.no_grad():
+                        if not li:
+                            i1.abs_()
+                            i2.abs_()
+                        t1.abs_()
+                        t2.abs_()
+
                     yield (
-                        _make_tensor(s), _make_tensor(s),
+                        i1, t1,
                         dict(log_input=li, full=f, reduction=r)
                     )
                     yield (
-                        _make_tensor(s), _make_tensor(s),
+                        i2, t2,
                         dict(log_input=li, full=f,
                              eps=random.uniform(1e-8, 1e-3),
                              reduction=r)
@@ -15178,34 +15194,6 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_poisson_nll_loss,
-        skips=(
-            # https://github.com/pytorch/pytorch/issues/67461
-            # torch.autograd.gradcheck.GradcheckError: Jacobian mismatch for output 0 with respect to input 0
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestGradients",
-                "test_fn_grad",
-                dtypes=(torch.float64,),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestGradients",
-                "test_fn_gradgrad",
-                dtypes=(torch.float64,),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestGradients",
-                "test_forward_mode_AD",
-                dtypes=(torch.float64,),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestGradients",
-                "test_fn_fwgrad_bwgrad",
-                dtypes=(torch.float64,),
-            ),
-        ),
     ),
     OpInfo(
         "argsort",
