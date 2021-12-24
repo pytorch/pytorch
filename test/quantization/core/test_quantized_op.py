@@ -4194,8 +4194,6 @@ class TestQuantizedConv(TestCase):
             dilation=dilations,
             bias=use_bias
         )
-        print("test_qconv_transpose2d: ", conv_op)
-        print("n:", batch_size, "; ic_g: ", input_channels_per_group, "; h: ", height, "; w: ", width, "; oc_g: ", output_channels_per_group)
         X_q, W_q, bias_float = self._test_qconv_impl(
             qconv, qconv_prepack, conv_op, batch_size,
             input_channels_per_group, (height, width),

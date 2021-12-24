@@ -215,6 +215,9 @@ auto ConvParams::use_mkldnn(const at::Tensor& input, const at::Tensor& weight) c
   if (!at::globalContext().userEnabledMkldnn()) {
     return false;
   }
+  if (transposed && is_output_padding_big()) {
+    return false;
+  }
   if (input.device().is_cpu() && input.scalar_type() == kBFloat16 && mkldnn_bf16_device_check()) {
     return true;
   }
