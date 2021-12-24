@@ -501,6 +501,13 @@ def merge_with_prefix(prefix, tmp_dir, out_dir, headers):
         for l in results:
             acc_csv.write(l)
 
+def save_error(name, test, error):
+    output_csv(
+        os.path.join(args.output_dir, f"error_{args.test}_{get_unique_suffix()}.csv"),
+        ("name", "test", "error"),
+    ).writerow([name, test, error])
+
+
 if __name__ == "__main__" :
     parser = argparse.ArgumentParser()
     parser.add_argument("--filter", "-k", action="append", default=[], help="filter benchmarks")
@@ -575,10 +582,11 @@ if __name__ == "__main__" :
                             lazy_result = call_model_with(lazy_model, lazy_inputs)
                             if not check_results(correct_result, lazy_result, device):
                                 print(f"INCORRECT: {name}")
+                                save_error(name, "eval", "Incorrect results.")
                                 continue
-                    except Exception:
-                        logging.exception("unhandled error")
+                    except Exception as e:
                         print(f"ERROR: {name}")
+                        save_error(name, "eval", e)
                         continue
 
                     lazy_overhead_experiment(args, results, benchmark, lazy_benchmark)
@@ -609,3 +617,4 @@ if __name__ == "__main__" :
 
     merge_with_prefix("lazy_overheads_", dirpath, args.output_dir, ("dev", "name", "test", "overhead", "pvalue"))
     merge_with_prefix("lazy_compute_", dirpath, args.output_dir, ("name", "dev", "experiment", "test", "speedup", "pvalue"))
+    merge_with_prefix("error_", dirpath, args.output_dir, ("name", "test", "error"))
