@@ -137,7 +137,7 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss(const Tensor& log_probs_t_, const Ten
       ctc_loss_desc.desc(),
       workspace.data_ptr(),
       workspace_size));
-  
+
   if (!is_batched) {
     return std::make_tuple(costs, grad.squeeze(1));
   }

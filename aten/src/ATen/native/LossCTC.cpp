@@ -36,14 +36,13 @@ static inline int64_t get_target_prime(target_t* target, int64_t offset, int64_t
 // The function returns the loss and the alphas, the alphas are kept for the backward step. The wrapper (ctc_loss below) hides
 // the alphas from the user by only returning the loss.
 template<typename scalar_t, ScalarType target_scalar_type>
-std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs_, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths, int64_t BLANK) {
+std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths, int64_t BLANK) {
   // log_probs: input_len x batch_size x num_labels
   // targets [int64]: batch_size x target_length OR sum(target_lengths)
   constexpr scalar_t neginf = -std::numeric_limits<scalar_t>::infinity();
   using target_t = typename std::conditional<target_scalar_type == kInt, int, int64_t>::type;
 
   CheckedFrom c = "ctc_loss_cpu";
-  Tensor log_probs = log_probs_.dim() == 3 ? log_probs_ : log_probs_.unsqueeze(1);
   auto log_probs_arg = TensorArg(log_probs, "log_probs", 1);
   auto targets_arg = TensorArg(targets, "targets", 2);
   checkScalarType(c, targets_arg, target_scalar_type);
@@ -376,7 +375,8 @@ Tensor ctc_loss_backward_cpu(const Tensor& grad, const Tensor& log_probs, const 
 // this wrapper function dispatches to the native and cudnn implementations and hides the alpha/grad from the user (by just returning the loss)
 // the gradient is implemented for _cudnn_ctc_loss (just in derivatives.yaml) and _ctc_loss and this function has automatic gradients
 // it also handles the reduction if desired
-Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths, int64_t BLANK, int64_t reduction, bool zero_infinity) {
+Tensor ctc_loss(const Tensor& log_probs_, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths, int64_t BLANK, int64_t reduction, bool zero_infinity) {
+  Tensor log_probs = log_probs_.dim() == 3 ? log_probs_ : log_probs_.unsqueeze(1);
   bool use_cudnn =
       (log_probs.device().type() == at::kCUDA) &&
       at::_use_cudnn_ctc_loss(
