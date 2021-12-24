@@ -39,8 +39,8 @@ class InverseWishart(ExponentialFamily):
         are based on :attr:`scale_tril`. If :attr:`covariance_matrix` or
         :attr:`precision_matrix` is passed instead, it is only used to compute
         the corresponding lower triangular matrices using a Cholesky decomposition.
-        Inverse Wishart distirbution is inverse distribution of `torch.distributions.wishart.Wishart`
-        wishart and inverse wishart distributions may exhibit pros and cons according to the use case.
+        Inverse Wishart distirbution is inverse transformed distribution of `torch.distributions.wishart.Wishart`
+        wishart and inverse wishart distributions may exhibit other advanctages according to the use case.
     """
     arg_constraints = {
         'covariance_matrix': constraints.positive_definite,
@@ -85,7 +85,7 @@ class InverseWishart(ExponentialFamily):
         if self.df.lt(event_shape[-1]).any():
             warnings.warn("Low df values detected. Singular samples are highly likely to occur for ndim - 1 < df < ndim.")
 
-        super(Wishart, self).__init__(batch_shape, event_shape, validate_args=validate_args)
+        super(InverseWishart, self).__init__(batch_shape, event_shape, validate_args=validate_args)
         self._batch_dims = [-(x + 1) for x in range(len(self._batch_shape))]
 
         if scale_tril is not None:
@@ -108,7 +108,7 @@ class InverseWishart(ExponentialFamily):
         )
 
     def expand(self, batch_shape, _instance=None):
-        new = self._get_checked_instance(Wishart, _instance)
+        new = self._get_checked_instance(InverseWishart, _instance)
         batch_shape = torch.Size(batch_shape)
         cov_shape = batch_shape + self.event_shape
         df_shape = batch_shape
@@ -136,7 +136,7 @@ class InverseWishart(ExponentialFamily):
             )
         )
 
-        super(Wishart, new).__init__(batch_shape, self.event_shape, validate_args=False)
+        super(InverseWishart, new).__init__(batch_shape, self.event_shape, validate_args=False)
         new._validate_args = self._validate_args
         return new
 
