@@ -2469,12 +2469,14 @@ struct to_ir {
   void emitRaise(const Raise& raise) {
     auto sv = emitSugaredExpr(raise.expr(), 1);
     Value* error_message = nullptr;
+    Value* qualified_class_name = nullptr;
 
     if (auto exception_instance =
             std::dynamic_pointer_cast<ExceptionMessageValue>(sv)) {
       // The typical case, an instance of the exception class was thrown:
       //    raise RuntimeError("error")
       error_message = exception_instance->getValue();
+      qualified_class_name = exception_instance->getQualifiedClassName();
     } else if (
         auto exception_class = std::dynamic_pointer_cast<ExceptionValue>(sv)) {
       // A bare exception was thrown so add an empty message. e.g.
@@ -2491,7 +2493,11 @@ struct to_ir {
       error_message = graph->insert(aten::str, {error_message});
     }
 
-    graph->insert(prim::RaiseException, {error_message}, {}, raise.range());
+    graph->insert(
+        prim::RaiseException,
+        {error_message, qualified_class_name},
+        {},
+        raise.range());
     exit_blocks.insert(environment_stack->block());
   }
 
