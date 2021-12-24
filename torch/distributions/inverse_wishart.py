@@ -154,7 +154,7 @@ class InverseWishart(ExponentialFamily):
 
     @property
     def mean(self):
-        raise NotImplementedError
+        return self.covariance_matrix.div(self.df - self._event_shape[-1] - 1)
 
     @property
     def variance(self):
