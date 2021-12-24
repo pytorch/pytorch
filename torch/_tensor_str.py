@@ -375,7 +375,7 @@ def _str_intern(inp):
             suffixes.append('axis=' + str(self.q_per_channel_axis()))
         tensor_str = _tensor_str(self.dequantize(), indent)
     else:
-        if self.is_meta:
+        if not self.has_storage or self.is_meta:
             suffixes.append('size=' + str(tuple(self.shape)))
             if self.dtype != torch.get_default_dtype():
                 suffixes.append('dtype=' + str(self.dtype))

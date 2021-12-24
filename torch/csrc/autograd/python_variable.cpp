@@ -992,6 +992,17 @@ PyObject *THPVariable_is_meta(THPVariable *self, void *unused)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject *THPVariable_has_storage(THPVariable *self, void *unused)
+{
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject *)self)) {
+    return handle_torch_function_getter(self, "has_storage");
+  }
+  auto& self_ = THPVariable_Unpack(self);
+  return torch::autograd::utils::wrap(self_.has_storage());
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject *THPVariable_is_complex(THPVariable *self, void *unused)
 {
   HANDLE_TH_ERRORS
@@ -1113,6 +1124,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"is_complex", (getter)THPVariable_is_complex, nullptr, nullptr, nullptr},
   {"is_quantized", (getter)THPVariable_is_quantized, nullptr, nullptr, nullptr},
   {"is_meta", (getter)THPVariable_is_meta, nullptr, nullptr, nullptr},
+  {"has_storage", (getter)THPVariable_has_storage, nullptr, nullptr, nullptr},
   {"dtype", (getter)THPVariable_dtype, nullptr, nullptr, nullptr},
   {"layout", (getter)THPVariable_layout, nullptr, nullptr, nullptr},
   {"device", (getter)THPVariable_device, nullptr, nullptr, nullptr},
