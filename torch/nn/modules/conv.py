@@ -45,7 +45,6 @@ class _ConvNd(Module):
     __constants__ = ['stride', 'padding', 'dilation', 'groups',
                      'padding_mode', 'output_padding', 'in_channels',
                      'out_channels', 'kernel_size']
-    __annotations__ = {'bias': Optional[torch.Tensor]}
 
     def _conv_forward(self, input: Tensor, weight: Tensor, bias: Optional[Tensor]) -> Tensor:
         ...
@@ -62,7 +61,6 @@ class _ConvNd(Module):
     groups: int
     padding_mode: str
     weight: Tensor
-    bias: Optional[Tensor]
 
     def __init__(self,
                  in_channels: int,
