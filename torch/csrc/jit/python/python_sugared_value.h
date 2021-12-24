@@ -331,7 +331,9 @@ struct VISIBILITY_HIDDEN PythonExceptionValue : public ExceptionValue {
             py::str(py::getattr(exception_class, "__name__", py::str("")))),
         exception_class_qualified_name_(
             py::str(py::module::import("torch._jit_internal")
-                        .attr("_qualified_name")(exception_class, false))) {}
+                        .attr("_qualified_name")(
+                            exception_class,
+                            /*mangle_name=*/false))) {}
 
   std::string kind() const override {
     return "Python exception";
