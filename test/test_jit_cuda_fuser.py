@@ -38,6 +38,24 @@ if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
 FUSION_GROUP = 'prim::CudaFusionGroup'
 FUSION_GUARD = 'prim::CudaFusionGuard'
 
+import contextlib
+
+@contextlib.contextmanager
+def nvfuser_singleton_fusion(flag):
+    old_value = torch._C._jit_set_nvfuser_single_node_mode(flag)
+    try:
+        yield
+    finally:
+        torch._C._jit_set_nvfuser_single_node_mode(old_value)
+
+@contextlib.contextmanager
+def nvfuser_horizontal_fusion(flag):
+    old_value = torch._C._jit_set_nvfuser_horizontal_mode(flag)
+    try:
+        yield
+    finally:
+        torch._C._jit_set_nvfuser_horizontal_mode(old_value)
+
 def is_pre_volta():
     prop = torch.cuda.get_device_properties(torch.cuda.current_device())
     return prop.major < 7
@@ -3098,6 +3116,40 @@ class TestCudaFuser(JitTestCase):
             jit_o = jitted(x, y)
         graph = jitted.graph_for(x, y)
         self.assertGraphContainsExactly(graph, FUSION_GROUP, 0)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_singleton_fusion(self):
+        x = torch.randn(4, 2, device="cuda")
+
+        with nvfuser_singleton_fusion(True):
+            def t(x):
+                return x.relu()
+
+            t_jit = torch.jit.script(t)
+            self._run_helper(t_jit, t, x)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_disable_sibling_fuse(self):
+        x = torch.randn(4, 2, device="cuda")
+        y = torch.randn(8, device="cuda")
+        s = torch.tensor(1.5, device="cuda")
+
+        with nvfuser_horizontal_fusion(False):
+            def t(x, y, s):
+                o1 = x + s
+                o2 = y + s
+                return o1, o2
+
+            t_jit = torch.jit.script(t)
+            for i in range(5):
+                t_jit(x, y, s)
+
+            # sibling fusion should be disabled with the flag
+            self.assertGraphContainsExactly(t_jit.graph_for(x, y, s), FUSION_GUARD, 0)
 
 class TestPassManagerCudaFuser(JitTestCase):
 
