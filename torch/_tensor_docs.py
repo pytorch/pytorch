@@ -4888,6 +4888,11 @@ add_docstr_all('is_sparse_csr',
 Is ``True`` if the Tensor uses sparse CSR storage layout, ``False`` otherwise.
 """)
 
+add_docstr_all('has_storage',
+               r"""
+Is ``True`` if the Tensor has storage, ``False`` otherwise.
+""")
+
 add_docstr_all('device',
                r"""
 Is the :class:`torch.device` where this Tensor is.

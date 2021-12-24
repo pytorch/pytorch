@@ -380,7 +380,7 @@ def _str_intern(inp):
             if self.dtype != torch.get_default_dtype():
                 suffixes.append('dtype=' + str(self.dtype))
             # TODO: This implies that ellipses is valid syntax for allocating
-            # a meta tensor, which it could be, but it isn't right now
+            # a tensor, which it could be, but it isn't right now
             tensor_str = '...'
         else:
             if self.numel() == 0 and not self.is_sparse:
