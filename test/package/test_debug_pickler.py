@@ -15,11 +15,45 @@ except ImportError:
 class TestDebugPickler(PackageTestCase):
     def test_tuple(self):
         from package_a.bad_pickle import BadPickle, GoodPickle
-        obj = [
+        obj1 = [
             GoodPickle(),
-            (GoodPickle(), GoodPickle(), BadPickle()),
+            (GoodPickle(), GoodPickle() ,BadPickle()),
         ]
-        debug_dumps(sys_importer, obj)
+        obj2 = [
+            GoodPickle(),
+            (GoodPickle(), GoodPickle() ,GoodPickle(), BadPickle(), GoodPickle()),
+        ]
+        with self.assertRaises(PicklingError) as e1:
+            debug_dumps(sys_importer, obj1)
+        with self.assertRaises(PicklingError) as e2:
+            debug_dumps(sys_importer, obj2)
+        self.assertEqual(
+            str(e1.exception),
+            dedent(
+                """\
+                I can't be pickled!.
+
+                We think the problematic object is found at:
+                <pickled object> (<class 'list'>)
+                  <object @ idx 1> (<class 'tuple'>)
+                  <object @ idx 2> (<class 'package_a.bad_pickle.BadPickle'>)
+                """
+            ),
+        )
+
+        self.assertEqual(
+            str(e2.exception),
+            dedent(
+                """\
+                I can't be pickled!.
+
+                We think the problematic object is found at:
+                <pickled object> (<class 'list'>)
+                  <object @ idx 1> (<class 'tuple'>)
+                  <object @ idx 3> (<class 'package_a.bad_pickle.BadPickle'>)
+                """
+            ),
+        )
 
     def test_basic_msg(self):
         from package_a.bad_pickle import BadPickle, GoodPickle

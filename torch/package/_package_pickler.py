@@ -141,6 +141,14 @@ class ListElement(DebugInfo):
     def format(self):
         return f"  <object @ idx {self.idx}> ({type(self.value)})"
 
+class TupleElement(DebugInfo):
+    def __init__(self, idx, value):
+        self.idx = idx
+        self.value = value
+
+    def format(self):
+        return f"  <object @ idx {self.idx}> ({type(self.value)})"
+
 class DictElement(DebugInfo):
     def __init__(self, key, value):
         self.key = key
@@ -206,9 +214,13 @@ class DebugPickler(PackagePickler):
         n = len(obj)
         save = self.save
         memo = self.memo
+        idx = 0
         if n <= 3 and self.proto >= 2:
             for element in obj:
+                self.obj_stack.append(TupleElement(idx, element))
                 save(element)
+                self.obj_stack.pop()
+                idx += 1
             # Subtle.  Same as in the big comment below.
             if id(obj) in memo:
                 get = self.get(memo[id(obj)][0])
@@ -223,7 +235,10 @@ class DebugPickler(PackagePickler):
         write = self.write
         write(MARK)
         for element in obj:
+            self.obj_stack.append(TupleElement(idx, element))
             save(element)
+            self.obj_stack.pop()
+            idx += 1
 
         if id(obj) in memo:
             # Subtle.  d was not in memo when we entered save_tuple(), so
@@ -256,7 +271,8 @@ class DebugPickler(PackagePickler):
 
     def format_trace(self):
         stack = self.obj_stack
-        new_stack = []
+        # print(stack)
+        traced_stack = []
         idx_to_skip = set()
         for idx, obj in enumerate(stack):
             if idx in idx_to_skip:
@@ -278,18 +294,18 @@ class DebugPickler(PackagePickler):
                 prev_obj = stack[idx - 1]
                 if getattr(prev_obj, "__dict__", None) is obj:
                     dict_element = stack[idx + 1]
-                    new_stack.append(ObjectAttribute(dict_element.key, dict_element.value))
+                    traced_stack.append(ObjectAttribute(dict_element.key, dict_element.value))
                     idx_to_skip.add(idx + 1)
                     idx_to_skip.add(idx + 2)
                     continue
-            if isinstance(obj, (ListElement, DictElement)):
+            if isinstance(obj, (ListElement, DictElement, TupleElement)):
                 # Fold [ListElement, obj] into just [ListElement]
-                new_stack.append(obj)
+                traced_stack.append(obj)
                 idx_to_skip.add(idx + 1)
                 continue
-            new_stack.append(obj)
+            traced_stack.append(obj)
 
-        stack = new_stack
+        stack = traced_stack
         stack[0] = RootObject(stack[0])
 
         msg = io.StringIO()
@@ -308,6 +324,9 @@ def debug_dumps(importer, obj):
     try:
         p.dump(obj)
     except (TypeError, PicklingError) as e:
+        # print(f"{str(e)}.\n\n"
+        #     "We think the problematic object is found at:\n"
+        #     f"{p.format_trace()}")
         raise PicklingError(
             f"{str(e)}.\n\n"
             "We think the problematic object is found at:\n"
