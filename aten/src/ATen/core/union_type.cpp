@@ -111,10 +111,8 @@ void filterDuplicateSubtypes(std::vector<TypePtr>* types) {
   size_t end_idx = types->size()-1;
   for (size_t i = types->size()-1; i > 0; --i) {
     for (size_t j = std::min(i-1, end_idx); ; --j) {
-      c10::optional<TypePtr> unified;
-      unified = get_supertype((*types)[i], (*types)[j]);
-      if (unified) {
-        (*types)[j] = *unified;
+      if (auto unified = get_supertype((*types)[i], (*types)[j])) {
+        (*types)[j] = std::move(*unified);
         (*types)[i] = (*types)[end_idx];
         --end_idx;
         break;
@@ -160,13 +158,13 @@ void standardizeVectorForUnion(std::vector<TypePtr>* to_flatten) {
                         "passed a `nullptr`");
   std::vector<TypePtr> to_fill;
   standardizeVectorForUnion(*to_flatten, &to_fill);
-  *to_flatten = to_fill;
+  *to_flatten = std::move(to_fill);
 }
 
 OptionalType::OptionalType(TypePtr contained)
                            : UnionType({contained, NoneType::get()}, TypeKind::OptionalType) {
   bool is_numbertype = false;
-  if (auto as_union = contained->cast<UnionType>()) {
+  if (auto as_union = contained->castRaw<UnionType>()) {
     is_numbertype = as_union->containedTypes().size() == 3 &&
                     as_union->canHoldType(*NumberType::get());
   }
@@ -195,20 +193,17 @@ UnionType::UnionType(std::vector<TypePtr> reference, TypeKind kind) : Type(kind)
   // Gate the assert in a regular conditional so that we don't create
   // this long error message unnecessarily
   if (types_.size() == 1) {
-    std::stringstream msg;
-    msg << "After type unification was performed, the Union with the "
-        << "original types {";
+    std::string msg = "After type unification was performed, the Union with the original types {";
     for (const auto i : c10::irange(reference.size())) {
-      msg << reference[i]->repr_str();
+      msg += reference[i]->repr_str();
       if (i > 0) {
-        msg << ",";
+        msg += ",";
       }
-      msg << " ";
+      msg += " ";
     }
-    msg << "} has the single type " << types_[0]->repr_str()
-         << ". Use the common supertype instead of creating a Union"
-         << "type";
-    TORCH_INTERNAL_ASSERT(false, msg.str());
+    msg += "} has the single type " + types_[0]->repr_str()
+         + ". Use the common supertype instead of creating a Union type";
+    TORCH_INTERNAL_ASSERT(false, msg);
   }
 
   can_hold_none_ = false;
@@ -357,7 +352,7 @@ bool UnionType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
 
 std::string UnionType::unionStr(TypePrinter printer, bool is_annotation_str)
     const {
-  std::stringstream ss;
+  std::string ss;
 
   bool can_hold_numbertype = this->canHoldType(*NumberType::get());
 
@@ -375,33 +370,33 @@ std::string UnionType::unionStr(TypePrinter printer, bool is_annotation_str)
   std::string open_delimeter = is_annotation_str ? "[" : "(";
   std::string close_delimeter = is_annotation_str ? "]" : ")";
 
-  ss << "Union" + open_delimeter;
+  ss = "Union" + open_delimeter;
   bool printed = false;
   for (size_t i = 0; i < types_.size(); ++i) {
     if (!can_hold_numbertype || !is_numbertype(types_[i])) {
       if (i > 0) {
-        ss << ", ";
+        ss += ", ";
         printed = true;
       }
       if (is_annotation_str) {
-        ss << this->containedTypes()[i]->annotation_str(printer);
+        ss += this->containedTypes()[i]->annotation_str(printer);
       } else {
-        ss << this->containedTypes()[i]->str();
+        ss += this->containedTypes()[i]->str();
       }
     }
   }
   if (can_hold_numbertype) {
     if (printed) {
-      ss << ", ";
+      ss += ", ";
     }
     if (is_annotation_str) {
-      ss << NumberType::get()->annotation_str(printer);
+      ss += NumberType::get()->annotation_str(printer);
     } else {
-      ss << NumberType::get()->str();
+      ss += NumberType::get()->str();
     }
   }
-  ss << close_delimeter;
-  return ss.str();
+  ss += close_delimeter;
+  return ss;
 }
 
 std::string UnionType::str() const {
