@@ -15,7 +15,10 @@ _log_2 = math.log(2)
 
 def _mvdigamma(x: torch.Tensor, p: int) -> torch.Tensor:
     assert x.gt((p - 1) / 2).all(), "Wrong domain for multivariate digamma function."
-    return torch.digamma(x.unsqueeze(-1) - torch.arange(p).div(2).expand(x.shape + (-1,))).sum(-1)
+    return torch.digamma(
+        x.unsqueeze(-1)
+        - torch.arange(p, dtype=x.dtype, device=x.device).div(2).expand(x.shape + (-1,))
+    ).sum(-1)
 
 
 class Wishart(ExponentialFamily):
