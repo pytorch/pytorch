@@ -273,13 +273,13 @@ class DebugPickler(PackagePickler):
 
     dispatch[tuple] = save_tuple
 
-    def save_set(self, obj):
+    def save_set(self, obj, set_type=set):
         save = self.save
         write = self.write
 
         if self.proto < 4:
             self.obj_stack.append(SetElementPreProtocol4Flag(self.proto))
-            self.save_reduce(set, (list(obj),), obj=obj)
+            self.save_reduce(set_type, (list(obj),), obj=obj)
             self.obj_stack.pop()
             return
 
@@ -300,6 +300,9 @@ class DebugPickler(PackagePickler):
             if n < self._BATCHSIZE:
                 return
     dispatch[set] = save_set
+    def save_frozenset(self, obj, settype=set):
+        self.save_set(obj, set_type = frozenset)
+    dispatch[frozenset] = save_frozenset
 
     def save(self, obj, save_persistent_id=True):
         self.obj_stack.append(obj)

@@ -36,6 +36,29 @@ class TestDebugPickler(PackageTestCase):
             ),
         )
 
+    def test_frozenset(self):
+        from package_a.bad_pickle import BadPickle, GoodPickle
+        lst = [GoodPickle(), GoodPickle() ,BadPickle()]
+        obj = [
+            GoodPickle(),
+            frozenset(lst),
+        ]
+        with self.assertRaises(PicklingError) as e:
+            debug_dumps(sys_importer, obj)
+        self.assertEqual(
+            str(e.exception),
+            dedent(
+                """\
+                I can't be pickled!.
+
+                We think the problematic object is found at:
+                <pickled object> (<class 'list'>)
+                  <object @ idx 1> (<class 'frozenset'>)
+                  <object BadPickle> (<class 'package_a.bad_pickle.BadPickle'>)
+                """
+            ),
+        )
+
     def test_tuple(self):
         from package_a.bad_pickle import BadPickle, GoodPickle
         obj1 = [
