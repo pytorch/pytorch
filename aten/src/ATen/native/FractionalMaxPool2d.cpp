@@ -108,9 +108,9 @@ TORCH_META_FUNC(fractional_max_pool2d_backward)(
 
   /* resize */
   if (ndims == 3) {
-    set_output(0, {numPlanes, outputH, outputW}, input.options());
+    set_output(0, {numPlanes, inputH, inputW}, input.options());
   } else {
-    set_output(0, {numBatch, numPlanes, outputH, outputW}, input.options());
+    set_output(0, {numBatch, numPlanes, inputH, inputW}, input.options());
   }
 }
 } // namespace meta
