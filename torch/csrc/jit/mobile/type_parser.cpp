@@ -3,16 +3,15 @@
 #include <queue>
 
 #include <ATen/core/jit_type.h>
+#include <ATen/core/type_factory.h>
 #include <c10/util/string_view.h>
 #include <torch/csrc/jit/frontend/parser_constants.h>
-#include <torch/csrc/jit/frontend/type_factory.h>
 #include <torch/csrc/jit/mobile/runtime_compatibility.h>
 #include <torch/custom_class.h>
 
 using torch::jit::valid_single_char_tokens;
 
 namespace c10 {
-using TypeFactory = torch::jit::TypeFactory<c10::DynamicType>;
 
 namespace {
 
@@ -97,7 +96,7 @@ std::unordered_set<std::string> TypeParser::getContainedTypes() {
 template <typename T>
 TypePtr TypeParser::parseSingleElementType() {
   expectChar('[');
-  auto result = TypeFactory::create<T>(parse());
+  auto result = DynamicTypeFactory::create<T>(parse());
   expectChar(']');
   return result;
 }
@@ -113,7 +112,7 @@ TypePtr TypeParser::parseNonSimple(const std::string& token) {
     expectChar(',');
     auto val = parse();
     expectChar(']');
-    return TypeFactory::create<DictType>(std::move(key), std::move(val));
+    return DynamicTypeFactory::create<DictType>(std::move(key), std::move(val));
   } else if (token == "Tuple") {
     std::vector<TypePtr> types;
     expectChar('[');
@@ -124,14 +123,14 @@ TypePtr TypeParser::parseNonSimple(const std::string& token) {
       }
     }
     expect("]");
-    return TypeFactory::createTuple(std::move(types));
+    return DynamicTypeFactory::create<TupleType>(std::move(types));
   }
   return nullptr;
 }
 
 TypePtr TypeParser::parse() {
   std::string token = next();
-  const auto& baseTypes = TypeFactory::basePythonTypes();
+  const auto& baseTypes = DynamicTypeFactory::basePythonTypes();
   auto simpleTypeIt = baseTypes.find(token);
   if (simpleTypeIt != baseTypes.end()) {
     if (cur() != "]" && cur() != "," && cur() != "") {
@@ -197,7 +196,7 @@ TypePtr TypeParser::parseNamedTuple(const std::string& qualified_name) {
       next();
     }
   }
-  return TypeFactory::createNamedTuple(
+  return DynamicTypeFactory::createNamedTuple(
       qualified_name, field_names, field_types);
 }
 

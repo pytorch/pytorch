@@ -1,7 +1,6 @@
-#include <torch/csrc/jit/frontend/type_factory.h>
+#include <ATen/core/type_factory.h>
 
-namespace torch {
-namespace jit {
+namespace c10 {
 
 // Dtype constraints are not constrained in compilation. Therefore, we map
 // all tensor subclasses with different dtypes to a same underlying
@@ -36,8 +35,8 @@ namespace jit {
   _(list, AnyListType)              \
   _(tuple, AnyTupleType)
 
-const std::unordered_map<std::string, c10::TypePtr>& TypeFactory<
-    c10::DynamicType>::basePythonTypes() {
+const std::unordered_map<std::string, c10::TypePtr>& DynamicTypeFactory::
+    basePythonTypes() {
   static const std::unordered_map<std::string, c10::TypePtr> map = {
 #define MAP_ITEM(NAME, TYPE) \
   {#NAME, c10::DynamicTypeTrait<c10::TYPE>::getBaseType()},
@@ -47,8 +46,8 @@ const std::unordered_map<std::string, c10::TypePtr>& TypeFactory<
   return map;
 }
 
-const std::unordered_map<std::string, c10::TypePtr>& TypeFactory<
-    c10::Type>::basePythonTypes() {
+const std::unordered_map<std::string, c10::TypePtr>& DefaultTypeFactory::
+    basePythonTypes() {
   static const std::unordered_map<std::string, c10::TypePtr> map = {
 #define MAP_ITEM(NAME, TYPE) {#NAME, c10::TYPE::get()},
       FORALL_BASE_PYTHON_TYPES(MAP_ITEM)
@@ -57,5 +56,4 @@ const std::unordered_map<std::string, c10::TypePtr>& TypeFactory<
   return map;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace c10

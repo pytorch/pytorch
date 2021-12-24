@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/frontend/script_type_parser.h>
 
+#include <ATen/core/type_factory.h>
 #include <torch/csrc/jit/frontend/parser.h>
-#include <torch/csrc/jit/frontend/type_factory.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/custom_class.h>
 
@@ -23,7 +23,7 @@ std::string collectQualname(const Select& select) {
 }
 
 const std::unordered_map<std::string, c10::TypePtr>& string_to_type_lut() {
-  return TypeFactory<c10::Type>::basePythonTypes();
+  return c10::DefaultTypeFactory::basePythonTypes();
 }
 
 } // namespace

@@ -9,19 +9,23 @@
 namespace c10 {
 
 namespace {
+
 bool contains(DynamicType::Tag lhs, DynamicTypeBits rhs) {
   return (static_cast<DynamicTypeBits>(lhs) | rhs) ==
       static_cast<DynamicTypeBits>(lhs);
 }
+
 bool contains(DynamicType::Tag lhs, DynamicType::Tag rhs) {
   return contains(lhs, static_cast<DynamicTypeBits>(rhs));
 }
-} // namespace
 
-#define DYNAMIC_TYPE_TAG_VALUE(NAME, _) \
-constexpr DynamicType::Tag DynamicTypeTrait<NAME##Type>::tagValue;
-FORALL_DYNAMIC_TYPES(DYNAMIC_TYPE_TAG_VALUE)
-#undef DYNAMIC_TYPE_TAG_VALUE
+C10_NOINLINE DynamicTypePtr makeBaseType(DynamicType::Tag tag) {
+  return std::make_shared<DynamicType>(
+      tag,
+      DynamicType::Arguments{});
+}
+
+} // namespace
 
 std::string DynamicType::str() const {
   if (name_) {
@@ -200,12 +204,6 @@ bool DynamicType::LabeledDynamicType::equals(
   return (label == other.label) && (*ty == *other.ty);
 }
 
-DynamicTypePtr makeDynamicType(DynamicType::Tag tag) {
-  return std::make_shared<DynamicType>(
-      tag,
-      DynamicType::Arguments{});
-}
-
 DynamicType::Ptr IValue::TagType<c10::DynamicType>::get(const c10::IValue& v) {
   switch (v.tag) {
     case Tag::None:
@@ -278,5 +276,13 @@ TORCH_API TupleTypePtr ivalue::TupleTypeFactory<TupleType>::fallback(const Type&
   return TupleType::create(std::move(types));
 #endif
 }
+
+#define DYNAMIC_TYPE_TAG_VALUE(NAME, _) \
+const DynamicTypePtr& DynamicTypeTrait<NAME ## Type>::getBaseType() { \
+  static auto type = makeBaseType(tagValue()); \
+  return type; \
+}
+    FORALL_DYNAMIC_TYPES(DYNAMIC_TYPE_TAG_VALUE)
+#undef DYNAMIC_TYPE_TAG_VALUE
 
 } // namespace c10

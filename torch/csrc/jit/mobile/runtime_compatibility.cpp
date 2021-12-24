@@ -1,6 +1,6 @@
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/core/type_factory.h>
 #include <caffe2/serialize/inline_container.h>
-#include <torch/csrc/jit/frontend/type_factory.h>
 #include <torch/csrc/jit/mobile/runtime_compatibility.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/runtime/operator.h>
@@ -77,7 +77,7 @@ RuntimeCompatibilityInfo RuntimeCompatibilityInfo::get() {
 
 std::unordered_set<std::string> _get_mobile_supported_types() {
   std::unordered_set<std::string> supported_types;
-  for (const auto& it : TypeFactory<c10::DynamicType>::basePythonTypes()) {
+  for (const auto& it : c10::DynamicTypeFactory::basePythonTypes()) {
     supported_types.insert(it.first);
   }
   supported_types.insert(
