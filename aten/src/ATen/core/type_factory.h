@@ -3,30 +3,23 @@
 #include <ATen/core/dynamic_type.h>
 #include <ATen/core/jit_type.h>
 
-namespace torch {
-namespace jit {
+namespace c10 {
 
-template <typename T>
-struct TypeFactory {};
-
-template <>
-struct TORCH_API TypeFactory<c10::DynamicType> {
+struct TORCH_API DynamicTypeFactory {
   template <typename T, typename... Args>
   static c10::TypePtr create(Args&&... args) {
     return std::make_shared<c10::DynamicType>(
-        c10::DynamicTypeTrait<T>::tagValue,
+        c10::DynamicTypeTrait<T>::tagValue(),
         c10::DynamicType::Arguments(
             c10::ArrayRef<c10::TypePtr>({std::forward<Args>(args)...})));
   }
 };
 
-template <>
-struct TORCH_API TypeFactory<c10::Type> {
+struct TORCH_API DefaultTypeFactory {
   template <typename T, typename... Args>
   static c10::TypePtr create(Args&&... args) {
     return T::create(std::forward<Args>(args)...);
   }
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace c10
