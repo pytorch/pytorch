@@ -107,7 +107,11 @@ TORCH_META_FUNC(fractional_max_pool2d_backward)(
     "fractional_max_pool2d_backward(): gradOutput height unexpected");
 
   /* resize */
-  set_output(0, input.sizes(), input.options());
+  if (ndims == 3) {
+    set_output(0, {numPlanes, outputH, outputW}, input.options());
+  } else {
+    set_output(0, {numBatch, numPlanes, outputH, outputW}, input.options());
+  }
 }
 } // namespace meta
 
