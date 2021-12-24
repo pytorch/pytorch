@@ -9,19 +9,23 @@
 namespace c10 {
 
 namespace {
+
 bool contains(DynamicType::Tag lhs, DynamicTypeBits rhs) {
   return (static_cast<DynamicTypeBits>(lhs) | rhs) ==
       static_cast<DynamicTypeBits>(lhs);
 }
+
 bool contains(DynamicType::Tag lhs, DynamicType::Tag rhs) {
   return contains(lhs, static_cast<DynamicTypeBits>(rhs));
 }
-} // namespace
 
-#define DYNAMIC_TYPE_TAG_VALUE(NAME, _) \
-constexpr DynamicType::Tag DynamicTypeTrait<NAME##Type>::tagValue;
-FORALL_DYNAMIC_TYPES(DYNAMIC_TYPE_TAG_VALUE)
-#undef DYNAMIC_TYPE_TAG_VALUE
+C10_NOINLINE DynamicTypePtr makeBaseType(DynamicType::Tag tag) {
+  return std::make_shared<DynamicType>(
+      tag,
+      DynamicType::Arguments{});
+}
+
+} // namespace
 
 std::string DynamicType::str() const {
   if (name_) {
@@ -30,10 +34,7 @@ std::string DynamicType::str() const {
   std::string ret = "Dynamic<";
   ret += std::to_string(static_cast<DynamicTypeBits>(tag_));
   ret += ">";
-  if (tag_ == Tag::Class) {
-    auto name = class_->name();
-    ret += "[" + (name ? name->qualifiedName() : "Unknown Class") + "]";
-  } else if (arguments_.elems.size() > 0) {
+  if (tag_ != Tag::Class && arguments_.elems.size() > 0) {
     ret += "[";
     for (const auto& arg : arguments_.elems) {
       if (arg.label) {
@@ -96,6 +97,12 @@ DynamicType::DynamicType(Tag tag, c10::string_view name, Arguments arguments)
 DynamicType::DynamicType(const Type& other) : Type(DynamicType::Kind) {
   auto kind = other.kind();
   TORCH_INTERNAL_ASSERT(kind != Kind);
+  if (auto n = other.castRaw<NamedType>()) {
+    if (const auto& qn = n->name()) {
+      name_ = qn->qualifiedName();
+    }
+  }
+
   if (auto cls = other.cast<ClassType>()) {
     new (&class_) ClassTypePtr(std::move(cls));
     tag_ = Tag::Class;
@@ -110,11 +117,6 @@ DynamicType::DynamicType(const Type& other) : Type(DynamicType::Kind) {
 #undef CASE_TYPE
     default:
       TORCH_INTERNAL_ASSERT(false, "Unsupported dynamic type: ", other.str());
-  }
-  if (auto n = other.castRaw<NamedType>()) {
-    if (const auto& qn = n->name()) {
-      name_ = qn->qualifiedName();
-    }
   }
 
   auto args = other.containedTypes();
@@ -202,12 +204,6 @@ bool DynamicType::LabeledDynamicType::equals(
   return (label == other.label) && (*ty == *other.ty);
 }
 
-DynamicTypePtr makeDynamicType(DynamicType::Tag tag) {
-  return std::make_shared<DynamicType>(
-      tag,
-      DynamicType::Arguments{});
-}
-
 DynamicType::Ptr IValue::TagType<c10::DynamicType>::get(const c10::IValue& v) {
   switch (v.tag) {
     case Tag::None:
@@ -280,5 +276,13 @@ TORCH_API TupleTypePtr ivalue::TupleTypeFactory<TupleType>::fallback(const Type&
   return TupleType::create(std::move(types));
 #endif
 }
+
+#define DYNAMIC_TYPE_TAG_VALUE(NAME, _) \
+const DynamicTypePtr& DynamicTypeTrait<NAME ## Type>::getBaseType() { \
+  static auto type = makeBaseType(tagValue()); \
+  return type; \
+}
+    FORALL_DYNAMIC_TYPES(DYNAMIC_TYPE_TAG_VALUE)
+#undef DYNAMIC_TYPE_TAG_VALUE
 
 } // namespace c10

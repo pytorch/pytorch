@@ -22,6 +22,17 @@ class _InstanceNorm(_NormBase):
     def _check_input_dim(self, input):
         raise NotImplementedError
 
+    def _get_no_batch_dim(self):
+        raise NotImplementedError
+
+    def _handle_no_batch_input(self, input):
+        return self._apply_instance_norm(input.unsqueeze(0)).squeeze(0)
+
+    def _apply_instance_norm(self, input):
+        return F.instance_norm(
+            input, self.running_mean, self.running_var, self.weight, self.bias,
+            self.training or not self.track_running_stats, self.momentum, self.eps)
+
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
         version = local_metadata.get('version', None)
@@ -54,9 +65,11 @@ class _InstanceNorm(_NormBase):
 
     def forward(self, input: Tensor) -> Tensor:
         self._check_input_dim(input)
-        return F.instance_norm(
-            input, self.running_mean, self.running_var, self.weight, self.bias,
-            self.training or not self.track_running_stats, self.momentum, self.eps)
+
+        if input.dim() == self._get_no_batch_dim():
+            return self._handle_no_batch_input(input)
+
+        return self._apply_instance_norm(input)
 
 
 class InstanceNorm1d(_InstanceNorm):
@@ -102,7 +115,7 @@ class InstanceNorm1d(_InstanceNorm):
 
     Args:
         num_features: :math:`C` from an expected input of size
-            :math:`(N, C, L)` or :math:`L` from input of size :math:`(N, L)`
+            :math:`(N, C, L)` or :math:`(C, L)`
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
@@ -114,8 +127,8 @@ class InstanceNorm1d(_InstanceNorm):
             statistics in both training and eval modes. Default: ``False``
 
     Shape:
-        - Input: :math:`(N, C, L)`
-        - Output: :math:`(N, C, L)` (same shape as input)
+        - Input: :math:`(N, C, L)` or :math:`(C, L)`
+        - Output: :math:`(N, C, L)` or :math:`(C, L)` (same shape as input)
 
     Examples::
 
@@ -127,16 +140,12 @@ class InstanceNorm1d(_InstanceNorm):
         >>> output = m(input)
     """
 
+    def _get_no_batch_dim(self):
+        return 2
+
     def _check_input_dim(self, input):
-        if input.dim() == 2:
-            raise ValueError(
-                'InstanceNorm1d returns 0-filled tensor to 2D tensor. '
-                'This is because InstanceNorm1d reshapes inputs to '
-                '(1, N * C, ...) from (N, C,...) and this makes '
-                'variances 0.'
-            )
-        if input.dim() != 3:
-            raise ValueError('expected 3D input (got {}D input)'
+        if input.dim() not in (2, 3):
+            raise ValueError('expected 2D or 3D input (got {}D input)'
                              .format(input.dim()))
 
 
@@ -152,7 +161,7 @@ class LazyInstanceNorm1d(_LazyNormBase, _InstanceNorm):
 
     Args:
         num_features: :math:`C` from an expected input of size
-            :math:`(N, C, L)` or :math:`L` from input of size :math:`(N, L)`
+            :math:`(N, C, L)` or :math:`(C, L)`
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
@@ -162,20 +171,20 @@ class LazyInstanceNorm1d(_LazyNormBase, _InstanceNorm):
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics and always uses batch
             statistics in both training and eval modes. Default: ``False``
+
+    Shape:
+        - Input: :math:`(N, C, L)` or :math:`(C, L)`
+        - Output: :math:`(N, C, L)` or :math:`(C, L)` (same shape as input)
     """
 
     cls_to_become = InstanceNorm1d  # type: ignore[assignment]
 
+    def _get_no_batch_dim(self):
+        return 2
+
     def _check_input_dim(self, input):
-        if input.dim() == 2:
-            raise ValueError(
-                'InstanceNorm1d returns 0-filled tensor to 2D tensor.'
-                'This is because InstanceNorm1d reshapes inputs to'
-                '(1, N * C, ...) from (N, C,...) and this makes'
-                'variances 0.'
-            )
-        if input.dim() != 3:
-            raise ValueError('expected 3D input (got {}D input)'
+        if input.dim() not in (2, 3):
+            raise ValueError('expected 2D or 3D input (got {}D input)'
                              .format(input.dim()))
 
 
@@ -222,7 +231,7 @@ class InstanceNorm2d(_InstanceNorm):
 
     Args:
         num_features: :math:`C` from an expected input of size
-            :math:`(N, C, H, W)`
+            :math:`(N, C, H, W)` or :math:`(C, H, W)`
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
@@ -234,8 +243,8 @@ class InstanceNorm2d(_InstanceNorm):
             statistics in both training and eval modes. Default: ``False``
 
     Shape:
-        - Input: :math:`(N, C, H, W)`
-        - Output: :math:`(N, C, H, W)` (same shape as input)
+        - Input: :math:`(N, C, H, W)` or :math:`(C, H, W)`
+        - Output: :math:`(N, C, H, W)` or :math:`(C, H, W)` (same shape as input)
 
     Examples::
 
@@ -247,9 +256,12 @@ class InstanceNorm2d(_InstanceNorm):
         >>> output = m(input)
     """
 
+    def _get_no_batch_dim(self):
+        return 3
+
     def _check_input_dim(self, input):
-        if input.dim() != 4:
-            raise ValueError('expected 4D input (got {}D input)'
+        if input.dim() not in (3, 4):
+            raise ValueError('expected 3D or 4D input (got {}D input)'
                              .format(input.dim()))
 
 
@@ -265,7 +277,7 @@ class LazyInstanceNorm2d(_LazyNormBase, _InstanceNorm):
 
     Args:
         num_features: :math:`C` from an expected input of size
-            :math:`(N, C, H, W)`
+            :math:`(N, C, H, W)` or :math:`(C, H, W)`
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
@@ -275,13 +287,21 @@ class LazyInstanceNorm2d(_LazyNormBase, _InstanceNorm):
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics and always uses batch
             statistics in both training and eval modes. Default: ``False``
+
+    Shape:
+        - Input: :math:`(N, C, H, W)` or :math:`(C, H, W)`
+        - Output: :math:`(N, C, H, W)` or :math:`(C, H, W)` (same shape as input)
     """
 
     cls_to_become = InstanceNorm2d  # type: ignore[assignment]
 
+    def _get_no_batch_dim(self):
+        return 3
+
     def _check_input_dim(self, input):
-        if input.dim() != 4:
-            raise ValueError("expected 4D input (got {}D input)".format(input.dim()))
+        if input.dim() not in (3, 4):
+            raise ValueError('expected 3D or 4D input (got {}D input)'
+                             .format(input.dim()))
 
 
 class InstanceNorm3d(_InstanceNorm):
@@ -327,7 +347,7 @@ class InstanceNorm3d(_InstanceNorm):
 
     Args:
         num_features: :math:`C` from an expected input of size
-            :math:`(N, C, D, H, W)`
+            :math:`(N, C, D, H, W)` or :math:`(C, D, H, W)`
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
@@ -339,8 +359,8 @@ class InstanceNorm3d(_InstanceNorm):
             statistics in both training and eval modes. Default: ``False``
 
     Shape:
-        - Input: :math:`(N, C, D, H, W)`
-        - Output: :math:`(N, C, D, H, W)` (same shape as input)
+        - Input: :math:`(N, C, D, H, W)` or :math:`(C, D, H, W)`
+        - Output: :math:`(N, C, D, H, W)` or :math:`(C, D, H, W)` (same shape as input)
 
     Examples::
 
@@ -352,9 +372,12 @@ class InstanceNorm3d(_InstanceNorm):
         >>> output = m(input)
     """
 
+    def _get_no_batch_dim(self):
+        return 4
+
     def _check_input_dim(self, input):
-        if input.dim() != 5:
-            raise ValueError('expected 5D input (got {}D input)'
+        if input.dim() not in (4, 5):
+            raise ValueError('expected 4D or 5D input (got {}D input)'
                              .format(input.dim()))
 
 
@@ -370,7 +393,7 @@ class LazyInstanceNorm3d(_LazyNormBase, _InstanceNorm):
 
     Args:
         num_features: :math:`C` from an expected input of size
-            :math:`(N, C, D, H, W)`
+            :math:`(N, C, D, H, W)` or :math:`(C, D, H, W)`
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
@@ -380,10 +403,18 @@ class LazyInstanceNorm3d(_LazyNormBase, _InstanceNorm):
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics and always uses batch
             statistics in both training and eval modes. Default: ``False``
+
+    Shape:
+        - Input: :math:`(N, C, D, H, W)` or :math:`(C, D, H, W)`
+        - Output: :math:`(N, C, D, H, W)` or :math:`(C, D, H, W)` (same shape as input)
     """
 
     cls_to_become = InstanceNorm3d  # type: ignore[assignment]
 
+    def _get_no_batch_dim(self):
+        return 4
+
     def _check_input_dim(self, input):
-        if input.dim() != 5:
-            raise ValueError("expected 5D input (got {}D input)".format(input.dim()))
+        if input.dim() not in (4, 5):
+            raise ValueError('expected 4D or 5D input (got {}D input)'
+                             .format(input.dim()))
