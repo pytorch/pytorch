@@ -534,6 +534,12 @@ def fractional_max_pool3d_with_indices(
         return_indices: if ``True``, will return the indices along with the outputs.
                         Useful to pass to :func:`~torch.nn.functional.max_unpool3d`.
 
+    Shape:
+        - Input: :math:`(N, C, T_{in}, H_{in}, W_{in})` or :math:`(C, T_{in}, H_{in}, W_{in})`.
+        - Output: :math:`(N, C, T_{out}, H_{out}, W_{out})` or :math:`(C, T_{out}, H_{out}, W_{out})`, where
+          :math:`(T_{out}, H_{out}, W_{out})=\text{output\_size}` or
+          :math:`(T_{out}, H_{out}, W_{out})=\text{output\_ratio} \times (T_{in}, H_{in}, W_{in})`
+
     Examples::
         >>> input = torch.randn(20, 16, 50, 32, 16)
         >>> # pool of cubic window of size=3, and target output size 13x12x11
@@ -561,13 +567,14 @@ def fractional_max_pool3d_with_indices(
         assert output_ratio is not None
         _output_ratio = _triple(output_ratio)
         output_size = [
-            int(input.size(2) * _output_ratio[0]),
-            int(input.size(3) * _output_ratio[1]),
-            int(input.size(4) * _output_ratio[2]),
+            int(input.size(-3) * _output_ratio[0]),
+            int(input.size(-2) * _output_ratio[1]),
+            int(input.size(-1) * _output_ratio[2]),
         ]
 
     if _random_samples is None:
-        _random_samples = torch.rand(input.size(0), input.size(1), 3, dtype=input.dtype, device=input.device)
+        n_batch = 1 if input.dim() == 4 else input.size(0)
+        _random_samples = torch.rand(n_batch, input.size(-4), 3, dtype=input.dtype, device=input.device)
     return torch._C._nn.fractional_max_pool3d(input, kernel_size, output_size, _random_samples)
 
 
