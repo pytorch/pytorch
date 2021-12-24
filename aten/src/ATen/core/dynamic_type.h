@@ -178,7 +178,9 @@ struct DynamicTypeTrait {};
 #define DYNAMIC_TYPE_TAG_VALUE(NAME, _) \
 template <> \
 struct TORCH_API DynamicTypeTrait<NAME ## Type> { \
-static constexpr auto tagValue = DynamicType::Tag::NAME; \
+static auto tagValue() { \
+  return DynamicType::Tag::NAME; \
+} \
 };
     FORALL_DYNAMIC_TYPES(DYNAMIC_TYPE_TAG_VALUE)
 #undef DYNAMIC_TYPE_TAG_VALUE
