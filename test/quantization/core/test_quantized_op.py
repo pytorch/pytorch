@@ -4194,6 +4194,8 @@ class TestQuantizedConv(TestCase):
             dilation=dilations,
             bias=use_bias
         )
+        print("test_qconv_transpose2d: ", conv_op)
+        print("n:", batch_size, "; ic_g: ", input_channels_per_group, "; h: ", height, "; w: ", width, "; oc_g: ", output_channels_per_group)
         X_q, W_q, bias_float = self._test_qconv_impl(
             qconv, qconv_prepack, conv_op, batch_size,
             input_channels_per_group, (height, width),
@@ -4222,8 +4224,6 @@ class TestQuantizedConv(TestCase):
         qconv_op.zero_point = Y_zero_point
         qconv_op.set_weight_bias(W_q, bias_float)
 
-        xx = X_q.dequantize()
-        print(conv_op, xx.size(), xx.stride())
         Y_dq_ref = conv_op(X_q.dequantize())
         Y_q_ref = torch.quantize_per_tensor(Y_dq_ref, scale=Y_scale,
                                             zero_point=Y_zero_point,
