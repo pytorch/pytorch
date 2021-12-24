@@ -16418,7 +16418,7 @@ class TestNNDeviceType(NNTestCase):
         input_lengths_no_bd = torch.tensor(input_length)
         target_lengths_no_bd = torch.tensor(target_length)
 
-        return ((log_probs, targets, input_lengths, target_lengths), 
+        return ((log_probs, targets, input_lengths, target_lengths),
                 (log_probs_no_bd, targets_no_bd, input_lengths_no_bd, target_lengths_no_bd))
 
     @onlyCUDA
@@ -16430,7 +16430,7 @@ class TestNNDeviceType(NNTestCase):
 
         with torch.backends.cudnn.flags(enabled=False):
             res = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths, zero_infinity=True)
-            res_no_bd = torch.nn.functional.ctc_loss(log_probs_no_bd, targets_no_bd, input_lengths_no_bd, 
+            res_no_bd = torch.nn.functional.ctc_loss(log_probs_no_bd, targets_no_bd, input_lengths_no_bd,
                                                      target_lengths_no_bd, zero_infinity=True)
 
         grad_out = torch.randn_like(res)
@@ -16465,7 +16465,7 @@ class TestNNDeviceType(NNTestCase):
         log_probs_no_bd, targets_no_bd, input_lengths_no_bd, target_lengths_no_bd = args_no_bd
 
         res = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths, zero_infinity=True)
-        res_no_bd = torch.nn.functional.ctc_loss(log_probs_no_bd, targets_no_bd, input_lengths_no_bd, 
+        res_no_bd = torch.nn.functional.ctc_loss(log_probs_no_bd, targets_no_bd, input_lengths_no_bd,
                                                  target_lengths_no_bd, zero_infinity=True)
 
         grad_out = torch.randn_like(res)
