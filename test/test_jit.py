@@ -12788,6 +12788,24 @@ dedent """
             test_str.append(str(tm.foo.schema))
         self.assertExpectedStripMangled("\n".join(test_str) + "\n")
 
+    def test_or_in_non_bool_context(self):
+        class OrModule(torch.nn.Module):
+            def __init__(self, v=5):
+                super().__init__()
+                self.v = v
+
+            def forward(self, a: int):
+                b: int = self.v or a
+                c: bool = self.v or a
+                if c:
+                    return b + a
+                return b + 2
+
+        m = OrModule()
+        self.checkModule(m, (4,))
+        scripted_m = torch.jit.script(m)
+        self.assertTrue(scripted_m(4) == 9)
+
     #  String frontend , MyPy-style type comments , Script function
     def test_annot_string_mypy_fn(self):
         code = '''

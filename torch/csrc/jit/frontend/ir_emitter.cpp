@@ -1191,11 +1191,23 @@ struct to_ir {
 
   CondValue emitCondExpr(const Expr& expr) {
     switch (expr.kind()) {
-      case TK_AND:
-      case TK_OR: {
+      case TK_AND: {
         auto binop = BinOp(expr);
         return emitShortCircuitLogical(
             binop.range(), binop.lhs(), binop.rhs(), expr.kind() == TK_OR);
+      }
+      case TK_OR: {
+        auto binop = BinOp(expr);
+        Value* lhs_val = emitExpr(binop.lhs());
+        Value* rhs_val = emitExpr(binop.rhs());
+        Value* cond_value = emitBuiltinCall(
+            expr.get()->range(),
+            *method.graph(),
+            aten::__or__,
+            {lhs_val, rhs_val},
+            {});
+        auto refinements = RefinementSet({});
+        return CondValue(cond_value, refinements, c10::nullopt);
       }
       case TK_NOT: {
         CondValue v = emitCondExpr(Expr(expr.tree()->trees()[0]));
@@ -3042,6 +3054,14 @@ struct to_ir {
           type = typeParser_.parseTypeFromExpr(stmt.type().get());
         }
         auto rhs_sugared_val = emitSugaredExpr(rhs, 1, type);
+        // To handle situation like:
+        //   c: bool = a: int OR b: int
+        // In this case, we should output:
+        //   c = bool(aten::or(a, b))
+        if (rhs.kind() == TK_OR && type->kind() == BoolType::Kind) {
+          rhs_sugared_val = std::make_shared<SimpleValue>(
+              emitToBool(rhs.range(), emitExpr(rhs)));
+        }
         // START BC HACK
         //
         // For old serialized quantized RNN modules, switch
