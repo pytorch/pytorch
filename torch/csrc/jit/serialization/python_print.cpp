@@ -14,7 +14,6 @@
 #include <torch/csrc/jit/ir/attributes.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/ir_views.h>
-#include <torch/csrc/jit/operator_upgraders/upgraders_guard.h>
 #include <torch/csrc/jit/operator_upgraders/version_map.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/runtime/calculate_necessary_args.h>

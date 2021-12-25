@@ -1,8 +1,8 @@
 #pragma once
 
+#include <caffe2/serialize/versions.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/api/module.h>
-#include <torch/csrc/jit/operator_upgraders/upgraders_guard.h>
 
 #include <cstdint>
 

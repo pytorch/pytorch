@@ -5,6 +5,7 @@ import io
 import os
 import random
 import sys
+import unittest
 
 import torch
 
@@ -22,6 +23,9 @@ if __name__ == "__main__":
     )
 
 class TestSaveLoadForOpVersion(JitTestCase):
+    skip_reason = "This test is meant to run only for dynamic versioning"
+
+    @unittest.skipIf(torch._C._is_upgraders_enabled(), skip_reason)
     def test_versioned_symbols(self):
         """
         Tests Torchscript symbol versioning. See note [Versioned Symbols].
@@ -108,7 +112,7 @@ class TestSaveLoadForOpVersion(JitTestCase):
     NOTE: currently compares against current div behavior, too, since
       div behavior has not yet been updated.
     """
-
+    @unittest.skipIf(torch._C._is_upgraders_enabled(), skip_reason)
     def test_versioned_div_tensor(self):
         def historic_div(self, other):
             if self.is_floating_point() or other.is_floating_point():
@@ -162,6 +166,7 @@ class TestSaveLoadForOpVersion(JitTestCase):
             _helper(current_module, torch.div)
             _helper(current_mobile_module, torch.div)
 
+    @unittest.skipIf(torch._C._is_upgraders_enabled(), skip_reason)
     def test_versioned_div_tensor_inplace(self):
         def historic_div_(self, other):
             if self.is_floating_point() or other.is_floating_point():
@@ -212,6 +217,7 @@ class TestSaveLoadForOpVersion(JitTestCase):
             _helper(current_module, torch.Tensor.div_)
             _helper(current_mobile_module, torch.Tensor.div_)
 
+    @unittest.skipIf(torch._C._is_upgraders_enabled(), skip_reason)
     def test_versioned_div_tensor_out(self):
         def historic_div_out(self, other, out):
             if self.is_floating_point() or other.is_floating_point() or out.is_floating_point():
@@ -264,6 +270,7 @@ class TestSaveLoadForOpVersion(JitTestCase):
                 _helper(v3_mobile_module, historic_div_out)
                 _helper(current_mobile_module, torch.div)
 
+    @unittest.skipIf(torch._C._is_upgraders_enabled(), skip_reason)
     def test_versioned_div_scalar(self):
         def historic_div_scalar_float(self, other: float):
             return torch.true_divide(self, other)
@@ -334,6 +341,7 @@ class TestSaveLoadForOpVersion(JitTestCase):
                 _helper(v3_mobile_module_int, historic_div_scalar_int)
                 _helper(current_mobile_module_int, torch.div)
 
+    @unittest.skipIf(torch._C._is_upgraders_enabled(), skip_reason)
     def test_versioned_div_scalar_reciprocal(self):
         def historic_div_scalar_float_reciprocal(self, other: float):
             return other / self
@@ -415,6 +423,7 @@ class TestSaveLoadForOpVersion(JitTestCase):
                 _helper(v3_mobile_module_int, current_mobile_module_int)
                 _helper(current_mobile_module_int, torch.div)
 
+    @unittest.skipIf(torch._C._is_upgraders_enabled(), skip_reason)
     def test_versioned_div_scalar_inplace(self):
         def historic_div_scalar_float_inplace(self, other: float):
             return self.true_divide_(other)
@@ -493,6 +502,7 @@ class TestSaveLoadForOpVersion(JitTestCase):
 
     # NOTE: Scalar division was already true division in op version 3,
     #   so this test verifies the behavior is unchanged.
+    @unittest.skipIf(torch._C._is_upgraders_enabled(), skip_reason)
     def test_versioned_div_scalar_scalar(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -530,6 +540,7 @@ class TestSaveLoadForOpVersion(JitTestCase):
 
     # NOTE: the JIT was incapable of handling boolean fill values when
     #   PyTorch produced file format versions 0-4
+    @unittest.skipIf(torch._C._is_upgraders_enabled(), skip_reason)
     def test_versioned_full_integer_value(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -567,6 +578,7 @@ class TestSaveLoadForOpVersion(JitTestCase):
     #   to version 5 is preserved.
     # NOTE: while torch.full in eager PyTorch accepts a requires_grad argument,
     #   it does not in Torchscript (see https://github.com/pytorch/pytorch/issues/40363)
+    @unittest.skipIf(torch._C._is_upgraders_enabled(), skip_reason)
     def test_versioned_full_preserved(self):
         class MyModule(torch.nn.Module):
             def __init__(self):

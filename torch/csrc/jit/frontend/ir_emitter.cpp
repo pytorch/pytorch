@@ -4,6 +4,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/irange.h>
+#include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/frontend/canonicalize_modified_loop.h>
 #include <torch/csrc/jit/frontend/convert_to_ssa.h>
@@ -12,7 +13,6 @@
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/frontend/script_type_parser.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/operator_upgraders/upgraders_guard.h>
 #include <torch/csrc/jit/passes/annotate_warns.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>

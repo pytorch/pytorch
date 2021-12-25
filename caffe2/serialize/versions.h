@@ -1,9 +1,13 @@
 #pragma once
-#include <torch/csrc/jit/operator_upgraders/upgraders_guard.h>
 #include <cstdint>
 
 namespace caffe2 {
 namespace serialize {
+
+// Flag that controls if we want to enable upgraders
+// in the server side. When this flag is set to False,
+// it will switch to old dynamic versioning approach
+#define ENABLE_UPGRADERS true
 
 constexpr uint64_t kMinSupportedFileFormatVersion = 0x1L;
 

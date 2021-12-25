@@ -1,3 +1,4 @@
+#include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/operator_upgraders/upgraders_guard.h>
 
 namespace torch {
