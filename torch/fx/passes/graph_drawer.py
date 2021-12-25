@@ -217,15 +217,13 @@ if HAS_PYDOT:
                 dot_graph.add_node(dot_node)
 
                 def get_module_params_or_buffers():
-                    for pname, ptensor in (
-                        leaf_module.named_parameters()
-                        if if isinstance(ptensor, torch.nn.Parameter)
-                        else leaf_module.named_buffers()
+                    for pname, ptensor in chain(
+                        leaf_module.named_parameters(),leaf_module.named_buffers()
                     ):
                         pname1 = node.name + "." + pname
                         label1 = (
                             pname1 + "|op_code=get_" + "parameter"
-                            if is_param
+                            if isinstance(ptensor, torch.nn.Parameter)
                             else "buffer" + r"\l"
                         )
                         dot_w_node = pydot.Node(
