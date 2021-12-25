@@ -664,7 +664,7 @@ def parse_args():
         default=0,
         help="print verbose information and test-by-test results",
     )
-    parser.add_argument("--jit", "--jit", action="store_true", help="run all jit tests")
+    parser.add_argument("--jit", "--jit-tests", action="store_true", help="run all jit tests")
     parser.add_argument(
         "--distributed-tests",
         "--distributed-tests",
