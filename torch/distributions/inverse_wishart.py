@@ -158,7 +158,16 @@ class InverseWishart(ExponentialFamily):
 
     @property
     def variance(self):
-        raise NotImplementedError
+        nu = self.df # has shape (batch_shape)
+        p = self._event_shape[-1]
+
+        V = self.covariance_matrix  # has shape (batch_shape x event_shape)
+        diag_V = V.diagonal(dim1=-2, dim2=-1)
+
+        return (
+            (v - p + 1) * V.pow(2)
+            + (v - p - 1) * torch.einsum("...i,...j->...ij", diag_V, diag_V)
+        ) / ((v - p) * (v - p - 1).pow(2) * (v - p - 3))
 
     def rsample(self, sample_shape=torch.Size(), max_try_correction=None):
         raise NotImplementedError
