@@ -744,7 +744,10 @@ struct SimpleSelf : public Self {
 // This is not a SimpleValue so it can not pass through the code paths that
 // expect a SimpleValue as a sugared value.
 struct TORCH_API ExceptionMessageValue : public SugaredValue {
-  explicit ExceptionMessageValue(Value* value) : value_(value) {}
+  explicit ExceptionMessageValue(
+      Value* value,
+      Value* qualified_class_name = nullptr)
+      : value_(value), qualified_class_name_(qualified_class_name) {}
 
   std::string kind() const override {
     return "exception message";
@@ -754,7 +757,14 @@ struct TORCH_API ExceptionMessageValue : public SugaredValue {
     return value_;
   }
 
+  // qualified python class name
+  Value* getQualifiedClassName() {
+    return qualified_class_name_;
+  }
+
+ private:
   Value* value_;
+  Value* qualified_class_name_;
 };
 
 struct TORCH_API ExceptionValue : public SugaredValue {
