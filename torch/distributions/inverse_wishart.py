@@ -173,7 +173,17 @@ class InverseWishart(ExponentialFamily):
         raise NotImplementedError
 
     def log_prob(self, value):
-        raise NotImplementedError
+        if self._validate_args:
+            self._validate_sample(value)
+        nu = self.df  # has shape (batch_shape)
+        p = self._event_shape[-1]  # has singleton shape
+        return (
+            - nu * p * _log_2 / 2
+            - nu * self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
+            - torch.mvlgamma(nu / 2, p=p)
+            - (nu + p + 1) / 2 * torch.linalg.slogdet(value).logabsdet
+            - torch.cholesky_solve(value, self._unbroadcasted_scale_tril).diagonal(dim1=-2, dim2=-1).reciprocal().sum(dim=-1) / 2
+        )
 
     def entropy(self):
         raise NotImplementedError
