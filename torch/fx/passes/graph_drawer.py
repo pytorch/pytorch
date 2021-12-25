@@ -7,6 +7,7 @@ from typing import Dict, Any, TYPE_CHECKING
 from torch.fx.node import _get_qualified_name
 from torch.fx.passes.shape_prop import TensorMetadata
 from torch.fx._compatibility import compatibility
+from itertools import chain
 
 try:
     import pydot
@@ -215,10 +216,10 @@ if HAS_PYDOT:
                 )
                 dot_graph.add_node(dot_node)
 
-                def get_module_params_or_buffers(is_param: bool):
+                def get_module_params_or_buffers():
                     for pname, ptensor in (
                         leaf_module.named_parameters()
-                        if is_param
+                        if if isinstance(ptensor, torch.nn.Parameter)
                         else leaf_module.named_buffers()
                     ):
                         pname1 = node.name + "." + pname
@@ -239,8 +240,7 @@ if HAS_PYDOT:
                     leaf_module = self._get_leaf_node(graph_module, node)
 
                     if not isinstance(leaf_module, torch.fx.GraphModule):
-                        get_module_params_or_buffers(True)
-                        get_module_params_or_buffers(False)
+                        get_module_params_or_buffers()
 
             for node in graph_module.graph.nodes:
                 if ignore_getattr and node.op == "get_attr":
