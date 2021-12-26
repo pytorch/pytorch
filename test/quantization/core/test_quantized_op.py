@@ -2157,7 +2157,13 @@ class TestQuantizedOps(TestCase):
         Y = torch.mean(qX.dequantize(), dim)
         Y = torch.quantize_per_tensor(Y, scale, zero_point, torch_type).dequantize()
         qY = torch.mean(qX, dim)
+        self.assertEqual(Y, qY.dequantize())
 
+        # Dim is empty
+        dim = []
+        Y = torch.mean(qX.dequantize(), dim)
+        Y = torch.quantize_per_tensor(Y, scale, zero_point, torch_type).dequantize()
+        qY = torch.mean(qX, dim)
         self.assertEqual(Y, qY.dequantize())
 
     @skipIfNoQNNPACK
@@ -2176,6 +2182,31 @@ class TestQuantizedOps(TestCase):
             YQ = torch.quantize_per_tensor(Y, scale=0.2, zero_point=0, dtype=torch.quint8)
             MQ = XQ.mean((2, 3), keepdim=keep)
             self.assertTrue(torch.equal(MQ, YQ))
+
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=2, max_dims=5,
+                                              min_side=1, max_side=10),
+                       qparams=hu.qparams()),
+           dim=st.integers(-1, 4),
+           unbiased=st.booleans(),
+           keepdim=st.booleans())
+    @override_qengines
+    def test_std(self, X, dim, unbiased, keepdim):
+        X, (scale, zero_point, torch_type) = X
+        assume(dim < X.ndim)
+        qX = torch.quantize_per_tensor(torch.tensor(X).float(), scale, zero_point, torch_type)
+
+        # dim is not empty
+        Y = torch.std(qX.dequantize(), dim, unbiased, keepdim)
+        Y = torch.quantize_per_tensor(Y, scale, zero_point, torch_type).dequantize()
+        qY = torch.std(qX, dim, unbiased, keepdim)
+        self.assertEqual(Y, qY.dequantize())
+
+        # dim is empty
+        dim = []
+        Y = torch.std(qX.dequantize(), dim, unbiased, keepdim)
+        Y = torch.quantize_per_tensor(Y, scale, zero_point, torch_type).dequantize()
+        qY = torch.std(qX, dim, unbiased, keepdim)
+        self.assertEqual(Y, qY.dequantize())
 
     """Tests the correctness of the quantized equal op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),

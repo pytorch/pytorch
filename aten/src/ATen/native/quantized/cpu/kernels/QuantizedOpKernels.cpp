@@ -2776,6 +2776,70 @@ void qmean_inner_dim_kernel(
   });
 }
 
+void qstd_inner_dim_kernel(
+    const Tensor& self,
+    optional<IntArrayRef> dim,
+    optional<int64_t> unbiased,
+    bool keepdim,
+    Tensor& result) {
+  ScalarType dtype = self.scalar_type();
+  auto in_dims = self.sizes().vec();
+  auto out_dims = in_dims;
+  int64_t num_dims_to_squeeze = dim.has_value() && !dim.value().empty() ?
+                                dim.value().size() :
+                                self.dim();
+  int64_t M = 1; // Num of groups
+  int64_t N = 1; // Num of elements to take std of in each group
+  for (int i = 0; i < in_dims.size() - num_dims_to_squeeze; ++i) {
+    M *= in_dims[i];
+  }
+  for (int i = 0; i < num_dims_to_squeeze; ++i) {
+    auto idx = out_dims.size() - 1 - i;
+    N *= out_dims[idx];
+    out_dims[idx] = 1;
+  }
+  if (!keepdim) {
+    out_dims.erase(out_dims.end() - num_dims_to_squeeze, out_dims.end());
+  }
+  int64_t den = N; // Denominator when computing mean and deviation
+  if (unbiased.has_value() && unbiased.value() == 1) {
+    den -= 1;
+  }
+  auto x_scale = self.q_scale();
+  auto x_zp = self.q_zero_point();
+  result = at::_empty_affine_quantized(
+      out_dims,
+      at::device(kCPU).dtype(dtype).memory_format(self.suggest_memory_format()),
+      x_scale,
+      x_zp,
+      c10::nullopt);
+
+  AT_DISPATCH_QINT_TYPES(self.scalar_type(), "quantized_layer_norm_kernel_impl_cpu", [&]() {
+    scalar_t* X_data = self.data_ptr<scalar_t>();
+    scalar_t* Y_data = result.data_ptr<scalar_t>();
+
+    at::parallel_for(0, M, 1, [&](int64_t start, int64_t end) {
+      for (const auto i : c10::irange(start, end)) {
+        scalar_t* X_ptr = X_data + i * N;
+        scalar_t* Y_ptr = Y_data + i;
+        scalar_t::underlying* X_ptr_underlying = reinterpret_cast<scalar_t::underlying*>(X_ptr);
+        scalar_t::underlying* Y_ptr_underlying = reinterpret_cast<scalar_t::underlying*>(Y_ptr);
+        auto x_sum_shifted = hsum(X_ptr_underlying, N);
+        auto x_sum_sq_shifted = hsum_sq(X_ptr_underlying, N);
+        // Mean with zero point
+        float x_mean_shifted_div_scale_x = static_cast<float>(x_sum_shifted) / N;
+        float x_mean_unbiased_shifted_div_scale_x = static_cast<float>(x_sum_shifted) / den;
+        // variance / x_scale^2
+        float x_var_div_scale_x_sq =
+            std::max(static_cast<float>(x_sum_sq_shifted) / den -
+                2 * x_mean_shifted_div_scale_x * x_mean_unbiased_shifted_div_scale_x +
+                x_mean_shifted_div_scale_x * x_mean_shifted_div_scale_x * N / den, 0.0f);
+        *Y_ptr_underlying = std::sqrt(x_var_div_scale_x_sq) * x_scale;
+      }
+    });
+  });
+}
+
 #ifdef USE_FBGEMM
 void quantize_tensor_per_tensor_affine_cpu(
     const Tensor& rtensor,
@@ -3759,6 +3823,7 @@ REGISTER_NO_AVX512_DISPATCH(dequantize_tensor_per_tensor_affine_sub_byte_stub);
 REGISTER_NO_AVX512_DISPATCH(masked_fill_kernel_quantized_stub);
 REGISTER_NO_AVX512_DISPATCH(index_put_kernel_quantized_stub);
 REGISTER_NO_AVX512_DISPATCH(qmean_inner_dim_stub);
+REGISTER_NO_AVX512_DISPATCH(qstd_inner_dim_stub);
 #else
 REGISTER_DISPATCH(dequantize_tensor_per_channel_affine_stub,
                   &dequantize_tensor_per_channel_affine_cpu);
@@ -3830,6 +3895,7 @@ REGISTER_DISPATCH(
     index_put_kernel_quantized_stub,
     &index_put_kernel_quantized_cpu);
 REGISTER_DISPATCH(qmean_inner_dim_stub, &qmean_inner_dim_kernel);
+REGISTER_DISPATCH(qstd_inner_dim_stub, &qstd_inner_dim_kernel);
 #endif // CPU_CAPABILITY_AVX512 && _WIN32
 
 } // namespace native

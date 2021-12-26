@@ -10,8 +10,9 @@ namespace at {
 namespace native {
 
 DEFINE_DISPATCH(qmean_inner_dim_stub);
+DEFINE_DISPATCH(qstd_inner_dim_stub);
 
-// If mean values are taken in the innermost dims, the fast path can be used.
+// If mean/std is taken in the innermost dims, the fast path can be used.
 inline bool is_innnermost_dim(
     const Tensor& self,
     IntArrayRef dim) {
@@ -168,6 +169,79 @@ Tensor& mean_out_quantized_cpu(
     c10::optional<ScalarType> opt_dtype) {
   return mean_out_quantized_cpu(
       self, dimnames_to_positions(self, dim), keepdim, opt_dtype, result);
+}
+
+// qstd
+inline bool is_std_inner_dim_fast_path(
+    const Tensor& self,
+    optional<IntArrayRef> dim,
+    optional<int64_t> unbiased) {
+  // Do not enter fast path if there are too few elements
+  IntArrayRef dims = dim.has_value() ? dim.value() : IntArrayRef();
+  auto all_dims = std::vector<int64_t>(self.dim());
+  std::iota(all_dims.begin(), all_dims.end(), 0);
+  dims = dims.empty() ? all_dims : dims;
+  bool is_unbiased = unbiased.has_value() ? unbiased.value() : 0;
+  int64_t num_ele = 1;
+  for (auto d : dims) {
+    num_ele *= self.size(d);
+  }
+  if (num_ele == 1 && is_unbiased) {
+    return false;
+  }
+  return is_innnermost_dim(self, dims);
+}
+
+Tensor& std_out_quantized_cpu(
+    const Tensor& self,
+    optional<IntArrayRef> dim,
+    optional<int64_t> unbiased,
+    bool keepdim,
+    Tensor& result) {
+  // Fast path
+  if (is_std_inner_dim_fast_path(self, dim, unbiased)) {
+    qstd_inner_dim_stub(self.device().type(), self, dim, unbiased, keepdim, result);
+    return result;
+  }
+
+  // Reference path
+  auto self_dequantized = self.dequantize();
+  auto result_dequantized = at::std(self_dequantized, dim, unbiased, keepdim);
+  result = at::quantize_per_tensor(
+      result_dequantized,
+      self.q_scale(),
+      self.q_zero_point(),
+      self.scalar_type());
+  return result;
+}
+
+Tensor std_quantized_cpu(
+    const Tensor& self,
+    optional<IntArrayRef> dim,
+    optional<int64_t> unbiased,
+    bool keepdim) {
+  Tensor result;
+  std_out_quantized_cpu(self, dim, unbiased, keepdim, result);
+  return result;
+}
+
+Tensor std_quantized_cpu(
+    const Tensor& self,
+    DimnameList dim,
+    optional<int64_t> unbiased,
+    bool keepdim) {
+  return std_quantized_cpu(
+      self, dimnames_to_positions(self, dim), unbiased, keepdim);
+}
+
+Tensor& std_out_quantized_cpu(
+    Tensor& result,
+    const Tensor& self,
+    DimnameList dim,
+    optional<int64_t> unbiased,
+    bool keepdim) {
+  return std_out_quantized_cpu(
+      self, dimnames_to_positions(self, dim), unbiased, keepdim, result);
 }
 
 } // namespace native
