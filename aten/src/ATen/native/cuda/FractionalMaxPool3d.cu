@@ -246,7 +246,6 @@ TORCH_IMPL_FUNC(fractional_max_pool3d_out_cuda) (
   int64_t dimt = 1;
   int64_t dimh = 2;
   int64_t dimw = 3;
-  int64_t numBatch = 1;
 
   int64_t outputT = output_size[0];
   int64_t outputH = output_size[1];
@@ -257,7 +256,6 @@ TORCH_IMPL_FUNC(fractional_max_pool3d_out_cuda) (
 
   int64_t ndims = input.ndimension();
   if (ndims == 5) {
-    numBatch = input.size(0);
     planeDim++;
     dimt++;
     dimh++;
