@@ -233,13 +233,14 @@ void fractional_max_pool3d_backward_out_cuda_template(
 
 }// namespace
 
-TORCH_IMPL_FUNC(fractional_max_pool3d_out_cuda)(
+TORCH_IMPL_FUNC(fractional_max_pool3d_out_cuda) (
   const Tensor& input,
   IntArrayRef pool_size,
   IntArrayRef output_size,
-  const Tensor& randomSamples
+  const Tensor& randomSamples,
   const Tensor& output,
-  const Tensor& indices) {
+  const Tensor& indices
+) {
 
   int64_t planeDim = 0;
   int64_t dimt = 1;
