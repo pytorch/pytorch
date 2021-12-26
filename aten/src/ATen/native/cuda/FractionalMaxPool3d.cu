@@ -141,17 +141,14 @@ __global__ void fractional_max_pool3d_backward_out_frame(
     }
   }
 
-void fractional_max_pool3d_out_cuda_template(
-  Tensor& output,
-  Tensor& indices,
+TORCH_IMPL_FUNC(fractional_max_pool3d_out_cuda)(
   const Tensor& input,
   IntArrayRef pool_size,
   IntArrayRef output_size,
-  const Tensor& randomSamples) {
-    TORCH_CHECK(pool_size.size() == 3,
-                "fractional_max_pool3d: kernel_size must either be a single Int or tuple of three Ints")
-    TORCH_CHECK(output_size.size() == 3,
-                "fractional_max_pool3d: output_size must either be a single Int or tuple of three Ints")
+  const Tensor& randomSamples
+  const Tensor& output,
+  const Tensor& indices) {
+
     int64_t planeDim = 0;
     int64_t dimt = 1;
     int64_t dimh = 2;
@@ -166,17 +163,6 @@ void fractional_max_pool3d_out_cuda_template(
     int64_t poolSizeW = pool_size[2];
 
     int64_t ndims = input.ndimension();
-    TORCH_CHECK(
-                ndims == 4 || ndims == 5,
-                "fractional_max_pool3d_out_cuda_template(): ",
-                "Expected 4D or 5D tensor, but got: ", input.sizes());
-    for (int64_t i = 1; i < ndims; ++i) {
-      TORCH_CHECK(input.size(i) > 0,
-        "fractional_max_pool3d_out_cuda_template(): ",
-        "Expected input to have non-zero size for non-batch dimensions, but got",
-        input.sizes(), " with dimension ", i, " being empty.");
-    }
-
     if (ndims == 5) {
       numBatch = input.size(0);
       planeDim++;
@@ -190,34 +176,6 @@ void fractional_max_pool3d_out_cuda_template(
     int64_t inputT = input.size(dimt);
     int64_t inputH = input.size(dimh);
     int64_t inputW = input.size(dimw);
-
-    TORCH_CHECK(
-      outputT + poolSizeT - 1 < inputT,
-      "fractional_max_pool3d_out_cuda_template(): ",
-      "pool time (", poolSizeT, ") too large relative to input time (",
-      inputT, ")");
-    TORCH_CHECK(
-      outputH + poolSizeH - 1 < inputH,
-      "fractional_max_pool3d_out_cuda_template(): ",
-      "pool height (", poolSizeH, ") too large relative to input height (",
-      inputH, ")");
-    TORCH_CHECK(
-      outputW + poolSizeW - 1 < inputW,
-      "fractional_max_pool3d_out_cuda_template(): ",
-      "pool width (", poolSizeW, ") too large relative to input width (",
-      inputW, ")");
-
-    if (ndims == 4) {
-      /* resize output */
-      output.resize_({numPlanes, outputT, outputH, outputW});
-      /* indices will contain the locations for each output point */
-      indices.resize_({numPlanes, outputT, outputH, outputW});
-    } else {
-      /* resize output */
-      output.resize_({numBatch, numPlanes, outputT, outputH, outputW});
-      /* indices will contain the locations for each output point */
-      indices.resize_({numBatch, numPlanes, outputT, outputH, outputW});
-    }
 
     auto output_ = output;
     auto indices_ = indices;
@@ -256,7 +214,7 @@ void fractional_max_pool3d_out_cuda_template(
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
     );
-  }
+}
 
 void fractional_max_pool3d_backward_out_cuda_template(
   Tensor& gradInput,
@@ -349,41 +307,6 @@ void fractional_max_pool3d_backward_out_cuda_template(
   }
 
 }// namespace
-
-std::tuple<Tensor&, Tensor&> fractional_max_pool3d_out_cuda(const at::Tensor& input,
-   IntArrayRef pool_size,
-   IntArrayRef output_size,
-   const at::Tensor& randomSamples,
-   at::Tensor& output,
-   at::Tensor& indices) {
-   fractional_max_pool3d_out_cuda_template(
-     output,
-     indices,
-     input,
-     pool_size,
-     output_size,
-     randomSamples
-   );
-   return std::tuple<Tensor&, Tensor&>(output, indices);
- }
-
-std::tuple<Tensor, Tensor> fractional_max_pool3d_cuda(
-  const at::Tensor& input,
-  IntArrayRef pool_size,
-  IntArrayRef output_size,
-  const at::Tensor& randomSamples) {
-    Tensor output = at::empty({0}, input.options());
-    Tensor indices = at::empty({0}, input.options().dtype(kLong));
-    fractional_max_pool3d_out_cuda_template(
-      output,
-      indices,
-      input,
-      pool_size,
-      output_size,
-      randomSamples
-    );
-    return std::tuple<Tensor, Tensor>(output, indices);
-  }
 
 Tensor& fractional_max_pool3d_backward_out_cuda(const at::Tensor& gradOutput_,
   const at::Tensor& input,
