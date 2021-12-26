@@ -11,10 +11,10 @@ namespace at {
 
 namespace meta {
 TORCH_META_FUNC(fractional_max_pool3d)(
-  const Tensor& input_,
+  const at::Tensor& input_,
   IntArrayRef pool_size,
   IntArrayRef output_size,
-  const Tensor& randomSamples
+  const at::Tensor& randomSamples
 ) {
   TORCH_CHECK(
       pool_size.size() == 3,
