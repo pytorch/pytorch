@@ -62,11 +62,13 @@ cc_library(
 
 cc_library(
     name = "c10",
-    srcs = glob([
+    srcs = [
+        "util/TypeCast.cpp",
+        "util/typeid.cpp",
+    ] + glob([
         "core/*.cpp",
         "core/impl/*.cpp",
         "mobile/*.cpp",
-        "util/*.cpp",
     ]) + if_cuda(
         glob([
             "cuda/*.cpp",
@@ -77,6 +79,7 @@ cc_library(
     deps = [
         ":headers",
         "@fmt",
+        "//c10/util:base",
     ] + if_cuda(
         ["@cuda"],
         [],

@@ -29,11 +29,10 @@ def define_targets(rules):
     )
 
     rules.exports_files(
+        glob(["*.h"]) + # for //c10:headers
         [
             "TypeCast.cpp",
-            "TypeCast.h",
             "typeid.cpp",
-            "typeid.h",
         ],
         visibility = ["//c10:__pkg__"],
     )
