@@ -63,7 +63,6 @@ cc_library(
     name = "c10",
     srcs = [
         "//c10/core:sources",
-        "//c10/util:sources",
     ] + glob([
         "mobile/*.cpp",
     ]) + if_cuda(
@@ -77,7 +76,9 @@ cc_library(
         ":headers",
         "@fmt",
         "//c10/core:ScalarType",
+        "//c10/util:TypeCast",
         "//c10/util:base",
+        "//c10/util:typeid",
     ] + if_cuda(
         ["@cuda"],
         [],
