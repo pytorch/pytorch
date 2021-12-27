@@ -28,9 +28,19 @@ def define_targets(rules):
         }),
     )
 
-    rules.exports_files(
-        glob(["*.h"]) + # for //c10:headers
-        [
+    rules.filegroup(
+        name = "headers",
+        srcs = rules.glob(
+            ["*.h"],
+            exclude = [
+            ],
+        ),
+        visibility = ["//c10:__pkg__"],
+    )
+
+    rules.filegroup(
+        name = "sources",
+        srcs = [
             "TypeCast.cpp",
             "typeid.cpp",
         ],
