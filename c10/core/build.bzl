@@ -13,6 +13,18 @@ def define_targets(rules):
     )
 
     rules.cc_library(
+        name = "alloc_cpu",
+        srcs = ["impl/alloc_cpu.cpp"],
+        hdrs = ["impl/alloc_cpu.h"],
+        visibility = ["//visibility:public"],
+        deps = [
+            ":alignment",
+            "//c10/macros:macros",
+            "//c10/util:base",
+        ],
+    )
+
+    rules.cc_library(
         name = "base",
         srcs = rules.glob(
             [
