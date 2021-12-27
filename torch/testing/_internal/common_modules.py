@@ -14,7 +14,6 @@ from torch.testing._internal.common_utils import (
     freeze_rng_state, set_single_threaded_if_parallel_tbb)
 from types import ModuleType
 from typing import List, Tuple, Type, Set, Dict
-import unittest
 
 
 # List of all namespaces containing modules to test.
