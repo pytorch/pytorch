@@ -6,6 +6,36 @@ def define_targets(rules):
         deps = ["//c10/util:base"],
     )
 
+    rules.cc_library(
+        name = "base",
+        srcs = rules.glob(
+            [
+                "*.cpp",
+                "impl/*.cpp",
+            ],
+            exclude = [
+                "CPUAllocator.cpp",
+            ],
+        ),
+        hdrs = rules.glob(
+            [
+                "*.h",
+                "impl/*.h",
+            ],
+            exclude = [
+                "CPUAllocator.h",
+            ],
+        ),
+        visibility = ["//visibility:public"],
+        deps = [
+            ":ScalarType",
+            "//c10/macros:macros",
+            "//c10/util:TypeCast",
+            "//c10/util:base",
+            "//c10/util:typeid",
+        ],
+    )
+
     rules.filegroup(
         name = "headers",
         srcs = rules.glob(
@@ -21,13 +51,6 @@ def define_targets(rules):
 
     rules.filegroup(
         name = "sources",
-        srcs = rules.glob(
-            [
-                "*.cpp",
-                "impl/*.cpp",
-            ],
-            exclude = [
-            ],
-        ),
+        srcs = ["CPUAllocator.cpp"],
         visibility = ["//c10:__pkg__"],
     )

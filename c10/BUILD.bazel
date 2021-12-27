@@ -76,6 +76,7 @@ cc_library(
         ":headers",
         "@fmt",
         "//c10/core:ScalarType",
+        "//c10/core:base",
         "//c10/util:TypeCast",
         "//c10/util:base",
         "//c10/util:typeid",
