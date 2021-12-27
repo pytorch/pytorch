@@ -6760,15 +6760,12 @@ else:
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             ind.index_copy_(0, ind.clone(), ind)
 
-    @expectedFailureMeta  # Warning not triggered
     @onlyNativeDeviceTypes
     def test_index_fill_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
-        y = torch.rand((6,), device=device)
         ind = torch.tensor([2, 1, 0], device=device)
-        value = torch.rand((3,), device=device)
 
-        with self.assertWarnsRegex(UserWarning, "index_fill_ on expanded tensors"):
+        with self.assertWarnsRegex(UserWarning, "index_fill on expanded tensors"):
             x.index_fill_(0, ind, 1.0)
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             ind.index_fill_(0, ind, 0)
