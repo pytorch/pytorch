@@ -167,6 +167,15 @@ Probability distributions - torch.distributions
     :undoc-members:
     :show-inheritance:
 
+:hidden:`InverseWishart`
+~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.distributions.inverse_wishart
+.. autoclass:: InverseWishart
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
 :hidden:`Kumaraswamy`
 ~~~~~~~~~~~~~~~~~~~~~
 
