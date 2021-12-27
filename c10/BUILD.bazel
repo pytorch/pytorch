@@ -39,10 +39,9 @@ header_template_rule(
 cc_library(
     name = "headers",
     hdrs = [
+        "//c10/core:headers",
         "//c10/util:headers",
     ] + glob([
-        "core/*.h",
-        "core/impl/*.h",
         "cuda/*.h",
         "cuda/impl/*.h",
         "mobile/*.h",
@@ -63,10 +62,9 @@ cc_library(
 cc_library(
     name = "c10",
     srcs = [
+        "//c10/core:sources",
         "//c10/util:sources",
     ] + glob([
-        "core/*.cpp",
-        "core/impl/*.cpp",
         "mobile/*.cpp",
     ]) + if_cuda(
         glob([
@@ -78,6 +76,7 @@ cc_library(
     deps = [
         ":headers",
         "@fmt",
+        "//c10/core:ScalarType",
         "//c10/util:base",
     ] + if_cuda(
         ["@cuda"],
