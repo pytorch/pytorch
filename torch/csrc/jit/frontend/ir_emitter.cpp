@@ -2469,12 +2469,14 @@ struct to_ir {
   void emitRaise(const Raise& raise) {
     auto sv = emitSugaredExpr(raise.expr(), 1);
     Value* error_message = nullptr;
+    Value* qualified_class_name = nullptr;
 
     if (auto exception_instance =
             std::dynamic_pointer_cast<ExceptionMessageValue>(sv)) {
       // The typical case, an instance of the exception class was thrown:
       //    raise RuntimeError("error")
       error_message = exception_instance->getValue();
+      qualified_class_name = exception_instance->getQualifiedClassName();
     } else if (
         auto exception_class = std::dynamic_pointer_cast<ExceptionValue>(sv)) {
       // A bare exception was thrown so add an empty message. e.g.
@@ -2491,7 +2493,11 @@ struct to_ir {
       error_message = graph->insert(aten::str, {error_message});
     }
 
-    graph->insert(prim::RaiseException, {error_message}, {}, raise.range());
+    graph->insert(
+        prim::RaiseException,
+        {error_message, qualified_class_name},
+        {},
+        raise.range());
     exit_blocks.insert(environment_stack->block());
   }
 
@@ -5170,7 +5176,8 @@ std::unique_ptr<Function> CompilationUnit::define(
     const Self* self,
     const std::unordered_map<std::string, Function*>& function_table,
     bool shouldMangle,
-    CompilationUnit::FunctionType type) const {
+    CompilationUnit::FunctionType type,
+    c10::optional<size_t> operator_set_version) const {
   TORCH_INTERNAL_ASSERT(resolver);
   auto _resolver = resolver;
   if (!self) {
@@ -5202,8 +5209,11 @@ std::unique_ptr<Function> CompilationUnit::define(
       name = mangle(name);
     }
   }
-  auto fn = torch::make_unique<GraphFunction>(
-      std::move(name), std::make_shared<Graph>(), creator);
+
+  auto graph = std::make_shared<Graph>();
+  graph->set_op_version(operator_set_version);
+
+  auto fn = torch::make_unique<GraphFunction>(std::move(name), graph, creator);
   if (self) {
     // Register this as a method on `self`'s type
     if (type == CompilationUnit::FunctionType::Hook) {
@@ -5224,7 +5234,8 @@ std::vector<Function*> CompilationUnit::define(
     const std::vector<Def>& definitions,
     const std::vector<ResolverPtr>& defResolvers,
     const Self* self,
-    bool shouldMangle) {
+    bool shouldMangle,
+    c10::optional<size_t> operator_set_version) {
   TORCH_INTERNAL_ASSERT(definitions.size() == defResolvers.size());
   TORCH_INTERNAL_ASSERT(properties.size() == propResolvers.size());
   std::vector<Function*> functions;
@@ -5266,7 +5277,8 @@ std::vector<Function*> CompilationUnit::define(
         self,
         function_table,
         shouldMangle,
-        CompilationUnit::FunctionType::Method);
+        CompilationUnit::FunctionType::Method,
+        operator_set_version);
 
     record_function(std::move(fn));
   }
