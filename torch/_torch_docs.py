@@ -1606,7 +1606,7 @@ the input tensor.
 
 .. note::
 
-    This function may return less then the specified number of chunks!
+    This function may return less than the specified number of chunks!
 
 .. seealso::
 
