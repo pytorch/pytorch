@@ -25,6 +25,7 @@ from ..qconfig_dict_utils import (
 from .qconfig_utils import (
     generate_qconfig_map,
     update_qconfig_for_fusion,
+    get_standalone_module_configs,
 )
 
 from .quantization_patterns import (
@@ -197,29 +198,31 @@ def is_pattern_dtype_config_supported_by_backend(
             return True
     return False
 
-def get_standalone_module_configs(
+def prepare_get_standalone_module_configs(
     node: Node,
     modules: Dict[str, torch.nn.Module],
     prepare_custom_config_dict: Dict[str, Any],
     qconfig: QConfigAny,
-) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
     """
     Returns the standalone module qconfig_dict and prepare_config_dict
     for `node`, assuming that the module pointed to by `node` is
     a standalone modules.
     """
-    standalone_module = modules[node.target]  # type: ignore[index]
-    standalone_module_name_configs = \
-        prepare_custom_config_dict.get("standalone_module_name", [])
-    standalone_module_class_configs = \
-        prepare_custom_config_dict.get("standalone_module_class", [])
-    class_config_map = {x[0]: (x[1], x[2]) for x in standalone_module_class_configs}
-    name_config_map = {x[0]: (x[1], x[2]) for x in standalone_module_name_configs}
-    config = class_config_map.get(type(standalone_module), (None, None))
-    config = name_config_map.get(node.target, config)
-    sm_qconfig_dict = {"": qconfig} if config[0] is None else config[0]
-    sm_prepare_config_dict = {} if config[1] is None else config[1]
-    return sm_qconfig_dict, sm_prepare_config_dict
+    standalone_module_name = str(node.target)
+    standalone_module_type = type(modules[standalone_module_name])  # type: ignore[index]
+    sm_qconfig_dict, sm_prepare_config_dict, sm_backend_config_dict = \
+        get_standalone_module_configs(standalone_module_name, standalone_module_type, prepare_custom_config_dict)
+    # fallback to use parent module's qconfig if user didn't specify qconfig dict
+    if sm_qconfig_dict is None:
+        sm_qconfig_dict = {"": qconfig}
+    if sm_prepare_config_dict is None:
+        sm_prepare_config_dict = {}
+    # TODO: sm_backend_config_dict can fallback to use parent's backend_config_dict
+    # as well, this can be added later
+    if sm_backend_config_dict is None:
+        sm_backend_config_dict = {}
+    return sm_qconfig_dict, sm_prepare_config_dict, sm_backend_config_dict
 
 def qat_swap_modules(
         root: torch.nn.Module,
@@ -459,8 +462,8 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
 
     else:
         # custom flow for standalone modules
-        _sm_qconfig_dict, sm_prepare_config_dict = \
-            get_standalone_module_configs(
+        _sm_qconfig_dict, sm_prepare_config_dict, _sm_backend_config_dict = \
+            prepare_get_standalone_module_configs(
                 node, modules, prepare_custom_config_dict, qconfig)
 
         sm_input_quantized_idxs = \
@@ -621,6 +624,7 @@ def maybe_insert_output_observer_for_node(
     node_name_to_target_dtype: Dict[str, Dict[str, Optional[torch.dtype]]],
     matched_pattern: Any,
     qhandler: Optional[QuantizeHandler],
+    is_qat: bool,
 ) -> Optional[Node]:
     """
     If `node` needs an output observer, creates it, inserts it into `graph`
@@ -643,7 +647,7 @@ def maybe_insert_output_observer_for_node(
     dtype = node_name_to_target_dtype[node.name]["output_activation_dtype"]
     should_insert_observer = \
         qhandler.should_insert_observer_for_output(
-            qconfig, model.training) and dtype not in (torch.bool, None, torch.float)
+            qconfig, is_qat) and dtype not in (torch.bool, None, torch.float)
     # TODO(future PR): move the following logic to
     # should_insert_observer_for_output
     should_insert_observer = should_insert_observer and \
@@ -660,7 +664,7 @@ def maybe_insert_output_observer_for_node(
             act_post_process_ctr = qhandler.get_activation_ctr(
                 qconfig,
                 matched_pattern,
-                model.training)
+                is_qat)
         observer = act_post_process_ctr()
         new_obs = insert_observer(node, node, observer, model, modules, graph)
         return new_obs
@@ -941,6 +945,7 @@ def insert_observers_for_model(
     output_quantized_idxs: List[int],
     backend_config_dict: Optional[Dict[str, Any]],
     observed_node_names: Set[str],
+    is_qat: bool,
 ) -> Optional[Node]:
     """
     Inserts observers, using the following high level algorithm:
@@ -1118,7 +1123,7 @@ def insert_observers_for_model(
                         # this returns the new observer node if it was needed
                         maybe_output_obs_node = maybe_insert_output_observer_for_node(
                             node, model, modules, graph, matches,
-                            node_name_to_target_dtype, pattern, qhandler)
+                            node_name_to_target_dtype, pattern, qhandler, is_qat)
                         if maybe_output_obs_node is not None:
                             # Update users of original node to use the output observer
                             # instead. For example, change
@@ -1192,15 +1197,15 @@ def run_prepare_fx_on_standalone_modules(
         elif not isinstance(qhandler, StandaloneModuleQuantizeHandler):
             continue
 
-        sm_qconfig_dict, sm_prepare_config_dict = \
-            get_standalone_module_configs(
+        sm_qconfig_dict, sm_prepare_config_dict, sm_backend_config_dict = \
+            prepare_get_standalone_module_configs(
                 root_node, modules, prepare_custom_config_dict, qconfig)
 
         standalone_module = modules[root_node.target]
         prepare = \
             torch.ao.quantization.quantize_fx._prepare_standalone_module_fx  # type: ignore[attr-defined]
         observed_standalone_module = \
-            prepare(standalone_module, sm_qconfig_dict, sm_prepare_config_dict)
+            prepare(standalone_module, sm_qconfig_dict, sm_prepare_config_dict, sm_backend_config_dict)
         preserved_attributes = \
             set(sm_prepare_config_dict.get("preserved_attributes", []))
         observed_standalone_module = ObservedStandaloneGraphModule(
@@ -1219,7 +1224,7 @@ def save_state(
     prepare_custom_config_dict: Dict[str, Any],
     equalization_qconfig_map: Dict[str, Any],
     qconfig_dict: Dict[str, Dict[Any, Any]],
-    is_training: bool,
+    is_qat: bool,
     observed_node_names: Set[str],
 ) -> None:
     observed._patterns = patterns  # type: ignore[assignment]
@@ -1229,7 +1234,7 @@ def save_state(
     observed._node_name_to_scope = node_name_to_scope  # type: ignore[assignment]
     observed._equalization_qconfig_map = equalization_qconfig_map  # type: ignore[assignment]
     observed._qconfig_dict = qconfig_dict  # type: ignore[assignment]
-    observed._is_training = is_training  # type: ignore[assignment]
+    observed._is_qat = is_qat  # type: ignore[assignment]
     observed._observed_node_names = observed_node_names  # type: ignore[assignment]
 
 def prepare(
@@ -1239,7 +1244,8 @@ def prepare(
         prepare_custom_config_dict: Optional[Dict[str, Any]] = None,
         equalization_qconfig_dict: Optional[Dict[str, Any]] = None,
         backend_config_dict: Optional[Dict[str, Any]] = None,
-        is_standalone_module: bool = False) -> ObservedGraphModule:
+        is_standalone_module: bool = False,
+        is_qat: bool = False) -> ObservedGraphModule:
     """ standalone_module means it a submodule that is not inlined in
     parent module, and will be quantized separately as one unit.
 
@@ -1309,7 +1315,7 @@ def prepare(
     # TODO: support regex as well
     propagate_qconfig_(model, flattened_qconfig_dict)
 
-    if model.training:
+    if is_qat:
         additional_qat_module_mapping = prepare_custom_config_dict.get(
             "additional_qat_module_mapping", {})
         qat_swap_modules(model, additional_qat_module_mapping)
@@ -1365,10 +1371,11 @@ def prepare(
         input_quantized_idxs,
         output_quantized_idxs,
         backend_config_dict,
-        observed_node_names)
+        observed_node_names,
+        is_qat)
 
     save_state(model, qconfig_map, node_name_to_scope, patterns,
-               prepare_custom_config_dict, equalization_qconfig_map, qconfig_dict, model.training, observed_node_names)
+               prepare_custom_config_dict, equalization_qconfig_map, qconfig_dict, is_qat, observed_node_names)
 
     preserved_attributes = set(prepare_custom_config_dict.get("preserved_attributes", []))
     model = ObservedGraphModule(model, model.graph, preserved_attributes)
