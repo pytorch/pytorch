@@ -761,10 +761,21 @@
   index: non_differentiable
   result: self_t.index_copy_(dim, index, source_t)
 
+- name: index_fill.int_Scalar(Tensor self, int dim, Tensor index, Scalar value) -> Tensor
+  self: grad.index_fill(dim, index, 0)
+  index: non_differentiable
+  result: at::index_fill(self_t, dim, index, 0)
+
 - name: index_fill_.int_Scalar(Tensor(a!) self, int dim, Tensor index, Scalar value) -> Tensor(a!)
   self: grad.clone().index_fill_(dim, index, 0)
   index: non_differentiable
   result: self_t.index_fill_(dim, index, 0)
+
+- name: index_fill.int_Tensor(Tensor self, int dim, Tensor index, Tensor value) -> Tensor
+  self: grad.index_fill(dim, index, 0)
+  value: grad.index_select(dim, std::get<0>(at::_unique(index, /*sorted=*/false))).sum()
+  index: non_differentiable
+  result: at::index_fill(self_t, dim, index, value_t)
 
 - name: index_fill_.int_Tensor(Tensor(a!) self, int dim, Tensor index, Tensor value) -> Tensor(a!)
   self: grad.clone().index_fill_(dim, index, 0)

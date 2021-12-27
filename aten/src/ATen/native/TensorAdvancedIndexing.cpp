@@ -236,6 +236,56 @@ TORCH_PRECOMPUTE_META_FUNC(index_add)
   return TORCH_PRECOMPUTE_STRUCT(index_add)().set_dim(dim);
 }
 
+template <typename Meta>
+int64_t index_fill_meta_impl(
+    Meta& meta,
+    const Tensor& self,
+    int64_t dim,
+    const Tensor& index,
+    const Scalar& value) {
+
+  at::native::scatter_gather_dtype_check("index_fill", self, index);
+  at::assert_no_overlap(self, index);
+  if (at::has_internal_overlap(self) == at::MemOverlap::YES) {
+    TORCH_WARN(
+      "Use of index_fill on expanded tensors is deprecated. "
+      "Please clone() the tensor before performing this operation. "
+      "This also applies to advanced indexing e.g. tensor[mask] = scalar");
+  }
+  if (!self.is_complex() && value.isComplex()) {
+    TORCH_CHECK(false, "index_fill(): Converting complex Scalar to non-complex type is not supported");
+  }
+  TORCH_CHECK(index.dim() <= 1, "Index has to be a vector/scalar");
+
+  // auto& result = meta.maybe_get_output(0);
+  // Should we check assert_no_internal_overlap on result
+  // as it is done for index_add ?
+  meta.set_output(self.sizes(), self.options());
+
+  // TODO: add TI checks to meta as in index_add
+
+  // Precompute and return dim
+  return at::maybe_wrap_dim(dim, (self.dim() == 0) ? 1 : self.dim());
+}
+
+TORCH_PRECOMPUTE_META_FUNC2(index_fill, int_Scalar)
+(const Tensor& self, int64_t dim, const Tensor& index, const Scalar& value) {
+  at::NoNamesGuard guard;
+  dim = index_fill_meta_impl(*this, self, dim, index, value);
+  return TORCH_PRECOMPUTE_STRUCT2(index_fill, int_Scalar)().set_dim(dim);
+}
+
+TORCH_PRECOMPUTE_META_FUNC2(index_fill, int_Tensor)
+(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& value) {
+
+  TORCH_CHECK(value.dim() == 0, "index_fill_ only supports a 0-dimensional value tensor, but got tensor "
+      "with ", value.dim(), " dimension(s).");
+
+  at::NoNamesGuard guard;
+  dim = index_fill_meta_impl(*this, self, dim, index, value.item());
+  return TORCH_PRECOMPUTE_STRUCT2(index_fill, int_Tensor)().set_dim(dim);
+}
+
 } // namespace meta
 
 namespace native {
@@ -1091,93 +1141,6 @@ Tensor index_select_backward(const Tensor& grad, IntArrayRef self_sizes, int64_t
   return at::zeros(self_sizes, grad.options()).index_add_(dim, index, grad);
 }
 
-Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, const Scalar& source) {
-  at::NoNamesGuard guard;
-
-  TORCH_CHECK_INDEX(
-    index.scalar_type() == ScalarType::Long,
-    "index_fill_(): Expected dtype int64 for index.");
-
-  at::assert_no_overlap(self, index);
-  if (at::has_internal_overlap(self) == at::MemOverlap::YES) {
-    TORCH_WARN(
-      "Use of index_fill_ on expanded tensors is deprecated. "
-      "Please clone() the tensor before performing this operation. "
-      "This also applies to advanced indexing e.g. tensor[mask] = scalar");
-  }
-
-  if (!self.is_complex() && source.isComplex()) {
-    TORCH_CHECK(false, "index_fill_(): Converting complex Scalar to non-complex type is not supported");
-  }
-
-  // Handle the case when `self` is 0-dim
-  Tensor self_nonzero_dim = (self.dim() == 0) ? self.unsqueeze(-1) : self;
-
-  dim = at::maybe_wrap_dim(dim, self_nonzero_dim);
-  TORCH_CHECK(index.dim() <= 1, "Index has to be a vector/scalar");
-
-  // Prepare `index` for TensorIterator.
-  // It is restrided to be broadcastable over `self` in TensorIterator.
-  auto index_sizes = std::vector<int64_t>(self_nonzero_dim.dim(), 1);
-  auto index_strides = std::vector<int64_t>(self_nonzero_dim.dim(), 0);
-  index_sizes[dim] = index.numel();
-  index_strides[dim] = (index.dim() > 0) ? index.stride(0) : 1; // `index` is 1d or scalar
-  auto index_restrided = index.as_strided(
-    index_sizes, index_strides);
-
-  // Prepare `self` for TensorIterator.
-  // Restride `self` to not advance in dimension `dim`.
-  // We do not use squash_dim here because `index` will
-  // need to advance in this dimension.
-  // Note that self_sizes[dim] is set to index.numel().
-  // This is done so that self_sizes[dim] and index_sizes[dim]
-  // match as required by TensorIterator (input shape should
-  // strictly broadcast over output shape, i.e.
-  // output.shape[i] >= input.shape[i] for i in range(dims)).
-  auto self_sizes = self_nonzero_dim.sizes().vec();
-  auto self_strides = self_nonzero_dim.strides().vec();
-  self_sizes[dim] = index.numel();
-  self_strides[dim] = 0;
-  auto self_restrided = self_nonzero_dim.as_strided(self_sizes, self_strides);
-
-  auto iter = TensorIteratorConfig()
-    // We do not check for overlap because `self` is restrided
-    // with zero stride. Zero strides trigger memory overlap assert
-    // within TensorIterator.
-    .set_check_mem_overlap(false)
-    .check_all_same_dtype(false)
-    .resize_outputs(false)
-    .add_output(self_restrided)
-    .add_input(index_restrided)
-    .build();
-
-  auto self_dim_size = (self_nonzero_dim.sizes())[dim];
-  auto self_dim_stride = (self_nonzero_dim.strides())[dim];
-  index_fill_stub(
-    iter.device_type(),
-    iter,
-    dim,
-    self_dim_size,
-    self_dim_stride,
-    source);
-
-  return self;
-}
-
-Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  TORCH_CHECK(source.dim() == 0, "index_fill_ only supports a 0-dimensional value tensor, but got tensor "
-      "with ", source.dim(), " dimension(s).");
-  return self.index_fill_(dim, index, source.item());
-}
-
-Tensor index_fill(const Tensor & self, int64_t dim, const Tensor & index, const Scalar& source) {
-  return self.clone(at::MemoryFormat::Preserve).index_fill_(dim, index, source);
-}
-
-Tensor index_fill(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  return self.clone(at::MemoryFormat::Preserve).index_fill_(dim, index, source);
-}
-
 // gather_out_cpu_cuda
 TORCH_IMPL_FUNC(gather_out)
 (const Tensor& self, int64_t dim, const Tensor& index, bool sparse_grad, const Tensor& result) {
@@ -1350,6 +1313,84 @@ TORCH_IMPL_FUNC(_scatter_reduce_structured_cpu)
       }
     }
   });
+}
+
+void index_fill_out_helper(
+    const Tensor& self,
+    int64_t dim,
+    const Tensor& index,
+    const Scalar& value,
+    const Tensor& out) {
+
+  if (index.numel() == 0) return;
+  if (!out.is_same(self)){
+    out.copy_(self);
+  }
+
+  // Handle the case when `self` is 0-dim
+  Tensor out_nonzero_dim = (out.dim() == 0) ? out.unsqueeze(-1) : out;
+
+  // Prepare `index` for TensorIterator.
+  // It is restrided to be broadcastable over `self` in TensorIterator.
+  auto index_sizes = std::vector<int64_t>(out_nonzero_dim.dim(), 1);
+  auto index_strides = std::vector<int64_t>(out_nonzero_dim.dim(), 0);
+  index_sizes[dim] = index.numel();
+  index_strides[dim] = (index.dim() > 0) ? index.stride(0) : 1; // `index` is 1d or scalar
+  auto index_restrided = index.as_strided(index_sizes, index_strides);
+
+  // Prepare `out` for TensorIterator.
+  // Restride `out` to not advance in dimension `dim`.
+  // We do not use squash_dim here because `index` will
+  // need to advance in this dimension.
+  // Note that out_sizes[dim] is set to index.numel().
+  // This is done so that out_sizes[dim] and index_sizes[dim]
+  // match as required by TensorIterator (input shape should
+  // strictly broadcast over output shape, i.e.
+  // output.shape[i] >= input.shape[i] for i in range(dims)).
+  auto out_sizes = out_nonzero_dim.sizes().vec();
+  auto out_strides = out_nonzero_dim.strides().vec();
+  out_sizes[dim] = index.numel();
+  out_strides[dim] = 0;
+  auto out_restrided = out_nonzero_dim.as_strided(out_sizes, out_strides);
+
+  auto iter = TensorIteratorConfig()
+    // We do not check for overlap because `self` is restrided
+    // with zero stride. Zero strides trigger memory overlap assert
+    // within TensorIterator.
+    .set_check_mem_overlap(false)
+    .check_all_same_dtype(false)
+    .resize_outputs(false)
+    .add_output(out_restrided)
+    .add_input(index_restrided)
+    .build();
+
+  auto out_dim_size = (out_nonzero_dim.sizes())[dim];
+  auto out_dim_stride = (out_nonzero_dim.strides())[dim];
+  index_fill_stub(
+    iter.device_type(),
+    iter,
+    dim,
+    out_dim_size,
+    out_dim_stride,
+    value);
+}
+
+TORCH_IMPL_FUNC(index_fill_int_scalar_out)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Scalar& value,
+ const Tensor& out) {
+  index_fill_out_helper(self, dim, index, value, out);
+}
+
+TORCH_IMPL_FUNC(index_fill_int_tensor_out)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Tensor& value,
+ const Tensor& out) {
+  index_fill_out_helper(self, dim, index, value.item(), out);
 }
 
 Tensor masked_scatter(const Tensor & self, const Tensor & mask, const Tensor & source) {

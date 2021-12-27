@@ -1875,7 +1875,8 @@ selecting the indices in the order given in :attr:`index`.
 Args:
     dim (int): dimension along which to index
     index (LongTensor): indices of :attr:`self` tensor to fill in
-    value (float): the value to fill with
+    value (float or Tensor): the value to fill with. If Tensor, it should
+        be a 0-dimensional value tensor.
 
 Example::
     >>> x = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]], dtype=torch.float)
