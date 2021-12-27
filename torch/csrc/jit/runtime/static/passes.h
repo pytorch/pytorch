@@ -23,9 +23,7 @@ TORCH_API void EnableStaticRuntimeLayerNorm(
 TORCH_API void RemoveImmutableInputDictLookups(
     std::shared_ptr<torch::jit::Graph>& graph);
 
-TORCH_API bool HasInplaceOp(
-    std::shared_ptr<Graph>& graph,
-    const AliasDb& alias_db);
+TORCH_API bool graphHasOp(std::shared_ptr<Graph>& graph, const char* op_name);
 
 TORCH_API bool forwardHasOp(const Module& module, const char* op_name);
 
