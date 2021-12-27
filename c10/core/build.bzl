@@ -7,6 +7,12 @@ def define_targets(rules):
     )
 
     rules.cc_library(
+        name = "alignment",
+        hdrs = ["alignment.h"],
+        visibility = ["//visibility:public"],
+    )
+
+    rules.cc_library(
         name = "base",
         srcs = rules.glob(
             [
@@ -44,6 +50,7 @@ def define_targets(rules):
                 "impl/*.h",
             ],
             exclude = [
+                "alignment.h",
             ],
         ),
         visibility = ["//c10:__pkg__"],
