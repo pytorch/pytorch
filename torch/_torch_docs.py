@@ -8497,7 +8497,7 @@ Slices the :attr:`input` tensor along the selected dimension at the given index.
 This function returns a view of the original tensor with the given dimension removed.
 
 Args:
-    {input} (Tensor)
+    {input}
     dim (int): the dimension to slice
     index (int): the index to select with
 
@@ -8506,7 +8506,7 @@ Args:
     :meth:`select` is equivalent to slicing. For example,
     ``tensor.select(0, index)`` is equivalent to ``tensor[index]`` and
     ``tensor.select(2, index)`` is equivalent to ``tensor[:,:,index]``.
-""")
+""".format(**common_args)))
 
 add_docstr(torch.select_scatter,
            r"""
@@ -8517,7 +8517,7 @@ This function returns a tensor with fresh storage; it does not create a view.
 
 
 Args:
-    {input} (Tensor)
+    {input}
     src (Tensor): The tensor to embed into :attr:`input`
     dim (int): the dimension to insert the slice into.
     index (int): the index to select with
@@ -8535,7 +8535,7 @@ Example::
     >>> a.select_scatter(b, 0, 0)
     tensor([[1., 1.],
             [0., 0.]])
-""")
+""".format(**common_args)))
 
 add_docstr(torch.slice_scatter,
            r"""
@@ -8547,7 +8547,7 @@ This function returns a tensor with fresh storage; it does not create a view.
 
 
 Args:
-    {input} (Tensor)
+    {input}
     src (Tensor): The tensor to embed into :attr:`input`
     dim (int): the dimension to insert the slice into
     start (Optional[int]): the start index of where to insert the slice
@@ -8578,7 +8578,7 @@ Example::
             [0., 0., 1., 0., 1., 0., 0., 0.],
             [0., 0., 1., 0., 1., 0., 0., 0.],
             [0., 0., 1., 0., 1., 0., 0., 0.]])
-""")
+""".format(**common_args)))
 
 add_docstr(torch.set_flush_denormal,
            r"""
