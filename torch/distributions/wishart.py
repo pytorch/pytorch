@@ -262,7 +262,7 @@ class Wishart(ExponentialFamily):
             (p + 1) * self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
             + p * (p + 1) * _log_2 / 2
             + torch.mvlgamma(nu / 2, p=p)
-            - _mvdigamma(nu / 2, p=p) * (nu - p - 1) / 2
+            - (nu - p - 1) / 2 * _mvdigamma(nu / 2, p=p)
             + nu * p / 2
         )
 
