@@ -22,13 +22,24 @@ class DLDeviceType(enum.IntEnum):
 
 torch._C._add_docstr(to_dlpack, r"""to_dlpack(tensor) -> PyCapsule
 
-Returns a DLPack representing the tensor.
+Returns an opaque object (a "DLPack capsule") representing the tensor.
+
+    .. note::
+      ``to_dlpack`` is the old-style DLPack interface. The capsule it returns
+      cannot be used for anything in Python other than use it as input to
+      ``from_dlpack``. The more idiomatic use of DLPack is to call
+      ``from_dlpack`` directly on the tensor object - this works when that
+      object has a ``__dlpack__`` method, which PyTorch and most other
+      libraries indeed have now.
+
+    .. warning::
+      Only call ``from_dlpack`` once per capsule produced with ``to_dlpack``.
+      Its behavior when used on the same capsule multiple times is undefined.
 
 Args:
     tensor: a tensor to be exported
 
-The DLPack shares the tensors memory.
-Note that each DLPack can only be consumed once.
+The DLPack shares the tensor's memory.
 """)
 
 # TODO: add a typing.Protocol to be able to tell Mypy that only objects with
@@ -36,19 +47,48 @@ Note that each DLPack can only be consumed once.
 def from_dlpack(ext_tensor: Any) -> torch.Tensor:
     """from_dlpack(ext_tensor) -> Tensor
 
-    Convers a tensor from a external library into a ``torch.Tensor``
+    Converts a tensor from a external library into a ``torch.Tensor``
     by means of the ``__dlpack__`` protocol.
 
-    The tensor will share the memory with the object represented
-    in the DLPack.
-
-    .. warning::
-      Only call from_dlpack once per capsule. Its behavior when used
-      on the same capsule multiple times is undefined.
+    The returned PyTorch tensor will share the memory with the input tensor
+    (which may have come from another library). Note that in-place operations
+    will therefore also affect the data of the input tensor. This may lead to
+    unexpected issues (e.g., other libraries may have read-only flags or
+    immutable data structures), so the user should only do this if they know
+    for sure that this is fine.
 
     Args:
-        ext_tensor (object with __dlpack__ attribute or DLPack capsule):
+        ext_tensor (object with ``__dlpack__`` attribute or DLPack capsule):
             The tensor or DLPack capsule to convert.
+
+    Examples::
+
+        >>> import torch.utils.dlpack
+        >>> t = torch.arange(4)
+
+        # Convert a tensor directly (PyTorch >= 1.10)
+        >>> t2 = torch.utils.dlpack.from_dlpack(t)
+        >>> t2[:2] = -1  # show that memory is shared
+        >>> t2
+        tensor([-1, -1,  2,  3])
+        >>> t
+        tensor([-1, -1,  2,  3])
+
+        # The old-style DLPack usage, with an intermediate capsule object
+        >>> capsule = torch.utils.dlpack.to_dlpack(t)
+        >>> capsule
+        <capsule object "dltensor" at 0x7f6017d14300>
+        >>> t3 = torch.utils.dlpack.from_dlpack(capsule)
+        >>> t3
+        tensor([-1, -1,  2,  3])
+        >>> t3[0] = -9  # now we're sharing memory between 3 tensors
+        >>> t3
+        tensor([-9, -1,  2,  3])
+        >>> t2
+        tensor([-9, -1,  2,  3])
+        >>> t
+        tensor([-9, -1,  2,  3])
+
     """
     if hasattr(ext_tensor, '__dlpack__'):
         device = ext_tensor.__dlpack_device__()
