@@ -241,56 +241,6 @@ class TestMkldnn(TestCase):
     def test_conv3d(self):
         self._test_conv_base(dim=3)
 
-    def _test_conv2d_nhwc_base(self, dtype):
-        conv_module = torch.nn.Conv2d
-        input_shapes = (224, 224)
-        options = itertools.product([True, False], [True, False], [1, 2], [1, 4])
-        for train, bias, dilation, groups in options:
-            N = torch.randint(3, 10, (1,)).item()
-            M = torch.randint(1, 3, (1,)).item() * groups
-            C = torch.randint(1, 3, (1,)).item() * groups
-            x_shape = (N, C) + input_shapes
-            x = torch.randn(x_shape, dtype=dtype)
-            # conv1: mkldnn conv2d in contiguous memory format (nchw)
-            # conv2: mkldnn conv2d in channels last memory format (nhwc)
-            conv1 = conv_module(in_channels=C,
-                                out_channels=M,
-                                kernel_size=3,
-                                stride=2,
-                                padding=1,
-                                dilation=dilation,
-                                bias=bias,
-                                groups=groups).to(dtype=dtype)
-            conv2 = copy.deepcopy(conv1).to(memory_format=torch.channels_last)
-            x1 = x.clone()
-            x2 = x.clone().to(memory_format=torch.channels_last)
-            if train:
-                x1.requires_grad_()
-                x2.requires_grad_()
-            y1 = conv1(x1)
-            y2 = conv2(x2)
-            self.assertEqual(y1, y2)
-            if train:
-                y1.sum().backward()
-                y2.sum().backward()
-                self.assertTrue(x2.grad.is_contiguous(memory_format=torch.channels_last))
-                self.assertEqual(conv1.weight.grad,
-                                 conv2.weight.grad,
-                                 atol=1e-3,
-                                 rtol=1e-3)
-                if bias:
-                    self.assertEqual(conv1.bias.grad, conv2.bias.grad)
-                self.assertEqual(x1.grad, x2.grad)
-
-    def test_conv2d_nhwc(self):
-        self._test_conv2d_nhwc_base(dtype=torch.float32)
-
-    @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
-    def test_conv2d_nhwc_bf16(self):
-        # when has_bf16_support() returns false, bf16 CPU conv will fall back to thnn impl
-        if has_bf16_support():
-            self._test_conv2d_nhwc_base(dtype=torch.bfloat16)
-
     @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def _test_conv_bf16_base(self, dim):
         conv_module = {1: torch.nn.Conv1d, 2: torch.nn.Conv2d, 3: torch.nn.Conv3d}
@@ -332,6 +282,131 @@ class TestMkldnn(TestCase):
 
     def test_conv3d_bf16(self):
         self._test_conv_bf16_base(dim=3)
+
+    def _test_conv_nhwc_base(self, conv_module, dtype):
+        input_shapes = (55, 55)
+        options = itertools.product([True, False], [True, False], [1, 2], [1, 4])
+        for train, bias, dilation, groups in options:
+            N = torch.randint(3, 10, (1,)).item()
+            M = torch.randint(1, 3, (1,)).item() * groups
+            C = torch.randint(1, 3, (1,)).item() * groups
+            x_shape = (N, C) + input_shapes
+            x = torch.randn(x_shape, dtype=dtype)
+            # conv1: mkldnn conv in contiguous memory format (nchw)
+            # conv2: mkldnn conv in channels last memory format (nhwc)
+            conv1 = conv_module(in_channels=C,
+                                out_channels=M,
+                                kernel_size=3,
+                                stride=2,
+                                padding=1,
+                                dilation=dilation,
+                                bias=bias,
+                                groups=groups).to(dtype=dtype)
+            conv2 = copy.deepcopy(conv1).to(memory_format=torch.channels_last)
+            x1 = x.clone()
+            x2 = x.clone().to(memory_format=torch.channels_last)
+            if train:
+                x1.requires_grad_()
+                x2.requires_grad_()
+            y1 = conv1(x1)
+            y2 = conv2(x2)
+            self.assertEqual(y1, y2)
+            if train:
+                y1.sum().backward()
+                y2.sum().backward()
+                self.assertTrue(x2.grad.is_contiguous(memory_format=torch.channels_last))
+                self.assertEqual(conv1.weight.grad,
+                                 conv2.weight.grad,
+                                 atol=1e-3,
+                                 rtol=1e-3)
+                if bias:
+                    self.assertEqual(conv1.bias.grad, conv2.bias.grad)
+                self.assertEqual(x1.grad, x2.grad)
+
+    def test_conv2d_nhwc(self):
+        self._test_conv_nhwc_base(torch.nn.Conv2d, dtype=torch.float32)
+
+    @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
+    def test_conv2d_nhwc_bf16(self):
+        # when has_bf16_support() returns false, bf16 CPU conv will fall back to thnn impl
+        if has_bf16_support():
+            self._test_conv_nhwc_base(torch.nn.Conv2d, dtype=torch.bfloat16)
+
+    def test_conv_transpose2d_nhwc(self):
+        self._test_conv_nhwc_base(torch.nn.ConvTranspose2d, dtype=torch.float32)
+
+    @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
+    def test_conv_transpose2d_nhwc_bf16(self):
+        # when has_bf16_support() returns false, bf16 CPU conv will fall back to thnn impl
+        if has_bf16_support():
+            self._test_conv_nhwc_base(torch.nn.ConvTranspose2d, dtype=torch.bfloat16)
+
+
+    def _test_conv_transpose_base(self, dim):
+        conv_module = {
+            1: torch.nn.ConvTranspose1d,
+            2: torch.nn.ConvTranspose2d,
+            3: torch.nn.ConvTranspose3d
+        }
+        input_shapes = {1: (55,), 2: (28, 28), 3: (14, 14, 14)}
+        options = itertools.product([True, False], [True, False], [1, 2], [1, 4])
+        for train, bias, dilation, groups in options:
+            N = torch.randint(3, 10, (1,)).item()
+            M = torch.randint(1, 3, (1,)).item() * groups
+            C = torch.randint(1, 3, (1,)).item() * groups
+            x_shape = (N, C) + input_shapes[dim]
+            data = torch.randn(x_shape, dtype=torch.float32)
+            # conv: mkldnn tranpose conv fp32
+            # conv_ref: thnn transpose conv fp32
+            conv = conv_module[dim](in_channels=C,
+                                    out_channels=M,
+                                    kernel_size=3,
+                                    stride=1,
+                                    padding=1,
+                                    dilation=dilation,
+                                    bias=bias,
+                                    groups=groups).to(dtype=torch.float32)
+            x = data.clone()
+            x_ref = x.clone()
+            if train:
+                x.requires_grad_()
+                x_ref.requires_grad_()
+
+            conv_ref = copy.deepcopy(conv)
+            with torch.backends.mkldnn.flags(enabled=False):
+                y_ref = conv_ref(x_ref)
+                if train:
+                    y_ref.sum().backward()
+
+            y = conv(x)
+            if train:
+                y.sum().backward()
+
+            self.assertEqual(y, y_ref)
+            if train:
+                self.assertEqual(x.grad, x_ref.grad)
+                self.assertEqual(conv.weight.grad,
+                                 conv_ref.weight.grad,
+                                 atol=1e-3,
+                                 rtol=1e-3)
+                if bias:
+                    self.assertEqual(conv.bias.grad, conv_ref.bias.grad)
+
+            if has_bf16_support():
+                x_bf16 = data.to(dtype=torch.bfloat16)
+                conv1 = copy.deepcopy(conv)
+                conv_bf16 = conv1.to(dtype=torch.bfloat16)
+                y_bf16 = conv_bf16(x_bf16)
+                self.assertEqual(y, y_bf16.float(), atol=1e-1, rtol=1e-3)
+
+    def test_conv_transpose1d(self):
+        self._test_conv_transpose_base(dim=1)
+
+    def test_conv_transpose2d(self):
+        self._test_conv_transpose_base(dim=2)
+
+    def test_conv_transpose3d(self):
+        self._test_conv_transpose_base(dim=3)
 
     def test_conv2d_legacy_jit_model(self):
         """
