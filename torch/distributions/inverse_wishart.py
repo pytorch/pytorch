@@ -202,7 +202,7 @@ class InverseWishart(ExponentialFamily):
     def _natural_params(self):
         return (
             0.5 * self.df,
-            - 0.5 * torch.cholesky_inverse(self._unbroadcasted_scale_tril)
+            - 0.5 * self.covariance_matrix
         )
 
     def _log_normalizer(self, x, y):
