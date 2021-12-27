@@ -1,5 +1,19 @@
 def define_targets(rules):
     rules.cc_library(
+        name = "CPUAllocator",
+        srcs = ["CPUAllocator.cpp"],
+        hdrs = ["CPUAllocator.h"],
+        visibility = ["//visibility:public"],
+        deps = [
+            ":alignment",
+            ":base",
+            "//c10/mobile:CPUCachingAllocator",
+            "//c10/mobile:CPUProfilingAllocator",
+            "//c10/util:base",
+        ],
+    )
+
+    rules.cc_library(
         name = "ScalarType",
         hdrs = ["ScalarType.h"],
         visibility = ["//visibility:public"],
@@ -67,11 +81,5 @@ def define_targets(rules):
                 "alignment.h",
             ],
         ),
-        visibility = ["//c10:__pkg__"],
-    )
-
-    rules.filegroup(
-        name = "sources",
-        srcs = ["CPUAllocator.cpp"],
         visibility = ["//c10:__pkg__"],
     )
