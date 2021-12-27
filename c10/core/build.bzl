@@ -33,6 +33,7 @@ def define_targets(rules):
             ],
             exclude = [
                 "CPUAllocator.cpp",
+                "impl/alloc_cpu.cpp",
             ],
         ),
         hdrs = rules.glob(
@@ -42,6 +43,7 @@ def define_targets(rules):
             ],
             exclude = [
                 "CPUAllocator.h",
+                "impl/alloc_cpu.h",
             ],
         ),
         visibility = ["//visibility:public"],
