@@ -206,4 +206,5 @@ class InverseWishart(ExponentialFamily):
         )
 
     def _log_normalizer(self, x, y):
-        raise NotImplementedError
+        p = y.shape[-1]
+        return x * (torch.linalg.slogdet(-2 * y).logabsdet + _log_2 * p) + _mvdigamma(x, p=p)
