@@ -24,22 +24,22 @@ torch._C._add_docstr(to_dlpack, r"""to_dlpack(tensor) -> PyCapsule
 
 Returns an opaque object (a "DLPack capsule") representing the tensor.
 
-    .. note::
-      ``to_dlpack`` is the old-style DLPack interface. The capsule it returns
-      cannot be used for anything in Python other than use it as input to
-      ``from_dlpack``. The more idiomatic use of DLPack is to call
-      ``from_dlpack`` directly on the tensor object - this works when that
-      object has a ``__dlpack__`` method, which PyTorch and most other
-      libraries indeed have now.
+.. note::
+  ``to_dlpack`` is a legacy DLPack interface. The capsule it returns
+  cannot be used for anything in Python other than use it as input to
+  ``from_dlpack``. The more idiomatic use of DLPack is to call
+  ``from_dlpack`` directly on the tensor object - this works when that
+  object has a ``__dlpack__`` method, which PyTorch and most other
+  libraries indeed have now.
 
-    .. warning::
-      Only call ``from_dlpack`` once per capsule produced with ``to_dlpack``.
-      Its behavior when used on the same capsule multiple times is undefined.
+.. warning::
+  Only call ``from_dlpack`` once per capsule produced with ``to_dlpack``.
+  Behavior when a capsule is consumed multiple times is undefined.
 
 Args:
     tensor: a tensor to be exported
 
-The DLPack shares the tensor's memory.
+The DLPack capsule shares the tensor's memory.
 """)
 
 # TODO: add a typing.Protocol to be able to tell Mypy that only objects with
@@ -47,8 +47,7 @@ The DLPack shares the tensor's memory.
 def from_dlpack(ext_tensor: Any) -> torch.Tensor:
     """from_dlpack(ext_tensor) -> Tensor
 
-    Converts a tensor from a external library into a ``torch.Tensor``
-    by means of the ``__dlpack__`` protocol.
+    Converts a tensor from an external library into a ``torch.Tensor``.
 
     The returned PyTorch tensor will share the memory with the input tensor
     (which may have come from another library). Note that in-place operations
@@ -58,8 +57,14 @@ def from_dlpack(ext_tensor: Any) -> torch.Tensor:
     for sure that this is fine.
 
     Args:
-        ext_tensor (object with ``__dlpack__`` attribute or DLPack capsule):
+        ext_tensor (object with ``__dlpack__`` attribute, or a DLPack capsule):
             The tensor or DLPack capsule to convert.
+
+            If ``ext_tensor`` is a tensor (or ndarray) object, it must support
+            the ``__dlpack__`` protocol (i.e., have a ``ext_tensor.__dlpack__``
+            method). Otherwise ``ext_tensor`` may be a DLPack capsule, which is
+            an opaque ``PyCapsule`` instance, typically produced by a
+            ``to_dlpack`` function or method.
 
     Examples::
 
