@@ -35,6 +35,7 @@ env:
   PR_NUMBER: ${{ github.event.pull_request.number }}
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   PYTORCH_RETRY_TEST_CASES: 1
+  PYTORCH_FINAL_PACKAGE_DIR: /tmp/artifacts
 !{{ common.concurrency(build_environment) }}
 
 jobs:
@@ -112,7 +113,7 @@ jobs:
         with:
           name: pytorch-!{{ package_type }}-py${{ matrix.python_version }}-${{ matrix.gpu_arch_type }}${{ matrix.gpu_arch_version }}
           path:
-            /remote/**/*.whl
+            ${{ env.PYTORCH_FINAL_PACKAGE_DIR }}/*
       - name: Parse ref
         id: parse-ref
         working-directory: pytorch/

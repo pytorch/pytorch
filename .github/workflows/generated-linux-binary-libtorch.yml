@@ -26,6 +26,7 @@ env:
   PR_NUMBER: ${{ github.event.pull_request.number }}
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   PYTORCH_RETRY_TEST_CASES: 1
+  PYTORCH_FINAL_PACKAGE_DIR: /tmp/artifacts
 concurrency:
   group: linux-binary-libtorch-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
@@ -51,7 +52,7 @@ jobs:
         id: set-matrix
         run: |
           # outputting for debugging purposes
-          MATRIX=$(python .github/scripts/generate_binary_build_matrix.py)
+          MATRIX=$(python .github/scripts/generate_binary_build_matrix.py libtorch)
           echo "${MATRIX}"
           echo "::set-output name=matrix::${MATRIX}"
 
@@ -109,7 +110,7 @@ jobs:
         with:
           name: pytorch-libtorch-py${{ matrix.python_version }}-${{ matrix.gpu_arch_type }}${{ matrix.gpu_arch_version }}
           path:
-            /remote/**/*.whl
+            ${{ env.PYTORCH_FINAL_PACKAGE_DIR }}/*
       - name: Parse ref
         id: parse-ref
         working-directory: pytorch/
