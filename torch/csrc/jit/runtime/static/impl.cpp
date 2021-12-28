@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/runtime/static/impl.h>
 
 #include <ATen/MemoryOverlap.h>
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
 #include <ATen/record_function.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/core/InferenceMode.h>
@@ -19,6 +19,7 @@
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/passes/variadic_ops.h>
+#include <torch/csrc/jit/runtime/static/fusion.h>
 #include <torch/csrc/jit/runtime/static/memory_planner.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
@@ -28,6 +29,7 @@
 #include <stdexcept>
 
 #ifdef FBCODE_CAFFE2
+#include <common/logging/logging.h>
 #include <folly/dynamic.h>
 #include <folly/json.h>
 #endif
@@ -96,8 +98,17 @@ namespace {
 
 void OptimizeGraph(
     std::shared_ptr<torch::jit::Graph>& graph,
-    const StaticModuleOptions& opts) {
+    const StaticModuleOptions& opts,
+    std::vector<IValue> sample_inputs) {
   GRAPH_DUMP("Before optimizations: ", graph);
+  if (opts.enable_tensorexpr_fusion) {
+    if (sample_inputs.empty()) {
+      VLOG(1) << "Cannot perform TensorExpr fusion - sample_inputs is empty";
+    } else {
+      VLOG(1) << "Performing TensorExpr fusion";
+      performTensorExprFusion(graph, std::move(sample_inputs));
+    }
+  }
   Inline(*graph);
   ConstantPropagation(graph);
   Canonicalize(graph);
@@ -135,6 +146,10 @@ void OptimizeGraph(
   GRAPH_DUMP("Final graph after optimizations: ", graph);
 }
 
+bool IsSelfInGraphInput(std::shared_ptr<torch::jit::Graph>& graph) {
+  return !graph->inputs().empty() && graph->inputs().at(0)->type()->is_module();
+}
+
 // remove unused input 0 from graph
 bool removeSelfFromGraphInput(std::shared_ptr<torch::jit::Graph>& graph) {
   if (graph->inputs().at(0)->type()->is_module()) {
@@ -170,20 +185,23 @@ bool mayContainAlias(
 
 void PrepareGraphForStaticModule(
     std::shared_ptr<torch::jit::Graph> graph,
-    const StaticModuleOptions& opts) {
+    const StaticModuleOptions& opts,
+    std::vector<IValue> sample_inputs) {
   TORCH_CHECK(canEnableStaticRuntime(graph));
-  OptimizeGraph(graph, opts);
+  OptimizeGraph(graph, opts, std::move(sample_inputs));
 }
 
 std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
     const torch::jit::Module& m,
     bool is_frozen,
-    const StaticModuleOptions& opts) {
+    const StaticModuleOptions& opts,
+    std::vector<IValue> sample_inputs) {
   LOG(INFO) << "StaticModuleOptions: cleanup_activations "
             << opts.cleanup_activations << ", enable_out_variant "
             << opts.enable_out_variant << ", optimize_memory "
             << opts.optimize_memory << ", manage_output_tensors "
-            << opts.manage_output_tensors;
+            << opts.manage_output_tensors << ", enable_tensorexpr_fusion "
+            << opts.enable_tensorexpr_fusion;
 
   Module module = m.copy();
   if (!is_frozen) {
@@ -194,15 +212,19 @@ std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
   Method method = module.get_method("forward");
   auto graph = module.get_method("forward").graph();
 
-  PrepareGraphForStaticModule(graph, opts);
+  if (!sample_inputs.empty() && IsSelfInGraphInput(graph)) {
+    sample_inputs.insert(sample_inputs.begin(), m._ivalue());
+  }
+  PrepareGraphForStaticModule(graph, opts, std::move(sample_inputs));
 
   return std::make_pair(graph, module);
 }
 
 std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
     std::shared_ptr<torch::jit::Graph> graph,
-    const StaticModuleOptions& opts) {
-  PrepareGraphForStaticModule(graph, opts);
+    const StaticModuleOptions& opts,
+    std::vector<IValue> sample_inputs) {
+  PrepareGraphForStaticModule(graph, opts, std::move(sample_inputs));
   return std::make_pair(graph, c10::nullopt);
 }
 
@@ -261,10 +283,19 @@ void ValueGroup::init(
 
 namespace {
 
+bool isTensorList(const Value* value) {
+  auto* type = value->type()->castRaw<ListType>();
+  if (!type) {
+    return false;
+  }
+  return type->getElementType()->kind() == c10::TypeKind::TensorType;
+}
+
 bool containTensorsOnly(at::ArrayRef<Value*> values) {
   // return true only if all outputs are tensors
   return std::all_of(values.begin(), values.end(), [](const Value* value) {
-    return value->type()->castRaw<TensorType>() != nullptr;
+    return value->type()->kind() == c10::TypeKind::TensorType ||
+        isTensorList(value);
   });
 }
 
@@ -423,14 +454,20 @@ std::vector<const Value*> ManagedTensorRanges::
 
 StaticModule::StaticModule(
     std::shared_ptr<torch::jit::Graph> g,
-    const StaticModuleOptions& opts)
-    : StaticModule(PrepareForStaticModule(g->copy(), opts), opts) {}
+    const StaticModuleOptions& opts,
+    std::vector<IValue> sample_inputs)
+    : StaticModule(
+          PrepareForStaticModule(g->copy(), opts, std::move(sample_inputs)),
+          opts) {}
 
 StaticModule::StaticModule(
     const torch::jit::Module& m,
     bool is_frozen,
-    const StaticModuleOptions& opts)
-    : StaticModule(PrepareForStaticModule(m, is_frozen, opts), opts) {}
+    const StaticModuleOptions& opts,
+    std::vector<IValue> sample_inputs)
+    : StaticModule(
+          PrepareForStaticModule(m, is_frozen, opts, std::move(sample_inputs)),
+          opts) {}
 
 StaticModule::StaticModule(
     std::pair<std::shared_ptr<torch::jit::Graph>, c10::optional<Module>>
@@ -996,13 +1033,19 @@ void StaticRuntime::verify_and_correct_memory_overlap(ProcessedNode& n) {
     } else if (planner_) {
       bool overlap_detected_with_fast_check = false;
       for (size_t i = 0; i < n.outputs().size(); i++) {
-        at::Tensor& t = n.Output(i).toTensor();
-        if (planner_->overlapWithInternalBuffer(t.data_ptr())) {
-          DLOG(INFO) << "Detected alias for node: " << PrintNode(n.node());
-          n.Output(i) = at::native::clone(t, c10::nullopt);
-          // set flag if overlap detected
-          overlap_detected_with_fast_check = true;
-          n.set_outputs_memory_overlap_detected();
+        auto& output = n.Output(i);
+        if (output.isTensor()) {
+          overlap_detected_with_fast_check |=
+              fast_check_and_correct_overlap_with(n, output);
+        } else if (output.isTensorList()) {
+          auto tensor_list = output.toListRef();
+          for (auto& ival : tensor_list) {
+            overlap_detected_with_fast_check |=
+                fast_check_and_correct_overlap_with(
+                    n,
+                    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+                    const_cast<c10::IValue&>(ival));
+          }
         }
       }
       if (n.outputs_memory_overlap_detected() &&
@@ -1012,6 +1055,19 @@ void StaticRuntime::verify_and_correct_memory_overlap(ProcessedNode& n) {
       }
     }
   }
+}
+
+bool StaticRuntime::fast_check_and_correct_overlap_with(
+    ProcessedNode& n,
+    c10::IValue& tensor_ival) {
+  auto& tensor = tensor_ival.toTensor();
+  if (planner_->overlapWithInternalBuffer(tensor.data_ptr())) {
+    DLOG(INFO) << "Detected alias for node: " << PrintNode(n.node());
+    tensor_ival = at::native::clone(tensor, c10::nullopt);
+    n.set_outputs_memory_overlap_detected();
+    return true;
+  }
+  return false;
 }
 
 StaticRuntime::Deallocator::~Deallocator() {
@@ -1424,6 +1480,7 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
         nodes_[k].run();
         millis = timer.MilliSeconds();
         results.time_per_node[k] += millis;
+        verify_and_correct_memory_overlap(nodes_[k]);
       }
       timer.Start();
       if (static_module_.opts().cleanup_activations) {
@@ -1813,6 +1870,19 @@ bool ProcessedNode::verify_inputs_dont_overlap_outputs(bool force_check) const {
   return true;
 }
 
+bool ProcessedNode::check_and_correct_overlap_with(
+    const at::Tensor& input,
+    c10::IValue& output_ival) {
+  auto& tensor = output_ival.toTensor();
+  if (!checkNoMemoryOverlap(input, tensor)) {
+    DLOG(INFO) << "Detected alias for node: " << PrintNode(node());
+    output_ival = at::native::clone(tensor, c10::nullopt);
+    set_outputs_memory_overlap_detected();
+    return true;
+  }
+  return false;
+}
+
 void ProcessedNode::verify_and_correct_memory_overlap() {
   for (const auto i : c10::irange(inputs_.size())) {
     const IValue& in = Input(i);
@@ -1821,11 +1891,21 @@ void ProcessedNode::verify_and_correct_memory_overlap() {
     }
     const auto& in_t = in.toTensor();
     for (const auto j : c10::irange(num_outputs_)) {
-      const auto& out_t = Output(j).toTensor();
-      if (!checkNoMemoryOverlap(in_t, out_t)) {
-        DLOG(INFO) << "Detected alias for node: " << PrintNode(node());
-        Output(i) = at::native::clone(out_t, c10::nullopt);
-        set_outputs_memory_overlap_detected();
+      auto& output = Output(j);
+      if (output.isTensor()) {
+        check_and_correct_overlap_with(in_t, output);
+      } else if (output.isTensorList()) {
+        auto tensors = output.toListRef();
+        for (const auto& ival : tensors) {
+          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+          check_and_correct_overlap_with(in_t, const_cast<c10::IValue&>(ival));
+        }
+#ifdef FBCODE_CAFFE2
+        if (outputs_memory_overlap_detected()) {
+          LOG_EVERY_MS(WARNING, 60000)
+              << "Detected alias for node: " << PrintNode(node());
+        }
+#endif
       }
     }
   }
