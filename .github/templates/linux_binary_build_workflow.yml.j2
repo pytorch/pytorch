@@ -88,6 +88,9 @@ jobs:
       GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
       PYTORCH_BUILD_NUMBER: 1
       SKIP_ALL_TESTS: 1
+{%- if package_type == "libtorch" %}
+      LIBTORCH_VARIANT: ${{ matrix.libtorch_variant }}
+{%- endif %}
     steps:
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
@@ -101,8 +104,8 @@ jobs:
           path: builder
       - name: Move repositories to expected locations
         run: |
-          mv pytorch /pytorch
-          mv builder /builder
+          cp pytorch /pytorch
+          cp builder /builder
       - name: Generate version string
         working-directory: /pytorch/
         run: |
