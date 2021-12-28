@@ -4,7 +4,6 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Dict, Set, List, Iterable
 
-import itertools
 import jinja2
 import json
 import os
@@ -75,7 +74,7 @@ LABEL_CIFLOW_IOS = "ciflow/ios"
 LABEL_CIFLOW_MACOS = "ciflow/macos"
 LABEL_CIFLOW_TRUNK = "ciflow/trunk"
 LABEL_CIFLOW_BINARIES = "ciflow/binaries"
-LABEL_CIFLOW_BINARIES_WHEEL= "ciflow/binaries/wheel"
+LABEL_CIFLOW_BINARIES_WHEEL = "ciflow/binaries/wheel"
 LABEL_CIFLOW_BINARIES_CONDA = "ciflow/binaries/conda"
 
 

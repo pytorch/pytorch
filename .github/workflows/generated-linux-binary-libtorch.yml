@@ -95,8 +95,8 @@ jobs:
           path: builder
       - name: Move repositories to expected locations
         run: |
-          cp pytorch /pytorch
-          cp builder /builder
+          cp -r pytorch /pytorch
+          cp -r builder /builder
       - name: Generate version string
         working-directory: /pytorch/
         run: |
