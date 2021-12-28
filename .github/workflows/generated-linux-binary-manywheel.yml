@@ -27,6 +27,7 @@ env:
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   PYTORCH_RETRY_TEST_CASES: 1
   PYTORCH_FINAL_PACKAGE_DIR: /tmp/artifacts
+  USE_GLOO_WITH_OPENSSL: ON
   # Needed for conda builds
   TORCH_CONDA_BUILD_FOLDER: pytorch-nightly
   ANACONDA_USER: pytorch
@@ -104,7 +105,7 @@ jobs:
       - name: Set BUILD_SPLIT_CUDA
         if: ${{ matrix.gpu_arch_type == 'cuda' && startsWith(matrix.gpu_arch_version, '11') }}
         run: |
-          echo "BUILD_SPLIT_CUDA=1" >> "$GITHUB_ENV"
+          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
       - name: Build PyTorch binary
         run: |
           bash /builder/manywheel/build.sh

@@ -62,7 +62,6 @@ LIBTORCH_CONTAINER_IMAGES = {
 }
 
 FULL_PYTHON_VERSIONS = [
-    "3.6",
     "3.7",
     "3.8",
     "3.9",
@@ -97,9 +96,9 @@ def generate_conda_matrix(is_pr: bool) -> List[Dict[str, str]]:
 def generate_libtorch_matrix(is_pr: bool) -> List[Dict[str, str]]:
     libtorch_variants = [
         "shared-with-deps",
-        "shared-without-deps",
+        # "shared-without-deps", # TODO: Uncomment this once we verify works
         "static-with-deps",
-        "static-without-deps",
+        # "static-without-deps", # TODO: Uncomment this once we verify works
     ]
     return [
         {
