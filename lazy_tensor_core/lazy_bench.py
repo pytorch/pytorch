@@ -85,7 +85,6 @@ SKIP_TRAIN_ONLY = {
     # slow tests
     "timm_efficientnet",
     "Super_SloMo",
-    "dcgan",
     "BERT_pytorch",
     "demucs",
     "opacus_cifar10",
