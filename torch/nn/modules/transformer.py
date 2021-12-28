@@ -130,12 +130,13 @@ class Transformer(Module):
             >>> output = transformer_model(src, tgt, src_mask=src_mask, tgt_mask=tgt_mask)
         """
 
-        if not self.batch_first and src.size(1) != tgt.size(1):
+        is_batched = src.dim() == 3
+        if not self.batch_first and src.size(1) != tgt.size(1) and is_batched:
             raise RuntimeError("the batch number of src and tgt must be equal")
-        elif self.batch_first and src.size(0) != tgt.size(0):
+        elif self.batch_first and src.size(0) != tgt.size(0) and is_batched:
             raise RuntimeError("the batch number of src and tgt must be equal")
 
-        if src.size(2) != self.d_model or tgt.size(2) != self.d_model:
+        if src.size(-1) != self.d_model or tgt.size(-1) != self.d_model:
             raise RuntimeError("the feature number of src and tgt must be equal to d_model")
 
         memory = self.encoder(src, mask=src_mask, src_key_padding_mask=src_key_padding_mask)
