@@ -16,7 +16,7 @@ class TestDebugPickler(PackageTestCase):
 
     def test_set(self):
         from package_a.bad_pickle import BadPickle, GoodPickle
-        lst = [GoodPickle(), GoodPickle() ,BadPickle()]
+        lst = [GoodPickle(), GoodPickle(), BadPickle()]
         obj = [
             GoodPickle(),
             set(lst),
@@ -27,21 +27,21 @@ class TestDebugPickler(PackageTestCase):
         with self.assertRaises(PicklingError) as e4:
             debug_dumps(sys_importer, obj, protocol=4)
         error = dedent(
-                """\
-                I can't be pickled!.
+            """\
+            I can't be pickled!.
 
-                We think the problematic object is found at:
-                <pickled object> (<class 'list'>)
-                  <object @ idx 1> (<class 'set'>)
-                  <object BadPickle> (<class 'package_a.bad_pickle.BadPickle'>)
-                """
-            )
+            We think the problematic object is found at:
+            <pickled object> (<class 'list'>)
+                <object @ idx 1> (<class 'set'>)
+                <object BadPickle> (<class 'package_a.bad_pickle.BadPickle'>)
+            """
+        )
         self.assertEqual(str(e3.exception), error)
         self.assertEqual(str(e4.exception), error)
 
     def test_frozenset(self):
         from package_a.bad_pickle import BadPickle, GoodPickle
-        lst = [GoodPickle(), GoodPickle() ,BadPickle()]
+        lst = [GoodPickle(), GoodPickle(), BadPickle()]
         obj = [
             GoodPickle(),
             frozenset(lst),
@@ -52,15 +52,15 @@ class TestDebugPickler(PackageTestCase):
         with self.assertRaises(PicklingError) as e4:
             debug_dumps(sys_importer, obj, protocol=4)
         error = dedent(
-                """\
-                I can't be pickled!.
+            """\
+            I can't be pickled!.
 
-                We think the problematic object is found at:
-                <pickled object> (<class 'list'>)
-                  <object @ idx 1> (<class 'frozenset'>)
-                  <object BadPickle> (<class 'package_a.bad_pickle.BadPickle'>)
-                """
-            )
+            We think the problematic object is found at:
+            <pickled object> (<class 'list'>)
+                <object @ idx 1> (<class 'frozenset'>)
+                <object BadPickle> (<class 'package_a.bad_pickle.BadPickle'>)
+            """
+        )
         self.assertEqual(str(e3.exception), error)
         self.assertEqual(str(e4.exception), error)
 
@@ -68,7 +68,7 @@ class TestDebugPickler(PackageTestCase):
         from package_a.bad_pickle import BadPickle, GoodPickle
         obj1 = [
             GoodPickle(),
-            (GoodPickle(), GoodPickle() ,BadPickle()),
+            (GoodPickle(), GoodPickle(), BadPickle()),
         ]
         obj2 = [
             GoodPickle(),
@@ -84,15 +84,15 @@ class TestDebugPickler(PackageTestCase):
             debug_dumps(sys_importer, obj2, protocol=4)
 
         error = dedent(
-                """\
-                I can't be pickled!.
+            """\
+            I can't be pickled!.
 
-                We think the problematic object is found at:
-                <pickled object> (<class 'list'>)
-                  <object @ idx 1> (<class 'tuple'>)
-                  <object @ idx 2> (<class 'package_a.bad_pickle.BadPickle'>)
-                """
-            )
+            We think the problematic object is found at:
+            <pickled object> (<class 'list'>)
+                <object @ idx 1> (<class 'tuple'>)
+                <object @ idx 2> (<class 'package_a.bad_pickle.BadPickle'>)
+            """
+        )
 
         self.assertEqual(str(e1_protocol3.exception), error)
         self.assertEqual(str(e2_protocol3.exception), error)
@@ -111,16 +111,16 @@ class TestDebugPickler(PackageTestCase):
         with self.assertRaises(PicklingError) as e4:
             debug_dumps(sys_importer, a, protocol=4)
         error = dedent(
-                """\
-                I can't be pickled!.
+            """\
+            I can't be pickled!.
 
-                We think the problematic object is found at:
-                <pickled object> (<class 'package_a.bad_pickle.GoodPickle'>)
-                  .b (<class 'package_a.bad_pickle.GoodPickle'>)
-                  .c (<class 'package_a.bad_pickle.GoodPickle'>)
-                  .d (<class 'package_a.bad_pickle.BadPickle'>)
-                """
-            )
+            We think the problematic object is found at:
+            <pickled object> (<class 'package_a.bad_pickle.GoodPickle'>)
+                .b (<class 'package_a.bad_pickle.GoodPickle'>)
+                .c (<class 'package_a.bad_pickle.GoodPickle'>)
+                .d (<class 'package_a.bad_pickle.BadPickle'>)
+            """
+        )
         self.assertEqual(str(e3.exception), error)
         self.assertEqual(str(e4.exception), error)
 
@@ -138,17 +138,17 @@ class TestDebugPickler(PackageTestCase):
         with self.assertRaises(PicklingError) as e4:
             debug_dumps(sys_importer, obj, protocol=4)
         error = dedent(
-                """\
-                I can't be pickled!.
+            """\
+            I can't be pickled!.
 
-                We think the problematic object is found at:
-                <pickled object> (<class 'list'>)
-                  <object @ idx 1> (<class 'list'>)
-                  <object @ idx 2> (<class 'list'>)
-                  <object @ idx 1> (<class 'list'>)
-                  <object @ idx 0> (<class 'package_a.bad_pickle.BadPickle'>)
-                """
-            )
+            We think the problematic object is found at:
+            <pickled object> (<class 'list'>)
+                <object @ idx 1> (<class 'list'>)
+                <object @ idx 2> (<class 'list'>)
+                <object @ idx 1> (<class 'list'>)
+                <object @ idx 0> (<class 'package_a.bad_pickle.BadPickle'>)
+            """
+        )
         self.assertEqual(str(e3.exception), error)
         self.assertEqual(str(e4.exception), error)
 
@@ -166,20 +166,20 @@ class TestDebugPickler(PackageTestCase):
         with self.assertRaises(PicklingError) as e4:
             debug_dumps(sys_importer, obj, protocol=4)
         error = dedent(
-                """\
-                I can't be pickled!.
+            """\
+            I can't be pickled!.
 
-                We think the problematic object is found at:
-                <pickled object> (<class 'list'>)
-                  <object @ idx 1> (<class 'list'>)
-                  <object @ idx 2> (<class 'list'>)
-                  <object @ idx 1> (<class 'list'>)
-                  <object @ idx 0> (<class 'package_a.bad_pickle.GoodPickle'>)
-                  .b (<class 'package_a.bad_pickle.GoodPickle'>)
-                  .c (<class 'package_a.bad_pickle.GoodPickle'>)
-                  .d (<class 'package_a.bad_pickle.BadPickle'>)
-                """
-            )
+            We think the problematic object is found at:
+            <pickled object> (<class 'list'>)
+                <object @ idx 1> (<class 'list'>)
+                <object @ idx 2> (<class 'list'>)
+                <object @ idx 1> (<class 'list'>)
+                <object @ idx 0> (<class 'package_a.bad_pickle.GoodPickle'>)
+                .b (<class 'package_a.bad_pickle.GoodPickle'>)
+                .c (<class 'package_a.bad_pickle.GoodPickle'>)
+                .d (<class 'package_a.bad_pickle.BadPickle'>)
+            """
+        )
         self.assertEqual(str(e3.exception), error)
         self.assertEqual(str(e4.exception), error)
 
@@ -193,15 +193,15 @@ class TestDebugPickler(PackageTestCase):
         with self.assertRaises(PicklingError) as e4:
             debug_dumps(sys_importer, a, protocol=4)
         error = dedent(
-                """\
-                I can't be pickled!.
+            """\
+            I can't be pickled!.
 
-                We think the problematic object is found at:
-                <pickled object> (<class 'package_a.bad_pickle.GoodPickle'>)
-                  .bad_list (<class 'list'>)
-                  <object @ idx 2> (<class 'package_a.bad_pickle.BadPickle'>)
-                """
-            )
+            We think the problematic object is found at:
+            <pickled object> (<class 'package_a.bad_pickle.GoodPickle'>)
+                .bad_list (<class 'list'>)
+                <object @ idx 2> (<class 'package_a.bad_pickle.BadPickle'>)
+            """
+        )
         self.assertEqual(str(e3.exception), error)
         self.assertEqual(str(e4.exception), error)
 
@@ -215,14 +215,14 @@ class TestDebugPickler(PackageTestCase):
         with self.assertRaises(PicklingError) as e4:
             debug_dumps(sys_importer, obj, protocol=4)
         error = dedent(
-                """\
-                I can't be pickled!.
+            """\
+            I can't be pickled!.
 
-                We think the problematic object is found at:
-                <pickled object> (<class 'dict'>)
-                  <object @ key bar> (<class 'package_a.bad_pickle.BadPickle'>)
-                """
-            )
+            We think the problematic object is found at:
+            <pickled object> (<class 'dict'>)
+                <object @ key bar> (<class 'package_a.bad_pickle.BadPickle'>)
+            """
+        )
         self.assertEqual(str(e3.exception), error)
         self.assertEqual(str(e4.exception), error)
 
@@ -244,21 +244,21 @@ class TestDebugPickler(PackageTestCase):
         with self.assertRaises(PicklingError) as e4:
             debug_dumps(sys_importer, obj, protocol=4)
         error = dedent(
-                """\
-                I can't be pickled!.
+            """\
+            I can't be pickled!.
 
-                We think the problematic object is found at:
-                <pickled object> (<class 'dict'>)
-                  <object @ key bar> (<class 'list'>)
-                  <object @ idx 1> (<class 'list'>)
-                  <object @ idx 2> (<class 'list'>)
-                  <object @ idx 1> (<class 'list'>)
-                  <object @ idx 0> (<class 'package_a.bad_pickle.GoodPickle'>)
-                  .b (<class 'package_a.bad_pickle.GoodPickle'>)
-                  .c (<class 'package_a.bad_pickle.GoodPickle'>)
-                  .d (<class 'package_a.bad_pickle.BadPickle'>)
-                """
-            )
+            We think the problematic object is found at:
+            <pickled object> (<class 'dict'>)
+                <object @ key bar> (<class 'list'>)
+                <object @ idx 1> (<class 'list'>)
+                <object @ idx 2> (<class 'list'>)
+                <object @ idx 1> (<class 'list'>)
+                <object @ idx 0> (<class 'package_a.bad_pickle.GoodPickle'>)
+                .b (<class 'package_a.bad_pickle.GoodPickle'>)
+                .c (<class 'package_a.bad_pickle.GoodPickle'>)
+                .d (<class 'package_a.bad_pickle.BadPickle'>)
+            """
+        )
         self.assertEqual(str(e3.exception), error)
         self.assertEqual(str(e4.exception), error)
 

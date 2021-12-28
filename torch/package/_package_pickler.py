@@ -1,6 +1,7 @@
 """isort:skip_file"""
 from struct import pack
 from types import FunctionType
+from typing import List
 from pickle import _compat_pickle, _tuplesize2code, _extension_registry, _getattribute, _Pickler  # type: ignore[attr-defined]
 from itertools import islice
 import io
@@ -26,6 +27,7 @@ from pickle import (
     POP,
     POP_MARK,
     EMPTY_SET,
+    ADDITEMS,
 )
 
 class PackagePickler(_Pickler):
@@ -116,6 +118,7 @@ class PackagePickler(_Pickler):
 class DebugInfo:
     def format(self):
         raise AssertionError(f"unknown debug type {self}")
+
     def __repr__(self):
         return f"DebugInfo({self.__class__.__name__})"
 
@@ -272,7 +275,7 @@ class DebugPickler(PackagePickler):
             if self.bin:
                 write(POP_MARK + get)
             else:   # proto 0 -- POP_MARK not available
-                write(POP * (n+1) + get)
+                write(POP * (n + 1) + get)
             return
 
         # No recursion.
@@ -310,7 +313,7 @@ class DebugPickler(PackagePickler):
     dispatch[set] = save_set
 
     def save_frozenset(self, obj, settype=set):
-        self.save_set(obj, set_type = frozenset)
+        self.save_set(obj, set_type=frozenset)
     dispatch[frozenset] = save_frozenset
 
     def save(self, obj, save_persistent_id=True):
@@ -322,7 +325,7 @@ class DebugPickler(PackagePickler):
 
     def format_trace(self):
         stack = self.obj_stack
-        traced_stack = []
+        traced_stack :List[DebugInfo] = []
         idx_to_skip = set()
         for idx, obj in enumerate(stack):
             if idx in idx_to_skip:
