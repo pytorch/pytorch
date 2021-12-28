@@ -706,7 +706,6 @@ _(aten, slow_conv_dilated2d) \
 _(aten, slow_conv_dilated3d) \
 _(aten, slow_conv_dilated3d_backward) \
 _(aten, slow_conv_transpose2d) \
-_(aten, slow_conv_transpose2d_backward) \
 _(aten, slow_conv_transpose3d) \
 _(aten, slow_conv_transpose3d_backward) \
 _(aten, threshold) \
