@@ -1,3 +1,4 @@
+#include <fmt/format.h>
 #include <torch/csrc/distributed/rpc/agent_utils.h>
 
 namespace torch {
@@ -48,12 +49,9 @@ static std::atomic<int> barrierId(0);
 
 std::tuple<std::string, std::string, std::string> getNextKeyIds() {
   barrierId++;
-  std::string processCountKey =
-      storeKeyProcessCount + storeKeyBarrierId + std::to_string(barrierId);
-  std::string activeCallCountKey =
-      storeKeyActiveCallCount + storeKeyBarrierId + std::to_string(barrierId);
-  std::string barrierKey =
-      storeKeyReady + storeKeyBarrierId + std::to_string(barrierId);
+  std::string processCountKey = fmt::format("{}{}{}", storeKeyProcessCount, storeKeyBarrierId, barrierId);
+  std::string activeCallCountKey = fmt::format("{}{}{}", storeKeyActiveCallCount, storeKeyBarrierId, barrierId);
+  std::string barrierKey = fmt::format("{}{}{}", storeKeyReady, storeKeyBarrierId, barrierId);
   return std::make_tuple(processCountKey, activeCallCountKey, barrierKey);
 }
 
