@@ -84,15 +84,15 @@ jobs:
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
-          path: pytorch
+          path: /pytorch
           submodules: recursive
       - name: Clone pytorch/builder
         uses: actions/checkout@v2
         with:
           repository: pytorch/builder
-          path: builder
+          path: /builder
       - name: Generate version string
-        working-directory: pytorch/
+        working-directory: /pytorch/
         run: |
           version=$(.github/scripts/generate_pytorch_version.py)
           echo "Generated version: ${version}"
@@ -101,12 +101,6 @@ jobs:
         if: ${{ matrix.gpu_arch_type == 'cuda' && startsWith(matrix.gpu_arch_version, '11') }}
         run: |
           echo "BUILD_SPLIT_CUDA=1" >> "$GITHUB_ENV"
-      # TODO: Remove this once we remove the need for the directories to be
-      #       in specific locations
-      - name: Symlink repositories to root directory (for legacy scripts purposes)
-        run: |
-          ln -s "$PWD"/pytorch /pytorch
-          ln -s "$PWD"/builder /builder
       - name: Build PyTorch binary
         run: |
           bash /builder/manywheel/build.sh
@@ -117,7 +111,7 @@ jobs:
             ${{ env.PYTORCH_FINAL_PACKAGE_DIR }}/*
       - name: Parse ref
         id: parse-ref
-        working-directory: pytorch/
+        working-directory: /pytorch/
         run: |
           .github/scripts/parse_ref.py
       - name: Display and upload binary build size statistics (Click Me)
@@ -128,7 +122,7 @@ jobs:
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
           WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
-        working-directory: pytorch/
+        working-directory: /pytorch/
         run: |
           COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
           export COMMIT_TIME
