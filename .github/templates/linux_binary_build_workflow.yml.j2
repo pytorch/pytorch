@@ -91,13 +91,17 @@ jobs:
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
-          path: /pytorch
+          path: pytorch
           submodules: recursive
       - name: Clone pytorch/builder
         uses: actions/checkout@v2
         with:
           repository: pytorch/builder
-          path: /builder
+          path: builder
+      - name: Move repositories to expected locations
+        run: |
+          mv pytorch /pytorch
+          mv builder /builder
       - name: Generate version string
         working-directory: /pytorch/
         run: |
