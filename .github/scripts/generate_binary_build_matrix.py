@@ -141,7 +141,7 @@ def main() -> None:
     modes = {
         "conda": generate_conda_matrix,
         "libtorch": generate_libtorch_matrix,
-        "manywheels": generate_wheels_matrix,
+        "manywheel": generate_wheels_matrix,
     }
     parser = argparse.ArgumentParser()
     parser.add_argument("mode", choices=modes.keys())
