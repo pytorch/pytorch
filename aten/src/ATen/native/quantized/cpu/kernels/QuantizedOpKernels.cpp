@@ -2844,6 +2844,212 @@ void qstd_inner_dim_kernel(
   });
 }
 
+// For channels_last/3d format
+void quantized_normalize_nhwc_kernel(
+    const Tensor& X, // input tensor
+    const Tensor& gamma, // weight (optional)
+    const Tensor& beta, // bias (optional)
+    bool affine_per_channel, // scaling applied elementwise if false, per channel if true
+    int num_channels, // only used if affine_per_channel is set
+    int num_groups, // only used if affine_per_channel is set
+    int64_t M, // number of groups = Bs * G
+    int64_t N, // number of elements in each group = C * H * W / G
+    double eps,
+    Tensor* Y) {
+  AT_DISPATCH_QINT_TYPES(X.scalar_type(), "quantized_norm_nhwc_kernel_impl_cpu", [&]() {
+    using qVec = vec::Vectorized<scalar_t>;
+    using fVec = vec::Vectorized<float>;
+
+    TORCH_INTERNAL_ASSERT(X.numel() == M * N, "Unexpected num elements in X");
+    TORCH_INTERNAL_ASSERT(
+        !gamma.defined() ||
+        (!affine_per_channel && gamma.numel() == N) ||
+        (affine_per_channel && gamma.numel() == num_channels),
+        "Unexpected size of gamma");
+    TORCH_INTERNAL_ASSERT(
+        !beta.defined() ||
+        (!affine_per_channel && beta.numel() == N) ||
+        (affine_per_channel && beta.numel() == num_channels),
+        "Unexpected size of beta");
+
+    scalar_t* X_data = X.data_ptr<scalar_t>();
+    const float* gamma_data = gamma.defined() ? gamma.data_ptr<float>() : nullptr;
+    const float* beta_data = beta.defined() ? beta.data_ptr<float>() : nullptr;
+    scalar_t* Y_data = Y->data_ptr<scalar_t>();
+    const bool gamma_null = gamma_data == nullptr;
+    const bool beta_null = beta_data == nullptr;
+    int64_t x_zp = X.q_zero_point();
+    float x_scale = X.q_scale();
+    fVec x_zp_vec((float)x_zp);
+    fVec one_vec(1.0f);
+    fVec zero_vec(0.0f);
+    float x_fake_scale = 1.0f;
+    fVec x_fake_scale_vec(x_fake_scale);
+    fVec x_fake_scale_zp_neg_premul_vec = x_fake_scale_vec * x_zp_vec.neg();
+    int64_t y_zp = Y->q_zero_point();
+    float y_scale = Y->q_scale();
+    float y_inv_scale = 1.0f / y_scale;
+
+    int64_t G = num_groups;
+    constexpr int kFloatVLen = fVec::size(); // = 8
+    int64_t kIntVLen = kFloatVLen * qVec::float_num_vecs(); // = 8 * 4 = 32
+    int64_t kNumIntVecInLayer = N / kIntVLen; // Num of int vec in each group (N = CHW/G)
+    int64_t kNonVecRemInLayer = N % kIntVLen; // Num of int scalar
+    int channels_per_group = num_channels / G;
+    int64_t HxW = N / channels_per_group; // = HW
+    int64_t kNumIntVecInChannel = HxW / kIntVLen; // HW / 32
+    int64_t kNonVecRemInChannel = HxW % kIntVLen; // HW % 32
+    int64_t kNumIntVecInHxW = channels_per_group / kIntVLen; // C/G / 32
+    int64_t kNonVecRemInHxW = channels_per_group % kIntVLen; // C/G % 32
+
+    Tensor buffer = at::empty({M, 2 * channels_per_group}, X.options().dtype(at::kFloat));
+    float* buffer_data = buffer.data_ptr<float>();
+    // Parallel for each group, M = Bs * G
+    at::parallel_for(0, M, 1, [&](int64_t start, int64_t end) {
+      for (const auto i : c10::irange(start, end)) { // For each group
+
+        // Step 1: calculate mean and variance.
+        int64_t l_sum_shifted = 0;
+        int64_t l_sum_sq_shifted = 0;
+        for (const auto c : c10::irange(HxW)) {
+          scalar_t* X_ptr = X_data + i / G * N * G + i % G * channels_per_group + c * num_channels;
+          scalar_t::underlying* X_ptr_underlying = reinterpret_cast<scalar_t::underlying*>(X_ptr);
+          l_sum_shifted += hsum(X_ptr_underlying, channels_per_group);
+          l_sum_sq_shifted += hsum_sq(X_ptr_underlying, channels_per_group);
+        }
+
+        // mean(dqX) / scale_x + x_zp
+        float l_mean_shifted_div_scale_x = static_cast<float>(l_sum_shifted) / N;
+        // mean(dqX) / scale_x
+        float layer_mean_div_scale_x = l_mean_shifted_div_scale_x - x_zp;
+        // var(dqX) / scale_x^2
+        float layer_var_div_scale_x_sq =
+          std::max(static_cast<float>(l_sum_sq_shifted) / N -
+              l_mean_shifted_div_scale_x * l_mean_shifted_div_scale_x, 0.0f);
+        // scale_x / sqrt(var(dqX) + eps)
+        float scale_x_div_layer_std = x_scale /
+          std::sqrt(layer_var_div_scale_x_sq * x_scale * x_scale + eps);
+
+        // Step 2: calculate scale and bias
+        float* scale_ptr = buffer_data + i * 2 * channels_per_group;
+        float* bias_ptr = scale_ptr + channels_per_group;
+        for (const auto d : c10::irange(channels_per_group)) {
+          const int64_t c = i % G * channels_per_group + d;
+          scale_ptr[d] = scale_x_div_layer_std * (gamma_null ? 1.0f : gamma_data[c]);
+          bias_ptr[d] = -scale_ptr[d] * layer_mean_div_scale_x + (beta_null ? 0.0f : beta_data[c]);
+        }
+
+        // Step 3: normalize by applying scale and bias
+        for (const auto c : c10::irange(HxW)) {
+          const scalar_t* X_ptr = X_data + i / G * N * G + i % G * channels_per_group + c * num_channels;
+          scalar_t* Y_ptr = Y_data + i / G * N * G + i % G * channels_per_group + c * num_channels;
+          // vectorized
+          for (const auto vecIdx : c10::irange(kNumIntVecInHxW)) {
+            int64_t vecStartIdx = vecIdx * kIntVLen;
+            auto qXVec = qVec::loadu(X_ptr + vecStartIdx);
+            auto dqXVec = qXVec.dequantize(x_fake_scale_vec, x_zp_vec,
+                  x_fake_scale_zp_neg_premul_vec);
+            for (int i = 0; i < dqXVec.size(); ++i) {
+              auto scaleVec = fVec::loadu(scale_ptr + vecStartIdx + i * kFloatVLen);
+              auto biasVec = fVec::loadu(bias_ptr + vecStartIdx + i * kFloatVLen);
+              dqXVec[i] = dqXVec[i] * scaleVec + biasVec;
+            }
+            qVec::quantize(dqXVec, y_scale, y_zp, y_inv_scale)
+                .store(Y_ptr + vecStartIdx);
+          }
+          // Remaining scalar
+          for (int64_t remIdx = kNumIntVecInHxW * kIntVLen;
+               remIdx < kNonVecRemInHxW + kNumIntVecInHxW * kIntVLen;
+               ++remIdx) {
+            auto qXVal = X_ptr[remIdx];
+            float dqXVal = at::native::dequantize_val(x_fake_scale, x_zp, qXVal);
+            float dqY = dqXVal * scale_ptr[remIdx] + bias_ptr[remIdx];
+            Y_ptr[remIdx] = at::native::quantize_val<scalar_t>(y_scale, y_zp, dqY);
+          }
+        } // loop over HxW
+
+/*
+        // Old implementation
+        // TODO replace with TensorIterator implementation once #33166 is fixed.
+        if (affine_per_channel) {
+
+          // if scaling per channel, scaling parameters can be pre-multiplied
+          // with normalization parameters
+          for (const auto chIdx : c10::irange(channels_per_group)) { // for each channel HxW
+            int scalingIdx = (i * channels_per_group + chIdx) % (num_channels);
+            float gamma = gamma_null ? 1.0f : gamma_data[scalingIdx];
+            // scale_x / layer_std * gamma
+            float gamma_p = scale_x_div_layer_std * gamma;
+            float beta = beta_null ? 0.0f : beta_data[scalingIdx];
+            fVec gamma_p_vec(gamma_p);
+            fVec beta_vec(beta);
+
+            int64_t chStartIdx = chIdx * HxW;
+            int64_t chEndIdx = chStartIdx + HxW;
+
+            for (const auto vecIdx : c10::irange(kNumIntVecInChannel)) {
+              int64_t vecStartIdx = chStartIdx + vecIdx * kIntVLen;
+              auto qXVec = qVec::loadu(X_ptr + vecStartIdx);
+              auto dqXVec = qXVec.dequantize(x_fake_scale_vec, x_zp_vec,
+                  x_fake_scale_zp_neg_premul_vec);
+              for (auto &dq : dqXVec) {
+                dq =
+                  (dq - layer_mean_div_scale_xVec) *
+                    gamma_p_vec + beta_vec;
+                qVec::quantize(dqXVec, y_scale, y_zp, y_inv_scale)
+                  .store(Y_ptr + vecStartIdx);
+              }
+            }
+            for (int64_t remIdx = chEndIdx - kNonVecRemInChannel;
+                 remIdx < chEndIdx;
+                 remIdx++) {
+              auto qXVal = X_ptr[remIdx];
+              float dqXVal = at::native::dequantize_val(x_fake_scale, x_zp, qXVal);
+              float dqY =
+                (dqXVal - layer_mean_div_scale_x) * gamma_p + beta;
+              Y_ptr[remIdx] = at::native::quantize_val<scalar_t>(y_scale, y_zp, dqY);
+            }
+          } // for chIdx
+
+        } else {
+
+          for (const auto vecIdx : c10::irange(kNumIntVecInLayer)) {
+            int64_t vecStartIdx = vecIdx * kIntVLen;
+            auto qXVec = qVec::loadu(X_ptr + vecStartIdx);
+            auto dqXVec = qXVec.dequantize(x_fake_scale_vec, x_zp_vec,
+                x_fake_scale_zp_neg_premul_vec);
+            for (const auto dqXVecIdx : c10::irange(dqXVec.size())) {
+              int64_t vecVecStartIdx = vecStartIdx + dqXVecIdx * kFloatVLen;
+              auto gammaVec = gamma_null
+                ? one_vec
+                : fVec::loadu(gamma_data + vecVecStartIdx);
+              auto betaVec = beta_null
+                ? zero_vec
+                : fVec::loadu(beta_data + vecVecStartIdx);
+              dqXVec[dqXVecIdx] =
+                (dqXVec[dqXVecIdx] - layer_mean_div_scale_xVec) *
+                  scale_x_div_layer_stdVec * gammaVec + betaVec;
+              qVec::quantize(dqXVec, y_scale, y_zp, y_inv_scale)
+                .store(Y_ptr + vecStartIdx);
+            }
+          }
+          for (int64_t remIdx = N - kNonVecRemInLayer; remIdx < N; remIdx++) {
+            const float gamma_v = gamma_null ? 1.0f : gamma_data[remIdx];
+            const float beta_v = beta_null ? 0.0f : beta_data[remIdx];
+            auto qXVal = X_ptr[remIdx];
+            float dqXVal = at::native::dequantize_val(x_fake_scale, x_zp, qXVal);
+            float dqY =
+              ((dqXVal - layer_mean_div_scale_x) * scale_x_div_layer_std) * gamma_v + beta_v;
+            Y_ptr[remIdx] = at::native::quantize_val<scalar_t>(y_scale, y_zp, dqY);
+          }
+        } // if affine_per_channel
+*/
+      } // for each group
+    }); // parallel_for
+
+  });
+}
+
 #ifdef USE_FBGEMM
 void quantize_tensor_per_tensor_affine_cpu(
     const Tensor& rtensor,
@@ -3821,6 +4027,7 @@ REGISTER_NO_AVX512_DISPATCH(quantize_tensor_per_tensor_affine_stub);
 REGISTER_NO_AVX512_DISPATCH(quantize_tensor_per_channel_affine_stub);
 REGISTER_NO_AVX512_DISPATCH(quantize_tensor_per_channel_float_qparams_stub);
 REGISTER_NO_AVX512_DISPATCH(quantized_normalize_stub);
+REGISTER_NO_AVX512_DISPATCH(quantized_normalize_nhwc_stub);
 REGISTER_NO_AVX512_DISPATCH(qupsample_bilinear2d_nhwc_stub);
 REGISTER_NO_AVX512_DISPATCH(quantize_tensor_per_tensor_affine_sub_byte_stub);
 REGISTER_NO_AVX512_DISPATCH(dequantize_tensor_per_tensor_affine_sub_byte_stub);
@@ -3884,6 +4091,7 @@ REGISTER_DISPATCH(
     quantize_tensor_per_channel_float_qparams_stub,
     &quantize_tensor_per_channel_float_qparams_cpu);
 REGISTER_DISPATCH(quantized_normalize_stub, &quantized_normalize_kernel);
+REGISTER_DISPATCH(quantized_normalize_nhwc_stub, &quantized_normalize_nhwc_kernel);
 REGISTER_DISPATCH(qupsample_bilinear2d_nhwc_stub,
                   &qupsample_bilinear2d_nhwc_kernel);
 REGISTER_DISPATCH(

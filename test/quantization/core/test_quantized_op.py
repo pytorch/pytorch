@@ -2276,10 +2276,10 @@ class TestQuantizedOps(TestCase):
     @skipIfNoFBGEMM
     def test_group_norm(self):
         # hypothesis is flaky for this test, create test cases manually
-        batches_list = (1, 7)
-        num_groups_list = (1, 2)
-        channels_per_groups = (1, 2)
-        elements_per_channels = (8, 17)
+        batches_list = (1, 7, 12)
+        num_groups_list = (1, 2, 4)
+        channels_per_groups = (1, 36, 72)
+        elements_per_channels = (8, 57, 128)
         torch_types = (torch.qint8, torch.quint8)
         y_scales = (0.1, 4.23)
         y_zero_points = (0, 1)
