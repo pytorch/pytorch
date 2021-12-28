@@ -182,7 +182,7 @@ def fuse_unsqueeze_cat_sum(gm: torch.fx.GraphModule):
 
 try:
     import tensorrt as trt
-    from torch.fx.experimental.fx2trt.fx2trt import tensorrt_converter
+    from torch.fx.experimental.fx2trt.converter_registry import tensorrt_converter
     from torch.fx.experimental.fx2trt.converters.acc_ops_converters import (
         get_trt_tensor,
         add_binary_elementwise_layer,

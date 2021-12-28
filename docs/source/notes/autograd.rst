@@ -108,7 +108,7 @@ Setting ``requires_grad``
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
 :attr:`requires_grad` is a flag, defaulting to false *unless wrapped
-in a ``nn.Parameter``*, that allows for fine-grained exclusion of
+in a* ``nn.Parameter``, that allows for fine-grained exclusion of
 subgraphs from gradient computation. It takes effect in both the
 forward and backward passes:
 

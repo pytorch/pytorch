@@ -19,8 +19,8 @@ from torch.ao.quantization import (
     float16_dynamic_qconfig,
     float_qparams_weight_only_qconfig,
     PerChannelMinMaxObserver,
-    QConfigDynamic,
     default_dynamic_quant_observer,
+    QConfig,
 )
 
 from torch.testing._internal.common_quantization import (
@@ -72,7 +72,70 @@ import io
 import unittest
 import numpy as np
 
-class TestPostTrainingStatic(QuantizationTestCase):
+class TestQuantizeEagerOps(QuantizationTestCase):
+    def _test_activation_op_impl(
+            self, float_module_class, quantized_module_class, extra_module_kwargs):
+        """ Implementation for testing common activation ops like leaky relu
+        Args:
+            extra_module_kwargs: keyword args to instantiate the float module
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.activation_op = float_module_class(**extra_module_kwargs)
+                self.quant = QuantStub()
+                self.dequant = DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.activation_op(x)
+                x = self.dequant(x)
+                return x
+
+        m = M().eval()
+        m.qconfig = default_qconfig
+        m = prepare(m)
+        self.checkObservers(m)
+        m = convert(m)
+        self.assertEqual(type(m.activation_op), quantized_module_class)
+
+    def test_leaky_relu(self):
+        self._test_activation_op_impl(nn.LeakyReLU, nnq.LeakyReLU, {'negative_slope': 0.1, 'inplace': False})
+
+    def test_relu(self):
+        self._test_activation_op_impl(nn.ReLU, nn.ReLU, {'inplace': False})
+
+    # Histogram Observers are slow, so have no-deadline to ensure test doesn't time out
+    @given(train_mode=st.booleans())
+    def test_functional_module(self, train_mode):
+        model = ModelWithFunctionals()
+        x = torch.rand(10, 1, dtype=torch.float)
+        xq = torch.quantize_per_tensor(x, 0.01, 30, torch.quint8)
+        self.checkScriptable(model, [[x]], check_save_load=True)
+        if train_mode:
+            model.qconfig = torch.ao.quantization.get_default_qat_qconfig('fbgemm')
+            model = prepare_qat(model)
+        else:
+            model.qconfig = torch.ao.quantization.get_default_qconfig('qnnpack')
+            model = prepare(model)
+        # Check if observers and quant/dequant nodes are inserted
+        self.checkNoPrepModules(model)
+        self.checkObservers(model)
+        # Calibrate
+        model(xq.dequantize())
+        model = convert(model)
+
+        def checkQuantized(model):
+            self.checkNoPrepModules(model)
+            self.assertEqual(type(model.myadd), torch.nn.quantized.QFunctional)
+            self.assertEqual(type(model.mycat), torch.nn.quantized.QFunctional)
+            self.assertEqual(type(model.myadd_relu), torch.nn.quantized.QFunctional)
+            self.checkNoQconfig(model)
+
+        checkQuantized(model)
+        self.checkScriptable(model, [[xq]], check_save_load=True)
+
+class TestQuantizeEagerPTQStatic(QuantizationTestCase):
 
     def test_single_layer(self):
         r"""Quantize SingleLayerLinearModel which has one Linear module, make sure it is swapped
@@ -560,8 +623,8 @@ class TestPostTrainingStatic(QuantizationTestCase):
             float_qparams_observer = PerChannelMinMaxObserver.with_args(dtype=dtype,
                                                                         qscheme=torch.per_channel_affine_float_qparams,
                                                                         ch_axis=0)
-            float_qparams_qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
-                                                   weight=float_qparams_observer)
+            float_qparams_qconfig = QConfig(activation=default_dynamic_quant_observer,
+                                            weight=float_qparams_observer)
             model.qconfig = float_qparams_qconfig
 
             prepare(model, inplace=True)
@@ -751,7 +814,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
 
 
 @skipIfNoFBGEMM
-class TestPostTrainingDynamic(QuantizationTestCase):
+class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
     def test_single_layer(self):
         r"""Dynamic Quantize SingleLayerLinearDynamicModel which has one Linear module,
         make sure it is swapped to nnqd.Linear which is the quantized version of
@@ -1166,72 +1229,7 @@ class TestPostTrainingDynamic(QuantizationTestCase):
         self.assertTrue('QuantizedEmbedding' in str(q_model))
         self.assertTrue('DynamicQuantizedLinear' in str(q_model))
 
-
-class TestEagerModeActivationOps(QuantizationTestCase):
-    def _test_activation_op_impl(
-            self, float_module_class, quantized_module_class, extra_module_kwargs):
-        """ Implementation for testing common activation ops like leaky relu
-        Args:
-            extra_module_kwargs: keyword args to instantiate the float module
-        """
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.activation_op = float_module_class(**extra_module_kwargs)
-                self.quant = QuantStub()
-                self.dequant = DeQuantStub()
-
-            def forward(self, x):
-                x = self.quant(x)
-                x = self.activation_op(x)
-                x = self.dequant(x)
-                return x
-
-        m = M().eval()
-        m.qconfig = default_qconfig
-        m = prepare(m)
-        self.checkObservers(m)
-        m = convert(m)
-        self.assertEqual(type(m.activation_op), quantized_module_class)
-
-    def test_leaky_relu(self):
-        self._test_activation_op_impl(nn.LeakyReLU, nnq.LeakyReLU, {'negative_slope': 0.1, 'inplace': False})
-
-    def test_relu(self):
-        self._test_activation_op_impl(nn.ReLU, nn.ReLU, {'inplace': False})
-
-class TestFunctionalModule(QuantizationTestCase):
-    # Histogram Observers are slow, so have no-deadline to ensure test doesn't time out
-    @given(train_mode=st.booleans())
-    def test_functional_module(self, train_mode):
-        model = ModelWithFunctionals()
-        x = torch.rand(10, 1, dtype=torch.float)
-        xq = torch.quantize_per_tensor(x, 0.01, 30, torch.quint8)
-        self.checkScriptable(model, [[x]], check_save_load=True)
-        if train_mode:
-            model.qconfig = torch.ao.quantization.get_default_qat_qconfig('fbgemm')
-            model = prepare_qat(model)
-        else:
-            model.qconfig = torch.ao.quantization.get_default_qconfig('qnnpack')
-            model = prepare(model)
-        # Check if observers and quant/dequant nodes are inserted
-        self.checkNoPrepModules(model)
-        self.checkObservers(model)
-        # Calibrate
-        model(xq.dequantize())
-        model = convert(model)
-
-        def checkQuantized(model):
-            self.checkNoPrepModules(model)
-            self.assertEqual(type(model.myadd), torch.nn.quantized.QFunctional)
-            self.assertEqual(type(model.mycat), torch.nn.quantized.QFunctional)
-            self.assertEqual(type(model.myadd_relu), torch.nn.quantized.QFunctional)
-            self.checkNoQconfig(model)
-
-        checkQuantized(model)
-        self.checkScriptable(model, [[xq]], check_save_load=True)
-
-class TestQuantizeONNXExport(JitTestCase):
+class TestQuantizeEagerONNXExport(JitTestCase):
     def _test_lower_graph_impl(self, model, data):
         model.qconfig = torch.ao.quantization.default_qconfig
         model = torch.ao.quantization.prepare(model)

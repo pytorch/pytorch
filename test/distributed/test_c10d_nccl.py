@@ -611,6 +611,35 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
             self.assertEqualIgnoreType(expected, output[i])
 
+        # Test the input params overridden scenarios, aka, when the input is
+        # a list and output is just one tensor.
+        # Sum
+        output_tensor = torch.empty_like(input_per_gpu[0][0]).cuda(self.rank)
+        input_list = [tensor[0].cuda(self.rank) for tensor in input_per_gpu]
+        pg.reduce_scatter(output_tensor, input_list, c10d.ReduceOp.SUM).wait()
+        expected = torch.tensor(
+            float((1 + self.world_size) * self.world_size / 2) + self.world_size * self.rank
+        )
+        self.assertEqualIgnoreType(expected, output_tensor)
+
+        # Min
+        pg.reduce_scatter(output_tensor, input_list, c10d.ReduceOp.MIN).wait()
+        expected = torch.tensor(self.rank + 1)
+        self.assertEqualIgnoreType(expected, output_tensor)
+
+        # Max
+        pg.reduce_scatter(output_tensor, input_list, c10d.ReduceOp.MAX).wait()
+        expected = torch.tensor(self.rank + self.world_size)
+        self.assertEqualIgnoreType(expected, output_tensor)
+
+        # Product
+        pg.reduce_scatter(output_tensor, input_list, c10d.ReduceOp.PRODUCT).wait()
+        prod_val = self.rank + 1
+        for k in range(1, self.world_size):
+            prod_val = prod_val * (self.rank + 1 + k)
+        expected = torch.tensor(prod_val)
+        self.assertEqualIgnoreType(expected, output_tensor)
+
     @requires_nccl()
     @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
     def test_reduce_scatter_base_ops(self):
