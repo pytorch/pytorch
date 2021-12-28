@@ -234,7 +234,7 @@
       "win-vs2019-cuda11.3-py3"
     ],
     "ciflow/xla": [
-      "linux-bionic-py3.6-clang9"
+      "linux-xenial-py3.6-gcc7"
     ]
   },
   "version": "v1"
