@@ -232,12 +232,6 @@
       "periodic-win-vs2019-cuda11.5-py3",
       "win-vs2019-cpu-py3",
       "win-vs2019-cuda11.3-py3"
-<<<<<<< HEAD
-=======
-    ],
-    "ciflow/xla": [
-      "linux-bionic-py3.7-clang9"
->>>>>>> 6584f6d807 (Replacing python 3.6 workflows with python 3.7 workflows)
     ]
   },
   "version": "v1"
