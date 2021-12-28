@@ -1,7 +1,9 @@
 #pragma once
 
 #include <c10/util/variant.h>
+#include <jit/passes/symbolic_shape_runtime_fusion.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/passes/symbolic_shape_runtime_fusion.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
@@ -12,6 +14,13 @@
 namespace torch {
 namespace jit {
 namespace tensorexpr {
+
+struct SmallSizeTPairHash {
+ public:
+  std::size_t operator()(const std::pair<size_t, size_t>& x) const {
+    return x.first << 32 | x.second;
+  }
+};
 
 // Returns true if the TE fuser supports this conv2d.
 bool conv2dIsSupportedJit(const Node* node);
@@ -114,20 +123,27 @@ class TORCH_API TensorExprKernel {
       std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings =
           {},
       std::vector<int64_t> symbolic_shape_inputs = {},
-      bool pre_alloc = false);
+      bool pre_alloc = false,
+      std::unordered_map<
+          const torch::jit::Value*,
+          std::vector<torch::jit::StrideInput>> symbolic_strides = {});
 
   explicit TensorExprKernel(
       const std::shared_ptr<Graph>& subgraph,
       std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings =
           {},
       std::vector<int64_t> symbolic_shape_inputs = {},
-      bool pre_alloc = false)
+      bool pre_alloc = false,
+      std::unordered_map<
+          const torch::jit::Value*,
+          std::vector<torch::jit::StrideInput>> symbolic_strides = {})
       : TensorExprKernel(
             subgraph,
             SubgraphUtils::generateNameForGraph(subgraph),
             custom_lowerings,
             symbolic_shape_inputs,
-            pre_alloc) {}
+            pre_alloc,
+            symbolic_strides) {}
 
   void run(Stack& stack);
   void runFast(
@@ -251,10 +267,12 @@ class TORCH_API TensorExprKernel {
   };
 
   ExprHandle getVarForShape(const c10::ShapeSymbol& ss);
-  std::vector<ExprHandle>& getStridesForValue(const Value* v);
-  BufHandle bindSymbolicShapeInput(const Value* input, const std::string& name);
+  ExprHandle getStrideArg(size_t tensor_input, size_t stride_index);
   std::vector<ExprHandle> sizesFromSymbolicShape(
       const c10::SymbolicShape& shape);
+  std::vector<ExprHandle> getInputStrides(
+      const torch::jit::Value* input,
+      const std::vector<ExprHandle>& inputTensorDims);
 
   int64_t nInputs_ = 0;
   int64_t nOutputs_ = 0;
@@ -295,6 +313,17 @@ class TORCH_API TensorExprKernel {
   StmtPtr stmt_ = nullptr;
   bool pre_alloc_{false};
   std::string kernel_func_name_;
+
+  // index of stack, stride index of tensor that will be appended as a codegen
+  // arg
+  std::vector<std::pair<size_t, size_t>> input_stride_args_;
+  // map from <input index, tensor dimension> to stride as arg VarHandle
+  std::unordered_map<std::pair<size_t, size_t>, VarHandle, SmallSizeTPairHash>
+      strideArgToVar_;
+  std::unordered_map<
+      const torch::jit::Value*,
+      std::vector<torch::jit::StrideInput>>
+      symbolic_strides_;
 };
 
 TORCH_API int& getTECudaPointwiseLoopLevels();

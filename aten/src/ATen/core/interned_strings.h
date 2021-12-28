@@ -474,6 +474,8 @@ namespace c10 {
   _(attr, axes)                      \
   _(attr, axis)                      \
   _(attr, symbolic_shape_inputs)     \
+  _(attr, striding_inputs_desc)      \
+  _(attr, striding_outputs_desc)     \
   _(attr, broadcast)                 \
   _(attr, direction)                 \
   _(attr, ends)                      \

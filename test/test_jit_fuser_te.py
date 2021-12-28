@@ -38,6 +38,47 @@ from jit.test_fuser_common import TestFuserCommon  # noqa: F401
 FUSION_GROUP = 'prim::TensorExprGroup'
 LLVM_ENABLED = torch._C._llvm_enabled()
 
+def _get_differentiable_graph_node(node, diff_node):
+    if node.kind() == 'prim::DifferentiableGraph':
+        diff_node.append(node)
+    else:
+        for block in node.blocks():
+            for n in block.nodes():
+                _get_differentiable_graph_node(n, diff_node)
+
+def _graph_for(self, *args, **kwargs):
+    return _script_method_graph_for(self, self, *args, **kwargs)
+
+def _script_method_graph_for(self, parent, *args, **kwargs):
+    try:
+        dbs = parent.get_debug_state()
+        eps = list(dbs.execution_plans.values())
+        assert(len(eps) == 1)
+        graph = eps[0].graph.copy()
+
+        # graph_executor_states for differentiable node
+        fw_states = eps[0].code.differentiable_op_executor_states()
+        diff_nodes: List[torch._C.Node] = []
+        for n in graph.nodes():
+            _get_differentiable_graph_node(n, diff_nodes)
+
+        assert(len(fw_states) == len(diff_nodes))
+        # swap each differentiable graph with optimized graph in their execution plan
+        for n, state in zip(diff_nodes, fw_states):
+            fw_execution_plans = list(state.execution_plans.values())
+            # we can only update the subgraph when there's a unique execution
+            # plan. Avoid assert here so we would skip the ones that can't be
+            # updated while try the best effort to update other nodes.
+            if len(fw_execution_plans) == 1:
+                n.g_('Subgraph', fw_execution_plans[0].graph)
+
+        return graph
+    except Exception:
+        # fallback approach, we just ran the graph and return the recorded optimized
+        # graph
+        self(*args, **kwargs)
+        return last_executed_optimized_graph()
+
 def strip_profiling_nodes(nodes):
     profiling_opcodes = set(['prim::BailoutTemplate', 'prim::BailOut'])
     return [n for n in nodes if n.kind() not in profiling_opcodes]
@@ -55,6 +96,15 @@ def texpr_reductions_enabled():
         yield
     finally:
         torch._C._jit_set_texpr_reductions_enabled(old)
+
+@contextlib.contextmanager
+def texpr_dynamic_enabled():
+    old = torch._C._jit_texpr_dynamic_shape_enabled()
+    torch._C._jit_set_texpr_dynamic_shape_enabled(True)
+    try:
+        yield
+    finally:
+        torch._C._jit_set_texpr_dynamic_shape_enabled(old)
 
 @contextlib.contextmanager
 def inline_fusion_groups():
@@ -1999,6 +2049,76 @@ class TestTEFuser(JitTestCase):
                 test(*args)
         self.assertIn("fused_mul_add", prof.table())
 
+    def test_dynamic_shapes(self):
+        from functools import partial
+        n = 10
+
+        gen_tensor = (
+            lambda n: R(1, n),
+            lambda n: R(n, n),
+            lambda n: R(n, n).transpose(0, 1),
+            lambda n: R(n + 1, n + 1, 2)[:n, n, 0],
+            lambda n: R(n, n, 2)[:, :, 0],
+            lambda n: R(n, n + 1, n + 2, n + 3).to(memory_format=torch.channels_last),
+        )
+
+        with texpr_dynamic_enabled():
+            def foo(x, y, z):
+                return torch.sigmoid(torch.tanh(x))
+
+            foo.__disable_jit_function_caching__ = True
+
+            def fi(x, y, z):
+                return torch.tanh(x + y)
+
+            fi.__disable_jit_function_caching__ = True
+
+            def fum(x, y, z):
+                return torch.tanh(x + y) + z
+
+            fum.__disable_jit_function_caching__ = True
+
+            funcs = [foo, fi, fum]
+            with inline_fusion_groups():
+                for device in self.devices:
+                    I = partial(torch.randint, 0, 100, device=device)
+                    R = partial(torch.randn, device=device)
+
+                    for i, func in enumerate(funcs):
+                        num_args = i + 1
+                        for j, gen in enumerate(gen_tensor):
+                            inps = (gen(n), gen(n), gen(n))
+                            func_s = torch.jit.trace(func, inps, check_trace=False)
+                            torch._C._jit_pass_erase_shape_information(func_s.graph)
+                            for _ in range(2):
+                                x, y, z = gen(n), gen(n), gen(n)
+                                func_s(x, y, z)
+
+                            for incr in range(3):
+                                func_s(*[gen(n + 1) for _ in range(3)])
+
+                            g = torch.jit.last_executed_optimized_graph()
+                            torch._C._jit_pass_inline(g)
+                            torch._C._jit_pass_dce(g)
+
+                            # We should see only one optimized kernel
+                            FileCheck().check_count("TensorExprDynamicGuard", 1, exactly=True).run(g)
+                            self.assertEqual(func(*inps), func_s(*inps))
+
+                    gen = gen_tensor[0]
+                    inps = (gen(n), gen(n), gen(n))
+                    foo_s = torch.jit.trace(foo, inps)
+                    torch._C._jit_pass_erase_shape_information(foo_s.graph)
+                    g_prev = None
+                    for gen in gen_tensor:
+                        for i in range(3):
+                            foo_s(*[gen(n + i) for _ in range(3)])
+                            inps = (gen(n), gen(n), gen(n))
+                            self.assertEqual(foo_s(*inps), foo(*inps))
+                    g = torch.jit.last_executed_optimized_graph()
+                    torch._C._jit_pass_inline(g)
+                    torch._C._jit_pass_dce(g)
+                    FileCheck().check_count("TensorExprDynamicGuard", len(gen_tensor), exactly=True).run(g)
 
 works_list = [
     '__radd__',

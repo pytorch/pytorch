@@ -14,26 +14,6 @@ static_assert(
     std::is_same<decltype(getTypePtr<std::tuple<int64_t, int64_t>>()), const TupleTypePtr&>::value,
     "getTypePtr<std::tuple<int64_t, int64_t>> not returning const ref!");
 
-namespace {
-inline bool is_contiguous_strides(
-    const IntArrayRef sizes,
-    const IntArrayRef strides) {
-  int n_dim = static_cast<int>(sizes.size());
-
-  if (n_dim == 0 || strides[n_dim-1] != 1) {
-    return false;
-  }
-
-  for (int i = n_dim - 2; i >= 0; i--) {
-    if (strides[i] != strides[i+1] * sizes[i+1]) {
-      return false;
-    }
-  }
-  return true;
-}
-
-} // namespace
-
 TypeVerbosity type_verbosity() {
   static const char* c_verbosity = std::getenv("PYTORCH_JIT_TYPE_VERBOSITY");
   static TypeVerbosity verbosity = c_verbosity ?

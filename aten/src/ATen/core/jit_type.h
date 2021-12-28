@@ -26,6 +26,23 @@ using OptNameList = c10::optional<std::vector<std::string>>;
 void standardizeVectorForUnion(std::vector<TypePtr>& reference, std::vector<TypePtr>* to_fill);
 void standardizeVectorForUnion(std::vector<TypePtr>* to_flatten);
 
+inline bool is_contiguous_strides(
+    const IntArrayRef sizes,
+    const IntArrayRef strides) {
+  int n_dim = static_cast<int>(sizes.size());
+
+  if (n_dim == 0 || strides[n_dim - 1] != 1) {
+    return false;
+  }
+
+  for (int i = n_dim - 2; i >= 0; i--) {
+    if (strides[i] != strides[i + 1] * sizes[i + 1]) {
+      return false;
+    }
+  }
+  return true;
+}
+
 struct AnyType;
 using AnyTypePtr = std::shared_ptr<AnyType>;
 // Any is the top of the type hierarchy, all other types are subtypes
@@ -631,6 +648,12 @@ struct TORCH_API TensorType : public Type {
     copy->sizes_ = SymbolicShape(d);
     copy->strides_ = VaryingShape<Stride>(d);
     return copy;
+  }
+
+  TensorTypePtr withStrides(VaryingShape<Stride> sstrides) const {
+    auto cloned = clone();
+    cloned->strides_ = sstrides;
+    return cloned;
   }
 
   TensorTypePtr withSizesStrides(
