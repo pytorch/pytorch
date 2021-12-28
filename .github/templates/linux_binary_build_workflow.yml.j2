@@ -69,7 +69,7 @@ jobs:
       matrix:
         ${{ fromJson(needs.generate-build-matrix.outputs.matrix) }}
     container:
-      image: ${{ matrix.wheel_container_image }}
+      image: ${{ matrix.container_image }}
     env:
       DESIRED_PYTHON: ${{ matrix.python_version }}
       # TODO: This is a legacy variable that we eventually want to get rid of in

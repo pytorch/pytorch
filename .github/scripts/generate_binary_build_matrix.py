@@ -85,12 +85,12 @@ def generate_conda_matrix(is_pr: bool) -> List[Dict[str, str]]:
         {
             "python_version": python_version,
             "gpu_arch_type": arch_type(arch_version),
-            "gpu_arch_version": arch_version,
+            "gpu_arch_version": "" if arch_version == "cpu" else arch_version,
             "container_image": CONDA_CONTAINER_IMAGES[arch_version],
         }
-        for python_version in snip_if(is_pr, FULL_PYTHON_VERSIONS)
+        for python_version in FULL_PYTHON_VERSIONS
         # We don't currently build conda packages for rocm
-        for arch_version in ["cpu"] + snip_if(is_pr, CUDA_ARCHES)
+        for arch_version in ["cpu"] + CUDA_ARCHES
     ]
 
 
@@ -104,14 +104,14 @@ def generate_libtorch_matrix(is_pr: bool) -> List[Dict[str, str]]:
     return [
         {
             "gpu_arch_type": arch_type(arch_version),
-            "gpu_arch_version": arch_version,
+            "gpu_arch_version": "" if arch_version == "cpu" else arch_version,
             "libtorch_variant": libtorch_variant,
             "devtoolset": abi_version,
             "container_image": LIBTORCH_CONTAINER_IMAGES[(arch_version, abi_version)],
         }
         # We don't currently build libtorch for rocm
-        for arch_version in ["cpu"] + snip_if(is_pr, CUDA_ARCHES)
-        for libtorch_variant in snip_if(is_pr, libtorch_variants)
+        for arch_version in ["cpu"] + CUDA_ARCHES
+        for libtorch_variant in libtorch_variants
         # one of the values in the following list must be exactly
         # "cxx11-abi", but the precise value of the other one doesn't
         # matter
@@ -120,17 +120,15 @@ def generate_libtorch_matrix(is_pr: bool) -> List[Dict[str, str]]:
 
 
 def generate_wheels_matrix(is_pr: bool) -> List[Dict[str, str]]:
-    arches = ["cpu"]
-    arches += snip_if(is_pr, CUDA_ARCHES)
-    arches += snip_if(is_pr, ROCM_ARCHES)
+    arches = ["cpu"] + CUDA_ARCHES + ROCM_ARCHES
     return [
         {
             "python_version": python_version,
             "gpu_arch_type": arch_type(arch_version),
-            "gpu_arch_version": arch_version,
+            "gpu_arch_version": "" if arch_version == "cpu" else arch_version,
             "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
         }
-        for python_version in snip_if(is_pr, FULL_PYTHON_VERSIONS)
+        for python_version in FULL_PYTHON_VERSIONS
         for arch_version in arches
     ]
 
@@ -143,7 +141,7 @@ def main() -> None:
     modes = {
         "conda": generate_conda_matrix,
         "libtorch": generate_libtorch_matrix,
-        "wheels": generate_wheels_matrix,
+        "manywheels": generate_wheels_matrix,
     }
     parser = argparse.ArgumentParser()
     parser.add_argument("mode", choices=modes.keys())
