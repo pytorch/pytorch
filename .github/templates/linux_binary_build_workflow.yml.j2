@@ -129,6 +129,7 @@ jobs:
             -e PYTORCH_BUILD_NUMBER \
             -e PYTORCH_ROOT \
             -e SKIP_ALL_TESTS \
+            -e LIBTORCH_VARIANT \
             --tty \
             --detach \
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
