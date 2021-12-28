@@ -7,7 +7,7 @@ if [ -n "$GCC_VERSION" ]; then
   # Need the official toolchain repo to get alternate packages
   add-apt-repository ppa:ubuntu-toolchain-r/test
   apt-get update
-  if [ "$UBUNTU_VERSION" = "16.04" -a "${GCC_VERSION:0:1}" = "5" ]; then
+  if [ [ "$UBUNTU_VERSION" = "16.04" ] && [ "${GCC_VERSION:0:1}" = "5" ] ]; then
     apt-get install -y g++-5=5.4.0-6ubuntu1~16.04.12
     update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-5 50
     update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-5 50
