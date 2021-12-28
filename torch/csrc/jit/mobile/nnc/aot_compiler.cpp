@@ -41,22 +41,14 @@ std::vector<mobile::nnc::InputSpec> toInputSpecs(const std::shared_ptr<Graph>& g
   for (auto v : g->inputs()) {
     auto t = v->type();
     mobile::nnc::InputSpec spec;
-    if (t->kind() == TypeKind::TensorType) {
-      auto tt = t->cast<TensorType>();
-      spec.sizes_ = {};
-      auto sizes_vec = *tt->sizes().sizes();
-      for (auto s : sizes_vec) {
-        spec.sizes_.push_back(s ? *s : 0);
-      }
-      spec.is_scalar_ = false;
-      spec.dtype_ = *tt->scalarType();
-    } else if (t->kind() == TypeKind::IntType) {
-      spec.sizes_ = {};
-      spec.is_scalar_ = true;
-      spec.dtype_ = at::kLong;
-    } else {
-      TORCH_CHECK(false, "Unsupported input type");
+    TORCH_CHECK(t->kind() == TypeKind::TensorType, "Unsupported input type");
+    auto tt = t->cast<TensorType>();
+    spec.sizes_ = {};
+    auto sizes_vec = *tt->sizes().sizes();
+    for (auto s : sizes_vec) {
+      spec.sizes_.push_back(s ? *s : 0);
     }
+    spec.dtype_ = *tt->scalarType();
     specs.emplace_back(std::move(spec));
   }
   return specs;

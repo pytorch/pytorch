@@ -28,7 +28,6 @@ struct TORCH_API InputSpec {
   C10_NODISCARD bool validate(const at::Tensor& input) const;
 
   std::vector<int64_t> sizes_;
-  bool is_scalar_ = false;
   c10::ScalarType dtype_{c10::ScalarType::Undefined};
 };
 
