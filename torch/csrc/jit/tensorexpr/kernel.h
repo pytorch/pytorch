@@ -169,7 +169,6 @@ class TORCH_API TensorExprKernel {
     return symbolic_shape_inputs_;
   }
 
-
  private:
   enum BackendType {
     kUninitialized,
