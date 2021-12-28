@@ -17,6 +17,7 @@ struct MatchedSchema {
   std::vector<Value*> inputs;
   std::vector<TypePtr> return_types;
   c10::OptNameList return_field_names;
+  std::string schema_name;
 };
 
 TORCH_API MatchedSchema matchSchema(
