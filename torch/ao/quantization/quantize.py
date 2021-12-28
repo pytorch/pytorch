@@ -435,6 +435,7 @@ def prepare_qat(model, mapping=None, inplace=False, allow_list=None):
         allow_list: a set that lists out allowable modules to be propagated with qconfig
     """
     torch._C._log_api_usage_once("quantization_api.quantize.prepare_qat")
+    assert model.training, "prepare_qat only works on models in training mode"
     if mapping is None:
         mapping = get_default_qat_module_mappings()
 
