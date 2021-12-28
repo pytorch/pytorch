@@ -429,6 +429,16 @@ class RNN(RNNBase):
             max_batch_size = int(batch_sizes[0])
         else:
             batch_sizes = None
+            is_batched = input.dim() == 3
+            batch_dim = 0 if self.batch_first else 1
+            if not is_batched:
+                input = input.unsqueeze(batch_dim)
+                if hx is not None:
+                    assert hx.dim() == 2
+                    hx = hx.unsqueeze(1)
+            else:
+                if hx is not None:
+                    assert hx.dim() == 3
             max_batch_size = input.size(0) if self.batch_first else input.size(1)
             sorted_indices = None
             unsorted_indices = None
@@ -471,6 +481,11 @@ class RNN(RNNBase):
         if isinstance(orig_input, PackedSequence):
             output_packed = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
             return output_packed, self.permute_hidden(hidden, unsorted_indices)
+
+        if not is_batched:
+            output = output.squeeze(batch_dim)
+            hidden = hidden.squeeze(1)
+
         return output, self.permute_hidden(hidden, unsorted_indices)
 
 # XXX: LSTM and GRU implementation is different from RNNBase, this is because:
@@ -848,6 +863,16 @@ class GRU(RNNBase):
             max_batch_size = int(max_batch_size)
         else:
             batch_sizes = None
+            is_batched = input.dim() == 3
+            batch_dim = 0 if self.batch_first else 1
+            if not is_batched:
+                input = input.unsqueeze(batch_dim)
+                if hx is not None:
+                    assert hx.dim() == 2
+                    hx = hx.unsqueeze(1)
+            else:
+                if hx is not None:
+                    assert hx.dim() == 3
             max_batch_size = input.size(0) if self.batch_first else input.size(1)
             sorted_indices = None
             unsorted_indices = None
@@ -877,6 +902,10 @@ class GRU(RNNBase):
             output_packed = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
             return output_packed, self.permute_hidden(hidden, unsorted_indices)
         else:
+            if not is_batched:
+                output = output.squeeze(batch_dim)
+                hidden = hidden.squeeze(1)
+
             return output, self.permute_hidden(hidden, unsorted_indices)
 
 
