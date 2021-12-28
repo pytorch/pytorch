@@ -50,6 +50,14 @@ def node_ctor_inputs(schema: LazyIrSchema) -> str:
     return ",\n                              ".join(node_ctor_values)
 
 
+def aten_symbol(schema: LazyIrSchema) -> str:
+    missing_interned_strings = {
+        'sigmoid_backward',
+    }
+    if schema.aten_name in missing_interned_strings:
+        return f'c10::Symbol::fromQualString("aten::{schema.aten_name}")'
+    return f'at::aten::{schema.aten_name}'
+
 @dataclass(frozen=True)
 class LazyIR:
     backend_index: BackendIndex
@@ -104,7 +112,7 @@ class LazyIR:
 class {schema.node_name} : public {self.node_base} {{
  public:
   {schema.node_name}({node_ctor_args}, std::vector<Shape>&& shapes)
-      : {self.node_base}(torch::lazy::OpKind(at::aten::{schema.aten_name}),
+      : {self.node_base}(torch::lazy::OpKind({aten_symbol(schema)}),
               {{{base_ctor_value_args}}}, std::move(shapes),
               /* num_outputs */ {len(func.returns)},
               torch::lazy::MHash({scalar_hashes})){comma_if_scalar_initializers}

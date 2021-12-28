@@ -12,6 +12,8 @@ full_codegen:
   - avg_pool2d
   - avg_pool2d_backward
   - baddbmm
+  - binary_cross_entropy
+  - binary_cross_entropy_backward
   - bitwise_and.Tensor
   - bmm
   - constant_pad_nd
@@ -71,6 +73,7 @@ full_codegen:
   - relu_
   - rsqrt
   - sigmoid
+  - sigmoid_backward
   - silu
   - smooth_l1_loss
   - smooth_l1_loss_backward

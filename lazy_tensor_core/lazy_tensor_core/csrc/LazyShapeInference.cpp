@@ -76,6 +76,18 @@ std::vector<int64_t> expand_param_if_needed(
   }
 }
 
+std::vector<Shape> compute_shape_binary_cross_entropy(const at::Tensor & self, const at::Tensor & target, const c10::optional<at::Tensor> & weight, int64_t reduction) {
+  if(reduction == at::Reduction::None) {
+    return {Shape(self.scalar_type(), self.sizes().vec())};
+  }
+  return {Shape(self.scalar_type(), {})};
+}
+
+std::vector<Shape> compute_shape_binary_cross_entropy_backward(const at::Tensor & grad_output, const at::Tensor & self, const at::Tensor & target, const c10::optional<at::Tensor> & weight, int64_t reduction) {
+  return {Shape(self.scalar_type(), self.sizes().vec())};
+}
+
+
 std::vector<Shape> compute_shape_constant_pad_nd(const at::Tensor & self, at::IntArrayRef pad, const at::Scalar & value) {
   // Based on aten/src/ATen/native/ConstantPadNd.cpp::constant_pad_nd
   TORCH_CHECK(pad.size() % 2 == 0, "Length of pad must be even but instead it equals ",
