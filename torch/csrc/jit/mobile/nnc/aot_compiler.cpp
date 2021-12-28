@@ -44,7 +44,8 @@ std::vector<mobile::nnc::InputSpec> toInputSpecs(const std::shared_ptr<Graph>& g
     if (t->kind() == TypeKind::TensorType) {
       auto tt = t->cast<TensorType>();
       spec.sizes_ = {};
-      for (auto s : *tt->sizes().sizes()) {
+      auto sizes_vec = *tt->sizes().sizes();
+      for (auto s : sizes_vec) {
         spec.sizes_.push_back(s ? *s : 0);
       }
       spec.is_scalar_ = false;
