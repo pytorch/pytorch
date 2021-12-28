@@ -115,7 +115,7 @@ jobs:
           ln -s "$PWD"/builder /builder
       - name: Build PyTorch binary
         run: |
-          /builder/!{{ package_type }}/build.sh
+          bash /builder/!{{ package_type }}/build.sh
       - uses: actions/upload-artifact@v2
         with:
 {%- if package_type == "libtorch" %}

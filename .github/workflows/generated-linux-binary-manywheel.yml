@@ -108,7 +108,7 @@ jobs:
           ln -s "$PWD"/builder /builder
       - name: Build PyTorch binary
         run: |
-          /builder/manywheel/build.sh
+          bash /builder/manywheel/build.sh
       - uses: actions/upload-artifact@v2
         with:
           name: pytorch-manywheel-py${{ matrix.python_version }}-${{ matrix.gpu_arch_type }}${{ matrix.gpu_arch_version }}

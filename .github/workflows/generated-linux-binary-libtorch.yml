@@ -108,7 +108,7 @@ jobs:
           ln -s "$PWD"/builder /builder
       - name: Build PyTorch binary
         run: |
-          /builder/libtorch/build.sh
+          bash /builder/libtorch/build.sh
       - uses: actions/upload-artifact@v2
         with:
           name: pytorch-libtorch-${{ matrix.gpu_arch_type }}${{ matrix.gpu_arch_version }}-${{ matrix.devtoolset }}-${{ matrix.libtorch_variant }}
