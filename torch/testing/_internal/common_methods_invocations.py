@@ -11561,7 +11561,7 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and_complex_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16),
         supports_forward_ad=True,
-        supports_fwgrad_bwgrad=False,  # Need: tanh_backward
+        supports_fwgrad_bwgrad=True,
         supports_autograd=True,
         assert_autodiffed=False,
         supports_gradgrad=True,
@@ -11745,7 +11745,7 @@ op_db: List[OpInfo] = [
            supports_gradgrad=True,
            supports_out=False,
            supports_forward_ad=True,
-           supports_fwgrad_bwgrad=False,  # Need: hardtanh_backward
+           supports_fwgrad_bwgrad=True,
            autodiff_nonfusible_nodes=["aten::relu6"]),
     OpInfo('mm',
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
