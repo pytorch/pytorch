@@ -240,7 +240,6 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         group_key_fn: Function used to generate group key from the data of the source datapipe
         buffer_size: The size of buffer for ungrouped data
         group_size: The size of each group
-        unbatch_level: Specifies if it necessary to unbatch source data before grouping
         guaranteed_group_size: The guaranteed minimum group size
         drop_remaining: Specifies if the group smaller than `guaranteed_group_size` will be dropped from buffer
     """
@@ -250,22 +249,18 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
                  *,
                  buffer_size: int = 10000,
                  group_size: Optional[int] = None,
-                 unbatch_level: int = 0,
                  guaranteed_group_size: Optional[int] = None,
                  drop_remaining: bool = False):
-        if unbatch_level == 0:
-            self.datapipe = datapipe
-        else:
-            self.datapipe = datapipe.unbatch(unbatch_level=unbatch_level)
+        self.datapipe = datapipe
         self.group_key_fn = group_key_fn
         self.buffer_size = buffer_size
         self.group_size = group_size
         self.guaranteed_group_size = None
         if group_size is not None and buffer_size is not None:
-            assert group_size > 0 and group_size <= buffer_size
+            assert 0 < group_size <= buffer_size
             self.guaranteed_group_size = group_size
         if guaranteed_group_size is not None:
-            assert guaranteed_group_size > 0 and group_size is not None and guaranteed_group_size <= group_size
+            assert group_size is not None and 0 < guaranteed_group_size <= group_size
             self.guaranteed_group_size = guaranteed_group_size
         self.drop_remaining = drop_remaining
         self.wrapper_class = DataChunk
@@ -288,7 +283,7 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         new_buffer_size = buffer_size - biggest_size
         del buffer_elements[biggest_key]
 
-        return (result_to_yield, new_buffer_size)
+        return result_to_yield, new_buffer_size
 
     def __iter__(self):
         buffer_elements: DefaultDict[Any, List] = defaultdict(list)
