@@ -36,6 +36,8 @@ env:
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   PYTORCH_RETRY_TEST_CASES: 1
   PYTORCH_FINAL_PACKAGE_DIR: /tmp/artifacts
+  # Needed for conda builds
+  TORCH_CONDA_BUILD_FOLDER: pytorch-nightly
 !{{ common.concurrency(build_environment) }}
 
 jobs:
@@ -72,6 +74,7 @@ jobs:
     strategy:
       matrix:
         ${{ fromJson(needs.generate-build-matrix.outputs.matrix) }}
+      fail-fast: false
     container:
       image: ${{ matrix.container_image }}
     env:
