@@ -25,6 +25,7 @@ from ..qconfig_dict_utils import (
 from .qconfig_utils import (
     generate_qconfig_map,
     update_qconfig_for_fusion,
+    get_standalone_module_configs,
 )
 
 from .quantization_patterns import (
@@ -197,29 +198,31 @@ def is_pattern_dtype_config_supported_by_backend(
             return True
     return False
 
-def get_standalone_module_configs(
+def prepare_get_standalone_module_configs(
     node: Node,
     modules: Dict[str, torch.nn.Module],
     prepare_custom_config_dict: Dict[str, Any],
     qconfig: QConfigAny,
-) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
     """
     Returns the standalone module qconfig_dict and prepare_config_dict
     for `node`, assuming that the module pointed to by `node` is
     a standalone modules.
     """
-    standalone_module = modules[node.target]  # type: ignore[index]
-    standalone_module_name_configs = \
-        prepare_custom_config_dict.get("standalone_module_name", [])
-    standalone_module_class_configs = \
-        prepare_custom_config_dict.get("standalone_module_class", [])
-    class_config_map = {x[0]: (x[1], x[2]) for x in standalone_module_class_configs}
-    name_config_map = {x[0]: (x[1], x[2]) for x in standalone_module_name_configs}
-    config = class_config_map.get(type(standalone_module), (None, None))
-    config = name_config_map.get(node.target, config)
-    sm_qconfig_dict = {"": qconfig} if config[0] is None else config[0]
-    sm_prepare_config_dict = {} if config[1] is None else config[1]
-    return sm_qconfig_dict, sm_prepare_config_dict
+    standalone_module_name = str(node.target)
+    standalone_module_type = type(modules[standalone_module_name])  # type: ignore[index]
+    sm_qconfig_dict, sm_prepare_config_dict, sm_backend_config_dict = \
+        get_standalone_module_configs(standalone_module_name, standalone_module_type, prepare_custom_config_dict)
+    # fallback to use parent module's qconfig if user didn't specify qconfig dict
+    if sm_qconfig_dict is None:
+        sm_qconfig_dict = {"": qconfig}
+    if sm_prepare_config_dict is None:
+        sm_prepare_config_dict = {}
+    # TODO: sm_backend_config_dict can fallback to use parent's backend_config_dict
+    # as well, this can be added later
+    if sm_backend_config_dict is None:
+        sm_backend_config_dict = {}
+    return sm_qconfig_dict, sm_prepare_config_dict, sm_backend_config_dict
 
 def qat_swap_modules(
         root: torch.nn.Module,
@@ -459,8 +462,8 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
 
     else:
         # custom flow for standalone modules
-        _sm_qconfig_dict, sm_prepare_config_dict = \
-            get_standalone_module_configs(
+        _sm_qconfig_dict, sm_prepare_config_dict, _sm_backend_config_dict = \
+            prepare_get_standalone_module_configs(
                 node, modules, prepare_custom_config_dict, qconfig)
 
         sm_input_quantized_idxs = \
@@ -1194,15 +1197,15 @@ def run_prepare_fx_on_standalone_modules(
         elif not isinstance(qhandler, StandaloneModuleQuantizeHandler):
             continue
 
-        sm_qconfig_dict, sm_prepare_config_dict = \
-            get_standalone_module_configs(
+        sm_qconfig_dict, sm_prepare_config_dict, sm_backend_config_dict = \
+            prepare_get_standalone_module_configs(
                 root_node, modules, prepare_custom_config_dict, qconfig)
 
         standalone_module = modules[root_node.target]
         prepare = \
             torch.ao.quantization.quantize_fx._prepare_standalone_module_fx  # type: ignore[attr-defined]
         observed_standalone_module = \
-            prepare(standalone_module, sm_qconfig_dict, sm_prepare_config_dict)
+            prepare(standalone_module, sm_qconfig_dict, sm_prepare_config_dict, sm_backend_config_dict)
         preserved_attributes = \
             set(sm_prepare_config_dict.get("preserved_attributes", []))
         observed_standalone_module = ObservedStandaloneGraphModule(
