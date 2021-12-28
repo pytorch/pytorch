@@ -11492,6 +11492,7 @@ op_db: List[OpInfo] = [
         supports_autograd=True,
         assert_autodiffed=False,
         supports_gradgrad=False,
+        supports_forward_ad=True,
         supports_out=False,
         inplace_variant=partial(torch.nn.functional.hardsigmoid, inplace=True),
         decorators=[
@@ -11515,7 +11516,6 @@ op_db: List[OpInfo] = [
         supports_autograd=True,
         assert_autodiffed=False,
         supports_gradgrad=True,
-        supports_fwgrad_bwgrad=True,
         supports_out=False,
     ),
     UnaryUfuncInfo(
