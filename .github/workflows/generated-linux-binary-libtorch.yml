@@ -57,7 +57,7 @@ jobs:
           echo "::set-output name=matrix::${MATRIX}"
 
   build:
-    name: pytorch-libtorch-py${{ matrix.python_version }}-${{ matrix.gpu_arch_type }}${{ matrix.gpu_arch_version }}
+    name: pytorch-libtorch-${{ matrix.gpu_arch_type }}${{ matrix.gpu_arch_version }}-${{ matrix.devtoolset }}-${{ matrix.libtorch_variant }}
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
     timeout-minutes: 240
@@ -66,7 +66,7 @@ jobs:
       matrix:
         ${{ fromJson(needs.generate-build-matrix.outputs.matrix) }}
     container:
-      image: ${{ matrix.wheel_container_image }}
+      image: ${{ matrix.container_image }}
     env:
       DESIRED_PYTHON: ${{ matrix.python_version }}
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -108,7 +108,7 @@ jobs:
           /builder/libtorch/build.sh
       - uses: actions/upload-artifact@v2
         with:
-          name: pytorch-libtorch-py${{ matrix.python_version }}-${{ matrix.gpu_arch_type }}${{ matrix.gpu_arch_version }}
+          name: pytorch-libtorch-${{ matrix.gpu_arch_type }}${{ matrix.gpu_arch_version }}-${{ matrix.devtoolset }}-${{ matrix.libtorch_variant }}
           path:
             ${{ env.PYTORCH_FINAL_PACKAGE_DIR }}/*
       - name: Parse ref

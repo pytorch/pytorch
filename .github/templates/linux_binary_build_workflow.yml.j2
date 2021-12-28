@@ -60,7 +60,11 @@ jobs:
 {%- endblock %}
 {% block build +%}
   build:
+{%- if package_type == "libtorch" %}
+    name: pytorch-!{{ package_type }}-${{ matrix.gpu_arch_type }}${{ matrix.gpu_arch_version }}-${{ matrix.devtoolset }}-${{ matrix.libtorch_variant }}
+{%- else %}
     name: pytorch-!{{ package_type }}-py${{ matrix.python_version }}-${{ matrix.gpu_arch_type }}${{ matrix.gpu_arch_version }}
+{%- endif %}
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
     timeout-minutes: !{{ common.timeout_minutes }}
@@ -111,7 +115,11 @@ jobs:
           /builder/!{{ package_type }}/build.sh
       - uses: actions/upload-artifact@v2
         with:
+{%- if package_type == "libtorch" %}
+          name: pytorch-!{{ package_type }}-${{ matrix.gpu_arch_type }}${{ matrix.gpu_arch_version }}-${{ matrix.devtoolset }}-${{ matrix.libtorch_variant }}
+{%- else %}
           name: pytorch-!{{ package_type }}-py${{ matrix.python_version }}-${{ matrix.gpu_arch_type }}${{ matrix.gpu_arch_version }}
+{%- endif %}
           path:
             ${{ env.PYTORCH_FINAL_PACKAGE_DIR }}/*
       - name: Parse ref
