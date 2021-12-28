@@ -73,6 +73,7 @@ LABEL_CIFLOW_SLOW_GRADCHECK = "ciflow/slow-gradcheck"
 LABEL_CIFLOW_DOCKER = "ciflow/docker"
 LABEL_CIFLOW_IOS = "ciflow/ios"
 LABEL_CIFLOW_MACOS = "ciflow/macos"
+LABEL_CIFLOW_TRUNK = "ciflow/trunk"
 LABEL_CIFLOW_BINARIES = "ciflow/binaries"
 LABEL_CIFLOW_BINARIES_WHEEL= "ciflow/binaries/wheel"
 LABEL_CIFLOW_BINARIES_CONDA = "ciflow/binaries/conda"
@@ -85,7 +86,6 @@ class CIFlowConfig:
     labels: Set[str] = field(default_factory=set)
     trigger_action: str = 'unassigned'
     trigger_actor: str = 'pytorchbot'
-    root_job_name: str = 'ciflow_should_run'
     root_job_condition: str = ''
     label_conditions: str = ''
     # Certain jobs might not want to be part of the ciflow/all workflow
@@ -115,10 +115,12 @@ class CIFlowConfig:
                                   f"         }}}}"
 
     def reset_root_job(self) -> None:
-        self.root_job_name = ''
         self.root_job_condition = ''
 
     def __post_init__(self) -> None:
+        self.labels.add(LABEL_CIFLOW_ALL)
+        if LABEL_CIFLOW_SCHEDULED not in self.labels:
+            self.labels.add(LABEL_CIFLOW_TRUNK)
         if self.add_to_ciflow_all:
             self.labels.add(LABEL_CIFLOW_ALL)
         assert all(label.startswith(LABEL_CIFLOW_PREFIX) for label in self.labels)
@@ -173,6 +175,7 @@ class CIWorkflow:
     only_run_smoke_tests_on_pull_request: bool = False
     num_test_shards_on_pull_request: int = -1
     distributed_test: bool = True
+    fx2trt_test: bool = False
     timeout_after: int = 240
     xcode_version: str = ''
 
@@ -180,6 +183,7 @@ class CIWorkflow:
     # so it's easier for both shell and Python scripts to consume it if false is represented as the empty string.
     enable_jit_legacy_test: YamlShellBool = "''"
     enable_distributed_test: YamlShellBool = "''"
+    enable_fx2trt_test: YamlShellBool = "''"
     enable_multigpu_test: YamlShellBool = "''"
     enable_nogpu_no_avx_test: YamlShellBool = "''"
     enable_nogpu_no_avx2_test: YamlShellBool = "''"
@@ -196,6 +200,9 @@ class CIWorkflow:
 
         if self.distributed_test:
             self.enable_distributed_test = 1
+
+        if self.fx2trt_test:
+            self.enable_fx2trt_test = 1
 
         # If num_test_shards_on_pull_request is not user-defined, default to num_test_shards unless we are
         # only running smoke tests on the pull request.
@@ -231,6 +238,7 @@ class CIWorkflow:
             assert LABEL_CIFLOW_CPU in self.ciflow_config.labels
         if self.is_scheduled:
             assert LABEL_CIFLOW_DEFAULT not in self.ciflow_config.labels
+            assert LABEL_CIFLOW_TRUNK not in self.ciflow_config.labels
             assert LABEL_CIFLOW_SCHEDULED in self.ciflow_config.labels
         if self.build_with_debug:
             assert self.build_environment.endswith("-debug")
@@ -279,26 +287,14 @@ class DockerWorkflow:
 class BinaryBuildWorkflow:
     package_type: str
     os: str
-    gpu_arch_type: str
 
     # Optional fields
     build_environment: str = ''
     ciflow_config: CIFlowConfig = field(default_factory=CIFlowConfig)
-    docker_image_base: str = ''
-    gpu_arch_version: str = ''
     is_scheduled: str = ''
-    python_version: str = ''
 
     def __post_init__(self) -> None:
-        self.build_environment = f"{self.os}-binary-{self.package_type}-py{self.python_version}-{self.gpu_arch_type}{self.gpu_arch_version}"
-        self.assert_valid()
-
-    def assert_valid(self) -> None:
-        # Python version should be specified if building anything except libtorch
-        if self.package_type != "libtorch":
-            assert self.python_version != ""
-        if self.gpu_arch_type == "cpu":
-            assert self.gpu_arch_version == ""
+        self.build_environment = f"{self.os}-binary-{self.package_type}"
 
     def generate_workflow_file(self, workflow_template: jinja2.Template) -> None:
         output_file_path = GITHUB_DIR / f"workflows/generated-{self.build_environment}.yml"
@@ -338,6 +334,19 @@ WINDOWS_WORKFLOWS = [
         ciflow_config=CIFlowConfig(
             run_on_canary=True,
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_CUDA, LABEL_CIFLOW_WIN}
+        ),
+    ),
+    CIWorkflow(
+        arch="windows",
+        build_environment="periodic-win-vs2019-cuda11.5-py3",
+        cuda_version="11.5",
+        test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
+        num_test_shards=2,
+        enable_force_on_cpu_test=1,
+        is_scheduled="45 4,10,16,22 * * *",
+        ciflow_config=CIFlowConfig(
+            run_on_canary=True,
+            labels={LABEL_CIFLOW_SCHEDULED, LABEL_CIFLOW_CUDA, LABEL_CIFLOW_WIN}
         ),
     ),
     CIWorkflow(
@@ -461,7 +470,7 @@ LINUX_WORKFLOWS = [
         build_environment="linux-xenial-py3.6-clang7-asan",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang7-asan",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
-        num_test_shards=2,
+        num_test_shards=3,
         distributed_test=False,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_SANITIZERS, LABEL_CIFLOW_CPU},
@@ -507,23 +516,25 @@ LINUX_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="linux",
-        build_environment="linux-bionic-cuda11.5-py3.6-gcc7",
+        build_environment="periodic-linux-bionic-cuda11.5-py3.6-gcc7",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-cuda11.5-cudnn8-py3-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         num_test_shards=2,
+        is_scheduled="45 4,10,16,22 * * *",
         ciflow_config=CIFlowConfig(
-            labels=set([LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA]),
+            labels=set([LABEL_CIFLOW_SCHEDULED, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA]),
         ),
     ),
     CIWorkflow(
         arch="linux",
-        build_environment="libtorch-linux-bionic-cuda11.5-py3.6-gcc7",
+        build_environment="periodic-libtorch-linux-bionic-cuda11.5-py3.6-gcc7",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-cuda11.5-cudnn8-py3-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         build_generates_artifacts=False,
+        is_scheduled="45 4,10,16,22 * * *",
         exclude_test=True,
         ciflow_config=CIFlowConfig(
-            labels=set([LABEL_CIFLOW_LIBTORCH, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA]),
+            labels=set([LABEL_CIFLOW_SCHEDULED, LABEL_CIFLOW_LIBTORCH, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA]),
         ),
     ),
     CIWorkflow(
@@ -532,6 +543,7 @@ LINUX_WORKFLOWS = [
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         num_test_shards=2,
+        fx2trt_test=True,
         ciflow_config=CIFlowConfig(
             labels=set([LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA]),
         ),
@@ -611,7 +623,7 @@ LINUX_WORKFLOWS = [
     ),
 ]
 
-ANDROID_WORKFLOWS = [
+ANDROID_SHORT_WORKFLOWS = [
     CIWorkflow(
         arch="linux",
         build_environment="pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single",
@@ -634,11 +646,24 @@ ANDROID_WORKFLOWS = [
     ),
 ]
 
+ANDROID_WORKFLOWS = [
+    CIWorkflow(
+        arch="linux",
+        build_environment="pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
+        test_runner_type=LINUX_CPU_TEST_RUNNER,
+        exclude_test=True,
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_ANDROID},
+        ),
+    ),
+]
+
 BAZEL_WORKFLOWS = [
     CIWorkflow(
         arch="linux",
-        build_environment="linux-xenial-py3.6-gcc7-bazel-test",
-        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7",
+        build_environment="linux-xenial-cuda11.3-py3.6-gcc7-bazel-test",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_BAZEL, LABEL_CIFLOW_CPU, LABEL_CIFLOW_LINUX},
@@ -778,98 +803,31 @@ DOCKER_WORKFLOWS = [
     ),
 ]
 
-SUPPORTED_PYTHON_VERSIONS = [
-    "3.6",
-    "3.7",
-    "3.8",
-    "3.9"
-]
-
-SUPPORTED_CUDA_VERSIONS = [
-    "10.2",
-    "11.1",
-    "11.3",
-    "11.5"
-]
-
-ROCM_VERSIONS = [
-    "4.1",
-    "4.2",
-    "4.3.1"
-]
-
 LINUX_BINARY_BUILD_WORFKLOWS = [
-    # WHEELS
-    *[
-        BinaryBuildWorkflow(
-            os="linux",
-            package_type="manywheel",
-            gpu_arch_type="cpu",
-            python_version=python_version,
-            docker_image_base="pytorch/manylinux-builder:cpu",
-            ciflow_config=CIFlowConfig(
-                labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},
-                add_to_ciflow_all=False,
-            ),
-        ) for python_version in SUPPORTED_PYTHON_VERSIONS
-    ],
-    *[
-        BinaryBuildWorkflow(
-            os="linux",
-            package_type="manywheel",
-            gpu_arch_type="cuda",
-            gpu_arch_version=gpu_arch_version,
-            python_version=python_version,
-            docker_image_base=f"pytorch/manylinux-builder:cuda{gpu_arch_version}",
-            ciflow_config=CIFlowConfig(
-                labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},
-                add_to_ciflow_all=False,
-            ),
-        ) for python_version, gpu_arch_version in itertools.product(SUPPORTED_PYTHON_VERSIONS, SUPPORTED_CUDA_VERSIONS)
-    ],
-    # NOTE: ROCM is only supported for linux wheels
-    *[
-        BinaryBuildWorkflow(
-            os="linux",
-            package_type="manywheel",
-            gpu_arch_type="rocm",
-            gpu_arch_version=gpu_arch_version,
-            python_version=python_version,
-            docker_image_base=f"pytorch/manylinux-builder:rocm{gpu_arch_version}",
-            ciflow_config=CIFlowConfig(
-                labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},
-                add_to_ciflow_all=False,
-            ),
-        ) for python_version, gpu_arch_version in itertools.product(SUPPORTED_PYTHON_VERSIONS, ROCM_VERSIONS)
-    ],
-    # CONDA
-    *[
-        BinaryBuildWorkflow(
-            os="linux",
-            package_type="conda",
-            gpu_arch_type="cpu",
-            python_version=python_version,
-            docker_image_base="pytorch/conda-builder:cpu",
-            ciflow_config=CIFlowConfig(
-                labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_CONDA},
-                add_to_ciflow_all=False,
-            ),
-        ) for python_version in SUPPORTED_PYTHON_VERSIONS
-    ],
-    *[
-        BinaryBuildWorkflow(
-            os="linux",
-            package_type="conda",
-            gpu_arch_type="cuda",
-            gpu_arch_version=gpu_arch_version,
-            python_version=python_version,
-            docker_image_base=f"pytorch/conda-builder:cuda{gpu_arch_version}",
-            ciflow_config=CIFlowConfig(
-                labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_CONDA},
-                add_to_ciflow_all=False,
-            ),
-        ) for python_version, gpu_arch_version in itertools.product(SUPPORTED_PYTHON_VERSIONS, SUPPORTED_CUDA_VERSIONS)
-    ],
+    BinaryBuildWorkflow(
+        os="linux",
+        package_type="manywheel",
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},
+            add_to_ciflow_all=False,
+        ),
+    ),
+    BinaryBuildWorkflow(
+        os="linux",
+        package_type="conda",
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_CONDA},
+            add_to_ciflow_all=False,
+        ),
+    ),
+    BinaryBuildWorkflow(
+        os="linux",
+        package_type="libtorch",
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_CONDA},
+            add_to_ciflow_all=False,
+        ),
+    ),
 ]
 
 def main() -> None:
@@ -885,7 +843,8 @@ def main() -> None:
         (jinja_env.get_template("ios_ci_workflow.yml.j2"), IOS_WORKFLOWS),
         (jinja_env.get_template("macos_ci_workflow.yml.j2"), MACOS_WORKFLOWS),
         (jinja_env.get_template("docker_builds_ci_workflow.yml.j2"), DOCKER_WORKFLOWS),
-        (jinja_env.get_template("android_ci_workflow.yml.j2"), ANDROID_WORKFLOWS),
+        (jinja_env.get_template("android_ci_full_workflow.yml.j2"), ANDROID_WORKFLOWS),
+        (jinja_env.get_template("android_ci_workflow.yml.j2"), ANDROID_SHORT_WORKFLOWS),
         (jinja_env.get_template("linux_binary_build_workflow.yml.j2"), LINUX_BINARY_BUILD_WORFKLOWS),
     ]
     # Delete the existing generated files first, this should align with .gitattributes file description.

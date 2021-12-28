@@ -3,7 +3,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 #include <array>
 #include <cstdint>
@@ -70,6 +70,7 @@ enum class ExprType {
   TransposeOp,
   ShiftOp,
   GatherOp,
+  ViewOp,
   Split,
   Merge,
 };
@@ -194,15 +195,15 @@ static constexpr std::array<ParallelType, 6> kParallelTypeThreads = {
     ParallelType::TIDy,
     ParallelType::TIDz};
 
-static constexpr std::array<ParallelType, 6> kParallelTypeBIDs = {
+static constexpr std::array<ParallelType, 3> kParallelTypeBIDs = {
     ParallelType::BIDx,
     ParallelType::BIDy,
     ParallelType::BIDz};
 
-static constexpr std::array<ParallelType, 6> kParallelTypeTIDs = {
-    ParallelType::BIDx,
-    ParallelType::BIDy,
-    ParallelType::BIDz};
+static constexpr std::array<ParallelType, 3> kParallelTypeTIDs = {
+    ParallelType::TIDx,
+    ParallelType::TIDy,
+    ParallelType::TIDz};
 
 enum class MemoryType { Local, Shared, Global };
 
@@ -219,7 +220,8 @@ enum class IterType {
   Reduction,
   BroadcastWithStride,
   BroadcastWithoutStride,
-  Gather
+  Gather,
+  Stride
 };
 
 enum class SwizzleType { NoSwizzle, Transpose };
