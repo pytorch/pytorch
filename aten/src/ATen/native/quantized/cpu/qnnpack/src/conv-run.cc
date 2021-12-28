@@ -221,9 +221,11 @@ struct q8dwconv_context {
   size_t output_row_stride;
   size_t output_col_increment;
   union pytorch_qnnp_conv_quantization_params quantization_params;
-  const pytorch_q8dwconv2d_up_ukernel_function unipass_2d_ukernel;
-  const pytorch_q8dwconv2d_mp_ukernel_function multipass_2d_ukernel;
-  const pytorch_q8dwconv3d_mp_ukernel_function multipass_3d_ukernel;
+  union {
+    const pytorch_q8dwconv2d_up_ukernel_function unipass_2d_ukernel;
+    const pytorch_q8dwconv2d_mp_ukernel_function multipass_2d_ukernel;
+    const pytorch_q8dwconv3d_mp_ukernel_function multipass_3d_ukernel;
+  };
 };
 static void compute_dwconv2d_unipass(
     const struct q8dwconv_context context[1],
@@ -424,9 +426,6 @@ enum pytorch_qnnp_status qnnpackConv(
               .unipass_2d_ukernel = convolution->per_channel
                   ? pytorch_qnnp_params.q8dw9.updw_per_channel
                   : pytorch_qnnp_params.q8dw9.updw,
-              .multipass_2d_ukernel = convolution->per_channel
-                  ? pytorch_qnnp_params.q8dw25.mpdw_per_channel
-                  : pytorch_qnnp_params.q8dw25.mpdw,
           };
           pthreadpool_compute_2d(
               threadpool,
@@ -454,9 +453,6 @@ enum pytorch_qnnp_status qnnpackConv(
               .output_col_increment =
                   (output_pixel_stride - groups) * sizeof(uint8_t),
               .quantization_params = conv_quantization_params,
-              .unipass_2d_ukernel = convolution->per_channel
-                  ? pytorch_qnnp_params.q8dw9.updw_per_channel
-                  : pytorch_qnnp_params.q8dw9.updw,
               .multipass_2d_ukernel = convolution->per_channel
                   ? pytorch_qnnp_params.q8dw25.mpdw_per_channel
                   : pytorch_qnnp_params.q8dw25.mpdw,
