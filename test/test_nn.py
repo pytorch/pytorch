@@ -1834,9 +1834,126 @@ class TestNN(NNTestCase):
         parameters.pop('p4')
         check()
 
+        # Check reverse works
+        forward = list(iter(parameter_dict))
+        backward = list(reversed(parameter_dict))
+        self.assertEqual(len(forward), len(backward))
+        n = len(forward)
+        for i in range(n):
+            self.assertIs(forward[i], backward[n - i - 1])
+        check()
+
+        # Check copy works
+        copy = parameter_dict.copy()
+
+        # Check all keys are present and have shallow copied values
+        for key in parameter_dict:
+            self.assertTrue(key in copy)
+            self.assertEqual(parameter_dict[key], copy[key])
+            self.assertIs(parameter_dict[key], copy[key])
+        check()
+
+        parameter_dict["p20"] = Parameter(torch.randn(10, 10))
+        copy["p21"] = Parameter(torch.randn(9, 10))
+
+        self.assertTrue("p20" in parameter_dict)
+        self.assertFalse("p20" in copy)
+        self.assertFalse("p21" in parameter_dict)
+        self.assertTrue("p21" in copy)
+        parameter_dict.pop("p20")
+        check()
+
+        p = Parameter(torch.randn(10, 10))
+        parameter_dict['p12'] = p
+        p_popitem = parameter_dict.popitem()
+        self.assertEqual(p_popitem[0], 'p12')
+        self.assertIs(p_popitem[1], p)
+
+        # Unit test for set_default
+        # 1. Ensure parameter is correctly inserted when
+        #    the key is not present in `ParameterDict`
+        assert 'p11' not in parameter_dict
+        parameters['p11'] = Parameter(torch.randn(10, 10))
+        p_setdefault = parameter_dict.setdefault('p11', parameters['p11'])
+        self.assertIs(p_setdefault, parameters['p11'])
+        # 2. Ensure parameter is NOT inserted when the
+        #    key is already present in `ParameterDict`
+        p = Parameter(torch.randn(10, 10))
+        self.assertFalse(parameter_dict.setdefault('p11', p) is p)
+        # 3. Ensure `None` is inserted when the key is not
+        #    present in `Parameter` and parameter is not specified
+        self.assertIs(parameter_dict.setdefault('p26'), None)
+        del parameter_dict['p26']
+        check()
+
+        parameters2 = OrderedDict([
+            ('p13', Parameter(torch.randn(10, 10))),
+            ('p2', Parameter(torch.randn(10, 10))),
+            ('p3', Parameter(torch.randn(10, 10))),
+        ])
+        parameter_dict2 = nn.ParameterDict(parameters2)
+        parameters.update(parameters2)
+        parameter_dict |= parameter_dict2
+        check()
+
+        parameters2 = OrderedDict()
+        parameter_dict2 = nn.ParameterDict(parameters2)
+        parameters.update(parameters2)
+        parameter_dict |= parameter_dict2
+        check()
+
+        parameters2 = OrderedDict([
+            ('p14', Parameter(torch.randn(10, 10))),
+            ('p15', Parameter(torch.randn(10, 10))),
+            ('p13', Parameter(torch.randn(10, 10))),
+        ])
+        parameter_dict2 = nn.ParameterDict(parameters2)
+        parameters.update(parameters2)
+        parameter_dict |= parameter_dict2
+        check()
+
+        # Check __or__ and __ror__ works
+        parameters2 = OrderedDict([
+            ('p20', Parameter(torch.randn(10, 10))),
+            ('p21', Parameter(torch.randn(10, 10))),
+            ('p22', Parameter(torch.randn(10, 10))),
+        ])
+        parameter_dict2 = nn.ParameterDict(parameters2)
+        parameters.update(parameters2)
+        parameter_dict = parameter_dict | parameter_dict2
+        check()
+
+        parameters2 = OrderedDict([
+            ('p23', Parameter(torch.randn(10, 10))),
+            ('p24', Parameter(torch.randn(10, 10))),
+            ('p25', Parameter(torch.randn(10, 10))),
+        ])
+        parameter_dict2 = nn.ParameterDict(parameters2)
+        parameters2.update(parameters)
+        parameters = parameters2
+        parameter_dict = parameter_dict2 | parameter_dict
+        check()
+
+        parameters['p17'] = Parameter(torch.randn(10, 10))
+        parameter_dict['p17'] = parameters['p17']
+        self.assertIs(parameters['p17'], parameter_dict.get('p17'))
+        temp_param = Parameter(torch.randn(10, 10))
+        self.assertIs(parameters['p17'], parameter_dict.get('p17', temp_param))
+        self.assertIs(None, parameter_dict.get('p18'))
+        self.assertIs(temp_param, parameter_dict.get('p18', temp_param))
+        check()
+
         parameter_dict.clear()
         self.assertEqual(len(parameter_dict), 0)
         parameters.clear()
+        check()
+
+        parameter_dict2 = parameter_dict.fromkeys(['p19', 'p20'])
+        self.assertEqual({'p19': None, 'p20': None}, parameter_dict2)
+        check()
+
+        parameter_dict2 = parameter_dict.fromkeys(['p19', 'p20'], temp_param)
+        self.assertEqual({'p19': temp_param, 'p20': temp_param}, parameter_dict2)
         check()
 
     def test_add_module(self):
@@ -11824,18 +11941,21 @@ class TestNNInit(TestCase):
         self.assertEqual(F.max_unpool1d(output, indices, 2), F.max_unpool1d(output, indices, 2, stride=2))
 
         # Test list / tuple passed as argument to max_unpool1d
-        input = torch.randn([1, 1, 5])
+        input = torch.randn([1, 1, 5], requires_grad=True)
         output, indices = F.max_pool1d(input, 2, stride=2, return_indices=True)
         self.assertEqual(F.max_unpool1d(output, indices, 2, stride=2, output_size=input.shape),
                          F.max_unpool1d(output, indices, 2, stride=2, output_size=input.size()))
+        gradcheck(F.max_unpool1d, (output, indices, 2), check_forward_ad=True)
 
         # Test 2D
-        output, indices = F.max_pool2d(torch.randn([1, 1, 4, 4]), 2, stride=2, return_indices=True)
+        output, indices = F.max_pool2d(torch.randn([1, 1, 4, 4], requires_grad=True), 2, stride=2, return_indices=True)
         self.assertEqual(F.max_unpool2d(output, indices, 2), F.max_unpool2d(output, indices, 2, stride=2))
+        gradcheck(F.max_unpool2d, (output, indices, 2), check_forward_ad=True)
 
         # Test 3D
-        output, indices = F.max_pool3d(torch.randn([4, 4, 4, 4, 4]), 2, stride=2, return_indices=True)
+        output, indices = F.max_pool3d(torch.randn([4, 4, 4, 4, 4], requires_grad=True), 2, stride=2, return_indices=True)
         self.assertEqual(F.max_unpool3d(output, indices, 2), F.max_unpool3d(output, indices, 2, stride=2))
+        gradcheck(F.max_unpool3d, (output, indices, 2), check_forward_ad=True)
 
     def test_dirac_properties(self):
         for dims in [3, 4, 5]:
@@ -14892,6 +15012,8 @@ class TestNNDeviceType(NNTestCase):
         helper(None, 3, 50, 50, ks=5)
 
     def test_upsamplingNearest1d(self, device):
+        # Forward AD does not support XLA because XLA tensors don't have storage
+        check_forward_ad = torch.device(device).type != 'xla'
 
         def helper(mode):
             m = nn.Upsample(size=4, mode=mode)
@@ -14905,11 +15027,13 @@ class TestNNDeviceType(NNTestCase):
 
             # Checks upsampling
             input = torch.randn(1, 1, 2, requires_grad=True, device=device)
-            gradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input])
+            gradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input], check_forward_ad=check_forward_ad)
+            gradgradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input], check_fwd_over_rev=check_forward_ad)
 
             # Checks downsampling
             input = torch.randn(1, 1, 20, requires_grad=True, device=device)
-            gradcheck(lambda x: F.interpolate(x, 11, mode=mode), [input])
+            gradcheck(lambda x: F.interpolate(x, 11, mode=mode), [input], check_forward_ad=check_forward_ad)
+            gradgradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input], check_fwd_over_rev=check_forward_ad)
 
             # consistency CUDA/CPU check
             if torch.device(device).type == 'cuda':
@@ -14993,6 +15117,8 @@ class TestNNDeviceType(NNTestCase):
         helper(10, 15)
 
     def test_upsamplingNearest2d(self, device):
+        # Forward AD does not support XLA because XLA tensors don't have storage
+        check_forward_ad = torch.device(device).type != 'xla'
 
         def helper(memory_format, mode):
             in_t = torch.ones(1, 2, 2, 2, device=device).contiguous(memory_format=memory_format)
@@ -15017,15 +15143,15 @@ class TestNNDeviceType(NNTestCase):
 
             # test backward when input's height is not same as width
             input = torch.ones(1, 2, 2, 1, requires_grad=True, device=device).contiguous(memory_format=memory_format)
-            gradcheck(lambda x: F.interpolate(x, size=(4, 2), mode=mode), [input])
-            gradgradcheck(lambda x: F.interpolate(x, size=(4, 2), mode=mode), [input])
+            gradcheck(lambda x: F.interpolate(x, size=(4, 2), mode=mode), [input], check_forward_ad=check_forward_ad)
+            gradgradcheck(lambda x: F.interpolate(x, size=(4, 2), mode=mode), [input], check_fwd_over_rev=check_forward_ad)
 
             input = torch.randn(1, 2, 2, 2, requires_grad=True, device=device).contiguous(memory_format=memory_format)
             self.assertEqual(
                 F.interpolate(input, 4, mode=mode),
                 F.interpolate(input, scale_factor=2, mode=mode))
-            gradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input])
-            gradgradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input])
+            gradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input], check_forward_ad=check_forward_ad)
+            gradgradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input], check_fwd_over_rev=check_forward_ad)
 
             # Assert that cpu and cuda handle channels_last memory format in the same way
             # https://github.com/pytorch/pytorch/issues/54590
@@ -15053,8 +15179,8 @@ class TestNNDeviceType(NNTestCase):
         helper(torch.contiguous_format, "nearest")
         helper(torch.channels_last, "nearest")
         # Uncomment below once F.interpolate is updated
-        # helper(torch.contiguous_format, "nearest-exact")
-        # helper(torch.channels_last, "nearest-exact")
+        helper(torch.contiguous_format, "nearest-exact")
+        helper(torch.channels_last, "nearest-exact")
 
     def test_upsamplingNearest2d_correctness(self, device):
         # Here we check if output matches OpenCV's INTER_NEAREST-like result
@@ -15110,6 +15236,8 @@ class TestNNDeviceType(NNTestCase):
         helper(torch.channels_last, 10, 15)
 
     def test_upsamplingNearest3d(self, device):
+        # Forward AD does not support XLA because XLA tensors don't have storage
+        check_forward_ad = torch.device(device).type != 'xla'
 
         def helper(memory_format, mode):
             m = nn.Upsample(size=4, mode=mode)
@@ -15129,7 +15257,8 @@ class TestNNDeviceType(NNTestCase):
             input = torch.randn(
                 1, 2, 2, 2, 2, requires_grad=True, device=device
             ).contiguous(memory_format=memory_format)
-            gradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input])
+            gradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input], check_forward_ad=check_forward_ad)
+            gradgradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input], check_fwd_over_rev=check_forward_ad)
 
             # Assert that cpu and cuda handle channels_last memory format in the same way
             # https://github.com/pytorch/pytorch/issues/54590
@@ -15144,11 +15273,11 @@ class TestNNDeviceType(NNTestCase):
                 out_cpu = torch.nn.functional.interpolate(a.to('cpu'), scale_factor=2, mode=mode)
                 self.assertEqual(out_cpu, out_cuda.to('cpu'))
 
-                gradcheck(lambda x: F.interpolate(x, 4, mode=mode), [a])
-                gradgradcheck(lambda x: F.interpolate(x, 4, mode=mode), [a])
+                gradcheck(lambda x: F.interpolate(x, 4, mode=mode), [a], check_forward_ad=check_forward_ad)
+                gradgradcheck(lambda x: F.interpolate(x, 4, mode=mode), [a], check_fwd_over_rev=check_forward_ad)
 
-                gradcheck(lambda x: F.interpolate(x, 4, mode=mode), [a.to('cuda')])
-                gradgradcheck(lambda x: F.interpolate(x, 4, mode=mode), [a.to('cuda')])
+                gradcheck(lambda x: F.interpolate(x, 4, mode=mode), [a.to('cuda')], check_forward_ad=check_forward_ad)
+                gradgradcheck(lambda x: F.interpolate(x, 4, mode=mode), [a.to('cuda')], check_fwd_over_rev=check_forward_ad)
 
         helper(torch.contiguous_format, "nearest")
         helper(torch.channels_last_3d, "nearest")
@@ -15217,6 +15346,9 @@ class TestNNDeviceType(NNTestCase):
         helper(torch.channels_last_3d, 10, 15)
 
     def test_upsamplingBilinear2d(self, device):
+        # Forward AD does not support XLA because XLA tensors don't have storage
+        check_forward_ad = torch.device(device).type != 'xla'
+
         for antialias in [True, False]:
             # temporarily disabled on CUDA:
             if antialias and torch.device(device).type == 'cuda':
@@ -15237,7 +15369,8 @@ class TestNNDeviceType(NNTestCase):
                         self.assertTrue(in_t.grad.is_contiguous(memory_format=memory_format))
 
                         input = torch.randn(1, 2, 2, 2, device=device).contiguous(memory_format=memory_format).requires_grad_()
-                        gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
+                        gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input], check_forward_ad=check_forward_ad)
+                        gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input], check_fwd_over_rev=check_forward_ad)
 
                         # Assert that cpu and cuda give same results
                         if torch.device(device).type == 'cuda':
