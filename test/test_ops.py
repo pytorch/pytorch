@@ -22,7 +22,8 @@ from torch.testing._internal.common_device_type import \
 from torch.testing._internal.common_jit import JitCommonTestCase, check_against_reference
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, create_traced_fn, \
     check_alias_annotation
-from torch.testing._internal.jit_utils import disable_autodiff_subgraph_inlining
+from torch.testing._internal.jit_utils import disable_autodiff_subgraph_inlining, JitTestCase, \
+    TensorExprTestOptions
 import torch.testing._internal.opinfo_helper as opinfo_helper
 from torch.testing._internal.composite_compliance import _check_composite_compliance
 
@@ -1155,6 +1156,67 @@ class TestJit(JitCommonTestCase):
                 graph = traced.graph_for(*inp)
                 FileCheck().check(op_name).check_not(variant_name).run(graph)
 
+class TestJitTEFuser(JitTestCase):
+    def setUp(self):
+        super(JitTestCase, self).setUp()
+        self.tensorexpr_options = TensorExprTestOptions()
+
+    def tearDown(self):
+        super(JitTestCase, self).tearDown()
+        self.tensorexpr_options.restore()
+
+    @_variant_ops(op_db)
+    def test_jit_te_fuser(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype)
+
+        # Acquires variants to test
+        func = op.get_op()
+        method = op.get_method()
+        variants = {
+            # TODO: inplace tests currently fail, fix and add inplace variant
+            'function': func, 'method': method,
+        }
+
+        # TODO: find better way to standardize on op registration itself..
+        has_fake_function = op.name in ["resize_", 'resize_as_']
+
+        if has_fake_function:
+            variants = {'method': getattr(torch.Tensor, op.name)}
+
+        # doesn't support tracing
+        if has_fake_function:
+            return
+
+        def clone_inputs(args):
+            inputs: List[Union[torch.Tensor, List[torch.Tensor]]] = []
+
+            for arg in args:
+                if isinstance(arg, torch.Tensor):
+                    inputs.append(arg.detach().clone())
+                elif is_iterable_of_tensors(arg):
+                    inputs.append([t.detach().clone() for t in arg])
+                else:
+                    inputs.append(arg)
+
+            return inputs
+
+        for sample in samples:
+            for func_type, variant in variants.items():
+                if variant is None:
+                    continue
+
+                if is_lambda(variant):
+                    continue
+
+                trace = create_traced_fn(self, variant)
+                ref = variant(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
+
+                val = trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
+                self.assertEqual(ref, val)
+
+                self.assertAllFused(torch.jit.last_executed_optimized_graph())
+
+
 class TestMathBits(TestCase):
     # Tests that
     # 1. The operator's output for physically conjugated/negated tensors and conjugate/negative view tensors
@@ -1288,6 +1350,7 @@ class TestMathBits(TestCase):
 instantiate_device_type_tests(TestCommon, globals())
 instantiate_device_type_tests(TestGradients, globals())
 instantiate_device_type_tests(TestJit, globals())
+instantiate_device_type_tests(TestJitTEFuser, globals())
 instantiate_device_type_tests(TestMathBits, globals())
 
 if __name__ == '__main__':

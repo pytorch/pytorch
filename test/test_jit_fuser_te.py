@@ -21,7 +21,7 @@ torch._C._jit_set_profiling_mode(True)
 
 from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, \
     enable_profiling_mode_for_profiling_tests, TestCase
-from torch.testing._internal.jit_utils import JitTestCase, \
+from torch.testing._internal.jit_utils import JitTestCase, TensorExprTestOptions \
     RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, warmup_backward, set_fusion_group_inlining
 
 from torch.testing._internal.common_methods_invocations import op_db
@@ -67,26 +67,7 @@ def inline_fusion_groups():
 
 class TestTEFuser(JitTestCase):
     def setUp(self):
-        self.old_cpu_fuser_state = torch._C._jit_can_fuse_on_cpu()
-        self.old_must_use_cpu_state = torch._C._jit_get_te_must_use_llvm_cpu()
-        self.old_gpu_fuser_state = torch._C._jit_can_fuse_on_gpu()
-
-        torch._C._jit_override_can_fuse_on_cpu(True)
-        # TODO: force LLVM. need to add it to asan, mac, windows builds + sandcastle
-        # torch._C._jit_set_te_must_use_llvm_cpu(True)
-        torch._C._jit_override_can_fuse_on_gpu(True)
-
-        self.old_profiling_executor = torch._C._jit_set_profiling_executor(True)
-        self.old_profiling_mode = torch._C._jit_set_profiling_mode(True)
-
-        self.old_fusion_inlining = torch._C._debug_get_fusion_group_inlining()
-        torch._C._debug_set_fusion_group_inlining(False)
-
-        self.texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()
-        torch._C._jit_set_texpr_fuser_enabled(True)
-
-        self.old_te_must_use_llvm_cpu = torch._C._jit_get_te_must_use_llvm_cpu()
-        torch._C._jit_set_te_must_use_llvm_cpu(False)
+        self.tensorexpr_options = TensorExprTestOptions()
 
         self.devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         self.int_dtypes = [
@@ -105,16 +86,7 @@ class TestTEFuser(JitTestCase):
         self.dtypes = self.int_dtypes + self.fp_dtypes
 
     def tearDown(self):
-        torch._C._jit_set_profiling_executor(self.old_profiling_executor)
-        torch._C._jit_set_profiling_mode(self.old_profiling_mode)
-
-        torch._C._jit_override_can_fuse_on_gpu(self.old_gpu_fuser_state)
-        torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuser_state)
-        torch._C._jit_set_te_must_use_llvm_cpu(self.old_must_use_cpu_state)
-        torch._C._debug_set_fusion_group_inlining(self.old_fusion_inlining)
-
-        torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
-        torch._C._jit_set_te_must_use_llvm_cpu(self.old_te_must_use_llvm_cpu)
+        self.tensorexpr_options.restore()
 
     def assertLastGraphAllFused(self):
         self.assertAllFused(torch.jit.last_executed_optimized_graph())
