@@ -1000,6 +1000,29 @@ class TestTEFuser(JitTestCase):
         ge = self.checkScript(fn, (x, y))
         self.assertAllFused(ge.graph_for(x, y))
 
+    def test_inlined_optimized_graph(self):
+        @torch.jit.script
+        def foo(x):
+            return torch.relu(x + x)
+
+        for _ in range(3):
+            foo(torch.rand([4, 4]))
+
+        for _ in range(3):
+            foo(torch.rand([10]))
+
+        for _ in range(3):
+            foo(torch.rand([2, 2, 2]))
+
+        g = torch.jit.last_executed_optimized_graph()
+
+        FileCheck().check_count("prim::If", 1, exactly=True).check("prim::TensorExpr").run(g)
+        torch._C._jit_pass_inline(g)
+        f = FileCheck()
+        for _ in range(3):
+            f.check("prim::If").check("prim::TensorExpr")
+        f.run(g)
+
     def test_small_constant(self):
         for device in self.devices:
             def fn_test_small_constant(x, y):

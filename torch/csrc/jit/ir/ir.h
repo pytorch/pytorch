@@ -1588,6 +1588,11 @@ TORCH_API std::vector<Value*> inlineCallTo(
     GraphFunction* callee,
     bool use_graph = true);
 
+TORCH_API std::vector<Value*> inlineCallTo(
+    Node* to_replace,
+    GraphFunction* callee,
+    Graph* callee_graph);
+
 /** If there is only one value in \p OUTPUTS and its kind is Tuple, insert a
  * tuple unpack node and return the resulting values.
  */
