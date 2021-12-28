@@ -69,7 +69,7 @@ jobs:
     name: pytorch-linux-!{{ package_type }}-py${{ matrix.python_version }}-${{ matrix.gpu_arch_type }}${{ matrix.gpu_arch_version }}
 {%- endif %}
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: linux.2xlarge
+    runs-on: linux.4xlarge
     timeout-minutes: !{{ common.timeout_minutes }}
     needs: generate-build-matrix
     strategy:
