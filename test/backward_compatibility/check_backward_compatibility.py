@@ -51,6 +51,7 @@ ALLOW_LIST = [
     ("aten::adaptive_avg_pool3d_backward", datetime.date(9999, 1, 1)),
     ("aten::_embedding_bag_dense_backward", datetime.date(9999, 1, 1)),
     ("aten::randperm", datetime.date(9999, 1, 1)),
+    ("aten::_conv_depthwise2d_backward", datetime.date(2022, 1, 31)),
     ("aten::cudnn_convolution_backward", datetime.date(2022, 1, 31)),
     ("aten::cudnn_convolution_backward_input", datetime.date(2022, 1, 31)),
     ("aten::cudnn_convolution_backward_weight", datetime.date(2022, 1, 31)),
