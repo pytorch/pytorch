@@ -4594,8 +4594,26 @@ Tensor batch_norm_jvp(
   if (train) {
     mean_p = saved_mean.view(view_size);
     invstd_p = saved_invstd.view(view_size);
-    auto invstd_t = -invstd_p.pow(3) * ((input_t - input_t.mean(dims, true)) * (input_p - mean_p)).sum(dims, true) / numel;
-    result_t = (input_t - input_t.mean(dims, true)) * invstd_p + (input_p - mean_p) * invstd_t;
+    Tensor invstd_t;
+    if (areAnyTensorSubclassLike({input_t, input_p, mean_p, invstd_p}) || input_t._is_zerotensor()) {
+      invstd_t = -invstd_p.pow(3) * (input_t - input_t.mean(dims, true)) * (input_p - mean_p);
+    } else {
+      invstd_t = input_t - input_t.mean(dims, true);
+      invstd_t *= input_p - mean_p;
+      invstd_t *= -invstd_p.pow(3);
+    }
+    invstd_t = invstd_t.sum(dims, true);
+    invstd_t /= numel;
+
+    if (areAnyTensorSubclassLike({input_t, input_p, mean_p, invstd_p}) || input_t._is_zerotensor()) {
+      result_t = (input_t - input_t.mean(dims, true)) * invstd_p + (input_p - mean_p) * invstd_t;
+    } else {
+      result_t = input_t - input_t.mean(dims, true);
+      result_t *= invstd_p;
+      auto temp = input_p - mean_p;
+      temp *= invstd_t;
+      result_t += temp;
+    }
   } else {
     TORCH_INTERNAL_ASSERT(
         running_mean.has_value() && running_var.has_value(),
@@ -4608,11 +4626,22 @@ Tensor batch_norm_jvp(
 
   if (weight_p.defined()) {
     auto result_p = (input_p - mean_p) * invstd_p;
-    result_t = result_t * weight_p.view(view_size) + result_p * weight_t.view(view_size);
+    if (areAnyTensorSubclassLike({result_p, result_t, weight_p, weight_t}) || result_t._is_zerotensor() || weight_t._is_zerotensor()) {
+      result_t = result_t * weight_p.view(view_size) + result_p * weight_t.view(view_size);
+    } else {
+      result_t *= weight_p.view(view_size);
+      auto temp = result_p;
+      temp *= weight_t.view(view_size);
+      result_t += temp;
+    }
   }
 
   if (bias_p.defined()) {
-    result_t = result_t + bias_t.view(view_size);
+    if (areAnyTensorSubclassLike({result_t, bias_t}) || result_t._is_zerotensor()) {
+      result_t = result_t + bias_t.view(view_size);
+    } else {
+      result_t += bias_t.view(view_size);
+    }
   }
 
   return result_t;
