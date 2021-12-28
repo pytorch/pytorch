@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from functools import partial, wraps
 import warnings
 import unittest
+import itertools
 
 import torch
 
@@ -706,7 +707,8 @@ class TestGradients(TestCase):
         return _fn
 
     def _check_helper(self, device, dtype, op, variant, check, *, check_forward_ad=False, check_backward_ad=True,
-                      check_undefined_grad=True, check_batched_grad=None, check_batched_forward_grad=False):
+                      check_batched_grad=None, check_batched_forward_grad=False):
+        assert check in ('gradcheck', 'bwgrad_bwgrad', 'fwgrad_bwgrad')
         # NB: check_backward_ad does not affect gradgradcheck (always True)
         if variant is None:
             self.skipTest("Skipped! Variant not implemented.")
@@ -754,34 +756,33 @@ class TestGradients(TestCase):
                                           fast_mode=op.gradcheck_fast_mode,
                                           check_forward_ad=check_forward_ad,
                                           check_backward_ad=check_backward_ad,
-                                          check_undefined_grad=check_undefined_grad,
+                                          check_undefined_grad=True,
                                           check_batched_forward_grad=check_batched_forward_grad))
-            elif check == 'gradgradcheck':
+            elif check in ('bwgrad_bwgrad', 'fwgrad_bwgrad'):  # gradgrad check
                 self.assertFalse(check_forward_ad, msg="Cannot run forward AD check for gradgradcheck")
-                self.assertTrue(gradgradcheck(fn, gradcheck_args,
-                                              gen_non_contig_grad_outputs=False,
-                                              check_batched_grad=op.check_batched_gradgrad,
-                                              check_grad_dtypes=True,
-                                              nondet_tol=op.gradcheck_nondet_tol,
-                                              fast_mode=op.gradcheck_fast_mode))
-                self.assertTrue(gradgradcheck(fn, gradcheck_args,
-                                              gen_non_contig_grad_outputs=True,
-                                              check_batched_grad=op.check_batched_gradgrad,
-                                              check_grad_dtypes=True,
-                                              nondet_tol=op.gradcheck_nondet_tol,
-                                              fast_mode=op.gradcheck_fast_mode))
+                for gen_non_contig_grad_outputs in (False, True):
+                    kwargs = {
+                        "gen_non_contig_grad_outputs": gen_non_contig_grad_outputs,
+                        "check_batched_grad": op.check_batched_gradgrad,
+                        "check_grad_dtypes": True,
+                        "nondet_tol": op.gradcheck_nondet_tol,
+                        "fast_mode": op.gradcheck_fast_mode
+                    }
+                    if check == "fwgrad_bwgrad":
+                        kwargs["check_fwd_over_rev"] = True
+                        kwargs["check_rev_over_rev"] = False
+                        kwargs["check_batched_grad"] = False
+                        kwargs["check_undefined_grad"] = False
+
+                    self.assertTrue(gradgradcheck(fn, gradcheck_args, **kwargs))
             else:
                 self.assertTrue(False, msg="Unknown check requested!")
 
     def _grad_test_helper(self, device, dtype, op, variant, *, check_forward_ad=False, check_backward_ad=True,
-                          check_undefined_grad=True, check_batched_grad=None, check_batched_forward_grad=False):
+                          check_batched_grad=None, check_batched_forward_grad=False):
         return self._check_helper(device, dtype, op, variant, 'gradcheck', check_forward_ad=check_forward_ad,
-                                  check_backward_ad=check_backward_ad, check_undefined_grad=check_undefined_grad,
-                                  check_batched_grad=check_batched_grad,
+                                  check_backward_ad=check_backward_ad, check_batched_grad=check_batched_grad,
                                   check_batched_forward_grad=check_batched_forward_grad)
-
-    def _gradgrad_test_helper(self, device, dtype, op, variant):
-        return self._check_helper(device, dtype, op, variant, 'gradgradcheck')
 
     def _skip_helper(self, op, device, dtype):
         if not op.supports_autograd and not op.supports_forward_ad:
@@ -815,7 +816,21 @@ class TestGradients(TestCase):
         self._skip_helper(op, device, dtype)
         if not op.supports_gradgrad:
             self.skipTest("Skipped! Operation does not support gradgrad")
-        self._gradgrad_test_helper(device, dtype, op, op.get_op())
+        self._check_helper(device, dtype, op, op.get_op(), 'bwgrad_bwgrad')
+
+    # Test that forward-over-reverse gradgrad is computed correctly
+    @_gradcheck_ops(op_db)
+    def test_fn_fwgrad_bwgrad(self, device, dtype, op):
+        self._skip_helper(op, device, dtype)
+
+        if op.supports_fwgrad_bwgrad:
+            self._check_helper(device, dtype, op, op.get_op(), "fwgrad_bwgrad")
+        else:
+            err_msg = r"Trying to use forward AD with .* that does not support it\."
+            hint_msg = ("Running forward-over-backward gradgrad for an OP that has does not support it did not "
+                        "raise any error. If your op supports forward AD, you should set supports_fwgrad_bwgrad=True.")
+            with self.assertRaisesRegex(NotImplementedError, err_msg, msg=hint_msg):
+                self._check_helper(device, dtype, op, op.get_op(), "fwgrad_bwgrad")
 
     # Test that gradients of gradients are properly raising
     @_gradcheck_ops(op_db)
@@ -826,7 +841,7 @@ class TestGradients(TestCase):
 
         err_msg = r"derivative for .* is not implemented"
         with self.assertRaisesRegex(RuntimeError, err_msg):
-            self._gradgrad_test_helper(device, dtype, op, op.get_op())
+            self._check_helper(device, dtype, op, op.get_op(), 'bwgrad_bwgrad')
 
     # Method gradgrad (and grad, see above) tests are disabled since they're
     #   costly and redundant with function gradgrad (and grad) tests
@@ -840,7 +855,7 @@ class TestGradients(TestCase):
         self._skip_helper(op, device, dtype)
         if not op.inplace_variant or not op.supports_inplace_autograd:
             self.skipTest("Skipped! Operation does not support inplace autograd.")
-        self._gradgrad_test_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()))
+        self._check_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()), "bwgrad_bwgrad")
 
     def _forward_grad_helper(self, device, dtype, op, variant, is_inplace):
         # TODO: clean up how attributes are passed to gradcheck from OpInfos
@@ -848,8 +863,7 @@ class TestGradients(TestCase):
             check_batched_forward_grad = ((op.check_batched_forward_grad and not is_inplace) or
                                           (op.check_inplace_batched_forward_grad and is_inplace))
             self._grad_test_helper(device, dtype, op, variant, check_forward_ad=True, check_backward_ad=False,
-                                   check_undefined_grad=False, check_batched_grad=False,
-                                   check_batched_forward_grad=check_batched_forward_grad)
+                                   check_batched_grad=False, check_batched_forward_grad=check_batched_forward_grad)
         if op.supports_forward_ad:
             call_grad_test_helper()
         else:
@@ -1150,22 +1164,8 @@ class TestMathBits(TestCase):
     # This test only runs for C -> R and C -> C functions
     # TODO: add tests for `R->C` functions
     # Note: This test runs for functions that take both tensors and tensorlists as input.
-    def _test_math_view(self, device, dtype, op, _requires_grad, math_op_physical, math_op_view, is_bit_set, out_type):
-        samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad)
+    def _test_math_view(self, device, dtype, op, samples, math_op_physical, math_op_view, is_bit_set, out_type):
         inplace_variant = op.inplace_variant
-
-        # helper function to physically conjugate/negate the tensor
-        def math_physical(input):
-            if isinstance(input, torch.Tensor):
-                tensor_requires_grad = input.requires_grad
-                with torch.no_grad():
-                    input = math_op_physical(input)
-                return input.requires_grad_(tensor_requires_grad)
-
-            if isinstance(input, Sequence):
-                out = list(map(clone_input_helper, input))
-                out[0] = math_physical(out[0])
-                return tuple(out)
 
         # helper function to clone and conjugate/negate the input if its a tensor
         # else clone the sequence and conjugate/negate the first element in the sequence
@@ -1175,7 +1175,8 @@ class TestMathBits(TestCase):
             if isinstance(input, torch.Tensor):
                 requires_grad = kwargs.get('requires_grad', input.requires_grad)
                 with torch.no_grad():
-                    input = input.clone()
+                    # Ensure view represents the original sample input
+                    input = math_op_physical(input)
                 # Note: .conj() is not called under no_grad mode since it's not allowed to modify a
                 # view created in no_grad mode. Here it's ok to do so, so as a workaround we call conj
                 # before resetting the requires_grad field for input
@@ -1191,7 +1192,6 @@ class TestMathBits(TestCase):
         for sample in samples:
             tensor = sample.input if isinstance(sample.input, torch.Tensor) else sample.input[0]
             cloned1 = clone_and_perform_view(sample.input)
-            sample.input = math_physical(sample.input)
 
             # Computes function forward value with a physically conjugated/negated tensor and
             # a conj/neg view tensor and verifies that the output in both case are equal.
@@ -1216,6 +1216,10 @@ class TestMathBits(TestCase):
             # TODO: update to handle checking grads of all tensor inputs as
             #   derived from each tensor output
             if isinstance(expected_forward, torch.Tensor) and expected_forward.requires_grad:
+                output_process_fn_grad = sample.output_process_fn_grad or (lambda x: x)
+                expected_forward = output_process_fn_grad(expected_forward)
+                forward_with_mathview = output_process_fn_grad(forward_with_mathview)
+
                 tensor = sample.input if isinstance(sample.input, torch.Tensor) else sample.input[0]
                 expected_forward.sum().backward(retain_graph=True)
                 forward_with_mathview.sum().backward(retain_graph=True)
@@ -1228,8 +1232,8 @@ class TestMathBits(TestCase):
                     # a repeat of the above test if output is not complex valued
                     if (out_type(expected_forward)):
                         grad = torch.randn_like(expected_forward)
-                        expected_forward.backward(math_op_physical(grad))
-                        forward_with_mathview.backward(math_op_view(grad))
+                        expected_forward.backward(grad)
+                        forward_with_mathview.backward(math_op_view(math_op_physical(grad)))
 
                         self.assertEqual(tensor.grad, cloned1_tensor.grad)
 
@@ -1241,23 +1245,42 @@ class TestMathBits(TestCase):
         math_op_view = torch.conj
         _requires_grad = (op.supports_autograd and op.supports_complex_autograd(torch.device(device).type))
         is_bit_set = torch.is_conj
-        self._test_math_view(device, dtype, op, _requires_grad, math_op_physical, math_op_view, is_bit_set, torch.is_complex)
+        samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad)
+        self._test_math_view(device, dtype, op, samples, math_op_physical, math_op_view, is_bit_set, torch.is_complex)
 
     @ops(op_db, allowed_dtypes=(torch.double,))
     def test_neg_view(self, device, dtype, op):
         if not op.test_neg_view:
             self.skipTest("Operation not tested with tensors with negative bit.")
+        math_op_physical = torch.neg
+        math_op_view = torch._neg_view
+        is_bit_set = torch.is_neg
+        samples = op.sample_inputs(device, dtype, requires_grad=op.supports_autograd)
+        self._test_math_view(device, dtype, op, samples, math_op_physical, math_op_view, is_bit_set,
+                             lambda x: True)
 
-        # The view op here is an identity, but math_op_physical's output is
-        # modified inplace, so we must at least clone
-        math_op_physical = torch.clone
+    @ops(op_db, allowed_dtypes=(torch.cdouble,))
+    def test_neg_conj_view(self, device, dtype, op):
+        if not op.test_neg_view:
+            self.skipTest("Operation not tested with tensors with negative bit.")
+        if not op.test_conjugated_samples:
+            self.skipTest("Operation doesn't support conjugated inputs.")
+
+        def math_op_physical(x):
+            return -x.conj_physical()
 
         def math_op_view(x):
-            return torch.conj(x * -1j).imag
+            return torch._neg_view(x).conj()
+
+        def is_bit_set(x):
+            return torch.is_neg(x) and torch.is_conj(x)
+
         _requires_grad = (op.supports_autograd and op.supports_complex_autograd(torch.device(device).type))
-        is_bit_set = torch.is_neg
-        self._test_math_view(device, dtype, op, _requires_grad, math_op_physical, math_op_view, is_bit_set,
-                             lambda x: not torch.is_complex(x))
+        samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad)
+        # Only test one sample
+        samples = itertools.islice(samples, 1)
+        self._test_math_view(device, dtype, op, samples, math_op_physical, math_op_view, is_bit_set,
+                             torch.is_complex)
 
 
 instantiate_device_type_tests(TestCommon, globals())
