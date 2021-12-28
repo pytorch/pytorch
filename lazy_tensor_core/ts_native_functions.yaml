@@ -89,6 +89,7 @@ full_codegen:
   - threshold_backward
   - topk
   - trace
+  - triu
   - trunc
   - zero_
 supported:
