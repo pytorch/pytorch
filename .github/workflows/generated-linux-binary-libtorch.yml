@@ -29,6 +29,7 @@ env:
   PYTORCH_FINAL_PACKAGE_DIR: /tmp/artifacts
   # Needed for conda builds
   TORCH_CONDA_BUILD_FOLDER: pytorch-nightly
+  ANACONDA_USER: pytorch
 concurrency:
   group: linux-binary-libtorch-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
