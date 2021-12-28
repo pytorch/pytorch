@@ -156,6 +156,8 @@ jobs:
             -e ANACONDA_USER \
             -e PYTORCH_BUILD_VERSION \
             -e PYTORCH_BUILD_NUMBER \
+            -e PYTORCH_ROOT \
+            -e SKIP_ALL_TESTS \
             --tty \
             --detach \
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
