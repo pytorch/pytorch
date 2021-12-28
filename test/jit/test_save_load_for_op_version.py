@@ -6,7 +6,7 @@ import os
 import random
 import sys
 import hypothesis.strategies as st
-from hypothesis import given
+from hypothesis import example, settings, given
 
 import torch
 
@@ -120,13 +120,15 @@ class TestSaveLoadForOpVersion(JitTestCase):
       div behavior has not yet been updated.
     """
 
+    @settings(max_examples=10)  # A total of 10 examples will be generated
     @given(
-        sample_input=st.lists(
-            st.integers(min_value=1, max_value=1999),
-            min_size=4,
-            max_size=4,
+        st.lists(
+            st.integers(min_value=7, max_value=1999),
+            min_size=6,
+            max_size=6,
         ).map(generate_int_float_mixed_tuples)
-    )
+    )  # Generate a list of int and float, like [678, 1149.0, 1566, 1369.0, 1131, 269.0]
+    @example([2, 3, 2.0, 3.0])  # Ensure this example case will be covered
     def test_versioned_div_tensor(self, sample_input):
         def historic_div(self, other):
             if self.is_floating_point() or other.is_floating_point():
@@ -179,13 +181,15 @@ class TestSaveLoadForOpVersion(JitTestCase):
             _helper(current_module, torch.div)
             _helper(current_mobile_module, torch.div)
 
+    @settings(max_examples=10)  # A total of 10 examples will be generated
     @given(
-        sample_input=st.lists(
-            st.integers(min_value=1, max_value=1999),
-            min_size=4,
-            max_size=4,
+        st.lists(
+            st.integers(min_value=7, max_value=1999),
+            min_size=6,
+            max_size=6,
         ).map(generate_int_float_mixed_tuples)
-    )
+    )  # Generate a list of int and float, like [678, 1149.0, 1566, 1369.0, 1131, 269.0]
+    @example([2, 3, 2.0, 3.0])  # Ensure this example case will be covered
     def test_versioned_div_tensor_inplace(self, sample_input):
         def historic_div_(self, other):
             if self.is_floating_point() or other.is_floating_point():
@@ -235,13 +239,15 @@ class TestSaveLoadForOpVersion(JitTestCase):
             _helper(current_module, torch.Tensor.div_)
             _helper(current_mobile_module, torch.Tensor.div_)
 
+    @settings(max_examples=10)  # A total of 10 examples will be generated
     @given(
-        sample_input=st.lists(
-            st.integers(min_value=1, max_value=1999),
-            min_size=4,
-            max_size=4,
+        st.lists(
+            st.integers(min_value=7, max_value=1999),
+            min_size=6,
+            max_size=6,
         ).map(generate_int_float_mixed_tuples)
-    )
+    )  # Generate a list of int and float, like [678, 1149.0, 1566, 1369.0, 1131, 269.0]
+    @example([2, 3, 2.0, 3.0])  # Ensure this example case will be covered
     def test_versioned_div_tensor_out(self, sample_input):
         def historic_div_out(self, other, out):
             if self.is_floating_point() or other.is_floating_point() or out.is_floating_point():
@@ -293,13 +299,15 @@ class TestSaveLoadForOpVersion(JitTestCase):
                 _helper(v3_mobile_module, historic_div_out)
                 _helper(current_mobile_module, torch.div)
 
+    @settings(max_examples=10)  # A total of 10 examples will be generated
     @given(
-        sample_input=st.lists(
-            st.integers(min_value=1, max_value=1999),
-            min_size=4,
-            max_size=4,
+        st.lists(
+            st.integers(min_value=7, max_value=1999),
+            min_size=6,
+            max_size=6,
         ).map(generate_int_float_mixed_tuples)
-    )
+    )  # Generate a list of int and float, like [678, 1149.0, 1566, 1369.0, 1131, 269.0]
+    @example([2, 3, 2.0, 3.0])  # Ensure this example case will be covered
     def test_versioned_div_scalar(self, sample_input):
         def historic_div_scalar_float(self, other: float):
             return torch.true_divide(self, other)
@@ -369,13 +377,15 @@ class TestSaveLoadForOpVersion(JitTestCase):
                 _helper(v3_mobile_module_int, historic_div_scalar_int)
                 _helper(current_mobile_module_int, torch.div)
 
+    @settings(max_examples=10)  # A total of 10 examples will be generated
     @given(
-        sample_input=st.lists(
-            st.integers(min_value=1, max_value=1999),
-            min_size=4,
-            max_size=4,
+        st.lists(
+            st.integers(min_value=7, max_value=1999),
+            min_size=6,
+            max_size=6,
         ).map(generate_int_float_mixed_tuples)
-    )
+    )  # Generate a list of int and float, like [678, 1149.0, 1566, 1369.0, 1131, 269.0]
+    @example([2, 3, 2.0, 3.0])  # Ensure this example case will be covered
     def test_versioned_div_scalar_reciprocal(self, sample_input):
         def historic_div_scalar_float_reciprocal(self, other: float):
             return other / self
@@ -456,13 +466,15 @@ class TestSaveLoadForOpVersion(JitTestCase):
                 _helper(v3_mobile_module_int, current_mobile_module_int)
                 _helper(current_mobile_module_int, torch.div)
 
+    @settings(max_examples=10)  # A total of 10 examples will be generated
     @given(
-        sample_input=st.lists(
-            st.integers(min_value=1, max_value=1999),
-            min_size=4,
-            max_size=4,
+        st.lists(
+            st.integers(min_value=7, max_value=1999),
+            min_size=6,
+            max_size=6,
         ).map(generate_int_float_mixed_tuples)
-    )
+    )  # Generate a list of int and float, like [678, 1149.0, 1566, 1369.0, 1131, 269.0]
+    @example([2, 3, 2.0, 3.0])  # Ensure this example case will be covered
     def test_versioned_div_scalar_inplace(self, sample_input):
         def historic_div_scalar_float_inplace(self, other: float):
             return self.true_divide_(other)
