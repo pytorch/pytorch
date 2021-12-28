@@ -89,8 +89,11 @@ concurrency:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
 {%- endmacro -%}
 
-{%- macro teardown_ec2_linux() -%}
+{%- macro teardown_ec2_linux(pytorch_directory="") -%}
       - name: Hold runner for 2 hours or until ssh sessions have drained
+{%- if pytorch_directory %}
+        working-directory: !{{ pytorch_directory }}
+{%- endif %}
         # Always hold for active ssh sessions
         if: always()
         run: .github/scripts/wait_for_ssh_to_drain.sh
