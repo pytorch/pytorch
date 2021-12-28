@@ -674,9 +674,9 @@ def module_inputs_torch_nn_RNN_GRU(module_info, device, dtype, requires_grad, **
             b, b_f, bidir = args
 
         cons_args = {'input_size': 2, 'hidden_size': 2, 'num_layers': 2,
-                         'batch_first': b_f, 'bias': b, 'bidirectional': bidir}
+                     'batch_first': b_f, 'bias': b, 'bidirectional': bidir}
         cons_args_hidden = {'input_size': 2, 'hidden_size': 3, 'num_layers': 2,
-                        'batch_first': b_f, 'bias': b, 'bidirectional': bidir}
+                            'batch_first': b_f, 'bias': b, 'bidirectional': bidir}
 
         if is_rnn:
             cons_args['nonlinearity'] = nl
