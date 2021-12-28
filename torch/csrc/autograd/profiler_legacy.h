@@ -10,54 +10,15 @@
 #include <forward_list>
 #include <tuple>
 #include <ATen/ATen.h>
-#include <torch/csrc/profiler/util.h>
 #include <torch/csrc/Export.h>
-
-struct CUevent_st;
-typedef std::shared_ptr<CUevent_st> CUDAEventStub;
+#include <torch/csrc/profiler/util.h>
+#include <torch/csrc/profiler/api.h>
 
 namespace torch { namespace autograd {
 
 struct Node;
 
 namespace profiler {
-
-struct TORCH_API CUDAStubs {
-  virtual void record(int* device, CUDAEventStub* event, int64_t* cpu_ns) const {
-    fail();
-  }
-  virtual float elapsed(const CUDAEventStub* event, const CUDAEventStub* event2) const {
-    fail();
-    return 0.f;
-  }
-  virtual void nvtxMarkA(const char* name) const {
-    fail();
-  }
-  virtual void nvtxRangePushA(const char* name) const {
-    fail();
-  }
-  virtual void nvtxRangePop() const {
-    fail();
-  }
-  virtual bool enabled() const {
-    return false;
-  }
-  virtual void onEachDevice(std::function<void(int)> op) const {
-    fail();
-  }
-  virtual void synchronize() const {
-    fail();
-  }
-  virtual ~CUDAStubs();
-
-private:
-  void fail() const {
-    AT_ERROR("CUDA used in profiler but not enabled.");
-  }
-};
-
-TORCH_API void registerCUDAMethods(CUDAStubs* stubs);
-TORCH_API const CUDAStubs* cudaStubs();
 
 enum class C10_API_ENUM EventKind : uint16_t {
   Mark,
@@ -301,7 +262,7 @@ struct TORCH_API LegacyEvent {
   int64_t cpu_memory_usage_ = 0;
   int64_t cuda_memory_usage_ = 0;
   int device_ = -1;
-  CUDAEventStub cuda_event = nullptr;
+  torch::profiler::impl::CUDAEventStub cuda_event = nullptr;
   int node_id_ = 0;
   bool is_remote_ = false;
   int64_t cuda_us_ = -1;
@@ -357,46 +318,6 @@ struct RangeEventList {
   static const size_t kReservedCapacity = 1024;
 };
 
-enum class C10_API_ENUM ProfilerState {
-  Disabled = 0,
-  CPU, // CPU-only profiling
-  CUDA, // CPU + CUDA events
-  NVTX,  // only emit NVTX markers
-  KINETO, // use libkineto
-  KINETO_GPU_FALLBACK, // use CUDA events when CUPTI is not available
-  NUM_PROFILER_STATES, // must be the last one
-};
-
-struct TORCH_API ProfilerConfig {
-  explicit ProfilerConfig(
-      ProfilerState state,
-      bool report_input_shapes = false,
-      bool profile_memory = false,
-      bool with_stack = false,
-      bool with_flops = false,
-      bool with_modules = false)
-      : state(state),
-        report_input_shapes(report_input_shapes),
-        profile_memory(profile_memory),
-        with_stack(with_stack),
-        with_flops(with_flops),
-        with_modules(with_modules) {}
-  ~ProfilerConfig() = default;
-  ProfilerState state;
-  bool report_input_shapes;
-  bool profile_memory;
-  bool with_stack;
-  bool with_flops;
-  bool with_modules;
-
-  // Returns IValues corresponding to ProfilerConfig struct, to be used for
-  // serialization.
-  at::IValue toIValue() const;
-
-  // Reconstructs a ProfilerConfig from IValues given by toIValue.
-  static ProfilerConfig fromIValue(const at::IValue& profilerConfigIValue);
-};
-
 // A struct to control settings of disableProfiler options.
 struct TORCH_API ProfilerDisableOptions {
   ProfilerDisableOptions() = default;
@@ -414,17 +335,13 @@ struct TORCH_API ProfilerDisableOptions {
 
 // NOTE: profiler mode is thread local, with automatic propagation
 // across thread boundary (e.g. at::launch tasks)
-TORCH_API void enableProfilerLegacy(const ProfilerConfig&);
+TORCH_API void enableProfilerLegacy(const torch::profiler::impl::ProfilerConfig&);
 using thread_event_lists = std::vector<std::vector<LegacyEvent>>;
 TORCH_API thread_event_lists disableProfilerLegacy(c10::optional<ProfilerDisableOptions> profilerDisableOptions = c10::nullopt);
 
 // adds profiledEvents to the current thread local recorded events. Each event
 // will be marked with node ID given by fromNodeId.
 TORCH_API void addEventList(std::vector<LegacyEvent>&& profiledEvents);
-// Returns if the profiler is currently enabled in the current thread.
-TORCH_API bool profilerEnabled();
-// Retrieve the thread_local ProfilerConfig.
-TORCH_API ProfilerConfig getProfilerConfig();
 // Writes profiled events to a stream.
 TORCH_API void writeProfilerEventsToStream(std::ostream& out, const std::vector<LegacyEvent*>& events);
 
@@ -457,7 +374,7 @@ private:
 // }
 struct TORCH_API TLSLegacyProfilerGuard {
   explicit TLSLegacyProfilerGuard(
-      const ProfilerConfig& cfg,
+      const torch::profiler::impl::ProfilerConfig& cfg,
       c10::optional<std::function<void(const thread_event_lists&)>>
           resultCallback = c10::nullopt,
       c10::optional<ProfilerDisableOptions> profilerDisableOptions =
@@ -484,13 +401,11 @@ struct TORCH_API TLSLegacyProfilerGuard {
   const c10::optional<ProfilerDisableOptions> profilerDisableOptions_;
 };
 
-struct TORCH_API ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
+struct TORCH_API ProfilerLegacyThreadLocalState : public torch::profiler::impl::ProfilerThreadLocalStateBase {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  explicit ProfilerThreadLocalState(const ProfilerConfig& config)
-      : config_(config), remoteProfiledEvents_{c10::nullopt} {}
-  ~ProfilerThreadLocalState() override = default;
-
-  const ProfilerConfig& config() const;
+  explicit ProfilerLegacyThreadLocalState(const torch::profiler::impl::ProfilerConfig& config)
+      : ProfilerThreadLocalStateBase(config), remoteProfiledEvents_{c10::nullopt} {}
+  ~ProfilerLegacyThreadLocalState() override = default;
 
   thread_event_lists consolidate();
 
@@ -506,18 +421,6 @@ struct TORCH_API ProfilerThreadLocalState : public c10::MemoryReportingInfoBase 
 
   void popRange(const at::RecordFunction& fn, const bool record_cuda);
 
-  void setCallbackHandle(at::CallbackHandle handle) {
-    handle_ = handle;
-  }
-
-  at::CallbackHandle callbackHandle() const {
-    return handle_;
-  }
-
-  bool hasCallbackHandle() {
-    return handle_ > 0;
-  }
-
   void reportMemoryUsage(
       void* /* unused */,
       int64_t alloc_size,
@@ -525,7 +428,9 @@ struct TORCH_API ProfilerThreadLocalState : public c10::MemoryReportingInfoBase 
       int64_t /* total_reserved, unused for legacy */,
       c10::Device device) override;
 
-  bool memoryProfilingEnabled() const override;
+  torch::profiler::impl::ActiveProfilerType profilerType() override {
+    return torch::profiler::impl::ActiveProfilerType::LEGACY;
+  }
 
  protected:
   RangeEventList& getEventList(int64_t thread_id = -1);
@@ -536,10 +441,6 @@ struct TORCH_API ProfilerThreadLocalState : public c10::MemoryReportingInfoBase 
       // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
       event_lists_map_;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  ProfilerConfig config_ = ProfilerConfig(ProfilerState::Disabled);
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  at::CallbackHandle handle_ = 0;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   c10::optional<std::vector<std::vector<LegacyEvent>>> remoteProfiledEvents_;
 };

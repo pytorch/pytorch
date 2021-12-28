@@ -290,6 +290,7 @@ class LLVMCodeGenImpl : public IRVisitor {
   void visit(IntrinsicsPtr v) override;
   void visit(AllocatePtr v) override;
   void visit(FreePtr v) override;
+  void visit(PlacementAllocatePtr v) override;
   void visit(LetPtr v) override;
   void visit(CondPtr v) override;
   void visit(ExternalCallPtr v) override;
@@ -317,26 +318,6 @@ class LLVMCodeGenImpl : public IRVisitor {
   }
 };
 
-extern "C" {
-typedef void (*ParallelCallee)(int64_t index, int8_t* packed_data);
-void DispatchParallel(
-    int8_t* func,
-    int64_t start,
-    int64_t stop,
-    int8_t* packed_data) noexcept {
-  // TODO: preserve the func type.
-  try {
-    ParallelCallee callee = reinterpret_cast<ParallelCallee>(func);
-    at::parallel_for(start, stop, 1, [&](int64_t f_begin, int64_t f_end) {
-      for (int64_t index = f_begin; index < f_end; index++) {
-        callee(index, packed_data);
-      }
-    });
-  } catch (...) {
-  }
-}
-}
-
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
@@ -355,9 +336,9 @@ LLVMCodeGen::LLVMCodeGen(
     c10::optional<std::string> triple,
     c10::optional<std::string> cpu,
     c10::optional<std::string> attrs)
-    : CodeGen(stmt, args, device, kernel_func_name),
-      impl_(std::make_unique<
-            LLVMCodeGenImpl>(stmt, args, device, dtype, triple, cpu, attrs)) {
+    : CodeGen(stmt, args, device, kernel_func_name) {
+  impl_ = std::make_unique<LLVMCodeGenImpl>(
+      this->stmt(), args, device, dtype, triple, cpu, attrs);
   callee_ = std::make_unique<LLVMCodeGenCallee>(
       impl_->releaseJIT(), (void*)impl_->getKernelAddress());
 }
@@ -2047,6 +2028,11 @@ void LLVMCodeGenImpl::visit(AllocatePtr v) {
   irb_.SetInsertPoint(irb_.GetInsertBlock());
   llvm::Value* malloc = irb_.Insert(I);
   varToVal_[v->buffer_var()] = malloc;
+}
+
+void LLVMCodeGenImpl::visit(PlacementAllocatePtr v) {
+  llvm::Value* ptr = varToVal_.at(v->buf_to_reuse()->base_handle());
+  varToVal_[v->buf()->base_handle()] = ptr;
 }
 
 void LLVMCodeGenImpl::visit(FreePtr v) {
