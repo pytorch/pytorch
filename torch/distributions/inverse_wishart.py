@@ -127,6 +127,18 @@ class InverseWishart(ExponentialFamily):
         if 'precision_matrix' in self.__dict__:
             new.precision_matrix = self.precision_matrix.expand(cov_shape)
 
+        # Chi2 distribution is needed for Bartlett decomposition sampling
+        new._dist_chi2 = torch.distributions.chi2.Chi2(
+            df=(
+                new.df.unsqueeze(-1)
+                - torch.arange(
+                    self.event_shape[-1],
+                    dtype=new._unbroadcasted_scale_tril.dtype,
+                    device=new._unbroadcasted_scale_tril.device,
+                ).expand(batch_shape + (-1,))
+            )
+        )
+
         super(InverseWishart, new).__init__(batch_shape, self.event_shape, validate_args=False)
         new._validate_args = self._validate_args
         return new
@@ -159,7 +171,7 @@ class InverseWishart(ExponentialFamily):
 
     @property
     def variance(self):
-        nu = self.df # has shape (batch_shape)
+        nu = self.df  # has shape (batch_shape)
         p = self._event_shape[-1]
 
         V = self.covariance_matrix  # has shape (batch_shape x event_shape)
@@ -170,8 +182,69 @@ class InverseWishart(ExponentialFamily):
             + (v - p - 1) * torch.einsum("...i,...j->...ij", diag_V, diag_V)
         ) / ((v - p) * (v - p - 1).pow(2) * (v - p - 3))
 
+    def _bartlett_sampling(self, sample_shape=torch.Size()):
+        p = self._event_shape[-1]  # has singleton shape
+
+        # Implemented Sampling using Bartlett decomposition
+        noise = self._dist_chi2.rsample(sample_shape).sqrt().reciprocal().diag_embed(dim1=-2, dim2=-1)
+        i, j = torch.tril_indices(p, p, offset=-1)
+        noise[..., i, j] = torch.randn(
+            torch.Size(sample_shape) + self._batch_shape + (int(p * (p - 1) / 2),),
+            dtype=noise.dtype,
+            device=noise.device,
+        )
+        chol = self._unbroadcasted_scale_tril @ noise
+        return chol @ chol.transpose(-2, -1)
+
     def rsample(self, sample_shape=torch.Size(), max_try_correction=None):
-        raise NotImplementedError
+        r"""
+        .. warning::
+            In some cases, sampling algorithn based on Bartlett decomposition may return singular matrix samples.
+            Several tries to correct singular samples are performed by default, but it may end up returning
+            singular matrix samples. Sigular samples may return `-inf` values in `.log_prob()`.
+            In those cases, the user should validate the samples and either fix the value of `df`
+            or adjust `max_try_correction` value for argument in `.rsample` accordingly.
+        """
+
+        if max_try_correction is None:
+            max_try_correction = 3 if torch._C._get_tracing_state() else 10
+
+        sample_shape = torch.Size(sample_shape)
+        sample = self._bartlett_sampling(sample_shape)
+
+        # Below part is to improve numerical stability temporally and should be removed in the future
+        is_singular = self.support.check(sample)
+        if self._batch_shape:
+            is_singular = is_singular.amax(self._batch_dims)
+
+        if torch._C._get_tracing_state():
+            # Less optimized version for JIT
+            for _ in range(max_try_correction):
+                sample_new = self._bartlett_sampling(sample_shape)
+                sample = torch.where(is_singular, sample_new, sample)
+
+                is_singular = ~self.support.check(sample)
+                if self._batch_shape:
+                    is_singular = is_singular.amax(self._batch_dims)
+
+        else:
+            # More optimized version with data-dependent control flow.
+            if is_singular.any():
+                warnings.warn("Singular sample detected.")
+
+                for _ in range(max_try_correction):
+                    sample_new = self._bartlett_sampling(is_singular[is_singular].shape)
+                    sample[is_singular] = sample_new
+
+                    is_singular_new = ~self.support.check(sample_new)
+                    if self._batch_shape:
+                        is_singular_new = is_singular_new.amax(self._batch_dims)
+                    is_singular[is_singular.clone()] = is_singular_new
+
+                    if not is_singular.any():
+                        break
+
+        return sample
 
     def log_prob(self, value):
         if self._validate_args:
