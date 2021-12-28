@@ -36,27 +36,14 @@ std::vector<int64_t> getConstSizes(const BufPtr b) {
   return r;
 }
 
-std::vector<mobile::nnc::InputSpec> toInputSpecs(const std::shared_ptr<Graph>& g) {
+std::vector<mobile::nnc::InputSpec> toInputSpecs(
+    const std::vector<std::vector<int64_t>>& inputSizes,
+    const std::vector<at::ScalarType>& inputTypes) {
   std::vector<mobile::nnc::InputSpec> specs;
-  for (auto v : g->inputs()) {
-    auto t = v->type();
+  for (int i = 0; i < inputSizes.size(); ++i) {
     mobile::nnc::InputSpec spec;
-    if (t->kind() == TypeKind::TensorType) {
-      auto tt = t->cast<TensorType>();
-      spec.sizes_ = {};
-      auto sizes_vec = *tt->sizes().sizes();
-      for (auto s : sizes_vec) {
-        spec.sizes_.push_back(s ? *s : 0);
-      }
-      spec.is_scalar_ = false;
-      spec.dtype_ = *tt->scalarType();
-    } else if (t->kind() == TypeKind::IntType) {
-      spec.sizes_ = {};
-      spec.is_scalar_ = true;
-      spec.dtype_ = at::kLong;
-    } else {
-      TORCH_CHECK(false, "Unsupported input type");
-    }
+    spec.sizes_ = inputSizes[i];
+    spec.dtype_ = inputTypes[i];
     specs.emplace_back(std::move(spec));
   }
   return specs;
@@ -69,7 +56,7 @@ std::unique_ptr<Function> compileMethod(
     const std::vector<at::ScalarType>& types) {
   auto func = std::make_unique<Function>();
   func->set_name(method_name);
-  func->set_input_specs(toInputSpecs(kernel->graph()));
+  func->set_input_specs(toInputSpecs(sizes, types));
 
   auto params = c10::impl::GenericList(c10::AnyType::get());
   auto const_descriptors = kernel->getConstantDescriptors();

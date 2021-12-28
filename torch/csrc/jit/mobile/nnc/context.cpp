@@ -30,7 +30,6 @@ InputSpec::InputSpec(const c10::IValue& value) {
   auto dict = value.toGenericDict();
   sizes_ = dict.at("sizes").toIntVector();
   dtype_ = dict.at("dtype").toScalarType();
-  is_scalar_ = dict.at("is_scalar").toBool();
 }
 
 c10::IValue InputSpec::serialize() const {
@@ -38,13 +37,11 @@ c10::IValue InputSpec::serialize() const {
       at::StringType::get(), at::AnyType::get());
   dict.insert("sizes", sizes_);
   dict.insert("dtype", dtype_);
-  dict.insert("is_scalar", is_scalar_);
   return dict;
 }
 
 bool InputSpec::validate(const at::Tensor& input) const {
-  return input.scalar_type() == dtype_;
-//   return input.sizes() == sizes_ && input.scalar_type() == dtype_;
+  return input.sizes() == sizes_ && input.scalar_type() == dtype_;
 }
 
 OutputSpec::OutputSpec(const c10::IValue& value) {
@@ -232,26 +229,12 @@ c10::impl::GenericList Function::run(
       input_specs_.size(),
       " actual: ",
       inputs.size());
-  std::vector<int64_t> scalar_values;
   for (const auto i : c10::irange(inputs.size())) {
     const c10::IValue& input = inputs[i];
-    const auto& spec = input_specs_[i];
-    if (spec.is_scalar_) {
-      int64_t val = 0;
-      if (spec.dtype_ == c10::ScalarType::Long) {
-        val = input.toInt();
-      } else if (spec.dtype_ == c10::ScalarType::Float) {
-        double fval = input.toDouble();
-        memcpy(&val, &fval, sizeof(fval));
-      }
-      scalar_values.push_back(val);
-      args[i] = &scalar_values[scalar_values.size() - 1];
-    } else {
-      const auto& input_tensor = input.toTensor();
-      TORCH_CHECK(
-          input_specs_[i].validate(input_tensor), "Invalid input at pos: ", i);
-      args[i] = input_tensor.data_ptr();
-    }
+    const auto& input_tensor = input.toTensor();
+    TORCH_CHECK(
+        input_specs_[i].validate(input_tensor), "Invalid input at pos: ", i);
+    args[i] = input_tensor.data_ptr();
   }
 
   // Preallocate and fill in output tensors.
