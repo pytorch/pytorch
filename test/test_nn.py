@@ -15318,7 +15318,7 @@ class TestNNDeviceType(NNTestCase):
 
         # Forward AD does not support XLA because XLA tensors don't have storage
         check_forward_ad = torch.device(device).type != 'xla'
-            
+
         kwargs = dict(mode='bilinear', align_corners=align_corners, antialias=antialias)
         for memory_format in [torch.contiguous_format, torch.channels_last]:
             # test float scale factor up & downsampling
@@ -15335,7 +15335,7 @@ class TestNNDeviceType(NNTestCase):
 
                 input = torch.randn(1, 2, 2, 2, device=device).contiguous(memory_format=memory_format).requires_grad_()
                 gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input], check_forward_ad=check_forward_ad)
-                gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input], check_fwd_over_rev=check_forward_ad)                
+                gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input], check_fwd_over_rev=check_forward_ad)
 
                 # Assert that cpu and cuda give same results
                 if torch.device(device).type == 'cuda':
