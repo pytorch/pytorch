@@ -1072,6 +1072,7 @@
 - name: mv(Tensor self, Tensor vec) -> Tensor
   self: grad.ger(vec.conj())
   vec: self.conj().t().mv(grad)
+  result: mv(self_t, vec_p) + mv(self_p, vec_t)
 
 - name: mvlgamma(Tensor self, int p) -> Tensor
   self: mvlgamma_backward(grad, self, p)
@@ -1301,6 +1302,7 @@
   self: grad
   index: non_differentiable
   src: grad.gather(dim, index)
+  result: scatter_add(self_t, dim, index, src_t)
 
 - name: select.int(Tensor(a) self, int dim, int index) -> Tensor(a)
   self: select_backward(grad, self.sizes(), dim, index)
@@ -1634,6 +1636,7 @@
   condition: non_differentiable
   self: where(condition, grad, zeros_like(grad))
   other: where(condition, zeros_like(grad), grad)
+  result: where(condition, self_t, zeros_like(other_p)) + where(condition, zeros_like(self_p), other_t)
 
 # weight_norm_cuda_interface_backward does not have an explicitly defined derivative, so if we do happen
 # to be running backward with create_graph=True, fall back to a backward function that uses

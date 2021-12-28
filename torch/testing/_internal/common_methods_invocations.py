@@ -8530,6 +8530,8 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            assert_autodiffed=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_mv),
     OpInfo('addr',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
@@ -9572,7 +9574,7 @@ op_db: List[OpInfo] = [
                                     "test_out_arg_all_dtypes",
                                     device_type='cuda'),
                    ),
-                   supports_fwgrad_bwgrad=False,  # Need: _s_where
+                   supports_fwgrad_bwgrad=True,
                    supports_forward_ad=True),
     UnaryUfuncInfo('special.i1e',
                    aten_name='special_i1e',
@@ -9581,7 +9583,7 @@ op_db: List[OpInfo] = [
                    dtypesIfCUDA=all_types_and(torch.bool),
                    sample_inputs_func=sample_inputs_i0_i1,
                    supports_forward_ad=True,
-                   supports_fwgrad_bwgrad=False,  # Need: _s_where
+                   supports_fwgrad_bwgrad=True,
                    safe_casts_outputs=True),
     UnaryUfuncInfo('special.ndtr',
                    aten_name='special_ndtr',
@@ -10374,7 +10376,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_types(),
            sample_inputs_func=sample_inputs_reduction_quantile,
            supports_forward_ad=True,
-           supports_fwgrad_bwgrad=False,  # Need: scatter_add_
+           supports_fwgrad_bwgrad=True,
            # See https://github.com/pytorch/pytorch/issues/66357
            # Relies on copy_ to broadcast, but the forward AD path calls broadcast_to which
            # does not have a batching rule in core
@@ -10387,7 +10389,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_types(),
            sample_inputs_func=sample_inputs_reduction_quantile,
            supports_forward_ad=True,
-           supports_fwgrad_bwgrad=False,  # Need: scatter_add_
+           supports_fwgrad_bwgrad=True,
            # See https://github.com/pytorch/pytorch/issues/66357
            # Relies on copy_ to broadcast, but the forward AD path calls broadcast_to which
            # does not have a batching rule in core
@@ -10403,7 +10405,7 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         sample_inputs_func=sample_inputs_max_min_binary,
         supports_forward_ad=True,
-        supports_fwgrad_bwgrad=False,  # Need: _s_where
+        supports_fwgrad_bwgrad=True,
         assert_autodiffed=True,
         ref=np.maximum,
         skips=(
@@ -10420,7 +10422,7 @@ op_db: List[OpInfo] = [
         'maximum',
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         supports_forward_ad=True,
-        supports_fwgrad_bwgrad=False,  # Need: _s_where
+        supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_max_min_binary,
         ref=np.maximum,
         skips=(
@@ -10440,7 +10442,7 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         sample_inputs_func=sample_inputs_max_min_binary,
         supports_forward_ad=True,
-        supports_fwgrad_bwgrad=False,  # Need: _s_where
+        supports_fwgrad_bwgrad=True,
         assert_autodiffed=True,
         ref=np.minimum,
         skips=(
@@ -10457,7 +10459,7 @@ op_db: List[OpInfo] = [
         'minimum',
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         supports_forward_ad=True,
-        supports_fwgrad_bwgrad=False,  # Need: _s_where
+        supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_max_min_binary,
         ref=np.minimum,
         skips=(
@@ -10687,7 +10689,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
-           supports_fwgrad_bwgrad=False,  # Need: _s_where
+           supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_cosine_similarity),
     OpInfo('nn.functional.adaptive_avg_pool1d',
            dtypes=floating_types(),
@@ -11944,7 +11946,7 @@ op_db: List[OpInfo] = [
                    handles_complex_extremals=False,
                    safe_casts_outputs=True,
                    supports_forward_ad=True,
-                   supports_fwgrad_bwgrad=False,  # Need: _s_where
+                   supports_fwgrad_bwgrad=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2,
                                                   torch.float16: 1e-2}),),
                    skips=(
@@ -13044,7 +13046,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_gather,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            supports_forward_ad=True,
-           supports_fwgrad_bwgrad=False,  # Need: scatter_add_
+           supports_fwgrad_bwgrad=True,
            ),
     OpInfo('index_fill',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -13599,7 +13601,9 @@ op_db: List[OpInfo] = [
     OpInfo('scatter_add',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_scatter_add,
-           supports_out=False
+           supports_out=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            ),
     OpInfo('stack',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -13852,7 +13856,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_inplace_autograd=False,
            supports_forward_ad=True,
-           supports_fwgrad_bwgrad=False,  # Need: scatter_add_
+           supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_take_along_dim,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     ShapeFuncInfo('tile',
@@ -13919,7 +13923,7 @@ op_db: List[OpInfo] = [
            aliases=('special.xlogy',),
            dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
            supports_forward_ad=True,
-           supports_fwgrad_bwgrad=False,  # Need: _s_where
+           supports_fwgrad_bwgrad=True,
            safe_casts_outputs=True,
            sample_inputs_func=sample_inputs_xlogy),
     OpInfo('zero_',
