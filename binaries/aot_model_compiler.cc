@@ -43,6 +43,7 @@ C10_DEFINE_string(
     "",
     "Name of the output llvm assembly to be saved.");
 C10_DEFINE_string(output_model, "", "Name of the output model to be saved.");
+C10_DEFINE_string(arch, "", "Target architecture.");
 
 namespace {
 
@@ -71,6 +72,7 @@ c10::Dict<c10::IValue, c10::IValue> createCompileSpec() {
   method_spec.insert("asmfile", FLAGS_output_llvm);
   method_spec.insert("model_name", FLAGS_model_name);
   method_spec.insert("model_version", FLAGS_model_version);
+  method_spec.insert("arch", FLAGS_arch);
   compile_spec.insert(FLAGS_method_name, method_spec);
   return compile_spec;
 }

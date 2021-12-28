@@ -20,6 +20,7 @@
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
+#include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
 #include <fstream>
 
 using namespace torch::jit;
@@ -188,7 +189,7 @@ std::pair<std::unique_ptr<Function>, const std::string> aotCompile(
       std::make_shared<tensorexpr::TensorExprKernel>(
           TensorExprKernel(g, kernel_func_name));
 
-  const std::string compiled_assembly = kernel->getCodeText();
+  const std::string compiled_assembly = kernel->getCodeText("asm");
 
   auto func = compileMethod(kernel, method_name, sizes, types);
   return std::make_pair(std::move(func), compiled_assembly);
@@ -313,9 +314,26 @@ c10::IValue preprocess(
     std::string model_name = *method_spec.at("model_name").toString();
     std::string model_version = *method_spec.at("model_version").toString();
     std::string asmfile_name = *method_spec.at("asmfile").toString();
+    std::string arch = *method_spec.at("arch").toString();
     std::cout << "Model name: " << model_name << "\n";
     std::cout << "Model version: " << model_version << "\n";
     std::cout << "Asm file name: " << asmfile_name << "\n";
+    std::cout << "Arch: " << arch << "\n";
+
+    if (arch == "x86-64") {
+      LLVMTargetTriple() = "x86_64-unknown-unknown";
+      LLVMTargetAttrs() = "";
+    } else if (arch == "aarch64") {
+      LLVMTargetTriple() = "aarch64-unknown-unknown";
+      LLVMTargetAttrs() = "+neon,+thumb2";
+    } else if (arch == "arm") {
+      LLVMTargetTriple() = "arm-unknown-unknown";
+      LLVMTargetAttrs() = "+neon,+thumb2";
+    } else if (arch == "") {
+      // Do nothing
+    } else {
+      TORCH_CHECK(false, "Unknown architecture");
+    }
 
     auto method = mod.get_method(method_name);
     auto graph = toGraphFunction(method.function()).graph()->copy();
