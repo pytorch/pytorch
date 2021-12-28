@@ -49,6 +49,8 @@ jobs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     container:
       image: python:3.9
+      options:
+        ulimit: stack=10485760:83886080
     steps:
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
@@ -61,7 +63,7 @@ jobs:
           echo "::set-output name=matrix::${MATRIX}"
 
   build:
-    name: pytorch-libtorch-${{ matrix.gpu_arch_type }}${{ matrix.gpu_arch_version }}-${{ matrix.devtoolset }}-${{ matrix.libtorch_variant }}
+    name: pytorch-linux-libtorch-${{ matrix.gpu_arch_type }}${{ matrix.gpu_arch_version }}-${{ matrix.devtoolset }}-${{ matrix.libtorch_variant }}
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
     timeout-minutes: 240
@@ -112,7 +114,7 @@ jobs:
           bash /builder/libtorch/build.sh
       - uses: actions/upload-artifact@v2
         with:
-          name: pytorch-libtorch-${{ matrix.gpu_arch_type }}${{ matrix.gpu_arch_version }}-${{ matrix.devtoolset }}-${{ matrix.libtorch_variant }}
+          name: pytorch-linux-libtorch-${{ matrix.gpu_arch_type }}${{ matrix.gpu_arch_version }}-${{ matrix.devtoolset }}-${{ matrix.libtorch_variant }}
           path:
             ${{ env.PYTORCH_FINAL_PACKAGE_DIR }}/*
       - name: Parse ref
