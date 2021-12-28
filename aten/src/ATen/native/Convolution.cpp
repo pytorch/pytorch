@@ -28,6 +28,7 @@ DEFINE_DISPATCH(convolution_depthwise3x3_winograd_stub);
 DEFINE_DISPATCH(miopen_convolution_backward_stub);
 DEFINE_DISPATCH(miopen_convolution_transpose_backward_stub);
 DEFINE_DISPATCH(miopen_depthwise_convolution_backward_stub);
+DEFINE_DISPATCH(mkldnn_convolution_backward_stub);
 DEFINE_DISPATCH(slow_conv_dilated2d_backward_stub);
 DEFINE_DISPATCH(slow_conv_transpose2d_backward_stub);
 REGISTER_NO_CPU_DISPATCH(cudnn_convolution_backward_stub, cudnn_convolution_backward_fn);
@@ -1654,8 +1655,8 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
         weight = weight.contiguous();
       }
       std::tie(backend_grad_input, backend_grad_weight, backend_grad_bias) =
-        at::mkldnn_convolution_backward(input, grad_output, weight, params.padding, params.stride, params.dilation,
-            params.groups, output_mask);
+        mkldnn_convolution_backward_stub(input.device().type(), input, grad_output, weight, params.padding,
+          params.stride, params.dilation, params.groups, output_mask);
       break;
     case ConvBackend::Overrideable:
       // Only reach here when input is backend with out-of-source implementation.
