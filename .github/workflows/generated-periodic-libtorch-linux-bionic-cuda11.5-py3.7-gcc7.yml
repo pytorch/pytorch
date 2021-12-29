@@ -1,21 +1,18 @@
 # @generated DO NOT EDIT MANUALLY
-# Template is at:    .github/templates/bazel_ci_workflow.yml.j2
+# Template is at:    .github/templates/linux_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: linux-xenial-cuda11.3-py3.6-gcc7-bazel-test
+name: periodic-libtorch-linux-bionic-cuda11.5-py3.7-gcc7
 
 on:
   pull_request:
     types: [opened, synchronize, reopened, unassigned]
-  push:
-    branches:
-      - master
-      - release/*
-      - fbsync
+  schedule:
+    - cron: 45 4,10,16,22 * * *
   workflow_dispatch:
 
 env:
-  BUILD_ENVIRONMENT: linux-xenial-cuda11.3-py3.6-gcc7-bazel-test
-  DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
+  BUILD_ENVIRONMENT: periodic-libtorch-linux-bionic-cuda11.5-py3.7-gcc7
+  DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-cuda11.5-cudnn8-py3-gcc7
   SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
   XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
   TORCH_CUDA_ARCH_LIST: 5.2
@@ -33,25 +30,26 @@ env:
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   PYTORCH_RETRY_TEST_CASES: 1
 concurrency:
-  group: linux-xenial-cuda11.3-py3.6-gcc7-bazel-test-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: periodic-libtorch-linux-bionic-cuda11.5-py3.7-gcc7-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:
 
-  # building and testing in a single job since bazel runs only small subset of tests
-  build-and-test:
+  build:
     runs-on: linux.2xlarge
-    env:
-      JOB_BASE_NAME: linux-xenial-cuda11.3-py3.6-gcc7-bazel-test-build-and-test
-      NUM_TEST_SHARDS: 1
-      IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == 'unassigned') && (github.event.assigneed.login == 'pytorchbot') }}
-      LABEL_CONDITIONS: ${{ contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/bazel') || contains(github.event.pull_request.labels.*.name, 'ciflow/cpu') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux') || contains(github.event.pull_request.labels.*.name, 'ciflow/trunk') }}
+    timeout-minutes: 240
     if: ${{ (github.repository == 'pytorch/pytorch') && (
             (github.event_name == 'push') ||
             (github.event_name == 'schedule') ||
-            (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/bazel') || contains(github.event.pull_request.labels.*.name, 'ciflow/cpu') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux') || contains(github.event.pull_request.labels.*.name, 'ciflow/trunk')) ||
-            ((github.event_name == 'pull_request' && github.event.action != 'unassigned') && !contains(join(github.event.pull_request.labels.*.name), 'ciflow/')))
+            (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cuda') || contains(github.event.pull_request.labels.*.name, 'ciflow/libtorch') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux') || contains(github.event.pull_request.labels.*.name, 'ciflow/scheduled')) ||
+            (false))
          }}
+    env:
+      JOB_BASE_NAME: periodic-libtorch-linux-bionic-cuda11.5-py3.7-gcc7-build
+      IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == 'unassigned') && (github.event.assigneed.login == 'pytorchbot') }}
+      LABEL_CONDITIONS: ${{ contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cuda') || contains(github.event.pull_request.labels.*.name, 'ciflow/libtorch') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux') || contains(github.event.pull_request.labels.*.name, 'ciflow/scheduled') }}
+    outputs:
+      docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
     steps:
       - name: print labels
         run: echo "${PR_LABELS}"
@@ -158,36 +156,30 @@ jobs:
               "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
           }
           retry docker pull "${DOCKER_IMAGE}"
-      - name: Determine shm-size
-        run: |
-          shm_size="1g"
-          case "${BUILD_ENVIRONMENT}" in
-            *cuda*)
-              shm_size="2g"
-              ;;
-            *rocm*)
-              shm_size="8g"
-              ;;
-          esac
-          echo "SHM_SIZE=${shm_size}" >> "${GITHUB_ENV}"
-      - name: Output disk space left
-        run: |
-          sudo df -H
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
+      - name: Parse ref
+        id: parse-ref
+        run: .github/scripts/parse_ref.py
       - name: Build
+        env:
+          BRANCH: ${{ steps.parse-ref.outputs.branch }}
         run: |
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
             -e BUILD_ENVIRONMENT \
             -e JOB_BASE_NAME \
             -e MAX_JOBS="$(nproc --ignore=2)" \
+            -e AWS_DEFAULT_REGION \
+            -e IS_GHA \
+            -e PR_NUMBER \
+            -e SHA1 \
+            -e BRANCH \
+            -e GITHUB_RUN_ID \
             -e SCCACHE_BUCKET \
+            -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
-            -e PR_LABELS \
             -e SKIP_SCCACHE_INITIALIZATION=1 \
             -e TORCH_CUDA_ARCH_LIST \
+            -e PR_LABELS \
             -e http_proxy="http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -e https_proxy="http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -e no_proxy="localhost,127.0.0.1,github.com,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock" \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
@@ -199,125 +191,24 @@ jobs:
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
           )
-          docker exec -t "${container_name}" sh -c 'sudo chown -R jenkins . && sudo chown -R jenkins /dev && .jenkins/pytorch/build.sh'
-      - name: Parse ref
-        id: parse-ref
-        run: .github/scripts/parse_ref.py
+          docker exec -t "${container_name}" sh -c 'sudo chown -R jenkins . && .jenkins/pytorch/build.sh'
       - name: Display and upload binary build size statistics (Click Me)
         # temporary hack: set CIRCLE_* vars, until we update
         # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:
-          AWS_DEFAULT_REGION: us-east-1
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
           WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
         run: |
-          # The artifact file is created inside docker container, which contains the result binaries.
-          # Now unpackage it into the project folder. The subsequent script will scan project folder
-          # to locate result binaries and report their sizes.
-          # If artifact file is not provided it assumes that the project folder has been mounted in
-          # the docker during build and already contains the result binaries, so this step can be skipped.
-          export ARTIFACTS=
-          if [ -n "${ARTIFACTS}" ]; then
-            tar xf "${ARTIFACTS}" -C "${GITHUB_WORKSPACE}"
-            cd "${GITHUB_WORKSPACE}"
-          fi
           COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
           export COMMIT_TIME
-          ANDROID_BUILD_TYPE=
-          export ANDROID_BUILD_TYPE
           pip3 install requests==2.26 boto3==1.16.34
-          python3 -m tools.stats.upload_binary_size_to_scuba "android" || exit 0
-      - name: Test
-        # Time out the test phase after 3.5 hours
-        timeout-minutes: 210
-        run: |
-          # detached container should get cleaned up by teardown_ec2_linux
-          export SHARD_NUMBER=0
-          # TODO: Stop building test binaries as part of the build phase
-          # Make sure we copy test results from bazel-testlogs symlink to
-          # a regular directory ./test/test-reports
-          container_name=$(docker run \
-            -e BUILD_ENVIRONMENT \
-            -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
-            -e GITHUB_ACTIONS \
-            -e IN_CI \
-            -e SHARD_NUMBER \
-            -e NUM_TEST_SHARDS \
-            -e JOB_BASE_NAME \
-            -e MAX_JOBS="$(nproc --ignore=2)" \
-            -e SCCACHE_BUCKET \
-            -e PR_LABELS \
-            -e http_proxy="http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -e https_proxy="http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -e no_proxy="localhost,127.0.0.1,github.com,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock" \
-            --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
-            --security-opt seccomp=unconfined \
-            --cap-add=SYS_PTRACE \
-            --shm-size="${SHM_SIZE}" \
-            --tty \
-            --detach \
-            --user jenkins \
-            -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
-            -w /var/lib/jenkins/workspace \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t "${container_name}" sh -c 'sudo chown -R jenkins . && sudo chown -R jenkins /dev && .jenkins/pytorch/test.sh && cp -Lr ./bazel-testlogs ./test/test-reports'
+          python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
       - name: Chown workspace
-        if: always()
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Zip test reports for upload
-        if: always()
-        env:
-          FILE_SUFFIX: 'bazel-${{ github.job }}'
-        run: |
-          # Remove any previous test reports if they exist
-          rm -f test-reports-*.zip
-          zip -r "test-reports-${FILE_SUFFIX}.zip" test -i '*.xml'
-      - uses: seemethere/upload-artifact-s3@v3
-        name: Store Test Reports on S3
-        if: always()
-        with:
-          retention-days: 14
-          if-no-files-found: error
-          path:
-            test-reports-*.zip
-      - name: Zip JSONs for upload
-        if: always()
-        env:
-          FILE_SUFFIX: 'bazel-${{ github.job }}'
-        run: |
-          # Remove any previous test jsons if they exist
-          rm -f test-jsons-*.zip
-          zip -r "test-jsons-${FILE_SUFFIX}.zip" test -i '*.json'
-      - uses: seemethere/upload-artifact-s3@v3
-        name: Store Test Downloaded JSONs on S3
-        if: always()
-        with:
-          retention-days: 14
-          if-no-files-found: warn
-          path:
-            test-jsons-*.zip
-      - name: Display and upload test statistics (Click Me)
-        if: always()
-        # temporary hack: set CIRCLE_* vars, until we update
-        # tools/stats/print_test_stats.py to natively support GitHub Actions
-        env:
-          AWS_DEFAULT_REGION: us-east-1
-          BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          JOB_BASE_NAME: linux-xenial-cuda11.3-py3.6-gcc7-bazel-test-test
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          TAG: ${{ steps.parse-ref.outputs.tag }}
-          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
-        shell: bash
-        run: |
-          python3 -m pip install -r requirements.txt
-          python3 -m pip install boto3==1.19.12
-          python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -333,5 +224,14 @@ jobs:
           # ignore expansion of "docker ps -q" since it could be empty
           # shellcheck disable=SC2046
           docker stop $(docker ps -q) || true
+          # Prune all of the docker images
+          docker system prune -af
+      - name: Hold runner for 2 hours or until ssh sessions have drained
+        # Always hold for active ssh sessions
+        if: always()
+        run: .github/scripts/wait_for_ssh_to_drain.sh
+      - name: Clean up docker images
+        if: always()
+        run: |
           # Prune all of the docker images
           docker system prune -af
