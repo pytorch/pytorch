@@ -325,7 +325,7 @@ class DebugPickler(PackagePickler):
 
     def format_trace(self):
         stack = self.obj_stack
-        traced_stack :List[DebugInfo] = []
+        traced_stack: List[DebugInfo] = []
         idx_to_skip = set()
         for idx, obj in enumerate(stack):
             if idx in idx_to_skip:
