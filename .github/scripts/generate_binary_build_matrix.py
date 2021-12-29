@@ -10,16 +10,15 @@ architectures:
     * Latest ROCM
 """
 
-import argparse
-import os
-import json
 from typing import Dict, List
 
 
-CUDA_ARCHES = ["10.2", "11.1", "11.3", "11.5"]
+# CUDA_ARCHES = ["10.2", "11.1", "11.3", "11.5"]
+CUDA_ARCHES = ["10.2", "11.5"]
 
 
-ROCM_ARCHES = ["4.2", "4.3.1"]
+# ROCM_ARCHES = ["4.2", "4.3.1"]
+ROCM_ARCHES = ["4.3.1"]
 
 
 def arch_type(arch_version: str) -> str:
@@ -63,8 +62,8 @@ LIBTORCH_CONTAINER_IMAGES = {
 
 FULL_PYTHON_VERSIONS = [
     "3.7",
-    "3.8",
-    "3.9",
+    # "3.8",
+    # "3.9",
 ]
 
 
@@ -93,9 +92,9 @@ def generate_conda_matrix() -> List[Dict[str, str]]:
 def generate_libtorch_matrix() -> List[Dict[str, str]]:
     libtorch_variants = [
         "shared-with-deps",
-        "shared-without-deps",
+        # "shared-without-deps",
         "static-with-deps",
-        "static-without-deps",
+        # "static-without-deps",
     ]
     ret: List[Dict[str, str]] = []
     for arch_version in ["cpu"] + CUDA_ARCHES:

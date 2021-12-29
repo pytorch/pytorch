@@ -52,10 +52,6 @@ jobs:
     runs-on: linux.4xlarge
     timeout-minutes: 240
     env:
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: 
-      GPU_ARCH_VERSION: 
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/conda-builder:cpu
       PYTORCH_BUILD_NUMBER: 1
@@ -179,6 +175,125 @@ jobs:
           export COMMIT_TIME
           pip3 install requests==2.26
           python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
+      - name: Hold runner for 2 hours or until ssh sessions have drained
+        working-directory: pytorch/
+        # Always hold for active ssh sessions
+        if: always()
+        run: .github/scripts/wait_for_ssh_to_drain.sh
+      - name: Chown workspace
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Kill containers, clean up images
+        if: always()
+        run: |
+          # ignore expansion of "docker ps -q" since it could be empty
+          # shellcheck disable=SC2046
+          docker stop $(docker ps -q) || true
+          # Prune all of the docker images
+          docker system prune -af
+  conda-py3_7-cpu-test:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: conda-py3_7-cpu-build
+    runs-on: linux.4xlarge
+    timeout-minutes: 240
+    env:
+      PACKAGE_TYPE: conda
+      GPU_ARCH_TYPE: cpu
+      DOCKER_IMAGE: pytorch/conda-builder:cpu
+      PYTORCH_BUILD_NUMBER: 1
+      DESIRED_PYTHON: 3.7
+    steps:
+      - name: Display EC2 information
+        shell: bash
+        run: |
+          set -euo pipefail
+          function get_ec2_metadata() {
+            # Pulled from instance metadata endpoint for EC2
+            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
+            category=$1
+            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+          }
+          echo "ami-id: $(get_ec2_metadata ami-id)"
+          echo "instance-id: $(get_ec2_metadata instance-id)"
+          echo "instance-type: $(get_ec2_metadata instance-type)"
+      - name: Log in to ECR
+        env:
+          AWS_RETRY_MODE: standard
+          AWS_MAX_ATTEMPTS: 5
+        run: |
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE:?}/*"
+          rm -f ~/.ssh/authorized_keys
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Preserve github env variables for use in docker
+        run: |
+          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
+      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+        name: Download Build Artifacts
+        with:
+          name: conda-py3_7-cpu
+      - name: Clone pytorch/pytorch
+        uses: actions/checkout@v2
+        with:
+          path: pytorch
+          submodules: recursive
+      - name: Clone pytorch/builder
+        uses: actions/checkout@v2
+        with:
+          repository: pytorch/builder
+          path: builder
+      - name: Generate binary test script
+        working-directory: pytorch/
+        run: |
+          OUTPUT_SCRIPT="$(pwd)/run.sh" bash .circleci/scripts/binary_linux_test.sh
+      - name: Test PyTorch binary
+        run: |
+          # shellcheck disable=SC2086,SC2090
+          container_name=$(docker run \
+            ${GPU_FLAG:-} \
+            -e BUILD_ENVIRONMENT \
+            -e PYTORCH_FINAL_PACKAGE_DIR=/artifacts \
+            -e BUILD_SPLIT_CUDA \
+            -e DESIRED_PYTHON \
+            -e DESIRED_CUDA \
+            -e GPU_ARCH_VERSION \
+            -e GPU_ARCH_TYPE \
+            -e USE_GLOO_WITH_OPENSSL \
+            -e TORCH_CONDA_BUILD_FOLDER \
+            -e ANACONDA_USER \
+            -e PYTORCH_BUILD_VERSION \
+            -e PYTORCH_BUILD_NUMBER \
+            -e PYTORCH_ROOT \
+            -e SKIP_ALL_TESTS \
+            -e LIBTORCH_VARIANT \
+            -e DESIRED_DEVTOOLSET \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
+            -v "${GITHUB_WORKSPACE}/builder:/builder" \
+            -v "${GITHUB_WORKSPACE}/artifacts:/final_pkgs" \
+            -v "${GITHUB_WORKSPACE}/run.sh:/run.sh" \
+            -w / \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t "${container_name}" sh -c "bash /run.sh"
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -348,20 +463,20 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  conda-py3_7-cuda11_1-build:
+  conda-py3_7-cuda10_2-test:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
-    runs-on: linux.4xlarge
+    needs: conda-py3_7-cuda10_2-build
+    runs-on: linux.4xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
+      PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: 11.1
-      GPU_ARCH_VERSION: 11.1
+      DESIRED_CUDA: 10.2
+      GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.1
+      DOCKER_IMAGE: pytorch/conda-builder:cuda10.2
       PYTORCH_BUILD_NUMBER: 1
-      SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: 3.7
     steps:
       - name: Display EC2 information
@@ -404,6 +519,10 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
+      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+        name: Download Build Artifacts
+        with:
+          name: conda-py3_7-cuda10_2
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -414,25 +533,19 @@ jobs:
         with:
           repository: pytorch/builder
           path: builder
-      - name: Generate version string
+      - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
+        run: |
+          bash .github/scripts/install_nvidia_utils_linux.sh
+          echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+      - name: Generate binary test script
         working-directory: pytorch/
         run: |
-          version=$(.github/scripts/generate_pytorch_version.py)
-          echo "Generated version: ${version}"
-          echo "PYTORCH_BUILD_VERSION=${version}" >> "$GITHUB_ENV"
-      - name: Set BUILD_SPLIT_CUDA
+          OUTPUT_SCRIPT="$(pwd)/run.sh" bash .circleci/scripts/binary_linux_test.sh
+      - name: Test PyTorch binary
         run: |
-          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch binary
-        run: |
-          mkdir -p artifacts/
+          # shellcheck disable=SC2086,SC2090
           container_name=$(docker run \
+            ${GPU_FLAG:-} \
             -e BUILD_ENVIRONMENT \
             -e PYTORCH_FINAL_PACKAGE_DIR=/artifacts \
             -e BUILD_SPLIT_CUDA \
@@ -453,191 +566,12 @@ jobs:
             --detach \
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
             -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${GITHUB_WORKSPACE}/artifacts:/artifacts" \
+            -v "${GITHUB_WORKSPACE}/artifacts:/final_pkgs" \
+            -v "${GITHUB_WORKSPACE}/run.sh:/run.sh" \
             -w / \
             "${DOCKER_IMAGE}"
           )
-          docker exec -t "${container_name}" sh -c "bash /builder/conda/build.sh"
-      - uses: seemethere/upload-artifact-s3@v3
-        with:
-          name: conda-py3_7-cuda11_1
-          retention-days: 14
-          if-no-files-found: error
-          path:
-            artifacts/*
-      - name: Parse ref
-        id: parse-ref
-        working-directory: pytorch/
-        run: |
-          .github/scripts/parse_ref.py
-      - name: Display and upload binary build size statistics (Click Me)
-        env:
-          SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
-          BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          TAG: ${{ steps.parse-ref.outputs.tag }}
-          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
-        working-directory: pytorch/
-        run: |
-          COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
-          export COMMIT_TIME
-          pip3 install requests==2.26
-          python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
-  conda-py3_7-cuda11_3-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
-    runs-on: linux.4xlarge
-    timeout-minutes: 240
-    env:
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: 11.3
-      GPU_ARCH_VERSION: 11.3
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.3
-      PYTORCH_BUILD_NUMBER: 1
-      SKIP_ALL_TESTS: 1
-      DESIRED_PYTHON: 3.7
-    steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE:?}/*"
-          rm -f ~/.ssh/authorized_keys
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
-        with:
-          path: pytorch
-          submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
-        with:
-          repository: pytorch/builder
-          path: builder
-      - name: Generate version string
-        working-directory: pytorch/
-        run: |
-          version=$(.github/scripts/generate_pytorch_version.py)
-          echo "Generated version: ${version}"
-          echo "PYTORCH_BUILD_VERSION=${version}" >> "$GITHUB_ENV"
-      - name: Set BUILD_SPLIT_CUDA
-        run: |
-          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch binary
-        run: |
-          mkdir -p artifacts/
-          container_name=$(docker run \
-            -e BUILD_ENVIRONMENT \
-            -e PYTORCH_FINAL_PACKAGE_DIR=/artifacts \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_PYTHON \
-            -e DESIRED_CUDA \
-            -e GPU_ARCH_VERSION \
-            -e GPU_ARCH_TYPE \
-            -e USE_GLOO_WITH_OPENSSL \
-            -e TORCH_CONDA_BUILD_FOLDER \
-            -e ANACONDA_USER \
-            -e PYTORCH_BUILD_VERSION \
-            -e PYTORCH_BUILD_NUMBER \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            -e LIBTORCH_VARIANT \
-            -e DESIRED_DEVTOOLSET \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${GITHUB_WORKSPACE}/artifacts:/artifacts" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t "${container_name}" sh -c "bash /builder/conda/build.sh"
-      - uses: seemethere/upload-artifact-s3@v3
-        with:
-          name: conda-py3_7-cuda11_3
-          retention-days: 14
-          if-no-files-found: error
-          path:
-            artifacts/*
-      - name: Parse ref
-        id: parse-ref
-        working-directory: pytorch/
-        run: |
-          .github/scripts/parse_ref.py
-      - name: Display and upload binary build size statistics (Click Me)
-        env:
-          SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
-          BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          TAG: ${{ steps.parse-ref.outputs.tag }}
-          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
-        working-directory: pytorch/
-        run: |
-          COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
-          export COMMIT_TIME
-          pip3 install requests==2.26
-          python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
+          docker exec -t "${container_name}" sh -c "bash /run.sh"
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -810,622 +744,13 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  conda-py3_8-cpu-build:
+  conda-py3_7-cuda11_5-test:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
-    runs-on: linux.4xlarge
+    needs: conda-py3_7-cuda11_5-build
+    runs-on: linux.4xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: 
-      GPU_ARCH_VERSION: 
-      GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/conda-builder:cpu
-      PYTORCH_BUILD_NUMBER: 1
-      SKIP_ALL_TESTS: 1
-      DESIRED_PYTHON: 3.8
-    steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE:?}/*"
-          rm -f ~/.ssh/authorized_keys
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
-        with:
-          path: pytorch
-          submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
-        with:
-          repository: pytorch/builder
-          path: builder
-      - name: Generate version string
-        working-directory: pytorch/
-        run: |
-          version=$(.github/scripts/generate_pytorch_version.py)
-          echo "Generated version: ${version}"
-          echo "PYTORCH_BUILD_VERSION=${version}" >> "$GITHUB_ENV"
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch binary
-        run: |
-          mkdir -p artifacts/
-          container_name=$(docker run \
-            -e BUILD_ENVIRONMENT \
-            -e PYTORCH_FINAL_PACKAGE_DIR=/artifacts \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_PYTHON \
-            -e DESIRED_CUDA \
-            -e GPU_ARCH_VERSION \
-            -e GPU_ARCH_TYPE \
-            -e USE_GLOO_WITH_OPENSSL \
-            -e TORCH_CONDA_BUILD_FOLDER \
-            -e ANACONDA_USER \
-            -e PYTORCH_BUILD_VERSION \
-            -e PYTORCH_BUILD_NUMBER \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            -e LIBTORCH_VARIANT \
-            -e DESIRED_DEVTOOLSET \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${GITHUB_WORKSPACE}/artifacts:/artifacts" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t "${container_name}" sh -c "bash /builder/conda/build.sh"
-      - uses: seemethere/upload-artifact-s3@v3
-        with:
-          name: conda-py3_8-cpu
-          retention-days: 14
-          if-no-files-found: error
-          path:
-            artifacts/*
-      - name: Parse ref
-        id: parse-ref
-        working-directory: pytorch/
-        run: |
-          .github/scripts/parse_ref.py
-      - name: Display and upload binary build size statistics (Click Me)
-        env:
-          SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
-          BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          TAG: ${{ steps.parse-ref.outputs.tag }}
-          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
-        working-directory: pytorch/
-        run: |
-          COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
-          export COMMIT_TIME
-          pip3 install requests==2.26
-          python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
-  conda-py3_8-cuda10_2-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
-    runs-on: linux.4xlarge
-    timeout-minutes: 240
-    env:
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: 10.2
-      GPU_ARCH_VERSION: 10.2
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda10.2
-      PYTORCH_BUILD_NUMBER: 1
-      SKIP_ALL_TESTS: 1
-      DESIRED_PYTHON: 3.8
-    steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE:?}/*"
-          rm -f ~/.ssh/authorized_keys
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
-        with:
-          path: pytorch
-          submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
-        with:
-          repository: pytorch/builder
-          path: builder
-      - name: Generate version string
-        working-directory: pytorch/
-        run: |
-          version=$(.github/scripts/generate_pytorch_version.py)
-          echo "Generated version: ${version}"
-          echo "PYTORCH_BUILD_VERSION=${version}" >> "$GITHUB_ENV"
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch binary
-        run: |
-          mkdir -p artifacts/
-          container_name=$(docker run \
-            -e BUILD_ENVIRONMENT \
-            -e PYTORCH_FINAL_PACKAGE_DIR=/artifacts \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_PYTHON \
-            -e DESIRED_CUDA \
-            -e GPU_ARCH_VERSION \
-            -e GPU_ARCH_TYPE \
-            -e USE_GLOO_WITH_OPENSSL \
-            -e TORCH_CONDA_BUILD_FOLDER \
-            -e ANACONDA_USER \
-            -e PYTORCH_BUILD_VERSION \
-            -e PYTORCH_BUILD_NUMBER \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            -e LIBTORCH_VARIANT \
-            -e DESIRED_DEVTOOLSET \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${GITHUB_WORKSPACE}/artifacts:/artifacts" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t "${container_name}" sh -c "bash /builder/conda/build.sh"
-      - uses: seemethere/upload-artifact-s3@v3
-        with:
-          name: conda-py3_8-cuda10_2
-          retention-days: 14
-          if-no-files-found: error
-          path:
-            artifacts/*
-      - name: Parse ref
-        id: parse-ref
-        working-directory: pytorch/
-        run: |
-          .github/scripts/parse_ref.py
-      - name: Display and upload binary build size statistics (Click Me)
-        env:
-          SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
-          BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          TAG: ${{ steps.parse-ref.outputs.tag }}
-          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
-        working-directory: pytorch/
-        run: |
-          COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
-          export COMMIT_TIME
-          pip3 install requests==2.26
-          python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
-  conda-py3_8-cuda11_1-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
-    runs-on: linux.4xlarge
-    timeout-minutes: 240
-    env:
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: 11.1
-      GPU_ARCH_VERSION: 11.1
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.1
-      PYTORCH_BUILD_NUMBER: 1
-      SKIP_ALL_TESTS: 1
-      DESIRED_PYTHON: 3.8
-    steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE:?}/*"
-          rm -f ~/.ssh/authorized_keys
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
-        with:
-          path: pytorch
-          submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
-        with:
-          repository: pytorch/builder
-          path: builder
-      - name: Generate version string
-        working-directory: pytorch/
-        run: |
-          version=$(.github/scripts/generate_pytorch_version.py)
-          echo "Generated version: ${version}"
-          echo "PYTORCH_BUILD_VERSION=${version}" >> "$GITHUB_ENV"
-      - name: Set BUILD_SPLIT_CUDA
-        run: |
-          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch binary
-        run: |
-          mkdir -p artifacts/
-          container_name=$(docker run \
-            -e BUILD_ENVIRONMENT \
-            -e PYTORCH_FINAL_PACKAGE_DIR=/artifacts \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_PYTHON \
-            -e DESIRED_CUDA \
-            -e GPU_ARCH_VERSION \
-            -e GPU_ARCH_TYPE \
-            -e USE_GLOO_WITH_OPENSSL \
-            -e TORCH_CONDA_BUILD_FOLDER \
-            -e ANACONDA_USER \
-            -e PYTORCH_BUILD_VERSION \
-            -e PYTORCH_BUILD_NUMBER \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            -e LIBTORCH_VARIANT \
-            -e DESIRED_DEVTOOLSET \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${GITHUB_WORKSPACE}/artifacts:/artifacts" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t "${container_name}" sh -c "bash /builder/conda/build.sh"
-      - uses: seemethere/upload-artifact-s3@v3
-        with:
-          name: conda-py3_8-cuda11_1
-          retention-days: 14
-          if-no-files-found: error
-          path:
-            artifacts/*
-      - name: Parse ref
-        id: parse-ref
-        working-directory: pytorch/
-        run: |
-          .github/scripts/parse_ref.py
-      - name: Display and upload binary build size statistics (Click Me)
-        env:
-          SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
-          BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          TAG: ${{ steps.parse-ref.outputs.tag }}
-          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
-        working-directory: pytorch/
-        run: |
-          COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
-          export COMMIT_TIME
-          pip3 install requests==2.26
-          python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
-  conda-py3_8-cuda11_3-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
-    runs-on: linux.4xlarge
-    timeout-minutes: 240
-    env:
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: 11.3
-      GPU_ARCH_VERSION: 11.3
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.3
-      PYTORCH_BUILD_NUMBER: 1
-      SKIP_ALL_TESTS: 1
-      DESIRED_PYTHON: 3.8
-    steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE:?}/*"
-          rm -f ~/.ssh/authorized_keys
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
-        with:
-          path: pytorch
-          submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
-        with:
-          repository: pytorch/builder
-          path: builder
-      - name: Generate version string
-        working-directory: pytorch/
-        run: |
-          version=$(.github/scripts/generate_pytorch_version.py)
-          echo "Generated version: ${version}"
-          echo "PYTORCH_BUILD_VERSION=${version}" >> "$GITHUB_ENV"
-      - name: Set BUILD_SPLIT_CUDA
-        run: |
-          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch binary
-        run: |
-          mkdir -p artifacts/
-          container_name=$(docker run \
-            -e BUILD_ENVIRONMENT \
-            -e PYTORCH_FINAL_PACKAGE_DIR=/artifacts \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_PYTHON \
-            -e DESIRED_CUDA \
-            -e GPU_ARCH_VERSION \
-            -e GPU_ARCH_TYPE \
-            -e USE_GLOO_WITH_OPENSSL \
-            -e TORCH_CONDA_BUILD_FOLDER \
-            -e ANACONDA_USER \
-            -e PYTORCH_BUILD_VERSION \
-            -e PYTORCH_BUILD_NUMBER \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            -e LIBTORCH_VARIANT \
-            -e DESIRED_DEVTOOLSET \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${GITHUB_WORKSPACE}/artifacts:/artifacts" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t "${container_name}" sh -c "bash /builder/conda/build.sh"
-      - uses: seemethere/upload-artifact-s3@v3
-        with:
-          name: conda-py3_8-cuda11_3
-          retention-days: 14
-          if-no-files-found: error
-          path:
-            artifacts/*
-      - name: Parse ref
-        id: parse-ref
-        working-directory: pytorch/
-        run: |
-          .github/scripts/parse_ref.py
-      - name: Display and upload binary build size statistics (Click Me)
-        env:
-          SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
-          BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          TAG: ${{ steps.parse-ref.outputs.tag }}
-          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
-        working-directory: pytorch/
-        run: |
-          COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
-          export COMMIT_TIME
-          pip3 install requests==2.26
-          python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
-  conda-py3_8-cuda11_5-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
-    runs-on: linux.4xlarge
-    timeout-minutes: 240
-    env:
+      PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: 11.5
@@ -1433,8 +758,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda11.5
       PYTORCH_BUILD_NUMBER: 1
-      SKIP_ALL_TESTS: 1
-      DESIRED_PYTHON: 3.8
+      DESIRED_PYTHON: 3.7
     steps:
       - name: Display EC2 information
         shell: bash
@@ -1476,6 +800,10 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
+      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+        name: Download Build Artifacts
+        with:
+          name: conda-py3_7-cuda11_5
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -1486,25 +814,19 @@ jobs:
         with:
           repository: pytorch/builder
           path: builder
-      - name: Generate version string
+      - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
+        run: |
+          bash .github/scripts/install_nvidia_utils_linux.sh
+          echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+      - name: Generate binary test script
         working-directory: pytorch/
         run: |
-          version=$(.github/scripts/generate_pytorch_version.py)
-          echo "Generated version: ${version}"
-          echo "PYTORCH_BUILD_VERSION=${version}" >> "$GITHUB_ENV"
-      - name: Set BUILD_SPLIT_CUDA
+          OUTPUT_SCRIPT="$(pwd)/run.sh" bash .circleci/scripts/binary_linux_test.sh
+      - name: Test PyTorch binary
         run: |
-          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch binary
-        run: |
-          mkdir -p artifacts/
+          # shellcheck disable=SC2086,SC2090
           container_name=$(docker run \
+            ${GPU_FLAG:-} \
             -e BUILD_ENVIRONMENT \
             -e PYTORCH_FINAL_PACKAGE_DIR=/artifacts \
             -e BUILD_SPLIT_CUDA \
@@ -1525,801 +847,12 @@ jobs:
             --detach \
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
             -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${GITHUB_WORKSPACE}/artifacts:/artifacts" \
+            -v "${GITHUB_WORKSPACE}/artifacts:/final_pkgs" \
+            -v "${GITHUB_WORKSPACE}/run.sh:/run.sh" \
             -w / \
             "${DOCKER_IMAGE}"
           )
-          docker exec -t "${container_name}" sh -c "bash /builder/conda/build.sh"
-      - uses: seemethere/upload-artifact-s3@v3
-        with:
-          name: conda-py3_8-cuda11_5
-          retention-days: 14
-          if-no-files-found: error
-          path:
-            artifacts/*
-      - name: Parse ref
-        id: parse-ref
-        working-directory: pytorch/
-        run: |
-          .github/scripts/parse_ref.py
-      - name: Display and upload binary build size statistics (Click Me)
-        env:
-          SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
-          BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          TAG: ${{ steps.parse-ref.outputs.tag }}
-          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
-        working-directory: pytorch/
-        run: |
-          COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
-          export COMMIT_TIME
-          pip3 install requests==2.26
-          python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
-  conda-py3_9-cpu-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
-    runs-on: linux.4xlarge
-    timeout-minutes: 240
-    env:
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: 
-      GPU_ARCH_VERSION: 
-      GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/conda-builder:cpu
-      PYTORCH_BUILD_NUMBER: 1
-      SKIP_ALL_TESTS: 1
-      DESIRED_PYTHON: 3.9
-    steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE:?}/*"
-          rm -f ~/.ssh/authorized_keys
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
-        with:
-          path: pytorch
-          submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
-        with:
-          repository: pytorch/builder
-          path: builder
-      - name: Generate version string
-        working-directory: pytorch/
-        run: |
-          version=$(.github/scripts/generate_pytorch_version.py)
-          echo "Generated version: ${version}"
-          echo "PYTORCH_BUILD_VERSION=${version}" >> "$GITHUB_ENV"
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch binary
-        run: |
-          mkdir -p artifacts/
-          container_name=$(docker run \
-            -e BUILD_ENVIRONMENT \
-            -e PYTORCH_FINAL_PACKAGE_DIR=/artifacts \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_PYTHON \
-            -e DESIRED_CUDA \
-            -e GPU_ARCH_VERSION \
-            -e GPU_ARCH_TYPE \
-            -e USE_GLOO_WITH_OPENSSL \
-            -e TORCH_CONDA_BUILD_FOLDER \
-            -e ANACONDA_USER \
-            -e PYTORCH_BUILD_VERSION \
-            -e PYTORCH_BUILD_NUMBER \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            -e LIBTORCH_VARIANT \
-            -e DESIRED_DEVTOOLSET \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${GITHUB_WORKSPACE}/artifacts:/artifacts" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t "${container_name}" sh -c "bash /builder/conda/build.sh"
-      - uses: seemethere/upload-artifact-s3@v3
-        with:
-          name: conda-py3_9-cpu
-          retention-days: 14
-          if-no-files-found: error
-          path:
-            artifacts/*
-      - name: Parse ref
-        id: parse-ref
-        working-directory: pytorch/
-        run: |
-          .github/scripts/parse_ref.py
-      - name: Display and upload binary build size statistics (Click Me)
-        env:
-          SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
-          BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          TAG: ${{ steps.parse-ref.outputs.tag }}
-          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
-        working-directory: pytorch/
-        run: |
-          COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
-          export COMMIT_TIME
-          pip3 install requests==2.26
-          python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
-  conda-py3_9-cuda10_2-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
-    runs-on: linux.4xlarge
-    timeout-minutes: 240
-    env:
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: 10.2
-      GPU_ARCH_VERSION: 10.2
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda10.2
-      PYTORCH_BUILD_NUMBER: 1
-      SKIP_ALL_TESTS: 1
-      DESIRED_PYTHON: 3.9
-    steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE:?}/*"
-          rm -f ~/.ssh/authorized_keys
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
-        with:
-          path: pytorch
-          submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
-        with:
-          repository: pytorch/builder
-          path: builder
-      - name: Generate version string
-        working-directory: pytorch/
-        run: |
-          version=$(.github/scripts/generate_pytorch_version.py)
-          echo "Generated version: ${version}"
-          echo "PYTORCH_BUILD_VERSION=${version}" >> "$GITHUB_ENV"
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch binary
-        run: |
-          mkdir -p artifacts/
-          container_name=$(docker run \
-            -e BUILD_ENVIRONMENT \
-            -e PYTORCH_FINAL_PACKAGE_DIR=/artifacts \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_PYTHON \
-            -e DESIRED_CUDA \
-            -e GPU_ARCH_VERSION \
-            -e GPU_ARCH_TYPE \
-            -e USE_GLOO_WITH_OPENSSL \
-            -e TORCH_CONDA_BUILD_FOLDER \
-            -e ANACONDA_USER \
-            -e PYTORCH_BUILD_VERSION \
-            -e PYTORCH_BUILD_NUMBER \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            -e LIBTORCH_VARIANT \
-            -e DESIRED_DEVTOOLSET \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${GITHUB_WORKSPACE}/artifacts:/artifacts" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t "${container_name}" sh -c "bash /builder/conda/build.sh"
-      - uses: seemethere/upload-artifact-s3@v3
-        with:
-          name: conda-py3_9-cuda10_2
-          retention-days: 14
-          if-no-files-found: error
-          path:
-            artifacts/*
-      - name: Parse ref
-        id: parse-ref
-        working-directory: pytorch/
-        run: |
-          .github/scripts/parse_ref.py
-      - name: Display and upload binary build size statistics (Click Me)
-        env:
-          SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
-          BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          TAG: ${{ steps.parse-ref.outputs.tag }}
-          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
-        working-directory: pytorch/
-        run: |
-          COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
-          export COMMIT_TIME
-          pip3 install requests==2.26
-          python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
-  conda-py3_9-cuda11_1-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
-    runs-on: linux.4xlarge
-    timeout-minutes: 240
-    env:
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: 11.1
-      GPU_ARCH_VERSION: 11.1
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.1
-      PYTORCH_BUILD_NUMBER: 1
-      SKIP_ALL_TESTS: 1
-      DESIRED_PYTHON: 3.9
-    steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE:?}/*"
-          rm -f ~/.ssh/authorized_keys
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
-        with:
-          path: pytorch
-          submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
-        with:
-          repository: pytorch/builder
-          path: builder
-      - name: Generate version string
-        working-directory: pytorch/
-        run: |
-          version=$(.github/scripts/generate_pytorch_version.py)
-          echo "Generated version: ${version}"
-          echo "PYTORCH_BUILD_VERSION=${version}" >> "$GITHUB_ENV"
-      - name: Set BUILD_SPLIT_CUDA
-        run: |
-          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch binary
-        run: |
-          mkdir -p artifacts/
-          container_name=$(docker run \
-            -e BUILD_ENVIRONMENT \
-            -e PYTORCH_FINAL_PACKAGE_DIR=/artifacts \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_PYTHON \
-            -e DESIRED_CUDA \
-            -e GPU_ARCH_VERSION \
-            -e GPU_ARCH_TYPE \
-            -e USE_GLOO_WITH_OPENSSL \
-            -e TORCH_CONDA_BUILD_FOLDER \
-            -e ANACONDA_USER \
-            -e PYTORCH_BUILD_VERSION \
-            -e PYTORCH_BUILD_NUMBER \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            -e LIBTORCH_VARIANT \
-            -e DESIRED_DEVTOOLSET \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${GITHUB_WORKSPACE}/artifacts:/artifacts" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t "${container_name}" sh -c "bash /builder/conda/build.sh"
-      - uses: seemethere/upload-artifact-s3@v3
-        with:
-          name: conda-py3_9-cuda11_1
-          retention-days: 14
-          if-no-files-found: error
-          path:
-            artifacts/*
-      - name: Parse ref
-        id: parse-ref
-        working-directory: pytorch/
-        run: |
-          .github/scripts/parse_ref.py
-      - name: Display and upload binary build size statistics (Click Me)
-        env:
-          SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
-          BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          TAG: ${{ steps.parse-ref.outputs.tag }}
-          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
-        working-directory: pytorch/
-        run: |
-          COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
-          export COMMIT_TIME
-          pip3 install requests==2.26
-          python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
-  conda-py3_9-cuda11_3-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
-    runs-on: linux.4xlarge
-    timeout-minutes: 240
-    env:
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: 11.3
-      GPU_ARCH_VERSION: 11.3
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.3
-      PYTORCH_BUILD_NUMBER: 1
-      SKIP_ALL_TESTS: 1
-      DESIRED_PYTHON: 3.9
-    steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE:?}/*"
-          rm -f ~/.ssh/authorized_keys
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
-        with:
-          path: pytorch
-          submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
-        with:
-          repository: pytorch/builder
-          path: builder
-      - name: Generate version string
-        working-directory: pytorch/
-        run: |
-          version=$(.github/scripts/generate_pytorch_version.py)
-          echo "Generated version: ${version}"
-          echo "PYTORCH_BUILD_VERSION=${version}" >> "$GITHUB_ENV"
-      - name: Set BUILD_SPLIT_CUDA
-        run: |
-          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch binary
-        run: |
-          mkdir -p artifacts/
-          container_name=$(docker run \
-            -e BUILD_ENVIRONMENT \
-            -e PYTORCH_FINAL_PACKAGE_DIR=/artifacts \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_PYTHON \
-            -e DESIRED_CUDA \
-            -e GPU_ARCH_VERSION \
-            -e GPU_ARCH_TYPE \
-            -e USE_GLOO_WITH_OPENSSL \
-            -e TORCH_CONDA_BUILD_FOLDER \
-            -e ANACONDA_USER \
-            -e PYTORCH_BUILD_VERSION \
-            -e PYTORCH_BUILD_NUMBER \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            -e LIBTORCH_VARIANT \
-            -e DESIRED_DEVTOOLSET \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${GITHUB_WORKSPACE}/artifacts:/artifacts" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t "${container_name}" sh -c "bash /builder/conda/build.sh"
-      - uses: seemethere/upload-artifact-s3@v3
-        with:
-          name: conda-py3_9-cuda11_3
-          retention-days: 14
-          if-no-files-found: error
-          path:
-            artifacts/*
-      - name: Parse ref
-        id: parse-ref
-        working-directory: pytorch/
-        run: |
-          .github/scripts/parse_ref.py
-      - name: Display and upload binary build size statistics (Click Me)
-        env:
-          SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
-          BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          TAG: ${{ steps.parse-ref.outputs.tag }}
-          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
-        working-directory: pytorch/
-        run: |
-          COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
-          export COMMIT_TIME
-          pip3 install requests==2.26
-          python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
-  conda-py3_9-cuda11_5-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
-    runs-on: linux.4xlarge
-    timeout-minutes: 240
-    env:
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: 11.5
-      GPU_ARCH_VERSION: 11.5
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.5
-      PYTORCH_BUILD_NUMBER: 1
-      SKIP_ALL_TESTS: 1
-      DESIRED_PYTHON: 3.9
-    steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE:?}/*"
-          rm -f ~/.ssh/authorized_keys
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
-        with:
-          path: pytorch
-          submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
-        with:
-          repository: pytorch/builder
-          path: builder
-      - name: Generate version string
-        working-directory: pytorch/
-        run: |
-          version=$(.github/scripts/generate_pytorch_version.py)
-          echo "Generated version: ${version}"
-          echo "PYTORCH_BUILD_VERSION=${version}" >> "$GITHUB_ENV"
-      - name: Set BUILD_SPLIT_CUDA
-        run: |
-          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch binary
-        run: |
-          mkdir -p artifacts/
-          container_name=$(docker run \
-            -e BUILD_ENVIRONMENT \
-            -e PYTORCH_FINAL_PACKAGE_DIR=/artifacts \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_PYTHON \
-            -e DESIRED_CUDA \
-            -e GPU_ARCH_VERSION \
-            -e GPU_ARCH_TYPE \
-            -e USE_GLOO_WITH_OPENSSL \
-            -e TORCH_CONDA_BUILD_FOLDER \
-            -e ANACONDA_USER \
-            -e PYTORCH_BUILD_VERSION \
-            -e PYTORCH_BUILD_NUMBER \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            -e LIBTORCH_VARIANT \
-            -e DESIRED_DEVTOOLSET \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${GITHUB_WORKSPACE}/artifacts:/artifacts" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t "${container_name}" sh -c "bash /builder/conda/build.sh"
-      - uses: seemethere/upload-artifact-s3@v3
-        with:
-          name: conda-py3_9-cuda11_5
-          retention-days: 14
-          if-no-files-found: error
-          path:
-            artifacts/*
-      - name: Parse ref
-        id: parse-ref
-        working-directory: pytorch/
-        run: |
-          .github/scripts/parse_ref.py
-      - name: Display and upload binary build size statistics (Click Me)
-        env:
-          SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
-          BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          TAG: ${{ steps.parse-ref.outputs.tag }}
-          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
-        working-directory: pytorch/
-        run: |
-          COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
-          export COMMIT_TIME
-          pip3 install requests==2.26
-          python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
+          docker exec -t "${container_name}" sh -c "bash /run.sh"
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions

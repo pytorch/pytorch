@@ -55,10 +55,12 @@ jobs:
     runs-on: linux.4xlarge
     timeout-minutes: !{{ common.timeout_minutes }}
     env:
+{%- if config["gpu_arch_version"] %}
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: !{{ config["gpu_arch_version"] }}
       GPU_ARCH_VERSION: !{{ config["gpu_arch_version"] }}
+{%- endif %}
       GPU_ARCH_TYPE: !{{ config["gpu_arch_type"] }}
       DOCKER_IMAGE: !{{ config["container_image"] }}
       PYTORCH_BUILD_NUMBER: 1
@@ -150,5 +152,89 @@ jobs:
           export COMMIT_TIME
           pip3 install requests==2.26
           python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
+      !{{ common.teardown_ec2_linux("pytorch/") }}
+  !{{ config["build_name"] }}-test:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: !{{ config["build_name"] }}-build
+{%- if config["gpu_arch_type"] == "cuda" %}
+    runs-on: linux.4xlarge.nvidia.gpu
+{%- else %}
+    runs-on: linux.4xlarge
+{%- endif %}
+    timeout-minutes: !{{ common.timeout_minutes }}
+    env:
+      PACKAGE_TYPE: !{{ config["package_type"] }}
+{%- if config["gpu_arch_version"] %}
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: !{{ config["gpu_arch_version"] }}
+      GPU_ARCH_VERSION: !{{ config["gpu_arch_version"] }}
+{%- endif %}
+      GPU_ARCH_TYPE: !{{ config["gpu_arch_type"] }}
+      DOCKER_IMAGE: !{{ config["container_image"] }}
+      PYTORCH_BUILD_NUMBER: 1
+{%- if config["package_type"] == "libtorch" %}
+      LIBTORCH_VARIANT: !{{ config["libtorch_variant"] }}
+      DESIRED_DEVTOOLSET: !{{ config["devtoolset"] }}
+{%- else %}
+      DESIRED_PYTHON: !{{ config["python_version"] }}
+{%- endif %}
+    steps:
+      !{{ common.setup_ec2_linux() }}
+      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+        name: Download Build Artifacts
+        with:
+          name: !{{ config["build_name"] }}
+      - name: Clone pytorch/pytorch
+        uses: actions/checkout@v2
+        with:
+          path: pytorch
+          submodules: recursive
+      - name: Clone pytorch/builder
+        uses: actions/checkout@v2
+        with:
+          repository: pytorch/builder
+          path: builder
+{%- if config["gpu_arch_type"] == "cuda" %}
+      - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
+        run: |
+          bash .github/scripts/install_nvidia_utils_linux.sh
+          echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+{%- endif %}
+      - name: Generate binary test script
+        working-directory: pytorch/
+        run: |
+          OUTPUT_SCRIPT="$(pwd)/run.sh" bash .circleci/scripts/binary_linux_test.sh
+      - name: Test PyTorch binary
+        run: |
+          # shellcheck disable=SC2086,SC2090
+          container_name=$(docker run \
+            ${GPU_FLAG:-} \
+            -e BUILD_ENVIRONMENT \
+            -e PYTORCH_FINAL_PACKAGE_DIR=/artifacts \
+            -e BUILD_SPLIT_CUDA \
+            -e DESIRED_PYTHON \
+            -e DESIRED_CUDA \
+            -e GPU_ARCH_VERSION \
+            -e GPU_ARCH_TYPE \
+            -e USE_GLOO_WITH_OPENSSL \
+            -e TORCH_CONDA_BUILD_FOLDER \
+            -e ANACONDA_USER \
+            -e PYTORCH_BUILD_VERSION \
+            -e PYTORCH_BUILD_NUMBER \
+            -e PYTORCH_ROOT \
+            -e SKIP_ALL_TESTS \
+            -e LIBTORCH_VARIANT \
+            -e DESIRED_DEVTOOLSET \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
+            -v "${GITHUB_WORKSPACE}/builder:/builder" \
+            -v "${GITHUB_WORKSPACE}/artifacts:/final_pkgs" \
+            -v "${GITHUB_WORKSPACE}/run.sh:/run.sh" \
+            -w / \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t "${container_name}" sh -c "bash /run.sh"
       !{{ common.teardown_ec2_linux("pytorch/") }}
 {%- endfor %}
