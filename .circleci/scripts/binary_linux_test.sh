@@ -11,7 +11,7 @@ cat >"${OUTPUT_SCRIPT}" <<EOL
 set -eux -o pipefail
 
 retry () {
-    "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+    "\$@"  || (sleep 1 && "\$@") || (sleep 2 && "\$@")
 }
 
 python_nodot="\$(echo $DESIRED_PYTHON | tr -d m.u)"
