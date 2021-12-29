@@ -37,3 +37,4 @@ For a whirlwind tour of how to use the transforms, please check out `this sectio
 
    Install <install>
    functorch API Reference <functorch>
+   Tutorials <tutorials>

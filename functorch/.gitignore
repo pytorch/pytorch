@@ -8,7 +8,6 @@ functorch/_C.so
 t.py
 .vscode/
 ccache.sh
-*.ipynb
 docs/build
 docs/src
 docs/source/generated
