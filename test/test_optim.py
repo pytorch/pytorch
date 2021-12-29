@@ -368,6 +368,87 @@ class TestOptim(TestCase):
             with self.assertRaisesRegex(ValueError, "Invalid momentum value: -0.5"):
                 optimizer(None, lr=1e-2, momentum=-0.5)
 
+    def test_sgd_new(self):
+        optimizer = optim.SGD
+        for foreach in [True, False]:
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, maximize=maximize, foreach=foreach),
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, maximize=maximize, foreach=foreach),
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-3, maximize=maximize, foreach=foreach),
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer(
+                    self._build_params_dict_single(weight, bias, lr=1e-2),
+                    lr=1e-3, maximize=maximize, foreach=foreach),
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer(
+                    self._build_params_dict_single(weight, bias, lr=1e-2), maximize=maximize, foreach=foreach),
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, maximize=maximize, foreach=foreach),
+                [lambda opt: StepLR(opt, gamma=0.9, step_size=10)],
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, maximize=maximize, foreach=foreach),
+                [lambda opt: LinearLR(opt, start_factor=0.4, end_factor=0.8, total_iters=4)],
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, maximize=maximize, foreach=foreach),
+                [lambda opt: ConstantLR(opt, factor=0.4, total_iters=4)],
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, maximize=maximize, foreach=foreach),
+                [lambda opt: StepLR(opt, gamma=0.9, step_size=10),
+                 lambda opt: LinearLR(opt, start_factor=0.4, end_factor=0.6, total_iters=4)],
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, maximize=maximize, foreach=foreach),
+                [lambda opt: StepLR(opt, gamma=0.9, step_size=10),
+                 lambda opt: ReduceLROnPlateau(opt)],
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, maximize=maximize, foreach=foreach),
+                [lambda opt: StepLR(opt, gamma=0.99, step_size=10),
+                 lambda opt: ExponentialLR(opt, gamma=0.99),
+                 lambda opt: ReduceLROnPlateau(opt)],
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, momentum=0.5,
+                                                         maximize=maximize, foreach=foreach),
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, momentum=0.5, weight_decay=1,
+                                                         maximize=maximize, foreach=foreach),
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize:
+                optimizer([weight, bias], nesterov=True, lr=1e-3, momentum=0.5, weight_decay=1,
+                          maximize=maximize, foreach=foreach),
+                constructor_accepts_maximize=True
+            )
+            with self.assertRaisesRegex(ValueError, "Invalid momentum value: -0.5"):
+                optimizer(None, lr=1e-2, momentum=-0.5, foreach=foreach)
+
     def test_sgd_sparse(self):
         for optimizer in [optim.SGD, optim_mt.SGD]:
             self._test_rosenbrock_sparse(
@@ -494,8 +575,8 @@ class TestOptim(TestCase):
             ((optim.NAdam), dict(weight_decay=1., momentum_decay=6e-3)),
             ((optim.NAdam), dict(weight_decay=0., momentum_decay=4e-3)),
             ((optim.NAdam), dict(weight_decay=0.01, momentum_decay=4e-3)),
-            # ((optim.SGD), dict(lr=0.2, momentum=1, dampening=0, weight_decay=1, nesterov=True)),
-            # ((optim.SGD), dict(lr=0.2, momentum=1, dampening=0.5, weight_decay=1, nesterov=False)),
+            ((optim.SGD), dict(lr=0.2, momentum=1, dampening=0, weight_decay=1, nesterov=True)),
+            ((optim.SGD), dict(lr=0.2, momentum=1, dampening=0.5, weight_decay=1, nesterov=False)),
             ((optim.RAdam), dict(weight_decay=0)),
             ((optim.RAdam), dict(weight_decay=1)),
             # ((optim.RMSprop), dict(weight_decay=1, momentum=1, centered=True)),
