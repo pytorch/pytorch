@@ -19057,7 +19057,7 @@ class TestNNDeviceType(NNTestCase):
         module_input_dict = {torch.nn.AdaptiveAvgPool1d : inp_1d,
                              torch.nn.AdaptiveAvgPool2d : inp_2d,
                              torch.nn.AdaptiveAvgPool3d : inp_3d,}
-        
+
         for m, inp in module_input_dict.items():
             with self.assertRaisesRegex(RuntimeError,
                                         r"elements of output_size must be greater than or equal to 0"):
