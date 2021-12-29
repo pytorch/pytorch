@@ -2502,11 +2502,7 @@ Tensor svd_backward(const Tensor& gU,
   // where we have used that Im(diag(U^H gU)) = - Im(diag(V^h gV)) to group the diagonal imaginary terms into one
   // that just depends on U^H gU.
 
-  // Trivial case
-  if (!gS.defined() && !gU.defined() && !gVh.defined()) {
-    return {};
-  }
-
+  // We know that at least one of the gradients is defined
   const auto m = U.size(-2);
   const auto n = Vh.size(-1);
 
