@@ -204,7 +204,7 @@ jobs:
       - name: Generate binary test script
         working-directory: pytorch/
         run: |
-          OUTPUT_SCRIPT="$(pwd)/run.sh" bash .circleci/scripts/binary_linux_test.sh
+          OUTPUT_SCRIPT="${GITHUB_WORKSPACE}/run.sh" bash .circleci/scripts/binary_linux_test.sh
       - name: Test PyTorch binary
         run: |
           # shellcheck disable=SC2086,SC2090
