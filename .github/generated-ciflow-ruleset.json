@@ -14,9 +14,6 @@
       "ios-12-5-1-x86-64-full-jit",
       "libtorch-linux-xenial-cuda10.2-py3.6-gcc7",
       "libtorch-linux-xenial-cuda11.3-py3.6-gcc7",
-      "linux-binary-conda",
-      "linux-binary-libtorch",
-      "linux-binary-manywheel",
       "linux-bionic-cuda10.2-py3.9-gcc7",
       "linux-bionic-py3.6-clang9",
       "linux-docs",
@@ -61,7 +58,9 @@
       "linux-binary-manywheel"
     ],
     "ciflow/binaries/conda": [
-      "linux-binary-conda",
+      "linux-binary-conda"
+    ],
+    "ciflow/binaries/libtorch": [
       "linux-binary-libtorch"
     ],
     "ciflow/binaries/wheel": [
@@ -217,9 +216,6 @@
       "ios-12-5-1-x86-64-full-jit",
       "libtorch-linux-xenial-cuda10.2-py3.6-gcc7",
       "libtorch-linux-xenial-cuda11.3-py3.6-gcc7",
-      "linux-binary-conda",
-      "linux-binary-libtorch",
-      "linux-binary-manywheel",
       "linux-bionic-cuda10.2-py3.9-gcc7",
       "linux-bionic-py3.6-clang9",
       "linux-docs",

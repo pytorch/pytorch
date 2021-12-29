@@ -14,10 +14,10 @@ on:
   schedule:
     - cron: !{{ is_scheduled }}
 {%- else %}
-  push:
-    branches:
-      - master
-      - release/*
+  # push:
+  #   branches:
+  #     - master
+  #     - release/*
 {%- endif %}
   workflow_dispatch:
 
@@ -42,53 +42,32 @@ env:
 !{{ common.concurrency(build_environment) }}
 
 jobs:
-{% block generate_build_matrix +%}
-  generate-build-matrix:
+  should-run:
     if: !{{ ciflow_config.root_job_condition }}
-    runs-on: ubuntu-18.04
-    outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
-    container:
-      image: python:3.9
+    runs-on: ubuntu-latest
     steps:
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
-      - name: Generating build matrix
-        id: set-matrix
-        run: |
-          # outputting for debugging purposes
-          MATRIX=$(python .github/scripts/generate_binary_build_matrix.py !{{ package_type }})
-          echo "${MATRIX}"
-          echo "::set-output name=matrix::${MATRIX}"
-{%- endblock %}
-{% block build +%}
-  build:
-{%- if package_type == "libtorch" %}
-    name: pytorch-linux-!{{ package_type }}-${{ matrix.gpu_arch_type }}${{ matrix.gpu_arch_version }}-${{ matrix.devtoolset }}-${{ matrix.libtorch_variant }}
-{%- else %}
-    name: pytorch-linux-!{{ package_type }}-py${{ matrix.python_version }}-${{ matrix.gpu_arch_type }}${{ matrix.gpu_arch_version }}
-{%- endif %}
+      - name: noop
+        run: echo "This job is here so we don't have a bunch of skipped binary builds :D"
+{%- for config in build_configs %}
+  !{{ config["build_name"] }}-build:
     if: ${{ github.repository_owner == 'pytorch' }}
+    needs: should-run
     runs-on: linux.4xlarge
     timeout-minutes: !{{ common.timeout_minutes }}
-    needs: generate-build-matrix
-    strategy:
-      matrix:
-        ${{ fromJson(needs.generate-build-matrix.outputs.matrix) }}
-      fail-fast: false
     env:
-      DESIRED_PYTHON: ${{ matrix.python_version }}
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: ${{ matrix.gpu_arch_version }}
-      GPU_ARCH_VERSION: ${{ matrix.gpu_arch_version }}
-      GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
-      DOCKER_IMAGE: ${{ matrix.container_image }}
+      DESIRED_CUDA: !{{ config["gpu_arch_version"] }}
+      GPU_ARCH_VERSION: !{{ config["gpu_arch_version"] }}
+      GPU_ARCH_TYPE: !{{ config["gpu_arch_type"] }}
+      DOCKER_IMAGE: !{{ config["container_image"] }}
       PYTORCH_BUILD_NUMBER: 1
       SKIP_ALL_TESTS: 1
-{%- if package_type == "libtorch" %}
-      LIBTORCH_VARIANT: ${{ matrix.libtorch_variant }}
-      DESIRED_DEVTOOLSET: ${{ matrix.devtoolset }}
+{%- if config["package_type"] == "libtorch" %}
+      LIBTORCH_VARIANT: !{{ config["libtorch_variant"] }}
+      DESIRED_DEVTOOLSET: !{{ config["devtoolset"] }}
+{%- else %}
+      DESIRED_PYTHON: !{{ config["python_version"] }}
 {%- endif %}
     steps:
       !{{ common.setup_ec2_linux() }}
@@ -108,10 +87,14 @@ jobs:
           version=$(.github/scripts/generate_pytorch_version.py)
           echo "Generated version: ${version}"
           echo "PYTORCH_BUILD_VERSION=${version}" >> "$GITHUB_ENV"
+{%- if config["gpu_arch_type"] == 'cuda' and config["gpu_arch_version"].startswith('11') %}
       - name: Set BUILD_SPLIT_CUDA
-        if: ${{ matrix.gpu_arch_type == 'cuda' && startsWith(matrix.gpu_arch_version, '11') }}
         run: |
           echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
+{%- endif %}
+      - name: Pull Docker image
+        run: |
+          !{{ common.pull_docker("${DOCKER_IMAGE}") }}
       - name: Build PyTorch binary
         run: |
           mkdir -p artifacts/
@@ -140,14 +123,10 @@ jobs:
             -w / \
             "${DOCKER_IMAGE}"
           )
-          docker exec -t "${container_name}" sh -c "bash /builder/!{{ package_type }}/build.sh"
+          docker exec -t "${container_name}" sh -c "bash /builder/!{{ config["package_type"] }}/build.sh"
       - uses: !{{ common.upload_artifact_s3_action }}
         with:
-{%- if package_type == "libtorch" %}
-          name: pytorch-linux-!{{ package_type }}-${{ matrix.gpu_arch_type }}${{ matrix.gpu_arch_version }}-${{ matrix.devtoolset }}-${{ matrix.libtorch_variant }}
-{%- else %}
-          name: pytorch-linux-!{{ package_type }}-py${{ matrix.python_version }}-${{ matrix.gpu_arch_type }}${{ matrix.gpu_arch_version }}
-{%- endif %}
+          name: !{{ config["build_name"] }}
           retention-days: 14
           if-no-files-found: error
           path:
@@ -172,4 +151,4 @@ jobs:
           pip3 install requests==2.26
           python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
       !{{ common.teardown_ec2_linux("pytorch/") }}
-{%- endblock %}
+{%- endfor %}

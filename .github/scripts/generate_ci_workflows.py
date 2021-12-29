@@ -10,6 +10,8 @@ import os
 import sys
 from typing_extensions import Literal
 
+import generate_binary_build_matrix
+
 YamlShellBool = Literal["''", 1]
 Arch = Literal["windows", "linux", "macos"]
 
@@ -76,6 +78,7 @@ LABEL_CIFLOW_TRUNK = "ciflow/trunk"
 LABEL_CIFLOW_BINARIES = "ciflow/binaries"
 LABEL_CIFLOW_BINARIES_WHEEL = "ciflow/binaries/wheel"
 LABEL_CIFLOW_BINARIES_CONDA = "ciflow/binaries/conda"
+LABEL_CIFLOW_BINARIES_LIBTORCH = "ciflow/binaries/libtorch"
 
 
 @dataclass
@@ -87,8 +90,8 @@ class CIFlowConfig:
     trigger_actor: str = 'pytorchbot'
     root_job_condition: str = ''
     label_conditions: str = ''
-    # Certain jobs might not want to be part of the ciflow/all workflow
-    add_to_ciflow_all: bool = True
+    # Certain jobs might not want to be part of the ciflow/[all,trunk] workflow
+    isolated_workflow: bool = False
 
     def gen_root_job_condition(self) -> None:
         # CIFlow conditions:
@@ -117,11 +120,10 @@ class CIFlowConfig:
         self.root_job_condition = ''
 
     def __post_init__(self) -> None:
-        self.labels.add(LABEL_CIFLOW_ALL)
-        if LABEL_CIFLOW_SCHEDULED not in self.labels:
-            self.labels.add(LABEL_CIFLOW_TRUNK)
-        if self.add_to_ciflow_all:
+        if not self.isolated_workflow:
             self.labels.add(LABEL_CIFLOW_ALL)
+            if LABEL_CIFLOW_SCHEDULED not in self.labels:
+                self.labels.add(LABEL_CIFLOW_TRUNK)
         assert all(label.startswith(LABEL_CIFLOW_PREFIX) for label in self.labels)
         self.gen_root_job_condition()
 
@@ -284,8 +286,9 @@ class DockerWorkflow:
 
 @dataclass
 class BinaryBuildWorkflow:
-    package_type: str
     os: str
+    build_configs: List[Dict[str, str]]
+    package_type: str
 
     # Optional fields
     build_environment: str = ''
@@ -805,25 +808,28 @@ LINUX_BINARY_BUILD_WORFKLOWS = [
     BinaryBuildWorkflow(
         os="linux",
         package_type="manywheel",
+        build_configs=generate_binary_build_matrix.generate_wheels_matrix(),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},
-            add_to_ciflow_all=False,
+            isolated_workflow=True,
         ),
     ),
     BinaryBuildWorkflow(
         os="linux",
         package_type="conda",
+        build_configs=generate_binary_build_matrix.generate_conda_matrix(),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_CONDA},
-            add_to_ciflow_all=False,
+            isolated_workflow=True,
         ),
     ),
     BinaryBuildWorkflow(
         os="linux",
         package_type="libtorch",
+        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(),
         ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_CONDA},
-            add_to_ciflow_all=False,
+            labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
+            isolated_workflow=True,
         ),
     ),
 ]
