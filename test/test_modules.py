@@ -430,7 +430,10 @@ class TestModule(TestCase):
 
             grad_input = input_args + params + tuple(obj for (_, obj) in kwarg_tensors)
 
-            def fn_to_gradcheck(*input_and_params):
+            flat_input, flat_spec = torch.utils._pytree.tree_flatten(grad_input)
+
+            def fn_to_gradcheck(*flat_input_and_params):
+                input_and_params = torch.utils._pytree.tree_unflatten(flat_input_and_params, flat_spec)
                 new_input_args = input_and_params[:len(input_args)]
                 kwarg_args = input_and_params[-len(kwarg_tensors):]
                 new_kwargs = {name: obj for (name, _), obj in zip(kwarg_tensors, kwarg_args)}
@@ -438,7 +441,7 @@ class TestModule(TestCase):
                 with freeze_rng_state():
                     return m(*new_input_args, **new_kwargs, **other_kwargs)
 
-            self.assertTrue(check(fn_to_gradcheck, grad_input))
+            self.assertTrue(check(fn_to_gradcheck, flat_input))
 
 
     @modules(module_db, allowed_dtypes=[torch.double])
