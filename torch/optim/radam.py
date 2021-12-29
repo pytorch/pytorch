@@ -95,7 +95,6 @@ class RAdam(Optimizer):
             exp_avg_sqs = []
             state_steps = []
             beta1, beta2 = group['betas']
-            foreach = group['foreach']
 
             for p in group['params']:
                 if p.grad is not None:
@@ -126,12 +125,12 @@ class RAdam(Optimizer):
                   exp_avgs,
                   exp_avg_sqs,
                   state_steps,
-                  foreach=foreach,
                   beta1=beta1,
                   beta2=beta2,
                   lr=group['lr'],
                   weight_decay=group['weight_decay'],
-                  eps=group['eps'])
+                  eps=group['eps'],
+                  foreach=group['foreach'])
 
         return loss
 
@@ -141,13 +140,13 @@ def radam(params: List[Tensor],
           exp_avgs: List[Tensor],
           exp_avg_sqs: List[Tensor],
           state_steps: List[int],
-          foreach: bool = False,
           *,
           beta1: float,
           beta2: float,
           lr: float,
           weight_decay: float,
-          eps: float):
+          eps: float,
+          foreach: bool):
     r"""Functional API that performs RAdam algorithm computation.
 
     See :class:`~torch.optim.RAdam` for details.
