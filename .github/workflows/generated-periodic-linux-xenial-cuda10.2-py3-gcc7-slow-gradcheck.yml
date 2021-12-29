@@ -99,6 +99,10 @@ jobs:
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
           submodules: recursive
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
       - name: Calculate docker image tag
         id: calculate-tag
         run: |
@@ -244,6 +248,7 @@ jobs:
           docker system prune -af
 
   generate-test-matrix:
+    needs: build
     runs-on: ubuntu-18.04
     timeout-minutes: 240
     env:
@@ -340,6 +345,10 @@ jobs:
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
           submodules: recursive
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
       - name: Pull Docker image
         run: |
           retry () {
