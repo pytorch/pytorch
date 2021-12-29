@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import floating_types
 from torch.testing._internal.common_device_type import (
-    _TestParametrizer, _update_param_kwargs, skipIf, toleranceOverride, tol)
+    _TestParametrizer, _update_param_kwargs, skipIf, toleranceOverride, tol, skipMeta)
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_nn import nllloss_reference, get_reduction
 from torch.testing._internal.common_utils import (
@@ -314,6 +314,23 @@ def module_inputs_torch_nn_AvgPool1d(module_info, device, dtype, requires_grad, 
                     reference_fn=no_batch_dim_reference_fn)]
 
 
+def module_inputs_torch_nn_ConvNd(module_info, device, dtype, requires_grad, **kwargs):
+    N = kwargs['N']
+    lazy = kwargs['lazy'] if 'lazy' in kwargs else False
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # Currently, all sample inputs below are for testing no-batch-dim support.
+    kernel_size, C_in, C_out = 3, 4, 5
+    input_no_batch_shape = (C_in,) + tuple((6 for _ in range(N)))
+    return [
+        ModuleInput(constructor_input=(FunctionInput(C_out, kernel_size) if lazy else
+                                       FunctionInput(C_in, C_out, kernel_size)),
+                    forward_input=FunctionInput(make_input(shape=input_no_batch_shape)),
+                    desc='no_batch_dim',
+                    reference_fn=no_batch_dim_reference_fn)
+    ]
+
+
 def module_inputs_torch_nn_ELU(module_info, device, dtype, requires_grad, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -458,10 +475,31 @@ def module_inputs_torch_nn_MultiheadAttention(module_info, device, dtype, requir
 module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.AvgPool1d,
                module_inputs_func=module_inputs_torch_nn_AvgPool1d),
+    ModuleInfo(torch.nn.Conv1d,
+               module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=1, lazy=False)),
+    ModuleInfo(torch.nn.Conv2d,
+               module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=2, lazy=False)),
+    ModuleInfo(torch.nn.Conv3d,
+               module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=3, lazy=False)),
     ModuleInfo(torch.nn.ELU,
                module_inputs_func=module_inputs_torch_nn_ELU),
     ModuleInfo(torch.nn.L1Loss,
                module_inputs_func=module_inputs_torch_nn_L1Loss),
+    ModuleInfo(torch.nn.LazyConv1d,
+               module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=1, lazy=True),
+               # Lazy modules don't currently play well with ModuleInfo tests on the meta device.
+               # See https://github.com/pytorch/pytorch/issues/70505 for more info.
+               decorators=[skipMeta]),
+    ModuleInfo(torch.nn.LazyConv2d,
+               module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=2, lazy=True),
+               # Lazy modules don't currently play well with ModuleInfo tests on the meta device.
+               # See https://github.com/pytorch/pytorch/issues/70505 for more info.
+               decorators=[skipMeta]),
+    ModuleInfo(torch.nn.LazyConv3d,
+               module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=3, lazy=True),
+               # Lazy modules don't currently play well with ModuleInfo tests on the meta device.
+               # See https://github.com/pytorch/pytorch/issues/70505 for more info.
+               decorators=[skipMeta]),
     ModuleInfo(torch.nn.Linear,
                module_inputs_func=module_inputs_torch_nn_Linear),
     ModuleInfo(torch.nn.Bilinear,

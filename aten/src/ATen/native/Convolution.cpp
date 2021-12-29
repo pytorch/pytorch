@@ -613,36 +613,48 @@ static at::Tensor subtensor(at::Tensor& tensor, int dim, int groups, int g) {
 
 
 at::Tensor conv1d(
-    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
+    const Tensor& input_, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, int64_t groups) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-  return at::convolution(input, weight, bias, stride, padding, dilation,
-                         false, {0}, groups);
+  TORCH_CHECK(input_.dim() == 2 || input_.dim() == 3,
+      "Expected 2D (unbatched) or 3D (batched) input to conv1d, but got input of size: ", input_.sizes());
+  auto is_batched = (input_.dim() == 3);
+  auto input = is_batched ? input_ : input_.unsqueeze(0);
+  auto output = at::convolution(input, weight, bias, stride, padding, dilation, false, {0}, groups);
+  return is_batched ? output : output.squeeze(0);
 }
 
 at::Tensor conv2d(
-    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
+    const Tensor& input_, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, int64_t groups) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-  return at::convolution(input, weight, bias, stride, padding, dilation,
-                         false, {{0, 0}}, groups);
+  TORCH_CHECK(input_.dim() == 3 || input_.dim() == 4,
+      "Expected 3D (unbatched) or 4D (batched) input to conv2d, but got input of size: ", input_.sizes());
+  auto is_batched = (input_.dim() == 4);
+  auto input = is_batched ? input_ : input_.unsqueeze(0);
+  auto output = at::convolution(input, weight, bias, stride, padding, dilation, false, {{0, 0}}, groups);
+  return is_batched ? output : output.squeeze(0);
 }
 
 at::Tensor conv3d(
-    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
+    const Tensor& input_, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, int64_t groups) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-  return at::convolution(input, weight, bias, stride, padding, dilation,
-                         false, {{0, 0, 0}}, groups);
+  TORCH_CHECK(input_.dim() == 4 || input_.dim() == 5,
+      "Expected 4D (unbatched) or 5D (batched) input to conv3d, but got input of size: ", input_.sizes());
+  auto is_batched = (input_.dim() == 5);
+  auto input = is_batched ? input_ : input_.unsqueeze(0);
+  auto output = at::convolution(input, weight, bias, stride, padding, dilation, false, {{0, 0, 0}}, groups);
+  return is_batched ? output : output.squeeze(0);
 }
 
 

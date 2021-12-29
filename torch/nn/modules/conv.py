@@ -233,8 +233,8 @@ class Conv1d(_ConvNd):
     """.format(**reproducibility_notes, **convolution_notes) + r"""
 
     Shape:
-        - Input: :math:`(N, C_{in}, L_{in})`
-        - Output: :math:`(N, C_{out}, L_{out})` where
+        - Input: :math:`(N, C_{in}, L_{in})` or :math:`(C_{in}, L_{in})`
+        - Output: :math:`(N, C_{out}, L_{out})` or :math:`(C_{out}, L_{out})`, where
 
           .. math::
               L_{out} = \left\lfloor\frac{L_{in} + 2 \times \text{padding} - \text{dilation}
@@ -370,8 +370,8 @@ class Conv2d(_ConvNd):
     """.format(**reproducibility_notes, **convolution_notes) + r"""
 
     Shape:
-        - Input: :math:`(N, C_{in}, H_{in}, W_{in})`
-        - Output: :math:`(N, C_{out}, H_{out}, W_{out})` where
+        - Input: :math:`(N, C_{in}, H_{in}, W_{in})` or :math:`(C_{in}, H_{in}, W_{in})`
+        - Output: :math:`(N, C_{out}, H_{out}, W_{out})` or :math:`(C_{out}, H_{out}, W_{out})`, where
 
           .. math::
               H_{out} = \left\lfloor\frac{H_{in}  + 2 \times \text{padding}[0] - \text{dilation}[0]
@@ -504,8 +504,9 @@ class Conv3d(_ConvNd):
     """.format(**reproducibility_notes, **convolution_notes) + r"""
 
     Shape:
-        - Input: :math:`(N, C_{in}, D_{in}, H_{in}, W_{in})`
-        - Output: :math:`(N, C_{out}, D_{out}, H_{out}, W_{out})` where
+        - Input: :math:`(N, C_{in}, D_{in}, H_{in}, W_{in})` or :math:`(C_{in}, D_{in}, H_{in}, W_{in})`
+        - Output: :math:`(N, C_{out}, D_{out}, H_{out}, W_{out})` or :math:`(C_{out}, D_{out}, H_{out}, W_{out})`,
+            where
 
           .. math::
               D_{out} = \left\lfloor\frac{D_{in} + 2 \times \text{padding}[0] - \text{dilation}[0]
@@ -1122,7 +1123,7 @@ class _LazyConvXdMixin(LazyModuleMixin):
     def initialize_parameters(self, input) -> None:  # type: ignore[override]
         # defined by parent class but using a protocol
         if self.has_uninitialized_params():  # type: ignore[misc]
-            self.in_channels = input.shape[1]
+            self.in_channels = self._get_in_channels(input)
             if self.in_channels % self.groups != 0:
                 raise ValueError('in_channels must be divisible by groups')
             assert isinstance(self.weight, UninitializedParameter)
@@ -1137,6 +1138,10 @@ class _LazyConvXdMixin(LazyModuleMixin):
                 self.bias.materialize((self.out_channels,))
             self.reset_parameters()
 
+    # Function to extract in_channels from first input. This is expected to be overridden
+    # by subclasses.
+    def _get_in_channels(self, input: Tensor) -> int:
+        raise NotImplementedError()
 
 # LazyConv1d defines weight as a Tensor but derived class defines it as UnitializeParameter
 class LazyConv1d(_LazyConvXdMixin, Conv1d):  # type: ignore[misc]
@@ -1202,6 +1207,12 @@ class LazyConv1d(_LazyConvXdMixin, Conv1d):  # type: ignore[misc]
         self.out_channels = out_channels
         if bias:
             self.bias = UninitializedParameter(**factory_kwargs)
+
+    def _get_in_channels(self, input: Tensor) -> int:
+        if input.dim() not in (2, 3):
+            raise RuntimeError("Expected 2D (unbatched) or 3D (batched) input to LazyConv1d, but "
+                               "got input of size: ", input.shape)
+        return input.shape[1] if input.dim() == 3 else input.shape[0]
 
 
 # LazyConv2d defines weight as a Tensor but derived class defines it as UnitializeParameter
@@ -1269,6 +1280,12 @@ class LazyConv2d(_LazyConvXdMixin, Conv2d):  # type: ignore[misc]
         if bias:
             self.bias = UninitializedParameter(**factory_kwargs)
 
+    def _get_in_channels(self, input: Tensor) -> int:
+        if input.dim() not in (3, 4):
+            raise RuntimeError("Expected 3D (unbatched) or 4D (batched) input to LazyConv2d, but "
+                               "got input of size: ", input.shape)
+        return input.shape[1] if input.dim() == 4 else input.shape[0]
+
 
 # LazyConv3d defines weight as a Tensor but derived class defines it as UnitializeParameter
 class LazyConv3d(_LazyConvXdMixin, Conv3d):  # type: ignore[misc]
@@ -1334,6 +1351,12 @@ class LazyConv3d(_LazyConvXdMixin, Conv3d):  # type: ignore[misc]
         self.out_channels = out_channels
         if bias:
             self.bias = UninitializedParameter(**factory_kwargs)
+
+    def _get_in_channels(self, input: Tensor) -> int:
+        if input.dim() not in (4, 5):
+            raise RuntimeError("Expected 4D (unbatched) or 5D (batched) input to LazyConv3d, but "
+                               "got input of size: ", input.shape)
+        return input.shape[1] if input.dim() == 5 else input.shape[0]
 
 
 # LazyConvTranspose1d defines weight as a Tensor but derived class defines it as UnitializeParameter
