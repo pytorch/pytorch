@@ -417,6 +417,16 @@ Tensor group_norm_jvp(
   const Tensor& saved_mean, const Tensor& saved_invstd,
   int64_t groups
 );
+Tensor group_norm_mean_jvp(
+  const Tensor& input_t,
+  const Tensor& mean_p,
+  int64_t groups
+);
+Tensor group_norm_invstd_jvp(
+  const Tensor& input_p, const Tensor& input_t,
+  const Tensor& mean_p, const Tensor& invstd_p,
+  int64_t groups
+);
 
 Tensor convolution_jvp(
   const Tensor& input_p, const Tensor& input_t,
