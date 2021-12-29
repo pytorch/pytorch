@@ -2,6 +2,7 @@
 
 #include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
+#include <c10/util/Exception.h>
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/TensorUtils.h>
@@ -261,23 +262,23 @@ static inline void singleCheckErrors(int64_t info, const char* name, int64_t bat
   } else if (info > 0) {
     if (strstr(name, "inv")) {
       // inv, inverse, cholesky_inverse, etc.
-      TORCH_CHECK(false, name, batch_string,
+      TORCH_CHECK_LINALG(false, name, batch_string,
           ": The diagonal element ", info, " is zero, the inversion could not be completed because the input matrix is singular.");
     } else if (strstr(name, "solve")) {
       // solve, linalg_solve, cholesky_solve, etc.
-      TORCH_CHECK(false, name, batch_string,
+      TORCH_CHECK_LINALG(false, name, batch_string,
           ": The diagonal element ", info, " is zero, the solve could not be completed because the input matrix is singular.");
     } else if (strstr(name, "cholesky")) {
-      TORCH_CHECK(false, name, batch_string,
+      TORCH_CHECK_LINALG(false, name, batch_string,
           ": The factorization could not be completed because the input is not positive-definite (the leading minor of order ", info, " is not positive-definite).");
     } else if (strstr(name, "svd")) {
-      TORCH_CHECK(false, name, batch_string,
+      TORCH_CHECK_LINALG(false, name, batch_string,
           ": The algorithm failed to converge because the input matrix is ill-conditioned or has too many repeated singular values (error code: ", info, ").");
     } else if (strstr(name, "eig") || strstr(name, "syevd")) {
-      TORCH_CHECK(false, name, batch_string,
+      TORCH_CHECK_LINALG(false, name, batch_string,
           ": The algorithm failed to converge because the input matrix is ill-conditioned or has too many repeated eigenvalues (error code: ", info, ").");
     } else if (strstr(name, "lstsq")) {
-      TORCH_CHECK(false, name, batch_string,
+      TORCH_CHECK_LINALG(false, name, batch_string,
           ": The least squares solution could not be computed because the input matrix does not have full rank (error code: ", info, ").");
     } else {
       TORCH_INTERNAL_ASSERT(false, name, ": Unknown error code: ", info, ".");

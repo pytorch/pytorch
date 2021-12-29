@@ -7,6 +7,10 @@ namespace {
 std::atomic<const BackendImplInterface*> backend_impl_registry;
 } // namespace
 
+bool hasBackend() {
+  return !!backend_impl_registry.load();
+}
+
 const BackendImplInterface* getBackend() {
   auto* interface = backend_impl_registry.load();
   TORCH_CHECK(interface, "Lazy tensor backend not registered.");
