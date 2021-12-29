@@ -31,9 +31,7 @@ static bool hastensor(Module& m, const char* name) {
 void replaceConvBiasWithGetAttr(Module& module) {
   for (const auto& method : module.get_methods()) {
     auto graph = method.graph();
-    // Only looks for _convolution pattern.
-    // Thus assumes that tracing will have always gotten rid of aten::conv2d or
-    // aten::conv3d. If it did not, BN folding will fail.
+    graph->dump();
     const PatternInfo& pattern_convolution = PatternInfo::parse_from_str(R"(
         graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[],
             %transposed:bool, %output_padding:int[], %groups:int, %benchmark:bool,
@@ -72,6 +70,27 @@ void replaceConvBiasWithGetAttr(Module& module) {
     };
     replace_pattern(pattern_convolution);
     replace_pattern(pattern_convolution_deprecated);
+
+    // setting NoneType of convXd to TensorType. This avoids optimization to
+    // remove the bias argument, which gives wrong result, since it was later
+    // fused with bias from BatchNorm.
+    const PatternInfo& pattern_get_bias = PatternInfo::parse_from_str(R"(
+        graph(%self):
+          %bias : NoneType = prim::GetAttr[name="bias"](%self)
+          return (%bias) )");
+    auto replace_type = [&](const PatternInfo& pattern_get_bias) {
+      const Graph& pattern_get_bias_graph =
+          *pattern_get_bias.pattern_graph;
+      const auto& get_bias_vmap = pattern_get_bias.vmap;
+      
+      const auto& matches =
+          findPatternMatches(pattern_get_bias_graph, *graph);
+      for (const auto& match : matches) {
+        
+         match.values_map.at(get_bias_vmap.at("bias"))->setType(TensorType::get());
+      }
+    };
+    replace_type(pattern_get_bias);
   }
 }
 
@@ -86,15 +105,12 @@ void addBiasForConvIfNone(Module& module) {
        (demangled_typename == "__torch__.torch.nn.modules.conv.Conv3d"));
 
   if (is_floating_point_conv) {
+    module.dump(true, false, false);
     if (!t->hasAttribute("bias")) {
-      printf("setting bias\n");
       t->addAttribute("bias", TensorType::get(), true);
       module.setattr("bias", at::Tensor());
       replaceConvBiasWithGetAttr(module);
     } else {
-      printf("existing bias\n");
-      printf("is None? %d\n", module.attr("bias").isNone());
-      printf("is tensor? %d\n", module.attr("bias").isTensor());
       if (!module.attr("bias").isTensor()) {
         // t->unsafeChangeAttributeType("bias", TensorType::get());
         t->unsafeRemoveAttribute("bias");
@@ -102,12 +118,6 @@ void addBiasForConvIfNone(Module& module) {
         module.setattr("bias", at::Tensor());
         replaceConvBiasWithGetAttr(module);
       }
-    }
-  }
-  if (is_floating_point_conv) {
-    if (!hastensor(module, "bias")) {
-      printf("assertion failed\n");
-      printf("has attribute? %d\n", module.hasattr("bias"));
     }
   }
   for (Module m : module.children()) {
@@ -226,41 +236,22 @@ bool FoldConvBatchNormHelper::tryExtractingConvBNParameters(
     Module& conv,
     Module& bn,
     ConvBNParameters& r) {
-  if (!hastensor(conv, "bias")) {
-    printf("bias is not present?!?! this is strange\n");
-    printf("has attribute? %d\n", conv.hasattr("bias"));
-  }
-
   if (!hastensor(conv, "weight") || !hastensor(conv, "bias") ||
       !hastensor(bn, "running_mean") || !hastensor(bn, "running_var")) {
-    printf("pre-exit\n");
     return false;
   }
 
   r.bn_rm = bn.attr("running_mean").toTensor();
   r.bn_rv = bn.attr("running_var").toTensor();
   if (!extractOptionalBNParams(bn, r)) {
-    printf("no optional bn parameter and returning\n");
     return false;
   }
 
   r.conv_w = conv.attr("weight").toTensor();
   r.conv_b = conv.attr("bias").toTensor();
   if (!r.conv_b.defined()) {
-    printf("empty and set to zeros\n");
     r.conv_b = at::zeros_like(r.bn_rm);
-  } else {
-    printf("not empty and move along\n");
   }
-  // r.conv_b = at::zeros_like(r.bn_rm);
-  // if (conv.attr("bias").isTensor() && conv.attr("bias").toTensor().defined()) {
-  //   printf("not empty and move along\n");
-  //   r.conv_b = conv.attr("bias").toTensor();
-  // } else {
-  //   printf("empty and set to zeros\n");
-  // }
-
-  printf("folding!\n");
   return true;
 }
 
