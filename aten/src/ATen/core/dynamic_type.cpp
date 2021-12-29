@@ -191,6 +191,19 @@ TypePtr DynamicType::containedType(size_t i) const {
   return arguments_.elems.at(i).ty;
 }
 
+TypeKind DynamicType::dynamicKind() const {
+  switch (tag_) {
+#define CASE_TYPE(T, _) \
+  case Tag::T:   \
+    return TypeKind::T ## Type;
+    FORALL_DYNAMIC_TYPES(CASE_TYPE)
+#undef CASE_TYPE
+    default:
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false);
+      return TypeKind::AnyType;
+  }
+}
+
 bool DynamicType::LabeledDynamicType::isSubtypeOf(
     const LabeledDynamicType& other) const {
   if (!other.label || (label == other.label)) {

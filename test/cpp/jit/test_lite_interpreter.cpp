@@ -2065,7 +2065,12 @@ TEST(LiteInterpreterTest, DynamicType) {
       AnyListType::get(),
       AnyTupleType::get(),
       StreamObjType::get(),
-      CapsuleType::get()};
+      CapsuleType::get(),
+      GeneratorType::get(),
+      StorageType::get(),
+      VarType::create("t"),
+      VarType::create("v"),
+      AnyClassType::get()};
   std::copy(keyTypes.begin(), keyTypes.end(), back_inserter(types));
   auto expandTypes = [&](size_t tupleSize) {
     std::vector<TypePtr> nested;

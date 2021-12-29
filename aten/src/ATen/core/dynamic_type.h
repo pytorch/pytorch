@@ -21,6 +21,7 @@ constexpr DynamicTypeBits kDynamicFloatTypeBit = DYNAMIC_TYPE_BIT(4);
 constexpr DynamicTypeBits kDynamicComplexTypeBit = DYNAMIC_TYPE_BIT(5);
 constexpr DynamicTypeBits kDynamicListTypeBit = DYNAMIC_TYPE_BIT(7);
 constexpr DynamicTypeBits kDynamicTupleTypeBit = DYNAMIC_TYPE_BIT(8);
+constexpr DynamicTypeBits kDynamicClassTypeBit = DYNAMIC_TYPE_BIT(10);
 
 #define FORALL_DYNAMIC_TYPES(_)                                              \
   _(Tensor, DYNAMIC_TYPE_BIT(0))                                             \
@@ -35,7 +36,7 @@ constexpr DynamicTypeBits kDynamicTupleTypeBit = DYNAMIC_TYPE_BIT(8);
   _(List, kDynamicListTypeBit)                                               \
   _(Tuple, (kDynamicTupleTypeBit | kDynamicCovariantTypeBit))                \
   _(Dict, DYNAMIC_TYPE_BIT(9))                                               \
-  _(Class, DYNAMIC_TYPE_BIT(10))                                             \
+  _(Class, kDynamicClassTypeBit)                                             \
   _(Optional,                                                                \
     (DYNAMIC_TYPE_BIT(11) | kDynamicNoneTypeBit | kDynamicCovariantTypeBit)) \
   _(AnyList, (kDynamicListTypeBit | kDynamicAnyTypeBit))                     \
@@ -44,6 +45,10 @@ constexpr DynamicTypeBits kDynamicTupleTypeBit = DYNAMIC_TYPE_BIT(8);
   _(DeviceObj, DYNAMIC_TYPE_BIT(12))                                         \
   _(StreamObj, DYNAMIC_TYPE_BIT(13))                                         \
   _(Capsule, DYNAMIC_TYPE_BIT(14))                                           \
+  _(Generator, DYNAMIC_TYPE_BIT(15))                                         \
+  _(Storage, DYNAMIC_TYPE_BIT(16))                                           \
+  _(Var, DYNAMIC_TYPE_BIT(17))                                               \
+  _(AnyClass, kDynamicClassTypeBit | kDynamicAnyTypeBit)                     \
   _(Any, 0xffffffff)
 
 class DynamicType;
@@ -142,6 +147,7 @@ class DynamicType : public Type {
   const Arguments& arguments() const {
     return arguments_;
   }
+  TypeKind dynamicKind() const;
 
  private:
   bool symmetric() const override {
@@ -174,7 +180,12 @@ class DynamicType : public Type {
 };
 
 template <typename T>
-struct DynamicTypeTrait {};
+struct DynamicTypeTrait {
+static auto tagValue() {
+  TORCH_CHECK(false);
+  return DynamicType::Tag::Any;
+}
+};
 #define DYNAMIC_TYPE_TAG_VALUE(NAME, _) \
 template <> \
 struct TORCH_API DynamicTypeTrait<NAME ## Type> { \
