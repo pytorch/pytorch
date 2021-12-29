@@ -389,9 +389,6 @@ def debug_dumps(importer, obj, protocol=4):
     try:
         p.dump(obj)
     except (TypeError, PicklingError) as e:
-        # print(f"{str(e)}.\n\n"
-        #     "We think the problematic object is found at:\n"
-        #     f"{p.format_trace()}")
         raise PicklingError(
             f"{str(e)}.\n\n"
             "We think the problematic object is found at:\n"
