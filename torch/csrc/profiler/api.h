@@ -28,6 +28,12 @@ enum class C10_API_ENUM ProfilerState {
   NUM_PROFILER_STATES, // must be the last one
 };
 
+enum class C10_API_ENUM ActiveProfilerType {
+  NONE = 0,
+  LEGACY,
+  KINETO
+};
+
 struct TORCH_API ProfilerConfig {
   explicit ProfilerConfig(
       ProfilerState state,
@@ -84,6 +90,8 @@ struct TORCH_API ProfilerThreadLocalStateBase
     return config_.profile_memory;
   }
 
+  virtual ActiveProfilerType profilerType() = 0;
+
  protected:
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::mutex state_mutex_;
@@ -95,6 +103,11 @@ struct TORCH_API ProfilerThreadLocalStateBase
 
 // Returns if the profiler is currently enabled in the current thread.
 TORCH_API bool profilerEnabled();
+
+TORCH_API ActiveProfilerType profilerType();
+
+// Retrieve the thread_local ProfilerConfig.
+TORCH_API ProfilerConfig getProfilerConfig();
 
 // ----------------------------------------------------------------------------
 // -- CUDA --------------------------------------------------------------------
@@ -133,6 +146,7 @@ using torch::profiler::impl::ActivityType;
 using torch::profiler::impl::ProfilerConfig;
 using torch::profiler::impl::ProfilerState;
 using torch::profiler::impl::profilerEnabled;
+using torch::profiler::impl::getProfilerConfig;
 } // namespace profiler
 } // namespace autograd
 } // namespace torch
