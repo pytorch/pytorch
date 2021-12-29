@@ -59,7 +59,7 @@ class IterableWrapperIterDataPipe(IterDataPipe):
         if self.iter is None:
             self._create_iterator()
         self.state_counter += 1
-        return next(self.iter)
+        return next(self.iter)  # type:ignore[arg-type]
 
     def reset(self) -> None:
         self.iter = None
