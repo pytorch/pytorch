@@ -24,6 +24,7 @@ class _FunctionalRMSprop(object):
         weight_decay: float = 0.0,
         momentum: float = 0.0,
         centered: bool = False,
+        foreach: bool = False,
         _allow_empty_param_list: bool = False,
     ):
         self.defaults = {
@@ -34,6 +35,7 @@ class _FunctionalRMSprop(object):
             "momentum": momentum,
         }
         self.centered = centered
+        self.foreach = foreach
 
         if len(params) == 0 and not _allow_empty_param_list:
             raise ValueError("optimizer got an empty parameter list")
@@ -99,4 +101,5 @@ class _FunctionalRMSprop(object):
                       eps=eps,
                       weight_decay=weight_decay,
                       momentum=momentum,
-                      centered=self.centered)
+                      centered=self.centered,
+                      foreach=self.foreach)
