@@ -75,7 +75,7 @@ void replaceConvBiasWithGetAttr(Module& module) {
   }
 }
 
-void addBiasForConvIfNone(Module& module, const std::string& pattern_name) {
+void addBiasForConvIfNone(Module& module) {
   auto t = module.type()->expect<ClassType>();
 
   const std::string real_typename = t->name()->qualifiedName();
@@ -87,15 +87,31 @@ void addBiasForConvIfNone(Module& module, const std::string& pattern_name) {
 
   if (is_floating_point_conv) {
     if (!t->hasAttribute("bias")) {
-      auto optional_tensor_type = OptionalType::create(TensorType::get());
-      t->addAttribute("bias", optional_tensor_type, true);
-      auto optional_tensor = c10::optional<at::Tensor>();
-      module.setattr("bias", optional_tensor);
+      printf("setting bias\n");
+      t->addAttribute("bias", TensorType::get(), true);
+      module.setattr("bias", at::Tensor());
       replaceConvBiasWithGetAttr(module);
+    } else {
+      printf("existing bias\n");
+      printf("is None? %d\n", module.attr("bias").isNone());
+      printf("is tensor? %d\n", module.attr("bias").isTensor());
+      if (!module.attr("bias").isTensor()) {
+        // t->unsafeChangeAttributeType("bias", TensorType::get());
+        t->unsafeRemoveAttribute("bias");
+        t->addAttribute("bias", TensorType::get(), true);
+        module.setattr("bias", at::Tensor());
+        replaceConvBiasWithGetAttr(module);
+      }
+    }
+  }
+  if (is_floating_point_conv) {
+    if (!hastensor(module, "bias")) {
+      printf("assertion failed\n");
+      printf("has attribute? %d\n", module.hasattr("bias"));
     }
   }
   for (Module m : module.children()) {
-    addBiasForConvIfNone(m, pattern_name);
+    addBiasForConvIfNone(m);
   }
 }
 
@@ -210,24 +226,41 @@ bool FoldConvBatchNormHelper::tryExtractingConvBNParameters(
     Module& conv,
     Module& bn,
     ConvBNParameters& r) {
-  if (!hastensor(conv, "weight") || !conv.hasattr("bias") ||
+  if (!hastensor(conv, "bias")) {
+    printf("bias is not present?!?! this is strange\n");
+    printf("has attribute? %d\n", conv.hasattr("bias"));
+  }
+
+  if (!hastensor(conv, "weight") || !hastensor(conv, "bias") ||
       !hastensor(bn, "running_mean") || !hastensor(bn, "running_var")) {
+    printf("pre-exit\n");
     return false;
   }
 
   r.bn_rm = bn.attr("running_mean").toTensor();
   r.bn_rv = bn.attr("running_var").toTensor();
   if (!extractOptionalBNParams(bn, r)) {
+    printf("no optional bn parameter and returning\n");
     return false;
   }
 
   r.conv_w = conv.attr("weight").toTensor();
-  r.conv_b = at::zeros_like(r.bn_rm);
-  auto bias_opt = conv.attr("bias").toOptional<at::Tensor>();
-  if (bias_opt) {
-    r.conv_b = *bias_opt;
+  r.conv_b = conv.attr("bias").toTensor();
+  if (!r.conv_b.defined()) {
+    printf("empty and set to zeros\n");
+    r.conv_b = at::zeros_like(r.bn_rm);
+  } else {
+    printf("not empty and move along\n");
   }
+  // r.conv_b = at::zeros_like(r.bn_rm);
+  // if (conv.attr("bias").isTensor() && conv.attr("bias").toTensor().defined()) {
+  //   printf("not empty and move along\n");
+  //   r.conv_b = conv.attr("bias").toTensor();
+  // } else {
+  //   printf("empty and set to zeros\n");
+  // }
 
+  printf("folding!\n");
   return true;
 }
 
@@ -363,8 +396,7 @@ void FoldConvBatchNormHelper::transform() {
 Module FoldConvBatchNorm(const Module& module) {
   Module m = module.clone();
 
-  addBiasForConvIfNone(m, "Conv2d");
-  addBiasForConvIfNone(m, "Conv3d");
+  addBiasForConvIfNone(m);
   // Conv2d + BatchNorm2d
   const PatternInfo pattern2d = PatternInfo::parse_from_str(
       R"(
