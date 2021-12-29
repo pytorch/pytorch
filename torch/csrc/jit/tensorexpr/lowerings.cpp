@@ -30,7 +30,7 @@ int nnc_lowerings_lazy_registration() {
       {"aten::contiguous(Tensor(a) self, *, MemoryFormat memory_format=contiguous_format) -> (Tensor(a))"},
       computeNoop);
 
-#ifdef XNNPACK
+#ifdef USE_XNNPACK
   // TODO: add a test
   RegisterNNCLoweringsFunction prepacked_conv2d_clamp_run(
       {"prepacked::conv2d_clamp_run(Tensor X, __torch__.torch.classes.xnnpack.Conv2dOpContext W_prepack) -> (Tensor Y)"},
