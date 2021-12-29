@@ -10,6 +10,10 @@ cat >"${OUTPUT_SCRIPT}" <<EOL
 # =================== The following code will be executed inside Docker container ===================
 set -eux -o pipefail
 
+retry () {
+    "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+}
+
 python_nodot="\$(echo $DESIRED_PYTHON | tr -d m.u)"
 
 # Set up Python
