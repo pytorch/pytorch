@@ -229,7 +229,6 @@ def prepare_get_standalone_module_configs(
 def qat_swap_modules(
         root: torch.nn.Module,
         module_to_qat_module: Dict[Callable, Callable]) -> None:
-    print("module to qat module:", module_to_qat_module)
     convert(root, mapping=module_to_qat_module, inplace=True, remove_qconfig=False)
 
 # TODO: remove observed_op, looks like it's not used
@@ -1343,6 +1342,9 @@ def prepare(
     if is_qat:
         additional_qat_module_mapping = prepare_custom_config_dict.get(
             "additional_qat_module_mapping", {})
+        # this path will be deprecated after we fully migrate the convert path
+        # of fbgemm/qnnpack to use the reference path, it will stay
+        # here for a few months
         if backend_config_dict is None:
             module_to_qat_module = get_combined_dict(
                 get_default_qat_module_mappings(), additional_qat_module_mapping)

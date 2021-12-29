@@ -257,6 +257,31 @@ def module_inputs_torch_nn_NLLLoss(module_info, device, dtype, requires_grad, **
     return module_inputs
 
 
+def module_inputs_torch_nn_GaussianNLLLoss(module_info, device, dtype, requires_grad, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_target = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
+
+    cases: List[Tuple[str, dict]] = [
+        ('', {}),
+        ('reduction_sum', {'reduction': 'sum'}),
+        ('reduction_mean', {'reduction': 'mean'}),
+        ('reduction_none', {'reduction': 'none'}),
+    ]
+
+    module_inputs = []
+    for desc, constructor_kwargs in cases:
+        module_inputs.append(
+            ModuleInput(constructor_input=FunctionInput(**constructor_kwargs),
+                        forward_input=FunctionInput(make_input((3)),
+                                                    make_target((3)),
+                                                    make_input((1)).abs()),
+                        desc=desc,
+                        reference_fn=no_batch_dim_reference_fn)
+        )
+
+    return module_inputs
+
+
 def no_batch_dim_reference_fn(m, p, *args, **kwargs):
     """Reference function for modules supporting no batch dimensions.
 
@@ -316,6 +341,19 @@ def no_batch_dim_reference_mha(m, p, *args, **kwargs):
     with freeze_rng_state():
         output = m(*single_batch_input_args, **kwargs)
         return (output[0].squeeze(batch_dim), output[1].squeeze(0))
+
+
+def no_batch_dim_reference_lstmcell(m, p, *args, **kwargs):
+    """Reference function for LSTMCell supporting no batch dimensions.
+
+    The module is passed the input and target in batched form with a single item.
+    The output is squeezed to compare with the no-batch input.
+    """
+    inp, (h, c) = args
+    single_batch_input_args = (inp.unsqueeze(0), (h.unsqueeze(0), c.unsqueeze(0)))
+    with freeze_rng_state():
+        output = m(*single_batch_input_args, **kwargs)
+        return (output[0].squeeze(0), output[1].squeeze(0))
 
 
 def generate_regression_criterion_inputs(make_input):
@@ -460,6 +498,105 @@ def module_inputs_torch_nn_TransformerEncoderLayer(module_info, device, dtype, r
     return samples
 
 
+def module_inputs_torch_nn_TransformerDecoderLayer(module_info, device, dtype, requires_grad, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    samples = [
+        ModuleInput(
+            constructor_input=FunctionInput(4, 2, 16, 0.0),
+            forward_input=FunctionInput(
+                make_input(shape=(2, 3, 4)), make_input(shape=(2, 3, 4))
+            ),
+            desc='relu_activation'
+        ),
+        ModuleInput(
+            constructor_input=FunctionInput(4, 2, 8, 0.0, F.gelu),
+            forward_input=FunctionInput(
+                make_input(shape=(2, 3, 4)), make_input(shape=(2, 3, 4))
+            ),
+            desc='gelu_activation'
+        ), ]
+
+    # Samples below are for validating the no-batch-dim support.
+    key_padding_masks = (None, torch.tensor([False, False, True], device=device, dtype=torch.bool))
+    attn_masks = (None, torch.tensor([False, False, True], device=device, dtype=torch.bool).expand((3, 3)))
+    for tgt_mask, tgt_key_padding_mask, norm_first in itertools.product(attn_masks, key_padding_masks, (True, False)):
+        # Using same mask for tgt and memory
+        memory_mask = tgt_mask
+        memory_key_padding_mask = tgt_key_padding_mask
+        samples.append(
+            ModuleInput(
+                constructor_input=FunctionInput(d_model=4, nhead=2, dim_feedforward=8,
+                                                dropout=0.0, batch_first=True, norm_first=norm_first),
+                forward_input=FunctionInput(
+                    make_input(shape=(3, 4)), make_input(shape=(3, 4)), tgt_mask=tgt_mask, memory_mask=memory_mask,
+                    tgt_key_padding_mask=tgt_key_padding_mask, memory_key_padding_mask=memory_key_padding_mask
+                ),
+                reference_fn=partial(no_batch_dim_reference_fn,
+                                     batch_first=True,
+                                     kwargs_to_batchify={'tgt_key_padding_mask': 0, 'memory_key_padding_mask': 0}),
+                desc='no_batch_dim_batch_first'
+            ))
+
+        samples.append(
+            ModuleInput(
+                constructor_input=FunctionInput(4, 2, 8, dropout=0.0, batch_first=False, norm_first=norm_first),
+                forward_input=FunctionInput(
+                    make_input(shape=(3, 4)), make_input(shape=(3, 4)), tgt_mask=tgt_mask, memory_mask=memory_mask,
+                    tgt_key_padding_mask=tgt_key_padding_mask, memory_key_padding_mask=memory_key_padding_mask
+                ),
+                reference_fn=partial(no_batch_dim_reference_fn,
+                                     batch_first=False,
+                                     kwargs_to_batchify={'tgt_key_padding_mask': 0, 'memory_key_padding_mask': 0}),
+                desc='no_batch_dim'
+            ))
+
+    return samples
+
+
+def module_inputs_torch_nn_Transformer(module_info, device, dtype, requires_grad, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    samples = []
+    # Samples below are for validating the no-batch-dim support.
+    key_padding_masks = (None, torch.tensor([False, False, True], device=device, dtype=torch.bool))
+    attn_masks = (None, torch.tensor([False, False, True], device=device, dtype=torch.bool).expand((3, 3)))
+    for mask, key_padding_mask, norm_first in itertools.product(attn_masks, key_padding_masks, (True, False)):
+        # Using same mask for tgt and memory
+        src_mask , tgt_mask = (mask,) * 2
+        src_key_padding_mask, tgt_key_padding_mask = (key_padding_mask,) * 2
+        samples.append(
+            ModuleInput(
+                constructor_input=FunctionInput(d_model=4, nhead=2, dim_feedforward=8,
+                                                num_encoder_layers=1, num_decoder_layers=1,
+                                                dropout=0.0, batch_first=True, norm_first=norm_first),
+                forward_input=FunctionInput(
+                    make_input(shape=(3, 4)), make_input(shape=(3, 4)), tgt_mask=tgt_mask, src_mask=src_mask,
+                    tgt_key_padding_mask=tgt_key_padding_mask, src_key_padding_mask=src_key_padding_mask
+                ),
+                reference_fn=partial(no_batch_dim_reference_fn,
+                                     batch_first=True,
+                                     kwargs_to_batchify={'tgt_key_padding_mask': 0, 'src_key_padding_mask': 0}),
+                desc='no_batch_dim_batch_first'
+            ))
+
+        samples.append(
+            ModuleInput(
+                constructor_input=FunctionInput(d_model=4, nhead=2, dim_feedforward=8,
+                                                num_encoder_layers=1, num_decoder_layers=1,
+                                                dropout=0.0, batch_first=False, norm_first=norm_first),
+                forward_input=FunctionInput(
+                    make_input(shape=(3, 4)), make_input(shape=(3, 4)), tgt_mask=tgt_mask, src_mask=src_mask,
+                    tgt_key_padding_mask=tgt_key_padding_mask, src_key_padding_mask=src_key_padding_mask
+                ),
+                reference_fn=partial(no_batch_dim_reference_fn,
+                                     batch_first=False,
+                                     kwargs_to_batchify={'tgt_key_padding_mask': 0, 'src_key_padding_mask': 0}),
+                desc='no_batch_dim'
+            ))
+
+    return samples
+
+
 def module_inputs_torch_nn_Embedding(module_info, device, dtype, requires_grad, **kwargs):
     make_empty = partial(torch.empty, device=device, dtype=torch.long, requires_grad=False)
     return [
@@ -506,6 +643,56 @@ def module_inputs_torch_nn_MultiheadAttention(module_info, device, dtype, requir
     return samples
 
 
+def module_inputs_torch_nn_RNN_GRU_Cell(module_info, device, dtype, requires_grad, **kwargs):
+    # Currently all samples below are for validating the no-batch-dim support.
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    samples = [
+        ModuleInput(
+            constructor_input=FunctionInput(5, 10),
+            forward_input=FunctionInput(make_input(5), make_input(10)),
+            reference_fn=no_batch_dim_reference_fn,
+        ),
+        ModuleInput(
+            constructor_input=FunctionInput(5, 10, bias=True),
+            forward_input=FunctionInput(make_input(5), make_input(10)),
+            reference_fn=no_batch_dim_reference_fn,
+        )
+    ]
+
+    is_rnn = kwargs.get('is_rnn', False)
+    if is_rnn:
+        # RNN also supports `nonlinearity` argument.
+        # `tanh` is the default, so we check with `relu`
+        samples.append(
+            ModuleInput(
+                constructor_input=FunctionInput(5, 10, bias=True, nonlinearity='relu'),
+                forward_input=FunctionInput(make_input(5), make_input(10)),
+                reference_fn=no_batch_dim_reference_fn,
+            )
+        )
+
+    return samples
+
+
+def module_inputs_torch_nn_LSTMCell(module_info, device, dtype, requires_grad, **kwargs):
+    # Currently all samples below are for validating the no-batch-dim support.
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    samples = (
+        ModuleInput(
+            constructor_input=FunctionInput(5, 10),
+            forward_input=FunctionInput(make_input(5), (make_input(10), make_input(10))),
+            reference_fn=no_batch_dim_reference_lstmcell,
+        ),
+        ModuleInput(
+            constructor_input=FunctionInput(5, 10, bias=True),
+            forward_input=FunctionInput(make_input(5), (make_input(10), make_input(10))),
+            reference_fn=no_batch_dim_reference_lstmcell,
+        ),
+    )
+
+    return samples
+
+
 # Database of ModuleInfo entries in alphabetical order.
 module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.AvgPool1d,
@@ -527,15 +714,27 @@ module_db: List[ModuleInfo] = [
                ]),
     ModuleInfo(torch.nn.NLLLoss,
                module_inputs_func=module_inputs_torch_nn_NLLLoss),
+    ModuleInfo(torch.nn.GaussianNLLLoss,
+               module_inputs_func=module_inputs_torch_nn_GaussianNLLLoss),
     ModuleInfo(torch.nn.Hardswish,
                module_inputs_func=module_inputs_torch_nn_Hardswish,
                supports_gradgrad=False),
     ModuleInfo(torch.nn.TransformerEncoderLayer,
                module_inputs_func=module_inputs_torch_nn_TransformerEncoderLayer),
+    ModuleInfo(torch.nn.TransformerDecoderLayer,
+               module_inputs_func=module_inputs_torch_nn_TransformerDecoderLayer),
+    ModuleInfo(torch.nn.Transformer,
+               module_inputs_func=module_inputs_torch_nn_Transformer),
     ModuleInfo(torch.nn.MultiheadAttention,
                module_inputs_func=module_inputs_torch_nn_MultiheadAttention),
     ModuleInfo(torch.nn.Embedding,
                module_inputs_func=module_inputs_torch_nn_Embedding),
     ModuleInfo(torch.nn.ReLU,
                module_inputs_func=module_inputs_torch_nn_ReLU),
+    ModuleInfo(torch.nn.RNNCell,
+               module_inputs_func=partial(module_inputs_torch_nn_RNN_GRU_Cell, is_rnn=True)),
+    ModuleInfo(torch.nn.GRUCell,
+               module_inputs_func=module_inputs_torch_nn_RNN_GRU_Cell),
+    ModuleInfo(torch.nn.LSTMCell,
+               module_inputs_func=module_inputs_torch_nn_LSTMCell)
 ]
