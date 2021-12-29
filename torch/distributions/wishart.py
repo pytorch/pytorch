@@ -68,8 +68,10 @@ class Wishart(ExponentialFamily):
 
         param = next(p for p in (covariance_matrix, precision_matrix, scale_tril) if p is not None)
 
-        assert param.dim() > 1, \
-            "scale_tril must be at least two-dimensional, with optional leading batch dimensions"
+        if param.dim() > 1:
+            raise ValueError("scale_tril must be at least two-dimensional, with optional leading batch dimensions")
+        if df.le(param.shape[:-2] - 1).any():
+            raise Value(f"Value of df={df} expected to be greater than ndim={param.shape[:-2]-1}.")
 
         if isinstance(df, Number):
             batch_shape = torch.Size(param.shape[:-2])
