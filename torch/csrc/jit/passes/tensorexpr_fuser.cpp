@@ -1288,7 +1288,8 @@ Operation createTensorExprOp(const Node* node) {
           /*pre_alloc*/ false,
           stride_map);
 
-  return [kernel, &subgraph](Stack& stack) {
+  auto num_subgraph_inputs = subgraph->inputs().size();
+  return [kernel, num_subgraph_inputs](Stack& stack) {
     RECORD_FUNCTION(kernel->getKernelName(), std::vector<c10::IValue>());
 
     // Stack contents:
@@ -1298,7 +1299,6 @@ Operation createTensorExprOp(const Node* node) {
     // outputs are being passed in. Otherwise, output tensors are passed in
     // at the bottom of the stack. So, we call the appropriate run function
     // in TensorExprKernel.
-    auto num_subgraph_inputs = subgraph->inputs().size();
     if (num_subgraph_inputs == stack.size()) {
       kernel->run(stack);
     } else {
