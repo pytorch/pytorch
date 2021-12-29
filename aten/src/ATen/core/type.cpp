@@ -1544,6 +1544,11 @@ TensorTypePtr TensorType::create(const at::Tensor& t) {
   VaryingShape<size_t> stride_indices;
   VaryingShape<int64_t> strides;
   VaryingShape<int64_t> sizes;
+  // return undefined tensor type for undefined tensor
+  if (!t.defined()) {
+    return get();
+  }
+
   if (!t.is_mkldnn() && !t.is_sparse() && !t.is_sparse_csr()) {
     sizes = VaryingShape<int64_t>{t.sizes().vec()};
     strides = VaryingShape<int64_t>{t.strides().vec()};
