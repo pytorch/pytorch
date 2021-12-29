@@ -79,8 +79,8 @@ class Wishart(ExponentialFamily):
             self.df = df.expand(batch_shape)
         event_shape = param.shape[-2:]
 
-        if self.df.le(param.shape[:-2] - 1).any():
-            raise Value(f"Value of df={df} expected to be greater than ndim={param.shape[:-2]-1}.")
+        if self.df.le(event_shape[-1] - 1).any():
+            raise ValueError(f"Value of df={df} expected to be greater than ndim={event_shape[-1]-1}.")
 
         if scale_tril is not None:
             self.scale_tril = param.expand(batch_shape + (-1, -1))
