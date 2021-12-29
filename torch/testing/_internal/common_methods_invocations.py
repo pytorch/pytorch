@@ -8524,6 +8524,7 @@ op_db: List[OpInfo] = [
                # FIXME: bfloat16 backward support likely depends on CUDA11+
                #   and SM53+
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', active_if=IS_WINDOWS),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJitTEFuser', 'test_jit_te_fuser'),
            ),
            sample_inputs_func=sample_inputs_bmm),
     OpInfo('mv',
