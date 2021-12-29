@@ -223,8 +223,8 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
             with self.assertRaisesRegex(ValueError, 'Only ChunkShardingSpec supported for ShardedTensor ops!'):
                 fc6(torch.rand(10, 10).cuda(self.rank))
 
-            fc7 = torch.nn.Linear(10, 10).cuda(self.rank)
-            spec = ChunkShardingSpec(
+            fc7 = torch.nn.Linear(10, 80).cuda(self.rank)
+            multiple_local_shard_spec = ChunkShardingSpec(
                 dim=0,
                 placements=[
                     "rank:0/cuda:0",
@@ -238,7 +238,7 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
                 ],
             )
             del fc7.weight
-            fc7.weight = empty(spec, 10, 10)
+            fc7.weight = empty(multiple_local_shard_spec, 80, 10)
             with self.assertRaisesRegex(ValueError, 'Only one local shard supported!'):
                 fc7(torch.rand(10, 10).cuda(self.rank))
 
