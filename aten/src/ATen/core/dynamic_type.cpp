@@ -4,6 +4,7 @@
 
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
+#include <ATen/core/type_factory.h>
 #include <c10/util/Exception.h>
 
 namespace c10 {
@@ -247,8 +248,7 @@ DynamicType::Ptr IValue::TagType<c10::DynamicType>::get(const c10::IValue& v) {
 
 DynamicTypePtr ivalue::TupleTypeFactory<c10::DynamicType>::create(
     std::vector<TypePtr> elemTypes) {
-  return std::make_shared<DynamicType>(
-      DynamicType::Tag::Tuple, DynamicType::Arguments(elemTypes));
+  return DynamicTypeFactory::create<TupleType>(std::move(elemTypes));
 }
 
 DynamicTypePtr ivalue::TupleTypeFactory<c10::DynamicType>::fallback(const Type&) {
