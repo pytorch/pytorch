@@ -10,7 +10,7 @@ import os
 import sys
 from typing_extensions import Literal
 
-import generate_binary_build_matrix # type: ignore[import]
+import generate_binary_build_matrix  # type: ignore[import]
 
 YamlShellBool = Literal["''", 1]
 Arch = Literal["windows", "linux", "macos"]

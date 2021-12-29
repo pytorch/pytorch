@@ -185,6 +185,7 @@ jobs:
         name: Download Build Artifacts
         with:
           name: !{{ config["build_name"] }}
+          path: artifacts/
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -235,6 +236,6 @@ jobs:
             -w / \
             "${DOCKER_IMAGE}"
           )
-          docker exec -t "${container_name}" sh -c "bash /run.sh"
+          docker exec -t "${container_name}" sh -c "bash -x /run.sh"
       !{{ common.teardown_ec2_linux("pytorch/") }}
 {%- endfor %}

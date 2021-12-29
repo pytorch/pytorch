@@ -249,6 +249,7 @@ jobs:
         name: Download Build Artifacts
         with:
           name: conda-py3_7-cpu
+          path: artifacts/
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -293,7 +294,7 @@ jobs:
             -w / \
             "${DOCKER_IMAGE}"
           )
-          docker exec -t "${container_name}" sh -c "bash /run.sh"
+          docker exec -t "${container_name}" sh -c "bash -x /run.sh"
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -523,6 +524,7 @@ jobs:
         name: Download Build Artifacts
         with:
           name: conda-py3_7-cuda10_2
+          path: artifacts/
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -571,7 +573,7 @@ jobs:
             -w / \
             "${DOCKER_IMAGE}"
           )
-          docker exec -t "${container_name}" sh -c "bash /run.sh"
+          docker exec -t "${container_name}" sh -c "bash -x /run.sh"
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -804,6 +806,7 @@ jobs:
         name: Download Build Artifacts
         with:
           name: conda-py3_7-cuda11_5
+          path: artifacts/
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -852,7 +855,7 @@ jobs:
             -w / \
             "${DOCKER_IMAGE}"
           )
-          docker exec -t "${container_name}" sh -c "bash /run.sh"
+          docker exec -t "${container_name}" sh -c "bash -x /run.sh"
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
