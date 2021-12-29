@@ -906,9 +906,10 @@ REGISTER_OPERATOR_FUNCTOR(aten::tanh, aten_tanh, [](Node* n) -> SROperator {
 REGISTER_OPERATOR_FUNCTOR(
     prim::TensorExprDynamicGroup,
     prim_TensorExprDynamicGroup,
-    [](Node*) -> SROperator {
-      return [](ProcessedNode* p_node) {
-        auto graph = p_node->node()->g(attr::Subgraph);
+    [](Node* n) -> SROperator {
+      auto graph = n->g(attr::Subgraph);
+      Code code(graph, "");
+      return [code](ProcessedNode* p_node) {
         auto num_outputs = p_node->num_outputs();
         Stack stack;
         if (p_node->Output(0).isNone()) {
@@ -922,7 +923,7 @@ REGISTER_OPERATOR_FUNCTOR(
         for (auto i : c10::irange(p_node->num_inputs())) {
           stack.emplace_back(p_node->Input(i));
         }
-        runTensorExprDynamicGroup(graph, stack);
+        runTensorExprDynamicGroup(code, stack);
         if (p_node->Output(0).isNone()) {
           TORCH_INTERNAL_ASSERT(
               stack.size() == num_outputs,
