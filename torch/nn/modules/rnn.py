@@ -868,11 +868,13 @@ class GRU(RNNBase):
             if not is_batched:
                 input = input.unsqueeze(batch_dim)
                 if hx is not None:
-                    assert hx.dim() == 2
+                    assert hx.dim() == 2, \
+                        f"For unbatched 2-D input, hx should also be 2-D but got {hx.dim()}-D tensor"
                     hx = hx.unsqueeze(1)
             else:
                 if hx is not None:
-                    assert hx.dim() == 3
+                    assert hx.dim() == 3, \
+                        f"For batched 3-D input, hx should also be 3-D but got {hx.dim()}-D tensor"
             max_batch_size = input.size(0) if self.batch_first else input.size(1)
             sorted_indices = None
             unsorted_indices = None
