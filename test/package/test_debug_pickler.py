@@ -32,8 +32,8 @@ class TestDebugPickler(PackageTestCase):
 
             We think the problematic object is found at:
             <pickled object> (<class 'list'>)
-                <object @ idx 1> (<class 'set'>)
-                <object BadPickle> (<class 'package_a.bad_pickle.BadPickle'>)
+              <object @ idx 1> (<class 'set'>)
+              <object BadPickle> (<class 'package_a.bad_pickle.BadPickle'>)
             """
         )
         self.assertEqual(str(e3.exception), error)
@@ -57,8 +57,8 @@ class TestDebugPickler(PackageTestCase):
 
             We think the problematic object is found at:
             <pickled object> (<class 'list'>)
-                <object @ idx 1> (<class 'frozenset'>)
-                <object BadPickle> (<class 'package_a.bad_pickle.BadPickle'>)
+              <object @ idx 1> (<class 'frozenset'>)
+              <object BadPickle> (<class 'package_a.bad_pickle.BadPickle'>)
             """
         )
         self.assertEqual(str(e3.exception), error)
@@ -89,11 +89,10 @@ class TestDebugPickler(PackageTestCase):
 
             We think the problematic object is found at:
             <pickled object> (<class 'list'>)
-                <object @ idx 1> (<class 'tuple'>)
-                <object @ idx 2> (<class 'package_a.bad_pickle.BadPickle'>)
+              <object @ idx 1> (<class 'tuple'>)
+              <object @ idx 2> (<class 'package_a.bad_pickle.BadPickle'>)
             """
         )
-
         self.assertEqual(str(e1_protocol3.exception), error)
         self.assertEqual(str(e2_protocol3.exception), error)
         self.assertEqual(str(e1_protocol4.exception), error)
@@ -116,9 +115,9 @@ class TestDebugPickler(PackageTestCase):
 
             We think the problematic object is found at:
             <pickled object> (<class 'package_a.bad_pickle.GoodPickle'>)
-                .b (<class 'package_a.bad_pickle.GoodPickle'>)
-                .c (<class 'package_a.bad_pickle.GoodPickle'>)
-                .d (<class 'package_a.bad_pickle.BadPickle'>)
+              .b (<class 'package_a.bad_pickle.GoodPickle'>)
+              .c (<class 'package_a.bad_pickle.GoodPickle'>)
+              .d (<class 'package_a.bad_pickle.BadPickle'>)
             """
         )
         self.assertEqual(str(e3.exception), error)
@@ -143,10 +142,10 @@ class TestDebugPickler(PackageTestCase):
 
             We think the problematic object is found at:
             <pickled object> (<class 'list'>)
-                <object @ idx 1> (<class 'list'>)
-                <object @ idx 2> (<class 'list'>)
-                <object @ idx 1> (<class 'list'>)
-                <object @ idx 0> (<class 'package_a.bad_pickle.BadPickle'>)
+              <object @ idx 1> (<class 'list'>)
+              <object @ idx 2> (<class 'list'>)
+              <object @ idx 1> (<class 'list'>)
+              <object @ idx 0> (<class 'package_a.bad_pickle.BadPickle'>)
             """
         )
         self.assertEqual(str(e3.exception), error)
@@ -171,13 +170,13 @@ class TestDebugPickler(PackageTestCase):
 
             We think the problematic object is found at:
             <pickled object> (<class 'list'>)
-                <object @ idx 1> (<class 'list'>)
-                <object @ idx 2> (<class 'list'>)
-                <object @ idx 1> (<class 'list'>)
-                <object @ idx 0> (<class 'package_a.bad_pickle.GoodPickle'>)
-                .b (<class 'package_a.bad_pickle.GoodPickle'>)
-                .c (<class 'package_a.bad_pickle.GoodPickle'>)
-                .d (<class 'package_a.bad_pickle.BadPickle'>)
+              <object @ idx 1> (<class 'list'>)
+              <object @ idx 2> (<class 'list'>)
+              <object @ idx 1> (<class 'list'>)
+              <object @ idx 0> (<class 'package_a.bad_pickle.GoodPickle'>)
+              .b (<class 'package_a.bad_pickle.GoodPickle'>)
+              .c (<class 'package_a.bad_pickle.GoodPickle'>)
+              .d (<class 'package_a.bad_pickle.BadPickle'>)
             """
         )
         self.assertEqual(str(e3.exception), error)
@@ -198,8 +197,8 @@ class TestDebugPickler(PackageTestCase):
 
             We think the problematic object is found at:
             <pickled object> (<class 'package_a.bad_pickle.GoodPickle'>)
-                .bad_list (<class 'list'>)
-                <object @ idx 2> (<class 'package_a.bad_pickle.BadPickle'>)
+              .bad_list (<class 'list'>)
+              <object @ idx 2> (<class 'package_a.bad_pickle.BadPickle'>)
             """
         )
         self.assertEqual(str(e3.exception), error)
@@ -220,7 +219,7 @@ class TestDebugPickler(PackageTestCase):
 
             We think the problematic object is found at:
             <pickled object> (<class 'dict'>)
-                <object @ key bar> (<class 'package_a.bad_pickle.BadPickle'>)
+              <object @ key bar> (<class 'package_a.bad_pickle.BadPickle'>)
             """
         )
         self.assertEqual(str(e3.exception), error)
@@ -249,14 +248,14 @@ class TestDebugPickler(PackageTestCase):
 
             We think the problematic object is found at:
             <pickled object> (<class 'dict'>)
-                <object @ key bar> (<class 'list'>)
-                <object @ idx 1> (<class 'list'>)
-                <object @ idx 2> (<class 'list'>)
-                <object @ idx 1> (<class 'list'>)
-                <object @ idx 0> (<class 'package_a.bad_pickle.GoodPickle'>)
-                .b (<class 'package_a.bad_pickle.GoodPickle'>)
-                .c (<class 'package_a.bad_pickle.GoodPickle'>)
-                .d (<class 'package_a.bad_pickle.BadPickle'>)
+              <object @ key bar> (<class 'list'>)
+              <object @ idx 1> (<class 'list'>)
+              <object @ idx 2> (<class 'list'>)
+              <object @ idx 1> (<class 'list'>)
+              <object @ idx 0> (<class 'package_a.bad_pickle.GoodPickle'>)
+              .b (<class 'package_a.bad_pickle.GoodPickle'>)
+              .c (<class 'package_a.bad_pickle.GoodPickle'>)
+              .d (<class 'package_a.bad_pickle.BadPickle'>)
             """
         )
         self.assertEqual(str(e3.exception), error)
