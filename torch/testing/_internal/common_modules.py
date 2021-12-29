@@ -481,6 +481,12 @@ module_db: List[ModuleInfo] = [
                module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=2, lazy=False)),
     ModuleInfo(torch.nn.Conv3d,
                module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=3, lazy=False)),
+    ModuleInfo(torch.nn.ConvTranspose1d,
+               module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=1, lazy=False)),
+    ModuleInfo(torch.nn.ConvTranspose2d,
+               module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=2, lazy=False)),
+    ModuleInfo(torch.nn.ConvTranspose3d,
+               module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=3, lazy=False)),
     ModuleInfo(torch.nn.ELU,
                module_inputs_func=module_inputs_torch_nn_ELU),
     ModuleInfo(torch.nn.L1Loss,
@@ -496,6 +502,21 @@ module_db: List[ModuleInfo] = [
                # See https://github.com/pytorch/pytorch/issues/70505 for more info.
                decorators=[skipMeta]),
     ModuleInfo(torch.nn.LazyConv3d,
+               module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=3, lazy=True),
+               # Lazy modules don't currently play well with ModuleInfo tests on the meta device.
+               # See https://github.com/pytorch/pytorch/issues/70505 for more info.
+               decorators=[skipMeta]),
+    ModuleInfo(torch.nn.LazyConvTranspose1d,
+               module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=1, lazy=True),
+               # Lazy modules don't currently play well with ModuleInfo tests on the meta device.
+               # See https://github.com/pytorch/pytorch/issues/70505 for more info.
+               decorators=[skipMeta]),
+    ModuleInfo(torch.nn.LazyConvTranspose2d,
+               module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=2, lazy=True),
+               # Lazy modules don't currently play well with ModuleInfo tests on the meta device.
+               # See https://github.com/pytorch/pytorch/issues/70505 for more info.
+               decorators=[skipMeta]),
+    ModuleInfo(torch.nn.LazyConvTranspose3d,
                module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=3, lazy=True),
                # Lazy modules don't currently play well with ModuleInfo tests on the meta device.
                # See https://github.com/pytorch/pytorch/issues/70505 for more info.
