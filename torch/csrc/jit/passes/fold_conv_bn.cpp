@@ -79,15 +79,13 @@ void replaceConvBiasWithGetAttr(Module& module) {
           %bias : NoneType = prim::GetAttr[name="bias"](%self)
           return (%bias) )");
     auto replace_type = [&](const PatternInfo& pattern_get_bias) {
-      const Graph& pattern_get_bias_graph =
-          *pattern_get_bias.pattern_graph;
+      const Graph& pattern_get_bias_graph = *pattern_get_bias.pattern_graph;
       const auto& get_bias_vmap = pattern_get_bias.vmap;
-      
-      const auto& matches =
-          findPatternMatches(pattern_get_bias_graph, *graph);
+
+      const auto& matches = findPatternMatches(pattern_get_bias_graph, *graph);
       for (const auto& match : matches) {
-        
-         match.values_map.at(get_bias_vmap.at("bias"))->setType(TensorType::get());
+        match.values_map.at(get_bias_vmap.at("bias"))
+            ->setType(TensorType::get());
       }
     };
     replace_type(pattern_get_bias);
