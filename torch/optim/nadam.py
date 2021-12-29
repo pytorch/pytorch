@@ -94,7 +94,6 @@ class NAdam(Optimizer):
             mu_products = []
             state_steps = []
             beta1, beta2 = group['betas']
-            foreach = group['foreach']
 
             for p in group['params']:
                 if p.grad is not None:
@@ -128,13 +127,13 @@ class NAdam(Optimizer):
                   exp_avg_sqs,
                   mu_products,
                   state_steps,
-                  foreach=foreach,
                   beta1=beta1,
                   beta2=beta2,
                   lr=group['lr'],
                   weight_decay=group['weight_decay'],
                   momentum_decay=group['momentum_decay'],
-                  eps=group['eps'])
+                  eps=group['eps'],
+                  foreach=group['foreach'])
 
             # update mu_product
             for p in params_with_grad:
@@ -151,14 +150,14 @@ def nadam(params: List[Tensor],
           exp_avg_sqs: List[Tensor],
           mu_products: List[float],
           state_steps: List[int],
-          foreach: bool = False,
           *,
           beta1: float,
           beta2: float,
           lr: float,
           weight_decay: float,
           momentum_decay: float,
-          eps: float):
+          eps: float,
+          foreach: bool):
     r"""Functional API that performs NAdam algorithm computation.
 
     See :class:`~torch.optim.NAdam` for details.
