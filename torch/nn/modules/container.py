@@ -5,6 +5,7 @@ import operator
 
 import torch
 from .module import Module
+from ..parameter import Parameter
 from torch._jit_internal import _copy_to_script_wrapper
 
 from typing import Any, Dict, Iterable, Iterator, Mapping, Optional, TYPE_CHECKING, overload, Tuple, TypeVar, Union
@@ -419,12 +420,12 @@ class ModuleDict(Module):
 class ParameterList(Module):
     r"""Holds parameters in a list.
 
-    :class:`~torch.nn.ParameterList` can be indexed like a regular Python
-    list, but parameters it contains are properly registered, and will be
-    visible by all :class:`~torch.nn.Module` methods.
+    :class:`~torch.nn.ParameterList` can be used like a regular Python
+    list, but Tensor that are :class:`~torch.nn.Parameter` are properly registered,
+    and will be visible by all :class:`~torch.nn.Module` methods.
 
     Args:
-        parameters (iterable, optional): an iterable of :class:`~torch.nn.Parameter` to add
+        parameters (iterable, optional): an iterable of elements to add to the list.
 
     Example::
 
@@ -440,18 +441,14 @@ class ParameterList(Module):
                 return x
     """
 
-    _parameters: Dict[str, 'Parameter']  # type: ignore[assignment]
-
-    def __init__(self, parameters: Optional[Iterable['Parameter']] = None) -> None:
+    def __init__(self, values: Optional[Iterable[Any]] = None) -> None:
         super(ParameterList, self).__init__()
-        self._initialized = True
-        if parameters is not None:
-            self += parameters
-
-    def __setstate__(self, state):
-        state['_initialized'] = False
-        super(ParameterList, self).__setstate__(state)
-        self._initialized = True
+        self._size = 0
+        if values is not None:
+            # BC-breaking!
+            # Plain Tensors passed here used to be automatically converted into
+            # Parameters. Do we want to keep that behavior?
+            self += values
 
     def _get_abs_string_index(self, idx):
         """Get the absolute index for the list of modules"""
@@ -463,7 +460,7 @@ class ParameterList(Module):
         return str(idx)
 
     @overload
-    def __getitem__(self, idx: int) -> 'Parameter':
+    def __getitem__(self, idx: int) -> Any:
         ...
 
     @overload
@@ -472,78 +469,73 @@ class ParameterList(Module):
 
     def __getitem__(self, idx):
         if isinstance(idx, slice):
-            return self.__class__(list(self._parameters.values())[idx])
+            start, stop, step = idx.indices(len(self))
+            out = self.__class__()
+            for i in range(start, stop, step):
+                out.append(self[i])
+            return out
         else:
             idx = self._get_abs_string_index(idx)
-            return self._parameters[str(idx)]
+            return getattr(self, str(idx))
 
-    def __setitem__(self, idx: int, param: 'Parameter') -> None:
+    def __setitem__(self, idx: int, param: Any) -> None:
         idx = self._get_abs_string_index(idx)
-        return self.register_parameter(str(idx), param)
-
-    def __setattr__(self, key: Any, value: Any) -> None:
-        if getattr(self, "_initialized", False):
-            if not hasattr(self, key) and not isinstance(value, torch.nn.Parameter):
-                warnings.warn("Setting attributes on ParameterList is not supported.")
-        super(ParameterList, self).__setattr__(key, value)
+        return setattr(self, str(idx), param)
 
     def __len__(self) -> int:
-        return len(self._parameters)
+        return self._size
 
-    def __iter__(self) -> Iterator['Parameter']:
-        return iter(self._parameters.values())
+    def __iter__(self) -> Iterator[Any]:
+        return iter(self[i] for i in range(len(self)))
 
-    def __iadd__(self, parameters: Iterable['Parameter']) -> 'ParameterList':
+    def __iadd__(self, parameters: Iterable[Any]) -> 'ParameterList':
         return self.extend(parameters)
 
     def __dir__(self):
-        keys = super(ParameterList, self).__dir__()
-        keys = [key for key in keys if not key.isdigit()]
-        return keys
+        return list(range(self._size))
 
-    def append(self, parameter: 'Parameter') -> 'ParameterList':
-        """Appends a given parameter at the end of the list.
+    def append(self, value: Any) -> 'ParameterList':
+        """Appends a given value at the end of the list.
 
         Args:
-            parameter (nn.Parameter): parameter to append
+            value (Any): value to append
         """
-        self.register_parameter(str(len(self)), parameter)
+        setattr(self, str(len(self)), value)
+        self._size += 1
         return self
 
-    def extend(self, parameters: Iterable['Parameter']) -> 'ParameterList':
-        """Appends parameters from a Python iterable to the end of the list.
+    def extend(self, values: Iterable[Any]) -> 'ParameterList':
+        """Appends values from a Python iterable to the end of the list.
 
         Args:
-            parameters (iterable): iterable of parameters to append
+            values (iterable): iterable of values to append
         """
-        if not isinstance(parameters, container_abcs.Iterable):
+        # Tensor is an iterable but we never want to unpack it here
+        if not isinstance(values, container_abcs.Iterable) or isinstance(values, torch.Tensor):
             raise TypeError("ParameterList.extend should be called with an "
-                            "iterable, but got " + type(parameters).__name__)
-        offset = len(self)
-        for i, param in enumerate(parameters):
-            self.register_parameter(str(offset + i), param)
+                            "iterable, but got " + type(values).__name__)
+        for value in values:
+            self.append(value)
         return self
 
     def extra_repr(self) -> str:
         child_lines = []
-        for k, p in self._parameters.items():
-            size_str = 'x'.join(str(size) for size in p.size())
-            device_str = '' if not p.is_cuda else ' (GPU {})'.format(p.get_device())
-            parastr = 'Parameter containing: [{} of size {}{}]'.format(
-                torch.typename(p), size_str, device_str)
-            child_lines.append('  (' + str(k) + '): ' + parastr)
+        for k, p in enumerate(self):
+            if isinstance(p, torch.Tensor):
+                size_str = 'x'.join(str(size) for size in p.size())
+                device_str = '' if not p.is_cuda else ' (GPU {})'.format(p.get_device())
+                parastr = '{} containing: [{} of size {}{}]'.format(
+                    "Parameter" if isinstance(p, Parameter) else "Tensor",
+                    torch.typename(p), size_str, device_str)
+                child_lines.append('  (' + str(k) + '): ' + parastr)
+            else:
+                child_lines.append('  (' + str(k) + '): Object of type: ' + type(p).__name__)
+
         tmpstr = '\n'.join(child_lines)
         return tmpstr
 
-    def __call__(self, input):
+    def __call__(self, *args, **kwargs):
         raise RuntimeError('ParameterList should not be called.')
-
-    def _replicate_for_data_parallel(self):
-        warnings.warn("nn.ParameterList is being used with DataParallel but this is not "
-                      "supported. This list will appear empty for the models replicated "
-                      "on each GPU except the original one.")
-
-        return super(ParameterList, self)._replicate_for_data_parallel()
 
 
 class ParameterDict(Module):
@@ -551,6 +543,7 @@ class ParameterDict(Module):
 
     ParameterDict can be indexed like a regular Python dictionary, but parameters it
     contains are properly registered, and will be visible by all Module methods.
+    Other objects are treated as would be done by a regular Python dictionary
 
     :class:`~torch.nn.ParameterDict` is an **ordered** dictionary that respects
 
@@ -565,9 +558,9 @@ class ParameterDict(Module):
     merged mapping.
 
     Args:
-        parameters (iterable, optional): a mapping (dictionary) of
-            (string : :class:`~torch.nn.Parameter`) or an iterable of key-value pairs
-            of type (string, :class:`~torch.nn.Parameter`)
+        values (iterable, optional): a mapping (dictionary) of
+            (string : Any) or an iterable of key-value pairs
+            of type (string, Any)
 
     Example::
 
@@ -584,71 +577,74 @@ class ParameterDict(Module):
                 return x
     """
 
-    _parameters: Dict[str, 'Parameter']  # type: ignore[assignment]
-
-    def __init__(self, parameters: Optional[Mapping[str, 'Parameter']] = None) -> None:
+    def __init__(self, parameters: Optional[Mapping[str, Any]] = None) -> None:
         super(ParameterDict, self).__init__()
-        self._initialized = True
+        self._idxs = {}
+        # BC-breaking if this was passed plain Tensors before
         if parameters is not None:
             self.update(parameters)
 
-    def __setstate__(self, state):
-        state['_initialized'] = False
-        super(ParameterDict, self).__setstate__(state)
-        self._initialized = True
+    def _index_to_key(self, idx: Any) -> str:
+        if isinstance(idx, str):
+            return idx
+        elif isinstance(idx, container_abcs.Hashable):
+            return f"_hashed_key:{hash(idx)}"
+        else:
+            raise TypeError("Index given to ParameterDict cannot be used as a key as it is "
+                            f"not a key and not hashable. Type is '{type(idx).__name__}'")
 
-    def __getitem__(self, key: str) -> 'Parameter':
-        return self._parameters[key]
+    def __getitem__(self, idx: Any) -> Any:
+        key = self._index_to_key(idx)
+        return getattr(self, key)
 
-    def __setitem__(self, key: str, parameter: 'Parameter') -> None:
-        self.register_parameter(key, parameter)
+    def __setitem__(self, idx: Any, value: Any) -> None:
+        # BC-breaking if this was passed plain Tensors before
+        self._idxs[idx] = None
+        key = self._index_to_key(idx)
+        setattr(self, key, value)
 
-    def __delitem__(self, key: str) -> None:
-        del self._parameters[key]
-
-    def __setattr__(self, key: Any, value: Any) -> None:
-        if getattr(self, "_initialized", False):
-            if not hasattr(self, key) and not isinstance(value, torch.nn.Parameter):
-                warnings.warn("Setting attributes on ParameterDict is not supported.")
-        super(ParameterDict, self).__setattr__(key, value)
+    def __delitem__(self, idx: str) -> None:
+        del self._idxs[idx]
+        key = self._index_to_key(idx)
+        delattr(self, key)
 
     def __len__(self) -> int:
-        return len(self._parameters)
+        return len(self._idxs)
 
     def __iter__(self) -> Iterator[str]:
-        return iter(self._parameters.keys())
+        return iter(self._idxs)
 
     def __reversed__(self) -> Iterator[str]:
-        return reversed(list(self._parameters.keys()))
+        return reversed(list(self._idxs))
 
     def copy(self) -> 'ParameterDict':
         """Returns a copy of this :class:`~torch.nn.ParameterDict` instance.
         """
-        return ParameterDict(self._parameters.copy())
+        return ParameterDict(OrderedDict({k: self[k] for k in self._idxs}))
 
     def __contains__(self, key: str) -> bool:
-        return key in self._parameters
+        return key in self._idxs
 
-    def setdefault(self, key: str, default: Optional['Parameter'] = None) -> 'Parameter':
-        """If key is in the ParameterDict, return its parameter.
+    def setdefault(self, key: str, default: Optional[Any] = None) -> Any:
+        """If key is in the ParameterDict, return its value.
         If not, insert `key` with a parameter `default` and return `default`.
         `default` defaults to `None`.
 
         Args:
             key (string): key to set default for
-            default (:class:`~torch.nn.Parameter`): the parameter set to the key
+            default (Any): the parameter set to the key
         """
-        if key in self._parameters:
-            return self._parameters[key]
-        self[key] = default  # type: ignore[assignment]
-        return self._parameters[key]
+        if key not in self:
+            self[key] = default
+        return self[key]
 
     def clear(self) -> None:
         """Remove all items from the ParameterDict.
         """
-        self._parameters.clear()
+        for k in self._idxs.copy():
+            del self[k]
 
-    def pop(self, key: str) -> 'Parameter':
+    def pop(self, key: str) -> Any:
         r"""Remove key from the ParameterDict and return its parameter.
 
         Args:
@@ -658,13 +654,19 @@ class ParameterDict(Module):
         del self[key]
         return v
 
-    def popitem(self) -> Tuple[str, 'Parameter']:
+    def popitem(self) -> Tuple[str, Any]:
         """Remove and return the last inserted `(key, parameter)` pair
         from the ParameterDict
         """
-        return self._parameters.popitem()
+        # Python 3 dict are ordered right?
+        k, _ = self._idxs.popitem()
+        # Not nice, but hey
+        self._idxs[k] = None
+        val = self[k]
+        del self[k]
+        return k, val
 
-    def get(self, key: str, default: Optional['Parameter'] = None) -> 'Parameter | None':
+    def get(self, key: str, default: Optional[Any] = None) -> 'Parameter | None':
         r"""Return the parameter associated with key if present.
         Otherwise return default if provided, None if not.
 
@@ -672,33 +674,36 @@ class ParameterDict(Module):
             key (string): key to get from the ParameterDict
             default (Parameter, optional): value to return if key not present
         """
-        return self._parameters.get(key, default)
+        if key in self:
+            return self[key]
+        else:
+            return default
 
-    def fromkeys(self, keys: Iterable['str'], default: Optional['Parameter'] = None) -> 'ParameterDict':
+    def fromkeys(self, keys: Iterable['str'], default: Optional[Any] = None) -> 'ParameterDict':
         r"""Return a new ParameterDict with the keys provided
 
         Args:
             keys (iterable, string): keys to make the new ParameterDict from
             default (Parameter, optional): value to set for all keys
         """
-        return ParameterDict(self._parameters.fromkeys(keys, default))  # type: ignore[arg-type]
+        return ParameterDict({k: default for k in keys})
 
     def keys(self) -> Iterable[str]:
         r"""Return an iterable of the ParameterDict keys.
         """
-        return self._parameters.keys()
+        return list(self._idxs)
 
-    def items(self) -> Iterable[Tuple[str, 'Parameter']]:
+    def items(self) -> Iterable[Tuple[str, Any]]:
         r"""Return an iterable of the ParameterDict key/value pairs.
         """
-        return self._parameters.items()
+        return ((k, self[k]) for k in self._idxs)
 
-    def values(self) -> Iterable['Parameter']:
+    def values(self) -> Iterable[Any]:
         r"""Return an iterable of the ParameterDict values.
         """
-        return self._parameters.values()
+        return (self[k] for k in self._idxs)
 
-    def update(self, parameters: Mapping[str, 'Parameter']) -> None:
+    def update(self, parameters: Mapping[str, Any]) -> None:
         r"""Update the :class:`~torch.nn.ParameterDict` with the key-value pairs from a
         mapping or an iterable, overwriting existing keys.
 
@@ -737,35 +742,32 @@ class ParameterDict(Module):
 
     def extra_repr(self) -> str:
         child_lines = []
-        for k, p in self._parameters.items():
-            size_str = 'x'.join(str(size) for size in p.size())
-            device_str = '' if not p.is_cuda else ' (GPU {})'.format(p.get_device())
-            parastr = 'Parameter containing: [{} of size {}{}]'.format(
-                torch.typename(p), size_str, device_str)
-            child_lines.append('  (' + k + '): ' + parastr)
+        for k, p in self.items():
+            if isinstance(p, torch.Tensor):
+                size_str = 'x'.join(str(size) for size in p.size())
+                device_str = '' if not p.is_cuda else ' (GPU {})'.format(p.get_device())
+                parastr = '{} containing: [{} of size {}{}]'.format(
+                    "Parameter" if isinstance(p, Parameter) else "Tensor",
+                    torch.typename(p), size_str, device_str)
+                child_lines.append('  (' + str(k) + '): ' + parastr)
+            else:
+                child_lines.append('  (' + str(k) + '): Object of type: ' + type(p).__name__)
         tmpstr = '\n'.join(child_lines)
         return tmpstr
 
     def __call__(self, input):
         raise RuntimeError('ParameterDict should not be called.')
 
-    def _replicate_for_data_parallel(self):
-        warnings.warn("nn.ParameterDict is being used with DataParallel but this is not "
-                      "supported. This dict will appear empty for the models replicated "
-                      "on each GPU except the original one.")
-
-        return super(ParameterDict, self)._replicate_for_data_parallel()
-
     def __or__(self, other: 'ParameterDict') -> 'ParameterDict':
         copy = self.copy()
-        copy.update(other._parameters)
+        copy.update(other)
         return copy
 
     def __ror__(self, other: 'ParameterDict') -> 'ParameterDict':
         copy = other.copy()
-        copy.update(self._parameters)
+        copy.update(self)
         return copy
 
     def __ior__(self, other : 'ParameterDict') -> 'ParameterDict':
-        self.update(other._parameters)
+        self.update(other)
         return self
