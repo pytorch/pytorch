@@ -11502,8 +11502,15 @@ class TestNN(NNTestCase):
         self.assertEqual(asfm.tail[0][1].weight.size(), (5, 8))  # 5 targets in this cluster, dimensionality 8
         self.assertEqual(asfm.tail[1][1].weight.size(), (5, 4))
         self.assertEqual(asfm.tail[2][1].weight.size(), (5, 2))
-
         self.assertEqual(asfm(x, y).output.size(), (2, ))
+
+        # test no_batch_dim support
+        asfm = nn.AdaptiveLogSoftmaxWithLoss(16, 20, [5, 10, 15], div_value=2.)
+        x = torch.randn(1, 16)
+        y = torch.tensor([17])
+        x2 = x.squeeze(0)
+        y2 = y.squeeze(0)
+        self.assertEqual(asfm(x, y).output.squeeze(0), asfm(x2, y2).output)
 
         # log_probs actually returns log_proba
         asfm = nn.AdaptiveLogSoftmaxWithLoss(8, 4, [2], div_value=2.)
@@ -11941,18 +11948,21 @@ class TestNNInit(TestCase):
         self.assertEqual(F.max_unpool1d(output, indices, 2), F.max_unpool1d(output, indices, 2, stride=2))
 
         # Test list / tuple passed as argument to max_unpool1d
-        input = torch.randn([1, 1, 5])
+        input = torch.randn([1, 1, 5], requires_grad=True)
         output, indices = F.max_pool1d(input, 2, stride=2, return_indices=True)
         self.assertEqual(F.max_unpool1d(output, indices, 2, stride=2, output_size=input.shape),
                          F.max_unpool1d(output, indices, 2, stride=2, output_size=input.size()))
+        gradcheck(F.max_unpool1d, (output, indices, 2), check_forward_ad=True)
 
         # Test 2D
-        output, indices = F.max_pool2d(torch.randn([1, 1, 4, 4]), 2, stride=2, return_indices=True)
+        output, indices = F.max_pool2d(torch.randn([1, 1, 4, 4], requires_grad=True), 2, stride=2, return_indices=True)
         self.assertEqual(F.max_unpool2d(output, indices, 2), F.max_unpool2d(output, indices, 2, stride=2))
+        gradcheck(F.max_unpool2d, (output, indices, 2), check_forward_ad=True)
 
         # Test 3D
-        output, indices = F.max_pool3d(torch.randn([4, 4, 4, 4, 4]), 2, stride=2, return_indices=True)
+        output, indices = F.max_pool3d(torch.randn([4, 4, 4, 4, 4], requires_grad=True), 2, stride=2, return_indices=True)
         self.assertEqual(F.max_unpool3d(output, indices, 2), F.max_unpool3d(output, indices, 2, stride=2))
+        gradcheck(F.max_unpool3d, (output, indices, 2), check_forward_ad=True)
 
     def test_dirac_properties(self):
         for dims in [3, 4, 5]:
