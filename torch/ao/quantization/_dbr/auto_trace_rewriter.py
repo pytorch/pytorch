@@ -100,6 +100,14 @@ class AllModuleTracer(torch.fx.Tracer):
         if target == operator.mul:
             target = torch.mul
 
+        # TODO(future PR): move this into mappings
+        if target == 'add':
+            target = torch.add
+            kind = 'call_function'
+        if target == 'mul':
+            target = torch.mul
+            kind = 'call_function'
+
         dtype_to_use = torch.float
 
         if kind == 'call_function' or kind == 'call_method':
