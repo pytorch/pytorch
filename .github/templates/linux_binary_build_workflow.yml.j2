@@ -88,6 +88,7 @@ jobs:
       SKIP_ALL_TESTS: 1
 {%- if package_type == "libtorch" %}
       LIBTORCH_VARIANT: ${{ matrix.libtorch_variant }}
+      DESIRED_DEVTOOLSET: ${{ matrix.devtoolset }}
 {%- endif %}
     steps:
       !{{ common.setup_ec2_linux() }}
@@ -130,6 +131,7 @@ jobs:
             -e PYTORCH_ROOT \
             -e SKIP_ALL_TESTS \
             -e LIBTORCH_VARIANT \
+            -e DESIRED_DEVTOOLSET \
             --tty \
             --detach \
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
@@ -139,13 +141,15 @@ jobs:
             "${DOCKER_IMAGE}"
           )
           docker exec -t "${container_name}" sh -c "bash /builder/!{{ package_type }}/build.sh"
-      - uses: actions/upload-artifact@v2
+      - uses: !{{ common.upload_artifact_s3_action }}
         with:
 {%- if package_type == "libtorch" %}
           name: pytorch-linux-!{{ package_type }}-${{ matrix.gpu_arch_type }}${{ matrix.gpu_arch_version }}-${{ matrix.devtoolset }}-${{ matrix.libtorch_variant }}
 {%- else %}
           name: pytorch-linux-!{{ package_type }}-py${{ matrix.python_version }}-${{ matrix.gpu_arch_type }}${{ matrix.gpu_arch_version }}
 {%- endif %}
+          retention-days: 14
+          if-no-files-found: error
           path:
             artifacts/*
       - name: Parse ref

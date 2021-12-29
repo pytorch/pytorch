@@ -159,6 +159,7 @@ jobs:
             -e PYTORCH_ROOT \
             -e SKIP_ALL_TESTS \
             -e LIBTORCH_VARIANT \
+            -e DESIRED_DEVTOOLSET \
             --tty \
             --detach \
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
@@ -168,9 +169,11 @@ jobs:
             "${DOCKER_IMAGE}"
           )
           docker exec -t "${container_name}" sh -c "bash /builder/manywheel/build.sh"
-      - uses: actions/upload-artifact@v2
+      - uses: seemethere/upload-artifact-s3@v3
         with:
           name: pytorch-linux-manywheel-py${{ matrix.python_version }}-${{ matrix.gpu_arch_type }}${{ matrix.gpu_arch_version }}
+          retention-days: 14
+          if-no-files-found: error
           path:
             artifacts/*
       - name: Parse ref

@@ -16,12 +16,10 @@ import json
 from typing import Dict, List
 
 
-# CUDA_ARCHES = ["10.2", "11.1", "11.3", "11.5"]
-CUDA_ARCHES = ["10.2", "11.5"]
+CUDA_ARCHES = ["10.2", "11.1", "11.3", "11.5"]
 
 
-# ROCM_ARCHES = ["4.2", "4.3.1"]
-ROCM_ARCHES = ["4.3.1"]
+ROCM_ARCHES = ["4.2", "4.3.1"]
 
 
 def arch_type(arch_version: str) -> str:
@@ -98,9 +96,9 @@ def generate_conda_matrix(is_pr: bool) -> List[Dict[str, str]]:
 def generate_libtorch_matrix(is_pr: bool) -> List[Dict[str, str]]:
     libtorch_variants = [
         "shared-with-deps",
-        # "shared-without-deps", # TODO: Uncomment this once we verify works
+        "shared-without-deps",
         "static-with-deps",
-        # "static-without-deps", # TODO: Uncomment this once we verify works
+        "static-without-deps",
     ]
     return [
         {
