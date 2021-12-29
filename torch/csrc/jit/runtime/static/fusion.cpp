@@ -329,7 +329,11 @@ void performTensorExprFusion(
   GRAPH_DEBUG("Graph before tracing: ", graph);
   auto traced_graph = TraceGraph(graph, sample_inputs);
   GRAPH_DEBUG("Graph after tracing: ", traced_graph);
-  FuseTensorExprs(traced_graph);
+  FuseTensorExprs(
+      traced_graph,
+      /*min_group_size*/ 2,
+      /*disable_shape_checks*/ false,
+      /*add_composed_op*/ true);
   graph->block()->clear();
   graph->block()->cloneFrom(traced_graph->block(), nullptr);
   GRAPH_DUMP("Graph after fusion: ", graph);

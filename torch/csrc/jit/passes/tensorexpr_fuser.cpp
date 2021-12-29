@@ -364,10 +364,12 @@ class TensorExprFuser {
   TensorExprFuser(
       std::shared_ptr<Graph> graph,
       size_t min_group_size,
-      bool disable_shape_checks)
+      bool disable_shape_checks,
+      bool add_composed_op)
       : graph_(std::move(graph)),
         min_group_size_(min_group_size),
-        disable_shape_checks_(disable_shape_checks) {
+        disable_shape_checks_(disable_shape_checks),
+        add_composed_op_(add_composed_op) {
     parseTENotFuseOption();
   }
 
@@ -1171,7 +1173,7 @@ class TensorExprFuser {
     }
     for (Node* fusion_group : fusion_groups) {
       VLOG(1) << "GenerateGuard for fusion group: " << *fusion_group;
-      if (!GenerateGuard(fusion_group, /*add_composed_op=*/false)) {
+      if (!GenerateGuard(fusion_group, add_composed_op_)) {
         VLOG(1) << "  Unfusing the fusion group because GenerateGuard failed"
                 << std::endl;
         SubgraphUtils::unmergeSubgraph(fusion_group);
@@ -1209,12 +1211,15 @@ class TensorExprFuser {
   size_t min_group_size_;
   // If true, shapes are ignored
   bool disable_shape_checks_;
+  // compose Runtime Type Guard and Kernel in one op
+  bool add_composed_op_;
 };
 
 void FuseTensorExprs(
     std::shared_ptr<Graph>& graph,
     size_t min_group_size,
-    bool disable_shape_checks) {
+    bool disable_shape_checks,
+    bool add_composed_op) {
   GRAPH_DUMP("Before TExprFuser: ", graph);
 
   // Temporary change for Block code generation.
