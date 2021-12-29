@@ -19056,7 +19056,7 @@ class TestNNDeviceType(NNTestCase):
         inp_3d = (torch.randn(1, 1, 1, 1, 1, device=device), (-1, 0, 2))
         module_input_dict = {torch.nn.AdaptiveAvgPool1d : inp_1d,
                              torch.nn.AdaptiveAvgPool2d : inp_2d,
-                             torch.nn.AdaptiveAvgPool3d : inp_3d,}
+                             torch.nn.AdaptiveAvgPool3d : inp_3d}
 
         for m, inp in module_input_dict.items():
             with self.assertRaisesRegex(RuntimeError,
