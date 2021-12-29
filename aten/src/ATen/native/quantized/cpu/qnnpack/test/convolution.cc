@@ -1127,10 +1127,10 @@ _STATIC_AND_RUNTIME_TEST(
     1x1x1,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 27, 29)
+        .inputSize(8, 9, 10)
         .kernelSize(1, 1, 1)
-        .groupInputChannels(23)
-        .groupOutputChannels(19)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3))
 
 _STATIC_AND_RUNTIME_TEST(
@@ -1138,10 +1138,10 @@ _STATIC_AND_RUNTIME_TEST(
     1x1x1_runtime_quant,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 27, 29)
+        .inputSize(8, 9, 10)
         .kernelSize(1, 1, 1)
-        .groupInputChannels(23)
-        .groupOutputChannels(19)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3))
 
 _STATIC_AND_RUNTIME_TEST(
@@ -1149,10 +1149,10 @@ _STATIC_AND_RUNTIME_TEST(
     1x1x1_with_qmin,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 27, 29)
+        .inputSize(8, 9, 10)
         .kernelSize(1, 1, 1)
-        .groupInputChannels(23)
-        .groupOutputChannels(19)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .qmin(128)
         .iterations(3))
 
@@ -1161,10 +1161,10 @@ _STATIC_AND_RUNTIME_TEST(
     1x1x1_with_qmax,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 27, 29)
+        .inputSize(8, 9, 10)
         .kernelSize(1, 1, 1)
-        .groupInputChannels(23)
-        .groupOutputChannels(19)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .qmax(128)
         .iterations(3))
 
@@ -1173,11 +1173,11 @@ _STATIC_TEST(
     1x1x1_with_input_stride,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 27, 29)
+        .inputSize(8, 9, 10)
         .kernelSize(1, 1, 1)
         .inputPixelStride(28)
-        .groupInputChannels(23)
-        .groupOutputChannels(19)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3))
 
 _STATIC_TEST(
@@ -1185,11 +1185,11 @@ _STATIC_TEST(
     1x1x1_with_output_stride,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 27, 29)
+        .inputSize(8, 9, 10)
         .kernelSize(1, 1, 1)
-        .outputPixelStride(29)
-        .groupInputChannels(23)
-        .groupOutputChannels(19)
+        .outputPixelStride(7)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3))
 
 _STATIC_AND_RUNTIME_TEST(
@@ -1197,11 +1197,11 @@ _STATIC_AND_RUNTIME_TEST(
     1x1x1_with_batch,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 13, 14)
+        .inputSize(7, 8, 10)
         .kernelSize(1, 1, 1)
         .batchSize(3)
-        .groupInputChannels(23)
-        .groupOutputChannels(19)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3))
 
 _STATIC_AND_RUNTIME_TEST(
@@ -1209,11 +1209,11 @@ _STATIC_AND_RUNTIME_TEST(
     grouped_1x1x1,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 24, 25)
+        .inputSize(8, 10, 11)
         .kernelSize(1, 1, 1)
         .groups(2)
-        .groupInputChannels(17)
-        .groupOutputChannels(19)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3))
 
 TEST(CONVOLUTION_3D_OP, xzp_1x1x1) {
@@ -1221,10 +1221,10 @@ TEST(CONVOLUTION_3D_OP, xzp_1x1x1) {
   if (pytorch_qnnp_params.q8conv_xzp.kthreshold != SIZE_MAX) {
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 27, 29)
+        .inputSize(8, 9, 10)
         .kernelSize(1, 1, 1)
         .groupInputChannels(pytorch_qnnp_params.q8conv_xzp.kthreshold + 1)
-        .groupOutputChannels(19)
+        .groupInputChannels(6)
         .iterations(3)
         .testQ8();
   }
@@ -1235,10 +1235,10 @@ TEST(CONVOLUTION_3D_OP, xzp_1x1x1_with_qmin) {
   if (pytorch_qnnp_params.q8conv_xzp.kthreshold != SIZE_MAX) {
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 27, 29)
+        .inputSize(8, 9, 10)
         .kernelSize(1, 1, 1)
         .groupInputChannels(pytorch_qnnp_params.q8conv_xzp.kthreshold + 1)
-        .groupOutputChannels(19)
+        .groupInputChannels(6)
         .qmin(128)
         .iterations(3)
         .testQ8();
@@ -1250,10 +1250,10 @@ TEST(CONVOLUTION_3D_OP, xzp_1x1x1_with_qmax) {
   if (pytorch_qnnp_params.q8conv_xzp.kthreshold != SIZE_MAX) {
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 27, 29)
+        .inputSize(8, 9, 10)
         .kernelSize(1, 1, 1)
         .groupInputChannels(pytorch_qnnp_params.q8conv_xzp.kthreshold + 1)
-        .groupOutputChannels(19)
+        .groupInputChannels(6)
         .qmax(128)
         .iterations(3)
         .testQ8();
@@ -1265,11 +1265,11 @@ TEST(CONVOLUTION_3D_OP, xzp_1x1x1_with_input_stride) {
   if (pytorch_qnnp_params.q8conv_xzp.kthreshold != SIZE_MAX) {
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 27, 29)
+        .inputSize(8, 9, 10)
         .kernelSize(1, 1, 1)
         .inputPixelStride(pytorch_qnnp_params.q8conv_xzp.kthreshold + 5)
         .groupInputChannels(pytorch_qnnp_params.q8conv_xzp.kthreshold + 1)
-        .groupOutputChannels(19)
+        .groupInputChannels(6)
         .iterations(3)
         .testQ8();
   }
@@ -1280,11 +1280,11 @@ TEST(CONVOLUTION_3D_OP, xzp_1x1x1_with_output_stride) {
   if (pytorch_qnnp_params.q8conv_xzp.kthreshold != SIZE_MAX) {
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 27, 29)
+        .inputSize(8, 9, 10)
         .kernelSize(1, 1, 1)
-        .outputPixelStride(29)
+        .outputPixelStride(7)
         .groupInputChannels(pytorch_qnnp_params.q8conv_xzp.kthreshold + 1)
-        .groupOutputChannels(19)
+        .groupInputChannels(6)
         .iterations(3)
         .testQ8();
   }
@@ -1295,11 +1295,11 @@ TEST(CONVOLUTION_3D_OP, xzp_1x1x1_with_batch) {
   if (pytorch_qnnp_params.q8conv_xzp.kthreshold != SIZE_MAX) {
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 13, 14)
+        .inputSize(7, 8, 10)
         .kernelSize(1, 1, 1)
         .batchSize(3)
         .groupInputChannels(pytorch_qnnp_params.q8conv_xzp.kthreshold + 1)
-        .groupOutputChannels(19)
+        .groupInputChannels(6)
         .iterations(3)
         .testQ8();
   }
@@ -1310,11 +1310,11 @@ TEST(CONVOLUTION_3D_OP, grouped_xzp_1x1x1) {
   if (pytorch_qnnp_params.q8conv_xzp.kthreshold != SIZE_MAX) {
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 24, 25)
+        .inputSize(8, 10, 11)
         .kernelSize(1, 1, 1)
         .groups(2)
         .groupInputChannels(pytorch_qnnp_params.q8conv_xzp.kthreshold + 1)
-        .groupOutputChannels(19)
+        .groupInputChannels(6)
         .iterations(3)
         .testQ8();
   }
@@ -1325,11 +1325,11 @@ TEST(CONVOLUTION_3D_OP, grouped_xzp_1x1x1_runtime_quant) {
   if (pytorch_qnnp_params.q8conv_xzp.kthreshold != SIZE_MAX) {
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 24, 25)
+        .inputSize(8, 10, 11)
         .kernelSize(1, 1, 1)
         .groups(2)
         .groupInputChannels(pytorch_qnnp_params.q8conv_xzp.kthreshold + 1)
-        .groupOutputChannels(19)
+        .groupInputChannels(6)
         .iterations(3)
         .testQ8(Mode::Runtime);
   }
@@ -1340,11 +1340,11 @@ _STATIC_AND_RUNTIME_TEST(
     1x1x3,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 20, 19)
+        .inputSize(8, 7, 10)
         .paddingWidth(1)
         .kernelSize(1, 1, 3)
-        .groupInputChannels(17)
-        .groupOutputChannels(15)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3))
 
 _STATIC_AND_RUNTIME_TEST(
@@ -1352,12 +1352,12 @@ _STATIC_AND_RUNTIME_TEST(
     grouped_1x1x3,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 20, 19)
+        .inputSize(8, 7, 10)
         .paddingWidth(1)
         .kernelSize(1, 1, 3)
         .groups(2)
-        .groupInputChannels(17)
-        .groupOutputChannels(15)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3))
 
 _STATIC_AND_RUNTIME_TEST(
@@ -1365,11 +1365,11 @@ _STATIC_AND_RUNTIME_TEST(
     3x3x1,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 19, 20)
+        .inputSize(8, 9, 7)
         .paddingHeight(1)
         .kernelSize(3, 3, 1)
-        .groupInputChannels(17)
-        .groupOutputChannels(15)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3))
 
 _STATIC_AND_RUNTIME_TEST(
@@ -1377,12 +1377,12 @@ _STATIC_AND_RUNTIME_TEST(
     grouped_3x3x1,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 19, 20)
+        .inputSize(8, 9, 7)
         .paddingHeight(1)
         .kernelSize(3, 3, 1)
         .groups(2)
-        .groupInputChannels(17)
-        .groupOutputChannels(15)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3))
 
 _STATIC_AND_RUNTIME_TEST(
@@ -1390,11 +1390,11 @@ _STATIC_AND_RUNTIME_TEST(
     3x3x3,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 13, 12)
+        .inputSize(8, 10, 9)
         .padding(1)
         .kernelSize(3, 3, 3)
-        .groupInputChannels(15)
-        .groupOutputChannels(17)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3))
 
 _STATIC_AND_RUNTIME_TEST(
@@ -1402,10 +1402,10 @@ _STATIC_AND_RUNTIME_TEST(
     3x3x3_without_padding,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 13, 12)
+        .inputSize(8, 10, 9)
         .kernelSize(3, 3, 3)
-        .groupInputChannels(15)
-        .groupOutputChannels(17)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3))
 
 _STATIC_AND_RUNTIME_TEST(
@@ -1413,11 +1413,11 @@ _STATIC_AND_RUNTIME_TEST(
     3x3x3_with_width_padding,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 13, 12)
+        .inputSize(8, 10, 9)
         .paddingWidth(1)
         .kernelSize(3, 3, 3)
-        .groupInputChannels(15)
-        .groupOutputChannels(17)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3))
 
 _STATIC_AND_RUNTIME_TEST(
@@ -1425,11 +1425,11 @@ _STATIC_AND_RUNTIME_TEST(
     3x3x3_with_height_padding,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 13, 12)
+        .inputSize(8, 10, 9)
         .paddingHeight(1)
         .kernelSize(3, 3, 3)
-        .groupInputChannels(15)
-        .groupOutputChannels(17)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3))
 
 _STATIC_AND_RUNTIME_TEST(
@@ -1437,11 +1437,11 @@ _STATIC_AND_RUNTIME_TEST(
     3x3x3_with_depth_padding,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 13, 12)
+        .inputSize(8, 10, 9)
         .paddingDepth(1)
         .kernelSize(3, 3, 3)
-        .groupInputChannels(15)
-        .groupOutputChannels(17)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3))
 
 _STATIC_TEST(
@@ -1449,12 +1449,12 @@ _STATIC_TEST(
     3x3x3_with_input_stride,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 13, 12)
+        .inputSize(8, 10, 9)
         .padding(1)
         .kernelSize(3, 3, 3)
         .inputPixelStride(22)
-        .groupInputChannels(15)
-        .groupOutputChannels(17)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3))
 
 _STATIC_TEST(
@@ -1462,12 +1462,12 @@ _STATIC_TEST(
     3x3x3_with_output_stride,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 13, 12)
+        .inputSize(8, 10, 9)
         .padding(1)
         .kernelSize(3, 3, 3)
         .outputPixelStride(23)
-        .groupInputChannels(15)
-        .groupOutputChannels(17)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3))
 
 _STATIC_AND_RUNTIME_TEST(
@@ -1479,8 +1479,8 @@ _STATIC_AND_RUNTIME_TEST(
         .padding(1)
         .kernelSize(3, 3, 3)
         .batchSize(3)
-        .groupInputChannels(15)
-        .groupOutputChannels(17)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3))
 
 _STATIC_AND_RUNTIME_TEST(
@@ -1492,8 +1492,8 @@ _STATIC_AND_RUNTIME_TEST(
         .padding(1)
         .kernelSize(3, 3, 3)
         .groups(2)
-        .groupInputChannels(14)
-        .groupOutputChannels(13)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3))
 
 _STATIC_AND_RUNTIME_TEST(
@@ -1501,12 +1501,12 @@ _STATIC_AND_RUNTIME_TEST(
     3x3x3s2,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 19, 21)
+        .inputSize(8, 10, 12)
         .padding(1)
         .kernelSize(3, 3, 3)
         .subsampling(2)
-        .groupInputChannels(27)
-        .groupOutputChannels(19)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3))
 
 _STATIC_AND_RUNTIME_TEST(
@@ -1514,12 +1514,12 @@ _STATIC_AND_RUNTIME_TEST(
     3x3x3s1x2,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 13, 13)
+        .inputSize(8, 9, 10)
         .padding(1)
         .kernelSize(3, 3, 3)
         .subsampling(1, 1, 2)
-        .groupInputChannels(27)
-        .groupOutputChannels(19)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3))
 
 _STATIC_AND_RUNTIME_TEST(
@@ -1527,12 +1527,12 @@ _STATIC_AND_RUNTIME_TEST(
     3x3x3s2x1,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 13, 13)
+        .inputSize(8, 9, 10)
         .padding(1)
         .kernelSize(3, 3, 3)
         .subsampling(2, 2, 1)
-        .groupInputChannels(27)
-        .groupOutputChannels(19)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3))
 
 _STATIC_AND_RUNTIME_TEST(
@@ -1540,12 +1540,12 @@ _STATIC_AND_RUNTIME_TEST(
     3x3x3d2,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 13, 14)
+        .inputSize(7, 8, 10)
         .padding(2)
         .kernelSize(3, 3, 3)
         .dilation(2)
-        .groupInputChannels(27)
-        .groupOutputChannels(19)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3))
 
 _STATIC_AND_RUNTIME_TEST(
@@ -1553,12 +1553,12 @@ _STATIC_AND_RUNTIME_TEST(
     3x3x3d1x2,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(14, 14, 15)
+        .inputSize(11, 10, 8)
         .padding(1, 1, 2)
         .kernelSize(3, 3, 3)
         .dilation(1, 1, 2)
-        .groupInputChannels(27)
-        .groupOutputChannels(19)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3))
 
 _STATIC_AND_RUNTIME_TEST(
@@ -1566,12 +1566,12 @@ _STATIC_AND_RUNTIME_TEST(
     3x3x3d2x1,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 15, 14)
+        .inputSize(10, 9, 7)
         .padding(2, 2, 1)
         .kernelSize(3, 3, 3)
         .dilation(2, 2, 1)
-        .groupInputChannels(27)
-        .groupOutputChannels(19)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3))
 
 _STATIC_AND_RUNTIME_TEST(
@@ -1579,7 +1579,7 @@ _STATIC_AND_RUNTIME_TEST(
     depthwise_3x3x3,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 15, 14)
+        .inputSize(10, 9, 7)
         .padding(1, 1, 1)
         .kernelSize(3, 3, 3)
         .groups(27)
@@ -1590,7 +1590,7 @@ _STATIC_AND_RUNTIME_TEST(
     depthwise_3x3x3s2,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 15, 14)
+        .inputSize(10, 9, 7)
         .padding(1, 1, 1)
         .kernelSize(3, 3, 3)
         .subsampling(2)
@@ -1602,7 +1602,7 @@ _STATIC_AND_RUNTIME_TEST(
     depthwise_3x3x3s1x2,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 15, 14)
+        .inputSize(10, 9, 7)
         .padding(1, 1, 1)
         .kernelSize(3, 3, 3)
         .subsampling(1, 1, 2)
@@ -1614,7 +1614,7 @@ _STATIC_AND_RUNTIME_TEST(
     depthwise_3x3x3s2x1,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 15, 14)
+        .inputSize(10, 9, 7)
         .padding(1, 1, 1)
         .kernelSize(3, 3, 3)
         .subsampling(2, 2, 1)
@@ -1626,7 +1626,7 @@ _STATIC_AND_RUNTIME_TEST(
     depthwise_3x3x3d2,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 15, 14)
+        .inputSize(10, 9, 7)
         .padding(1, 1, 1)
         .kernelSize(3, 3, 3)
         .dilation(2)
@@ -1638,7 +1638,7 @@ _STATIC_AND_RUNTIME_TEST(
     depthwise_3x3x3d1x2,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 15, 14)
+        .inputSize(10, 9, 7)
         .padding(1, 1, 1)
         .kernelSize(3, 3, 3)
         .dilation(1, 1, 2)
@@ -1650,7 +1650,7 @@ _STATIC_AND_RUNTIME_TEST(
     depthwise_3x3x3d2x1,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 15, 14)
+        .inputSize(10, 9, 7)
         .padding(1, 1, 1)
         .kernelSize(3, 3, 3)
         .dilation(2, 2, 1)
@@ -1675,10 +1675,10 @@ _STATIC_AND_RUNTIME_TEST(
     1x1x1_per_channel,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 27, 29)
+        .inputSize(8, 9, 10)
         .kernelSize(1, 1, 1)
-        .groupInputChannels(23)
-        .groupOutputChannels(19)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3)
         .per_channel(true))
 
@@ -1687,10 +1687,10 @@ _STATIC_AND_RUNTIME_TEST(
     1x1x1_with_qmin_per_channel,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 27, 29)
+        .inputSize(8, 9, 10)
         .kernelSize(1, 1, 1)
-        .groupInputChannels(23)
-        .groupOutputChannels(19)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .qmin(128)
         .iterations(3)
         .per_channel(true))
@@ -1700,10 +1700,10 @@ _STATIC_AND_RUNTIME_TEST(
     1x1x1_with_qmax_per_channel,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 27, 29)
+        .inputSize(8, 9, 10)
         .kernelSize(1, 1, 1)
-        .groupInputChannels(23)
-        .groupOutputChannels(19)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .qmax(128)
         .iterations(3)
         .per_channel(true))
@@ -1713,11 +1713,11 @@ _STATIC_TEST(
     1x1x1_with_input_stride_per_channel,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 27, 29)
+        .inputSize(8, 9, 10)
         .kernelSize(1, 1, 1)
         .inputPixelStride(28)
-        .groupInputChannels(23)
-        .groupOutputChannels(19)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3)
         .per_channel(true))
 
@@ -1726,11 +1726,11 @@ _STATIC_TEST(
     1x1x1_with_output_stride_per_channel,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 27, 29)
+        .inputSize(8, 9, 10)
         .kernelSize(1, 1, 1)
-        .outputPixelStride(29)
-        .groupInputChannels(23)
-        .groupOutputChannels(19)
+        .outputPixelStride(7)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3)
         .per_channel(true))
 
@@ -1739,11 +1739,11 @@ _STATIC_AND_RUNTIME_TEST(
     1x1x1_with_batch_per_channel,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 13, 14)
+        .inputSize(7, 8, 10)
         .kernelSize(1, 1, 1)
         .batchSize(3)
-        .groupInputChannels(23)
-        .groupOutputChannels(19)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3)
         .per_channel(true))
 
@@ -1752,11 +1752,11 @@ _STATIC_AND_RUNTIME_TEST(
     grouped_1x1x1_per_channel,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 24, 25)
+        .inputSize(8, 10, 11)
         .kernelSize(1, 1, 1)
         .groups(2)
-        .groupInputChannels(17)
-        .groupOutputChannels(19)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3)
         .per_channel(true))
 
@@ -1765,10 +1765,10 @@ TEST(CONVOLUTION_3D_OP, xzp_1x1x1_per_channel) {
   if (pytorch_qnnp_params.q8conv_xzp.kthreshold != SIZE_MAX) {
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 27, 29)
+        .inputSize(8, 9, 10)
         .kernelSize(1, 1, 1)
         .groupInputChannels(pytorch_qnnp_params.q8conv_xzp.kthreshold + 1)
-        .groupOutputChannels(19)
+        .groupInputChannels(6)
         .iterations(3)
         .per_channel(true)
         .testQ8();
@@ -1780,10 +1780,10 @@ TEST(CONVOLUTION_3D_OP, xzp_1x1x1_with_qmin_per_channel) {
   if (pytorch_qnnp_params.q8conv_xzp.kthreshold != SIZE_MAX) {
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 27, 29)
+        .inputSize(8, 9, 10)
         .kernelSize(1, 1, 1)
         .groupInputChannels(pytorch_qnnp_params.q8conv_xzp.kthreshold + 1)
-        .groupOutputChannels(19)
+        .groupInputChannels(6)
         .qmin(128)
         .iterations(3)
         .per_channel(true)
@@ -1796,10 +1796,10 @@ TEST(CONVOLUTION_3D_OP, xzp_1x1x1_with_qmax_per_channel) {
   if (pytorch_qnnp_params.q8conv_xzp.kthreshold != SIZE_MAX) {
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 27, 29)
+        .inputSize(8, 9, 10)
         .kernelSize(1, 1, 1)
         .groupInputChannels(pytorch_qnnp_params.q8conv_xzp.kthreshold + 1)
-        .groupOutputChannels(19)
+        .groupInputChannels(6)
         .qmax(128)
         .iterations(3)
         .per_channel(true)
@@ -1812,11 +1812,11 @@ TEST(CONVOLUTION_3D_OP, xzp_1x1x1_with_input_stride_per_channel) {
   if (pytorch_qnnp_params.q8conv_xzp.kthreshold != SIZE_MAX) {
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 27, 29)
+        .inputSize(8, 9, 10)
         .kernelSize(1, 1, 1)
         .inputPixelStride(pytorch_qnnp_params.q8conv_xzp.kthreshold + 5)
         .groupInputChannels(pytorch_qnnp_params.q8conv_xzp.kthreshold + 1)
-        .groupOutputChannels(19)
+        .groupInputChannels(6)
         .iterations(3)
         .per_channel(true)
         .testQ8();
@@ -1828,11 +1828,11 @@ TEST(CONVOLUTION_3D_OP, xzp_1x1x1_with_output_stride_per_channel) {
   if (pytorch_qnnp_params.q8conv_xzp.kthreshold != SIZE_MAX) {
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 27, 29)
+        .inputSize(8, 9, 10)
         .kernelSize(1, 1, 1)
-        .outputPixelStride(29)
+        .outputPixelStride(7)
         .groupInputChannels(pytorch_qnnp_params.q8conv_xzp.kthreshold + 1)
-        .groupOutputChannels(19)
+        .groupInputChannels(6)
         .iterations(3)
         .per_channel(true)
         .testQ8();
@@ -1844,11 +1844,11 @@ TEST(CONVOLUTION_3D_OP, xzp_1x1x1_with_batch_per_channel) {
   if (pytorch_qnnp_params.q8conv_xzp.kthreshold != SIZE_MAX) {
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 13, 14)
+        .inputSize(7, 8, 10)
         .kernelSize(1, 1, 1)
         .batchSize(3)
         .groupInputChannels(pytorch_qnnp_params.q8conv_xzp.kthreshold + 1)
-        .groupOutputChannels(19)
+        .groupInputChannels(6)
         .iterations(3)
         .per_channel(true)
         .testQ8();
@@ -1860,11 +1860,11 @@ TEST(CONVOLUTION_3D_OP, grouped_xzp_1x1x1_per_channel) {
   if (pytorch_qnnp_params.q8conv_xzp.kthreshold != SIZE_MAX) {
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 24, 25)
+        .inputSize(8, 10, 11)
         .kernelSize(1, 1, 1)
         .groups(2)
         .groupInputChannels(pytorch_qnnp_params.q8conv_xzp.kthreshold + 1)
-        .groupOutputChannels(19)
+        .groupInputChannels(6)
         .iterations(3)
         .per_channel(true)
         .testQ8();
@@ -1876,11 +1876,11 @@ TEST(CONVOLUTION_3D_OP, grouped_xzp_1x1x1_runtime_quant_per_channel) {
   if (pytorch_qnnp_params.q8conv_xzp.kthreshold != SIZE_MAX) {
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 24, 25)
+        .inputSize(8, 10, 11)
         .kernelSize(1, 1, 1)
         .groups(2)
         .groupInputChannels(pytorch_qnnp_params.q8conv_xzp.kthreshold + 1)
-        .groupOutputChannels(19)
+        .groupInputChannels(6)
         .iterations(3)
         .per_channel(true)
         .testQ8(Mode::Runtime);
@@ -1892,11 +1892,11 @@ _STATIC_AND_RUNTIME_TEST(
     1x1x3_per_channel,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 20, 19)
+        .inputSize(8, 7, 10)
         .paddingWidth(1)
         .kernelSize(1, 1, 3)
-        .groupInputChannels(17)
-        .groupOutputChannels(15)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3)
         .per_channel(true))
 
@@ -1905,12 +1905,12 @@ _STATIC_AND_RUNTIME_TEST(
     grouped_1x1x3_per_channel,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 20, 19)
+        .inputSize(8, 7, 10)
         .paddingWidth(1)
         .kernelSize(1, 1, 3)
         .groups(2)
-        .groupInputChannels(17)
-        .groupOutputChannels(15)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3)
         .per_channel(true))
 
@@ -1919,11 +1919,11 @@ _STATIC_AND_RUNTIME_TEST(
     3x3x1_per_channel,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 19, 20)
+        .inputSize(8, 9, 7)
         .paddingHeight(1)
         .kernelSize(3, 3, 1)
-        .groupInputChannels(17)
-        .groupOutputChannels(15)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3)
         .per_channel(true))
 
@@ -1932,12 +1932,12 @@ _STATIC_AND_RUNTIME_TEST(
     grouped_3x3x1_per_channel,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 19, 20)
+        .inputSize(8, 9, 7)
         .paddingHeight(1)
         .kernelSize(3, 3, 1)
         .groups(2)
-        .groupInputChannels(17)
-        .groupOutputChannels(15)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3)
         .per_channel(true))
 
@@ -1946,11 +1946,11 @@ _STATIC_AND_RUNTIME_TEST(
     3x3x3_per_channel,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 13, 12)
+        .inputSize(8, 10, 9)
         .padding(1)
         .kernelSize(3, 3, 3)
-        .groupInputChannels(15)
-        .groupOutputChannels(17)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3)
         .per_channel(true))
 
@@ -1959,10 +1959,10 @@ _STATIC_AND_RUNTIME_TEST(
     3x3x3_without_padding_per_channel,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 13, 12)
+        .inputSize(8, 10, 9)
         .kernelSize(3, 3, 3)
-        .groupInputChannels(15)
-        .groupOutputChannels(17)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3)
         .per_channel(true))
 
@@ -1971,11 +1971,11 @@ _STATIC_AND_RUNTIME_TEST(
     3x3x3_with_width_padding_per_channel,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 13, 12)
+        .inputSize(8, 10, 9)
         .paddingWidth(1)
         .kernelSize(3, 3, 3)
-        .groupInputChannels(15)
-        .groupOutputChannels(17)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3)
         .per_channel(true))
 
@@ -1984,11 +1984,11 @@ _STATIC_AND_RUNTIME_TEST(
     3x3x3_with_height_padding_per_channel,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 13, 12)
+        .inputSize(8, 10, 9)
         .paddingHeight(1)
         .kernelSize(3, 3, 3)
-        .groupInputChannels(15)
-        .groupOutputChannels(17)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3)
         .per_channel(true))
 
@@ -1997,11 +1997,11 @@ _STATIC_AND_RUNTIME_TEST(
     3x3x3_with_depth_padding_per_channel,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 13, 12)
+        .inputSize(8, 10, 9)
         .paddingDepth(1)
         .kernelSize(3, 3, 3)
-        .groupInputChannels(15)
-        .groupOutputChannels(17)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3)
         .per_channel(true))
 
@@ -2010,12 +2010,12 @@ _STATIC_TEST(
     3x3x3_with_input_stride_per_channel,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 13, 12)
+        .inputSize(8, 10, 9)
         .padding(1)
         .kernelSize(3, 3, 3)
         .inputPixelStride(22)
-        .groupInputChannels(15)
-        .groupOutputChannels(17)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3)
         .per_channel(true))
 
@@ -2024,12 +2024,12 @@ _STATIC_TEST(
     3x3x3_with_output_stride_per_channel,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 13, 12)
+        .inputSize(8, 10, 9)
         .padding(1)
         .kernelSize(3, 3, 3)
         .outputPixelStride(23)
-        .groupInputChannels(15)
-        .groupOutputChannels(17)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3)
         .per_channel(true))
 
@@ -2042,8 +2042,8 @@ _STATIC_AND_RUNTIME_TEST(
         .padding(1)
         .kernelSize(3, 3, 3)
         .batchSize(3)
-        .groupInputChannels(15)
-        .groupOutputChannels(17)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3)
         .per_channel(true))
 
@@ -2056,8 +2056,8 @@ _STATIC_AND_RUNTIME_TEST(
         .padding(1)
         .kernelSize(3, 3, 3)
         .groups(2)
-        .groupInputChannels(14)
-        .groupOutputChannels(13)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3)
         .per_channel(true))
 
@@ -2066,12 +2066,12 @@ _STATIC_AND_RUNTIME_TEST(
     3x3x3s2_per_channel,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 19, 21)
+        .inputSize(8, 10, 12)
         .padding(1)
         .kernelSize(3, 3, 3)
         .subsampling(2)
-        .groupInputChannels(27)
-        .groupOutputChannels(19)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3)
         .per_channel(true))
 
@@ -2080,12 +2080,12 @@ _STATIC_AND_RUNTIME_TEST(
     3x3x3s1x2_per_channel,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 13, 13)
+        .inputSize(8, 9, 10)
         .padding(1)
         .kernelSize(3, 3, 3)
         .subsampling(1, 1, 2)
-        .groupInputChannels(27)
-        .groupOutputChannels(19)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3)
         .per_channel(true))
 
@@ -2094,12 +2094,12 @@ _STATIC_AND_RUNTIME_TEST(
     3x3x3s2x1_per_channel,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 13, 13)
+        .inputSize(8, 9, 10)
         .padding(1)
         .kernelSize(3, 3, 3)
         .subsampling(2, 2, 1)
-        .groupInputChannels(27)
-        .groupOutputChannels(19)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3)
         .per_channel(true))
 
@@ -2108,12 +2108,12 @@ _STATIC_AND_RUNTIME_TEST(
     3x3x3d2_per_channel,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 13, 14)
+        .inputSize(7, 8, 10)
         .padding(2)
         .kernelSize(3, 3, 3)
         .dilation(2)
-        .groupInputChannels(27)
-        .groupOutputChannels(19)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3)
         .per_channel(true))
 
@@ -2122,12 +2122,12 @@ _STATIC_AND_RUNTIME_TEST(
     3x3x3d1x2_per_channel,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(14, 14, 15)
+        .inputSize(11, 10, 8)
         .padding(1, 1, 2)
         .kernelSize(3, 3, 3)
         .dilation(1, 1, 2)
-        .groupInputChannels(27)
-        .groupOutputChannels(19)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3)
         .per_channel(true))
 
@@ -2136,12 +2136,12 @@ _STATIC_AND_RUNTIME_TEST(
     3x3x3d2x1_per_channel,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 15, 14)
+        .inputSize(10, 9, 7)
         .padding(2, 2, 1)
         .kernelSize(3, 3, 3)
         .dilation(2, 2, 1)
-        .groupInputChannels(27)
-        .groupOutputChannels(19)
+        .groupInputChannels(5)
+        .groupInputChannels(6)
         .iterations(3)
         .per_channel(true))
 
@@ -2150,7 +2150,7 @@ _STATIC_AND_RUNTIME_TEST(
     depthwise_3x3x3_per_channel,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 15, 14)
+        .inputSize(10, 9, 7)
         .padding(1, 1, 1)
         .kernelSize(3, 3, 3)
         .groups(27)
@@ -2162,7 +2162,7 @@ _STATIC_AND_RUNTIME_TEST(
     depthwise_3x3x3s2_per_channel,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 15, 14)
+        .inputSize(10, 9, 7)
         .padding(1, 1, 1)
         .kernelSize(3, 3, 3)
         .subsampling(2)
@@ -2175,7 +2175,7 @@ _STATIC_AND_RUNTIME_TEST(
     depthwise_3x3x3s1x2_per_channel,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 15, 14)
+        .inputSize(10, 9, 7)
         .padding(1, 1, 1)
         .kernelSize(3, 3, 3)
         .subsampling(1, 1, 2)
@@ -2188,7 +2188,7 @@ _STATIC_AND_RUNTIME_TEST(
     depthwise_3x3x3s2x1_per_channel,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 15, 14)
+        .inputSize(10, 9, 7)
         .padding(1, 1, 1)
         .kernelSize(3, 3, 3)
         .subsampling(2, 2, 1)
@@ -2201,7 +2201,7 @@ _STATIC_AND_RUNTIME_TEST(
     depthwise_3x3x3d2_per_channel,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 15, 14)
+        .inputSize(10, 9, 7)
         .padding(1, 1, 1)
         .kernelSize(3, 3, 3)
         .dilation(2)
@@ -2214,7 +2214,7 @@ _STATIC_AND_RUNTIME_TEST(
     depthwise_3x3x3d1x2_per_channel,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 15, 14)
+        .inputSize(10, 9, 7)
         .padding(1, 1, 1)
         .kernelSize(3, 3, 3)
         .dilation(1, 1, 2)
@@ -2227,7 +2227,7 @@ _STATIC_AND_RUNTIME_TEST(
     depthwise_3x3x3d2x1_per_channel,
     ConvolutionOperatorTester()
         .dimensionality(3)
-        .inputSize(8, 15, 14)
+        .inputSize(10, 9, 7)
         .padding(1, 1, 1)
         .kernelSize(3, 3, 3)
         .dilation(2, 2, 1)
