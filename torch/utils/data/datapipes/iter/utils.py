@@ -2,7 +2,6 @@ import copy
 import pickle
 import warnings
 from torch.utils.data import IterDataPipe
-
 from typing import Callable
 
 
@@ -30,38 +29,44 @@ class IterableWrapperIterDataPipe(IterDataPipe):
         self.deepcopy = deepcopy
         self.state_counter = 0
         self.iter = None
+        self.been_reset = False
 
     def __iter__(self):
-        if self.iter is None:
-            source_data = self.iterable
-            if self.deepcopy:
-                try:
-                    source_data = copy.deepcopy(self.iterable)
-                # For the case that data cannot be deep-copied,
-                # all in-place operations will affect iterable variable.
-                # When this DataPipe is iterated second time, it will
-                # yield modified items.
-                except TypeError:
-                    warnings.warn(
-                        "The input iterable can not be deepcopied, "
-                        "please be aware of in-place modification would affect source data."
-                    )
-            self.iter = iter(source_data)
+        if self.been_reset is True:
+            self.been_reset = False
+            return self.iter
+        elif self.iter is None:
+            self._create_iterator()
             return self.iter
         else:
-            # TODO: Raise a warning about only one iter may exist at a time?
-            #       Then, allow user to reset it with a separate method
-            return self.iter
+            raise RuntimeError(f"Only one iterator can exist for each {type(self).__name__} at a time.")
+
+    def _create_iterator(self) -> None:
+        source_data = self.iterable
+        if self.deepcopy:
+            try:
+                source_data = copy.deepcopy(self.iterable)
+            # For the case that data cannot be deep-copied,
+            # all in-place operations will affect iterable variable.
+            # When this DataPipe is iterated second time, it will
+            # yield modified items.
+            except TypeError:
+                warnings.warn(
+                    "The input iterable cannot be deep copied,"
+                    "please be aware of in-place modification would affect source data."
+                )
+        self.iter = iter(source_data)
 
     def __next__(self):
         if self.iter is None:
-            self.iter = self.__iter__()
+            self._create_iterator()
         self.state_counter += 1
         return next(self.iter)
 
-    def reset(self):
+    def reset(self) -> None:
         self.iter = None
-        return self.__iter__()
+        self._create_iterator()
+        self.been_reset = True
 
     def save_snapshot(self):
         return self.state_counter
