@@ -568,12 +568,10 @@ ctc_loss_zero_padded_gradients(
 // The backward. It essentially computes eq 16 by using the above kernels.
 // We don't do a lot of checking as we envision this to be called only when backpropagating through a (well-checked) forward.
 template<typename scalar_t, ScalarType target_scalar_type>
-Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_probs_, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths,
+Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_probs, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths,
                                       const Tensor& neg_log_likelihood, const Tensor& log_alpha, int64_t BLANK, bool zero_infinity) {
   constexpr scalar_t neginf = -INFINITY;
   using target_t = typename std::conditional<target_scalar_type == kInt, int, int64_t>::type;
-  auto is_batched = log_probs_.dim() == 3;
-  Tensor log_probs = is_batched ? log_probs_ : log_probs_.unsqueeze(1);
   int64_t batch_size = log_probs.size(1);
   int64_t num_labels = log_probs.size(2);
   int64_t lp_input_stride = log_probs.stride(0);
@@ -740,9 +738,6 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 
-  if (!is_batched) {
-    return grad.squeeze(1);
-  }
   return grad;
 }
 

@@ -12,6 +12,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/native/Fill.h>
 #include <c10/util/irange.h>
+#include <iostream>
 
 #include <numeric>
 #include <type_traits>
@@ -171,12 +172,10 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
 // a) computing the beta analogous to the alphas in the forward (backward half of the forward-backward algorithm) (eq (10) and (11))
 // b) collecting the per-activation characters for all s and wrapping the gradient (eq (16), the collection is the sum)
 template<typename scalar_t, ScalarType target_scalar_type>
-Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_probs_, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths,
+Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_probs, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths,
                                       const Tensor& neg_log_likelihood, const Tensor& log_alpha, int64_t BLANK, bool zero_infinity) {
   constexpr scalar_t neginf = -std::numeric_limits<scalar_t>::infinity();
   using target_t = typename std::conditional<target_scalar_type == kInt, int, int64_t>::type;
-  auto is_batched = log_probs_.dim() == 3;
-  Tensor log_probs = is_batched ? log_probs_ : log_probs_.unsqueeze(1);
   int64_t max_input_length = log_probs.size(0);
   int64_t batch_size = log_probs.size(1);
   int64_t num_labels = log_probs.size(2);
@@ -342,9 +341,6 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
     }
   });
 
-  if (!is_batched) {
-    return grad.squeeze(1);
-  }
   return grad;
 }
 
@@ -376,7 +372,8 @@ Tensor ctc_loss_backward_cpu(const Tensor& grad, const Tensor& log_probs, const 
 // the gradient is implemented for _cudnn_ctc_loss (just in derivatives.yaml) and _ctc_loss and this function has automatic gradients
 // it also handles the reduction if desired
 Tensor ctc_loss(const Tensor& log_probs_, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths, int64_t BLANK, int64_t reduction, bool zero_infinity) {
-  Tensor log_probs = log_probs_.dim() == 3 ? log_probs_ : log_probs_.unsqueeze(1);
+  auto is_batched = log_probs_.dim() == 3;
+  Tensor log_probs = is_batched ? log_probs_ : log_probs_.unsqueeze(1);
   bool use_cudnn =
       (log_probs.device().type() == at::kCUDA) &&
       at::_use_cudnn_ctc_loss(
@@ -408,7 +405,7 @@ Tensor ctc_loss(const Tensor& log_probs_, const Tensor& targets, IntArrayRef inp
   } else if (reduction == at::Reduction::Sum) {
     return res.sum();
   }
-  return res;
+  return is_batched ? res : res.squeeze(0);
 }
 
 // Convenience function accepting Tensors

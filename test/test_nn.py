@@ -16404,11 +16404,8 @@ class TestNNDeviceType(NNTestCase):
         _helper(zero_infinity=True)
         _helper(zero_infinity=False)
 
-    def _CTCLoss_no_batch_dim_helper(self, device):
-        input_length = 40
-        vocab_size = 3
+    def _CTCLoss_no_batch_dim_helper(self, device, input_length, vocab_size, target_length):
         batch_size = 1
-        target_length = 12
 
         log_probs = torch.randn(input_length, batch_size, vocab_size, dtype=torch.float, device=device) \
                          .log_softmax(2).requires_grad_()
@@ -16416,8 +16413,8 @@ class TestNNDeviceType(NNTestCase):
         input_lengths = batch_size * [input_length]
         target_lengths = batch_size * [target_length]
 
-        log_probs_no_bd = log_probs.squeeze(1)
-        targets_no_bd = targets.squeeze(0)
+        log_probs_no_bd = log_probs.squeeze(1).detach().clone().requires_grad_()
+        targets_no_bd = targets.squeeze(0).detach().clone()
         input_lengths_no_bd = torch.tensor(input_length)
         target_lengths_no_bd = torch.tensor(target_length)
 
@@ -16427,57 +16424,86 @@ class TestNNDeviceType(NNTestCase):
     @onlyCUDA
     @skipCUDAIfNoCudnn
     def test_CTCLoss_no_batch_dim_cudnn(self, device):
-        args, args_no_bd = self._CTCLoss_no_batch_dim_helper(device)
-        log_probs, targets, input_lengths, target_lengths = args
-        log_probs_no_bd, targets_no_bd, input_lengths_no_bd, target_lengths_no_bd = args_no_bd
+        def _CTCLoss_check_helper(expected, list_of_results, atol=None, rtol=None):
+            for r in list_of_results:
+                self.assertEqual(expected, r, atol=atol, rtol=rtol)
 
-        with torch.backends.cudnn.flags(enabled=False):
-            res = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths, zero_infinity=True)
-            res_no_bd = torch.nn.functional.ctc_loss(log_probs_no_bd, targets_no_bd, input_lengths_no_bd,
-                                                     target_lengths_no_bd, zero_infinity=True)
+        input_length = 40
+        vocab_size = 3
+        target_length = 12
 
-        grad_out = torch.randn_like(res)
-        grad, = torch.autograd.grad(res, log_probs, grad_out)
-        grad_out_no_bd = grad_out.detach().clone().double().requires_grad_()
-        grad_no_bd, = torch.autograd.grad(res_no_bd, log_probs_no_bd, grad_out_no_bd)
+        for reduction in ['none', 'mean']:
+            args, args_no_bd = self._CTCLoss_no_batch_dim_helper(device, input_length, vocab_size, target_length)
+            log_probs, targets, input_lengths, target_lengths = args
+            log_probs_no_bd, targets_no_bd, input_lengths_no_bd, target_lengths_no_bd = args_no_bd
 
-        with torch.backends.cudnn.flags(enabled=True):
-            res_mixed = torch.nn.functional.ctc_loss(log_probs, targets.cpu(), input_lengths, target_lengths, zero_infinity=True)
-            res_no_bd_mixed = torch.nn.functional.ctc_loss(
-                log_probs_no_bd,
-                targets_no_bd.cpu(),
-                input_lengths_no_bd,
-                target_lengths_no_bd,
-                zero_infinity=True
+            log_probs_refs = [log_probs.detach().clone().requires_grad_() for _ in range(3)]
+            log_probs_no_bd_ref = log_probs_no_bd.detach().clone().requires_grad_()
+
+            with torch.backends.cudnn.flags(enabled=False):
+                res1 = torch.nn.functional.ctc_loss(log_probs, targets.cuda(), input_lengths, target_lengths, reduction=reduction, zero_infinity=True)
+                res2 = torch.nn.functional.ctc_loss(log_probs_refs[0], targets_no_bd.cuda(), input_lengths, target_lengths, reduction=reduction, zero_infinity=True)
+                res_no_bd = torch.nn.functional.ctc_loss(log_probs_no_bd, targets_no_bd.cuda(), input_lengths_no_bd,
+                                                         target_lengths_no_bd, reduction=reduction, zero_infinity=True)
+                res1.backward()
+                res2.backward()
+                res_no_bd.backward()
+
+            with torch.backends.cudnn.flags(enabled=True):
+                res1_mixed = torch.nn.functional.ctc_loss(log_probs_refs[1], targets.cpu(), input_lengths, target_lengths, reduction=reduction, zero_infinity=True)
+                res2_mixed = torch.nn.functional.ctc_loss(log_probs_refs[2], targets.cpu(), input_lengths, target_lengths, reduction=reduction, zero_infinity=True)
+                res_no_bd_mixed = torch.nn.functional.ctc_loss(log_probs_no_bd_ref, targets_no_bd.cpu(), input_lengths_no_bd, 
+                                                               target_lengths_no_bd, reduction=reduction, zero_infinity=True)
+                res1_mixed.backward()
+                res2_mixed.backward()
+                res_no_bd_mixed.backward()
+
+            _CTCLoss_check_helper(
+                (1,) if reduction == 'none' else (), 
+                [res1.shape, res2.shape, res1_mixed.shape, res2_mixed.shape]
             )
-            grad_mixed, = torch.autograd.grad(res_mixed, log_probs, grad_out)
-            grad_no_bd_mixed, = torch.autograd.grad(res_no_bd_mixed, log_probs_no_bd, grad_out)
+            _CTCLoss_check_helper((), [res_no_bd.shape, res_no_bd_mixed.shape])
 
-        self.assertEqual(res, res_no_bd, atol=1e-4, rtol=0)
-        self.assertEqual(res, res_mixed, atol=1e-4, rtol=0)
-        self.assertEqual(res, res_no_bd_mixed, atol=1e-4, rtol=0)
+            _CTCLoss_check_helper((input_length, 1, vocab_size), [t.grad.shape for t in [log_probs] + log_probs_refs])
+            _CTCLoss_check_helper((input_length, vocab_size), [log_probs_no_bd.grad.shape, log_probs_no_bd_ref.grad.shape])
 
-        self.assertEqual(grad.squeeze(1), grad_no_bd, atol=1e-4, rtol=0)
-        self.assertEqual(grad, grad_mixed, atol=1e-4, rtol=0)
-        self.assertEqual(grad_no_bd, grad_no_bd_mixed, atol=1e-4, rtol=0)
+            _CTCLoss_check_helper(res1, [res2, res1_mixed, res2_mixed], atol=1e-4, rtol=0)
+            _CTCLoss_check_helper(res1.squeeze(0), [res_no_bd, res_no_bd_mixed], atol=1e-4, rtol=0)
+
+            _CTCLoss_check_helper(log_probs.grad, [t.grad for t in log_probs_refs], atol=1e-4, rtol=0)
+            _CTCLoss_check_helper(log_probs.grad.squeeze(1), [log_probs_no_bd.grad, log_probs_no_bd_ref.grad], atol=1e-4, rtol=0)
 
     @onlyCPU
     def test_CTCLoss_no_batch_dim_cpu(self, device):
-        args, args_no_bd = self._CTCLoss_no_batch_dim_helper(device)
-        log_probs, targets, input_lengths, target_lengths = args
-        log_probs_no_bd, targets_no_bd, input_lengths_no_bd, target_lengths_no_bd = args_no_bd
+        input_length = 40
+        vocab_size = 3
+        target_length = 12
 
-        res = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths, zero_infinity=True)
-        res_no_bd = torch.nn.functional.ctc_loss(log_probs_no_bd, targets_no_bd, input_lengths_no_bd,
-                                                 target_lengths_no_bd, zero_infinity=True)
+        for reduction in ['none', 'mean']:
+            args, args_no_bd = self._CTCLoss_no_batch_dim_helper(device, input_length, vocab_size, target_length)
+            log_probs, targets, input_lengths, target_lengths = args
+            log_probs_no_bd, targets_no_bd, input_lengths_no_bd, target_lengths_no_bd = args_no_bd
+            log_probs_ref = log_probs.detach().clone().requires_grad_()
 
-        grad_out = torch.randn_like(res)
-        grad, = torch.autograd.grad(res, log_probs, grad_out)
-        grad_out_no_bd = grad_out.detach().clone().double().requires_grad_()
-        grad_no_bd, = torch.autograd.grad(res_no_bd, log_probs_no_bd, grad_out_no_bd)
+            res1 = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction=reduction, zero_infinity=True)
+            res2 = torch.nn.functional.ctc_loss(log_probs_ref, targets_no_bd, input_lengths, target_lengths, reduction=reduction, zero_infinity=True)
+            res_no_bd = torch.nn.functional.ctc_loss(log_probs_no_bd, targets_no_bd, input_lengths_no_bd,
+                                                     target_lengths_no_bd, reduction=reduction, zero_infinity=True)
+            res1.backward()
+            res2.backward()
+            res_no_bd.backward()
 
-        self.assertEqual(res, res_no_bd, atol=1e-4, rtol=0)
-        self.assertEqual(grad.squeeze(1), grad_no_bd, atol=1e-4, rtol=0)
+            self.assertEqual((1,) if reduction == 'none' else (), res1.shape)
+            self.assertEqual((1,) if reduction == 'none' else (), res2.shape)
+            self.assertEqual((), res_no_bd.shape)
+            self.assertEqual((input_length, 1, vocab_size), log_probs.grad.shape)
+            self.assertEqual((input_length, 1, vocab_size), log_probs_ref.shape)
+            self.assertEqual((input_length, vocab_size), log_probs_no_bd.grad.shape)
+
+            self.assertEqual(res1, res2, atol=1e-4, rtol=0)
+            self.assertEqual(res1.squeeze(0), res_no_bd, atol=1e-4, rtol=0)
+            self.assertEqual(log_probs.grad, log_probs_ref.grad, atol=1e-4, rtol=0)
+            self.assertEqual(log_probs.grad.squeeze(1), log_probs_no_bd.grad, atol=1e-4, rtol=0)
 
     @onlyCUDA
     @skipCUDAIfNoCudnn
