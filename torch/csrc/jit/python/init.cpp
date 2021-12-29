@@ -74,6 +74,7 @@
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/remove_inplace_ops.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
+#include <torch/csrc/jit/passes/replacement_of_old_operators.h>
 #include <torch/csrc/jit/passes/restore_mutation.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
@@ -283,6 +284,11 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_onnx_lint", ONNXLintGraph)
       .def("_jit_pass_onnx_function_extraction", onnx::ONNXFunctionExtraction)
       .def("_jit_pass_fuse", FuseGraph)
+      .def(
+          "_jit_pass_replace_old_ops_with_upgraders",
+          [](std::shared_ptr<Graph>& g) {
+            return ReplaceOldOperatorsWithUpgraders(g);
+          })
       .def(
           "_jit_pass_dce",
           [](std::shared_ptr<Graph>& g) {
@@ -689,6 +695,18 @@ void initJITBindings(PyObject* module) {
             checkAliasAnnotation(g, std::move(stack), unqualified_op_name);
           })
       .def("_jit_set_nvfuser_enabled", &RegisterCudaFuseGraph::registerPass)
+      .def(
+          "_jit_set_nvfuser_single_node_mode",
+          [](bool flag) { return fuser::cuda::setSingletonFusion(flag); })
+      .def(
+          "_jit_nvfuser_single_node_mode",
+          []() { return fuser::cuda::getSingletonFusion(); })
+      .def(
+          "_jit_set_nvfuser_horizontal_mode",
+          [](bool flag) { return fuser::cuda::setHorizontalFusion(flag); })
+      .def(
+          "_jit_nvfuser_horizontal_mode",
+          []() { return fuser::cuda::getHorizontalFusion(); })
       .def(
           "_jit_set_nvfuser_guard_mode",
           [](bool profiling_flag) {
