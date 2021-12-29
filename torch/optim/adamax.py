@@ -116,12 +116,12 @@ class Adamax(Optimizer):
                    exp_avgs,
                    exp_infs,
                    state_steps,
-                   foreach=foreach,
                    eps=eps,
                    beta1=beta1,
                    beta2=beta2,
                    lr=lr,
-                   weight_decay=weight_decay)
+                   weight_decay=weight_decay,
+                   foreach=foreach)
 
         return loss
 
@@ -131,13 +131,13 @@ def adamax(params: List[Tensor],
            exp_avgs: List[Tensor],
            exp_infs: List[Tensor],
            state_steps: List[int],
-           foreach: bool = False,
            *,
            eps: float,
            beta1: float,
            beta2: float,
            lr: float,
-           weight_decay: float):
+           weight_decay: float,
+           foreach: bool):
     r"""Functional API that performs adamax algorithm computation.
 
     See :class:`~torch.optim.Adamax` for details.

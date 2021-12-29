@@ -57,7 +57,6 @@ class ASGD(Optimizer):
             axs = []
             etas = []
             state_steps = []
-            foreach = group['foreach']
 
             for p in group['params']:
                 if p.grad is not None:
@@ -86,9 +85,9 @@ class ASGD(Optimizer):
                  axs,
                  mus,
                  etas,
-                 foreach=foreach,
                  weight_decay=group['weight_decay'],
-                 lambd=group['lambd'])
+                 lambd=group['lambd'],
+                 foreach=group['foreach'])
 
             # update eta and mu
             for p in params_with_grad:
@@ -105,10 +104,10 @@ def asgd(params: List[Tensor],
          axs: List[Tensor],
          mus: List[float],
          etas: List[float],
-         foreach: bool = False,
          *,
          weight_decay: float,
-         lambd: float):
+         lambd: float,
+         foreach: bool):
     r"""Functional API that performs asgd algorithm computation.
 
     See :class:`~torch.optim.ASGD` for details.
