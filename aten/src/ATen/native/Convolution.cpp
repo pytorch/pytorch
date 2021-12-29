@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
+#include <ATen/native/ConvolutionMM3d.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/cpu/DepthwiseConvKernel.h>
@@ -1664,8 +1665,11 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
           params.dilation, params.transposed, params.output_padding, params.groups, output_mask);
       break;
     case ConvBackend::Slow3d:
+      // Note that no CUDA implementation of this kernel exists currently.
       std::tie(backend_grad_input, backend_grad_weight, backend_grad_bias) =
-        at::slow_conv3d_backward(grad_output, input, weight, kernel_size, params.stride, params.padding, output_mask);
+        slow_conv3d_backward_cpu(
+            grad_output, input, weight, kernel_size,
+            params.stride, params.padding, output_mask);
       break;
     // Handle backends that don't natively support groups > 1.
     case ConvBackend::NnpackSpatial:
