@@ -2318,7 +2318,8 @@ std::tuple<Tensor, Tensor, Tensor> linalg_svd_jvp(const Tensor& dA,
   auto dS = is_complex ? at::real(dP.diagonal(0, -2, -1)).clone()
                        : dP.diagonal(0, -2, -1).clone();
 
-  // dP = dP - dS
+  // dX = dP - dS
+  // Here we update dP in-place rather than 
   if (is_complex) {
     at::real(dP.diagonal(0, -2, -1)).zero_();
   } else {
@@ -2385,7 +2386,6 @@ std::tuple<Tensor, Tensor, Tensor> linalg_svd_jvp(const Tensor& dA,
   return std::make_tuple(std::move(dU), std::move(dS), std::move(dVh));
 }
 
-// This makes no assumption on the signs of sigma.
 Tensor svd_backward(const Tensor& gU,
                     const Tensor& gS,
                     const Tensor& gVh,
@@ -2530,9 +2530,19 @@ Tensor svd_backward(const Tensor& gU,
                                            : at::zeros_like(S);
     // Rather lax atol and rtol, as we don't want false positives
     TORCH_CHECK(at::allclose(imdiag_UhgU, -imdiag_VhgV, /*rtol=*/1e-2, /*atol=*/1e-2),
-                "The singular vectors in the complex case are specified up to multiplication "
+                "svd_backward: The singular vectors in the complex case are specified up to multiplication "
                 "by e^{i phi}. The specified loss function depends on this phase term, making "
                 "it ill-defined.");
+    if (isFwGradDefined(gU) || isFwGradDefined(gVh)) {
+      const auto imdiag_UhgU_t = isFwGradDefined(gU) ? toNonOptFwGrad(imdiag_UhgU)
+                                                     : at::zeros_like(S);
+      const auto imdiag_VhgV_t = isFwGradDefined(gVh) ? toNonOptFwGrad(imdiag_VhgV)
+                                                      : at::zeros_like(S);
+      TORCH_CHECK(at::allclose(imdiag_UhgU_t, -imdiag_VhgV_t, /*rtol=*/1e-2, /*atol=*/1e-2),
+                  "Forward AD of svd_backward: The tangents to the singular vectors in the "
+                  "complex case are specified up to multiplication by e^{i phi}. "
+                  "The specified loss tangents depend on this phase term, making them ill-defined.");
+    }
   }
 
   // gA = (skew(U^H gU) / E) S +  S ((skew(V^H gV) / E) + I o (gS + i Im(diag(U^H gU)) / S)
@@ -2544,7 +2554,7 @@ Tensor svd_backward(const Tensor& gU,
       const auto E = [&S]{
         const auto S2 = S * S;
         auto ret = S2.unsqueeze(-2) - S2.unsqueeze(-1);
-        // Any number a != 0 would, as we are going to compute 0 / a
+        // Any number a != 0 would, as we are just going to use it to compute 0 / a later on
         ret.diagonal(0, -2, -1).fill_(1);
         return ret;
       }();
