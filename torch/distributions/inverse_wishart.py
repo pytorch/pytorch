@@ -178,9 +178,9 @@ class InverseWishart(ExponentialFamily):
         diag_V = V.diagonal(dim1=-2, dim2=-1)
 
         return (
-            (v - p + 1) * V.pow(2)
-            + (v - p - 1) * torch.einsum("...i,...j->...ij", diag_V, diag_V)
-        ) / ((v - p) * (v - p - 1).pow(2) * (v - p - 3))
+            (nu - p + 1) * V.pow(2)
+            + (nu - p - 1) * torch.einsum("...i,...j->...ij", diag_V, diag_V)
+        ) / ((nu - p) * (nu - p - 1).pow(2) * (nu - p - 3))
 
     def _bartlett_sampling(self, sample_shape=torch.Size()):
         p = self._event_shape[-1]  # has singleton shape
