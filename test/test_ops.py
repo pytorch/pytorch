@@ -1214,7 +1214,8 @@ class TestJitTEFuser(JitTestCase):
                 val = trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
                 self.assertEqual(ref, val)
 
-                self.assertAllFused(torch.jit.last_executed_optimized_graph())
+                if op.expect_nnc_fusion:
+                    self.assertAllFused(torch.jit.last_executed_optimized_graph())
 
 
 class TestMathBits(TestCase):
