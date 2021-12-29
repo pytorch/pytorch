@@ -112,11 +112,11 @@ class Adadelta(Optimizer):
                      grads,
                      square_avgs,
                      acc_deltas,
-                     foreach=foreach,
                      lr=lr,
                      rho=rho,
                      eps=eps,
-                     weight_decay=weight_decay)
+                     weight_decay=weight_decay,
+                     foreach=foreach)
 
         return loss
 
@@ -125,12 +125,12 @@ def adadelta(params: List[Tensor],
              grads: List[Tensor],
              square_avgs: List[Tensor],
              acc_deltas: List[Tensor],
-             foreach: bool = False,
              *,
              lr: float,
              rho: float,
              eps: float,
-             weight_decay: float):
+             weight_decay: float,
+             foreach: bool):
     r"""Functional API that performs Adadelta algorithm computation.
 
     See :class:`~torch.optim.Adadelta` for details.
