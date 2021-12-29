@@ -10079,12 +10079,6 @@
     CPU: slow_conv_dilated3d_cpu
     CUDA: slow_conv_dilated3d_cuda
 
-- func: slow_conv_dilated3d_backward(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, int[3] dilation, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
-  python_module: nn
-  dispatch:
-    CPU: slow_conv_dilated3d_backward_cpu
-    CUDA: slow_conv_dilated3d_backward_cuda
-
 - func: col2im.out(Tensor self, int[2] output_size, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
