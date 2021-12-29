@@ -1,4 +1,3 @@
-#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 // (c) Facebook, Inc. and its affiliates. Confidential and proprietary.
 
 #include "test_utils.h"
