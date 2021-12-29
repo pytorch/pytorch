@@ -264,7 +264,7 @@ struct DeviceTypePropagationPass {
     if (device_prop_registry_)
       return;
 
-    static const OperatorMap<PropRule> temp_registry{
+    static OperatorMap<PropRule> temp_registry{
         {"aten::cpu(Tensor self) -> Tensor",
          setReturnstoDeviceRule(DeviceType::CPU)},
         {"aten::cuda(Tensor self) -> Tensor",
@@ -281,7 +281,7 @@ struct DeviceTypePropagationPass {
          returnSecondArgDeviceRule},
     };
     device_prop_registry_ =
-        std::make_unique<OperatorMap<PropRule>>(temp_registry);
+        std::make_unique<OperatorMap<PropRule>>(std::move(temp_registry));
   }
 
   static std::unique_ptr<OperatorMap<PropRule>> device_prop_registry_;
