@@ -46,7 +46,7 @@ jobs:
     steps:
       - name: noop
         run: echo "This job is here so we don't have a bunch of skipped binary builds :D"
-  conda-py3.7-cpu-build:
+  conda-py3_7-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -155,7 +155,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/conda/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: conda-py3.7-cpu
+          name: conda-py3_7-cpu
           retention-days: 14
           if-no-files-found: error
           path:
@@ -197,7 +197,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  conda-py3.7-cuda10.2-build:
+  conda-py3_7-cuda10_2-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -306,7 +306,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/conda/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: conda-py3.7-cuda10.2
+          name: conda-py3_7-cuda10_2
           retention-days: 14
           if-no-files-found: error
           path:
@@ -348,7 +348,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  conda-py3.7-cuda11.1-build:
+  conda-py3_7-cuda11_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -460,7 +460,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/conda/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: conda-py3.7-cuda11.1
+          name: conda-py3_7-cuda11_1
           retention-days: 14
           if-no-files-found: error
           path:
@@ -502,7 +502,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  conda-py3.7-cuda11.3-build:
+  conda-py3_7-cuda11_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -614,7 +614,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/conda/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: conda-py3.7-cuda11.3
+          name: conda-py3_7-cuda11_3
           retention-days: 14
           if-no-files-found: error
           path:
@@ -656,7 +656,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  conda-py3.7-cuda11.5-build:
+  conda-py3_7-cuda11_5-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -768,7 +768,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/conda/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: conda-py3.7-cuda11.5
+          name: conda-py3_7-cuda11_5
           retention-days: 14
           if-no-files-found: error
           path:
@@ -810,7 +810,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  conda-py3.8-cpu-build:
+  conda-py3_8-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -919,7 +919,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/conda/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: conda-py3.8-cpu
+          name: conda-py3_8-cpu
           retention-days: 14
           if-no-files-found: error
           path:
@@ -961,7 +961,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  conda-py3.8-cuda10.2-build:
+  conda-py3_8-cuda10_2-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -1070,7 +1070,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/conda/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: conda-py3.8-cuda10.2
+          name: conda-py3_8-cuda10_2
           retention-days: 14
           if-no-files-found: error
           path:
@@ -1112,7 +1112,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  conda-py3.8-cuda11.1-build:
+  conda-py3_8-cuda11_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -1224,7 +1224,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/conda/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: conda-py3.8-cuda11.1
+          name: conda-py3_8-cuda11_1
           retention-days: 14
           if-no-files-found: error
           path:
@@ -1266,7 +1266,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  conda-py3.8-cuda11.3-build:
+  conda-py3_8-cuda11_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -1378,7 +1378,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/conda/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: conda-py3.8-cuda11.3
+          name: conda-py3_8-cuda11_3
           retention-days: 14
           if-no-files-found: error
           path:
@@ -1420,7 +1420,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  conda-py3.8-cuda11.5-build:
+  conda-py3_8-cuda11_5-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -1532,7 +1532,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/conda/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: conda-py3.8-cuda11.5
+          name: conda-py3_8-cuda11_5
           retention-days: 14
           if-no-files-found: error
           path:
@@ -1574,7 +1574,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  conda-py3.9-cpu-build:
+  conda-py3_9-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -1683,7 +1683,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/conda/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: conda-py3.9-cpu
+          name: conda-py3_9-cpu
           retention-days: 14
           if-no-files-found: error
           path:
@@ -1725,7 +1725,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  conda-py3.9-cuda10.2-build:
+  conda-py3_9-cuda10_2-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -1834,7 +1834,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/conda/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: conda-py3.9-cuda10.2
+          name: conda-py3_9-cuda10_2
           retention-days: 14
           if-no-files-found: error
           path:
@@ -1876,7 +1876,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  conda-py3.9-cuda11.1-build:
+  conda-py3_9-cuda11_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -1988,7 +1988,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/conda/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: conda-py3.9-cuda11.1
+          name: conda-py3_9-cuda11_1
           retention-days: 14
           if-no-files-found: error
           path:
@@ -2030,7 +2030,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  conda-py3.9-cuda11.3-build:
+  conda-py3_9-cuda11_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -2142,7 +2142,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/conda/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: conda-py3.9-cuda11.3
+          name: conda-py3_9-cuda11_3
           retention-days: 14
           if-no-files-found: error
           path:
@@ -2184,7 +2184,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  conda-py3.9-cuda11.5-build:
+  conda-py3_9-cuda11_5-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -2296,7 +2296,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/conda/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: conda-py3.9-cuda11.5
+          name: conda-py3_9-cuda11_5
           retention-days: 14
           if-no-files-found: error
           path:

@@ -82,7 +82,9 @@ def generate_conda_matrix() -> List[Dict[str, str]]:
                     "gpu_arch_version": gpu_arch_version,
                     "container_image": CONDA_CONTAINER_IMAGES[arch_version],
                     "package_type": "conda",
-                    "build_name": f"conda-py{python_version}-{gpu_arch_type}{gpu_arch_version}",
+                    "build_name": f"conda-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(
+                        ".", "_"
+                    ),
                 }
             )
     return ret
@@ -104,9 +106,7 @@ def generate_libtorch_matrix() -> List[Dict[str, str]]:
                 # "cxx11-abi", but the precise value of the other one doesn't
                 # matter
                 gpu_arch_type = arch_type(arch_version)
-                gpu_arch_version = (
-                    "" if arch_version == "cpu" else arch_version
-                )
+                gpu_arch_version = "" if arch_version == "cpu" else arch_version
                 ret.append(
                     {
                         "gpu_arch_type": gpu_arch_type,
@@ -117,7 +117,9 @@ def generate_libtorch_matrix() -> List[Dict[str, str]]:
                             (arch_version, abi_version)
                         ],
                         "package_type": "libtorch",
-                        "build_name": "libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}",
+                        "build_name": f"libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{abi_version}".replace(
+                            ".", "_"
+                        ),
                     }
                 )
     return ret
@@ -137,7 +139,9 @@ def generate_wheels_matrix() -> List[Dict[str, str]]:
                     "gpu_arch_version": gpu_arch_version,
                     "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
                     "package_type": "manywheel",
-                    "build_name": f"manywheel-py{python_version}-{gpu_arch_type}{gpu_arch_version}",
+                    "build_name": f"manywheel-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(
+                        ".", "_"
+                    ),
                 }
             )
     return ret

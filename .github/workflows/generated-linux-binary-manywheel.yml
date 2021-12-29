@@ -46,7 +46,7 @@ jobs:
     steps:
       - name: noop
         run: echo "This job is here so we don't have a bunch of skipped binary builds :D"
-  manywheel-py3.7-cpu-build:
+  manywheel-py3_7-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -155,7 +155,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/manywheel/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: manywheel-py3.7-cpu
+          name: manywheel-py3_7-cpu
           retention-days: 14
           if-no-files-found: error
           path:
@@ -197,7 +197,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3.7-cuda10.2-build:
+  manywheel-py3_7-cuda10_2-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -306,7 +306,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/manywheel/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: manywheel-py3.7-cuda10.2
+          name: manywheel-py3_7-cuda10_2
           retention-days: 14
           if-no-files-found: error
           path:
@@ -348,7 +348,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3.7-cuda11.1-build:
+  manywheel-py3_7-cuda11_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -460,7 +460,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/manywheel/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: manywheel-py3.7-cuda11.1
+          name: manywheel-py3_7-cuda11_1
           retention-days: 14
           if-no-files-found: error
           path:
@@ -502,7 +502,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3.7-cuda11.3-build:
+  manywheel-py3_7-cuda11_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -614,7 +614,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/manywheel/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: manywheel-py3.7-cuda11.3
+          name: manywheel-py3_7-cuda11_3
           retention-days: 14
           if-no-files-found: error
           path:
@@ -656,7 +656,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3.7-cuda11.5-build:
+  manywheel-py3_7-cuda11_5-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -768,7 +768,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/manywheel/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: manywheel-py3.7-cuda11.5
+          name: manywheel-py3_7-cuda11_5
           retention-days: 14
           if-no-files-found: error
           path:
@@ -810,7 +810,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3.7-rocm4.2-build:
+  manywheel-py3_7-rocm4_2-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -919,7 +919,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/manywheel/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: manywheel-py3.7-rocm4.2
+          name: manywheel-py3_7-rocm4_2
           retention-days: 14
           if-no-files-found: error
           path:
@@ -961,7 +961,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3.7-rocm4.3.1-build:
+  manywheel-py3_7-rocm4_3_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -1070,7 +1070,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/manywheel/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: manywheel-py3.7-rocm4.3.1
+          name: manywheel-py3_7-rocm4_3_1
           retention-days: 14
           if-no-files-found: error
           path:
@@ -1112,7 +1112,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3.8-cpu-build:
+  manywheel-py3_8-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -1221,7 +1221,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/manywheel/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: manywheel-py3.8-cpu
+          name: manywheel-py3_8-cpu
           retention-days: 14
           if-no-files-found: error
           path:
@@ -1263,7 +1263,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3.8-cuda10.2-build:
+  manywheel-py3_8-cuda10_2-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -1372,7 +1372,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/manywheel/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: manywheel-py3.8-cuda10.2
+          name: manywheel-py3_8-cuda10_2
           retention-days: 14
           if-no-files-found: error
           path:
@@ -1414,7 +1414,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3.8-cuda11.1-build:
+  manywheel-py3_8-cuda11_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -1526,7 +1526,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/manywheel/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: manywheel-py3.8-cuda11.1
+          name: manywheel-py3_8-cuda11_1
           retention-days: 14
           if-no-files-found: error
           path:
@@ -1568,7 +1568,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3.8-cuda11.3-build:
+  manywheel-py3_8-cuda11_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -1680,7 +1680,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/manywheel/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: manywheel-py3.8-cuda11.3
+          name: manywheel-py3_8-cuda11_3
           retention-days: 14
           if-no-files-found: error
           path:
@@ -1722,7 +1722,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3.8-cuda11.5-build:
+  manywheel-py3_8-cuda11_5-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -1834,7 +1834,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/manywheel/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: manywheel-py3.8-cuda11.5
+          name: manywheel-py3_8-cuda11_5
           retention-days: 14
           if-no-files-found: error
           path:
@@ -1876,7 +1876,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3.8-rocm4.2-build:
+  manywheel-py3_8-rocm4_2-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -1985,7 +1985,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/manywheel/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: manywheel-py3.8-rocm4.2
+          name: manywheel-py3_8-rocm4_2
           retention-days: 14
           if-no-files-found: error
           path:
@@ -2027,7 +2027,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3.8-rocm4.3.1-build:
+  manywheel-py3_8-rocm4_3_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -2136,7 +2136,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/manywheel/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: manywheel-py3.8-rocm4.3.1
+          name: manywheel-py3_8-rocm4_3_1
           retention-days: 14
           if-no-files-found: error
           path:
@@ -2178,7 +2178,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3.9-cpu-build:
+  manywheel-py3_9-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -2287,7 +2287,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/manywheel/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: manywheel-py3.9-cpu
+          name: manywheel-py3_9-cpu
           retention-days: 14
           if-no-files-found: error
           path:
@@ -2329,7 +2329,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3.9-cuda10.2-build:
+  manywheel-py3_9-cuda10_2-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -2438,7 +2438,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/manywheel/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: manywheel-py3.9-cuda10.2
+          name: manywheel-py3_9-cuda10_2
           retention-days: 14
           if-no-files-found: error
           path:
@@ -2480,7 +2480,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3.9-cuda11.1-build:
+  manywheel-py3_9-cuda11_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -2592,7 +2592,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/manywheel/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: manywheel-py3.9-cuda11.1
+          name: manywheel-py3_9-cuda11_1
           retention-days: 14
           if-no-files-found: error
           path:
@@ -2634,7 +2634,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3.9-cuda11.3-build:
+  manywheel-py3_9-cuda11_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -2746,7 +2746,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/manywheel/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: manywheel-py3.9-cuda11.3
+          name: manywheel-py3_9-cuda11_3
           retention-days: 14
           if-no-files-found: error
           path:
@@ -2788,7 +2788,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3.9-cuda11.5-build:
+  manywheel-py3_9-cuda11_5-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -2900,7 +2900,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/manywheel/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: manywheel-py3.9-cuda11.5
+          name: manywheel-py3_9-cuda11_5
           retention-days: 14
           if-no-files-found: error
           path:
@@ -2942,7 +2942,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3.9-rocm4.2-build:
+  manywheel-py3_9-rocm4_2-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -3051,7 +3051,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/manywheel/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: manywheel-py3.9-rocm4.2
+          name: manywheel-py3_9-rocm4_2
           retention-days: 14
           if-no-files-found: error
           path:
@@ -3093,7 +3093,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3.9-rocm4.3.1-build:
+  manywheel-py3_9-rocm4_3_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -3202,7 +3202,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/manywheel/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: manywheel-py3.9-rocm4.3.1
+          name: manywheel-py3_9-rocm4_3_1
           retention-days: 14
           if-no-files-found: error
           path:

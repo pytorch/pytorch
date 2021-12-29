@@ -46,7 +46,7 @@ jobs:
     steps:
       - name: noop
         run: echo "This job is here so we don't have a bunch of skipped binary builds :D"
-  libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}-build:
+  libtorch-cpu-shared-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -156,7 +156,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}
+          name: libtorch-cpu-shared-with-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
           path:
@@ -198,7 +198,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}-build:
+  libtorch-cpu-shared-with-deps-pre-cxx11-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -308,7 +308,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}
+          name: libtorch-cpu-shared-with-deps-pre-cxx11
           retention-days: 14
           if-no-files-found: error
           path:
@@ -350,7 +350,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}-build:
+  libtorch-cpu-shared-without-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -460,7 +460,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}
+          name: libtorch-cpu-shared-without-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
           path:
@@ -502,7 +502,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}-build:
+  libtorch-cpu-shared-without-deps-pre-cxx11-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -612,7 +612,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}
+          name: libtorch-cpu-shared-without-deps-pre-cxx11
           retention-days: 14
           if-no-files-found: error
           path:
@@ -654,7 +654,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}-build:
+  libtorch-cpu-static-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -764,7 +764,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}
+          name: libtorch-cpu-static-with-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
           path:
@@ -806,7 +806,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}-build:
+  libtorch-cpu-static-with-deps-pre-cxx11-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -916,7 +916,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}
+          name: libtorch-cpu-static-with-deps-pre-cxx11
           retention-days: 14
           if-no-files-found: error
           path:
@@ -958,7 +958,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}-build:
+  libtorch-cpu-static-without-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -1068,7 +1068,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}
+          name: libtorch-cpu-static-without-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
           path:
@@ -1110,7 +1110,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}-build:
+  libtorch-cpu-static-without-deps-pre-cxx11-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -1220,7 +1220,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}
+          name: libtorch-cpu-static-without-deps-pre-cxx11
           retention-days: 14
           if-no-files-found: error
           path:
@@ -1262,7 +1262,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}-build:
+  libtorch-cuda10_2-shared-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -1372,7 +1372,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}
+          name: libtorch-cuda10_2-shared-with-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
           path:
@@ -1414,7 +1414,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}-build:
+  libtorch-cuda10_2-shared-with-deps-pre-cxx11-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -1524,7 +1524,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}
+          name: libtorch-cuda10_2-shared-with-deps-pre-cxx11
           retention-days: 14
           if-no-files-found: error
           path:
@@ -1566,7 +1566,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}-build:
+  libtorch-cuda10_2-shared-without-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -1676,7 +1676,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}
+          name: libtorch-cuda10_2-shared-without-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
           path:
@@ -1718,7 +1718,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}-build:
+  libtorch-cuda10_2-shared-without-deps-pre-cxx11-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -1828,7 +1828,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}
+          name: libtorch-cuda10_2-shared-without-deps-pre-cxx11
           retention-days: 14
           if-no-files-found: error
           path:
@@ -1870,7 +1870,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}-build:
+  libtorch-cuda10_2-static-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -1980,7 +1980,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}
+          name: libtorch-cuda10_2-static-with-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
           path:
@@ -2022,7 +2022,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}-build:
+  libtorch-cuda10_2-static-with-deps-pre-cxx11-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -2132,7 +2132,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}
+          name: libtorch-cuda10_2-static-with-deps-pre-cxx11
           retention-days: 14
           if-no-files-found: error
           path:
@@ -2174,7 +2174,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}-build:
+  libtorch-cuda10_2-static-without-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -2284,7 +2284,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}
+          name: libtorch-cuda10_2-static-without-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
           path:
@@ -2326,7 +2326,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}-build:
+  libtorch-cuda10_2-static-without-deps-pre-cxx11-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -2436,7 +2436,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}
+          name: libtorch-cuda10_2-static-without-deps-pre-cxx11
           retention-days: 14
           if-no-files-found: error
           path:
@@ -2478,7 +2478,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}-build:
+  libtorch-cuda11_1-shared-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -2591,7 +2591,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}
+          name: libtorch-cuda11_1-shared-with-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
           path:
@@ -2633,7 +2633,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}-build:
+  libtorch-cuda11_1-shared-with-deps-pre-cxx11-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -2746,7 +2746,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}
+          name: libtorch-cuda11_1-shared-with-deps-pre-cxx11
           retention-days: 14
           if-no-files-found: error
           path:
@@ -2788,7 +2788,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}-build:
+  libtorch-cuda11_1-shared-without-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -2901,7 +2901,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}
+          name: libtorch-cuda11_1-shared-without-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
           path:
@@ -2943,7 +2943,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}-build:
+  libtorch-cuda11_1-shared-without-deps-pre-cxx11-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -3056,7 +3056,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}
+          name: libtorch-cuda11_1-shared-without-deps-pre-cxx11
           retention-days: 14
           if-no-files-found: error
           path:
@@ -3098,7 +3098,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}-build:
+  libtorch-cuda11_1-static-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -3211,7 +3211,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}
+          name: libtorch-cuda11_1-static-with-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
           path:
@@ -3253,7 +3253,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}-build:
+  libtorch-cuda11_1-static-with-deps-pre-cxx11-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -3366,7 +3366,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}
+          name: libtorch-cuda11_1-static-with-deps-pre-cxx11
           retention-days: 14
           if-no-files-found: error
           path:
@@ -3408,7 +3408,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}-build:
+  libtorch-cuda11_1-static-without-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -3521,7 +3521,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}
+          name: libtorch-cuda11_1-static-without-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
           path:
@@ -3563,7 +3563,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}-build:
+  libtorch-cuda11_1-static-without-deps-pre-cxx11-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -3676,7 +3676,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}
+          name: libtorch-cuda11_1-static-without-deps-pre-cxx11
           retention-days: 14
           if-no-files-found: error
           path:
@@ -3718,7 +3718,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}-build:
+  libtorch-cuda11_3-shared-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -3831,7 +3831,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}
+          name: libtorch-cuda11_3-shared-with-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
           path:
@@ -3873,7 +3873,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}-build:
+  libtorch-cuda11_3-shared-with-deps-pre-cxx11-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -3986,7 +3986,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}
+          name: libtorch-cuda11_3-shared-with-deps-pre-cxx11
           retention-days: 14
           if-no-files-found: error
           path:
@@ -4028,7 +4028,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}-build:
+  libtorch-cuda11_3-shared-without-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -4141,7 +4141,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}
+          name: libtorch-cuda11_3-shared-without-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
           path:
@@ -4183,7 +4183,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}-build:
+  libtorch-cuda11_3-shared-without-deps-pre-cxx11-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -4296,7 +4296,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}
+          name: libtorch-cuda11_3-shared-without-deps-pre-cxx11
           retention-days: 14
           if-no-files-found: error
           path:
@@ -4338,7 +4338,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}-build:
+  libtorch-cuda11_3-static-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -4451,7 +4451,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}
+          name: libtorch-cuda11_3-static-with-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
           path:
@@ -4493,7 +4493,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}-build:
+  libtorch-cuda11_3-static-with-deps-pre-cxx11-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -4606,7 +4606,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}
+          name: libtorch-cuda11_3-static-with-deps-pre-cxx11
           retention-days: 14
           if-no-files-found: error
           path:
@@ -4648,7 +4648,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}-build:
+  libtorch-cuda11_3-static-without-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -4761,7 +4761,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}
+          name: libtorch-cuda11_3-static-without-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
           path:
@@ -4803,7 +4803,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}-build:
+  libtorch-cuda11_3-static-without-deps-pre-cxx11-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -4916,7 +4916,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}
+          name: libtorch-cuda11_3-static-without-deps-pre-cxx11
           retention-days: 14
           if-no-files-found: error
           path:
@@ -4958,7 +4958,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}-build:
+  libtorch-cuda11_5-shared-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -5071,7 +5071,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}
+          name: libtorch-cuda11_5-shared-with-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
           path:
@@ -5113,7 +5113,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}-build:
+  libtorch-cuda11_5-shared-with-deps-pre-cxx11-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -5226,7 +5226,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}
+          name: libtorch-cuda11_5-shared-with-deps-pre-cxx11
           retention-days: 14
           if-no-files-found: error
           path:
@@ -5268,7 +5268,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}-build:
+  libtorch-cuda11_5-shared-without-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -5381,7 +5381,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}
+          name: libtorch-cuda11_5-shared-without-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
           path:
@@ -5423,7 +5423,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}-build:
+  libtorch-cuda11_5-shared-without-deps-pre-cxx11-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -5536,7 +5536,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}
+          name: libtorch-cuda11_5-shared-without-deps-pre-cxx11
           retention-days: 14
           if-no-files-found: error
           path:
@@ -5578,7 +5578,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}-build:
+  libtorch-cuda11_5-static-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -5691,7 +5691,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}
+          name: libtorch-cuda11_5-static-with-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
           path:
@@ -5733,7 +5733,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}-build:
+  libtorch-cuda11_5-static-with-deps-pre-cxx11-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -5846,7 +5846,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}
+          name: libtorch-cuda11_5-static-with-deps-pre-cxx11
           retention-days: 14
           if-no-files-found: error
           path:
@@ -5888,7 +5888,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}-build:
+  libtorch-cuda11_5-static-without-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -6001,7 +6001,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}
+          name: libtorch-cuda11_5-static-without-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
           path:
@@ -6043,7 +6043,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}-build:
+  libtorch-cuda11_5-static-without-deps-pre-cxx11-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: should-run
     runs-on: linux.4xlarge
@@ -6156,7 +6156,7 @@ jobs:
           docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{devtoolset}
+          name: libtorch-cuda11_5-static-without-deps-pre-cxx11
           retention-days: 14
           if-no-files-found: error
           path:
