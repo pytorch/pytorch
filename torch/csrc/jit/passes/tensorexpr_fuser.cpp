@@ -1230,7 +1230,8 @@ void FuseTensorExprs(
   // Get rid of dead code so that we don't waste effort fusing it.
   EliminateDeadCode(graph);
 
-  TensorExprFuser fuser(graph, min_group_size, disable_shape_checks);
+  TensorExprFuser fuser(
+      graph, min_group_size, disable_shape_checks, add_composed_op);
   fuser.run();
 
   EliminateCommonSubexpression(graph);
