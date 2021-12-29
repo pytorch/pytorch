@@ -7,19 +7,19 @@ namespace c10 {
 
 struct TORCH_API DynamicTypeFactory {
   template <typename T, typename... Args>
-  static c10::TypePtr create(TypePtr ty, Args&&... args) {
+  static c10::DynamicTypePtr create(TypePtr ty, Args&&... args) {
     return std::make_shared<c10::DynamicType>(
         c10::DynamicTypeTrait<T>::tagValue(),
         c10::DynamicType::Arguments(c10::ArrayRef<c10::TypePtr>(
             {std::move(ty), std::forward<Args>(args)...})));
   }
   template <typename T>
-  static c10::TypePtr create(std::vector<c10::TypePtr> types) {
+  static c10::DynamicTypePtr create(std::vector<c10::TypePtr> types) {
     return std::make_shared<c10::DynamicType>(
         c10::DynamicTypeTrait<T>::tagValue(),
         c10::DynamicType::Arguments(types));
   }
-  static c10::TypePtr createNamedTuple(
+  static c10::DynamicTypePtr createNamedTuple(
       const std::string& name,
       const std::vector<c10::string_view>& fields,
       const std::vector<c10::TypePtr>& types) {

@@ -60,9 +60,30 @@ void AdaptiveLogSoftmaxWithLossImpl::reset_parameters() {
   }
 }
 
-ASMoutput AdaptiveLogSoftmaxWithLossImpl::forward(const Tensor& input, const Tensor& target) {
-  TORCH_CHECK(input.size(0) == target.size(0),
-      "Input and target should have the same size in the batch dimension.");
+ASMoutput AdaptiveLogSoftmaxWithLossImpl::forward(const Tensor& input_, const Tensor& target_) {
+  auto targ_dim = target_.dim();
+
+  TORCH_CHECK(
+    targ_dim == 1 || targ_dim == 0,
+    "0D or 1D target tensor expected, multi-target not supported");
+
+  if (targ_dim == 1) {
+  TORCH_CHECK(
+      input_.dim() == 2,
+      "1D target tensor expects 2D input tensors, but found inputs with sizes ",
+      input_.sizes(),
+      ".");
+  } else {
+    TORCH_CHECK(
+      input_.dim() == 1,
+      "0D target tensor expects 1D input tensors, but found inputs with sizes ",
+      input_.sizes(),
+      ".");
+  }
+
+  bool is_batched = (targ_dim > 0);
+  Tensor input = is_batched ? input_ : input_.unsqueeze(0);
+  Tensor target = is_batched ? target_ : target_.unsqueeze(0);
 
   int64_t used_rows = 0;
   const int64_t batch_size = target.size(0);
@@ -113,6 +134,10 @@ ASMoutput AdaptiveLogSoftmaxWithLossImpl::forward(const Tensor& input, const Ten
   const Tensor head_logprob = F::log_softmax(head_output, 1);
   output += head_logprob.gather(1, gather_inds.unsqueeze(1)).squeeze();
   const double loss = (-output).mean().item().toDouble();
+
+  if (!is_batched) {
+    output = output.squeeze(0);
+  }
 
   return ASMoutput(output, loss);
 }
