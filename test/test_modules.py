@@ -405,6 +405,10 @@ class TestModule(TestCase):
         module_cls = module_info.module_cls
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
                                                        requires_grad=True)
+        # === Set nondet tol for gradcheck to user-defined value if on CUDA and cudNN is enabled
+        gradcheck_nondet_tol = 0.0
+        if (torch.device(device).type == 'cuda' and torch.backends.cudnn.enabled):
+            gradcheck_nondet_tol = module_info.gradcheck_nondet_tol
 
         for module_input in module_inputs:
             if module_input.forward_input is None:
@@ -441,7 +445,7 @@ class TestModule(TestCase):
                 with freeze_rng_state():
                     return m(*new_input_args, **new_kwargs, **other_kwargs)
 
-            self.assertTrue(check(fn_to_gradcheck, flat_input))
+            self.assertTrue(check(fn_to_gradcheck, flat_input, nondet_tol=gradcheck_nondet_tol))
 
 
     @modules(module_db, allowed_dtypes=[torch.double])
