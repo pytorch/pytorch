@@ -221,11 +221,16 @@ struct RegisterHIPDispatch {
 #define REGISTER_VSX_DISPATCH(name, fn)
 #endif
 
+// Macro to register the same kernel for all CPU arch types. This is useful
+// if a kernel does not benefit from being recompiled across different arch types.
+#define REGISTER_ALL_CPU_DISPATCH(name, fn)                                    \
+  REGISTER_ARCH_DISPATCH(name, DEFAULT, fn)                                    \
+  REGISTER_AVX512_DISPATCH(name, fn)                                           \
+  REGISTER_AVX2_DISPATCH(name, fn)                                             \
+  REGISTER_VSX_DISPATCH(name, fn)
+
 #define REGISTER_NO_CPU_DISPATCH(name, fn_type)                                \
-  REGISTER_ARCH_DISPATCH(name, DEFAULT, static_cast<fn_type>(nullptr))         \
-  REGISTER_AVX512_DISPATCH(name, static_cast<fn_type>(nullptr))                \
-  REGISTER_AVX2_DISPATCH(name, static_cast<fn_type>(nullptr))                  \
-  REGISTER_VSX_DISPATCH(name, static_cast<fn_type>(nullptr))
+  REGISTER_ALL_CPU_DISPATCH(name, static_cast<fn_type>(nullptr))
 
 #define REGISTER_CUDA_DISPATCH(name, fn) \
   static RegisterCUDADispatch<decltype(fn), struct name> name ## __register(name, fn);
