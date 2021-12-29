@@ -388,21 +388,21 @@ RegisterOperators reg_guard({
         aliasAnalysisFromSchema()),
 });
 
-void runTensorExprDynamicGroup(std::shared_ptr<Graph> graph, Stack& stack) {
-  Code code(graph, "");
+void runTensorExprDynamicGroup(const Code& code, Stack& stack) {
   InterpreterState interpreter{code};
   interpreter.run(stack);
 }
 
 Operation createTensorExprDynamicGroup(const Node* node) {
   auto graph = node->g(attr::Subgraph);
+  Code code(graph, "");
   // This implementation creates a Code object and InterpreterState on every
   // call to TensorExprDynamicGroup, which affects performance. Ideally, we
   // should be reusing Code and InterpreterState across calls to this op.
   // But that is resulting in a "No frames found" error.
   // TODO: Improve the performance of this by figuring out a better approach.
-  return [graph](Stack& stack) {
-    runTensorExprDynamicGroup(graph, stack);
+  return [code](Stack& stack) {
+    runTensorExprDynamicGroup(code, stack);
     return 0;
   };
 }
