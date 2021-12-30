@@ -93,6 +93,7 @@ jobs:
           !{{ common.pull_docker("${DOCKER_IMAGE}") }}
       - name: Build PyTorch binary
         run: |
+          set -x
           mkdir -p artifacts/
           container_name=$(docker run \
             -e BINARY_ENV_FILE \
@@ -117,7 +118,7 @@ jobs:
             -w / \
             "${DOCKER_IMAGE}"
           )
-          docker exec -t "${container_name}" -w "${PYTORCH_ROOT}" sh -c "bash .circleci/scripts/binary_populate_env.sh"
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" sh -c "bash .circleci/scripts/binary_populate_env.sh"
           docker exec -t "${container_name}" sh -c "bash /builder/!{{ config["package_type"] }}/build.sh"
       - uses: !{{ common.upload_artifact_s3_action }}
         with:
@@ -177,6 +178,7 @@ jobs:
 {%- endif %}
       - name: Test PyTorch binary
         run: |
+          set -x
           # shellcheck disable=SC2086,SC2090
           container_name=$(docker run \
             ${GPU_FLAG:-} \
@@ -203,8 +205,8 @@ jobs:
             -w / \
             "${DOCKER_IMAGE}"
           )
-          docker exec -t "${container_name}" -w "${PYTORCH_ROOT}" sh -c "bash .circleci/scripts/binary_populate_env.sh"
-          docker exec -t "${container_name}" -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" sh -c "bash .circleci/scripts/binary_linux_test.sh"
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" sh -c "bash .circleci/scripts/binary_populate_env.sh"
+          docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" sh -c "bash .circleci/scripts/binary_linux_test.sh"
           docker exec -t "${container_name}" sh -c "bash -x /run.sh"
       !{{ common.teardown_ec2_linux("pytorch/") }}
 {%- endfor %}

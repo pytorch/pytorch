@@ -86,7 +86,9 @@ def generate_conda_matrix() -> List[Dict[str, str]]:
                     "python_version": python_version,
                     "gpu_arch_type": gpu_arch_type,
                     "gpu_arch_version": gpu_arch_version,
-                    "desired_cuda": translate_desired_cuda(gpu_arch_type, gpu_arch_version),
+                    "desired_cuda": translate_desired_cuda(
+                        gpu_arch_type, gpu_arch_version
+                    ),
                     "container_image": CONDA_CONTAINER_IMAGES[arch_version],
                     "package_type": "conda",
                     "build_name": f"conda-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(
@@ -118,7 +120,9 @@ def generate_libtorch_matrix() -> List[Dict[str, str]]:
                     {
                         "gpu_arch_type": gpu_arch_type,
                         "gpu_arch_version": gpu_arch_version,
-                        "desired_cuda": translate_desired_cuda(gpu_arch_type, gpu_arch_version),
+                        "desired_cuda": translate_desired_cuda(
+                            gpu_arch_type, gpu_arch_version
+                        ),
                         "libtorch_variant": libtorch_variant,
                         "devtoolset": abi_version,
                         "container_image": LIBTORCH_CONTAINER_IMAGES[
@@ -145,7 +149,9 @@ def generate_wheels_matrix() -> List[Dict[str, str]]:
                     "python_version": python_version,
                     "gpu_arch_type": gpu_arch_type,
                     "gpu_arch_version": gpu_arch_version,
-                    "desired_cuda": translate_desired_cuda(gpu_arch_type, gpu_arch_version),
+                    "desired_cuda": translate_desired_cuda(
+                        gpu_arch_type, gpu_arch_version
+                    ),
                     "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
                     "package_type": "manywheel",
                     "build_name": f"manywheel-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(
