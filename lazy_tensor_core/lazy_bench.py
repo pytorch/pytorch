@@ -569,6 +569,10 @@ if __name__ == "__main__" :
                         torch._C._jit_override_can_fuse_on_gpu(False)
                         torch._C._jit_set_texpr_fuser_enabled(False)
                         torch._C._jit_set_nvfuser_enabled(False)
+                    if args.fuser == 'fuser2':
+                        # special case to disable nvfuser horizontal fusion as it is currently broken
+                        # TODO(whc) remove this once it's fixed
+                        torch._C._jit_set_nvfuser_horizontal_mode(False)
                     try:
                         if args.test == 'eval':
                             # Correctness Check
