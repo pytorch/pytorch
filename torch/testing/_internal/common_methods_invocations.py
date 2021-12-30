@@ -5153,6 +5153,7 @@ def sample_inputs_linalg_eigh(op_info, device, dtype, requires_grad=False, **kwa
             # eigvalsh function
             return output
 
+    # Samples do not need to be Hermitian, as we're using gradcheck_wrapper_hermitian_input
     samples = sample_inputs_linalg_invertible(op_info, device, dtype, requires_grad)
     for sample in samples:
         sample.kwargs = {"UPLO": np.random.choice(["L", "U"])}
@@ -9818,38 +9819,31 @@ op_db: List[OpInfo] = [
     OpInfo('linalg.eigh',
            aten_name='linalg_eigh',
            dtypes=floating_and_complex_types(),
+           sample_inputs_func=sample_inputs_linalg_eigh,
+           gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
+           check_batched_forward_grad=False,
+           check_batched_grad=False,
            check_batched_gradgrad=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_linalg_eigh,
-           gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
-               # See: https://github.com/pytorch/pytorch/issues/67367
-               # This DecorateInfo should change to `dtypes=complex_dtypes()` after the above
-               # has been resolved.
-               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD',
-                            dtypes=floating_and_complex_types()),
-               # NotImplementedError: the derivative for 'eigh' with complex inputs is not implemented.
+               # Forward-over-reverse gradgrad might be incorrect
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad',
                             dtypes=complex_types()),),
            ),
     OpInfo('linalg.eigvalsh',
            aten_name='linalg_eigvalsh',
            dtypes=floating_and_complex_types(),
-           check_batched_gradgrad=False,
            sample_inputs_func=sample_inputs_linalg_eigh,
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
+           check_batched_forward_grad=False,
+           check_batched_grad=False,
+           check_batched_gradgrad=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           # See https://github.com/pytorch/pytorch/issues/66357
-           check_batched_forward_grad=False,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
-               # NotImplementedError: the derivative for 'eigh' with complex inputs is not implemented.
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad', dtypes=complex_types()),
-               # Gradcheck for complex is not implemented yet
-               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD', dtypes=complex_types()),
                # Pre-existing condition; Needs to be fixed
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
            )),

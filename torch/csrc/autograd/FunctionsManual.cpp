@@ -2692,57 +2692,33 @@ std::tuple<Tensor, Tensor> linalg_lstsq_backward(
   return std::make_tuple(A_grad, B_grad);
 }
 
+std::tuple<Tensor, Tensor> linalg_eigh_jvp(const Tensor& dA,
+                                           const Tensor& L,
+                                           const Tensor& V) {
+  // https://people.maths.ox.ac.uk/gilesm/files/NA-08-01.pdf
+  // dL = Re(diag(dP))
+  // dV = V[(dP - diag(dP)) / E]
+  // where
+  // dP = V^H dA V
+  // E_{ij} = L_i - L_j if i != j
+  //          1         otherwise
 
-// jvp functions for eigenvalues and eigenvectors are separate
-// because currently forward AD only works with one rule per output
-Tensor eigh_jvp_eigenvalues(
-    const Tensor& input_tangent,
-    const Tensor& eigenvalues,
-    const Tensor& eigenvectors) {
-  // An extended collection of matrix derivative results for forward and reverse mode automatic differentiation
-  // https://ora.ox.ac.uk/objects/uuid:8d0c0a29-c92b-4153-a1d2-38b276e93124
-  // Section 3.1 Eigenvalues and eigenvectors
-
-  // TODO: gradcheck from test_ops.py hangs with complex inputs
-  TORCH_CHECK_NOT_IMPLEMENTED(
-      !input_tangent.is_complex(),
-      "the derivative for 'eigh' with complex inputs is not implemented.");
-
-  // see the note in the implementation of eigh_backward that tangent should be Hermitian
-  auto hermitian_tangent = 0.5*(input_tangent + input_tangent.mH());
-
-  auto tmp = at::matmul(at::matmul(eigenvectors.mH(), hermitian_tangent), eigenvectors);
-  auto eigenvalues_tangent = tmp.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1);
-  if (eigenvalues_tangent.is_complex()) {
-    return at::real(eigenvalues_tangent);
-  }
-  return eigenvalues_tangent;
+  const auto dP = at::matmul(at::matmul(V.mH(), dA), V);
+  auto dL = dA.is_complex() ? at::real(dP.diagonal(0, -2, -1))
+                            : dP.diagonal(0, -2, -1);
+  auto dV = [&dP, &V, &L]{
+    auto ret = dP / (L.unsqueeze(-2) - L.unsqueeze(-1));
+    ret.diagonal(0, -2, -1).zero_();
+    return at::matmul(V, ret);
+  }();
+  return std::make_pair(std::move(dL), std::move(dV));
 }
 
-Tensor eigh_jvp_eigenvectors(
-    const Tensor& input_tangent,
-    const Tensor& eigenvalues,
-    const Tensor& eigenvectors) {
-  // An extended collection of matrix derivative results for forward and reverse mode automatic differentiation
-  // https://ora.ox.ac.uk/objects/uuid:8d0c0a29-c92b-4153-a1d2-38b276e93124
-  // Section 3.1 Eigenvalues and eigenvectors
-
-  TORCH_CHECK_NOT_IMPLEMENTED(
-      !input_tangent.is_complex(),
-      "the derivative for 'eigh' with complex inputs is not implemented.");
-
-  auto E = eigenvalues.unsqueeze(-2) - eigenvalues.unsqueeze(-1);
-  E.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(INFINITY);
-
-  // see the note in the implementation of eigh_backward that tangent should be Hermitian
-  auto hermitian_tangent = 0.5*(input_tangent + input_tangent.mH());
-
-  auto tmp = at::matmul(at::matmul(eigenvectors.mH(), hermitian_tangent), eigenvectors);
-  return at::matmul(eigenvectors, tmp.div(E));
-}
-
-Tensor eigh_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
-                     bool eigenvectors, const Tensor& L, const Tensor& V) {
+Tensor eigh_backward(const Tensor& gL,
+                     const Tensor& gV,
+                     const bool eigenvectors,
+                     const Tensor& L,
+                     const Tensor& V) {
   // This function is used for both torch.symeig and torch.linalg.eigh.
   // eigh (and torch.symeig) operates only on symmetric (resp. Hermitian) inputs.
 
@@ -2787,44 +2763,49 @@ Tensor eigh_backward(const std::vector<torch::autograd::Variable> &grads, const 
            "eigh_backward: torch.symeig(A, eigenvectors=False) is not differentiable. ",
            "Use torch.linalg.eigvalsh(A) instead.");
 
-  const auto gL = grads[0];
-  const auto gV = grads[1];
+  // Trivial case
+  if (!gL.defined() && !gV.defined()) {
+    return {};
+  }
 
-  if (gV.defined()) {
-    auto E = L.unsqueeze(-2) - L.unsqueeze(-1);
-    if (at::GradMode::is_enabled()) {
-      // Avoids differentiating through at infinity when doing gradgrad
-      // 1 could be any number, as we are going to overwrite the diagonal
-      E.diagonal(0, -2, -1).fill_(1);
-    }
+  // Shortcut for linalg.eigvals
+  if (!gV.defined()) {
+    // Compute V gL V^H
+    return at::matmul(V * gL.unsqueeze(-2), V.mH());
+  }
 
-    Tensor result =  at::matmul(V.mH(), gV);
-    // Project
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-    result = result.sub(result.mH()).mul_(0.5);
-    // E is skew-symmetric. Multiplying entrywise a skew-Hermitian matrix by a
-    // skew-symmetric matrix gives a Hermitian matrix, as we expected.
-    result.div_(E);
+  auto E = L.unsqueeze(-2) - L.unsqueeze(-1);
+  if (at::GradMode::is_enabled()) {
+    // Avoids differentiating through at infinity when doing gradgrad
+    // 1 could be any number, as we are going to overwrite the diagonal
+    E.diagonal(0, -2, -1).fill_(1);
+  }
 
-    if (gL.defined()) {
-      result.diagonal(0, -2, -1).copy_(gL);
-    }
-    else {
-      result.diagonal(0, -2, -1).zero_();
-    }
+  Tensor VhgV =  at::matmul(V.mH(), gV);
+  // Project
+  VhgV = 0.5 * (VhgV - VhgV.mH());
+  const auto diag_VhgV = VhgV.diagonal(0, -2, -1);
 
-    // Conjugating a Hermitian matrix by a unitary matrix gives a Hermitian matrix
-    return at::matmul(V, at::matmul(result, V.mH()));
+  // Check invariance of the loss function wrt the transformation V -> V e^{i\phi}
+  if (V.is_complex()) {
+    const auto imdiag_VhgV = at::imag(diag_VhgV);
+    TORCH_CHECK(at::allclose(imdiag_VhgV, at::zeros_like(imdiag_VhgV), /*rtol=*/1e-2, /*atol=*/1e-2),
+                "linalg_eigh_backward: The eigenvectors in the complex case are specified up to multiplication "
+                "by e^{i phi}. The specified loss function depends on this quantity, making it ill-defined.");
+  }
+
+  // E is skew-symmetric. Multiplying entrywise a skew-Hermitian matrix by a
+  // skew-symmetric matrix gives a Hermitian matrix, as we expected.
+  const auto gA = VhgV / std::move(E);
+
+  if (gL.defined()) {
+    gA.diagonal(0, -2, -1).copy_(gL);
   }
   else {
-    if (gL.defined()) {
-      // If we just gL is defined, one matmul suffices
-      return at::matmul(V * gL.unsqueeze(-2), V.mH());
-    } else {
-      // If neither is defined, there's nothing to do
-      return at::zeros_like(self, at::MemoryFormat::Contiguous);
-    }
+    gA.diagonal(0, -2, -1).zero_();
   }
+
+  return at::matmul(V, at::matmul(gA, V.mH()));
 }
 
 std::tuple<Tensor, Tensor> linalg_qr_jvp(

@@ -602,13 +602,11 @@ The eigenvalues are returned in ascending order.
              This non-uniqueness is caused by the fact that multiplying an eigenvector by
              `-1` in the real case or by :math:`e^{i \phi}, \phi \in \mathbb{R}` in the complex
              case produces another set of valid eigenvectors of the matrix.
-             This non-uniqueness problem is even worse when the matrix has repeated eigenvalues.
-             In this case, one may multiply the associated eigenvectors spanning
-             the subspace by a rotation matrix and the resulting eigenvectors will be valid
-             eigenvectors.
+             For this reason, the loss function shall not depend on the phase of the eigenvectors, as
+             this quantity is not well-defined. This will be checked when computing the gradients of the loss function.
 
 .. warning:: Gradients computed using the `eigenvectors` tensor will only be finite when
-             :attr:`A` has unique eigenvalues.
+             :attr:`A` has distinct eigenvalues.
              Furthermore, if the distance between any two eigenvalues is close to zero,
              the gradient will be numerically unstable, as it depends on the eigenvalues
              :math:`\lambda_i` through the computation of
