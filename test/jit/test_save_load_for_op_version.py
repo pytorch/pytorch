@@ -115,7 +115,7 @@ class TestSaveLoadForOpVersion(JitTestCase):
     @settings(max_examples=10, deadline=200000)  # A total of 10 examples will be generated
     @given(
         sample_input=st.tuples(st.integers(min_value=5, max_value=199), st.floats(min_value=5.0, max_value=199.0))
-    )  # Generate a pair (integeter, float)
+    )  # Generate a pair (integer, float)
     @example((2, 3, 2.0, 3.0))  # Ensure this example will be covered
     def test_versioned_div_tensor(self, sample_input):
         def historic_div(self, other):
@@ -172,7 +172,7 @@ class TestSaveLoadForOpVersion(JitTestCase):
     @settings(max_examples=10, deadline=200000)  # A total of 10 examples will be generated
     @given(
         sample_input=st.tuples(st.integers(min_value=5, max_value=199), st.floats(min_value=5.0, max_value=199.0))
-    )  # Generate a pair (integeter, float)
+    )  # Generate a pair (integer, float)
     @example((2, 3, 2.0, 3.0))  # Ensure this example will be covered
     def test_versioned_div_tensor_inplace(self, sample_input):
         def historic_div_(self, other):
@@ -226,7 +226,7 @@ class TestSaveLoadForOpVersion(JitTestCase):
     @settings(max_examples=10, deadline=200000)  # A total of 10 examples will be generated
     @given(
         sample_input=st.tuples(st.integers(min_value=5, max_value=199), st.floats(min_value=5.0, max_value=199.0))
-    )  # Generate a pair (integeter, float)
+    )  # Generate a pair (integer, float)
     @example((2, 3, 2.0, 3.0))  # Ensure this example will be covered
     def test_versioned_div_tensor_out(self, sample_input):
         def historic_div_out(self, other, out):
@@ -282,7 +282,7 @@ class TestSaveLoadForOpVersion(JitTestCase):
     @settings(max_examples=10, deadline=200000)  # A total of 10 examples will be generated
     @given(
         sample_input=st.tuples(st.integers(min_value=5, max_value=199), st.floats(min_value=5.0, max_value=199.0))
-    )  # Generate a pair (integeter, float)
+    )  # Generate a pair (integer, float)
     @example((2, 3, 2.0, 3.0))  # Ensure this example will be covered
     def test_versioned_div_scalar(self, sample_input):
         def historic_div_scalar_float(self, other: float):
@@ -356,7 +356,7 @@ class TestSaveLoadForOpVersion(JitTestCase):
     @settings(max_examples=10, deadline=200000)  # A total of 10 examples will be generated
     @given(
         sample_input=st.tuples(st.integers(min_value=5, max_value=199), st.floats(min_value=5.0, max_value=199.0))
-    )  # Generate a pair (integeter, float)
+    )  # Generate a pair (integer, float)
     @example((2, 3, 2.0, 3.0))  # Ensure this example will be covered
     def test_versioned_div_scalar_reciprocal(self, sample_input):
         def historic_div_scalar_float_reciprocal(self, other: float):
@@ -441,7 +441,7 @@ class TestSaveLoadForOpVersion(JitTestCase):
     @settings(max_examples=10, deadline=200000)  # A total of 10 examples will be generated
     @given(
         sample_input=st.tuples(st.integers(min_value=5, max_value=199), st.floats(min_value=5.0, max_value=199.0))
-    )  # Generate a pair (integeter, float)
+    )  # Generate a pair (integer, float)
     @example((2, 3, 2.0, 3.0))  # Ensure this example will be covered
     def test_versioned_div_scalar_inplace(self, sample_input):
         def historic_div_scalar_float_inplace(self, other: float):
