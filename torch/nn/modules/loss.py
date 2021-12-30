@@ -1648,7 +1648,7 @@ class CTCLoss(_Loss):
           If the targets are given as a 1d tensor that is the concatenation of individual
           targets, the target_lengths must add up to the total length of the tensor.
         - Output: scalar. If :attr:`reduction` is ``'none'``, then
-          :math:`(N)` or :math:`()`, where :math:`N = \text{batch size}`.
+          :math:`(N)` if input is batched or :math:`()` if input is unbatched, where :math:`N = \text{batch size}`.
 
     Examples::
 

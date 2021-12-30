@@ -339,7 +339,6 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
       }
     }
   });
-
   return grad;
 }
 

@@ -16431,12 +16431,16 @@ class TestNNDeviceType(NNTestCase):
         _helper(zero_infinity=True)
         _helper(zero_infinity=False)
 
-    def _CTCLoss_no_batch_dim_helper(self, device, input_length, vocab_size, target_length):
+    def _CTCLoss_gen_losses(self, device, input_length, vocab_size, target_length, reduction, cuda=False, cudnn=False):
+        def _targets_device(tensor):
+            return tensor.cuda() if cuda and not cudnn else tensor.cpu()
+
         batch_size = 1
 
         log_probs = torch.randn(input_length, batch_size, vocab_size, dtype=torch.float, device=device) \
                          .log_softmax(2).requires_grad_()
-        targets = torch.randint(low=1, high=vocab_size - 1, size=(batch_size, target_length), dtype=torch.int, device=device)
+        targets = torch.randint(low=1, high=vocab_size - 1, size=(batch_size, target_length),
+                                dtype=torch.int, device=device)
         input_lengths = batch_size * [input_length]
         target_lengths = batch_size * [target_length]
 
@@ -16445,108 +16449,99 @@ class TestNNDeviceType(NNTestCase):
         input_lengths_no_bd = torch.tensor(input_length)
         target_lengths_no_bd = torch.tensor(target_length)
 
-        return ((log_probs, targets, input_lengths, target_lengths),
-                (log_probs_no_bd, targets_no_bd, input_lengths_no_bd, target_lengths_no_bd))
+        log_probs_refs = [log_probs.detach().clone().requires_grad_() for _ in range(4)]
+        log_probs_no_bd_refs = [log_probs_no_bd.detach().clone().requires_grad_() for _ in range(2)]
 
-    def _CTCLoss_check_helper(self, log_probs_refs, log_probs_no_bd_refs, losses, losses_no_bd, reduction, input_length, vocab_size):
-        def _check_list(expected, list_to_compare, atol=None, rtol=None):
-            for ele in list_to_compare:
-                self.assertEqual(expected, ele, atol=atol, rtol=rtol)
+        func_ctc = torch.nn.functional.ctc_loss
+        ctc_loss = nn.CTCLoss(reduction=reduction, zero_infinity=True)
 
-        _check_list((1,) if reduction == 'none' else (), [loss.shape for loss in losses])
-        _check_list((), [loss.shape for loss in losses_no_bd])
+        losses = []
+        losses_no_bd = []
 
-        _check_list((input_length, 1, vocab_size), [t.grad.shape for t in log_probs_refs])
-        _check_list((input_length, vocab_size), [t.grad.shape for t in log_probs_no_bd_refs])
+        # testing the functional version
+        # batched case. log_probs.shape = (T, N, C), targets = (N, S), input_lengths/target_lengths = (N,)
+        losses.append(func_ctc(log_probs_refs[0], _targets_device(targets),
+                               input_lengths, target_lengths, reduction=reduction, zero_infinity=True))
+        # batched case. input.shape = (T, N, C), targets = (S,), input_lengths/target_lengths = (N,)
+        losses.append(func_ctc(log_probs_refs[1], _targets_device(targets_no_bd),
+                               input_lengths, target_lengths, reduction=reduction, zero_infinity=True))
+        # unbatched case. input.shape = (T, C), targets = (S,), input_lengths/target_lengths = (N,)
+        losses_no_bd.append(func_ctc(log_probs_no_bd_refs[0], _targets_device(targets_no_bd),
+                                     input_lengths_no_bd, target_lengths_no_bd, reduction=reduction,
+                                     zero_infinity=True))
 
-        _check_list(losses[0], losses[1:], atol=1e-4, rtol=0)
-        _check_list(losses[0].squeeze(0), losses_no_bd, atol=1e-4, rtol=0)
+        # same tests as above but with the module instead of functional version
+        losses.append(ctc_loss(log_probs_refs[2], _targets_device(targets), input_lengths, target_lengths))
+        losses.append(ctc_loss(log_probs_refs[3], _targets_device(targets_no_bd), input_lengths, target_lengths))
+        losses_no_bd.append(ctc_loss(log_probs_no_bd_refs[1], _targets_device(targets_no_bd),
+                                     input_lengths_no_bd, target_lengths_no_bd))
 
-        _check_list(log_probs_refs[0].grad, [t.grad for t in log_probs_refs[1:]], atol=1e-4, rtol=0)
-        _check_list(log_probs_refs[0].grad.squeeze(1), [t.grad for t in log_probs_no_bd_refs[1:]], atol=1e-4, rtol=0)
+        for loss in losses + losses_no_bd:
+            loss.backward()
 
-    @onlyCUDA
-    @skipCUDAIfNoCudnn
-    def test_CTCLoss_no_batch_dim_cudnn(self, device):
+        return losses, losses_no_bd, log_probs_refs, log_probs_no_bd_refs
+
+    def _assertEqual_list(self, expected, list_to_compare, atol=None, rtol=None):
+        for ele in list_to_compare:
+            self.assertEqual(expected, ele, atol=atol, rtol=rtol)
+
+    @parametrize_test("reduction", ['none', 'mean', 'sum'])
+    def test_CTCLoss_no_batch_dim(self, device, reduction):
         input_length = 40
         vocab_size = 3
         target_length = 12
 
-        for reduction in ['none', 'mean']:
-            args, args_no_bd = self._CTCLoss_no_batch_dim_helper(device, input_length, vocab_size, target_length)
-            log_probs, targets, input_lengths, target_lengths = args
-            log_probs_no_bd, targets_no_bd, input_lengths_no_bd, target_lengths_no_bd = args_no_bd
+        # cuda/cudnn case
+        if torch.cuda.is_available():
+            has_cudnn = 'cuda' in device and self.has_cudnn()
+            with torch.backends.cudnn.flags(enabled=has_cudnn):
+                args = self._CTCLoss_gen_losses(device, input_length, vocab_size, target_length,
+                                                reduction, True, has_cudnn)
+        # cpu case
+        else:
+            args = self._CTCLoss_gen_losses(device, input_length, vocab_size, target_length, reduction, False, False)
 
-            log_probs_refs = [log_probs.detach().clone().requires_grad_() for _ in range(8)]
-            log_probs_no_bd_refs = [log_probs_no_bd.detach().clone().requires_grad_() for _ in range(4)]
+        args = self._CTCLoss_gen_losses(device, input_length, vocab_size, target_length, reduction, False, False)
+        losses, losses_no_bd, log_probs_refs, log_probs_no_bd_refs = args
 
-            func_ctc = torch.nn.functional.ctc_loss
-            ctc_loss = nn.CTCLoss(reduction=reduction, zero_infinity=True)
+        self._assertEqual_list(losses[0], losses[1:], atol=1e-4, rtol=0)
+        self._assertEqual_list(losses[0].squeeze(0), losses_no_bd, atol=1e-4, rtol=0)
 
-            losses = []
-            losses_no_bd = []
+        self._assertEqual_list(log_probs_refs[0].grad, [t.grad for t in log_probs_refs[1:]], atol=1e-4, rtol=0)
+        self._assertEqual_list(
+            log_probs_refs[0].grad.squeeze(1),
+            [t.grad for t in log_probs_no_bd_refs[1:qg]],
+            atol=1e-4,
+            rtol=0,
+        )
 
-            with torch.backends.cudnn.flags(enabled=False):
-                losses.append(func_ctc(log_probs_refs[0], targets.cuda(), input_lengths, target_lengths, reduction=reduction, zero_infinity=True))
-                losses.append(func_ctc(log_probs_refs[1], targets_no_bd.cuda(), input_lengths, target_lengths, reduction=reduction, zero_infinity=True))
-                losses_no_bd.append(func_ctc(log_probs_no_bd_refs[0], targets_no_bd.cuda(), input_lengths_no_bd,
-                                             target_lengths_no_bd, reduction=reduction, zero_infinity=True))
-
-                losses.append(ctc_loss(log_probs_refs[2], targets.cuda(), input_lengths, target_lengths))
-                losses.append(ctc_loss(log_probs_refs[3], targets_no_bd.cuda(), input_lengths, target_lengths))
-                losses_no_bd.append(ctc_loss(log_probs_no_bd_refs[1], targets_no_bd.cuda(), input_lengths_no_bd, target_lengths_no_bd))
-
-                for loss in losses + losses_no_bd:
-                    loss.backward()
-
-            with torch.backends.cudnn.flags(enabled=True):
-                losses.append(func_ctc(log_probs_refs[4], targets.cpu(), input_lengths, target_lengths, reduction=reduction, zero_infinity=True))
-                losses.append(func_ctc(log_probs_refs[5], targets.cpu(), input_lengths, target_lengths, reduction=reduction, zero_infinity=True))
-                losses_no_bd.append(func_ctc(log_probs_no_bd_refs[2], targets_no_bd.cpu(), input_lengths_no_bd,
-                                             target_lengths_no_bd, reduction=reduction, zero_infinity=True))
-
-                losses.append(ctc_loss(log_probs_refs[6], targets.cpu(), input_lengths, target_lengths))
-                losses.append(ctc_loss(log_probs_refs[7], targets.cpu(), input_lengths, target_lengths))
-                losses_no_bd.append(ctc_loss(log_probs_no_bd_refs[3], targets_no_bd.cpu(), input_lengths_no_bd, target_lengths_no_bd))
-
-                for loss in losses[4:] + losses_no_bd[2:]:
-                    loss.backward()
-
-            self._CTCLoss_check_helper(log_probs_refs, log_probs_no_bd_refs, losses, losses_no_bd, reduction, input_length, vocab_size)
-
-    @onlyCPU
-    def test_CTCLoss_no_batch_dim_cpu(self, device):
+    @parametrize_test("reduction", ['none', 'mean', 'sum'])
+    def test_CTCLoss_no_batch_dim_shape(self, device, reduction):
         input_length = 40
         vocab_size = 3
         target_length = 12
 
-        for reduction in ['none', 'mean']:
-            args, args_no_bd = self._CTCLoss_no_batch_dim_helper(device, input_length, vocab_size, target_length)
-            log_probs, targets, input_lengths, target_lengths = args
-            log_probs_no_bd, targets_no_bd, input_lengths_no_bd, target_lengths_no_bd = args_no_bd
+        # cuda/cudnn case
+        if torch.cuda.is_available():
+            has_cudnn = 'cuda' in device and self.has_cudnn()
+            with torch.backends.cudnn.flags(enabled=has_cudnn):
+                args = self._CTCLoss_gen_losses(device, input_length, vocab_size, target_length,
+                                                reduction, True, has_cudnn)
+        # cpu case
+        else:
+            args = self._CTCLoss_gen_losses(device, input_length, vocab_size, target_length, reduction, False, False)
 
-            log_probs_refs = [log_probs.detach().clone().requires_grad_() for _ in range(4)]
-            log_probs_no_bd_refs = [log_probs_no_bd.detach().clone().requires_grad_() for _ in range(2)]
+        losses, losses_no_bd, log_probs_refs, log_probs_no_bd_refs = args
 
-            func_ctc = torch.nn.functional.ctc_loss
-            ctc_loss = nn.CTCLoss(reduction=reduction, zero_infinity=True)
+        # checking the output's shape
+        # batch dim case should be (N,). no batch dim case should be ()
+        self._assertEqual_list((1,) if reduction == 'none' else (), [loss.shape for loss in losses])
+        self._assertEqual_list((), [loss.shape for loss in losses_no_bd])
 
-            losses = []
-            losses_no_bd = []
-
-            losses.append(func_ctc(log_probs_refs[0], targets, input_lengths, target_lengths, reduction=reduction, zero_infinity=True))
-            losses.append(func_ctc(log_probs_refs[1], targets_no_bd, input_lengths, target_lengths, reduction=reduction, zero_infinity=True))
-            losses_no_bd.append(func_ctc(log_probs_no_bd_refs[0], targets_no_bd, input_lengths_no_bd,
-                                         target_lengths_no_bd, reduction=reduction, zero_infinity=True))
-
-            losses.append(ctc_loss(log_probs_refs[2], targets, input_lengths, target_lengths))
-            losses.append(ctc_loss(log_probs_refs[3], targets_no_bd, input_lengths, target_lengths))
-            losses_no_bd.append(ctc_loss(log_probs_no_bd_refs[1], targets_no_bd, input_lengths_no_bd, target_lengths_no_bd))
-
-            for loss in losses + losses_no_bd:
-                loss.backward()
-
-            self._CTCLoss_check_helper(log_probs_refs, log_probs_no_bd_refs, losses, losses_no_bd, reduction, input_length, vocab_size)
+        # checking the gradient's shape
+        # batch dim case should have shape (T, N, C). no batch dim case should have shape (T, C)
+        self._assertEqual_list((input_length, 1, vocab_size), [t.grad.shape for t in log_probs_refs])
+        self._assertEqual_list((input_length, vocab_size), [t.grad.shape for t in log_probs_no_bd_refs])
 
     @onlyCUDA
     @skipCUDAIfNoCudnn
