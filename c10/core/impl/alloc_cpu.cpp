@@ -41,7 +41,7 @@ void memset_junk(void* data, size_t num) {
   }
 }
 
-}  // namespace
+} // namespace
 
 void* alloc_cpu(size_t nbytes) {
   if (nbytes == 0) {
@@ -104,4 +104,4 @@ void free_cpu(void* data) {
 #endif
 }
 
-}  // namespace c10
+} // namespace c10

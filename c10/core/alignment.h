@@ -14,4 +14,4 @@ constexpr size_t gAlignment = 16;
 constexpr size_t gAlignment = 64;
 #endif
 
-}  // namespace c10
+} // namespace c10
