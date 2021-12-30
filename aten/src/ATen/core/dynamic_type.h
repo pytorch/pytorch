@@ -2,8 +2,8 @@
 
 #include <memory>
 
-#include <ATen/core/ivalue.h>
 #include <ATen/core/class_type.h>
+#include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type_base.h>
 #include <c10/util/Optional.h>
 
@@ -149,6 +149,9 @@ class DynamicType : public Type {
   }
   TypeKind dynamicKind() const;
 
+  // Should be used only on the server side to restore static type information.
+  TypePtr fallback() const;
+
  private:
   bool symmetric() const override {
     return false;
@@ -181,20 +184,20 @@ class DynamicType : public Type {
 
 template <typename T>
 struct DynamicTypeTrait {
-static auto tagValue() {
-  TORCH_CHECK(false);
-  return DynamicType::Tag::Any;
-}
+  static auto tagValue() {
+    TORCH_CHECK(false);
+    return DynamicType::Tag::Any;
+  }
 };
-#define DYNAMIC_TYPE_TAG_VALUE(NAME, _) \
-template <> \
-struct TORCH_API DynamicTypeTrait<NAME ## Type> { \
-static auto tagValue() { \
-  return DynamicType::Tag::NAME; \
-} \
-static const DynamicTypePtr& getBaseType(); \
-};
-    FORALL_DYNAMIC_TYPES(DYNAMIC_TYPE_TAG_VALUE)
+#define DYNAMIC_TYPE_TAG_VALUE(NAME, _)           \
+  template <>                                     \
+  struct TORCH_API DynamicTypeTrait<NAME##Type> { \
+    static auto tagValue() {                      \
+      return DynamicType::Tag::NAME;              \
+    }                                             \
+    static const DynamicTypePtr& getBaseType();   \
+  };
+FORALL_DYNAMIC_TYPES(DYNAMIC_TYPE_TAG_VALUE)
 #undef DYNAMIC_TYPE_TAG_VALUE
 
 template <>
