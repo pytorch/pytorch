@@ -317,18 +317,20 @@ def module_inputs_torch_nn_AvgPool1d(module_info, device, dtype, requires_grad, 
 def module_inputs_torch_nn_ConvNd(module_info, device, dtype, requires_grad, **kwargs):
     N = kwargs['N']
     lazy = kwargs['lazy'] if 'lazy' in kwargs else False
+    transposed = kwargs['transposed'] if 'transposed' in kwargs else False
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    conv_kwargs_list = [{}] if transposed else [{}, {'padding': 'same'}]
 
     # Currently, all sample inputs below are for testing no-batch-dim support.
     kernel_size, C_in, C_out = 3, 4, 5
     input_no_batch_shape = (C_in,) + tuple((6 for _ in range(N)))
     return [
-        ModuleInput(constructor_input=(FunctionInput(C_out, kernel_size, **kwargs) if lazy else
-                                       FunctionInput(C_in, C_out, kernel_size, **kwargs)),
+        ModuleInput(constructor_input=(FunctionInput(C_out, kernel_size, **conv_kwargs) if lazy else
+                                       FunctionInput(C_in, C_out, kernel_size, **conv_kwargs)),
                     forward_input=FunctionInput(make_input(shape=input_no_batch_shape)),
                     desc='no_batch_dim',
                     reference_fn=no_batch_dim_reference_fn)
-        for kwargs in ({}, {'padding': 'same'})
+        for conv_kwargs in conv_kwargs_list
     ]
 
 
@@ -482,6 +484,12 @@ module_db: List[ModuleInfo] = [
                module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=2, lazy=False)),
     ModuleInfo(torch.nn.Conv3d,
                module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=3, lazy=False)),
+    ModuleInfo(torch.nn.ConvTranspose1d,
+               module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=1, lazy=False, transposed=True)),
+    ModuleInfo(torch.nn.ConvTranspose2d,
+               module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=2, lazy=False, transposed=True)),
+    ModuleInfo(torch.nn.ConvTranspose3d,
+               module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=3, lazy=False, transposed=True)),
     ModuleInfo(torch.nn.ELU,
                module_inputs_func=module_inputs_torch_nn_ELU),
     ModuleInfo(torch.nn.L1Loss,
@@ -498,6 +506,21 @@ module_db: List[ModuleInfo] = [
                decorators=[skipMeta]),
     ModuleInfo(torch.nn.LazyConv3d,
                module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=3, lazy=True),
+               # Lazy modules don't currently play well with ModuleInfo tests on the meta device.
+               # See https://github.com/pytorch/pytorch/issues/70505 for more info.
+               decorators=[skipMeta]),
+    ModuleInfo(torch.nn.LazyConvTranspose1d,
+               module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=1, lazy=True, transposed=True),
+               # Lazy modules don't currently play well with ModuleInfo tests on the meta device.
+               # See https://github.com/pytorch/pytorch/issues/70505 for more info.
+               decorators=[skipMeta]),
+    ModuleInfo(torch.nn.LazyConvTranspose2d,
+               module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=2, lazy=True, transposed=True),
+               # Lazy modules don't currently play well with ModuleInfo tests on the meta device.
+               # See https://github.com/pytorch/pytorch/issues/70505 for more info.
+               decorators=[skipMeta]),
+    ModuleInfo(torch.nn.LazyConvTranspose3d,
+               module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=3, lazy=True, transposed=True),
                # Lazy modules don't currently play well with ModuleInfo tests on the meta device.
                # See https://github.com/pytorch/pytorch/issues/70505 for more info.
                decorators=[skipMeta]),
