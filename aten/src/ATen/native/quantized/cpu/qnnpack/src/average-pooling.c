@@ -253,11 +253,6 @@ enum pytorch_qnnp_status pytorch_qnnp_setup_average_pooling2d_nhwc_q8(
     }
   }
 
-  const size_t pooling_height = average_pooling->kernel_height;
-  const size_t pooling_width = average_pooling->kernel_width;
-  const size_t pooling_size = pooling_height * pooling_width;
-  const size_t output_height = average_pooling->output_height;
-  const size_t output_width = average_pooling->output_width;
   /* Micro-kernel may read up to (mr - 1) elements after the end of indirection
    * buffer */
   const uint32_t mr = pytorch_qnnp_params.q8avgpool.mr;
@@ -323,11 +318,11 @@ enum pytorch_qnnp_status pytorch_qnnp_setup_average_pooling2d_nhwc_q8(
    *  but kernel height (3) * stride (2) = 6.
    *  This you will see operator-run.c
    */
-  const size_t step_width = min(average_pooling->stride_width, pooling_width);
-  const size_t step_height =
-      pooling_size + (output_width * step_width - 1) * pooling_height;
-  const size_t indirection_buffer_size =
-      sizeof(void*) * ((mr - 1) + batch_size * output_height * step_height);
+  pytorch_qnnp_indirection_set_step_dimensions(average_pooling);
+  const size_t indirection_buffer_size = sizeof(void*) *
+      ((mr - 1) +
+       batch_size * average_pooling->output_height *
+           average_pooling->step_height);
 
   const void** indirection_buffer = (const void**)realloc(
       average_pooling->indirection_buffer, indirection_buffer_size);
@@ -339,8 +334,7 @@ enum pytorch_qnnp_status pytorch_qnnp_setup_average_pooling2d_nhwc_q8(
   }
   average_pooling->indirection_buffer = indirection_buffer;
 
-  pytorch_qnnp_indirection_init_dwconv2d(
-      average_pooling, valid_batch_size, step_height, step_width);
+  pytorch_qnnp_indirection_init_dwconv2d(average_pooling, valid_batch_size);
 
   average_pooling->last_input = input;
   average_pooling->last_input_height = input_height;
