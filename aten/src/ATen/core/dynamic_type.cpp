@@ -21,9 +21,7 @@ bool contains(DynamicType::Tag lhs, DynamicType::Tag rhs) {
 }
 
 C10_NOINLINE DynamicTypePtr makeBaseType(DynamicType::Tag tag) {
-  return std::make_shared<DynamicType>(
-      tag,
-      DynamicType::Arguments{});
+  return std::make_shared<DynamicType>(tag, DynamicType::Arguments{});
 }
 
 } // namespace
@@ -93,7 +91,10 @@ DynamicType::DynamicType(Tag tag, Arguments arguments)
     : Type(Kind), tag_(tag), arguments_(std::move(arguments)) {}
 
 DynamicType::DynamicType(Tag tag, c10::string_view name, Arguments arguments)
-    : Type(Kind), tag_(tag), name_(std::string{name}), arguments_(std::move(arguments)) {}
+    : Type(Kind),
+      tag_(tag),
+      name_(std::string{name}),
+      arguments_(std::move(arguments)) {}
 
 DynamicType::DynamicType(const Type& other) : Type(DynamicType::Kind) {
   auto kind = other.kind();
@@ -251,12 +252,14 @@ DynamicTypePtr ivalue::TupleTypeFactory<c10::DynamicType>::create(
   return DynamicTypeFactory::create<TupleType>(std::move(elemTypes));
 }
 
-DynamicTypePtr ivalue::TupleTypeFactory<c10::DynamicType>::fallback(const Type&) {
+DynamicTypePtr ivalue::TupleTypeFactory<c10::DynamicType>::fallback(
+    const Type&) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false);
   return nullptr;
 }
 
-TORCH_API TupleTypePtr ivalue::TupleTypeFactory<TupleType>::fallback(const Type& type) {
+TORCH_API TupleTypePtr
+ivalue::TupleTypeFactory<TupleType>::fallback(const Type& type) {
 #ifdef C10_MOBILE
   return nullptr;
 #else
@@ -277,12 +280,12 @@ TORCH_API TupleTypePtr ivalue::TupleTypeFactory<TupleType>::fallback(const Type&
 #endif
 }
 
-#define DYNAMIC_TYPE_TAG_VALUE(NAME, _) \
-const DynamicTypePtr& DynamicTypeTrait<NAME ## Type>::getBaseType() { \
-  static auto type = makeBaseType(tagValue()); \
-  return type; \
-}
-    FORALL_DYNAMIC_TYPES(DYNAMIC_TYPE_TAG_VALUE)
+#define DYNAMIC_TYPE_TAG_VALUE(NAME, _)                               \
+  const DynamicTypePtr& DynamicTypeTrait<NAME##Type>::getBaseType() { \
+    static auto type = makeBaseType(tagValue());                      \
+    return type;                                                      \
+  }
+FORALL_DYNAMIC_TYPES(DYNAMIC_TYPE_TAG_VALUE)
 #undef DYNAMIC_TYPE_TAG_VALUE
 
 } // namespace c10
