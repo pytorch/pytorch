@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: distributed"]
+
 import copy
 import logging
 import math
@@ -1221,6 +1223,17 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                     # one tensor in output tensor list
                     self.assertEqualIgnoreType(y, z)
 
+        # Added to address https://github.com/pytorch/pytorch/issues/65231
+        # In the failed tests, all assertEqualIgnoreType are passed on all
+        # processes. However, one of the process didn't call ProcessGroupGloo
+        # destructor before exiting program. This is not surprising as the only
+        # guarantee that Python makes is that garbage collection MAY happen
+        # before the program exits. If GC didn't happen, the two threads in
+        # ProcessGroup might be destructed before joined.
+        # FIXME: it's still unclear why only this test require explicit
+        # destroy_process_group()
+        c10d.destroy_process_group()
+
     @requires_gloo()
     def test_reduce_checks(self):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -2306,6 +2319,11 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
         with self.assertRaisesRegex(RuntimeError, "device_ids not supported"):
             c10d.barrier(device_ids=[self.rank])
+
+    @skip_if_lt_x_gpu(2)
+    @requires_gloo()
+    def test_gloo_warn_not_in_group(self):
+        self._test_warn_not_in_group(backend="gloo")
 
 
 if __name__ == "__main__":

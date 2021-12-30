@@ -1,3 +1,7 @@
+from collections import deque
+from typing import Set
+
+
 class DiGraph:
     """Really simple unweighted directed graph data structure to track dependencies.
 
@@ -83,3 +87,68 @@ class DiGraph:
             return n in self._node
         except TypeError:
             return False
+
+    def forward_transitive_closure(self, src: str) -> Set[str]:
+        """Returns a set of nodes that are reachable from src"""
+
+        result = set(src)
+        working_set = deque(src)
+        while len(working_set) > 0:
+            cur = working_set.popleft()
+            for n in self.successors(cur):
+                if n not in result:
+                    result.add(n)
+                    working_set.append(n)
+        return result
+
+    def backward_transitive_closure(self, src: str) -> Set[str]:
+        """Returns a set of nodes that are reachable from src in reverse direction"""
+
+        result = set(src)
+        working_set = deque(src)
+        while len(working_set) > 0:
+            cur = working_set.popleft()
+            for n in self.predecessors(cur):
+                if n not in result:
+                    result.add(n)
+                    working_set.append(n)
+        return result
+
+    def all_paths(self, src: str, dst: str):
+        """Returns a subgraph rooted at src that shows all the paths to dst."""
+
+        result_graph = DiGraph()
+        # First compute forward transitive closure of src (all things reachable from src).
+        forward_reachable_from_src = self.forward_transitive_closure(src)
+
+        if dst not in forward_reachable_from_src:
+            return result_graph
+
+        # Second walk the reverse dependencies of dst, adding each node to
+        # the output graph iff it is also present in forward_reachable_from_src.
+        # we don't use backward_transitive_closures for optimization purposes
+        working_set = deque(dst)
+        while len(working_set) > 0:
+            cur = working_set.popleft()
+            for n in self.predecessors(cur):
+                if n in forward_reachable_from_src:
+                    result_graph.add_edge(n, cur)
+                    # only explore further if its reachable from src
+                    working_set.append(n)
+
+        return result_graph.to_dot()
+
+    def to_dot(self) -> str:
+        """Returns the dot representation of the graph.
+
+        Returns:
+            A dot representation of the graph.
+        """
+        edges = "\n".join(f'"{f}" -> "{t}";' for f, t in self.edges)
+        return f"""\
+digraph G {{
+rankdir = LR;
+node [shape=box];
+{edges}
+}}
+"""

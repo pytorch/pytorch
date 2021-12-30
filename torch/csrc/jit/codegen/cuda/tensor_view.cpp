@@ -245,7 +245,11 @@ TensorView* TensorView::computeWith(
   return this;
 }
 
-TensorView* TensorView::split(int axis_, Val* factor, bool inner_split) {
+TensorView* TensorView::split(
+    int axis_,
+    Val* factor,
+    bool inner_split,
+    bool trim_out_of_bounds) {
   // Only check things associated with axis, factor will be validated in
   // IterDomain
   TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to do split on a 0-dim TensorView");
@@ -277,12 +281,16 @@ TensorView* TensorView::split(int axis_, Val* factor, bool inner_split) {
       "Splitting an axis of non-Serial parallel type is not supported at this time."
       " Parallelization strategy must be set after calling split.");
 
-  domain()->split(axis_, factor, inner_split);
+  domain()->split(axis_, factor, inner_split, trim_out_of_bounds);
   return this;
 }
 
-TensorView* TensorView::split(int axis, unsigned int factor, bool inner_split) {
-  split(axis, new Int(factor), inner_split);
+TensorView* TensorView::split(
+    int axis,
+    unsigned int factor,
+    bool inner_split,
+    bool trim_out_of_bounds) {
+  split(axis, new Int(factor), inner_split, trim_out_of_bounds);
   return this;
 }
 
@@ -494,7 +502,7 @@ TensorView* TensorView::welfordRfactorHelper(
 
     // construct a trivial root domain map
     std::unordered_map<IterDomain*, IterDomain*> id_map;
-    for (size_t i = 0; i < root.size(); i++) {
+    for (const auto i : c10::irange(root.size())) {
       id_map[this_root[i]] = root[i];
     }
 
@@ -643,11 +651,11 @@ TensorView* TensorView::cache_before() {
   // Create Producer Domain
   // This domain will be the consumer which needs a new domain, so replace the
   // producers domain with this domain.
-  auto root_domain = getRootDomain();
 
   TensorView* producer = new TensorView(
       new TensorDomain(
           domain()->getRootDomain(),
+          domain()->getRFactorDomain(),
           domain()->domain(),
           domain()->contiguity()),
       getDataType().value());
@@ -656,7 +664,8 @@ TensorView* TensorView::cache_before() {
   TensorView* consumer = this;
 
   size_t i = 0;
-  auto no_reduction_root_domain = TensorDomain::noReductions(getRootDomain());
+  auto no_reduction_root_domain =
+      TensorDomain::noReductions(getMaybeRFactorDomain());
   std::vector<IterDomain*> new_root_domain(no_reduction_root_domain.size());
   for (const auto& dom : no_reduction_root_domain) {
     new_root_domain[i++] = dom->clone();
@@ -707,7 +716,7 @@ TensorView* TensorView::cache_fork() {
       "Caching computed-at tensors is not allowed. Apply caching before computeAt");
 
   // This domain will be the producer, so create the consumer
-  auto root_domain = TensorDomain::noReductions(getRootDomain());
+  auto root_domain = TensorDomain::noReductions(getMaybeRFactorDomain());
   TensorView* new_output = new TensorView(
       new TensorDomain(
           IterDomain::clone(root_domain),
@@ -765,7 +774,8 @@ TensorView* TensorView::cache_after() {
   // Keep Broadcast Axis (Permanent)
   // Remove Reduction Axis
   size_t i = 0;
-  auto no_reduction_root_domain = TensorDomain::noReductions(getRootDomain());
+  auto no_reduction_root_domain =
+      TensorDomain::noReductions(getMaybeRFactorDomain());
   std::vector<IterDomain*> new_root_domain(no_reduction_root_domain.size());
   for (const auto& dom : no_reduction_root_domain) {
     new_root_domain[i++] = dom->clone();
@@ -815,7 +825,7 @@ void TensorView::clearReductionIterDomains() {
 
   std::vector<IterDomain*> new_root;
   std::vector<bool> new_contig;
-  for (size_t i = 0; i < getRootDomain().size(); i++) {
+  for (const auto i : c10::irange(getRootDomain().size())) {
     if (!getRootDomain()[i]->isReduction()) {
       new_root.push_back(getRootDomain()[i]);
       new_contig.push_back(domain()->contiguity()[i]);
@@ -860,7 +870,7 @@ TensorViewBuilder& TensorViewBuilder::shape(std::vector<int64_t> shape) {
 TensorView* TensorViewBuilder::build() const {
   // Build the domain
   std::vector<IterDomain*> domain(ndims_, nullptr);
-  for (size_t i = 0; i < ndims_; i++) {
+  for (const auto i : c10::irange(ndims_)) {
     if (shape_.empty() || shape_[i] == -1) {
       domain[i] = new IterDomain(new Int(0), new Int());
     } else {
@@ -868,7 +878,16 @@ TensorView* TensorViewBuilder::build() const {
           shape_[i] >= 0,
           "Invalid extent value. ",
           "For a tensor representing a single scalar use ndims = 0 with no sizes set.");
-      domain[i] = new IterDomain(new Int(0), new Int(shape_[i]));
+      if (shape_[i] == 1) {
+        // If size is known to be 1, assume it needs to be broadcasted.
+        domain[i] = new IterDomain(
+            new Int(0),
+            new Int(1),
+            ParallelType::Serial,
+            IterType::BroadcastWithStride);
+      } else {
+        domain[i] = new IterDomain(new Int(0), new Int(shape_[i]));
+      }
     }
   }
 

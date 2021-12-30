@@ -1191,12 +1191,12 @@ def multimarginloss_weights_no_reduce_test():
         pickle=False)
 
 
-def fractional_max_pool2d_test(test_case):
+def fractional_max_pool2d_test(test_case, return_indices=False):
     random_samples = torch.empty((1, 3, 2), dtype=torch.double).uniform_()
     if test_case == 'ratio':
-        return dict(
+        out = dict(
             constructor=lambda: nn.FractionalMaxPool2d(
-                2, output_ratio=0.5, _random_samples=random_samples),
+                2, output_ratio=0.5, _random_samples=random_samples, return_indices=return_indices),
             cpp_constructor_args='''torch::nn::FractionalMaxPool2dOptions(2)
                                     .output_ratio(0.5)
                                     ._random_samples(random_samples)''',
@@ -1204,16 +1204,22 @@ def fractional_max_pool2d_test(test_case):
             cpp_var_map={'random_samples': random_samples},
             fullname='FractionalMaxPool2d_ratio')
     elif test_case == 'size':
-        return dict(
+        out = dict(
             constructor=lambda: nn.FractionalMaxPool2d((2, 3), output_size=(
-                4, 3), _random_samples=random_samples),
+                4, 3), _random_samples=random_samples, return_indices=return_indices),
             cpp_constructor_args='''torch::nn::FractionalMaxPool2dOptions({2, 3})
                                     .output_size(std::vector<int64_t>({4, 3}))
                                     ._random_samples(random_samples)''',
             input_size=(1, 3, 7, 6),
             cpp_var_map={'random_samples': random_samples},
             fullname='FractionalMaxPool2d_size')
-
+    if return_indices:
+        # to get the return_indices behavior we have to call
+        # `forward_with_indices` in C++ and the return type switches from
+        # Tensor to tuple<Tensor, Tensor> which complicates testing considerably.
+        out['test_cpp_api_parity'] = False
+        out['fullname'] = '%s_return_indices' % out['fullname']
+    return out
 
 def fractional_max_pool2d_no_batch_dim_test(test_case, use_random_samples):
     if use_random_samples:
@@ -1265,12 +1271,12 @@ def fractional_max_pool2d_no_batch_dim_test(test_case, use_random_samples):
                 fullname='FractionalMaxPool2d_size_no_batch_dim_no_random_samples')
 
 
-def fractional_max_pool3d_test(test_case):
+def fractional_max_pool3d_test(test_case, return_indices=False):
     random_samples = torch.empty((2, 4, 3), dtype=torch.double).uniform_()
     if test_case == 'ratio':
-        return dict(
+        out = dict(
             constructor=lambda: nn.FractionalMaxPool3d(
-                2, output_ratio=0.5, _random_samples=random_samples),
+                2, output_ratio=0.5, _random_samples=random_samples, return_indices=return_indices),
             cpp_constructor_args='''torch::nn::FractionalMaxPool3dOptions(2)
                                     .output_ratio(0.5)
                                     ._random_samples(random_samples)''',
@@ -1278,9 +1284,9 @@ def fractional_max_pool3d_test(test_case):
             cpp_var_map={'random_samples': random_samples},
             fullname='FractionalMaxPool3d_ratio')
     elif test_case == 'size':
-        return dict(
+        out = dict(
             constructor=lambda: nn.FractionalMaxPool3d((2, 2, 2), output_size=(
-                4, 4, 4), _random_samples=random_samples),
+                4, 4, 4), _random_samples=random_samples, return_indices=return_indices),
             cpp_constructor_args='''torch::nn::FractionalMaxPool3dOptions({2, 2, 2})
                                     .output_size(std::vector<int64_t>({4, 4, 4}))
                                     ._random_samples(random_samples)''',
@@ -1288,15 +1294,72 @@ def fractional_max_pool3d_test(test_case):
             cpp_var_map={'random_samples': random_samples},
             fullname='FractionalMaxPool3d_size')
     elif test_case == 'asymsize':
-        return dict(
+        out = dict(
             constructor=lambda: nn.FractionalMaxPool3d((4, 2, 3), output_size=(
-                10, 3, 2), _random_samples=random_samples),
+                10, 3, 2), _random_samples=random_samples, return_indices=return_indices),
             cpp_constructor_args='''torch::nn::FractionalMaxPool3dOptions({4, 2, 3})
                                     .output_size(std::vector<int64_t>({10, 3, 2}))
                                     ._random_samples(random_samples)''',
             input_size=(2, 4, 16, 7, 5),
             cpp_var_map={'random_samples': random_samples},
             fullname='FractionalMaxPool3d_asymsize')
+    if return_indices:
+        # to get the return_indices behavior we have to call
+        # `forward_with_indices` in C++ and the return type switches from
+        # Tensor to tuple<Tensor, Tensor> which complicates testing considerably.
+        out['test_cpp_api_parity'] = False
+        out['fullname'] = '%s_return_indices' % out['fullname']
+    return out
+
+
+def fractional_max_pool3d_no_batch_dim_test(test_case, use_random_samples):
+    if use_random_samples:
+        # random_samples enables CPU and GPU checks to be consistent
+        random_samples = torch.empty((2, 4, 3), dtype=torch.double).uniform_()
+        if test_case == 'ratio':
+            return dict(
+                constructor=lambda: nn.FractionalMaxPool3d(
+                    2, output_ratio=0.5, _random_samples=random_samples),
+                cpp_constructor_args='''torch::nn::FractionalMaxPool3dOptions(2)
+                                        .output_ratio(0.5)
+                                        ._random_samples(random_samples)''',
+                input_size=(4, 5, 5, 5),
+                cpp_var_map={'random_samples': random_samples},
+                reference_fn=single_batch_reference_fn,
+                fullname='FractionalMaxPool3d_ratio_no_batch_dim')
+        elif test_case == 'size':
+            return dict(
+                constructor=lambda: nn.FractionalMaxPool3d((2, 2, 2), output_size=(
+                    4, 4, 4), _random_samples=random_samples),
+                cpp_constructor_args='''torch::nn::FractionalMaxPool3dOptions({2, 2, 2})
+                                        .output_size(std::vector<int64_t>({4, 4, 4}))
+                                        ._random_samples(random_samples)''',
+                input_size=(4, 7, 7, 7),
+                cpp_var_map={'random_samples': random_samples},
+                reference_fn=single_batch_reference_fn,
+                fullname='FractionalMaxPool3d_size_no_batch_dim')
+    else:
+        # can not check cuda because there RNG is different between cpu and cuda
+        if test_case == 'ratio':
+            return dict(
+                constructor=lambda: nn.FractionalMaxPool3d(
+                    2, output_ratio=0.5),
+                cpp_constructor_args='''torch::nn::FractionalMaxPool3dOptions(2)
+                                        .output_ratio(0.5)''',
+                input_size=(4, 5, 5, 5),
+                reference_fn=single_batch_reference_fn,
+                test_cuda=False,
+                fullname='FractionalMaxPool3d_ratio_no_batch_dim_no_random_samples')
+        elif test_case == 'size':
+            return dict(
+                constructor=lambda: nn.FractionalMaxPool3d((2, 2, 2), output_size=(
+                    4, 4, 4)),
+                cpp_constructor_args='''torch::nn::FractionalMaxPool3dOptions({2, 2, 2})
+                                        .output_size(std::vector<int64_t>({4, 4, 4}))''',
+                input_size=(4, 7, 7, 7),
+                reference_fn=single_batch_reference_fn,
+                test_cuda=False,
+                fullname='FractionalMaxPool3d_size_no_batch_dim_no_random_samples')
 
 
 def single_batch_reference_fn(input, parameters, module):
@@ -1369,13 +1432,19 @@ new_module_tests = [
     multimarginloss_weights_no_reduce_test(),
     fractional_max_pool2d_test('ratio'),
     fractional_max_pool2d_test('size'),
-    fractional_max_pool3d_test('ratio'),
-    fractional_max_pool3d_test('size'),
-    fractional_max_pool3d_test('asymsize'),
     fractional_max_pool2d_no_batch_dim_test('ratio', True),
     fractional_max_pool2d_no_batch_dim_test('ratio', False),
     fractional_max_pool2d_no_batch_dim_test('size', True),
     fractional_max_pool2d_no_batch_dim_test('size', False),
+    fractional_max_pool2d_test('ratio', return_indices=True),
+    fractional_max_pool3d_test('ratio'),
+    fractional_max_pool3d_test('size'),
+    fractional_max_pool3d_test('asymsize'),
+    fractional_max_pool3d_test('ratio', return_indices=True),
+    fractional_max_pool3d_no_batch_dim_test('ratio', True),
+    fractional_max_pool3d_no_batch_dim_test('ratio', False),
+    fractional_max_pool3d_no_batch_dim_test('size', True),
+    fractional_max_pool3d_no_batch_dim_test('size', False),
     dict(
         module_name='BatchNorm1d',
         constructor_args=(10,),
@@ -1567,6 +1636,27 @@ new_module_tests = [
         desc='tracking_stats',
     ),
     dict(
+        module_name='InstanceNorm1d',
+        constructor_args=(3, 1e-3, 0.3, False, True),
+        cpp_constructor_args='''torch::nn::InstanceNorm1dOptions(3)
+                                .eps(1e-3).momentum(0.3).affine(false).track_running_stats(true)''',
+        input_size=(3, 15),
+        cudnn=True,
+        check_eval=True,
+        ref=single_batch_reference_fn,
+        desc='tracking_stats_no_batch_dim',
+    ),
+    dict(
+        module_name='InstanceNorm1d',
+        constructor_args=(3, 1e-3, 0.3),
+        cpp_constructor_args='torch::nn::InstanceNorm1dOptions(3).eps(1e-3).momentum(0.3)',
+        input_size=(3, 15),
+        cudnn=True,
+        check_eval=True,
+        ref=single_batch_reference_fn,
+        desc='no_batch_dim',
+    ),
+    dict(
         module_name='InstanceNorm2d',
         constructor_args=(3, 1e-3, 0.3),
         cpp_constructor_args='torch::nn::InstanceNorm2dOptions(3).eps(1e-3).momentum(0.3)',
@@ -1583,6 +1673,27 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='tracking_stats',
+    ),
+    dict(
+        module_name='InstanceNorm2d',
+        constructor_args=(3, 1e-3, 0.3),
+        cpp_constructor_args='torch::nn::InstanceNorm2dOptions(3).eps(1e-3).momentum(0.3)',
+        input_size=(3, 6, 6),
+        cudnn=True,
+        check_eval=True,
+        ref=single_batch_reference_fn,
+        desc='no_batch_dim'
+    ),
+    dict(
+        module_name='InstanceNorm2d',
+        constructor_args=(3, 1e-3, 0.3, False, True),
+        cpp_constructor_args='''torch::nn::InstanceNorm2dOptions(3)
+                                .eps(1e-3).momentum(0.3).affine(false).track_running_stats(true)''',
+        input_size=(3, 6, 6),
+        cudnn=True,
+        check_eval=True,
+        ref=single_batch_reference_fn,
+        desc='tracking_stats_no_batch_dim',
     ),
     dict(
         module_name='InstanceNorm3d',
@@ -1603,12 +1714,34 @@ new_module_tests = [
         desc='tracking_stats',
     ),
     dict(
+        module_name='InstanceNorm3d',
+        constructor_args=(3, 1e-3, 0.3),
+        cpp_constructor_args='torch::nn::InstanceNorm3dOptions(3).eps(1e-3).momentum(0.3)',
+        input_size=(3, 4, 4, 4),
+        cudnn=True,
+        check_eval=True,
+        ref=single_batch_reference_fn,
+        desc='no_batch_dim'
+    ),
+    dict(
+        module_name='InstanceNorm3d',
+        constructor_args=(3, 1e-3, 0.3, False, True),
+        cpp_constructor_args='''torch::nn::InstanceNorm3dOptions(3)
+                                .eps(1e-3).momentum(0.3).affine(false).track_running_stats(true)''',
+        input_size=(2, 3, 4, 4, 4),
+        cudnn=True,
+        check_eval=True,
+        ref=single_batch_reference_fn,
+        desc='tracking_stats_no_batch_dim',
+    ),
+    dict(
         module_name='LayerNorm',
         constructor_args=([5], 1e-3),
         cpp_constructor_args='torch::nn::LayerNormOptions({5}).eps(1e-3)',
         input_size=(4, 5, 5),
         cudnn=True,
         check_eval=True,
+        check_half=True,
         desc='1d_elementwise_affine',
     ),
     dict(
@@ -1618,6 +1751,7 @@ new_module_tests = [
         input_size=(4, 5, 5),
         cudnn=True,
         check_eval=True,
+        check_half=True,
         desc='1d_no_elementwise_affine',
     ),
     dict(
@@ -1627,6 +1761,7 @@ new_module_tests = [
         input_size=(4, 2, 2, 5),
         cudnn=True,
         check_eval=True,
+        check_half=True,
         desc='3d_elementwise_affine',
     ),
     dict(
@@ -1636,6 +1771,7 @@ new_module_tests = [
         input_size=(4, 2, 2, 5),
         cudnn=True,
         check_eval=True,
+        check_half=True,
         desc='3d_no_elementwise_affine',
     ),
     dict(
@@ -1646,6 +1782,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         gradcheck_fast_mode=True,
+        check_half=True,
         desc='3d_no_affine_large_feature',
     ),
     dict(
@@ -1655,6 +1792,7 @@ new_module_tests = [
         input_size=(0, 5),
         cudnn=True,
         check_eval=True,
+        check_half=True,
         desc='1d_empty_elementwise_affine',
     ),
     dict(
@@ -1937,6 +2075,13 @@ new_module_tests = [
         desc='stride',
     ),
     dict(
+        module_name='MaxPool1d',
+        fullname='MaxPool1d_return_indices',
+        constructor=lambda: nn.MaxPool1d(4, return_indices=True),
+        input_size=(2, 10, 4),
+        test_cpp_api_parity=False,
+    ),
+    dict(
         module_name='Conv2d',
         constructor_args=(3, 4, (3, 2)),
         cpp_constructor_args='torch::nn::Conv2dOptions(3, 4, {3, 2})',
@@ -2150,6 +2295,14 @@ new_module_tests = [
         input_size=(1, 3, 7, 7),
         check_with_channels_last=True,
         desc='4d_input'
+    ),
+    dict(
+        module_name='MaxPool2d',
+        fullname='MaxPool2d_return_indices',
+        constructor=lambda: nn.MaxPool2d((3, 3), (2, 2), (1, 1), return_indices=True),
+        input_size=(1, 3, 7, 7),
+        check_with_channels_last=True,
+        test_cpp_api_parity=False,
     ),
     dict(
         module_name='AvgPool1d',
@@ -2646,6 +2799,13 @@ new_module_tests = [
         cpp_constructor_args='torch::nn::MaxPool3dOptions(2).stride(2).padding({1, 1, 1})',
         input_size=(2, 3, 5, 5, 5),
         desc='stride_padding',
+    ),
+    dict(
+        module_name='MaxPool3d',
+        fullname='MaxPool3d_return_indices',
+        constructor=lambda: nn.MaxPool3d(2, 2, (1, 1, 1), return_indices=True),
+        input_size=(2, 3, 5, 5, 5),
+        test_cpp_api_parity=False,
     ),
     dict(
         module_name='AvgPool3d',
@@ -3714,6 +3874,15 @@ new_module_tests = [
         test_cuda=True,
     ),
     dict(
+        fullname='Fold_no_batch_dim_input',
+        constructor=lambda: nn.Fold((3, 3), (2, 2), (1, 1), (0, 0), (1, 1)),
+        cpp_constructor_args='torch::nn::FoldOptions({3, 3}, {2, 2}).dilation({1, 1}).padding({0, 0}).stride({1, 1})',
+        input_size=(16, 4),
+        check_gradgrad=False,
+        ref=single_batch_reference_fn,
+        test_cuda=True,
+    ),
+    dict(
         fullname='Unfold_int_input',
         constructor=lambda: nn.Unfold(2, 1, 0, 1),
         cpp_constructor_args='torch::nn::UnfoldOptions(2).dilation(1).padding(0).stride(1)',
@@ -3726,6 +3895,15 @@ new_module_tests = [
         constructor=lambda: nn.Fold(3, 2, 1, 0, 1),
         cpp_constructor_args='torch::nn::FoldOptions(3, 2).dilation(1).padding(0).stride(1)',
         input_size=(2, 16, 4),
+        check_gradgrad=False,
+        test_cuda=True,
+    ),
+    dict(
+        fullname='Fold_no_batch_dim_int_input',
+        constructor=lambda: nn.Fold(3, 2, 1, 0, 1),
+        cpp_constructor_args='torch::nn::FoldOptions(3, 2).dilation(1).padding(0).stride(1)',
+        input_size=(16, 4),
+        ref=single_batch_reference_fn,
         check_gradgrad=False,
         test_cuda=True,
     ),
@@ -4234,17 +4412,16 @@ def cross_entropy_loss_indices_target_reference(input, target, weight=None, igno
 
     smooth_loss = -torch.sum(input, 1)
 
-    if ignore_index >= 0:
-        ignore_mask = target == ignore_index
-        smooth_loss.masked_fill_(ignore_mask, 0.0)
+    ignore_mask = target == ignore_index
+    smooth_loss.masked_fill_(ignore_mask, 0.0)
 
     if reduction == 'mean':
         if weight is not None:
             # TODO: This code can path can be removed if #61309 is resolved
             # loss is normalized by the weights to be consistent with nll_loss_nd
-            ret = torch.sum(smooth_loss) / weight.gather(0, target.flatten()).sum()
+            ret = torch.sum(smooth_loss) / weight.gather(0, target.masked_select(ignore_mask.logical_not()).flatten()).sum()
         else:
-            ret = torch.mean(smooth_loss)
+            ret = torch.mean(smooth_loss.masked_select(ignore_mask.logical_not()))
     elif reduction == 'sum':
         ret = torch.sum(smooth_loss)
     else:
@@ -5478,11 +5655,22 @@ classification_criterion_no_batch = [
     ('SoftMarginLoss', lambda: torch.randn(9), lambda: torch.tensor([-1, 1, 1] * 3)),
     ('NLLLoss', lambda: F.log_softmax(torch.randn(3), dim=0), lambda: torch.tensor(1)),
     ('CosineEmbeddingLoss', lambda: (torch.randn(9), torch.randn(9)), lambda: torch.tensor(1)),
+    # For MarginRankingLoss, input_fn : (x1, x2) and target_fn : target
+    ('MarginRankingLoss', lambda: (torch.randn(()), torch.randn(())), lambda: torch.randn(()).sign()),
     # For TripletMarginLoss, input_fn : (anchor, positive) and target_fn : negative
     ('TripletMarginLoss', lambda: (torch.randn(9), torch.randn(9)), lambda: torch.randn(9)),
+    ('MultiLabelSoftMarginLoss', lambda: torch.randn(9), lambda: torch.randn(9)),
 ]
 classification_criterion_no_batch_extra_info: Dict[str, dict] = {
     'MultiLabelMarginLoss': {'check_gradgrad': False},
+}
+# TODO : Fix these discrepancies
+classification_cpp_parity = {
+    'BCELoss': False,
+    'BCEWithLogitsLoss': False,
+    'HingeEmbeddingLoss': False,
+    'NLLLoss': False,
+    'SoftMarginLoss': False,
 }
 reductions = ['none', 'mean', 'sum']
 for (name, input_fn, target_fn), reduction in product(classification_criterion_no_batch,
@@ -5493,7 +5681,8 @@ for (name, input_fn, target_fn), reduction in product(classification_criterion_n
         input_fn=lambda f=input_fn: f(),
         target_fn=lambda f=target_fn: f(),
         reference_fn=single_batch_reference_criterion_fn,
-        test_cpp_api_parity=False,
+        test_cpp_api_parity=True,
+        has_parity=classification_cpp_parity.get(name, True)
     )
     extra_info = classification_criterion_no_batch_extra_info.get(name, {})
     classification_test_info.update(extra_info)
@@ -5776,6 +5965,8 @@ class ModuleTest(TestBase):
         test_case._zero_grad_input(input)
         with freeze_rng_state():
             output = test_case._forward(module, input)
+            if getattr(module, "return_indices", False):
+                output = output[0]
             grad_output = output.new(output.shape).normal_()
             output = output.clone()
             d_input = deepcopy(test_case._backward(module, input, output, grad_output))
@@ -5792,6 +5983,8 @@ class ModuleTest(TestBase):
             test_case._zero_grad_input(i)
             with freeze_rng_state():
                 out = test_case._forward(module, i)
+                if getattr(module, "return_indices", False):
+                    out = out[0]
                 grad = test_case._backward(module, i, out, go)
 
                 test_case.assertEqual(out, output)
@@ -5820,6 +6013,9 @@ class ModuleTest(TestBase):
         test_case._zero_grad_parameters(gpu_module)
         cpu_output = test_case._forward(cpu_module, cpu_input_tuple)
         gpu_output = test_case._forward(gpu_module, gpu_input_tuple)
+        if getattr(cpu_module, "return_indices", False):
+            cpu_output = cpu_output[0]
+            gpu_output = gpu_output[0]
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
         test_case.assertEqualIgnoreType(cpu_output, gpu_output, atol=self.precision, rtol=0)
 
@@ -5838,6 +6034,9 @@ class ModuleTest(TestBase):
         if self.check_gradgrad and not self.FIXME_no_cuda_gradgrad_comparison:
             cpu_output = cpu_module(*cpu_input_tuple)
             gpu_output = gpu_module(*gpu_input_tuple)
+            if getattr(cpu_module, "return_indices", False):
+                cpu_output = cpu_output[0]
+                gpu_output = gpu_output[0]
 
             cpu_gradOutput = torch.randn_like(cpu_output, requires_grad=True)
             gpu_gradOutput = cpu_gradOutput.type_as(gpu_output).detach()

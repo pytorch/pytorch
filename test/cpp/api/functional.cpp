@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <c10/util/irange.h>
 #include <torch/torch.h>
 
 #include <test/cpp/api/support.h>
@@ -172,6 +173,27 @@ TEST_F(FunctionalTest, FractionalMaxPool2d) {
                    {{ 0,  2},
                     {10, 12}}})));
   ASSERT_EQ(std::get<1>(y_with_indices).sizes(), std::vector<int64_t>({2, 2, 2}));
+
+  auto x1 = torch::ones({2, 2, 5, 5});
+  auto y1 = F::fractional_max_pool2d(x1, F::FractionalMaxPool2dFuncOptions(3).output_size(2));
+
+  ASSERT_EQ(y1.ndimension(), 4);
+  ASSERT_TRUE(torch::allclose(y1, torch::ones({2, 2, 2, 2})));
+  ASSERT_EQ(y1.sizes(), std::vector<int64_t>({2, 2, 2, 2}));
+
+  auto y1_with_indices = F::fractional_max_pool2d_with_indices(x1, F::FractionalMaxPool2dFuncOptions(3).output_size(2));
+  ASSERT_TRUE(torch::equal(y1, std::get<0>(y1_with_indices)));
+  ASSERT_TRUE(torch::allclose(
+    std::get<1>(y1_with_indices),
+    torch::tensor({{{{ 0,  2},
+                     {10, 12}},
+                    {{ 0,  2},
+                     {10, 12}}},
+                   {{{ 0,  2},
+                     {10, 12}},
+                    {{ 0,  2},
+                     {10, 12}}}})));
+  ASSERT_EQ(std::get<1>(y1_with_indices).sizes(), std::vector<int64_t>({2, 2, 2, 2}));
 }
 
 TEST_F(FunctionalTest, FractionalMaxPool3d) {
@@ -1127,7 +1149,7 @@ TEST_F(FunctionalTest, GumbelSoftmax) {
   int dims[] = {1, -1};
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers)
   int expected[] = {5*3, 5*4};
-  for(auto i=0; i<2; i++) {
+  for (const auto i : c10::irange(2)) {
     auto logits = torch::randn({5, 4, 3});
     int expected_count = expected[i];
     auto y_draw = F::gumbel_softmax(logits, F::GumbelSoftmaxFuncOptions().hard(true).dim(dims[i]));
@@ -1149,7 +1171,8 @@ TEST_F(FunctionalTest, GumbelSoftmax) {
 
     auto counts = torch::zeros_like(logits);
     torch::Tensor y_draw;
-    for (auto i=0; i<num_draws; i++) {
+    for (const auto i : c10::irange(num_draws)) {
+        (void)i; // Suppress unused variable warning
         y_draw = F::gumbel_softmax(logits, F::GumbelSoftmaxFuncOptions().hard(true));
         counts += y_draw;
     }
@@ -1175,7 +1198,7 @@ TEST_F(FunctionalTest, Softmax) {
   auto output = F::softmax(input, /*dim=*/1);
   auto sum = torch::sum(torch::exp(input), 1);
 
-  for (int i = 0; i < 2; i++) {
+  for (const auto i : c10::irange(2)) {
     auto expected = torch::exp(input[i]) / sum[i];
     ASSERT_TRUE(torch::allclose(output[i], expected));
   }
@@ -1187,7 +1210,7 @@ TEST_F(FunctionalTest, Softmin) {
   auto output = F::softmin(input, /*dim=*/1);
   auto sum = torch::sum(torch::exp(-input), 1);
 
-  for (int i = 0; i < 2; i++) {
+  for (const auto i : c10::irange(2)) {
     auto expected = torch::exp(-input[i]) / sum[i];
     ASSERT_TRUE(torch::allclose(output[i], expected));
   }
@@ -1199,7 +1222,7 @@ TEST_F(FunctionalTest, LogSoftmax) {
   auto output = F::log_softmax(input, /*dim=*/1);
   auto sum = torch::sum(torch::exp(input), 1);
 
-  for (int i = 0; i < 2; i++) {
+  for (const auto i : c10::irange(2)) {
     auto expected = torch::log(torch::exp(input[i]) / sum[i]);
     ASSERT_TRUE(torch::allclose(output[i], expected));
   }
@@ -2114,6 +2137,33 @@ TEST_F(FunctionalTest, Interpolate) {
                 .align_corners(true)),
         "align_corners option can only be set with the "
         "interpolating modes: linear | bilinear | bicubic | trilinear");
+  }
+  {
+    auto tensor = torch::rand({2, 3, 32, 32});
+    std::vector<int64_t> osize = {8, 10};
+    auto expected = at::native::_upsample_nearest_exact2d(tensor, osize, torch::nullopt);
+
+    auto options = F::InterpolateFuncOptions()
+        .size(osize)
+        .mode(torch::kNearestExact)
+        .align_corners(false);
+    auto output = F::interpolate(tensor, options);
+
+    ASSERT_TRUE(output.allclose(expected));
+  }
+  {
+    auto tensor = torch::rand({2, 3, 32, 32});
+    std::vector<int64_t> osize = {8, 10};
+    auto expected = at::native::_upsample_bilinear2d_aa(tensor, osize, false, torch::nullopt);
+
+    auto options = F::InterpolateFuncOptions()
+        .size(osize)
+        .mode(torch::kBilinear)
+        .align_corners(false)
+        .antialias(true);
+    auto output = F::interpolate(tensor, options);
+    ASSERT_TRUE(output.allclose(expected));
+
   }
 }
 

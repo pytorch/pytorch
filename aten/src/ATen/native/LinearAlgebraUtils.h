@@ -1,6 +1,8 @@
 #pragma once
 
 #include <c10/core/ScalarType.h>
+#include <c10/util/irange.h>
+#include <c10/util/Exception.h>
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/TensorUtils.h>
@@ -29,6 +31,14 @@ static char to_blas(TransposeType trans) {
   TORCH_INTERNAL_ASSERT(false, "Invalid transpose type");
 }
 
+static inline c10::MaybeOwned<Tensor> expect_resolved_conj(const Tensor& tensor) {
+  if (tensor.is_conj()) {
+    return c10::MaybeOwned<Tensor>::owned(tensor.resolve_conj());
+  } else {
+    return c10::MaybeOwned<Tensor>::borrowed(tensor);
+  }
+}
+
 /*
  * Clones a Tensor so that the following conditions hold:
  * If we think of a Tensor of having size (B, M, N), where B is any number
@@ -44,7 +54,7 @@ static inline Tensor cloneBatchedColumnMajor(const Tensor& src) {
   // this will be efficient (no reordering of the data will occur)
   // because the first transpose will make the tensor contiguous,
   // and cloning a contiguous tensor is fast.
-  auto result = src.transpose(-2, -1).clone(at::MemoryFormat::Contiguous);
+  auto result = src.mT().clone(at::MemoryFormat::Contiguous);
   result.transpose_(-2, -1);
   return result;
 }
@@ -169,7 +179,8 @@ void batch_iterator_with_broadcasting(const Tensor& a, const Tensor& b, const fu
     auto* b_batch_idx_ptr = data[0];
     auto* a_batch_idx_ptr = data[1];
 
-    for (int64_t elem = 0; elem < nelems; ++elem) {
+    for (const auto elem : c10::irange(nelems)) {
+      (void)elem; //Suppress unused variable warning
       auto b_curr_linear_batch_idx = *reinterpret_cast<int64_t*>(b_batch_idx_ptr);
       auto a_curr_linear_batch_idx = *reinterpret_cast<int64_t*>(a_batch_idx_ptr);
 
@@ -223,11 +234,17 @@ static inline void linearSolveCheckInputs(const Tensor& self, const Tensor& A, c
 }
 
 // Validates input shapes for operations on batches of square matrices (inverse, cholesky, symeig, eig)
-static inline void squareCheckInputs(const Tensor& self) {
-  TORCH_CHECK(self.dim() >= 2, "Tensor of matrices must have at least 2 dimensions. ");
+static inline void squareCheckInputs(const Tensor& self, const char* const f_name) {
+  TORCH_CHECK(self.dim() >= 2, f_name, ": The input tensor must have at least 2 dimensions.");
   TORCH_CHECK(self.size(-1) == self.size(-2),
-              "A must be batches of square matrices, "
+              f_name,
+              ": A must be batches of square matrices, "
               "but they are ", self.size(-1), " by ", self.size(-2), " matrices");
+}
+
+static inline void checkFloatingOrComplex(const Tensor& t, const char* const f_name) {
+  TORCH_CHECK((at::isFloatingType(t.scalar_type()) || at::isComplexType(t.scalar_type())),
+              f_name, ": Expected a floating point or complex tensor as input. Got ", toString(t.scalar_type()));
 }
 
 /*
@@ -245,23 +262,23 @@ static inline void singleCheckErrors(int64_t info, const char* name, int64_t bat
   } else if (info > 0) {
     if (strstr(name, "inv")) {
       // inv, inverse, cholesky_inverse, etc.
-      TORCH_CHECK(false, name, batch_string,
+      TORCH_CHECK_LINALG(false, name, batch_string,
           ": The diagonal element ", info, " is zero, the inversion could not be completed because the input matrix is singular.");
     } else if (strstr(name, "solve")) {
       // solve, linalg_solve, cholesky_solve, etc.
-      TORCH_CHECK(false, name, batch_string,
+      TORCH_CHECK_LINALG(false, name, batch_string,
           ": The diagonal element ", info, " is zero, the solve could not be completed because the input matrix is singular.");
     } else if (strstr(name, "cholesky")) {
-      TORCH_CHECK(false, name, batch_string,
+      TORCH_CHECK_LINALG(false, name, batch_string,
           ": The factorization could not be completed because the input is not positive-definite (the leading minor of order ", info, " is not positive-definite).");
     } else if (strstr(name, "svd")) {
-      TORCH_CHECK(false, name, batch_string,
+      TORCH_CHECK_LINALG(false, name, batch_string,
           ": The algorithm failed to converge because the input matrix is ill-conditioned or has too many repeated singular values (error code: ", info, ").");
     } else if (strstr(name, "eig") || strstr(name, "syevd")) {
-      TORCH_CHECK(false, name, batch_string,
+      TORCH_CHECK_LINALG(false, name, batch_string,
           ": The algorithm failed to converge because the input matrix is ill-conditioned or has too many repeated eigenvalues (error code: ", info, ").");
     } else if (strstr(name, "lstsq")) {
-      TORCH_CHECK(false, name, batch_string,
+      TORCH_CHECK_LINALG(false, name, batch_string,
           ": The least squares solution could not be computed because the input matrix does not have full rank (error code: ", info, ").");
     } else {
       TORCH_INTERNAL_ASSERT(false, name, ": Unknown error code: ", info, ".");
@@ -300,9 +317,7 @@ static inline void checkAllSameDim(TensorList tensors, int64_t dim) {
   }
 }
 
-static inline std::tuple<Tensor,Tensor> _linalg_broadcast_batch_dims(const Tensor& arg1, const Tensor& arg2, const char* name) {
-  linearSolveCheckInputs(arg1, arg2, name);
-
+static inline std::tuple<std::vector<int64_t>, std::vector<int64_t>> _linalg_broadcast_batch_dims(const Tensor& arg1, const Tensor& arg2) {
   // broadcast the batch dimensions of arg1 and arg2.
   IntArrayRef arg1_batch_sizes(arg1.sizes().data(), arg1.ndimension() - 2);
   IntArrayRef arg2_batch_sizes(arg2.sizes().data(), arg2.ndimension() - 2);
@@ -313,9 +328,20 @@ static inline std::tuple<Tensor,Tensor> _linalg_broadcast_batch_dims(const Tenso
 
   std::vector<int64_t> arg2_expand_size({expand_batch_portion});
   arg2_expand_size.insert(arg2_expand_size.end(), { arg2.size(-2), arg2.size(-1) });
+  return std::make_tuple(std::move(arg1_expand_size), std::move(arg2_expand_size));
+}
 
-  Tensor arg1_broadcasted  = arg1.expand(arg1_expand_size);
-  Tensor arg2_broadcasted = arg2.expand(arg2_expand_size);
+static inline std::tuple<Tensor,Tensor> _linalg_broadcast_batch_dims(const Tensor& arg1, const Tensor& arg2, const char* name) {
+  // If there's no name we assume we don't want to check the errors
+  if (name != nullptr) {
+    linearSolveCheckInputs(arg1, arg2, name);
+  }
+
+  std::vector<int64_t> arg1_expand_size, arg2_expand_size;
+  std::tie(arg1_expand_size, arg2_expand_size) = at::native::_linalg_broadcast_batch_dims(arg1, arg2);
+
+  auto arg1_broadcasted  = arg1_expand_size == arg1.sizes() ? arg1 : arg1.expand(arg1_expand_size);
+  auto arg2_broadcasted  = arg2_expand_size == arg2.sizes() ? arg2 : arg2.expand(arg2_expand_size);
   return std::make_tuple(arg1_broadcasted, arg2_broadcasted);
 }
 
@@ -332,7 +358,7 @@ static inline Tensor _move_to_end(const Tensor& self, IntArrayRef axes) {
   const int64_t ndim = self.ndimension();
   std::vector<int64_t> perm;
 
-  for (int64_t i = 0; i < ndim; i++) {
+  for (const auto i : c10::irange(ndim)) {
     auto it = std::find(a.begin(), a.end(), i);
     if (it == a.end()) {
        perm.push_back(i);
@@ -476,7 +502,7 @@ static inline std::vector<int64_t> create_dim_backshift_permutation(int64_t dim0
     "duplicate or invalid dimensions");
   std::vector<int64_t> permutation(ndim);
   int64_t cur_permuted_dim = 0;
-  for (int64_t dim_ind = 0; dim_ind < ndim; dim_ind++) {
+  for (const auto dim_ind : c10::irange(ndim)) {
     if ((dim_ind != dim0) && (dim_ind != dim1)) {
       permutation[cur_permuted_dim++] = dim_ind;
     }
@@ -493,7 +519,7 @@ static inline std::vector<int64_t> create_dim_backshift_permutation(int64_t dim0
 static inline std::vector<int64_t> create_reverse_permutation(std::vector<int64_t> permutation) {
   int64_t ndim = permutation.size();
   std::vector<int64_t> reverse_permutation(ndim);
-  for (int64_t dim_ind = 0; dim_ind < ndim; dim_ind++) {
+  for (const auto dim_ind : c10::irange(ndim)) {
     reverse_permutation[permutation[dim_ind]] = dim_ind;
   }
   return reverse_permutation;
@@ -560,6 +586,11 @@ static inline void checkLinalgCompatibleDtype(const std::string& fn_name, Scalar
       out_name, " with dtype ", out_type);
 }
 
+static inline void checkNotComplexTolerance(const Tensor& tol, const c10::string_view f_name, const c10::string_view tol_name) {
+  TORCH_CHECK(!at::isComplexType(tol.scalar_type()),
+              f_name, ": ", tol_name, " tensor of complex type is not supported. Got ", tol.scalar_type());
+}
+
 /*
   Two types of 'other' tensors are supported when solving
   a system of linear equations matmul(input, x) = other:
@@ -574,6 +605,26 @@ static inline bool linalg_solve_is_vector_rhs(const Tensor& input, const Tensor&
   auto expected_batched_rhs_shape = IntArrayRef(input.sizes().data(), input.dim() - 1); // input.shape[:-1]
   bool vector_case = other.dim() == 1 || (input.dim() - 1 == other.dim() && other.sizes().equals(expected_batched_rhs_shape));
   return vector_case;
+}
+
+static inline bool is_blas_compatible_column_major_order(const Tensor& input) {
+  IntArrayRef input_strides = input.strides();
+  IntArrayRef input_sizes = input.sizes();
+  auto ndim = input.dim();
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim == 2);
+  auto leading_dimension = input_strides[ndim - 1];
+  auto rows = input_sizes[ndim - 2];
+  return (input_strides[ndim - 2] == 1) && (leading_dimension >= std::max<int64_t>(1, rows));
+}
+
+static inline bool is_blas_compatible_row_major_order(const Tensor& input) {
+  IntArrayRef input_strides = input.strides();
+  IntArrayRef input_sizes = input.sizes();
+  auto ndim = input.dim();
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim == 2);
+  auto leading_dimension = input_strides[ndim - 2];
+  auto cols = input_sizes[ndim - 1];
+  return (input_strides[ndim - 1] == 1) && (leading_dimension >= std::max<int64_t>(1, cols));
 }
 
 }}  // namespace at::native

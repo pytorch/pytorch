@@ -1,11 +1,13 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/cuda/Loops.cuh>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAMathCompat.h>
-#include <ATen/native/cuda/Loops.cuh>
+#include <c10/util/TypeSafeSignMath.h>
 
 #include <type_traits>
 
@@ -97,7 +99,7 @@ void div_floor_kernel_cuda(TensorIteratorBase& iter) {
   } else if (isIntegralType(dtype, /*includeBool*/ false)) {
     AT_DISPATCH_INTEGRAL_TYPES(dtype, "div_floor_cuda", [&]() {
       gpu_kernel_with_scalars(iter, [] GPU_LAMBDA (scalar_t a, scalar_t b) -> scalar_t {
-        if (!std::is_unsigned<scalar_t>::value && (a < 0) != (b < 0)) {
+        if (c10::signs_differ(a, b)) {
           // Subtracts one from the results of truncation division if the
           // divisor and dividend have different sign(bit)s and the remainder of
           // the division is nonzero

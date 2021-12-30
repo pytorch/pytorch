@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/passes/loop_unrolling.h>
 
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
@@ -304,7 +304,7 @@ void LoopsPeeler::peelLoops() {
 bool PeelProfilingLoops(const std::shared_ptr<Graph>& graph) {
   auto peel_predicate = [](Node* n) {
     for (auto i : n->inputs()) {
-      if (i->type()->isSubtypeOf(TensorType::get())) {
+      if (i->type()->isSubtypeOf(*TensorType::get())) {
         return true;
       }
     }

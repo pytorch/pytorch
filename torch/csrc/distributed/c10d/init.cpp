@@ -9,6 +9,7 @@
 #include <c10d/ProcessGroupRoundRobin.hpp>
 #endif
 #include <c10d/ProcessGroup.hpp>
+#include <c10d/PyProcessGroup.hpp>
 
 #ifdef USE_C10D_GLOO
 #include <c10d/ProcessGroupGloo.hpp>
@@ -17,7 +18,6 @@
 
 #ifdef USE_C10D_NCCL
 #include <c10d/ProcessGroupNCCL.hpp>
-#include <torch/csrc/distributed/c10d/frontend_cuda.hpp>
 #endif
 
 #ifdef USE_C10D_MPI
@@ -29,7 +29,6 @@
 #include <pybind11/chrono.h>
 
 #include <c10d/comm.hpp>
-#include <c10d/frontend.hpp>
 #include <c10d/logger.hpp>
 #include <c10d/reducer.hpp>
 
@@ -231,10 +230,6 @@ void _register_builtin_comm_hook(
 
 PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
   C10_LOG_API_USAGE_ONCE("c10d.python.import");
-  ::c10d::initCustomClassBindings();
-#ifdef USE_C10D_NCCL
-  ::c10d::initCustomClassBindingsNccl();
-#endif
 
   auto c10d_module = THPObjectPtr(PyImport_ImportModule("torch.distributed"));
   if (!c10d_module) {
@@ -378,6 +373,14 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           },
           py::call_guard<py::gil_scoped_release>())
       .def("get_backward_stats", &::c10d::Reducer::get_backward_stats)
+      .def("_install_post_backward_futures", [](::c10d::Reducer& reducer, const std::vector<std::shared_ptr<jit::PythonFutureWrapper>>& futs) {
+              c10::List<c10::intrusive_ptr<c10::ivalue::Future>> futures(c10::FutureType::create(c10::TensorType::get()));
+              for (const auto & fut : futs) {
+              futures.push_back(fut->fut);
+              }
+              reducer.install_futures(std::move(futures));
+          },
+          py::call_guard<py::gil_scoped_release>())
       .def(
           "_rebuild_buckets",
           &::c10d::Reducer::rebuild_buckets,
@@ -445,6 +448,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::arg("device_ids"),
           py::arg("output_device"),
           py::arg("broadcast_buffers"),
+          py::arg("has_sync_bn"),
           py::call_guard<py::gil_scoped_release>())
       .def(
           "set_runtime_stats_and_log",
@@ -901,7 +905,7 @@ Example::
       )")
       .def(
           py::init([](const std::string& host,
-                      ::c10d::PortType port,
+                      uint16_t port,
                       int worldSize,
                       bool isServer,
                       std::chrono::milliseconds timeout,
@@ -953,9 +957,13 @@ Arguments:
       .def(py::init<const std::string&, c10::intrusive_ptr<::c10d::Store>>());
 
   auto processGroup =
-      intrusive_ptr_class_<::c10d::ProcessGroup>(module, "ProcessGroup")
+      py::class_<::c10d::ProcessGroup,
+                 c10::intrusive_ptr<::c10d::ProcessGroup>,
+                 ::c10d::PyProcessGroup>(module, "ProcessGroup")
+          .def(py::init<int, int>())
           .def("rank", &::c10d::ProcessGroup::getRank)
           .def("size", &::c10d::ProcessGroup::getSize)
+          .def("name", &::c10d::ProcessGroup::getBackendName)
 
           .def(
               "broadcast",
@@ -1143,14 +1151,17 @@ Arguments:
               "reduce_scatter",
               [](::c10d::ProcessGroup& pg,
                  at::Tensor& output,
-                 std::vector<at::Tensor>& input) {
+                 std::vector<at::Tensor>& input,
+                 ::c10d::ReduceOp op) {
                 std::vector<at::Tensor> outputs = {output};
                 std::vector<std::vector<at::Tensor>> inputs = {input};
-                return pg.reduce_scatter(
-                    outputs, inputs, ::c10d::ReduceScatterOptions());
+                ::c10d::ReduceScatterOptions opts;
+                opts.reduceOp = op;
+                return pg.reduce_scatter(outputs, inputs, opts);
               },
               py::arg("output_tensors"),
               py::arg("input_tensor"),
+              py::arg("op") = ::c10d::ReduceOp::SUM,
               py::call_guard<py::gil_scoped_release>())
 
           .def(
@@ -1284,6 +1295,8 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
 #endif
 
 #ifdef USE_C10D_GLOO
+  static const std::string GLOO_SOCKET_IFNAME_ENV = "GLOO_SOCKET_IFNAME";
+
   auto processGroupGloo =
       intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupGloo>(
           module, "ProcessGroupGloo", processGroup);
@@ -1334,9 +1347,9 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
             auto options = ::c10d::ProcessGroupGloo::Options::create();
 
             // Use interfaces listed in "GLOO_SOCKET_IFNAME", if set.
-            char* ifnameEnv = getenv(::c10d::GLOO_SOCKET_IFNAME_ENV.c_str());
-            if (ifnameEnv) {
-              for (const auto& iface : ::c10d::split(',', ifnameEnv)) {
+            char* ifnameEnv = getenv(GLOO_SOCKET_IFNAME_ENV.c_str());
+            if (ifnameEnv && strlen(ifnameEnv) > 1) {
+              for (const auto& iface : split(',', ifnameEnv)) {
                 options->devices.push_back(
                     ::c10d::ProcessGroupGloo::createDeviceForInterface(iface));
               }
@@ -1376,7 +1389,10 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               }),
               py::arg("pg"),
               py::arg("gloo_pg"),
-              py::call_guard<py::gil_scoped_release>());
+              py::call_guard<py::gil_scoped_release>())
+         .def_property_readonly(
+              "wrapped_pg", &::c10d::ProcessGroupWrapper::getWrappedPg
+         );
 #endif
 
 #ifdef USE_C10D_NCCL
@@ -1455,7 +1471,10 @@ Example::
       py::call_guard<py::gil_scoped_release>());
 #endif
 
-  intrusive_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")
+  py::class_<::c10d::ProcessGroup::Work,
+             c10::intrusive_ptr<::c10d::ProcessGroup::Work>,
+             ::c10d::PyProcessGroup::PyWork>(module, "Work")
+      .def(py::init<>())
       .def("is_completed", &::c10d::ProcessGroup::Work::isCompleted)
       .def(
           "is_success",
@@ -1675,6 +1694,7 @@ static PyMethodDef methods[] = { // NOLINT
 PyMethodDef* python_functions() {
   return methods;
 }
+
 } // namespace c10d
 } // namespace distributed
 } // namespace torch

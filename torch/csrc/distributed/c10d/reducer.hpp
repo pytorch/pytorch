@@ -15,6 +15,7 @@
 #include <c10d/comm.hpp>
 #include <c10d/default_comm_hooks.hpp>
 #include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/variable.h>
 #ifndef _WIN32
 #include <torch/csrc/distributed/autograd/context/context.h>
@@ -29,7 +30,7 @@ constexpr int kDDPRuntimeLoggingSampleRate = 100;
 constexpr int kUnsetTime = -1;
 
 inline int64_t current_time_in_nanos() {
-  return torch::autograd::profiler::getTime();
+  return torch::profiler::impl::getTime();
 }
 
 // Forward declaration
@@ -185,6 +186,11 @@ class TORCH_API Reducer {
   // rebuilt.
   bool rebuild_buckets();
 
+  // Install futures that should be awaited at end of backwards. Currently these
+  // are only used by user-defined custom buffer reduction hooks, but can be generalized
+  // to any user-originating futures that need to be awaited.
+  void install_futures(c10::List<c10::intrusive_ptr<c10::ivalue::Future>> futs);
+
   // Returns true if we should rebuild buckets, else false. We only rebuild
   // buckets once after the first iteration and never rebuild them if
   // find_unused_parameters_.
@@ -288,6 +294,9 @@ class TORCH_API Reducer {
 
   // Weak pointer to associated DDP logger.
   std::weak_ptr<c10d::Logger> logger_;
+  // List of futures installed by Reducer::install_futures that should be awaited
+  // at the end of backwards pass.
+  c10::optional<c10::List<c10::intrusive_ptr<c10::ivalue::Future>>> installed_futures_{c10::nullopt};
 
   // Work handle for allreduce on local_used_map_
   c10::intrusive_ptr<c10d::ProcessGroup::Work> local_used_work_;

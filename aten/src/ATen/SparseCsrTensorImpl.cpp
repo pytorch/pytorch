@@ -55,7 +55,24 @@ SparseCsrTensorImpl::SparseCsrTensorImpl(
     : TensorImpl(key_set, data_type, values.device()),
       crow_indices_(std::move(crow_indices)),
       col_indices_(std::move(col_indices)),
-      values_(std::move(values)) {}
+      values_(std::move(values)) {
+  set_storage_access_should_throw();
+}
+
+void SparseCsrTensorImpl::resize_(int64_t nnz, IntArrayRef size) {
+  auto rows = size[0];
+  auto cols = size[1];
+  auto old_crow_indices_size = crow_indices_.size(-1);
+  crow_indices_.resize_({rows + 1});
+  if (rows + 1 >= old_crow_indices_size) {
+    crow_indices_.narrow(-1, old_crow_indices_size, rows + 1 - old_crow_indices_size).fill_(nnz);
+  } else {
+    crow_indices_.narrow(-1, rows, 1).fill_(std::min<int64_t>(nnz, rows*cols));
+  }
+  col_indices_.resize_({std::min<int64_t>(nnz, rows*cols)});
+  values_.resize_({std::min<int64_t>(nnz, rows*cols)});
+  sizes_and_strides_.set_sizes(size);
+}
 
 void SparseCsrTensorImpl::resize_as_sparse_csr_tensor_(const Tensor& src) {
   crow_indices_ = at::empty_like(
