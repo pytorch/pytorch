@@ -129,7 +129,7 @@ jobs:
             -e DESIRED_PYTHON \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IN_GHA \
+            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -252,7 +252,7 @@ jobs:
             -e DESIRED_PYTHON \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IN_GHA \
+            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -371,7 +371,7 @@ jobs:
             -e DESIRED_PYTHON \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IN_GHA \
+            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -494,7 +494,7 @@ jobs:
             -e DESIRED_PYTHON \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IN_GHA \
+            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -613,7 +613,7 @@ jobs:
             -e DESIRED_PYTHON \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IN_GHA \
+            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -736,7 +736,7 @@ jobs:
             -e DESIRED_PYTHON \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IN_GHA \
+            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -855,7 +855,7 @@ jobs:
             -e DESIRED_PYTHON \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IN_GHA \
+            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -978,7 +978,7 @@ jobs:
             -e DESIRED_PYTHON \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IN_GHA \
+            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -1101,7 +1101,7 @@ jobs:
             -e DESIRED_PYTHON \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IN_GHA \
+            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -1232,7 +1232,7 @@ jobs:
             -e DESIRED_PYTHON \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IN_GHA \
+            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -1355,7 +1355,7 @@ jobs:
             -e DESIRED_PYTHON \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IN_GHA \
+            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -1486,7 +1486,7 @@ jobs:
             -e DESIRED_PYTHON \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IN_GHA \
+            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -1609,7 +1609,7 @@ jobs:
             -e DESIRED_PYTHON \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IN_GHA \
+            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -1740,7 +1740,7 @@ jobs:
             -e DESIRED_PYTHON \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IN_GHA \
+            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -1863,7 +1863,7 @@ jobs:
             -e DESIRED_PYTHON \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IN_GHA \
+            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -1994,7 +1994,7 @@ jobs:
             -e DESIRED_PYTHON \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IN_GHA \
+            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -2120,7 +2120,7 @@ jobs:
             -e DESIRED_PYTHON \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IN_GHA \
+            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -2251,7 +2251,7 @@ jobs:
             -e DESIRED_PYTHON \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IN_GHA \
+            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -2377,7 +2377,7 @@ jobs:
             -e DESIRED_PYTHON \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IN_GHA \
+            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -2508,7 +2508,7 @@ jobs:
             -e DESIRED_PYTHON \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IN_GHA \
+            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -2634,7 +2634,7 @@ jobs:
             -e DESIRED_PYTHON \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IN_GHA \
+            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -2765,7 +2765,7 @@ jobs:
             -e DESIRED_PYTHON \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IN_GHA \
+            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -2891,7 +2891,7 @@ jobs:
             -e DESIRED_PYTHON \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IN_GHA \
+            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -3022,7 +3022,7 @@ jobs:
             -e DESIRED_PYTHON \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IN_GHA \
+            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \

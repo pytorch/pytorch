@@ -21,7 +21,7 @@ tagged_version() {
 
 # These are only relevant for CircleCI
 # TODO: Remove these later once migrated fully to GHA
-if [[ -z ${IN_GHA:-} ]]; then
+if [[ -z ${IS_GHA:-} ]]; then
   # We need to write an envfile to persist these variables to following
   # steps, but the location of the envfile depends on the circleci executor
   if [[ "$(uname)" == Darwin ]]; then
@@ -177,7 +177,7 @@ export BUILD_JNI=$BUILD_JNI
 export PIP_UPLOAD_FOLDER="$PIP_UPLOAD_FOLDER"
 export DOCKER_IMAGE="$DOCKER_IMAGE"
 
-if [[ -z ${IN_GHA} ]]; then
+if [[ -z "${IS_GHA:-}" ]]; then
   export workdir="$workdir"
   export MAC_PACKAGE_WORK_DIR="$workdir"
   if [[ "$OSTYPE" == "msys" ]]; then
