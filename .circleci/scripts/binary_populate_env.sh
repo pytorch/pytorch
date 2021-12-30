@@ -21,7 +21,7 @@ tagged_version() {
 
 # These are only relevant for CircleCI
 # TODO: Remove these later once migrated fully to GHA
-if [[ -z ${IN_GHA} ]]; then
+if [[ -z ${IN_GHA:-} ]]; then
   # We need to write an envfile to persist these variables to following
   # steps, but the location of the envfile depends on the circleci executor
   if [[ "$(uname)" == Darwin ]]; then
