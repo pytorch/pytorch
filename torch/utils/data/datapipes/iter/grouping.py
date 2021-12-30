@@ -337,4 +337,3 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
             res = buffer_elements.pop(key)
             buffer_size -= len(res)
             yield self.wrapper_class(res)
-
