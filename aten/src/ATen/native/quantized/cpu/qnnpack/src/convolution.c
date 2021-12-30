@@ -658,19 +658,10 @@ enum pytorch_qnnp_status pytorch_qnnp_setup_convolution_ndhwc_q8(
       return pytorch_qnnp_status_success;
     }
     case pytorch_qnnp_ukernel_type_dwconv: {
-      const size_t kernel_depth = convolution->kernel_depth;
-      const size_t kernel_height = convolution->kernel_height;
-      const size_t kernel_width = convolution->kernel_width;
-      const size_t kernel_size = kernel_depth * kernel_height * kernel_width;
-      const size_t output_height = convolution->output_height;
-      const size_t output_width = convolution->output_width;
-      const size_t step_width = convolution->dilation_width == 1
-          ? convolution->stride_width
-          : kernel_width;
-      const size_t step_height =
-          kernel_size + (output_width * step_width - 1) * kernel_height;
-      const size_t indirection_buffer_size =
-          sizeof(void*) * batch_size * output_height * step_height;
+      pytorch_qnnp_indirection_set_step_dimensions(convolution);
+
+      const size_t indirection_buffer_size = sizeof(void*) * batch_size *
+          convolution->output_height * convolution->step_height;
 
       const void** indirection_buffer = (const void**)realloc(
           convolution->indirection_buffer, indirection_buffer_size);
@@ -682,8 +673,7 @@ enum pytorch_qnnp_status pytorch_qnnp_setup_convolution_ndhwc_q8(
       }
       convolution->indirection_buffer = indirection_buffer;
 
-      pytorch_qnnp_indirection_init_dwconv2d(
-          convolution, 0, step_height, step_width);
+      pytorch_qnnp_indirection_init_dwconv2d(convolution, 0);
       return pytorch_qnnp_status_success;
     }
     default:

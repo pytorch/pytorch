@@ -793,20 +793,20 @@ enum pytorch_qnnp_status pytorch_qnnp_run_operator(
       const size_t kernel_height = op->kernel_height;
       const size_t kernel_width = op->kernel_width;
       const size_t kernel_size = kernel_height * kernel_width;
-      const size_t width_step =
-          op->dilation_width == 1 ? op->stride_width : op->kernel_width;
       const size_t output_height = op->output_height;
       const size_t output_width = op->output_width;
+
+      const size_t step_height = op->step_height;
+      const size_t step_width = op->step_width;
 
       switch (kernel_size) {
         case 9: {
           struct q8dwconv_context context = {
               .groups = groups,
               .indirection_buffer = (const uint8_t**)op->indirection_buffer,
-              .indirection_buffer_row_stride =
-                  kernel_size + (output_width * width_step - 1) * kernel_height,
+              .indirection_buffer_row_stride = step_height,
               .indirection_buffer_col_stride =
-                  kernel_height * width_step * sizeof(void*),
+                  kernel_height * step_width * sizeof(void*),
               .packed_weights = op->packed_weights,
               .output = op->output,
               .output_height = output_height,
@@ -815,10 +815,9 @@ enum pytorch_qnnp_status pytorch_qnnp_run_operator(
               .output_col_increment =
                   (op->output_pixel_stride - groups) * sizeof(uint8_t),
               .quantization_params = op->conv_quantization_params,
-              .unipass_ukernel =
-                  op->per_channel ?
-                      pytorch_qnnp_params.q8dw9.updw_per_channel :
-                      pytorch_qnnp_params.q8dw9.updw,
+              .unipass_ukernel = op->per_channel
+                  ? pytorch_qnnp_params.q8dw9.updw_per_channel
+                  : pytorch_qnnp_params.q8dw9.updw,
           };
           pthreadpool_compute_2d(
               threadpool,
@@ -833,10 +832,9 @@ enum pytorch_qnnp_status pytorch_qnnp_run_operator(
               .groups = groups,
               .group_stride = op->group_stride,
               .indirection_buffer = (const uint8_t**)op->indirection_buffer,
-              .indirection_buffer_row_stride =
-                  kernel_size + (output_width * width_step - 1) * kernel_height,
+              .indirection_buffer_row_stride = step_height,
               .indirection_buffer_col_stride =
-                  kernel_height * width_step * sizeof(void*),
+                  kernel_height * step_width * sizeof(void*),
               .packed_weights = op->packed_weights,
               .output = op->output,
               .output_height = output_height,
@@ -845,10 +843,9 @@ enum pytorch_qnnp_status pytorch_qnnp_run_operator(
               .output_col_increment =
                   (op->output_pixel_stride - groups) * sizeof(uint8_t),
               .quantization_params = op->conv_quantization_params,
-              .multipass_ukernel =
-                  op->per_channel ?
-                      pytorch_qnnp_params.q8dw25.mpdw_per_channel :
-                      pytorch_qnnp_params.q8dw25.mpdw,
+              .multipass_ukernel = op->per_channel
+                  ? pytorch_qnnp_params.q8dw25.mpdw_per_channel
+                  : pytorch_qnnp_params.q8dw25.mpdw,
           };
           pthreadpool_compute_2d(
               threadpool,
@@ -1169,10 +1166,8 @@ enum pytorch_qnnp_status pytorch_qnnp_run_operator(
       const size_t pooling_width = op->kernel_width;
       const size_t pooling_size = pooling_height * pooling_width;
 
-      const size_t width_step = min(op->stride_width, pooling_width);
       const size_t indirect_input_height_stride =
-          (pooling_size + (output_width * width_step - 1) * pooling_height) *
-          sizeof(void*);
+          op->step_height * sizeof(void*);
       const size_t output_height_stride =
           output_width * op->output_pixel_stride;
 
@@ -1194,7 +1189,7 @@ enum pytorch_qnnp_status pytorch_qnnp_run_operator(
           .packed_channels = (channels + (kr - 1)) & -kr,
           .zero = op->zero_pointer,
           .input_increment =
-              (pooling_height * width_step - multipass_adjustment) *
+              (pooling_height * op->step_width - multipass_adjustment) *
               sizeof(void*),
           .output_increment =
               (op->output_pixel_stride - channels) * sizeof(uint8_t),
@@ -1237,12 +1232,8 @@ enum pytorch_qnnp_status pytorch_qnnp_run_operator(
       const size_t pooling_width = op->kernel_width;
       const size_t pooling_size = pooling_height * pooling_width;
 
-      const size_t width_step = op->dilation_width > 1
-          ? pooling_width
-          : min(op->stride_width, pooling_width);
       const size_t indirect_input_height_stride =
-          (pooling_size + (output_width * width_step - 1) * pooling_height) *
-          sizeof(void*);
+          op->step_height * sizeof(void*);
       const size_t output_height_stride =
           output_width * op->output_pixel_stride;
 
@@ -1262,7 +1253,7 @@ enum pytorch_qnnp_status pytorch_qnnp_run_operator(
           .pooling_size = pooling_size,
           .channels = channels,
           .input_increment =
-              (pooling_height * width_step - multipass_adjustment) *
+              (pooling_height * op->step_width - multipass_adjustment) *
               sizeof(void*),
           .output_increment =
               (op->output_pixel_stride - channels) * sizeof(uint8_t),
