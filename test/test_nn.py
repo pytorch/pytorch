@@ -16425,7 +16425,7 @@ class TestNNDeviceType(NNTestCase):
         def _check_list(expected, list_to_compare, atol=None, rtol=None):
             for ele in list_to_compare:
                 self.assertEqual(expected, ele, atol=atol, rtol=rtol)
-        
+
         _check_list((1,) if reduction == 'none' else (), [loss.shape for loss in losses])
         _check_list((), [loss.shape for loss in losses_no_bd])
 
@@ -16468,7 +16468,7 @@ class TestNNDeviceType(NNTestCase):
                 losses.append(ctc_loss(log_probs_refs[2], targets.cuda(), input_lengths, target_lengths))
                 losses.append(ctc_loss(log_probs_refs[3], targets_no_bd.cuda(), input_lengths, target_lengths))
                 losses_no_bd.append(ctc_loss(log_probs_no_bd_refs[1], targets_no_bd.cuda(), input_lengths_no_bd, target_lengths_no_bd))
-                
+
                 for loss in losses + losses_no_bd:
                     loss.backward()
 
@@ -16515,7 +16515,7 @@ class TestNNDeviceType(NNTestCase):
             losses.append(ctc_loss(log_probs_refs[2], targets, input_lengths, target_lengths))
             losses.append(ctc_loss(log_probs_refs[3], targets_no_bd, input_lengths, target_lengths))
             losses_no_bd.append(ctc_loss(log_probs_no_bd_refs[1], targets_no_bd, input_lengths_no_bd, target_lengths_no_bd))
-            
+
             for loss in losses + losses_no_bd:
                 loss.backward()
 
