@@ -71,7 +71,7 @@ def _convert_do_not_use(
         convert_custom_config_dict: Dict[str, Any] = None,
         is_standalone_module: bool = False,
         _remove_qconfig_flag: bool = True,
-        backend_config_dict: Optional[Dict[str, Any]] = None) -> QuantizedGraphModule:
+        backend_config_dict: Optional[Dict[str, Any]] = None) -> torch.nn.Module:
     """
     We will convert an observed model (a module with observer calls) to a reference
     quantized model, the rule is simple:
@@ -293,7 +293,6 @@ def _convert_do_not_use(
                     if isinstance(original_module, torch.nn.intrinsic._FusedModule):
                         fused_module = original_module
                         float_module = fused_module[0]  # type: ignore[index]
-                        print("float module:", float_module)
                     assert qconfig is not None
                     weight_post_process = qconfig.weight()
                     # run weight observer

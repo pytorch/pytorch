@@ -719,8 +719,6 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
             # once in standalone module
             ns.call_module(torch.ao.quantization.HistogramObserver): 2,
         }
-        print("prepared:", m)
-        print("prepared standalone:", m.standalone)
         self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
         standalone_node_occurrence = {
             # output of the standalone module
@@ -728,8 +726,6 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
         }
         self.checkGraphModuleNodes(m.standalone, expected_node_occurrence=standalone_node_occurrence)
         m = _convert_fx_do_not_use(m, is_reference=True, backend_config_dict=backend_config_dict)
-        print("converted:", m)
-        print("converted standalone:", m.standalone)
         node_occurrence = {
             ns.call_function(torch.quantize_per_tensor): 3,
             ns.call_module(nn.Conv2d): 1,
