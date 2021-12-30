@@ -5,10 +5,42 @@
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
 
+// NOLINTNEXTLINE
+C10_DEFINE_bool(
+    torch_jit_nvfuser_singleton_fusion,
+    false,
+    "enable single node fusion for nvfuser");
+
+// NOLINTNEXTLINE
+C10_DEFINE_bool(
+    torch_jit_nvfuser_horizontal_fusion,
+    true,
+    "enable single node fusion for nvfuser");
+
 namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
+
+bool getSingletonFusion() {
+  return FLAGS_torch_jit_nvfuser_singleton_fusion;
+}
+
+bool setSingletonFusion(bool value) {
+  bool old_value = FLAGS_torch_jit_nvfuser_singleton_fusion;
+  FLAGS_torch_jit_nvfuser_singleton_fusion = value;
+  return old_value;
+}
+
+bool getHorizontalFusion() {
+  return FLAGS_torch_jit_nvfuser_horizontal_fusion;
+}
+
+bool setHorizontalFusion(bool value) {
+  bool old_value = FLAGS_torch_jit_nvfuser_horizontal_fusion;
+  FLAGS_torch_jit_nvfuser_horizontal_fusion = value;
+  return old_value;
+}
 
 static std::atomic<bool> cuda_fusion_guard_mode{true};
 
@@ -51,6 +83,11 @@ void InsertProfileNodesForCUDAFuser(ProfilingRecord* pr) {
   if (getFuserInterface()->fn_insert_profile_inodes) {
     getFuserInterface()->fn_insert_profile_inodes(pr);
   }
+}
+
+bool profileNode(const Node* node) {
+  return getFuserInterface()->fn_profile_n != nullptr &&
+      getFuserInterface()->fn_profile_n(node);
 }
 
 //! [ Note -- type guard logic in CudaFusionGuard ]
@@ -124,8 +161,10 @@ bool complyWith(
       if (j != 0 && inner_dim != -1) {
         // we are not looking at dim-j, but dim-sorted_index, which
         // is the j-th fastest dim;
-        // TODO: merge this with above and put a long comment there
-        if (t_strides[sorted_index] < t_strides[inner_dim]) {
+        // Note: we ignore 0-stride dimension, since eager logic on stride
+        // indices is ambiguous
+        if (t_strides[sorted_index] != 0 && t_strides[inner_dim] != 0 &&
+            t_strides[sorted_index] < t_strides[inner_dim]) {
           return false;
         }
       }
@@ -193,7 +232,7 @@ RegisterOperators size_eq_guard({
         // if we would ever return refined tensor, which would change aliasing
         // analysis, we should update aliasdb pass.
         [](const Node* node) -> Operation {
-          return [](Stack* stack) {
+          return [](Stack& stack) {
             at::ArrayRef<IValue> inputs = last(stack, 2);
             drop(stack, 2);
 
@@ -218,7 +257,7 @@ RegisterOperators size_eq_guard({
                   return;
                 }
 
-                for (size_t i = 0; i < inp.size(); i++) {
+                for (const auto i : c10::irange(inp.size())) {
                   if (((inp[i] == 1) != (ref[i] == 1))) {
                     ret = false;
                     break;
@@ -295,7 +334,7 @@ RegisterOperators reg_add_optional({
     Operator(
         "prim::add_optional(Tensor(a) input, Tensor? bias) -> Tensor(a)",
         [](const Node* node) -> Operation {
-          return [](Stack* stack) {
+          return [](Stack& stack) {
             IValue input, bias;
             pop(stack, input, bias);
             if (bias.isNone()) {

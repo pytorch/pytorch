@@ -44,7 +44,7 @@ static void fractional_max_pool3d_out_single_batch_frame(
   int64_t poolSizeT, int64_t poolSizeH, int64_t poolSizeW) {
 
   at::parallel_for(0, numPlanes, 0, [&](int64_t start, int64_t end) {
-    for (auto plane = start; plane < end; ++plane) {
+    for (const auto plane : c10::irange(start, end)) {
       /* each plane contains 3 random samples,
          one for T, one for W, and one for H */
       scalar_t* randomSamplesForPlane = randomSamples + plane * 3;
@@ -126,7 +126,7 @@ static void fractional_max_pool3d_out_frame(
     }
 
     at::parallel_for(0, numBatch, 0, [&](int64_t start, int64_t end) {
-      for (auto batch = start; batch < end; ++batch) {
+      for (const auto batch : c10::irange(start, end)) {
         fractional_max_pool3d_out_single_batch_frame<scalar_t>(
           input + batch * numPlanes * inputW * inputH * inputT,
           output + batch * numPlanes * outputW * outputH * outputT,
@@ -171,7 +171,7 @@ void fractional_max_pool3d_out_cpu_template(
   TORCH_CHECK(ndims == 4 || ndims == 5,
               "fractional_max_pool3d_out(): Expected 4D or 5D tensor, but got: ",
               input_.sizes());
-  for (int64_t i = 1; i < ndims; ++i) {
+  for (const auto i : c10::irange(1, ndims)) {
     TORCH_CHECK(input_.size(i) > 0,
                 "fractional_max_pool3d_out(): Expected input to have non-zero size for non-batch dimensions, but got",
                 input_.sizes(), " with dimension ", i, " being empty.");
@@ -243,7 +243,7 @@ static void fractional_max_pool3d_backward_out_single_batch_frame(
   int64_t outputT, int64_t outputH, int64_t outputW) {
 
   at::parallel_for(0, numPlanes, 0, [&](int64_t start, int64_t end) {
-    for (auto plane = start; plane < end; plane++) {
+    for (const auto plane : c10::irange(start, end)) {
       scalar_t* gradInputForPlane = gradInput + plane * inputT * inputH * inputW;
       scalar_t* gradOutputForPlane = gradOutput +
                   plane * outputT * outputH * outputW;
@@ -284,7 +284,7 @@ static void fractional_max_pool3d_backward_out_frame(
     }
 
     at::parallel_for(0, numBatch, 0, [&](int64_t start, int64_t end) {
-      for (auto batch = start; batch < end; ++batch) {
+      for (const auto batch : c10::irange(start, end)) {
         fractional_max_pool3d_backward_out_single_batch_frame<scalar_t>(
           gradInput + batch * numPlanes * inputW * inputH * inputT,
           gradOutput + batch * numPlanes * outputW * outputH * outputT,

@@ -533,6 +533,19 @@ class StmtBuilder(Builder):
     def build_AnnAssign(ctx, stmt):
         if stmt.value is None:
             raise UnsupportedNodeError(ctx, stmt, reason='without assigned value')
+
+        # Disallow type annotations on instance attributes outside of __init__
+        if type(stmt.target) == ast.Attribute and\
+                stmt.target.value.id == "self" and\
+                ctx.funcname != "__init__":
+            start = stmt.col_offset
+            end = start + len(f"self.{stmt.target.attr}")
+            if hasattr(stmt.annotation, 'id'):
+                end += len(f": {stmt.annotation.id}")
+            sr = ctx.make_range(stmt.lineno, start, end)
+            raise ValueError("Type annotations on instance attributes must be declared in "
+                             f"__init__, not '{ctx.funcname}': {sr}")
+
         rhs = build_expr(ctx, stmt.value)
         lhs = build_expr(ctx, stmt.target)
         the_type = build_expr(ctx, stmt.annotation)
@@ -939,7 +952,7 @@ class ExprBuilder(Builder):
     @staticmethod
     def build_Str(ctx, expr):
         value = str(expr.s)
-        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1)
+        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + len(value) + 1)
         return StringLiteral(r, value)
 
     @staticmethod

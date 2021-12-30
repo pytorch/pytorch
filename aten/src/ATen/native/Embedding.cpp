@@ -123,7 +123,7 @@ Tensor embedding_dense_backward_cpu(
 
     auto parallel_section = [&](index_t start, index_t end) {
       TensorIterator iter(add_iter);
-      for (int64_t i = 0; i < numel; i++) {
+      for (const auto i : c10::irange(numel)) {
         if (indices_data[i] != padding_idx) {
           index_t k = indices_data[i];
           if (k >= start && k < end) {
@@ -167,7 +167,7 @@ Tensor & embedding_renorm_cpu_(
 
     // Note that we cannot use at::parallel_for here because we perform operations on
     // Tensor inside the loop. See github.com/pytorch/pytorch/issues/28370 for more details.
-    for (auto i = 0; i < num_indices; i++) {
+    for (const auto i : c10::irange(num_indices)) {
       if (i > 0 && sorted_indices[i] == sorted_indices[i - 1]) {
         continue;
       }

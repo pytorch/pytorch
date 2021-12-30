@@ -32,13 +32,13 @@ c10::AliasAnalysisKind aliasAnalysisConservative() {
 }
 
 void checkListInputType(const c10::TypePtr& elem_type, bool empty_list) {
-  if (!elem_type->isSubtypeOf(NumberType::get()) &&
+  if (!elem_type->isSubtypeOf(*NumberType::get()) &&
       elem_type != BoolType::get()) {
     std::stringstream error;
     error << "Input must be of ints, floats, or bools, "
           << "got " << elem_type->repr_str();
     // special case empty list torch.tensor([])
-    if (elem_type->isSubtypeOf(TensorType::get())) {
+    if (elem_type->isSubtypeOf(*TensorType::get())) {
       if (empty_list) {
         error << "\nEmpty lists default to List[Tensor]. Add a variable "
                  "annotation to the assignment to create an empty list "
@@ -203,7 +203,7 @@ void createTensorFromList(Stack& stack) {
   }
   auto sizes = compute_sizes(data);
   checkListInputType(elem_type, sizes.size() == 1 && sizes[0] == 0);
-  at::ScalarType initial_scalar_type = scalarTypeFromJitType(elem_type);
+  at::ScalarType initial_scalar_type = scalarTypeFromJitType(*elem_type);
   if (initial_scalar_type == at::ScalarType::Double) {
     initial_scalar_type = typeMetaToScalarType(c10::get_default_dtype());
   }
@@ -245,7 +245,7 @@ void createTensorFromList(Stack& stack) {
 RegisterOperators reg({
     OperatorGenerator(
         TORCH_SELECTIVE_SCHEMA(
-            "aten::split(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]"),
+            "aten::split(Tensor(a -> *) self, int[] split_sizes, int dim=0) -> Tensor(a)[]"),
         [](Stack& stack) {
           RECORD_FUNCTION("split_with_sizes", last(stack, 3));
 

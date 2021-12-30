@@ -53,7 +53,7 @@ void addObjectMethods(pybind11::module& m);
 Workspace* GetCurrentWorkspace();
 
 // Get workspace by name. Returns nullptr if none exists by name.
-Workspace* GetWorkspaceByName(const std::string &name);
+Workspace* GetWorkspaceByName(const std::string& name);
 
 class C10_EXPORT BlobFetcherBase {
  public:
@@ -350,10 +350,10 @@ class PythonOpBase : public Operator<Context> {
         auto kwargs = builder_call[2].cast<py::dict>();
         auto built_func = func(*args, **kwargs);
         CAFFE_ENFORCE(built_func);
-        built_func_.reset(
-            new Func{built_func,
-                     OperatorBase::template GetSingleArgument<bool>(
-                         "pass_workspace", false)});
+        built_func_.reset(new Func{
+            built_func,
+            OperatorBase::template GetSingleArgument<bool>(
+                "pass_workspace", false)});
       } catch (const py::error_already_set& e) {
         LOG(ERROR) << "Python exception encountered while creating PythonOp: "
                    << e.what();

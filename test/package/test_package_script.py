@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: package/deploy"]
+
 from io import BytesIO
 from textwrap import dedent
 from unittest import skipIf
@@ -117,6 +119,29 @@ class TestPackageScript(PackageTestCase):
                 fake.uses_script_class(input), loaded.uses_script_class(input)
             )
         )
+
+    def test_package_script_class_referencing_self(self):
+        import package_a.fake_script_class as fake
+
+        obj = fake.UsesIdListFeature()
+        # intentionally script here to fill the compilation cache, to make sure
+        # there is no false sharing between scripted types coming from the
+        # package vs. outside environment.
+        torch.jit.script(obj)
+
+        buffer = BytesIO()
+        with PackageExporter(buffer) as exporter:
+            exporter.intern("**")
+            exporter.save_pickle("obj", "obj.pkl", obj)
+
+        buffer.seek(0)
+        importer = PackageImporter(buffer)
+        obj_loaded = importer.load_pickle("obj", "obj.pkl")
+        scripted_obj_loaded = torch.jit.script(obj_loaded)
+
+        # Make sure the scripted object can be serialized without error.
+        buffer2 = scripted_obj_loaded.save_to_buffer()
+        torch.jit.load(BytesIO(buffer2))
 
     def test_different_package_script_class(self):
         """Test a case where the script class defined in the package is
@@ -525,6 +550,15 @@ class TestPackageScript(PackageTestCase):
 
         mod1 = ModWithTwoSubmodsAndTensor(shared_tensor, scripted_mod_0, scripted_mod_1)
 
+        self.assertEqual(
+            shared_tensor.storage()._cdata,
+            scripted_mod_0.tensor.storage()._cdata,
+        )
+        self.assertEqual(
+            shared_tensor.storage()._cdata,
+            scripted_mod_1.tensor.storage()._cdata,
+        )
+
         buffer = BytesIO()
         with PackageExporter(buffer) as e:
             e.intern("**")
@@ -534,13 +568,13 @@ class TestPackageScript(PackageTestCase):
         importer = PackageImporter(buffer)
         loaded_mod_1 = importer.load_pickle("res", "mod1.pkl")
 
-        self.assertTrue(
+        self.assertEqual(
             loaded_mod_1.tensor.storage()._cdata,
             loaded_mod_1.sub_mod_0.tensor.storage()._cdata,
         )
-        self.assertTrue(
+        self.assertEqual(
             loaded_mod_1.tensor.storage()._cdata,
-            loaded_mod_1.sub_mod_0.tensor.storage()._cdata,
+            loaded_mod_1.sub_mod_1.tensor.storage()._cdata,
         )
 
         loaded_mod_1.tensor.add_(torch.ones(3, 3))
@@ -591,11 +625,11 @@ class TestPackageScript(PackageTestCase):
         importer = PackageImporter(buffer_1)
         loaded_mod_1 = importer.load_pickle("res", "mod1.pkl")
 
-        self.assertTrue(
+        self.assertEqual(
             loaded_mod_1.tensor.storage()._cdata,
             loaded_mod_1.sub_mod_0.tensor.storage()._cdata,
         )
-        self.assertTrue(
+        self.assertEqual(
             loaded_mod_1.tensor.storage()._cdata,
             loaded_mod_1.sub_mod_1.tensor.storage()._cdata,
         )

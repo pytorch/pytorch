@@ -1,5 +1,5 @@
 #pragma once
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/named_value.h>
 
@@ -17,6 +17,7 @@ struct MatchedSchema {
   std::vector<Value*> inputs;
   std::vector<TypePtr> return_types;
   c10::OptNameList return_field_names;
+  std::string schema_name;
 };
 
 TORCH_API MatchedSchema matchSchema(

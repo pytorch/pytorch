@@ -1,7 +1,7 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <limits>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/cuda/Loops.cuh>
-#include <ATen/Context.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/native/DispatchStub.h>

@@ -15,6 +15,34 @@ from torch.fx.passes import graph_drawer
 from torch.fx.passes.shape_prop import TensorMetadata
 
 
+def get_target_from_module(mod: torch.nn.Module, target: str):
+    """
+    Gets `target` from `mod` and returns it. If `target` is empty then returns `mod.`
+    """
+    if target == "":
+        return mod
+
+    target_atoms = target.split(".")
+    curr_obj = mod
+    for i, atom in enumerate(target_atoms):
+        if not hasattr(curr_obj, atom):
+            raise RuntimeError(
+                f"Node referenced nonexistent target '{'.'.join(target_atoms[:i])}'; "
+                f" original whole target: '{target}'"
+            )
+        curr_obj = getattr(curr_obj, atom)
+    return curr_obj
+
+
+def get_attr(node: torch.fx.Node) -> Any:
+    """
+    Returns the underlying attr for a given node which
+    must be of type get_attr.
+    """
+    assert node.op == "get_attr", "Expected a get_attr node"
+    return get_target_from_module(node.graph.owning_module, str(node.target))
+
+
 def is_acc_op(node_or_target: Union[Callable, torch.fx.Node]) -> bool:
     """
     Returns whether `node_or_target` is an acc_op. If it's a node, then checks whether
@@ -78,9 +106,7 @@ def build_raw_tensor_meta(
     stride=None,
     memory_format=None,
     is_quantized=None,
-    qscheme=None,
-    q_scale=None,
-    q_zero_point=None,
+    qparams=None,
 ):
     return TensorMetadata(**locals())
 
@@ -92,10 +118,13 @@ def draw_graph(traced: torch.fx.GraphModule, fname: str, figname: str = "fx_grap
     print(f"Writing FX graph to file: {base}{ext}")
     g = graph_drawer.FxGraphDrawer(traced, figname)
     x = g.get_main_dot_graph()
-    getattr(x, "write_" + ext.lstrip("."))(fname)
+    try:
+        getattr(x, "write_" + ext.lstrip("."))(fname)
+    except OSError as e:
+        print(f"Failed to write the FX graph due to: {e}")
 
 
-def print_model_info(gm: torch.fx.GraphModule, header: Optional[str] = None):
+def get_model_info_str(gm: torch.fx.GraphModule, header: Optional[str] = None):
     """
     Print out info of the provided `gm`.
     If `header` is provided then it's included in the printed string.
@@ -104,7 +133,7 @@ def print_model_info(gm: torch.fx.GraphModule, header: Optional[str] = None):
     placeholder_count = get_attr_count = call_method_count = call_module_count = 0
     for node in gm.graph.nodes:
         if node.op == "call_function":
-            ops_and_counts[node.target] = ops_and_counts.get(node.target, 1) + 1
+            ops_and_counts[node.target] = ops_and_counts.get(node.target, 0) + 1
         elif node.op == "placeholder":
             placeholder_count += 1
         elif node.op == "get_attr":
@@ -137,7 +166,8 @@ def print_model_info(gm: torch.fx.GraphModule, header: Optional[str] = None):
     for op_str, count in pretty_ops_and_counts:
         model_info_str += f"> {op_str}: {count}\n"
 
-    print(model_info_str)
+    return model_info_str
+
 
 def get_unique_attr_name_in_module(mod_traced: torch.fx.GraphModule, name: str) -> str:
     """

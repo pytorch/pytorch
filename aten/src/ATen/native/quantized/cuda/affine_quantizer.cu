@@ -3,7 +3,6 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/quantized/affine_quantizer.h>
 #include <math.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/native/cuda/Loops.cuh>
 
 namespace at {

@@ -40,7 +40,7 @@ class Conv2d(nn.Conv2d):
     def from_float(cls, mod):
         r"""Create a qat module from a float module or qparams_dict
 
-            Args: `mod` a float module, either produced by torch.quantization utilities
+            Args: `mod` a float module, either produced by torch.ao.quantization utilities
             or directly from user
         """
         assert type(mod) == cls._FLOAT_MODULE, 'qat.' + cls.__name__ + '.from_float only works for ' + \
@@ -130,7 +130,7 @@ class Conv3d(nn.Conv3d):
     def from_float(cls, mod):
         r"""Create a qat module from a float module or qparams_dict
 
-        Args: `mod` a float module, either produced by torch.quantization utilities
+        Args: `mod` a float module, either produced by torch.ao.quantization utilities
         or directly from user
         """
         assert type(mod) == cls._FLOAT_MODULE, (

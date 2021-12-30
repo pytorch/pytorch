@@ -104,6 +104,12 @@ void IRVisitor::visit(LoadPtr v) {
 
 void IRVisitor::visit(BufPtr v) {
   v->base_handle()->accept(this);
+  if (v->qscale()) {
+    v->qscale()->accept(this);
+  }
+  if (v->qzero()) {
+    v->qzero()->accept(this);
+  }
 }
 
 void IRVisitor::visit(StorePtr v) {
@@ -175,6 +181,11 @@ void IRVisitor::visit(AllocatePtr v) {
 
 void IRVisitor::visit(FreePtr v) {
   v->buffer_var()->accept(this);
+}
+
+void IRVisitor::visit(PlacementAllocatePtr v) {
+  v->buf()->accept(this);
+  v->buf_to_reuse()->accept(this);
 }
 
 void IRVisitor::visit(LetPtr v) {
