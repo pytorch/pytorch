@@ -387,7 +387,7 @@ class DWConvMicrokernelTester {
 
       ASSERT_EQ(25, kernelSize())
           << "only 5x5 microkernel is currently supported";
-      pytorch_pack_q8dw_w_dilation(
+      pytorch_pack_q8dw_2d_w_dilation(
           kernelHeight(),
           kernelWidth(),
           channels(),
@@ -400,7 +400,7 @@ class DWConvMicrokernelTester {
           bias.data(),
           packedWeights.data(),
           true);
-      pytorch_pack_q8dw_w_dilation(
+      pytorch_pack_q8dw_2d_w_dilation(
           kernelHeight(),
           kernelWidth(),
           channels(),
@@ -414,7 +414,7 @@ class DWConvMicrokernelTester {
           packedWeights.data() +
               (10 + sizeof(int32_t) / sizeof(uint8_t)) * packedChannels(),
           false);
-      pytorch_pack_q8dw_w_dilation(
+      pytorch_pack_q8dw_2d_w_dilation(
           kernelHeight(),
           kernelWidth(),
           channels(),

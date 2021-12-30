@@ -295,7 +295,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_convolution3d_ndhwc_q8(
           break;
         case 25:
           /* change this later */
-          pytorch_pack_q8dw_w_dilation(
+          pytorch_pack_q8dw_2d_w_dilation(
               kernel_height,
               kernel_width,
               groups,
@@ -308,7 +308,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_convolution3d_ndhwc_q8(
               bias,
               convolution->packed_weights,
               true);
-          pytorch_pack_q8dw_w_dilation(
+          pytorch_pack_q8dw_2d_w_dilation(
               kernel_height,
               kernel_width,
               groups,
@@ -322,7 +322,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_convolution3d_ndhwc_q8(
               (char*)convolution->packed_weights +
                   (10 + sizeof(int32_t) / sizeof(uint8_t)) * c_stride,
               false);
-          pytorch_pack_q8dw_w_dilation(
+          pytorch_pack_q8dw_2d_w_dilation(
               kernel_height,
               kernel_width,
               groups,
