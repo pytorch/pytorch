@@ -168,7 +168,7 @@ Probability distributions - torch.distributions
     :show-inheritance:
 
 :hidden:`InverseWishart`
-~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. currentmodule:: torch.distributions.inverse_wishart
 .. autoclass:: InverseWishart
