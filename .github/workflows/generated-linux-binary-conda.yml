@@ -53,6 +53,9 @@ jobs:
     timeout-minutes: 240
     env:
       PACKAGE_TYPE: conda
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/conda-builder:cpu
       SKIP_ALL_TESTS: 1
@@ -176,6 +179,9 @@ jobs:
     timeout-minutes: 240
     env:
       PACKAGE_TYPE: conda
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/conda-builder:cpu
       DESIRED_PYTHON: 3.7
@@ -261,7 +267,6 @@ jobs:
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
             -v "${GITHUB_WORKSPACE}/builder:/builder" \
             -v "${GITHUB_WORKSPACE}/artifacts:/final_pkgs" \
-            -v "${GITHUB_WORKSPACE}/run.sh:/run.sh" \
             -w / \
             "${DOCKER_IMAGE}"
           )
@@ -514,7 +519,6 @@ jobs:
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
             -v "${GITHUB_WORKSPACE}/builder:/builder" \
             -v "${GITHUB_WORKSPACE}/artifacts:/final_pkgs" \
-            -v "${GITHUB_WORKSPACE}/run.sh:/run.sh" \
             -w / \
             "${DOCKER_IMAGE}"
           )
@@ -770,7 +774,6 @@ jobs:
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
             -v "${GITHUB_WORKSPACE}/builder:/builder" \
             -v "${GITHUB_WORKSPACE}/artifacts:/final_pkgs" \
-            -v "${GITHUB_WORKSPACE}/run.sh:/run.sh" \
             -w / \
             "${DOCKER_IMAGE}"
           )
