@@ -1,7 +1,7 @@
 def define_targets(rules):
     rules.cc_library(
         name = "cuda",
-        srcs = glob(
+        srcs = rules.glob(
             [
                 "*.cpp",
                 "impl/*.cpp",
@@ -10,7 +10,7 @@ def define_targets(rules):
                 "test/**/*.cpp",
             ],
         ),
-        hdrs = glob(
+        hdrs = rules.glob(
             [
                 "*.h",
                 "impl/*.h",
@@ -33,6 +33,7 @@ def define_targets(rules):
         name = "Macros",
         srcs = [":cuda_cmake_macros"],
         hdrs = ["CUDAMacros.h"],
+        visibility = ["//visibility:public"],
     )
 
     rules.cmake_configure_file(
@@ -44,7 +45,7 @@ def define_targets(rules):
 
     rules.filegroup(
         name = "headers",
-        srcs = glob(
+        srcs = rules.glob(
             [
                 "*.h",
                 "impl/*.h",
