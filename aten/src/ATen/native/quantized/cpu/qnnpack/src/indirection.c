@@ -215,9 +215,6 @@ void pytorch_qnnp_indirection_init_conv3d(
  *   indirection_buffer[j + step_height] points to the first
  *   input pixel used to compute the output pixel one row below-
  *   the (i + output_width)'th output pixel
- *   Some extra padding is included- the tightest fit would use
- *   (output_width - 1) * step_width instead of
- *   (output_width * step_width - 1)
  *
  * step_depth: Same as step height but for an xy slice rather than a row
  *
@@ -485,7 +482,7 @@ void pytorch_qnnp_indirection_set_step_dimensions(pytorch_qnnp_operator_t op) {
   }
 
   const size_t step_height = kernel_size +
-      (output_width * step_width - 1) * kernel_height * kernel_depth;
+      (output_width - 1) * step_width * kernel_height * kernel_depth;
 
   const size_t step_depth = step_height * output_height;
 
