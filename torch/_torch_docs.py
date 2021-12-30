@@ -213,6 +213,12 @@ arccosh(input, *, out=None) -> Tensor
 Alias for :func:`torch.acosh`.
 """)
 
+add_docstr(torch.index_add, r"""
+index_add(input, dim, index, source, *, alpha=1, out=None) -> Tensor
+
+See :meth:`~Tensor.index_add_` for function description.
+""")
+
 add_docstr(torch.add, r"""
 add(input, other, *, alpha=1, out=None) -> Tensor
 

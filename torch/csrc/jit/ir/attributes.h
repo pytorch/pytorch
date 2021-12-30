@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
 
 #include <torch/csrc/Export.h>
 
