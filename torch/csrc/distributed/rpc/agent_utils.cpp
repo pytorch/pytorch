@@ -49,9 +49,12 @@ static std::atomic<int> barrierId(0);
 
 std::tuple<std::string, std::string, std::string> getNextKeyIds() {
   barrierId++;
-  std::string processCountKey = fmt::format("{}{}{}", storeKeyProcessCount, storeKeyBarrierId, barrierId);
-  std::string activeCallCountKey = fmt::format("{}{}{}", storeKeyActiveCallCount, storeKeyBarrierId, barrierId);
-  std::string barrierKey = fmt::format("{}{}{}", storeKeyReady, storeKeyBarrierId, barrierId);
+  std::string processCountKey =
+      fmt::format("{}{}{}", storeKeyProcessCount, storeKeyBarrierId, barrierId);
+  std::string activeCallCountKey = fmt::format(
+      "{}{}{}", storeKeyActiveCallCount, storeKeyBarrierId, barrierId);
+  std::string barrierKey =
+      fmt::format("{}{}{}", storeKeyReady, storeKeyBarrierId, barrierId);
   return std::make_tuple(processCountKey, activeCallCountKey, barrierKey);
 }
 
