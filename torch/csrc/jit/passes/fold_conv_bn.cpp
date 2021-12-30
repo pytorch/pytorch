@@ -161,7 +161,6 @@ void addBiasForConvIfNone(Module& module) {
       replaceConvBiasWithGetAttr(module);
     } else {
       if (!module.attr("bias").isTensor()) {
-        // t->unsafeChangeAttributeType("bias", TensorType::get());
         t->unsafeRemoveAttribute("bias");
         t->addAttribute("bias", TensorType::get(), true);
         module.setattr("bias", at::Tensor());
