@@ -3702,7 +3702,7 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
             be used directly for interpolation.
         antialias (bool, optional): flag to apply anti-aliasing. Default: ``False``. Using anti-alias
             option together with ``align_corners=False``, interpolation result would match Pillow
-            result for downsampling operation. Supported modes: ``'bilinear'``.
+            result for downsampling operation. Supported modes: ``'bilinear'``, ``'bicubic'``.
 
     .. note::
         With ``mode='bicubic'``, it's possible to cause overshoot, in other words it can produce
@@ -3842,8 +3842,8 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
             output_size = [int(math.floor(float(input.size(i + 2)) * scale_factors[i])) for i in range(dim)]
         scale_factors = None
 
-    if antialias and not (mode in ("bilinear", ) and input.ndim == 4):
-        raise ValueError("Anti-alias option is only supported for bilinear mode")
+    if antialias and not (mode in ("bilinear", "bicubic") and input.ndim == 4):
+        raise ValueError("Anti-alias option is only supported for bilinear and bicubic modes")
 
     if input.dim() == 3 and mode == "nearest":
         return torch._C._nn.upsample_nearest1d(input, output_size, scale_factors)
@@ -3892,6 +3892,13 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
         return torch._C._nn.upsample_trilinear3d(input, output_size, align_corners, scale_factors)
     if input.dim() == 4 and mode == "bicubic":
         assert align_corners is not None
+        # Enforce that the full call with the new kwarg is not invoked when scripting.
+        # TODO: Remove this scripting logic once the 2-week FC window has passed.
+        if antialias:
+            if not torch.jit.is_scripting():
+                return torch._C._nn._upsample_bicubic2d_aa(input, output_size, align_corners, scale_factors)
+            else:
+                raise RuntimeError("TorchScript currently does not support antialias in interpolate")
         return torch._C._nn.upsample_bicubic2d(input, output_size, align_corners, scale_factors)
 
     if input.dim() == 3 and mode == "bilinear":
