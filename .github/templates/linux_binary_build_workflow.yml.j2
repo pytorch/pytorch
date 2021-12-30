@@ -173,10 +173,14 @@ jobs:
           path: builder
 {%- if config["gpu_arch_type"] == "cuda" %}
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
+        working-directory: pytorch/
         run: |
           bash .github/scripts/install_nvidia_utils_linux.sh
           echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
 {%- endif %}
+      - name: Pull Docker image
+        run: |
+          !{{ common.pull_docker("${DOCKER_IMAGE}") }}
       - name: Test PyTorch binary
         run: |
           set -x
