@@ -323,11 +323,12 @@ def module_inputs_torch_nn_ConvNd(module_info, device, dtype, requires_grad, **k
     kernel_size, C_in, C_out = 3, 4, 5
     input_no_batch_shape = (C_in,) + tuple((6 for _ in range(N)))
     return [
-        ModuleInput(constructor_input=(FunctionInput(C_out, kernel_size) if lazy else
-                                       FunctionInput(C_in, C_out, kernel_size)),
+        ModuleInput(constructor_input=(FunctionInput(C_out, kernel_size, **kwargs) if lazy else
+                                       FunctionInput(C_in, C_out, kernel_size, **kwargs)),
                     forward_input=FunctionInput(make_input(shape=input_no_batch_shape)),
                     desc='no_batch_dim',
                     reference_fn=no_batch_dim_reference_fn)
+        for kwargs in ({}, {'padding': 'same'})
     ]
 
 
