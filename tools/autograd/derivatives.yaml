@@ -1468,7 +1468,7 @@
   eigenvectors: eigh_jvp_eigenvectors(self_t, eigenvalues, eigenvectors)
 
 - name: linalg_eig(Tensor self) -> (Tensor eigenvalues, Tensor eigenvectors)
-  self: linalg_eig_backward(grads, self, eigenvalues, eigenvectors)
+  self: linalg_eig_backward(grads[0], grads[1], eigenvalues, eigenvectors, self.is_complex())
   # FIXME: Use eigenvalues, eigenvectors: linalg_eig_jvp instead (for now this is not possible due to a codegen limitation)
   eigenvalues: std::get<0>(linalg_eig_jvp(self_t, eigenvalues, eigenvectors))
   eigenvectors: std::get<1>(linalg_eig_jvp(self_t, eigenvalues, eigenvectors))

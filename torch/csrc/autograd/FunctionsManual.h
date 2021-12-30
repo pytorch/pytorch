@@ -168,8 +168,11 @@ Tensor slice_backward_wrapper(
     c10::optional<int64_t> start,
     c10::optional<int64_t> end,
     int64_t step);
-Tensor linalg_eig_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
-                           const Tensor& L, const Tensor& V);
+Tensor linalg_eig_backward(const Tensor& gL,
+                           const Tensor& gV,
+                           const Tensor& L,
+                           const Tensor& V,
+                           const bool is_complex);
 std::tuple<Tensor, Tensor> linalg_eig_jvp(const Tensor& dA,
                                           const Tensor& L,
                                           const Tensor& V);

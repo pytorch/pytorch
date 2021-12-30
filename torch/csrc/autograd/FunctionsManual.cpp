@@ -2547,10 +2547,11 @@ Tensor eig_backward(const std::vector<torch::autograd::Variable> &grads, const T
   return at::linalg_solve(U.mH(), at::matmul(U_contrib, U.mH()) + D_contrib * U.mH());
 }
 
-Tensor linalg_eig_backward(const std::vector<torch::autograd::Variable> &grads,
-                           const Tensor& self,
+Tensor linalg_eig_backward(const Tensor& gL,
+                           const Tensor& gV,
                            const Tensor& L,
-                           const Tensor& V) {
+                           const Tensor& V,
+                           const bool is_complex) {
   // https://arxiv.org/pdf/1701.00392.pdf Eq 4.77
   // For A = VLV^{-1}, denoting the gradients gA, gV and gL, we have
   // gA = V^{-H}(diag_embed(gL) + (V^H gV -V^HV diag(real(V^H gV))) / E*)V^H
@@ -2563,65 +2564,84 @@ Tensor linalg_eig_backward(const std::vector<torch::autograd::Variable> &grads,
   // Note: the term '-V^HV diag(real(V^H gV))' comes from the fact that the eigenvalue
   // decomposition is returned with eigenvectors normalized to have norm one.
 
-  const auto gL = grads[0];
-  const auto gV = grads[1];
+  // Trivial case
+  if (!gL.defined() && !gV.defined()) {
+    return {};
+  }
 
-  if (gV.defined()) {
-    const auto Lconj = L.conj();
-    auto Econj = Lconj.unsqueeze(-2) - Lconj.unsqueeze(-1);
+  // Shortcut for linalg.eigvals
+  if (!gV.defined()) {
+    // Compute V^-H gL V^H
+    const auto gA = at::linalg_solve(V.mH(), gL.unsqueeze(-1) * V.mH());
+    // If it is real, we have to project the derivative onto the real numbers
+    return is_complex ? gA : at::real(gA);
+  }
+
+  auto Econj = [&L]{
+    auto Lconj = L.conj();
+    auto ret = Lconj.unsqueeze(-2) - Lconj.unsqueeze(-1);
     if (at::GradMode::is_enabled()) {
       // Avoids differentiating through at infinity when doing gradgrad
       // 1 could be any number, as we are going to overwrite the diagonal
-      Econj.diagonal(0, -2, -1).fill_(1.);
+      ret.diagonal(0, -2, -1).fill_(1.);
     }
+    return ret;
+  }();
+  const auto VhgV = at::matmul(V.mH(), gV);
+  const auto diag_VhgV = VhgV.diagonal(0, -2, -1);
 
-    const auto VhgV = at::matmul(V.mH(), gV);
+  // Check invariance of the loss function wrt the transformation V -> V e^{i\phi}
+  if (is_complex) {
+    const auto imdiag_VhgV = at::imag(diag_VhgV);
+    TORCH_CHECK(at::allclose(imdiag_VhgV, at::zeros_like(imdiag_VhgV), /*rtol=*/1e-2, /*atol=*/1e-2),
+                "linalg_eig_backward: The eigenvectors in the complex case are specified up to multiplication "
+                "by e^{i phi}. The specified loss function depends on this quantity, making it ill-defined.");
+  }
 
-    const auto diag_re_VhgV = at::real(VhgV).diagonal(0, -2, -1);
-    auto result = VhgV - at::matmul(V.mH(), V * diag_re_VhgV.unsqueeze(-2));
+  auto gA = VhgV - at::matmul(V.mH(), V * at::real(diag_VhgV).unsqueeze(-2));
 
-    result.div_(Econj);
+  gA = gA / std::move(Econj);
 
-    // Copy gL into the diagonal
-    if (gL.defined()) {
-      result.diagonal(0, -2, -1).copy_(gL);
-    }
-    else {
-      result.diagonal(0, -2, -1).zero_();
-    }
-
-    // Conjugate by V^{-H}
-    result = at::linalg_solve(V.mH(), at::matmul(result, V.mH()));
-    // If it is real, we have to project the derivative onto the real numbers
-    return self.is_complex() ? result : at::real(result);
+  // Copy gL into the diagonal
+  if (gL.defined()) {
+    gA.diagonal(0, -2, -1).copy_(gL);
   }
   else {
-    if (gL.defined()) {
-      // Compute V^-H gL V^H
-      const auto result = at::linalg_solve(V.mH(), gL.unsqueeze(-1) * V.mH());
-      // If it is real, we have to project the derivative onto the real numbers
-      return self.is_complex() ? result : at::real(result);
-    } else {
-      // If neither is defined, there's nothing to do
-      return at::zeros_like(self, at::MemoryFormat::Contiguous);
-    }
+    gA.diagonal(0, -2, -1).zero_();
   }
+
+  // Conjugate by V^{-H}
+  gA = at::linalg_solve(V.mH(), at::matmul(gA, V.mH()));
+  // If it is real, we have to project the derivative onto the real numbers
+  return is_complex ? gA : at::real(gA);
 }
 
-// https://people.maths.ox.ac.uk/gilesm/files/NA-08-01.pdf, page 10
-// see also https://arxiv.org/pdf/1701.00392.pdf Eqs. (4.60) and (4.63)
 std::tuple<Tensor, Tensor> linalg_eig_jvp(const Tensor& dA,
                                           const Tensor& L,
                                           const Tensor& V) {
+  // https://people.maths.ox.ac.uk/gilesm/files/NA-08-01.pdf
+  // see also https://arxiv.org/pdf/1701.00392.pdf Eqs. (4.60) and (4.63)
+  // Note that neither of the formulas in these pdfs are correct, as they do not assume that
+  // the eigenvectors are of unit norm. This makes them miss the diagonal term in dV
+  // dL = diag(dP)
+  // dV = V (dX / E - Re(diag V^H V dX))
+  // where
+  // dP = V^{-1} dA V
+  // dX = dP - dL
+  // E_{ij} = L_i - L_j if i != j
+  //          1         otherwise
   const auto dAComplex = dA.to(c10::toComplexType(dA.scalar_type()));
-  const auto dVfactor = at::linalg_solve(V, at::matmul(dAComplex, V));
-  const auto Lconj = L.conj();
-  auto FTimesdVfactor = dVfactor / (Lconj.unsqueeze(-2) - Lconj.unsqueeze(-1));
-  FTimesdVfactor.diagonal(0, -2, -1).zero_();
+  const auto dP = at::linalg_solve(V, at::matmul(dAComplex, V));
+  auto dL = dP.diagonal(0, -2, -1);
+  auto dV = [&dP, &V, &L]{
+    auto ret = dP / (L.unsqueeze(-2) - L.unsqueeze(-1));
+    ret.diagonal(0, -2, -1).zero_();
+    ret = at::matmul(V, ret);
 
-  return std::make_tuple(
-    dVfactor.diagonal(0, -2, -1),
-    at::matmul(V, FTimesdVfactor));
+    auto aux = V * at::real(at::matmul(V.mH(), ret).diagonal(0, -2, -1)).unsqueeze(-2);
+    return ret - aux;
+  }();
+  return std::make_pair(std::move(dL), std::move(dV));
 }
 
 Tensor linalg_lstsq_jvp(
