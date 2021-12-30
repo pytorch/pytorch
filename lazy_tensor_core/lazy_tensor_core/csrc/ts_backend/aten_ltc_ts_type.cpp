@@ -382,17 +382,20 @@ at::Tensor LazyNativeFunctions::max_pool3d_with_indices_backward(
 }
 
 at::Tensor & LazyNativeFunctions::normal_(at::Tensor & self, double mean, double std, c10::optional<at::Generator> generator) {
-    if (generator.has_value()) {
-      return at::native::call_fallback_fn<&ltc_eager_fallback, ATEN_OP(normal_)>::call(self, mean, std, generator);
-    }
+    // Unconditionally fall back.
+    // implementing normal_ via lazy tensor caused differences in results compared to eager.
+    return at::native::call_fallback_fn<&ltc_eager_fallback, ATEN_OP(normal_)>::call(self, mean, std, generator);
+    // if (generator.has_value()) {
+    //   return at::native::call_fallback_fn<&ltc_eager_fallback, ATEN_OP(normal_)>::call(self, mean, std, generator);
+    // }
 
-    TORCH_LAZY_FN_COUNTER("lazy::");
-    auto device = bridge::GetBackendDevice(self);
-    LazyTensor lazy_self = GetLtcTensorOrCreateForWrappedNumber(self, *device);
-    std::vector<torch::lazy::Shape> shapes = {torch::lazy::Shape(self.scalar_type(), self.sizes().vec())};
-    auto node = torch::lazy::MakeNode<ir::ops::Normal>(lazy_self.GetIrValue(), mean, std, std::move(shapes));
-    lazy_self.SetInPlaceIrValue(node);
-    return self;
+    // TORCH_LAZY_FN_COUNTER("lazy::");
+    // auto device = bridge::GetBackendDevice(self);
+    // LazyTensor lazy_self = GetLtcTensorOrCreateForWrappedNumber(self, *device);
+    // std::vector<torch::lazy::Shape> shapes = {torch::lazy::Shape(self.scalar_type(), self.sizes().vec())};
+    // auto node = torch::lazy::MakeNode<ir::ops::Normal>(lazy_self.GetIrValue(), mean, std, std::move(shapes));
+    // lazy_self.SetInPlaceIrValue(node);
+    // return self;
 };
 
 at::Tensor LazyNativeFunctions::permute(const at::Tensor& self,
