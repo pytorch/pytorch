@@ -84,7 +84,10 @@ DynamicType::DynamicType(Tag tag, Arguments arguments)
     : Type(Kind), tag_(tag), arguments_(std::move(arguments)) {}
 
 DynamicType::DynamicType(Tag tag, c10::string_view name, Arguments arguments)
-    : Type(Kind), tag_(tag), name_(std::string{name}), arguments_(std::move(arguments)) {}
+    : Type(Kind),
+      tag_(tag),
+      name_(std::string{name}),
+      arguments_(std::move(arguments)) {}
 
 DynamicType::DynamicType(const Type& other) : Type(DynamicType::Kind) {
   auto kind = other.kind();
@@ -240,12 +243,14 @@ DynamicTypePtr ivalue::TupleTypeFactory<c10::DynamicType>::create(
   return DynamicTypeFactory::create<TupleType>(std::move(elemTypes));
 }
 
-DynamicTypePtr ivalue::TupleTypeFactory<c10::DynamicType>::fallback(const Type&) {
+DynamicTypePtr ivalue::TupleTypeFactory<c10::DynamicType>::fallback(
+    const Type&) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false);
   return nullptr;
 }
 
-TORCH_API TupleTypePtr ivalue::TupleTypeFactory<TupleType>::fallback(const Type& type) {
+TORCH_API TupleTypePtr
+ivalue::TupleTypeFactory<TupleType>::fallback(const Type& type) {
 #ifdef C10_MOBILE
   return nullptr;
 #else
