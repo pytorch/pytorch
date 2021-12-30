@@ -661,7 +661,7 @@ enum pytorch_qnnp_status pytorch_qnnp_setup_convolution_ndhwc_q8(
       pytorch_qnnp_indirection_set_step_dimensions(convolution);
 
       const size_t indirection_buffer_size = sizeof(void*) * batch_size *
-          convolution->output_height * convolution->step_height;
+          convolution->output_depth * convolution->step_depth;
 
       const void** indirection_buffer = (const void**)realloc(
           convolution->indirection_buffer, indirection_buffer_size);
@@ -673,7 +673,7 @@ enum pytorch_qnnp_status pytorch_qnnp_setup_convolution_ndhwc_q8(
       }
       convolution->indirection_buffer = indirection_buffer;
 
-      pytorch_qnnp_indirection_init_dwconv2d(convolution, 0);
+      pytorch_qnnp_indirection_init_dwconv(convolution, 0);
       return pytorch_qnnp_status_success;
     }
     default:

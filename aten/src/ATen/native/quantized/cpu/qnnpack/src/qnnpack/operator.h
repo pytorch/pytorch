@@ -76,6 +76,7 @@ struct pytorch_qnnp_operator {
   const void** indirection_buffer;
   void* a_sum;
 
+  size_t step_depth;
   size_t step_height;
   size_t step_width;
 

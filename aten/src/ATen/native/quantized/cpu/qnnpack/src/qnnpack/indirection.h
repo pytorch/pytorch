@@ -23,7 +23,7 @@ PYTORCH_QNNP_INTERNAL void pytorch_qnnp_indirection_init_conv3d(
     size_t output_tile_size,
     size_t tiled_output_size);
 
-PYTORCH_QNNP_INTERNAL void pytorch_qnnp_indirection_init_dwconv2d(
+PYTORCH_QNNP_INTERNAL void pytorch_qnnp_indirection_init_dwconv(
     pytorch_qnnp_operator_t op,
     size_t batch_start);
 
