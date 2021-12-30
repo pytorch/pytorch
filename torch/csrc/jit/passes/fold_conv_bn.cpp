@@ -31,7 +31,6 @@ static bool hastensor(Module& m, const char* name) {
 void restoreConvBiasWithNone(Module& module) {
   for (const auto& method : module.get_methods()) {
     auto graph = method.graph();
-    graph->dump();
 
     const PatternInfo& pattern_get_bias = PatternInfo::parse_from_str(R"(
         graph(%self):
@@ -62,7 +61,6 @@ void restoreConvBiasWithNone(Module& module) {
 void replaceConvBiasWithGetAttr(Module& module) {
   for (const auto& method : module.get_methods()) {
     auto graph = method.graph();
-    graph->dump();
 
     // setting NoneType of convXd to TensorType. This avoids optimization to
     // remove the bias argument, which gives wrong result, since it was later
@@ -140,11 +138,6 @@ void reverseBiasForConvIfNotDefined(Module& module) {
       restoreConvBiasWithNone(module);
     }
 
-    printf("after pass\n");
-    module.dump(true, false, false);
-    for (const auto& method : module.get_methods()) {
-      method.graph()->dump();
-    }
   }
   for (Module m : module.children()) {
     reverseBiasForConvIfNotDefined(m);
@@ -162,11 +155,9 @@ void addBiasForConvIfNone(Module& module) {
        (demangled_typename == "__torch__.torch.nn.modules.conv.Conv3d"));
 
   if (is_floating_point_conv) {
-    module.dump(true, false, false);
     if (!t->hasAttribute("bias")) {
       t->addAttribute("bias", TensorType::get(), true);
       module.setattr("bias", at::Tensor());
-      printf("inserting attribute\n");
       replaceConvBiasWithGetAttr(module);
     } else {
       if (!module.attr("bias").isTensor()) {
@@ -174,14 +165,8 @@ void addBiasForConvIfNone(Module& module) {
         t->unsafeRemoveAttribute("bias");
         t->addAttribute("bias", TensorType::get(), true);
         module.setattr("bias", at::Tensor());
-        printf("replacing attribute\n");
         replaceConvBiasWithGetAttr(module);
       }
-    }
-    printf("after pass\n");
-    module.dump(true, false, false);
-    for (const auto& method : module.get_methods()) {
-      method.graph()->dump();
     }
   }
   for (Module m : module.children()) {
