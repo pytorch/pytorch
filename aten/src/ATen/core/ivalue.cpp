@@ -840,6 +840,13 @@ IValue IValue::deepcopy(
         copy = IValue(toObject()->deepcopy(memo));
       }
     } break;
+    case IValue::Tag::Enum: {
+      auto enum_holder = toEnumHolder();
+      copy = IValue(c10::make_intrusive<ivalue::EnumHolder>(
+          enum_holder->type(),
+          enum_holder->name(),
+          enum_holder->value().deepcopy(memo)));
+    } break;
     case IValue::Tag::String:
     case IValue::Tag::None:
     case IValue::Tag::Double:
