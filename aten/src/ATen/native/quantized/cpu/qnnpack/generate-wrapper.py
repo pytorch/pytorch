@@ -59,6 +59,7 @@ QNNPACK_SOURCES = {
         "q8conv/4x4c2-sse2.c",
         "q8dwconv/mp8x25-sse2.c",
         "q8dwconv/mp8x25-sse2-per-channel.c",
+        "q8dwconv/mp8x27-sse2.c",
         "q8dwconv/up8x9-sse2.c",
         "q8dwconv/up8x9-sse2-per-channel.c",
         "q8gavgpool/mp8x7p7q-sse2.c",
