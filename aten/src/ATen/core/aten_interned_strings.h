@@ -703,7 +703,6 @@ _(aten, thnn_conv_depthwise2d_backward) \
 _(aten, thnn_conv_depthwise2d_forward) \
 _(aten, slow_conv_dilated2d) \
 _(aten, slow_conv_dilated3d) \
-_(aten, slow_conv_dilated3d_backward) \
 _(aten, slow_conv_transpose2d) \
 _(aten, slow_conv_transpose3d) \
 _(aten, slow_conv_transpose3d_backward) \
@@ -735,6 +734,9 @@ _(aten, _upsample_bilinear2d_aa_forward) \
 _(aten, upsample_bicubic2d) \
 _(aten, upsample_bicubic2d_backward) \
 _(aten, upsample_bicubic2d_forward) \
+_(aten, upsample_bicubic2d_aa) \
+_(aten, upsample_bicubic2d_backward_aa) \
+_(aten, upsample_bicubic2d_forward_aa) \
 _(aten, upsample_linear1d) \
 _(aten, upsample_linear1d_backward) \
 _(aten, upsample_linear1d_forward) \
