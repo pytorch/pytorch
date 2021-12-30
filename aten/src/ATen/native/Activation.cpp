@@ -95,8 +95,7 @@ TORCH_META_FUNC(softplus_backward) (
   const Tensor& grad_output,
   const Tensor& self,
   const Scalar& beta,
-  const Scalar& threshold,
-  const Tensor& output
+  const Scalar& threshold
 ) {
   build_borrowing_binary_op(maybe_get_output(), grad_output, self);
 }
@@ -251,7 +250,6 @@ TORCH_IMPL_FUNC(softplus_backward_out) (
   const Tensor& self,
   const Scalar& beta,
   const Scalar& threshold,
-  const Tensor& output,
   const Tensor& grad_input
 ) {
   softplus_backward_stub(device_type(), *this, beta, threshold);

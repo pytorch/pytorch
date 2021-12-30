@@ -1834,7 +1834,7 @@
   other: sparse_sparse_matmul_backward(grad, self, other, 1)
 
 - name: softplus(Tensor self, Scalar beta=1, Scalar threshold=20) -> Tensor
-  self: softplus_backward(grad, self, beta, threshold, result)
+  self: softplus_backward(grad, self, beta, threshold)
   result: auto_element_wise
 
 - name: softshrink(Tensor self, Scalar lambd=0.5) -> Tensor
@@ -2234,8 +2234,8 @@
   self: huber_loss_double_backward(grad * grad_output, self, target, reduction, delta)
   target: -huber_loss_double_backward(grad * grad_output, self, target, reduction, delta)
 
-- name: softplus_backward(Tensor grad_output, Tensor self, Scalar beta, Scalar threshold, Tensor output) -> Tensor
-  grad_output: softplus_backward(grad, self, beta, threshold, output)
+- name: softplus_backward(Tensor grad_output, Tensor self, Scalar beta, Scalar threshold) -> Tensor
+  grad_output: softplus_backward(grad, self, beta, threshold)
   self: softplus_double_backward(grad * grad_output, self, beta, threshold)
 
 - name: _softmax_backward_data(Tensor grad_output, Tensor output, int dim, ScalarType input_dtype) -> Tensor
