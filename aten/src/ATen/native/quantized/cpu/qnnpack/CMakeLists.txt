@@ -194,6 +194,7 @@ set(PYTORCH_QNNPACK_ARM_NEON_UKERNELS
   src/q8conv/8x8-neon.c
   src/q8dwconv/mp8x25-neon.c
   src/q8dwconv/mp8x25-neon-per-channel.c
+  src/q8dwconv/mp8x27-neon.c
   src/q8dwconv/up8x9-neon.c
   src/q8dwconv/up8x9-neon-per-channel.c
   src/q8gavgpool/mp8x7p7q-neon.c
