@@ -125,10 +125,13 @@ void ProfilingRecord::insertShapeProfile(Node* n, size_t offset) {
     IValue v;
     pop(stack, v);
 
+    TensorTypePtr new_tensor_type = nullptr;
     if (v.isTensor()) {
       auto& t = v.toTensor();
-      auto new_tensor_type = tensorTypeInCurrentExecutionContext(t);
+      new_tensor_type = tensorTypeInCurrentExecutionContext(t);
+    }
 
+    if (v.isTensor() || v.isNone()) {
       std::lock_guard<std::mutex> lock(this->mutex_);
       if (profiling_count_ > 0) {
         GRAPH_DEBUG(
@@ -139,21 +142,27 @@ void ProfilingRecord::insertShapeProfile(Node* n, size_t offset) {
             " with ",
             *new_tensor_type);
 
-        if (pn->hasRun()) {
-          const auto& existing_tensor_type =
-              pn->ty(attr::profiled_type)->expectRef<TensorType>();
-          GRAPH_DEBUG(
-              "Existing type for %",
-              pno->debugName(),
-              ": ",
-              existing_tensor_type);
-          auto merged_type = new_tensor_type->merge(existing_tensor_type);
-          GRAPH_DEBUG(
-              "Merged type for %", pno->debugName(), ": ", *merged_type);
-          pn->ty_(attr::profiled_type, std::move(merged_type));
-        } else {
+        if (new_tensor_type != nullptr) {
+          if (pn->hasRun()) {
+            const auto& existing_tensor_type =
+                pn->ty(attr::profiled_type)->expectRef<TensorType>();
+            GRAPH_DEBUG(
+                "Existing type for %",
+                pno->debugName(),
+                ": ",
+                existing_tensor_type);
+            auto merged_type = new_tensor_type->merge(existing_tensor_type);
+            GRAPH_DEBUG(
+                "Merged type for %", pno->debugName(), ": ", *merged_type);
+            pn->ty_(attr::profiled_type, std::move(merged_type));
+          } else {
+            pn->setHasRun(true);
+            pn->ty_(attr::profiled_type, std::move(new_tensor_type));
+          }
+        }
+        if (v.isNone()) {
           pn->setHasRun(true);
-          pn->ty_(attr::profiled_type, std::move(new_tensor_type));
+          pn->i_(attr::seen_none, 1);
         }
       }
     }
@@ -241,7 +250,7 @@ void ProfilingRecord::instrumentBlock(Block* block) {
     auto n = *it;
     for (const auto offset : c10::irange(n->inputs().size())) {
       auto i = n->input(offset);
-      if (i->type()->kind() == c10::TypeKind::TensorType &&
+      if (i->type()->isSubtypeOf(OptionalType::ofTensor()) &&
           (needsProfiledInputs(n) || needsProfiledOutput(i->node()))) {
         insertShapeProfile(n, offset);
       }
