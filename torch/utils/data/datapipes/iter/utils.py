@@ -86,7 +86,7 @@ class IterableWrapperIterDataPipe(IterDataPipe):
                 is called in an attempt to materialize the iterable.
         """
         if self.iter is not None:
-            raise Exception(f"{type(self).__name___} is only serializable before it has been iterated upon.")
+            raise Exception(f"{type(self).__name__} is only serializable before it has been iterated upon.")
         try:
             pickle.dumps(self.iterable)
             iterable_to_pickle = self.iterable
