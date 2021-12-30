@@ -14,6 +14,11 @@ retry () {
     "\$@"  || (sleep 1 && "\$@") || (sleep 2 && "\$@")
 }
 
+# Source binary env file here if exists
+if [[ -e "${BINARY_ENV_FILE:-/nofile}" ]]; then
+  source "${BINARY_ENV_FILE:-/nofile}"
+fi
+
 python_nodot="\$(echo $DESIRED_PYTHON | tr -d m.u)"
 
 # Set up Python

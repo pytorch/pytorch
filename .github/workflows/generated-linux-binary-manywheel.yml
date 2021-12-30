@@ -13,23 +13,23 @@ on:
   workflow_dispatch:
 
 env:
-  PYTORCH_BUILD_NUMBER: 1
-  SKIP_ALL_TESTS: 1
-  PYTORCH_ROOT: /pytorch
+  # Needed for conda builds
+  ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+  ANACONDA_USER: pytorch
+  AWS_DEFAULT_REGION: us-east-1
+  BINARY_ENV_FILE: /tmp/env
   BUILD_ENVIRONMENT: linux-binary-manywheel
+  BUILDER_ROOT: /builder
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   IN_CI: 1
   IS_GHA: 1
-  ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
   PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
-  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  AWS_DEFAULT_REGION: us-east-1
   PR_NUMBER: ${{ github.event.pull_request.number }}
-  SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+  PYTORCH_FINAL_PACKAGE_DIR: /artifacts
   PYTORCH_RETRY_TEST_CASES: 1
-  USE_GLOO_WITH_OPENSSL: ON
-  # Needed for conda builds
-  TORCH_CONDA_BUILD_FOLDER: pytorch-nightly
-  ANACONDA_USER: pytorch
+  PYTORCH_ROOT: /pytorch
+  SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+  SKIP_ALL_TESTS: 1
 concurrency:
   group: linux-binary-manywheel-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
@@ -52,9 +52,9 @@ jobs:
     runs-on: linux.4xlarge
     timeout-minutes: 240
     env:
+      PACKAGE_TYPE: manywheel
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
-      PYTORCH_BUILD_NUMBER: 1
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: 3.7
     steps:
@@ -108,12 +108,6 @@ jobs:
         with:
           repository: pytorch/builder
           path: builder
-      - name: Generate version string
-        working-directory: pytorch/
-        run: |
-          version=$(.github/scripts/generate_pytorch_version.py)
-          echo "Generated version: ${version}"
-          echo "PYTORCH_BUILD_VERSION=${version}" >> "$GITHUB_ENV"
       - name: Pull Docker image
         run: |
           retry () {
@@ -124,22 +118,20 @@ jobs:
         run: |
           mkdir -p artifacts/
           container_name=$(docker run \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
             -e BUILD_ENVIRONMENT \
-            -e PYTORCH_FINAL_PACKAGE_DIR=/artifacts \
             -e BUILD_SPLIT_CUDA \
-            -e DESIRED_PYTHON \
             -e DESIRED_CUDA \
-            -e GPU_ARCH_VERSION \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
             -e GPU_ARCH_TYPE \
-            -e USE_GLOO_WITH_OPENSSL \
-            -e TORCH_CONDA_BUILD_FOLDER \
-            -e ANACONDA_USER \
-            -e PYTORCH_BUILD_VERSION \
-            -e PYTORCH_BUILD_NUMBER \
+            -e GPU_ARCH_VERSION \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
             -e PYTORCH_ROOT \
             -e SKIP_ALL_TESTS \
-            -e LIBTORCH_VARIANT \
-            -e DESIRED_DEVTOOLSET \
             --tty \
             --detach \
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
@@ -148,6 +140,7 @@ jobs:
             -w / \
             "${DOCKER_IMAGE}"
           )
+          docker exec -t "${container_name}" -w "${PYTORCH_ROOT}" sh -c "bash .circleci/scripts/binary_populate_env.sh"
           docker exec -t "${container_name}" sh -c "bash /builder/manywheel/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
@@ -156,25 +149,6 @@ jobs:
           if-no-files-found: error
           path:
             artifacts/*
-      - name: Parse ref
-        id: parse-ref
-        working-directory: pytorch/
-        run: |
-          .github/scripts/parse_ref.py
-      - name: Display and upload binary build size statistics (Click Me)
-        env:
-          SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
-          BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          TAG: ${{ steps.parse-ref.outputs.tag }}
-          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
-        working-directory: pytorch/
-        run: |
-          COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
-          export COMMIT_TIME
-          pip3 install requests==2.26
-          python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -202,7 +176,6 @@ jobs:
       PACKAGE_TYPE: manywheel
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
-      PYTORCH_BUILD_NUMBER: 1
       DESIRED_PYTHON: 3.7
     steps:
       - name: Display EC2 information
@@ -260,31 +233,25 @@ jobs:
         with:
           repository: pytorch/builder
           path: builder
-      - name: Generate binary test script
-        working-directory: pytorch/
-        run: |
-          OUTPUT_SCRIPT="${GITHUB_WORKSPACE}/run.sh" bash .circleci/scripts/binary_linux_test.sh
       - name: Test PyTorch binary
         run: |
           # shellcheck disable=SC2086,SC2090
           container_name=$(docker run \
             ${GPU_FLAG:-} \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
             -e BUILD_ENVIRONMENT \
-            -e PYTORCH_FINAL_PACKAGE_DIR=/artifacts \
             -e BUILD_SPLIT_CUDA \
-            -e DESIRED_PYTHON \
             -e DESIRED_CUDA \
-            -e GPU_ARCH_VERSION \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
             -e GPU_ARCH_TYPE \
-            -e USE_GLOO_WITH_OPENSSL \
-            -e TORCH_CONDA_BUILD_FOLDER \
-            -e ANACONDA_USER \
-            -e PYTORCH_BUILD_VERSION \
-            -e PYTORCH_BUILD_NUMBER \
+            -e GPU_ARCH_VERSION \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
             -e PYTORCH_ROOT \
             -e SKIP_ALL_TESTS \
-            -e LIBTORCH_VARIANT \
-            -e DESIRED_DEVTOOLSET \
             --tty \
             --detach \
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
@@ -294,6 +261,8 @@ jobs:
             -w / \
             "${DOCKER_IMAGE}"
           )
+          docker exec -t "${container_name}" -w "${PYTORCH_ROOT}" sh -c "bash .circleci/scripts/binary_populate_env.sh"
+          docker exec -t "${container_name}" -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" sh -c "bash .circleci/scripts/binary_linux_test.sh"
           docker exec -t "${container_name}" sh -c "bash -x /run.sh"
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
@@ -319,13 +288,13 @@ jobs:
     runs-on: linux.4xlarge
     timeout-minutes: 240
     env:
+      PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: 10.2
+      DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
-      PYTORCH_BUILD_NUMBER: 1
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: 3.7
     steps:
@@ -379,12 +348,6 @@ jobs:
         with:
           repository: pytorch/builder
           path: builder
-      - name: Generate version string
-        working-directory: pytorch/
-        run: |
-          version=$(.github/scripts/generate_pytorch_version.py)
-          echo "Generated version: ${version}"
-          echo "PYTORCH_BUILD_VERSION=${version}" >> "$GITHUB_ENV"
       - name: Pull Docker image
         run: |
           retry () {
@@ -395,22 +358,20 @@ jobs:
         run: |
           mkdir -p artifacts/
           container_name=$(docker run \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
             -e BUILD_ENVIRONMENT \
-            -e PYTORCH_FINAL_PACKAGE_DIR=/artifacts \
             -e BUILD_SPLIT_CUDA \
-            -e DESIRED_PYTHON \
             -e DESIRED_CUDA \
-            -e GPU_ARCH_VERSION \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
             -e GPU_ARCH_TYPE \
-            -e USE_GLOO_WITH_OPENSSL \
-            -e TORCH_CONDA_BUILD_FOLDER \
-            -e ANACONDA_USER \
-            -e PYTORCH_BUILD_VERSION \
-            -e PYTORCH_BUILD_NUMBER \
+            -e GPU_ARCH_VERSION \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
             -e PYTORCH_ROOT \
             -e SKIP_ALL_TESTS \
-            -e LIBTORCH_VARIANT \
-            -e DESIRED_DEVTOOLSET \
             --tty \
             --detach \
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
@@ -419,6 +380,7 @@ jobs:
             -w / \
             "${DOCKER_IMAGE}"
           )
+          docker exec -t "${container_name}" -w "${PYTORCH_ROOT}" sh -c "bash .circleci/scripts/binary_populate_env.sh"
           docker exec -t "${container_name}" sh -c "bash /builder/manywheel/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
@@ -427,25 +389,6 @@ jobs:
           if-no-files-found: error
           path:
             artifacts/*
-      - name: Parse ref
-        id: parse-ref
-        working-directory: pytorch/
-        run: |
-          .github/scripts/parse_ref.py
-      - name: Display and upload binary build size statistics (Click Me)
-        env:
-          SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
-          BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          TAG: ${{ steps.parse-ref.outputs.tag }}
-          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
-        working-directory: pytorch/
-        run: |
-          COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
-          export COMMIT_TIME
-          pip3 install requests==2.26
-          python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -473,11 +416,10 @@ jobs:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: 10.2
+      DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
-      PYTORCH_BUILD_NUMBER: 1
       DESIRED_PYTHON: 3.7
     steps:
       - name: Display EC2 information
@@ -539,31 +481,25 @@ jobs:
         run: |
           bash .github/scripts/install_nvidia_utils_linux.sh
           echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
-      - name: Generate binary test script
-        working-directory: pytorch/
-        run: |
-          OUTPUT_SCRIPT="${GITHUB_WORKSPACE}/run.sh" bash .circleci/scripts/binary_linux_test.sh
       - name: Test PyTorch binary
         run: |
           # shellcheck disable=SC2086,SC2090
           container_name=$(docker run \
             ${GPU_FLAG:-} \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
             -e BUILD_ENVIRONMENT \
-            -e PYTORCH_FINAL_PACKAGE_DIR=/artifacts \
             -e BUILD_SPLIT_CUDA \
-            -e DESIRED_PYTHON \
             -e DESIRED_CUDA \
-            -e GPU_ARCH_VERSION \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
             -e GPU_ARCH_TYPE \
-            -e USE_GLOO_WITH_OPENSSL \
-            -e TORCH_CONDA_BUILD_FOLDER \
-            -e ANACONDA_USER \
-            -e PYTORCH_BUILD_VERSION \
-            -e PYTORCH_BUILD_NUMBER \
+            -e GPU_ARCH_VERSION \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
             -e PYTORCH_ROOT \
             -e SKIP_ALL_TESTS \
-            -e LIBTORCH_VARIANT \
-            -e DESIRED_DEVTOOLSET \
             --tty \
             --detach \
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
@@ -573,6 +509,8 @@ jobs:
             -w / \
             "${DOCKER_IMAGE}"
           )
+          docker exec -t "${container_name}" -w "${PYTORCH_ROOT}" sh -c "bash .circleci/scripts/binary_populate_env.sh"
+          docker exec -t "${container_name}" -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" sh -c "bash .circleci/scripts/binary_linux_test.sh"
           docker exec -t "${container_name}" sh -c "bash -x /run.sh"
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
@@ -598,13 +536,13 @@ jobs:
     runs-on: linux.4xlarge
     timeout-minutes: 240
     env:
+      PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: 11.5
+      DESIRED_CUDA: cu115
       GPU_ARCH_VERSION: 11.5
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.5
-      PYTORCH_BUILD_NUMBER: 1
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: 3.7
     steps:
@@ -658,12 +596,6 @@ jobs:
         with:
           repository: pytorch/builder
           path: builder
-      - name: Generate version string
-        working-directory: pytorch/
-        run: |
-          version=$(.github/scripts/generate_pytorch_version.py)
-          echo "Generated version: ${version}"
-          echo "PYTORCH_BUILD_VERSION=${version}" >> "$GITHUB_ENV"
       - name: Set BUILD_SPLIT_CUDA
         run: |
           echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
@@ -677,22 +609,20 @@ jobs:
         run: |
           mkdir -p artifacts/
           container_name=$(docker run \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
             -e BUILD_ENVIRONMENT \
-            -e PYTORCH_FINAL_PACKAGE_DIR=/artifacts \
             -e BUILD_SPLIT_CUDA \
-            -e DESIRED_PYTHON \
             -e DESIRED_CUDA \
-            -e GPU_ARCH_VERSION \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
             -e GPU_ARCH_TYPE \
-            -e USE_GLOO_WITH_OPENSSL \
-            -e TORCH_CONDA_BUILD_FOLDER \
-            -e ANACONDA_USER \
-            -e PYTORCH_BUILD_VERSION \
-            -e PYTORCH_BUILD_NUMBER \
+            -e GPU_ARCH_VERSION \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
             -e PYTORCH_ROOT \
             -e SKIP_ALL_TESTS \
-            -e LIBTORCH_VARIANT \
-            -e DESIRED_DEVTOOLSET \
             --tty \
             --detach \
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
@@ -701,6 +631,7 @@ jobs:
             -w / \
             "${DOCKER_IMAGE}"
           )
+          docker exec -t "${container_name}" -w "${PYTORCH_ROOT}" sh -c "bash .circleci/scripts/binary_populate_env.sh"
           docker exec -t "${container_name}" sh -c "bash /builder/manywheel/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
@@ -709,25 +640,6 @@ jobs:
           if-no-files-found: error
           path:
             artifacts/*
-      - name: Parse ref
-        id: parse-ref
-        working-directory: pytorch/
-        run: |
-          .github/scripts/parse_ref.py
-      - name: Display and upload binary build size statistics (Click Me)
-        env:
-          SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
-          BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          TAG: ${{ steps.parse-ref.outputs.tag }}
-          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
-        working-directory: pytorch/
-        run: |
-          COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
-          export COMMIT_TIME
-          pip3 install requests==2.26
-          python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -755,11 +667,10 @@ jobs:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: 11.5
+      DESIRED_CUDA: cu115
       GPU_ARCH_VERSION: 11.5
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.5
-      PYTORCH_BUILD_NUMBER: 1
       DESIRED_PYTHON: 3.7
     steps:
       - name: Display EC2 information
@@ -821,31 +732,25 @@ jobs:
         run: |
           bash .github/scripts/install_nvidia_utils_linux.sh
           echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
-      - name: Generate binary test script
-        working-directory: pytorch/
-        run: |
-          OUTPUT_SCRIPT="${GITHUB_WORKSPACE}/run.sh" bash .circleci/scripts/binary_linux_test.sh
       - name: Test PyTorch binary
         run: |
           # shellcheck disable=SC2086,SC2090
           container_name=$(docker run \
             ${GPU_FLAG:-} \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
             -e BUILD_ENVIRONMENT \
-            -e PYTORCH_FINAL_PACKAGE_DIR=/artifacts \
             -e BUILD_SPLIT_CUDA \
-            -e DESIRED_PYTHON \
             -e DESIRED_CUDA \
-            -e GPU_ARCH_VERSION \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
             -e GPU_ARCH_TYPE \
-            -e USE_GLOO_WITH_OPENSSL \
-            -e TORCH_CONDA_BUILD_FOLDER \
-            -e ANACONDA_USER \
-            -e PYTORCH_BUILD_VERSION \
-            -e PYTORCH_BUILD_NUMBER \
+            -e GPU_ARCH_VERSION \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
             -e PYTORCH_ROOT \
             -e SKIP_ALL_TESTS \
-            -e LIBTORCH_VARIANT \
-            -e DESIRED_DEVTOOLSET \
             --tty \
             --detach \
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
@@ -855,6 +760,8 @@ jobs:
             -w / \
             "${DOCKER_IMAGE}"
           )
+          docker exec -t "${container_name}" -w "${PYTORCH_ROOT}" sh -c "bash .circleci/scripts/binary_populate_env.sh"
+          docker exec -t "${container_name}" -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" sh -c "bash .circleci/scripts/binary_linux_test.sh"
           docker exec -t "${container_name}" sh -c "bash -x /run.sh"
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
@@ -880,13 +787,13 @@ jobs:
     runs-on: linux.4xlarge
     timeout-minutes: 240
     env:
+      PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: 4.3.1
       GPU_ARCH_VERSION: 4.3.1
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm4.3.1
-      PYTORCH_BUILD_NUMBER: 1
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: 3.7
     steps:
@@ -940,12 +847,6 @@ jobs:
         with:
           repository: pytorch/builder
           path: builder
-      - name: Generate version string
-        working-directory: pytorch/
-        run: |
-          version=$(.github/scripts/generate_pytorch_version.py)
-          echo "Generated version: ${version}"
-          echo "PYTORCH_BUILD_VERSION=${version}" >> "$GITHUB_ENV"
       - name: Pull Docker image
         run: |
           retry () {
@@ -956,22 +857,20 @@ jobs:
         run: |
           mkdir -p artifacts/
           container_name=$(docker run \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
             -e BUILD_ENVIRONMENT \
-            -e PYTORCH_FINAL_PACKAGE_DIR=/artifacts \
             -e BUILD_SPLIT_CUDA \
-            -e DESIRED_PYTHON \
             -e DESIRED_CUDA \
-            -e GPU_ARCH_VERSION \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
             -e GPU_ARCH_TYPE \
-            -e USE_GLOO_WITH_OPENSSL \
-            -e TORCH_CONDA_BUILD_FOLDER \
-            -e ANACONDA_USER \
-            -e PYTORCH_BUILD_VERSION \
-            -e PYTORCH_BUILD_NUMBER \
+            -e GPU_ARCH_VERSION \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
             -e PYTORCH_ROOT \
             -e SKIP_ALL_TESTS \
-            -e LIBTORCH_VARIANT \
-            -e DESIRED_DEVTOOLSET \
             --tty \
             --detach \
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
@@ -980,6 +879,7 @@ jobs:
             -w / \
             "${DOCKER_IMAGE}"
           )
+          docker exec -t "${container_name}" -w "${PYTORCH_ROOT}" sh -c "bash .circleci/scripts/binary_populate_env.sh"
           docker exec -t "${container_name}" sh -c "bash /builder/manywheel/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
@@ -988,25 +888,6 @@ jobs:
           if-no-files-found: error
           path:
             artifacts/*
-      - name: Parse ref
-        id: parse-ref
-        working-directory: pytorch/
-        run: |
-          .github/scripts/parse_ref.py
-      - name: Display and upload binary build size statistics (Click Me)
-        env:
-          SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
-          BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          TAG: ${{ steps.parse-ref.outputs.tag }}
-          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
-        working-directory: pytorch/
-        run: |
-          COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
-          export COMMIT_TIME
-          pip3 install requests==2.26
-          python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -1038,7 +919,6 @@ jobs:
       GPU_ARCH_VERSION: 4.3.1
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm4.3.1
-      PYTORCH_BUILD_NUMBER: 1
       DESIRED_PYTHON: 3.7
     steps:
       - name: Display EC2 information
@@ -1096,31 +976,25 @@ jobs:
         with:
           repository: pytorch/builder
           path: builder
-      - name: Generate binary test script
-        working-directory: pytorch/
-        run: |
-          OUTPUT_SCRIPT="${GITHUB_WORKSPACE}/run.sh" bash .circleci/scripts/binary_linux_test.sh
       - name: Test PyTorch binary
         run: |
           # shellcheck disable=SC2086,SC2090
           container_name=$(docker run \
             ${GPU_FLAG:-} \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
             -e BUILD_ENVIRONMENT \
-            -e PYTORCH_FINAL_PACKAGE_DIR=/artifacts \
             -e BUILD_SPLIT_CUDA \
-            -e DESIRED_PYTHON \
             -e DESIRED_CUDA \
-            -e GPU_ARCH_VERSION \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
             -e GPU_ARCH_TYPE \
-            -e USE_GLOO_WITH_OPENSSL \
-            -e TORCH_CONDA_BUILD_FOLDER \
-            -e ANACONDA_USER \
-            -e PYTORCH_BUILD_VERSION \
-            -e PYTORCH_BUILD_NUMBER \
+            -e GPU_ARCH_VERSION \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
             -e PYTORCH_ROOT \
             -e SKIP_ALL_TESTS \
-            -e LIBTORCH_VARIANT \
-            -e DESIRED_DEVTOOLSET \
             --tty \
             --detach \
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
@@ -1130,6 +1004,8 @@ jobs:
             -w / \
             "${DOCKER_IMAGE}"
           )
+          docker exec -t "${container_name}" -w "${PYTORCH_ROOT}" sh -c "bash .circleci/scripts/binary_populate_env.sh"
+          docker exec -t "${container_name}" -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" sh -c "bash .circleci/scripts/binary_linux_test.sh"
           docker exec -t "${container_name}" sh -c "bash -x /run.sh"
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/

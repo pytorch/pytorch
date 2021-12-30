@@ -19,39 +19,46 @@ tagged_version() {
   fi
 }
 
-# We need to write an envfile to persist these variables to following
-# steps, but the location of the envfile depends on the circleci executor
-if [[ "$(uname)" == Darwin ]]; then
-  # macos executor (builds and tests)
-  workdir="/Users/distiller/project"
-elif [[ "$OSTYPE" == "msys" ]]; then
-  # windows executor (builds and tests)
-  workdir="/c/w"
-elif [[ -d "/home/circleci/project" ]]; then
-  # machine executor (binary tests)
-  workdir="/home/circleci/project"
-else
-  # docker executor (binary builds)
-  workdir="/"
-fi
-envfile="$workdir/env"
-touch "$envfile"
-chmod +x "$envfile"
+# These are only relevant for CircleCI
+# TODO: Remove these later once migrated fully to GHA
+if [[ -z ${IN_GHA} ]]
+  # We need to write an envfile to persist these variables to following
+  # steps, but the location of the envfile depends on the circleci executor
+  if [[ "$(uname)" == Darwin ]]; then
+    # macos executor (builds and tests)
+    workdir="/Users/distiller/project"
+  elif [[ "$OSTYPE" == "msys" ]]; then
+    # windows executor (builds and tests)
+    workdir="/c/w"
+  elif [[ -d "/home/circleci/project" ]]; then
+    # machine executor (binary tests)
+    workdir="/home/circleci/project"
+  else
+    # docker executor (binary builds)
+    workdir="/"
+  fi
+  envfile="$workdir/env"
+  touch "$envfile"
+  chmod +x "$envfile"
 
-# Parse the BUILD_ENVIRONMENT to package type, python, and cuda
-configs=($BUILD_ENVIRONMENT)
-export PACKAGE_TYPE="${configs[0]}"
-export DESIRED_PYTHON="${configs[1]}"
-export DESIRED_CUDA="${configs[2]}"
-if [[ "${BUILD_FOR_SYSTEM:-}" == "windows" ]]; then
-  export DESIRED_DEVTOOLSET=""
-  export LIBTORCH_CONFIG="${configs[3]:-}"
-  if [[ "$LIBTORCH_CONFIG" == 'debug' ]]; then
-    export DEBUG=1
+  # Parse the BUILD_ENVIRONMENT to package type, python, and cuda
+  configs=($BUILD_ENVIRONMENT)
+  export PACKAGE_TYPE="${configs[0]}"
+  export DESIRED_PYTHON="${configs[1]}"
+  export DESIRED_CUDA="${configs[2]}"
+  if [[ "${BUILD_FOR_SYSTEM:-}" == "windows" ]]; then
+    export DESIRED_DEVTOOLSET=""
+    export LIBTORCH_CONFIG="${configs[3]:-}"
+    if [[ "$LIBTORCH_CONFIG" == 'debug' ]]; then
+      export DEBUG=1
+    fi
+  else
+    export DESIRED_DEVTOOLSET="${configs[3]:-}"
   fi
 else
-  export DESIRED_DEVTOOLSET="${configs[3]:-}"
+  envfile=${BINARY_ENV_FILE:-/tmp/env}
 fi
+
 if [[ "$PACKAGE_TYPE" == 'libtorch' ]]; then
   export BUILD_PYTHONLESS=1
 fi
@@ -131,6 +138,13 @@ if [[ "$PACKAGE_TYPE" == libtorch ]]; then
   fi
 fi
 
+# Because most Circle executors only have 20 CPUs, using more causes OOMs w/ Ninja and nvcc parallelization
+MEMORY_LIMIT_MAX_JOBS=18
+NUM_CPUS=$(( $(nproc) - 2 ))
+
+# Defaults here for **binary** linux builds so they can be changed in one place
+export MAX_JOBS=${MAX_JOBS:-$(( ${NUM_CPUS} > ${MEMORY_LIMIT_MAX_JOBS} ? ${MEMORY_LIMIT_MAX_JOBS} : ${NUM_CPUS} ))}
+
 cat >>"$envfile" <<EOL
 # =================== The following code will be executed inside Docker container ===================
 export TZ=UTC
@@ -163,27 +177,30 @@ export BUILD_JNI=$BUILD_JNI
 export PIP_UPLOAD_FOLDER="$PIP_UPLOAD_FOLDER"
 export DOCKER_IMAGE="$DOCKER_IMAGE"
 
-export workdir="$workdir"
-export MAC_PACKAGE_WORK_DIR="$workdir"
-if [[ "$OSTYPE" == "msys" ]]; then
-  export PYTORCH_ROOT="$workdir/p"
-  export BUILDER_ROOT="$workdir/b"
-else
-  export PYTORCH_ROOT="$workdir/pytorch"
-  export BUILDER_ROOT="$workdir/builder"
-fi
-export MINICONDA_ROOT="$workdir/miniconda"
-export PYTORCH_FINAL_PACKAGE_DIR="$workdir/final_pkgs"
+if [[ -z ${IN_GHA} ]]; then
+  export workdir="$workdir"
+  export MAC_PACKAGE_WORK_DIR="$workdir"
+  if [[ "$OSTYPE" == "msys" ]]; then
+    export PYTORCH_ROOT="$workdir/p"
+    export BUILDER_ROOT="$workdir/b"
+  else
+    export PYTORCH_ROOT="$workdir/pytorch"
+    export BUILDER_ROOT="$workdir/builder"
+  fi
+  export MINICONDA_ROOT="$workdir/miniconda"
+  export PYTORCH_FINAL_PACKAGE_DIR="$workdir/final_pkgs"
 
-export CIRCLE_TAG="${CIRCLE_TAG:-}"
-export CIRCLE_SHA1="$CIRCLE_SHA1"
-export CIRCLE_PR_NUMBER="${CIRCLE_PR_NUMBER:-}"
-export CIRCLE_BRANCH="$CIRCLE_BRANCH"
-export CIRCLE_WORKFLOW_ID="$CIRCLE_WORKFLOW_ID"
+  export CIRCLE_TAG="${CIRCLE_TAG:-}"
+  export CIRCLE_SHA1="$CIRCLE_SHA1"
+  export CIRCLE_PR_NUMBER="${CIRCLE_PR_NUMBER:-}"
+  export CIRCLE_BRANCH="$CIRCLE_BRANCH"
+  export CIRCLE_WORKFLOW_ID="$CIRCLE_WORKFLOW_ID"
+fi
 
 export USE_GOLD_LINKER="${USE_GOLD_LINKER}"
 export USE_GLOO_WITH_OPENSSL="ON"
 export USE_WHOLE_CUDNN="${USE_WHOLE_CUDNN}"
+export MAX_JOBS="${MAX_JOBS}"
 # =================== The above code will be executed inside Docker container ===================
 EOL
 
