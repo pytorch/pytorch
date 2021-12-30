@@ -144,7 +144,7 @@ jobs:
             "${DOCKER_IMAGE}"
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" sh -c "bash .circleci/scripts/binary_populate_env.sh"
-          docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
+          docker exec -t "${container_name}" sh -c "source ${BINARY_ENV_FILE} && bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
           name: libtorch-cpu-shared-with-deps-cxx11-abi
@@ -268,8 +268,9 @@ jobs:
             "${DOCKER_IMAGE}"
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" sh -c "bash .circleci/scripts/binary_populate_env.sh"
+          # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" sh -c "bash .circleci/scripts/binary_linux_test.sh"
-          docker exec -t "${container_name}" sh -c "bash -x /run.sh"
+          docker exec -t "${container_name}" sh -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -386,7 +387,7 @@ jobs:
             "${DOCKER_IMAGE}"
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" sh -c "bash .circleci/scripts/binary_populate_env.sh"
-          docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
+          docker exec -t "${container_name}" sh -c "source ${BINARY_ENV_FILE} && bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
           name: libtorch-cpu-shared-with-deps-pre-cxx11
@@ -510,8 +511,9 @@ jobs:
             "${DOCKER_IMAGE}"
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" sh -c "bash .circleci/scripts/binary_populate_env.sh"
+          # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" sh -c "bash .circleci/scripts/binary_linux_test.sh"
-          docker exec -t "${container_name}" sh -c "bash -x /run.sh"
+          docker exec -t "${container_name}" sh -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -628,7 +630,7 @@ jobs:
             "${DOCKER_IMAGE}"
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" sh -c "bash .circleci/scripts/binary_populate_env.sh"
-          docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
+          docker exec -t "${container_name}" sh -c "source ${BINARY_ENV_FILE} && bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
           name: libtorch-cpu-static-with-deps-cxx11-abi
@@ -752,8 +754,9 @@ jobs:
             "${DOCKER_IMAGE}"
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" sh -c "bash .circleci/scripts/binary_populate_env.sh"
+          # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" sh -c "bash .circleci/scripts/binary_linux_test.sh"
-          docker exec -t "${container_name}" sh -c "bash -x /run.sh"
+          docker exec -t "${container_name}" sh -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -870,7 +873,7 @@ jobs:
             "${DOCKER_IMAGE}"
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" sh -c "bash .circleci/scripts/binary_populate_env.sh"
-          docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
+          docker exec -t "${container_name}" sh -c "source ${BINARY_ENV_FILE} && bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
           name: libtorch-cpu-static-with-deps-pre-cxx11
@@ -994,8 +997,9 @@ jobs:
             "${DOCKER_IMAGE}"
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" sh -c "bash .circleci/scripts/binary_populate_env.sh"
+          # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" sh -c "bash .circleci/scripts/binary_linux_test.sh"
-          docker exec -t "${container_name}" sh -c "bash -x /run.sh"
+          docker exec -t "${container_name}" sh -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -1116,7 +1120,7 @@ jobs:
             "${DOCKER_IMAGE}"
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" sh -c "bash .circleci/scripts/binary_populate_env.sh"
-          docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
+          docker exec -t "${container_name}" sh -c "source ${BINARY_ENV_FILE} && bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
           name: libtorch-cuda10_2-shared-with-deps-cxx11-abi
@@ -1248,8 +1252,9 @@ jobs:
             "${DOCKER_IMAGE}"
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" sh -c "bash .circleci/scripts/binary_populate_env.sh"
+          # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" sh -c "bash .circleci/scripts/binary_linux_test.sh"
-          docker exec -t "${container_name}" sh -c "bash -x /run.sh"
+          docker exec -t "${container_name}" sh -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -1370,7 +1375,7 @@ jobs:
             "${DOCKER_IMAGE}"
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" sh -c "bash .circleci/scripts/binary_populate_env.sh"
-          docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
+          docker exec -t "${container_name}" sh -c "source ${BINARY_ENV_FILE} && bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
           name: libtorch-cuda10_2-shared-with-deps-pre-cxx11
@@ -1502,8 +1507,9 @@ jobs:
             "${DOCKER_IMAGE}"
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" sh -c "bash .circleci/scripts/binary_populate_env.sh"
+          # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" sh -c "bash .circleci/scripts/binary_linux_test.sh"
-          docker exec -t "${container_name}" sh -c "bash -x /run.sh"
+          docker exec -t "${container_name}" sh -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -1624,7 +1630,7 @@ jobs:
             "${DOCKER_IMAGE}"
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" sh -c "bash .circleci/scripts/binary_populate_env.sh"
-          docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
+          docker exec -t "${container_name}" sh -c "source ${BINARY_ENV_FILE} && bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
           name: libtorch-cuda10_2-static-with-deps-cxx11-abi
@@ -1756,8 +1762,9 @@ jobs:
             "${DOCKER_IMAGE}"
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" sh -c "bash .circleci/scripts/binary_populate_env.sh"
+          # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" sh -c "bash .circleci/scripts/binary_linux_test.sh"
-          docker exec -t "${container_name}" sh -c "bash -x /run.sh"
+          docker exec -t "${container_name}" sh -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -1878,7 +1885,7 @@ jobs:
             "${DOCKER_IMAGE}"
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" sh -c "bash .circleci/scripts/binary_populate_env.sh"
-          docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
+          docker exec -t "${container_name}" sh -c "source ${BINARY_ENV_FILE} && bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
           name: libtorch-cuda10_2-static-with-deps-pre-cxx11
@@ -2010,8 +2017,9 @@ jobs:
             "${DOCKER_IMAGE}"
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" sh -c "bash .circleci/scripts/binary_populate_env.sh"
+          # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" sh -c "bash .circleci/scripts/binary_linux_test.sh"
-          docker exec -t "${container_name}" sh -c "bash -x /run.sh"
+          docker exec -t "${container_name}" sh -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -2135,7 +2143,7 @@ jobs:
             "${DOCKER_IMAGE}"
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" sh -c "bash .circleci/scripts/binary_populate_env.sh"
-          docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
+          docker exec -t "${container_name}" sh -c "source ${BINARY_ENV_FILE} && bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
           name: libtorch-cuda11_5-shared-with-deps-cxx11-abi
@@ -2267,8 +2275,9 @@ jobs:
             "${DOCKER_IMAGE}"
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" sh -c "bash .circleci/scripts/binary_populate_env.sh"
+          # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" sh -c "bash .circleci/scripts/binary_linux_test.sh"
-          docker exec -t "${container_name}" sh -c "bash -x /run.sh"
+          docker exec -t "${container_name}" sh -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -2392,7 +2401,7 @@ jobs:
             "${DOCKER_IMAGE}"
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" sh -c "bash .circleci/scripts/binary_populate_env.sh"
-          docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
+          docker exec -t "${container_name}" sh -c "source ${BINARY_ENV_FILE} && bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
           name: libtorch-cuda11_5-shared-with-deps-pre-cxx11
@@ -2524,8 +2533,9 @@ jobs:
             "${DOCKER_IMAGE}"
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" sh -c "bash .circleci/scripts/binary_populate_env.sh"
+          # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" sh -c "bash .circleci/scripts/binary_linux_test.sh"
-          docker exec -t "${container_name}" sh -c "bash -x /run.sh"
+          docker exec -t "${container_name}" sh -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -2649,7 +2659,7 @@ jobs:
             "${DOCKER_IMAGE}"
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" sh -c "bash .circleci/scripts/binary_populate_env.sh"
-          docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
+          docker exec -t "${container_name}" sh -c "source ${BINARY_ENV_FILE} && bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
           name: libtorch-cuda11_5-static-with-deps-cxx11-abi
@@ -2781,8 +2791,9 @@ jobs:
             "${DOCKER_IMAGE}"
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" sh -c "bash .circleci/scripts/binary_populate_env.sh"
+          # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" sh -c "bash .circleci/scripts/binary_linux_test.sh"
-          docker exec -t "${container_name}" sh -c "bash -x /run.sh"
+          docker exec -t "${container_name}" sh -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -2906,7 +2917,7 @@ jobs:
             "${DOCKER_IMAGE}"
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" sh -c "bash .circleci/scripts/binary_populate_env.sh"
-          docker exec -t "${container_name}" sh -c "bash /builder/libtorch/build.sh"
+          docker exec -t "${container_name}" sh -c "source ${BINARY_ENV_FILE} && bash /builder/libtorch/build.sh"
       - uses: seemethere/upload-artifact-s3@v3
         with:
           name: libtorch-cuda11_5-static-with-deps-pre-cxx11
@@ -3038,8 +3049,9 @@ jobs:
             "${DOCKER_IMAGE}"
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" sh -c "bash .circleci/scripts/binary_populate_env.sh"
+          # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" sh -c "bash .circleci/scripts/binary_linux_test.sh"
-          docker exec -t "${container_name}" sh -c "bash -x /run.sh"
+          docker exec -t "${container_name}" sh -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions

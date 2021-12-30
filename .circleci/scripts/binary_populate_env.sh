@@ -57,6 +57,7 @@ if [[ -z ${IS_GHA:-} ]]; then
   fi
 else
   envfile=${BINARY_ENV_FILE:-/tmp/env}
+  workdir="/pytorch"
 fi
 
 if [[ "$PACKAGE_TYPE" == 'libtorch' ]]; then
@@ -145,7 +146,7 @@ NUM_CPUS=$(( $(nproc) - 2 ))
 # Defaults here for **binary** linux builds so they can be changed in one place
 export MAX_JOBS=${MAX_JOBS:-$(( ${NUM_CPUS} > ${MEMORY_LIMIT_MAX_JOBS} ? ${MEMORY_LIMIT_MAX_JOBS} : ${NUM_CPUS} ))}
 
-cat >>"$envfile" <<EOL
+cat >"$envfile" <<EOL
 # =================== The following code will be executed inside Docker container ===================
 export TZ=UTC
 echo "Running on $(uname -a) at $(date)"
@@ -155,7 +156,7 @@ export DESIRED_PYTHON="$DESIRED_PYTHON"
 export DESIRED_CUDA="$DESIRED_CUDA"
 export LIBTORCH_VARIANT="${LIBTORCH_VARIANT:-}"
 export BUILD_PYTHONLESS="${BUILD_PYTHONLESS:-}"
-export DESIRED_DEVTOOLSET="$DESIRED_DEVTOOLSET"
+export DESIRED_DEVTOOLSET="${DESIRED_DEVTOOLSET:-}"
 if [[ "${BUILD_FOR_SYSTEM:-}" == "windows" ]]; then
   export LIBTORCH_CONFIG="${LIBTORCH_CONFIG:-}"
   export DEBUG="${DEBUG:-}"
@@ -177,7 +178,16 @@ export BUILD_JNI=$BUILD_JNI
 export PIP_UPLOAD_FOLDER="$PIP_UPLOAD_FOLDER"
 export DOCKER_IMAGE="$DOCKER_IMAGE"
 
+
+export USE_GOLD_LINKER="${USE_GOLD_LINKER}"
+export USE_GLOO_WITH_OPENSSL="ON"
+export USE_WHOLE_CUDNN="${USE_WHOLE_CUDNN}"
+export MAX_JOBS="${MAX_JOBS}"
+# =================== The above code will be executed inside Docker container ===================
+EOL
+
 if [[ -z "${IS_GHA:-}" ]]; then
+  cat >>"$envfile" <<EOL
   export workdir="$workdir"
   export MAC_PACKAGE_WORK_DIR="$workdir"
   if [[ "$OSTYPE" == "msys" ]]; then
@@ -195,14 +205,8 @@ if [[ -z "${IS_GHA:-}" ]]; then
   export CIRCLE_PR_NUMBER="${CIRCLE_PR_NUMBER:-}"
   export CIRCLE_BRANCH="$CIRCLE_BRANCH"
   export CIRCLE_WORKFLOW_ID="$CIRCLE_WORKFLOW_ID"
-fi
-
-export USE_GOLD_LINKER="${USE_GOLD_LINKER}"
-export USE_GLOO_WITH_OPENSSL="ON"
-export USE_WHOLE_CUDNN="${USE_WHOLE_CUDNN}"
-export MAX_JOBS="${MAX_JOBS}"
-# =================== The above code will be executed inside Docker container ===================
 EOL
+fi
 
 echo 'retry () {' >> "$envfile"
 echo '    $*  || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)' >> "$envfile"

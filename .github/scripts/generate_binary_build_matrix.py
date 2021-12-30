@@ -68,10 +68,11 @@ FULL_PYTHON_VERSIONS = [
 
 
 def translate_desired_cuda(gpu_arch_type: str, gpu_arch_version: str) -> str:
-    if gpu_arch_type == "cuda":
-        return f"cu{gpu_arch_version.replace('.', '')}"
-    else:
-        return gpu_arch_version
+    return {
+        "cpu": "cpu",
+        "cuda": f"cu{gpu_arch_version.replace('.', '')}",
+        "rocm": f"rocm{gpu_arch_version}"
+    }.get(gpu_arch_type, gpu_arch_version)
 
 
 def generate_conda_matrix() -> List[Dict[str, str]]:

@@ -120,7 +120,7 @@ jobs:
             "${DOCKER_IMAGE}"
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" sh -c "bash .circleci/scripts/binary_populate_env.sh"
-          docker exec -t "${container_name}" sh -c "bash /builder/!{{ config["package_type"] }}/build.sh"
+          docker exec -t "${container_name}" sh -c "source ${BINARY_ENV_FILE} && bash /builder/!{{ config["package_type"] }}/build.sh"
       - uses: !{{ common.upload_artifact_s3_action }}
         with:
           name: !{{ config["build_name"] }}
@@ -208,7 +208,8 @@ jobs:
             "${DOCKER_IMAGE}"
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" sh -c "bash .circleci/scripts/binary_populate_env.sh"
+          # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" sh -c "bash .circleci/scripts/binary_linux_test.sh"
-          docker exec -t "${container_name}" sh -c "bash -x /run.sh"
+          docker exec -t "${container_name}" sh -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
       !{{ common.teardown_ec2_linux("pytorch/") }}
 {%- endfor %}
