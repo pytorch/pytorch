@@ -171,6 +171,7 @@ export OVERRIDE_PACKAGE_VERSION="$PYTORCH_BUILD_VERSION"
 # TODO: We don't need this anymore IIUC
 export TORCH_PACKAGE_NAME='torch'
 export TORCH_CONDA_BUILD_FOLDER='pytorch-nightly'
+export ANACONDA_USER='pytorch'
 
 export USE_FBGEMM=1
 export JAVA_HOME=$JAVA_HOME
