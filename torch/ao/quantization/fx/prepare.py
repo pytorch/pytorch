@@ -740,7 +740,7 @@ def maybe_insert_observers_before_graph_output(
             # check dtype of this node
             this_node_dtype = get_arg_target_dtype_as_output(
                 maybe_node, modules, node_name_to_target_dtype)
-            if this_node_dtype == torch.float and this_node_dtype != target_dtype:
+            if this_node_dtype != target_dtype:
                 # insert observer
                 qconfig = qconfig_map.get(maybe_node.name)
                 # TODO(future PR): see if we need to allow specifying qconfig
