@@ -32,6 +32,26 @@ void replaceConvBiasWithGetAttr(Module& module) {
   for (const auto& method : module.get_methods()) {
     auto graph = method.graph();
     graph->dump();
+
+    // setting NoneType of convXd to TensorType. This avoids optimization to
+    // remove the bias argument, which gives wrong result, since it was later
+    // fused with bias from BatchNorm.
+    const PatternInfo& pattern_get_bias = PatternInfo::parse_from_str(R"(
+        graph(%self):
+          %bias : NoneType = prim::GetAttr[name="bias"](%self)
+          return (%bias) )");
+    auto replace_type = [&](const PatternInfo& pattern_get_bias) {
+      const Graph& pattern_get_bias_graph = *pattern_get_bias.pattern_graph;
+      const auto& get_bias_vmap = pattern_get_bias.vmap;
+
+      const auto& matches = findPatternMatches(pattern_get_bias_graph, *graph);
+      for (const auto& match : matches) {
+        match.values_map.at(get_bias_vmap.at("bias"))
+            ->setType(TensorType::get());
+      }
+    };
+    replace_type(pattern_get_bias);
+
     const PatternInfo& pattern_convolution = PatternInfo::parse_from_str(R"(
         graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[],
             %transposed:bool, %output_padding:int[], %groups:int, %benchmark:bool,
@@ -70,25 +90,6 @@ void replaceConvBiasWithGetAttr(Module& module) {
     };
     replace_pattern(pattern_convolution);
     replace_pattern(pattern_convolution_deprecated);
-
-    // setting NoneType of convXd to TensorType. This avoids optimization to
-    // remove the bias argument, which gives wrong result, since it was later
-    // fused with bias from BatchNorm.
-    const PatternInfo& pattern_get_bias = PatternInfo::parse_from_str(R"(
-        graph(%self):
-          %bias : NoneType = prim::GetAttr[name="bias"](%self)
-          return (%bias) )");
-    auto replace_type = [&](const PatternInfo& pattern_get_bias) {
-      const Graph& pattern_get_bias_graph = *pattern_get_bias.pattern_graph;
-      const auto& get_bias_vmap = pattern_get_bias.vmap;
-
-      const auto& matches = findPatternMatches(pattern_get_bias_graph, *graph);
-      for (const auto& match : matches) {
-        match.values_map.at(get_bias_vmap.at("bias"))
-            ->setType(TensorType::get());
-      }
-    };
-    replace_type(pattern_get_bias);
   }
 }
 
@@ -107,6 +108,7 @@ void addBiasForConvIfNone(Module& module) {
     if (!t->hasAttribute("bias")) {
       t->addAttribute("bias", TensorType::get(), true);
       module.setattr("bias", at::Tensor());
+      printf("inserting attribute\n");
       replaceConvBiasWithGetAttr(module);
     } else {
       if (!module.attr("bias").isTensor()) {
@@ -114,8 +116,14 @@ void addBiasForConvIfNone(Module& module) {
         t->unsafeRemoveAttribute("bias");
         t->addAttribute("bias", TensorType::get(), true);
         module.setattr("bias", at::Tensor());
+        printf("replacing attribute\n");
         replaceConvBiasWithGetAttr(module);
       }
+    }
+    printf("after pass\n");
+    module.dump(true, false, false);
+    for (const auto& method : module.get_methods()) {
+      method.graph()->dump();
     }
   }
   for (Module m : module.children()) {
@@ -248,7 +256,10 @@ bool FoldConvBatchNormHelper::tryExtractingConvBNParameters(
   r.conv_w = conv.attr("weight").toTensor();
   r.conv_b = conv.attr("bias").toTensor();
   if (!r.conv_b.defined()) {
+    printf("replacing empty tensor!\n");
     r.conv_b = at::zeros_like(r.bn_rm);
+  } else {
+    printf("not empty tensor!\n");
   }
   return true;
 }
