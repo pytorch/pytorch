@@ -113,12 +113,30 @@ ProfileIValueOp* ProfilingRecord::createProfileIValueNode(
   return pn;
 }
 
-void ProfilingRecord::insertShapeProfile(Node* n, size_t offset) {
+namespace {
+bool isOptionalTensorType(const TypePtr& type) {
+  if (type->kind() != c10::TypeKind::OptionalType) {
+    return false;
+  }
+  const auto& kind = type->cast<OptionalType>()->getElementType()->kind();
+  return kind == c10::TypeKind::TensorType;
+}
+} // namespace
+
+void ProfilingRecord::insertShapeProfile(
+    Node* n,
+    size_t offset,
+    const TypePtr& input_type) {
   Value* i = n->input(offset);
   auto pn = createProfileNode(nullptr, {i});
   auto pno = pn->addOutput();
   pn->ty_(attr::profiled_type, TensorType::get());
-  pno->setType(TensorType::get());
+  pn->i_(attr::seen_none, 0);
+  if (isOptionalTensorType(input_type)) {
+    pno->setType(OptionalType::create(TensorType::get()));
+  } else if (input_type->kind() == c10::TypeKind::TensorType) {
+    pno->setType(TensorType::get());
+  }
   std::function<void(Stack&)> shape_profiler = [this, pn, pno](Stack& stack) {
     int64_t frame_id = 0;
     pop(stack, frame_id);
@@ -250,9 +268,11 @@ void ProfilingRecord::instrumentBlock(Block* block) {
     auto n = *it;
     for (const auto offset : c10::irange(n->inputs().size())) {
       auto i = n->input(offset);
-      if (i->type()->isSubtypeOf(OptionalType::ofTensor()) &&
-          (needsProfiledInputs(n) || needsProfiledOutput(i->node()))) {
-        insertShapeProfile(n, offset);
+      if ((needsProfiledInputs(n) || needsProfiledOutput(i->node()))) {
+        if (i->type()->kind() == c10::TypeKind::TensorType ||
+            isOptionalTensorType(i->type())) {
+          insertShapeProfile(n, offset, i->type());
+        }
       }
     }
 
@@ -269,8 +289,9 @@ void ProfilingRecord::instrumentBlock(Block* block) {
   for (size_t offset = 0; offset < block->return_node()->inputs().size();
        offset++) {
     auto i = block->return_node()->input(offset);
-    if (i->type()->isSubtypeOf(*TensorType::get())) {
-      insertShapeProfile(block->return_node(), offset);
+    if (i->type()->isSubtypeOf(*TensorType::get()) ||
+        isOptionalTensorType(i->type())) {
+      insertShapeProfile(block->return_node(), offset, i->type());
     }
   }
 }
