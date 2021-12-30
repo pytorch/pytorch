@@ -19102,6 +19102,20 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(m_initialized.weight.device, m_uninitialized.weight.device)
         self.assertFalse(torch.allclose(m_initialized.weight, m_uninitialized.weight))
 
+    def test_adaptive_pool_invalid(self, device):
+        inp_1d = (torch.randn(1, 1, 1, device=device), (-1,))
+        inp_2d = (torch.randn(1, 1, 1, 1, device=device), (-1, 0))
+        inp_3d = (torch.randn(1, 1, 1, 1, 1, device=device), (-1, 0, 2))
+        module_input_dict = {torch.nn.AdaptiveAvgPool1d : inp_1d,
+                             torch.nn.AdaptiveAvgPool2d : inp_2d,
+                             torch.nn.AdaptiveAvgPool3d : inp_3d}
+
+        for m, inp in module_input_dict.items():
+            with self.assertRaisesRegex(RuntimeError,
+                                        r"elements of output_size must be greater than or equal to 0"):
+                t, output_size = inp
+                m(output_size)(t)
+
 class TestModuleGlobalHooks(TestCase):
 
     def tearDown(self):
