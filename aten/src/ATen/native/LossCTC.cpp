@@ -12,7 +12,6 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/native/Fill.h>
 #include <c10/util/irange.h>
-#include <iostream>
 
 #include <numeric>
 #include <type_traits>
