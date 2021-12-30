@@ -14,8 +14,12 @@ class ProcessException(Exception):
 
     def __init__(self, msg: str, error_index: int, pid: int):
         super().__init__(msg)
+        self.msg = msg
         self.error_index = error_index
         self.pid = pid
+
+    def __reduce__(self):
+        return type(self), (self.msg, self.error_index, self.pid)
 
 
 class ProcessRaisedException(ProcessException):
@@ -46,6 +50,12 @@ class ProcessExitedException(ProcessException):
         super().__init__(msg, error_index, error_pid)
         self.exit_code = exit_code
         self.signal_name = signal_name
+
+    def __reduce__(self):
+        return (
+            type(self),
+            (self.msg, self.error_index, self.pid, self.exit_code, self.signal_name),
+        )
 
 
 def _wrap(fn, i, args, error_queue):
