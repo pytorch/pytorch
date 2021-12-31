@@ -178,7 +178,7 @@ class TRTInterpreter(torch.fx.Interpreter):
         if trt.__version__ >= "8.2":
             builder_config.profiling_verbosity = profiling_verbosity \
                 if profiling_verbosity else \
-                   trt.ProfilingVerbosity.LAYER_NAMES_ONLY
+                trt.ProfilingVerbosity.LAYER_NAMES_ONLY
         if fp16_mode:
             builder_config.set_flag(trt.BuilderFlag.FP16)
 
