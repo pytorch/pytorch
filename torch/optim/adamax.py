@@ -1,6 +1,8 @@
 import torch
-from . import _functional as F
+from torch import Tensor
+
 from .optimizer import Optimizer
+from typing import List
 
 
 class Adamax(Optimizer):
@@ -39,13 +41,14 @@ class Adamax(Optimizer):
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
+        foreach (bool, optional): whether foreach implementation of optimizer is used (default: False)
 
     .. _Adam\: A Method for Stochastic Optimization:
         https://arxiv.org/abs/1412.6980
     """
 
     def __init__(self, params, lr=2e-3, betas=(0.9, 0.999), eps=1e-8,
-                 weight_decay=0):
+                 weight_decay=0, foreach=False):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -57,7 +60,7 @@ class Adamax(Optimizer):
         if not 0.0 <= weight_decay:
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
 
-        defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay)
+        defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay, foreach=foreach)
         super(Adamax, self).__init__(params, defaults)
 
     @torch.no_grad()
@@ -84,6 +87,7 @@ class Adamax(Optimizer):
             eps = group['eps']
             lr = group['lr']
             weight_decay = group['weight_decay']
+            foreach = group['foreach']
 
             for p in group['params']:
                 if p.grad is None:
@@ -107,15 +111,120 @@ class Adamax(Optimizer):
                 state['step'] += 1
                 state_steps.append(state['step'])
 
-            F.adamax(params_with_grad,
-                     grads,
-                     exp_avgs,
-                     exp_infs,
-                     state_steps,
-                     eps=eps,
-                     beta1=beta1,
-                     beta2=beta2,
-                     lr=lr,
-                     weight_decay=weight_decay)
+            adamax(params_with_grad,
+                   grads,
+                   exp_avgs,
+                   exp_infs,
+                   state_steps,
+                   eps=eps,
+                   beta1=beta1,
+                   beta2=beta2,
+                   lr=lr,
+                   weight_decay=weight_decay,
+                   foreach=foreach)
 
         return loss
+
+
+def adamax(params: List[Tensor],
+           grads: List[Tensor],
+           exp_avgs: List[Tensor],
+           exp_infs: List[Tensor],
+           state_steps: List[int],
+           *,
+           eps: float,
+           beta1: float,
+           beta2: float,
+           lr: float,
+           weight_decay: float,
+           foreach: bool):
+    r"""Functional API that performs adamax algorithm computation.
+
+    See :class:`~torch.optim.Adamax` for details.
+    """
+
+    if foreach and not torch.jit.is_scripting():
+        func = _multi_tensor_adamax
+    else:
+        func = _single_tensor_adamax
+
+    func(params,
+         grads,
+         exp_avgs,
+         exp_infs,
+         state_steps,
+         eps=eps,
+         beta1=beta1,
+         beta2=beta2,
+         lr=lr,
+         weight_decay=weight_decay)
+
+
+def _single_tensor_adamax(params: List[Tensor],
+                          grads: List[Tensor],
+                          exp_avgs: List[Tensor],
+                          exp_infs: List[Tensor],
+                          state_steps: List[int],
+                          *,
+                          eps: float,
+                          beta1: float,
+                          beta2: float,
+                          lr: float,
+                          weight_decay: float):
+
+    for i, param in enumerate(params):
+        grad = grads[i]
+        exp_avg = exp_avgs[i]
+        exp_inf = exp_infs[i]
+        step = state_steps[i]
+
+        if weight_decay != 0:
+            grad = grad.add(param, alpha=weight_decay)
+
+        # Update biased first moment estimate.
+        exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
+        # Update the exponentially weighted infinity norm.
+        norm_buf = torch.cat([
+            exp_inf.mul_(beta2).unsqueeze(0),
+            grad.abs().add_(eps).unsqueeze_(0)
+        ], 0)
+        torch.amax(norm_buf, 0, keepdim=False, out=exp_inf)
+
+        bias_correction = 1 - beta1 ** step
+        clr = lr / bias_correction
+
+        param.addcdiv_(exp_avg, exp_inf, value=-clr)
+
+
+def _multi_tensor_adamax(params: List[Tensor],
+                         grads: List[Tensor],
+                         exp_avgs: List[Tensor],
+                         exp_infs: List[Tensor],
+                         state_steps: List[int],
+                         *,
+                         beta1: float,
+                         beta2: float,
+                         lr: float,
+                         weight_decay: float,
+                         eps: float):
+
+    if weight_decay != 0:
+        torch._foreach_add_(grads, params, alpha=weight_decay)
+
+    # Update biased first moment estimate.
+    torch._foreach_mul_(exp_avgs, beta1)
+    torch._foreach_add_(exp_avgs, grads, alpha=1 - beta1)
+
+    # Update the exponentially weighted infinity norm.
+    torch._foreach_mul_(exp_infs, beta2)
+
+    for exp_inf, grad in zip(exp_infs, grads):
+        norm_buf = torch.cat([
+            exp_inf.unsqueeze(0),
+            grad.abs().add_(eps).unsqueeze_(0)
+        ], 0)
+        torch.amax(norm_buf, 0, keepdim=False, out=exp_inf)
+
+    bias_corrections = [1 - beta1 ** state_step for state_step in state_steps]
+    clr = [-1 * (lr / bias_correction) for bias_correction in bias_corrections]
+    torch._foreach_addcdiv_(params, exp_avgs, exp_infs, clr)
