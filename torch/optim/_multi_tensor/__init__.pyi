@@ -1,11 +1,14 @@
-from .adam import Adam as Adam
+from functools import partial
+from torch import optim
+
+Adam = partial(optim.Adam, foreach=True)
 from .adamw import AdamW as AdamW
-from .nadam import NAdam as NAdam
-from .sgd import SGD as SGD
-from .radam import RAdam as RAdam
-from .rmsprop import RMSprop as RMSprop
+NAdam = partial(optim.NAdam, foreach=True)
+SGD = partial(optim.SGD, foreach=True)
+RAdam = partial(optim.RAdam, foreach=True)
+RMSprop = partial(optim.RMSprop, foreach=True)
 from .rprop import Rprop as Rprop
-from .asgd import ASGD as ASGD
-from .adamax import Adamax as Adamax
-from .adadelta import Adadelta as Adadelta
-from .adagrad import Adagrad as Adagrad
+ASGD = partial(optim.ASGD, foreach=True)
+Adamax = partial(optim.Adamax, foreach=True)
+Adadelta = partial(optim.Adadelta, foreach=True)
+Adagrad = partial(optim.Adagrad, foreach=True)
