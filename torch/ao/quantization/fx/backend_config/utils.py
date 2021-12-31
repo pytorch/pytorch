@@ -14,7 +14,7 @@ def get_pattern_to_quantize_handlers(
     new path, this is not exposed to backend developers
     """
     pattern_to_quantize_handlers = dict()
-    for config in backend_config_dict["configs"]:
+    for config in backend_config_dict.get("configs", []):
         pattern = config["pattern"]
         observation_type = config["observation_type"]
         dtype_configs = config["dtype_configs"]
@@ -26,7 +26,7 @@ def get_pattern_to_quantize_handlers(
 def get_pattern_to_dtype_configs(
         backend_config_dict: Dict[str, Any]) -> Dict[Pattern, List[Dict[str, torch.dtype]]]:
     pattern_to_dtype_configs: Dict[Pattern, List[Dict[str, torch.dtype]]] = dict()
-    for config in backend_config_dict["configs"]:
+    for config in backend_config_dict.get("configs", []):
         pattern = config["pattern"]
         dtype_configs = config["dtype_configs"]
         pattern_to_dtype_configs[pattern] = dtype_configs
@@ -35,7 +35,7 @@ def get_pattern_to_dtype_configs(
 def get_pattern_to_input_type_to_index(
         backend_config_dict: Dict[str, Any]) -> Dict[Pattern, Dict[str, int]]:
     pattern_to_input_type_to_index: Dict[Pattern, Dict[str, int]] = dict()
-    for config in backend_config_dict["configs"]:
+    for config in backend_config_dict.get("configs", []):
         pattern = config["pattern"]
         input_type_to_index = config.get("input_type_to_index", {})
         pattern_to_input_type_to_index[pattern] = input_type_to_index
@@ -44,7 +44,7 @@ def get_pattern_to_input_type_to_index(
 def get_quantized_reference_module_mapping(
         backend_config_dict: Dict[str, Any]) -> Dict[Callable, Callable]:
     mapping: Dict[Callable, Callable] = dict()
-    for config in backend_config_dict["configs"]:
+    for config in backend_config_dict.get("configs", []):
         if "root_module" in config and "reference_quantized_module_for_root" in config:
             mapping[config["root_module"]] = config["reference_quantized_module_for_root"]
     return mapping
@@ -52,7 +52,7 @@ def get_quantized_reference_module_mapping(
 def get_fusion_pattern_to_fuse_handler_cls(
         backend_config_dict: Dict[str, Any]) -> Dict[Pattern, Callable]:
     fusion_pattern_to_fuse_handlers = dict()
-    for config in backend_config_dict["configs"]:
+    for config in backend_config_dict.get("configs", []):
         if "fuser_method" in config:
             pattern = config["pattern"]
             fusion_pattern_to_fuse_handlers[pattern] = \
@@ -63,7 +63,7 @@ def get_fusion_pattern_to_fuse_handler_cls(
 def get_fuser_method_mapping(
         backend_config_dict: Dict[str, Any]) -> Dict[Pattern, Union[nn.Sequential, Callable]]:
     fuser_method_mapping : Dict[Pattern, Union[nn.Sequential, Callable]] = dict()
-    for config in backend_config_dict["configs"]:
+    for config in backend_config_dict.get("configs", []):
         if "fuser_method" in config:
             pattern = config["pattern"]
             fuser_method = config["fuser_method"]
