@@ -642,6 +642,7 @@ BAD_EXAMPLES = [
             'covariance_matrix': torch.tensor([[1.0, 1.0], [1.0, -2.0]], requires_grad=True),
             'df': 3.,
         },
+    ]),
     Example(LKJCholesky, [
         {
             'dim': -2,
