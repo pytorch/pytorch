@@ -513,93 +513,12 @@ class TestOptim(TestCase):
             ((optim.Adagrad, optim._multi_tensor.Adagrad), dict(weight_decay=1)),
         ]
 
-        kIterations = 11
+        kIterations = 3
         device = 'cuda'
 
         for optimizers, params in optimizer_pairs_with_flags:
             res = []
             for opt in optimizers:
-                weight = torch.tensor([[-0.2109, -0.4976], [-0.1413, -0.3420], [-0.2524, 0.6976]],
-                                      dtype=torch.float64, device=device, requires_grad=True)
-                bias = torch.tensor([-0.1085, -0.2979, 0.6892], dtype=torch.float64, device=device, requires_grad=True)
-                weight2 = torch.tensor([[-0.0508, -0.3941, -0.2843]],
-                                       dtype=torch.float64, device=device, requires_grad=True)
-                bias2 = torch.tensor([-0.0711], dtype=torch.float64, device=device, requires_grad=True)
-                input = torch.tensor([0.1, 0.2, 0.3, 0.4, 0.5, 0.6], dtype=torch.float64, device=device).reshape(3, 2)
-
-                model = torch.nn.Sequential(torch.nn.Linear(2, 3),
-                                            torch.nn.Sigmoid(),
-                                            torch.nn.Linear(3, 1),
-                                            torch.nn.Sigmoid())
-                model.to(torch.float64).to(device)
-
-                pretrained_dict = model.state_dict()
-                pretrained_dict['0.weight'] = weight
-                pretrained_dict['0.bias'] = bias
-                pretrained_dict['2.weight'] = weight2
-                pretrained_dict['2.bias'] = bias2
-                model.load_state_dict(pretrained_dict)
-
-                optimizer = opt(model.parameters(), **params)
-
-                for _ in range(kIterations):
-                    optimizer.zero_grad()
-                    output = model(input)
-                    loss = output.sum()
-                    loss.backward()
-
-                    if iter == 0:
-                        model.parameters().__next__().grad = None
-
-                    optimizer.step()
-
-                res.append(model.parameters())
-
-            for p1, p2 in zip(res[0], res[1]):
-                self.assertEqual(p1, p2, atol=5e-5, rtol=0)
-
-    def test_optimizers_foreach_flag(self):
-        if not torch.cuda.is_available():
-            return
-
-        optimizer_pairs_with_flags = [
-            ((optim.Adam), dict(weight_decay=1., amsgrad=True)),
-            ((optim.Adam), dict(weight_decay=1., amsgrad=False)),
-            ((optim.Adam), dict(weight_decay=0., amsgrad=True)),
-            ((optim.Adam), dict(weight_decay=0., amsgrad=False)),
-            # ((optim.AdamW), dict(weight_decay=1., amsgrad=True)),
-            # ((optim.AdamW), dict(weight_decay=1., amsgrad=False)),
-            # ((optim.AdamW), dict(weight_decay=0., amsgrad=True)),
-            # ((optim.AdamW), dict(weight_decay=0., amsgrad=False)),
-            ((optim.NAdam), dict(weight_decay=0., momentum_decay=6e-3)),
-            ((optim.NAdam), dict(weight_decay=1., momentum_decay=6e-3)),
-            ((optim.NAdam), dict(weight_decay=0., momentum_decay=4e-3)),
-            ((optim.NAdam), dict(weight_decay=0.01, momentum_decay=4e-3)),
-            ((optim.SGD), dict(lr=0.2, momentum=1, dampening=0, weight_decay=1, nesterov=True)),
-            ((optim.SGD), dict(lr=0.2, momentum=1, dampening=0.5, weight_decay=1, nesterov=False)),
-            ((optim.RAdam), dict(weight_decay=0)),
-            ((optim.RAdam), dict(weight_decay=1)),
-            # ((optim.RMSprop), dict(weight_decay=1, momentum=1, centered=True)),
-            # ((optim.RMSprop), dict(weight_decay=1, momentum=0, centered=True)),
-            # ((optim.RMSprop), dict(weight_decay=1, momentum=1, centered=False)),
-            # ((optim.RMSprop), dict(weight_decay=0, momentum=1, centered=False)),
-            # ((optim.Rprop), dict(lr=1e-2, etas=(0.5, 1.2), step_sizes=(1e-6, 50))),
-            ((optim.ASGD), dict(weight_decay=0)),
-            ((optim.ASGD), dict(weight_decay=1)),
-            ((optim.Adamax), dict(weight_decay=0)),
-            ((optim.Adamax), dict(weight_decay=1)),
-            ((optim.Adadelta), dict(weight_decay=0)),
-            ((optim.Adadelta), dict(weight_decay=1)),
-            ((optim.Adagrad), dict(weight_decay=0)),
-            ((optim.Adagrad), dict(weight_decay=1)),
-        ]
-
-        kIterations = 3
-        device = 'cuda'
-
-        for opt, params in optimizer_pairs_with_flags:
-            res = []
-            for foreach in (True, False):
                 input = torch.tensor([0.1, 0.2, 0.3, 0.4, 0.5, 0.6], dtype=torch.float64, device=device).reshape(3, 2)
 
                 torch.manual_seed(1)
@@ -608,7 +527,7 @@ class TestOptim(TestCase):
                                             torch.nn.Linear(3, 1),
                                             torch.nn.Sigmoid())
                 model.to(dtype=torch.float64, device=device)
-                optimizer = opt(model.parameters(), foreach=foreach, **params)
+                optimizer = opt(model.parameters(), **params)
 
                 for _ in range(kIterations):
                     optimizer.zero_grad()
@@ -694,84 +613,6 @@ class TestOptim(TestCase):
             with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
                 optimizer(None, lr=1e-2, weight_decay=-1)
 
-    # new test that test_adam can be switched to when merge is complete and multitensor is deleted
-    def test_adam_new(self):
-        optimizer = optim.Adam
-        for foreach in [True, False]:
-            self._test_basic_cases(
-                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, maximize=maximize, foreach=foreach),
-                constructor_accepts_maximize=True
-            )
-            self._test_basic_cases(
-                lambda weight, bias, maximize: optimizer(
-                    self._build_params_dict(weight, bias, lr=1e-2), lr=1e-3, maximize=maximize, foreach=foreach),
-                constructor_accepts_maximize=True
-            )
-            self._test_basic_cases(
-                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, amsgrad=True,
-                                                         maximize=maximize, foreach=foreach),
-                constructor_accepts_maximize=True
-            )
-            self._test_basic_cases(
-                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, weight_decay=0.1,
-                                                         maximize=maximize, foreach=foreach),
-                constructor_accepts_maximize=True
-            )
-            self._test_basic_cases(
-                lambda weight, bias, maximize: optimizer(
-                    self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-3, amsgrad=True, maximize=maximize, foreach=foreach),
-                constructor_accepts_maximize=True
-            )
-            self._test_basic_cases(
-                lambda weight, bias, maximize: optimizer(
-                    self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-3, maximize=maximize, foreach=foreach),
-                [lambda opt: ExponentialLR(opt, gamma=0.9)],
-                constructor_accepts_maximize=True
-            )
-            self._test_basic_cases(
-                lambda weight, bias, maximize: optimizer(
-                    self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-3, maximize=maximize, foreach=foreach),
-                [lambda opt: LinearLR(opt, start_factor=0.4, total_iters=4)],
-                constructor_accepts_maximize=True
-            )
-            self._test_basic_cases(
-                lambda weight, bias, maximize: optimizer(
-                    self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-3, maximize=maximize, foreach=foreach),
-                [lambda opt: ConstantLR(opt, factor=0.4, total_iters=4)],
-                constructor_accepts_maximize=True
-            )
-            self._test_basic_cases(
-                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, amsgrad=True,
-                                                         maximize=maximize, foreach=foreach),
-                [lambda opt: ConstantLR(opt, factor=0.4, total_iters=4),
-                 lambda opt: ExponentialLR(opt, gamma=0.9)],
-                constructor_accepts_maximize=True
-            )
-            self._test_basic_cases(
-                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, amsgrad=True,
-                                                         maximize=maximize, foreach=foreach),
-                [lambda opt: ExponentialLR(opt, gamma=0.9),
-                 lambda opt: ReduceLROnPlateau(opt)],
-                constructor_accepts_maximize=True
-            )
-            self._test_basic_cases(
-                lambda weight, bias, maximize: optimizer(
-                    self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-3, amsgrad=True, maximize=maximize, foreach=foreach),
-                [lambda opt: StepLR(opt, gamma=0.9, step_size=10),
-                 lambda opt: ReduceLROnPlateau(opt)],
-                constructor_accepts_maximize=True
-            )
-            with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
-                optimizer(None, lr=1e-2, betas=(1.0, 0.0))
-
-            with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
-                optimizer(None, lr=1e-2, weight_decay=-1)
-
     # Test whether variance parameter is always real
     def test_complex_adam_variance(self):
         complex_param = torch.randn(5, 5, dtype=torch.complex64, requires_grad=True)
@@ -845,31 +686,6 @@ class TestOptim(TestCase):
             with self.assertRaisesRegex(ValueError, "Invalid rho value: 1.1"):
                 optimizer(None, lr=1e-2, rho=1.1)
 
-    # new test that test_adadelta can be switched to when merge is complete and multitensor is deleted
-    @skipIfRocm
-    def test_adadelta_new(self):
-        optimizer = optim.Adadelta
-        for foreach in [True, False]:
-            self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict(weight, bias, foreach=foreach))
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict(weight, bias, rho=0.95, foreach=foreach))
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict(weight, bias, rho=0.95, foreach=foreach)),
-                [lambda opt: StepLR(opt, gamma=0.9, step_size=10),
-                 lambda opt: ReduceLROnPlateau(opt)]
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], weight_decay=1, foreach=foreach)
-            )
-            with self.assertRaisesRegex(ValueError, "Invalid rho value: 1.1"):
-                optimizer(None, lr=1e-2, rho=1.1, foreach=foreach)
-
     def test_adadelta_complex(self):
         for optimizer in [optim.Adadelta]:
             self._test_complex_optimizer(
@@ -904,32 +720,6 @@ class TestOptim(TestCase):
             with self.assertRaisesRegex(ValueError, "Invalid momentum_decay value: -0.2"):
                 optimizer(None, lr=1e-2, momentum_decay=-0.2)
 
-    # new test that test_nadam can be switched to when merge is complete and multitensor is deleted
-    def test_nadam_new(self):
-        optimizer = optim.NAdam
-        for foreach in [True, False]:
-            self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3, foreach=foreach)
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict(weight, bias, lr=1e-2, foreach=foreach),
-                    lr=1e-3)
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3, weight_decay=0.1, momentum_decay=6e-3,
-                                               foreach=foreach)
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3, weight_decay=0.1, momentum_decay=6e-3,
-                                               foreach=foreach),
-                [lambda opt: ExponentialLR(opt, gamma=0.9)]
-            )
-            with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
-                optimizer(None, lr=1e-2, betas=(1.0, 0.0), foreach=foreach)
-            with self.assertRaisesRegex(ValueError, "Invalid momentum_decay value: -0.2"):
-                optimizer(None, lr=1e-2, momentum_decay=-0.2, foreach=foreach)
-
     def test_adagrad(self):
         for optimizer in [optim.Adagrad, optim_mt.Adagrad]:
             self._test_basic_cases(
@@ -960,39 +750,6 @@ class TestOptim(TestCase):
             )
             with self.assertRaisesRegex(ValueError, "Invalid lr_decay value: -0.5"):
                 optimizer(None, lr=1e-2, lr_decay=-0.5)
-
-    # new test that test_adagrad can be switched to when merge is complete and multitensor is deleted
-    def test_adagrad_new(self):
-        optimizer = optim.Adagrad
-        for foreach in [True, False]:
-            self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-1, foreach=foreach)
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    [weight, bias], lr=1e-1, initial_accumulator_value=0.1, foreach=foreach
-                )
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-1, foreach=foreach)
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-1, foreach=foreach),
-                [lambda opt: ReduceLROnPlateau(opt)]
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-1, foreach=foreach),
-                [lambda opt: ReduceLROnPlateau(opt),
-                 lambda opt: ExponentialLR(opt, gamma=0.99)]
-            )
-            with self.assertRaisesRegex(ValueError, "Invalid lr_decay value: -0.5"):
-                optimizer(None, lr=1e-2, lr_decay=-0.5, foreach=foreach)
 
     def test_adagrad_sparse(self):
         for optimizer in [optim.Adagrad, optim_mt.Adagrad]:
@@ -1032,24 +789,6 @@ class TestOptim(TestCase):
             with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 1: 1.0"):
                 optimizer(None, lr=1e-2, betas=(0.0, 1.0))
 
-    # new test that test_adamax can be switched to when merge is complete and multitensor is deleted
-    def test_adamax_new(self):
-        optimizer = optim.Adamax
-        for foreach in [True, False]:
-            self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-1, foreach=foreach)
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-1, foreach=foreach)
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-1, weight_decay=1, foreach=foreach)
-            )
-            with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 1: 1.0"):
-                optimizer(None, lr=1e-2, betas=(0.0, 1.0), foreach=foreach)
-
     def test_radam(self):
         for optimizer in [optim.RAdam, optim_mt.RAdam]:
             self._test_basic_cases(
@@ -1073,32 +812,6 @@ class TestOptim(TestCase):
 
             with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
                 optimizer(None, lr=1e-2, weight_decay=-1)
-
-    # new test that test_radam can be switched to when merge is complete and multitensor is deleted
-    def test_radam_new(self):
-        optimizer = optim.RAdam
-        for foreach in [True, False]:
-            self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3, foreach=foreach),
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict(weight, bias, lr=1e-2, foreach=foreach),
-                    lr=1e-3)
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3, weight_decay=0.1, foreach=foreach)
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3, foreach=foreach),
-                [lambda opt: ExponentialLR(opt, gamma=0.9),
-                    lambda opt: ReduceLROnPlateau(opt)]
-            )
-            with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
-                optimizer(None, lr=1e-2, betas=(1.0, 0.0), foreach=foreach)
-
-            with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
-                optimizer(None, lr=1e-2, weight_decay=-1, foreach=foreach)
 
     def test_rmsprop(self):
         for optimizer in [optim.RMSprop, optim_mt.RMSprop]:
@@ -1150,26 +863,6 @@ class TestOptim(TestCase):
             )
             with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -0.5"):
                 optimizer(None, lr=1e-2, weight_decay=-0.5)
-
-    # new test that test_asgd can be switched to when merge is complete and multitensor is deleted
-    def test_asgd_new(self):
-        optimizer = optim.ASGD
-        for foreach in [True, False]:
-            self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3, t0=100, foreach=foreach)
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict(weight, bias, lr=1e-2, foreach=foreach),
-                    lr=1e-3, t0=100)
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict(weight, bias, lr=1e-3, foreach=foreach),
-                    lr=1e-2, weight_decay=1)
-            )
-            with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -0.5"):
-                optimizer(None, lr=1e-2, weight_decay=-0.5, foreach=foreach)
 
     def test_rprop(self):
         for optimizer in [optim.Rprop, optim_mt.Rprop]:
