@@ -2819,9 +2819,8 @@ void svd_kernel(const Tensor& A,
                 Tensor& Vh,
                 const Tensor& info) {
 #ifdef USE_CUSOLVER
-  // We always use cuSOLVER unless MAGMA is available and the user has specified they want to use MAGMA
-  if (at::globalContext().linalgPreferredBackend() == at::LinalgBackend::Magma
-      && at::globalContext().hasMAGMA()) {
+  // We always use cuSOLVER unless the user has specified they want to use MAGMA
+  if (at::globalContext().linalgPreferredBackend() == at::LinalgBackend::Magma) {
     svd_magma(A, full_matrices, compute_uv, U, S, Vh, info);
   } else {
     // svd_cusolver computes V rather than Vh, so we pass a view of Vh.mT
