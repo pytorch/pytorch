@@ -12,17 +12,14 @@ namespace jit {
 static UpgradersMap upgradersMap;
 
 void UpgradersMap::set_content(
-    std::unordered_map<std::string, std::shared_ptr<Graph>>& content) {
+    std::unordered_map<std::string, std::shared_ptr<Graph>>&& content) {
   // make sure we populate the map only once
   std::lock_guard<std::mutex> _(lock);
   if (isPopulated) {
     return;
   }
 
-  for (const auto& entry : content) {
-    content_.insert(entry);
-  }
-
+  content_ = std::move(content);
   isPopulated = true;
 }
 
@@ -55,8 +52,8 @@ void UpgradersMap::test_only_remove_content(
 }
 
 void populate_upgraders_map(
-    std::unordered_map<std::string, std::shared_ptr<Graph>> content) {
-  upgradersMap.set_content(content);
+    std::unordered_map<std::string, std::shared_ptr<Graph>>&& content) {
+  upgradersMap.set_content(std::move(content));
 }
 
 int get_upgraders_map_size() {

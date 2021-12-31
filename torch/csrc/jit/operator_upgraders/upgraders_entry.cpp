@@ -2,10 +2,11 @@
 
 #include <ATen/core/stack.h>
 #include <c10/macros/Export.h>
+#include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/operator_upgraders/upgraders.h>
-#include <torch/jit.h>
 #include <string>
 #include <unordered_map>
 
@@ -56,8 +57,9 @@ def full_out_0_4(size:List[int], fill_value:number, *, out:Tensor) -> Tensor:
   return torch.full(size, fill_value, out=out)
 )SCRIPT"}});
 
+using UpgraderMap = std::unordered_map<std::string, std::shared_ptr<Graph>>;
 void populate_upgraders_graph_map() {
-  std::unordered_map<std::string, std::shared_ptr<Graph>> populate_content;
+  UpgraderMap populate_content;
   for (const auto& entry : kUpgradersEntryMap) {
     auto cu = std::make_shared<CompilationUnit>();
     cu->define(c10::nullopt, entry.second, nativeResolver(), nullptr);
@@ -66,7 +68,7 @@ void populate_upgraders_graph_map() {
     populate_content.insert(std::make_pair(entry.first, graphFunction.graph()));
   }
 
-  populate_upgraders_map(populate_content);
+  populate_upgraders_map(std::forward<UpgraderMap>(populate_content));
 }
 
 } // namespace jit
