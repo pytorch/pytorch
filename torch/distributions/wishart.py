@@ -20,7 +20,6 @@ def _mvdigamma(x: torch.Tensor, p: int) -> torch.Tensor:
         - torch.arange(p, dtype=x.dtype, device=x.device).div(2).expand(x.shape + (-1,))
     ).sum(-1)
 
-
 class Wishart(ExponentialFamily):
     r"""
     Creates a Wishart distribution parameterized by a symmetric positive definite matrix :math:`\Sigma`,
@@ -30,6 +29,7 @@ class Wishart(ExponentialFamily):
         >>> m = Wishart(torch.eye(2), torch.Tensor([2]))
         >>> m.sample()  # Wishart distributed with mean=`df * I` and
                         # variance(x_ij)=`df` for i != j and variance(x_ij)=`2 * df` for i == j
+
     Args:
         covariance_matrix (Tensor): positive-definite covariance matrix
         precision_matrix (Tensor): positive-definite precision matrix
@@ -57,7 +57,6 @@ class Wishart(ExponentialFamily):
     }
     support = constraints.positive_definite
     has_rsample = True
-    _mean_carrier_measure = 0
 
     def __init__(self,
                  df: Union[torch.Tensor, Number],
@@ -70,8 +69,8 @@ class Wishart(ExponentialFamily):
 
         param = next(p for p in (covariance_matrix, precision_matrix, scale_tril) if p is not None)
 
-        assert param.dim() > 1, \
-            "scale_tril must be at least two-dimensional, with optional leading batch dimensions"
+        if param.dim() < 2:
+            raise ValueError("scale_tril must be at least two-dimensional, with optional leading batch dimensions")
 
         if isinstance(df, Number):
             batch_shape = torch.Size(param.shape[:-2])
@@ -80,6 +79,9 @@ class Wishart(ExponentialFamily):
             batch_shape = torch.broadcast_shapes(param.shape[:-2], df.shape)
             self.df = df.expand(batch_shape)
         event_shape = param.shape[-2:]
+
+        if self.df.le(event_shape[-1] - 1).any():
+            raise ValueError(f"Value of df={df} expected to be greater than ndim={event_shape[-1]-1}.")
 
         if scale_tril is not None:
             self.scale_tril = param.expand(batch_shape + (-1, -1))
