@@ -177,7 +177,7 @@ def _multi_tensor_asgd(params: List[Tensor],
 
     # update parameter
     updates = torch._foreach_mul(grads, etas)
-    torch._foreach_sub_(params, updates)
+    torch._foreach_add_(params, updates, alpha=-1)
 
     # averaging
     for i, mu in enumerate(mus):
