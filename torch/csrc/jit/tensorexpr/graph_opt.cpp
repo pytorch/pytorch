@@ -413,6 +413,9 @@ std::shared_ptr<Graph> replaceListOutputWithTuple(
     const std::shared_ptr<Graph>& graph) {
   auto out = graph->outputs()[0];
   auto out_node = out->node();
+  if (out_node->kind() != prim::ListConstruct) {
+    return graph;
+  }
   auto tuple_node = graph->createTuple(out_node->inputs());
   tuple_node->insertAfter(out_node);
   out->replaceAllUsesWith(tuple_node->output());
