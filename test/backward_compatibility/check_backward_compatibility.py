@@ -57,6 +57,9 @@ ALLOW_LIST = [
     ("aten::cudnn_convolution_transpose_backward", datetime.date(2022, 1, 31)),
     ("aten::cudnn_convolution_transpose_backward_input", datetime.date(2022, 1, 31)),
     ("aten::cudnn_convolution_transpose_backward_weight", datetime.date(2022, 1, 31)),
+    ("aten::mkldnn_convolution_backward", datetime.date(2022, 1, 31)),
+    ("aten::mkldnn_convolution_backward_input", datetime.date(2022, 1, 31)),
+    ("aten::mkldnn_convolution_backward_weights", datetime.date(2022, 1, 31)),
     ("aten::_nnpack_spatial_convolution_backward", datetime.date(2022, 1, 31)),
     ("aten::_nnpack_spatial_convolution_backward_input", datetime.date(2022, 1, 31)),
     ("aten::_nnpack_spatial_convolution_backward_weight", datetime.date(2022, 1, 31)),
@@ -65,6 +68,7 @@ ALLOW_LIST = [
     ("aten::slow_conv3d_forward", datetime.date(2022, 1, 31)),
     ("aten::slow_conv3d_backward", datetime.date(2022, 1, 31)),
     ("aten::slow_conv_dilated2d_backward", datetime.date(2022, 1, 31)),
+    ("aten::slow_conv_dilated3d_backward", datetime.date(2022, 1, 31)),
     ("aten::slow_conv_transpose2d", datetime.date(2022, 1, 31)),
     ("aten::slow_conv_transpose2d_backward", datetime.date(2022, 1, 31)),
     ("aten::slow_conv_transpose3d", datetime.date(2022, 1, 31)),
@@ -103,6 +107,8 @@ ALLOW_LIST = [
     ("q::_FloatToBfloat16Quantized", datetime.date(2021, 12, 21)),
     ("q::_Bfloat16QuantizedToFloat", datetime.date(2021, 12, 21)),
     ("aten::_inverse_helper", datetime.date(2021, 12, 31)),
+    ("aten::softplus_backward", datetime.date(2022, 1, 31)),
+    ("aten::softplus_backward.grad_input", datetime.date(2022, 1, 31)),
 ]
 
 ALLOW_LIST_COMPILED = [
