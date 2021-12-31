@@ -3412,6 +3412,10 @@ Computes the dot product of two 1D tensors.
     Unlike NumPy's dot, torch.dot intentionally only supports computing the dot product
     of two 1D tensors with the same number of elements.
 
+.. seealso::
+
+        :func:`torch.linalg.vecdot` the vector product of two batches of vectors along a dimension.
+
 Args:
     input (Tensor): first tensor in the dot product, must be 1D.
     other (Tensor): second tensor in the dot product, must be 1D.

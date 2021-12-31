@@ -2251,3 +2251,42 @@ Examples::
     >>> torch.dist(Q.mT @ Q, torch.eye(4))
     tensor(6.2158e-07)
 """)
+
+vecdot = _add_docstr(_linalg.linalg_vecdot, r"""
+linalg.vecdot(x, y, *, dim=-1, out=None) -> Tensor
+
+Computes the vector product of two batches of vectors along a dimension.
+
+In symbols, this function computes
+
+.. math::
+
+    \sum_{i=1}^n x_iy_i.
+
+over the dimension :attr:`dim`.
+
+Supports input of half, bfloat16, float, double, cfloat, cdouble and integral dtypes.
+It also supports broadcasting.
+
+.. seealso::
+
+        :func:`torch.matmul` computes a general matrix-matrix multiplication for batches
+        of matrices.
+
+Args:
+    x (Tensor): first batch of vectors.
+    y (Tensor): second batch of vectors.
+
+Keyword args:
+    dim (int): Dimension along which to compute the vector product.
+    out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
+
+Examples::
+
+    >>> v1 = torch.randn(3, 2)
+    >>> v2 = torch.randn(3, 2)
+    >>> linalg.vecdot(v1, v2)
+    tensor([ 0.3223,  0.2815, -0.1944])
+    >>> torch.dot(v1[0], v2[0])
+    tensor(0.3223)
+""")

@@ -2012,6 +2012,15 @@ def sample_inputs_isclose(
         yield SampleInput(lhs, args=(rhs,),
                           kwargs=dict(op_kwargs, rtol=rtol, atol=atol, equal_nan=equal_nan))
 
+def sample_inputs_linalg_vecdot(op_info, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_binary_pwise(op_info, device, dtype, requires_grad)
+
+    # Add also samples with dim != -1
+    for s in sample_inputs_binary_pwise(op_info, device, dtype, requires_grad):
+        if s.input.ndim > 1:
+            s.kwargs["dim"] = 0
+            yield s
+
 def sample_inputs_t(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     return (SampleInput(make_arg((1, 2))),
@@ -9778,6 +9787,17 @@ op_db: List[OpInfo] = [
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
            ),
+    BinaryUfuncInfo('linalg.vecdot',
+                    aten_name='linalg_vecdot',
+                    ref=lambda x, y, *, dim=-1: (x * y).sum(dim),
+                    dtypes=all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool),
+                    sample_inputs_func=sample_inputs_linalg_vecdot,
+                    supports_forward_ad=True,
+                    supports_fwgrad_bwgrad=True,
+                    skips=(
+                        # torch.sum(out=) has an incorrect behaviour
+                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+                    ),),
     OpInfo('linalg.cond',
            aten_name='linalg_cond',
            dtypes=floating_and_complex_types(),

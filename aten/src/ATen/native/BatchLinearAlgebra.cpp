@@ -3836,6 +3836,14 @@ TransposeType to_transpose_type(const bool contig, const bool conj) {
 }
 } // end of anonymous namespace
 
+Tensor& linalg_vecdot_out(const Tensor& x, const Tensor& y, int64_t dim, Tensor& out) {
+  return at::sum_out(out, x * y, /*dim=*/dim);
+}
+
+Tensor linalg_vecdot(const Tensor& x, const Tensor& y, int64_t dim) {
+  return (x * y).sum(/*dim=*/dim);
+}
+
 /*
 Solves the matrix equation AX = B for A triangular.
 'left' If true solves AX = B, if false solves XA = B
