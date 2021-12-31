@@ -3876,6 +3876,23 @@ class TestDistributionShapes(TestCase):
         self.assertRaises(ValueError, wishart.log_prob, self.tensor_sample_2)
         self.assertEqual(wishart.log_prob(torch.ones(2, 1, 1)).size(), torch.Size((2,)))
 
+    def test_inverse_wishart_shape_scalar_params(self):
+        inverse_wishart = InverseWishart(torch.tensor(1), torch.tensor([[1.]]))
+        self.assertEqual(inverse_wishart._batch_shape, torch.Size())
+        self.assertEqual(inverse_wishart._event_shape, torch.Size((1, 1)))
+        self.assertEqual(inverse_wishart.sample().size(), torch.Size((1, 1)))
+        self.assertEqual(inverse_wishart.sample((3, 2)).size(), torch.Size((3, 2, 1, 1)))
+        self.assertRaises(ValueError, inverse_wishart.log_prob, self.scalar_sample)
+
+    def test_inverse_wishart_shape_tensor_params(self):
+        inverse_wishart = InverseWishart(torch.tensor([1., 1.]), torch.tensor([[[1.]], [[1.]]]))
+        self.assertEqual(inverse_wishart._batch_shape, torch.Size((2,)))
+        self.assertEqual(inverse_wishart._event_shape, torch.Size((1, 1)))
+        self.assertEqual(inverse_wishart.sample().size(), torch.Size((2, 1, 1)))
+        self.assertEqual(inverse_wishart.sample((3, 2)).size(), torch.Size((3, 2, 2, 1, 1)))
+        self.assertRaises(ValueError, inverse_wishart.log_prob, self.tensor_sample_2)
+        self.assertEqual(inverse_wishart.log_prob(torch.ones(2, 1, 1)).size(), torch.Size((2,)))
+
     def test_normal_shape_scalar_params(self):
         normal = Normal(0, 1)
         self.assertEqual(normal._batch_shape, torch.Size())
