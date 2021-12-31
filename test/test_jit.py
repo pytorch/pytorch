@@ -74,6 +74,10 @@ from jit.test_dtype_analysis import TestDtypeAnalysis, TestDtypeCustomRulesCPU  
 from jit.test_dce import TestDCE  # noqa: F401
 from jit.test_sparse import TestSparse  # noqa: F401
 
+# run the old upgrader tests if the ENABLE_UPGRADERS flag is off
+if not torch._C._is_upgraders_enabled():
+    from jit.test_legacy_upgraders import TestLegacyUpgraders  # noqa: F401
+
 # Torch
 from torch import Tensor
 from torch._C import TensorType, BoolType, parse_ir, _propagate_shapes

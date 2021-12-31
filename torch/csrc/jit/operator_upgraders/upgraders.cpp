@@ -1,4 +1,7 @@
 #include <torch/csrc/jit/operator_upgraders/upgraders.h>
+
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/ir/irparser.h>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -9,13 +12,17 @@ namespace jit {
 static UpgradersMap upgradersMap;
 
 void UpgradersMap::set_content(
-    std::unordered_map<std::string, std::string>&& content) {
+    std::unordered_map<std::string, std::shared_ptr<Graph>>& content) {
   // make sure we populate the map only once
   std::lock_guard<std::mutex> _(lock);
   if (isPopulated) {
     return;
   }
-  content_ = std::move(content);
+
+  for (const auto& entry : content) {
+    content_.insert(entry);
+  }
+
   isPopulated = true;
 }
 
@@ -24,7 +31,7 @@ int UpgradersMap::count() {
   return content_.size();
 }
 
-const std::unordered_map<std::string, std::string>& UpgradersMap::
+const std::unordered_map<std::string, std::shared_ptr<Graph>>& UpgradersMap::
     get_content() {
   std::lock_guard<std::mutex> _(lock);
   return content_;
@@ -34,7 +41,9 @@ void UpgradersMap::test_only_set_content(
     const std::unordered_map<std::string, std::string>& content) {
   std::lock_guard<std::mutex> _(lock);
   for (const auto& entry : content) {
-    content_.insert(entry);
+    auto graph = std::make_shared<Graph>();
+    torch::jit::parseIR(entry.second, graph.get());
+    content_.insert(std::make_pair(entry.first, graph));
   }
 }
 void UpgradersMap::test_only_remove_content(
@@ -46,15 +55,16 @@ void UpgradersMap::test_only_remove_content(
 }
 
 void populate_upgraders_map(
-    std::unordered_map<std::string, std::string>&& content) {
-  upgradersMap.set_content(std::move(content));
+    std::unordered_map<std::string, std::shared_ptr<Graph>> content) {
+  upgradersMap.set_content(content);
 }
 
 int get_upgraders_map_size() {
   return upgradersMap.count();
 }
 
-const std::unordered_map<std::string, std::string>& dump_upgraders_map() {
+const std::unordered_map<std::string, std::shared_ptr<Graph>>&
+dump_upgraders_map() {
   return upgradersMap.get_content();
 }
 
