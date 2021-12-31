@@ -2319,7 +2319,7 @@ std::tuple<Tensor, Tensor, Tensor> linalg_svd_jvp(const Tensor& dA,
                        : dP.diagonal(0, -2, -1).clone();
 
   // dX = dP - dS
-  // Here we update dP in-place rather than 
+  // Here we update dP in-place rather than
   if (is_complex) {
     at::real(dP.diagonal(0, -2, -1)).zero_();
   } else {
@@ -2506,7 +2506,6 @@ Tensor svd_backward(const Tensor& gU,
   if (!gS.defined() && !gU.defined() && !gVh.defined()) {
     return {};
   }
-
 
   const auto m = U.size(-2);
   const auto n = Vh.size(-1);
