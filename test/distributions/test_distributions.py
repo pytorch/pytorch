@@ -53,7 +53,8 @@ from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  Cauchy, Chi2, ContinuousBernoulli, Dirichlet,
                                  Distribution, Exponential, ExponentialFamily,
                                  FisherSnedecor, Gamma, Geometric, Gumbel,
-                                 HalfCauchy, HalfNormal, Independent, Kumaraswamy,
+                                 HalfCauchy, HalfNormal,
+                                 Independent, InverseWishart, Kumaraswamy,
                                  LKJCholesky, Laplace, LogisticNormal,
                                  LogNormal, LowRankMultivariateNormal,
                                  MixtureSameFamily, Multinomial, MultivariateNormal,
@@ -628,6 +629,19 @@ BAD_EXAMPLES = [
         {'scale': torch.tensor([0., 1.], requires_grad=True)},
         {'scale': torch.tensor([1., -1.], requires_grad=True)},
     ]),
+    Example(InverseWishart, [
+        {
+            'covariance_matrix': torch.tensor([[1.0, 0.0], [0.0, -2.0]], requires_grad=True),
+            'df': torch.tensor([1.5], requires_grad=True),
+        },
+        {
+            'covariance_matrix': torch.tensor([[1.0, 1.0], [1.0, -2.0]], requires_grad=True),
+            'df': torch.tensor([3.], requires_grad=True),
+        },
+        {
+            'covariance_matrix': torch.tensor([[1.0, 1.0], [1.0, -2.0]], requires_grad=True),
+            'df': 3.,
+        },
     Example(LKJCholesky, [
         {
             'dim': -2,
@@ -4554,6 +4568,10 @@ class TestAgainstScipy(TestCase):
             (
                 HalfNormal(positive_var2),
                 scipy.stats.halfnorm(scale=positive_var2)
+            ),
+            (
+                InverseWishart(20 + positive_var[0], cov_tensor),  # scipy var for Wishart only supports scalars
+                scipy.stats.invwishart(20 + positive_var[0].item(), cov_tensor),
             ),
             (
                 Laplace(random_var, positive_var2),
