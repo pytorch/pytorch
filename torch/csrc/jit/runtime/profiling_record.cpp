@@ -118,11 +118,20 @@ bool isOptionalTensorType(const TypePtr& type) {
   if (type->kind() != c10::TypeKind::OptionalType) {
     return false;
   }
-  const auto& kind = type->cast<OptionalType>()->getElementType()->kind();
+  const auto& kind = type->expect<OptionalType>()->getElementType()->kind();
   return kind == c10::TypeKind::TensorType;
 }
 } // namespace
 
+// Inserts profiling nodes.
+//
+// The prim::profile node profile Tensor and Optional[Tensor].
+//
+// It stores two fields:
+// 1. attr::seen_none, an integer, which is initially 0 and is set to 1 if the
+// profiled value is ever `None`
+// 2. attr::profiled_type, which is the most specific Tensor type that matches
+// all the non-null inputs observed during profiling.
 void ProfilingRecord::insertShapeProfile(
     Node* n,
     size_t offset,
