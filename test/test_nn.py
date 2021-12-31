@@ -16510,7 +16510,7 @@ class TestNNDeviceType(NNTestCase):
         self._assertEqual_list(log_probs_refs[0].grad, [t.grad for t in log_probs_refs[1:]], atol=1e-4, rtol=0)
         self._assertEqual_list(
             log_probs_refs[0].grad.squeeze(1),
-            [t.grad for t in log_probs_no_bd_refs[1:qg]],
+            [t.grad for t in log_probs_no_bd_refs],
             atol=1e-4,
             rtol=0,
         )
