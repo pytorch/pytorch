@@ -414,6 +414,9 @@ std::shared_ptr<Graph> replaceListOutputWithTuple(
     const std::shared_ptr<Graph>& graph) {
   auto out = graph->outputs()[0];
   auto out_node = out->node();
+  if (out_node->kind() != prim::ListConstruct) {
+    return graph;
+  }
   auto tuple_node = graph->createTuple(out_node->inputs());
   tuple_node->insertAfter(out_node);
   out->replaceAllUsesWith(tuple_node->output());
@@ -477,6 +480,10 @@ std::shared_ptr<Graph> trimGraph(
     changed = trimGraphOnce(graph);
     EliminateDeadCode(graph->block());
   }
+  // Avoid letting quantized values to graph outputs.
+  // Ideally we should allow quantized outputs as well, but currently the main
+  // user of this pass - AOT NNC - does not support it.
+  // TODO: remove output dequantization once NNC supports quantized outputs.
   dequantizeResults(graph);
   return graph;
 }
