@@ -168,28 +168,23 @@ Tensor slice_backward_wrapper(
     c10::optional<int64_t> start,
     c10::optional<int64_t> end,
     int64_t step);
+std::tuple<Tensor, Tensor> linalg_eig_jvp(const Tensor& dA,
+                                          const Tensor& L,
+                                          const Tensor& V,
+                                          const bool is_hermitian);
 Tensor linalg_eig_backward(const Tensor& gL,
                            const Tensor& gV,
                            const Tensor& L,
                            const Tensor& V,
-                           const bool is_complex);
-std::tuple<Tensor, Tensor> linalg_eig_jvp(const Tensor& dA,
-                                          const Tensor& L,
-                                          const Tensor& V);
+                           const bool is_complex,
+                           const bool is_hermitian,
+                           const bool symeig_eigenvectors=true);
 Tensor linalg_lstsq_jvp(
   const Tensor& A,
   const Tensor& B,
   const Tensor& dA,
   const Tensor& dB
 );
-std::tuple<Tensor, Tensor> linalg_eigh_jvp(const Tensor& dA,
-                                           const Tensor& L,
-                                           const Tensor& V);
-Tensor eigh_backward(const Tensor& gL,
-                     const Tensor& gV,
-                     const bool eigenvectors,
-                     const Tensor& L,
-                     const Tensor& V);
 std::tuple<Tensor, Tensor> triangular_solve_backward(
     const Tensor & grad_x, const Tensor & grad_m,
     const Tensor & b, const Tensor & a, const Tensor & x,
