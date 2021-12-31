@@ -223,7 +223,7 @@ def _multi_tensor_adamax(params: List[Tensor],
             exp_inf.unsqueeze(0),
             grad.abs().add_(eps).unsqueeze_(0)
         ], 0)
-        torch.max(norm_buf, 0, keepdim=False, out=(exp_inf, exp_inf.new().long()))
+        torch.amax(norm_buf, 0, keepdim=False, out=exp_inf)
 
     bias_corrections = [1 - beta1 ** state_step for state_step in state_steps]
     clr = [-1 * (lr / bias_correction) for bias_correction in bias_corrections]
