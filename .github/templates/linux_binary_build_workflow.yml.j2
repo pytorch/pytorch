@@ -160,7 +160,7 @@ jobs:
         name: Download Build Artifacts
         with:
           name: !{{ config["build_name"] }}
-          path: artifacts/
+          path: "${{ runner.temp }}/artifacts/"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -206,7 +206,7 @@ jobs:
             --detach \
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
             -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${GITHUB_WORKSPACE}/artifacts:/final_pkgs" \
+            -v "${RUNNER_TEMP}/artifacts:/final_pkgs" \
             -w / \
             "${DOCKER_IMAGE}"
           )
