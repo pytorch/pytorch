@@ -59,7 +59,7 @@ def _convert_do_not_use(
         convert_custom_config_dict: Dict[str, Any] = None,
         is_standalone_module: bool = False,
         _remove_qconfig_flag: bool = True,
-        backend_config_dict: Optional[Dict[str, Any]] = None) -> QuantizedGraphModule:
+        backend_config_dict: Optional[Dict[str, Any]] = None) -> torch.nn.Module:
     """
     We will convert an observed model (a module with observer calls) to a reference
     quantized model, the rule is simple:

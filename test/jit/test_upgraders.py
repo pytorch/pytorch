@@ -81,7 +81,7 @@ class TestUpgraders(JitTestCase):
         # upgrader map should have populated now
         upgraders_size = torch._C._get_upgraders_map_size()
 
-        test_map = {"a": "b", "c": "d"}
+        test_map = {"a": str(torch._C.Graph()), "c": str(torch._C.Graph())}
         torch._C._test_only_populate_upgraders(test_map)
         upgraders_size_after_test = torch._C._get_upgraders_map_size()
         self.assertEqual(upgraders_size_after_test - upgraders_size, 2)
@@ -132,7 +132,6 @@ class TestUpgraders(JitTestCase):
         @torch.jit.script
         def _test_serialization_subcmul_0_2(self: torch.Tensor, other: torch.Tensor, alpha: Union[int, float] = 2) -> torch.Tensor:
             return other - (self * alpha)
-
         torch._C._test_only_populate_upgraders({"_test_serialization_subcmul_0_2": str(_test_serialization_subcmul_0_2.graph)})
 
         # test if the server is able to find the test upgraders and apply to IR
