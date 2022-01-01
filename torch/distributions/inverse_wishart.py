@@ -173,14 +173,14 @@ class InverseWishart(ExponentialFamily):
     def variance(self):
         nu = self.df  # has shape (batch_shape)
         p = self._event_shape[-1]
-
         V = self.covariance_matrix  # has shape (batch_shape x event_shape)
         diag_V = V.diagonal(dim1=-2, dim2=-1)
+        eff_df = (nu - p).view(self._batch_shape + (1, 1))
 
         return (
-            (nu - p + 1) * V.pow(2)
-            + (nu - p - 1) * torch.einsum("...i,...j->...ij", diag_V, diag_V)
-        ) / ((nu - p) * (nu - p - 1).pow(2) * (nu - p - 3))
+            (eff_df + 1) * V.pow(2)
+            + (eff_df - 1) * torch.einsum("...i,...j->...ij", diag_V, diag_V)
+        ) / (eff_df * (eff_df - 1).pow(2) * (eff_df - 3))
 
     def _bartlett_sampling(self, sample_shape=torch.Size()):
         p = self._event_shape[-1]  # has singleton shape
