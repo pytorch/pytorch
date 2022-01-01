@@ -12,11 +12,12 @@ def profile_cuda_kernels(fn, args, string_id="Model time"):
     old_args = args[:]
     n_repeats = 1
     n_layers = 1
+    ref = fn(*old_args)
+    gO = torch.rand_like(ref)
     for _ in range(0, warmup // n_layers):
         args = list(old_args[:])
         ref = fn(*args)
-        loss = ref.sum()
-        loss.backward()
+        ref.backward(gO)
 
     torch.cuda.synchronize()
 
@@ -42,7 +43,6 @@ def profile_cuda_kernels(fn, args, string_id="Model time"):
             for arg in args:
                 arg.grad = None
             ref = fn(*args)
-            loss = ref.sum()
 
             print(f"###### Backward profile for {string_id} starts #####")
             torch.cuda.synchronize()
@@ -50,7 +50,7 @@ def profile_cuda_kernels(fn, args, string_id="Model time"):
                 activities=[ProfilerActivity.CUDA], record_shapes=True
             ) as prof:
                 with record_function("baseline"):
-                    loss.backward()
+                    ref.backward(gO)
             print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=30))
             torch.cuda.synchronize()
             print(f"###### Backward profile for {string_id} ends #####")
@@ -61,46 +61,31 @@ def profile_cuda_kernels(fn, args, string_id="Model time"):
     print("################################################\n\n\n\n")
 
 
-def time_with_torch_timer(fn, args, string_id):
-    if len(args) == 3:
-        env = {"fn": fn, "a": args[0], "b": args[1], "c": args[2]}
-        fn_call = "fn(a, b, c)"
-        grad_none = "a.grad = b.grad = c.grad = None"
-    elif len(args) == 2:
-        env = {"fn": fn, "a": args[0], "b": args[1]}
-        fn_call = "fn(a, b)"
-        grad_none = "a.grad = b.grad = None"
-    elif len(args) == 1:
-        env = {"fn": fn, "a": args[0]}
-        fn_call = "fn(a)"
-        grad_none = "a.grad = None"
-
+def time_with_torch_timer(fn, args, string_id, kwargs={}):
     print("################################################")
     print(f"#### Torch Timer for {string_id} starts #########")
     print("################################################")
-
+    ref = fn(*args, **kwargs)
+    gO = torch.rand_like(ref)
+    env = {"args": args, "gO": gO, "kwargs": kwargs, "fn": fn}
+    grad_none = {"for x in args: x.grad=None"}
+    fn_call = "fn(*args, **kwargs)"
     # Measure end-to-end fwd time
     timer = Timer(stmt=f"{fn_call}", globals=env)
     fwd_latency = round(timer.timeit(1000).mean * 10 ** 6, 3)
     timer_blocked = timer.blocked_autorange()
     print(f"Forward = {fwd_latency}")
 
-    # Measure end-to-end fwd + sum time
-    timer = Timer(stmt=f"fwd = {fn_call}; loss = fwd.sum()", globals=env)
-    fwd_sum_latency = round(timer.timeit(1000).mean * 10 ** 6, 3)
-    timer_blocked = timer.blocked_autorange()
-    # print(f"Forward + sum = {fwd_sum_latency}")
-
     # Measure end-to-end fwd bwd
     timer = Timer(
-        stmt=f"{grad_none}; fwd = {fn_call}; loss = fwd.sum(); loss.backward()",
+        stmt=f"{grad_none}; fwd = {fn_call}; fwd.backward(gO)",
         globals=env,
     )
-    fwd_sum_bwd_latency = round(timer.timeit(1000).mean * 10 ** 6, 3)
+    fwd_bwd_latency = round(timer.timeit(1000).mean * 10 ** 6, 3)
     timer_blocked = timer.blocked_autorange()
     # print(f"Forward + sum + Backward = {fwd_sum_bwd_latency}")
 
-    bwd_latency = round(fwd_sum_bwd_latency - fwd_sum_latency, 3)
+    bwd_latency = round(fwd_bwd_latency - fwd_latency, 3)
     print(f"Backward = {bwd_latency}")
 
     print("################################################")
@@ -116,15 +101,15 @@ def time_with_manual_timer(fn, args, string_id):
     repeats = 1000
     n_layers = 1
     old_args = args[:]
+    ref = fn(*old_args)
+    gO = torch.rand_like(ref)
     for _ in range(0, warmup // n_layers):
         args = list(old_args[:])
 
         for arg in args:
             arg.grad = None
         ref = fn(*args)
-        ref = args[0]
-        loss = ref.sum()
-        loss.backward()
+        ref.backward(gO)
 
     torch.cuda.synchronize()
 
@@ -139,11 +124,8 @@ def time_with_manual_timer(fn, args, string_id):
         torch.cuda.synchronize()
         fwd_end = time.time()
 
-        loss = ref.sum()
-        torch.cuda.synchronize()
-
         bwd_start = time.time()
-        loss.backward()
+        ref.backward(gO)
         torch.cuda.synchronize()
         bwd_end = time.time()
 
