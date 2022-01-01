@@ -173,19 +173,13 @@ class Wishart(ExponentialFamily):
 
     @property
     def mean(self):
-        return (
-            self.df.expand(self._batch_shape + self._event_shape)
-            * self.covariance_matrix
-        )
+        return self.df.view(self._batch_shape + (1, 1,)) * self.covariance_matrix
 
     @property
     def variance(self):
         V = self.covariance_matrix  # has shape (batch_shape x event_shape)
         diag_V = V.diagonal(dim1=-2, dim2=-1)
-        return (
-            self.df.expand(self._batch_shape + self._event_shape)
-            * (V.pow(2) + torch.einsum("...i,...j->...ij", diag_V, diag_V))
-        )
+        return self.df.view(self._batch_shape + (1, 1,)) * (V.pow(2) + torch.einsum("...i,...j->...ij", diag_V, diag_V))
 
     def _bartlett_sampling(self, sample_shape=torch.Size()):
         p = self._event_shape[-1]  # has singleton shape
