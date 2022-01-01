@@ -583,7 +583,7 @@ void GraphTask::exec_post_processing() {
     // surrounding the user's call to backward()). This has two benefits:
     //  1. caller_current_streams have been synced with leaf_streams, so callbacks may
     //     safely access any grad.
-    //  2. The callback's results can safely be used on (user-facing) caller_current_streams
+    //  2. The callbacks' results can safely be used on (user-facing) caller_current_streams
     //     after backward().
     c10::MultiStreamGuard g(caller_current_streams_filtered);
 

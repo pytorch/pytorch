@@ -263,7 +263,15 @@ void free(void* ptr) {
                         "ptr's stream uses vector is empty");
 
   if (C10_UNLIKELY(capture_underway)) {
-    if (it->second.captured) {
+    if (!it->second.captured) {
+      TORCH_WARN_ONCE("free() was called on an uncaptured allocation during graph capture. "
+                      "This may be benign, for example, a Python tensor in the capture "
+                      "might happen to shadow (use the same name as) an unrelated temporary "
+                      "tensor from somewhere before capture, pushing the earlier tensor "
+                      "out of scope.\n"
+                      "However, if the tensor we're freeing here IS used by the capture, "
+                      "freeing it is an error, and may cause illegal memory accesses or "
+                      "memory corruption during graph replay.");
       // See Note [Avoid freeing uncaptured ptrs during CUDA graph capture]
       // Remembers the raw pointer, not the iterator.
       // This forces notifyCaptureEnded to do another lookup,
@@ -272,9 +280,7 @@ void free(void* ptr) {
       ungraphed_ptrs_defer_free_until_no_capture.push_back(ptr);
       return;
     }
-  }
-
-  if (C10_UNLIKELY(it->second.captured)) {
+  } else if (C10_UNLIKELY(it->second.captured)) {
     TORCH_WARN("Attempting uncaptured free of a captured allocation. "
                "This is technically allowed, but may indicate you are losing "
                "the last user-visible tensor through which the allocation can "
