@@ -1775,7 +1775,7 @@ depthwise according to :attr:`indices_or_sections`. Each split is a view of
 :attr:`input`.
 
 This is equivalent to calling torch.tensor_split(input, indices_or_sections, dim=2)
-(the split dimension is 1), except that if :attr:`indices_or_sections` is an integer
+(the split dimension is 2), except that if :attr:`indices_or_sections` is an integer
 it must evenly divide the split dimension or a runtime error will be thrown.
 
 This function is based on NumPy's :func:`numpy.dsplit`.
