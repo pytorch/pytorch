@@ -244,7 +244,6 @@ def clamp(*, input, min=None, max=None):
     return torch.clamp(**locals())
 
 
-@register_acc_op_properties(AccOpProperty.unary)
 @register_acc_op_mapping(op_and_target=("call_function", torch.cat))
 @register_acc_op
 def cat(*, tensors, dim):
