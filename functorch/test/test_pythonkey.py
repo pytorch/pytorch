@@ -62,6 +62,13 @@ class TestPythonKey(TestCase):
         new_inp = torch.randn(3)
         self.assertEqual(fx_f(new_inp), f(new_inp))
 
+    def test_scalar_device(self):
+        def f(a, b):
+            return a + b
+        inps = [torch.randn(3, device='cuda'), torch.tensor(5)]
+        fx_f = make_fx(f)(*inps)
+        self.assertEqual(fx_f(*inps), f(*inps))
+
     def test_make_fx_vmap(self, device):
         def f(x):
             return torch.sin(x)
@@ -273,6 +280,7 @@ class TestAOTAutograd(TestCase):
             return a + b
         inp = [torch.randn(3, 3, requires_grad=True), torch.randn(3, 3)]
         self.verify_aot_autograd(f, inp)
+
 
     def test_multi_output(self):
         def f(a, b):

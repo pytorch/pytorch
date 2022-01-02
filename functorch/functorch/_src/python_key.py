@@ -41,6 +41,14 @@ def pythonkey_meta():
     finally:
         USE_META = False
 
+def get_output_device(devices):
+    if len(devices) == 1:
+        return devices[0]
+    else:
+        for device in devices:
+            if device.type == 'cuda':
+                return device
+        raise RuntimeError("Couldn't infer output device from input device")
 
 class PythonTensor(torch.Tensor):
     elem: torch.Tensor
@@ -83,11 +91,6 @@ class PythonTensor(torch.Tensor):
         def unwrap_tensor(e):
             return e.elem if isinstance(e, PythonTensor) else e
 
-        # Used to infer the output device
-        input_devices = list(set([i.device for i in pytree.tree_flatten(args)[0] +
-                             pytree.tree_flatten(kwargs)[0] if isinstance(i, PythonTensor)]))
-        assert len(input_devices) == 1
-        output_device = input_devices[0]
         proxy_args = pytree.tree_map(unwrap_proxy, args)
         proxy_kwargs = pytree.tree_map(unwrap_proxy, kwargs)
         proxy_out = func(*proxy_args, **proxy_kwargs)
@@ -102,6 +105,13 @@ class PythonTensor(torch.Tensor):
                                      if isinstance(x, torch.Tensor) else x, kwargs)
             real_out = func(*args, **kwargs)
 
+        if real_out.device.type == 'meta':
+            # Used to infer the output device
+            input_devices = list(set([i.device for i in pytree.tree_flatten(args)[0] +
+                                pytree.tree_flatten(kwargs)[0] if isinstance(i, PythonTensor)]))
+            output_device = get_output_device(input_devices)
+        else:
+            output_device = real_out.device
         def wrap_with_proxy(e, proxy):
             # Some ops (like native_batch_norm_backward) return undefined tensors that get
             # converted into None in python.
