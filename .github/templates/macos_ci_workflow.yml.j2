@@ -83,6 +83,7 @@ jobs:
 {%- if not exclude_test %}
 {% block test +%}
   generate-test-matrix:
+    needs: build
     runs-on: ubuntu-18.04
     timeout-minutes: !{{ common.timeout_minutes }}
     env:
