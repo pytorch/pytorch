@@ -105,13 +105,6 @@ class PythonTensor(torch.Tensor):
                                      if isinstance(x, torch.Tensor) else x, kwargs)
             real_out = func(*args, **kwargs)
 
-        if real_out.device.type == 'meta':
-            # Used to infer the output device
-            input_devices = list(set([i.device for i in pytree.tree_flatten(args)[0] +
-                                pytree.tree_flatten(kwargs)[0] if isinstance(i, PythonTensor)]))
-            output_device = get_output_device(input_devices)
-        else:
-            output_device = real_out.device
         def wrap_with_proxy(e, proxy):
             # Some ops (like native_batch_norm_backward) return undefined tensors that get
             # converted into None in python.
@@ -119,9 +112,14 @@ class PythonTensor(torch.Tensor):
             # tensors back to C++, we'll error.
             if e is None:
                 e = torch.empty(())
-            # Currently assuming that all inputs to an op are the same device - not totally
-            # sure that's true
             if type(e) == torch.Tensor:
+                output_device = e.device.type
+                if output_device == 'meta':
+                    # Infer the original output device from the inputs
+                    input_devices = list(set([i.device for i in pytree.tree_flatten(args)[0] +
+                                        pytree.tree_flatten(kwargs)[0] if isinstance(i, PythonTensor)]))
+                    output_device = get_output_device(input_devices)
+
                 return PythonTensor(e, proxy, output_device)
             else:
                 return e
@@ -130,7 +128,7 @@ class PythonTensor(torch.Tensor):
         elif isinstance(real_out, list):
             return list([wrap_with_proxy(e, proxy_out[idx]) for idx, e in enumerate(real_out)])
         elif isinstance(real_out, torch.Tensor):
-            return PythonTensor(real_out, proxy_out, output_device)
+            return wrap_with_proxy(real_out, proxy_out)
         else:
             return real_out
 

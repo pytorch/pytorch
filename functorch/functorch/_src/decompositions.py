@@ -33,7 +33,7 @@ def sigmoid_backward_decomposition(out_grad: Tensor, y: Tensor):
 
 @register_decomposition(aten.softplus_backward)
 # The out argument seems to always be ignored?
-def softplus_backward_decomposition(out_grad: Tensor, x: Tensor, beta: float, threshold: float, out):
+def softplus_backward_decomposition(out_grad: Tensor, x: Tensor, beta: float, threshold: float):
     z = (x * beta).exp()
     return aten.where((x * beta) > threshold, out_grad, out_grad * z / (z + 1.0))
 
