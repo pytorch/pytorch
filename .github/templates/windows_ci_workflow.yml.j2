@@ -126,6 +126,7 @@ jobs:
           rm -rf ./*
 
   generate-test-matrix:
+    needs: build
     runs-on: ubuntu-18.04
     timeout-minutes: !{{ common.timeout_minutes }}
     env:
