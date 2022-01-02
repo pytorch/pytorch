@@ -99,11 +99,10 @@ def time_with_manual_timer(fn, args, string_id):
     print("################################################")
     warmup = 50
     repeats = 1000
-    n_layers = 1
     old_args = args[:]
     ref = fn(*old_args)
     gO = torch.rand_like(ref)
-    for _ in range(0, warmup // n_layers):
+    for _ in range(0, warmup):
         args = list(old_args[:])
 
         for arg in args:
@@ -115,7 +114,7 @@ def time_with_manual_timer(fn, args, string_id):
 
     fwd_times = []
     bwd_times = []
-    for _ in range(0, repeats // n_layers):
+    for _ in range(0, repeats):
         args = list(old_args[:])
         for arg in args:
             arg.grad = None
