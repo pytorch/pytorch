@@ -261,7 +261,7 @@ class TestNumbaIntegration(common.TestCase):
             ]
             # Zero-copy when using `torch.as_tensor()`
             for numpy_ary in numpy_arys:
-                numba_ary = numba.cuda.to_device(numpy_ary)
+                numba_ary = numba.cuda.to_device(numpy_ary, sync=false)
                 torch_ary = torch.as_tensor(numba_ary, device="cuda")
                 self.assertEqual(numba_ary.__cuda_array_interface__, torch_ary.__cuda_array_interface__)
                 self.assertEqual(torch_ary.cpu().data.numpy(), numpy.asarray(numba_ary, dtype=dtype))
@@ -272,7 +272,7 @@ class TestNumbaIntegration(common.TestCase):
 
             # Implicit-copy because `torch_ary` is a CPU array
             for numpy_ary in numpy_arys:
-                numba_ary = numba.cuda.to_device(numpy_ary)
+                numba_ary = numba.cuda.to_device(numpy_ary, sync=false)
                 torch_ary = torch.as_tensor(numba_ary, device="cpu")
                 self.assertEqual(torch_ary.data.numpy(), numpy.asarray(numba_ary, dtype=dtype))
 
@@ -282,7 +282,7 @@ class TestNumbaIntegration(common.TestCase):
 
             # Explicit-copy when using `torch.tensor()`
             for numpy_ary in numpy_arys:
-                numba_ary = numba.cuda.to_device(numpy_ary)
+                numba_ary = numba.cuda.to_device(numpy_ary, sync=false)
                 torch_ary = torch.tensor(numba_ary, device="cuda")
                 self.assertEqual(torch_ary.cpu().data.numpy(), numpy.asarray(numba_ary, dtype=dtype))
 
