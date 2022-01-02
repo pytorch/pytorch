@@ -24,10 +24,6 @@ if [[ "$CIRCLECI" == 'true' ]]; then
     rm -rf "C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Community"
   fi
 
-  if [[ -d "C:\\Program Files (x86)\\Microsoft Visual Studio 14.0" ]]; then
-    rm -rf "C:\\Program Files (x86)\\Microsoft Visual Studio 14.0"
-  fi
-
   if [[ -d "C:\\Program Files (x86)\\Microsoft.NET" ]]; then
     rm -rf "C:\\Program Files (x86)\\Microsoft.NET"
   fi
