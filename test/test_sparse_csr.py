@@ -1280,8 +1280,8 @@ class TestSparseCSR(TestCase):
             self.assertEqual(actual.col_indices(), expect.col_indices())
             self.assertEqual(actual._nnz(), expect._nnz())
 
+    # Utility function which checks that an error is raised for exponent as zero
     def _test_pow_check_error(self, func, device, dtype, is_out=False):
-        # First ensure that the op fails for exponent as zero
         inp = make_tensor((1, 2), dtype=dtype, device=device).to_sparse_csr()
         if is_out:
             out = self.genSparseCSRTensor(inp.size(), inp._nnz(),
@@ -1295,25 +1295,17 @@ class TestSparseCSR(TestCase):
         err_msg = "Exponent must be greater than 0 for Sparse CSR Layout."
 
         # Generate exponent as 0 per the given dtype
+        # Only pow with Scalar exponent is supported as of now, for Sparse CSR
         if dtype.is_complex:
             exp = complex(0, 0)
             with self.assertRaisesRegex(RuntimeError, "not supported"):
-                if is_out:
-                    func(inp, exp, out=out)
-                else:
-                    func(inp, exp)
+                func(inp, exp, out=out) if is_out else func(inp, exp)
             return
         else:
-            if dtype.is_floating_point:
-                exp = 0.
-            else:
-                exp = 0
+            exp = 0. if dtype.is_floating_point else 0
 
             with self.assertRaisesRegex(RuntimeError, err_msg):
-                if is_out:
-                    func(inp, exp, out=out)
-                else:
-                    func(inp, exp)
+                func(inp, exp, out=out) if is_out else func(inp, exp)
 
         # Negative exponent is also not supported for Sparse CSR
         exps = []
@@ -1324,10 +1316,7 @@ class TestSparseCSR(TestCase):
 
         for exp in exps:
             with self.assertRaisesRegex(RuntimeError, err_msg):
-                if is_out:
-                    func(inp, exp, out=out)
-                else:
-                    func(inp, exp)
+                func(inp, exp, out=out) if is_out else func(inp, exp)
 
         # Also check for exponent as boolean (False)
         with self.assertRaisesRegex(RuntimeError, "not supported"):
