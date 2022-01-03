@@ -1,11 +1,11 @@
 #pragma once
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <string>
 #include <vector>
 
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 namespace c10 {
 struct Type;
