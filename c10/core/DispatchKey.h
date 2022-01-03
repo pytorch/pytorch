@@ -139,7 +139,6 @@ enum class DispatchKey : uint8_t {
   BackendSelect,
 
   Python,
-  FuncTorchPython, // See Note [Out-of-tree vmap+grad prototype]
 
   // The named dispatch key is set for any tensors with named dimensions.
   // Although we have a dispatch key for named tensors, for historical reasons,
@@ -164,6 +163,8 @@ enum class DispatchKey : uint8_t {
   // negation
   // This is implemented at a dispatch level right before any backends run
   Negative,
+
+  ZeroTensor, // registered at build/aten/src/ATen/RegisterZeroTensor.cpp
 
   // See Note [Out-of-tree vmap+grad prototype]. The purpose of this key
   // is to insert code after the "autograd subsystem" runs, so this key should
