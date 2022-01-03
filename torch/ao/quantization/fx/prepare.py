@@ -88,6 +88,7 @@ from .backend_config.utils import (
     get_pattern_to_quantize_handlers,
     get_pattern_to_dtype_configs,
     get_pattern_to_input_type_to_index,
+    get_module_to_qat_module,
 )
 
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union, Set
@@ -227,10 +228,8 @@ def prepare_get_standalone_module_configs(
 
 def qat_swap_modules(
         root: torch.nn.Module,
-        additional_qat_module_mapping: Dict[Callable, Callable]) -> None:
-    all_mappings = get_combined_dict(
-        get_default_qat_module_mappings(), additional_qat_module_mapping)
-    convert(root, mapping=all_mappings, inplace=True, remove_qconfig=False)
+        module_to_qat_module: Dict[Callable, Callable]) -> None:
+    convert(root, mapping=module_to_qat_module, inplace=True, remove_qconfig=False)
 
 # TODO: remove observed_op, looks like it's not used
 def insert_observer(
@@ -1343,7 +1342,15 @@ def prepare(
     if is_qat:
         additional_qat_module_mapping = prepare_custom_config_dict.get(
             "additional_qat_module_mapping", {})
-        qat_swap_modules(model, additional_qat_module_mapping)
+        # this path will be deprecated after we fully migrate the convert path
+        # of fbgemm/qnnpack to use the reference path, it will stay
+        # here for a few months
+        if backend_config_dict is None:
+            module_to_qat_module = get_combined_dict(
+                get_default_qat_module_mappings(), additional_qat_module_mapping)
+        else:
+            module_to_qat_module = get_module_to_qat_module(backend_config_dict)
+        qat_swap_modules(model, module_to_qat_module)
         qconfig_dict = update_qconfig_for_qat(qconfig_dict, additional_qat_module_mapping)
 
     qconfig_dict = update_qconfig_for_fusion(model, qconfig_dict)
