@@ -183,7 +183,7 @@ class ModuleList(Module):
         return str(idx)
 
     @_copy_to_script_wrapper
-    def __getitem__(self, idx: int) -> Module:
+    def __getitem__(self, idx: int) -> Union[Module, 'ModuleList']:
         if isinstance(idx, slice):
             return self.__class__(list(self._modules.values())[idx])
         else:

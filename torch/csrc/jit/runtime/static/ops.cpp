@@ -731,6 +731,51 @@ void varstackNonserialOut(
   at::native::_cat_out_cpu(inputs_unsqueezed, dim, result);
 }
 
+void varStackFastOut(
+    at::Tensor& out,
+    int64_t dim,
+    const VarStackNodeWrapper& inputs) {
+  DCHECK(out.is_contiguous());
+  const auto num_inputs = static_cast<int64_t>(inputs.size());
+  TORCH_CHECK(num_inputs > 0, "stack expects a non-empty list of tensors");
+
+  const auto first_tensor_shape = inputs[0].sizes();
+  for (const auto i : c10::irange(1, num_inputs)) {
+    const auto shape = inputs[i].sizes();
+    TORCH_CHECK(
+        shape == first_tensor_shape,
+        "Stack expects each tensor to be the same size, but got ",
+        first_tensor_shape,
+        " at position 0 and ",
+        shape,
+        " at position ",
+        i);
+  }
+
+  const std::array<int64_t, 2> output_size = (dim == 0 || dim == -2)
+      ? std::array<int64_t, 2>{num_inputs, 1}
+      : std::array<int64_t, 2>{1, num_inputs};
+
+  at::native::resize_(out, output_size, c10::nullopt);
+
+  AT_DISPATCH_ALL_TYPES(out.scalar_type(), "varStackFastOut", [&]() {
+    auto* out_data = out.data_ptr<scalar_t>();
+    for (const auto i : c10::irange(num_inputs)) {
+      auto& tensor = inputs[i];
+      auto* input_ptr = tensor.data_ptr<scalar_t>();
+      out_data[i] = *input_ptr;
+    }
+  });
+}
+
+bool inputsAreScalars(const VarStackNodeWrapper& inputs) {
+  // All stack inputs should have the same size, so we only check
+  // the first one. If this isn't true, an exception will be thrown
+  // in the VarStack implementation
+  const auto& first_tensor = inputs[0];
+  return first_tensor.sizes()[0] == 1 && first_tensor.dim() == 1;
+}
+
 void varStackOut(ProcessedNode& pnode, int64_t dim) {
   const auto num_inputs = pnode.num_inputs();
   TORCH_CHECK(num_inputs > 1, "stack expects a non-empty list of tensors");
@@ -738,6 +783,11 @@ void varStackOut(ProcessedNode& pnode, int64_t dim) {
 
   auto inputs = VarStackNodeWrapper(pnode);
   auto& output = pnode.Output(0).toTensor();
+
+  if (output.is_contiguous() && inputsAreScalars(inputs)) {
+    varStackFastOut(output, dim, inputs);
+    return;
+  }
 
   bool can_use_serial = at::native::detail::CanUseNativeSerialStack<
       VarStackNodeWrapper,
