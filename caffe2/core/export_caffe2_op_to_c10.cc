@@ -58,7 +58,7 @@ void call_caffe2_op_from_c10(
   // Convert outputs to caffe2::Tensor
   std::vector<caffe2::Tensor> outputs_c2(num_outputs);
   for (auto i : c10::irange(num_outputs)) {
-    outputs_c2[i] = caffe2::Tensor(outputs.get(i));
+    outputs_c2[i] = caffe2::Tensor(outputs.extract(i));
   }
 
   outputs_c2 = (*call_op)(schema, inputs, std::move(outputs_c2));
@@ -75,12 +75,12 @@ void call_caffe2_op_from_c10(
     }
   }
   if (return_tensor_list) {
-    for (auto i : c10::irange(num_outputs)) {
+    for (const auto i : c10::irange(num_outputs)) {
       outputs.set(i, at::Tensor(std::move(outputs_c2[i])));
     }
     torch::jit::push(*stack, outputs);
   } else {
-    for (auto i : c10::irange(num_outputs)) {
+    for (const auto i : c10::irange(num_outputs)) {
       torch::jit::push(*stack, at::Tensor(std::move(outputs_c2[i])));
     }
   }

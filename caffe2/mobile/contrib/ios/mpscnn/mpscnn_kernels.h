@@ -523,7 +523,7 @@ kernel void col2im(
                 }
             } else {
                 half4 components(0, 0, 0, 0);
-                for (auto i = 0; i < 4; ++i) {
+                for (const auto i : c10::irange(4)) {
                     ushort c_col_i = n * divRoundUp(kernel_h * kernel_w * C, 4) * 4 + h_k * kernel_w * C +
                     w_k * C + c * 4 + i;
                     ushort c_col_i_z = c_col_i / 4;
@@ -826,7 +826,7 @@ kernel void concat(
   ushort2 gid_ = ushort2(gid.x, gid.y);
   half4 value;
   
-  for (int off = 0; off < 4; ++off) {
+  for (const auto off : c10::irange(4)) {
     ushort cur_channel = c * 4 + off;
     ushort cur_idx = 0;
     if (cur_channel >= C) {
@@ -1013,8 +1013,8 @@ kernel void roi_warp(texture2d_array<half, access::sample> ina[[texture(0), func
   const RoIT count = iy_upper * ix_upper;
 
   RoIT4 output_val = 0.0;
-  for (int iy = 0; iy < iy_upper; iy++) {
-    for (int ix = 0; ix < ix_upper; ix++) {
+  for (const auto iy : c10::irange(iy_upper)) {
+    for (const auto ix : c10::irange(ix_upper)) {
       const RoIT y =
           roi_start_h + ph * bin_size_h + iy * bin_size_h / static_cast<RoIT>(roi_bin_grid_h);
       const RoIT x =
@@ -1141,7 +1141,7 @@ kernel void channel_shuffle(
   const ushort c = gid.z - n * divRoundUp(C, 4);
   half4 value;
   ushort2 gid_ = gid.xy;
-  for (int off = 0; off < 4; ++off) {
+  for (const auto off : c10::irange(4)) {
     ushort cur_channel = c * 4 + off;
     if (cur_channel >= C) {
       break;

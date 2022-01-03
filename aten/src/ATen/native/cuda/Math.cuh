@@ -2,6 +2,7 @@
 
 #include <ATen/AccumulateType.h>
 #include <c10/macros/Macros.h>
+#include <ATen/native/cuda/jit_utils.h>
 
 namespace at {
 namespace native {
@@ -93,18 +94,6 @@ static inline C10_HOST_DEVICE scalar_t calc_trigamma(scalar_t in) {
   const accscalar_t ixx = 1 / (x*x);
   result += (1 + 1 / (2*x) + ixx * (one/6 - ixx * (one/30 - ixx * (one/42)))) / x;
   return static_cast<scalar_t>(sign * result);
-}
-
-template <typename scalar_t>
-static inline C10_HOST_DEVICE scalar_t calc_gcd(scalar_t a_in, scalar_t b_in) {
-  scalar_t a = ::abs(a_in);
-  scalar_t b = ::abs(b_in);
-  while (a != 0) {
-    scalar_t c = a;
-    a = b % a;
-    b = c;
-  }
-  return b;
 }
 
 /*
@@ -330,24 +319,129 @@ static inline C10_HOST_DEVICE scalar_t calc_i0e(scalar_t _x) {
   return (chbevl(scalar_t{32.0} / x - scalar_t{2.0}, B, len) / ::sqrt(x));
 }
 
-template <typename scalar_t>
-static inline C10_HOST_DEVICE scalar_t calc_i1(scalar_t _x) {
-  const auto x = ::abs(_x);
-  if (x <= scalar_t{8.0}) {
-    auto coeff_pair = chebyshev_coefficients_i1e_A<scalar_t>();
-    auto A = std::get<0>(coeff_pair);
-    auto len = std::get<1>(coeff_pair);
-    scalar_t y = x / scalar_t{2.0} - scalar_t{2.0};
-    const scalar_t out = ::exp(x) * x * chbevl(y, A, len);
-    return (_x < scalar_t{0.0}) ? -out : out;
+// A jittable version of the gcd operation
+// See note [Jiterator]
+const auto gcd_string = jiterator_stringify(
+  template <typename T>
+  T gcd(const T a_in, const T b_in) {
+    T a = ::abs(a_in);
+    T b = ::abs(b_in);
+
+    while (a != 0) {
+      T c = a;
+      a = b % a;
+      b = c;
+    }
+
+    return b;
+  }
+); // gcd_string
+
+// A jittable version of the i1 operation
+// See note [Jiterator]
+const auto i1_string = jiterator_stringify(
+  template<typename T>
+  T chbevl(const T x, const T array[], const int len) {
+      T b0, b1, b2;
+
+      b0 = array[0];
+      b1 = 0;
+
+      for (int i = 1; i < len; ++i)  {
+          b2 = b1;
+          b1 = b0;
+          b0 = x * b1 - b2 + array[i];
+      }
+
+      return 0.5 * (b0 - b2);
   }
 
-  auto coeff_pair = chebyshev_coefficients_i1e_B<scalar_t>();
-  auto B = std::get<0>(coeff_pair);
-  auto len = std::get<1>(coeff_pair);
-  const scalar_t out = (::exp(x) * chbevl(scalar_t{32.0} / x - scalar_t{2.0}, B, len)) / ::sqrt(x);
-  return (_x < scalar_t{0.0}) ? -out : out;
+  template <typename T>
+  T i1(T _x) {
+    const T x = ::abs(_x);
+
+    if (x <= T{8.0}) {
+      // Chebyshev coefficients for exp(-x) i1(x) in the internal [0, 8]
+      //   lim(x->0){ exp(-x) i1(x) / x } = 1/2
+      static const T coefficients[] = {
+          2.77791411276104639959E-18, -2.11142121435816608115E-17,
+          1.55363195773620046921E-16, -1.10559694773538630805E-15,
+          7.60068429473540693410E-15, -5.04218550472791168711E-14,
+          3.22379336594557470981E-13, -1.98397439776494371520E-12,
+          1.17361862988909016308E-11, -6.66348972350202774223E-11,
+          3.62559028155211703701E-10, -1.88724975172282928790E-9,
+          9.38153738649577178388E-9,  -4.44505912879632808065E-8,
+          2.00329475355213526229E-7,  -8.56872026469545474066E-7,
+          3.47025130813767847674E-6,  -1.32731636560394358279E-5,
+          4.78156510755005422638E-5,  -1.61760815825896745588E-4,
+          5.12285956168575772895E-4,  -1.51357245063125314899E-3,
+          4.15642294431288815669E-3,  -1.05640848946261981558E-2,
+          2.47264490306265168283E-2,  -5.29459812080949914269E-2,
+          1.02643658689847095384E-1,  -1.76416518357834055153E-1,
+          2.52587186443633654823E-1};
+      const int len = 29;
+      const T y = x / T{2.0} - T{2.0};
+      const T out = ::exp(x) * x * chbevl(y, coefficients, len);
+      return (_x < T{0.0}) ? -out : out;
+    }
+
+    // Chebyshev coefficients for exp(-x) sqrt(x) i1(x)
+    //   in the inverted interval [8, infinity]
+    //   lim(x->inf){ exp(-x) sqrt(x) i1(x) } = 1/sqrt(2pi)
+    static const T coefficients[] = {
+      7.51729631084210481353E-18,  4.41434832307170791151E-18,
+      -4.65030536848935832153E-17, -3.20952592199342395980E-17,
+      2.96262899764595013876E-16,  3.30820231092092828324E-16,
+      -1.88035477551078244854E-15, -3.81440307243700780478E-15,
+      1.04202769841288027642E-14,  4.27244001671195135429E-14,
+      -2.10154184277266431302E-14, -4.08355111109219731823E-13,
+      -7.19855177624590851209E-13, 2.03562854414708950722E-12,
+      1.41258074366137813316E-11,  3.25260358301548823856E-11,
+      -1.89749581235054123450E-11, -5.58974346219658380687E-10,
+      -3.83538038596423702205E-9,  -2.63146884688951950684E-8,
+      -2.51223623787020892529E-7,  -3.88256480887769039346E-6,
+      -1.10588938762623716291E-4,  -9.76109749136146840777E-3,
+      7.78576235018280120474E-1};
+    const int len = 25;
+    const T out = (::exp(x) * chbevl(T{32.0} / x - T{2.0}, coefficients, len)) / ::sqrt(x);
+    return (_x < T{0.0}) ? -out : out;
+  }
+); // i1_string
+
+// TODO: guard calc_gcd on jiterating by moving all uses of it to the jiterator
+template <typename scalar_t>
+static inline C10_HOST_DEVICE scalar_t calc_gcd(scalar_t a_in, scalar_t b_in) {
+  scalar_t a = ::abs(a_in);
+  scalar_t b = ::abs(b_in);
+  while (a != 0) {
+    scalar_t c = a;
+    a = b % a;
+    b = c;
+  }
+  return b;
 }
+
+#ifndef USE_JITERATOR
+  // calc_i1 is only defined on CUDA if we're not using the jiterator
+  template <typename scalar_t>
+  static inline C10_HOST_DEVICE scalar_t calc_i1(scalar_t _x) {
+    const auto x = ::abs(_x);
+    if (x <= scalar_t{8.0}) {
+      auto coeff_pair = chebyshev_coefficients_i1e_A<scalar_t>();
+      auto A = std::get<0>(coeff_pair);
+      auto len = std::get<1>(coeff_pair);
+      scalar_t y = x / scalar_t{2.0} - scalar_t{2.0};
+      const scalar_t out = ::exp(x) * x * chbevl(y, A, len);
+      return (_x < scalar_t{0.0}) ? -out : out;
+    }
+
+    auto coeff_pair = chebyshev_coefficients_i1e_B<scalar_t>();
+    auto B = std::get<0>(coeff_pair);
+    auto len = std::get<1>(coeff_pair);
+    const scalar_t out = (::exp(x) * chbevl(scalar_t{32.0} / x - scalar_t{2.0}, B, len)) / ::sqrt(x);
+    return (_x < scalar_t{0.0}) ? -out : out;
+  }
+#endif // !USE_JITERATOR
 
 template <typename scalar_t>
 static inline C10_HOST_DEVICE scalar_t calc_i1e(scalar_t _x) {
@@ -367,6 +461,85 @@ static inline C10_HOST_DEVICE scalar_t calc_i1e(scalar_t _x) {
   const scalar_t out = chbevl(scalar_t{32.0} / x - scalar_t{2.0}, B, len) / ::sqrt(x);
   return (_x < scalar_t{0.0}) ? -out : out;
 }
+
+// Stringified version of i0 suitable for jit compilation
+#ifdef USE_JITERATOR
+const auto i0_string = jiterator_stringify(
+  template<typename T>
+  T chbevl(T x, const T array[], size_t len) {
+
+      T b0, b1, b2;
+
+      b0 = array[0];
+      b1 = 0;
+
+      for (size_t i = 1; i < len; ++i)  {
+          b2 = b1;
+          b1 = b0;
+          b0 = x * b1 - b2 + array[i];
+      }
+
+      return 0.5 * (b0 - b2);
+  }
+
+  template<typename T>
+  T i0(T _x) {
+      T x = ::abs(_x);
+
+      if (x <= T{8.0}) {
+          /* Chebyshev coefficients for exp(-x) I0(x)
+          *   in the interval [0,8].
+          *
+          * lim(x->0){ exp(-x) I0(x) } = 1.
+          */
+          static const T A[] = {
+              -4.41534164647933937950E-18, 3.33079451882223809783E-17,
+              -2.43127984654795469359E-16, 1.71539128555513303061E-15,
+              -1.16853328779934516808E-14, 7.67618549860493561688E-14,
+              -4.85644678311192946090E-13, 2.95505266312963983461E-12,
+              -1.72682629144155570723E-11, 9.67580903537323691224E-11,
+              -5.18979560163526290666E-10, 2.65982372468238665035E-9,
+              -1.30002500998624804212E-8,  6.04699502254191894932E-8,
+              -2.67079385394061173391E-7,  1.11738753912010371815E-6,
+              -4.41673835845875056359E-6,  1.64484480707288970893E-5,
+              -5.75419501008210370398E-5,  1.88502885095841655729E-4,
+              -5.76375574538582365885E-4,  1.63947561694133579842E-3,
+              -4.32430999505057594430E-3,  1.05464603945949983183E-2,
+              -2.37374148058994688156E-2,  4.93052842396707084878E-2,
+              -9.49010970480476444210E-2,  1.71620901522208775349E-1,
+              -3.04682672343198398683E-1,  6.76795274409476084995E-1};
+          const auto len = 30;
+
+          T y = (x / T{2.0}) - T{2.0};
+          return ::exp(x) * chbevl(y, A, len);
+      }
+
+      // Handles x > 8 case
+      /* Chebyshev coefficients for exp(-x) sqrt(x) I0(x)
+      * in the inverted interval [8,infinity].
+      *
+      * lim(x->inf){ exp(-x) sqrt(x) I0(x) } = 1/sqrt(2pi).
+      */
+      const T B[] = {
+          -7.23318048787475395456E-18, -4.83050448594418207126E-18,
+          4.46562142029675999901E-17,  3.46122286769746109310E-17,
+          -2.82762398051658348494E-16, -3.42548561967721913462E-16,
+          1.77256013305652638360E-15,  3.81168066935262242075E-15,
+          -9.55484669882830764870E-15, -4.15056934728722208663E-14,
+          1.54008621752140982691E-14,  3.85277838274214270114E-13,
+          7.18012445138366623367E-13,  -1.79417853150680611778E-12,
+          -1.32158118404477131188E-11, -3.14991652796324136454E-11,
+          1.18891471078464383424E-11,  4.94060238822496958910E-10,
+          3.39623202570838634515E-9,   2.26666899049817806459E-8,
+          2.04891858946906374183E-7,   2.89137052083475648297E-6,
+          6.88975834691682398426E-5,   3.36911647825569408990E-3,
+          8.04490411014108831608E-1};
+      const auto len = 25;
+
+      return ::exp(x) * chbevl(T{32.0} / x - T{2.0}, B, len) / ::sqrt(x);
+  }
+); // jiterator_stringify
+#endif // USE_JITERATOR
 
 } // namespace native
 } // namespace at

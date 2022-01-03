@@ -13,6 +13,14 @@
 #include <torch/csrc/jit/passes/utils/optimization_utils.h>
 #include <torch/csrc/jit/tensorexpr/types.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/ones_like.h>
+#include <ATen/ops/zeros_like.h>
+#include <ATen/ops/zeros.h>
+#endif
+
 namespace torch {
 namespace jit {
 
