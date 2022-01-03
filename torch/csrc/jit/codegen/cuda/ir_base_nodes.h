@@ -3,7 +3,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 #include <torch/csrc/jit/codegen/cuda/type.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>

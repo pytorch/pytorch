@@ -133,6 +133,10 @@ class TORCH_API TensorExprKernel {
   void runFast(
       const std::vector<void*>& inputs,
       const std::vector<void*>& outputs);
+  // Expected format of stack:
+  //  ... <outputs> <inputs>
+  // i.e., output IValues must be below the input IValues in the stack.
+  void runWithAllocatedOutputs(Stack& stack);
 
   void fallback(Stack& stack) {
     InterpreterState(code_).run(stack);
@@ -199,6 +203,7 @@ class TORCH_API TensorExprKernel {
 
   std::string getCodeGenName(BackendType backendType);
 
+  void updateOutputSizesAndStrides(const at::ArrayRef<IValue>& inputs);
   std::vector<CodeGen::CallArg> prepareRunArgs(
       const at::ArrayRef<IValue>& inputs,
       std::vector<at::Tensor>& outputs);
@@ -252,6 +257,7 @@ class TORCH_API TensorExprKernel {
       const c10::SymbolicShape& shape);
 
   int64_t nInputs_ = 0;
+  int64_t nOutputs_ = 0;
   std::vector<CodeGen::BufferArg> bufferArgs_;
   std::vector<std::vector<int64_t>> tensorOutputSizes_;
   std::vector<std::vector<int64_t>> tensorOutputStrides_;

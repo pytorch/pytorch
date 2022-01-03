@@ -10,9 +10,6 @@
 #include <functional>
 #include <memory>
 
-// Forward-declares THCState
-struct THCState;
-
 // Forward-declares at::cuda::NVRTC
 namespace at { namespace cuda {
 struct NVRTC;
@@ -73,7 +70,7 @@ struct TORCH_API CUDAHooksInterface {
   virtual ~CUDAHooksInterface() {}
 
   // Initialize THCState and, transitively, the CUDA state
-  virtual std::unique_ptr<THCState, void (*)(THCState*)> initCUDA() const {
+  virtual void initCUDA() const {
     TORCH_CHECK(false, "Cannot initialize CUDA without ATen_cuda library. ", CUDA_HELP);
   }
 
