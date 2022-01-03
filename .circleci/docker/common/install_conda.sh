@@ -108,7 +108,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     scikit-image \
     librosa>=0.6.2 \
     psutil \
-    numba<=0.49.0 \
+    numba<=0.49.1 \
     llvmlite \
     unittest-xml-reporting \
     boto3==1.16.34 \
