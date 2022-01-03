@@ -9886,6 +9886,7 @@ op_db: List[OpInfo] = [
                         DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
                         DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
                         DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+                        DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
                         # FIXME: ldexp does not accept scalar inputs
                         DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_broadcast_python_scalar'),
                     ),
@@ -12937,8 +12938,6 @@ op_db: List[OpInfo] = [
            supports_scripting=False,
            op=torch.Tensor.__getitem__,
            skips=(
-               # ZeroTensors are immutable. Please use the materialized zero tensor obtained using .clone()
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
                # AssertionError: False is not true : Scalars failed to compare as equal! 0 != 104448
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', device_type='cuda')),
            assert_jit_shape_analysis=False,  # TODO: support index.Tensor()
