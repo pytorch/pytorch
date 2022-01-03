@@ -9,8 +9,6 @@
 #include <tuple>
 #include <unordered_set>
 
-#include <THC/THC.h>
-
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/core/DeviceType.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
