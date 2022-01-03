@@ -12,7 +12,7 @@
 #include <unordered_set>
 #include <vector>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 // Uses a compressed index representation for faster comparisons
 typedef c10::SparseBitVector<256> MemoryLocations;
