@@ -3428,10 +3428,10 @@ class TestONNXRuntime(unittest.TestCase):
                 return torch.clamp(x, 0, 1)
 
         x = torch.randn(3, 3)
-        self.run_test(MyClip9(),x)
-        self.run_test(MyClip9(),x.to(torch.int32))
-        if self.opset_version >= 12: # awaiting bugfix in ORT to remove this constraint.
-            self.run_test(MyClip9(),x.to(torch.double))
+        self.run_test(MyClip9(), x)
+        self.run_test(MyClip9(), x.to(torch.int32))
+        if self.opset_version >= 12:  # awaiting bugfix in ORT to remove this constraint.
+            self.run_test(MyClip9(), x.to(torch.double))
 
     @skipIfUnsupportedOpsetVersion([7])
     def test_normalize(self):
