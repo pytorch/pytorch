@@ -1,6 +1,7 @@
 #include <ATen/native/LinearAlgebraUtils.h>
 
 #include <c10/core/ScalarType.h>
+#include <c10/util/Exception.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/TensorUtils.h>
 #include <limits>
@@ -176,6 +177,7 @@ void singleCheckErrors(int64_t info, const char* name, int64_t batch_id) {
     }
   }
 }
+
 
 /*
  * Given a vector of int64_t infos, obtained after a batch operations,
