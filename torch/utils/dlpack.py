@@ -71,8 +71,8 @@ def from_dlpack(ext_tensor: Any) -> torch.Tensor:
         >>> import torch.utils.dlpack
         >>> t = torch.arange(4)
 
-        # Convert a tensor directly (PyTorch >= 1.10)
-        >>> t2 = torch.utils.dlpack.from_dlpack(t)
+        # Convert a tensor directly (supported in PyTorch >= 1.10)
+        >>> t2 = torch.from_dlpack(t)
         >>> t2[:2] = -1  # show that memory is shared
         >>> t2
         tensor([-1, -1,  2,  3])
@@ -83,7 +83,7 @@ def from_dlpack(ext_tensor: Any) -> torch.Tensor:
         >>> capsule = torch.utils.dlpack.to_dlpack(t)
         >>> capsule
         <capsule object "dltensor" at 0x7f6017d14300>
-        >>> t3 = torch.utils.dlpack.from_dlpack(capsule)
+        >>> t3 = torch.from_dlpack(capsule)
         >>> t3
         tensor([-1, -1,  2,  3])
         >>> t3[0] = -9  # now we're sharing memory between 3 tensors
