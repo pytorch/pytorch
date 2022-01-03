@@ -624,6 +624,90 @@ Tensor matrix_rank(const Tensor& self, bool symmetric) {
   return at::linalg_matrix_rank(self, 0.0, c10::nullopt, symmetric);
 }
 
+std::tuple<Tensor&, Tensor&, Tensor&, Tensor&>
+linalg_svd_rank_revealing_out(
+    const Tensor& input,
+    double tol,
+    bool full_matrices,
+    Tensor& U,
+    Tensor& S,
+    Tensor& Vh,
+    Tensor& rank) {
+  return std::tie(U, S, Vh, rank);
+}
+
+std::tuple<Tensor&, Tensor&, Tensor&, Tensor&>
+linalg_svd_rank_revealing_out(
+    const Tensor& input,
+    const Tensor& tol,
+    bool full_matrices,
+    Tensor& U,
+    Tensor& S,
+    Tensor& Vh,
+    Tensor& rank) {
+  return std::tie(U, S, Vh, rank);
+}
+
+std::tuple<Tensor&, Tensor&, Tensor&, Tensor&>
+linalg_svd_rank_revealing_out(
+    const Tensor& input,
+    const c10::optional<Tensor>& atol,
+    const c10::optional<Tensor>& rtol,
+    bool full_matrices,
+    Tensor& U,
+    Tensor& S,
+    Tensor& Vh,
+    Tensor& rank) {
+  return std::tie(U, S, Vh, rank);
+}
+
+std::tuple<Tensor&, Tensor&, Tensor&, Tensor&>
+linalg_svd_rank_revealing_out(
+    const Tensor& input,
+    c10::optional<double> atol,
+    c10::optional<double> rtol,
+    bool full_matrices,
+    Tensor& U,
+    Tensor& S,
+    Tensor& Vh,
+    Tensor& rank) {
+  return std::tie(U, S, Vh, rank);
+}
+
+std::tuple<Tensor, Tensor, Tensor, Tensor>
+linalg_svd_rank_revealing(
+    const Tensor& input,
+    double tol,
+    bool full_matrices) {
+  return std::make_tuple(Tensor(), Tensor(), Tensor(), Tensor());
+}
+
+std::tuple<Tensor, Tensor, Tensor, Tensor>
+linalg_svd_rank_revealing(
+    const Tensor& input,
+    const Tensor& tol,
+    bool full_matrices) {
+  return std::make_tuple(Tensor(), Tensor(), Tensor(), Tensor());
+}
+
+std::tuple<Tensor, Tensor, Tensor, Tensor>
+linalg_svd_rank_revealing(
+    const Tensor& input,
+    c10::optional<double> atol,
+    c10::optional<double> rtol,
+    bool full_matrices) {
+  return std::make_tuple(Tensor(), Tensor(), Tensor(), Tensor());
+}
+
+std::tuple<Tensor, Tensor, Tensor, Tensor>
+linalg_svd_rank_revealing(
+    const Tensor& input,
+    const c10::optional<Tensor>& atol,
+    const c10::optional<Tensor>& rtol,
+    bool full_matrices) {
+  return std::make_tuple(Tensor(), Tensor(), Tensor(), Tensor());
+}
+
 // multi_dot helper functions
 namespace {
 
