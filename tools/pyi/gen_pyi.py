@@ -1,7 +1,6 @@
+import argparse
 import collections
 from pprint import pformat
-
-import argparse
 
 from tools.codegen.model import Variant
 from tools.codegen.api.python import (PythonSignatureGroup,
@@ -10,7 +9,7 @@ from tools.codegen.gen import parse_native_yaml
 from tools.codegen.utils import FileManager
 from typing import Sequence, List, Dict
 
-from ..autograd.gen_python_functions import should_generate_py_binding, load_signatures, group_overloads
+from tools.autograd.gen_python_functions import should_generate_py_binding, load_signatures, group_overloads
 
 """
 This module implements generation of type stubs for PyTorch,

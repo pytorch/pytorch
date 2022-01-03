@@ -6,7 +6,7 @@
 #include <torch/nn/modules/common.h>
 #include <torch/nn/modules/linear.h>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 namespace torch {
 namespace nn {

@@ -8,6 +8,7 @@
 #include <iostream>
 
 #include "c10/core/thread_pool.h"
+#include <c10/util/irange.h>
 #include "caffe2/core/common.h"
 #include "caffe2/core/db.h"
 #include "caffe2/image/transform_gpu.h"
@@ -387,7 +388,7 @@ ImageInputOp<Context>::ImageInputOp(
             << ".";
 
   std::mt19937 meta_randgen(time(nullptr));
-  for (int i = 0; i < num_decode_threads_; ++i) {
+  for (const auto i : c10::irange(num_decode_threads_)) {
     randgen_per_thread_.emplace_back(meta_randgen());
   }
   ReinitializeTensor(
@@ -406,7 +407,7 @@ ImageInputOp<Context>::ImageInputOp(
   // data type for prefetched_label_ is actually not known here..
   ReinitializeTensor(&prefetched_label_, sizes, at::dtype<int>().device(CPU));
 
-  for (int i = 0; i < additional_output_sizes_.size(); ++i) {
+  for (const auto i : c10::irange(additional_output_sizes_.size())) {
     prefetched_additional_outputs_on_device_.emplace_back();
     prefetched_additional_outputs_.emplace_back();
   }
@@ -423,7 +424,7 @@ bool RandomSizedCropping(cv::Mat* img, const int crop, std::mt19937* randgen) {
   std::uniform_real_distribution<> aspect_ratio_dis(3.0 / 4.0, 4.0 / 3.0);
 
   cv::Mat cropping;
-  for (int i = 0; i < 10; ++i) {
+  for (const auto i : c10::irange(10)) {
     int target_area = int(ceil(area_dis(*randgen) * area));
     float aspect_ratio = aspect_ratio_dis(*randgen);
     int nh = floor(std::sqrt(((float)target_area / aspect_ratio)));
@@ -499,12 +500,12 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
       } else {
         // Datum stores things in CHW order, let's do HWC for images to make
         // things more consistent with conventional image storage.
-        for (int c = 0; c < 3; ++c) {
+        for (const auto c : c10::irange(3)) {
           const char* datum_buffer =
               datum.data().data() + datum.height() * datum.width() * c;
           uchar* ptr = src.ptr<uchar>(0) + c;
-          for (int h = 0; h < datum.height(); ++h) {
-            for (int w = 0; w < datum.width(); ++w) {
+          for (const auto h : c10::irange(datum.height())) {
+            for (const auto w : c10::irange(datum.width())) {
               *ptr = *(datum_buffer++);
               ptr += 3;
             }
@@ -522,7 +523,7 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
     vector<TensorProto> additional_output_protos;
     int start = additional_inputs_offset_;
     int end = start + additional_inputs_count_;
-    for (int i = start; i < end; ++i) {
+    for (const auto i : c10::irange(start, end)) {
       additional_output_protos.push_back(protos.protos(i));
     }
 
@@ -588,7 +589,7 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
         float* label_data =
             prefetched_label_.mutable_data<float>() + item_id * num_labels_;
         memset(label_data, 0, sizeof(float) * num_labels_);
-        for (int i = 0; i < label_proto.float_data_size(); ++i) {
+        for (const auto i : c10::irange(label_proto.float_data_size())) {
           label_data[(int)label_proto.float_data(i)] = 1.0;
         }
       } else if (label_type_ == MULTI_LABEL_WEIGHTED_SPARSE) {
@@ -596,7 +597,7 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
         float* label_data =
             prefetched_label_.mutable_data<float>() + item_id * num_labels_;
         memset(label_data, 0, sizeof(float) * num_labels_);
-        for (int i = 0; i < label_proto.float_data_size(); ++i) {
+        for (const auto i : c10::irange(label_proto.float_data_size())) {
           label_data[(int)label_proto.float_data(i)] =
               weight_proto.float_data(i);
         }
@@ -605,7 +606,7 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
         CAFFE_ENFORCE(label_proto.float_data_size() == num_labels_);
         float* label_data =
             prefetched_label_.mutable_data<float>() + item_id * num_labels_;
-        for (int i = 0; i < label_proto.float_data_size(); ++i) {
+        for (const auto i : c10::irange(label_proto.float_data_size())) {
           label_data[i] = label_proto.float_data(i);
         }
       } else {
@@ -620,7 +621,7 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
         int* label_data =
             prefetched_label_.mutable_data<int>() + item_id * num_labels_;
         memset(label_data, 0, sizeof(int) * num_labels_);
-        for (int i = 0; i < label_proto.int32_data_size(); ++i) {
+        for (const auto i : c10::irange(label_proto.int32_data_size())) {
           label_data[label_proto.int32_data(i)] = 1;
         }
       } else if (label_type_ == MULTI_LABEL_WEIGHTED_SPARSE) {
@@ -628,7 +629,7 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
         float* label_data =
             prefetched_label_.mutable_data<float>() + item_id * num_labels_;
         memset(label_data, 0, sizeof(float) * num_labels_);
-        for (int i = 0; i < label_proto.int32_data_size(); ++i) {
+        for (const auto i : c10::irange(label_proto.int32_data_size())) {
           label_data[label_proto.int32_data(i)] = weight_proto.float_data(i);
         }
       } else if (
@@ -636,7 +637,7 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
         CAFFE_ENFORCE(label_proto.int32_data_size() == num_labels_);
         int* label_data =
             prefetched_label_.mutable_data<int>() + item_id * num_labels_;
-        for (int i = 0; i < label_proto.int32_data_size(); ++i) {
+        for (const auto i : c10::irange(label_proto.int32_data_size())) {
           label_data[i] = label_proto.int32_data(i);
         }
       } else {
@@ -646,14 +647,14 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
       LOG(FATAL) << "Unsupported label data type.";
     }
 
-    for (int i = 0; i < additional_output_protos.size(); ++i) {
+    for (const auto i : c10::irange(additional_output_protos.size())) {
       auto additional_output_proto = additional_output_protos[i];
       if (additional_output_proto.data_type() == TensorProto::FLOAT) {
         float* additional_output =
             prefetched_additional_outputs_[i].template mutable_data<float>() +
             item_id * additional_output_proto.float_data_size();
 
-        for (int j = 0; j < additional_output_proto.float_data_size(); ++j) {
+        for (const auto j : c10::irange(additional_output_proto.float_data_size())) {
           additional_output[j] = additional_output_proto.float_data(j);
         }
       } else if (additional_output_proto.data_type() == TensorProto::INT32) {
@@ -661,7 +662,7 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
             prefetched_additional_outputs_[i].template mutable_data<int>() +
             item_id * additional_output_proto.int32_data_size();
 
-        for (int j = 0; j < additional_output_proto.int32_data_size(); ++j) {
+        for (const auto j : c10::irange(additional_output_proto.int32_data_size())) {
           additional_output[j] = additional_output_proto.int32_data(j);
         }
       } else if (additional_output_proto.data_type() == TensorProto::INT64) {
@@ -669,7 +670,7 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
             prefetched_additional_outputs_[i].template mutable_data<int64_t>() +
             item_id * additional_output_proto.int64_data_size();
 
-        for (int j = 0; j < additional_output_proto.int64_data_size(); ++j) {
+        for (const auto j : c10::irange(additional_output_proto.int64_data_size())) {
           additional_output[j] = additional_output_proto.int64_data(j);
         }
       } else if (additional_output_proto.data_type() == TensorProto::UINT8) {
@@ -677,7 +678,7 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
             prefetched_additional_outputs_[i].template mutable_data<uint8_t>() +
             item_id * additional_output_proto.int32_data_size();
 
-        for (int j = 0; j < additional_output_proto.int32_data_size(); ++j) {
+        for (const auto j : c10::irange(additional_output_proto.int32_data_size())) {
           additional_output[j] =
               static_cast<uint8_t>(additional_output_proto.int32_data(j));
         }
@@ -799,11 +800,11 @@ void Saturation(
       std::uniform_real_distribution<float>(-alpha_rand, alpha_rand)(*randgen);
   // BGR to Gray scale image: R -> 0.299, G -> 0.587, B -> 0.114
   int p = 0;
-  for (int h = 0; h < img_size; ++h) {
-    for (int w = 0; w < img_size; ++w) {
+  for (const auto h : c10::irange(img_size)) {
+    for (const auto w : c10::irange(img_size)) {
       float gray_color = img[3 * p] * 0.114f + img[3 * p + 1] * 0.587f +
           img[3 * p + 2] * 0.299f;
-      for (int c = 0; c < 3; ++c) {
+      for (const auto c : c10::irange(3)) {
         img[3 * p + c] = img[3 * p + c] * alpha + gray_color * (1.0f - alpha);
       }
       p++;
@@ -821,9 +822,9 @@ void Brightness(
   float alpha = 1.0f +
       std::uniform_real_distribution<float>(-alpha_rand, alpha_rand)(*randgen);
   int p = 0;
-  for (int h = 0; h < img_size; ++h) {
-    for (int w = 0; w < img_size; ++w) {
-      for (int c = 0; c < 3; ++c) {
+  for (const auto h : c10::irange(img_size)) {
+    for (const auto w : c10::irange(img_size)) {
+      for (const auto c : c10::irange(3)) {
         img[p++] *= alpha;
       }
     }
@@ -839,8 +840,8 @@ void Contrast(
     std::mt19937* randgen) {
   float gray_mean = 0;
   int p = 0;
-  for (int h = 0; h < img_size; ++h) {
-    for (int w = 0; w < img_size; ++w) {
+  for (const auto h : c10::irange(img_size)) {
+    for (const auto w : c10::irange(img_size)) {
       // BGR to Gray scale image: R -> 0.299, G -> 0.587, B -> 0.114
       gray_mean += img[3 * p] * 0.114f + img[3 * p + 1] * 0.587f +
           img[3 * p + 2] * 0.299f;
@@ -852,9 +853,9 @@ void Contrast(
   float alpha = 1.0f +
       std::uniform_real_distribution<float>(-alpha_rand, alpha_rand)(*randgen);
   p = 0;
-  for (int h = 0; h < img_size; ++h) {
-    for (int w = 0; w < img_size; ++w) {
-      for (int c = 0; c < 3; ++c) {
+  for (const auto h : c10::irange(img_size)) {
+    for (const auto w : c10::irange(img_size)) {
+      for (const auto c : c10::irange(3)) {
         img[p] = img[p] * alpha + gray_mean * (1.0f - alpha);
         p++;
       }
@@ -880,7 +881,7 @@ void ColorJitter(
       jitter_order.end(),
       std::default_random_engine(seed));
 
-  for (int i = 0; i < 3; ++i) {
+  for (const auto i : c10::irange(3)) {
     if (jitter_order[i] == 0) {
       Saturation<Context>(img, img_size, saturation, randgen);
     } else if (jitter_order[i] == 1) {
@@ -902,21 +903,21 @@ void ColorLighting(
     std::mt19937* randgen) {
   std::normal_distribution<float> d(0, alpha_std);
   std::vector<float> alphas(3);
-  for (int i = 0; i < 3; ++i) {
+  for (const auto i : c10::irange(3)) {
     alphas[i] = d(*randgen);
   }
 
   std::vector<float> delta_rgb(3, 0.0);
-  for (int i = 0; i < 3; ++i) {
-    for (int j = 0; j < 3; ++j) {
+  for (const auto i : c10::irange(3)) {
+    for (const auto j : c10::irange(3)) {
       delta_rgb[i] += eigvecs[i][j] * eigvals[j] * alphas[j];
     }
   }
 
   int p = 0;
-  for (int h = 0; h < img_size; ++h) {
-    for (int w = 0; w < img_size; ++w) {
-      for (int c = 0; c < 3; ++c) {
+  for (const auto h : c10::irange(img_size)) {
+    for (const auto w : c10::irange(img_size)) {
+      for (const auto c : c10::irange(3)) {
         img[p++] += delta_rgb[2 - c];
       }
     }
@@ -933,9 +934,9 @@ void ColorNormalization(
     const std::vector<float>& mean,
     const std::vector<float>& std) {
   int p = 0;
-  for (int h = 0; h < img_size; ++h) {
-    for (int w = 0; w < img_size; ++w) {
-      for (int c = 0; c < channels; ++c) {
+  for (const auto h : c10::irange(img_size)) {
+    for (const auto w : c10::irange(img_size)) {
+      for (const auto c : c10::irange(channels)) {
         img[p] = (img[p] - mean[c]) * std[c];
         p++;
       }
@@ -987,7 +988,7 @@ void TransformImage(
     for (int h = height_offset; h < height_offset + crop; ++h) {
       for (int w = width_offset + crop - 1; w >= width_offset; --w) {
         const uint8_t* cv_data = scaled_img.ptr(h) + w * channels;
-        for (int c = 0; c < channels; ++c) {
+        for (const auto c : c10::irange(channels)) {
           *(image_data_ptr++) = static_cast<float>(cv_data[c]);
         }
       }
@@ -997,7 +998,7 @@ void TransformImage(
     for (int h = height_offset; h < height_offset + crop; ++h) {
       for (int w = width_offset; w < width_offset + crop; ++w) {
         const uint8_t* cv_data = scaled_img.ptr(h) + w * channels;
-        for (int c = 0; c < channels; ++c) {
+        for (const auto c : c10::irange(channels)) {
           *(image_data_ptr++) = static_cast<float>(cv_data[c]);
         }
       }
@@ -1057,7 +1058,7 @@ void CropTransposeImage(
     for (int h = height_offset; h < height_offset + crop; ++h) {
       for (int w = width_offset + crop - 1; w >= width_offset; --w) {
         const uint8_t* cv_data = scaled_img.ptr(h) + w * channels;
-        for (int c = 0; c < channels; ++c) {
+        for (const auto c : c10::irange(channels)) {
           *(cropped_data++) = cv_data[c];
         }
       }
@@ -1067,7 +1068,7 @@ void CropTransposeImage(
     for (int h = height_offset; h < height_offset + crop; ++h) {
       for (int w = width_offset; w < width_offset + crop; ++w) {
         const uint8_t* cv_data = scaled_img.ptr(h) + w * channels;
-        for (int c = 0; c < channels; ++c) {
+        for (const auto c : c10::irange(channels)) {
           *(cropped_data++) = cv_data[c];
         }
       }
@@ -1166,7 +1167,7 @@ bool ImageInputOp<Context>::Prefetch() {
   prefetched_label_.mutable_data<int>();
   // Prefetching handled with a thread pool of "decode_threads" threads.
 
-  for (int item_id = 0; item_id < batch_size_; ++item_id) {
+  for (const auto item_id : c10::irange(batch_size_)) {
     std::string key, value;
     cv::Mat img;
 
@@ -1189,7 +1190,7 @@ bool ImageInputOp<Context>::Prefetch() {
           LOG(FATAL) << "Unsupported label type.";
         }
 
-        for (int i = 0; i < additional_inputs_count_; ++i) {
+        for (const auto i : c10::irange(additional_inputs_count_)) {
           int index = additional_inputs_offset_ + i;
           TensorProto additional_output_proto = protos.protos(index);
           auto sizes =
@@ -1264,7 +1265,7 @@ bool ImageInputOp<Context>::Prefetch() {
     ReinitializeAndCopyFrom(
         &prefetched_label_on_device_, device, prefetched_label_);
 
-    for (int i = 0; i < prefetched_additional_outputs_on_device_.size(); ++i) {
+    for (const auto i : c10::irange(prefetched_additional_outputs_on_device_.size())) {
       ReinitializeAndCopyFrom(
           &prefetched_additional_outputs_on_device_[i],
           device,
@@ -1290,7 +1291,7 @@ bool ImageInputOp<Context>::CopyPrefetched() {
     OperatorBase::OutputTensorCopyFrom(
         1, options, prefetched_label_, /* async */ true);
 
-    for (int i = 2; i < OutputSize(); ++i) {
+    for (const auto i : c10::irange(2, OutputSize())) {
       OperatorBase::OutputTensorCopyFrom(
           i, options, prefetched_additional_outputs_[i - 2], /* async */ true);
     }
@@ -1331,7 +1332,7 @@ bool ImageInputOp<Context>::CopyPrefetched() {
     OperatorBase::OutputTensorCopyFrom(
         1, type, prefetched_label_on_device_, /* async */ true);
 
-    for (int i = 2; i < OutputSize(); ++i) {
+    for (const auto i : c10::irange(2, OutputSize())) {
       OperatorBase::OutputTensorCopyFrom(
           i,
           type,
