@@ -7,7 +7,6 @@
 #include <vector>
 
 #include <c10/macros/Macros.h>
-#include <ATen/ATen.h>
 #include <ATen/record_function.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/frontend/source_range.h>
