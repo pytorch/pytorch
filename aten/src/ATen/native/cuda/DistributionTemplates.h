@@ -617,20 +617,28 @@ void bernoulli_tensor_cuda_kernel(
 }
 
 template<typename RNG>
-void bernoulli_kernel(const TensorBase &self, const TensorBase &p, RNG gen) {
+void bernoulli_kernel(const TensorBase &self, const TensorBase &p_, RNG gen) {
   PhiloxCudaState rng_engine_inputs;
   {
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(gen->mutex_);
     rng_engine_inputs = gen->philox_cuda_state(10);
   }
+  TORCH_CHECK(at::isFloatingType(p_.scalar_type()), "expected probabilities tensor to have floating type, got ", p_.scalar_type());
+  // cast probabilities tensor to double for double `self` tensor, and to `float` for everything else
+  TensorBase p;
+  if (self.dtype() == at::kDouble) {
+    p = p_.to(at::kDouble);
+  } else {
+    p = p_.to(at::kFloat);
+  }
   AT_DISPATCH_ALL_TYPES_AND3(
     at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool, self.scalar_type(), "bernoulli_tensor_cuda_self_", [&] {
-      using self_t = scalar_t;
-      AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, p.scalar_type(), "bernoulli_tensor_cuda_p_", [&] {
-        using p_t = scalar_t;
-        return bernoulli_tensor_cuda_kernel<self_t, p_t>(self, p, rng_engine_inputs);
-      });
+      if (std::is_same<scalar_t, double>::value) {
+        return bernoulli_tensor_cuda_kernel<double, double>(self, p, rng_engine_inputs);
+      } else {
+        return bernoulli_tensor_cuda_kernel<scalar_t, float>(self, p, rng_engine_inputs);
+      }
    });
 }
 
