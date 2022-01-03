@@ -7558,12 +7558,28 @@ def sample_inputs_poisson_nll_loss(op_info, device, dtype, requires_grad, **kwar
         for s, r in _generate_sample_shape_reduction():
             for li in (True, False):
                 for f in (True, False):
+                    i1 = _make_tensor(s)
+                    i2 = _make_tensor(s)
+                    # For Poisson NLL Loss,
+                    # target is assumed to be from
+                    # Poisson Distribution which
+                    # always has positive samples
+                    t1 = _make_tensor(s, low=0)
+                    t2 = _make_tensor(s, low=0)
+
+                    with torch.no_grad():
+                        if not li:
+                            i1.abs_()
+                            i2.abs_()
+                        t1.abs_()
+                        t2.abs_()
+
                     yield (
-                        _make_tensor(s), _make_tensor(s),
+                        i1, t1,
                         dict(log_input=li, full=f, reduction=r)
                     )
                     yield (
-                        _make_tensor(s), _make_tensor(s),
+                        i2, t2,
                         dict(log_input=li, full=f,
                              eps=random.uniform(1e-8, 1e-3),
                              reduction=r)
@@ -10115,11 +10131,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_masked_select,
-           skips=(
-               # 69855: RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
-           )),
+           sample_inputs_func=sample_inputs_masked_select),
     OpInfo('matrix_exp',
            dtypes=floating_and_complex_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
@@ -10169,14 +10181,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_max_min_reduction_no_dim,
-           skips=(
-               # 69855: RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
-               # (ROCm) unexpected success
-               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_fwgrad_bwgrad',
-                            device_type='cuda', dtypes=[torch.float64], active_if=TEST_WITH_ROCM),
-           )),
+           sample_inputs_func=sample_inputs_max_min_reduction_no_dim),
     OpInfo('median',
            dtypes=all_types_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.float16),
@@ -10184,14 +10189,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=partial(sample_inputs_reduction, supports_multiple_dims=False),
-           skips=(
-               # 69855: RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
-               # (ROCm) unexpected success
-               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_fwgrad_bwgrad',
-                            device_type='cuda', dtypes=[torch.float64], active_if=TEST_WITH_ROCM),
-           )),
+           sample_inputs_func=partial(sample_inputs_reduction, supports_multiple_dims=False)),
     OpInfo('nanmedian',
            dtypes=all_types_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.float16),
@@ -10199,14 +10197,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=partial(sample_inputs_reduction, supports_multiple_dims=False),
-           skips=(
-               # 69855: RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
-               # (ROCm) unexpected success
-               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_fwgrad_bwgrad',
-                            device_type='cuda', dtypes=[torch.float64], active_if=TEST_WITH_ROCM),
-           )),
+           sample_inputs_func=partial(sample_inputs_reduction, supports_multiple_dims=False)),
     OpInfo('var_mean',
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
@@ -10306,14 +10297,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_max_min_reduction_no_dim,
-           skips=(
-               # 69855: RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
-               # (ROCm) unexpected success
-               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_fwgrad_bwgrad',
-                            device_type='cuda', dtypes=[torch.float64], active_if=TEST_WITH_ROCM),
-           )),
+           sample_inputs_func=sample_inputs_max_min_reduction_no_dim),
     OpInfo('quantile',
            dtypes=floating_types(),
            sample_inputs_func=sample_inputs_reduction_quantile,
@@ -10621,13 +10605,6 @@ op_db: List[OpInfo] = [
            check_inplace_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_as_strided,
            skips=(
-               # 69855: RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
-               # FIXME: AssertionError: False is not true : Tensors failed to compare as equal!
-               # With rtol=1e-07 and atol=1e-07, found 1 element(s) (out of 1) whose difference(s)
-               # exceeded the margin of error (including 0 nan comparisons). The greatest difference
-               # was 1.0 (1.0 vs. -0.0), which occurred at index 0.
-               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
                # AssertionError: False is not true : Tensors failed to compare as equal!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples'),
                # AssertionError: False is not true : Scalars failed to compare as equal!
@@ -10642,6 +10619,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_cosine_similarity),
     OpInfo('nn.functional.adaptive_avg_pool1d',
            dtypes=floating_types(),
+           dtypesIfCPU=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
@@ -10650,6 +10628,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_adaptive_avg_pool1d),
     OpInfo('nn.functional.adaptive_avg_pool2d',
            dtypes=floating_types(),
+           dtypesIfCPU=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            decorators=(
                # RuntimeError:
@@ -10692,6 +10671,10 @@ op_db: List[OpInfo] = [
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            supports_out=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           # got: Batching rule not implemented for aten::flatten.using_ints
+           check_batched_forward_grad=False,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=sample_inputs_adaptive_max_pool1d),
     OpInfo('nn.functional.adaptive_max_pool2d',
@@ -10709,6 +10692,10 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
            ),
            supports_out=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           # got: Batching rule not implemented for aten::flatten.using_ints
+           check_batched_forward_grad=False,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=sample_inputs_adaptive_max_pool2d),
     OpInfo('nn.functional.adaptive_max_pool3d',
@@ -10728,6 +10715,10 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
            ),
            supports_out=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           # got: Batching rule not implemented for aten::flatten.using_ints
+           check_batched_forward_grad=False,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=sample_inputs_adaptive_max_pool3d),
     OpInfo('nn.functional.avg_pool1d',
@@ -11118,49 +11109,54 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.fractional_max_pool2d',
            supports_autograd=True,
            supports_out=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           op=lambda input, *args, **kwargs:
+               wrapper_set_seed(torch.nn.functional.fractional_max_pool2d, input, *args, **kwargs),
+           # vmap does not support random operations
+           check_batched_forward_grad=False,
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16),
            test_neg_view=False,
            sample_inputs_func=sample_inputs_fractional_max_pool2d,
-           decorators=[
-               # FIXME: both derivatives are implemented incorrectly
-               # https://github.com/pytorch/pytorch/issues/69322
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_grad'),
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_gradgrad'),
-               # FIXME: produces incorrect output on non-contiguous inputs
-               # https://github.com/pytorch/pytorch/issues/69325
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples'),
+           decorators=(
                # FIXME: AssertionError: False is not true : Tensors failed to compare as equal!
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                # RuntimeError: input->type()->kind() == TypeKind::OptionalType
                # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-           ], ),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'))),
     OpInfo('nn.functional.fractional_max_pool3d',
            supports_autograd=True,
            supports_out=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           op=lambda input, *args, **kwargs:
+               wrapper_set_seed(torch.nn.functional.fractional_max_pool3d, input, *args, **kwargs),
+           # vmap does not support random operations
+           check_batched_forward_grad=False,
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16),
            test_neg_view=False,
            sample_inputs_func=sample_inputs_fractional_max_pool3d,
-           decorators=[
+           decorators=(
                # FIXME: both derivatives are implemented incorrectly
                # https://github.com/pytorch/pytorch/issues/69322
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_grad'),
+               # RuntimeError: cannot reshape tensor of 0 elements into shape [0, 1, -1] because the
+               # unspecified dimension size -1 can be any value and is ambiguous
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_gradgrad'),
-               # FIXME: produces incorrect output on non-contiguous inputs
-               # https://github.com/pytorch/pytorch/issues/69325
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples'),
                # FIXME: AssertionError: False is not true : Tensors failed to compare as equal!
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                # RuntimeError: input->type()->kind() == TypeKind::OptionalType
                # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-           ], ),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),)),
     OpInfo('nn.functional.max_pool1d',
            aten_name='max_pool1d',
            supports_autograd=True,
            supports_out=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           # got: Batching rule not implemented for aten::flatten.using_ints
+           check_batched_forward_grad=False,
            # TODO: add shape checks
            assert_jit_shape_analysis=False,
            dtypes=floating_types(),
@@ -11176,6 +11172,10 @@ op_db: List[OpInfo] = [
            # Vmap is not happy with non-contiguous (channels_last) inputs
            check_batched_gradgrad=False,
            supports_out=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           # got: Batching rule not implemented for aten::flatten.using_ints
+           check_batched_forward_grad=False,
            assert_jit_shape_analysis=True,
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
@@ -11184,6 +11184,10 @@ op_db: List[OpInfo] = [
            aten_name='max_pool3d',
            supports_autograd=True,
            supports_out=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           # got: Batching rule not implemented for aten::flatten.using_ints
+           check_batched_forward_grad=False,
            # TODO: add shape checks
            assert_jit_shape_analysis=False,
            dtypes=floating_types(),
@@ -12974,11 +12978,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
-           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-           skips=(
-               # 69855: RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
-           )),
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     OpInfo('index_add',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            # An `out=` variant exists but is not exposed to the Python API
@@ -13312,6 +13312,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view'),
                # Empty tensor data is garbage so it's hard to make comparisons with it.
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
+               # Empty tensor data is garbage so it's hard to make comparisons with it.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_conj_view'),
                # Can't find schemas for this operator for some reason
                DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
            )),
@@ -13415,6 +13417,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view'),
                # Empty tensor data is garbage so it's hard to make comparisons with it.
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
+               # Empty tensor data is garbage so it's hard to make comparisons with it.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_conj_view'),
                # Can't find schemas for this operator for some reason
                DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
            ),
@@ -13880,11 +13884,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_trace,
-           skips=(
-               # 69855: RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
-           )),
+           sample_inputs_func=sample_inputs_trace),
     OpInfo('transpose',
            aliases=('swapdims', 'swapaxes'),
            assert_jit_shape_analysis=True,
@@ -15109,34 +15109,6 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_poisson_nll_loss,
-        skips=(
-            # https://github.com/pytorch/pytorch/issues/67461
-            # torch.autograd.gradcheck.GradcheckError: Jacobian mismatch for output 0 with respect to input 0
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestGradients",
-                "test_fn_grad",
-                dtypes=(torch.float64,),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestGradients",
-                "test_fn_gradgrad",
-                dtypes=(torch.float64,),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestGradients",
-                "test_forward_mode_AD",
-                dtypes=(torch.float64,),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestGradients",
-                "test_fn_fwgrad_bwgrad",
-                dtypes=(torch.float64,),
-            ),
-        ),
     ),
     OpInfo(
         "argsort",
@@ -15162,8 +15134,6 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         skips=(
-            # 69855: RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
-            DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 "TestJit",
