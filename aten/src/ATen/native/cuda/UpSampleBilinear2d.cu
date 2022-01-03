@@ -463,7 +463,7 @@ static void upsample_bilinear2d_backward_out_cuda_template(
 template <typename scalar_t, typename accscalar_t, int interp_size>
 C10_LAUNCH_BOUNDS_1(1024)
 __global__ void upsample_gen2d_aa_out_frame(
-    const int n,
+    const int num_elements,
     const accscalar_t rheight,
     const accscalar_t rwidth,
     const bool align_corners,
@@ -478,75 +478,188 @@ __global__ void upsample_gen2d_aa_out_frame(
   const int height2 = odata.size(2);
   const int width2 = odata.size(3);
 
-  if (index < n) {
-    const int w2 = index % width2; // 0:width2-1
-    const int h2 = index / width2; // 0:height2-1
+  if (index >= num_elements) {
+    return;
+  }
 
-    const accscalar_t support_h = static_cast<accscalar_t>(
-        (rheight >= 1.0) ? (interp_size * 0.5) * rheight : interp_size * 0.5);
-    const accscalar_t support_w = static_cast<accscalar_t>(
-        (rwidth >= 1.0) ? (interp_size * 0.5) * rwidth : interp_size * 0.5);
+  const int w2 = index % width2; // 0:width2-1
+  const int h2 = index / width2; // 0:height2-1
 
-    const int interp_height = (int)ceilf(support_h) * 2 + 1;
-    const int interp_width = (int)ceilf(support_w) * 2 + 1;
+  const accscalar_t support_h = static_cast<accscalar_t>(
+      (rheight >= 1.0) ? (interp_size * 0.5) * rheight : interp_size * 0.5);
+  const accscalar_t support_w = static_cast<accscalar_t>(
+      (rwidth >= 1.0) ? (interp_size * 0.5) * rwidth : interp_size * 0.5);
 
-    // Setup local buffers
-    // TODO: maybe we can specify dynamic shared memory size before calling the
-    // cuda code, however we should then ensure that device has enough shared
-    // memory
-    scalar_t wx[256];
-    scalar_t wy[256];
-    scalar_t buffer1[256];
-    scalar_t buffer2[256];
+  const int interp_height = (int)ceilf(support_h) * 2 + 1;
+  const int interp_width = (int)ceilf(support_w) * 2 + 1;
 
-    // Compute weights
-    int64_t xmin, xsize, ymin, ysize;
-    typedef scalar_t (*aa_filter_fn_t)(scalar_t);
-    aa_filter_fn_t filter_fn;
-    if (interp_size == 2) {
-      filter_fn = upsample_antialias::bilinear_filter;
-    } else {
-      filter_fn = upsample_antialias::bicubic_filter;
+  // Setup temporary buffers using shared memory
+  // extern __shared__ int smem[];
+  // scalar_t *wx = reinterpret_cast<scalar_t*>(smem);
+  // scalar_t *wy = reinterpret_cast<scalar_t*>(smem);
+  // scalar_t *buffer1 = reinterpret_cast<scalar_t*>(smem);
+  // scalar_t *buffer2 = reinterpret_cast<scalar_t*>(smem);
+  // // split wx, wy, buffer1, buffer2 and assign to each thread
+  // const int offset = (interp_width + interp_height) * 2;
+  // wx = &wx[threadIdx.x * offset];
+  // wy = &wy[interp_width + threadIdx.x * offset];
+  // buffer1 = &buffer1[interp_width + interp_height + threadIdx.x * offset];
+  // buffer2 = &buffer2[interp_width + interp_height + interp_width + threadIdx.x * offset];
+  scalar_t wx[256];
+  scalar_t wy[256];
+  scalar_t buffer1[256];
+  scalar_t buffer2[256];
+
+  // Compute weights
+  int xmin, xsize, ymin, ysize;
+  typedef scalar_t (*aa_filter_fn_t)(scalar_t);
+  aa_filter_fn_t filter_fn;
+  if (interp_size == 2) {
+    filter_fn = upsample_antialias::bilinear_filter;
+  } else {
+    filter_fn = upsample_antialias::bicubic_filter;
+  }
+
+  upsample_antialias::_compute_weights(
+      w2,
+      width1,
+      rwidth,
+      support_w,
+      wx,
+      interp_width,
+      filter_fn,
+      xmin,
+      xsize);
+  upsample_antialias::_compute_weights(
+      h2,
+      height1,
+      rheight,
+      support_h,
+      wy,
+      interp_height,
+      filter_fn,
+      ymin,
+      ysize);
+
+  for (int n = 0; n < batchsize; n++) {
+    for (int c = 0; c < channels; c++) {
+      // interpolate on y-axis for ymin to ymin + ysize
+      for (int y = 0; y < ysize; y++) {
+        // copy data into the local buffer and use
+        // interpolate_aa_single_dim method
+        for (int x = 0; x < xsize; x++) {
+          buffer1[x] = idata[n][c][ymin + y][xmin + x];
+        }
+
+        buffer2[y] = static_cast<scalar_t>(
+            upsample_antialias::interpolate_aa_single_dim<scalar_t, accscalar_t>(
+                buffer1, wx, xsize));
+      }
+      odata[n][c][h2][w2] = static_cast<scalar_t>(
+          upsample_antialias::interpolate_aa_single_dim<scalar_t, accscalar_t>(
+              buffer2, wy, ysize));
     }
+  }
+}
 
-    upsample_antialias::_compute_weights(
-        w2,
-        width1,
-        rwidth,
-        support_w,
-        wx,
-        interp_width,
-        filter_fn,
-        xmin,
-        xsize);
-    upsample_antialias::_compute_weights(
-        h2,
-        height1,
-        rheight,
-        support_h,
-        wy,
-        interp_height,
-        filter_fn,
-        ymin,
-        ysize);
+// Code for upsampling with antialias
+template <typename scalar_t, typename accscalar_t, int interp_size>
+C10_LAUNCH_BOUNDS_1(1024)
+__global__ void upsample_gen2d_aa_backward_out_frame(
+    const int num_elements,
+    const accscalar_t height_scale,
+    const accscalar_t width_scale,
+    const bool align_corners,
+    PackedTensorAccessor64<scalar_t, 4> idata,
+    const PackedTensorAccessor64<scalar_t, 4> odata) {
+  int index = threadIdx.x + blockIdx.x * blockDim.x;
 
+  const int batchsize = idata.size(0);
+  const int channels = idata.size(1);
+  const int input_height = idata.size(2);
+  const int input_width = idata.size(3);
+  const int output_height = odata.size(2);
+  const int output_width = odata.size(3);
+
+  if (index >= num_elements) {
+    return;
+  }
+
+  const int output_x = index % output_width;
+  const int output_y = index / output_width;
+  // special case: output just copy
+  if (input_height == output_height && input_width == output_width) {
     for (int n = 0; n < batchsize; n++) {
       for (int c = 0; c < channels; ++c) {
-        // interpolate on x-axis for ymin to ymin + ysize
-        for (int64_t y = 0; y < ysize; y++) {
-          // copy data into the local buffer and use
-          // interpolate_aa_single_dim method
-          for (int x = 0; x < xsize; x++) {
-            buffer1[x] = idata[n][c][ymin + y][xmin + x];
-          }
+        const scalar_t val = odata[n][c][output_y][output_x];
+        idata[n][c][output_y][output_x] = val;
+      }
+    }
+    return;
+  }
 
-          buffer2[y] = static_cast<scalar_t>(
-              upsample_antialias::interpolate_aa_single_dim<scalar_t, accscalar_t>(
-                  buffer1, wx, xsize));
+  const accscalar_t support_h = static_cast<accscalar_t>(
+      (height_scale >= 1.0) ? (interp_size * 0.5) * height_scale
+                            : interp_size * 0.5);
+  const accscalar_t support_w = static_cast<accscalar_t>(
+      (width_scale >= 1.0) ? (interp_size * 0.5) * width_scale
+                           : interp_size * 0.5);
+
+  const int interp_height = (int)ceilf(support_h) * 2 + 1;
+  const int interp_width = (int)ceilf(support_w) * 2 + 1;
+
+  // Setup local buffers
+  // TODO: maybe we can specify dynamic shared memory size before calling the
+  // cuda code, however we should then ensure that device has enough shared
+  // memory
+  scalar_t wx[256];
+  scalar_t wy[256];
+
+  // Compute weights
+  int xmin, xsize, ymin, ysize;
+  typedef scalar_t (*aa_filter_fn_t)(scalar_t);
+  aa_filter_fn_t filter_fn;
+  if (interp_size == 2) {
+    filter_fn = upsample_antialias::bilinear_filter;
+  } else if (interp_size == 4) {
+    filter_fn = upsample_antialias::bicubic_filter;
+  }
+  upsample_antialias::_compute_weights(
+      output_x,
+      input_width,
+      width_scale,
+      support_w,
+      wx,
+      interp_width,
+      filter_fn,
+      xmin,
+      xsize);
+  upsample_antialias::_compute_weights(
+      output_y,
+      input_height,
+      height_scale,
+      support_h,
+      wy,
+      interp_height,
+      filter_fn,
+      ymin,
+      ysize);
+
+  for (int n = 0; n < batchsize; n++) {
+    for (int c = 0; c < channels; ++c) {
+      scalar_t out_value = odata[n][c][output_y][output_x];
+      for (int y = 0; y < ysize; y++) {
+        for (int x = 0; x < xsize; x++) {
+          upsample_increment_value_bounded<scalar_t, accscalar_t>(
+              idata,
+              n,
+              c,
+              input_height,
+              input_width,
+              ymin + y,
+              xmin + x,
+              wx[x] * wy[y] * out_value);
         }
-        odata[n][c][h2][w2] = static_cast<scalar_t>(
-            upsample_antialias::interpolate_aa_single_dim<scalar_t, accscalar_t>(
-                buffer2, wy, ysize));
       }
     }
   }
@@ -588,6 +701,71 @@ static void upsample_gen2d_aa_out_cuda_template(
         const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
             input_width, output_width, align_corners, scales_w);
 
+        // We are using local buffer memory of 256 * sizeof(float) per thread
+        // to store weights
+        TORCH_CHECK(
+            rheight < (255 / interp_size),
+            "Max supported scale factor is 127 (bilinear), 63 (bicubic)");
+        TORCH_CHECK(
+            rwidth < (255 / interp_size),
+            "Max supported scale factor is 127 (bilinear), 63 (bicubic)");
+
+        upsample_gen2d_aa_out_frame<scalar_t, accscalar_t, interp_size>
+            <<<ceil_div(num_kernels, num_threads),
+               num_threads,
+               0,
+               stream>>>(
+                num_kernels, rheight, rwidth, align_corners, idata, odata);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+      });
+}
+
+template <int interp_size>
+static void upsample_gen2d_aa_backward_out_cuda_template(
+    const Tensor& grad_input,
+    const Tensor& grad_output_,
+    IntArrayRef output_size,
+    IntArrayRef input_size,
+    bool align_corners,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
+
+  // Copied and adapted from
+  // UpSampleBicubic2d.cu::upsample_bicubic2d_backward_out_cuda_template
+  TensorArg grad_input_arg{grad_input, "grad_input", 1},
+      grad_output_arg{grad_output_, "grad_output_", 2};
+  checkAllSameGPU(
+      "upsample_gen2d_backward_out_cuda", {grad_output_arg, grad_input_arg});
+
+  int output_height = output_size[0];
+  int output_width = output_size[1];
+
+  int nbatch = input_size[0];
+  int channels = input_size[1];
+  int input_height = input_size[2];
+  int input_width = input_size[3];
+
+  Tensor grad_output = grad_output_.contiguous();
+
+  grad_input.zero_();
+
+  const int num_kernels = output_height * output_width;
+  const int num_threads = std::min(
+      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+      grad_output.scalar_type(), "upsample_gen2d_backward_out_frame", [&] {
+        using accscalar_t = at::acc_type<scalar_t, true>;
+
+        auto idata = grad_input.packed_accessor64<scalar_t, 4>();
+        auto odata = grad_output.packed_accessor64<scalar_t, 4>();
+
+        const accscalar_t rheight = area_pixel_compute_scale<accscalar_t>(
+            input_height, output_height, align_corners, scales_h);
+        const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
+            input_width, output_width, align_corners, scales_w);
+
         // We are using static buffer memory of 256 * sizeof(float) per thread
         // to store weights. Size of weights array is
         // interp_size = scale * 2 + 1 for bilinear mode
@@ -598,7 +776,7 @@ static void upsample_gen2d_aa_out_cuda_template(
             rwidth < (255 / interp_size),
             "Max supported scale factor is 127 (bilinear), 63 (bicubic)");
 
-        upsample_gen2d_aa_out_frame<scalar_t, accscalar_t, interp_size>
+        upsample_gen2d_aa_backward_out_frame<scalar_t, accscalar_t, interp_size>
             <<<ceil_div(num_kernels, num_threads),
                num_threads,
                0,
@@ -656,36 +834,36 @@ TORCH_IMPL_FUNC(_upsample_bilinear2d_aa_backward_out_cuda) (
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("upsample_bilinear2d_aa_backward_out_cuda");
-  // upsample_bilinear2d_backward_out_cuda_template(
-  //     grad_input, grad_output, output_size, input_size, align_corners, scales_h, scales_w);
+  upsample_gen2d_aa_backward_out_cuda_template<2>(
+      grad_input, grad_output, output_size, input_size, align_corners, scales_h, scales_w);
 }
 
-// // We define bicubic anti-alias function implementations in this file instead of
-// // UpSampleBicubic2d.cu as we are using a single generic implementation
-// TORCH_IMPL_FUNC(_upsample_bicubic2d_aa_out_cuda) (
-//     const Tensor& input,
-//     IntArrayRef output_size,
-//     bool align_corners,
-//     c10::optional<double> scales_h,
-//     c10::optional<double> scales_w,
-//     const Tensor& output) {
-//   upsample_gen2d_aa_out_cuda_template<4>(output, input, output_size, align_corners, scales_h, scales_w);
-// }
+// We define bicubic anti-alias function implementations in this file instead of
+// UpSampleBicubic2d.cu as we are using a single generic implementation
+TORCH_IMPL_FUNC(_upsample_bicubic2d_aa_out_cuda) (
+    const Tensor& input,
+    IntArrayRef output_size,
+    bool align_corners,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w,
+    const Tensor& output) {
+  upsample_gen2d_aa_out_cuda_template<4>(output, input, output_size, align_corners, scales_h, scales_w);
+}
 
-// TORCH_IMPL_FUNC(_upsample_bicubic2d_aa_backward_out_cuda) (
-//     const Tensor& grad_output,
-//     IntArrayRef output_size,
-//     IntArrayRef input_size,
-//     bool align_corners,
-//     c10::optional<double> scales_h,
-//     c10::optional<double> scales_w,
-//     const Tensor& grad_input) {
-//   // See Note [Writing Nondeterministic Operations]
-//   // Nondeterministic because of atomicAdd usage
-//   globalContext().alertNotDeterministic("upsample_bicubic2d_aa_backward_out_cuda");
-//   // upsample_bicubic2d_backward_out_cuda_template(
-//   //     grad_input, grad_output, output_size, input_size, align_corners, scales_h, scales_w);
-// }
+TORCH_IMPL_FUNC(_upsample_bicubic2d_aa_backward_out_cuda) (
+    const Tensor& grad_output,
+    IntArrayRef output_size,
+    IntArrayRef input_size,
+    bool align_corners,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w,
+    const Tensor& grad_input) {
+  // See Note [Writing Nondeterministic Operations]
+  // Nondeterministic because of atomicAdd usage
+  globalContext().alertNotDeterministic("upsample_bicubic2d_aa_backward_out_cuda");
+  upsample_gen2d_aa_backward_out_cuda_template<4>(
+      grad_input, grad_output, output_size, input_size, align_corners, scales_h, scales_w);
+}
 
 } // namespace native
 } // namespace at

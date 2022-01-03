@@ -293,29 +293,29 @@ __device__ __forceinline__ static accscalar_t bicubic_filter(accscalar_t x) {
 
 template <typename scalar_t, typename accscalar_t, typename filter_fn_t>
 __device__ __forceinline__ static void _compute_weights(
-    const int64_t i,
-    const int64_t input_size,
+    const int i,
+    const int input_size,
     const accscalar_t scale,
     const accscalar_t support,
     scalar_t* wt_ptr,
-    int64_t interp_size,
+    int interp_size,
     filter_fn_t filter_fn,
-    int64_t& xmin,
-    int64_t& xmax) {
+    int& xmin,
+    int& xsize) {
   accscalar_t invscale = (scale >= 1.0) ? 1.0 / scale : 1.0;
   accscalar_t center = scale * (i + 0.5);
   xmin = max(
-      static_cast<int64_t>(center - support + 0.5), static_cast<int64_t>(0));
-  xmax = min(static_cast<int64_t>(center + support + 0.5), input_size) - xmin;
+      static_cast<int>(center - support + 0.5), static_cast<int>(0));
+  xsize = min(static_cast<int>(center + support + 0.5), input_size) - xmin;
 
   accscalar_t total_w = 0.0;
-  int64_t j = 0;
-  for (j = 0; j < xmax; j++) {
+  int j = 0;
+  for (j = 0; j < xsize; j++) {
     accscalar_t w = filter_fn((j + xmin - center + 0.5) * invscale);
     wt_ptr[j] = static_cast<scalar_t>(w);
     total_w += w;
   }
-  for (j = 0; j < xmax; j++) {
+  for (j = 0; j < xsize; j++) {
     if (total_w != 0.0) {
       wt_ptr[j] /= total_w;
     }
@@ -329,12 +329,12 @@ template <typename scalar_t, typename accscalar_t>
 __device__ __forceinline__ static accscalar_t interpolate_aa_single_dim(
     scalar_t* src,
     scalar_t* weights,
-    int64_t size) {
+    int size) {
   scalar_t t = static_cast<accscalar_t>(*src);
   scalar_t wts = static_cast<accscalar_t>(weights[0]);
   accscalar_t output = t * wts;
 
-  int64_t j = 1;
+  int j = 1;
   for (; j < size; j++) {
     wts = static_cast<accscalar_t>(weights[j]);
     t = static_cast<accscalar_t>(*(src + j));

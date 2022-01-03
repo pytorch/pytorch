@@ -15344,10 +15344,6 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("antialias", [True, False])
     @parametrize_test("align_corners", [True, False])
     def test_upsamplingBilinear2d(self, device, antialias, align_corners):
-        # temporarily disabled on CUDA:
-        if antialias and torch.device(device).type == 'cuda':
-            self.skipTest("Antialias option can't be yet tested on CUDA")
-
         # Forward AD does not support XLA because XLA tensors don't have storage
         check_forward_ad = torch.device(device).type != 'xla'
 
@@ -15412,9 +15408,6 @@ class TestNNDeviceType(NNTestCase):
     def test_upsamplingBicubic2d(self, device, antialias, align_corners):
         kwargs = dict(mode='bicubic', align_corners=align_corners, antialias=antialias)
         # test float scale factor up & downsampling
-        # temporarily disabled on CUDA:
-        if antialias and torch.device(device).type == 'cuda':
-            self.skipTest("Antialias option can't be yet tested on CUDA")
         for scale_factor in [0.5, 1, 1.5, 2]:
             in_t = torch.ones(2, 3, 8, 8, device=device)
             out_t = F.interpolate(in_t, scale_factor=scale_factor, **kwargs)
