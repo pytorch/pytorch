@@ -142,6 +142,8 @@ class TORCH_API TensorBase {
   const TensorBase& fill_(const c10::Scalar& scalar) const;
   const TensorBase& zero_() const;
 
+  TensorBase to(at::TensorOptions options={}, bool non_blocking=false, bool copy=false, c10::optional<at::MemoryFormat> memory_format=c10::nullopt) const;
+
   bool is_complex() const {
     return at::isComplexType(this->scalar_type());
   }
@@ -302,6 +304,14 @@ class TORCH_API TensorBase {
   }
   bool is_alias_of(const at::TensorBase& other) const{
     return impl_->storage().is_alias_of(other.storage());
+  }
+
+  inline bool _is_zerotensor() const {
+    return impl_->_is_zerotensor();
+  }
+
+  inline void _set_zero(bool zero) const {
+    impl_->_set_zero(zero);
   }
 
   inline bool is_conj() const {
