@@ -340,13 +340,15 @@ class RNN(RNNBase):
         bidirectional: If ``True``, becomes a bidirectional RNN. Default: ``False``
 
     Inputs: input, h_0
-        * **input**: tensor of shape :math:`(L, N, H_{in})` when ``batch_first=False`` or
+        * **input**: tensor of shape :math:`(L, H_{in})` for unbatched input,
+          :math:`(L, N, H_{in})` when ``batch_first=False`` or
           :math:`(N, L, H_{in})` when ``batch_first=True`` containing the features of
           the input sequence.  The input can also be a packed variable length sequence.
           See :func:`torch.nn.utils.rnn.pack_padded_sequence` or
           :func:`torch.nn.utils.rnn.pack_sequence` for details.
-        * **h_0**: tensor of shape :math:`(D * \text{num\_layers}, N, H_{out})` containing the initial hidden
-          state for each element in the batch. Defaults to zeros if not provided.
+        * **h_0**: tensor of shape :math:`(D * \text{num\_layers}, H_{out})` for unbatched input or
+          :math:`(D * \text{num\_layers}, N, H_{out})` containing the initial hidden
+          state for the input sequence batch. Defaults to zeros if not provided.
 
         where:
 
@@ -360,12 +362,14 @@ class RNN(RNNBase):
             \end{aligned}
 
     Outputs: output, h_n
-        * **output**: tensor of shape :math:`(L, N, D * H_{out})` when ``batch_first=False`` or
+        * **output**: tensor of shape :math:`(L, D * H_{out})` for unbatched input,
+          :math:`(L, N, D * H_{out})` when ``batch_first=False`` or
           :math:`(N, L, D * H_{out})` when ``batch_first=True`` containing the output features
           `(h_t)` from the last layer of the RNN, for each `t`. If a
           :class:`torch.nn.utils.rnn.PackedSequence` has been given as the input, the output
           will also be a packed sequence.
-        * **h_n**: tensor of shape :math:`(D * \text{num\_layers}, N, H_{out})` containing the final hidden state
+        * **h_n**: tensor of shape :math:`(D * \text{num\_layers}, H_{out})` for unbatched input or
+          :math:`(D * \text{num\_layers}, N, H_{out})` containing the final hidden state
           for each element in the batch.
 
     Attributes:
@@ -387,6 +391,9 @@ class RNN(RNNBase):
         For bidirectional RNNs, forward and backward are directions 0 and 1 respectively.
         Example of splitting the output layers when ``batch_first=False``:
         ``output.view(seq_len, batch, num_directions, hidden_size)``.
+
+    .. note::
+        `batch_first` argument is ignored for unbatched inputs.
 
     .. include:: ../cudnn_rnn_determinism.rst
 
@@ -781,13 +788,15 @@ class GRU(RNNBase):
         bidirectional: If ``True``, becomes a bidirectional GRU. Default: ``False``
 
     Inputs: input, h_0
-        * **input**: tensor of shape :math:`(L, N, H_{in})` when ``batch_first=False`` or
+        * **input**: tensor of shape :math:`(L, H_{in})` for unbatched input,
+          :math:`(L, N, H_{in})` when ``batch_first=False`` or
           :math:`(N, L, H_{in})` when ``batch_first=True`` containing the features of
           the input sequence.  The input can also be a packed variable length sequence.
           See :func:`torch.nn.utils.rnn.pack_padded_sequence` or
           :func:`torch.nn.utils.rnn.pack_sequence` for details.
-        * **h_0**: tensor of shape :math:`(D * \text{num\_layers}, N, H_{out})` containing the initial hidden
-          state for each element in the batch. Defaults to zeros if not provided.
+        * **h_0**: tensor of shape :math:`(D * \text{num\_layers}, H_{out})` or
+          :math:`(D * \text{num\_layers}, N, H_{out})`
+          containing the initial hidden state for the input sequence. Defaults to zeros if not provided.
 
         where:
 
@@ -801,13 +810,15 @@ class GRU(RNNBase):
             \end{aligned}
 
     Outputs: output, h_n
-        * **output**: tensor of shape :math:`(L, N, D * H_{out})` when ``batch_first=False`` or
+        * **output**: tensor of shape :math:`(L, H_{in})` for unbatched input,
+          :math:`(L, N, D * H_{out})` when ``batch_first=False`` or
           :math:`(N, L, D * H_{out})` when ``batch_first=True`` containing the output features
           `(h_t)` from the last layer of the GRU, for each `t`. If a
           :class:`torch.nn.utils.rnn.PackedSequence` has been given as the input, the output
           will also be a packed sequence.
-        * **h_n**: tensor of shape :math:`(D * \text{num\_layers}, N, H_{out})` containing the final hidden state
-          for each element in the batch.
+        * **h_n**: tensor of shape :math:`(D * \text{num\_layers}, H_{out})` or
+          :math:`(D * \text{num\_layers}, N, H_{out})` containing the final hidden state
+          for the input sequence.
 
     Attributes:
         weight_ih_l[k] : the learnable input-hidden weights of the :math:`\text{k}^{th}` layer
@@ -828,6 +839,9 @@ class GRU(RNNBase):
         For bidirectional GRUs, forward and backward are directions 0 and 1 respectively.
         Example of splitting the output layers when ``batch_first=False``:
         ``output.view(seq_len, batch, num_directions, hidden_size)``.
+
+    .. note::
+        `batch_first` argument is ignored for unbatched inputs.
 
     .. include:: ../cudnn_persistent_rnn.rst
 
