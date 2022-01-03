@@ -89,6 +89,8 @@ def main() -> None:
             'num_shards': 1,
             'runner': DISTRIBUTED_GPU_RUNNER_TYPE if "cuda" in str(BUILD_ENVIRONMENT) else TEST_RUNNER_TYPE
         }
+    if os.getenv('ENABLE_FX2TRT_TEST'):
+        configs['fx2trt'] = {'num_shards': 1, 'runner': TEST_RUNNER_TYPE}
     if os.getenv('ENABLE_SLOW_TEST'):
         configs['slow'] = {'num_shards': 1, 'runner': TEST_RUNNER_TYPE}
     if os.getenv('ENABLE_DOCS_TEST'):

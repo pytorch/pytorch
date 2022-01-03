@@ -349,34 +349,6 @@ Tensor& _linalg_inv_out_helper_cuda_lib(Tensor& result, Tensor& infos_getrf, Ten
   return result;
 }
 
-// entrance of calculations of `inverse` using cusolver getrf + getrs, cublas getrfBatched + getriBatched
-Tensor _inverse_helper_cuda_lib(const Tensor& self) {
-  Tensor self_working_copy = cloneBatchedColumnMajor(self);
-  Tensor self_inv_working_copy = column_major_identity_matrix_like(self_working_copy);
-  const int batch_size = cuda_int_cast(batchCount(self), "batchCount");
-
-  if (self.dim() > 2 && batch_size > 1) {
-    Tensor infos_getrf = at::zeros({std::max<int64_t>(1, batchCount(self))}, self.options().dtype(kInt));
-    Tensor infos_getrs = at::zeros({std::max<int64_t>(1, batchCount(self))}, self.options().dtype(kInt));
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "inverse_cuda", [&]{
-      apply_batched_inverse_lib<scalar_t>(
-        self_working_copy, self_inv_working_copy, infos_getrf, infos_getrs);
-    });
-    batchCheckErrors(infos_getrf, "inverse_cuda");
-    batchCheckErrors(infos_getrs, "inverse_cuda");
-  } else {
-    Tensor infos_getrf = at::zeros({1}, self.options().dtype(kInt));
-    Tensor infos_getrs = at::zeros({1}, self.options().dtype(kInt));
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "inverse_cuda", [&]{
-      apply_single_inverse_lib<scalar_t>(self_working_copy, self_inv_working_copy, infos_getrf, infos_getrs);
-    });
-    batchCheckErrors(infos_getrf, "inverse_cuda");
-    batchCheckErrors(infos_getrs, "inverse_cuda");
-  }
-
-  return self_inv_working_copy;
-}
-
 // call cusolver gesvd function to calculate svd
 template<typename scalar_t>
 inline static void apply_svd_cusolver_gesvd(const Tensor& A, const Tensor& U, const Tensor& S, const Tensor& V,
@@ -406,24 +378,21 @@ inline static void apply_svd_cusolver_gesvd(const Tensor& A, const Tensor& U, co
   TORCH_INTERNAL_ASSERT(lwork >= 0, "gesvd_buffersize failed to get needed buffer size, got lwork = ", lwork);
 
   auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
-  auto dataPtr_work = allocator.allocate(sizeof(scalar_t)*lwork);
-  auto dataPtr_rwork = allocator.allocate(sizeof(value_t)*std::min(m, n));
+  const auto dataPtr_work = allocator.allocate(sizeof(scalar_t)*lwork);
+  const auto dataPtr_rwork = allocator.allocate(sizeof(value_t)*std::min(m, n));
 
-  at::Tensor V_view, Vh_workspace;
-  if (compute_uv) {
-    // V is F-transposed. Since this function computes Vh, we need to make it F-contig so that Vh is F-transposed
-    // We create an auxiliary tensor with the correct strides and use it in place of V
-    // nb. We can do this .view() because V is a batch of either row-major or column-major matrices
-    V_view = V.view({-1, n, V.size(-1)});
-    Vh_workspace = at::empty({n, full_matrices ? n : k},
-                             A.options().memory_format(at::MemoryFormat::Contiguous)).conj();
-  }
+  // nb. We can do this .view() because V is a batch of F-contig matrices
+  const auto V_view = compute_uv ? V.view({-1, n, V.size(-1)})
+                                 : Tensor{};
+  // V is F-contig. Since this function computes Vh, we need an auxiliary F-conj-transposed matrix to hold Vh
+  const auto Vh_workspace = compute_uv ?  at::empty({n, full_matrices ? n : k},
+                                              A.options().memory_format(at::MemoryFormat::Contiguous)).conj()
+                                       : Tensor{};
   const auto Vh_ptr = compute_uv ? Vh_workspace.data_ptr<scalar_t>()
                                  : nullptr;
 
-  // Need to allocate U if compute_uv == false
-  auto U_stride = compute_uv ? matrixStride(U) : 0;
-  auto U_ptr = compute_uv ? U.data_ptr<scalar_t>() : nullptr;
+  const auto U_stride = compute_uv ? matrixStride(U) : 0;
+  const auto U_ptr = compute_uv ? U.data_ptr<scalar_t>() : nullptr;
 
   int batchsize = calculate_all_batches ? cuda_int_cast(batchCount(A), "batch size")
                                         : batches.size();
@@ -652,6 +621,9 @@ void svd_cusolver(const Tensor& A,
                   const Tensor& S,
                   const Tensor& V,
                   const Tensor& info) {
+  // Here U and V are F-contig
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(U.mT().is_contiguous());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(V.mT().is_contiguous());
   const auto batch_size = batchCount(A);
   const auto m = A.size(-2);
   const auto n = A.size(-1);

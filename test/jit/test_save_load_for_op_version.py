@@ -5,6 +5,8 @@ import io
 import os
 import random
 import sys
+import hypothesis.strategies as st
+from hypothesis import example, settings, given
 
 import torch
 
@@ -100,6 +102,7 @@ class TestSaveLoadForOpVersion(JitTestCase):
         node_count = sum(str(n).count(kind) for n in m.graph.nodes())
         self.assertEqual(node_count, count)
 
+
     """
     Tests that verify Torchscript remaps aten::div(_) from versions 0-3
     to call either aten::true_divide(_), if an input is a float type,
@@ -109,7 +112,12 @@ class TestSaveLoadForOpVersion(JitTestCase):
       div behavior has not yet been updated.
     """
 
-    def test_versioned_div_tensor(self):
+    @settings(max_examples=10, deadline=200000)  # A total of 10 examples will be generated
+    @given(
+        sample_input=st.tuples(st.integers(min_value=5, max_value=199), st.floats(min_value=5.0, max_value=199.0))
+    )  # Generate a pair (integer, float)
+    @example((2, 3, 2.0, 3.0))  # Ensure this example will be covered
+    def test_versioned_div_tensor(self, sample_input):
         def historic_div(self, other):
             if self.is_floating_point() or other.is_floating_point():
                 return self.true_divide(other)
@@ -142,8 +150,7 @@ class TestSaveLoadForOpVersion(JitTestCase):
         current_mobile_module = self._save_load_mobile_module(MyModule)
         self._verify_count("aten::div", current_module, 3)
 
-        vals = (2., 3., 2, 3)
-        for val_a, val_b in product(vals, vals):
+        for val_a, val_b in product(sample_input, sample_input):
             a = torch.tensor((val_a,))
             b = torch.tensor((val_b,))
 
@@ -162,7 +169,12 @@ class TestSaveLoadForOpVersion(JitTestCase):
             _helper(current_module, torch.div)
             _helper(current_mobile_module, torch.div)
 
-    def test_versioned_div_tensor_inplace(self):
+    @settings(max_examples=10, deadline=200000)  # A total of 10 examples will be generated
+    @given(
+        sample_input=st.tuples(st.integers(min_value=5, max_value=199), st.floats(min_value=5.0, max_value=199.0))
+    )  # Generate a pair (integer, float)
+    @example((2, 3, 2.0, 3.0))  # Ensure this example will be covered
+    def test_versioned_div_tensor_inplace(self, sample_input):
         def historic_div_(self, other):
             if self.is_floating_point() or other.is_floating_point():
                 return self.true_divide_(other)
@@ -190,8 +202,7 @@ class TestSaveLoadForOpVersion(JitTestCase):
         current_mobile_module = self._save_load_mobile_module(MyModule)
         self._verify_count("aten::div", current_module, 1)
 
-        vals = (2., 3., 2, 3)
-        for val_a, val_b in product(vals, vals):
+        for val_a, val_b in product(sample_input, sample_input):
             a = torch.tensor((val_a,))
             b = torch.tensor((val_b,))
 
@@ -212,7 +223,12 @@ class TestSaveLoadForOpVersion(JitTestCase):
             _helper(current_module, torch.Tensor.div_)
             _helper(current_mobile_module, torch.Tensor.div_)
 
-    def test_versioned_div_tensor_out(self):
+    @settings(max_examples=10, deadline=200000)  # A total of 10 examples will be generated
+    @given(
+        sample_input=st.tuples(st.integers(min_value=5, max_value=199), st.floats(min_value=5.0, max_value=199.0))
+    )  # Generate a pair (integer, float)
+    @example((2, 3, 2.0, 3.0))  # Ensure this example will be covered
+    def test_versioned_div_tensor_out(self, sample_input):
         def historic_div_out(self, other, out):
             if self.is_floating_point() or other.is_floating_point() or out.is_floating_point():
                 return torch.true_divide(self, other, out=out)
@@ -239,8 +255,7 @@ class TestSaveLoadForOpVersion(JitTestCase):
         current_mobile_module = self._save_load_mobile_module(MyModule)
         self._verify_count("aten::div", current_module, 1)
 
-        vals = (2., 3., 2, 3)
-        for val_a, val_b in product(vals, vals):
+        for val_a, val_b in product(sample_input, sample_input):
             a = torch.tensor((val_a,))
             b = torch.tensor((val_b,))
 
@@ -264,7 +279,12 @@ class TestSaveLoadForOpVersion(JitTestCase):
                 _helper(v3_mobile_module, historic_div_out)
                 _helper(current_mobile_module, torch.div)
 
-    def test_versioned_div_scalar(self):
+    @settings(max_examples=10, deadline=200000)  # A total of 10 examples will be generated
+    @given(
+        sample_input=st.tuples(st.integers(min_value=5, max_value=199), st.floats(min_value=5.0, max_value=199.0))
+    )  # Generate a pair (integer, float)
+    @example((2, 3, 2.0, 3.0))  # Ensure this example will be covered
+    def test_versioned_div_scalar(self, sample_input):
         def historic_div_scalar_float(self, other: float):
             return torch.true_divide(self, other)
 
@@ -309,8 +329,7 @@ class TestSaveLoadForOpVersion(JitTestCase):
         for m in (current_module_float, current_module_int):
             self._verify_count("aten::div", m, 1)
 
-        vals = (2., 3., 2, 3)
-        for val_a, val_b in product(vals, vals):
+        for val_a, val_b in product(sample_input, sample_input):
             a = torch.tensor((val_a,))
             b = val_b
 
@@ -334,7 +353,12 @@ class TestSaveLoadForOpVersion(JitTestCase):
                 _helper(v3_mobile_module_int, historic_div_scalar_int)
                 _helper(current_mobile_module_int, torch.div)
 
-    def test_versioned_div_scalar_reciprocal(self):
+    @settings(max_examples=10, deadline=200000)  # A total of 10 examples will be generated
+    @given(
+        sample_input=st.tuples(st.integers(min_value=5, max_value=199), st.floats(min_value=5.0, max_value=199.0))
+    )  # Generate a pair (integer, float)
+    @example((2, 3, 2.0, 3.0))  # Ensure this example will be covered
+    def test_versioned_div_scalar_reciprocal(self, sample_input):
         def historic_div_scalar_float_reciprocal(self, other: float):
             return other / self
 
@@ -381,8 +405,7 @@ class TestSaveLoadForOpVersion(JitTestCase):
         current_mobile_module_float = self._save_load_mobile_module(MyModuleFloat)
         current_mobile_module_int = self._save_load_mobile_module(MyModuleInt)
 
-        vals = (2., 3., 2, 3)
-        for val_a, val_b in product(vals, vals):
+        for val_a, val_b in product(sample_input, sample_input):
             a = torch.tensor((val_a,))
             b = val_b
 
@@ -415,7 +438,12 @@ class TestSaveLoadForOpVersion(JitTestCase):
                 _helper(v3_mobile_module_int, current_mobile_module_int)
                 _helper(current_mobile_module_int, torch.div)
 
-    def test_versioned_div_scalar_inplace(self):
+    @settings(max_examples=10, deadline=200000)  # A total of 10 examples will be generated
+    @given(
+        sample_input=st.tuples(st.integers(min_value=5, max_value=199), st.floats(min_value=5.0, max_value=199.0))
+    )  # Generate a pair (integer, float)
+    @example((2, 3, 2.0, 3.0))  # Ensure this example will be covered
+    def test_versioned_div_scalar_inplace(self, sample_input):
         def historic_div_scalar_float_inplace(self, other: float):
             return self.true_divide_(other)
 
@@ -468,8 +496,7 @@ class TestSaveLoadForOpVersion(JitTestCase):
         for m in (current_module_float, current_module_int):
             self._verify_count("aten::div", m, 1)
 
-        vals = (2., 3., 2, 3)
-        for val_a, val_b in product(vals, vals):
+        for val_a, val_b in product(sample_input, sample_input):
             a = torch.tensor((val_a,))
             b = val_b
 
