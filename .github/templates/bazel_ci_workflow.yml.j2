@@ -15,11 +15,15 @@ on:
   # building and testing in a single job since bazel runs only small subset of tests
   build-and-test:
     runs-on: !{{ test_runner_type }}
-    needs: [!{{ ciflow_config.root_job_name }}]
     env:
       JOB_BASE_NAME: !{{ build_environment }}-build-and-test
       NUM_TEST_SHARDS: !{{ num_test_shards }}
+      IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == '!{{ ciflow_config.trigger_action }}') && (github.event.assigneed.login == '!{{ ciflow_config.trigger_actor }}') }}
+      LABEL_CONDITIONS: ${{ !{{ ciflow_config.label_conditions }} }}
+    if: !{{ ciflow_config.root_job_condition }}
     steps:
+      - name: print labels
+        run: echo "${PR_LABELS}"
       !{{ common.setup_ec2_linux() }}
       !{{ common.checkout_pytorch("recursive") }}
       !{{ common.calculate_docker_image(false) }}
