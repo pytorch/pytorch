@@ -25,6 +25,7 @@ unary_ops = [
     (torch.exp, acc_ops.exp),
     (torch.floor, acc_ops.floor),
     (torch.ceil, acc_ops.ceil),
+    (torch.sign, acc_ops.sign),
 ]
 
 
