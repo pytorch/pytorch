@@ -2255,7 +2255,7 @@ Examples::
 vecdot = _add_docstr(_linalg.linalg_vecdot, r"""
 linalg.vecdot(x, y, *, dim=-1, out=None) -> Tensor
 
-Computes the vector product of two batches of vectors along a dimension.
+Computes the real dot product of two batches of vectors along a dimension.
 
 In symbols, this function computes
 
@@ -2278,7 +2278,7 @@ Args:
     y (Tensor): second batch of vectors.
 
 Keyword args:
-    dim (int): Dimension along which to compute the vector product.
+    dim (int): Dimension along which to compute the real dot product. Default: `-1`.
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
 
 Examples::
