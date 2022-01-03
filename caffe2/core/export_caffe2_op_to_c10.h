@@ -54,9 +54,9 @@ struct TORCH_API RegisterDefinition {
   RegisterDefinition(const char *name, c10::BoxedKernel kernel);
 };
 
-extern template class RegisterDefinition<c10::DispatchKey::CPU>;
-extern template class RegisterDefinition<c10::DispatchKey::CUDA>;
-extern template class RegisterDefinition<c10::DispatchKey::HIP>;
+extern template struct RegisterDefinition<c10::DispatchKey::CPU>;
+extern template struct RegisterDefinition<c10::DispatchKey::CUDA>;
+extern template struct RegisterDefinition<c10::DispatchKey::HIP>;
 
 struct TORCH_API RegisterSchema {
   RegisterSchema(const char *schema_str);
