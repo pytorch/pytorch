@@ -1297,7 +1297,7 @@ class TestSparseCSR(TestCase):
         # Generate exponent as 0 per the given dtype
         if dtype.is_complex:
             exp = complex(0, 0)
-            with self.assertRaisesRegex(RuntimeError, "Complex Exponent is not supported for Sparse CSR Layout."):
+            with self.assertRaisesRegex(RuntimeError, "not supported"):
                 if is_out:
                     func(inp, exp, out=out)
                 else:
@@ -1330,7 +1330,7 @@ class TestSparseCSR(TestCase):
                     func(inp, exp)
 
         # Also check for exponent as boolean (False)
-        with self.assertRaisesRegex(RuntimeError, "Exponent as False is not supported for Sparse CSR Layout."):
+        with self.assertRaisesRegex(RuntimeError, "not supported"):
             func(inp, False)
 
     @ops(sparse_csr_pow)
