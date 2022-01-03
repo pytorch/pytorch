@@ -392,6 +392,78 @@ void bsrmv<c10::complex<double>>(
       reinterpret_cast<cuDoubleComplex*>(y)));
 }
 
+template <>
+void linear_solve<float>(
+  CUSOLVER_LINEAR_SOLVE_ARGTYPES(float)) {
+    TORCH_CUSOLVER_CHECK(cusolverSpScsrlsvluHost(
+        handle,
+        n,
+        nnzA,
+        descrA,
+        csrValA,
+        csrRowPtrA,
+        csrColIndA,
+        b,
+        tol,
+        reorder,
+        x,
+        singularity));
+  }
+
+template <>
+void linear_solve<double>(
+  CUSOLVER_LINEAR_SOLVE_ARGTYPES(double)) {
+    TORCH_CUSOLVER_CHECK(cusolverSpDcsrlsvluHost(
+        handle,
+        n,
+        nnzA,
+        descrA,
+        csrValA,
+        csrRowPtrA,
+        csrColIndA,
+        b,
+        tol,
+        reorder,
+        x,
+        singularity));
+  }
+
+template <>
+void linear_solve<cuComplex>(
+  CUSOLVER_LINEAR_SOLVE_ARGTYPES(cuComplex)) {
+    TORCH_CUSOLVER_CHECK(cusolverSpCcsrlsvluHost(
+        handle,
+        n,
+        nnzA,
+        descrA,
+        csrValA,
+        csrRowPtrA,
+        csrColIndA,
+        b,
+        tol,
+        reorder,
+        x,
+        singularity));
+  }
+
+template <>
+void linear_solve<cuDoubleComplex>(
+  CUSOLVER_LINEAR_SOLVE_ARGTYPES(cuDoubleComplex)) {
+    TORCH_CUSOLVER_CHECK(cusolverSpZcsrlsvluHost(
+        handle,
+        n,
+        nnzA,
+        descrA,
+        csrValA,
+        csrRowPtrA,
+        csrColIndA,
+        b,
+        tol,
+        reorder,
+        x,
+        singularity));
+  }
+
 #if AT_USE_HIPSPARSE_TRIANGULAR_SOLVE()
 
 template <>

@@ -255,8 +255,7 @@ template <>
 void bsrsm2_bufferSize<float>(CUSPARSE_BSRSM2_BUFFER_ARGTYPES(float));
 template <>
 void bsrsm2_bufferSize<double>(CUSPARSE_BSRSM2_BUFFER_ARGTYPES(double));
-template <>
-void bsrsm2_bufferSize<c10::complex<float>>(
+template <> void bsrsm2_bufferSize<c10::complex<float>>(
     CUSPARSE_BSRSM2_BUFFER_ARGTYPES(c10::complex<float>));
 template <>
 void bsrsm2_bufferSize<c10::complex<double>>(
@@ -314,6 +313,28 @@ void bsrsm2_solve<c10::complex<float>>(
 template <>
 void bsrsm2_solve<c10::complex<double>>(
     CUSPARSE_BSRSM2_SOLVE_ARGTYPES(c10::complex<double>));
+
+#define CUSOLVER_LINEAR_SOLVE_ARGTYPES(scalar_t)                                 \
+    cusolverSpHandle_t handle, int n, int nnzA, const cusparseMatDescr_t descrA, \
+    const scalar_t *csrValA, const int *csrRowPtrA, const int *csrColIndA,       \
+    const scalar_t *b, float tol, int reorder, scalar_t *x, int *singularity
+
+template <typename scalar_t>
+inline void linear_solve(CUSOLVER_LINEAR_SOLVE_ARGTYPES(scalar_t)) {
+    TORCH_INTERNAL_ASSERT(
+        false,
+        "at::cuda::sparse::linear_solve: not implemented for ",
+        typeid(scalar_t).name());
+}
+
+template <>
+void linear_solve<float>(CUSOLVER_LINEAR_SOLVE_ARGTYPES(float));
+template <>
+void linear_solve<double>(CUSOLVER_LINEAR_SOLVE_ARGTYPES(double));
+template <>
+void linear_solve<cuComplex>(CUSOLVER_LINEAR_SOLVE_ARGTYPES(cuComplex));
+template <>
+void linear_solve<cuDoubleComplex>(CUSOLVER_LINEAR_SOLVE_ARGTYPES(cuDoubleComplex));
 
 #endif // AT_USE_HIPSPARSE_TRIANGULAR_SOLVE
 

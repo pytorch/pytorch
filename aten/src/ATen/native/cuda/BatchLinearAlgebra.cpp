@@ -2425,6 +2425,8 @@ std::tuple<Tensor, Tensor> _symeig_helper_cuda(const Tensor& self, bool eigenvec
   }
 }
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg_eigh ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 // This is a type dispatch function for 'apply_magma_eigh'
