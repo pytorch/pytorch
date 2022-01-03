@@ -712,8 +712,7 @@ Tensor & index_put_(Tensor & self, const torch::List<c10::optional<Tensor>>& ind
 }
 
 TORCH_IMPL_FUNC(index_copy_out)
-(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Tensor& result_) {
-    Tensor& result = const_cast<Tensor&>(result_);
+(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Tensor& result) {
     if (!result.is_same(self)) result.copy_(self);
 
     // See Note [Enabling Deterministic Operations]
@@ -733,7 +732,7 @@ TORCH_IMPL_FUNC(index_copy_out)
     Tensor result_nonzero = result.dim() == 0 ? result.unsqueeze(0) : result;
     Tensor source_nonzero = source.dim() == 0 ? source.unsqueeze(0) : source;
 
-    // The only different between the following  tensor iterator and that of index_fill_ is that
+    // The only difference between the following  tensor iterator and that of index_fill_ is that
     // this one has also source as an input. We should refactor it when if constexpr is available (C++17)
 
     // Prepare `index` for TensorIterator.
