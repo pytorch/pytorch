@@ -44,18 +44,6 @@ class ConcaterIterDataPipe(IterDataPipe):
         return len(self)
 
 
-# This is fake class to show API, going to be replaced by the copy from torchdata
-# TODO(VitalyFedyunin): Replace with valid version, documentation and tests
-class IterateBuffer(IterDataPipe):
-
-    def __init__(self, buffer):
-        self.buffer = buffer
-
-    def __iter__(self):
-        for i in self.buffer:
-            yield i
-
-
 @functional_datapipe('fork')
 class ForkerIterDataPipe(IterDataPipe):
     r""" :class:`ForkerIterDataPipe`.
@@ -288,6 +276,7 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
         self.child_buffers = [deque() for _ in range(self.num_instances)]
         self.instance_started = [False] * self.num_instances
         self.main_datapipe_exhausted = False
+
 
 @functional_datapipe('mux')
 class MultiplexerIterDataPipe(IterDataPipe):

@@ -2,7 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <torch/csrc/python_headers.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 const int DTYPE_NAME_LEN = 64;
 
