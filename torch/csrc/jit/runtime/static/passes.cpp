@@ -15,24 +15,6 @@ C10_DEFINE_bool(
 
 namespace torch {
 namespace jit {
-namespace {
-bool HasInplaceOp(Block* block, const AliasDb& alias_db) {
-  for (auto* node : block->nodes()) {
-    for (Block* sub_block : node->blocks()) {
-      if (HasInplaceOp(sub_block, alias_db)) {
-        return true;
-      }
-    }
-    auto inputs = node->inputs();
-    // check if node modifies inputs (both inplace ops and certain out variants
-    // would qualify). For example: c = torch.sigmoid(b, out=b) is essentially
-    // the same as c = b.sigmoid_()
-    if (inputs.size() > 0 && alias_db.writesToAlias(node, {inputs[0]})) {
-      return true;
-    }
-  }
-  return false;
-}
 
 bool graphHasOp(std::shared_ptr<Graph>& graph, const char* op_name) {
   DepthFirstGraphNodeIterator graph_it(graph);
@@ -43,11 +25,6 @@ bool graphHasOp(std::shared_ptr<Graph>& graph, const char* op_name) {
     }
   }
   return false;
-}
-} // namespace
-
-bool HasInplaceOp(std::shared_ptr<Graph>& graph, const AliasDb& alias_db) {
-  return HasInplaceOp(graph->block(), alias_db);
 }
 
 bool forwardHasOp(
@@ -516,7 +493,6 @@ void ReplaceWithCopy(
     return false;
   };
 
-  bool has_inplace_ops = HasInplaceOp(graph, db);
   std::vector<std::pair<Node*, Node*>> replacement;
   for (auto* n : graph->nodes()) {
     c10::Symbol new_symbol;
@@ -527,8 +503,10 @@ void ReplaceWithCopy(
     }
     DCHECK(n->outputs().size() == 1);
 
-    // In cases of having in-place ops in the graph, only replace the op with
-    // the copy version for ops with input with number of use == 1. Example:
+    // We do not want to replace operators with their copy variant when the
+    // inputs to the operators have writers (can be updated). With an output
+    // that aliases to the input, updates to the input will be visible to the
+    // operator's output as well. For example:
     //
     // def forward(self, inp: Tensor, shape: List[int]):
     //   a = inp + inp
@@ -544,8 +522,7 @@ void ReplaceWithCopy(
     // and c are no longer aliases of a, the value of e would change as a
     // result. To keep static runtime consistent with the jit interpreter, here
     // we choose not to replace reshape with the copy version
-    auto* in = n->input(0);
-    if (has_inplace_ops && in->uses().size() > 1) {
+    if (db.hasInputWriters(n)) {
       continue;
     }
 

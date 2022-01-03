@@ -79,21 +79,21 @@ std::pair<IValue, IValue> getFunctionTuple(
     const mobile::Function& func,
     BackendDebugInfoRecorder& debug_info_recorder,
     TypeNameUniquer& type_name_uniquer_) {
-  const std::shared_ptr<mobile::Code> mobile_code_ptr = func.get_code();
+  const auto& mobile_code = func.get_code();
 
   // instructions
   std::vector<IValue> instructions;
-  instructions.reserve(mobile_code_ptr->instructions_.size());
-  for (Instruction ins : mobile_code_ptr->instructions_) {
+  instructions.reserve(mobile_code.instructions_.size());
+  for (Instruction ins : mobile_code.instructions_) {
     instructions.emplace_back(to_tuple({toString(ins.op), ins.X, ins.N}));
   }
 
   // operators
   std::vector<IValue> operators;
-  operators.reserve(mobile_code_ptr->op_names_.size());
-  for (int i = 0; i < mobile_code_ptr->op_names_.size(); ++i) {
-    const auto& opname = mobile_code_ptr->op_names_[i];
-    const int size = mobile_code_ptr->operator_input_sizes_[i];
+  operators.reserve(mobile_code.op_names_.size());
+  for (int i = 0; i < mobile_code.op_names_.size(); ++i) {
+    const auto& opname = mobile_code.op_names_[i];
+    const int size = mobile_code.operator_input_sizes_[i];
     if (BytecodeEmitMode::is_default_value_for_unspecified_arg_enabled()) {
       operators.emplace_back(to_tuple({opname.name, opname.overload_name}));
     } else {
@@ -104,11 +104,11 @@ std::pair<IValue, IValue> getFunctionTuple(
 
   // types
   std::vector<IValue> types;
-  types.reserve(mobile_code_ptr->types_.size());
+  types.reserve(mobile_code.types_.size());
   static const std::string torch_prefix("__torch__");
   static const std::string class_prefix("__torch__.torch.classes");
 
-  for (const TypePtr& t : mobile_code_ptr->types_) {
+  for (const TypePtr& t : mobile_code.types_) {
     std::string type_str = t->annotation_str();
     if (t->kind() == TypeKind::TupleType) {
       TORCH_CHECK(
@@ -177,20 +177,19 @@ std::pair<IValue, IValue> getFunctionTuple(
 
   // since the register location is embedded into the bytecode, pass the
   // register size
-  auto register_size = static_cast<int>(mobile_code_ptr->register_size_);
+  auto register_size = static_cast<int>(mobile_code.register_size_);
 
   auto codeTable = Table(
       {{"instructions", to_tuple(instructions)},
        {"operators", to_tuple(operators)},
-       {"constants", to_tuple(mobile_code_ptr->constants_)},
+       {"constants", to_tuple(mobile_code.constants_)},
        {"types", to_tuple(types)},
        {"register_size", register_size}});
 
   // schema
   const auto& schema = func.getSchema();
-  auto type_printer =
-      [&](const c10::ConstTypePtr& t) -> c10::optional<std::string> {
-    auto namedType = t->cast<c10::NamedType>();
+  auto type_printer = [&](const c10::Type& t) -> c10::optional<std::string> {
+    auto namedType = t.cast<c10::NamedType>();
     if (namedType && namedType->name()) {
       return type_name_uniquer_.getUniqueName(namedType).qualifiedName();
     }
@@ -252,7 +251,7 @@ std::pair<IValue, IValue> getFunctionTuple(
   // will correspond to {source_range, inlinedCallStackPtr} which we will
   // serialize separately.
   IValue module_debug_tuple =
-      c10::ivalue::Tuple::create(mobile_code_ptr->debug_handles_);
+      c10::ivalue::Tuple::create(mobile_code.debug_handles_);
   auto function_debug_info =
       Table({{"function_debug_handles", module_debug_tuple}});
   debug_info_vals = to_tuple({qn, function_debug_info});
@@ -709,9 +708,8 @@ void ScriptModuleSerializer::convertNamedType(
   std::string qualifier = qualname.prefix();
   PythonPrint* pp = file_streams_.find(qualifier);
 
-  auto type_printer =
-      [&](const c10::ConstTypePtr& t) -> c10::optional<std::string> {
-    auto namedType = t->cast<c10::NamedType>();
+  auto type_printer = [&](const c10::Type& t) -> c10::optional<std::string> {
+    auto namedType = t.cast<c10::NamedType>();
     if (namedType && namedType->name()) {
       return type_name_uniquer_.getUniqueName(namedType).qualifiedName();
     }
@@ -807,7 +805,7 @@ namespace {
 void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
   mobile::Module mobile_m = jitModuleToMobile(m, getOptionsFromGlobal());
   for (const auto& method : mobile_m.get_methods()) {
-    for (const auto& op : method.function().get_code()->op_names_) {
+    for (const auto& op : method.function().get_code().op_names_) {
       // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
       opnames.emplace(
           op.overload_name.empty() ? op.name
