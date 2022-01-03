@@ -5,6 +5,7 @@ import io
 import os
 import random
 import sys
+import unittest
 
 import torch
 # Make the helper files in test/ importable
@@ -21,6 +22,9 @@ if __name__ == "__main__":
 
 # Legacy test cases for dynamic operator versioning
 class TestLegacyUpgraders(JitTestCase):
+    reason: str = "Skipped due to new global operator versioning for operators"
+
+    @unittest.skipIf(torch._C._is_upgraders_enabled(), reason)
     def test_versioned_symbols(self):
         """
         Tests Torchscript symbol versioning. See note [Versioned Symbols].
@@ -100,6 +104,7 @@ class TestLegacyUpgraders(JitTestCase):
       div behavior has not yet been updated.
     """
 
+    @unittest.skipIf(torch._C._is_upgraders_enabled(), reason)
     def test_versioned_div_tensor(self):
         def historic_div(self, other):
             if self.is_floating_point() or other.is_floating_point():
@@ -148,6 +153,7 @@ class TestLegacyUpgraders(JitTestCase):
             _helper(v3_module, historic_div)
             _helper(current_module, torch.div)
 
+    @unittest.skipIf(torch._C._is_upgraders_enabled(), reason)
     def test_versioned_div_tensor_inplace(self):
         def historic_div_(self, other):
             if self.is_floating_point() or other.is_floating_point():
@@ -194,6 +200,7 @@ class TestLegacyUpgraders(JitTestCase):
             a = torch.tensor((val_a,))
             _helper(current_module, torch.Tensor.div_)
 
+    @unittest.skipIf(torch._C._is_upgraders_enabled(), reason)
     def test_versioned_div_tensor_out(self):
         def historic_div_out(self, other, out):
             if self.is_floating_point() or other.is_floating_point() or out.is_floating_point():
@@ -241,6 +248,7 @@ class TestLegacyUpgraders(JitTestCase):
                 _helper(v3_module, historic_div_out)
                 _helper(current_module, torch.div)
 
+    @unittest.skipIf(torch._C._is_upgraders_enabled(), reason)
     def test_versioned_div_scalar(self):
         def historic_div_scalar_float(self, other: float):
             return torch.true_divide(self, other)
@@ -301,6 +309,7 @@ class TestLegacyUpgraders(JitTestCase):
                 _helper(v3_module_int, historic_div_scalar_int)
                 _helper(current_module_int, torch.div)
 
+    @unittest.skipIf(torch._C._is_upgraders_enabled(), reason)
     def test_versioned_div_scalar_reciprocal(self):
         def historic_div_scalar_float_reciprocal(self, other: float):
             return other / self
@@ -371,6 +380,7 @@ class TestLegacyUpgraders(JitTestCase):
                 _helper(v3_module_int, historic_div_scalar_int_reciprocal)
                 _helper(current_module_int, torch.div)
 
+    @unittest.skipIf(torch._C._is_upgraders_enabled(), reason)
     def test_versioned_div_scalar_inplace(self):
         def historic_div_scalar_float_inplace(self, other: float):
             return self.true_divide_(other)
@@ -439,6 +449,7 @@ class TestLegacyUpgraders(JitTestCase):
 
     # NOTE: Scalar division was already true division in op version 3,
     #   so this test verifies the behavior is unchanged.
+    @unittest.skipIf(torch._C._is_upgraders_enabled(), reason)
     def test_versioned_div_scalar_scalar(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -472,6 +483,7 @@ class TestLegacyUpgraders(JitTestCase):
 
     # NOTE: the JIT was incapable of handling boolean fill values when
     #   PyTorch produced file format versions 0-4
+    @unittest.skipIf(torch._C._is_upgraders_enabled(), reason)
     def test_versioned_full_integer_value(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -509,6 +521,7 @@ class TestLegacyUpgraders(JitTestCase):
     #   to version 5 is preserved.
     # NOTE: while torch.full in eager PyTorch accepts a requires_grad argument,
     #   it does not in Torchscript (see https://github.com/pytorch/pytorch/issues/40363)
+    @unittest.skipIf(torch._C._is_upgraders_enabled(), reason)
     def test_versioned_full_preserved(self):
         class MyModule(torch.nn.Module):
             def __init__(self):

@@ -3,7 +3,6 @@
 from itertools import product as product
 import io
 import os
-import random
 import sys
 import hypothesis.strategies as st
 from hypothesis import example, settings, given
