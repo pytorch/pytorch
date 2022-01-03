@@ -161,6 +161,10 @@ c10::intrusive_ptr<JitFuture> sendMessageWithAutograd(
   // tell the remote end to process this request with the profiler enabled.
   if (!forceDisableProfiling && torch::autograd::profiler::profilerEnabled()) {
     auto profilerConfig = torch::autograd::profiler::getProfilerConfig();
+    TORCH_CHECK(
+        torch::profiler::impl::profilerType() ==
+            torch::profiler::impl::ActiveProfilerType::LEGACY,
+        "Currently only the legacy autograd profiler is supported in a distributed context.");
     auto msgWithProfiling = getMessageWithProfiling(
         std::move(msg),
         rpc::MessageType::RUN_WITH_PROFILING_REQ,
