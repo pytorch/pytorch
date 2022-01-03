@@ -882,6 +882,7 @@ def _test_undefined_forward_mode(func, outputs, inputs):
     with fwAD.dual_level():
         fw_grads = []
         dual_inputs = []
+        tensor_indices = set()
         for i, inp in enumerate(inputs):
             if is_tensor_like(inp) and inp.requires_grad:
                 if inp.layout == torch._mkldnn:  # type: ignore[attr-defined]
@@ -891,12 +892,15 @@ def _test_undefined_forward_mode(func, outputs, inputs):
                 # If inp is a differentiable view, the dual might not be the tangent given to
                 # make_dual, so read it explicitly from the dual tensor
                 fw_grads.append(fwAD.unpack_dual(inp)[1])
+                tensor_indices.add(i)
             dual_inputs.append(inp)
 
         for i, (fw_grad, u) in enumerate(zip(fw_grads, all_u)):
             fw_grad.copy_(u.view_as(fw_grad))
 
-        for idx, inp in enumerate(tensor_inputs):
+        for idx, inp in enumerate(inputs):
+            if idx not in tensor_indices:
+                continue
             dual_inp_obj = dual_inputs[idx]
 
             # case 1 (Materialized Zero Tensor Tangent)
@@ -1381,8 +1385,6 @@ def gradcheck(
     """
     assert check_forward_ad or check_backward_ad, \
         "Expected at least one of check_forward_ad or check_backward_ad to be True"
-    assert not (check_undefined_grad and not check_backward_ad), \
-        "Setting check_undefined_grad=True requires check_backward_ad to be True"
     assert not (check_batched_grad and not check_backward_ad), (
         "Setting check_batched_grad=True requires check_backward_ad to be True")
     assert not (check_batched_forward_grad and not check_forward_ad), (
@@ -1427,7 +1429,7 @@ def _gradcheck_helper(func, inputs, eps, atol, rtol, check_sparse_nnz, nondet_to
 
     _test_backward_mul_by_grad_output(outputs, tupled_inputs, check_sparse_nnz)
 
-    if check_undefined_grad:
+    if check_undefined_grad and check_backward_ad:
         _test_undefined_backward_mode(func, outputs, tupled_inputs)
     return True
 

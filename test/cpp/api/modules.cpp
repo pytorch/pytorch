@@ -2668,6 +2668,15 @@ TEST_F(ModulesTest, AdaptiveLogSoftmaxWithLoss) {
       ASSERT_TRUE(torch::allclose(out, logprob_out.gather(1, y.unsqueeze(1)).squeeze()));
     }
   }
+  {
+    // test no batch dim
+    AdaptiveLogSoftmaxWithLoss asfm(AdaptiveLogSoftmaxWithLossOptions(16, 20, {4, 10, 15}).div_value(2.));
+    auto x = torch::randn({1, 16});
+    auto y = torch::tensor({17});
+    auto x2 = x.squeeze(0);
+    auto y2 = y.squeeze(0);
+    ASSERT_TRUE(torch::allclose(asfm(x, y).output.squeeze(0), asfm(x2, y2).output));
+  }
 }
 
 TEST_F(ModulesTest, Softmax2d) {
