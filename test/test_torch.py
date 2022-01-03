@@ -6730,7 +6730,6 @@ else:
         self.unary_check_input_output_mem_overlap(
             doubles, sz, lambda input, out: out.copy_(input))
 
-    @expectedFailureMeta  # RuntimeError not raised
     @onlyNativeDeviceTypes
     def test_index_add_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
