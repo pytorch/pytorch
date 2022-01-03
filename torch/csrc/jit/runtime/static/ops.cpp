@@ -3,14 +3,18 @@
 #include <ATen/CPUFunctions.h>
 #include <ATen/InferSize.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/Parallel.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/cpu/vec/functional.h>
+#include <ATen/cpu/vec/vec.h>
 #include <ATen/native/EmbeddingBag.h>
 #include <ATen/native/Fill.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
+#include <ATen/native/cpu/SerialStackImpl.h>
 #include <ATen/native/layer_norm.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qembeddingbag.h>
@@ -18,8 +22,10 @@
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/quantized/Quantizer.h>
 #include <c10/core/ScalarType.h>
+#include <c10/core/WrapDimMinimal.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/passes/symbolic_shape_runtime_fusion.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
 #include <torch/csrc/jit/runtime/static/te_wrapper.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
@@ -155,18 +161,23 @@ namespace {
 // non-_MSC_VER version is a syntax error according to MSVC. Use the
 // appropriate version depending on if we're MSVC or not.
 
-#define TO_COPY_OUT_FAST_PATH_LOGIC(out, self, self_t)                         \
-  do {                                                                         \
-    const auto N = self.numel();                                               \
-    const auto self_data = self.data_ptr<self_t>();                            \
-    AT_DISPATCH_ALL_TYPES_AND2(                                                \
-        kHalf, kBFloat16, out.scalar_type(), "to_copy_out_inner_loop", [&]() { \
-          const auto out_data = out.data_ptr<scalar_t>();                      \
-          for (const auto idx : c10::irange(N)) {                              \
-            /* NOLINTNEXTLINE(bugprone-signed-char-misuse) */                  \
-            out_data[idx] = static_cast<scalar_t>(self_data[idx]);             \
-          }                                                                    \
-        });                                                                    \
+#define TO_COPY_OUT_FAST_PATH_LOGIC(out, self, self_t)             \
+  do {                                                             \
+    const auto N = self.numel();                                   \
+    const auto self_data = self.data_ptr<self_t>();                \
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(                        \
+        kHalf,                                                     \
+        kBFloat16,                                                 \
+        kBool,                                                     \
+        out.scalar_type(),                                         \
+        "to_copy_out_inner_loop",                                  \
+        [&]() {                                                    \
+          const auto out_data = out.data_ptr<scalar_t>();          \
+          for (const auto idx : c10::irange(N)) {                  \
+            /* NOLINTNEXTLINE(bugprone-signed-char-misuse) */      \
+            out_data[idx] = static_cast<scalar_t>(self_data[idx]); \
+          }                                                        \
+        });                                                        \
   } while (0)
 
 #ifdef _MSC_VER
@@ -196,6 +207,18 @@ at::Tensor& to_copy_out(
   } else {
     at::native::resize_(out, self.sizes(), c10::nullopt);
   }
+  auto is_unsupported_dtype = [](ScalarType t) {
+#define TORCH_OPS_UNSUPPORTED_TYPE(_, type) \
+  case k##type:                             \
+    return true;
+    switch (t) {
+      AT_FORALL_QINT_TYPES(TORCH_OPS_UNSUPPORTED_TYPE)
+      AT_FORALL_COMPLEX_TYPES(TORCH_OPS_UNSUPPORTED_TYPE)
+      default:
+        return false;
+    }
+#undef TORCH_OPS_UNSUPPORTED_TYPE
+  };
   // Fast path: can we just copy the data ourselves? Avoids creating a
   // TensorIterator in at::native::copy_, which is relatively
   // expensive.
@@ -206,14 +229,15 @@ at::Tensor& to_copy_out(
        memory_format == c10::MemoryFormat::Contiguous) &&
       // CopyKernel.cpp handles this case specially, so let's not mess
       // with it.
-      !self.is_neg() &&
+      !self.is_neg() && !is_unsupported_dtype(self.dtype().toScalarType()) &&
+      !is_unsupported_dtype(out.dtype().toScalarType()) &&
       !(
           // FBGEMM optimization might kick in, don't interfere with
           // that.
           (self.dtype() == kFloat && out.dtype() == kHalf) ||
           (self.dtype() == kHalf && out.dtype() == kFloat))) {
-    AT_DISPATCH_ALL_TYPES_AND2(
-        kHalf, kBFloat16, self.scalar_type(), "to_copy_out", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND3(
+        kHalf, kBFloat16, kBool, self.scalar_type(), "to_copy_out", [&]() {
           TO_COPY_OUT_FAST_PATH_BODY(out, self);
         });
     return out;
@@ -651,6 +675,133 @@ REGISTER_OPERATOR_FUNCTOR(aten::nan_to_num, aten_nan_to_num, [](Node* n) -> SROp
   };
 });
 
+namespace {
+
+class VarStackNodeWrapper {
+ public:
+  explicit VarStackNodeWrapper(const ProcessedNode& pnode) : pnode_(pnode) {}
+
+  const at::Tensor& operator[](size_t idx) const {
+    TORCH_CHECK(idx < size());
+    return pnode_.Input(idx).toTensor();
+  }
+
+  size_t size() const {
+    return pnode_.num_inputs() - 1;
+  }
+
+ private:
+  const ProcessedNode& pnode_;
+};
+
+void varStackSerialOut(
+    at::Tensor& result,
+    int64_t dim,
+    const VarStackNodeWrapper& inputs) {
+  auto result_sizes = inputs[0].sizes().vec();
+  result_sizes.insert(result_sizes.begin() + dim, inputs.size());
+  at::native::resize_(result, result_sizes);
+
+  AT_DISPATCH_FLOATING_TYPES(
+      result.scalar_type(), "varstack_serial_kernel", [&]() {
+        at::native::detail::
+            stack_serial_kernel_impl<scalar_t, VarStackNodeWrapper>(
+                result, inputs, dim);
+      });
+}
+
+std::vector<at::Tensor> unsqueezeVarStackInputs(
+    const VarStackNodeWrapper& inputs,
+    const int64_t dim) {
+  std::vector<at::Tensor> result;
+  result.reserve(inputs.size());
+  for (const auto i : c10::irange(inputs.size())) {
+    result.push_back(at::native::unsqueeze(inputs[i], dim));
+  }
+  return result;
+}
+
+void varstackNonserialOut(
+    at::Tensor& result,
+    const int64_t dim,
+    const VarStackNodeWrapper& inputs) {
+  std::vector<at::Tensor> inputs_unsqueezed =
+      unsqueezeVarStackInputs(inputs, dim);
+  fastResizeToZero(result);
+  at::native::_cat_out_cpu(inputs_unsqueezed, dim, result);
+}
+
+void varStackFastOut(
+    at::Tensor& out,
+    int64_t dim,
+    const VarStackNodeWrapper& inputs) {
+  DCHECK(out.is_contiguous());
+  const auto num_inputs = static_cast<int64_t>(inputs.size());
+  TORCH_CHECK(num_inputs > 0, "stack expects a non-empty list of tensors");
+
+  const auto first_tensor_shape = inputs[0].sizes();
+  for (const auto i : c10::irange(1, num_inputs)) {
+    const auto shape = inputs[i].sizes();
+    TORCH_CHECK(
+        shape == first_tensor_shape,
+        "Stack expects each tensor to be the same size, but got ",
+        first_tensor_shape,
+        " at position 0 and ",
+        shape,
+        " at position ",
+        i);
+  }
+
+  const std::array<int64_t, 2> output_size = (dim == 0 || dim == -2)
+      ? std::array<int64_t, 2>{num_inputs, 1}
+      : std::array<int64_t, 2>{1, num_inputs};
+
+  at::native::resize_(out, output_size, c10::nullopt);
+
+  AT_DISPATCH_ALL_TYPES(out.scalar_type(), "varStackFastOut", [&]() {
+    auto* out_data = out.data_ptr<scalar_t>();
+    for (const auto i : c10::irange(num_inputs)) {
+      auto& tensor = inputs[i];
+      auto* input_ptr = tensor.data_ptr<scalar_t>();
+      out_data[i] = *input_ptr;
+    }
+  });
+}
+
+bool inputsAreScalars(const VarStackNodeWrapper& inputs) {
+  // All stack inputs should have the same size, so we only check
+  // the first one. If this isn't true, an exception will be thrown
+  // in the VarStack implementation
+  const auto& first_tensor = inputs[0];
+  return first_tensor.sizes()[0] == 1 && first_tensor.dim() == 1;
+}
+
+void varStackOut(ProcessedNode& pnode, int64_t dim) {
+  const auto num_inputs = pnode.num_inputs();
+  TORCH_CHECK(num_inputs > 1, "stack expects a non-empty list of tensors");
+  dim = c10::maybe_wrap_dim(dim, pnode.Input(0).toTensor().dim() + 1);
+
+  auto inputs = VarStackNodeWrapper(pnode);
+  auto& output = pnode.Output(0).toTensor();
+
+  if (output.is_contiguous() && inputsAreScalars(inputs)) {
+    varStackFastOut(output, dim, inputs);
+    return;
+  }
+
+  bool can_use_serial = at::native::detail::CanUseNativeSerialStack<
+      VarStackNodeWrapper,
+      /*skip_overlap_check*/ true>::call(output, inputs, dim);
+
+  if (can_use_serial) {
+    varStackSerialOut(output, dim, inputs);
+    return;
+  }
+  varstackNonserialOut(output, dim, inputs);
+}
+
+} // namespace
+
 // Split out into a function to appease MSVC's pre-processor
 SROperator aten_stack(Node* n) {
   if (!n->matches(torch::schema(
@@ -679,20 +830,12 @@ REGISTER_OPERATOR_FUNCTOR(
     [](Node* n) -> SROperator {
       return [](ProcessedNode* p_node) {
         const size_t num_inputs = p_node->num_inputs();
-
-        std::vector<at::Tensor> inputs(num_inputs - 1);
-        for (size_t i = 0; i < num_inputs - 1; ++i) {
-          inputs[i] = p_node->Input(i).toTensor();
-        }
-
         const auto dim = p_node->Input(num_inputs - 1).toInt();
+
         if (p_node->Output(0).isNone()) {
-          p_node->Output(0) = at::native::_stack_cpu(inputs, dim);
-          return;
+          p_node->Output(0) = create_empty_from(p_node->Input(0).toTensor());
         }
-        auto& out_t = p_node->Output(0).toTensor();
-        fastResizeToZero(out_t);
-        at::native::_stack_out_cpu(inputs, dim, out_t);
+        varStackOut(*p_node, dim);
       };
     });
 
@@ -759,6 +902,37 @@ REGISTER_OPERATOR_FUNCTOR(aten::tanh, aten_tanh, [](Node* n) -> SROperator {
     te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn});
   };
 });
+
+REGISTER_OPERATOR_FUNCTOR(
+    prim::TensorExprDynamicGroup,
+    prim_TensorExprDynamicGroup,
+    [](Node*) -> SROperator {
+      return [](ProcessedNode* p_node) {
+        auto graph = p_node->node()->g(attr::Subgraph);
+        auto num_outputs = p_node->num_outputs();
+        Stack stack;
+        if (p_node->Output(0).isNone()) {
+          stack.reserve(p_node->num_inputs());
+        } else {
+          stack.reserve(p_node->num_inputs() + num_outputs);
+          for (const auto& o : p_node->outputs()) {
+            stack.emplace_back(o);
+          }
+        }
+        for (auto i : c10::irange(p_node->num_inputs())) {
+          stack.emplace_back(p_node->Input(i));
+        }
+        runTensorExprDynamicGroup(graph, stack);
+        if (p_node->Output(0).isNone()) {
+          TORCH_INTERNAL_ASSERT(
+              stack.size() == num_outputs,
+              "Unexpected # of outputs on stack after executing TensorExprDynamicGroup");
+          for (auto i : c10::irange(num_outputs)) {
+            p_node->Output(i) = std::move(stack[i]);
+          }
+        }
+      };
+    });
 
 REGISTER_OPERATOR_FUNCTOR(
     aten::sigmoid,
@@ -1990,21 +2164,6 @@ REGISTER_OPERATOR_FUNCTOR(
       };
     });
 
-namespace {
-
-void check_cat_no_zero_dim(const std::vector<at::Tensor>& tensors) {
-  for (const auto i : c10::irange(tensors.size())) {
-    auto& t = tensors[i];
-    TORCH_CHECK(
-        t.dim() > 0,
-        "zero-dimensional tensor (at position ",
-        i,
-        ") cannot be concatenated");
-  }
-}
-
-} // namespace
-
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(
     prim::VarConcat,
@@ -2018,11 +2177,9 @@ REGISTER_OPERATOR_FUNCTOR(
         }
         auto dim = p_node->Input(num_inputs - 1).toInt();
         if (p_node->Output(0).isNone()) {
-          p_node->Output(0) = at::cat(inputs, dim);
+          p_node->Output(0) = at::native::_cat_cpu(inputs, dim);
           return;
         }
-        check_cat_no_zero_dim(inputs);
-        dim = legacy_cat_wrap_dim(dim, inputs);
         auto& out_t = p_node->Output(0).toTensor();
         fastResizeToZero(out_t);
         at::native::_cat_out_cpu(inputs, dim, out_t);
