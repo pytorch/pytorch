@@ -9978,6 +9978,7 @@ op_db: List[OpInfo] = [
                         DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
                         DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
                         DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+                        DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
                         # FIXME: ldexp does not accept scalar inputs
                         DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_broadcast_python_scalar'),
                     ),
