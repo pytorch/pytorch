@@ -41,6 +41,7 @@ def pythonkey_meta():
     finally:
         USE_META = False
 
+
 def get_output_device(devices):
     if len(devices) == 1:
         return devices[0]
@@ -49,6 +50,7 @@ def get_output_device(devices):
             if device.type == 'cuda':
                 return device
         raise RuntimeError("Couldn't infer output device from input device")
+
 
 class PythonTensor(torch.Tensor):
     elem: torch.Tensor
@@ -99,9 +101,10 @@ class PythonTensor(torch.Tensor):
         try:
             real_out = func(*args, **kwargs)
         except NotImplementedError:
-            args = pytree.tree_map(lambda x: torch.ones_like(x, device=output_device)
+            # Hardcoding in running in cuda if meta-tracing fails for now.
+            args = pytree.tree_map(lambda x: torch.ones_like(x, device='cuda')
                                    if isinstance(x, torch.Tensor) else x, args)
-            kwargs = pytree.tree_map(lambda x: torch.ones_like(x, device=output_device)
+            kwargs = pytree.tree_map(lambda x: torch.ones_like(x, device='cuda')
                                      if isinstance(x, torch.Tensor) else x, kwargs)
             real_out = func(*args, **kwargs)
 
@@ -117,7 +120,7 @@ class PythonTensor(torch.Tensor):
                 if output_device == 'meta':
                     # Infer the original output device from the inputs
                     input_devices = list(set([i.device for i in pytree.tree_flatten(args)[0] +
-                                        pytree.tree_flatten(kwargs)[0] if isinstance(i, PythonTensor)]))
+                                         pytree.tree_flatten(kwargs)[0] if isinstance(i, PythonTensor)]))
                     output_device = get_output_device(input_devices)
 
                 return PythonTensor(e, proxy, output_device)
