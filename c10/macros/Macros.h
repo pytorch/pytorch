@@ -138,6 +138,13 @@
 #define C10_UNUSED __attribute__((__unused__))
 #endif //_MSC_VER
 
+// Direct port of LLVM_ATTRIBUTE_USED.
+#if __has_attribute(used)
+#define C10_USED __attribute__((__used__))
+#else
+#define C10_USED
+#endif
+
 #define C10_RESTRICT __restrict
 
 // Simply define the namespace, in case a dependent library want to refer to
