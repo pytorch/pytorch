@@ -1562,6 +1562,41 @@ static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t di
   return self;
 }
 
+static inline Tensor sparse_csr_transpose(const Tensor & self, int64_t dim0, int64_t dim1) {
+  TORCH_INTERNAL_ASSERT(self.is_sparse_csr());
+  auto dim0_ = maybe_wrap_dim(dim0, 2);
+  auto dim1_ = maybe_wrap_dim(dim1, 2);
+  if (dim0 == dim1) {
+    return self.clone();
+  }
+
+  auto sizes = self.sizes();
+  auto crow_indices = self.crow_indices();
+  auto col_indices = self.col_indices();
+  auto values = self.values();
+
+  // convert CSR indices to COO indices and swap its rows
+  const bool out_int32 = crow_indices.scalar_type() == ScalarType::Int;
+  Tensor indices_transposed = _convert_indices_from_csr_to_coo(crow_indices, col_indices, out_int32, true);
+
+  // sort transposed indices
+  auto indices_scalar = at::sparse::flatten_indices(indices_transposed, {sizes[1], sizes[0]});
+  auto indicesPermutation = std::get<1>(indices_scalar.sort(0));
+  auto indices_transposed_sorted = indices_transposed.index_select(1, indicesPermutation);
+
+  // construct a CSR tensor that is transpose of self
+  auto new_row_indices = indices_transposed_sorted.select(0, 0);
+  auto new_col_indices = indices_transposed_sorted.select(0, 1);
+  auto new_values = values.index_select(0, indicesPermutation);
+  Tensor new_crow_indices = _convert_indices_from_coo_to_csr(new_row_indices, sizes[1], out_int32);
+
+  return at::native::_sparse_csr_tensor_unsafe(new_crow_indices, new_col_indices, new_values,
+                                               {sizes[1], sizes[0]},
+                                               new_values.scalar_type(),
+                                               self.layout(),
+                                               new_values.device());
+}
+
 // torch.row_stack, alias for torch.vstack
 Tensor& row_stack_out(TensorList tensors, Tensor& result) {
   return at::vstack_out(result, tensors);
@@ -1650,6 +1685,14 @@ Tensor transpose(const Tensor & self, int64_t dim0, int64_t dim1) {
   auto ndims = self.dim();
   dim0 = maybe_wrap_dim(dim0, ndims);
   dim1 = maybe_wrap_dim(dim1, ndims);
+
+  if (self.is_sparse_csr()) {
+    // Sparse CSR transpose is a copy operation as the values of
+    // transposed CSR tensor are permuted values of the input CSR
+    // tensor.
+    return sparse_csr_transpose(self, dim0, dim1);
+  }
+
   if (dim0 == dim1) {
     return self;
   }
@@ -2122,7 +2165,7 @@ std::vector<Tensor> meshgrid(TensorList tensors,
   // swap the outputs if we swapped the inputs.
   //
   // * Why do we even support this function for exactly one input?
-  bool swap_first_and_second_tensors;
+  bool swap_first_and_second_tensors = false;
 
   if (indexing == "xy") {
     // We can only swap if there are multiple tensors.
@@ -2136,7 +2179,6 @@ std::vector<Tensor> meshgrid(TensorList tensors,
     TORCH_CHECK(indexing == "ij",
                 "torch.meshgrid: indexing must be one of \"xy\" or \"ij\", "
                 "but received: ", indexing);
-    swap_first_and_second_tensors = false;
   }
 
   std::vector<int64_t> shape(size);
