@@ -331,7 +331,7 @@ class Hardsigmoid(Module):
 
 
 class Tanh(Module):
-    r"""Applies the element-wise function:
+    r"""Applies the Hyperbolic Tangent (Tanh) function, element-wise.
 
     .. math::
         \text{Tanh}(x) = \tanh(x) = \frac{\exp(x) - \exp(-x)} {\exp(x) + \exp(-x)}
