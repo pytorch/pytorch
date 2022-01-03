@@ -1591,6 +1591,30 @@ def pow(g, self, exponent):
     return pow
 
 
+def _clamp_common_types(g, self, min_f=None, max_f=None):
+    assert not (
+        min is None and max is None), "either max or min should be specified"
+
+    # clip-6 is only available to float, double, and float16.
+    # for other types, we first cast to float, then do clip and cast back.
+    origin_dtype = self.type().scalarType()
+    is_fp_clamp = self.type().scalarType(
+    ) == "Float" or self.type().scalarType() == "Double"
+
+    if not is_fp_clamp:
+        warnings.warn(
+            "ONNX opset < 11 does not support clamp/clip to non-float types. Using cast-clip-cast instead.")
+        self = g.op("Cast", self, to_i=sym_help.cast_pytorch_to_onnx["Float"])
+
+    self = g.op("Clip", self, min_f=min_f, max_f=max_f)
+
+    if not is_fp_clamp:
+        self = g.op(
+            "Cast", self, to_i=sym_help.cast_pytorch_to_onnx[origin_dtype])
+
+    return self
+
+
 def clamp(g, self, min, max):
     # min or max may be None that we need to dispatch to
     # Clip separately, as ONNX does not have None syntax
@@ -1600,15 +1624,15 @@ def clamp(g, self, min, max):
         return clamp_min(g, self, min)
     else:
         if sym_help._is_constant(min) and sym_help._is_constant(max):
-            return g.op("Clip", self, min_f=_parse_arg(min, "f"), max_f=_parse_arg(max, "f"))
+            return _clamp_common_types(g, self, min_f=_parse_arg(min, "f"), max_f=_parse_arg(max, "f"))
         else:
             return clamp_max(g, clamp_min(g, self, min), max)
 
 
-@parse_args("v", "v")
+@parse_args('v', 'v')
 def clamp_min(g, self, min):
-    if sym_help._is_constant(min):
-        return g.op("Clip", self, min_f=_parse_arg(min, "f"))
+    if sym_help._is_constant(min) and (self.type().scalarType() == "Float" or self.type().scalarType() == "Double"):
+        return _clamp_common_types(g, self, min_f=_parse_arg(min, 'f'))
     else:
         dtype = self.type().scalarType()
         min = g.op("Cast", min, to_i=sym_help.cast_pytorch_to_onnx[dtype])
@@ -1617,8 +1641,8 @@ def clamp_min(g, self, min):
 
 @parse_args("v", "v")
 def clamp_max(g, self, max):
-    if sym_help._is_constant(max):
-        return g.op("Clip", self, max_f=_parse_arg(max, "f"))
+    if sym_help._is_constant(max) and (self.type().scalarType() == "Float" or self.type().scalarType() == "Double"):
+        return _clamp_common_types(g, self, max_f=_parse_arg(max, 'f'))
     else:
         dtype = self.type().scalarType()
         max = g.op("Cast", max, to_i=sym_help.cast_pytorch_to_onnx[dtype])
@@ -1951,7 +1975,7 @@ def slice(g, self, *args):
 
 @parse_args("v", "f", "f")
 def hardtanh(g, self, min_val, max_val):
-    return g.op("Clip", self, min_f=min_val, max_f=max_val)
+    return _clamp_common_types(g, self, min_f=min_val, max_f=max_val)
 
 
 @parse_args("v")

@@ -17,6 +17,30 @@ from torch.onnx.utils import _add_block, _add_input_to_block, _add_output_to_blo
 
 # This file exports ONNX ops for opset 11
 
+def _clamp_common_types(g, self, min, max):
+    # clip-6 is only available to float, double, and float16.
+    # for other types, we first cast to float, then do clip and cast back.
+    origin_dtype = self.type().scalarType()
+    is_fp_clamp = self.type().scalarType(
+    ) == "Float" or self.type().scalarType() == "Double"
+
+    if not is_fp_clamp:
+        warnings.warn(
+            "ONNX opset < 11 does not support clamp/clip to non-float types. Using cast-clip-cast instead.")
+        self = g.op("Cast", self, to_i=sym_help.cast_pytorch_to_onnx["Float"])
+        if min.type().scalarType() != "Float":
+            min = g.op("Cast", min, to_i=sym_help.cast_pytorch_to_onnx["Float"])
+        if max.type().scalarType() != "Float":
+            max = g.op("Cast", max, to_i=sym_help.cast_pytorch_to_onnx["Float"])
+
+    self = g.op("Clip", self, min, max)
+
+    if not is_fp_clamp:
+        self = g.op(
+            "Cast", self, to_i=sym_help.cast_pytorch_to_onnx[origin_dtype])
+
+    return self
+
 
 @parse_args("v", "f", "f")
 def hardtanh(g, self, min_val, max_val):
@@ -27,7 +51,7 @@ def hardtanh(g, self, min_val, max_val):
         dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
     min_val = g.op("Constant", value_t=torch.tensor(min_val, dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
     max_val = g.op("Constant", value_t=torch.tensor(max_val, dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
-    return g.op("Clip", self, min_val, max_val)
+    return _clamp_common_types(g, self, min_val, max_val)
 
 
 def clamp(g, self, min, max):
@@ -49,7 +73,7 @@ def clamp(g, self, min, max):
         return clamp_min(g, self, min)
     else:
         if sym_help._get_tensor_rank(min) == 0 and sym_help._get_tensor_rank(max) == 0:
-            return g.op("Clip", self, min, max)
+            return _clamp_common_types(g, self, min, max)
         else:
             return clamp_max(g, clamp_min(g, self, min), max)
 
@@ -60,7 +84,7 @@ def clamp_min(g, self, min):
     min = g.op("Cast", min, to_i=sym_help.cast_pytorch_to_onnx[dtype])
     if sym_help._get_tensor_rank(min) == 0:
         max = unused(g)
-        return g.op("Clip", self, min, max)
+        return _clamp_common_types(g, self, min, max)
     else:
         return g.op("Max", self, min)
 
@@ -71,7 +95,7 @@ def clamp_max(g, self, max):
     max = g.op("Cast", max, to_i=sym_help.cast_pytorch_to_onnx[dtype])
     if sym_help._get_tensor_rank(max) == 0:
         min = unused(g)
-        return g.op("Clip", self, min, max)
+        return _clamp_common_types(g, self, min, max)
     else:
         return g.op("Min", self, max)
 
