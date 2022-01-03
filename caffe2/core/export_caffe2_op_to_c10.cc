@@ -124,9 +124,9 @@ RegisterDefinition<key>::RegisterDefinition(const char *name, c10::BoxedKernel k
   }
 }
 
-template class RegisterDefinition<c10::DispatchKey::CPU>;
-template class RegisterDefinition<c10::DispatchKey::CUDA>;
-template class RegisterDefinition<c10::DispatchKey::HIP>;
+template struct RegisterDefinition<c10::DispatchKey::CPU>;
+template struct RegisterDefinition<c10::DispatchKey::CUDA>;
+template struct RegisterDefinition<c10::DispatchKey::HIP>;
 
 RegisterSchema::RegisterSchema(const char *schema_str) {
   static torch::Library m(
