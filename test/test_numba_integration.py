@@ -272,7 +272,7 @@ class TestNumbaIntegration(common.TestCase):
 
             # Implicit-copy because `torch_ary` is a CPU array
             for numpy_ary in numpy_arys:
-                numba_ary = numba.cuda.to_device(numpy_ary, sync=False)
+                numba_ary = numba.cuda.to_device(numpy_ary)
                 torch_ary = torch.as_tensor(numba_ary, device="cpu")
                 self.assertEqual(torch_ary.data.numpy(), numpy.asarray(numba_ary, dtype=dtype))
 
@@ -282,7 +282,7 @@ class TestNumbaIntegration(common.TestCase):
 
             # Explicit-copy when using `torch.tensor()`
             for numpy_ary in numpy_arys:
-                numba_ary = numba.cuda.to_device(numpy_ary, sync=False)
+                numba_ary = numba.cuda.to_device(numpy_ary)
                 torch_ary = torch.tensor(numba_ary, device="cuda")
                 self.assertEqual(torch_ary.cpu().data.numpy(), numpy.asarray(numba_ary, dtype=dtype))
 
@@ -319,7 +319,7 @@ class TestNumbaIntegration(common.TestCase):
     @unittest.skipIf(not TEST_NUMBA_CUDA, "No numba.cuda")
     def test_from_cuda_array_interface_lifetime(self):
         """torch.as_tensor(obj) tensor grabs a reference to obj so that the lifetime of obj exceeds the tensor"""
-        numba_ary = numba.cuda.to_device(numpy.arange(6))
+        numba_ary = numba.cuda.to_device(numpy.arange(6), sync=False)
         torch_ary = torch.as_tensor(numba_ary, device="cuda")
         self.assertEqual(torch_ary.__cuda_array_interface__, numba_ary.__cuda_array_interface__)  # No copy
         del numba_ary
@@ -333,7 +333,7 @@ class TestNumbaIntegration(common.TestCase):
         """torch.as_tensor() tensor device must match active numba context."""
 
         # Zero-copy: both torch/numba default to device 0 and can interop freely
-        numba_ary = numba.cuda.to_device(numpy.arange(6))
+        numba_ary = numba.cuda.to_device(numpy.arange(6), sync=False)
         torch_ary = torch.as_tensor(numba_ary, device="cuda")
         self.assertEqual(torch_ary.cpu().data.numpy(), numpy.asarray(numba_ary))
         self.assertEqual(torch_ary.__cuda_array_interface__, numba_ary.__cuda_array_interface__)
