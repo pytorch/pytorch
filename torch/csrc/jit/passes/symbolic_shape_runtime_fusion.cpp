@@ -153,6 +153,9 @@ bool GenerateGuard(Node* tensorexpr_graph_node, bool add_composed_op) {
   auto tensorexpr_graph = SubgraphUtils::getSubgraph(tensorexpr_graph_node);
 
   // Move constant tensors from the subgraph to the outer scope.
+  // This is necessary because symbolic shape analysis does not handle the
+  // case of broadcast(constant, symbolic_shape) well and that results in poor
+  // performance.
   moveConstantTensorsOutOfSubgraph(tensorexpr_graph_node, tensorexpr_graph);
 
   // Generalize Inputs
