@@ -12,3 +12,4 @@ dependencies:
       - pillow>=4.1.1
       - scipy
       - av
+      - networkx
