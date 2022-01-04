@@ -119,6 +119,9 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # For numba issue see https://github.com/pytorch/pytorch/issues/51511
   if [[ $(conda run -n py_$ANACONDA_PYTHON_VERSION python -c "import sys; print(int(sys.version_info < (3, 9)))") == "1" ]]; then
     conda_pip_install numba==0.54.1
+  elif [ "$ANACONDA_PYTHON_VERSION" = "3.10" ]; then
+    # Do not install numba for 3.10
+    echo "Numba is not available for 3.10 yet"
   else
     conda_pip_install numba==0.49.0
   fi
@@ -132,4 +135,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   fi
 
   popd
+
+  # Add python from non-default environment to the default path
+  sed -e "s|PATH=\"\(.*\)\"|PATH=\"/opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/bin:\1\"|g" -i /etc/environment
 fi
