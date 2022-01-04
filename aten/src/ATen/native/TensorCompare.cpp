@@ -489,11 +489,11 @@ TORCH_IMPL_FUNC(clamp_out)
  const Tensor& result) {
   using at::native::detail::ClampLimits;
   if (min && max) {
-    clamp_scalar_stub(device_type(), *this, min.get(), max.get(), ClampLimits::MinMax);
+    clamp_scalar_stub(device_type(), *this, min.get(), max.get());
   } else if (max) {
-    clamp_scalar_stub(device_type(), *this, max.get(), max.get(), ClampLimits::Max);
+    clamp_max_scalar_stub(device_type(), *this, max.get());
   } else if (min) {
-    clamp_scalar_stub(device_type(), *this, min.get(), min.get(), ClampLimits::Min);
+    clamp_min_scalar_stub(device_type(), *this, min.get());
   }
 }
 
