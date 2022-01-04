@@ -588,7 +588,7 @@ if __name__ == "__main__" :
                                 save_error(name, "eval", "Incorrect results.", args.output_dir)
                                 continue
                     except Exception as e:
-                        print(f"ERROR: {name}")
+                        print(f"ERROR: {name}: {e}")
                         save_error(name, "eval", e, args.output_dir)
                         continue
 
