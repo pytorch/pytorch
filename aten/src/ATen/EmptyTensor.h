@@ -11,7 +11,7 @@ TORCH_API size_t computeStorageNbytes(
 TORCH_API TensorBase empty_generic(
     IntArrayRef size,
     c10::Allocator* allocator,
-    c10::DispatchKey dispatch_key,
+    c10::DispatchKeySet ks,
     ScalarType scalar_type,
     c10::optional<c10::MemoryFormat> memory_format_opt);
 
@@ -19,7 +19,7 @@ TORCH_API TensorBase empty_strided_generic(
     IntArrayRef size,
     IntArrayRef stride,
     c10::Allocator* allocator,
-    c10::DispatchKey dispatch_key,
+    c10::DispatchKeySet ks,
     ScalarType scalar_type);
 
 TORCH_API TensorBase empty_cpu(
