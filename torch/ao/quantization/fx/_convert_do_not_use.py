@@ -18,6 +18,7 @@ from .backend_config.utils import get_quantized_reference_module_mapping
 
 from .graph_module import (
     QuantizedGraphModule,
+    is_observed_standalone_module,
 )
 from ._equalize import update_obs_for_equalization, convert_eq_obs
 from .utils import (
@@ -53,6 +54,17 @@ QAT_MODULE_CLASSES = (
     torch.nn.intrinsic.qat.ConvBnReLU3d,
     torch.nn.intrinsic.qat.ConvReLU3d
 )
+
+def insert_dequantize_node(
+        node: Node,
+        graph: Graph):
+    """ Inserts dequantize node for `node` in `graph`
+    """
+    with graph.inserting_after(node):
+        dequantize_node = graph.call_method("dequantize", (node,))
+        for user_node in dict(node.users):
+            if user_node is not dequantize_node:
+                user_node.replace_input_with(node, dequantize_node)
 
 def _convert_do_not_use(
         model: GraphModule, is_reference: bool = False,
@@ -176,9 +188,9 @@ def _convert_do_not_use(
             if cur_placeholder_node_idx in input_quantized_idxs:
                 # Inputs are assumed to be quantized if the user specifid the
                 # input_quantized_idxs override.
-                # Note: we don't need to do anything for this, it affects prepare
-                # step in terms of whether to insert observer for input or not
-                continue
+                # we need to dequantize the inputs since all operators took
+                # floating point inputs in reference quantized models
+                insert_dequantize_node(node, model.graph)
         elif node.op == "output":
             cur_output_node_idx = output_node_seen_cnt
             output_node_seen_cnt += 1
@@ -190,12 +202,55 @@ def _convert_do_not_use(
                 if isinstance(maybe_dequantize_node, Node) and \
                    maybe_dequantize_node.op == "call_method" and \
                    maybe_dequantize_node.target == "dequantize":
-                    quantized_node = maybe_dequantize_node.args[0]
-                    maybe_dequantize_node.replace_all_uses_with(quantized_node)
+                    quantize_node = maybe_dequantize_node.args[0]
+                    maybe_dequantize_node.replace_all_uses_with(quantize_node)
                     model.graph.erase_node(maybe_dequantize_node)
         elif node.op == "call_module":
             if is_activation_post_process(modules[node.target]):
                 replace_observer_with_quantize_dequantize_node(model.graph, node, modules)
+            elif is_observed_standalone_module(modules[node.target]):
+                # TODO: move this to a separate function
+                convert = torch.ao.quantization._quantize_fx_do_not_use._convert_do_not_use  # type: ignore[attr-defined]
+                # We know that observed standalone module is a GraphModule since
+                # it's produced by us
+                observed_standalone_module : GraphModule = modules[str(node.target)]  # type: ignore[assignment]
+                sm_input_quantized_idxs = \
+                    observed_standalone_module \
+                    ._standalone_module_input_quantized_idxs\
+                    .tolist()  # type: ignore[operator]
+                # remove the dequantize nodes for inputs
+                args = list(node.args)
+                for idx in range(len(args)):
+                    if idx in sm_input_quantized_idxs:
+                        arg = args[idx]
+                        if arg.op == "call_method" and arg.target == "dequantize":
+                            quantize_node = arg.args[0]
+                            node.replace_input_with(arg, quantize_node)
+                            if len(arg.users) == 0:
+                                model.graph.erase_node(arg)
+                # add dequantize node for output
+                sm_output_quantized_idxs = \
+                    observed_standalone_module \
+                    ._standalone_module_output_quantized_idxs \
+                    .tolist()  # type: ignore[operator]
+                if len(sm_output_quantized_idxs) > 0:
+                    assert sm_output_quantized_idxs[0] == 0, "Currently only quantized"
+                    "output idxs = [0] is supported"
+
+                    # if it's non-empty, then it means the output is kept in quantized form
+                    # we'll just add a dequantize node after this node
+                    insert_dequantize_node(node, model.graph)
+
+                # TODO: allow convert_custom_config_dict to override backend_config_dict
+                # for standalone module
+                quantized_standalone_module = convert(
+                    observed_standalone_module,
+                    is_reference=True,
+                    backend_config_dict=backend_config_dict)
+                parent_name, name = _parent_name(node.target)
+                # update the modules dict
+                setattr(modules[parent_name], name, quantized_standalone_module)
+                modules[str(node.target)] = quantized_standalone_module
             elif type(modules[node.target]) in set(
                     weighted_module_classes).union(QAT_MODULE_CLASSES).union(FUSED_MODULE_CLASSES):
                 # TODO: refactor this part to a function
