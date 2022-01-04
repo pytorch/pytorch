@@ -64,7 +64,7 @@ namespace CUDACachingAllocator {
  * Note [Interaction with CUDA graph capture]
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  * Graph capture performs a dry run of a region of execution, freezing all CUDA
- * work (and virtual addresses used during that work) into a "graph." The graph
+ * work (and virtual addresses used during that work) into a "graph". The graph
  * may be "replayed" like a single giant kernel, with greatly reduced CPU
  * overhead as well as modestly improved GPU performance.
  *
