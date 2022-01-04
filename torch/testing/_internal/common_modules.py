@@ -415,7 +415,7 @@ def module_inputs_torch_nn_ConvNd(module_info, device, dtype, requires_grad, **k
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     conv_kwargs_list = [{}] if transposed else [{}, {'padding': 'same'}]
     kernel_size, C_in, C_out = 3, 4, 5
-    input_no_batch_shape = (C_in,) + tuple((i+3 for i in range(N)))
+    input_no_batch_shape = (C_in,) + tuple((i + 3 for i in range(N)))
     input_batch_shape = (2,) + input_no_batch_shape
     return [
         ModuleInput(constructor_input=(FunctionInput(C_out, kernel_size, **conv_kwargs) if lazy else
