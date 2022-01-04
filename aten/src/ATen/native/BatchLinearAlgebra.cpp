@@ -982,57 +982,6 @@ Tensor linalg_solve(const Tensor& input, const Tensor& other) {
   return result;
 }
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg_solve for sparse CSR ~~~~~~~~~~~~~~~~
-
-// DEFINE_DISPATCH(linalg_solve_sparse_csr_stub);
-
-// template <typename scalar_t>
-// void apply_sparse_csr_lu_solve(const Tensor& input, const Tensor& other, const Tensor& result, int& _singularity) {
-//   auto values = input.values();
-//   auto values_data_ptr = values.data_ptr<scalar_t>();
-//   auto crow_indices = input.crow_indices().to(kInt);
-//   auto crow_indices_data_ptr = crow_indices.data_ptr<int>();
-//   auto col_indices = input.col_indices().to(kInt);
-//   auto col_indices_data_ptr = col_indices.data_ptr<int>();
-//   auto handle = at::cuda::getCurrentCUDASparseHandle();
-//   auto descrA = at::cuda::sparse::CuSparseMatDescriptor();
-
-//   const scalar_t *b = other.data_ptr<scalar_t>();
-//   int n = sizeof(csrRowPtrA)/sizeof(int) - 1;
-//   int nnzA = input._nnz();
-//   float tol = 0;
-//   int reorder = 1;
-//   scalar_t *x = result.data_ptr<scalar_t>();
-//   int singularity = _singularity;
-//   at::cuda::sparse::linear_solve(handle, n, nnzA, descrA, values_data_ptr, crow_indices_data_ptr, col_indices_data_ptr, tol, reorder, x, &singularity);
-// }
-
-// void _linalg_solve_sparse_csr_impl(const Tensor& input, const Tensor& other, const Tensor& result) {
-//   int singularity = 0;
-//   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "sparse_csr_solve", [&] {
-//     apply_sparse_csr_lu_solve<scalar_t>(input, other, result, singularity);
-//   });
-//   if (singularity != -1) {
-//     // raise error
-//     TORCH_CHECK(false, "Something went wrong\n");
-//   }
-// }
-
-// Tensor& linalg_solve_sparse_csr_out(const Tensor& input, const Tensor& other, Tensor& result) {
-//   TORCH_INTERNAL_ASSERT(input.is_sparse_csr());
-//   TORCH_INTERNAL_ASSERT(result.is_contiguous());
-//   linalg_solve_sparse_csr_stub(input.device().type(), input, other, result);
-//   // _linalg_solve_sparse_csr_impl(input, other, result);
-//   return result;
-// }
-
-// Tensor linalg_solve_sparse_csr(const Tensor& input, const Tensor& other) {
-//   TORCH_INTERNAL_ASSERT(input.is_sparse_csr());
-//   linalg_solve_stub(input.device().type(), input, other);
-// }
-
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
 /*
 Computes the inverse of n-by-n matrix 'self'
 This is an in-place routine, it overwrites the content of 'self'.

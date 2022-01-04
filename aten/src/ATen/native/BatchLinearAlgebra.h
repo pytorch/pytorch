@@ -219,13 +219,6 @@ using triangular_solve_fn = void (*)(
     bool /*unitriangular*/);
 DECLARE_DISPATCH(triangular_solve_fn, triangular_solve_stub);
 
-// using linalg_solve_fn = void (*)(
-//     const Tensor& /*input*/,
-//     const Tensor& /*other*/,
-//     Tensor& result
-// );
-// DECLARE_DISPATCH(linalg_solve_fn, linalg_solve_sparse_csr_stub);
-
 using lu_fn = void (*)(
     const Tensor& /*input*/,
     const Tensor& /*pivots*/,
