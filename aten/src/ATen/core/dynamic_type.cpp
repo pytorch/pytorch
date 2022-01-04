@@ -263,6 +263,8 @@ TypePtr DynamicType::fallback() const {
     case Tag::Any:
       return AnyType::get();
   }
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false);
+  return nullptr;
 }
 
 bool DynamicType::LabeledDynamicType::isSubtypeOf(
