@@ -5,6 +5,17 @@
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/quantization/helper.h>
 
+#include <ATen/TensorOperators.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/ones_like.h>
+#include <ATen/ops/rsqrt.h>
+#include <ATen/ops/zeros_like.h>
+#endif
+
 #include <stack>
 
 namespace torch {
