@@ -17,6 +17,8 @@
 #include <torch/csrc/lazy/ts_backend/ops/expand.h>
 #include <torch/csrc/lazy/ts_backend/ops/scalar.h>
 
+#include <ATen/ScalarOps.h>
+
 namespace torch {
 namespace lazy {
 namespace {
