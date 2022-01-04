@@ -16,6 +16,12 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/core/symbol.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty_strided.h>
+#endif
+
 #include <exception>
 #include <iostream>
 #include <memory>
