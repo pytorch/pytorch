@@ -4,11 +4,11 @@
 
 #include <cuda_runtime_api.h>
 #include <cusparse.h>
-#include <cusolverSp.h>
 #include <cublas_v2.h>
 
 #ifdef CUDART_VERSION
 #include <cusolverDn.h>
+#include <cusolverSp.h>
 #endif
 
 #include <ATen/core/ATenGeneral.h>
