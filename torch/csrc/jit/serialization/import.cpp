@@ -10,6 +10,7 @@
 #endif
 #include <torch/csrc/jit/frontend/script_type_parser.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/operator_upgraders/upgraders_entry.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 #include <torch/csrc/jit/serialization/import_source.h>
@@ -239,6 +240,8 @@ graph(%x, %packed_params, %stride, %padding, %dilation, %groups, %r_scale, %r_ze
 Module ScriptModuleDeserializer::deserialize(
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
+  // we populate the upgraders map before any load starts
+  populate_upgraders_graph_map();
   C10_LOG_API_USAGE_ONCE("torch.script.load");
   device_ = device;
   // Load extra files.
