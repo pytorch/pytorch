@@ -721,10 +721,13 @@ def prelu(g, self, weight):
         weight = sym_help._unsqueeze_helper(g, weight, list(range(1, self_rank - 1)))
     elif self_rank is not None and self_rank == 0:
         self = sym_help._unsqueeze_helper(g, self, [0])
-    assert self_rank is None or sym_help._get_tensor_rank(self) >= len(sym_help._get_tensor_sizes(weight)), \
-        "slope must be unidirectionally broadcastable to input tensor"
-    return g.op("PRelu", self, weight)
+        self_rank = sym_help._get_tensor_rank(self)
 
+    slope_rank = sym_help._get_tensor_rank(weight)
+    if self_rank is not None and slope_rank is not None:
+        assert self_rank >= slope_rank, \
+            "unidirectional broadcasting: rank(x) must >= rank(slope) but got {} < {}".format(self_rank, slope_rank)
+    return g.op("PRelu", self, weight)
 
 def silu(g, input):
     return g.op("Mul", input, g.op("Sigmoid", input))
