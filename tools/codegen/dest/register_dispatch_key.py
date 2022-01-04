@@ -30,7 +30,7 @@ def gen_registration_headers(
     if per_operator_headers:
         headers = ["#include <ATen/ops/as_strided_native.h>"]
     else:
-        headers = ["#include <ATen/NativeFunctions.h"]
+        headers = ["#include <ATen/NativeFunctions.h>"]
 
     if backend_index.dispatch_key in (DispatchKey.CPU, DispatchKey.Meta):
         headers.append("#include <ATen/EmptyTensor.h>")

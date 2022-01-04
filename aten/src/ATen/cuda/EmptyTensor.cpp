@@ -14,8 +14,9 @@ TensorBase empty_cuda(
   at::globalContext().lazyInitCUDA();
   const DeviceGuard device_guard(device_or_default(device_opt));
   auto* allocator = at::cuda::getCUDADeviceAllocator();
+  constexpr c10::DispatchKeySet cuda_dks(c10::DispatchKey::CUDA);
   return at::detail::empty_generic(
-      size, allocator, DispatchKey::CUDA, dtype, memory_format_opt);
+      size, allocator, cuda_dks, dtype, memory_format_opt);
 }
 
 TensorBase empty_cuda(
@@ -51,8 +52,9 @@ TensorBase empty_strided_cuda(
   at::globalContext().lazyInitCUDA();
   const DeviceGuard device_guard(device_or_default(device_opt));
   auto* allocator = at::cuda::getCUDADeviceAllocator();
+  constexpr c10::DispatchKeySet cuda_dks(c10::DispatchKey::CUDA);
   return at::detail::empty_strided_generic(
-      size, stride, allocator, DispatchKey::CUDA, dtype);
+      size, stride, allocator, cuda_dks, dtype);
 }
 
 TensorBase empty_strided_cuda(

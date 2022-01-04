@@ -632,7 +632,7 @@ Tensor miopen_convolution_forward(
   // See #4500
   Tensor weight_contig = weight->contiguous(memory_format);
   // Make sure that NC11 strides follow formula
-  weight_contig.resize_(weieht_contig.sizes(), memory_format);
+  weight_contig.resize_(weight_contig.sizes(), memory_format);
   Tensor input_contig = input->contiguous(memory_format);
   input_contig.resize_(input_contig.sizes(), memory_format);
 
