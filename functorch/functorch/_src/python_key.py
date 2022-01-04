@@ -11,7 +11,6 @@ from torch._C import _disabled_torch_function_impl
 import torch.utils._pytree as pytree
 from torch.fx import Tracer, GraphModule
 import torch.fx as fx
-from .nnc_compile import nnc_compile
 from .decompositions import decomposition_table
 from enum import Enum
 import warnings
@@ -218,113 +217,5 @@ def make_fx(f):
         phs = pytree.tree_map(lambda x: fx.PH, args)
         t = pythonkey_trace(wrap_key(f, args), concrete_args=tuple(phs))
         return t
-
-    return wrapped
-
-
-@dataclass(eq=True, frozen=True)
-class TensorSpec:
-    shape: Tuple[int, ...]
-    stride: Tuple[int, ...]
-    dtype: torch.dtype
-    device: torch.device
-
-
-@dataclass(eq=True, frozen=True)
-class ConcreteValueSpec:
-    value: Any
-
-
-@dataclass(eq=True, frozen=True)
-class SpecializationKey:
-    func: Callable
-    specs: Tuple[Union[TensorSpec, ConcreteValueSpec], ...]
-
-
-def get_spec(arg):
-    if isinstance(arg, torch.Tensor):
-        return TensorSpec(
-            tuple(arg.shape),
-            tuple(arg.stride()),
-            arg.dtype,
-            arg.device)
-    return ConcreteValueSpec(arg)
-
-
-def construct_specialization_key(f, args):
-    flat_args, _ = pytree.tree_flatten(args)
-    return SpecializationKey(f, tuple(get_spec(arg) for arg in flat_args))
-
-
-nnc_jit_cache: Dict[Callable, Dict[SpecializationKey, Callable]] = {}
-
-
-class RetrievalStatus(Enum):
-    Success = 0
-    UnknownFunc = 1
-    UnknownSpecialization = 2
-
-
-def retrieve_from_cache(f, key):
-    if f not in nnc_jit_cache:
-        return RetrievalStatus.UnknownFunc, None
-    cache_for_f = nnc_jit_cache[f]
-    if key not in cache_for_f:
-        return RetrievalStatus.UnknownSpecialization, None
-    return RetrievalStatus.Success, cache_for_f[key]
-
-
-def add_to_cache(f, key, compiled_f):
-    if f not in nnc_jit_cache:
-        nnc_jit_cache[f] = {key: compiled_f}
-    else:
-        nnc_jit_cache[f][key] = compiled_f
-
-
-def nnc_jit(f, static_argnums=None, skip_specialization=False):
-    local_cache = None
-
-    @functools.wraps(f)
-    def compiled(*args):
-        nonlocal local_cache, static_argnums
-        if local_cache is not None and skip_specialization:
-            return local_cache(*args)
-        key = construct_specialization_key(f, args)
-        status, compiled_f = retrieve_from_cache(f, key)
-        if status is RetrievalStatus.Success:
-            return compiled_f(*args)
-        if status is RetrievalStatus.UnknownSpecialization:
-            warnings.warn(
-                f'Recompiling kernel for {f} due to new specialization. '
-                f'We recompile when we see inputs with new sizes/strides/'
-                f'dtype/device. Frequent recompilations can be bad for '
-                f'performance.',
-                stacklevel=2)
-
-        fx_model = make_fx(f)(*args)
-        fx_model.graph.lint()
-        if static_argnums is None:
-            static_argnums = []
-        if isinstance(static_argnums, int):
-            static_argnums = [static_argnums]
-        args = list(args)
-        for idx in range(len(args)):
-            if idx in static_argnums:
-                args[idx] = torch.empty(())
-        args = tuple(args)
-        compiled_f = nnc_compile(fx_model, args)
-        local_cache = compiled_f
-        add_to_cache(f, key, compiled_f)
-        return compiled_f(*args)
-    return compiled
-
-
-def make_nnc(f):
-    @functools.wraps(f)
-    def wrapped(*args):
-        fx_model = make_fx(f)(*args)
-        fx_model.graph.lint()
-        compiled_f = nnc_compile(fx_model, args, get_loopnest=True)
-        return compiled_f
 
     return wrapped
