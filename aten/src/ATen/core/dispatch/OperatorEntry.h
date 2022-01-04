@@ -175,9 +175,6 @@ public:
 
   const KernelFunction& lookup(DispatchKeySet ks) const {
     const auto idx = ks.getDispatchTableIndexForDispatchKeySet();
-    if (C10_UNLIKELY(idx == -1)) {
-      reportError(ks.highestPriorityTypeId());
-    }
     const auto& kernel = dispatchTable_[idx];
     // A valid kernel *always* has a boxed kernel and *may* have an
     // unboxed kernel. However, we typically do unboxed calls in at::
