@@ -62,10 +62,10 @@ class TestPythonKey(TestCase):
         new_inp = torch.randn(3)
         self.assertEqual(fx_f(new_inp), f(new_inp))
 
-    def test_scalar_device(self):
+    def test_scalar_device(self, device):
         def f(a, b):
             return a + b
-        inps = [torch.randn(3, device='cuda'), torch.tensor(5)]
+        inps = [torch.randn(3, device=device), torch.tensor(5)]
         fx_f = make_fx(f)(*inps)
         self.assertEqual(fx_f(*inps), f(*inps))
 
