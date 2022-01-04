@@ -660,7 +660,7 @@ at::Tensor conv2d(
   Tensor input;
   bool is_batched;
   std::tie(input, is_batched) = batchify(input_, /*num_spatial_dims=*/ 2, "conv2d");
-  auto output = at::convolution(input, weight, bias, stride, padding, dilation, false, {0}, groups);
+  auto output = at::convolution(input, weight, bias, stride, padding, dilation, false, {{0, 0}}, groups);
   return is_batched ? output : output.squeeze(0);
 }
 
@@ -674,7 +674,7 @@ at::Tensor conv3d(
   Tensor input;
   bool is_batched;
   std::tie(input, is_batched) = batchify(input_, /*num_spatial_dims=*/ 3, "conv3d");
-  auto output = at::convolution(input, weight, bias, stride, padding, dilation, false, {0}, groups);
+  auto output = at::convolution(input, weight, bias, stride, padding, dilation, false, {{0, 0, 0}}, groups);
   return is_batched ? output : output.squeeze(0);
 }
 
@@ -806,10 +806,9 @@ at::Tensor conv_transpose1d(
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-  TORCH_CHECK(input_.dim() == 2 || input_.dim() == 3,
-      "Expected 2D (unbatched) or 3D (batched) input to conv_transpose1d, but got input of size: ", input_.sizes());
-  auto is_batched = (input_.dim() == 3);
-  auto input = is_batched ? input_ : input_.unsqueeze(0);
+  Tensor input;
+  bool is_batched;
+  std::tie(input, is_batched) = batchify(input_, /*num_spatial_dims=*/ 1, "conv_transpose1d");
   auto output = at::convolution(
       input, weight, bias, stride, padding, dilation, true, output_padding, groups);
   return is_batched ? output : output.squeeze(0);
@@ -822,10 +821,9 @@ at::Tensor conv_transpose2d(
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-  TORCH_CHECK(input_.dim() == 3 || input_.dim() == 4,
-      "Expected 3D (unbatched) or 4D (batched) input to conv_transpose2d, but got input of size: ", input_.sizes());
-  auto is_batched = (input_.dim() == 4);
-  auto input = is_batched ? input_ : input_.unsqueeze(0);
+  Tensor input;
+  bool is_batched;
+  std::tie(input, is_batched) = batchify(input_, /*num_spatial_dims=*/ 2, "conv_transpose2d");
   auto output = at::convolution(
       input, weight, bias, stride, padding, dilation, true, output_padding, groups);
   return is_batched ? output : output.squeeze(0);
@@ -838,10 +836,9 @@ at::Tensor conv_transpose3d(
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-  TORCH_CHECK(input_.dim() == 4 || input_.dim() == 5,
-      "Expected 4D (unbatched) or 5D (batched) input to conv_transpose3d, but got input of size: ", input_.sizes());
-  auto is_batched = (input_.dim() == 5);
-  auto input = is_batched ? input_ : input_.unsqueeze(0);
+  Tensor input;
+  bool is_batched;
+  std::tie(input, is_batched) = batchify(input_, /*num_spatial_dims=*/ 3, "conv_transpose3d");
   auto output = at::convolution(
       input, weight, bias, stride, padding, dilation, true, output_padding, groups);
   return is_batched ? output : output.squeeze(0);

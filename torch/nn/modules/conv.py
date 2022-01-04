@@ -1139,10 +1139,22 @@ class _LazyConvXdMixin(LazyModuleMixin):
                 self.bias.materialize((self.out_channels,))
             self.reset_parameters()
 
-    # Function to extract in_channels from first input. This is expected to be overridden
-    # by subclasses.
+    # Function to extract in_channels from first input.
     def _get_in_channels(self, input: Tensor) -> int:
+        num_spatial_dims = self._get_num_spatial_dims()
+        num_dims_no_batch = num_spatial_dims + 1  # +1 for channels dim
+        num_dims_batch = num_dims_no_batch + 1
+        if input.dim() not in (num_dims_no_batch, num_dims_batch):
+            raise RuntimeError("Expected {}D (unbatched) or {}D (batched) input to {}, but "
+                               "got input of size: {}".format(num_dims_no_batch, num_dims_batch,
+                               self.__class__.__name__, input.shape))
+        return input.shape[1] if input.dim() == num_dims_batch else input.shape[0]
+
+    # Function to return the number of spatial dims expected for inputs to the module.
+    # This is expected to be implemented by subclasses.
+    def _get_num_spatial_dims(self) -> int:
         raise NotImplementedError()
+
 
 # LazyConv1d defines weight as a Tensor but derived class defines it as UnitializeParameter
 class LazyConv1d(_LazyConvXdMixin, Conv1d):  # type: ignore[misc]
@@ -1209,11 +1221,8 @@ class LazyConv1d(_LazyConvXdMixin, Conv1d):  # type: ignore[misc]
         if bias:
             self.bias = UninitializedParameter(**factory_kwargs)
 
-    def _get_in_channels(self, input: Tensor) -> int:
-        if input.dim() not in (2, 3):
-            raise RuntimeError("Expected 2D (unbatched) or 3D (batched) input to LazyConv1d, but "
-                               "got input of size: ", input.shape)
-        return input.shape[1] if input.dim() == 3 else input.shape[0]
+    def _get_num_spatial_dims(self) -> int:
+        return 1
 
 
 # LazyConv2d defines weight as a Tensor but derived class defines it as UnitializeParameter
@@ -1281,11 +1290,8 @@ class LazyConv2d(_LazyConvXdMixin, Conv2d):  # type: ignore[misc]
         if bias:
             self.bias = UninitializedParameter(**factory_kwargs)
 
-    def _get_in_channels(self, input: Tensor) -> int:
-        if input.dim() not in (3, 4):
-            raise RuntimeError("Expected 3D (unbatched) or 4D (batched) input to LazyConv2d, but "
-                               "got input of size: ", input.shape)
-        return input.shape[1] if input.dim() == 4 else input.shape[0]
+    def _get_num_spatial_dims(self) -> int:
+        return 2
 
 
 # LazyConv3d defines weight as a Tensor but derived class defines it as UnitializeParameter
@@ -1353,11 +1359,8 @@ class LazyConv3d(_LazyConvXdMixin, Conv3d):  # type: ignore[misc]
         if bias:
             self.bias = UninitializedParameter(**factory_kwargs)
 
-    def _get_in_channels(self, input: Tensor) -> int:
-        if input.dim() not in (4, 5):
-            raise RuntimeError("Expected 4D (unbatched) or 5D (batched) input to LazyConv3d, but "
-                               "got input of size: ", input.shape)
-        return input.shape[1] if input.dim() == 5 else input.shape[0]
+    def _get_num_spatial_dims(self) -> int:
+        return 3
 
 
 # LazyConvTranspose1d defines weight as a Tensor but derived class defines it as UnitializeParameter
@@ -1424,11 +1427,8 @@ class LazyConvTranspose1d(_LazyConvXdMixin, ConvTranspose1d):  # type: ignore[mi
         if bias:
             self.bias = UninitializedParameter(**factory_kwargs)
 
-    def _get_in_channels(self, input: Tensor) -> int:
-        if input.dim() not in (2, 3):
-            raise RuntimeError("Expected 2D (unbatched) or 3D (batched) input to LazyConvTranspose1d, but "
-                               "got input of size: ", input.shape)
-        return input.shape[1] if input.dim() == 3 else input.shape[0]
+    def _get_num_spatial_dims(self) -> int:
+        return 1
 
 
 # LazyConvTranspose2d defines weight as a Tensor but derived class defines it as UnitializeParameter
@@ -1495,11 +1495,8 @@ class LazyConvTranspose2d(_LazyConvXdMixin, ConvTranspose2d):  # type: ignore[mi
         if bias:
             self.bias = UninitializedParameter(**factory_kwargs)
 
-    def _get_in_channels(self, input: Tensor) -> int:
-        if input.dim() not in (3, 4):
-            raise RuntimeError("Expected 3D (unbatched) or 4D (batched) input to LazyTransposeConv2d, but "
-                               "got input of size: ", input.shape)
-        return input.shape[1] if input.dim() == 4 else input.shape[0]
+    def _get_num_spatial_dims(self) -> int:
+        return 2
 
 
 # LazyConvTranspose3d defines weight as a Tensor but derived class defines it as UnitializeParameter
@@ -1566,8 +1563,5 @@ class LazyConvTranspose3d(_LazyConvXdMixin, ConvTranspose3d):  # type: ignore[mi
         if bias:
             self.bias = UninitializedParameter(**factory_kwargs)
 
-    def _get_in_channels(self, input: Tensor) -> int:
-        if input.dim() not in (4, 5):
-            raise RuntimeError("Expected 4D (unbatched) or 5D (batched) input to LazyConvTranspose3d, but "
-                               "got input of size: ", input.shape)
-        return input.shape[1] if input.dim() == 5 else input.shape[0]
+    def _get_num_spatial_dims(self) -> int:
+        return 3

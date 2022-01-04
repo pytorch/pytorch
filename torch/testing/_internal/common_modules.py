@@ -316,8 +316,8 @@ def module_inputs_torch_nn_AvgPool1d(module_info, device, dtype, requires_grad, 
 
 def module_inputs_torch_nn_ConvNd(module_info, device, dtype, requires_grad, **kwargs):
     N = kwargs['N']
-    lazy = kwargs['lazy'] if 'lazy' in kwargs else False
-    transposed = kwargs['transposed'] if 'transposed' in kwargs else False
+    lazy = kwargs.get('lazy', False)
+    transposed = kwargs.get('transposed', False)
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     conv_kwargs_list = [{}] if transposed else [{}, {'padding': 'same'}]
 
