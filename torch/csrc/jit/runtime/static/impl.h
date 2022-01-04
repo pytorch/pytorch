@@ -1,7 +1,7 @@
 #pragma once
 
-#include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
+#include <ATen/core/symbol.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
@@ -163,6 +163,8 @@ struct TORCH_API StaticModuleOptions {
   // graph, where storage is deallocated outside static runtime
   // (enable_out_variant must be true)
   bool manage_output_tensors{false};
+  // enable TensorExpr fusion of ops at model loading time
+  bool enable_tensorexpr_fusion{false};
 };
 
 /// The static runime supports two execution modes.
@@ -218,12 +220,14 @@ class TORCH_API StaticModule {
  public:
   explicit StaticModule(
       std::shared_ptr<torch::jit::Graph> g,
-      const StaticModuleOptions& opts = StaticModuleOptions());
+      const StaticModuleOptions& opts = StaticModuleOptions(),
+      std::vector<IValue> sample_inputs = {});
 
   explicit StaticModule(
       const torch::jit::Module& m,
       bool is_frozen = false,
-      const StaticModuleOptions& opts = StaticModuleOptions());
+      const StaticModuleOptions& opts = StaticModuleOptions(),
+      std::vector<IValue> sample_inputs = {});
 
   typedef enum {
     CONSTANT_VALUE = -2, // VALUE nodes defined by prim::Constant
@@ -556,6 +560,9 @@ class TORCH_API StaticRuntime {
   // Set Input(idx) to arg. Always copies. Used for kwargs.
   void set_arg(const size_t idx, const IValue& arg);
 
+  bool fast_check_and_correct_overlap_with(
+      ProcessedNode& n,
+      c10::IValue& tensor_ival);
   void verify_and_correct_memory_overlap(ProcessedNode& n);
 
   // clean up owning refs of input IValues
@@ -715,6 +722,9 @@ class TORCH_API ProcessedNode {
     return overlap_detected_;
   }
 
+  bool check_and_correct_overlap_with(
+      const at::Tensor& input,
+      c10::IValue& output);
   void verify_and_correct_memory_overlap();
 
   void set_values(IValue* values) {
