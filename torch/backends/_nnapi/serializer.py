@@ -210,6 +210,7 @@ class Operand(NamedTuple):
 
     # This is always the PyTorch shape, which is NCHW for feature maps.
     # The actual NNAPI operand might have a transposed shape.
+    # we use 0 for load time dynamic shapes & -1 for runtime dynamic shapes
     shape: Tuple[int, ...]
 
     # Specifies how the shape of the operand that we define in NNAPI
@@ -305,7 +306,7 @@ def reverse_map_dim(dim_order, d):
     # d should be the dimension that NNAPI will see.
     # reverse_map_dim(PRESUMED_CONTIGUOUS, x) == x
     # reverse_map_dim(CHANNELS_LAST, 3) == 1
-    if dim_order is DimOrder.PRESUMED_CONTIGUOUS:
+    if dim_order in (DimOrder.PRESUMED_CONTIGUOUS, DimOrder.SCALAR_OR_VECTOR):
         return d
     assert dim_order is DimOrder.CHANNELS_LAST
     return [0, 2, 3, 1][d]
@@ -469,10 +470,13 @@ class _NnapiSerializer(object):
     def get_tensor_operand_by_jitval_fixed_size(self, jitval):
         op_id, oper = self.get_tensor_operand_by_jitval(jitval)
         for s in oper.shape:
-            if s <= 0:
+            if s == 0:
                 # TODO: Improve this error message, possibly after converting
                 # many callsites to support flexible size.
                 raise Exception("Flexible size is not supported for this operand.")
+            if s < 0:
+                # runtime flex
+                LOG.warn(f"Operand {oper} has runtime flex shape")
         return op_id, oper
 
     def get_tensor_operand_or_constant(self, jitval, dim_order=DimOrder.PRESUMED_CONTIGUOUS):
@@ -510,16 +514,26 @@ class _NnapiSerializer(object):
         return record
 
     @staticmethod
-    def operand_to_template_torchscript(op_id, oper):
+    def operand_to_template_torchscript(op_id, oper, shape=None):
         """Return a TorchScript expression to build a template for a given operand."""
+        if shape is None:
+            shape = oper.shape
+        else:
+            assert len(shape) == len(oper.shape)
+
         shape_parts = ["("]
-        for d, s in enumerate(oper.shape):
+        for d, s in enumerate(shape):
             if s > 0:
                 # Fixed shape dimension: just add the value.
                 shape_parts.append(str(s))
-            else:
-                # Flexible shape dimension: it should have been computed in a variable.
+            elif s == 0:
+                # Load time flexible shape dimension: it should have been computed in a variable.
                 shape_parts.append(flex_name(op_id, d))
+            elif s == -1:
+                # Runtime flexible shape
+                shape_parts.append('0')
+            else:
+                raise Exception("Unknown dim value, dimensions should be >= -1")
             shape_parts.append(",")
         shape_parts.append(")")
         shape_code = "".join(shape_parts)
@@ -622,7 +636,7 @@ class _NnapiSerializer(object):
 
         return ConvPoolArgs2d(*(kernels + strides + real_paddings + dilations + [group_num]))
 
-    def serialize_model(self, model, inputs):
+    def serialize_model(self, model, inputs, return_shapes=None):
         self.add_immediate_bool_scalar(False)
         self.add_immediate_bool_scalar(True)
 
@@ -654,11 +668,17 @@ class _NnapiSerializer(object):
         else:
             raise Exception(f"Unsupported return type: {retn_input.type()}")
 
-        for v in return_values:
+        if return_shapes is not None:
+            assert len(return_shapes) == len(return_values)
+        for i, v in enumerate(return_values):
             op_id = self.jitval_operand_map[v]
             self.outputs.append(op_id)
             out_dim_orders.append(self.operands[op_id].dim_order.value)
-            template_return_lines.append(self.operand_to_template_torchscript(op_id, self.operands[op_id]) + ",")
+            shape = return_shapes[i] if return_shapes else None
+            template_return_lines.append(
+                self.operand_to_template_torchscript(
+                    op_id, self.operands[op_id], shape) + ","
+            )
         template_return_lines.append("]")
 
         model = []
@@ -698,6 +718,9 @@ class _NnapiSerializer(object):
                     self.flexible_shape_computation_lines.append(
                         f"ser_model[{model_offset}] = {flex_name(op_id, pt_d)}")
                 model_offset += 1
+
+            # convert runtime flex shape from -1 to 0
+            shape = tuple(d if d != -1 else 0 for d in shape)
             model.append(self.serialize_ints(shape))
 
         model.extend(serialized_value_data)
@@ -2006,5 +2029,15 @@ class _NnapiSerializer(object):
                 )
 
 
-def serialize_model(module, inputs, config=None):
-    return _NnapiSerializer(config).serialize_model(module, inputs)
+def serialize_model(module, inputs, *, config=None, return_shapes=None):
+    """Convert to NNAPI and serialize torchscript module:
+    Parameters:
+        module: Torchscript module to convert
+        inputs: Tensors used to specify input details for NNAPI
+        config (optional): Optional config to attach to module
+        return_shapes (optional): Specify shape of outputs if
+            your module uses runtime flexible shapes to set output
+            buffer size for NNAPI
+    """
+
+    return _NnapiSerializer(config).serialize_model(module, inputs, return_shapes)
