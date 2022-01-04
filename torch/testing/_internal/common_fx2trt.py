@@ -9,6 +9,7 @@ from torch.fx.experimental.fx2trt import (
     InputTensorSpec,
     TRTModule,
 )
+from torch.testing._internal.common_utils import TestCase
 from torch.fx.experimental.normalize import NormalizeArgs
 from torch.fx.passes import shape_prop
 
@@ -35,7 +36,7 @@ def fetch_attr(mod, target):
 
 
 @unittest.skipIf(not torch.cuda.is_available(), "Skip because CUDA is not available")
-class TRTTestCase(unittest.TestCase):
+class TRTTestCase(TestCase):
     def setUp(self):
         torch.manual_seed(3)
 

@@ -493,6 +493,10 @@ class NativeFunction:
                                inp.annotation.alias_set_after != "" for inp in self.func.schema_order_arguments())
         return is_non_mutating_view or is_inplace_view or is_wildcard_view
 
+    @property
+    def root_name(self) -> str:
+        return self.func.name.name.base
+
 SchemaKind = Enum('SchemaKind', ('functional', 'inplace', 'out'))
 
 # A structured kernel is guaranteed to have a functional and out variant, and
@@ -544,6 +548,10 @@ class NativeFunctionsGroup:
         yield self.out
         if self.inplace is not None:
             yield self.inplace
+
+    @property
+    def root_name(self) -> str:
+        return self.functional.root_name
 
     @staticmethod
     def from_dict(d: Dict[SchemaKind, NativeFunction]) -> Optional['NativeFunctionsGroup']:

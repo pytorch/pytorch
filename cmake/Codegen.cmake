@@ -192,10 +192,16 @@ if(INTERN_BUILD_ATEN_OPS)
       --static_dispatch_backend ${STATIC_DISPATCH_BACKEND})
   endif()
 
+  set(GEN_PER_OPERATOR_FLAG)
+  if(USE_PER_OPERATOR_HEADERS)
+    list(APPEND GEN_PER_OPERATOR_FLAG "--per-operator-headers")
+  endif()
+
   set(GEN_COMMAND
       "${PYTHON_EXECUTABLE}" -m tools.codegen.gen
       --source-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen
       --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
+      ${GEN_PER_OPERATOR_FLAG}
       ${GEN_ROCM_FLAG}
       ${CUSTOM_BUILD_FLAGS}
       ${GEN_VULKAN_FLAGS}
@@ -204,9 +210,6 @@ if(INTERN_BUILD_ATEN_OPS)
   file(GLOB_RECURSE headers_templates "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/templates/*\.h")
   file(GLOB_RECURSE sources_templates "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/templates/*\.cpp")
   set(declarations_yaml_templates "")
-
-  file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/aten/src/ATen)
-  file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/aten/src/ATen/core)
 
   foreach(gen_type "headers" "sources" "declarations_yaml")
     # The codegen outputs may change dynamically as PyTorch is
@@ -237,11 +240,19 @@ if(INTERN_BUILD_ATEN_OPS)
     include("${CMAKE_BINARY_DIR}/aten/src/ATen/generated_${gen_type}.cmake")
     include("${CMAKE_BINARY_DIR}/aten/src/ATen/core_generated_${gen_type}.cmake")
     include("${CMAKE_BINARY_DIR}/aten/src/ATen/cuda_generated_${gen_type}.cmake")
+    include("${CMAKE_BINARY_DIR}/aten/src/ATen/ops_generated_${gen_type}.cmake")
+
+    message(STATUS "${gen_type} outputs: ${gen_outputs}")
 
     add_custom_command(
       COMMENT "Generating ATen ${gen_type}"
-      OUTPUT ${generated_${gen_type}} ${cuda_generated_${gen_type}} ${core_generated_${gen_type}}
+      OUTPUT
+        ${generated_${gen_type}}
+        ${cuda_generated_${gen_type}}
+        ${core_generated_${gen_type}}
+        ${ops_generated_${gen_type}}
         ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_${gen_type}.cmake
+        ${CMAKE_BINARY_DIR}/aten/src/ATen/ops_generated_${gen_type}.cmake
         ${CMAKE_BINARY_DIR}/aten/src/ATen/core_generated_${gen_type}.cmake
         ${CMAKE_BINARY_DIR}/aten/src/ATen/cuda_generated_${gen_type}.cmake
       COMMAND ${GEN_COMMAND_${gen_type}}
@@ -255,8 +266,8 @@ if(INTERN_BUILD_ATEN_OPS)
   # not tracked correctly in CMake. We make the libATen.so depend explicitly
   # on building the generated ATen files to workaround.
   add_custom_target(ATEN_CPU_FILES_GEN_TARGET DEPENDS
-      ${generated_headers} ${core_generated_headers}
-      ${generated_sources} ${core_generated_sources}
+      ${generated_headers} ${core_generated_headers} ${ops_generated_headers}
+      ${generated_sources} ${core_generated_sources} ${ops_generated_sources}
       ${generated_declarations_yaml})
   add_custom_target(ATEN_CUDA_FILES_GEN_TARGET DEPENDS
       ${cuda_generated_headers} ${cuda_generated_sources})
@@ -264,6 +275,11 @@ if(INTERN_BUILD_ATEN_OPS)
   add_library(ATEN_CUDA_FILES_GEN_LIB INTERFACE)
   add_dependencies(ATEN_CPU_FILES_GEN_LIB ATEN_CPU_FILES_GEN_TARGET)
   add_dependencies(ATEN_CUDA_FILES_GEN_LIB ATEN_CUDA_FILES_GEN_TARGET)
+
+  if(USE_PER_OPERATOR_HEADERS)
+    target_compile_definitions(ATEN_CPU_FILES_GEN_LIB INTERFACE AT_PER_OPERATOR_HEADERS)
+    target_compile_definitions(ATEN_CUDA_FILES_GEN_LIB INTERFACE AT_PER_OPERATOR_HEADERS)
+  endif()
 endif()
 
 function(append_filelist name outputvar)
