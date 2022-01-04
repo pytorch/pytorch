@@ -528,7 +528,7 @@ test_lazy_tensor_core() {
   ln -sf "$TORCH_LIB_DIR"/libtorch* torch/lib/
   ln -sf "$TORCH_LIB_DIR"/libshm* torch/lib/
   ln -sf "$TORCH_LIB_DIR"/libc10* torch/lib/
-  ln -sf "$PWD"/lazy_tensor_core/build/lib.linux-x86_64-3.6/_LAZYC.cpython-36m-x86_64-linux-gnu.so lazy_tensor_core/build/lib.linux-x86_64-3.6/libptltc.so
+  ln -sf "$PWD"/lazy_tensor_core/build/lib.linux-x86_64-3.7/_LAZYC.cpython-37m-x86_64-linux-gnu.so lazy_tensor_core/build/lib.linux-x86_64-3.7/libptltc.so
   lazy_tensor_core/test/cpp/build/test_ptltc
   assert_git_not_dirty
 }
