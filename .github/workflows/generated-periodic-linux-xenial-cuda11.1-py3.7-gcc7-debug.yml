@@ -52,6 +52,36 @@ jobs:
     outputs:
       docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
     steps:
+      - name: Print ENV variables
+        run: |
+          echo "CI is ${CI}"
+          echo "GITHUB_WORKFLOW is ${GITHUB_WORKFLOW}"
+          echo "GITHUB_RUN_ID is ${GITHUB_RUN_ID}"
+          echo "GITHUB_RUN_NUMBER is ${GITHUB_RUN_NUMBER}"
+          echo "GITHUB_JOB is ${GITHUB_JOB}"
+          echo "GITHUB_ACTION is ${GITHUB_ACTION}"
+          echo "GITHUB_ACTION_PATH is ${GITHUB_ACTION_PATH}"
+          echo "GITHUB_ACTIONS is ${GITHUB_ACTIONS}"
+          echo "GITHUB_ACTOR is ${GITHUB_ACTOR}"
+          echo "GITHUB_REPOSITORY is ${GITHUB_REPOSITORY}"
+          echo "GITHUB_EVENT_NAME is ${GITHUB_EVENT_NAME}"
+          echo "GITHUB_EVENT_PATH is ${GITHUB_EVENT_PATH}"
+          echo "GITHUB_WORKSPACE is ${GITHUB_WORKSPACE}"
+          echo "GITHUB_SHA is ${GITHUB_SHA}"
+          echo "GITHUB_REF is ${GITHUB_REF}"
+          echo "GITHUB_REF_NAME is ${GITHUB_REF_NAME}"
+          echo "GITHUB_REF_PROTECTED is ${GITHUB_REF_PROTECTED}"
+          echo "GITHUB_REF_TYPE is ${GITHUB_REF_TYPE}"
+          echo "GITHUB_HEAD_REF is ${GITHUB_HEAD_REF}"
+          echo "GITHUB_BASE_REF is ${GITHUB_BASE_REF}"
+          echo "GITHUB_SERVER_URL is ${GITHUB_SERVER_URL}"
+          echo "GITHUB_API_URL is ${GITHUB_API_URL}"
+          echo "GITHUB_GRAPHQL_URL is ${GITHUB_GRAPHQL_URL}"
+          echo "RUNNER_NAME is ${RUNNER_NAME}"
+          echo "RUNNER_OS is ${RUNNER_OS}"
+          echo "RUNNER_ARCH is ${RUNNER_ARCH}"
+          echo "RUNNER_TEMP is ${RUNNER_TEMP}"
+          echo "RUNNER_TOOL_CACHE is ${RUNNER_TOOL_CACHE}"
       - name: print labels
         run: echo "${PR_LABELS}"
       - name: Display EC2 information
