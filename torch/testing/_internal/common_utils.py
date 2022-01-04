@@ -1878,7 +1878,6 @@ class TestCase(expecttest.TestCase):
         torch.bfloat16   : (0.016, 1e-5),
         torch.float32    : (1.3e-6, 1e-5),
         torch.float64    : (1e-7, 1e-7),
-        torch.complex32  : (0.001, 1e-5),
         torch.complex64  : (1.3e-6, 1e-5),
         torch.complex128 : (1e-7, 1e-7),
     }

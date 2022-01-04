@@ -198,7 +198,7 @@ c10::optional<at::Tensor> runTorchSlice_opset10(
   return c10::optional<at::Tensor>(updated_val);
 }
 
-// Refer to AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF
+// Refer to AT_FORALL_SCALAR_TYPES_WITH_COMPLEX
 at::Tensor runTorchArange_opset11(
     const Node* node,
     const std::vector<at::Tensor>& inputTensorValues) {

@@ -74,8 +74,6 @@ inline cudaDataType ScalarTypeToCudaDataType(const c10::ScalarType& scalar_type)
       return CUDA_R_32F;
     case c10::ScalarType::Double:
       return CUDA_R_64F;
-    case c10::ScalarType::ComplexHalf:
-      return CUDA_C_16F;
     case c10::ScalarType::ComplexFloat:
       return CUDA_C_32F;
     case c10::ScalarType::ComplexDouble:

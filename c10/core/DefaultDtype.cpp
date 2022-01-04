@@ -11,9 +11,6 @@ void set_default_dtype(caffe2::TypeMeta dtype) {
   default_dtype = dtype;
   default_dtype_as_scalartype = default_dtype.toScalarType();
   switch (default_dtype_as_scalartype) {
-    case ScalarType::Half:
-      default_complex_dtype = ScalarType::ComplexHalf;
-      break;
     case ScalarType::Double:
       default_complex_dtype = ScalarType::ComplexDouble;
       break;

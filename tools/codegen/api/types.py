@@ -41,7 +41,6 @@ longT = BaseCppType('', 'int64_t')
 halfT = BaseCppType('at', 'Half')
 doubleT = BaseCppType('', 'double')
 floatT = BaseCppType('', 'float')
-complexHalfT = BaseCppType('c10', 'complex<c10::Half>')  # stuffing template param here is an abuse
 complexFloatT = BaseCppType('c10', 'complex<float>')
 complexDoubleT = BaseCppType('c10', 'complex<double>')
 boolT = BaseCppType('', 'bool')

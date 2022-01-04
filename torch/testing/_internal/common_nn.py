@@ -6208,7 +6208,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
                     return tensor
 
             def to_half(x):
-                # TODO: torch.complex32 when properly supported
+                # TODO: torch.complex32 when supported
                 return to_type(x, torch.float16, None)
 
             def to_single(x):

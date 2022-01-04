@@ -10,7 +10,7 @@ c10::ScalarType toAccumulateType(c10::ScalarType type, bool is_cuda) {
           CppTypeToScalarType<at::acc_type<scalar_t, true>>::value :    \
           CppTypeToScalarType<at::acc_type<scalar_t, false>>::value;
 
-    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_CASE)
+    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_CASE)
 #undef DEFINE_CASE
 
     default: TORCH_INTERNAL_ASSERT(false, "Unrecognized ScalarType: ", type);

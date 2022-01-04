@@ -921,7 +921,6 @@ class ScalarType(enum.IntEnum):
     HALF = enum.auto()
     FLOAT = enum.auto()
     DOUBLE = enum.auto()
-    COMPLEX32 = enum.auto()
     COMPLEX64 = enum.auto()
     COMPLEX128 = enum.auto()
     BOOL = enum.auto()
@@ -943,14 +942,13 @@ scalar_type_to_pytorch_type = [
     torch.half,         # 5
     torch.float,        # 6
     torch.double,       # 7
-    torch.complex32,    # 8
-    torch.complex64,    # 9
-    torch.complex128,   # 10
-    torch.bool,         # 11
-    torch.qint8,        # 12
-    torch.quint8,       # 13
-    torch.qint32,       # 14
-    torch.bfloat16,     # 15
+    torch.complex64,    # 8
+    torch.complex128,   # 9
+    torch.bool,         # 10
+    torch.qint8,        # 11
+    torch.quint8,       # 12
+    torch.qint32,       # 13
+    torch.bfloat16,     # 14
 ]
 
 def _cast_func_template(to_i, g, input, non_blocking):
@@ -966,14 +964,13 @@ scalar_type_to_onnx = [
     cast_pytorch_to_onnx["Half"],            # 5
     cast_pytorch_to_onnx["Float"],           # 6
     cast_pytorch_to_onnx["Double"],          # 7
-    cast_pytorch_to_onnx["Undefined"],       # 8
-    cast_pytorch_to_onnx["ComplexFloat"],    # 9
-    cast_pytorch_to_onnx["ComplexDouble"],   # 10
-    cast_pytorch_to_onnx["Bool"],            # 11
-    cast_pytorch_to_onnx["Char"],            # 12
-    cast_pytorch_to_onnx["Byte"],            # 13
-    cast_pytorch_to_onnx["Int"],             # 14
-    cast_pytorch_to_onnx["BFloat16"],        # 15
+    cast_pytorch_to_onnx["ComplexFloat"],    # 8
+    cast_pytorch_to_onnx["ComplexDouble"],   # 9
+    cast_pytorch_to_onnx["Bool"],            # 10
+    cast_pytorch_to_onnx["Char"],            # 11
+    cast_pytorch_to_onnx["Byte"],            # 12
+    cast_pytorch_to_onnx["Int"],             # 13
+    cast_pytorch_to_onnx["BFloat16"],        # 14
 ]
 
 # Global set to store the list of quantized operators in the network.

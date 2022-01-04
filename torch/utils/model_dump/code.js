@@ -462,7 +462,6 @@ function computeTensorMemory(numel, dtype) {
     "Half": 2,
     "Float": 4,
     "Double": 8,
-    "ComplexHalf": 4,
     "ComplexFloat": 8,
     "ComplexDouble": 16,
     "Bool": 1,

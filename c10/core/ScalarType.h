@@ -35,21 +35,17 @@ namespace c10 {
   _(at::Half, Half) /* 5 */                              \
   _(float, Float) /* 6 */                                \
   _(double, Double) /* 7 */                              \
-  _(c10::complex<c10::Half>, ComplexHalf) /* 8 */        \
-  _(c10::complex<float>, ComplexFloat) /* 9 */           \
-  _(c10::complex<double>, ComplexDouble) /* 10 */        \
-  _(bool, Bool) /* 11 */                                 \
-  _(c10::qint8, QInt8) /* 12 */                          \
-  _(c10::quint8, QUInt8) /* 13 */                        \
-  _(c10::qint32, QInt32) /* 14 */                        \
-  _(at::BFloat16, BFloat16) /* 15 */                     \
-  _(c10::quint4x2, QUInt4x2) /* 16 */                    \
-  _(c10::quint2x4, QUInt2x4) /* 17 */
+  _(c10::complex<float>, ComplexFloat) /* 8 */           \
+  _(c10::complex<double>, ComplexDouble) /* 9 */         \
+  _(bool, Bool) /* 10 */                                 \
+  _(c10::qint8, QInt8) /* 11 */                          \
+  _(c10::quint8, QUInt8) /* 12 */                        \
+  _(c10::qint32, QInt32) /* 13 */                        \
+  _(at::BFloat16, BFloat16) /* 14 */                     \
+  _(c10::quint4x2, QUInt4x2) /* 15 */                    \
+  _(c10::quint2x4, QUInt2x4) /* 16 */
 
-// If you want to support ComplexHalf for real, add ComplexHalf
-// into this macro (and change the name).  But beware: convert()
-// doesn't work for all the conversions you need...
-#define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(_) \
+#define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(_) \
   _(uint8_t, Byte)                                                 \
   _(int8_t, Char)                                                  \
   _(int16_t, Short)                                                \
@@ -244,8 +240,7 @@ static inline bool isFloatingType(ScalarType t) {
 
 static inline bool isComplexType(ScalarType t) {
   return (
-      t == ScalarType::ComplexHalf || t == ScalarType::ComplexFloat ||
-      t == ScalarType::ComplexDouble);
+      t == ScalarType::ComplexFloat || t == ScalarType::ComplexDouble);
 }
 
 static inline bool isQIntType(ScalarType t) {
@@ -292,7 +287,6 @@ static inline bool isSignedType(ScalarType t) {
     return std::numeric_limits<ctype>::is_signed;
 
   switch (t) {
-    case ScalarType::ComplexHalf:
     case ScalarType::ComplexFloat:
     case ScalarType::ComplexDouble:
       return true;
@@ -309,8 +303,6 @@ static inline bool isUnderlying(ScalarType type, ScalarType qtype) {
 
 static inline ScalarType toValueType(ScalarType t) {
   switch (t) {
-    case ScalarType::ComplexHalf:
-      return ScalarType::Half;
     case ScalarType::ComplexFloat:
       return ScalarType::Float;
     case ScalarType::ComplexDouble:
@@ -322,14 +314,10 @@ static inline ScalarType toValueType(ScalarType t) {
 
 static inline ScalarType toComplexType(ScalarType t) {
   switch (t) {
-    case ScalarType::Half:
-      return ScalarType::ComplexHalf;
     case ScalarType::Float:
       return ScalarType::ComplexFloat;
     case ScalarType::Double:
       return ScalarType::ComplexDouble;
-    case ScalarType::ComplexHalf:
-      return ScalarType::ComplexHalf;
     case ScalarType::ComplexFloat:
       return ScalarType::ComplexFloat;
     case ScalarType::ComplexDouble:
@@ -378,7 +366,6 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
   constexpr auto f2 = ScalarType::Half;
   constexpr auto f4 = ScalarType::Float;
   constexpr auto f8 = ScalarType::Double;
-  constexpr auto c2 = ScalarType::ComplexHalf;
   constexpr auto c4 = ScalarType::ComplexFloat;
   constexpr auto c8 = ScalarType::ComplexDouble;
   constexpr auto b1 = ScalarType::Bool;
@@ -407,23 +394,22 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
   // corrent values for the type promotions in complex type cases.
   static constexpr ScalarType _promoteTypesLookup[static_cast<int>(
       ScalarType::NumOptions)][static_cast<int>(ScalarType::NumOptions)] = {
-      /*        u1  i1  i2  i4  i8  f2  f4  f8  c2  c4  c8  b1  q1  q2  q3  bf*/
-      /* u1 */ {u1, i2, i2, i4, i8, f2, f4, f8, ud, c4, c8, u1, ud, ud, ud, bf},
-      /* i1 */ {i2, i1, i2, i4, i8, f2, f4, f8, ud, c4, c8, i1, ud, ud, ud, bf},
-      /* i2 */ {i2, i2, i2, i4, i8, f2, f4, f8, ud, c4, c8, i2, ud, ud, ud, bf},
-      /* i4 */ {i4, i4, i4, i4, i8, f2, f4, f8, ud, c4, c8, i4, ud, ud, ud, bf},
-      /* i8 */ {i8, i8, i8, i8, i8, f2, f4, f8, ud, c4, c8, i8, ud, ud, ud, bf},
-      /* f2 */ {f2, f2, f2, f2, f2, f2, f4, f8, ud, c4, c8, f2, ud, ud, ud, f4},
-      /* f4 */ {f4, f4, f4, f4, f4, f4, f4, f8, ud, c4, c8, f4, ud, ud, ud, f4},
-      /* f8 */ {f8, f8, f8, f8, f8, f8, f8, f8, ud, c8, c8, f8, ud, ud, ud, f8},
-      /* c2 */ {ud, ud, ud, ud, ud, ud, ud, ud, c2, c4, c8, ud, ud, ud, ud, ud},
-      /* c4 */ {c4, c4, c4, c4, c4, c4, c4, c8, c4, c4, c8, c4, ud, ud, ud, c4},
-      /* c8 */ {c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, ud, ud, ud, c8},
-      /* b1 */ {u1, i1, i2, i4, i8, f2, f4, f8, ud, c4, c8, b1, ud, ud, ud, bf},
-      /* q1 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
-      /* q2 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
-      /* q3 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
-      /* bf */ {bf, bf, bf, bf, bf, f4, f4, f8, ud, c4, c8, bf, ud, ud, ud, bf},
+      /*        u1  i1  i2  i4  i8  f2  f4  f8  c4  c8  b1  q1  q2  q3  bf*/
+      /* u1 */ {u1, i2, i2, i4, i8, f2, f4, f8, c4, c8, u1, ud, ud, ud, bf},
+      /* i1 */ {i2, i1, i2, i4, i8, f2, f4, f8, c4, c8, i1, ud, ud, ud, bf},
+      /* i2 */ {i2, i2, i2, i4, i8, f2, f4, f8, c4, c8, i2, ud, ud, ud, bf},
+      /* i4 */ {i4, i4, i4, i4, i8, f2, f4, f8, c4, c8, i4, ud, ud, ud, bf},
+      /* i8 */ {i8, i8, i8, i8, i8, f2, f4, f8, c4, c8, i8, ud, ud, ud, bf},
+      /* f2 */ {f2, f2, f2, f2, f2, f2, f4, f8, c4, c8, f2, ud, ud, ud, f4},
+      /* f4 */ {f4, f4, f4, f4, f4, f4, f4, f8, c4, c8, f4, ud, ud, ud, f4},
+      /* f8 */ {f8, f8, f8, f8, f8, f8, f8, f8, c8, c8, f8, ud, ud, ud, f8},
+      /* c4 */ {c4, c4, c4, c4, c4, c4, c4, c8, c4, c8, c4, ud, ud, ud, c4},
+      /* c8 */ {c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, ud, ud, ud, c8},
+      /* b1 */ {u1, i1, i2, i4, i8, f2, f4, f8, c4, c8, b1, ud, ud, ud, bf},
+      /* q1 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
+      /* q2 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
+      /* q3 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
+      /* bf */ {bf, bf, bf, bf, bf, f4, f4, f8, c4, c8, bf, ud, ud, ud, bf},
   };
   return _promoteTypesLookup[static_cast<int>(a)][static_cast<int>(b)];
 }

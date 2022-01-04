@@ -122,7 +122,7 @@ C10_HOST_DEVICE inline dest_t fetch_and_cast(
     const ScalarType src_type,
     const void* ptr) {
   switch (src_type) {
-    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(FETCH_AND_CAST_CASE)
+    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(FETCH_AND_CAST_CASE)
     default:
       ERROR_UNSUPPORTED_CAST
   }
@@ -141,7 +141,7 @@ C10_HOST_DEVICE inline void cast_and_store(
     void* ptr,
     src_t value) {
   switch (dest_type) {
-    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(CAST_AND_STORE_CASE)
+    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(CAST_AND_STORE_CASE)
     default:;
   }
   ERROR_UNSUPPORTED_CAST

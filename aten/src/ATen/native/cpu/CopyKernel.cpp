@@ -27,8 +27,6 @@ static void copy_kernel(TensorIterator& iter, bool non_blocking) {
     if (iter.tensor(0).is_neg() == iter.tensor(1).is_neg()) {
       if (dtype == ScalarType::Half) {
         cpu_kernel(iter, [=](at::Half a) -> at::Half { return a; });
-      } else if (dtype == ScalarType::ComplexHalf) {
-        cpu_kernel(iter, [=](c10::complex<at::Half> a) -> c10::complex<at::Half> { return a; });
       } else if (isQIntType(dtype)) {
         AT_DISPATCH_QINT_TYPES(dtype, "copy_kernel", [&] {
           cpu_kernel_vec(

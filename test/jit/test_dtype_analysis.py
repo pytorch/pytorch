@@ -3,7 +3,7 @@ from typing import Tuple
 from unittest.case import expectedFailure
 
 import torch
-from torch import complex32, float32, float64, int32, int64
+from torch import float32, float64, int32, int64
 from torch.testing._internal.common_methods_invocations import (
     SampleInput,
     sample_inputs_adaptive_avg_pool2d,
@@ -198,7 +198,6 @@ class TestDtypeAnalysis(TestDtypeBase):
         input_dtypes = [
             (float32,),  # Simple Case
             (int64,),  # Test how some unary ops implicitly convert to float
-            (complex32,),  # Show we can handle complex vals as well
         ]
 
         for fn, in_shapes, in_dtypes in product(functions, input_shapes, input_dtypes):
@@ -227,7 +226,6 @@ class TestDtypeAnalysis(TestDtypeBase):
             (int32, int64),  # Size Promotion (compliated case for 0dim tensors)
             (float32, int32),  # type Promotion
             (int64, float32),  # Type promotion with size change
-            (float64, complex32),  # Show we can handle complex vals as well
         ]
 
         for fn, in_shapes, in_dtypes in product(functions, input_shapes, input_dtypes):
