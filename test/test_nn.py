@@ -1382,9 +1382,13 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_NUMPY, "numpy not found")
     def test_invalid_load_state_dict(self):
         m = torch.nn.Linear(2, 2, bias=False)
-        state_dict = {
-            'weight': np.random.randn(2, 2),
-        }
+
+        state_dict = {'weight': np.random.randn(2, 2)}
+        with self.assertRaisesRegex(RuntimeError,
+                                    "expected torch.Tensor from checkpoint but received"):
+            m.load_state_dict(state_dict)
+
+        state_dict = {'weight': ((1., 1.), (2., 2.))}
         with self.assertRaisesRegex(RuntimeError,
                                     "expected torch.Tensor from checkpoint but received"):
             m.load_state_dict(state_dict)

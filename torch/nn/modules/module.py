@@ -1387,6 +1387,13 @@ class Module:
             key = prefix + name
             if key in state_dict:
                 input_param = state_dict[key]
+                if not torch.is_tensor(input_param):
+                    error_msgs.append('While copying the parameter named "{}", '
+                                      'expected torch.Tensor from checkpoint but '
+                                      'received {}'
+                                      .format(key, type(input_param)))
+                    continue
+
                 # This is used to avoid copying uninitialized parameters into
                 # non-lazy modules, since they dont have the hook to do the checks
                 # in such case, it will error when accessing the .shape attribute.
@@ -1405,18 +1412,11 @@ class Module:
                     with torch.no_grad():
                         param.copy_(input_param)
                 except Exception as ex:
-                    if torch.is_tensor(input_param):
-                        error_msgs.append('While copying the parameter named "{}", '
-                                          'whose dimensions in the model are {} and '
-                                          'whose dimensions in the checkpoint are {}, '
-                                          'an exception occurred : {}.'
-                                          .format(key, param.size(), input_param.size(), ex.args))
-                    else:
-                        error_msgs.append('While copying the parameter named "{}", '
-                                          'expected torch.Tensor from checkpoint but '
-                                          'received {}, '
-                                          'an exception occured : {}'
-                                          .format(key, type(input_param), ex.args))
+                    error_msgs.append('While copying the parameter named "{}", '
+                                      'whose dimensions in the model are {} and '
+                                      'whose dimensions in the checkpoint are {}, '
+                                      'an exception occurred : {}.'
+                                      .format(key, param.size(), input_param.size(), ex.args))
             elif strict:
                 missing_keys.append(key)
 
