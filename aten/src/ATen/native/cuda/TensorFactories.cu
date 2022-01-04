@@ -70,12 +70,9 @@ Tensor empty_strided_cuda(IntArrayRef size, IntArrayRef stride, c10::optional<Sc
   TORCH_CHECK(!pin_memory_opt.has_value() || !*pin_memory_opt, "Only dense CPU tensors can be pinned");
   auto* allocator = at::cuda::getCUDADeviceAllocator();
   auto dtype = dtype_or_default(dtype_opt);
+  constexpr c10::DispatchKeySet cuda_ks(c10::DispatchKey::CUDA);
   return at::detail::empty_strided_generic(
-      size,
-      stride,
-      allocator,
-      DispatchKey::CUDA,
-      dtype);
+      size, stride, allocator, cuda_ks, dtype);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangle ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
