@@ -982,6 +982,8 @@ Tensor linalg_solve(const Tensor& input, const Tensor& other) {
   return result;
 }
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 /*
 Computes the inverse of n-by-n matrix 'self'
 This is an in-place routine, it overwrites the content of 'self'.
