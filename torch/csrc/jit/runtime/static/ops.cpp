@@ -1239,6 +1239,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::pow, aten_pow, [](Node* n) -> SROperator {
 
 namespace {
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct ToArgs {
   c10::optional<at::ScalarType> dtype;
   c10::Layout layout;
