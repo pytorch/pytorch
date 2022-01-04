@@ -10,7 +10,7 @@
 #include <torch/csrc/utils/disallow_copy.h>
 #include <torch/csrc/utils/python_stub.h>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/core/dynamic_type.h>
 #include <ATen/core/enum_type.h>
 #include <ATen/core/function_schema.h>
