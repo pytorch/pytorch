@@ -1147,7 +1147,7 @@ class _LazyConvXdMixin(LazyModuleMixin):
         if input.dim() not in (num_dims_no_batch, num_dims_batch):
             raise RuntimeError("Expected {}D (unbatched) or {}D (batched) input to {}, but "
                                "got input of size: {}".format(num_dims_no_batch, num_dims_batch,
-                               self.__class__.__name__, input.shape))
+                                                              self.__class__.__name__, input.shape))
         return input.shape[1] if input.dim() == num_dims_batch else input.shape[0]
 
     # Function to return the number of spatial dims expected for inputs to the module.
