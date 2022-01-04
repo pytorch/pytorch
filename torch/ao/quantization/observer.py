@@ -896,12 +896,12 @@ class HistogramObserver(_ObserverBase):
 
         # which dst_bins the beginning and end of src_bin belong to?
         dst_bin_of_begin = torch.clamp(
-            src_bin_begin // dst_bin_width, 0, self.dst_nbins - 1
+            torch.div(src_bin_begin, dst_bin_width, rounding_mode='floor'), 0, self.dst_nbins - 1
         )
         dst_bin_of_begin_center = (dst_bin_of_begin + 0.5) * dst_bin_width
 
         dst_bin_of_end = torch.clamp(
-            src_bin_end // dst_bin_width, 0, self.dst_nbins - 1
+            torch.div(src_bin_end, dst_bin_width, rounding_mode='floor'), 0, self.dst_nbins - 1
         )
         dst_bin_of_end_center = (dst_bin_of_end + 0.5) * dst_bin_width
 
