@@ -89,11 +89,11 @@ pip install --user "git+https://github.com/pytorch/functorch.git"
 
 Run a quick sanity check in python:
 ```py
->>> import torch
->>> from functorch import vmap
->>> x = torch.randn(3)
->>> y = vmap(torch.sin)(x)
->>> assert torch.allclose(y, x.sin())
+import torch
+from functorch import vmap
+x = torch.randn(3)
+y = vmap(torch.sin)(x)
+assert torch.allclose(y, x.sin())
 ```
 
 #### From Source
@@ -134,11 +134,11 @@ pip install --user "git+https://github.com/pytorch/functorch.git@release/torch_1
 
 Finally, run a quick sanity check in python:
 ```py
->>> import torch
->>> from functorch import vmap
->>> x = torch.randn(3)
->>> y = vmap(torch.sin)(x)
->>> assert torch.allclose(y, x.sin())
+import torch
+from functorch import vmap
+x = torch.randn(3)
+y = vmap(torch.sin)(x)
+assert torch.allclose(y, x.sin())
 ```
 
 </p>
@@ -168,17 +168,17 @@ that runs on examples and then lift it to a function that can take batches of
 examples with `vmap(func)`, leading to a simpler modeling experience:
 
 ```py
->>> from functorch import vmap
->>> batch_size, feature_size = 3, 5
->>> weights = torch.randn(feature_size, requires_grad=True)
->>>
->>> def model(feature_vec):
->>>     # Very simple linear model with activation
->>>     assert feature_vec.dim() == 1
->>>     return feature_vec.dot(weights).relu()
->>>
->>> examples = torch.randn(batch_size, feature_size)
->>> result = vmap(model)(examples)
+from functorch import vmap
+batch_size, feature_size = 3, 5
+weights = torch.randn(feature_size, requires_grad=True)
+
+def model(feature_vec):
+    # Very simple linear model with activation
+    assert feature_vec.dim() == 1
+    return feature_vec.dot(weights).relu()
+
+examples = torch.randn(batch_size, feature_size)
+result = vmap(model)(examples)
 ```
 
 ### grad
@@ -187,35 +187,35 @@ examples with `vmap(func)`, leading to a simpler modeling experience:
 the gradients of the output of func w.r.t. to `inputs[0]`.
 
 ```py
->>> from functorch import grad
->>> x = torch.randn([])
->>> cos_x = grad(lambda x: torch.sin(x))(x)
->>> assert torch.allclose(cos_x, x.cos())
->>>
->>> # Second-order gradients
->>> neg_sin_x = grad(grad(lambda x: torch.sin(x)))(x)
->>> assert torch.allclose(neg_sin_x, -x.sin())
+from functorch import grad
+x = torch.randn([])
+cos_x = grad(lambda x: torch.sin(x))(x)
+assert torch.allclose(cos_x, x.cos())
+
+# Second-order gradients
+neg_sin_x = grad(grad(lambda x: torch.sin(x)))(x)
+assert torch.allclose(neg_sin_x, -x.sin())
 ```
 
 When composed with `vmap`, `grad` can be used to compute per-sample-gradients:
 ```py
->>> from functorch import vmap
->>> batch_size, feature_size = 3, 5
->>>
->>> def model(weights,feature_vec):
->>>     # Very simple linear model with activation
->>>     assert feature_vec.dim() == 1
->>>     return feature_vec.dot(weights).relu()
->>>
->>> def compute_loss(weights, example, target):
->>>     y = model(weights, example)
->>>     return ((y - target) ** 2).mean()  # MSELoss
->>>
->>> weights = torch.randn(feature_size, requires_grad=True)
->>> examples = torch.randn(batch_size, feature_size)
->>> targets = torch.randn(batch_size)
->>> inputs = (weights,examples, targets)
->>> grad_weight_per_example = vmap(grad(compute_loss), in_dims=(None, 0, 0))(*inputs)
+from functorch import vmap
+batch_size, feature_size = 3, 5
+
+def model(weights,feature_vec):
+    # Very simple linear model with activation
+    assert feature_vec.dim() == 1
+    return feature_vec.dot(weights).relu()
+
+def compute_loss(weights, example, target):
+    y = model(weights, example)
+    return ((y - target) ** 2).mean()  # MSELoss
+
+weights = torch.randn(feature_size, requires_grad=True)
+examples = torch.randn(batch_size, feature_size)
+targets = torch.randn(batch_size)
+inputs = (weights,examples, targets)
+grad_weight_per_example = vmap(grad(compute_loss), in_dims=(None, 0, 0))(*inputs)
 ```
 
 ### vjp and jacrev
@@ -223,47 +223,47 @@ When composed with `vmap`, `grad` can be used to compute per-sample-gradients:
 The `vjp` transform applies `func` to `inputs` and returns a new function that
 computes vjps given some `cotangents` Tensors.
 ```py
->>> from functorch import vjp
->>> outputs, vjp_fn = vjp(func, inputs); vjps = vjp_fn(*cotangents)
+from functorch import vjp
+outputs, vjp_fn = vjp(func, inputs); vjps = vjp_fn(*cotangents)
 ```
 
 The `jacrev` transform returns a new function that takes in `x` and returns the
 Jacobian of `torch.sin` with respect to `x`
 ```py
->>> from functorch import jacrev
->>> x = torch.randn(5)
->>> jacobian = jacrev(torch.sin)(x)
->>> expected = torch.diag(torch.cos(x))
->>> assert torch.allclose(jacobian, expected)
+from functorch import jacrev
+x = torch.randn(5)
+jacobian = jacrev(torch.sin)(x)
+expected = torch.diag(torch.cos(x))
+assert torch.allclose(jacobian, expected)
 ```
 Use `jacrev` to compute the jacobian. This can be composed with vmap to produce
 batched jacobians:
 
 ```py
->>> x = torch.randn(64, 5)
->>> jacobian = vmap(jacrev(torch.sin))(x)
->>> assert jacobian.shape == (64, 5, 5)
+x = torch.randn(64, 5)
+jacobian = vmap(jacrev(torch.sin))(x)
+assert jacobian.shape == (64, 5, 5)
 ```
 
 `jacrev` can be composed with itself to produce hessians:
 ```py
->>> def f(x):
->>>   return x.sin().sum()
->>>
->>> x = torch.randn(5)
->>> hessian = jacrev(jacrev(f))(x)
+def f(x):
+  return x.sin().sum()
+
+x = torch.randn(5)
+hessian = jacrev(jacrev(f))(x)
 ```
 
 ### Tracing through the transformations
 We can also trace through these transformations in order to capture the results as new code using `make_fx`. There is also experimental integration with the NNC compiler (only works on CPU for now!).
 
 ```py
->>> from functorch import make_fx, grad
->>> def f(x):
->>>     return torch.sin(x).sum()
->>> x = torch.randn(100)
->>> grad_f = make_fx(grad(f))(x)
->>> print(grad_f.code)
+from functorch import make_fx, grad
+def f(x):
+    return torch.sin(x).sum()
+x = torch.randn(100)
+grad_f = make_fx(grad(f))(x)
+print(grad_f.code)
 
 def forward(self, x_1):
     sin = torch.ops.aten.sin(x_1)
