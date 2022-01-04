@@ -432,7 +432,7 @@ class TestOptim(TestCase):
             ((optim.Adagrad, optim._multi_tensor.Adagrad), dict(weight_decay=1)),
         ]
 
-        kIterations = 3
+        kIterations = 4
         device = 'cuda'
 
         for optimizers, params in optimizer_pairs_with_flags:
@@ -448,11 +448,16 @@ class TestOptim(TestCase):
                 model.to(dtype=torch.float64, device=device)
                 optimizer = opt(model.parameters(), **params)
 
-                for _ in range(kIterations):
+                for iter in range(kIterations):
                     optimizer.zero_grad()
                     output = model(input)
                     loss = output.sum()
                     loss.backward()
+
+                    # Test that step behaves as expected (a no-op) when grads are set to None
+                    if iter == 0:
+                        optimizer.zero_grad(set_to_none=True)
+
                     optimizer.step()
 
                 res.append(model.parameters())
