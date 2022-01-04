@@ -324,6 +324,7 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_jvp', set({
         skip('nn.functional.dropout'),  # randomness testing artifact; not actually a problem
         skip('nn.functional.rrelu'),  # randomness testing artifact; not actually a problem
+        xfail('nn.functional.max_pool1d')
 
         # See https://github.com/pytorch/pytorch/issues/69034
         # RuntimeError: expected scalar type double but found float
@@ -583,6 +584,9 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_vmapjvp', {
         skip('nn.functional.dropout'),  # randomness
         skip('nn.functional.rrelu'),  # randomness
+        skip('nn.functional.fractional_max_pool2d'),  # randomness
+        skip('nn.functional.fractional_max_pool3d'),  # randomness
+        xfail('nn.functional.max_pool1d')
 
         # TODO: fails in core due to in-place batched nto non-batched
         # but fails here for a different reason
@@ -676,6 +680,9 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_vmapjvpall', {
         skip('nn.functional.dropout'),  # randomness
         skip('nn.functional.rrelu'),  # randomness
+        skip('nn.functional.fractional_max_pool2d'),  # randomness
+        skip('nn.functional.fractional_max_pool3d'),  # randomness
+        xfail('nn.functional.max_pool1d')
 
         # Causing a CUDA assert, needs investigation
         skip('div', 'floor_rounding', device_type='cuda'),
