@@ -251,24 +251,12 @@ bool InterpreterState::run(Stack& stack) {
           tupleIndex(stack);
           frame.step();
         } break;
-        case GETITEM_T: {
-          listSelect(stack);
-          frame.step();
-        } break;
-        case LEN_T: {
-          listLen(stack);
-          frame.step();
-        } break;
         case TUPLE_UNPACK: {
           tupleUnpack(stack);
           frame.step();
         } break;
         case RAISE_EXCEPTION: {
           raiseException(stack);
-          frame.step();
-        } break;
-        case UNCHECKED_CAST: {
-          noop(stack);
           frame.step();
         } break;
         case __IS__: {
@@ -303,16 +291,8 @@ bool InterpreterState::run(Stack& stack) {
           toPrimDType(stack);
           frame.step();
         } break;
-        case APPEND_T: {
-          listAppend(stack);
-          frame.step();
-        } break;
         case DIM: {
           dim(stack);
-          frame.step();
-        } break;
-        case EXTEND_T: {
-          listExtend(stack);
           frame.step();
         } break;
         case __NOT__: {
@@ -321,10 +301,6 @@ bool InterpreterState::run(Stack& stack) {
         } break;
         case BOOL_TENSOR: {
           boolTensor(stack);
-          frame.step();
-        } break;
-        case SLICE_T: {
-          listSlice(stack);
           frame.step();
         } break;
         case TO_LIST: {

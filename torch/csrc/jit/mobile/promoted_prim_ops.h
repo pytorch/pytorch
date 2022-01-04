@@ -1,6 +1,7 @@
 #pragma once
+#include <ATen/Functions.h>
 #include <torch/csrc/jit/mobile/prim_ops_registery.h>
-#include <torch/csrc/jit/runtime/register_ops_utils.h>
+#include <torch/csrc/jit/runtime/register_ops_common_utils.h>
 
 namespace torch {
 namespace jit {

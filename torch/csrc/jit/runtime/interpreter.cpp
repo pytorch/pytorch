@@ -640,16 +640,6 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             tupleIndex(stack);
           }
             INST_NEXT;
-          case INST(GETITEM_T): {
-            INST_GUARD;
-            listSelect(stack);
-          }
-            INST_NEXT;
-          case INST(LEN_T): {
-            INST_GUARD;
-            listLen(stack);
-          }
-            INST_NEXT;
           case INST(TUPLE_UNPACK): {
             INST_GUARD;
             tupleUnpack(stack);
@@ -705,19 +695,9 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             toPrimDType(stack);
           }
             INST_NEXT;
-          case INST(APPEND_T): {
-            INST_GUARD;
-            listAppend(stack);
-          }
-            INST_NEXT;
           case INST(DIM): {
             INST_GUARD;
             dim(stack);
-          }
-            INST_NEXT;
-          case INST(EXTEND_T): {
-            INST_GUARD;
-            listExtend(stack);
           }
             INST_NEXT;
           case INST(__NOT__): {
@@ -728,11 +708,6 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           case INST(BOOL_TENSOR): {
             INST_GUARD;
             boolTensor(stack);
-          }
-            INST_NEXT;
-          case INST(SLICE_T): {
-            INST_GUARD;
-            listSlice(stack);
           }
             INST_NEXT;
           case INST(TO_LIST): {

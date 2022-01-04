@@ -53,8 +53,6 @@ namespace jit {
   _(ISINSTANCE, "TI") /* check object is one of  types[X:X+N]  */              \
   _(TUPLE_SLICE, "II") /* slice tup[X:(X+N)] */                                \
   _(TUPLE_INDEX, "") /**/                                                      \
-  _(GETITEM_T, "") /**/                                                        \
-  _(LEN_T, "") /**/                                                            \
   _(TUPLE_UNPACK, "") /**/                                                     \
   _(RAISE_EXCEPTION, "") /**/                                                  \
   _(UNCHECKED_CAST, "") /**/                                                   \
@@ -66,12 +64,9 @@ namespace jit {
   _(DEVICE, "") /**/                                                           \
   _(DTYPE, "") /**/                                                            \
   _(TO_PRIM_DTYPE, "") /**/                                                    \
-  _(APPEND_T, "") /**/                                                         \
   _(DIM, "") /**/                                                              \
-  _(EXTEND_T, "") /**/                                                         \
   _(__NOT__, "") /**/                                                          \
   _(BOOL_TENSOR, "") /**/                                                      \
-  _(SLICE_T, "") /**/                                                          \
   _(TO_LIST, "") /* convert the input to a list */                             \
   _(NUM_TO_TENSOR_SCALAR, "") /**/                                             \
   _(IS_CUDA, "") /**/                                                          \
