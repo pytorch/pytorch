@@ -10,9 +10,11 @@ from torch._C import _disabled_torch_function_impl
 import torch.utils._pytree as pytree
 from torch.fx import Tracer, GraphModule
 import torch.fx as fx
+from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from .decompositions import decomposition_table
 from contextlib import contextmanager
 
+aten = torch.ops.aten
 
 USE_DECOMPOSE = False
 USE_META = False
@@ -48,6 +50,14 @@ def get_output_device(devices):
         raise RuntimeError("Couldn't infer output device from input device")
 
 
+in_place_ops = set([
+    aten.relu_,
+    aten.add_,
+    aten.hardtanh_,
+    aten.hardswish_,
+])
+
+
 class PythonTensor(torch.Tensor):
     elem: torch.Tensor
 
@@ -67,10 +77,12 @@ class PythonTensor(torch.Tensor):
         )
 
         # ...the real tensor is held as an element on the tensor.
-        r.elem = elem
         if USE_META:
-            r.elem = r.elem.to('meta')
+            r.elem = elem.to('meta')
+        else:
+            r.elem = elem
         r.proxy = proxy
+        proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(r)
         return r
 
     def __repr__(self):
@@ -89,18 +101,26 @@ class PythonTensor(torch.Tensor):
         def unwrap_tensor(e):
             return e.elem if isinstance(e, PythonTensor) else e
 
+        input_devices = list(set([i.device for i in pytree.tree_flatten(args)[0] +
+                                  pytree.tree_flatten(kwargs)[0] if isinstance(i, PythonTensor)]))
+        output_device = get_output_device(input_devices)
+
         proxy_args = pytree.tree_map(unwrap_proxy, args)
         proxy_kwargs = pytree.tree_map(unwrap_proxy, kwargs)
         proxy_out = func(*proxy_args, **proxy_kwargs)
+
+        if func in in_place_ops:
+            args[0].proxy = proxy_out
         args = pytree.tree_map(unwrap_tensor, args)
         kwargs = pytree.tree_map(unwrap_tensor, kwargs)
+
         try:
             real_out = func(*args, **kwargs)
         except NotImplementedError:
             # Hardcoding in running in cuda if meta-tracing fails for now.
-            args = pytree.tree_map(lambda x: torch.ones_like(x, device='cuda')
+            args = pytree.tree_map(lambda x: torch.ones_like(x, device=output_device)
                                    if isinstance(x, torch.Tensor) else x, args)
-            kwargs = pytree.tree_map(lambda x: torch.ones_like(x, device='cuda')
+            kwargs = pytree.tree_map(lambda x: torch.ones_like(x, device=output_device)
                                      if isinstance(x, torch.Tensor) else x, kwargs)
             real_out = func(*args, **kwargs)
 
@@ -112,13 +132,6 @@ class PythonTensor(torch.Tensor):
             if e is None:
                 e = torch.empty(())
             if type(e) == torch.Tensor:
-                output_device = e.device.type
-                if output_device == 'meta':
-                    # Infer the original output device from the inputs
-                    input_devices = list(set([i.device for i in pytree.tree_flatten(args)[0] +
-                                         pytree.tree_flatten(kwargs)[0] if isinstance(i, PythonTensor)]))
-                    output_device = get_output_device(input_devices)
-
                 return PythonTensor(e, proxy, output_device)
             else:
                 return e
