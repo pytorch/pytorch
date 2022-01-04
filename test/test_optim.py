@@ -448,15 +448,16 @@ class TestOptim(TestCase):
                 model.to(dtype=torch.float64, device=device)
                 optimizer = opt(model.parameters(), **params)
 
-                for iter in range(kIterations):
+                for _ in range(kIterations):
                     optimizer.zero_grad()
                     output = model(input)
                     loss = output.sum()
                     loss.backward()
 
                     # Test that step behaves as expected (a no-op) when grads are set to None
-                    if iter == 0:
-                        optimizer.zero_grad(set_to_none=True)
+                    # TODO: uncomment after optim foreach cleanup is landed
+                    # if iter == 0:
+                    #     optimizer.zero_grad(set_to_none=True)
 
                     optimizer.step()
 
