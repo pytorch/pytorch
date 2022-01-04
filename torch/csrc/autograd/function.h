@@ -9,7 +9,7 @@
 #include <torch/csrc/utils/python_stub.h>
 #include <torch/csrc/utils/variadic.h>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/record_function.h>
 #include <ATen/SequenceNumber.h>
 #include <c10/util/Exception.h>
