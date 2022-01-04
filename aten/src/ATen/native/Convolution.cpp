@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
+#include <ATen/native/ConvolutionMM3d.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/cpu/DepthwiseConvKernel.h>
@@ -28,6 +29,10 @@ DEFINE_DISPATCH(convolution_depthwise3x3_winograd_stub);
 DEFINE_DISPATCH(miopen_convolution_backward_stub);
 DEFINE_DISPATCH(miopen_convolution_transpose_backward_stub);
 DEFINE_DISPATCH(miopen_depthwise_convolution_backward_stub);
+DEFINE_DISPATCH(mkldnn_convolution_backward_stub);
+DEFINE_DISPATCH(slow_conv_dilated2d_backward_stub);
+DEFINE_DISPATCH(slow_conv_dilated3d_backward_stub);
+DEFINE_DISPATCH(slow_conv_transpose2d_backward_stub);
 REGISTER_NO_CPU_DISPATCH(cudnn_convolution_backward_stub, cudnn_convolution_backward_fn);
 REGISTER_NO_CPU_DISPATCH(cudnn_convolution_transpose_backward_stub, cudnn_convolution_transpose_backward_fn);
 REGISTER_NO_CPU_DISPATCH(miopen_convolution_backward_stub, miopen_convolution_backward_fn);
@@ -1453,15 +1458,17 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _convolution_backward_nogroup_bac
     // NB: nnpack backward does not support strided convolutions; use slow impl instead
     case ConvBackend::NnpackSpatial:
     case ConvBackend::SlowDilated2d:
-      return at::slow_conv_dilated2d_backward(
+      return slow_conv_dilated2d_backward_stub(
+        input.device().type(),
         grad_output, input, weight, kernel_size, params.stride, params.padding, params.dilation, output_mask);
     case ConvBackend::SlowDilated3d:
-      return at::slow_conv_dilated3d_backward(
+      return slow_conv_dilated3d_backward_stub(
+        input.device().type(),
         grad_output, input, weight, kernel_size, params.stride, params.padding, params.dilation, output_mask);
     case ConvBackend::SlowTranspose2d:
-      return at::slow_conv_transpose2d_backward(
-        grad_output, input, weight, kernel_size, params.stride, params.padding, params.output_padding,
-        params.dilation, output_mask);
+      return slow_conv_transpose2d_backward_stub(
+        input.device().type(), grad_output, input, weight, kernel_size, params.stride, params.padding,
+        params.output_padding, params.dilation, output_mask);
     case ConvBackend::SlowTranspose3d:
       return at::slow_conv_transpose3d_backward(
         grad_output, input, weight, kernel_size, params.stride, params.padding, params.output_padding,
@@ -1480,7 +1487,10 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _convolution_backward_nogroup_bac
 //   input_: tensor of shape (N, C_in, L_in), (N, C_in, H_in, W_in), or (N, C_in, D_in, H_in, W_in)
 //   weight_: tensor of shape (C_out, C_in // groups, *kernel_size); dimension of kernel_size must match the number
 //       of input spatial dimensions
-//   bias_sizes_opt: if specified, shape of bias
+//   bias_sizes_opt: if specified, indicates that a bias was used in the forward pass and contains the shape
+//       of the bias. While the bias shape can be computed from other inputs, it is provided to this function for
+//       ease of use. The bias shape is (weight.shape[0]) for normal convolution and (weight.shape[1] * groups)
+//       for transposed convolution.
 //   stride: single value or an array with dimension matching the number of input spatial dimensions
 //   padding: single value or an array with dimension matching the number of input spatial dimensions
 //   dilation: single value or an array with dimension matching the number of input spatial dimensions
@@ -1648,8 +1658,8 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
         weight = weight.contiguous();
       }
       std::tie(backend_grad_input, backend_grad_weight, backend_grad_bias) =
-        at::mkldnn_convolution_backward(input, grad_output, weight, params.padding, params.stride, params.dilation,
-            params.groups, output_mask);
+        mkldnn_convolution_backward_stub(input.device().type(), input, grad_output, weight, params.padding,
+          params.stride, params.dilation, params.groups, output_mask);
       break;
     case ConvBackend::Overrideable:
       // Only reach here when input is backend with out-of-source implementation.
@@ -1658,8 +1668,11 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
           params.dilation, params.transposed, params.output_padding, params.groups, output_mask);
       break;
     case ConvBackend::Slow3d:
+      // Note that no CUDA implementation of this kernel exists currently.
       std::tie(backend_grad_input, backend_grad_weight, backend_grad_bias) =
-        at::slow_conv3d_backward(grad_output, input, weight, kernel_size, params.stride, params.padding, output_mask);
+        slow_conv3d_backward_cpu(
+            grad_output, input, weight, kernel_size,
+            params.stride, params.padding, output_mask);
       break;
     // Handle backends that don't natively support groups > 1.
     case ConvBackend::NnpackSpatial:
