@@ -12,6 +12,7 @@
 #include <ATen/native/TensorShape.h>
 #include <ATen/native/cpu/CatKernel.h>
 #include <ATen/native/cpu/StackKernel.h>
+#include <ATen/native/cpu/SerialStackImpl.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/SparseTensorUtils.h>
@@ -750,7 +751,7 @@ Tensor sum_to_size(const Tensor& self, IntArrayRef size) {
 // We currently do not support per-channel quant for unfold, diagonal, expand, permute.
 // TODO: Make this an aten function and replace as_strided_qtensorimpl once that is done.
 Tensor make_qtensor(const Tensor& self, IntArrayRef size, IntArrayRef stride, QuantizerPtr quantizer) {
-  auto result = detail::make_tensor<QTensorImpl>(
+  auto result = at::detail::make_tensor<QTensorImpl>(
       c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype(), quantizer);
   setStrided(result, size, stride, self.storage_offset());
   return result;
@@ -758,7 +759,7 @@ Tensor make_qtensor(const Tensor& self, IntArrayRef size, IntArrayRef stride, Qu
 
 Tensor as_strided_tensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
-  auto result = detail::make_tensor<TensorImpl>(
+  auto result = at::detail::make_tensor<TensorImpl>(
       c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype());
   setStrided(result, size, stride, storage_offset);
   return result;
@@ -770,7 +771,7 @@ Tensor as_strided_qtensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef 
   TORCH_CHECK(
       quantizer->qscheme() == QScheme::PER_TENSOR_AFFINE,
       "Setting strides is possible only on uniformly quantized tensor");
-  auto result = detail::make_tensor<QTensorImpl>(
+  auto result = at::detail::make_tensor<QTensorImpl>(
       c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype(), quantizer);
   setStrided(result, size, stride, storage_offset);
   return result;
@@ -1016,11 +1017,11 @@ Tensor alias_with_sizes_and_strides(
     const Vec& strides) {
   Tensor self_;
   if (self.is_quantized()) {
-    self_ = detail::make_tensor<QTensorImpl>(
+    self_ = at::detail::make_tensor<QTensorImpl>(
       c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype(), get_qtensorimpl(self)->quantizer());
     setStrided(self_, sizes, strides, self.storage_offset());
   } else {
-    self_ = detail::make_tensor<TensorImpl>(
+    self_ = at::detail::make_tensor<TensorImpl>(
       c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype());
     setStrided(self_, sizes, strides, self.storage_offset());
   }
@@ -1420,73 +1421,9 @@ static inline std::vector<Tensor> get_stack_inputs(TensorList tensors, int64_t d
   return inputs;
 }
 
-// Checks to see whether native stack can be invoked under these conditions:
-// - result and input tensors are contiguous
-// - only one thread is used
-// - no type promotion has to occur
-// - tensors dtype is Double or Float
-bool inline can_use_native_serial_stack(Tensor& result, TensorList tensors, int64_t dim) {
-  TORCH_CHECK(tensors.size() > 0, "expected a non-empty list of Tensors");
-
-  const Tensor& firstTensor = tensors[0];
-  // stack dimension should be in range [0,firstTensor.dim())
-  // dim == firstTensor.dim() is a valid input, but it is handled by default code path
-  // that uses unsqueeze
-  if (dim >= firstTensor.dim()) return false;
-  // Native stack doesn't apply any tensor is skipped.
-  if (should_skip(firstTensor)) return false;
-  // there should be no type promotion
-  if (result.dtype() != firstTensor.dtype()) return false;
-
-  // Inputs cannot alias the output tensor
-  for (const auto i : c10::irange(tensors.size())) {
-    auto lap = at::get_overlap_status(result, tensors[i]);
-    TORCH_CHECK(lap != at::MemOverlapStatus::PARTIAL &&
-        lap != at::MemOverlapStatus::FULL, 0,
-        "unsupported operation: the input tensors cannot refer to any of the "
-        "output memory locations. Found overlap in input tensor ", i);
-  }
-
-  auto first_tensor_mem_format = firstTensor.suggest_memory_format();
-  ScalarType dtype = firstTensor.scalar_type();
-
-  if (!result.is_contiguous(first_tensor_mem_format)) {
-    return false;
-  }
-
-  // fast path only works for Double and Float
-  if (dtype != ScalarType::Double && dtype != ScalarType::Float) {
-    return false;
-  }
-
-  // check remainder of inputs
-  auto const &first_tensor_shape = firstTensor.sizes();
-  for (const auto i : c10::irange(1, tensors.size())) {
-    auto const &tensor = tensors[i];
-    TORCH_CHECK(tensors[i].sizes() == firstTensor.sizes(),
-      "stack expects each tensor to be equal size, but got ", first_tensor_shape,
-      " at entry 0 and ", tensor.sizes(), " at entry ", i);
-
-    // every tensor must be contiguous
-    // tensor sizes and strides must be the same
-    // there should be no type promotion
-    if (!tensor.is_contiguous(first_tensor_mem_format) ||
-      tensor.strides() != firstTensor.strides() ||
-      tensor.dtype() != dtype) {
-      return false;
-    }
-  }
-
-  // fast native stack should only be used when it is not worth using multiple threads
-  // or there is only one thread. Note that we aren't checking result.numel() here because
-  // it may not have been resized and we want to defer that cost till later.
-  int64_t numel_in_stack = firstTensor.numel() * tensors.size();
-  return numel_in_stack < at::internal::GRAIN_SIZE && at::get_num_threads() == 1;
-}
-
 bool inline maybe_native_stack(Tensor& result, TensorList tensors, int64_t dim) {
   dim = maybe_wrap_dim(dim, tensors[0].dim() + 1);
-  if (can_use_native_serial_stack(result, tensors, dim)) {
+  if (detail::CanUseNativeSerialStack<TensorList, /*skip_overlap_check*/ false>::call(result, tensors, dim)) {
     // compute the size of the result
     auto result_sizes = tensors[0].sizes().vec();
     result_sizes.insert(result_sizes.begin() + dim, tensors.size());

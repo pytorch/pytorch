@@ -44,11 +44,18 @@ def get_full_params(model, recurse=True):
     else:
         torch.cuda.synchronize()
         model._rebuild_full_params()
+        torch.cuda.synchronize()
         if model.module.flat_param is not None:
             model.module._unflatten_params()
 
 def _maybe_cuda(model, move_to_cuda):
     return model.cuda() if move_to_cuda else model
+
+def _maybe_wrap_fsdp(model, wrap_fsdp, *args, **kwargs):
+    return (
+        model if not wrap_fsdp
+        else FullyShardedDataParallel(model, *args, **kwargs)
+    )
 
 class DummyProcessGroup:
     def __init__(self, rank: int, size: int):
@@ -212,6 +219,7 @@ class NestedWrappedModuleWithDelay(ModuleWithDelay):
         wrap_fsdp,
         fsdp_init_mode=FSDPInitMode.CUDA_AFTER,
         cpu_offload=None,
+        backward_prefetch=None,
         **kwargs
     ):
         super().__init__(
@@ -219,7 +227,8 @@ class NestedWrappedModuleWithDelay(ModuleWithDelay):
                 group,
                 wrap_fsdp,
                 fsdp_init_mode=fsdp_init_mode,
-                cpu_offload=cpu_offload
+                cpu_offload=cpu_offload,
+                backward_prefetch=backward_prefetch,
             ),
             **kwargs
         )
@@ -413,6 +422,7 @@ class FSDPTest(MultiProcessTestCase):
         fsdp_init_mode=FSDPInitMode.CUDA_AFTER,
         lr=0.01,
         cpu_offload=CPUOffload(),
+        backward_prefetch=None,
         **kwargs
     ):
         group = dist.distributed_c10d._get_default_group()
@@ -432,12 +442,18 @@ class FSDPTest(MultiProcessTestCase):
 
         # Confirm we get the same behavior using FullyShardedDataParallel.
         try:
-            model = model_init_fn(group=group, wrap_fsdp=True, fsdp_init_mode=fsdp_init_mode, cpu_offload=cpu_offload)
+            model = model_init_fn(
+                group=group,
+                wrap_fsdp=True,
+                fsdp_init_mode=fsdp_init_mode,
+                cpu_offload=cpu_offload,
+                backward_prefetch=backward_prefetch
+            )
         except Exception as e:
             raise ValueError(f"model_Init_fn {model_init_fn} got error {str(e)}")
 
         cpu_offload = cpu_offload or CPUOffload()  # disabled if not specified.
-        model = FullyShardedDataParallel(model, cpu_offload=cpu_offload)
+        model = FullyShardedDataParallel(model, cpu_offload=cpu_offload, backward_prefetch=backward_prefetch)
         # Call model.cuda() after init FSDP if specified.
         if fsdp_init_mode == FSDPInitMode.CUDA_AFTER:
             model = model.cuda()

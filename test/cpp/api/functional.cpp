@@ -173,6 +173,27 @@ TEST_F(FunctionalTest, FractionalMaxPool2d) {
                    {{ 0,  2},
                     {10, 12}}})));
   ASSERT_EQ(std::get<1>(y_with_indices).sizes(), std::vector<int64_t>({2, 2, 2}));
+
+  auto x1 = torch::ones({2, 2, 5, 5});
+  auto y1 = F::fractional_max_pool2d(x1, F::FractionalMaxPool2dFuncOptions(3).output_size(2));
+
+  ASSERT_EQ(y1.ndimension(), 4);
+  ASSERT_TRUE(torch::allclose(y1, torch::ones({2, 2, 2, 2})));
+  ASSERT_EQ(y1.sizes(), std::vector<int64_t>({2, 2, 2, 2}));
+
+  auto y1_with_indices = F::fractional_max_pool2d_with_indices(x1, F::FractionalMaxPool2dFuncOptions(3).output_size(2));
+  ASSERT_TRUE(torch::equal(y1, std::get<0>(y1_with_indices)));
+  ASSERT_TRUE(torch::allclose(
+    std::get<1>(y1_with_indices),
+    torch::tensor({{{{ 0,  2},
+                     {10, 12}},
+                    {{ 0,  2},
+                     {10, 12}}},
+                   {{{ 0,  2},
+                     {10, 12}},
+                    {{ 0,  2},
+                     {10, 12}}}})));
+  ASSERT_EQ(std::get<1>(y1_with_indices).sizes(), std::vector<int64_t>({2, 2, 2, 2}));
 }
 
 TEST_F(FunctionalTest, FractionalMaxPool3d) {
@@ -2116,6 +2137,33 @@ TEST_F(FunctionalTest, Interpolate) {
                 .align_corners(true)),
         "align_corners option can only be set with the "
         "interpolating modes: linear | bilinear | bicubic | trilinear");
+  }
+  {
+    auto tensor = torch::rand({2, 3, 32, 32});
+    std::vector<int64_t> osize = {8, 10};
+    auto expected = at::native::_upsample_nearest_exact2d(tensor, osize, torch::nullopt);
+
+    auto options = F::InterpolateFuncOptions()
+        .size(osize)
+        .mode(torch::kNearestExact)
+        .align_corners(false);
+    auto output = F::interpolate(tensor, options);
+
+    ASSERT_TRUE(output.allclose(expected));
+  }
+  {
+    auto tensor = torch::rand({2, 3, 32, 32});
+    std::vector<int64_t> osize = {8, 10};
+    auto expected = at::native::_upsample_bilinear2d_aa(tensor, osize, false, torch::nullopt);
+
+    auto options = F::InterpolateFuncOptions()
+        .size(osize)
+        .mode(torch::kBilinear)
+        .align_corners(false)
+        .antialias(true);
+    auto output = F::interpolate(tensor, options);
+    ASSERT_TRUE(output.allclose(expected));
+
   }
 }
 
