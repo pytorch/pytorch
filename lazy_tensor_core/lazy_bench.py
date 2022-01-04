@@ -505,6 +505,7 @@ def merge_with_prefix(prefix, tmp_dir, out_dir, headers):
 
 def merge_reformat(tmp_dir, out_dir):
 
+    out_dir = args.output_dir
     def get_field(row, name, file_type):
         headers = {
             "error": ("name", "test", "error"),
@@ -522,7 +523,6 @@ def merge_reformat(tmp_dir, out_dir):
     for csvf in csv_files:
 
         with open(csvf, "r") as csvfile:
-            print(f"processing {csvf}")
             prefix = os.path.basename(csvf).split("_")[0]
             csvreader = csv.reader(csvfile)
             # This skips the first row of the CSV file.
@@ -540,11 +540,12 @@ def merge_reformat(tmp_dir, out_dir):
                 entry[get_field(r, "experiment", prefix)] = get_field(r, "speedup", prefix)
             
 
-    headers = ["name", "test", "amortized", "unamortized", "error"]
+    amortized_header = f"amortized {args.inner_loop_repeat}x"
+    headers = ["name", "test", amortized_header, "unamortized", "error"]
     with open(os.path.join(out_dir, "reformat.csv"), "w") as acc_csv:
         acc_csv.write(",".join(headers) + "\n")
         for k, v in table.items():
-            acc_csv.write(f"{k[0]},{k[1]},{v.get('amortized 10x', 'N/A')},{v.get('unamortized', 'N/A')},{v.get('overhead', 'N/A')},{v.get('error', 'N/A')}\n")  
+            acc_csv.write(f"{k[0]},{k[1]},{v.get(amortized_header, 'N/A')},{v.get('unamortized', 'N/A')},{v.get('overhead', 'N/A')},{v.get('error', 'N/A')}\n")  
 
 
 def save_error(name, test, error, dir):
@@ -669,4 +670,4 @@ if __name__ == "__main__" :
     merge_with_prefix("lazy-overheads_", dirpath, args.output_dir, ("dev", "name", "test", "overhead", "pvalue"))
     merge_with_prefix("lazy-compute_", dirpath, args.output_dir, ("name", "dev", "experiment", "test", "speedup", "pvalue"))
     merge_with_prefix("error_", dirpath, args.output_dir, ("name", "test", "error"))
-    merge_reformat(dirpath, args.output_dir)
+    merge_reformat(dirpath, args)
