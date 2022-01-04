@@ -98,13 +98,9 @@ class Capture(object):
                 *,
                 buffer_size=10000,
                 group_size=None,
-                unbatch_level=0,
                 guaranteed_group_size=None,
                 drop_remaining=False):
-        if unbatch_level != 0:
-            dp = self.unbatch(unbatch_level)._dataframes_per_row()
-        else:
-            dp = self._dataframes_per_row()
+        dp = self._dataframes_per_row()
         dp = dp.as_datapipe().groupby(group_key_fn, buffer_size=buffer_size, group_size=group_size,
                                       guaranteed_group_size=guaranteed_group_size, drop_remaining=drop_remaining)
         return dp
