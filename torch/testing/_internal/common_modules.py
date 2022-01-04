@@ -1028,46 +1028,54 @@ module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.RNN,
                module_inputs_func=partial(module_inputs_torch_nn_RNN_GRU, is_rnn=True),
                decorators=(
-                   # RuntimeError: Batching rule not implemented for aten::_cudnn_rnn_backward. We could not generate a fallback
+                   # RuntimeError: Batching rule not implemented for aten::_cudnn_rnn_backward.
+                   # We could not generate a fallback
                    DecorateInfo(
-                       unittest.expectedFailure, "TestModule", "test_grad", active_if=(TEST_CUDNN and not TEST_WITH_ROCM)
+                       unittest.expectedFailure, "TestModule", "test_grad",
+                       active_if=(TEST_CUDNN and not TEST_WITH_ROCM)
                    ),
                    # NotImplementedError: the derivative for '_cudnn_rnn_backward' is not implemented.
                    # Double backwards is not supported for CuDNN RNNs due to limitations in the CuDNN API
                    DecorateInfo(
-                       unittest.expectedFailure, "TestModule", "test_gradgrad", active_if=(TEST_CUDNN and not TEST_WITH_ROCM)
+                       unittest.expectedFailure, "TestModule", "test_gradgrad",
+                       active_if=(TEST_CUDNN and not TEST_WITH_ROCM)
                    ),
                    # CUDNN RNN doesn't accept non-contiguous hx
                    DecorateInfo(
-                       unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors", active_if=(TEST_CUDNN and not TEST_WITH_ROCM)
+                       unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors",
+                       active_if=(TEST_CUDNN and not TEST_WITH_ROCM)
                    ),
                    # MIOPEN RNN doesn't accept non-contiguous hx (this is dispatched to miopen only for float).
                    DecorateInfo(
-                       unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors", active_if=(TEST_CUDNN and TEST_WITH_ROCM),
-                       dtypes=(torch.float,)
+                       unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors",
+                       active_if=(TEST_CUDNN and TEST_WITH_ROCM), dtypes=(torch.float,)
                    ),
                )
                ),
     ModuleInfo(torch.nn.GRU,
                module_inputs_func=partial(module_inputs_torch_nn_RNN_GRU, is_rnn=False),
                decorators=(
-                   # RuntimeError: Batching rule not implemented for aten::_cudnn_rnn_backward. We could not generate a fallback
+                   # RuntimeError: Batching rule not implemented for aten::_cudnn_rnn_backward.
+                   # We could not generate a fallback
                    DecorateInfo(
-                       unittest.expectedFailure, "TestModule", "test_grad", active_if=(TEST_CUDNN and not TEST_WITH_ROCM)
+                       unittest.expectedFailure, "TestModule", "test_grad",
+                       active_if=(TEST_CUDNN and not TEST_WITH_ROCM)
                    ),
                    # NotImplementedError: the derivative for '_cudnn_rnn_backward' is not implemented.
                    # Double backwards is not supported for CuDNN RNNs due to limitations in the CuDNN API
                    DecorateInfo(
-                       unittest.expectedFailure, "TestModule", "test_gradgrad", active_if=(TEST_CUDNN and not TEST_WITH_ROCM)
+                       unittest.expectedFailure, "TestModule", "test_gradgrad",
+                       active_if=(TEST_CUDNN and not TEST_WITH_ROCM)
                    ),
                    # CUDNN GRU doesn't accept non-contiguous hx
                    DecorateInfo(
-                       unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors", active_if=(TEST_CUDNN and not TEST_WITH_ROCM)
+                       unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors",
+                       active_if=(TEST_CUDNN and not TEST_WITH_ROCM)
                    ),
                    # MIOPEN GRU doesn't accept non-contiguous hx (this is dispatched to miopen only for float).
                    DecorateInfo(
-                       unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors", active_if=(TEST_CUDNN and TEST_WITH_ROCM),
-                       dtypes=(torch.float,)
+                       unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors",
+                       active_if=(TEST_CUDNN and TEST_WITH_ROCM), dtypes=(torch.float,)
                    ),
                ))
 ]
