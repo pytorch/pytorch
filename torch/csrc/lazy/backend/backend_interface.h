@@ -15,6 +15,8 @@ namespace lazy {
  */
 class TORCH_API BackendImplInterface {
  public:
+  virtual ~BackendImplInterface() = default;
+
   /**
    * Initialization/Teardown
    * */
@@ -117,6 +119,7 @@ class TORCH_API BackendRegistrar {
   BackendRegistrar(const BackendImplInterface* backend_impl_interface);
 };
 
+bool hasBackend();
 TORCH_API const BackendImplInterface* getBackend();
 
 }  // lazy
