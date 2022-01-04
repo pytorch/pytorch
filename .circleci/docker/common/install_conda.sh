@@ -67,6 +67,10 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     #   conda_install pkg1 pkg2 ... [-c channel]
     as_jenkins conda install -q -n py_$ANACONDA_PYTHON_VERSION -y python="$ANACONDA_PYTHON_VERSION" $*
   }
+  conda_pip_install() {
+    # Ensure that the install command is run in specific environment
+    as_jenkins conda run -n py_$ANACONDA_PYTHON_VERSION pip install --progress-bar off $*
+  }
 
   # Install PyTorch conda deps, as per https://github.com/pytorch/pytorch README
   # DO NOT install cmake here as it would install a version newer than 3.10, but
@@ -97,7 +101,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # Pin SciPy because of failing distribution tests (see #60347)
   # Pin MyPy version because new errors are likely to appear with each release
   # Pin hypothesis to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
-  as_jenkins pip install --progress-bar off pytest \
+  conda_pip_install pytest \
     scipy==1.6.3 \
     scikit-image \
     psutil \
@@ -111,18 +115,18 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
 
   # Install numba only on python-3.8 or below
   # For numba issue see https://github.com/pytorch/pytorch/issues/51511
-  if [[ $(python -c "import sys; print(int(sys.version_info < (3, 9)))") == "1" ]]; then
-    as_jenkins pip install --progress-bar off numba==0.54.1
+  if [[ $(conda run -n py_$ANACONDA_PYTHON_VERSION python -c "import sys; print(int(sys.version_info < (3, 9)))") == "1" ]]; then
+    conda_pip_install numba==0.54.1
   else
-    as_jenkins pip install --progress-bar off numba==0.49.0
+    conda_pip_install numba==0.49.0
   fi
 
   # Update scikit-learn to a python-3.8 compatible version
   if [[ $(python -c "import sys; print(int(sys.version_info >= (3, 8)))") == "1" ]]; then
-    as_jenkins pip install --progress-bar off -U scikit-learn
+    conda_pip_install -U scikit-learn
   else
     # Pinned scikit-learn due to https://github.com/scikit-learn/scikit-learn/issues/14485 (affects gcc 5.5 only)
-    as_jenkins pip install --progress-bar off scikit-learn==0.20.3
+    conda_pip_install scikit-learn==0.20.3
   fi
 
   popd
