@@ -1,7 +1,7 @@
 # @generated DO NOT EDIT MANUALLY
 # Template is at:    .github/templates/linux_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: linux-xenial-py3.6-clang7-onnx
+name: linux-xenial-py3.7-gcc5.4
 
 on:
   pull_request:
@@ -14,8 +14,8 @@ on:
   workflow_dispatch:
 
 env:
-  BUILD_ENVIRONMENT: linux-xenial-py3.6-clang7-onnx
-  DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang7-onnx
+  BUILD_ENVIRONMENT: linux-xenial-py3.7-gcc5.4
+  DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.7-gcc5.4
   SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
   XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
   TORCH_CUDA_ARCH_LIST: 5.2
@@ -33,39 +33,29 @@ env:
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   PYTORCH_RETRY_TEST_CASES: 1
 concurrency:
-  group: linux-xenial-py3.6-clang7-onnx-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: linux-xenial-py3.7-gcc5.4-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:
 
-  ciflow_should_run:
-    runs-on: linux.large
-    timeout-minutes: 240
-    env:
-      IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == 'unassigned') && (github.event.assigneed.login == 'pytorchbot') }}
-      LABEL_CONDITIONS: ${{ contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cpu') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux') || contains(github.event.pull_request.labels.*.name, 'ciflow/onnx') || contains(github.event.pull_request.labels.*.name, 'ciflow/trunk') }}
-      LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
-    if: ${{ (github.repository == 'pytorch/pytorch') && (
-            (github.event_name == 'push') ||
-            (github.event_name == 'schedule') ||
-            (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cpu') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux') || contains(github.event.pull_request.labels.*.name, 'ciflow/onnx') || contains(github.event.pull_request.labels.*.name, 'ciflow/trunk')) ||
-            ((github.event_name == 'pull_request' && github.event.action != 'unassigned') && !contains(join(github.event.pull_request.labels.*.name), 'ciflow/')))
-         }}
-    steps:
-      - name: noop
-        run: echo running ciflow_should_run
-      - name: print labels
-        run: echo "${LABELS}"
-
   build:
     runs-on: linux.2xlarge
-    needs: [ciflow_should_run]
     timeout-minutes: 240
+    if: ${{ (github.repository_owner == 'pytorch') && (
+            (github.event_name == 'push') ||
+            (github.event_name == 'schedule') ||
+            (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cpu') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux') || contains(github.event.pull_request.labels.*.name, 'ciflow/trunk')) ||
+            ((github.event_name == 'pull_request' && github.event.action != 'unassigned') && !contains(join(github.event.pull_request.labels.*.name), 'ciflow/')))
+         }}
     env:
-      JOB_BASE_NAME: linux-xenial-py3.6-clang7-onnx-build
+      JOB_BASE_NAME: linux-xenial-py3.7-gcc5.4-build
+      IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == 'unassigned') && (github.event.assigneed.login == 'pytorchbot') }}
+      LABEL_CONDITIONS: ${{ contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cpu') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux') || contains(github.event.pull_request.labels.*.name, 'ciflow/trunk') }}
     outputs:
       docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
     steps:
+      - name: print labels
+        run: echo "${PR_LABELS}"
       - name: Display EC2 information
         shell: bash
         run: |
@@ -112,6 +102,10 @@ jobs:
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
           submodules: recursive
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
       - name: Calculate docker image tag
         id: calculate-tag
         run: |
@@ -257,19 +251,20 @@ jobs:
           docker system prune -af
 
   generate-test-matrix:
+    needs: build
     runs-on: ubuntu-18.04
-    needs: [ciflow_should_run]
     timeout-minutes: 240
     env:
       TEST_RUNNER_TYPE: linux.2xlarge
-      ENABLE_DISTRIBUTED_TEST: ''
-      ENABLE_JIT_LEGACY_TEST: ''
+      ENABLE_DISTRIBUTED_TEST: 1
+      ENABLE_JIT_LEGACY_TEST: 1
+      ENABLE_FX2TRT_TEST: ''
       ENABLE_MULTIGPU_TEST: ''
       ENABLE_NOGPU_NO_AVX_TEST: ''
       ENABLE_NOGPU_NO_AVX2_TEST: ''
       ENABLE_SLOW_TEST: ''
-      ENABLE_DOCS_TEST: ''
-      ENABLE_BACKWARDS_COMPAT_TEST: ''
+      ENABLE_DOCS_TEST: 1
+      ENABLE_BACKWARDS_COMPAT_TEST: 1
       ENABLE_XLA_TEST: ''
       ENABLE_NOARCH_TEST: ''
       NUM_TEST_SHARDS: 2
@@ -293,7 +288,7 @@ jobs:
         run: .github/scripts/generate_pytorch_test_matrix.py
 
   test:
-    needs: [build, generate-test-matrix, ciflow_should_run]
+    needs: [build, generate-test-matrix]
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
       fail-fast: false
@@ -301,7 +296,7 @@ jobs:
     timeout-minutes: 240
     env:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
-      JOB_BASE_NAME: linux-xenial-py3.6-clang7-onnx-test
+      JOB_BASE_NAME: linux-xenial-py3.7-gcc5.4-test
       TEST_CONFIG: ${{ matrix.config }}
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
@@ -353,6 +348,10 @@ jobs:
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
           submodules: recursive
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
       - name: Pull Docker image
         run: |
           retry () {
@@ -512,7 +511,7 @@ jobs:
         env:
           AWS_DEFAULT_REGION: us-east-1
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          JOB_BASE_NAME: linux-xenial-py3.6-clang7-onnx-test
+          JOB_BASE_NAME: linux-xenial-py3.7-gcc5.4-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
