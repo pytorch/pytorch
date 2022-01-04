@@ -619,6 +619,7 @@ class TestOperators(TestCase):
     def test_prelu(self):
         x = torch.randn(1, 2, 3, 4)
         self.assertONNX(torch.nn.PReLU(2), x, keep_initializers_as_inputs=True)
+        self.assertONNX(torch.nn.PReLU(), torch.tensor(1.0))
 
     def test_log_sigmoid(self):
         x = torch.randn(1, 2, 3, 4)
