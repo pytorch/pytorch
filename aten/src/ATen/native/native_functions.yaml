@@ -1874,6 +1874,8 @@
   device_guard: False
 
 - func: empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+  device_check: NoCheck
+  device_guard: False
   dispatch:
     CPU: empty_cpu
     CUDA: empty_cuda
