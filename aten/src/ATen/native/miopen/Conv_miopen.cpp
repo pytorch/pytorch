@@ -110,6 +110,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_depthwise_convolution_backwa
 #include <ATen/miopen/Descriptors.h>
 #include <ATen/miopen/Types.h>
 #include <ATen/miopen/Utils.h>
+#include <ATen/hip/EmptyTensor.h>
 
 #include <ATen/TensorUtils.h>
 #include <ATen/native/ConvUtils.h>
@@ -615,14 +616,10 @@ Tensor miopen_convolution_forward(
     memory_format = (weight->ndimension() == 5) ? /*at::MemoryFormat::ChannelsLast3d*/at::MemoryFormat::Contiguous : at::MemoryFormat::ChannelsLast;
   }
 
-  auto output_t = at::native::empty_cuda(
+  auto output_t = at::detail::empty_cuda(
                     conv_output_size(input->sizes(), weight->sizes(),
                                      padding, stride, dilation),
-                    /*dtype=*/input->scalar_type(),
-                    /*layout=*/c10::nullopt,
-                    /*device=*/kCUDA,
-                    /*pin_memory=*/c10::nullopt,
-                    /*memory_format=*/memory_format);
+                    input->options().memory_format(memory_format));
 
   if (output_t.numel() == 0) {
     return output_t;
@@ -635,7 +632,7 @@ Tensor miopen_convolution_forward(
   // See #4500
   Tensor weight_contig = weight->contiguous(memory_format);
   // Make sure that NC11 strides follow formula
-  weight_contig.resize_(weight_contig.sizes(), memory_format);
+  weight_contig.resize_(weieht_contig.sizes(), memory_format);
   Tensor input_contig = input->contiguous(memory_format);
   input_contig.resize_(input_contig.sizes(), memory_format);
 
@@ -714,14 +711,10 @@ Tensor miopen_depthwise_convolution_forward(
     memory_format = (weight->ndimension() == 5) ? /*at::MemoryFormat::ChannelsLast3d*/at::MemoryFormat::Contiguous : at::MemoryFormat::ChannelsLast;
   }
 
-  auto output_t = at::native::empty_cuda(
-                    conv_output_size(input->sizes(), weight->sizes(),
-                                     padding, stride, dilation),
-                    /*dtype=*/input->scalar_type(),
-                    /*layout=*/c10::nullopt,
-                    /*device=*/kCUDA,
-                    /*pin_memory=*/c10::nullopt,
-                    /*memory_format=*/memory_format);
+  auto output_t = at::detail::empty_cuda(
+      conv_output_size(input->sizes(), weight->sizes(),
+                       padding, stride, dilation),
+      input->options().memory_format(memory_format));
 
   TensorArg output{ output_t, "result", 0 };
   convolution_shape_check(c, input, weight, output, padding, stride, dilation, groups);
@@ -1085,13 +1078,8 @@ Tensor miopen_convolution_backward_input(
     memory_format = (weight->ndimension() == 5) ? /*at::MemoryFormat::ChannelsLast3d*/at::MemoryFormat::Contiguous : at::MemoryFormat::ChannelsLast;
   }
 
-  auto grad_input_t = at::native::empty_cuda(
-                    input_size,
-                    /*dtype=*/grad_output->scalar_type(),
-                    /*layout=*/c10::nullopt,
-                    /*device=*/kCUDA,
-                    /*pin_memory=*/c10::nullopt,
-                    /*memory_format=*/memory_format);
+  auto grad_input_t = at::detail::empty_cuda(
+      input_size, grad_output->options().memory_format(memory_format));
 
   // Avoid "grad_input" when this is being used as transposed convolution
   TensorArg grad_input{ grad_input_t, "result", 0 };
@@ -1185,12 +1173,7 @@ Tensor miopen_depthwise_convolution_backward_input(
   }
 
   auto grad_input_t = at::native::empty_cuda(
-                    input_size,
-                    /*dtype=*/grad_output->scalar_type(),
-                    /*layout=*/c10::nullopt,
-                    /*device=*/kCUDA,
-                    /*pin_memory=*/c10::nullopt,
-                    /*memory_format=*/memory_format);
+      input_size, grad_output->options().memory_format(memory_format));
 
   TensorArg grad_input{ grad_input_t, "result", 0 };
   convolution_shape_check(c, grad_input, weight, grad_output, padding, stride, dilation, groups);
