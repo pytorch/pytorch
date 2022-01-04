@@ -1,12 +1,6 @@
 """isort:skip_file"""
-from struct import pack
-from types import FunctionType
-from typing import List
-from pickle import _compat_pickle, _tuplesize2code, _extension_registry, _getattribute, _Pickler  # type: ignore[attr-defined]
-from itertools import islice
 import io
-from .importer import Importer, ObjMismatchError, ObjNotFoundError, sys_importer
-
+from itertools import islice
 from pickle import (
     EXT1,
     EXT2,
@@ -29,6 +23,13 @@ from pickle import (
     EMPTY_SET,
     ADDITEMS,
 )
+from pickle import _compat_pickle, _tuplesize2code, _extension_registry, _getattribute, _Pickler  # type: ignore[attr-defined]
+from struct import pack
+from types import FunctionType
+from typing import List
+
+from .importer import Importer, ObjMismatchError, ObjNotFoundError, sys_importer
+
 
 class PackagePickler(_Pickler):
     """Package-aware pickler.
@@ -115,6 +116,7 @@ class PackagePickler(_Pickler):
 
     dispatch[FunctionType] = save_global
 
+
 class DebugInfo:
     def format(self):
         raise AssertionError(f"unknown debug type {self}")
@@ -122,12 +124,14 @@ class DebugInfo:
     def __repr__(self):
         return f"DebugInfo({self.__class__.__name__})"
 
+
 class RootObject(DebugInfo):
     def __init__(self, obj):
         self.obj = obj
 
     def format(self):
         return f"<pickled object> ({type(self.obj)})"
+
 
 class ObjectAttribute(DebugInfo):
     def __init__(self, attr_name, attr_value):
@@ -137,6 +141,7 @@ class ObjectAttribute(DebugInfo):
     def format(self):
         return f"  .{self.attr_name} ({type(self.attr_value)})"
 
+
 class ListElement(DebugInfo):
     def __init__(self, idx, value):
         self.idx = idx
@@ -144,6 +149,7 @@ class ListElement(DebugInfo):
 
     def format(self):
         return f"  <object @ idx {self.idx}> ({type(self.value)})"
+
 
 class TupleElement(DebugInfo):
     def __init__(self, idx, value):
@@ -153,6 +159,7 @@ class TupleElement(DebugInfo):
     def format(self):
         return f"  <object @ idx {self.idx}> ({type(self.value)})"
 
+
 class DictElement(DebugInfo):
     def __init__(self, key, value):
         self.key = key
@@ -161,6 +168,7 @@ class DictElement(DebugInfo):
     def format(self):
         return f"  <object @ key {self.key}> ({type(self.value)})"
 
+
 class SetElement(DebugInfo):
     def __init__(self, obj):
         self.obj = obj
@@ -168,10 +176,12 @@ class SetElement(DebugInfo):
     def format(self):
         return f"  <object {self.obj}> ({type(self.obj)})"
 
+
 class SetElementPreProtocol4Flag(DebugInfo):
     # for protocol < 4 converts sets into a tupled list, so we flag and error is handled in trace
     def __init__(self, proto):
         pass
+
 
 class TypeElement(DebugInfo):
     def __init__(self, obj):
@@ -180,9 +190,10 @@ class TypeElement(DebugInfo):
     def format(self):
         return f"  type {type(self.obj)} (from object {(self.obj)})"
 
+
 class DebugPickler(PackagePickler):
-    """A pickler that implements debug tracing functionality to better
-    """
+    """A pickler that implements debug tracing functionality to better"""
+
     def __init__(self, *args, **kwargs):
         self.obj_stack = []
         super().__init__(*args, **kwargs)
@@ -274,7 +285,7 @@ class DebugPickler(PackagePickler):
             get = self.get(memo[id(obj)][0])
             if self.bin:
                 write(POP_MARK + get)
-            else:   # proto 0 -- POP_MARK not available
+            else:  # proto 0 -- POP_MARK not available
                 write(POP * (n + 1) + get)
             return
 
@@ -310,18 +321,18 @@ class DebugPickler(PackagePickler):
                 write(ADDITEMS)
             if n < self._BATCHSIZE:
                 return
+
     dispatch[set] = save_set
 
     def save_frozenset(self, obj, settype=set):
         self.save_set(obj, set_type=frozenset)
+
     dispatch[frozenset] = save_frozenset
 
     def save(self, obj, save_persistent_id=True):
         self.obj_stack.append(obj)
         super().save(obj, save_persistent_id)
         self.obj_stack.pop()
-
-
 
     def format_trace(self):
         stack = self.obj_stack
@@ -347,7 +358,9 @@ class DebugPickler(PackagePickler):
                 prev_obj = stack[idx - 1]
                 if getattr(prev_obj, "__dict__", None) is obj:
                     dict_element = stack[idx + 1]
-                    traced_stack.append(ObjectAttribute(dict_element.key, dict_element.value))
+                    traced_stack.append(
+                        ObjectAttribute(dict_element.key, dict_element.value)
+                    )
                     idx_to_skip.add(idx + 1)
                     idx_to_skip.add(idx + 2)
                     continue
@@ -396,6 +409,7 @@ def debug_dumps(importer, obj, protocol=4):
         ) from e
     else:
         raise ValueError(f"We expected pickling of {obj} to throw an exception")
+
 
 def create_pickler(data_buf, importer, protocol=4):
     if importer is sys_importer:

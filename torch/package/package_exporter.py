@@ -8,6 +8,7 @@ from collections import OrderedDict, defaultdict
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from pickle import PicklingError
 from typing import (
     Any,
     BinaryIO,
@@ -26,7 +27,6 @@ import torch
 from torch.serialization import location_tag, normalize_storage_type
 from torch.types import Storage
 from torch.utils.hooks import RemovableHandle
-from pickle import PicklingError
 
 from ._digraph import DiGraph
 from ._importlib import _normalize_path
@@ -41,6 +41,7 @@ from .importer import Importer, OrderedImporter, sys_importer
 _gate_torchscript_serialization = True
 
 ActionHook = Callable[["PackageExporter", str], None]
+
 
 class _ModuleProviderAction(Enum):
     """Represents one of the actions that :class:`PackageExporter` can take on a module.
@@ -552,8 +553,10 @@ class PackageExporter:
                 self.add_dependency(dep)
 
     def save_pickle(
-        self, package: str,
-        resource: str, obj: Any,
+        self,
+        package: str,
+        resource: str,
+        obj: Any,
         dependencies: bool = True,
         pickle_protocol: int = 3,
     ):
@@ -574,7 +577,9 @@ class PackageExporter:
             dependencies (bool, optional): If ``True``, we scan the source for dependencies.
         """
 
-        assert ((pickle_protocol == 4) or (pickle_protocol == 3)), "torch.package only supports pickle protocols 3 and 4"
+        assert (pickle_protocol == 4) or (
+            pickle_protocol == 3
+        ), "torch.package only supports pickle protocols 3 and 4"
 
         filename = self._filename(package, resource)
         # Write the pickle data for `obj`
@@ -621,12 +626,19 @@ class PackageExporter:
             # pickletools.dis(data_value)
             for opcode, arg, pos in pickletools.genops(data_value):
                 if pickle_protocol == 4:
-                    if opcode.name == "SHORT_BINUNICODE" or opcode.name == "BINUNICODE8":
+                    if (
+                        opcode.name == "SHORT_BINUNICODE"
+                        or opcode.name == "BINUNICODE8"
+                    ):
                         assert isinstance(arg, str)
                         module = field
                         field = arg
                         memo[memo_count] = arg
-                    elif opcode.name == "BINGET_LONG" or opcode.name == "BINGET" or opcode.name == "GET":
+                    elif (
+                        opcode.name == "BINGET_LONG"
+                        or opcode.name == "BINGET"
+                        or opcode.name == "GET"
+                    ):
                         assert isinstance(arg, int)
                         module = field
                         field = memo.get(arg, None)
@@ -637,7 +649,9 @@ class PackageExporter:
                         if module not in all_dependencies:
                             all_dependencies.append(module)
                         _check_mocked_error(module, field)
-                elif pickle_protocol == 3 and opcode.name == "GLOBAL":  # a global reference
+                elif (
+                    pickle_protocol == 3 and opcode.name == "GLOBAL"
+                ):  # a global reference
                     assert isinstance(arg, str)
                     module, field = arg.split(" ")
                     if module not in all_dependencies:
@@ -648,7 +662,6 @@ class PackageExporter:
                 self.add_dependency(module_name)
 
         self._write(filename, data_value)
-
 
     def save_text(self, package: str, resource: str, text: str):
         """Save text data to the package.

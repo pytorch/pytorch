@@ -13,9 +13,9 @@ except ImportError:
 
 
 class TestDebugPickler(PackageTestCase):
-
     def test_set(self):
         from package_a.bad_pickle import BadPickle, GoodPickle
+
         lst = [GoodPickle(), GoodPickle(), BadPickle()]
         obj = [
             GoodPickle(),
@@ -41,6 +41,7 @@ class TestDebugPickler(PackageTestCase):
 
     def test_frozenset(self):
         from package_a.bad_pickle import BadPickle, GoodPickle
+
         lst = [GoodPickle(), GoodPickle(), BadPickle()]
         obj = [
             GoodPickle(),
@@ -66,6 +67,7 @@ class TestDebugPickler(PackageTestCase):
 
     def test_tuple(self):
         from package_a.bad_pickle import BadPickle, GoodPickle
+
         obj1 = [
             GoodPickle(),
             (GoodPickle(), GoodPickle(), BadPickle()),

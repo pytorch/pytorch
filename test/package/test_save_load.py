@@ -264,9 +264,12 @@ class TestSaveLoad(PackageTestCase):
         a.b.c.d = BadPickle()
         buffer = BytesIO()
 
-        with self.assertRaisesRegex(pickle.PicklingError, "We think the problematic object is found at"):
+        with self.assertRaisesRegex(
+            pickle.PicklingError, "We think the problematic object is found at"
+        ):
             with PackageExporter(buffer) as pe:
                 pe.save_pickle("foo", "foo.pkl", a)
+
 
 if __name__ == "__main__":
     run_tests()
