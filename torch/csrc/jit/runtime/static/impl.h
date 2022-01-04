@@ -493,7 +493,7 @@ class TORCH_API StaticModule {
 // `StaticRuntime` stores a vector of IValues that all
 // `BlockRunner`s share. This vector is used to store all
 // constants, inputs, and intermediate tensors.
-class BlockRunner {
+class TORCH_API BlockRunner {
  public:
   explicit BlockRunner(
       const StaticModule& sm,
