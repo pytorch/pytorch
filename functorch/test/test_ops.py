@@ -272,14 +272,15 @@ vjp_fail = {
     xfail('tensor_split'),
     xfail('to_sparse'),
     xfail('nn.functional.ctc_loss'),
-    xfail('nn.functional.fractional_max_pool3d'),
-    xfail('nn.functional.fractional_max_pool2d'),
 }
 
 
 class TestOperators(TestCase):
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
-    @skipOps('TestOperators', 'test_grad', vjp_fail)
+    @skipOps('TestOperators', 'test_grad', vjp_fail.union({
+        skip('nn.functional.fractional_max_pool2d'),  # fails on cuda, runs okay on cpu
+        skip('nn.functional.fractional_max_pool3d'),  # fails on cuda, runs okay on cpu
+    }))
     def test_grad(self, device, dtype, op):
         if op.name in vjp_fail:
             self.skipTest("Skipped; Expected failures")
@@ -324,7 +325,9 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_jvp', set({
         skip('nn.functional.dropout'),  # randomness testing artifact; not actually a problem
         skip('nn.functional.rrelu'),  # randomness testing artifact; not actually a problem
-        xfail('nn.functional.max_pool1d'),
+        skip('nn.functional.fractional_max_pool2d'),  # fails on cuda, runs okay on cpu
+        skip('nn.functional.fractional_max_pool3d'),  # fails on cuda, runs okay on cpu
+        skip('nn.functional.max_pool1d'),  # fails on cpu, runs okay on cuda
 
         # See https://github.com/pytorch/pytorch/issues/69034
         # RuntimeError: expected scalar type double but found float
@@ -383,6 +386,8 @@ class TestOperators(TestCase):
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjp', vjp_fail.union({
+        skip('nn.functional.fractional_max_pool2d'),  # fails on cpu, runs okay on cuda
+        skip('nn.functional.fractional_max_pool3d'),  # fails on cpu, runs okay on cuda
         skip('nn.functional.conv_transpose3d', device_type='cuda'),  # numerical precision
     }))
     def test_vjp(self, device, dtype, op):
@@ -418,6 +423,8 @@ class TestOperators(TestCase):
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjpvjp', vjp_fail.union({
+        skip('nn.functional.fractional_max_pool2d'),  # fails on cuda, runs okay on cpu
+        xfail('nn.functional.fractional_max_pool3d'),
         skip('nn.functional.conv_transpose3d'),  # numerical precision problem
     }))
     def test_vjpvjp(self, device, dtype, op):
@@ -586,7 +593,7 @@ class TestOperators(TestCase):
         skip('nn.functional.rrelu'),  # randomness
         skip('nn.functional.fractional_max_pool2d'),  # randomness
         skip('nn.functional.fractional_max_pool3d'),  # randomness
-        xfail('nn.functional.max_pool1d'),
+        skip('nn.functional.max_pool1d'),  # fails on cpu, runs on cuda
 
         # TODO: fails in core due to in-place batched nto non-batched
         # but fails here for a different reason
@@ -680,9 +687,9 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_vmapjvpall', {
         skip('nn.functional.dropout'),  # randomness
         skip('nn.functional.rrelu'),  # randomness
-        xfail('nn.functional.fractional_max_pool2d'),  # randomness
-        xfail('nn.functional.fractional_max_pool3d'),  # randomness
-        xfail('nn.functional.max_pool1d'),
+        xfail('nn.functional.fractional_max_pool2d'),  # Cannot access data pointer of Tensor that doesn't have storage
+        xfail('nn.functional.fractional_max_pool3d'),  # Cannot access data pointer of Tensor that doesn't have storage
+        skip('nn.functional.max_pool1d'),  # fails on cpu, runs on cuda
 
         # Causing a CUDA assert, needs investigation
         skip('div', 'floor_rounding', device_type='cuda'),
