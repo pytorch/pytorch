@@ -43,6 +43,11 @@ def parse_backend_yaml(
     cpp_namespace = yaml_values.pop('cpp_namespace', None)
     assert cpp_namespace is not None, 'You must provide a value for "cpp_namespace"'
 
+    # Mostly just defaulting to false to stick with LazyTensor convention.
+    use_out_as_primary = yaml_values.pop('use_out_as_primary', False)
+    assert isinstance(use_out_as_primary, bool), \
+        f'You must provide either True or False for use_out_as_primary. Provided: {use_out_as_primary}'
+
     supported = yaml_values.pop('supported', [])
     if supported is None:
         supported = []  # Allow an empty list of supported ops
@@ -59,7 +64,7 @@ def parse_backend_yaml(
         f'{backend_yaml_path} contains unexpected keys: {", ".join(yaml_values.keys())}. \
 Only the following keys are supported: {", ".join(valid_keys)}'
 
-    def create_backend_index(backend_ops: List[str], dispatch_key: DispatchKey) -> BackendIndex:
+    def create_backend_index(backend_ops: List[str], dispatch_key: DispatchKey, *, use_out_as_primary: bool) -> BackendIndex:
         metadata: Dict[OperatorName, BackendMetadata] = {}
         for op in backend_ops:
             op_name = OperatorName.parse(op)
@@ -69,11 +74,9 @@ Only the following keys are supported: {", ".join(valid_keys)}'
             # TODO: allow structured external backends later.
             m = BackendMetadata(kernel=kernel_name, structured=False)
             metadata[op_name] = m
-        # TODO: currently hardcoding the fact that XLA implements out/inplace in terms of functional ops,
-        # this should eventually be toggleable per-backend.
         return BackendIndex(
             dispatch_key=dispatch_key,
-            use_out_as_primary=False,
+            use_out_as_primary=use_out_as_primary,
             external=True,
             index=metadata)
 
@@ -82,7 +85,7 @@ Only the following keys are supported: {", ".join(valid_keys)}'
         with context(lambda: f'The provided value for "backend" must be a valid DispatchKey, but got {backend}.'):
             backend_key = DispatchKey.parse(backend)
 
-        backend_idx = create_backend_index(supported, backend_key)
+        backend_idx = create_backend_index(supported, backend_key, use_out_as_primary=use_out_as_primary)
         assert backend_key not in backend_indices
         backend_indices[backend_key] = backend_idx
 
@@ -92,7 +95,7 @@ Only the following keys are supported: {", ".join(valid_keys)}'
 the behavior of autograd for some operators on your backend. However "Autograd{backend}" is not a valid DispatchKey.'):
             autograd_key = DispatchKey.parse(f'Autograd{backend}')
 
-        autograd_idx = create_backend_index(supported_autograd, autograd_key)
+        autograd_idx = create_backend_index(supported_autograd, autograd_key, use_out_as_primary=use_out_as_primary)
         assert autograd_key not in backend_indices
         backend_indices[autograd_key] = autograd_idx
 
@@ -265,7 +268,7 @@ def gen_dispatcher_registrations(
         )),
     })
 
-def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[str]) -> None:
+def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[str] = None) -> None:
 
     # Assumes that this file lives at PYTORCH_ROOT/tools/codegen/gen_backend_stubs.py
     pytorch_root = pathlib.Path(__file__).parent.parent.parent.absolute()
@@ -289,7 +292,10 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
     selector = SelectiveBuilder.get_nop_selector()
 
 
-    assert backend_key is not None
+    if backend_key is None:
+        # This could be useful if a backend wants to quickly set up a noop yaml file but doesn't have any kernels ready yet.
+        return
+
     class_name = backend_indices[backend_key].native_function_class_name()
 
     if impl_path is not None:
