@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/CPUGeneratorImpl.h>
-#include <ATen/Utils.h>
 #include <ATen/Dispatch.h>
+#include <ATen/EmptyTensor.h>
 #include <ATen/Parallel.h>
 #include <ATen/MapAllocator.h>
 #include <ATen/NativeFunctions.h>

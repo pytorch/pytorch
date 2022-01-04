@@ -1273,13 +1273,14 @@ void to_copy_functor(ProcessedNode* p_node) {
 
     // See Note [Explicit nullopt MemoryFormat argument]
     // Can't use size {0} if memory_format is ChannelLast
-    p_node->Output(0) = at::detail::empty_cpu(
+    at::Tensor output = at::detail::empty_cpu(
         self.sizes(),
         dtype,
         layout,
         self.device(),
         c10::nullopt,
         memory_format);
+    p_node->Output(0) = std::move(output);
   }
 
   copy_strides = copy_strides ||
