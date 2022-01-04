@@ -1200,20 +1200,41 @@ class TestFunctionalIterDataPipe(TestCase):
         arrs = [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
         input_dp = dp.iter.IterableWrapper(arrs)
 
-        def _collate_fn(batch):
-            return torch.tensor(sum(batch), dtype=torch.float)
+        def _collate_fn(batch, default_type=torch.float):
+            return torch.tensor(sum(batch), dtype=default_type)
 
+        # Functional Test: defaults to the default collate function when a custom one is not specified
+        collate_dp = input_dp.collate()
+        for x, y in zip(input_dp, collate_dp):
+            self.assertEqual(torch.tensor(x), y)
+
+        # Functional Test: custom collate function
         collate_dp = input_dp.collate(collate_fn=_collate_fn)
-        self.assertEqual(len(input_dp), len(collate_dp))
-        for x, y in zip(collate_dp, input_dp):
-            self.assertEqual(x, torch.tensor(sum(y), dtype=torch.float))
+        for x, y in zip(input_dp, collate_dp):
+            self.assertEqual(torch.tensor(sum(x), dtype=torch.float), y)
 
+        # Functional Test: custom, partial collate function
+        collate_dp = input_dp.collate(partial(_collate_fn, default_type=torch.int))
+        for x, y in zip(input_dp, collate_dp):
+            self.assertEqual(torch.tensor(sum(x), dtype=torch.int), y)
+
+        # Reset Test: reset the DataPipe and results are still correct
+        n_elements_before_reset = 1
+        res_before_reset, res_after_reset = reset_after_n_next_calls(collate_dp, n_elements_before_reset)
+        self.assertEqual([torch.tensor(6, dtype=torch.int)], res_before_reset)
+        for x, y in zip(input_dp, res_after_reset):
+            self.assertEqual(torch.tensor(sum(x), dtype=torch.int), y)
+
+        # __len__ Test: __len__ is inherited
+        self.assertEqual(len(input_dp), len(collate_dp))
+
+        # __len__ Test: verify that it has no valid __len__ when the source doesn't have it
         input_dp_nl = IDP_NoLen(arrs)
         collate_dp_nl = input_dp_nl.collate()
         with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
             len(collate_dp_nl)
-        for x, y in zip(collate_dp_nl, input_dp_nl):
-            self.assertEqual(x, torch.tensor(y))
+        for x, y in zip(input_dp_nl, collate_dp_nl):
+            self.assertEqual(torch.tensor(x), y)
 
     def test_batch_datapipe(self):
         arrs = list(range(10))
