@@ -44,13 +44,13 @@ class Adadelta(Optimizer):
         lr (float, optional): coefficient that scale delta before it is applied
             to the parameters (default: 1.0)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
-        foreach (bool, optional): whether foreach implementation of optimizer is used (default: False)
+        foreach (bool, optional): whether foreach implementation of optimizer is used (default: None)
 
     .. _ADADELTA\: An Adaptive Learning Rate Method:
         https://arxiv.org/abs/1212.5701
     """
 
-    def __init__(self, params, lr=1.0, rho=0.9, eps=1e-6, weight_decay=0, foreach=False):
+    def __init__(self, params, lr=1.0, rho=0.9, eps=1e-6, weight_decay=0, foreach=None):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= rho <= 1.0:
@@ -142,7 +142,10 @@ def adadelta(params: List[Tensor],
         # Placeholder for more complex foreach logic to be added when value is not set
         foreach = False
 
-    if foreach and not torch.jit.is_scripting():
+    if foreach and torch.jit.is_scripting(): 
+        raise RuntimeError('torch.jit.script not supported with foreach optimizers')
+
+    if foreach and not torch.jit.is_scripting(): 
         func = _multi_tensor_adadelta
     else:
         func = _single_tensor_adadelta
