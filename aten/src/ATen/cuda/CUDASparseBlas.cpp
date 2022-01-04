@@ -400,13 +400,13 @@ void linear_solve<float>(
         n,
         nnzA,
         descrA,
-        csrValA,
+        reinterpret_cast<const float*>(csrValA),
         csrRowPtrA,
         csrColIndA,
         b,
         tol,
         reorder,
-        x,
+        reinterpret_cast<float *>(x),
         singularity));
   }
 
