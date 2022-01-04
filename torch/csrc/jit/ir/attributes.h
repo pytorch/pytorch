@@ -1,4 +1,5 @@
 #pragma once
+#include <ATen/core/ivalue.h>
 #include <ATen/core/Tensor.h>
 #include <string>
 #include <vector>
