@@ -12,8 +12,8 @@ class TORCH_API TypeParser {
 
   TypePtr parse();
   std::vector<TypePtr> parseList();
-  static std::unordered_set<std::string> getNonSimpleType();
-  static std::unordered_set<std::string> getCustomType();
+  static const std::unordered_set<std::string>& getNonSimpleType();
+  static const std::unordered_set<std::string>& getCustomType();
   std::unordered_set<std::string> getContainedTypes();
 
  private:
