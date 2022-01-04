@@ -8,6 +8,8 @@
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/Resize.h>
+#include <ATen/cuda/CUDASparseDescriptors.h>
+#include <ATen/cuda/CUDASolver.h>
 #include <algorithm>
 
 #include <cuda_runtime.h>
@@ -261,6 +263,59 @@ TORCH_IMPL_FUNC(_convert_indices_from_csr_to_coo_structured_cuda) (
       convert_indices_from_csr_to_coo_cuda<scalar_t, int64_t>(result, crow_indices, col_indices);
     });
   }
+}
+
+template <typename scalar_t, typename value_t>
+void _apply_sparse_csr_lu_solve(
+  const at::sparse_csr::SparseCsrTensor& input,
+  const Tensor& other,
+  Tensor& result,
+  int& _singularity) {
+  auto values = input.values();
+  const scalar_t *values_data_ptr = values.data_ptr<scalar_t>();
+  auto crow_indices = input.crow_indices().to(kInt);
+  const int *crow_indices_data_ptr = crow_indices.data_ptr<int>();
+  auto col_indices = input.col_indices().to(kInt);
+  const int *col_indices_data_ptr = col_indices.data_ptr<int>();
+  auto handle = at::cuda::getCurrentCUDASolverSpHandle(); 
+  auto descrA = at::cuda::sparse::CuSparseMatDescriptor();
+
+  const scalar_t *b = other.data_ptr<scalar_t>();
+  int n = crow_indices.numel() - 1; 
+  int nnzA = input._nnz();
+  value_t tol = 0.0;
+  int reorder = 1;
+  scalar_t *x = result.data_ptr<scalar_t>();
+  int singularity = _singularity;
+
+  at::cuda::solver::linear_solve<scalar_t, value_t>(handle, n, nnzA, descrA.descriptor(), values_data_ptr,
+    crow_indices_data_ptr, col_indices_data_ptr, b, tol, reorder, x, &singularity);
+}
+
+/* Linear Solver using cuSolver backend with inputs on Host */
+void linalg_solve_sparse_csr_kernel(
+  const Tensor& input,
+  const Tensor& other,
+  Tensor& result) {
+  int singularity = 0;
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "sparse_csr_solve", [&] {
+    if (input.scalar_type() == at::kComplexFloat || input.scalar_type() == at::kFloat) {
+      _apply_sparse_csr_lu_solve<scalar_t, float>(input, other, result, singularity);
+    } else {
+      _apply_sparse_csr_lu_solve<scalar_t, double>(input, other, result, singularity);
+    }
+  });
+  if (singularity != -1) {
+    // raise error
+    TORCH_CHECK(false, "Something went wrong\n");
+  }
+}
+
+Tensor& linalg_solve_sparse_csr_out(const Tensor& input, const Tensor& other, Tensor& result) {
+  TORCH_INTERNAL_ASSERT(input.is_sparse_csr());
+  TORCH_INTERNAL_ASSERT(result.is_contiguous());
+  linalg_solve_sparse_csr_kernel(input, other, result);
+  return result;
 }
 
 } // namespace native

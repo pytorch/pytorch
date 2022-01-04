@@ -795,56 +795,6 @@ void addmm_out_sparse_csr(
   }
 }
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~linalg_solve~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-template <typename scalar_t>
-void _apply_sparse_csr_lu_solve(
-  const Tensor& input,
-  const Tensor& other,
-  Tensor& result,
-  int& _singularity) {
-  auto values = input.values();
-  const scalar_t *values_data_ptr = values.data_ptr<scalar_t>();
-  auto crow_indices = input.crow_indices().to(kInt);
-  const int *crow_indices_data_ptr = crow_indices.data_ptr<int>();
-  auto col_indices = input.col_indices().to(kInt);
-  const int *col_indices_data_ptr = col_indices.data_ptr<int>();
-  cusolverSpHandle_t _handle;
-  cusolverSpCreate(&_handle);
-  auto descrA = at::cuda::sparse::CuSparseMatDescriptor();
-
-  const scalar_t *b = other.data_ptr<scalar_t>();
-  int n = crow_indices.numel() - 1; 
-  int nnzA = input._nnz();
-  float tol = 0;
-  int reorder = 1;
-  scalar_t *x = result.data_ptr<scalar_t>();
-  int singularity = _singularity;
-  at::cuda::sparse::linear_solve(_handle, n, nnzA, descrA, values_data_ptr,
-    crow_indices_data_ptr, col_indices_data_ptr, tol, reorder, x, &singularity);
-}
-
-/* Linear Solver using cuSolver backend with inputs on Host */
-void linalg_solve_sparse_csr_kernel(
-  const Tensor& input,
-  const Tensor& other,
-  Tensor& result) {
-  int singularity = 0;
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "sparse_csr_solve", [&] {
-    _apply_sparse_csr_lu_solve<scalar_t>(input, other, result, singularity);
-  });
-  if (singularity != -1) {
-    // raise error
-    TORCH_CHECK(false, "Something went wrong\n");
-  }
-}
-
-Tensor& linalg_solve_sparse_csr_out(const Tensor& input, const Tensor& other, Tensor& result) {
-  TORCH_INTERNAL_ASSERT(input.is_sparse_csr());
-  TORCH_INTERNAL_ASSERT(result.is_contiguous());
-  linalg_solve_sparse_csr_kernel(input, other, result);
-  return result;
-}
-
 /*
   Computes a sparse matrix-dense vector product defined as
   y <- alpha*op(A)*x + beta*y

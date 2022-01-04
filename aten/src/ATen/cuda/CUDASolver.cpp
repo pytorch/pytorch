@@ -162,6 +162,77 @@ void getrs<c10::complex<float>>(
       info));
 }
 
+template <>
+void linear_solve<float, float>(
+  CUSOLVER_LINEAR_SOLVE_ARGTYPES(float, float)) {
+    TORCH_CUSOLVER_CHECK(cusolverSpScsrlsvluHost(
+        handle,
+        n,
+        nnzA,
+        descrA,
+        csrValA,
+        csrRowPtrA,
+        csrColIndA,
+        b,
+        tol,
+        reorder,
+        x,
+        singularity));
+  }
+
+template <>
+void linear_solve<double, double>(
+  CUSOLVER_LINEAR_SOLVE_ARGTYPES(double, double)) {
+    TORCH_CUSOLVER_CHECK(cusolverSpDcsrlsvluHost(
+        handle,
+        n,
+        nnzA,
+        descrA,
+        csrValA,
+        csrRowPtrA,
+        csrColIndA,
+        b,
+        tol,
+        reorder,
+        x,
+        singularity));
+  }
+
+template <>
+void linear_solve<cuComplex, float>(
+  CUSOLVER_LINEAR_SOLVE_ARGTYPES(cuComplex, float)) {
+    TORCH_CUSOLVER_CHECK(cusolverSpCcsrlsvluHost(
+        handle,
+        n,
+        nnzA,
+        descrA,
+        csrValA,
+        csrRowPtrA,
+        csrColIndA,
+        b,
+        tol,
+        reorder,
+        x,
+        singularity));
+  }
+
+template <>
+void linear_solve<cuDoubleComplex, double>(
+  CUSOLVER_LINEAR_SOLVE_ARGTYPES(cuDoubleComplex, double)) {
+    TORCH_CUSOLVER_CHECK(cusolverSpZcsrlsvluHost(
+        handle,
+        n,
+        nnzA,
+        descrA,
+        csrValA,
+        csrRowPtrA,
+        csrColIndA,
+        b,
+        tol,
+        reorder,
+        x,
+        singularity));
+  }
 
 template<>
 void gesvd_buffersize<float>(CUDASOLVER_GESVD_BUFFERSIZE_ARGTYPES()) {

@@ -13,6 +13,28 @@ namespace at {
 namespace cuda {
 namespace solver {
 
+#define CUSOLVER_LINEAR_SOLVE_ARGTYPES(scalar_t, value_t)                         \
+    cusolverSpHandle_t handle, int n, int nnzA, const cusparseMatDescr_t descrA,  \
+    const scalar_t *csrValA, const int *csrRowPtrA, const int *csrColIndA,        \
+    const scalar_t *b, value_t tol, int reorder, scalar_t *x, int *singularity
+
+template <typename scalar_t, typename value_t>
+inline void linear_solve(CUSOLVER_LINEAR_SOLVE_ARGTYPES(scalar_t, value_t)) {
+    TORCH_INTERNAL_ASSERT(
+        false,
+        "at::cuda::sparse::linear_solve: not implemented for ",
+        typeid(scalar_t).name());
+}
+
+template <>
+void linear_solve<float, float>(CUSOLVER_LINEAR_SOLVE_ARGTYPES(float, float));
+template <>
+void linear_solve<double, double>(CUSOLVER_LINEAR_SOLVE_ARGTYPES(double, double));
+template <>
+void linear_solve<cuComplex, float>(CUSOLVER_LINEAR_SOLVE_ARGTYPES(cuComplex, float));
+template <>
+void linear_solve<cuDoubleComplex, double>(CUSOLVER_LINEAR_SOLVE_ARGTYPES(cuDoubleComplex, double));
+
 #define CUDASOLVER_GETRF_ARGTYPES(Dtype)  \
     cusolverDnHandle_t handle, int m, int n, Dtype* dA, int ldda, int* ipiv, int* info
 
