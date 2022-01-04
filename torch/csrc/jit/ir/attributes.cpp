@@ -17,19 +17,19 @@ std::unique_ptr<AttributeValue> GraphsAttr::clone() const {
   return Ptr(new GraphsAttr(name, std::move(copy)));
 }
 
-template class ScalarAttributeValue<c10::complex<double>, AttributeKind::c>;
-template class VectorAttributeValue<c10::complex<double>, AttributeKind::cs>;
-template class ScalarAttributeValue<double, AttributeKind::f>;
-template class VectorAttributeValue<double, AttributeKind::fs>;
-template class ScalarAttributeValue<int64_t, AttributeKind::i>;
-template class VectorAttributeValue<int64_t, AttributeKind::is>;
-template class ScalarAttributeValue<std::string, AttributeKind::s>;
-template class VectorAttributeValue<std::string, AttributeKind::ss>;
-template class ScalarAttributeValue<at::Tensor, AttributeKind::t>;
-template class VectorAttributeValue<at::Tensor, AttributeKind::ts>;
-template class ScalarAttributeValue<c10::TypePtr, AttributeKind::ty>;
-template class VectorAttributeValue<c10::TypePtr, AttributeKind::tys>;
-template class ScalarAttributeValue<at::IValue, AttributeKind::ival>;
+template struct ScalarAttributeValue<c10::complex<double>, AttributeKind::c>;
+template struct VectorAttributeValue<c10::complex<double>, AttributeKind::cs>;
+template struct ScalarAttributeValue<double, AttributeKind::f>;
+template struct VectorAttributeValue<double, AttributeKind::fs>;
+template struct ScalarAttributeValue<int64_t, AttributeKind::i>;
+template struct VectorAttributeValue<int64_t, AttributeKind::is>;
+template struct ScalarAttributeValue<std::string, AttributeKind::s>;
+template struct VectorAttributeValue<std::string, AttributeKind::ss>;
+template struct ScalarAttributeValue<at::Tensor, AttributeKind::t>;
+template struct VectorAttributeValue<at::Tensor, AttributeKind::ts>;
+template struct ScalarAttributeValue<c10::TypePtr, AttributeKind::ty>;
+template struct VectorAttributeValue<c10::TypePtr, AttributeKind::tys>;
+template struct ScalarAttributeValue<at::IValue, AttributeKind::ival>;
 
 } // namespace jit
 } // namespace torch
