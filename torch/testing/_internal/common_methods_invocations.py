@@ -5237,19 +5237,21 @@ def sample_inputs_linalg_lu(op_info, device, dtype, requires_grad=False, **kwarg
     make_fn = make_tensor if not full_rank else make_fullrank_matrices_with_distinct_singular_values
     make_arg = partial(make_fn, dtype=dtype, device=device, requires_grad=requires_grad)
 
-    # not needed once OpInfo tests support Iterables
-    def generate_samples():
-        batch_shapes = ((), (3,), (3, 3))
-        # pivot=False only supported in CUDA
-        pivots = (True, False) if torch.device(device).type == "cuda" else (True,)
-        deltas = (-2, -1, 0, +1, +2)
-        for batch_shape, pivot, delta in product(batch_shapes, pivots, deltas):
-            shape = batch_shape + (S + delta, S)
-            # Insanely annoying that make_fullrank_blablabla accepts a *shape and not a tuple!
-            A = make_arg(shape) if not full_rank else make_arg(*shape)
-            yield SampleInput(A, kwargs={"pivot": pivot})
+    def out_fn(output):
+        if op_info.name in ("linalg.lu"):
+            return output[1], output[2]
+        else:
+            return output
 
-    return list(generate_samples())
+    batch_shapes = ((), (3,), (3, 3))
+    # pivot=False only supported in CUDA
+    pivots = (True, False) if torch.device(device).type == "cuda" else (True,)
+    deltas = (-2, -1, 0, +1, +2)
+    for batch_shape, pivot, delta in product(batch_shapes, pivots, deltas):
+        shape = batch_shape + (S + delta, S)
+        # Insanely annoying that make_fullrank_blablabla accepts a *shape and not a tuple!
+        A = make_arg(shape) if not full_rank else make_arg(*shape)
+        yield SampleInput(A, kwargs={"pivot": pivot}, output_process_fn_grad=out_fn)
 
 def sample_inputs_lu_solve(op_info, device, dtype, requires_grad=False, **kwargs):
     make_fn = make_fullrank_matrices_with_distinct_singular_values
@@ -5289,10 +5291,13 @@ def sample_inputs_lu_solve(op_info, device, dtype, requires_grad=False, **kwargs
             yield SampleInput(b_, args=(lu_, pivs))
 
 def sample_inputs_lu_unpack(op_info, device, dtype, requires_grad=False, **kwargs):
+    def out_fn(output):
+        return output[1], output[2]
+
     for lu_sample in sample_inputs_linalg_lu(op_info, device, dtype, requires_grad, **kwargs):
         lu_data, pivots = torch.linalg.lu_factor(lu_sample.input)
         lu_data.requires_grad_(requires_grad)
-        yield SampleInput(lu_data, args=(pivots,))
+        yield SampleInput(lu_data, args=(pivots,), output_process_fn_grad=out_fn)
 
 
 def sample_inputs_roll(op_info, device, dtype, requires_grad=False, **kwargs):

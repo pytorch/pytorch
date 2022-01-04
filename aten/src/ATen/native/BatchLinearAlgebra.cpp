@@ -1800,6 +1800,8 @@ TORCH_IMPL_FUNC(lu_unpack_out)(const Tensor& LU,
                         .expand(perm_sizes)
                         .contiguous();
 
+    // Note that perm is of type kLong and pivots is a 1-indexed kInt.
+    // This is taken into account in the unpack_pivots kernel
     auto iter = TensorIteratorConfig()
       .set_check_mem_overlap(false)
       .check_all_same_dtype(false)
