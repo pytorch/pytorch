@@ -22,7 +22,7 @@ void check_size_nonnegative(IntArrayRef size) {
 TensorBase empty_generic(
     IntArrayRef size,
     c10::Allocator* allocator,
-    c10::DispatchKey dispatch_key,
+    c10::DispatchKeySet ks,
     ScalarType scalar_type,
     c10::optional<c10::MemoryFormat> memory_format_opt) {
   at::detail::check_size_nonnegative(size);
@@ -38,7 +38,7 @@ TensorBase empty_generic(
       /*resizeable=*/true);
 
   auto tensor = detail::make_tensor_base<TensorImpl>(
-      std::move(storage_impl), dispatch_key, dtype);
+      std::move(storage_impl), ks, dtype);
   // Default TensorImpl has size [0]
   if (size.size() != 1 || size[0] != 0) {
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
@@ -57,7 +57,8 @@ TensorBase empty_generic(
 TensorBase empty_cpu(IntArrayRef size, ScalarType dtype, bool pin_memory,
                      c10::optional<c10::MemoryFormat> memory_format_opt) {
   auto allocator = GetCPUAllocatorMaybePinned(pin_memory);
-  return empty_generic(size, allocator, DispatchKey::CPU, dtype, memory_format_opt);
+  constexpr c10::DispatchKeySet cpu_ks(c10::DispatchKey::CPU);
+  return empty_generic(size, allocator, cpu_ks, dtype, memory_format_opt);
 }
 
 TensorBase empty_cpu(
