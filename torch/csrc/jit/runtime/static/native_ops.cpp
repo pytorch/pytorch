@@ -606,21 +606,21 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
 REGISTER_NATIVE_OPERATOR_FUNCTOR(prim::If, prim_If, [](Node*) -> SROperator {
   return [](ProcessedNode* p_node) {
     auto condition = p_node->Input(0).toBool();
-    auto& block_runners = p_node->block_runners();
-    DCHECK_EQ(block_runners.size(), 2);
-    auto& runner = block_runners[!condition];
+    auto* block_runners = p_node->block_runners();
+    DCHECK(block_runners);
+    DCHECK_EQ(block_runners->size(), 2);
+    auto& runner = (*block_runners)[!condition];
 
-    auto output = (*runner)({});
-    if (output.isTuple()) {
-      auto& elems = output.toTupleRef().elements();
-      DCHECK_EQ(elems.size(), p_node->num_outputs());
-      for (const auto i : c10::irange(elems.size())) {
-        p_node->Output(i) = elems[i];
-      }
+    auto output = runner({});
+    if (!output.isTuple()) {
+      p_node->Output(0) = std::move(output);
       return;
     }
-
-    p_node->Output(0) = std::move(output);
+    auto& elems = output.toTupleRef().elements();
+    DCHECK_EQ(elems.size(), p_node->num_outputs());
+    for (const auto i : c10::irange(elems.size())) {
+      p_node->Output(i) = elems[i];
+    }
   };
 });
 
@@ -657,15 +657,16 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         const auto max_trip_count = p_node->Input(0).toInt();
         auto condition = p_node->Input(1).toBool();
 
-        auto& block_runners = p_node->block_runners();
-        DCHECK_EQ(block_runners.size(), 1);
-        auto& runner = block_runners[0];
+        auto* block_runners = p_node->block_runners();
+        DCHECK(block_runners);
+        DCHECK_EQ(block_runners->size(), 1);
+        auto& runner = (*block_runners)[0];
 
         auto args = collectLoopSubBlockInputs(*p_node);
         int64_t loop_count = 0;
 
         while (condition && loop_count < max_trip_count) {
-          auto output = (*runner)(args);
+          auto output = runner(args);
 
           if (output.isTuple()) {
             auto& elems = output.toTupleRef().elements();

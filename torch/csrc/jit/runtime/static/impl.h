@@ -165,6 +165,8 @@ struct TORCH_API StaticModuleOptions {
   // graph, where storage is deallocated outside static runtime
   // (enable_out_variant must be true)
   bool manage_output_tensors{false};
+  // enable TensorExpr fusion of ops at model loading time
+  bool enable_tensorexpr_fusion{false};
 };
 
 /// The static runime supports two execution modes.
@@ -331,12 +333,14 @@ class TORCH_API StaticModule {
  public:
   explicit StaticModule(
       std::shared_ptr<torch::jit::Graph> g,
-      const StaticModuleOptions& opts = StaticModuleOptions());
+      const StaticModuleOptions& opts = StaticModuleOptions(),
+      std::vector<IValue> sample_inputs = {});
 
   explicit StaticModule(
       const torch::jit::Module& m,
       bool is_frozen = false,
-      const StaticModuleOptions& opts = StaticModuleOptions());
+      const StaticModuleOptions& opts = StaticModuleOptions(),
+      std::vector<IValue> sample_inputs = {});
 
  private:
   explicit StaticModule(
@@ -417,26 +421,15 @@ class TORCH_API StaticModule {
     return module_.has_value();
   }
 
-  size_t inputs_offset() const {
-    return 0;
-  }
-
-  size_t constants_offset() const {
-    return inputs_offset() + num_inputs();
-  }
-
-  size_t intermediate_values_offset() const {
-    return constants_offset() + num_constants();
-  }
-
   StaticRuntime& runtime();
 
+  // See [Shared values array]
   size_t value_buffer_size() const {
     return value_buffer_size_;
   }
 
  private:
-  // Recursively prepares the `BlockInfo`s and output indices for each block.
+  // Recursively prepares the BlockInfo array.
   // - Populates `value_to_index` with the indices of each intermediate value
   // - Returns the number of Value* processed, including sub-blocks.
   size_t prepareBlockInfo(
@@ -449,7 +442,7 @@ class TORCH_API StaticModule {
       const AliasDb& alias_db,
       FastMap<const Value*, uint32_t>& value_to_index);
 
-  // Recurses on sub-blocks and populates the array of `ProcessedNode`s
+  // Recurses on sub-blocks and populates the array of ProcessedNodes
   // Returns (number of nodes processed, number of blocks processed)
   std::pair<size_t, size_t> prepareProcessedNodes(
       Block& block,
@@ -506,7 +499,7 @@ class BlockRunner {
       const StaticModule& sm,
       std::vector<IValue>& values,
       size_t block_idx);
-  BlockRunner(BlockRunner&&) = delete;
+  BlockRunner(BlockRunner&&) = default;
   BlockRunner& operator=(BlockRunner&&) = delete;
   ~BlockRunner();
 
@@ -672,6 +665,9 @@ class BlockRunner {
   // Set Input(idx) to arg. Always copies. Used for kwargs.
   void set_arg(const size_t idx, const IValue& arg);
 
+  bool fast_check_and_correct_overlap_with(
+      ProcessedNode& n,
+      c10::IValue& tensor_ival);
   void verify_and_correct_memory_overlap(ProcessedNode& n);
 
   // clean up owning refs of input IValues
@@ -708,15 +704,25 @@ class BlockRunner {
   const bool first_input_is_self_;
   // Index of the start of this blocks inputs in the shared values_ array.
   const uint16_t inputs_begin_;
+  // How many sub-blocks does this one have? Includes *all* descendants, not
+  // just children of this block. For example, if we have 2 nested loops in this
+  // block, num_sub_blocks = 2, not 1.
   uint16_t num_sub_blocks_ = 0;
 
   bool manage_output_tensors_enabled_ = false;
   std::unique_ptr<MemoryPlanner> planner_;
+  // [Shared values array]
   // ProcessedNodes reference their inputs and outputs with
   // offsets into this array, which saves memory.
-  // The first static_module_.num_constants() slots are constants.
-  // Note that constants for all block runners are pooled together.
-  // Inputs for this block runner begin at inputs_begin_.
+  // All BlockRunners share the same array. The layout is as
+  // follows:
+  // [constants][block_0][block_1]...[block_N]
+  // Note that constants from all blocks are pooled together at the start.
+  // The block ordering is depth-first.
+  // Each block is further divided into inputs and intermediates:
+  // [block_i] = [inputs_i][intermediates_i]
+  // Each BlockRunner knows where its inputs start. Each ProcessedNode
+  // knows how to find the indices of its outputs/inputs in this array.
   std::vector<IValue>& values_;
   std::vector<IValue*> outputs_;
   std::vector<ProcessedNode> nodes_;
@@ -769,8 +775,43 @@ class TORCH_API ProcessedNode {
       ProcessedNodeInputs inputs,
       uint16_t outputs_offset);
 
-  ProcessedNode(const ProcessedNode&) = default;
-  ProcessedNode& operator=(const ProcessedNode&) = default;
+  ProcessedNode(const ProcessedNode& other)
+      : node_(other.node_),
+        fn_(other.fn_),
+        overlap_detected_(other.overlap_detected_),
+        inputs_(other.inputs_),
+        outputs_offset_(other.outputs_offset_),
+        num_outputs_(other.num_outputs_),
+        values_(other.values_),
+        // It doesn't really make sense to copy block runners,
+        // each processed node needs its own. This is OK to do
+        // since ProcessedNodes are copied from StaticModule right before
+        // the block runners are set up.
+        // TODO(T105178680): For this task, we should move
+        // block runners out of ProcessedNode. Then, we don't have to deal
+        // with this caveat.
+        block_runners_(nullptr)
+#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
+        ,
+        op_name_(other.op_name_)
+#endif
+  {
+  }
+
+  ProcessedNode& operator=(const ProcessedNode& other) {
+    node_ = other.node_;
+    fn_ = other.fn_;
+    overlap_detected_ = other.overlap_detected_;
+    inputs_ = other.inputs_;
+    outputs_offset_ = other.outputs_offset_;
+    num_outputs_ = other.num_outputs_;
+    values_ = other.values_;
+    block_runners_ = nullptr;
+#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
+    op_name_ = other.op_name_;
+#endif
+    return *this;
+  }
 
   // These should be noexcept, but some Android build is failing
   // saying the noexcept specification doesn't match the calculated
@@ -840,6 +881,9 @@ class TORCH_API ProcessedNode {
     return overlap_detected_;
   }
 
+  bool check_and_correct_overlap_with(
+      const at::Tensor& input,
+      c10::IValue& output);
   void verify_and_correct_memory_overlap();
 
   void set_values(IValue* values) {
@@ -854,15 +898,16 @@ class TORCH_API ProcessedNode {
   // used in debug mode
   bool verify_no_memory_overlap(bool force_check = false) const;
 
-  std::vector<std::shared_ptr<BlockRunner>>& block_runners() {
-    return block_runners_;
+  std::vector<BlockRunner>* block_runners() {
+    return block_runners_.get();
+  }
+
+  void set_block_runners(
+      std::unique_ptr<std::vector<BlockRunner>> block_runners) {
+    block_runners_ = std::move(block_runners);
   }
 
  private:
-  // For control flow; processed nodes may have sub-blocks which can
-  // be executed by op implementations.
-  std::vector<std::shared_ptr<BlockRunner>> block_runners_;
-
   C10_NODISCARD bool verify_outputs_dont_overlap_each_other() const;
 
   C10_NODISCARD bool verify_inputs_dont_overlap_outputs(bool force_check) const;
@@ -874,6 +919,9 @@ class TORCH_API ProcessedNode {
   uint16_t outputs_offset_;
   uint16_t num_outputs_;
   IValue* values_ = nullptr; // unowned
+  // For control flow; processed nodes may have sub-blocks which can
+  // be executed by op implementations.
+  std::unique_ptr<std::vector<BlockRunner>> block_runners_;
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   const char* op_name_;
 #endif
