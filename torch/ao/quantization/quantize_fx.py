@@ -284,7 +284,7 @@ def _prepare_standalone_module_fx(
         model,
         qconfig_dict,
         prepare_custom_config_dict,
-        backend_config_dict,
+        backend_config_dict=backend_config_dict,
         is_standalone_module=True,
         is_qat=is_qat,
     )

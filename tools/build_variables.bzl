@@ -112,6 +112,7 @@ core_sources_common = [
     "torch/csrc/jit/mobile/type_parser.cpp",
     "torch/csrc/jit/mobile/runtime_compatibility.cpp",
     "torch/csrc/jit/operator_upgraders/version_map.cpp",
+    "torch/csrc/jit/operator_upgraders/upgraders_guard.cpp",
     "torch/csrc/jit/runtime/instruction.cpp",
     "torch/csrc/jit/runtime/jit_exception.cpp",
     "torch/csrc/jit/runtime/operator.cpp",
@@ -121,7 +122,6 @@ core_sources_common = [
     "torch/csrc/jit/runtime/vararg_functions.cpp",
     "torch/csrc/jit/mobile/promoted_prim_ops.cpp",
     "torch/csrc/jit/mobile/prim_ops_registery.cpp",
-    "torch/csrc/jit/operator_upgraders/upgraders.cpp",
     "torch/csrc/profiler/util.cpp",
 ]
 
@@ -209,6 +209,8 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/mobile/nnc/context.cpp",
     "torch/csrc/jit/mobile/nnc/registry.cpp",
     "torch/csrc/jit/operator_upgraders/utils.cpp",
+    "torch/csrc/jit/operator_upgraders/upgraders_entry.cpp",
+    "torch/csrc/jit/operator_upgraders/upgraders.cpp",
     "torch/csrc/jit/passes/annotate_warns.cpp",
     "torch/csrc/jit/passes/bailout_graph.cpp",
     "torch/csrc/jit/passes/batch_mm.cpp",
