@@ -1,6 +1,6 @@
 import warnings
 from torch.utils.data import IterDataPipe, _utils, functional_datapipe
-from typing import Callable, Dict, Iterator, Optional, Sized, Tuple, TypeVar
+from typing import Callable, Iterator, Sized, TypeVar
 
 try:
     import dill
@@ -37,8 +37,6 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
               For `input_col` with multiple indices, the left-most one is used, and other indices will be removed.
             - Integer is used for list/tuple. -1 represents to append result at the end.
             - Key is used for dict. New key is acceptable.
-        fn_args: Positional arguments for `fn`
-        fn_kwargs: Keyword arguments for `fn`
     """
     datapipe: IterDataPipe
     fn: Callable
@@ -49,9 +47,6 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
         fn: Callable,
         input_col=None,
         output_col=None,
-        *,
-        fn_args: Optional[Tuple] = None,
-        fn_kwargs: Optional[Dict] = None,
     ) -> None:
         super().__init__()
         self.datapipe = datapipe
@@ -70,20 +65,18 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
                 raise ValueError("`output_col` must be a single-element list or tuple")
             output_col = output_col[0]
         self.output_col = output_col
-        self.args = () if fn_args is None else fn_args
-        self.kwargs = {} if fn_kwargs is None else fn_kwargs
 
     def _apply_fn(self, data):
         if self.input_col is None and self.output_col is None:
-            return self.fn(data, *self.args, **self.kwargs)
+            return self.fn(data)
 
         if self.input_col is None:
-            res = self.fn(data, *self.args, **self.kwargs)
+            res = self.fn(data)
         elif isinstance(self.input_col, (list, tuple)):
             args = tuple(data[col] for col in self.input_col)
-            res = self.fn(*args, *self.args, **self.kwargs)
+            res = self.fn(*args)
         else:
-            res = self.fn(data[self.input_col], *self.args, **self.kwargs)
+            res = self.fn(data[self.input_col])
 
         # Copy tuple to list and run in-place modification because tuple is immutable.
         if isinstance(data, tuple):
@@ -132,8 +125,6 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
             dill_function,
             self.input_col,
             self.output_col,
-            self.args,
-            self.kwargs,
         )
         return state
 
@@ -143,8 +134,6 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
             dill_function,
             self.input_col,
             self.output_col,
-            self.args,
-            self.kwargs,
         ) = state
         if DILL_AVAILABLE:
             self.fn = dill.loads(dill_function)  # type: ignore[assignment]
@@ -156,15 +145,17 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
 class CollatorIterDataPipe(MapperIterDataPipe):
     r""":class:`CollatorIterDataPipe`.
 
-    Iterable DataPipe to collate samples from datapipe to Tensor(s) by `util_.collate.default_collate`,
-    or customized Data Structure by collate_fn.
+    Iterable DataPipe to collate samples from DataPipe to Tensor(s) by a custom collate function,
+    which defaults to `torch.utils.data.default_collate` if it is not specified.
+
+    .. note::
+        While writing a custom collate function, you can import `torch.utils.data.default_collate` for the
+        default behavior and `functools.partial` to specify any additional arguments.
 
     Args:
         datapipe: Iterable DataPipe being collated
         collate_fn: Customized collate function to collect and combine data or a batch of data.
             Default function collates to Tensor(s) based on data type.
-        fn_args: Positional arguments for `collate_fn`
-        fn_kwargs: Keyword arguments for `collate_fn`
 
     Example: Convert integer data to float Tensor
         >>> class MyIterDataPipe(torch.utils.data.IterDataPipe):
@@ -196,7 +187,5 @@ class CollatorIterDataPipe(MapperIterDataPipe):
         self,
         datapipe: IterDataPipe,
         collate_fn: Callable = _utils.collate.default_collate,
-        fn_args: Optional[Tuple] = None,
-        fn_kwargs: Optional[Dict] = None,
     ) -> None:
-        super().__init__(datapipe, fn=collate_fn, fn_args=fn_args, fn_kwargs=fn_kwargs)
+        super().__init__(datapipe, fn=collate_fn)
