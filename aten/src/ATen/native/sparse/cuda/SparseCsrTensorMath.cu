@@ -270,7 +270,7 @@ void _apply_sparse_csr_lu_solve(
   const at::sparse_csr::SparseCsrTensor& input,
   const Tensor& other,
   Tensor& result,
-  int& _singularity) {
+  int &_singularity) {
   auto values = input.values();
   const scalar_t *values_data_ptr = values.data_ptr<scalar_t>();
   auto crow_indices = input.crow_indices().to(kInt);
@@ -286,10 +286,9 @@ void _apply_sparse_csr_lu_solve(
   value_t tol = 0.0;
   int reorder = 1;
   scalar_t *x = result.data_ptr<scalar_t>();
-  int singularity = _singularity;
 
   at::cuda::solver::linear_solve<scalar_t, value_t>(handle, n, nnzA, descrA.descriptor(), values_data_ptr,
-    crow_indices_data_ptr, col_indices_data_ptr, b, tol, reorder, x, &singularity);
+    crow_indices_data_ptr, col_indices_data_ptr, b, tol, reorder, x, &_singularity);
 }
 
 /* Linear Solver using cuSolver backend with inputs on Host */
@@ -297,7 +296,7 @@ void linalg_solve_sparse_csr_kernel(
   const Tensor& input,
   const Tensor& other,
   Tensor& result) {
-  int singularity = 0;
+  int singularity = -2;
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "sparse_csr_solve", [&] {
     if (input.scalar_type() == at::kComplexFloat || input.scalar_type() == at::kFloat) {
       _apply_sparse_csr_lu_solve<scalar_t, float>(input, other, result, singularity);
@@ -307,7 +306,7 @@ void linalg_solve_sparse_csr_kernel(
   });
   if (singularity != -1) {
     // raise error
-    TORCH_CHECK(false, "Something went wrong\n");
+    TORCH_CHECK(false, "Something went wrong, got singularity as: ", singularity);
   }
 }
 
