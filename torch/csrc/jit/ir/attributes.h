@@ -1,10 +1,10 @@
 #pragma once
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <string>
 #include <vector>
 
-#include <ATen/core/interned_strings.h>
-#include <ATen/core/type_ptr.h>
+#include <ATen/core/jit_type_base.h>
+#include <ATen/core/symbol.h>
 
 #include <torch/csrc/Export.h>
 
