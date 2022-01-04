@@ -86,7 +86,8 @@ std::vector<ByteCodeEntry> generate_bytecode_list() {
     GraphFunction jitFunc(entry.first, upgrader_graph, nullptr);
     auto mobileFunc = convertJitFunctionToMobileFunction(jitFunc, options);
     auto codeTable = convertMobileFunctionToCodeTable(*mobileFunc, options);
-    upgraders_bytecode_list.push_back(std::make_tuple(entry.first, codeTable));
+    upgraders_bytecode_list.emplace_back(
+        std::make_tuple(entry.first, codeTable));
   }
   return upgraders_bytecode_list;
 }
