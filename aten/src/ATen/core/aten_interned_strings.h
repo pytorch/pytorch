@@ -1,5 +1,13 @@
 #pragma once
 
+#if defined(TORCH_ASSERT_NO_OPERATORS) || defined(TORCH_ASSERT_ONLY_METHOD_OPERATORS)
+#error This change adds a dependency on native_functions.yaml,          \
+  meaning the file will need to be re-compiled every time an operator   \
+  is changed or added. Consider if including <ATen/core/symbol.h> for   \
+  the c10::Symbol class would be sufficient, or if your change would be \
+  better placed in another file.
+#endif
+
 // ATen symbols correspond exactly to operators defined in ATen.  Every
 // symbol here corresponds exactly to an ATen operation which is defined
 // in Declarations.yaml; attributes are in one-to-one correspondence with
@@ -254,6 +262,7 @@ _(aten, conv_tbc) \
 _(aten, conv_tbc_backward) \
 _(aten, conv_transpose1d) \
 _(aten, convolution) \
+_(aten, convolution_backward) \
 _(aten, copy_sparse_to_sparse) \
 _(aten, corrcoef) \
 _(aten, cos) \
@@ -474,25 +483,12 @@ _(aten, min_values) \
 _(aten, miopen_batch_norm) \
 _(aten, miopen_batch_norm_backward) \
 _(aten, miopen_convolution) \
-_(aten, miopen_convolution_backward) \
-_(aten, miopen_convolution_backward_bias) \
-_(aten, miopen_convolution_backward_input) \
-_(aten, miopen_convolution_backward_weight) \
 _(aten, miopen_convolution_transpose) \
-_(aten, miopen_convolution_transpose_backward) \
-_(aten, miopen_convolution_transpose_backward_input) \
-_(aten, miopen_convolution_transpose_backward_weight) \
 _(aten, miopen_depthwise_convolution) \
-_(aten, miopen_depthwise_convolution_backward) \
-_(aten, miopen_depthwise_convolution_backward_input) \
-_(aten, miopen_depthwise_convolution_backward_weight) \
 _(aten, miopen_rnn) \
 _(aten, miopen_rnn_backward) \
 _(aten, mish) \
 _(aten, mkldnn_convolution) \
-_(aten, mkldnn_convolution_backward) \
-_(aten, mkldnn_convolution_backward_input) \
-_(aten, mkldnn_convolution_backward_weights) \
 _(aten, mm) \
 _(aten, mode) \
 _(aten, mse_loss) \
@@ -683,6 +679,7 @@ _(aten, take_along_dim) \
 _(aten, tan) \
 _(aten, tanh) \
 _(aten, tanh_) \
+_(aten, tanh_backward) \
 _(aten, tensor) \
 _(aten, tensordot) \
 _(aten, tensor_split) \
@@ -697,17 +694,13 @@ _(aten, _slow_conv2d_backward) \
 _(aten, _slow_conv2d_forward) \
 _(aten, tile) \
 _(aten, slow_conv3d) \
-_(aten, slow_conv3d_backward) \
 _(aten, slow_conv3d_forward) \
 _(aten, thnn_conv_depthwise2d) \
 _(aten, thnn_conv_depthwise2d_backward) \
 _(aten, thnn_conv_depthwise2d_forward) \
 _(aten, slow_conv_dilated2d) \
-_(aten, slow_conv_dilated2d_backward) \
 _(aten, slow_conv_dilated3d) \
-_(aten, slow_conv_dilated3d_backward) \
 _(aten, slow_conv_transpose2d) \
-_(aten, slow_conv_transpose2d_backward) \
 _(aten, slow_conv_transpose3d) \
 _(aten, slow_conv_transpose3d_backward) \
 _(aten, threshold) \
@@ -738,6 +731,9 @@ _(aten, _upsample_bilinear2d_aa_forward) \
 _(aten, upsample_bicubic2d) \
 _(aten, upsample_bicubic2d_backward) \
 _(aten, upsample_bicubic2d_forward) \
+_(aten, upsample_bicubic2d_aa) \
+_(aten, upsample_bicubic2d_backward_aa) \
+_(aten, upsample_bicubic2d_forward_aa) \
 _(aten, upsample_linear1d) \
 _(aten, upsample_linear1d_backward) \
 _(aten, upsample_linear1d_forward) \

@@ -288,12 +288,23 @@ private:
     // based on tensor impl. //TODO: find a way to use mkldnn storage
     if (a.is_mkldnn() || b.is_mkldnn()) {
       return a.unsafeGetTensorImpl() == b.unsafeGetTensorImpl();
-    } else if (a.is_sparse() || b.is_sparse()) {
-      if (a.is_sparse()) {
-        return isAliasOf(a._values(), b) || isAliasOf(a._indices(), b);
-      } else {
-        return isAliasOf(b._values(), a) || isAliasOf(b._indices(), a);
-      }
+    }
+
+    if (a.is_sparse()) {
+      return isAliasOf(a._values(), b) || isAliasOf(a._indices(), b);
+    }
+    if (b.is_sparse()) {
+      return isAliasOf(a, b._values()) || isAliasOf(a, b._indices());
+    }
+    if (a.is_sparse_csr()) {
+      return isAliasOf(a.values(), b) ||
+             isAliasOf(a.crow_indices(), b) ||
+             isAliasOf(a.col_indices(), b);
+    }
+    if (b.is_sparse_csr()) {
+      return isAliasOf(a, b.values()) ||
+             isAliasOf(a, b.crow_indices()) ||
+             isAliasOf(a, b.col_indices());
     }
 
     return a.is_alias_of(b);
@@ -892,6 +903,11 @@ public:
         // so this will detect overlap of sparse tensors that share a values
         // tensor, but not sparse tensors that share an indices tensor.
         return hashTensor(ten._values());
+      } else if (ten.is_sparse_csr()) {
+        // COO sparse tensors have a "values" tensor and an "indices" tensor
+        // so this will detect overlap of sparse tensors that share a values
+        // tensor, but not sparse tensors that share an indices tensor.
+        return hashTensor(ten.values());
       } else {
         return reinterpret_cast<size_t>(
             ten.storage().unsafeGetStorageImpl());
