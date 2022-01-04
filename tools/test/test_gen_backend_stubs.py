@@ -221,6 +221,17 @@ supported:
         output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
         self.assertExpectedInline(output_error, '''You must provide either True or False for use_out_as_primary. Provided: frue''')  # noqa: B950
 
+    # if device_guard is provided, it must be a bool
+    def test_device_guard_non_bool(self) -> None:
+        yaml_str = '''\
+backend: XLA
+cpp_namespace: torch_xla
+device_guard: frue
+supported:
+- abs'''
+        output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
+        self.assertExpectedInline(output_error, '''You must provide either True or False for device_guard. Provided: frue''')  # noqa: B950
+
 
 if __name__ == '__main__':
     unittest.main()
