@@ -5,7 +5,6 @@
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/named_value.h>
-#include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/runtime/argument_spec.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 
