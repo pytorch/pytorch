@@ -33,9 +33,8 @@ from .pattern_utils import (
     get_default_output_activation_post_process_map,
     Pattern,
 )
-
+from ..utils import _parent_name
 from .utils import (
-    _parent_name,
     all_node_args_have_no_tensors,
     quantize_node,
     get_per_tensor_qparams,
