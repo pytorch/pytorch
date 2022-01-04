@@ -59,7 +59,7 @@ def gen_fallback_code(schema: LazyIrSchema, overload_name: str) -> str:
     else:
         aten_op_str = f"ATEN_OP({schema.aten_name})"
     return f"""
-        if (force_eager_fallback(at::aten::{schema.aten_name})) {{
+        if (force_eager_fallback({aten_symbol(schema)})) {{
             return at::native::call_fallback_fn<&ltc_eager_fallback, {aten_op_str}>::call(
                 {fallback_args}
             );
