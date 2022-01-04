@@ -32,7 +32,7 @@ log = logging.getLogger(__name__)
 # Models that are known to crash or otherwise not work with lazy tensor are
 # disabled, but should be removed from these lists once fixed
 SKIP = {
-    "fastNLP_Bert",
+
     "vision_maskrcnn",
     "speech_trasformer",
     "nvidia_deeprecommender",

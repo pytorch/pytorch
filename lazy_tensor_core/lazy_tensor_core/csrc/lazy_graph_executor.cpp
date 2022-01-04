@@ -711,16 +711,9 @@ std::vector<torch::lazy::BackendDataPtr> LazyGraphExecutor::FetchTensorData(
     torch::lazy::BackendDataPtr handle = tensor.CurrentDataHandle();
     if (handle == nullptr && config.force_ltc_data) {
       const torch::lazy::BackendDevice& tensor_device = tensor.GetDevice();
-<<<<<<< HEAD
       handle = torch::lazy::getBackend()->CreateDataPlaceholder(
           tensor_device, std::move(tensor.shape()));
-      tensor.SetDataHandle(handle, config.sync_ltc_data);
-=======
-      handle = compiler::getBackend()
-                   ->CreateDataPlaceholder(tensor_device,
-                                           std::move(tensor.shape()));
-      tensor.SetDataHandle(handle, true/*config.sync_ltc_data*/);
->>>>>>> a86001c556 (more diag)
+      tensor.SetDataHandle(handle,  true/*config.sync_ltc_data*/);
     }
     tensors_data.emplace_back(std::move(handle));
   }
@@ -952,15 +945,11 @@ LazyGraphExecutor::ScheduleSyncTensorsGraph(
       coll, std::move(parameters_data), std::move(tensors_data),
       std::move(cached_computation));
 
-<<<<<<< HEAD
-  auto syncfn = [this, async, hash = coll->hash]() {
+  auto syncfn = [this, async, hash = coll->hash, lazy_tensors]() {
     // For profiling lazy trace overhead
     if (noop_execution_mode_)
       return;
 
-=======
-  auto syncfn = [async, hash = coll->hash, lazy_tensors]() {
->>>>>>> a86001c556 (more diag)
     try {
       VLOG(3) << "Executing IR graph hash " << torch::lazy::HashToString(hash)
               << " on device " << async->device << " ...";

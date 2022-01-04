@@ -38,7 +38,7 @@
 #include <sstream>
 #include <queue>
 #include "c10/core/DeviceType.h"
-#include <TH/TH.h>
+//#include <TH/TH.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 
 namespace torch { namespace autograd {

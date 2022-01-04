@@ -20,7 +20,6 @@
 #include "lazy_tensor_core/csrc/ts_backend/aten_autograd_ops_ts.h"
 #include "lazy_tensor_core/csrc/ts_backend/aten_eager_fallback.h"
 #include "lazy_tensors/computation_client/sys_util.h"
-#include "lazy_tensors/computation_client/metrics.h"
 #include "lazy_tensor_core/csrc/ts_backend/backend_impl.h"
 namespace torch_lazy_tensors {
 namespace ir {
