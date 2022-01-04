@@ -1037,9 +1037,14 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(
                        unittest.expectedFailure, "TestModule", "test_gradgrad", active_if=(TEST_CUDNN and not TEST_WITH_ROCM)
                    ),
-                   # CUDNN and MIOPEN RNN doesn't accept non-contiguous hx
+                   # CUDNN RNN doesn't accept non-contiguous hx
                    DecorateInfo(
-                       unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors", active_if=TEST_CUDNN
+                       unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors", active_if=(TEST_CUDNN and not TEST_WITH_ROCM)
+                   ),
+                   # MIOPEN RNN doesn't accept non-contiguous hx (this is dispatched to miopen only for float).
+                   DecorateInfo(
+                       unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors", active_if=(TEST_CUDNN and TEST_WITH_ROCM),
+                       dtypes=(torch.float,)
                    ),
                )
                ),
@@ -1055,9 +1060,14 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(
                        unittest.expectedFailure, "TestModule", "test_gradgrad", active_if=(TEST_CUDNN and not TEST_WITH_ROCM)
                    ),
-                   # CUDNN and MIOPEN GRU doesn't accept non-contiguous hx
+                   # CUDNN GRU doesn't accept non-contiguous hx
                    DecorateInfo(
-                       unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors", active_if=TEST_CUDNN
+                       unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors", active_if=(TEST_CUDNN and not TEST_WITH_ROCM)
+                   ),
+                   # MIOPEN GRU doesn't accept non-contiguous hx (this is dispatched to miopen only for float).
+                   DecorateInfo(
+                       unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors", active_if=(TEST_CUDNN and TEST_WITH_ROCM),
+                       dtypes=(torch.float,)
                    ),
                ))
 ]
