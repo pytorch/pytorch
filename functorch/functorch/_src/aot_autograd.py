@@ -335,11 +335,13 @@ class PytreeThunk:
 
 
 def compiled_function(
-    fn, fw_compiler, bw_compiler, partition_fn=default_partition, decompose=False, hasher_type="StaticShapeHasher"
+    fn, fw_compiler, bw_compiler=None, partition_fn=default_partition, decompose=False, hasher_type="StaticShapeHasher"
 ):
     global compile_cache
     if compile_cache is None:
         compile_cache = CompileCache()
+    if bw_compiler is None:
+        bw_compiler = fw_compiler
     cached_res = None
 
     fn_id = id(fn)
