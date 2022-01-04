@@ -1405,11 +1405,18 @@ class Module:
                     with torch.no_grad():
                         param.copy_(input_param)
                 except Exception as ex:
-                    error_msgs.append('While copying the parameter named "{}", '
-                                      'whose dimensions in the model are {} and '
-                                      'whose dimensions in the checkpoint are {}, '
-                                      'an exception occurred : {}.'
-                                      .format(key, param.size(), input_param.size(), ex.args))
+                    if torch.is_tensor(input_param):
+                        error_msgs.append('While copying the parameter named "{}", '
+                                          'whose dimensions in the model are {} and '
+                                          'whose dimensions in the checkpoint are {}, '
+                                          'an exception occurred : {}.'
+                                          .format(key, param.size(), input_param.size(), ex.args))
+                    else:
+                        error_msgs.append('While copying the parameter named "{}", '
+                                          'expected torch.Tensor from checkpoint but '
+                                          'received {}, '
+                                          'an exception occured : {}'
+                                          .format(key, type(input_param), ex.args))
             elif strict:
                 missing_keys.append(key)
 
