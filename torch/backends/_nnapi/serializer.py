@@ -525,6 +525,8 @@ class _NnapiSerializer(object):
         shape_code = "".join(shape_parts)
         if oper.op_type == NNAPI_OperandCode.TENSOR_FLOAT32:
             return f"torch.zeros({shape_code}, dtype=torch.float32)"
+        elif oper.op_type == NNAPI_OperandCode.TENSOR_INT32:
+            return f"torch.zeros({shape_code}, dtype=torch.int32)"
         elif oper.op_type == NNAPI_OperandCode.TENSOR_QUANT8_ASYMM:
             return (
                 f"torch.quantize_per_tensor("
