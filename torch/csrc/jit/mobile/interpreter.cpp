@@ -3,15 +3,15 @@
 #include <ATen/core/function.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/operator_name.h>
-#include <torch/csrc/jit/mobile/function.h>
-#include <torch/csrc/jit/runtime/jit_exception.h>
-#include <torch/csrc/jit/runtime/vararg_functions.h>
-
 #include <ATen/record_function.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/backends/backend_exception.h>
+#include <torch/csrc/jit/mobile/function.h>
 #include <torch/csrc/jit/mobile/observer.h>
+#include <torch/csrc/jit/mobile/promoted_prim_ops.h>
+#include <torch/csrc/jit/runtime/jit_exception.h>
+#include <torch/csrc/jit/runtime/vararg_functions.h>
 
 namespace torch {
 namespace jit {
@@ -245,6 +245,102 @@ bool InterpreterState::run(Stack& stack) {
         } break;
         case TUPLE_SLICE: {
           tupleSlice(stack, inst.X, inst.X + inst.N);
+          frame.step();
+        } break;
+        case TUPLE_INDEX: {
+          tupleIndex(stack);
+          frame.step();
+        } break;
+        case GETITEM_T: {
+          listSelect(stack);
+          frame.step();
+        } break;
+        case LEN_T: {
+          listLen(stack);
+          frame.step();
+        } break;
+        case TUPLE_UNPACK: {
+          tupleUnpack(stack);
+          frame.step();
+        } break;
+        case RAISE_EXCEPTION: {
+          raiseException(stack);
+          frame.step();
+        } break;
+        case UNCHECKED_CAST: {
+          noop(stack);
+          frame.step();
+        } break;
+        case __IS__: {
+          is(stack);
+          frame.step();
+        } break;
+        case UN_INITIALIZED: {
+          unInitialized(stack);
+          frame.step();
+        } break;
+        case __ISNOT__: {
+          isNot(stack);
+          frame.step();
+        } break;
+        case FORMAT: {
+          aten_format(stack);
+          frame.step();
+        } break;
+        case SIZE: {
+          size(stack);
+          frame.step();
+        } break;
+        case DEVICE: {
+          device(stack);
+          frame.step();
+        } break;
+        case DTYPE: {
+          dtype(stack);
+          frame.step();
+        } break;
+        case TO_PRIM_DTYPE: {
+          toPrimDType(stack);
+          frame.step();
+        } break;
+        case APPEND_T: {
+          listAppend(stack);
+          frame.step();
+        } break;
+        case DIM: {
+          dim(stack);
+          frame.step();
+        } break;
+        case EXTEND_T: {
+          listExtend(stack);
+          frame.step();
+        } break;
+        case __NOT__: {
+          _not(stack);
+          frame.step();
+        } break;
+        case BOOL_TENSOR: {
+          boolTensor(stack);
+          frame.step();
+        } break;
+        case SLICE_T: {
+          listSlice(stack);
+          frame.step();
+        } break;
+        case TO_LIST: {
+          toList(stack);
+          frame.step();
+        } break;
+        case NUM_TO_TENSOR_SCALAR: {
+          numToTensorScalar(stack);
+          frame.step();
+        } break;
+        case IS_CUDA: {
+          isCuda(stack);
+          frame.step();
+        } break;
+        case NUM_TO_TENSOR_BOOL: {
+          numToTensorBool(stack);
           frame.step();
         } break;
         case DICT_CONSTRUCT: {
