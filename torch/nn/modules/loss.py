@@ -323,11 +323,11 @@ class GaussianNLLLoss(_Loss):
             losses. Default: ``'mean'``.
 
     Shape:
-        - Input: :math:`(N, *)` where :math:`*` means any number of additional
+        - Input: :math:`(N, *)` or :math:`(*)` where :math:`*` means any number of additional
           dimensions
-        - Target: :math:`(N, *)`, same shape as the input, or same shape as the input
+        - Target: :math:`(N, *)` or :math:`(*)`, same shape as the input, or same shape as the input
           but with one dimension equal to 1 (to allow for broadcasting)
-        - Var: :math:`(N, *)`, same shape as the input, or same shape as the input but
+        - Var: :math:`(N, *)` or :math:`(*)`, same shape as the input, or same shape as the input but
           with one dimension equal to 1, or same shape as the input but with one fewer
           dimension (to allow for broadcasting)
         - Output: scalar if :attr:`reduction` is ``'mean'`` (default) or

@@ -1063,11 +1063,11 @@ class TestQuantizeFx(QuantizationTestCase):
         for is_name in [True, False]:
             if is_name:
                 prepare_config = {
-                    "standalone_module_name": [("standalone", None, interface_config)]
+                    "standalone_module_name": [("standalone", None, interface_config, None)]
                 }
             else:
                 prepare_config = {
-                    "standalone_module_class": [(StandaloneModule, None, interface_config)]
+                    "standalone_module_class": [(StandaloneModule, None, interface_config, None)]
                 }
 
             original_m_copy = copy.deepcopy(original_m)
