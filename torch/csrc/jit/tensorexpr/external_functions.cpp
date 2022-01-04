@@ -790,9 +790,10 @@ void nnc_aten_adaptive_avg_pool2d(
     W = extra_args[1];
   }
   try {
-    at::adaptive_avg_pool2d_out(r, x, {H, W});
+    r = at::adaptive_avg_pool2d(x, {H, W});
   } catch (...) {
   }
+  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
 void nnc_aten_mean(

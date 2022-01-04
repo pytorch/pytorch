@@ -24,23 +24,6 @@ if __name__ == "__main__":
     )
 
 class TestSaveLoad(JitTestCase):
-
-    def test_versioned_symbols_reserialization(self):
-        """
-        Tests that loading and saving serialized Torchscript with a versioned
-        symbol won't persist the original function and will inline the
-        versioned builtin.
-        """
-        module_v2 = torch.jit.load(pytorch_test_dir + "/jit/fixtures/_test_serialization_subcmul_v2.pt")
-        buffer = io.BytesIO()
-        torch.jit.save(module_v2, buffer)
-        buffer.seek(0)
-        module_reserialized = torch.jit.load(buffer)
-
-        subcmul_nodes = sum("subcmul" in n.kind() for
-                            n in module_reserialized.graph.nodes())
-        self.assertEqual(subcmul_nodes, 0)
-
     def test_different_modules(self):
         """
         Exercise the situation where we have the same qualified name
