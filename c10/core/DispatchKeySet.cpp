@@ -180,7 +180,7 @@ initializeFunctionalityOffsetsAndMasks() {
 #if defined(C10_MOBILE_TRIM_DISPATCH_KEYS)
 // [Note: Trimmed Mobile Dispatch Keys]
         uint16_t mask = 0;
-        uint16_t offset = -1;
+        uint16_t offset = 0;
         switch (k) {
           case DispatchKey::Undefined:
             offset = 0;
@@ -199,7 +199,9 @@ initializeFunctionalityOffsetsAndMasks() {
           case DispatchKey::AutogradCPU:
             offset = 7;
           default:
-            offset = -1;
+            // All other keys which are unsupported on mobile will get sent t
+            // to the undefined kernel, causing them to error.
+            offset = 0;
         }
         offsets_and_masks[functionality_idx] = FunctionalityOffsetAndMask(offset, 0);
 #else
