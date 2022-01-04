@@ -1742,6 +1742,10 @@ TEST(StaticRuntime, VarStack) {
   std::vector<IValue> args5 = {at::randn({1, 2, 3}), at::randn({1, 2, 3}), 3};
   testStaticRuntime(var_stack_script, args5);
 
+  // Fast path
+  std::vector<IValue> args6 = {at::randn({1}), at::randn({1}), 0};
+  testStaticRuntime(var_stack_script, args6);
+
   testStaticRuntime(var_stack_script, args1, args2);
 }
 
