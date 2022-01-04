@@ -3,7 +3,7 @@ from typing import Dict, Iterable, Tuple
 import torch
 import torch.fx.passes.splitter_base as splitter_base
 from torch.fx.experimental.fx2trt.tools.trt_minimizer import TensorRTMinimizer
-from torch.fx.experimental.fx2trt.fx2trt import (
+from torch.fx.experimental.fx2trt import (
     InputTensorSpec,
     TRTModule,
     TRTInterpreter,
