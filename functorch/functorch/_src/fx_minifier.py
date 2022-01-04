@@ -36,6 +36,8 @@ def _get_placeholders(graph):
 
 
 def _convert_node_to_placeholder(node, inps):
+    if node.op == 'output':
+        return
     node.op = 'placeholder'
     node.args = ()
     node.target = node.name

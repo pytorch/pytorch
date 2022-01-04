@@ -12,6 +12,8 @@ def ts_compile(fx_g, _):
                 args[1] = [1]
                 node.args = tuple(args)
     fx_g.graph.lint()
+
+    # print(set([i.target for i in fx_g.graph.nodes if i.op == 'call_function']))
     # Works around this NVFuser issue: https://github.com/csarofeen/pytorch/issues/1311
     for i in range(1000):
         attr = f'_tensor_constant{i}'
@@ -21,25 +23,26 @@ def ts_compile(fx_g, _):
             break
 
     fx_g.recompile()
+
     f = torch.jit.script(fx_g)
 
     # Works around alias analysis issues in TS
-    graph = f.graph
-    outputs = list(graph.outputs())
-    output = outputs[0]
-    graph.eraseOutput(0)
-    outputs = list(output.node().inputs())
-    for inp in output.node().inputs():
-        graph.registerOutput(inp)
-    output.node().destroy()
-    torch._C._jit_pass_remove_mutation(graph)
-    for i in range(len(list(graph.outputs()))):
-        graph.eraseOutput(0)
-    node = graph.create("prim::ListConstruct", outputs)
-    graph.appendNode(node)
-    node.output().setType(torch._C.ListType.ofTensors())
-    graph.registerOutput(node.output())
-    torch._C._jit_pass_remove_mutation(f.graph)
+    # graph = f.graph
+    # outputs = list(graph.outputs())
+    # output = outputs[0]
+    # graph.eraseOutput(0)
+    # outputs = list(output.node().inputs())
+    # for inp in output.node().inputs():
+    #     graph.registerOutput(inp)
+    # output.node().destroy()
+    # torch._C._jit_pass_remove_mutation(graph)
+    # for i in range(len(list(graph.outputs()))):
+    #     graph.eraseOutput(0)
+    # node = graph.create("prim::ListConstruct", outputs)
+    # graph.appendNode(node)
+    # node.output().setType(torch._C.ListType.ofTensors())
+    # graph.registerOutput(node.output())
+    # torch._C._jit_pass_remove_mutation(f.graph)
 
     f = torch.jit.freeze(f.eval())
     f = torch.jit.optimize_for_inference(f)
@@ -107,7 +110,6 @@ def tvm_compile(name):
 
 
 def nop(f, _):
-    print(f.code)
     return f
 
 
