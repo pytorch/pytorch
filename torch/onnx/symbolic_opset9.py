@@ -721,6 +721,7 @@ def prelu(g, self, weight):
         weight = sym_help._unsqueeze_helper(g, weight, list(range(1, self_rank - 1)))
     elif self_rank is not None and self_rank == 0:
         self = sym_help._unsqueeze_helper(g, self, [0])
+    assert sym_help._get_tensor_rank(self) >= len(sym_help._get_tensor_sizes(weight)), "slope must be unidirectionally broadcastable to input tensor"
     return g.op("PRelu", self, weight)
 
 
