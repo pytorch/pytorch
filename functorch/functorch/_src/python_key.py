@@ -3,7 +3,6 @@
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
-from dataclasses import dataclass
 import functools
 from typing import Any, Dict, Optional, Tuple, Callable, Union
 import torch
@@ -12,8 +11,6 @@ import torch.utils._pytree as pytree
 from torch.fx import Tracer, GraphModule
 import torch.fx as fx
 from .decompositions import decomposition_table
-from enum import Enum
-import warnings
 from contextlib import contextmanager
 
 
