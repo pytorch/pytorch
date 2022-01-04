@@ -1,5 +1,6 @@
 #include "lazy_tensor_core/csrc/lazy_graph_executor.h"
 
+#include <ATen/Functions.h>
 #include <c10/util/Logging.h>
 #include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
 #include <torch/csrc/lazy/core/ir_dump_util.h>

@@ -1,3 +1,6 @@
+#include <torch/csrc/lazy/ts_backend/ts_node_lowering.h>
+
+#include <ATen/Functions.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
 #include <torch/csrc/lazy/backend/backend_interface.h>
 #include <torch/csrc/lazy/core/helpers.h>
@@ -16,7 +19,6 @@
 #include <torch/csrc/lazy/core/view_ops/select_view_update.h>
 #include <torch/csrc/lazy/core/view_ops/view.h>
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
-#include <torch/csrc/lazy/ts_backend/ts_node_lowering.h>
 
 #include "lazy_tensor_core/csrc/ops/repeat.h"
 #include "lazy_tensor_core/csrc/ops/squeeze.h"
