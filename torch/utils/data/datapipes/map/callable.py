@@ -1,5 +1,5 @@
 import warnings
-from typing import Callable, Dict, Optional, Tuple, TypeVar
+from typing import Callable, TypeVar
 
 from torch.utils.data import MapDataPipe, functional_datapipe
 
@@ -35,8 +35,6 @@ class MapperMapDataPipe(MapDataPipe[T_co]):
     args:
         datapipe: Source Map DataPipe
         fn: Function called over each item
-        fn_args: Positional arguments for `fn`
-        fn_kwargs: Keyword arguments for `fn`
     """
     datapipe: MapDataPipe
     fn: Callable
@@ -45,8 +43,6 @@ class MapperMapDataPipe(MapDataPipe[T_co]):
         self,
         datapipe: MapDataPipe,
         fn: Callable = default_fn,
-        fn_args: Optional[Tuple] = None,
-        fn_kwargs: Optional[Dict] = None,
     ) -> None:
         super().__init__()
         self.datapipe = datapipe
@@ -57,25 +53,23 @@ class MapperMapDataPipe(MapDataPipe[T_co]):
                 "regular python function or functools.partial instead."
             )
         self.fn = fn  # type: ignore[assignment]
-        self.args = () if fn_args is None else fn_args
-        self.kwargs = {} if fn_kwargs is None else fn_kwargs
 
     def __len__(self) -> int:
         return len(self.datapipe)
 
     def __getitem__(self, index) -> T_co:
-        return self.fn(self.datapipe[index], *self.args, **self.kwargs)
+        return self.fn(self.datapipe[index])
 
     def __getstate__(self):
         if DILL_AVAILABLE:
             dill_function = dill.dumps(self.fn)
         else:
             dill_function = self.fn
-        state = (self.datapipe, dill_function, self.args, self.kwargs)
+        state = (self.datapipe, dill_function)
         return state
 
     def __setstate__(self, state):
-        (self.datapipe, dill_function, self.args, self.kwargs) = state
+        (self.datapipe, dill_function) = state
         if DILL_AVAILABLE:
             self.fn = dill.loads(dill_function)  # type: ignore[assignment]
         else:
