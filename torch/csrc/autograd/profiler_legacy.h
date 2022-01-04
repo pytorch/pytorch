@@ -342,8 +342,6 @@ TORCH_API thread_event_lists disableProfilerLegacy(c10::optional<ProfilerDisable
 // adds profiledEvents to the current thread local recorded events. Each event
 // will be marked with node ID given by fromNodeId.
 TORCH_API void addEventList(std::vector<LegacyEvent>&& profiledEvents);
-// Retrieve the thread_local ProfilerConfig.
-TORCH_API torch::profiler::impl::ProfilerConfig getProfilerConfig();
 // Writes profiled events to a stream.
 TORCH_API void writeProfilerEventsToStream(std::ostream& out, const std::vector<LegacyEvent*>& events);
 
@@ -429,6 +427,10 @@ struct TORCH_API ProfilerLegacyThreadLocalState : public torch::profiler::impl::
       int64_t /* total_allocated, unused for legacy */,
       int64_t /* total_reserved, unused for legacy */,
       c10::Device device) override;
+
+  torch::profiler::impl::ActiveProfilerType profilerType() override {
+    return torch::profiler::impl::ActiveProfilerType::LEGACY;
+  }
 
  protected:
   RangeEventList& getEventList(int64_t thread_id = -1);

@@ -290,7 +290,7 @@ def _prepare_standalone_module_fx(
         model,
         qconfig_dict,
         prepare_custom_config_dict,
-        backend_config_dict,
+        backend_config_dict=backend_config_dict,
         is_standalone_module=True,
         is_qat=is_qat,
     )
@@ -404,7 +404,8 @@ def prepare_fx(
                ("submodule.standalone",
                 None,  # qconfig_dict for the prepare function called in the submodule,
                        # None means use qconfig from parent qconfig_dict
-                {"input_quantized_idxs": [], "output_quantized_idxs": []})  # prepare_custom_config_dict
+                {"input_quantized_idxs": [], "output_quantized_idxs": []}),  # prepare_custom_config_dict
+                {}  # backend_config_dict, TODO: point to README doc when it's ready
             ],
 
             "standalone_module_class": [
@@ -412,7 +413,8 @@ def prepare_fx(
                 (StandaloneModule,
                  None,  # qconfig_dict for the prepare function called in the submodule,
                         # None means use qconfig from parent qconfig_dict
-                {"input_quantized_idxs": [0], "output_quantized_idxs": [0]})  # prepare_custom_config_dict
+                {"input_quantized_idxs": [0], "output_quantized_idxs": [0]},  # prepare_custom_config_dict
+                {})  # backend_config_dict, TODO: point to README doc when it's ready
             ],
 
             # user will manually define the corresponding observed

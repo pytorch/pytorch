@@ -864,6 +864,7 @@ class TestDistributed(QuantizationTestCase):
             fused_model = torch.ao.quantization.fuse_modules(
                 model,
                 [['conv', 'bn']],
+                is_qat=True,
             )
             # convert to QAT
             fused_model.qconfig = torch.ao.quantization.get_default_qconfig('fbgemm')
