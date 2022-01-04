@@ -1,6 +1,6 @@
 import torch
 from functools import partial
-from .aot_autograd import draw_graph
+from .aot_autograd import draw_graph, aot_function
 import time
 
 
@@ -109,3 +109,11 @@ def tvm_compile(name):
 def nop(f, _):
     print(f.code)
     return f
+
+def simple_ts_compile(fx_g, _):
+    f = torch.jit.script(fx_g)
+    f = torch.jit.freeze(f.eval())
+    return f
+
+def nnc_jit(f):
+    return aot_function(f, simple_ts_compile)
