@@ -9,7 +9,7 @@
 #include <torch/csrc/lazy/core/unique.h>
 
 // TODO: DebugUtil will be upstreamed after LazyTensor is in.
-//#include "lazy_tensor_core/csrc/debug_util.h"
+#include "lazy_tensor_core/csrc/debug_util.h"
 #include <torch/csrc/lazy/ts_backend/ops/arithmetic_ir_ops.h>
 #include <torch/csrc/lazy/ts_backend/ops/device_data.h>
 #include <torch/csrc/lazy/ts_backend/ops/expand.h>
@@ -862,8 +862,8 @@ LazyGraphExecutor::SyncTensorsGraphInternal(std::vector<LazyTensor>* tensors,
   if (coll.indices.empty()) {
     return nullptr;
   }
-  // DebugUtil::SaveTensorsGraphInfo("ScheduleSyncTensorsGraph", *tensors,
-  //                                &coll.indices);
+  DebugUtil::SaveTensorsGraphInfo("ScheduleSyncTensorsGraph", *tensors,
+                                 &coll.indices);
 
   PostOrderData po_data = RunPostOrder(*tensors, coll.indices);
   coll.hash = torch::lazy::HashCombine(
