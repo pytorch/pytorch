@@ -1738,6 +1738,14 @@ TEST(StaticRuntime, VarStack) {
   std::vector<IValue> args4 = {at::randn({4, 5, 6}), at::randn({4, 5, 6}), -1};
   testStaticRuntime(var_stack_script, args4);
 
+  // Non-serial path
+  std::vector<IValue> args5 = {at::randn({1, 2, 3}), at::randn({1, 2, 3}), 3};
+  testStaticRuntime(var_stack_script, args5);
+
+  // Fast path
+  std::vector<IValue> args6 = {at::randn({1}), at::randn({1}), 0};
+  testStaticRuntime(var_stack_script, args6);
+
   testStaticRuntime(var_stack_script, args1, args2);
 }
 
@@ -2204,6 +2212,21 @@ TEST(StaticRuntime, Split) {
   testStaticRuntime(src, {a, 1, 0});
   testStaticRuntime(src, {a, 1, 1});
   testStaticRuntime(src, {a, 2, -1}, {b, 2, 2});
+}
+
+TEST(StaticRuntime, SplitWithSizes) {
+  const auto src = R"JIT(
+    def forward(self, inp, split_sizes: List[int], dim: int):
+        return inp.split(split_sizes, dim)
+  )JIT";
+
+  const auto a = at::randn({2, 2});
+  const auto b = at::randn({2, 2, 2});
+  const auto split_sizes = c10::List<int64_t>{1, 1};
+
+  testStaticRuntime(src, {a, split_sizes, 0});
+  testStaticRuntime(src, {a, split_sizes, 1});
+  testStaticRuntime(src, {a, split_sizes, -1}, {b, split_sizes, 2});
 }
 
 namespace {
