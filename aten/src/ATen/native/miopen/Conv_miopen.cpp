@@ -616,10 +616,10 @@ Tensor miopen_convolution_forward(
     memory_format = (weight->ndimension() == 5) ? /*at::MemoryFormat::ChannelsLast3d*/at::MemoryFormat::Contiguous : at::MemoryFormat::ChannelsLast;
   }
 
-  auto output_t = at::detail::empty_cuda(
-                    conv_output_size(input->sizes(), weight->sizes(),
-                                     padding, stride, dilation),
-                    input->options().memory_format(memory_format));
+  Tensor output_t = at::detail::empty_cuda(
+      conv_output_size(input->sizes(), weight->sizes(),
+                       padding, stride, dilation),
+      input->options().memory_format(memory_format));
 
   if (output_t.numel() == 0) {
     return output_t;
@@ -711,7 +711,7 @@ Tensor miopen_depthwise_convolution_forward(
     memory_format = (weight->ndimension() == 5) ? /*at::MemoryFormat::ChannelsLast3d*/at::MemoryFormat::Contiguous : at::MemoryFormat::ChannelsLast;
   }
 
-  auto output_t = at::detail::empty_cuda(
+  Tensor output_t = at::detail::empty_cuda(
       conv_output_size(input->sizes(), weight->sizes(),
                        padding, stride, dilation),
       input->options().memory_format(memory_format));
@@ -1078,7 +1078,7 @@ Tensor miopen_convolution_backward_input(
     memory_format = (weight->ndimension() == 5) ? /*at::MemoryFormat::ChannelsLast3d*/at::MemoryFormat::Contiguous : at::MemoryFormat::ChannelsLast;
   }
 
-  auto grad_input_t = at::detail::empty_cuda(
+  Tensor grad_input_t = at::detail::empty_cuda(
       input_size, grad_output->options().memory_format(memory_format));
 
   // Avoid "grad_input" when this is being used as transposed convolution
@@ -1172,7 +1172,7 @@ Tensor miopen_depthwise_convolution_backward_input(
     memory_format = (weight->ndimension() == 5) ? /*at::MemoryFormat::ChannelsLast3d*/at::MemoryFormat::Contiguous : at::MemoryFormat::ChannelsLast;
   }
 
-  auto grad_input_t = at::native::empty_cuda(
+  Tensor grad_input_t = at::native::empty_cuda(
       input_size, grad_output->options().memory_format(memory_format));
 
   TensorArg grad_input{ grad_input_t, "result", 0 };
