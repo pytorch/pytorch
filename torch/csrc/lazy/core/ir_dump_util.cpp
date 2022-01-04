@@ -250,6 +250,9 @@ std::string DumpUtil::PostOrderToText(
     if (opt_root_id) {
       ss << ", ROOT=" << *opt_root_id;
     }
+    if (node->lazy_tensor_id_ != -1) {
+      ss << " , TID=" << node->lazy_tensor_id_;
+    }
     ss << "\n";
   }
   ss << "}\n";

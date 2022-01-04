@@ -395,6 +395,10 @@ LazyGraphExecutor* LazyGraphExecutor::Get() {
 }
 
 void LazyGraphExecutor::RegisterTensor(std::shared_ptr<LazyTensor::Data> data) {
+  static const auto LTC_BREAK_ON_REGISTER = std::getenv("LTC_BREAK_ON_REGISTER");
+  if (LTC_BREAK_ON_REGISTER && std::to_string(data->unique_id) == LTC_BREAK_ON_REGISTER) {
+    TORCH_CHECK(false, "LTC_BREAK_ON_REGISTER");
+  }
   DeviceContextArena::Get()->RegisterTensor(data);
 }
 
@@ -704,6 +708,16 @@ LazyGraphExecutor::PostOrderData LazyGraphExecutor::RunPostOrder(
       torch::lazy::Util::ComputePostOrder(roots, &po_data.emission_map);
   std::unordered_map<torch::lazy::BackendData::Handle, size_t> data_handles;
   for (auto node : po_data.post_order) {
+    
+    static auto const LTC_RECOMPUTATION_VERBOSE = std::getenv("LTC_RECOMPUTATION_VERBOSE");
+    if (LTC_RECOMPUTATION_VERBOSE && GetComputedBackendDatas().count(node->lazy_tensor_id_) != 0
+      && !torch::lazy::DeviceData::Cast(node)) {
+      auto roots_str = c10::fmap(roots, [](const Node* n) { return n->lazy_tensor_id_; });
+      std::cerr << "Computing the roots for [" << roots_str << " ]" << std::endl;
+      std::cerr << "Graphs for the said nodes: " << torch::lazy::DumpUtil::ToText(roots);
+      std::cerr << "Node with id " << node->lazy_tensor_id_ << " (" << node->ToString() << ") was already materialized" << std::endl;
+    }
+
     const torch::lazy::DeviceData* device_data = torch::lazy::DeviceData::Cast(node);
     if (device_data != nullptr) {
       torch::lazy::BackendData::Handle handle =
@@ -918,6 +932,7 @@ LazyGraphExecutor::ScheduleSyncTensorsGraph(
           async->tensors_data[i] = std::move(results[i]);
         }
       }
+
     } catch (...) {
       // There are two paths of discovery of an exception happening on an
       // asynchronous task. One happens if the creator of the asynchronous task
@@ -946,6 +961,11 @@ LazyGraphExecutor::ScheduleSyncTensorsGraph(
     std::vector<torch::lazy::BackendDataPtr> parameters_data,
     ComputationCache::TypePtr cached_computation) {
   auto tensors_data = FetchTensorData(tensors, coll->config, coll->indices);
+  auto& computed_datas = GetComputedBackendDatas();
+  for (auto index : coll->indices) {
+    //std::cerr << "Inserting " << (*tensors)[index].GetUniqueId() << " into GetComputedBackendDatas()\n";
+    computed_datas.insert((*tensors)[index].GetUniqueId());
+  }
   return ScheduleSyncTensorsGraph(coll, std::move(parameters_data),
                                   std::move(tensors_data),
                                   std::move(cached_computation));

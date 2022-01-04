@@ -13,6 +13,14 @@
 #include "lazy_tensors/computation_client/sys_util.h"
 
 namespace torch_lazy_tensors {
+
+
+
+std::unordered_set<int64_t>& GetComputedBackendDatas() {
+  static std::unordered_set<int64_t> set_;
+  return set_;
+}
+
 namespace {
 LazyTensor GetOrCreateLtcTensor(const at::Tensor& tensor,
                                 const torch::lazy::BackendDevice& device) {
@@ -35,7 +43,11 @@ LazyTensor LazyTensor::Create(const at::Tensor& tensor, const torch::lazy::Backe
 
 LazyTensor LazyTensor::Create(torch::lazy::Value ir_value,
                               const torch::lazy::BackendDevice& device) {
-  LazyTensor xtensor(std::move(ir_value), device);
+  LazyTensor xtensor(ir_value, device);
+  if (ir_value) {
+    //std::cerr << "Setting id on " << ir_value.node->lazy_tensor_id_ << std::endl;
+    ir_value.node->lazy_tensor_id_ = xtensor.GetUniqueId();
+  }
   LazyGraphExecutor::Get()->RegisterTensor(xtensor.data_ptr());
   return xtensor;
 }
@@ -173,6 +185,10 @@ void LazyTensor::SetDataHandle(torch::lazy::BackendDataPtr handle, bool sync) {
 void LazyTensor::SetIrValue(torch::lazy::Value ir_value) {
   data()->handle = nullptr;
   data()->tensor_data = c10::nullopt;
+  if (ir_value) {
+      //std::cerr << "SetIrValue: Setting id on " << ir_value.node->lazy_tensor_id_ << std::endl;
+      ir_value.node->lazy_tensor_id_ = GetUniqueId();
+  }
   if (data()->view != nullptr) {
     // If we have an active view, and a SetIrValue() happens, it means we are
     // within an in-place execution context, and we need to update the view's
@@ -196,6 +212,10 @@ void LazyTensor::SetInPlaceIrValue(torch::lazy::Value ir_value) {
 }
 
 void LazyTensor::AssignIrValue(torch::lazy::Value ir_value) const {
+  if (ir_value) {
+      //std::cerr << "AssignIrValue: Setting id on " << ir_value.node->lazy_tensor_id_ << std::endl;
+      ir_value.node->lazy_tensor_id_ = GetUniqueId();
+  }
   data()->ir_value = std::move(ir_value);
   data()->generation += 1;
 }

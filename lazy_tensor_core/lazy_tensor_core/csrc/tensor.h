@@ -8,6 +8,8 @@
 
 namespace torch_lazy_tensors {
 
+std::unordered_set<int64_t>& GetComputedBackendDatas();
+
 class LazyTensor {
  public:
   // This is the core lazy tensor data structure where all the tensor data is

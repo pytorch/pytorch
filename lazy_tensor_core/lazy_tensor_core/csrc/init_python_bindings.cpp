@@ -445,6 +445,10 @@ void InitLtcModuleBindings(py::module m) {
           };
           return GetTensorsDump(tensors, coverter);
         });
+  m.def("_print_text",
+        [](const std::string& s) {
+          std::cerr << s;
+        });
   m.def("_get_ltc_tensors_backend",
         [](const std::vector<at::Tensor>& tensors) -> std::string {
           return GetTensorsBackendGraph(tensors);

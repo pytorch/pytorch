@@ -175,6 +175,7 @@ class TORCH_API Node {
   }
 
   virtual std::string ToString() const;
+  int64_t lazy_tensor_id_ = -1;
 
  private:
   // The ID of the operation captured by this node.
