@@ -29,6 +29,10 @@ runner_types:
     os: linux
     max_available: 500
     disk_size: 150
+  linux.4xlarge:
+    instance_type: c5.4xlarge
+    os: linux
+    disk_size: 150
   linux.8xlarge.nvidia.gpu:
     instance_type: g3.8xlarge
     os: linux
