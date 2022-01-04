@@ -125,6 +125,11 @@ int64_t LTCTensorImpl::size(int64_t d) const {
   return c10::TensorImpl::size(d);
 }
 
+int64_t LTCTensorImpl::stride(int64_t d) const {
+  const_cast<LTCTensorImpl*>(this)->setup_size_properties();
+  return c10::TensorImpl::stride(d);
+}
+
 void LTCTensorImpl::setup_size_properties() {
   size_t generation = tensor_.generation();
   if (generation != generation_) {
@@ -153,6 +158,11 @@ void LTCTensorImpl::setup_size_properties() {
 at::IntArrayRef LTCTensorImpl::sizes() const {
   const_cast<LTCTensorImpl*>(this)->setup_size_properties();
   return c10::TensorImpl::sizes();
+}
+
+at::IntArrayRef LTCTensorImpl::strides() const {
+  const_cast<LTCTensorImpl*>(this)->setup_size_properties();
+  return c10::TensorImpl::strides();
 }
 
 int64_t LTCTensorImpl::dim() const {
