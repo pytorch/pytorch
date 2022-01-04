@@ -9,6 +9,13 @@
 #include <torch/csrc/jit/runtime/static/impl.h>
 #include <torch/csrc/jit/runtime/static/memory_planner.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/allclose.h>
+#endif
+
 #include <memory>
 #include <unordered_map>
 
@@ -69,7 +76,8 @@ class ModuleStaticRuntimeTestContext : public StaticRuntimeTestContext {
   }
 
   StaticModule makeStaticModule(const StaticModuleOptions& opt) const override {
-    return torch::jit::StaticModule(module_, /* is_frozen */ false, opt);
+    return torch::jit::StaticModule(
+        module_, /* is_frozen */ false, opt, /* sample_inputs */ {});
   }
 
  private:
@@ -91,7 +99,7 @@ class GraphStaticRuntimeContext : public StaticRuntimeTestContext {
   }
 
   StaticModule makeStaticModule(const StaticModuleOptions& opt) const override {
-    return StaticModule(graph_, opt);
+    return StaticModule(graph_, opt, /* sample_inputs */ {});
   }
 
  private:
