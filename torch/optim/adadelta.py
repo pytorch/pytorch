@@ -125,16 +125,20 @@ def adadelta(params: List[Tensor],
              grads: List[Tensor],
              square_avgs: List[Tensor],
              acc_deltas: List[Tensor],
+             foreach: bool = None,
              *,
              lr: float,
              rho: float,
              eps: float,
-             weight_decay: float,
-             foreach: bool):
+             weight_decay: float):
     r"""Functional API that performs Adadelta algorithm computation.
 
     See :class:`~torch.optim.Adadelta` for details.
     """
+
+    if foreach is None:
+        # Placeholder for more complex foreach logic to be added when value is not set
+        foreach = False
 
     if foreach and not torch.jit.is_scripting():
         func = _multi_tensor_adadelta
