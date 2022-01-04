@@ -36,7 +36,8 @@ struct ByteCodeFunctionWithOperator {
   std::vector<OperatorString> operators;
 };
 
-TORCH_API std::vector<ByteCodeFunctionWithOperator> getUpgraderBytecodeList();
+TORCH_API const std::vector<ByteCodeFunctionWithOperator>&
+getUpgraderBytecodeList();
 
 } // namespace jit
 } // namespace torch
