@@ -1,6 +1,6 @@
 import torch
 import torch.fx.experimental.fx_acc.acc_ops as acc_ops
-from caffe2.torch.fb.fx2trt.tests.test_utils import AccTestCase
+from torch.testing._internal.common_fx2trt import AccTestCase
 from torch.fx.experimental.fx2trt.passes.fuse_pass import (
     fuse_permute_linear,
     trt_transposed_linear,
