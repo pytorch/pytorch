@@ -1,5 +1,6 @@
 #include "lazy_tensor_core/csrc/ts_backend/backend_impl.h"
 
+#include <ATen/Functions.h>
 #include <torch/csrc/lazy/backend/backend_device.h>
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
 
