@@ -116,6 +116,11 @@ concurrency:
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
           submodules: !{{ submodules }}
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+
 {%- endmacro -%}
 
 {%- macro upload_downloaded_files(name, artifact_name="", use_s3=True, when="always()") -%}
