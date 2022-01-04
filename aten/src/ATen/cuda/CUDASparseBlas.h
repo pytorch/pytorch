@@ -255,7 +255,8 @@ template <>
 void bsrsm2_bufferSize<float>(CUSPARSE_BSRSM2_BUFFER_ARGTYPES(float));
 template <>
 void bsrsm2_bufferSize<double>(CUSPARSE_BSRSM2_BUFFER_ARGTYPES(double));
-template <> void bsrsm2_bufferSize<c10::complex<float>>(
+template <>
+void bsrsm2_bufferSize<c10::complex<float>>(
     CUSPARSE_BSRSM2_BUFFER_ARGTYPES(c10::complex<float>));
 template <>
 void bsrsm2_bufferSize<c10::complex<double>>(
