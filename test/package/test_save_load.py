@@ -255,6 +255,18 @@ class TestSaveLoad(PackageTestCase):
             exporter.intern("**")
             exporter.save_module("package_a.use_torch_package_importer")
 
+    def test_save_bad_pickle(self):
+        from package_a.bad_pickle import BadPickle, GoodPickle
+
+        a = GoodPickle()
+        a.b = GoodPickle()
+        a.b.c = GoodPickle()
+        a.b.c.d = BadPickle()
+        buffer = BytesIO()
+
+        with self.assertRaisesRegex(pickle.PicklingError, "We think the problematic object is found at"):
+            with PackageExporter(buffer) as pe:
+                pe.save_pickle("foo", "foo.pkl", a)
 
 if __name__ == "__main__":
     run_tests()
