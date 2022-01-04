@@ -8,7 +8,7 @@ import functools
 import itertools
 import warnings
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
-    skipCUDAIfNoMagma
+    skipCUDAIfNoMagma, skipCPUIfNoLapack
 import types
 
 
@@ -2415,6 +2415,7 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         self._batched_grad_test(Tensor.trace, (x,))
 
     @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
     @allowVmapFallbackUsage
     def test_symeig(self, device):
         def op(x):

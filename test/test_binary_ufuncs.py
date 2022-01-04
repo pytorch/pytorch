@@ -33,6 +33,9 @@ if TEST_SCIPY:
     import scipy.special
     import scipy.integrate
 
+dev_name = torch.cuda.get_device_name(torch.cuda.current_device()).lower()
+IS_JETSON = 'xavier' in dev_name or 'nano' in dev_name or 'jetson' in dev_name or 'tegra' in dev_name
+
 # TODO: remove this
 def _generate_input(shape, dtype, device, with_extremal):
     if shape == ():

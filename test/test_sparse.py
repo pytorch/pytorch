@@ -36,6 +36,9 @@ load_tests = load_tests
 # batched grad doesn't support sparse
 gradcheck = functools.partial(gradcheck, check_batched_grad=False)
 
+dev_name = torch.cuda.get_device_name(torch.cuda.current_device()).lower()
+IS_JETSON = 'xavier' in dev_name or 'nano' in dev_name or 'jetson' in dev_name or 'tegra' in dev_name
+
 CUSPARSE_SPMM_COMPLEX128_SUPPORTED = (
     IS_WINDOWS and torch.version.cuda and LooseVersion(torch.version.cuda) > "11.2"
 ) or (not IS_WINDOWS and CUDA11OrLater)
@@ -1252,7 +1255,7 @@ class TestSparse(TestCase):
         self.assertEqual(self.safeToDense(res), self.safeToDense(true_result))
 
     @coalescedonoff
-    @dtypes(torch.double, torch.cdouble)
+    @dtypes(torch.double, *((torch.cdouble,) if not is JETSON else ()))
     def test_sparse_addmm(self, device, dtype, coalesced):
         def test_shape(m, n, p, nnz, broadcast, alpha_beta=None):
             if alpha_beta is None:
@@ -3226,7 +3229,7 @@ class TestSparse(TestCase):
     # TODO: Check after why ROCm's cusparseXcsrgemm2Nnz function doesn't return the same nnz value as CUDA
     @skipIfRocm
     @coalescedonoff
-    @dtypes(*get_all_complex_dtypes(),
+    @dtypes(*(torch.complex64, *((torch.complex128,) if not is JETSON else ())),
             *get_all_fp_dtypes(include_half=False, include_bfloat16=False))
     @dtypesIfCUDA(*((torch.complex64,) if CUDA11OrLater else ()),
                   *((torch.complex128,) if CUSPARSE_SPMM_COMPLEX128_SUPPORTED else ()),

@@ -65,6 +65,8 @@ assert torch.get_default_dtype() is torch.float32
 load_tests = load_tests
 
 AMPERE_OR_ROCM = TEST_WITH_ROCM or tf32_is_not_fp32()
+dev_name = torch.cuda.get_device_name(torch.cuda.current_device()).lower()
+IS_JETSON = 'xavier' in dev_name or 'nano' in dev_name or 'jetson' in dev_name or 'tegra' in dev_name
 
 # Wrap base test class into a class to hide it from testing
 # See https://stackoverflow.com/a/25695512
@@ -5523,6 +5525,7 @@ else:
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "sandcastle OOM with current tpx gpu/re configuration")
     @onlyCUDA
     @dtypes(torch.half)  # only small dtype not to get oom
+    @unittest.skipIf(IS_JETSON, "OOM")
     def test_large_cumsum(self, device, dtype):
         # initialization to avoid overflow and half caveats
         x = torch.empty(2**30 + 200, device=device, dtype=dtype)
@@ -5533,6 +5536,7 @@ else:
 
     @onlyCUDA
     @dtypes(torch.half)  # only small dtype not to get oom
+    @unittest.skipIf(IS_JETSON, "OOM")
     def test_large_cumprod(self, device, dtype):
         # initialization to avoid overflow and half caveats
         x = torch.empty(2**30 + 200, device=device, dtype=dtype)

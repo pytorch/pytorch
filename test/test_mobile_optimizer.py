@@ -21,6 +21,8 @@ except ImportError:
     HAS_TORCHVISION = False
 
 FileCheck = torch._C.FileCheck
+dev_name = torch.cuda.get_device_name(torch.cuda.current_device()).lower()
+IS_JETSON = 'xavier' in dev_name or 'nano' in dev_name or 'jetson' in dev_name or 'tegra' in dev_name
 
 class TestOptimizer(TestCase):
 
@@ -361,6 +363,7 @@ class TestOptimizer(TestCase):
         bi_module_lint_list = generate_mobile_module_lints(bi_module)
         self.assertEqual(len(bi_module_lint_list), 0)
 
+    @unittest.skipIf(IS_JETSON, "Skip on Jetsons")
     def test_preserve_bundled_inputs_methods(self):
         class MyBundledInputModule(torch.nn.Module):
             def __init__(self):

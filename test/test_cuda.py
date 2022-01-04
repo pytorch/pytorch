@@ -57,7 +57,8 @@ if TEST_CUDA:
     TEST_LARGE_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 12e9
     TEST_MEDIUM_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 6e9
     TEST_BF16 = torch.cuda.is_bf16_supported()
-
+dev_name = torch.cuda.get_device_name(torch.cuda.current_device()).lower()
+IS_JETSON = 'xavier' in dev_name or 'nano' in dev_name or 'jetson' in dev_name or 'tegra' in dev_name
 
 types = [
     torch.FloatTensor,
@@ -274,6 +275,7 @@ class TestCuda(TestCase):
         assert_change(0, empty_cache=True)
         assert_change(0, reset_peak=True)
 
+    @unittest.skipIf(IS_JETSON, "Does not work on jetson")
     def test_cudart_register(self):
         t = torch.ones(20)
         self.assertFalse(t.is_pinned())
@@ -591,6 +593,7 @@ class TestCuda(TestCase):
         self.assertEqual(torch._C._get_cublas_allow_fp16_reduced_precision_reduction(), not orig)
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig
 
+    @unittest.skipIf(IS_JETSON, "Does not work on jetson")
     def test_cudnn_allow_tf32_get_set(self):
         with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=False):
             self.assertFalse(torch.backends.cudnn.allow_tf32)
@@ -1984,6 +1987,7 @@ t1.start()
 t2.start()
 """])
 
+    @unittest.skipIf(IS_JETSON, "Does not work on jetson")
     def test_fixed_cuda_assert_async(self):
         with self.assertRaisesRegex(RuntimeError, "Boolean value of Tensor with no values is ambiguous"):
             torch._assert_async(torch.tensor([], device="cuda"))

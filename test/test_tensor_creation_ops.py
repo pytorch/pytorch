@@ -29,6 +29,8 @@ from torch.utils.dlpack import to_dlpack
 from torch.testing._internal.common_methods_invocations import (
     tri_tests_args, _compare_trilu_indices, run_additional_tri_tests)
 
+dev_name = torch.cuda.get_device_name(torch.cuda.current_device()).lower()
+IS_JETSON = 'xavier' in dev_name or 'nano' in dev_name or 'jetson' in dev_name or 'tegra' in dev_name
 
 # TODO: replace with make_tensor
 def _generate_input(shape, dtype, device, with_extremal):
@@ -1105,7 +1107,7 @@ class TestTensorCreation(TestCase):
     # errors with UBSAN. These casts are deliberate in PyTorch, however, and
     # NumPy has the same behavior.
     @onlyNativeDeviceTypes
-    @unittest.skipIf(IS_MACOS, "Test is broken on MacOS, see https://github.com/pytorch/pytorch/issues/38752")
+    @unittest.skipIf(IS_MACOS or IS_JETSON, "Test is broken on MacOS and Jetsons, see https://github.com/pytorch/pytorch/issues/38752")
     @unittest.skipIf(IS_PPC, "Test is borken on PowerPC, see https://github.com/pytorch/pytorch/issues/39671")
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_float_to_int_conversion_finite(self, device, dtype):

@@ -16,6 +16,8 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, dtypes, dtypesIfCPU, dtypesIfCUDA,
     onlyNativeDeviceTypes)
 
+dev_name = torch.cuda.get_device_name(torch.cuda.current_device()).lower()
+IS_JETSON = 'xavier' in dev_name or 'nano' in dev_name or 'jetson' in dev_name or 'tegra' in dev_name
 
 class TestIndexing(TestCase):
     def test_index(self, device):
@@ -727,6 +729,7 @@ class TestIndexing(TestCase):
             self.assertEqual(y, torch.ones(size=(10, 10), device=device))
             self.assertEquals(len(w), 2)
 
+    @unittest.skipIf(IS_JETSON, "Too large for Jetson")
     def test_index_put_accumulate_large_tensor(self, device):
         # This test is for tensors with number of elements >= INT_MAX (2^31 - 1).
         N = (1 << 31) + 5
