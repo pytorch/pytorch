@@ -1745,6 +1745,7 @@ if(NOT INTERN_BUILD_MOBILE)
   endif()
 
   find_package(VSX) # checks VSX
+  find_package(ZVECTOR) # checks ZVECTOR
   # checks AVX and AVX2. Already called once in MiscCheck.cmake. Called again here for clarity --
   # cached results will be used so no extra overhead.
   find_package(AVX)
