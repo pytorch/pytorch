@@ -125,6 +125,8 @@ def adadelta(params: List[Tensor],
              grads: List[Tensor],
              square_avgs: List[Tensor],
              acc_deltas: List[Tensor],
+             # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
+             # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
              foreach: bool = None,
              *,
              lr: float,
