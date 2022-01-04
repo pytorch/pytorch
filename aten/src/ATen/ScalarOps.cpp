@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/ScalarOps.h>
+#include <ATen/Dispatch.h>
 #include <ATen/EmptyTensor.h>
+#include <ATen/ScalarOps.h>
 
 namespace at {
 namespace {
