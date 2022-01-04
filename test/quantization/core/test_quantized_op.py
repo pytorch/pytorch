@@ -28,6 +28,7 @@ from torch.testing._internal.common_quantized import _quantize, _dequantize, _ca
     override_quantized_engine, supported_qengines, override_qengines, _snr
 from torch.testing._internal.common_quantized import qengine_is_qnnpack
 from torch.ao.quantization import PerChannelMinMaxObserver
+from torch.testing._internal.common_cuda import TEST_CUDNN
 
 from typing import Optional
 
@@ -3806,7 +3807,8 @@ class TestQuantizedConv(TestCase):
         self, batch_size, input_channels_per_group, input_feature_map_shape,
         output_channels_per_group, groups, kernels, strides, pads, dilations,
         X_scale, X_zero_point, W_scale, W_zero_point,
-        use_bias, use_channelwise, use_transpose
+        use_bias, use_channelwise, use_transpose,
+        device=torch.device("cpu")
     ):
         assert not (use_channelwise and use_transpose), \
                "Cannot generate channelwise qconv_transpose_tensors "
@@ -3862,9 +3864,16 @@ class TestQuantizedConv(TestCase):
             W = W_scales_tensor.reshape(*W_shape) * (
                 W_init.float() - W_zero_points_tensor.reshape(*W_shape)).float()
             b = X_scale * W_scales_tensor * b_init.float()
+            W_scales_tensor = W_scales_tensor.to(device)
+            W_zero_points_tensor = W_zero_points_tensor.to(device)
         else:
             W = W_scale[0] * (W_init - W_zero_point[0]).float()
             b = X_scale * W_scale[0] * b_init.float()
+
+        # set Tensors to use the correct device
+        X = X.to(device)
+        W = W.to(device)
+        b = b.to(device)
 
         X_q = torch.quantize_per_tensor(
             X, scale=X_scale, zero_point=X_zero_point, dtype=torch.quint8)
@@ -3886,19 +3895,23 @@ class TestQuantizedConv(TestCase):
         input_channels_per_group, input_feature_map_shape,
         output_channels_per_group, groups, kernels, strides, pads, o_pads,
         dilations, X_scale, X_zero_point, W_scale, W_zero_point, Y_scale,
-        Y_zero_point, use_bias, use_relu, use_channelwise, use_transpose
+        Y_zero_point, use_bias, use_relu, use_channelwise, use_transpose,
+        device=torch.device("cpu"),
     ):
         (X, W), (X_q, W_q), bias_float = self._make_qconv_tensors(
             batch_size, input_channels_per_group, input_feature_map_shape,
             output_channels_per_group, groups, kernels,
             strides, pads, dilations, X_scale, X_zero_point, W_scale,
-            W_zero_point, use_bias, use_channelwise, use_transpose)
+            W_zero_point, use_bias, use_channelwise, use_transpose, device=device)
+        if bias_float is not None:
+            bias_float = bias_float.to(device)
         # Assign weights
         W = W_q.dequantize()
         X = X_q.dequantize()
         conv_op.weight = torch.nn.Parameter(W, requires_grad=False)
         conv_op.bias = torch.nn.Parameter(
             bias_float, requires_grad=False) if use_bias else None
+        print("setting up conv")
         result_ref = conv_op(X)
         if use_relu:
             assert not use_transpose, "Cannot fuse ReLU with ConvTranspose"
@@ -3910,18 +3923,25 @@ class TestQuantizedConv(TestCase):
             result_ref, scale=Y_scale, zero_point=Y_zero_point,
             dtype=torch.quint8)
 
-        if use_transpose:
-            W_prepack = qconv_prepack_fn(
-                W_q, bias_float, strides, pads, o_pads, dilations, groups)
+        if qconv_prepack_fn is not None:
+            if use_transpose:
+                W_prepack = qconv_prepack_fn(
+                    W_q, bias_float, strides, pads, o_pads, dilations, groups)
+            else:
+                W_prepack = qconv_prepack_fn(
+                    W_q, bias_float, strides, pads, dilations, groups)
+            Y_q = qconv_fn(
+                X_q,
+                W_prepack,
+                Y_scale,
+                Y_zero_point,
+            )
         else:
-            W_prepack = qconv_prepack_fn(
-                W_q, bias_float, strides, pads, dilations, groups)
-        Y_q = qconv_fn(
-            X_q,
-            W_prepack,
-            Y_scale,
-            Y_zero_point,
-        )
+            print("running cudnn qconv fn")
+            # quantized conv op without prepacking
+            Y_q = qconv_fn(X_q, W_q, bias_float, strides, pads, dilations, groups, Y_scale, Y_zero_point)
+            print("after runnign cudnn qconv fn")
+
         # Make sure the results match
         # assert_array_almost_equal compares using the following formula:
         #     abs(desired-actual) < 1.5 * 10**(-decimal)
@@ -4018,6 +4038,107 @@ class TestQuantizedConv(TestCase):
             output_channels_per_group, groups, kernels, strides, pads, None,
             dilations, X_scale, X_zero_point, W_scale, W_zero_point,
             Y_scale, Y_zero_point, use_bias, use_relu, use_channelwise, False)
+
+    @given(batch_size=st.integers(1, 3),
+           input_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
+           height=st.integers(10, 16),
+           width=st.integers(7, 14),
+           output_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
+           groups=st.integers(1, 3),
+           kernel_h=st.integers(1, 7),
+           kernel_w=st.integers(1, 7),
+           stride_h=st.integers(1, 2),
+           stride_w=st.integers(1, 2),
+           pad_h=st.integers(0, 2),
+           pad_w=st.integers(0, 2),
+           dilation=st.integers(1, 2),
+           X_scale=st.floats(1.2, 1.6),
+           X_zero_point=st.sampled_from([0]),
+           W_scale=st.lists(st.floats(0.2, 1.6), min_size=1, max_size=2),
+           W_zero_point=st.lists(st.integers(0, 0), min_size=1, max_size=2),
+           Y_scale=st.floats(4.2, 5.6),
+           Y_zero_point=st.sampled_from([0]),
+           # TODO: enable bias
+           use_bias=st.sampled_from([False]),
+           use_relu=st.sampled_from([False]),
+           # TODO: enable channelwise
+           use_channelwise=st.sampled_from([False]))
+    @skipIfNoFBGEMM
+    @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
+    def test_qconv2d_cudnn(
+            self,
+            batch_size,
+            input_channels_per_group,
+            height,
+            width,
+            output_channels_per_group,
+            groups,
+            kernel_h,
+            kernel_w,
+            stride_h,
+            stride_w,
+            pad_h,
+            pad_w,
+            dilation,
+            X_scale,
+            X_zero_point,
+            W_scale,
+            W_zero_point,
+            Y_scale,
+            Y_zero_point,
+            use_bias,
+            use_relu,
+            use_channelwise,
+    ):
+        input_channels = input_channels_per_group * groups
+        output_channels = output_channels_per_group * groups
+        kernels = (kernel_h, kernel_w)
+        strides = (stride_h, stride_w)
+        pads = (pad_h, pad_w)
+        dilations = (dilation, dilation)
+        print("params:")
+        print(batch_size,
+              input_channels_per_group,
+              height,
+              width,
+              output_channels_per_group,
+              groups,
+              kernel_h,
+              kernel_w,
+              stride_h,
+              stride_w,
+              pad_h,
+              pad_w,
+              dilation,
+              X_scale,
+              X_zero_point,
+              W_scale,
+              W_zero_point,
+              Y_scale,
+              Y_zero_point,
+              use_bias,
+              use_relu,
+              use_channelwise,
+        )
+
+        qconv = torch.ops.quantized.conv2d_cudnn
+        assert not use_relu, "conv2d_relu_cudnn is not supported yet"
+        conv_op = torch.nn.Conv2d(
+            input_channels,
+            output_channels,
+            kernels,
+            strides,
+            pads,
+            dilations,
+            groups,
+        ).to(torch.device("cuda"))
+        self._test_qconv_impl(
+            qconv, None, conv_op, batch_size,
+            input_channels_per_group, (height, width),
+            output_channels_per_group, groups, kernels, strides, pads, None,
+            dilations, X_scale, X_zero_point, W_scale, W_zero_point,
+            Y_scale, Y_zero_point, use_bias, use_relu, use_channelwise, False,
+            device=torch.device("cuda"))
 
     """Tests the correctness of quantized convolution op."""
     @given(batch_size=st.integers(1, 3),
