@@ -259,7 +259,6 @@ class TestAOTAutograd(TestCase):
         inp = [torch.randn(3, 3, requires_grad=True), torch.randn(3, 3)]
         self.verify_aot_autograd(f, inp)
 
-
     def test_multi_output(self):
         def f(a, b):
             return a + b, a - b
