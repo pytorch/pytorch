@@ -406,7 +406,8 @@ static const OperatorGeneratorArgs opGenArgs[] = {
         numToTensorScalar,
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA("prim::RaiseException(str msg) -> ()"),
+        TORCH_SELECTIVE_SCHEMA(
+            "prim::RaiseException(str msg, str? cls=None) -> ()"),
         raiseException,
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
