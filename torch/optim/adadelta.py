@@ -142,10 +142,10 @@ def adadelta(params: List[Tensor],
         # Placeholder for more complex foreach logic to be added when value is not set
         foreach = False
 
-    if foreach and torch.jit.is_scripting(): 
+    if foreach and torch.jit.is_scripting():
         raise RuntimeError('torch.jit.script not supported with foreach optimizers')
 
-    if foreach and not torch.jit.is_scripting(): 
+    if foreach and not torch.jit.is_scripting():
         func = _multi_tensor_adadelta
     else:
         func = _single_tensor_adadelta
@@ -197,6 +197,9 @@ def _multi_tensor_adadelta(params: List[Tensor],
                            weight_decay: float,
                            rho: float,
                            eps: float):
+
+    if len(params) == 0:
+        return
 
     if weight_decay != 0:
         torch._foreach_add_(grads, params, alpha=weight_decay)
