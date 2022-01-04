@@ -714,10 +714,19 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         }
         throw;
       }
-      bool is_jit_exception = dynamic_cast<JITException*>(&e);
+      auto* jit_exception = dynamic_cast<JITException*>(&e);
       // Janky af.  See https://github.com/pytorch/pytorch/issues/54612
       auto* not_implemented_error = dynamic_cast<c10::NotImplementedError*>(&e);
-      handleError(ExceptionMessage(e), is_jit_exception, not_implemented_error);
+
+      c10::optional<std::string> python_class_name;
+      if (jit_exception) {
+        python_class_name = jit_exception->getPythonClassName();
+      }
+      handleError(
+          ExceptionMessage(e),
+          (bool)jit_exception,
+          not_implemented_error,
+          python_class_name);
       return false;
     }
   }
@@ -736,15 +745,18 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   void handleError(
       const ExceptionMessage& msg,
       bool is_jit_exception,
-      c10::NotImplementedError* not_implemented_error) {
+      c10::NotImplementedError* not_implemented_error,
+      c10::optional<std::string> python_class_name) {
     std::ostringstream ss;
+    std::string class_name =
+        python_class_name ? *python_class_name : "RuntimeError";
     ss << "The following operation failed in the TorchScript interpreter.\n";
     formatStackTrace(ss);
-    ss << "RuntimeError: " << msg << "\n";
+    ss << class_name << ": " << msg << "\n";
     if (future_) {
       future_->setError(std::make_exception_ptr(Future::FutureError(ss.str())));
     } else if (is_jit_exception) {
-      throw JITException(ss.str());
+      throw JITException(ss.str(), python_class_name);
     } else if (not_implemented_error) {
       throw c10::NotImplementedError(
           ss.str(),
