@@ -1617,6 +1617,8 @@ of the singular values of :attr:`A` as returned by :func:`torch.linalg.svd`.
     The gradient computation only operates over the first singular subspaces of :attr:`A` of size :attr:`rank`,
     and hence eliminates the issue of numerically unstable gradients with repeated zero singular values
     that the backward for :func:`torch.linalg.svd` has.
+    This, however, comes at a performance cost of a CPU-GPU synchronization in the backward if :attr:`A` is located
+    on a GPU.
 
 Args:
     A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
