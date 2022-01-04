@@ -9,7 +9,7 @@ from torch.testing._internal.common_methods_invocations import (
     sample_inputs_adaptive_avg_pool2d,
     sample_inputs_conv2d,
 )
-from torch.testing._internal.common_utils import set_default_dtype
+from torch.testing._internal.common_utils import set_default_dtype, first_sample
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.jit_metaprogramming_utils import create_traced_fn
 from torch.testing._internal.common_device_type import (
@@ -340,7 +340,8 @@ class TestDtypeCustomRules(TestDtypeBase):
 
     def custom_rules_test_base(self, device, dtype, op, allow_eager_fail=False):
         try:
-            sample_input = op.sample_inputs(device, dtype, requires_grad=False)[0]
+            samples = op.sample_inputs(device, dtype, requires_grad=False)
+            sample_input = first_sample(self, samples)
             input_args = [sample_input.input, *sample_input.args]
             expected_res = op(*input_args, **sample_input.kwargs)
 
