@@ -1221,8 +1221,7 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
                 x = F.conv2d(
                     x, updated_weight, self.bias2d, self.stride2d, self.padding2d,
                     self.dilation2d, self.groups)
-                # TODO: uncommenting this fails the test. Why?
-                # x = F.linear(x, self.w1, self.b1)
+                x = F.linear(x, self.w1, self.b1)
                 return x
 
         input_shape = (1, 1, 1, 1)
