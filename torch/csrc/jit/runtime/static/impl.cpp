@@ -831,6 +831,7 @@ BlockRunner::BlockRunner(
   num_sub_blocks_ = static_cast<uint16_t>(num_sub_blocks);
 }
 
+BlockRunner::BlockRunner(BlockRunner&&) = default;
 BlockRunner::~BlockRunner() = default;
 
 void BlockRunner::set_arg(const size_t idx, std::vector<IValue>&& args) {
