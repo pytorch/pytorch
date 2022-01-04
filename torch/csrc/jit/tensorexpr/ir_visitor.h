@@ -43,6 +43,7 @@ class TORCH_API IRVisitor {
   virtual void visit(IntrinsicsPtr v);
   virtual void visit(AllocatePtr v);
   virtual void visit(FreePtr v);
+  virtual void visit(PlacementAllocatePtr v);
   virtual void visit(LetPtr v);
   virtual void visit(CondPtr v);
   virtual void visit(TermPtr v);

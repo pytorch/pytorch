@@ -2,13 +2,14 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <ATen/native/cuda/jit_utils.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
 
 namespace at { namespace cuda { namespace jit {
 
-const std::string jit_code_template = R"ESCAPE(
+const std::string jit_common_types = R"ESCAPE(
   typedef long long int int64_t;
   typedef unsigned int uint32_t;
   typedef signed char int8_t;
@@ -20,6 +21,7 @@ const std::string jit_code_template = R"ESCAPE(
   constexpr int num_threads = 128;
   constexpr int thread_work_size = 4; // TODO: make template substitution once we decide where those vars live
   constexpr int block_work_size = thread_work_size * num_threads;
+  //TODO use _assert_fail, because assert is disabled in non-debug builds
   #define ERROR_UNSUPPORTED_CAST assert(false);
 
 
@@ -32,13 +34,17 @@ const std::string jit_code_template = R"ESCAPE(
   _(int16_t, Short) /* 2 */                              \
   _(int, Int) /* 3 */                                    \
   _(int64_t, Long) /* 4 */                               \
-  _(void, Half) /* 5 */                                  \
+  _(at::Half, Half) /* 5 */                                  \
   _(float, Float) /* 6 */                                \
   _(double, Double) /* 7 */                              \
-  _(void, ComplexFloat) /* 8 */                          \
-  _(void, ComplexDouble) /* 9 */                         \
-  _(bool, Bool) /* 10 */                                 \
-  _(void, BFloat16) /* 11 */                             \
+  _(c10::complex<c10::Half>, ComplexHalf) /* 8 */        \
+  _(c10::complex<float>, ComplexFloat) /* 9 */                          \
+  _(c10::complex<double>, ComplexDouble) /* 10 */                         \
+  _(bool, Bool) /* 11 */                                 \
+  _(void, QInt8) /* 12 */                          \
+  _(void, QUInt8) /* 13 */                        \
+  _(void, QInt32) /* 14 */                        \
+  _(at::BFloat16, BFloat16) /* 15 */                             \
 
   #define AT_FORALL_SCALAR_TYPES(_) \
   _(uint8_t, Byte)                \
@@ -47,7 +53,13 @@ const std::string jit_code_template = R"ESCAPE(
   _(int, Int)                     \
   _(int64_t, Long)                \
   _(float, Float)                 \
-  _(double, Double)
+  _(at::Half, Half)               \
+  _(at::BFloat16, BFloat16)       \
+  _(double, Double)               \
+  _(bool, Bool)                   \
+  _(c10::complex<float>, ComplexFloat)   \
+  _(c10::complex<double>, ComplexDouble)
+
 
   enum class ScalarType : int8_t {
   #define DEFINE_ENUM(_1, n) n,
@@ -56,6 +68,129 @@ const std::string jit_code_template = R"ESCAPE(
       Undefined,
   NumOptions
   };
+
+  template <typename T, int size>
+  struct Array {
+  T data[size];
+
+  __device__ T operator[](int i) const {
+      return data[i];
+  }
+  __device__ T& operator[](int i) {
+      return data[i];
+  }
+  Array() = default;
+  Array(const Array&) = default;
+  Array& operator=(const Array&) = default;
+  };
+
+  ${half_string}
+  ${bfloat16_string}
+  ${complex_string}
+
+
+)ESCAPE";
+
+//we need to include half, bfloat16 and complex strings to all kernels with half arguments and to all kernels with type casting
+//regardless of whether they have half arguments (because fetch_and_cast and cast_and_store loop over all types)
+const std::string jiterator_half_support_literal = R"ESCAPE(
+namespace at {
+struct alignas(2) Half {
+  unsigned short x;
+
+  Half() = default;
+  inline __host__ __device__ Half(float value){
+    asm("{  cvt.rn.f16.f32 %0, %1;}\n" : "=h"(x) : "f"(value));
+  }
+  inline __host__ __device__ operator float() const{
+      float val;
+      asm("{  cvt.f32.f16 %0, %1;}\n" : "=f"(val) : "h"(x)); // do we need const cast here?
+      //asm("{  cvt.f32.f16 %0, %1;}\n" : "=f"(val) : "h"(__HALF_TO_CUS(x)));
+      return val;
+  }
+
+};
+}
+)ESCAPE";
+
+const std::string jiterator_bfloat16_support_literal = R"ESCAPE(
+namespace at {
+struct alignas(2) BFloat16 {
+  unsigned short x;
+
+  __device__ unsigned short __internal_float2bfloat16(
+      const float f,
+      unsigned int& sign,
+      unsigned int& remainder) {
+    unsigned int x;
+
+    x = __float_as_uint(f);
+
+    if ((x & 0x7fffffffU) > 0x7f800000U) {
+      sign = 0U;
+      remainder = 0U;
+      return static_cast<unsigned short>(0x7fffU);
+    }
+    sign = x >> 31;
+    remainder = x << 16;
+    return static_cast<unsigned short>(x >> 16);
+  }
+
+
+  BFloat16() = default;
+  inline __host__ __device__ BFloat16(float value){
+  #if __CUDA_ARCH__ >= 800
+  asm("{  cvt.rn.bf16.f32 %0, %1;}\n" : "=h"(x) : "f"(value));
+  )ESCAPE"
+  R"ESCAPE(
+  #else
+  unsigned int sign;
+  unsigned int remainder;
+  x = __internal_float2bfloat16(value, sign, remainder);
+  if ((remainder > 0x80000000U) ||
+      ((remainder == 0x80000000U) && ((x & 0x1U) != 0U))) {
+    x++;
+  }
+  #endif
+  }
+
+  inline __host__ __device__ operator float() const{
+    float val;
+    asm("{ mov.b32 %0, {0,%1};}\n" : "=f"(val) : "h"(x)); //do we need const cast here?
+    return val;
+  }
+
+};
+}
+)ESCAPE";
+
+//copy-pasted from util/complex.h
+const std::string jiterator_complex_support_literal = R"ESCAPE(
+//a very limited complex class, the only thing it currently allows is implicit conversion
+//to complex, and complex -> real that is unused
+namespace c10 {
+  template<typename T>
+  struct alignas(sizeof(T) * 2) complex {
+    using value_type = T;
+
+    T real_ = T(0);
+    T imag_ = T(0);
+    constexpr complex() = default;
+    inline __host__ __device__ constexpr complex(const T& re, const T& im = T())
+      : real_(re), imag_(im) {}
+
+    //FIXME I didn't find how complex -> real conversion is done in eager
+    //we are not going to use it, but it's needed for compilation
+    inline __host__ __device__ operator T() const{
+      return real_;
+    }
+
+  };
+}
+)ESCAPE";
+
+
+const std::string jit_code_template = R"ESCAPE(
 
   // Fetch a value with dynamic type src_type from ptr, and cast it to static type dest_t.
   // For now, simplified version that does not handle complex and special casting to uint8
@@ -80,21 +215,6 @@ const std::string jit_code_template = R"ESCAPE(
   }
   ERROR_UNSUPPORTED_CAST
   }
-
-  template <typename T, int size>
-  struct Array {
-  T data[size];
-
-  __device__ T operator[](int i) const {
-      return data[i];
-  }
-  __device__ T& operator[](int i) {
-      return data[i];
-  }
-  Array() = default;
-  Array(const Array&) = default;
-  Array& operator=(const Array&) = default;
-  };
 
   struct LoadWithoutCast {
   template <typename scalar_t>
@@ -228,7 +348,8 @@ const std::string jit_code_template = R"ESCAPE(
       ${offset_calculator}<${nInputs}> input_calculator,
       ${offset_calculator}<1> output_calculator,
       ${loader} l,
-      ${storer} s) {
+      ${storer} s,
+      ${compute_type} scalar_val) {
     ${declare_load_arrays}
     ${declare_store_arrays}
 
@@ -253,7 +374,9 @@ const std::string jit_code_template = R"ESCAPE(
 
     #pragma unroll
     for (int j = 0; j < thread_work_size; j++) {
-        out[j] = ${name}<${scalar_type}>(${args});
+      if ((threadIdx.x  + j*num_threads) < remaining) {
+        out[j] = ${name}<${compute_type}>(${args});
+      }
     }
 
     thread_idx = threadIdx.x;
@@ -275,74 +398,6 @@ const std::string jit_code_template = R"ESCAPE(
 )ESCAPE";
 
 const std::string jit_vectorized_code_template = R"ESCAPE(
-  typedef long long int int64_t;
-  typedef unsigned int uint32_t;
-  typedef signed char int8_t;
-  typedef unsigned char uint8_t;
-  typedef short int16_t;
-  static_assert(sizeof(int64_t) == 8, "expected size does not match");
-  static_assert(sizeof(uint32_t) == 4, "expected size does not match");
-  static_assert(sizeof(int8_t) == 1, "expected size does not match");
-  constexpr int num_threads = 128;
-  constexpr int thread_work_size = 4; //TODO make template substitution once we decide where those vars live
-  constexpr int block_work_size = thread_work_size * num_threads;
-  #define ERROR_UNSUPPORTED_CAST assert(false);
-
-
-  // NB: Order matters for this macro; it is relied upon in
-  // _promoteTypesLookup and the serialization format.
-  // Note, some types have ctype as void because we don't support them in codegen
-  #define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(_) \
-  _(uint8_t, Byte) /* 0 */                               \
-  _(int8_t, Char) /* 1 */                                \
-  _(int16_t, Short) /* 2 */                              \
-  _(int, Int) /* 3 */                                    \
-  _(int64_t, Long) /* 4 */                               \
-  _(void, Half) /* 5 */                              \
-  _(float, Float) /* 6 */                                \
-  _(double, Double) /* 7 */                              \
-  _(void, ComplexHalf) /* 8 */        \
-  _(void, ComplexFloat) /* 9 */           \
-  _(void, ComplexDouble) /* 10 */        \
-  _(bool, Bool) /* 11 */                                 \
-  _(void, QInt8) /* 12 */                          \
-  _(void, QUInt8) /* 13 */                        \
-  _(void, QInt32) /* 14 */                        \
-  _(void, BFloat16) /* 15 */                     \
-  _(void, QUInt4x2) /* 16 */
-
-  #define AT_FORALL_SCALAR_TYPES(_) \
-  _(uint8_t, Byte)                \
-  _(int8_t, Char)                 \
-  _(int16_t, Short)               \
-  _(int, Int)                     \
-  _(int64_t, Long)                \
-  _(float, Float)                 \
-  _(double, Double)
-
-  enum class ScalarType : int8_t {
-  #define DEFINE_ENUM(_1, n) n,
-  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_ENUM)
-  #undef DEFINE_ENUM
-      Undefined,
-  NumOptions
-  };
-
-
-  template <typename T, int size>
-  struct Array {
-  T data[size];
-
-  __device__ T operator[](int i) const {
-      return data[i];
-  }
-  __device__ T& operator[](int i) {
-      return data[i];
-  }
-  Array() = default;
-  Array(const Array&) = default;
-  Array& operator=(const Array&) = default;
-  };
 
   template <typename scalar_t>
   __device__ __inline__ scalar_t load(char* base_ptr, uint32_t offset) {
@@ -367,7 +422,8 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
   extern "C" __global__
   void ${name}_vectorized${vec_size}_kernel(
       const int N,
-      Array<char*, ${nInputs}+1> data) //[${nInputs}+1],
+      Array<char*, ${nInputs}+1> data,
+      ${compute_type} scalar_val) //[${nInputs}+1],
       {
       constexpr int vec_size = ${vec_size};
       int remaining = N - block_work_size * blockIdx.x;
@@ -388,7 +444,9 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
         }
         #pragma unroll
         for (int j = 0; j < thread_work_size; j++) {
-          out[j] = ${name}<${scalar_type}>(${args});
+          if ((threadIdx.x  + j*num_threads) < remaining) {
+            out[j] = ${name}<${compute_type}>(${args});
+          }
         }
         thread_idx = threadIdx.x;
         #pragma unroll
@@ -415,7 +473,7 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
 
         #pragma unroll
         for (int j = 0; j < thread_work_size; j++) {
-          out[j] = ${name}<${scalar_type}>(${args});
+          out[j] = ${name}<${compute_type}>(${args});
         }
         using vec_t_output = aligned_vector<${result_type}, vec_size>;
         vec_t_output * to_ = reinterpret_cast<vec_t_output *>(data[0]) + block_work_size / vec_size * idx;
@@ -443,6 +501,7 @@ const at::cuda::NVRTC& nvrtc() {
 }
 
 // query codegen output arch and target
+// TODO refactor so this function is usable both from jit and from aten
 void codegenOutputQuery(
     const cudaDeviceProp* const prop,
     int& major,
@@ -490,6 +549,19 @@ void codegenOutputQuery(
   }
 }
 
+//TODO another copy paste from jit, refactor so it's usable from both
+void __inline__ initializeCudaContext() {
+  // lazily construct context if non-existing yet;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  CUcontext pctx = nullptr;
+  AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuCtxGetCurrent(&pctx));
+  if (!pctx) {
+    std::unique_lock<std::mutex> cudaFreeMutexLock(
+        *(c10::cuda::CUDACachingAllocator::getFreeMutex()));
+    cudaFree(nullptr);
+  }
+}
+
 //FIXME - this are defined in Loops.cuh, but including Loops.cuh here would lead to circular includes Loops.cuh -> CUDALoops.cuh -> jit_utils.h -> Loops.cuh
 #define THREAD_WORK_SIZE 4
 constexpr int thread_work_size = THREAD_WORK_SIZE;
@@ -498,24 +570,27 @@ std::string generate_code(
     int nTensors,
     const std::string& func,
     const std::string& name,
-    const std::string& common_type,
+    const std::string& f_inputs_type,
+    const std::string& compute_type,
     const std::string& result_type,
     bool contiguous,
     bool dynamic_casting,
+    BinaryFuncVariant scalar_pos,
     bool vectorized,
     int vec_size) {
   TemplateEnv env;
   env.s("index_type", "unsigned int");
   const int nInputs = nTensors - 1;
   env.s("nInputs", std::to_string(nInputs));
-  env.s("scalar_type", common_type);
+  env.s("scalar_type", f_inputs_type);
+  env.s("compute_type", compute_type);
   env.s("functor", func);
   env.s("name", name);
   std::stringstream declare_load_arrays;
   for (int i = 0; i < nInputs; i++) {
     // TODO these arrays are potentially of the different types, use function
     // traits to determine the types
-    declare_load_arrays << common_type << " arg" << std::to_string(i)
+    declare_load_arrays << f_inputs_type << " arg" << std::to_string(i)
                         << "[" << std::to_string(thread_work_size) << "];\n";
   }
   env.s("declare_load_arrays", declare_load_arrays.str());
@@ -525,11 +600,34 @@ std::string generate_code(
   env.s("declare_store_arrays", declare_store_arrays.str());
   const int nOutputs = 1; // FIXME
   std::stringstream functor_args;
-  for (int i = 0; i < nInputs - 1; i++) {
-    functor_args << "arg" << std::to_string(i) << "[j], ";
+  if (scalar_pos == BinaryFuncVariant::NoScalar) {
+    for (int i = 0; i < nInputs - 1; i++) {
+      functor_args << "arg" << std::to_string(i) << "[j], ";
+    }
+    functor_args << "arg" << std::to_string(nInputs - 1) << "[j]";
+  } else if (scalar_pos == BinaryFuncVariant::LhsScalar) {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(nInputs == 1);
+    functor_args << "scalar_val, arg0[j]";
+  } else { //RhsScalar
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(nInputs == 1);
+    functor_args << "arg0[j], scalar_val";
   }
-  functor_args << "arg" << std::to_string(nInputs - 1) << "[j]";
   env.s("args", functor_args.str());
+  if (f_inputs_type == "at::Half" || result_type == "at::Half" || dynamic_casting) {
+    env.s("half_string", jiterator_half_support_literal);
+  } else {
+    env.s("half_string", "");
+  }
+  if (f_inputs_type == "at::BFloat16" || result_type == "at::BFloat16" || dynamic_casting) {
+    env.s("bfloat16_string", jiterator_bfloat16_support_literal);
+  } else {
+    env.s("bfloat16_string", "");
+  }
+  if (dynamic_casting) {
+    env.s("complex_string", jiterator_complex_support_literal);
+  } else {
+    env.s("complex_string", "");
+  }
 
   if (!vectorized) {
     if (!dynamic_casting) {
@@ -548,7 +646,7 @@ std::string generate_code(
     std::stringstream load_inputs;
     for (int i = 0; i < nInputs; i++) {
       auto i_string = std::to_string(i);
-      load_inputs << "arg" << i_string << "[j] = l.load<" << common_type
+      load_inputs << "arg" << i_string << "[j] = l.load<" << f_inputs_type
                   << ">(data[" << std::to_string(i + nOutputs)
                   << "], input_offsets[" << i_string << "], " << i_string
                   << ");\n";
@@ -559,7 +657,7 @@ std::string generate_code(
     store_outputs << "s.store<" << result_type
                   << ">(out[j], data[0], output_offsets[0]);\n";
     env.s("store_outputs", store_outputs.str());
-      static auto cuda_template = CodeTemplate(jit_code_template);
+    static auto cuda_template = CodeTemplate(jit_common_types + jit_code_template);
     return cuda_template.format(env);
   }
 
@@ -587,12 +685,12 @@ std::string generate_code(
   std::stringstream load_unrolled_inputs;
   for (const auto i: c10::irange(nInputs)){
     auto i_string = std::to_string(i);
-    load_unrolled_inputs << "arg" << i_string << "[j] = load<" << common_type
+    load_unrolled_inputs << "arg" << i_string << "[j] = load<" << f_inputs_type
       << ">(data[" << std::to_string(i + nOutputs) << "], linear_idx);\n";
   }
   env.s("load_unrolled_inputs", load_unrolled_inputs.str());
 
-  static auto cuda_template = CodeTemplate(jit_vectorized_code_template);
+  static auto cuda_template = CodeTemplate(jit_common_types + jit_vectorized_code_template);
   return cuda_template.format(env);
 }
 
@@ -637,6 +735,7 @@ NvrtcFunction jit_pwise_function(
   args.push_back("-DNDEBUG");
 #endif
   // compiles and validates result
+  initializeCudaContext();
   const auto compilation_result =
       nvrtc.nvrtcCompileProgram(program, args.size(), args.data());
   if (compilation_result != NVRTC_SUCCESS) {
@@ -646,7 +745,7 @@ NvrtcFunction jit_pwise_function(
     AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcGetProgramLog(program, log.data()));
     std::stringstream cu;
     cu << log.data();
-    throw std::runtime_error(cu.str());
+    throw std::runtime_error(cu.str() + code);
   }
   size_t ptx_size = 0;
   std::vector<char> ptx;
@@ -672,7 +771,6 @@ NvrtcFunction jit_pwise_function(
     std::string name = kernel_name + "_kernel";
     AT_CUDA_DRIVER_CHECK(
         nvrtc.cuModuleGetFunction(&(compiled_kernel_.function), compiled_kernel_.module, name.c_str()));
-
     // TODO: use guards to avoid leaking
     AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcDestroyProgram(&program));
 
@@ -682,10 +780,10 @@ NvrtcFunction jit_pwise_function(
 // TODO: may need/want to initialize CUDA context here (refactor into nvrtc call)
 void launch_jitted_pwise_function(
     NvrtcFunction function,
-    std::array<void*, 6>& args,
+    std::array<void*, 7>& args,
     const int nBlocks,
     const int kBlockSize) {
-
+  initializeCudaContext();
   const auto& nvrtc = at::globalContext().getNVRTC();
   // Launches kernel on current stream
   auto stream = at::cuda::getCurrentCUDAStream();
