@@ -125,7 +125,7 @@ class BackendWithCompiler : public PyTorchBackendInterface {
               (x.scalar_type() == c10::ScalarType::Float &&
                h.scalar_type() == c10::ScalarType::Float),
               "Only float tensors are compatible for add and sub.");
-          auto y = at::detail::empty_cpu(
+          Tensor y = at::detail::empty_cpu(
               x.sizes(), c10::ScalarType::Float, {}, {}, {}, c10::nullopt);
           auto x_ptr = float_data_ptr(x);
           auto h_ptr = float_data_ptr(h);
