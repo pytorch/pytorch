@@ -38,7 +38,7 @@ size_t computeStorageNbytes(
 TensorBase empty_generic(
     IntArrayRef size,
     c10::Allocator* allocator,
-    c10::DispatchKey dispatch_key,
+    c10::DispatchKeySet ks,
     ScalarType scalar_type,
     c10::optional<c10::MemoryFormat> memory_format_opt) {
   at::detail::check_size_nonnegative(size);
@@ -54,7 +54,7 @@ TensorBase empty_generic(
       /*resizeable=*/true);
 
   auto tensor = detail::make_tensor_base<TensorImpl>(
-      std::move(storage_impl), dispatch_key, dtype);
+      std::move(storage_impl), ks, dtype);
   // Default TensorImpl has size [0]
   if (size.size() != 1 || size[0] != 0) {
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
@@ -74,7 +74,7 @@ TensorBase empty_strided_generic(
     IntArrayRef size,
     IntArrayRef stride,
     c10::Allocator* allocator,
-    c10::DispatchKey dispatch_key,
+    c10::DispatchKeySet ks,
     ScalarType scalar_type) {
   at::detail::check_size_nonnegative(size);
 
@@ -88,7 +88,7 @@ TensorBase empty_strided_generic(
       /*resizeable=*/true);
 
   auto tensor = detail::make_tensor_base<TensorImpl>(
-      std::move(storage_impl), dispatch_key, dtype);
+      std::move(storage_impl), ks, dtype);
   tensor.unsafeGetTensorImpl()->set_sizes_and_strides(size, stride);
   return tensor;
 }
@@ -96,7 +96,8 @@ TensorBase empty_strided_generic(
 TensorBase empty_cpu(IntArrayRef size, ScalarType dtype, bool pin_memory,
                      c10::optional<c10::MemoryFormat> memory_format_opt) {
   auto allocator = GetCPUAllocatorMaybePinned(pin_memory);
-  return empty_generic(size, allocator, DispatchKey::CPU, dtype, memory_format_opt);
+  constexpr c10::DispatchKeySet cpu_ks(c10::DispatchKey::CPU);
+  return empty_generic(size, allocator, cpu_ks, dtype, memory_format_opt);
 }
 
 TensorBase empty_cpu(
@@ -129,8 +130,9 @@ TensorBase empty_cpu(
 TensorBase empty_strided_cpu(IntArrayRef size, IntArrayRef stride,
                              ScalarType dtype, bool pin_memory) {
   auto allocator = at::detail::GetCPUAllocatorMaybePinned(pin_memory);
+  constexpr c10::DispatchKeySet cpu_ks(c10::DispatchKey::CPU);
   return at::detail::empty_strided_generic(
-      size, stride, allocator, DispatchKey::CPU, dtype);
+      size, stride, allocator, cpu_ks, dtype);
 }
 
 TensorBase empty_strided_cpu(
@@ -187,8 +189,9 @@ at::Allocator* GetMetaAllocator() {
 TensorBase empty_meta(IntArrayRef size, ScalarType dtype,
                      c10::optional<c10::MemoryFormat> memory_format_opt) {
   auto *allocator = GetMetaAllocator();
+  constexpr c10::DispatchKeySet meta_dks(c10::DispatchKey::Meta);
   return at::detail::empty_generic(
-      size, allocator, DispatchKey::CPU, dtype, memory_format_opt);
+      size, allocator, meta_dks, dtype, memory_format_opt);
 }
 
 TensorBase empty_meta(
@@ -226,8 +229,9 @@ TensorBase empty_meta(
 TensorBase empty_strided_meta(IntArrayRef size, IntArrayRef stride,
                               ScalarType dtype) {
   auto *allocator = GetMetaAllocator();
+  constexpr c10::DispatchKeySet meta_dks(c10::DispatchKey::Meta);
   return at::detail::empty_strided_generic(
-      size, stride, allocator, DispatchKey::Meta, dtype);
+      size, stride, allocator, meta_dks, dtype);
 }
 
 TensorBase empty_strided_meta(
