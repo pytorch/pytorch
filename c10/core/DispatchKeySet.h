@@ -173,7 +173,7 @@ class DispatchKeySet final {
       // - the CPUBit backend bit
       // first compute which bit to flip for the backend
       auto backend_k = toBackendBit(k);
-      uint64_t backend_val = 1ULL << (static_cast<uint8_t>(backend_k) - 1);
+      uint64_t backend_val = backend_k == BackendBit::InvalidBit ? 0 : 1ULL << (static_cast<uint8_t>(backend_k) - 1);
       repr_ = functionality_val + backend_val;
     } else {
       // At this point, we should have covered every case except for alias keys.
