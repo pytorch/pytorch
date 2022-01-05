@@ -259,6 +259,7 @@ Examples::
 .. autosummary::
     :toctree: generated
     :nosignatures:
+    :noindex:
 
     no_grad
     enable_grad
