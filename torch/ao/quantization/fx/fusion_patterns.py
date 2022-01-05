@@ -28,7 +28,8 @@ class FuseHandler(ABC):
              root_node: Node,
              matched_node_pattern: NodePattern,
              fuse_custom_config_dict: Dict[str, Any],
-             fuser_method_mapping: Optional[Dict[Pattern, Union[torch.nn.Sequential, Callable]]]) -> Node:
+             fuser_method_mapping: Optional[Dict[Pattern, Union[torch.nn.Sequential, Callable]]],
+             is_qat: bool) -> Node:
         pass
 
 @register_fusion_pattern((torch.nn.ReLU, torch.nn.Conv1d))
