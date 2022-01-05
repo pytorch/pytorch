@@ -1455,11 +1455,29 @@ Tensor _stack_cpu(TensorList tensors, int64_t dim) {
   return at::native::_stack_out_cpu(tensors, dim, result);
 }
 
+void check_stack_inputs(TensorList tensors, int64_t dim) {
+  at::IntArrayRef entry_shape = tensors[0].sizes();
+  for (const auto i : c10::irange(1, tensors.size())) {
+    TORCH_CHECK(tensors[i].sizes() == entry_shape,
+      "stack expects each tensor to be equal size, but got ", entry_shape,
+      " at entry 0 and ", tensors[i].sizes(), " at entry ", i);
+  }
+}
+
 // TODO(msubkhankulov): refactor to use _stack
 Tensor stack(TensorList tensors, int64_t dim) {
   TORCH_CHECK(tensors.size() > 0,
            "stack expects a non-empty TensorList");
-  return at::cat(get_stack_inputs(tensors, dim), dim);
+  auto wrapped_dim = maybe_wrap_dim(dim, tensors[0].ndimension()+1);
+  if (wrapped_dim < tensors[0].ndimension() && !tensors[0].is_sparse()) {
+    check_stack_inputs(tensors, wrapped_dim);
+    auto result_sizes = tensors[0].sizes().vec();
+    result_sizes.insert(result_sizes.begin() + wrapped_dim, tensors.size());
+    auto out = at::cat(tensors, wrapped_dim);
+    return out.view(result_sizes); // one can always split a dimension with view
+  } else { //dim = tensors[0].ndimension() cannot be efficiently handled by view
+    return at::cat(get_stack_inputs(tensors, dim), dim);
+  }
 }
 
 // CPU specific implementation
@@ -1480,7 +1498,24 @@ Tensor& _stack_out(TensorList tensors, int64_t dim, Tensor& result) {
 Tensor& stack_out(TensorList tensors, int64_t dim, Tensor& result) {
   TORCH_CHECK(tensors.size() > 0,
            "stack expects a non-empty TensorList");
+  auto wrapped_dim = maybe_wrap_dim(dim, tensors[0].ndimension()+1);
+  if (wrapped_dim < tensors[0].ndimension() && !tensors[0].is_sparse()) {
+    check_stack_inputs(tensors, wrapped_dim);
+    auto result_sizes = tensors[0].sizes().vec();
+    result_sizes.insert(result_sizes.begin() + wrapped_dim, tensors.size());
+    at::native::resize_output(result, result_sizes);
+    auto cat_sizes = tensors[0].sizes().vec();
+    cat_sizes[wrapped_dim] *= tensors.size();
+    auto strides = at::detail::computeStride(result.sizes(), result.strides(), cat_sizes);
+    if (strides.has_value()) {
+      //can take fast cat path
+      auto result_view = result.view(cat_sizes);
+      at::cat_out(result_view, tensors, wrapped_dim);
+      return result;
+    }
+  }
   return at::cat_out(result, get_stack_inputs(tensors, dim), dim);
+
 }
 
 Tensor hstack(TensorList tensors) {
