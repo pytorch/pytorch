@@ -11,6 +11,7 @@ cc_library(
         # public header in this file.
         "Export.h",
     ],
+    linkstatic = True,
     visibility = ["//visibility:public"],
 )
 
