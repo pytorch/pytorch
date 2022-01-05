@@ -19,6 +19,8 @@ def define_targets(rules):
                 "CUDAMacros.h",
             ],
         ),
+        linkstatic = True,
+        local_defines = ["C10_BUILD_MAIN_LIB"],
         visibility = ["//visibility:public"],
         deps = [
             ":Macros",
@@ -33,6 +35,8 @@ def define_targets(rules):
         name = "Macros",
         srcs = [":cuda_cmake_macros"],
         hdrs = ["CUDAMacros.h"],
+        linkstatic = True,
+        local_defines = ["C10_BUILD_MAIN_LIB"],
         visibility = ["//visibility:public"],
     )
 
