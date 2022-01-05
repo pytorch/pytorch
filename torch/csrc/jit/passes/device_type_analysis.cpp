@@ -28,8 +28,7 @@ Returns: Bool indicating if anything was changed
 */
 
 bool setDeviceType(Value* value, c10::optional<Device> device) {
-  auto tensor_type = value->type()->cast<TensorType>();
-  TORCH_INTERNAL_ASSERT(tensor_type, "Expecting a tensor type");
+  auto tensor_type = value->type()->expect<TensorType>();
   bool changed = tensor_type->device() != device;
   if (changed) {
     value->setType(tensor_type->withDevice(device));
@@ -64,6 +63,9 @@ bool propWithNoDevice(Node* n) {
       continue;
     }
 
+    // CPU devices on zerodim tensors are the only device that can be
+    // overwritten by another device. Therefore, to be conservative
+    // assume that it is not a zerodim cpu tensor unless we know it is.
     bool is_zerodim = tensor_type->symbolic_sizes().rank().value_or(-1) == 0;
     bool is_cpu = tensor_type->device() && tensor_type->device()->is_cpu();
     bool is_cpu_zerodim = is_zerodim && is_cpu;
@@ -88,14 +90,13 @@ bool propWithNoDevice(Node* n) {
 }
 
 bool defaultDeviceProp(Node* n) {
-  // Detecting of the op has a device object argument
+  // Detecting if the op has a device object argument
   // as there is implicit string conversion to device
   auto schema = n->maybeSchema();
   if (!schema) {
     return false;
   }
   auto arguments = schema->arguments();
-  auto input_vec = n->inputs();
   for (int i = 0; i < arguments.size(); i++) {
     Argument& argument = arguments[i];
     if (DeviceObjType::get()->isSubtypeOf(argument.type())) {
@@ -164,7 +165,7 @@ struct DeviceTypePropagationPass {
 
     switch (n->kind()) {
       case prim::Constant:
-        // This is already been propagated by something else in freezing
+        // This is already been propagated by something else
       case prim::ListConstruct:
       case prim::ListUnpack:
         return; // Not handled for now
@@ -202,12 +203,6 @@ struct DeviceTypePropagationPass {
     return changed;
   }
 
-  /*
-  bool processLoop(Node* n) {
-    GRAPH_DEBUG("processLoop");
-  }
-  */
-
   void processIf(Node* node) {
     GRAPH_DEBUG("processIf");
     auto blocks = node->blocks();
@@ -220,7 +215,7 @@ struct DeviceTypePropagationPass {
     mergeAndApplyTensorProps(
         true_block->outputs(), false_block->outputs(), node->outputs());
   }
-  // for efficiency
+
   void processAtenOps(Node* n) {
     GRAPH_DEBUG("processAtenOps");
     GRAPH_DEBUG("case = ", n->kind(), " ", *n);
