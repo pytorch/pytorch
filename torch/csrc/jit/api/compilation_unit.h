@@ -1,19 +1,12 @@
 #pragma once
-#include <ATen/core/function.h>
-#include <c10/util/Exception.h>
-#include <torch/csrc/jit/api/function_impl.h>
-#include <torch/csrc/jit/frontend/name_mangler.h>
-#include <torch/csrc/jit/frontend/source_range.h>
-#include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/runtime/graph_executor.h>
-
-#include <torch/csrc/Export.h>
-#include <torch/csrc/utils/memory.h>
 
 #include <ATen/core/function_schema.h>
 #include <ATen/core/qualified_name.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
+#include <torch/csrc/Export.h>
+#include <torch/csrc/jit/api/function_impl.h>
+#include <torch/csrc/jit/frontend/name_mangler.h>
 
 #include <functional>
 #include <memory>
@@ -85,7 +78,6 @@ struct TORCH_API CompilationUnit {
     return true;
   }
 
-  // for historic reasons, these are defined in ir_emitter.cpp
   // Returns the list of Functions just defined.
   std::vector<Function*> define(
       const c10::optional<c10::QualifiedName>& prefix,

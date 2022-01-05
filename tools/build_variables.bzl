@@ -191,6 +191,7 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/frontend/inline_loop_condition.cpp",
     "torch/csrc/jit/frontend/ir_emitter.cpp",
     "torch/csrc/jit/frontend/ir_emitter_utils.cpp",
+    "torch/csrc/jit/api/compilation_unit.cpp",
     "torch/csrc/jit/frontend/parser.cpp",
     "torch/csrc/jit/frontend/run_cleanup_passes.cpp",
     "torch/csrc/jit/frontend/schema_matching.cpp",
