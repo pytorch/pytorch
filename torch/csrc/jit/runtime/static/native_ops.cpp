@@ -603,25 +603,16 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         const auto did_copy = p_node->Input(2).toBool();
         DCHECK(p_node->Input(0).isTensor());
         DCHECK(!did_copy || p_node->Input(1).isTensor());
-        // Check to avoid an unnecessary refcount bump. IValue in
-        // general doesn't do this check because it would probably
-        // result in code bloat and not hit often, but here we are
-        // likely to very often be assigning the same tensor.
-        if (did_copy) {
-          if (p_node->Output(0).isTensor() &&
-              p_node->Input(1).toTensor().is_same(
-                  p_node->Output(0).toTensor())) {
-            return;
-          }
-          p_node->Output(0) = p_node->Input(1);
-        } else {
-          if (p_node->Output(0).isTensor() &&
-              p_node->Input(0).toTensor().is_same(
-                  p_node->Output(0).toTensor())) {
-            return;
-          }
-          p_node->Output(0) = p_node->Input(0);
-        }
+        const IValue& assignFrom =
+            did_copy ? p_node->Input(1) : p_node->Input(0);
+        // Create an IValue that borrows the input Tensor in order to
+        // save a refcount increment here and decrement in
+        // MemoryPlanner::deallocate. MemoryPlanner knows about this
+        // and will safely clean it up by using the corresponding
+        // destroyBorrow method.
+        p_node->Output(0) =
+            IValue(c10::MaybeOwnedTraits<at::TensorBase>::createBorrow(
+                assignFrom.toTensor()));
       };
     });
 
