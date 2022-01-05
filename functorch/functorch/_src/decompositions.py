@@ -8,9 +8,12 @@ aten = torch.ops.aten
 decomposition_table = {}
 
 
-def register_decomposition(aten_op):
+def register_decomposition(aten_op, registry=None):
     def decomposition_decorator(f):
-        decomposition_table[aten_op] = f
+        nonlocal registry
+        if registry is None:
+            registry = decomposition_table
+        registry[aten_op] = f
         return f
     return decomposition_decorator
 
@@ -218,6 +221,14 @@ def native_dropout_decomposition(input, p, generator=None):
 #     return [res, mask]
 
 
+# Questionable decompositions
 @register_decomposition(aten._s_where)
 def _s_where_canonicalization(a, b, c):
     return aten.where(a, b, c)
+
+
+# This is only valid if we're running the graph without autograd, such as if the backward pass has been traced.
+# Note that this decomposition causes issues with in-place ops
+@register_decomposition(aten.detach)
+def detach_decomposition(x):
+    return x

@@ -17,7 +17,7 @@ from functorch import (
 )
 from functorch.compile import (
     nnc_jit, compiled_function, compiled_module,
-    partition_with_recompute_fwd_in_bwd, pythonkey_decompose, aot_function, aot_module
+    partition_with_recompute_fwd_in_bwd, pythonkey_decompose, aot_function, aot_module, decomposition_table
 )
 
 from torch.testing._internal.common_device_type import ops
@@ -107,8 +107,7 @@ class TestPythonKey(TestCase):
 
         self.assertEqual(torch.ops.aten.tanh_backward in ops, True)
 
-        with pythonkey_decompose():
-            fx_f = make_fx(grad(f))(torch.randn(5))
+        fx_f = make_fx(grad(f), decomposition_table)(torch.randn(5))
         ops = set([i.target for i in fx_f.graph.nodes])
         self.assertEqual(torch.ops.aten.tanh_backward in ops, False)
 
@@ -315,7 +314,6 @@ class TestEagerFusionOpInfo(TestCase):
     @skipOps('TestEagerFusionOpInfo', 'test_aot_autograd_exhaustive', {
         xfail('__rmatmul__'),
         xfail('linalg.cholesky'),
-        xfail('linalg.det'),
         xfail('linalg.inv'),
         xfail('matmul'),
         xfail('nn.functional.linear'),
@@ -324,16 +322,15 @@ class TestEagerFusionOpInfo(TestCase):
         xfail('special.zeta', 'grad'),
         xfail('to_sparse'),
         xfail('addcdiv'),
-        xfail('angle'),
         xfail('cholesky'),
         xfail('cumulative_trapezoid'),
         xfail('diag_embed'),
         xfail('linalg.householder_product'),
         xfail('logit'),
         xfail('matrix_exp'),
-        xfail('sgn'),
         xfail('trapezoid'),
         xfail('trapz'),
+        xfail('trace'),
     })
     def test_aot_autograd_exhaustive(self, device, dtype, op):
 
@@ -362,8 +359,11 @@ class TestEagerFusionOpInfo(TestCase):
 
             def get_grads(args):
                 return pytree.tree_map(lambda x: x.grad, args)
-
-            compiled_f = compiled_function(f, lambda x, _: x, lambda x, _: x)
+            
+            def nop(f, _):
+                # print(f.code)
+                return f
+            compiled_f = compiled_function(f, nop, nop)
 
             reset_grads()
             compiled_f(args, kwargs).sum().backward()
