@@ -6,19 +6,33 @@
 name: !{{ build_environment }}
 {%- endblock %}
 
+{%- macro binary_env(config) -%}
+    env:
+      PACKAGE_TYPE: !{{ config["package_type"] }}
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: !{{ config["desired_cuda"] }}
+{%- if config["gpu_arch_version"] %}
+      GPU_ARCH_VERSION: !{{ config["gpu_arch_version"] }}
+{%- endif %}
+      GPU_ARCH_TYPE: !{{ config["gpu_arch_type"] }}
+      DOCKER_IMAGE: !{{ config["container_image"] }}
+      SKIP_ALL_TESTS: 1
+{%- if config["package_type"] == "libtorch" %}
+      LIBTORCH_VARIANT: !{{ config["libtorch_variant"] }}
+      DESIRED_DEVTOOLSET: !{{ config["devtoolset"] }}
+{%- else %}
+      DESIRED_PYTHON: !{{ config["python_version"] }}
+{%- endif %}
+{%- endmacro %}
+
 on:
   pull_request:
     types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
-
-{%- if is_scheduled %}
-  schedule:
-    - cron: !{{ is_scheduled }}
-{%- else %}
-  # push:
-  #   branches:
-  #     - master
-  #     - release/*
-{%- endif %}
+  push:
+    tags:
+      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+      - nightly
   workflow_dispatch:
 
 env:
@@ -54,23 +68,7 @@ jobs:
     needs: should-run
     runs-on: linux.4xlarge
     timeout-minutes: !{{ common.timeout_minutes }}
-    env:
-      PACKAGE_TYPE: !{{ config["package_type"] }}
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: !{{ config["desired_cuda"] }}
-{%- if config["gpu_arch_version"] %}
-      GPU_ARCH_VERSION: !{{ config["gpu_arch_version"] }}
-{%- endif %}
-      GPU_ARCH_TYPE: !{{ config["gpu_arch_type"] }}
-      DOCKER_IMAGE: !{{ config["container_image"] }}
-      SKIP_ALL_TESTS: 1
-{%- if config["package_type"] == "libtorch" %}
-      LIBTORCH_VARIANT: !{{ config["libtorch_variant"] }}
-      DESIRED_DEVTOOLSET: !{{ config["devtoolset"] }}
-{%- else %}
-      DESIRED_PYTHON: !{{ config["python_version"] }}
-{%- endif %}
+    !{{ binary_env(config) }}
     steps:
       !{{ common.setup_ec2_linux() }}
       - name: Clone pytorch/pytorch
@@ -129,7 +127,7 @@ jobs:
           path:
             artifacts/*
       !{{ common.teardown_ec2_linux("pytorch/") }}
-  !{{ config["build_name"] }}-test:
+  !{{ config["build_name"] }}-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: !{{ config["build_name"] }}-build
 {%- if config["gpu_arch_type"] == "cuda" %}
@@ -138,22 +136,7 @@ jobs:
     runs-on: linux.4xlarge
 {%- endif %}
     timeout-minutes: !{{ common.timeout_minutes }}
-    env:
-      PACKAGE_TYPE: !{{ config["package_type"] }}
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: !{{ config["desired_cuda"] }}
-{%- if config["gpu_arch_version"] %}
-      GPU_ARCH_VERSION: !{{ config["gpu_arch_version"] }}
-{%- endif %}
-      GPU_ARCH_TYPE: !{{ config["gpu_arch_type"] }}
-      DOCKER_IMAGE: !{{ config["container_image"] }}
-{%- if config["package_type"] == "libtorch" %}
-      LIBTORCH_VARIANT: !{{ config["libtorch_variant"] }}
-      DESIRED_DEVTOOLSET: !{{ config["devtoolset"] }}
-{%- else %}
-      DESIRED_PYTHON: !{{ config["python_version"] }}
-{%- endif %}
+    !{{ binary_env(config) }}
     steps:
       !{{ common.setup_ec2_linux() }}
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
@@ -215,4 +198,47 @@ jobs:
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
       !{{ common.teardown_ec2_linux("pytorch/") }}
+  !{{ config["build_name"] }}-upload:  # Uploading
+    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: !{{ config["build_name"] }}-build
+    !{{ binary_env(config) }}
+    steps:
+      !{{ common.setup_ec2_linux() }}
+      - name: Clone pytorch/pytorch
+        uses: actions/checkout@v2
+      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+        name: Download Build Artifacts
+        with:
+          name: !{{ config["build_name"] }}
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Set DRY_RUN (only for tagged pushes)
+        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        run: |
+          echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
+      - name: Set UPLOAD_CHANNEL (only for tagged pushes)
+        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        run: |
+          # reference ends with an RC suffix
+          if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
+            echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
+          fi
+      - uses: conda-incubator/setup-miniconda@v2
+        with:
+          auto-activate-base: true
+      - name: Install dependencies
+        run: |
+          conda install -yq anaconda-client
+          pip install -q awscli
+      - name: Upload binaries
+        env:
+          PKG_DIR: "${{ runner.temp }}/artifacts"
+          UPLOAD_SUBFOLDER: "${{ env.DESIRED_CUDA }}"
+          # When running these on pull_request events these should be blank
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_PYTORCH_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_SECRET_KEY }}
+          ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+        run: |
+          .circleci/scripts/binary_upload.sh
+      !{{ common.teardown_ec2_linux() }}
 {%- endfor %}
