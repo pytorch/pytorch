@@ -13,7 +13,8 @@ from tools.codegen.api.autograd import (Derivative, DifferentiabilityInfo,
                                         uses_single_grad)
 from tools.codegen.api.types import (Binding, BaseCType, OptionalCType, tensorT, longT,
                                      doubleT, scalarT, stringT, boolT, intArrayRefT,
-                                     tensorListT, MutRefCType, ListCType, ArrayRefCType)
+                                     tensorListT, MutRefCType, ListCType, ArrayRefCType,
+                                     optionalIntArrayRefT)
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.utils import FileManager
 from tools.codegen.model import Argument
@@ -421,6 +422,10 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
         elif type == BaseCType(intArrayRefT):
             saved_variables.append(f'std::vector<int64_t> {name};')
             getter_definitions.append(GETTER_DEFINITION.substitute(
+                op=info.op, name=name, body=GETTER_BODY_ARRAYREF_LONG))
+        elif type == BaseCType(optionalIntArrayRefT):
+            saved_variables.append(f'c10::OptionalArray<int64_t> {name};')
+            getter_definitions.append(GETTER_DEFINITION_OPT_ARRAYREF.substitute(
                 op=info.op, name=name, body=GETTER_BODY_ARRAYREF_LONG))
         elif type == OptionalCType(BaseCType(intArrayRefT)):
             saved_variables.append(f'c10::OptionalArray<int64_t> {name};')

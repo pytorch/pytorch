@@ -79,7 +79,7 @@ namespace torch {
 enum class ParameterType {
   TENSOR, SCALAR, INT64, DOUBLE, COMPLEX, TENSOR_LIST, INT_LIST, GENERATOR,
   BOOL, STORAGE, PYOBJECT, SCALARTYPE, LAYOUT, MEMORY_FORMAT, DEVICE, STREAM, STRING,
-  DIMNAME, DIMNAME_LIST, QSCHEME, FLOAT_LIST, SCALAR_LIST
+  DIMNAME, DIMNAME_LIST, QSCHEME, FLOAT_LIST, SCALAR_LIST, OPTIONAL_INT_LIST
 };
 
 struct FunctionParameter;
@@ -421,10 +421,13 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(int i, std::vector<in
 }
 
 inline c10::OptionalArray<int64_t> PythonArgs::intlistOptional(int i) {
-  if (!args[i]) {
-    return {};
+  c10::OptionalArray<int64_t> res;
+  if (args[i] == Py_None || !args[i]) {
+    res = c10::OptionalArray<int64_t>();
+  } else {
+    res = c10::OptionalArray<int64_t>(intlist(i));
   }
-  return intlist(i);
+  return res;
 }
 
 inline std::vector<double> PythonArgs::getDoublelist(int i) {

@@ -26,6 +26,7 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"complex", ParameterType::COMPLEX},
   {"TensorList", ParameterType::TENSOR_LIST},
   {"c10::List<c10::optional<Tensor>>", ParameterType::TENSOR_LIST},
+  {"OptionalIntArrayRef", ParameterType::OPTIONAL_INT_LIST},
   {"IntArrayRef", ParameterType::INT_LIST},
   {"ArrayRef<double>", ParameterType::FLOAT_LIST},
   {"Generator", ParameterType::GENERATOR},
@@ -475,6 +476,10 @@ static bool is_int_list(PyObject* obj, int broadcast_size) {
   return broadcast_size > 0 && THPUtils_checkLong(obj);
 }
 
+static bool is_optional_int_list(PyObject* obj, int broadcast_size) {
+  return is_int_list(obj, broadcast_size) || (obj == Py_None);
+}
+
 // argnum is needed for raising the TypeError, it's used in the error message.
 auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded_args, int argnum) -> bool
 {
@@ -522,6 +527,7 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
     case ParameterType::TENSOR_LIST: {
       return is_tensor_list_and_append_overloaded(obj, &overloaded_args, argnum, true /* throw_error */);
     }
+    case ParameterType::OPTIONAL_INT_LIST: return is_optional_int_list(obj, size);
     case ParameterType::INT_LIST: return is_int_list(obj, size);
     case ParameterType::FLOAT_LIST: return is_float_or_complex_list(obj);
     case ParameterType::GENERATOR: return THPGenerator_Check(obj);
@@ -552,6 +558,7 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::DOUBLE: return "float";
     case ParameterType::COMPLEX: return "complex";
     case ParameterType::TENSOR_LIST: return "tuple of Tensors";
+    case ParameterType::OPTIONAL_INT_LIST: return "tuple of ints (optional)";
     case ParameterType::INT_LIST: return "tuple of ints";
     case ParameterType::FLOAT_LIST: return "tuple of floats";
     case ParameterType::GENERATOR: return "torch.Generator";
@@ -693,7 +700,7 @@ void FunctionParameter::set_default_str(const std::string& str) {
       default_scalar = as_integer.has_value() ? at::Scalar(as_integer.value()) :
                                                 at::Scalar(atof(str.c_str()));
     }
-  } else if (type_ == ParameterType::INT_LIST) {
+  } else if ((type_ == ParameterType::INT_LIST) || (type_ == ParameterType::OPTIONAL_INT_LIST)) {
     if (str != "None") {
       default_intlist = parse_intlist_args(str, size);
     }
@@ -917,7 +924,7 @@ bool FunctionSignature::parse(PyObject* self, PyObject* args, PyObject* kwargs, 
 
   // if there is a single positional IntArrayRef argument, i.e. expand(..), view(...),
   // allow a var-args style IntArrayRef, so expand(5,3) behaves as expand((5,3))
-  if (max_pos_args == 1 && params[0].type_ == ParameterType::INT_LIST) {
+  if (max_pos_args == 1 && (params[0].type_ == ParameterType::INT_LIST || params[0].type_ == ParameterType::OPTIONAL_INT_LIST)) {
     allow_varargs_intlist = true;
   }
 
