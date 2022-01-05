@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
@@ -1548,6 +1549,46 @@ TEST_F(Kernel, RunWithAllocatedOutputs) {
   for (size_t i = 0; i < 5 * 3; i++) {
     CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
   }
+#endif
+}
+
+TEST_F(Kernel, RunComposedFallback) {
+#ifdef TORCH_ENABLE_LLVM
+  const auto graph_string = R"IR(
+      graph(%0 : Float(5, 3, strides=[3, 1], device=cpu),
+            %1 : Float(5, 3, strides=[1, 5], device=cpu)):
+        %2 : Float(5, 3, strides=[3, 1], device=cpu) = aten::mul(%0, %1)
+        %3 : Float(5, 3, strides=[3, 1], device=cpu) = aten::mul(%0, %2)
+        return (%3))IR";
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  // wrong input sizes so we hit the fallback path
+  auto a = at::rand({2, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto b = at::rand({2, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat))
+               .transpose(0, 1);
+  auto ref = a * (a * b);
+  bool dynamic_enabled = tensorExprFuserEnabled();
+  setTensorExprDynamicShapeFusionEnabled(true);
+  FuseTensorExprs(graph);
+  Code code(graph, "");
+  InterpreterState interpreter{code};
+  std::vector<IValue> stack = {a, b};
+  interpreter.run(stack);
+  at::Tensor out = pop(stack).toTensor();
+  ASSERT_TRUE(at::allclose(out, ref));
+
+  auto inp_1 = at::ones({4, 4}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto inp_ref = at::ones({4, 4}, TensorOptions(kCPU).dtype(at::kFloat));
+  stack = {inp_1, a, b};
+  InterpreterState interpreter2{code};
+  interpreter2.run(stack);
+  out = pop(stack).toTensor();
+  ASSERT_TRUE(at::allclose(out, ref));
+  // inp_1 should be resized and copied into
+  ASSERT_TRUE(at::allclose(inp_1, ref));
+  setTensorExprDynamicShapeFusionEnabled(dynamic_enabled);
+
 #endif
 }
 
