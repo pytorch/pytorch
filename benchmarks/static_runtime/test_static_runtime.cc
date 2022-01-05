@@ -999,6 +999,13 @@ TEST(StaticRuntime, to) {
         return e
   )JIT";
 
+  const auto to_script_select_tensor_output_into_tuple = R"JIT(
+    def forward(self, a, b):
+        d = a.half() * b.half()
+        e = d.float()
+        return (d, e)
+  )JIT";
+
   const auto to_script_memory_planning_fail = R"JIT(
     def forward(self, a, b):
         d = a.half() * b.half()
@@ -1045,6 +1052,7 @@ TEST(StaticRuntime, to) {
 
     testStaticRuntime(to_script_memory_planning_fail, {a, a});
     testStaticRuntime(to_script_fails_managed_output_check, {a, a});
+    testStaticRuntime(to_script_select_tensor_output_into_tuple, {a, a});
 
     // dynamic shapes
     testStaticRuntime(to_script_dtype, args0, {a2, b, c, d, e});
