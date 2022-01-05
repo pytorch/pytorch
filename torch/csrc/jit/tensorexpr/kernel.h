@@ -1,7 +1,7 @@
 #pragma once
 
 #include <c10/util/variant.h>
-#include <jit/passes/symbolic_shape_runtime_fusion.h>
+#include <torch/csrc/jit/passes/symbolic_shape_runtime_fusion.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/symbolic_shape_runtime_fusion.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
