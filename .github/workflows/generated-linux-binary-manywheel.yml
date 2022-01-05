@@ -302,7 +302,7 @@ jobs:
   manywheel-py3_7-cpu-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_7-cpu-build
+    needs: manywheel-py3_7-cpu-test
     env:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -361,11 +361,11 @@ jobs:
           name: manywheel-py3_7-cpu
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
@@ -668,7 +668,7 @@ jobs:
   manywheel-py3_7-cuda10_2-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_7-cuda10_2-build
+    needs: manywheel-py3_7-cuda10_2-test
     env:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -728,11 +728,11 @@ jobs:
           name: manywheel-py3_7-cuda10_2
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
@@ -1038,7 +1038,7 @@ jobs:
   manywheel-py3_7-cuda11_1-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_7-cuda11_1-build
+    needs: manywheel-py3_7-cuda11_1-test
     env:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -1098,11 +1098,11 @@ jobs:
           name: manywheel-py3_7-cuda11_1
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
@@ -1408,7 +1408,7 @@ jobs:
   manywheel-py3_7-cuda11_3-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_7-cuda11_3-build
+    needs: manywheel-py3_7-cuda11_3-test
     env:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -1468,11 +1468,11 @@ jobs:
           name: manywheel-py3_7-cuda11_3
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
@@ -1778,7 +1778,7 @@ jobs:
   manywheel-py3_7-cuda11_5-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_7-cuda11_5-build
+    needs: manywheel-py3_7-cuda11_5-test
     env:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -1838,11 +1838,11 @@ jobs:
           name: manywheel-py3_7-cuda11_5
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
@@ -2140,7 +2140,7 @@ jobs:
   manywheel-py3_7-rocm4_2-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_7-rocm4_2-build
+    needs: manywheel-py3_7-rocm4_2-test
     env:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -2200,11 +2200,11 @@ jobs:
           name: manywheel-py3_7-rocm4_2
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
@@ -2502,7 +2502,7 @@ jobs:
   manywheel-py3_7-rocm4_3_1-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_7-rocm4_3_1-build
+    needs: manywheel-py3_7-rocm4_3_1-test
     env:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -2562,11 +2562,11 @@ jobs:
           name: manywheel-py3_7-rocm4_3_1
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
@@ -2862,7 +2862,7 @@ jobs:
   manywheel-py3_8-cpu-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_8-cpu-build
+    needs: manywheel-py3_8-cpu-test
     env:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -2921,11 +2921,11 @@ jobs:
           name: manywheel-py3_8-cpu
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
@@ -3228,7 +3228,7 @@ jobs:
   manywheel-py3_8-cuda10_2-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_8-cuda10_2-build
+    needs: manywheel-py3_8-cuda10_2-test
     env:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -3288,11 +3288,11 @@ jobs:
           name: manywheel-py3_8-cuda10_2
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
@@ -3598,7 +3598,7 @@ jobs:
   manywheel-py3_8-cuda11_1-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_8-cuda11_1-build
+    needs: manywheel-py3_8-cuda11_1-test
     env:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -3658,11 +3658,11 @@ jobs:
           name: manywheel-py3_8-cuda11_1
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
@@ -3968,7 +3968,7 @@ jobs:
   manywheel-py3_8-cuda11_3-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_8-cuda11_3-build
+    needs: manywheel-py3_8-cuda11_3-test
     env:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -4028,11 +4028,11 @@ jobs:
           name: manywheel-py3_8-cuda11_3
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
@@ -4338,7 +4338,7 @@ jobs:
   manywheel-py3_8-cuda11_5-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_8-cuda11_5-build
+    needs: manywheel-py3_8-cuda11_5-test
     env:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -4398,11 +4398,11 @@ jobs:
           name: manywheel-py3_8-cuda11_5
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
@@ -4700,7 +4700,7 @@ jobs:
   manywheel-py3_8-rocm4_2-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_8-rocm4_2-build
+    needs: manywheel-py3_8-rocm4_2-test
     env:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -4760,11 +4760,11 @@ jobs:
           name: manywheel-py3_8-rocm4_2
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
@@ -5062,7 +5062,7 @@ jobs:
   manywheel-py3_8-rocm4_3_1-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_8-rocm4_3_1-build
+    needs: manywheel-py3_8-rocm4_3_1-test
     env:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -5122,11 +5122,11 @@ jobs:
           name: manywheel-py3_8-rocm4_3_1
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
@@ -5422,7 +5422,7 @@ jobs:
   manywheel-py3_9-cpu-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_9-cpu-build
+    needs: manywheel-py3_9-cpu-test
     env:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -5481,11 +5481,11 @@ jobs:
           name: manywheel-py3_9-cpu
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
@@ -5788,7 +5788,7 @@ jobs:
   manywheel-py3_9-cuda10_2-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_9-cuda10_2-build
+    needs: manywheel-py3_9-cuda10_2-test
     env:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -5848,11 +5848,11 @@ jobs:
           name: manywheel-py3_9-cuda10_2
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
@@ -6158,7 +6158,7 @@ jobs:
   manywheel-py3_9-cuda11_1-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_9-cuda11_1-build
+    needs: manywheel-py3_9-cuda11_1-test
     env:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -6218,11 +6218,11 @@ jobs:
           name: manywheel-py3_9-cuda11_1
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
@@ -6528,7 +6528,7 @@ jobs:
   manywheel-py3_9-cuda11_3-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_9-cuda11_3-build
+    needs: manywheel-py3_9-cuda11_3-test
     env:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -6588,11 +6588,11 @@ jobs:
           name: manywheel-py3_9-cuda11_3
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
@@ -6898,7 +6898,7 @@ jobs:
   manywheel-py3_9-cuda11_5-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_9-cuda11_5-build
+    needs: manywheel-py3_9-cuda11_5-test
     env:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -6958,11 +6958,11 @@ jobs:
           name: manywheel-py3_9-cuda11_5
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
@@ -7260,7 +7260,7 @@ jobs:
   manywheel-py3_9-rocm4_2-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_9-rocm4_2-build
+    needs: manywheel-py3_9-rocm4_2-test
     env:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -7320,11 +7320,11 @@ jobs:
           name: manywheel-py3_9-rocm4_2
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
@@ -7622,7 +7622,7 @@ jobs:
   manywheel-py3_9-rocm4_3_1-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_9-rocm4_3_1-build
+    needs: manywheel-py3_9-rocm4_3_1-test
     env:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -7682,11 +7682,11 @@ jobs:
           name: manywheel-py3_9-rocm4_3_1
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then

@@ -201,7 +201,7 @@ jobs:
   !{{ config["build_name"] }}-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: !{{ config["build_name"] }}-build
+    needs: !{{ config["build_name"] }}-test
     !{{ binary_env(config) }}
     steps:
       !{{ common.setup_ec2_linux() }}
@@ -213,11 +213,11 @@ jobs:
           name: !{{ config["build_name"] }}
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        if: ${{ github.event_name == "push" && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
