@@ -4,7 +4,6 @@
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/llvmMathExtras.h>
 #include <ostream>
-#include <array>
 
 namespace c10 {
 
@@ -191,12 +190,20 @@ class DispatchKeySet final {
     }
   }
 
-  explicit constexpr DispatchKeySet(std::initializer_list<BackendBit> ks)
-      : repr_(0) {
+  constexpr uint64_t backend_bits_to_repr(std::initializer_list<BackendBit> ks) {
+    uint64_t repr = 0;
     for (auto k : ks) {
-      repr_ |= DispatchKeySet(k).repr_;
+      repr |= DispatchKeySet(k).repr_;
     }
+    return repr;
   }
+
+  explicit constexpr DispatchKeySet(std::initializer_list<BackendBit> ks)
+      // Note: for some reason, putting this logic directly in the constructor
+      // appears to fail to compile on CUDA 10.1.
+      // See an example internal failure at
+      // https://www.internalfb.com/intern/skycastle/run/76561193669136035/artifact/actionlog.76561193742069401.stderr
+      : repr_(backend_bits_to_repr(ks)) {}
 
   // Test if a DispatchKey is in the set
   inline bool has(DispatchKey t) const {
@@ -500,13 +507,10 @@ constexpr DispatchKeySet autograd_dispatch_keyset_with_ADInplaceOrView =
 // backend dispatch keys that map to DispatchKey::AutogradOther
 // NB: keys in this set also get associated with CompositeImplicitAutograd
 constexpr DispatchKeySet autogradother_backends = DispatchKeySet(
-        // TODO: delete commented code before landing.
-        // HIP and VE now have their own backend bits, which means that
-        // they can now have their own Autograd keys.
+        // HIP and VE aren't in this list: they now have their own backend bits
+        // which means that they can now have their own Autograd keys.
         // Technically, HIP will now redispatch to its own custom AutogradHIP slot
         // in the runtime table.
-        //{DispatchKey::HIP,
-        //DispatchKey::VE,
         {DispatchKey::FPGA,
         DispatchKey::ORT,
         DispatchKey::Vulkan,
