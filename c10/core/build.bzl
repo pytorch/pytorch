@@ -2,6 +2,8 @@ def define_targets(rules):
     rules.cc_library(
         name = "ScalarType",
         hdrs = ["ScalarType.h"],
+        linkstatic = True,
+        local_defines = ["C10_BUILD_MAIN_LIB"],
         visibility = ["//visibility:public"],
         deps = ["//c10/util:base"],
     )
@@ -9,6 +11,8 @@ def define_targets(rules):
     rules.cc_library(
         name = "alignment",
         hdrs = ["alignment.h"],
+        linkstatic = True,
+        local_defines = ["C10_BUILD_MAIN_LIB"],
         visibility = ["//visibility:public"],
     )
 
@@ -16,6 +20,8 @@ def define_targets(rules):
         name = "alloc_cpu",
         srcs = ["impl/alloc_cpu.cpp"],
         hdrs = ["impl/alloc_cpu.h"],
+        linkstatic = True,
+        local_defines = ["C10_BUILD_MAIN_LIB"],
         visibility = ["//visibility:public"],
         deps = [
             ":alignment",
@@ -46,6 +52,8 @@ def define_targets(rules):
                 "impl/alloc_cpu.h",
             ],
         ),
+        linkstatic = True,
+        local_defines = ["C10_BUILD_MAIN_LIB"],
         visibility = ["//visibility:public"],
         deps = [
             ":ScalarType",
