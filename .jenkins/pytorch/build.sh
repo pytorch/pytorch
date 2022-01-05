@@ -305,7 +305,7 @@ fi
 
 # Test Lazy Tensor Core. Don't merge to master.
 # Restrict lazy tensor to cuda environments to limit potential breakages for the feature branch.
-if [[ "$BUILD_ENVIRONMENT" == *linux-xenial-cuda11.3* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *linux-xenial-cuda11.3* && "$BUILD_ENVIRONMENT" != *bazel* ]]; then
   pushd lazy_tensor_core/
   ./scripts/apply_patches.sh
   DEBUG=1 python setup.py install
