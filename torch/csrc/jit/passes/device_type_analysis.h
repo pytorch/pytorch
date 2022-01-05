@@ -6,10 +6,7 @@ namespace torch {
 namespace jit {
 struct Graph;
 
-// Transposes the weight matrix for frozen linear modules.
-// and converts it into a matmul
-
-// Should support everything except for when the device type is passed in as an arg
+// Propagates Device type info throughout the given graph.
 TORCH_API bool DeviceTypePropagation(std::shared_ptr<Graph>& graph);
 
 } // namespace jit
