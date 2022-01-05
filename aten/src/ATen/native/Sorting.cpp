@@ -8,45 +8,36 @@
 #include <ATen/native/Sorting.h>
 #include <ATen/native/SortingUtils.h>
 #include <ATen/native/ReduceOpsUtils.h>
+#include <c10/util/irange.h>
 
 #include <utility>
 
 namespace at {
 namespace meta {
-
 using namespace native;
+  TORCH_META_FUNC(topk) (
+    const Tensor& self,
+    int64_t k,
+    int64_t dim_,
+    bool largest,
+    bool sorted) {
 
-TORCH_META_FUNC(topk)
-(const Tensor& self, int64_t k, int64_t dim_, bool largest, bool sorted) {
-  int64_t dim = maybe_wrap_dim(dim_, self.dim(), /*wrap_scalar=*/true);
-  TORCH_CHECK(
-      k >= 0 && k <= (self.dim() > 0 ? self.size(dim) : 1),
-      "selected index k out of range");
-  int64_t sliceSize = self.dim() == 0 ? 1 : self.size(dim);
-  TORCH_CHECK(k >= 0 && k <= sliceSize, "k not in range for dimension");
+    int64_t dim = maybe_wrap_dim(dim_, self.dim(), /*wrap_scalar=*/true);
+    TORCH_CHECK(
+        k >= 0 && k <= (self.dim() > 0 ? self.size(dim) : 1),
+        "selected index k out of range");
+    int64_t sliceSize = self.dim() == 0 ? 1 : self.size(dim);
+    TORCH_CHECK(k >= 0 && k <= sliceSize, "k not in range for dimension");
 
-  // Build the output size, which is the dim being selected set to
-  // size k
-  DimVector topKSize(self.sizes().vec());
-  if (topKSize.size() > 0) {
-    topKSize[dim] = k;
+    // Build the output size, which is the dim being selected set to
+    // size k
+    DimVector topKSize(self.sizes().vec());
+    if (topKSize.size() > 0) {
+      topKSize[dim] = k;
+    }
+    set_output(0, topKSize, self.options());
+    set_output(1, topKSize, self.options().dtype(at::kLong));
   }
-  set_output(0, topKSize, self.options());
-  set_output(1, topKSize, self.options().dtype(at::kLong));
-}
-
-TORCH_META_FUNC2(sort, stable)
-(const Tensor& self, c10::optional<bool> stable, int64_t dim, bool descending) {
-  TORCH_INTERNAL_ASSERT(
-      stable.has_value(),
-      "sort(): c10::optional<bool> for stable has to have value.");
-  maybe_wrap_dim(dim, self.dim());
-  // 'set_output' will only modify the strides, if the output was resized.
-  // Which means that we can ignore the output's strides here.
-  set_output(0, self.sizes(), self.strides(), self.options(), {});
-  set_output(1, self.sizes(), self.strides(), self.options().dtype(kLong), {});
-}
-
 } // namespace meta
 
 namespace native {
@@ -293,7 +284,11 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cpu(
     int64_t dim_,
     bool keepdim) {
   int64_t dim = maybe_wrap_dim(dim_, self.dim(), /*wrap_scalar=*/true);
+  int64_t slicesize = self.dim() == 0 ? 1 : self.size(dim);
   zero_numel_check_dims(self, dim, "kthvalue()");
+
+  TORCH_CHECK(k >= 1 && k <= slicesize,
+              "kthvalue(): selected number k out of range for dimension ", dim);
 
   at::assert_no_overlap(self, values);
 
@@ -325,7 +320,7 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cpu(
 
   AT_DISPATCH_ALL_TYPES_AND(ScalarType::BFloat16, self.scalar_type(), "kthvalue_cpu", [&] {
     auto loop = [&](char** data, const int64_t* strides, int64_t n) {
-      for (int64_t i = 0; i < n; ++i) {
+      for (const auto i : c10::irange(n)) {
         TensorAccessor<scalar_t, 1> tmp_values(
             reinterpret_cast<scalar_t*>(data[0] + i * strides[0]),
             &sizes[dim], &tmp_values_stride);
@@ -335,7 +330,7 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cpu(
         auto mode_value = reinterpret_cast<scalar_t*>(data[2] + i * strides[2]);
         auto mode_index = reinterpret_cast<int64_t*>(data[3] + i * strides[3]);
 
-        for (int64_t j = 0; j < tmp_indices.size(0); j++) {
+        for (const auto j : c10::irange(tmp_indices.size(0))) {
           tmp_indices[j] = j;
         }
 
@@ -421,7 +416,7 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
 
   AT_DISPATCH_ALL_TYPES_AND(ScalarType::BFloat16, in.scalar_type(), "median_out", [&] {
     auto loop = [&](char** data, const int64_t* strides, int64_t n) {
-      for (int64_t i = 0; i < n; ++i) {
+      for (const auto i : c10::irange(n)) {
         auto valp = reinterpret_cast<scalar_t*>(data[0] + i * strides[0]);
         auto indp = reinterpret_cast<int64_t*>(data[1] + i * strides[1]);
         auto ip = reinterpret_cast<const scalar_t*>(data[2] + i * strides[2]);
@@ -898,37 +893,52 @@ Tensor nanmedian_cpu(const Tensor& self) {
   return median_impl(self, /*ignore_nan=*/true);
 }
 
-TORCH_IMPL_FUNC(sort_stable_out)
-(const Tensor& self,
- c10::optional<bool> stable,
- int64_t dim,
- bool descending,
- const Tensor& values,
- const Tensor& indices) {
-  // check if self is scalar
-  if (self.dim() == 0 && self.numel() == 1) {
-    values.copy_(self);
-    indices.zero_();
-  } else {
-    dim = maybe_wrap_dim(dim, self.dim());
-    sort_stub(self.device().type(), self, dim, descending, stable.value(), values, indices);
-  }
-}
-
-std::tuple<Tensor&, Tensor&> sort_out(
-    const Tensor& self,
+std::tuple<Tensor&, Tensor&> sort_out_cpu_stable(const Tensor& self,
+    c10::optional<bool> stable,
     int64_t dim,
     bool descending,
     Tensor& values,
     Tensor& indices) {
-  return at::sort_out(values, indices, self, false, dim, descending);
+  values.resize_(self.sizes()).copy_(self);
+  indices.resize_(self.sizes());
+
+  // check if self is scalar
+  if (self.dim() == 0 && self.numel() == 1) {
+    indices.zero_();
+    return std::forward_as_tuple(values, indices);
+  }
+
+  TORCH_INTERNAL_ASSERT(stable.has_value(), "sort_out(): c10::optional<bool> for stable has to have value.");
+  sort_stub(kCPU, values, indices, dim, descending, stable.value());
+
+  return std::forward_as_tuple(values, indices);
 }
 
-std::tuple<Tensor, Tensor> sort(
+std::tuple<Tensor&, Tensor&> sort_out_cpu(const Tensor& self,
+    int64_t dim,
+    bool descending,
+    Tensor& values,
+    Tensor& indices) {
+  return at::native::sort_out_cpu_stable(
+      self, /*stable=*/false, dim, descending, values, indices);
+}
+
+std::tuple<Tensor, Tensor> sort_cpu_stable(
+    const Tensor& self,
+    c10::optional<bool> stable,
+    int64_t dim,
+    bool descending) {
+  TORCH_CHECK(!self.is_complex(), "sort(): input tensor must be of non-complex type");
+  Tensor values = at::empty({0}, self.options());
+  Tensor indices = at::empty({0}, self.options().dtype(kLong));
+  return at::native::sort_out_cpu_stable(self, stable, dim, descending, values, indices);
+}
+
+std::tuple<Tensor, Tensor> sort_cpu(
     const Tensor& self,
     int64_t dim,
     bool descending) {
-  return at::sort(self, false, dim, descending);
+  return sort_cpu_stable(self, /*stable=*/false, dim, descending);
 }
 
 Tensor& msort_out(const Tensor& self, Tensor& values) {

@@ -30,7 +30,7 @@ namespace caffe2 {
  * W(N * K) = U(N * middle) * trans(V(K * middle))
  * */
 // This is Caffe's InnerProductOp, with a name that fits its purpose better.
-template <typename T, class Context, class Engine=DefaultEngine>
+template <typename T, class Context, class Engine = DefaultEngine>
 class FullyConnectedOpDecomp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -44,15 +44,15 @@ class FullyConnectedOpDecomp final : public Operator<Context> {
     const auto& V = Input(2);
     const auto& b = Input(3);
 
-    //auto* buffer_ptr = Output(1);
+    // auto* buffer_ptr = Output(1);
     // Size M * middle;
-    //auto& multi_buffer_ = *buffer_ptr;
+    // auto& multi_buffer_ = *buffer_ptr;
     CAFFE_ENFORCE_GE(X.dim(), 1);
     CAFFE_ENFORCE_GE(U.dim(), 2);
     CAFFE_ENFORCE_GE(V.dim(), 2);
     if (X.dim() > 2 || U.dim() > 2 || V.dim() > 2) {
       VLOG(1) << "Using legacy support for arbitrary input and weight "
-                       "dimensions.";
+                 "dimensions.";
     }
     CAFFE_ENFORCE_EQ(b.dim(), 1);
     // batch size
@@ -79,25 +79,51 @@ class FullyConnectedOpDecomp final : public Operator<Context> {
     T* multi_buffer_data = multi_buffer_.template mutable_data<T>();
     //  X * V * tans(U)
     math::Gemm<T, Context, Engine>(
-        CblasNoTrans, CblasNoTrans, M, middle, K, 1, X.template data<T>(),
-        V.template data<T>(), 0, multi_buffer_data,
+        CblasNoTrans,
+        CblasNoTrans,
+        M,
+        middle,
+        K,
+        1,
+        X.template data<T>(),
+        V.template data<T>(),
+        0,
+        multi_buffer_data,
         &context_);
     math::Gemm<T, Context, Engine>(
-        CblasNoTrans, CblasTrans, M, N, middle, 1, multi_buffer_data,
-        U.template data<T>(), 0, Y->template mutable_data<T>(),
+        CblasNoTrans,
+        CblasTrans,
+        M,
+        N,
+        middle,
+        1,
+        multi_buffer_data,
+        U.template data<T>(),
+        0,
+        Y->template mutable_data<T>(),
         &context_);
     // Add bias term
     if (bias_multiplier_.numel() != M) {
       // If the helper bias multiplier is not M, reshape and fill it with one.
       bias_multiplier_.Resize(M);
       math::Set<T, Context>(
-          M, static_cast<T>(1), bias_multiplier_.template mutable_data<T>(),
+          M,
+          static_cast<T>(1),
+          bias_multiplier_.template mutable_data<T>(),
           &context_);
     }
     math::Gemm<T, Context, Engine>(
-        CblasNoTrans, CblasNoTrans, M, N, 1, 1,
-        bias_multiplier_.template data<T>(), b.template data<T>(), 1,
-        Y->template mutable_data<T>(), &context_);
+        CblasNoTrans,
+        CblasNoTrans,
+        M,
+        N,
+        1,
+        1,
+        bias_multiplier_.template data<T>(),
+        b.template data<T>(),
+        1,
+        Y->template mutable_data<T>(),
+        &context_);
     return true;
   }
 
@@ -106,7 +132,7 @@ class FullyConnectedOpDecomp final : public Operator<Context> {
   Tensor multi_buffer_{Context::GetDeviceType()};
 };
 
-template <typename T, class Context, class Engine=DefaultEngine>
+template <typename T, class Context, class Engine = DefaultEngine>
 class FullyConnectedDecompGradientOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -148,41 +174,75 @@ class FullyConnectedDecompGradientOp : public Operator<Context> {
     du_buffer_.Resize(N, middle);
     T* du_buffer_data = du_buffer_.template mutable_data<T>();
     math::Gemm<T, Context, Engine>(
-        CblasNoTrans, CblasNoTrans, M, middle, K, 1,
-        X.template data<T>(), V.template data<T>(),
-        0, du_buffer_data,
+        CblasNoTrans,
+        CblasNoTrans,
+        M,
+        middle,
+        K,
+        1,
+        X.template data<T>(),
+        V.template data<T>(),
+        0,
+        du_buffer_data,
         &context_);
     math::Gemm<T, Context, Engine>(
-        CblasTrans, CblasNoTrans, N, middle, M, 1,
-        dY.template data<T>(), du_buffer_data,
-        0, dU->template mutable_data<T>(),
+        CblasTrans,
+        CblasNoTrans,
+        N,
+        middle,
+        M,
+        1,
+        dY.template data<T>(),
+        du_buffer_data,
+        0,
+        dU->template mutable_data<T>(),
         &context_);
     // Compute dV
     // first compute dY * U
     dv_buffer_.Resize(M, middle);
     T* dv_buffer_data = dv_buffer_.template mutable_data<T>();
     math::Gemm<T, Context, Engine>(
-        CblasNoTrans, CblasNoTrans, M, middle, N, 1,
-        dY.template data<T>(), U.template data<T>(),
-        0, dv_buffer_data,
+        CblasNoTrans,
+        CblasNoTrans,
+        M,
+        middle,
+        N,
+        1,
+        dY.template data<T>(),
+        U.template data<T>(),
+        0,
+        dv_buffer_data,
         &context_);
     math::Gemm<T, Context, Engine>(
-        CblasTrans, CblasNoTrans, K, middle, M, 1,
-        dY.template data<T>(), du_buffer_data,
-        0, dV->template mutable_data<T>(),
+        CblasTrans,
+        CblasNoTrans,
+        K,
+        middle,
+        M,
+        1,
+        dY.template data<T>(),
+        du_buffer_data,
+        0,
+        dV->template mutable_data<T>(),
         &context_);
     if (bias_multiplier_.numel() != M) {
       // If the helper bias multiplier is not M, reshape and fill it with one.
       bias_multiplier_.Resize(M);
       math::Set<T, Context>(
-          M, static_cast<T>(1),
+          M,
+          static_cast<T>(1),
           bias_multiplier_.template mutable_data<T>(),
           &context_);
     }
     // Compute dB
     math::Gemv<T, Context>(
-        CblasTrans, M, N, 1, dY.template data<T>(),
-        bias_multiplier_.template data<T>(), 0,
+        CblasTrans,
+        M,
+        N,
+        1,
+        dY.template data<T>(),
+        bias_multiplier_.template data<T>(),
+        0,
         db->template mutable_data<T>(),
         &context_);
     // Compute dX if necessary.
@@ -191,14 +251,28 @@ class FullyConnectedDecompGradientOp : public Operator<Context> {
       dx_buffer_.Resize(M, middle);
       T* dx_buffer_data = dx_buffer_.template mutable_data<T>();
       math::Gemm<T, Context, Engine>(
-          CblasNoTrans, CblasNoTrans, M, middle, N, 1,
-          dY.template data<T>(), U.template data<T>(),
-          0, dx_buffer_data,
+          CblasNoTrans,
+          CblasNoTrans,
+          M,
+          middle,
+          N,
+          1,
+          dY.template data<T>(),
+          U.template data<T>(),
+          0,
+          dx_buffer_data,
           &context_);
       math::Gemm<T, Context, Engine>(
-          CblasNoTrans, CblasTrans, M, K, middle, 1,
-          dx_buffer_data, V.template data<T>(),
-          0, dX->template mutable_data<T>(),
+          CblasNoTrans,
+          CblasTrans,
+          M,
+          K,
+          middle,
+          1,
+          dx_buffer_data,
+          V.template data<T>(),
+          0,
+          dX->template mutable_data<T>(),
           &context_);
     }
 
@@ -212,6 +286,6 @@ class FullyConnectedDecompGradientOp : public Operator<Context> {
   Tensor dx_buffer_{Context::GetDeviceType()};
 };
 
-}  // namespace caffe2
+} // namespace caffe2
 
-#endif  // CAFFE2_OPERATORS_FULLY_CONNECTED_OP_H_
+#endif // CAFFE2_OPERATORS_FULLY_CONNECTED_OP_H_

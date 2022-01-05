@@ -299,7 +299,10 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
 // or alias keys and their associated keysets).
 // This function should be considered a private helper for updateDispatchTable_()
 void OperatorEntry::updateDispatchTableEntry_(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) {
-  auto dispatch_ix = static_cast<uint8_t>(dispatch_key);
+  const auto dispatch_ix = c10::getDispatchTableIndexForDispatchKey(dispatch_key);
+  if (C10_UNLIKELY(dispatch_ix == -1)) {
+    return;
+  }
   dispatchTable_[dispatch_ix] = computeDispatchTableEntry(dispatcher, dispatch_key);
   dispatchKeyExtractor_.setOperatorHasFallthroughForKey(dispatch_key, dispatchTable_[dispatch_ix].isFallthrough());
 }
@@ -395,14 +398,14 @@ std::string OperatorEntry::listAllDispatchKeys() const {
   return str.str();
 }
 
-void OperatorEntry::reportSignatureError(std::string name) const {
+void OperatorEntry::reportSignatureError(const CppSignature call_signature) const {
   TORCH_CHECK(false,
         "\nTried to access or call an operator with a wrong signature.\n",
         "  operator: ", (schema_.has_value() ? toString(schema_->schema) : toString(name_)), "\n",
         "    ", (schema_.has_value() ? schema_->debug : "unknown debug info"), "\n",
         "  correct signature:  ", cpp_signature_->signature.name(), "\n",
         "    ", cpp_signature_->debug, "\n",
-        "  accessed/called as: ", name, "\n",
+        "  accessed/called as: ", call_signature.name(), "\n",
         "This likely happened in a call to OperatorHandle::typed<Return (Args...)>(). ",
         "Please make sure that the function signature matches the signature in the operator registration call."
   );

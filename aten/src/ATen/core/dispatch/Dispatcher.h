@@ -283,7 +283,11 @@ private:
   void checkSchemaCompatibility(const OperatorHandle& op, const FunctionSchema& schema, const std::string& debug);
 
   std::list<OperatorDef> operators_;
+#if !defined(C10_MOBILE)
   LeftRight<ska::flat_hash_map<OperatorName, OperatorHandle>> operatorLookupTable_;
+#else
+  RWSafeLeftRightWrapper<ska::flat_hash_map<OperatorName, OperatorHandle>> operatorLookupTable_;
+#endif
   // Map from namespace to debug string (saying, e.g., where the library was defined)
   ska::flat_hash_map<std::string, std::string> libraries_;
 
@@ -304,6 +308,7 @@ public:
   OperatorHandle& operator=(OperatorHandle&&) noexcept = default;
   OperatorHandle(const OperatorHandle&) = default;
   OperatorHandle& operator=(const OperatorHandle&) = default;
+  ~OperatorHandle();
 
   const OperatorName& operator_name() const {
     return operatorDef_->op.operator_name();

@@ -1,9 +1,10 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/onnx/constant_fold.h>
-
-#include <c10/util/Exception.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 
+#include <ATen/Functions.h>
+
+#include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <algorithm>
@@ -476,7 +477,7 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     // If rank of indices is 0, rank of output tensor should be
     // rank_of_input - 1.
     if (q < 1) {
-      updated_val = updated_val.squeeze();
+      updated_val = updated_val.squeeze(axis);
     }
     return c10::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Range) {

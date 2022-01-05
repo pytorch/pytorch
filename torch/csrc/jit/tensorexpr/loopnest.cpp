@@ -59,13 +59,16 @@ LoopNest::LoopNest(const std::vector<Tensor>& output_tensors) {
   verify(root_stmt_);
 }
 
-std::unordered_set<BufPtr> LoopNest::getIntermediateBufs() const {
-  std::unordered_set<BufPtr> result;
+std::vector<BufPtr> LoopNest::getIntermediateBufs() const {
+  std::vector<BufPtr> result;
+  std::unordered_set<BufPtr> result_set;
   auto input_bufs = getInputBufs();
   auto bufs = NodeFinder<Buf>::find(root_stmt_);
   for (auto buf : bufs) {
-    if (!output_bufs_.count(buf) && !input_bufs.count(buf)) {
-      result.insert(buf);
+    if (!output_bufs_.count(buf) && !input_bufs.count(buf) &&
+        !result_set.count(buf)) {
+      result.push_back(buf);
+      result_set.insert(buf);
     }
   }
   return result;
@@ -102,7 +105,8 @@ class IndexFlattener : public IRMutator {
     return alloc<Load>(
         v->dtype(),
         v->buf(),
-        std::vector<ExprPtr>({flatten_index(v->buf()->dims(), v->indices())}));
+        std::vector<ExprPtr>({flatten_index(
+            v->buf()->dims(), v->indices(), v->buf()->strides())}));
   }
 
   StmtPtr mutate(StorePtr v) override {
@@ -112,7 +116,7 @@ class IndexFlattener : public IRMutator {
       return v;
     }
     std::vector<ExprPtr> indices = {
-        flatten_index(v->buf()->dims(), v->indices())};
+        flatten_index(v->buf()->dims(), v->indices(), v->buf()->strides())};
     v->set_indices(indices);
     v->set_value(new_value);
     return v;
@@ -1129,37 +1133,6 @@ BlockPtr findLowestContainingBlock(const std::vector<BufLoadOrStoreUse>& uses) {
   return b;
 }
 
-StmtPtr LoopNest::insertAllocFree(
-    StmtPtr stmt,
-    const c10::optional<std::unordered_set<BufPtr>>&
-        interm_bufs /* = c10::nullopt*/) {
-  std::unordered_set<BufPtr> intermediate_bufs;
-  if (interm_bufs) {
-    intermediate_bufs = *interm_bufs;
-  } else {
-    intermediate_bufs = getIntermediateBufs();
-  }
-
-  if (intermediate_bufs.size() == 0ULL) {
-    return stmt;
-  }
-
-  BlockPtr b = to<Block>(stmt);
-  if (!b) {
-    b = alloc<Block>(std::vector<StmtPtr>({stmt}));
-  }
-
-  std::unordered_map<BufPtr, std::vector<BufLoadOrStoreUse>> uses =
-      findLoadOrStoreUses(stmt);
-  // Insert allocations and frees for temporary buffers at global scope.
-  for (BufPtr buf : intermediate_bufs) {
-    b->prepend_stmt(alloc<Allocate>(buf));
-    b->append_stmt(alloc<Free>(buf));
-  }
-
-  return b;
-}
-
 class StmtDeleter : public IRMutator {
  public:
   StmtDeleter(const std::unordered_set<StmtPtr>& targets) : targets_(targets) {}
@@ -1216,17 +1189,12 @@ void LoopNest::eliminateDeadStores() {
   root_stmt_ = root_stmt_->accept_mutator(&deleter);
 }
 
-void LoopNest::prepareForCodegen(
-    const c10::optional<std::unordered_set<BufPtr>>&
-        interm_bufs /*= c10::nullopt*/) {
+void LoopNest::prepareForCodegen() {
   // Expand reduction ops.
   ReductionExpander reduceExpander;
   root_stmt_ = reduceExpander.expand(root_stmt_);
 
   root_stmt_ = FlattenIndexes(root_stmt_);
-
-  // Add allocs and frees for intermediate buffers at the global level.
-  root_stmt_ = insertAllocFree(root_stmt_, interm_bufs);
 }
 
 namespace {
@@ -1605,6 +1573,9 @@ void LoopNest::splitWithTail(
   if (!p) {
     throw malformed_input("splitWithTail attempted on loop with no parent", p);
   }
+
+  // Normalize the loop to simplify start and stop bound computation
+  normalize(f);
 
   bool tail_is_needed = true;
   if (intValue(f->start()) && intValue(f->stop())) {

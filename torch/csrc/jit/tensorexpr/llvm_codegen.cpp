@@ -55,6 +55,24 @@ C10_DEFINE_bool(
 namespace torch {
 namespace jit {
 namespace tensorexpr {
+
+c10::optional<std::string>& LLVMTargetTriple() {
+  static c10::optional<std::string> triple = c10::nullopt;
+  return triple;
+}
+c10::optional<std::string>& LLVMTargetCPU() {
+  static c10::optional<std::string> cpu = c10::nullopt;
+  return cpu;
+}
+c10::optional<std::string>& LLVMTargetAttrs() {
+  static c10::optional<std::string> attrs = c10::nullopt;
+  return attrs;
+}
+bool& LLVMAOTWorkflow() {
+  static bool aot_workflow = false;
+  return aot_workflow;
+}
+
 namespace {
 
 llvm::CmpInst::Predicate llvm_comparison_predicate(
@@ -150,6 +168,30 @@ struct FunctionCallee {
 #endif
 } // namespace
 
+class LLVMCodeGenCallee {
+ public:
+  LLVMCodeGenCallee(
+      std::unique_ptr<llvm::orc::PytorchLLVMJIT> jit,
+      void* kernelAddress)
+      : jit_(std::move(jit)), kernelAddress_(kernelAddress) {}
+
+  llvm::orc::PytorchLLVMJIT* getJIT() {
+    return jit_.get();
+  }
+
+  void* getKernelAddress() {
+    return kernelAddress_;
+  }
+
+  void setKernelAddress(void* kernelAddress) {
+    kernelAddress_ = kernelAddress;
+  }
+
+ private:
+  std::unique_ptr<llvm::orc::PytorchLLVMJIT> jit_;
+  void* kernelAddress_;
+};
+
 class LLVMCodeGenImpl : public IRVisitor {
  private:
   std::unique_ptr<llvm::LLVMContext> context_;
@@ -215,6 +257,7 @@ class LLVMCodeGenImpl : public IRVisitor {
   ~LLVMCodeGenImpl() = default;
 
   llvm::JITTargetAddress getKernelAddress() const;
+  std::unique_ptr<llvm::orc::PytorchLLVMJIT> releaseJIT();
 
   void visit(AddPtr v) override;
   void visit(SubPtr v) override;
@@ -247,6 +290,7 @@ class LLVMCodeGenImpl : public IRVisitor {
   void visit(IntrinsicsPtr v) override;
   void visit(AllocatePtr v) override;
   void visit(FreePtr v) override;
+  void visit(PlacementAllocatePtr v) override;
   void visit(LetPtr v) override;
   void visit(CondPtr v) override;
   void visit(ExternalCallPtr v) override;
@@ -274,26 +318,6 @@ class LLVMCodeGenImpl : public IRVisitor {
   }
 };
 
-extern "C" {
-typedef void (*ParallelCallee)(int64_t index, int8_t* packed_data);
-void DispatchParallel(
-    int8_t* func,
-    int64_t start,
-    int64_t stop,
-    int8_t* packed_data) noexcept {
-  // TODO: preserve the func type.
-  try {
-    ParallelCallee callee = reinterpret_cast<ParallelCallee>(func);
-    at::parallel_for(start, stop, 1, [&](int64_t f_begin, int64_t f_end) {
-      for (int64_t index = f_begin; index < f_end; index++) {
-        callee(index, packed_data);
-      }
-    });
-  } catch (...) {
-  }
-}
-}
-
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
@@ -312,12 +336,23 @@ LLVMCodeGen::LLVMCodeGen(
     c10::optional<std::string> triple,
     c10::optional<std::string> cpu,
     c10::optional<std::string> attrs)
-    : CodeGen(stmt, args, device, kernel_func_name),
-      impl_(std::make_unique<
-            LLVMCodeGenImpl>(stmt, args, device, dtype, triple, cpu, attrs)) {}
+    : CodeGen(stmt, args, device, kernel_func_name) {
+  impl_ = std::make_unique<LLVMCodeGenImpl>(
+      this->stmt(), args, device, dtype, triple, cpu, attrs);
+  callee_ = std::make_unique<LLVMCodeGenCallee>(
+      impl_->releaseJIT(), (void*)impl_->getKernelAddress());
+}
+
+void LLVMCodeGen::cleanup_memory() {
+  impl_.reset(nullptr);
+}
 
 void LLVMCodeGen::call_raw(const std::vector<void*>& args) {
   value<float>(const_cast<void**>(args.data()));
+}
+
+void LLVMCodeGen::call_with_numel(void** args, int64_t /* numel */) {
+  value<float>(const_cast<void**>(args));
 }
 
 void LLVMCodeGen::call(const std::vector<CallArg>& args) {
@@ -348,11 +383,14 @@ at::Tensor LLVMCodeGen::empty_strided(
       size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 }
 
-void* LLVMCodeGen::getKernelAddress(LLVMCodeGenImpl* impl) {
-  return (void*)impl->getKernelAddress();
+void* LLVMCodeGen::getKernelAddress(LLVMCodeGenCallee* callee) {
+  return (void*)callee->getKernelAddress();
 }
 
 std::string LLVMCodeGen::getCodeText(const std::string& attr /*=""*/) {
+  TORCH_INTERNAL_ASSERT(
+      impl_.get(),
+      "LLVMCodeGen memory has been cleaned up. So, code text is not available at this point");
   if (attr == "asm") {
     return impl_->getASMCodeText();
   } else {
@@ -362,6 +400,10 @@ std::string LLVMCodeGen::getCodeText(const std::string& attr /*=""*/) {
 
 llvm::JITTargetAddress LLVMCodeGenImpl::getKernelAddress() const {
   return kernelAddress_;
+}
+
+std::unique_ptr<llvm::orc::PytorchLLVMJIT> LLVMCodeGenImpl::releaseJIT() {
+  return std::move(jit_);
 }
 
 namespace {
@@ -379,6 +421,15 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
     c10::optional<std::string> cpu,
     c10::optional<std::string> attrs)
     : context_(std::make_unique<llvm::LLVMContext>()), irb_(getContext()) {
+  if (!triple) {
+    triple = LLVMTargetTriple();
+  }
+  if (!cpu) {
+    cpu = LLVMTargetCPU();
+  }
+  if (!attrs) {
+    attrs = LLVMTargetAttrs();
+  }
   // Manually map types to LLVM types.
   ByteTy_ = llvm::Type::getInt8Ty(getContext());
   CharTy_ = llvm::Type::getInt8Ty(getContext());
@@ -435,8 +486,10 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   emitKernel(stmt, params);
 
   jit_->addModule(std::move(module_), std::move(context_));
-  auto sym = jit_->findSymbol("wrapper");
-  kernelAddress_ = assertSuccess(sym.getAddress());
+  if (!LLVMAOTWorkflow()) {
+    auto sym = jit_->findSymbol("wrapper");
+    kernelAddress_ = assertSuccess(sym.getAddress());
+  }
 }
 
 llvm::LLVMContext& LLVMCodeGenImpl::getContext() {
@@ -452,6 +505,14 @@ llvm::Type* LLVMCodeGenImpl::dtypeToLLVM(Dtype dtype) {
 
     AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
+    case ScalarType::QInt8:
+      return CharTy_;
+      break;
+
+    case ScalarType::QUInt8:
+      return ByteTy_;
+      break;
+
     default:
       throw unsupported_dtype();
   }
@@ -933,9 +994,11 @@ void LLVMCodeGenImpl::visit(CastPtr v) {
   }
 
   bool destUnsigned = v->dtype().scalar_type() == ScalarType::Byte ||
+      v->dtype().scalar_type() == ScalarType::QUInt8 ||
       v->dtype().scalar_type() == ScalarType::Bool;
   bool srcUnsigned =
       v->src_value()->dtype().scalar_type() == ScalarType::Byte ||
+      v->src_value()->dtype().scalar_type() == ScalarType::QUInt8 ||
       v->src_value()->dtype().scalar_type() == ScalarType::Bool;
 
   // Scalar casts
@@ -1076,6 +1139,12 @@ void LLVMCodeGenImpl::visit(RampPtr v) {
     break;
     AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
+    case ScalarType::QInt8:
+      vecType = llvm::VectorType::get(CharTy_, element_count);
+      break;
+    case ScalarType::QUInt8:
+      vecType = llvm::VectorType::get(ByteTy_, element_count);
+      break;
     default:
       throw std::runtime_error("invalid dtype in Ramp");
   }
@@ -1143,12 +1212,15 @@ void LLVMCodeGenImpl::visit(LoadPtr v) {
     break;
     AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
+    case ScalarType::QInt8:
+      loadType = llvm::VectorType::get(CharTy_, element_count);
+      break;
+    case ScalarType::QUInt8:
+      loadType = llvm::VectorType::get(ByteTy_, element_count);
+      break;
     default:
       throw std::runtime_error("invalid dtype in Load");
   }
-
-  // Detect whether the vector mask is all true
-  bool unmasked_load = true;
 
   // Handle the case where the load is contiguous and unmasked efficiently
   auto idx_ramp = to<Ramp>(v->flat_index());
@@ -1801,9 +1873,6 @@ void LLVMCodeGenImpl::visit(IntrinsicsPtr v) {
 }
 
 void LLVMCodeGenImpl::visit(ExternalCallPtr v) {
-  constexpr int max_buffers = 10;
-  constexpr int max_dimensions = 40;
-
   auto& func_registry = getNNCFunctionRegistry();
   if (!func_registry.count(v->func_name())) {
     throw unimplemented_lowering(v);
@@ -1830,6 +1899,8 @@ void LLVMCodeGenImpl::visit(ExternalCallPtr v) {
       LongTy_, llvm::ConstantInt::getSigned(IntTy_, bufs_num));
   llvm::Value* buf_dims = irb_.CreateAlloca(
       LongTy_, llvm::ConstantInt::getSigned(IntTy_, dims_num));
+  llvm::Value* buf_strides = irb_.CreateAlloca(
+      LongTy_, llvm::ConstantInt::getSigned(IntTy_, dims_num));
   llvm::Value* buf_dtypes = irb_.CreateAlloca(
       ByteTy_, llvm::ConstantInt::getSigned(IntTy_, bufs_num));
   llvm::Value* extra_args = irb_.CreateAlloca(
@@ -1837,6 +1908,7 @@ void LLVMCodeGenImpl::visit(ExternalCallPtr v) {
 
   int i = 0;
   int dim_idx = 0;
+  int stride_idx = 0;
   for (BufPtr b : bufs) {
     // Store value for buf pointer
     auto gep = irb_.CreateInBoundsGEP(
@@ -1869,6 +1941,16 @@ void LLVMCodeGenImpl::visit(ExternalCallPtr v) {
       dim_idx++;
     }
 
+    // Store strides of the buf
+    for (const auto dim : c10::irange(b->dims().size())) {
+      gep = irb_.CreateInBoundsGEP(
+          buf_strides, {llvm::ConstantInt::getSigned(IntTy_, stride_idx)});
+      b->strides()[dim]->accept(this);
+      auto stride_val = this->value_;
+      irb_.CreateStore(irb_.CreateZExt(stride_val, LongTy_), gep);
+      stride_idx++;
+    }
+
     i++;
   }
 
@@ -1891,6 +1973,7 @@ void LLVMCodeGenImpl::visit(ExternalCallPtr v) {
            Int8PtrTy_->getPointerTo(), // void** buf_data
            LongTy_->getPointerTo(), // int64_t* buf_ranks
            LongTy_->getPointerTo(), // int64_t* buf_dims
+           LongTy_->getPointerTo(), // int64_t* buf_strides
            ByteTy_->getPointerTo(), // int64_t* buf_dtypes
            LongTy_, // int64_t args_num
            LongTy_->getPointerTo()}, // int64_t* extra_args
@@ -1907,6 +1990,7 @@ void LLVMCodeGenImpl::visit(ExternalCallPtr v) {
        buf_ptrs,
        buf_ranks,
        buf_dims,
+       buf_strides,
        buf_dtypes,
        llvm::ConstantInt::getSigned(LongTy_, args_num),
        extra_args});
@@ -1944,6 +2028,11 @@ void LLVMCodeGenImpl::visit(AllocatePtr v) {
   irb_.SetInsertPoint(irb_.GetInsertBlock());
   llvm::Value* malloc = irb_.Insert(I);
   varToVal_[v->buffer_var()] = malloc;
+}
+
+void LLVMCodeGenImpl::visit(PlacementAllocatePtr v) {
+  llvm::Value* ptr = varToVal_.at(v->buf_to_reuse()->base_handle());
+  varToVal_[v->buf()->base_handle()] = ptr;
 }
 
 void LLVMCodeGenImpl::visit(FreePtr v) {

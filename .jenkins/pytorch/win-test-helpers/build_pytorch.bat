@@ -97,23 +97,20 @@ set CXX=sccache-cl
 set CMAKE_GENERATOR=Ninja
 
 if "%USE_CUDA%"=="1" (
-  copy %TMP_DIR_WIN%\bin\sccache.exe %TMP_DIR_WIN%\bin\nvcc.exe
-
   :: randomtemp is used to resolve the intermittent build error related to CUDA.
   :: code: https://github.com/peterjc123/randomtemp-rust
   :: issue: https://github.com/pytorch/pytorch/issues/25393
   ::
-  :: Previously, CMake uses CUDA_NVCC_EXECUTABLE for finding nvcc and then
-  :: the calls are redirected to sccache. sccache looks for the actual nvcc
-  :: in PATH, and then pass the arguments to it.
-  :: Currently, randomtemp is placed before sccache (%TMP_DIR_WIN%\bin\nvcc)
-  :: so we are actually pretending sccache instead of nvcc itself.
-  curl -kL https://github.com/peterjc123/randomtemp-rust/releases/download/v0.3/randomtemp.exe --output %TMP_DIR_WIN%\bin\randomtemp.exe
+  :: CMake requires a single command as CUDA_NVCC_EXECUTABLE, so we push the wrappers
+  :: randomtemp.exe and sccache.exe into a batch file which CMake invokes.
+  curl -kL https://github.com/peterjc123/randomtemp-rust/releases/download/v0.4/randomtemp.exe --output %TMP_DIR_WIN%\bin\randomtemp.exe
   if errorlevel 1 exit /b
   if not errorlevel 0 exit /b
-  set RANDOMTEMP_EXECUTABLE=%TMP_DIR_WIN%\bin\nvcc.exe
-  set CUDA_NVCC_EXECUTABLE=%TMP_DIR_WIN%\bin\randomtemp.exe
-  set RANDOMTEMP_BASEDIR=%TMP_DIR_WIN%\bin
+  echo @"%TMP_DIR_WIN%\bin\randomtemp.exe" "%TMP_DIR_WIN%\bin\sccache.exe" "%CUDA_PATH%\bin\nvcc.exe" %%* > "%TMP_DIR%/bin/nvcc.bat"
+  cat %TMP_DIR%/bin/nvcc.bat
+  set CUDA_NVCC_EXECUTABLE=%TMP_DIR%/bin/nvcc.bat
+  for /F "usebackq delims=" %%n in (`cygpath -m "%CUDA_PATH%\bin\nvcc.exe"`) do set CMAKE_CUDA_COMPILER=%%n
+  set CMAKE_CUDA_COMPILER_LAUNCHER=%TMP_DIR%/bin/randomtemp.exe;%TMP_DIR%\bin\sccache.exe
 )
 
 @echo off

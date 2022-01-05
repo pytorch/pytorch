@@ -1,16 +1,42 @@
-#include <ATen/ATen.h>
+#include <ATen/Functions.h>
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
+#include <ATen/cuda/CachingHostAllocator.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAEvent.h>
+#include <ATen/cuda/PeerToPeerAccess.h>
 #include <c10/cuda/CUDAStream.h>
 #include <ATen/native/Copy.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
-#include <THC/THC.h>
 
 namespace at {
 namespace native {
+
+void neg_kernel_cuda(TensorIteratorBase &iter);
+void conj_kernel_cuda(TensorIteratorBase &iter);
+
+namespace {
+void direct_copy_kernel_cuda(TensorIteratorBase &iter) {
+  ScalarType dtype = iter.dtype(0);
+  if (isQIntType(dtype)) {
+    AT_DISPATCH_QINT_TYPES(dtype, "copy_", [&] {
+      gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
+    });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+        kHalf, kBool, kBFloat16, dtype, "copy_", [&] {
+          gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
+    });
+  }
+}
+
+void neg_conj_kernel_cuda(TensorIteratorBase &iter) {
+  AT_DISPATCH_COMPLEX_TYPES(iter.common_dtype(), "neg_conj_cuda", [&] {
+    gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return -std::conj(x); });
+  });
+}
+}  // namespace (anonymous)
 
 using namespace at::cuda;
 
@@ -63,36 +89,17 @@ void copy_device_to_device(TensorIterator& iter, bool non_blocking) {
           copy_stream));
     }
   } else {
-    auto dtype = iter.dtype(0);
-    if (isQIntType(dtype)) {
-      AT_DISPATCH_QINT_TYPES(dtype, "copy_", [&] {
-        gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
-      });
-    } else {
-      if (same_neg) {
-        if (!same_conj && same_type) {
-          AT_DISPATCH_COMPLEX_TYPES(
-              dtype, "copy_conj_", [&] {
-                gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return std::conj(x); });
-              });
-        } else {
-          AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-              kHalf, kBool, kBFloat16, dtype, "copy_", [&] {
-                gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
-              });
-        }
+    if (same_neg) {
+      if (!same_conj && same_type) {
+        conj_kernel_cuda(iter);
       } else {
-        if (!same_conj && same_type) {
-          AT_DISPATCH_COMPLEX_TYPES(
-              dtype, "copy_conj_", [&] {
-                gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return std::conj(-x); });
-              });
-        } else {
-          AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-              kHalf, kBool, kBFloat16, dtype, "copy_", [&] {
-                gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return -x; });
-              });
-        }
+        direct_copy_kernel_cuda(iter);
+      }
+    } else {
+      if (!same_conj && same_type) {
+        neg_conj_kernel_cuda(iter);
+      } else {
+        neg_kernel_cuda(iter);
       }
     }
   }
@@ -140,8 +147,7 @@ static bool maybe_enable_p2p_access(Device dst_device, Device src_device) {
   if (dst_device.is_cpu() || src_device.is_cpu()) {
     return false;
   }
-  return THCState_getPeerToPeerAccess(
-        globalContext().getTHCState(), src_device.index(), dst_device.index());
+  return at::cuda::get_p2p_access(src_device.index(), dst_device.index());
 }
 
 static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
@@ -218,7 +224,7 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
   if (non_blocking) {
     AT_CUDA_CHECK(cudaMemcpyAsync(dst, src, nbytes, kind, stream));
     void* ptr = (dst_device == kCPU ? dst : src);
-    AT_CUDA_CHECK(THCCachingHostAllocator_recordEvent(ptr, stream));
+    AT_CUDA_CHECK(CachingHostAllocator_recordEvent(ptr, stream));
   } else {
     at::cuda::memcpy_and_sync(dst, src, nbytes, kind, stream);
   }

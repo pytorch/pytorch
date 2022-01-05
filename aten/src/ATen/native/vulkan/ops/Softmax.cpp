@@ -77,16 +77,20 @@ Tensor softmax_internal(
           shader_descriptor,
           global_work_group_size,
           local_work_group_size,
-          // Shader parameters
-          block,
-          // Textures
+          // Write-only access bypasses synchronization but inserts appropriate
+          // barriers if necessary.
           v_output.image(
               command_buffer,
               vTensor::Stage::Compute,
               vTensor::Access::Write),
+          // Read-only access is implied on const tensors and triggers an async
+          // synchronization if necessary.
           v_input.image(
               command_buffer,
-              vTensor::Stage::Compute));
+              vTensor::Stage::Compute),
+          // Object lifetime is managed by the resource pool.
+          // It is OK not to keep track of the handle.
+          context->resource().pool.uniform(block).object);
     }
     else {
       TORCH_CHECK(false, "Not implemented!");

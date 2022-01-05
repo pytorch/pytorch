@@ -8,7 +8,7 @@
 
 #include <ATen/AccumulateType.h>
 
-#include <ATen/cuda/cub.cuh>
+#include <ATen/cuda/cub.h>
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/EmbeddingBackwardKernel.cuh>
 #include <ATen/native/cuda/KernelUtils.cuh>
@@ -177,7 +177,7 @@ Tensor embedding_bag_backward_cuda_sum_avg(
   AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_bag_backward_cuda_sum_avg", [&] () {
     auto range = at::arange(num_indices, indices.options());
     int64_t nbits = cuda::cub::get_num_bits(num_weights);
-    cuda::cub::sort_pairs(
+    cuda::cub::radix_sort_pairs(
       indices.data_ptr<index_t>(), sorted_indices.data_ptr<index_t>(),
       range.data_ptr<index_t>(), orig_indices.data_ptr<index_t>(),
       num_indices, false/*, 0, nbits*/);
@@ -237,7 +237,7 @@ Tensor embedding_bag_backward_cuda_max(const Tensor &grad,
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
   dim3 block = dim3(64, 4);
 #else
   dim3 block = dim3(32, 8);
@@ -335,7 +335,7 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices_,
     max_indices = at::empty({0}, indices.options());
   }
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
   dim3 block = dim3(64, 4);
 #else
   dim3 block = dim3(32, 8);

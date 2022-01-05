@@ -15,7 +15,7 @@ class ReLU6(torch.nn.ReLU):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/ReLU6.png
+    .. image:: ../scripts/activation_images/ReLU6.png
 
     Examples::
 

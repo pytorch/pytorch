@@ -399,8 +399,8 @@ void TensorSerializer::SerializeWithOptions(
   std::vector<std::future<void>> futures;
   if (tensor.numel() > chunk_size) {
     futures.reserve(FLAGS_caffe2_max_tensor_serializer_threads);
-    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
     for (const auto i : c10::irange(FLAGS_caffe2_max_tensor_serializer_threads)) {
+      (void)i;
       futures.emplace_back(std::async(std::launch::async, task));
     }
   }

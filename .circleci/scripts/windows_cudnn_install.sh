@@ -19,6 +19,9 @@ case ${CUDA_VERSION} in
     11.3)
         archive_version="v8.2.0.53"
         ;;
+    11.5)
+        archive_version="v8.2.0.53"
+        ;;
     *)
         echo "CUDA_VERSION: ${CUDA_VERSION} not supported yet"
         exit 1

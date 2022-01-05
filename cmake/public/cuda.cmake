@@ -35,6 +35,13 @@ if(NOT CUDA_FOUND)
   set(CAFFE2_USE_CUDA OFF)
   return()
 endif()
+
+# Enable CUDA language support
+set(CUDAToolkit_ROOT "${CUDA_TOOLKIT_ROOT_DIR}")
+enable_language(CUDA)
+set(CMAKE_CUDA_STANDARD ${CMAKE_CXX_STANDARD})
+set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+
 message(STATUS "Caffe2: CUDA detected: " ${CUDA_VERSION})
 message(STATUS "Caffe2: CUDA nvcc is: " ${CUDA_NVCC_EXECUTABLE})
 message(STATUS "Caffe2: CUDA toolkit directory: " ${CUDA_TOOLKIT_ROOT_DIR})
@@ -435,6 +442,8 @@ endif()
 
 # setting nvcc arch flags
 torch_cuda_get_nvcc_gencode_flag(NVCC_FLAGS_EXTRA)
+# CMake 3.18 adds integrated support for architecture selection, but we can't rely on it
+set(CMAKE_CUDA_ARCHITECTURES OFF)
 list(APPEND CUDA_NVCC_FLAGS ${NVCC_FLAGS_EXTRA})
 message(STATUS "Added CUDA NVCC flags for: ${NVCC_FLAGS_EXTRA}")
 
@@ -453,14 +462,10 @@ endforeach()
 string(REPLACE ";" "," SUPPRESS_WARNING_FLAGS "${SUPPRESS_WARNING_FLAGS}")
 list(APPEND CUDA_NVCC_FLAGS -Xcudafe ${SUPPRESS_WARNING_FLAGS})
 
-# Set C++14 support
 set(CUDA_PROPAGATE_HOST_FLAGS_BLOCKLIST "-Werror")
 if(MSVC)
   list(APPEND CUDA_NVCC_FLAGS "--Werror" "cross-execution-space-call")
   list(APPEND CUDA_NVCC_FLAGS "--no-host-device-move-forward")
-else()
-  list(APPEND CUDA_NVCC_FLAGS "-std=c++14")
-  list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-fPIC")
 endif()
 
 # OpenMP flags for NVCC with Clang-cl
@@ -477,9 +482,15 @@ endif()
 # Debug and Release symbol support
 if(MSVC)
   if(${CAFFE2_USE_MSVC_STATIC_RUNTIME})
-    list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-MT$<$<CONFIG:Debug>:d>")
+    string(APPEND CMAKE_CUDA_FLAGS_DEBUG " -Xcompiler /MTd")
+    string(APPEND CMAKE_CUDA_FLAGS_MINSIZEREL " -Xcompiler /MT")
+    string(APPEND CMAKE_CUDA_FLAGS_RELEASE " -Xcompiler /MT")
+    string(APPEND CMAKE_CUDA_FLAGS_RELWITHDEBINFO " -Xcompiler /MT")
   else()
-    list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-MD$<$<CONFIG:Debug>:d>")
+    string(APPEND CMAKE_CUDA_FLAGS_DEBUG " -Xcompiler /MDd")
+    string(APPEND CMAKE_CUDA_FLAGS_MINSIZEREL " -Xcompiler /MD")
+    string(APPEND CMAKE_CUDA_FLAGS_RELEASE " -Xcompiler /MD")
+    string(APPEND CMAKE_CUDA_FLAGS_RELWITHDEBINFO " -Xcompiler /MD")
   endif()
   if(CUDA_NVCC_FLAGS MATCHES "Zi")
     list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-FS")
@@ -493,3 +504,11 @@ list(APPEND CUDA_NVCC_FLAGS "--expt-relaxed-constexpr")
 
 # Set expt-extended-lambda to support lambda on device
 list(APPEND CUDA_NVCC_FLAGS "--expt-extended-lambda")
+
+foreach(FLAG ${CUDA_NVCC_FLAGS})
+  string(FIND "${FLAG}" " " flag_space_position)
+  if(NOT flag_space_position EQUAL -1)
+    message(FATAL_ERROR "Found spaces in CUDA_NVCC_FLAGS entry '${FLAG}'")
+  endif()
+  string(APPEND CMAKE_CUDA_FLAGS " ${FLAG}")
+endforeach()

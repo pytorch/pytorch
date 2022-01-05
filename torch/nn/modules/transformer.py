@@ -130,12 +130,13 @@ class Transformer(Module):
             >>> output = transformer_model(src, tgt, src_mask=src_mask, tgt_mask=tgt_mask)
         """
 
-        if not self.batch_first and src.size(1) != tgt.size(1):
+        is_batched = src.dim() == 3
+        if not self.batch_first and src.size(1) != tgt.size(1) and is_batched:
             raise RuntimeError("the batch number of src and tgt must be equal")
-        elif self.batch_first and src.size(0) != tgt.size(0):
+        elif self.batch_first and src.size(0) != tgt.size(0) and is_batched:
             raise RuntimeError("the batch number of src and tgt must be equal")
 
-        if src.size(2) != self.d_model or tgt.size(2) != self.d_model:
+        if src.size(-1) != self.d_model or tgt.size(-1) != self.d_model:
             raise RuntimeError("the feature number of src and tgt must be equal to d_model")
 
         memory = self.encoder(src, mask=src_mask, src_key_padding_mask=src_key_padding_mask)
@@ -272,7 +273,7 @@ class TransformerEncoderLayer(Module):
             ("relu" or "gelu") or a unary callable. Default: relu
         layer_norm_eps: the eps value in layer normalization components (default=1e-5).
         batch_first: If ``True``, then the input and output tensors are provided
-            as (batch, seq, feature). Default: ``False``.
+            as (batch, seq, feature). Default: ``False`` (seq, batch, feature).
         norm_first: if ``True``, layer norm is done prior to attention and feedforward
             operations, respectivaly. Otherwise it's done after. Default: ``False`` (after).
 
@@ -288,8 +289,9 @@ class TransformerEncoderLayer(Module):
     """
     __constants__ = ['batch_first', 'norm_first']
 
-    def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1, activation=F.relu,
-                 layer_norm_eps=1e-5, batch_first=False, norm_first=False,
+    def __init__(self, d_model: int, nhead: int, dim_feedforward: int = 2048, dropout: float = 0.1,
+                 activation: Union[str, Callable[[Tensor], Tensor]] = F.relu,
+                 layer_norm_eps: float = 1e-5, batch_first: bool = False, norm_first: bool = False,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
         super(TransformerEncoderLayer, self).__init__()
@@ -373,7 +375,7 @@ class TransformerDecoderLayer(Module):
             ("relu" or "gelu") or a unary callable. Default: relu
         layer_norm_eps: the eps value in layer normalization components (default=1e-5).
         batch_first: If ``True``, then the input and output tensors are provided
-            as (batch, seq, feature). Default: ``False``.
+            as (batch, seq, feature). Default: ``False`` (seq, batch, feature).
         norm_first: if ``True``, layer norm is done prior to self attention, multihead
             attention and feedforward operations, respectivaly. Otherwise it's done after.
             Default: ``False`` (after).
@@ -392,8 +394,9 @@ class TransformerDecoderLayer(Module):
     """
     __constants__ = ['batch_first', 'norm_first']
 
-    def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1, activation=F.relu,
-                 layer_norm_eps=1e-5, batch_first=False, norm_first=False,
+    def __init__(self, d_model: int, nhead: int, dim_feedforward: int = 2048, dropout: float = 0.1,
+                 activation: Union[str, Callable[[Tensor], Tensor]] = F.relu,
+                 layer_norm_eps: float = 1e-5, batch_first: bool = False, norm_first: bool = False,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
         super(TransformerDecoderLayer, self).__init__()
