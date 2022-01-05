@@ -6269,9 +6269,9 @@ class TestNN(NNTestCase):
             output.mean().backward()
 
 
+    @skipIfRocm
     # For https://github.com/pytorch/pytorch/pull/1273
     # Almost identical to the above `test_Conv2d_naive_groups`
-    @skipIfRocm
     def test_Conv2d_groups_nobias(self):
         dev_dtypes = [("cpu", torch.float)]
         if TEST_CUDA:
@@ -13098,11 +13098,11 @@ class TestNNDeviceType(NNTestCase):
         torch.cuda.synchronize()
 
 
+    @onlyCUDA
+    @tf32_on_and_off(0.01)
+    @dtypes(*ALL_TENSORTYPES)
     # Very similar to test_Conv2d_naive_groups but with special care to handle
     # the number of groups == number of input channels
-    @onlyCUDA
-    @dtypes(*ALL_TENSORTYPES)
-    @tf32_on_and_off(0.01)
     def test_Conv2d_depthwise_naive_groups(self, device, dtype):
         for depth_multiplier in [1, 2]:
             m = nn.Conv2d(2, 2 * depth_multiplier, kernel_size=3, groups=2).to(device, dtype)
