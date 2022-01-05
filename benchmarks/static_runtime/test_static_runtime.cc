@@ -1015,16 +1015,34 @@ TEST(StaticRuntime, to) {
     std::vector<IValue> args0{a, b, c, d, e};
     std::vector<IValue> args1{a, b, c, d};
     std::vector<IValue> args2{a, other, c, d, e};
+    std::vector<IValue> args2WithDifferentOtherType{
+        a, at::randn({4, 3, 1, 2}, ScalarType::Double), c, d, e};
     std::vector<IValue> args3{a, c10::nullopt, c, d};
 
-    testStaticRuntime(to_script_dtype, args0);
+    std::vector<IValue> args0WithInt{a, ScalarType::Int, c, d, e};
+    testStaticRuntime(
+        to_script_dtype,
+        args0,
+        args0WithInt,
+        /* default for use_allclose */ false,
+        /* default for use_equalnan */ false,
+        /* check_resize */ false);
     testStaticRuntime(to_script_dtype_strided, args0);
     testStaticRuntime(to_script_prim_dtype, args1);
     if (!d) {
       testStaticRuntime(to_script_prim_dtype, args3);
     }
-    testStaticRuntime(to_script_other, args2);
+    // Second set of args tests case where the `other` tensor's dtype
+    // changes between iterations.
+    testStaticRuntime(
+        to_script_other,
+        args2,
+        args2WithDifferentOtherType,
+        /* default for use_allclose */ false,
+        /* default for use_equalnan */ false,
+        /* check_resize */ false);
     testStaticRuntime(to_script_alias, {a});
+
     testStaticRuntime(to_script_memory_planning_fail, {a, a});
     testStaticRuntime(to_script_fails_managed_output_check, {a, a});
 
