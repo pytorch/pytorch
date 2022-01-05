@@ -13042,16 +13042,16 @@ class TestNNDeviceType(NNTestCase):
     @skipCUDAIfNoCudnn
     @dtypes(*get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM))
     def test_Conv2d_deterministic_cudnn(self, device, dtype):
-        inputs = torch.randn(2, 3, 5, 5, device="cuda", dtype=dtype, requires_grad=True)
+        inputs = torch.randn(2, 3, 5, 5, device=device, dtype=dtype, requires_grad=True)
         with cudnn.flags(enabled=True, benchmark=True, deterministic=True):
-            conv1 = torch.nn.Conv2d(3, 3, 3).to("cuda", dtype)
-            conv2 = torch.nn.Conv2d(3, 3, 3).to("cuda", dtype)
+            conv1 = torch.nn.Conv2d(3, 3, 3).to(device, dtype)
+            conv2 = torch.nn.Conv2d(3, 3, 3).to(device, dtype)
             conv2.bias.data.copy_(conv1.bias.data)
             conv2.weight.data.copy_(conv1.weight.data)
             out1 = conv1(inputs)
             out2 = conv2(inputs)
             self.assertEqual(out1, out2, atol=0.0, rtol=0)
-            y = torch.randn(out1.size(), device="cuda", dtype=dtype)
+            y = torch.randn(out1.size(), device=device, dtype=dtype)
             out1.backward(y)
             out2.backward(y)
             self.assertEqual(conv1.bias.grad.data, conv2.bias.grad.data, atol=0.0, rtol=0)
@@ -13071,9 +13071,9 @@ class TestNNDeviceType(NNTestCase):
 
         def run_test(benchmark):
             with torch.backends.cudnn.flags(benchmark=benchmark):
-                conv = torch.nn.Conv2d(256, 256, kernel_size=3, padding=1).to("cuda", dtype)
+                conv = torch.nn.Conv2d(256, 256, kernel_size=3, padding=1).to(device, dtype)
                 for size in sizes:
-                    x = torch.randn(size, device="cuda", dtype=dtype)
+                    x = torch.randn(size, device=device, dtype=dtype)
                     out = conv(x.detach().clone().requires_grad_())
                     out.backward(torch.ones_like(out))
 
@@ -13085,12 +13085,12 @@ class TestNNDeviceType(NNTestCase):
     @dtypes(torch.half, torch.float)
     def test_ConvTranspose2d_large_output_padding(self, device, dtype):
         net1 = torch.nn.ConvTranspose2d(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1)\
-            .to(device='cuda', dtype=dtype)
+            .to(device=device, dtype=dtype)
         net2 = torch.nn.ConvTranspose2d(64, 32, kernel_size=3, stride=2, padding=1, output_padding=1)\
-            .to(device='cuda', dtype=dtype)
+            .to(device=device, dtype=dtype)
         net3 = torch.nn.ConvTranspose2d(32, 3, kernel_size=3, stride=2, padding=1, output_padding=1)\
-            .to(device='cuda', dtype=dtype)
-        x = torch.rand(1, 128, 6, 6, device='cuda', dtype=dtype, requires_grad=True)
+            .to(device=device, dtype=dtype)
+        x = torch.rand(1, 128, 6, 6, device=device, dtype=dtype, requires_grad=True)
         x = net1(x)
         x = net2(x)
         x = net3(x)
@@ -13105,22 +13105,22 @@ class TestNNDeviceType(NNTestCase):
     @tf32_on_and_off(0.01)
     def test_Conv2d_depthwise_naive_groups(self, device, dtype):
         for depth_multiplier in [1, 2]:
-            m = nn.Conv2d(2, 2 * depth_multiplier, kernel_size=3, groups=2).to("cuda", dtype)
+            m = nn.Conv2d(2, 2 * depth_multiplier, kernel_size=3, groups=2).to(device, dtype)
             i = torch.randn(2, 2, 6, 6, device="cuda", dtype=dtype).div_(2).requires_grad_()
             output = m(i)
-            grad_output = torch.randn(2, 2 * depth_multiplier, 4, 4, device="cuda", dtype=dtype) / 2
+            grad_output = torch.randn(2, 2 * depth_multiplier, 4, 4, device=device, dtype=dtype) / 2
             output.backward(grad_output)
 
             offset = 1 * depth_multiplier
 
-            m1 = nn.Conv2d(1, 1 * depth_multiplier, kernel_size=3).to("cuda", dtype)
+            m1 = nn.Conv2d(1, 1 * depth_multiplier, kernel_size=3).to(device, dtype)
             m1.weight.data = m.weight.data[:offset].clone()
             m1.bias.data = m.bias.data[:offset].clone()
             i1 = i.detach()[:, :1].clone().requires_grad_()
             output1 = m1(i1)
             output1.backward(grad_output[:, :offset].contiguous())
 
-            m2 = nn.Conv2d(1, 1 * depth_multiplier, kernel_size=3).to("cuda", dtype)
+            m2 = nn.Conv2d(1, 1 * depth_multiplier, kernel_size=3).to(device, dtype)
             m2.weight.data.copy_(m.weight.data[offset:])
             m2.bias.data.copy_(m.bias.data[offset:])
             i2 = i.detach()[:, 1:].clone().requires_grad_()
@@ -13146,22 +13146,22 @@ class TestNNDeviceType(NNTestCase):
     @tf32_on_and_off(0.005)
     def test_Conv3d_depthwise_naive_groups(self, device, dtype):
         for depth_multiplier in [1, 2]:
-            m = nn.Conv3d(2, 2 * depth_multiplier, kernel_size=3, groups=2).to("cuda", dtype)
+            m = nn.Conv3d(2, 2 * depth_multiplier, kernel_size=3, groups=2).to(device, dtype)
             i = torch.randn(2, 2, 6, 6, 6, device="cuda", dtype=dtype).div_(2).requires_grad_()
             output = m(i)
-            grad_output = torch.randn(2, 2 * depth_multiplier, 4, 4, 4, device="cuda", dtype=dtype) / 2
+            grad_output = torch.randn(2, 2 * depth_multiplier, 4, 4, 4, device=device, dtype=dtype) / 2
             output.backward(grad_output)
 
             offset = 1 * depth_multiplier
 
-            m1 = nn.Conv3d(1, 1 * depth_multiplier, kernel_size=3).to("cuda", dtype)
+            m1 = nn.Conv3d(1, 1 * depth_multiplier, kernel_size=3).to(device, dtype)
             m1.weight.data = m.weight.data[:offset].clone()
             m1.bias.data = m.bias.data[:offset].clone()
             i1 = i.detach()[:, :1].clone().requires_grad_()
             output1 = m1(i1)
             output1.backward(grad_output[:, :offset].contiguous())
 
-            m2 = nn.Conv3d(1, 1 * depth_multiplier, kernel_size=3).to("cuda", dtype)
+            m2 = nn.Conv3d(1, 1 * depth_multiplier, kernel_size=3).to(device, dtype)
             m2.weight.data.copy_(m.weight.data[offset:])
             m2.bias.data.copy_(m.bias.data[offset:])
             i2 = i.detach()[:, 1:].clone().requires_grad_()
@@ -13187,11 +13187,11 @@ class TestNNDeviceType(NNTestCase):
     @dtypes(*get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM))
     def test_noncontig_conv_grad(self, device, dtype):
         # FIXME: remove after adding non-contiguous grad tests for all modules
-        module = nn.Conv2d(3, 5, kernel_size=3, padding=1).to("cuda", dtype)
-        input = torch.randn(2, 3, 10, 10, dtype=dtype, device="cuda", requires_grad=True)
+        module = nn.Conv2d(3, 5, kernel_size=3, padding=1).to(device, dtype)
+        input = torch.randn(2, 3, 10, 10, dtype=dtype, device=device, requires_grad=True)
         output = module(input)
 
-        grad = torch.randn(2, 2, 5, 10, 10, dtype=dtype, device="cuda")[:, 1]
+        grad = torch.randn(2, 2, 5, 10, 10, dtype=dtype, device=device)[:, 1]
         assert not grad.is_contiguous()
         output.backward(grad, retain_graph=True)
         self.assertIsNotNone(input.grad)
@@ -13205,8 +13205,8 @@ class TestNNDeviceType(NNTestCase):
     @onlyCUDA
     @dtypes(torch.float, torch.half)
     def test_batchnorm_large_batch(self, device, dtype):
-        bn = nn.BatchNorm2d(1).to('cuda', dtype)
-        data = torch.rand(880801, 1, 1, 1, device="cuda", dtype=dtype)
+        bn = nn.BatchNorm2d(1).to(device, dtype)
+        data = torch.rand(880801, 1, 1, 1, device=device, dtype=dtype)
         out = bn(data).sum().backward()
 
 
@@ -13214,7 +13214,7 @@ class TestNNDeviceType(NNTestCase):
     @dtypes(*DOUBLE_TENSORTYPES)
     def test_conv_double_backward(self, device, dtype):
         with torch.backends.cudnn.flags(deterministic=True):
-            # Double backward only runs with DoubleTensor due to precison reason
+            # Double backward only runs with DoubleTensor due to precision reason
             batch_size = 1
             for kern, inp_size, dilations in [(3, 5, [1, 2]), (4, 9, [1])]:
                 for stride, padding, chan_in, chan_out, dilation in product([1], [2], [2], [3], dilations):
