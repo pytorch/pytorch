@@ -113,6 +113,11 @@ def add_auto_observation(
             kwargs = kwargs if kwargs else {}
             hook_type = get_torch_function_hook_type(parent_module, func)
 
+            if first_call and hook_type is not HookType.OP_HOOKS:
+                qstate = getattr(parent_module, '_auto_quant_state', None)
+                if qstate:
+                    qstate.add_seen_op_type_without_op_hooks(func)
+
             if hook_type is HookType.OP_HOOKS:
                 qstate = parent_module._auto_quant_state  # type: ignore[attr-defined]
                 fqn = module_id_to_fqn[id(parent_module)] if parent_module else None
@@ -199,6 +204,14 @@ def add_auto_observation(
                     fqn = module_id_to_fqn.get(id(self), None)
 
                     hook_type = get_module_hook_type(parent_module, cur_module)
+
+                    if first_call and hook_type is not HookType.OP_HOOKS and \
+                            parent_module is not None:
+                        parent_qstate_fc = getattr(
+                            parent_module, '_auto_quant_state', None)
+                        if parent_qstate_fc:
+                            parent_qstate_fc.add_seen_op_type_without_op_hooks(
+                                type(cur_module))
 
                     if hook_type is HookType.OP_HOOKS:
                         parent_qstate: AutoQuantizationState = \
