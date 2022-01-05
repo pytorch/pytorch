@@ -1107,11 +1107,11 @@ Tensor TensorExprKernel::convertOutputToCorrectStrides(std::vector<ExprHandle>& 
         std::vector<ExprHandle> new_axes(sorted_stride_indices_descending.size());
         for (size_t stride_index : sorted_stride_indices_descending) {
           auto size = sizes[stride_index];
-          auto index = zero;
           auto stride = strides[stride_index];
+          auto index = absolute_position / ExprHandle(stride);
           auto one = Cast::make(size.dtype(), 1);
-          auto non_one_index = absolute_position / ExprHandle(stride);
-          index = CompareSelect::make(size, one, index, non_one_index, kEQ);
+          // if the size is one, we don't advance the absolute position
+          // which would give 0
           auto non_one_position = absolute_position % ExprHandle(stride);
           absolute_position = CompareSelect::make(size, one, absolute_position, non_one_position, kEQ);
           new_axes[stride_index] = index;
@@ -1426,7 +1426,6 @@ void TensorExprKernel::compile() {
       tensorOutputStrideDesc_.push_back(stride_desc[0]);
       Tensor properly_strided_output = convertSymbolicOutputToCorrectStrides(output);
       if (properly_strided_output.stmt()) {
-        // block->append_stmt(IRSimplifier::simplify(properly_strided_output.stmt()));
         block->append_stmt(properly_strided_output.stmt());
       }
       bufs_[output] = properly_strided_output.buf();
