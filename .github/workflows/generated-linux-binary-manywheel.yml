@@ -303,6 +303,10 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_7-cpu-test
+    # For setup-miniconda
+    defaults:
+      run:
+        shell: bash -l {0}
     env:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -371,9 +375,8 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-activate-base: true
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -669,6 +672,10 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_7-cuda10_2-test
+    # For setup-miniconda
+    defaults:
+      run:
+        shell: bash -l {0}
     env:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -738,9 +745,8 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-activate-base: true
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -1039,6 +1045,10 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_7-cuda11_1-test
+    # For setup-miniconda
+    defaults:
+      run:
+        shell: bash -l {0}
     env:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -1108,9 +1118,8 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-activate-base: true
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -1409,6 +1418,10 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_7-cuda11_3-test
+    # For setup-miniconda
+    defaults:
+      run:
+        shell: bash -l {0}
     env:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -1478,9 +1491,8 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-activate-base: true
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -1779,6 +1791,10 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_7-cuda11_5-test
+    # For setup-miniconda
+    defaults:
+      run:
+        shell: bash -l {0}
     env:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -1848,9 +1864,8 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-activate-base: true
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -2141,6 +2156,10 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_7-rocm4_2-test
+    # For setup-miniconda
+    defaults:
+      run:
+        shell: bash -l {0}
     env:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -2210,9 +2229,8 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-activate-base: true
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -2503,6 +2521,10 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_7-rocm4_3_1-test
+    # For setup-miniconda
+    defaults:
+      run:
+        shell: bash -l {0}
     env:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -2572,9 +2594,8 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-activate-base: true
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -2863,6 +2884,10 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_8-cpu-test
+    # For setup-miniconda
+    defaults:
+      run:
+        shell: bash -l {0}
     env:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -2931,9 +2956,8 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-activate-base: true
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -3229,6 +3253,10 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_8-cuda10_2-test
+    # For setup-miniconda
+    defaults:
+      run:
+        shell: bash -l {0}
     env:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -3298,9 +3326,8 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-activate-base: true
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -3599,6 +3626,10 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_8-cuda11_1-test
+    # For setup-miniconda
+    defaults:
+      run:
+        shell: bash -l {0}
     env:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -3668,9 +3699,8 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-activate-base: true
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -3969,6 +3999,10 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_8-cuda11_3-test
+    # For setup-miniconda
+    defaults:
+      run:
+        shell: bash -l {0}
     env:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -4038,9 +4072,8 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-activate-base: true
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -4339,6 +4372,10 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_8-cuda11_5-test
+    # For setup-miniconda
+    defaults:
+      run:
+        shell: bash -l {0}
     env:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -4408,9 +4445,8 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-activate-base: true
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -4701,6 +4737,10 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_8-rocm4_2-test
+    # For setup-miniconda
+    defaults:
+      run:
+        shell: bash -l {0}
     env:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -4770,9 +4810,8 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-activate-base: true
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -5063,6 +5102,10 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_8-rocm4_3_1-test
+    # For setup-miniconda
+    defaults:
+      run:
+        shell: bash -l {0}
     env:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -5132,9 +5175,8 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-activate-base: true
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -5423,6 +5465,10 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_9-cpu-test
+    # For setup-miniconda
+    defaults:
+      run:
+        shell: bash -l {0}
     env:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -5491,9 +5537,8 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-activate-base: true
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -5789,6 +5834,10 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_9-cuda10_2-test
+    # For setup-miniconda
+    defaults:
+      run:
+        shell: bash -l {0}
     env:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -5858,9 +5907,8 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-activate-base: true
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -6159,6 +6207,10 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_9-cuda11_1-test
+    # For setup-miniconda
+    defaults:
+      run:
+        shell: bash -l {0}
     env:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -6228,9 +6280,8 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-activate-base: true
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -6529,6 +6580,10 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_9-cuda11_3-test
+    # For setup-miniconda
+    defaults:
+      run:
+        shell: bash -l {0}
     env:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -6598,9 +6653,8 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-activate-base: true
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -6899,6 +6953,10 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_9-cuda11_5-test
+    # For setup-miniconda
+    defaults:
+      run:
+        shell: bash -l {0}
     env:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -6968,9 +7026,8 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-activate-base: true
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -7261,6 +7318,10 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_9-rocm4_2-test
+    # For setup-miniconda
+    defaults:
+      run:
+        shell: bash -l {0}
     env:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -7330,9 +7391,8 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-activate-base: true
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -7623,6 +7683,10 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_9-rocm4_3_1-test
+    # For setup-miniconda
+    defaults:
+      run:
+        shell: bash -l {0}
     env:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -7692,9 +7756,8 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-activate-base: true
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client

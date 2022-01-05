@@ -202,6 +202,10 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: !{{ config["build_name"] }}-test
+    # For setup-miniconda
+    defaults:
+      run:
+        shell: bash -l {0}
     !{{ binary_env(config) }}
     steps:
       !{{ common.setup_ec2_linux() }}
@@ -223,9 +227,8 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-activate-base: true
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client

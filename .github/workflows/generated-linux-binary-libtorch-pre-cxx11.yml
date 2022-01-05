@@ -305,6 +305,10 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-shared-with-deps-pre-cxx11-test
+    # For setup-miniconda
+    defaults:
+      run:
+        shell: bash -l {0}
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -374,9 +378,8 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-activate-base: true
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -667,6 +670,10 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-shared-without-deps-pre-cxx11-test
+    # For setup-miniconda
+    defaults:
+      run:
+        shell: bash -l {0}
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -736,9 +743,8 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-activate-base: true
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -1029,6 +1035,10 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-static-with-deps-pre-cxx11-test
+    # For setup-miniconda
+    defaults:
+      run:
+        shell: bash -l {0}
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -1098,9 +1108,8 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-activate-base: true
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -1391,6 +1400,10 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-static-without-deps-pre-cxx11-test
+    # For setup-miniconda
+    defaults:
+      run:
+        shell: bash -l {0}
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -1460,9 +1473,8 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-activate-base: true
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -1760,6 +1772,10 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda10_2-shared-with-deps-pre-cxx11-test
+    # For setup-miniconda
+    defaults:
+      run:
+        shell: bash -l {0}
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -1830,9 +1846,8 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-activate-base: true
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -2130,6 +2145,10 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda10_2-shared-without-deps-pre-cxx11-test
+    # For setup-miniconda
+    defaults:
+      run:
+        shell: bash -l {0}
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -2200,9 +2219,8 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-activate-base: true
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -2500,6 +2518,10 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda10_2-static-with-deps-pre-cxx11-test
+    # For setup-miniconda
+    defaults:
+      run:
+        shell: bash -l {0}
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -2570,9 +2592,8 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-activate-base: true
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -2870,6 +2891,10 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda10_2-static-without-deps-pre-cxx11-test
+    # For setup-miniconda
+    defaults:
+      run:
+        shell: bash -l {0}
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -2940,9 +2965,8 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-activate-base: true
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -3243,6 +3267,10 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_1-shared-with-deps-pre-cxx11-test
+    # For setup-miniconda
+    defaults:
+      run:
+        shell: bash -l {0}
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -3313,9 +3341,8 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-activate-base: true
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -3616,6 +3643,10 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_1-shared-without-deps-pre-cxx11-test
+    # For setup-miniconda
+    defaults:
+      run:
+        shell: bash -l {0}
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -3686,9 +3717,8 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-activate-base: true
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -3989,6 +4019,10 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_1-static-with-deps-pre-cxx11-test
+    # For setup-miniconda
+    defaults:
+      run:
+        shell: bash -l {0}
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -4059,9 +4093,8 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-activate-base: true
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -4362,6 +4395,10 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_1-static-without-deps-pre-cxx11-test
+    # For setup-miniconda
+    defaults:
+      run:
+        shell: bash -l {0}
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -4432,9 +4469,8 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-activate-base: true
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -4735,6 +4771,10 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_3-shared-with-deps-pre-cxx11-test
+    # For setup-miniconda
+    defaults:
+      run:
+        shell: bash -l {0}
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -4805,9 +4845,8 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-activate-base: true
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -5108,6 +5147,10 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_3-shared-without-deps-pre-cxx11-test
+    # For setup-miniconda
+    defaults:
+      run:
+        shell: bash -l {0}
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -5178,9 +5221,8 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-activate-base: true
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -5481,6 +5523,10 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_3-static-with-deps-pre-cxx11-test
+    # For setup-miniconda
+    defaults:
+      run:
+        shell: bash -l {0}
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -5551,9 +5597,8 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-activate-base: true
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -5854,6 +5899,10 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_3-static-without-deps-pre-cxx11-test
+    # For setup-miniconda
+    defaults:
+      run:
+        shell: bash -l {0}
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -5924,9 +5973,8 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-activate-base: true
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -6227,6 +6275,10 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_5-shared-with-deps-pre-cxx11-test
+    # For setup-miniconda
+    defaults:
+      run:
+        shell: bash -l {0}
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -6297,9 +6349,8 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-activate-base: true
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -6600,6 +6651,10 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_5-shared-without-deps-pre-cxx11-test
+    # For setup-miniconda
+    defaults:
+      run:
+        shell: bash -l {0}
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -6670,9 +6725,8 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-activate-base: true
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -6973,6 +7027,10 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_5-static-with-deps-pre-cxx11-test
+    # For setup-miniconda
+    defaults:
+      run:
+        shell: bash -l {0}
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -7043,9 +7101,8 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-activate-base: true
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -7346,6 +7403,10 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_5-static-without-deps-pre-cxx11-test
+    # For setup-miniconda
+    defaults:
+      run:
+        shell: bash -l {0}
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -7416,9 +7477,8 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-activate-base: true
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
