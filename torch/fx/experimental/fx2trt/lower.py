@@ -120,7 +120,7 @@ class LowerTrtInterpreter:
         return interp_result
 
 
-class LowerFunc(t.Protocol):
+class LowerFunc:
     """Signature for fx2trt lower functions"""
 
     def __call__(
@@ -231,7 +231,6 @@ class Lowerer(LowerFunc):
         const_split_mod = split_const_subgraphs(module)
         const_split_mod.run_folding()
         module = self.acc_trace(const_split_mod, input)  # type: ignore[misc]
-        print(f"acc traced: {module.graph}")
         split_module, splits = self.split(module, input)  # type: ignore[arg-type]
         split_module.eval()  # type: ignore[attr-defined]
         for _split in splits:  # type: ignore[attr-defined]

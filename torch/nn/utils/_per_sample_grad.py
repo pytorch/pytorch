@@ -1,17 +1,18 @@
+import torch
 from torch.nn.utils._stateless import functional_call
 from torch._expanded_weights.expanded_weights_impl import ExpandedWeight
 
 # dependency on `functional_call` means that this can't be exposed in utils
 # without creating circular dependency
-def per_sample_call(module, batch_size, args, kwargs=None):
+def call_for_per_sample_grads(module, batch_size, args, kwargs=None):
     r"""
-    per_sample_call(module, batch_size, args, kwargs=None) -> Tensor
-    Invoked just like a forward pass, ``per_sample_call`` will produce the same
+    call_for_per_sample_grads(module, batch_size, args, kwargs=None) -> Tensor
+    Invoked just like a forward pass, ``call_for_per_sample_grads`` will produce the same
     forward result. Then, when backward is invoked, the parameters of ``module``
     will have a ``grad_sample`` field populated with the per sample gradients
     instead of the regular gradients
     Args:
-        module: The module to get per sample gradients with respect to. All trainable
+        module: The ``nn.Module`` to get per sample gradients with respect to. All trainable
           parameters will compute per sample gradients, located in a ``grad_sample``
           field when ``backward`` is invoked
         batch_size: The batch size of the input. Typically the input's first dimension
@@ -36,5 +37,11 @@ def per_sample_call(module, batch_size, args, kwargs=None):
         else:
             return og_tensor
 
+    if not isinstance(module, torch.nn.Module):
+        raise RuntimeError(f"Module passed must be nn.Module, got {type(module).__name__}")
+    if not isinstance(batch_size, int):
+        raise RuntimeError(f"Batch size passed must be an integer, got {type(batch_size).__name__}")
+    if batch_size < 1:
+        raise RuntimeError(f"Batch size must be positive, got {batch_size}")
     params = {name: maybe_build_expanded_weight(value) for (name, value) in module.named_parameters()}
     return functional_call(module, params, args, kwargs)

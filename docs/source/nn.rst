@@ -416,7 +416,7 @@ for more information on how to implement your own parametrizations.
 
     parametrize.ParametrizationList
 
-Stateless API
+Per Sample Gradient API
 -------------
 
 .. autosummary::
