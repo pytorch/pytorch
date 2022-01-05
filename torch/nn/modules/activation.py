@@ -472,7 +472,11 @@ class Hardswish(Module):
 
 
 class ELU(Module):
-    r"""Applies the element-wise function:
+    r"""Applies the Exponential Linear Unit (ELU) function, element-wise, as described
+    in the paper: `Fast and Accurate Deep Network Learning by Exponential Linear
+    Units (ELUs) <https://arxiv.org/abs/1511.07289>`__.
+
+    ELU is defined as:
 
     .. math::
         \text{ELU}(x) = \begin{cases}
