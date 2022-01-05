@@ -8,6 +8,7 @@ graph {
     input: "bias"
     output: "3"
     op_type: "ATen"
+    domain: "org.pytorch.aten"
     attribute {
       name: "cudnn_enable"
       i: 1

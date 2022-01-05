@@ -11,6 +11,7 @@ graph {
     output: "5"
     output: "6"
     op_type: "ATen"
+    domain: "org.pytorch.aten"
     attribute {
       name: "include_last_offset"
       i: 0

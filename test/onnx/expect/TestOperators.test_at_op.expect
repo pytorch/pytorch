@@ -8,6 +8,7 @@ graph {
     output: "1"
     name: "ATen_0"
     op_type: "ATen"
+    domain: "org.pytorch.aten"
     attribute {
       name: "operator_name"
       s: "add"

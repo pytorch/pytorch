@@ -113,13 +113,13 @@ void validateBlock(
           WithInsertPoint guard(node);
           auto* new_node =
               b->owningGraph()->insertNode(b->owningGraph()->create(
-                  Symbol(::c10::onnx::ATen),
+                  Symbol(::c10::aten::ATen),
                   node->inputs(),
                   node->outputs().size()));
           for (size_t i = 0; i < node->outputs().size(); ++i) {
             node->output(i)->replaceAllUsesWith(new_node->output(i));
           }
-          new_node->s_(Symbol::fromQualString("attr::operator"), "expand");
+          new_node->s_(Symbol::fromQualString("attr::operator_name"), "expand");
         }
       }
 #endif
