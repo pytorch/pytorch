@@ -48,6 +48,7 @@ cc_library(
     ]),
     deps = [
         ":cuda_cmake_macros_h",
+        "//c10/core:alignment",
         "//c10/macros",
     ] + select({
         ":using_gflags": ["@com_github_gflags_gflags//:gflags"],
