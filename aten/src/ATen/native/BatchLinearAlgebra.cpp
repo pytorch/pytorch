@@ -3837,11 +3837,22 @@ TransposeType to_transpose_type(const bool contig, const bool conj) {
 } // end of anonymous namespace
 
 Tensor& linalg_vecdot_out(const Tensor& x, const Tensor& y, int64_t dim, Tensor& out) {
-  return at::sum_out(out, x * y, /*dim=*/dim);
+  // Computes x^H y
+  if (x.dim() == 1 && y.dim() == 1) {
+    at::native::resize_output(out, {});
+    return at::vdot_out(out, x, y);
+  } else {
+    return at::sum_out(out, x.conj() * y, /*dim=*/dim);
+  }
 }
 
 Tensor linalg_vecdot(const Tensor& x, const Tensor& y, int64_t dim) {
-  return (x * y).sum(/*dim=*/dim);
+  // Computes x^H y
+  if (x.dim() == 1 && y.dim() == 1) {
+    return at::vdot(x, y);
+  } else {
+    return x.conj().mul(y).sum(/*dim=*/dim);
+  }
 }
 
 /*
