@@ -972,7 +972,7 @@ def get_selected_tests(options):
     # skip all distributed tests if distributed package is not available.
     if not dist.is_available():
         selected_tests = exclude_tests(DISTRIBUTED_TESTS, selected_tests,
-                                       "PyToch is built without distributed support.")
+                                       "PyTorch is built without distributed support.")
 
     return selected_tests
 
