@@ -10691,6 +10691,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_cosine_similarity),
     OpInfo('nn.functional.adaptive_avg_pool1d',
            dtypes=floating_types(),
+           dtypesIfCPU=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
@@ -10699,6 +10700,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_adaptive_avg_pool1d),
     OpInfo('nn.functional.adaptive_avg_pool2d',
            dtypes=floating_types(),
+           dtypesIfCPU=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            decorators=(
                # RuntimeError:
@@ -13582,10 +13584,7 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           skips=(
-               # TODO: see https://github.com/pytorch/pytorch/issues/64709
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-           )),
+           ),
     OpInfo('hstack',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack,

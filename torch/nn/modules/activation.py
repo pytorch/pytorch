@@ -331,7 +331,9 @@ class Hardsigmoid(Module):
 
 
 class Tanh(Module):
-    r"""Applies the element-wise function:
+    r"""Applies the Hyperbolic Tangent (Tanh) function element-wise.
+
+    Tanh is defined as:
 
     .. math::
         \text{Tanh}(x) = \tanh(x) = \frac{\exp(x) - \exp(-x)} {\exp(x) + \exp(-x)}
@@ -472,7 +474,11 @@ class Hardswish(Module):
 
 
 class ELU(Module):
-    r"""Applies the element-wise function:
+    r"""Applies the Exponential Linear Unit (ELU) function, element-wise, as described
+    in the paper: `Fast and Accurate Deep Network Learning by Exponential Linear
+    Units (ELUs) <https://arxiv.org/abs/1511.07289>`__.
+
+    ELU is defined as:
 
     .. math::
         \text{ELU}(x) = \begin{cases}
