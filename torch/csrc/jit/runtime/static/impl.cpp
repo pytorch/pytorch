@@ -833,7 +833,9 @@ BlockRunner::BlockRunner(
   num_sub_blocks_ = static_cast<uint16_t>(num_sub_blocks);
 }
 
-BlockRunner::BlockRunner(BlockRunner&&) = default;
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+BlockRunner::BlockRunner(BlockRunner&&) noexcept = default;
+
 BlockRunner::~BlockRunner() = default;
 
 void BlockRunner::set_arg(const size_t idx, std::vector<IValue>&& args) {
