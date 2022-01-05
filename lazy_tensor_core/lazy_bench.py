@@ -506,6 +506,8 @@ def merge_with_prefix(prefix, tmp_dir, out_dir, headers):
 def merge_reformat(tmp_dir, out_dir):
 
     out_dir = args.output_dir
+    # depending on the type of an experiment, fields can be in a different order
+    # `get_field` deals with all three types including `error`
     def get_field(row, name, file_type):
         headers = {
             "error": ("name", "test", "error"),
