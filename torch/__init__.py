@@ -435,6 +435,7 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
           ``mode='max'``
         * :func:`torch.Tensor.scatter_add_` when ``input`` dimension is larger than one
           and called on a CUDA tensor
+        * :func:`torch.Tensor.scatter_` when called on a CPU or CUDA tensor
         * :func:`torch.gather` when ``input`` dimension is larger than one
           and called on a CUDA tensor that requires grad
         * :func:`torch.Tensor.put_` when ``accumulate=False``

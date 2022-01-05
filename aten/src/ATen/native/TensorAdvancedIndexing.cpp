@@ -143,11 +143,17 @@ void scatter_meta_impl(
 
 TORCH_META_FUNC2(scatter, src)
 (const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
+  // See note [Writing Nondeterministic Operations]
+  // Nondeterministic when index contains duplicate entries
+  at::globalContext().alertNotDeterministic("scatter_src_out");
   scatter_meta_impl(*this, self, dim, index, src);
 }
 
 TORCH_META_FUNC2(scatter, value)
 (const Tensor& self, int64_t dim, const Tensor& index, const Scalar& value) {
+  // See note [Writing Nondeterministic Operations]
+  // Nondeterministic when index contains duplicate entries
+  at::globalContext().alertNotDeterministic("scatter_value_out");
   scatter_meta_impl(*this, self, dim, index);
 }
 
@@ -157,6 +163,9 @@ TORCH_META_FUNC2(scatter, reduce)
  const Tensor& index,
  const Tensor& src,
  const c10::string_view reduce) {
+  // See note [Writing Nondeterministic Operations]
+  // Nondeterministic when index contains duplicate entries
+  at::globalContext().alertNotDeterministic("scatter_reduce_out");
   scatter_meta_impl(*this, self, dim, index, src, reduce);
 }
 
@@ -166,6 +175,9 @@ TORCH_META_FUNC2(scatter, value_reduce)
  const Tensor& index,
  const Scalar& src,
  const c10::string_view reduce) {
+  // See note [Writing Nondeterministic Operations]
+  // Nondeterministic when index contains duplicate entries
+  at::globalContext().alertNotDeterministic("scatter_value_reduce_out");
   scatter_meta_impl(*this, self, dim, index, nullopt, reduce);
 }
 
@@ -1225,6 +1237,9 @@ TORCH_IMPL_FUNC(scatter_src_out)
  const Tensor& index,
  const Tensor& src,
  const Tensor& out) {
+  // See note [Writing Nondeterministic Operations]
+  // Nondeterministic when index contains duplicate entries
+  at::globalContext().alertNotDeterministic("scatter_src_out");
   scatter_impl(self, dim, index, src, out,
                scatter_reduce_stub,
                scatter_stub);
@@ -1236,6 +1251,9 @@ TORCH_IMPL_FUNC(scatter_value_out)
  const Tensor& index,
  const Scalar& value,
  const Tensor& out) {
+  // See note [Writing Nondeterministic Operations]
+  // Nondeterministic when index contains duplicate entries
+  at::globalContext().alertNotDeterministic("scatter_value_out");
   scatter_impl(self, dim, index, value, out,
                scatter_scalar_reduce_stub,
                scatter_fill_stub);
@@ -1248,6 +1266,9 @@ TORCH_IMPL_FUNC(scatter_reduce_out)
  const Tensor& src,
  const c10::string_view reduce,
  const Tensor& out) {
+  // See note [Writing Nondeterministic Operations]
+  // Nondeterministic when index contains duplicate entries
+  at::globalContext().alertNotDeterministic("scatter_reduce_out");
   scatter_impl(self, dim, index, src, out,
                scatter_reduce_stub,
                scatter_stub,
@@ -1261,6 +1282,9 @@ TORCH_IMPL_FUNC(scatter_value_reduce_out)
  const Scalar& value,
  const c10::string_view reduce,
  const Tensor& out) {
+  // See note [Writing Nondeterministic Operations]
+  // Nondeterministic when index contains duplicate entries
+  at::globalContext().alertNotDeterministic("scatter_value_reduce_out");
   scatter_impl(self, dim, index, value, out,
                scatter_scalar_reduce_stub,
                scatter_fill_stub,

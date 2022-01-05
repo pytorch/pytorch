@@ -4241,6 +4241,43 @@ else:
         test_func(torch.Tensor.scatter_add)
         test_func(torch.scatter_add)
 
+    def test_nondeterministic_alert_scatter(self, device):
+        def test_func(op_call):
+            input = torch.randn(5, 4, device=device)
+            dim = 0
+            index = torch.tensor([[3]], device=device)
+            src = torch.tensor([[1.0]], device=device)
+            value = 1.0
+
+            @expectedAlertNondeterministic('scatter_src_out')
+            def test_scatter_src(slf, device):
+                op_call(input, dim, index, src)
+
+            test_scatter_src(self, device)
+
+            @expectedAlertNondeterministic('scatter_reduce_out')
+            def test_scatter_reduce(slf, device):
+                op_call(input, dim, index, src, reduce='add')
+
+            test_scatter_reduce(self, device)
+
+            @expectedAlertNondeterministic('scatter_value_out')
+            def test_scatter_value(slf, device):
+                op_call(input, dim, index, value)
+
+            test_scatter_value(self, device)
+
+            @expectedAlertNondeterministic('scatter_value_reduce_out')
+            def test_scatter_reduce_value(slf, device):
+                op_call(input, dim, index, value, reduce='add')
+
+            test_scatter_reduce_value(self, device)
+
+        test_func(torch.Tensor.scatter_)
+        test_func(torch.Tensor.scatter)
+        test_func(torch.scatter)
+
+
     @expectedFailureMeta  # expected a non-determinitic error, but it was not raised
     @onlyNativeDeviceTypes
     def test_nondeterministic_alert_put(self, device):
