@@ -786,6 +786,29 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
 
+    def test_unsupported_ops_recorded(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv2d = nn.Conv2d(1, 1, 1)
+                self.softshrink = nn.Softshrink()
+
+            def forward(self, x):
+                # supported
+                x = self.conv2d(x)
+                x = x + x
+                # not supported
+                x = self.softshrink(x)
+                x = F.tanhshrink(x)
+                return x
+
+        m = M().eval()
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        mp = _quantize_dbr.prepare(m, qconfig_dict, (torch.randn(1, 1, 1, 1),))
+        expected = set([nn.Softshrink, F.tanhshrink])
+        self.assertTrue(
+            mp._auto_quant_state.seen_op_types_without_op_hooks == expected)
+
     def test_unknown_op_after_quantized(self):
         class M(torch.nn.Module):
             def forward(self, x):
