@@ -2407,6 +2407,78 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
   return u_term + sigma_term + v_term;
 }
 
+std::vector<at::indexing::TensorIndex>
+toVectorOfTensorIndices(ArrayRef<Tensor> v, c10::optional<int64_t> len = c10::nullopt) {
+  std::vector<at::indexing::TensorIndex> result;
+  result.reserve(len.has_value() ? len.value() : v.size());
+  for (const Tensor& t : v) {
+    result.push_back(t);
+  }
+  return result;
+}
+
+Tensor linalg_svd_rank_revealing_backward(
+    const std::vector<torch::autograd::Variable>& grads,
+    const Tensor& input,
+    const Tensor& U,
+    const Tensor& S,
+    const Tensor& Vh,
+    const Tensor& rank
+) {
+  if (!rank.numel()) {
+    return Tensor();
+  }
+
+  const auto& U_grad = grads[0];
+  const auto& S_grad = grads[1];
+  const auto& Vh_grad = grads[2];
+  auto grad = at::empty_like(input);
+
+  // Find only unique ranks and store them on the CPU
+  // as they are used for indexing
+  const auto unique_ranks = std::get<0>(at::_unique(
+    rank.device().type() == at::kCUDA ? rank.to(at::kCPU) : rank,
+    /*sorted=*/false
+  ));
+
+  const auto n_batch_dims = input.dim() - 2;
+
+  using at::indexing::Slice;
+  for (const auto i : c10::irange(unique_ranks.numel())) {
+    const auto r = unique_ranks.select(0, i).item<int64_t>();
+
+    // Form an index for matrices of rank r.
+    // It is equivalent to indexing at [rank == r, :]
+    const auto rank_r_mask = at::where(rank == r);
+    auto rank_r_indices = toVectorOfTensorIndices(rank_r_mask, n_batch_dims + 2);
+    rank_r_indices.push_back(Slice());
+
+    // rank_r_indices is used here to index a batch of vectors
+    const auto S_rank_r = S.index(rank_r_indices).narrow(-1, 0, r);
+    const auto S_grad_rank_r = S_grad.index(rank_r_indices).narrow(-1, 0, r);
+
+    // Modify rank_r_indices to be able to index matrices.
+    // It is equivalent to indexing at [rank == r, :, :]
+    rank_r_indices.push_back(Slice());
+    const auto input_rank_r = input.index(rank_r_indices);
+    const auto U_rank_r = U.index(rank_r_indices).narrow(-1, 0, r);
+    const auto Vh_rank_r = Vh.index(rank_r_indices).narrow(-2, 0, r);
+    const auto U_grad_rank_r = U_grad.index(rank_r_indices).narrow(-1, 0, r);
+    const auto Vh_grad_rank_r = Vh_grad.index(rank_r_indices).narrow(-2, 0, r);
+
+    const auto grad_rank_r = svd_backward(
+        {U_grad_rank_r, S_grad_rank_r, Vh_grad_rank_r.mH()},
+        input_rank_r,
+        /*some=*/true,
+        /*compute_uv=*/true,
+        U_rank_r, S_rank_r, Vh_rank_r.mH()
+    );
+    grad.index_put_(rank_r_indices, grad_rank_r);
+  }
+
+  return grad;
+}
+
 // The implementation follows:
 // "An extended collection of matrix derivative results for forward and reverse mode algorithmic differentiation"
 // https://people.maths.ox.ac.uk/gilesm/files/NA-08-01.pdf
