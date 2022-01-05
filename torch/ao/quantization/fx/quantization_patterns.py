@@ -42,6 +42,7 @@ from .utils import (
     create_qparam_nodes,
     get_qconv_prepack_op,
     get_qconv_op,
+    create_node_from_old_node_preserve_meta,
 )
 
 from ..qconfig import QConfigAny
@@ -459,8 +460,11 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
                             quantized_graph, node_name_to_scope)
                     kwargs = {**self.binary_op_node.kwargs}
                     add_args = (*load_arg(quantized=activation_dtype(qconfig))(self.binary_op_node.args), scale_arg, zero_point_arg)
-                    op = quantized_graph.create_node(
-                        'call_function', self.quantized_binary_op, add_args, kwargs)
+                    # TODO(after initial review): expand to all callsites in this file
+                    op = create_node_from_old_node_preserve_meta(
+                        quantized_graph,
+                        ('call_function', self.quantized_binary_op, add_args, kwargs),
+                        self.binary_op_node)
                     return op
             else:
                 assert dtypes == (torch.float16, torch.float16, None)

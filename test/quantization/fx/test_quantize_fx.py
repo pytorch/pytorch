@@ -3474,6 +3474,30 @@ class TestQuantizeFx(QuantizationTestCase):
                 expected_node_occurrence=node_occurrence,
                 expected_node_list=node_list)
 
+    def test_stack_trace_preserved(self):
+        class M(nn.Module):
+            def forward(self, x):
+                x = x + x
+                return x
+
+        m = M().eval()
+        mp = prepare_fx(m, get_default_qconfig_dict())
+
+        found_stack_trace = False
+        for n in mp.graph.nodes:
+            if n.op == 'call_function' and n.target == operator.add:
+                found_stack_trace = n.stack_trace is not None
+                break
+        self.assertTrue(found_stack_trace)
+
+        mq = convert_fx(mp)
+        found_stack_trace = False
+        for n in mq.graph.nodes:
+            if n.op == 'call_function' and n.target == torch.ops.quantized.add:
+                found_stack_trace = n.stack_trace is not None
+                break
+        self.assertTrue(found_stack_trace)
+
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
     def setUp(self):
