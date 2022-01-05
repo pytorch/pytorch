@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <torch/csrc/autograd/profiler_kineto.h>
 
 #include <c10/macros/Export.h>
@@ -6,7 +7,10 @@
 #include <limits>
 
 #include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/operator.h>
+
+#include <ATen/Context.h>
 
 #include <sstream>
 #include <stdexcept>

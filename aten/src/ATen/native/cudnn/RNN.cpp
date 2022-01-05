@@ -1572,6 +1572,7 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
   // TODO:  try_get_weight_buf returns a Tensor, but _cudnn_rnn below takes a c10::optional<Tensor>
   // in weight_buf's slot.  Do we want try_get_weight_buf to return a c10::optional<Tensor>
   // instead of a defined or undefined Tensor?
+  at::cuda::OptionalCUDAGuard guard(input.get_device());
   auto weight_buf = try_get_weight_buf(
       input, params, has_biases, mode, hidden_size, proj_size, num_layers, bidirectional);
 
@@ -1608,6 +1609,7 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
     hidden_size = cx.size(2);
     proj_size = hx.size(2);
   }
+  at::cuda::OptionalCUDAGuard guard(input.get_device());
   auto weight_buf = try_get_weight_buf(
       input, params, has_biases, mode, hidden_size, proj_size, num_layers, bidirectional);
   auto & dropout_state = get_dropout_state(dropout_p, train, input.options());
