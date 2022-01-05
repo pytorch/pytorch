@@ -174,7 +174,7 @@ TORCH_META_FUNC(scatter_add)
   scatter_meta_impl(*this, self, dim, index, src, "add");
 }
 
-TORCH_META_FUNC(_scatter_reduce)
+TORCH_META_FUNC(scatter_reduce2)
 (const Tensor& self,
  int64_t dim,
  const Tensor& index,
@@ -1297,7 +1297,7 @@ TORCH_IMPL_FUNC(scatter_add)
   }
 }
 
-TORCH_IMPL_FUNC(_scatter_reduce_structured_cpu)
+TORCH_IMPL_FUNC(scatter_reduce2_structured_cpu)
 (const Tensor& self,
  int64_t dim,
  const Tensor& index,
@@ -1325,7 +1325,7 @@ TORCH_IMPL_FUNC(_scatter_reduce_structured_cpu)
 
   out.zero_();
 
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, self.scalar_type(), "_scatter_reduce", [&] {
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, self.scalar_type(), "scatter_reduce2", [&] {
     auto self_data = self.data_ptr<scalar_t>();
     auto index_data = index.data_ptr<int64_t>();
     auto out_data = out.data_ptr<scalar_t>();
