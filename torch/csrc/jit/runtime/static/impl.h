@@ -504,7 +504,7 @@ class TORCH_API BlockRunner {
       const StaticModule& sm,
       std::vector<IValue>& values,
       size_t block_idx);
-  BlockRunner(BlockRunner&&);
+  BlockRunner(BlockRunner&&) noexcept;
   BlockRunner& operator=(BlockRunner&&) = delete;
   ~BlockRunner();
 
