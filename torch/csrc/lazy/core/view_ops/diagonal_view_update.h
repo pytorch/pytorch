@@ -5,7 +5,7 @@
 namespace torch {
 namespace lazy {
 
-class DiagonalViewUpdate : public TsNode {
+class TORCH_API DiagonalViewUpdate : public TsNode {
  public:
   DiagonalViewUpdate(
       const Value& target,
