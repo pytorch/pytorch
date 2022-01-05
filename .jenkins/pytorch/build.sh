@@ -192,7 +192,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
   export CXX=clang++
 fi
 
-if [[ "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.7-gcc7-build* || "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.7-gcc5.4-build* ]]; then
+if [[ "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.6-gcc7-build* || "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.6-gcc5.4-build* ]]; then
   export USE_GLOO_WITH_OPENSSL=ON
 fi
 
