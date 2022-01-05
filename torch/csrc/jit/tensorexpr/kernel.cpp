@@ -15,7 +15,6 @@
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <torch/csrc/jit/tensorexpr/operators/operators.h>
-#include "jit/tensorexpr/expr.h"
 
 using namespace torch::jit;
 using namespace torch::jit::tensorexpr;
@@ -1073,7 +1072,82 @@ bool denseAndNonOverlapping(
   return (strides == at::infer_dense_strides(sizes, strides));
 }
 
-Tensor TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
+Tensor TensorExprKernel::convertOutputToCorrectStrides(std::vector<ExprHandle>& sizes, std::vector<size_t>& sorted_stride_indices_descending, std::vector<ExprPtr>& strides, BufPtr& buf) {
+  // We need to convert the output tensor so that its values are layed
+  // so that when viewed from the output strides the values are correct.
+  // A contiguous Tensor of size(2, 3) with values 0-5 is layed out as:
+  // [0] [1] [2] [3] [4] [5]
+  // The same valued tensor with strides (2, 1) would be layed out like
+  // [0] [3] [1] [4] [2] [5]
+  // When we are doing the re-ordering of values into the output tensor,
+  // we are iterating per-element of the input, and we are fixed
+  // in indexing in to the output tensor at [i, j] = val
+  // `val` we want here is equal to the indices for the output
+  // tensor that would have given the same position as the output
+  // The position is equal to the sum of stride[i] * index[i],
+  // and we can can calculate the equivalent indices in the
+  // output tensor strides by iteratively computing the index of
+  // the biggest stride:
+  // absolute = ...
+  // for stride in strides_from_largest_to_smallest:
+  //     cur_idx = absolute // stride
+  //     absolute = absolute % stride
+  auto dims = c10::fmap<DimArg>(sizes);
+  std::vector<ExprPtr> default_strides = make_contiguous_strides(sizes);
+  auto zero = LongImm::make(0);
+  return Compute(
+      "output_1", dims, [&](const std::vector<VarHandle>& axes_input) {
+        std::vector<ExprHandle> axes(axes_input.begin(), axes_input.end());
+        auto absolute_position = ExprHandle(immLike(axes[0], 0));
+        for (size_t i = 0; i < axes.size(); ++i) {
+          ExprHandle stride(default_strides[i]);
+          ExprHandle axis = axes[i];
+          absolute_position = absolute_position + (stride * axis);
+        }
+        std::vector<ExprHandle> new_axes(sorted_stride_indices_descending.size());
+        for (size_t stride_index : sorted_stride_indices_descending) {
+          auto size = sizes[stride_index];
+          auto index = zero;
+          auto stride = strides[stride_index];
+          auto one = Cast::make(size.dtype(), 1);
+          auto non_one_index = absolute_position / ExprHandle(stride);
+          index = CompareSelect::make(size, one, index, non_one_index, kEQ);
+          auto non_one_position = absolute_position % ExprHandle(stride);
+          absolute_position = CompareSelect::make(size, one, absolute_position, non_one_position, kEQ);
+          new_axes[stride_index] = index;
+        }
+        return BufHandle(buf).load(new_axes);
+      });
+}
+
+
+Tensor TensorExprKernel::convertSymbolicOutputToCorrectStrides(torch::jit::Value* v) {
+  const TensorTypePtr& tt = v->type()->expect<TensorType>();
+  TORCH_INTERNAL_ASSERT(
+      bufs_.count(v),
+      buildErrorMessage(
+          "Ouput tensor has no corresponding bufs in the fuser."));
+  BufPtr buf = bufs_.at(v);
+  // output is contiguous, no work to do
+  if (tensorOutputStrideDesc_[v->offset()] == torch::jit::StrideInput::TENSOR_CONT) {
+    return Tensor(buf, nullptr);;
+  }
+  TORCH_INTERNAL_ASSERT(tensorOutputStrideDesc_[v->offset()] == torch::jit::StrideInput::TENSOR_CONT_CHANNELS_LAST);
+  auto sizes = sizesFromSymbolicShape(tt->symbolic_sizes());
+  auto dims = c10::fmap<DimArg>(sizes);
+  auto strides = make_channels_last_strides(sizes);
+  // For a tensor with dimensions N C H W, channels last
+  // format will is in format N H W C,
+  // so the order largest to smallest will be N, H, W, C
+  std::vector<size_t> sorted_stride_indices = {0, 2, 3, 1};
+  auto zero = LongImm::make(0);
+  std::vector<ExprPtr> default_strides = make_contiguous_strides(sizes);
+  // See explanation in convertOutputToCorrectStrides
+  return convertOutputToCorrectStrides(sizes, sorted_stride_indices, strides, buf);
+}
+
+
+Tensor TensorExprKernel::convertStaticShapeOutputToCorrectStrides(torch::jit::Value* v) {
   const TensorTypePtr& tt = v->type()->expect<TensorType>();
   TORCH_INTERNAL_ASSERT(
       bufs_.count(v),
@@ -1112,27 +1186,12 @@ Tensor TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
   }
 
   auto dims = c10::fmap<DimArg>(sizesForValue(v));
-  // We need to convert the output tensor so that its values are layed
-  // so that when viewed from the output strides the values are correct.
-  // A contiguous Tensor of size(2, 3) with values 0-5 is layed out as:
-  // [0] [1] [2] [3] [4] [5]
-  // The same valued tensor with strides (2, 1) would be layed out like
-  // [0] [3] [1] [4] [2] [5]
-  // When we are doing the re-ordering of values into the output tensor,
-  // we are iterating per-element of the input, and we are fixed
-  // in indexing in to the output tensor at [i, j] = val
-  // `val` we want here is equal to the indices for the output
-  // tensor that would have given the same position as the output
-  // The position is equal to the sum of stride[i] * index[i],
-  // and we can can calculate the equivalent indices in the
-  // output tensor strides by iteratively computing the index of
-  // the biggest stride:
-  // absolute = ...
-  // for stride in strides_from_largest_to_smallest:
-  //     cur_idx = absolute // stride
-  //     absolute = absolute % stride
-
   auto zero = LongImm::make(0);
+  std::vector<size_t> sorted_stride_indices = reverse_sort_indices(strides);
+
+  // TODO: call into `convertOutputToCorrectStrides`. Currently this causes a bug
+  // in IRSimplifier to occur.
+  // See explanation in `convertOutputToCorrectStrides`
   return Compute(
       "output_1", dims, [&](const std::vector<VarHandle>& axes_input) {
         std::vector<ExprHandle> axes(axes_input.begin(), axes_input.end());
@@ -1141,8 +1200,7 @@ Tensor TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
           absolute_position = absolute_position +
               (ExprHandle(immLike(axes[i], default_strides[i])) * axes[i]);
         }
-        std::vector<size_t> sorted_stride_indices =
-            reverse_sort_indices(strides);
+
         std::vector<ExprHandle> new_axes(sorted_stride_indices.size());
         for (size_t stride_index : sorted_stride_indices) {
           auto size = sizes[stride_index];
@@ -1360,16 +1418,25 @@ void TensorExprKernel::compile() {
     }
     const auto& tt = output->type()->expect<TensorType>();
     if (has_symbolic_shapes_) {
-      // We only support contiguous tensors with symbolic shapes at this time.
       auto sizes = sizesFromSymbolicShape(tt->symbolic_sizes());
       tensorOutputSymbolicSizes_.push_back(sizes);
+      TORCH_INTERNAL_ASSERT(symbolic_strides_.count(output));
+      auto stride_desc = symbolic_strides_[output];
+      TORCH_INTERNAL_ASSERT(stride_desc.size() == 1);
+      tensorOutputStrideDesc_.push_back(stride_desc[0]);
+      Tensor properly_strided_output = convertSymbolicOutputToCorrectStrides(output);
+      if (properly_strided_output.stmt()) {
+        // block->append_stmt(IRSimplifier::simplify(properly_strided_output.stmt()));
+        block->append_stmt(properly_strided_output.stmt());
+      }
+      bufs_[output] = properly_strided_output.buf();
     } else {
       // The "strided" tensor will be incorrect if used in NNC,
       // since NNC views it as contiguous. Only convert it to the right
       // strides at the end of the kernel (if already contiguous it's a no-op)
-      Tensor properly_strided_output = convertOutputToCorrectStrides(output);
+      Tensor properly_strided_output = convertStaticShapeOutputToCorrectStrides(output);
       if (properly_strided_output.stmt()) {
-        block->append_stmt(properly_strided_output.stmt());
+        block->append_stmt(IRSimplifier::simplify(properly_strided_output.stmt()));
       }
       // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
       bufs_[output] = properly_strided_output.buf();
@@ -1490,8 +1557,14 @@ void TensorExprKernel::updateOutputSizesAndStrides(
         tensorOutputSizes_[i].emplace_back(inputs[input_pos].toInt());
       }
     }
-    tensorOutputStrides_[i] =
-        TensorType::contiguousStridesOf(tensorOutputSizes_[i]);
+
+    if (tensorOutputStrideDesc_[i] == torch::jit::StrideInput::TENSOR_CONT) {
+      tensorOutputStrides_[i] = TensorType::contiguousStridesOf(tensorOutputSizes_[i]);
+    } else if (tensorOutputStrideDesc_[i] == torch::jit::StrideInput::TENSOR_CONT_CHANNELS_LAST) {
+      tensorOutputStrides_[i] = at::get_channels_last_strides_2d(tensorOutputSizes_[i]);
+    } else {
+      TORCH_INTERNAL_ASSERT(false);
+    }
   }
 }
 

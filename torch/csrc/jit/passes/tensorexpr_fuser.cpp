@@ -22,6 +22,7 @@
 #include <torch/csrc/jit/runtime/symbolic_shape_registry_util.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/utils/memory.h>
+#include <ATen/core/interned_strings.h>
 
 // NOLINTNEXTLINE
 C10_DEFINE_bool(
@@ -1284,6 +1285,10 @@ Operation createTensorExprOp(const Node* node) {
     }
     stride_map[v] = striding_inputs[index];
     index++;
+  }
+  std::vector<std::string> output_desc = node->ival(attr::striding_outputs_desc).to<std::vector<std::string>>();
+  for (size_t i = 0; i < subgraph->outputs().size(); ++i) {
+    stride_map[subgraph->outputs().at(i)] = {strideInputFromString(output_desc.at(i))};
   }
 
   std::shared_ptr<tensorexpr::TensorExprKernel> kernel =

@@ -1858,6 +1858,23 @@ class TestTEFuser(JitTestCase):
         script = self.checkScript(eager, (x, y))
         self.assertAllFused(script.graph_for(x, y))
 
+    def test_channels_last_dims_dynamic(self):
+        def eager(x, y):
+            return x / (y + 0.0001)
+
+        for i in range(4):
+            size = [2, 3, 4, 5]
+            size[i] = 1
+            inp = torch.rand(size).to(memory_format=torch.channels_last)
+            with texpr_dynamic_enabled():
+                foo_s = torch.jit.trace(eager, (inp, inp))
+                for _ in range(3):
+                    out = foo_s(inp, inp)
+                out_eager = foo(inp, inp)
+                self.assertEqual(out_eager, out)
+                self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+                self.assertAllFused(torch.jit.last_executed_optimized_graph())
+
     def test_unsqueeze_var_dim(self):
         def eager(x, y, z: int):
             return x * torch.unsqueeze(y, dim=z)
