@@ -6,7 +6,8 @@ namespace at {
 namespace native {
 
 void Unfold3dCopyCPU(
-    const Tensor& src,
+    ScalarType dtype,
+    const void *src,
     int64_t C,
     int64_t X_D,
     int64_t X_H,
@@ -23,10 +24,11 @@ void Unfold3dCopyCPU(
     int64_t pad_d,
     int64_t pad_h,
     int64_t pad_w,
-    Tensor* dst);
+    void* dst);
 
 void Unfold3dAccCPU(
-    const Tensor& src,
+    ScalarType dtype,
+    const void *src,
     int64_t C,
     int64_t X_D,
     int64_t X_H,
@@ -43,7 +45,7 @@ void Unfold3dAccCPU(
     int64_t pad_d,
     int64_t pad_h,
     int64_t pad_w,
-    Tensor* dst);
+    void *dst);
 
 } // namespace native
 } // namespace at

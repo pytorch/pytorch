@@ -196,9 +196,6 @@ docs/source/scripts/activation_images/
 # PyCharm files
 .idea
 
-# OSX dir files
-.DS_Store
-
 # GDB history
 .gdb_history
 
@@ -287,6 +284,7 @@ TAGS
 # clang tooling storage location
 .clang-format-bin
 .clang-tidy-bin
+.lintbin
 
 # clangd background index
 .clangd/

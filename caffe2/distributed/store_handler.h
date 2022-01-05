@@ -67,8 +67,7 @@ class TORCH_API StoreHandler {
 /*
  * The backing store is no longer available. It may have been deleted.
  */
-struct TORCH_API StoreHandlerNotAvailableException
-    : public std::runtime_error {
+struct TORCH_API StoreHandlerNotAvailableException : public std::runtime_error {
   explicit StoreHandlerNotAvailableException(const std::string& msg)
       : std::runtime_error(msg) {}
 };

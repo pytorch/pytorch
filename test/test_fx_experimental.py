@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: fx"]
+
 import math
 import numbers
 import operator
@@ -1057,10 +1059,11 @@ class {test_classname}(torch.nn.Module):
         for node in traced_modules_annotated.graph.nodes:
             if node.type is None:
                 check = (node.op, node.target)
-                self.assertTrue(
-                    check
-                    in {
+                self.assertIn(
+                    check,
+                    {
                         ("placeholder", "x"),
+                        ("call_module", "maxpool"),
                         ("call_function", operator.add),
                         ("call_function", torch.flatten),
                         ("output", "output"),
@@ -1096,7 +1099,7 @@ class {test_classname}(torch.nn.Module):
                     ("call_function", torch.flatten),
                     ("output", "output"),
                 }
-                self.assertTrue(check in excluded_nodes)
+                self.assertIn(check, excluded_nodes)
 
         # Smoke test torchscript compilation since now we're emitting type annotations
         torch.jit.script(traced_functionals_annotated)
@@ -1460,19 +1463,32 @@ class TestNormalizeOperators(JitTestCase):
         # Sorted and one entry on each line to minimize merge conflicts.
         op_skip = {
             # See: https://github.com/pytorch/pytorch/issues/64997
+            "as_strided",
             "block_diag",
             "broadcast_tensors",
+            "cartesian_prod",
             "contiguous",
             "einsum",
             "expand",
             "expand_as",
             "fill_",
+            "T",   # Implemented with a lambda
+            "H",   # Implemented with a lambda
+            "mT",  # Implemented with a lambda
+            "mH",  # Implemented with a lambda
             "gradient",
+            "histogramdd",
             "igamma",
             "igammac",
             "index_put",
             "nn.functional.conv2d",
             "nn.functional.dropout",
+            "nn.functional.dropout2d",
+            "nn.functional.embedding",  # Implemented with a lambda
+            "nn.functional.embedding_bag",  # Implemented with a lambda
+            "nn.functional.rrelu",  # Implemented with a lambda
+            "nn.functional.feature_alpha_dropout",  # Implemented with a lambda
+            "nonzero",
             "polygamma",
             "special.polygamma",
             "repeat",
@@ -1480,12 +1496,39 @@ class TestNormalizeOperators(JitTestCase):
             "resize_",
             "resize_as_",
             "special.zeta",
+            "sum_to_size",
             "to_sparse",
+            "unique",
+            "unique_consecutive",
             "view",
             "view_as",
             "unfold",
             "where",
             "zero_",
+            'bfloat16',
+            'bool',
+            'byte',
+            'char',
+            'double',
+            'float',
+            'half',
+            'int',
+            'long',
+            'short',
+            'empty_like',
+            'ones_like',
+            'randn_like',
+            'zeros_like',
+            'full_like',
+            'rand_like',
+            'randint_like',
+            'new_ones',
+            'new_empty',
+            'new_zeros',
+            'new_full',
+            'normal',
+            'multinomial',
+            'bernoulli',
             "__getitem__",
             "__radd__",
             "__rsub__",
@@ -1497,10 +1540,19 @@ class TestNormalizeOperators(JitTestCase):
             '__ror__',
             '__rxor__',
             "__rmatmul__",
+            "atleast_1d",
+            "atleast_2d",
+            "atleast_3d",
+            "svd_lowrank",  # implemented with a lambda
+            "pca_lowrank",  # implemented with a lambda
+            "column_stack",
         }
 
         # Unsupported input types
         if op.name in op_skip:
+            return
+
+        if op.name.startswith('_masked.'):
             return
 
         # These ops currently don't trace in FX for various reasons (i.e. they take a list of tensors)

@@ -1,9 +1,12 @@
 #include <torch/csrc/jit/serialization/python_print.h>
 
+#include <algorithm>
+
 #include <ATen/core/qualified_name.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/frontend/versioned_symbols.h>
@@ -12,8 +15,6 @@
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/runtime/calculate_necessary_args.h>
-
-#include <algorithm>
 
 using c10::QualifiedName;
 
@@ -1117,7 +1118,7 @@ struct PythonPrintImpl {
         // we cannot recover the type of unwrap_optional(None),
         // using normal schema matching, so we route around this by rewriting
         // the call to unwrap_optional(annotated(Optional[T], None))
-        if (node->input()->type()->isSubtypeOf(NoneType::get()) ||
+        if (node->input()->type()->isSubtypeOf(*NoneType::get()) ||
             node->input()->mustBeNone()) {
           auto input_type = OptionalType::create(node->output()->type());
           stmt << "annotate(" << input_type->annotation_str(type_printer_)
@@ -1301,9 +1302,8 @@ struct PythonPrintImpl {
   void printFunction(
       const Function& func,
       bool print_first_argument_type = true) {
-    TORCH_INTERNAL_ASSERT(func.isGraphFunction());
     const FunctionSchema& schema = func.getSchema();
-    Graph& graph = *func.graph();
+    Graph& graph = *toGraphFunction(func).graph();
     used_names_.clear(); // each graph can reuse local names
 
     WithSourceRange guard(&source_range_stack_, graph.param_node());

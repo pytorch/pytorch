@@ -1,9 +1,9 @@
 import random
-import warnings
 
 from collections import defaultdict
 
 from torch.utils.data import IterDataPipe, functional_datapipe, DataChunk
+from torch.utils.data.datapipes.utils.common import deprecation_warning_torchdata
 from typing import Any, Callable, DefaultDict, Iterator, List, Optional, Sized, TypeVar
 
 T_co = TypeVar('T_co', covariant=True)
@@ -47,8 +47,8 @@ class BatcherIterDataPipe(IterDataPipe[DataChunk]):
         datapipe: Iterable DataPipe being batched
         batch_size: The size of each batch
         drop_last: Option to drop the last batch if it's not full
-        unbatch_level: Specifies if it necessary to unbatch source data before
-            applying new batching rule
+        wrapper_class: wrapper to apply onto each batch (type `List`) before yielding,
+            defaults to DataChunk
     """
     datapipe: IterDataPipe
     batch_size: int
@@ -59,16 +59,11 @@ class BatcherIterDataPipe(IterDataPipe[DataChunk]):
                  datapipe: IterDataPipe,
                  batch_size: int,
                  drop_last: bool = False,
-                 unbatch_level: int = 0,
                  wrapper_class=DataChunk,
                  ) -> None:
         assert batch_size > 0, "Batch size is required to be larger than 0!"
         super().__init__()
-        if unbatch_level == 0:
-            self.datapipe = datapipe
-        else:
-            self.datapipe = datapipe.unbatch(unbatch_level=unbatch_level)
-        self.unbatch_level = unbatch_level
+        self.datapipe = datapipe
         self.batch_size = batch_size
         self.drop_last = drop_last
         self.length = None
@@ -84,12 +79,11 @@ class BatcherIterDataPipe(IterDataPipe[DataChunk]):
         if len(batch) > 0:
             if not self.drop_last:
                 yield self.wrapper_class(batch)
-            batch = []
 
     def __len__(self) -> int:
         if self.length is not None:
             return self.length
-        if isinstance(self.datapipe, Sized) and self.unbatch_level == 0:
+        if isinstance(self.datapipe, Sized):
             if self.drop_last:
                 self.length = len(self.datapipe) // self.batch_size
             else:
@@ -185,8 +179,7 @@ class BucketBatcherIterDataPipe(IterDataPipe[DataChunk[T_co]]):
         assert batch_size > 0, "Batch size is required to be larger than 0!"
         assert batch_num > 0, "Number of batches is required to be larger than 0!"
         assert bucket_num > 0, "Number of buckets is required to be larger than 0!"
-
-        warnings.warn("`BucketBatcher` is going to be removed from PyTorch Core")
+        deprecation_warning_torchdata(type(self).__name__)
         super().__init__()
 
         # TODO: Verify _datapippe is not going to be serialized twice
@@ -247,7 +240,6 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         group_key_fn: Function used to generate group key from the data of the source datapipe
         buffer_size: The size of buffer for ungrouped data
         group_size: The size of each group
-        unbatch_level: Specifies if it necessary to unbatch source data before grouping
         guaranteed_group_size: The guaranteed minimum group size
         drop_remaining: Specifies if the group smaller than `guaranteed_group_size` will be dropped from buffer
     """
@@ -257,22 +249,18 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
                  *,
                  buffer_size: int = 10000,
                  group_size: Optional[int] = None,
-                 unbatch_level: int = 0,
                  guaranteed_group_size: Optional[int] = None,
                  drop_remaining: bool = False):
-        if unbatch_level == 0:
-            self.datapipe = datapipe
-        else:
-            self.datapipe = datapipe.unbatch(unbatch_level=unbatch_level)
+        self.datapipe = datapipe
         self.group_key_fn = group_key_fn
         self.buffer_size = buffer_size
         self.group_size = group_size
         self.guaranteed_group_size = None
         if group_size is not None and buffer_size is not None:
-            assert group_size > 0 and group_size <= buffer_size
+            assert 0 < group_size <= buffer_size
             self.guaranteed_group_size = group_size
         if guaranteed_group_size is not None:
-            assert guaranteed_group_size > 0 and group_size is not None and guaranteed_group_size <= group_size
+            assert group_size is not None and 0 < guaranteed_group_size <= group_size
             self.guaranteed_group_size = guaranteed_group_size
         self.drop_remaining = drop_remaining
         self.wrapper_class = DataChunk
@@ -295,7 +283,7 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         new_buffer_size = buffer_size - biggest_size
         del buffer_elements[biggest_key]
 
-        return (result_to_yield, new_buffer_size)
+        return result_to_yield, new_buffer_size
 
     def __iter__(self):
         buffer_elements: DefaultDict[Any, List] = defaultdict(list)
@@ -316,7 +304,7 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
                 if result_to_yield is not None:
                     yield self.wrapper_class(result_to_yield)
 
-        while buffer_size:
-            (result_to_yield, buffer_size) = self._remove_biggest_key(buffer_elements, buffer_size)
-            if result_to_yield is not None:
-                yield self.wrapper_class(result_to_yield)
+        for key in tuple(buffer_elements.keys()):
+            res = buffer_elements.pop(key)
+            buffer_size -= len(res)
+            yield self.wrapper_class(res)

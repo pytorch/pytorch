@@ -207,14 +207,10 @@ static void LstmCell_RunFusion_GpuOnly(
   executor.setMeasureKernelTimeFlag(true);
   executor.compileFusion(&fusion);
 
-  cudaDeviceSynchronize();
-
   for (auto _ : benchmark_state) {
+    clearL2Cache();
     outputs = executor.runFusion(c10::ArrayRef<c10::IValue>(inputs), lparams);
     benchmark_state.SetIterationTime(executor.kernelTimeMs() / 1000.0);
-    cudaDeviceSynchronize();
-    clearL2Cache();
-    cudaDeviceSynchronize();
   }
 }
 

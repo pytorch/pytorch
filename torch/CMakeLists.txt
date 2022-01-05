@@ -81,7 +81,8 @@ list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${LIBSHM_SRCDIR})
 
 set(TORCH_PYTHON_LINK_LIBRARIES
     shm
-    fmt::fmt-header-only)
+    fmt::fmt-header-only
+    ATEN_CPU_FILES_GEN_LIB)
 
 set(TORCH_PYTHON_COMPILE_DEFINITIONS)
 
@@ -104,13 +105,15 @@ else()
       -fno-strict-aliasing
       -Wno-write-strings
       -Wno-strict-aliasing)
-    if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
-        list(APPEND TORCH_PYTHON_COMPILE_OPTIONS
-          -Wno-writable-strings)
-    endif()
+endif()
+
+if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
+    list(APPEND TORCH_PYTHON_COMPILE_OPTIONS
+      -Wno-writable-strings)
 endif()
 
 if(USE_CUDA)
+    include(${TORCH_ROOT}/cmake/public/cuda.cmake)
     append_filelist("libtorch_python_cuda_core_sources" TORCH_PYTHON_SRCS)
     list(APPEND TORCH_PYTHON_SRCS ${GENERATED_THNN_CXX_CUDA})
 
@@ -119,16 +122,7 @@ if(USE_CUDA)
         list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_CUDNN)
     endif()
 
-    if(MSVC)
-      list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${NVTOOLEXT_HOME}/lib/x64/nvToolsExt64_1.lib)
-      list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES "${NVTOOLEXT_HOME}/include")
-    elseif(APPLE)
-      list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${CUDA_TOOLKIT_ROOT_DIR}/lib/libnvToolsExt.dylib)
-    else()
-      find_library(LIBNVTOOLSEXT libnvToolsExt.so PATHS ${CUDA_TOOLKIT_ROOT_DIR}/lib64/)
-      list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${LIBNVTOOLSEXT})
-    endif()
-
+    list(APPEND TORCH_PYTHON_LINK_LIBRARIES torch::nvtoolsext)
 endif()
 
 if(USE_ROCM)
@@ -195,8 +189,6 @@ add_custom_target(torch_python_stubs DEPENDS
     "${TORCH_SRC_DIR}/_C/_VariableFunctions.pyi"
     "${TORCH_SRC_DIR}/nn/functional.pyi"
 )
-# For Declarations.yaml dependency
-add_dependencies(torch_python_stubs ATEN_CPU_FILES_GEN_TARGET)
 add_custom_command(
     OUTPUT
     "${TORCH_SRC_DIR}/_C/__init__.pyi"
@@ -211,6 +203,8 @@ add_custom_command(
     "${TORCH_SRC_DIR}/_C/_VariableFunctions.pyi.in"
     "${TORCH_SRC_DIR}/nn/functional.pyi.in"
     "${TOOLS_PATH}/pyi/gen_pyi.py"
+    "${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml"
+    "${TORCH_ROOT}/tools/autograd/deprecated.yaml"
     WORKING_DIRECTORY
     "${TORCH_ROOT}"
 )
@@ -252,6 +246,9 @@ endif()
 #          affect both torch_python and DEPLOY interpreter.
 if(USE_DEPLOY)
   add_library(torch_python_obj OBJECT ${TORCH_PYTHON_SRCS})
+  if(NOT MSVC)
+    target_compile_options(torch_python_obj PRIVATE -Wno-unused-variable)
+  endif()
   if(USE_DISTRIBUTED)
     # Set c10d-related compile definitions. For a "normal" build of
     # libtorch_python, these are set on libtorch as PUBLIC so they are
@@ -354,6 +351,10 @@ if(USE_PRECOMPILED_HEADERS)
       "$<$<COMPILE_LANGUAGE:CXX>:ATen/ATen.h>")
 endif()
 
+if(NOT MSVC)
+  target_compile_options(torch_python PRIVATE -Wno-unused-variable)
+endif()
+
 # Required workaround for generated sources
 # See https://samthursfield.wordpress.com/2015/11/21/cmake-dependencies-between-targets-and-files-and-custom-commands/#custom-commands-in-different-directories
 add_dependencies(torch_python generate-torch-sources)
@@ -373,6 +374,12 @@ endif()
 if(USE_CUDA)
   torch_cuda_get_nvcc_gencode_flag(_ARCH_FLAGS)
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/cuda/Module.cpp PROPERTIES COMPILE_FLAGS "-DCUDA_ARCH_FLAGS=\"${_ARCH_FLAGS_readable}\"")
+endif()
+
+# Preserve HIP arch flags
+if(USE_ROCM)
+  string(REPLACE ";" " " PYTORCH_ROCM_ARCH_readable "${PYTORCH_ROCM_ARCH}")
+  set_source_files_properties(${TORCH_SRC_DIR}/csrc/cuda/Module.cpp PROPERTIES COMPILE_FLAGS "-DCUDA_ARCH_FLAGS=\"${PYTORCH_ROCM_ARCH_readable}\"")
 endif()
 
 target_compile_definitions(torch_python PRIVATE "-DTHP_BUILD_MAIN_LIB")
@@ -429,10 +436,4 @@ if(NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
           )
   # Pybind11 requires explicit linking of the torch_python library
   target_link_libraries(nnapi_backend torch torch_python)
-endif()
-
-if(BUILD_BINARY)
-  add_library(aot_compiler SHARED
-          ${TORCH_SRC_DIR}/csrc/jit/mobile/nnc/aot_compiler.cpp
-          )
 endif()

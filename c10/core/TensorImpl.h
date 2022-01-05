@@ -19,6 +19,7 @@
 #include <c10/util/Logging.h>
 #include <c10/util/Optional.h>
 #include <c10/util/accumulate.h>
+#include <c10/util/irange.h>
 #include <c10/util/python_stub.h>
 
 // A global boolean variable to control whether we free memory when a Tensor
@@ -68,7 +69,7 @@ inline std::vector<int64_t> ToVectorint64_t(ArrayRef<int> src) {
  */
 inline int64_t size_from_dim_(int k, IntArrayRef dims) {
   int64_t r = 1;
-  for (size_t i = k; i < dims.size(); ++i) {
+  for (const auto i : c10::irange(k, dims.size())) {
     r *= dims[i];
   }
   return r;
@@ -78,7 +79,7 @@ inline int64_t size_from_dim_(int k, IntArrayRef dims) {
 inline int64_t size_to_dim_(int k, IntArrayRef dims) {
   TORCH_CHECK((unsigned)k <= dims.size());
   int64_t r = 1;
-  for (int i = 0; i < k; ++i) {
+  for (const auto i : c10::irange(k)) {
     r *= dims[i];
   }
   return r;
@@ -1057,6 +1058,26 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   /**
+   * Whether or not the tensor is a zerotensor
+   */
+  inline bool _is_zerotensor() const {
+    return key_set_.has(DispatchKey::ZeroTensor);
+  }
+
+  /**
+   Set whether or not the tensor is a zero tensor
+  */
+  void _set_zero(bool value) {
+    if (value) {
+      TORCH_INTERNAL_ASSERT(
+          false,
+          "Please call `torch._efficientzerotensor` if you want to create a tensor with no storage.");
+    } else {
+      key_set_ = key_set_.remove(DispatchKey::ZeroTensor);
+    }
+  }
+
+  /**
    * Whether or not the tensor should be negated
    */
   inline bool is_neg() const {
@@ -1180,13 +1201,15 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         dtype_initialized(),
         "Cannot access data pointer of Tensor that doesn't have initialized dtype "
         "(e.g., caffe2::Tensor x(CPU), prior to calling mutable_data<T>() on x)");
-    if (storage_offset_) {
-      return static_cast<void*>(
-          static_cast<char*>(storage_.data()) +
-          data_type_.itemsize() * storage_offset_);
-    } else {
-      return storage_.data();
+    // Computing an offset into an empty tensor would be UB, since an empty
+    // tensor's storage will be nullptr, and adding a nonzero offset to nullptr
+    // is UB.  So we skip the offset computation in this case.
+    if (is_empty()) {
+      return nullptr;
     }
+    return static_cast<void*>(
+        static_cast<char*>(storage_.data()) +
+        data_type_.itemsize() * storage_offset_);
   }
 
   /**
@@ -2141,7 +2164,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     auto old_numel = numel_;
     sizes_and_strides_.resize(src.size());
     int64_t new_numel = 1;
-    for (size_t i = 0; i < src.size(); ++i) {
+    for (const auto i : c10::irange(src.size())) {
       new_numel *= src[i];
       sizes_and_strides_.size_at_unchecked(i) = src[i];
     }

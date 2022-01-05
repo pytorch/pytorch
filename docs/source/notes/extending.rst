@@ -17,6 +17,9 @@ Adding operations to :mod:`~torch.autograd` requires implementing a new
 are what :mod:`~torch.autograd` uses to encode the operation history and compute
 gradients.
 
+The first part of this doc is focused on backward mode AD as it is the most widely used
+feature. A section at the end discusses the extensions for forward mode AD.
+
 When to use
 ^^^^^^^^^^^
 In general, implement a custom function if you want to perform computations in your model
@@ -68,9 +71,9 @@ Take the following steps:
   tensors if there are multiple outputs. Also, please refer to the
   docs of :class:`Function` to find descriptions of useful methods that can be
   called only from :meth:`~Function.forward`.
-- :meth:`~Function.backward` defines the gradient formula. It will be given
-  as many :class:`Tensor` arguments as there were outputs, with each of them
-  representing gradient w.r.t. that output. It is important NEVER to modify
+- :meth:`~Function.backward` (or :meth:`~Function.vjp`) defines the gradient formula.
+  It will be given as many :class:`Tensor` arguments as there were outputs, with each
+  of them representing gradient w.r.t. that output. It is important NEVER to modify
   these in-place. It should return as many tensors as there
   were inputs, with each of them containing the gradient w.r.t. its
   corresponding input. If your inputs didn't require gradient
@@ -204,7 +207,7 @@ And here, we optimize the above example by calling set_materialize_grads(False):
     Inputs to ``backward``, i.e., :attr:`grad_output`, can also be tensors that
     track history. So if ``backward`` is implemented with differentiable
     operations, (e.g., invocation of another custom
-    :class:`~torch.autograd.function`), higher order derivatives will work.
+    :class:`~torch.autograd.Function`), higher order derivatives will work.
     In this case, the tensors saved with ``save_for_backward`` can also be used
     in the backward and have gradients flowing back but tensors saved in the ``ctx``
     won't have gradients flowing back for them.
@@ -227,6 +230,35 @@ numerical approximations using small finite differences::
 See :ref:`grad-check` for more details on finite-difference gradient comparisons.
 If your function is used in higher order derivatives (differentiating the backward pass) you
 can use the ``gradgradcheck`` function from the same package to check higher order derivatives.
+
+Forward mode AD
+^^^^^^^^^^^^^^^
+
+Overriding the forward mode AD formula has a very similar API with some different subtleties.
+You can implement the :meth:`~Function.jvp` function.
+
+It will be given as many :class:`Tensor` arguments as there were inputs, with each
+of them representing gradient w.r.t. that input. It should return as many tensors as there
+were outputs, with each of them containing the gradient w.r.t. its corresponding output.
+The :meth:`~Function.jvp` will be called just after the :meth:`~Function.forward`
+method, before the :meth:`~Function.apply` returns.
+
+:meth:`~Function.jvp` has a few subtle differences with the :meth:`~Function.backward` function:
+
+- You can use the `ctx` to pass any data from the :meth:`~Function.forward` to the :meth:`~Function.jvp` function.
+  If that state will not be needed for the :meth:`~Function.backward`,
+  you can explicitly free it by doing ``del ctx.foo`` at the end of the :meth:`~Function.jvp` function.
+- The implementation of :meth:`~Function.jvp` must be backward differentiable or explicitly check that
+  none of the given forward mode gradient has ``requires_grad`` set.
+- The :meth:`~Function.jvp` function must match the view/inplace behavior of :meth:`~Function.forward`.
+  For example, if the ``i`` th input is modified inplace, then the ``i`` th gradient must be updated inplace.
+  Similarly, if the ``j`` th output is a view of the ``k`` th input. Then the returned ``j`` th output gradient must be
+  a view of the given ``k`` th input gradient.
+- Because the user cannot specify which gradient needs to be computed, the :meth:`~Function.jvp` function should
+  always compute gradients for all the outputs.
+- The forward mode gradients do respect the flag set by :meth:`~torch.autograd.function.FunctionCtx.set_materialize_grads`
+  and you can get `None` input gradients when this is disabled.
+
 
 Extending :mod:`torch.nn`
 -------------------------

@@ -63,7 +63,7 @@ void apply_reflect_conj_tri_single(scalar_t* self, int64_t n, int64_t stride, bo
   std::function<void(int64_t, int64_t)> loop = [](int64_t, int64_t){};
   if (upper) {
     loop = [&](int64_t start, int64_t end) {
-      for (int64_t i = start; i < end; i++) {
+      for (const auto i : c10::irange(start, end)) {
         for (int64_t j = i + 1; j < n; j++) {
           self[i * stride + j] = conj_impl(self[j * stride + i]);
         }
@@ -71,8 +71,8 @@ void apply_reflect_conj_tri_single(scalar_t* self, int64_t n, int64_t stride, bo
     };
   } else {
     loop = [&](int64_t start, int64_t end) {
-      for (int64_t i = start; i < end; i++) {
-        for (int64_t j = 0; j < i; j++) {
+      for (const auto i : c10::irange(start, end)) {
+        for (const auto j : c10::irange(i)) {
           self[i * stride + j] = conj_impl(self[j * stride + i]);
         }
       }
@@ -106,7 +106,7 @@ void apply_cholesky_inverse(Tensor& input, Tensor& infos, bool upper) {
   auto n = input.size(-2);
   auto lda = std::max<int64_t>(1, n);
 
-  for (int64_t i = 0; i < batch_size; i++) {
+  for (const auto i : c10::irange(batch_size)) {
     scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
     int* info_working_ptr = &infos_data[i];
     lapackCholeskyInverse<scalar_t>(uplo, n, input_working_ptr, lda, info_working_ptr);
@@ -206,6 +206,7 @@ std::tuple<Tensor, Tensor> eig_kernel_impl(const Tensor& self, bool& eigenvector
   });
   // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
   singleCheckErrors(info, "eig_cpu");
+
   return std::tuple<Tensor, Tensor>(vals_, vecs_);
 }
 
@@ -273,7 +274,7 @@ void linalg_eig_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos,
   // the content of eigenvalues, eigenvectors and infos is overwritten by 'apply_linalg_eig'
 
   // apply_linalg_eig modifies in-place provided input matrix, therefore we need a copy
-  Tensor input_working_copy = at::empty(input.transpose(-2, -1).sizes(), input.options());
+  Tensor input_working_copy = at::empty(input.mT().sizes(), input.options());
   input_working_copy.transpose_(-2, -1);  // make input_working_copy to have Fortran contiguous memory layout
   input_working_copy.copy_(input);
 
@@ -501,7 +502,7 @@ inline void apply_orgqr(Tensor& self, const Tensor& tau) {
   lwork = std::max<int>(1, real_impl<scalar_t, value_t>(wkopt));
   Tensor work = at::empty({lwork}, self.options());
 
-  for (int64_t i = 0; i < batch_size; i++) {
+  for (const auto i : c10::irange(batch_size)) {
     scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
     scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
 
@@ -795,7 +796,7 @@ This is an in-place routine, content of 'B' is overwritten.
 and the actual diagonal values are not used.
 */
 template<typename scalar_t>
-void apply_triangular_solve(Tensor& A, Tensor& B, bool left, bool upper, TransposeType transpose, bool unitriangular) {
+void apply_triangular_solve(const Tensor& A, const Tensor& B, bool left, bool upper, TransposeType transpose, bool unitriangular) {
 #if !AT_BUILD_WITH_BLAS()
   TORCH_CHECK(
       false,
@@ -826,7 +827,7 @@ void apply_triangular_solve(Tensor& A, Tensor& B, bool left, bool upper, Transpo
 #endif
 }
 
-void triangular_solve_kernel(Tensor& A, Tensor& B, bool left, bool upper, TransposeType transpose, bool unitriangular) {
+void triangular_solve_kernel(const Tensor& A, const Tensor& B, bool left, bool upper, TransposeType transpose, bool unitriangular) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(A.scalar_type(), "triangular_solve_cpu", [&]{
     apply_triangular_solve<scalar_t>(A, B, left, upper, transpose, unitriangular);
   });
@@ -948,65 +949,78 @@ REGISTER_ARCH_DISPATCH(cholesky_stub, DEFAULT, &cholesky_kernel);
 REGISTER_AVX512_DISPATCH(cholesky_stub, &cholesky_kernel);
 REGISTER_AVX2_DISPATCH(cholesky_stub, &cholesky_kernel);
 REGISTER_VSX_DISPATCH(cholesky_stub, &cholesky_kernel);
+REGISTER_ZVECTOR_DISPATCH(cholesky_stub, &cholesky_kernel);
 
 REGISTER_ARCH_DISPATCH(cholesky_inverse_stub, DEFAULT, &cholesky_inverse_kernel_impl);
 REGISTER_AVX512_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl);
 REGISTER_AVX2_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl);
 REGISTER_VSX_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl);
+REGISTER_ZVECTOR_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl);
 
 REGISTER_ARCH_DISPATCH(eig_stub, DEFAULT, &eig_kernel_impl);
 REGISTER_AVX512_DISPATCH(eig_stub, &eig_kernel_impl);
 REGISTER_AVX2_DISPATCH(eig_stub, &eig_kernel_impl);
 REGISTER_VSX_DISPATCH(eig_stub, &eig_kernel_impl);
+REGISTER_ZVECTOR_DISPATCH(eig_stub, &eig_kernel_impl);
 
 REGISTER_ARCH_DISPATCH(linalg_eig_stub, DEFAULT, &linalg_eig_kernel);
 REGISTER_AVX512_DISPATCH(linalg_eig_stub, &linalg_eig_kernel);
 REGISTER_AVX2_DISPATCH(linalg_eig_stub, &linalg_eig_kernel);
 REGISTER_VSX_DISPATCH(linalg_eig_stub, &linalg_eig_kernel);
+REGISTER_ZVECTOR_DISPATCH(linalg_eig_stub, &linalg_eig_kernel);
 
 REGISTER_ARCH_DISPATCH(linalg_eigh_stub, DEFAULT, &linalg_eigh_kernel);
 REGISTER_AVX512_DISPATCH(linalg_eigh_stub, &linalg_eigh_kernel);
 REGISTER_AVX2_DISPATCH(linalg_eigh_stub, &linalg_eigh_kernel);
 REGISTER_VSX_DISPATCH(linalg_eigh_stub, &linalg_eigh_kernel);
+REGISTER_ZVECTOR_DISPATCH(linalg_eigh_stub, &linalg_eigh_kernel);
 
 REGISTER_ARCH_DISPATCH(geqrf_stub, DEFAULT, &geqrf_kernel);
 REGISTER_AVX512_DISPATCH(geqrf_stub, &geqrf_kernel);
 REGISTER_AVX2_DISPATCH(geqrf_stub, &geqrf_kernel);
 REGISTER_VSX_DISPATCH(geqrf_stub, &geqrf_kernel);
+REGISTER_ZVECTOR_DISPATCH(geqrf_stub, &geqrf_kernel);
 
 REGISTER_ARCH_DISPATCH(orgqr_stub, DEFAULT, &orgqr_kernel_impl);
 REGISTER_AVX512_DISPATCH(orgqr_stub, &orgqr_kernel_impl);
 REGISTER_AVX2_DISPATCH(orgqr_stub, &orgqr_kernel_impl);
 REGISTER_VSX_DISPATCH(orgqr_stub, &orgqr_kernel_impl);
+REGISTER_ZVECTOR_DISPATCH(orgqr_stub, &orgqr_kernel_impl);
 
 REGISTER_ARCH_DISPATCH(ormqr_stub, DEFAULT, &ormqr_kernel);
 REGISTER_AVX512_DISPATCH(ormqr_stub, &ormqr_kernel);
 REGISTER_AVX2_DISPATCH(ormqr_stub, &ormqr_kernel);
 REGISTER_VSX_DISPATCH(ormqr_stub, &ormqr_kernel);
+REGISTER_ZVECTOR_DISPATCH(ormqr_stub, &ormqr_kernel);
 
 REGISTER_ARCH_DISPATCH(lstsq_stub, DEFAULT, &lstsq_kernel);
 REGISTER_AVX512_DISPATCH(lstsq_stub, &lstsq_kernel);
 REGISTER_AVX2_DISPATCH(lstsq_stub, &lstsq_kernel);
 REGISTER_VSX_DISPATCH(lstsq_stub, &lstsq_kernel);
+REGISTER_ZVECTOR_DISPATCH(lstsq_stub, &lstsq_kernel);
 
 REGISTER_ARCH_DISPATCH(triangular_solve_stub, DEFAULT, &triangular_solve_kernel);
 REGISTER_AVX512_DISPATCH(triangular_solve_stub, &triangular_solve_kernel);
 REGISTER_AVX2_DISPATCH(triangular_solve_stub, &triangular_solve_kernel);
 REGISTER_VSX_DISPATCH(triangular_solve_stub, &triangular_solve_kernel);
+REGISTER_ZVECTOR_DISPATCH(triangular_solve_stub, &triangular_solve_kernel);
 
 REGISTER_ARCH_DISPATCH(lu_stub, DEFAULT, &lu_kernel);
 REGISTER_AVX512_DISPATCH(lu_stub, &lu_kernel);
 REGISTER_AVX2_DISPATCH(lu_stub, &lu_kernel);
 REGISTER_VSX_DISPATCH(lu_stub, &lu_kernel);
+REGISTER_ZVECTOR_DISPATCH(lu_stub, &lu_kernel);
 
 REGISTER_ARCH_DISPATCH(lu_solve_trans_stub, DEFAULT, &lu_solve_trans_kernel);
 REGISTER_AVX512_DISPATCH(lu_solve_trans_stub, &lu_solve_trans_kernel);
 REGISTER_AVX2_DISPATCH(lu_solve_trans_stub, &lu_solve_trans_kernel);
 REGISTER_VSX_DISPATCH(lu_solve_trans_stub, &lu_solve_trans_kernel);
+REGISTER_ZVECTOR_DISPATCH(lu_solve_trans_stub, &lu_solve_trans_kernel);
 
 REGISTER_ARCH_DISPATCH(lu_solve_stub, DEFAULT, &lu_solve_kernel);
 REGISTER_AVX512_DISPATCH(lu_solve_stub, &lu_solve_kernel);
 REGISTER_AVX2_DISPATCH(lu_solve_stub, &lu_solve_kernel);
 REGISTER_VSX_DISPATCH(lu_solve_stub, &lu_solve_kernel);
+REGISTER_ZVECTOR_DISPATCH(lu_solve_stub, &lu_solve_kernel);
 
 }} // namespace at::native

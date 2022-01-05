@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Owner(s): ["oncall: mobile"]
+
 import os
 import ctypes
 import torch
@@ -514,10 +516,10 @@ class TestNNAPI(TestCase):
                     if "quant" in kind:
                         model = torch.nn.Sequential(model)
                         model.eval()
-                        model.qconfig = torch.quantization.get_default_qconfig('qnnpack')
-                        model = torch.quantization.prepare(model)
+                        model.qconfig = torch.ao.quantization.get_default_qconfig('qnnpack')
+                        model = torch.ao.quantization.prepare(model)
                         model(inp)
-                        model = torch.quantization.convert(model)
+                        model = torch.ao.quantization.convert(model)
                         inp = qpt(inp, 1.0 / 16, 128)
                         # I've seen numerical differences between QNNPACK and NNAPI,
                         # but never more than 1 quantum, and never more than ~1% of
@@ -556,7 +558,7 @@ class TestNNAPI(TestCase):
 
                 if "quant" in kind:
                     model = torch.nn.quantized.ConvTranspose2d(in_ch, out_ch, kernel)
-                    model.qconfig = torch.quantization.get_default_qconfig('qnnpack')
+                    model.qconfig = torch.ao.quantization.get_default_qconfig('qnnpack')
                     inp = qpt(inp, 1.0 / 16, 128)
                     # I've seen numerical differences between QNNPACK and NNAPI,
                     # but never more than 1 quantum, and never more than ~10% of
