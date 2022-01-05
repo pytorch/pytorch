@@ -940,9 +940,8 @@ class RNNCell(RNNCellBase):
         nonlinearity: The non-linearity to use. Can be either ``'tanh'`` or ``'relu'``. Default: ``'tanh'``
 
     Inputs: input, hidden
-        - **input** of shape `(batch, input_size)`: tensor containing input features
-        - **hidden** of shape `(batch, hidden_size)`: tensor containing the initial hidden
-          state for each element in the batch.
+        - **input**: tensor containing input features
+        - **hidden**: tensor containing the initial hidden state
           Defaults to zero if not provided.
 
     Outputs: h'
@@ -950,13 +949,11 @@ class RNNCell(RNNCellBase):
           for each element in the batch
 
     Shape:
-        - Input1: :math:`(N, H_{in})` tensor containing input features where
-          :math:`H_{in}` = `input_size`
-        - Input2: :math:`(N, H_{out})` tensor containing the initial hidden
-          state for each element in the batch where :math:`H_{out}` = `hidden_size`
-          Defaults to zero if not provided.
-        - Output: :math:`(N, H_{out})` tensor containing the next hidden state
-          for each element in the batch
+        - input: :math:`(N, H_{in})` or :math:`(H_{in})` tensor containing input features where
+          :math:`H_{in}` = `input_size`.
+        - hidden: :math:`(N, H_{out})` or :math:`(H_{out})` tensor containing the initial hidden
+          state where :math:`H_{out}` = `hidden_size`. Defaults to zero if not provided.
+        - output: :math:`(N, H_{out})` or :math:`(H_{out})` tensor containing the next hidden state.
 
     Attributes:
         weight_ih: the learnable input-hidden weights, of shape
@@ -990,8 +987,17 @@ class RNNCell(RNNCellBase):
         self.nonlinearity = nonlinearity
 
     def forward(self, input: Tensor, hx: Optional[Tensor] = None) -> Tensor:
+        assert input.dim() in (1, 2), \
+            f"RNNCell: Expected input to be 1-D or 2-D but received {input.dim()}-D tensor"
+        is_batched = input.dim() == 2
+        if not is_batched:
+            input = input.unsqueeze(0)
+
         if hx is None:
             hx = torch.zeros(input.size(0), self.hidden_size, dtype=input.dtype, device=input.device)
+        else:
+            hx = hx.unsqueeze(0) if not is_batched else hx
+
         if self.nonlinearity == "tanh":
             ret = _VF.rnn_tanh_cell(
                 input, hx,
@@ -1008,6 +1014,10 @@ class RNNCell(RNNCellBase):
             ret = input  # TODO: remove when jit supports exception flow
             raise RuntimeError(
                 "Unknown nonlinearity: {}".format(self.nonlinearity))
+
+        if not is_batched:
+            ret = ret.squeeze(0)
+
         return ret
 
 
@@ -1034,19 +1044,15 @@ class LSTMCell(RNNCellBase):
             `b_hh`. Default: ``True``
 
     Inputs: input, (h_0, c_0)
-        - **input** of shape `(batch, input_size)`: tensor containing input features
-        - **h_0** of shape `(batch, hidden_size)`: tensor containing the initial hidden
-          state for each element in the batch.
-        - **c_0** of shape `(batch, hidden_size)`: tensor containing the initial cell state
-          for each element in the batch.
+        - **input** of shape `(batch, input_size)` or `(input_size)`: tensor containing input features
+        - **h_0** of shape `(batch, hidden_size)` or `(hidden_size)`: tensor containing the initial hidden state
+        - **c_0** of shape `(batch, hidden_size)` or `(hidden_size)`: tensor containing the initial cell state
 
           If `(h_0, c_0)` is not provided, both **h_0** and **c_0** default to zero.
 
     Outputs: (h_1, c_1)
-        - **h_1** of shape `(batch, hidden_size)`: tensor containing the next hidden state
-          for each element in the batch
-        - **c_1** of shape `(batch, hidden_size)`: tensor containing the next cell state
-          for each element in the batch
+        - **h_1** of shape `(batch, hidden_size)` or `(hidden_size)`: tensor containing the next hidden state
+        - **c_1** of shape `(batch, hidden_size)` or `(hidden_size)`: tensor containing the next cell state
 
     Attributes:
         weight_ih: the learnable input-hidden weights, of shape
@@ -1079,14 +1085,27 @@ class LSTMCell(RNNCellBase):
         super(LSTMCell, self).__init__(input_size, hidden_size, bias, num_chunks=4, **factory_kwargs)
 
     def forward(self, input: Tensor, hx: Optional[Tuple[Tensor, Tensor]] = None) -> Tuple[Tensor, Tensor]:
+        assert input.dim() in (1, 2), \
+            f"LSTMCell: Expected input to be 1-D or 2-D but received {input.dim()}-D tensor"
+        is_batched = input.dim() == 2
+        if not is_batched:
+            input = input.unsqueeze(0)
+
         if hx is None:
             zeros = torch.zeros(input.size(0), self.hidden_size, dtype=input.dtype, device=input.device)
             hx = (zeros, zeros)
-        return _VF.lstm_cell(
+        else:
+            hx = (hx[0].unsqueeze(0), hx[1].unsqueeze(0)) if not is_batched else hx
+
+        ret = _VF.lstm_cell(
             input, hx,
             self.weight_ih, self.weight_hh,
             self.bias_ih, self.bias_hh,
         )
+
+        if not is_batched:
+            ret = (ret[0].squeeze(0), ret[1].squeeze(0))
+        return ret
 
 
 class GRUCell(RNNCellBase):
@@ -1110,23 +1129,21 @@ class GRUCell(RNNCellBase):
             `b_hh`. Default: ``True``
 
     Inputs: input, hidden
-        - **input** of shape `(batch, input_size)`: tensor containing input features
-        - **hidden** of shape `(batch, hidden_size)`: tensor containing the initial hidden
+        - **input** : tensor containing input features
+        - **hidden** : tensor containing the initial hidden
           state for each element in the batch.
           Defaults to zero if not provided.
 
     Outputs: h'
-        - **h'** of shape `(batch, hidden_size)`: tensor containing the next hidden state
+        - **h'** : tensor containing the next hidden state
           for each element in the batch
 
     Shape:
-        - Input1: :math:`(N, H_{in})` tensor containing input features where
-          :math:`H_{in}` = `input_size`
-        - Input2: :math:`(N, H_{out})` tensor containing the initial hidden
-          state for each element in the batch where :math:`H_{out}` = `hidden_size`
-          Defaults to zero if not provided.
-        - Output: :math:`(N, H_{out})` tensor containing the next hidden state
-          for each element in the batch
+        - input: :math:`(N, H_{in})` or :math:`(H_{in})` tensor containing input features where
+          :math:`H_{in}` = `input_size`.
+        - hidden: :math:`(N, H_{out})` or :math:`(H_{out})` tensor containing the initial hidden
+          state where :math:`H_{out}` = `hidden_size`. Defaults to zero if not provided.
+        - output: :math:`(N, H_{out})` or :math:`(H_{out})` tensor containing the next hidden state.
 
     Attributes:
         weight_ih: the learnable input-hidden weights, of shape
@@ -1157,10 +1174,24 @@ class GRUCell(RNNCellBase):
         super(GRUCell, self).__init__(input_size, hidden_size, bias, num_chunks=3, **factory_kwargs)
 
     def forward(self, input: Tensor, hx: Optional[Tensor] = None) -> Tensor:
+        assert input.dim() in (1, 2), \
+            f"GRUCell: Expected input to be 1-D or 2-D but received {input.dim()}-D tensor"
+        is_batched = input.dim() == 2
+        if not is_batched:
+            input = input.unsqueeze(0)
+
         if hx is None:
             hx = torch.zeros(input.size(0), self.hidden_size, dtype=input.dtype, device=input.device)
-        return _VF.gru_cell(
+        else:
+            hx = hx.unsqueeze(0) if not is_batched else hx
+
+        ret = _VF.gru_cell(
             input, hx,
             self.weight_ih, self.weight_hh,
             self.bias_ih, self.bias_hh,
         )
+
+        if not is_batched:
+            ret = ret.squeeze(0)
+
+        return ret
