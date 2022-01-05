@@ -9,6 +9,10 @@
 // NOTE: CUDA on Windows requires that the enclosing function
 // of a __device__ lambda not have internal linkage.
 
+// TODO: review jiterating igamma and igammac if/when a persistent (across processes)
+//   cache is implemented, because they take a VERY long time to compile
+// TODO: it's also odd these ops use gpu_kernel_with_scalars
+
 namespace {
 
 /*
@@ -517,7 +521,6 @@ __noinline__ __host__ __device__ scalar_t calc_igamma(scalar_t a, scalar_t x) {
 namespace at { namespace native {
 
 void igamma_kernel_cuda(TensorIteratorBase& iter) {
-
   AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "igamma_cuda", [&]() {
     gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
       return calc_igamma(a, b);
@@ -526,7 +529,6 @@ void igamma_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 void igammac_kernel_cuda(TensorIteratorBase& iter) {
-
   AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "igammac_cuda", [&]() {
     gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
       return calc_igammac(a, b);
