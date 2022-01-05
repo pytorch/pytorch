@@ -4,6 +4,8 @@ import copy
 
 class TestPerOverloadAPI(TestCase):
     def test_basics_opoverloadpacket(self):
+        # add is ony used as an example here. It is ok to update the test
+        # if the semantics of add are modified in the future.
         add_packet = torch.ops.aten.add
 
         # class attributes
@@ -35,7 +37,7 @@ class TestPerOverloadAPI(TestCase):
         # class attributes
         self.assertEqual(add_tensoroverload.name, 'aten.add')
         self.assertEqual(add_tensoroverload.overload_name, 'Tensor')
-        self.assertEqual(add_tensoroverload.overloadpacket, add_packet)
+        self.assertEqual(add_tensoroverload.overload_packet, add_packet)
 
         # deepcopy is a no-op
         self.assertEqual(id(add_tensoroverload), id(copy.deepcopy(add_tensoroverload)))
