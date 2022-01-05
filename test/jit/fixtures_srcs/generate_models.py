@@ -161,7 +161,7 @@ def generate_models():
                 f"Please run the script before the commit to change operator.")
 
         actual_operator_list = get_operator_list(script_module)
-        if expect_operator in actual_operator_list:
+        if expect_operator not in actual_operator_list:
             logger.error(
                 f"The model includes operator: {actual_operator_list}, "
                 f"however it doesn't cover the operator {expect_operator}."
