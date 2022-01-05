@@ -292,11 +292,16 @@ class BinaryBuildWorkflow:
 
     # Optional fields
     build_environment: str = ''
+    abi_version: str = ''
     ciflow_config: CIFlowConfig = field(default_factory=CIFlowConfig)
     is_scheduled: str = ''
 
     def __post_init__(self) -> None:
-        self.build_environment = f"{self.os}-binary-{self.package_type}"
+        if self.abi_version:
+            self.build_environment = f"{self.os}-binary-{self.package_type}-{self.abi_version}"
+        else:
+            self.build_environment = f"{self.os}-binary-{self.package_type}"
+
 
     def generate_workflow_file(self, workflow_template: jinja2.Template) -> None:
         output_file_path = GITHUB_DIR / f"workflows/generated-{self.build_environment}.yml"
@@ -826,7 +831,22 @@ LINUX_BINARY_BUILD_WORFKLOWS = [
     BinaryBuildWorkflow(
         os="linux",
         package_type="libtorch",
-        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(),
+        abi_version=generate_binary_build_matrix.CXX11_ABI,
+        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
+            generate_binary_build_matrix.CXX11_ABI
+        ),
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
+            isolated_workflow=True,
+        ),
+    ),
+    BinaryBuildWorkflow(
+        os="linux",
+        package_type="libtorch",
+        abi_version=generate_binary_build_matrix.PRE_CXX11_ABI,
+        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
+            generate_binary_build_matrix.PRE_CXX11_ABI
+        ),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
             isolated_workflow=True,

@@ -10,7 +10,7 @@ architectures:
     * Latest ROCM
 """
 
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 
 CUDA_ARCHES = ["10.2", "11.1", "11.3", "11.5"]
@@ -45,17 +45,20 @@ CONDA_CONTAINER_IMAGES = {
     "cpu": "pytorch/conda-builder:cpu",
 }
 
-LIBTORCH_CONTAINER_IMAGES = {
+PRE_CXX11_ABI = "pre-cxx11"
+CXX11_ABI = "cxx11-abi"
+
+LIBTORCH_CONTAINER_IMAGES: Dict[Tuple[str, str], str] = {
     **{
-        (gpu_arch, "pre-cxx11"): f"pytorch/manylinux-builder:cuda{gpu_arch}"
+        (gpu_arch, PRE_CXX11_ABI): f"pytorch/manylinux-builder:cuda{gpu_arch}"
         for gpu_arch in CUDA_ARCHES
     },
     **{
-        (gpu_arch, "cxx11-abi"): f"pytorch/libtorch-cxx11-builder:cuda{gpu_arch}"
+        (gpu_arch, CXX11_ABI): f"pytorch/libtorch-cxx11-builder:cuda{gpu_arch}"
         for gpu_arch in CUDA_ARCHES
     },
-    ("cpu", "pre-cxx11"): "pytorch/manylinux-builder:cpu",
-    ("cpu", "cxx11-abi"): "pytorch/libtorch-cxx11-builder:cpu",
+    ("cpu", PRE_CXX11_ABI): "pytorch/manylinux-builder:cpu",
+    ("cpu", CXX11_ABI): "pytorch/libtorch-cxx11-builder:cpu",
 }
 
 FULL_PYTHON_VERSIONS = [
@@ -98,7 +101,7 @@ def generate_conda_matrix() -> List[Dict[str, str]]:
     return ret
 
 
-def generate_libtorch_matrix() -> List[Dict[str, str]]:
+def generate_libtorch_matrix(abi_version: str) -> List[Dict[str, str]]:
     libtorch_variants = [
         "shared-with-deps",
         "shared-without-deps",
@@ -108,31 +111,30 @@ def generate_libtorch_matrix() -> List[Dict[str, str]]:
     ret: List[Dict[str, str]] = []
     for arch_version in ["cpu"] + CUDA_ARCHES:
         for libtorch_variant in libtorch_variants:
-            for abi_version in ["cxx11-abi", "pre-cxx11"]:
-                # We don't currently build libtorch for rocm
-                # one of the values in the following list must be exactly
-                # "cxx11-abi", but the precise value of the other one doesn't
-                # matter
-                gpu_arch_type = arch_type(arch_version)
-                gpu_arch_version = "" if arch_version == "cpu" else arch_version
-                ret.append(
-                    {
-                        "gpu_arch_type": gpu_arch_type,
-                        "gpu_arch_version": gpu_arch_version,
-                        "desired_cuda": translate_desired_cuda(
-                            gpu_arch_type, gpu_arch_version
-                        ),
-                        "libtorch_variant": libtorch_variant,
-                        "devtoolset": abi_version,
-                        "container_image": LIBTORCH_CONTAINER_IMAGES[
-                            (arch_version, abi_version)
-                        ],
-                        "package_type": "libtorch",
-                        "build_name": f"libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{abi_version}".replace(
-                            ".", "_"
-                        ),
-                    }
-                )
+            # We don't currently build libtorch for rocm
+            # one of the values in the following list must be exactly
+            # CXX11_ABI, but the precise value of the other one doesn't
+            # matter
+            gpu_arch_type = arch_type(arch_version)
+            gpu_arch_version = "" if arch_version == "cpu" else arch_version
+            ret.append(
+                {
+                    "gpu_arch_type": gpu_arch_type,
+                    "gpu_arch_version": gpu_arch_version,
+                    "desired_cuda": translate_desired_cuda(
+                        gpu_arch_type, gpu_arch_version
+                    ),
+                    "libtorch_variant": libtorch_variant,
+                    "devtoolset": abi_version,
+                    "container_image": LIBTORCH_CONTAINER_IMAGES[
+                        (arch_version, abi_version)
+                    ],
+                    "package_type": "libtorch",
+                    "build_name": f"libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{abi_version}".replace(
+                        ".", "_"
+                    ),
+                }
+            )
     return ret
 
 
