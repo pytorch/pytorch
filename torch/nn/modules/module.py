@@ -1387,9 +1387,9 @@ class Module:
             key = prefix + name
             if key in state_dict:
                 input_param = state_dict[key]
-                if not torch.is_tensor(input_param):
+                if not torch.overrides.is_tensor_like(input_param):
                     error_msgs.append('While copying the parameter named "{}", '
-                                      'expected torch.Tensor from checkpoint but '
+                                      'expected torch.Tensor or Tensor-like object from checkpoint but '
                                       'received {}'
                                       .format(key, type(input_param)))
                     continue
