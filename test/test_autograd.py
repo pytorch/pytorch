@@ -5986,9 +5986,12 @@ for shape in [(1,), ()]:
             # note that in that sense, a is saved twice
             self.assertEqual(6 * 8 * a, a.grad)
 
-    def test_graph_save_on_cpu(self):
+    @parametrize("non_blocking_copy_to_cpu", [True, False])
+    def test_graph_save_on_cpu(self, non_blocking_copy_to_cpu):
         def test(get_input, cuda, pin_memory):
-            with torch.autograd.graph.save_on_cpu(pin_memory):
+            with torch.autograd.graph.save_on_cpu(
+                pin_memory, non_blocking_copy_to_cpu
+            ):
                 a = get_input()
                 if cuda:
                     a.cuda()
@@ -6013,7 +6016,8 @@ for shape in [(1,), ()]:
                 test(lambda: x, cuda, pin_memory)
 
     @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
-    def test_graph_save_on_cpu_cuda(self):
+    @parametrize("non_blocking_copy_to_cpu", [True, False])
+    def test_graph_save_on_cpu_cuda(self, non_blocking_copy_to_cpu):
         def f(x):
             a = x + 1
             return a * a
@@ -6038,7 +6042,9 @@ for shape in [(1,), ()]:
         del y
 
         # with hooks
-        with torch.autograd.graph.save_on_cpu():
+        with torch.autograd.graph.save_on_cpu(
+            non_blocking_copy_to_cpu=non_blocking_copy_to_cpu
+        ):
             a = torch.ones(1, requires_grad=True, device="cuda")
             y = f(a)
             memory_with_hooks = torch.cuda.memory_allocated()
