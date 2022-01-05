@@ -10007,7 +10007,6 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('linalg.trace',
            aten_name='linalg_trace',
-           supports_out=False,
            op=torch.linalg.trace,
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            backward_dtypes=floating_and_complex_types_and(torch.bfloat16, torch.float16),

@@ -1111,7 +1111,15 @@ Tensor trace_cpu(const Tensor& self) {
 // TODO: this routine should be implemented without diag and sum for perf problems,
 // see https://github.com/pytorch/pytorch/pull/47305,
 Tensor linalg_trace(const Tensor& self, int64_t offset) {
-  return at::diagonal(self, offset, -2, -1).sum(-1);
+  TORCH_CHECK(self.dim() >= 2,
+           "self should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
+  return at::sum(at::diagonal(self, offset, -2, -1), -1);
+}
+
+Tensor& linalg_trace_out(const Tensor& self, int64_t offset, Tensor &result) {
+  TORCH_CHECK(self.dim() >= 2,
+           "self should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
+  return at::sum_out(result, at::diagonal(self, offset, -2, -1), -1);
 }
 
 void impl_func_prod(
