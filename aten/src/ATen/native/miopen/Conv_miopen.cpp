@@ -1172,7 +1172,7 @@ Tensor miopen_depthwise_convolution_backward_input(
     memory_format = (weight->ndimension() == 5) ? /*at::MemoryFormat::ChannelsLast3d*/at::MemoryFormat::Contiguous : at::MemoryFormat::ChannelsLast;
   }
 
-  Tensor grad_input_t = at::native::empty_cuda(
+  Tensor grad_input_t = at::detail::empty_cuda(
       input_size, grad_output->options().memory_format(memory_format));
 
   TensorArg grad_input{ grad_input_t, "result", 0 };
