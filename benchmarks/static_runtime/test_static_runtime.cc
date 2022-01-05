@@ -2321,3 +2321,36 @@ TEST(StaticRuntime, ModelCrashOnSecondRun) {
   // Run again to verify this.
   compareResultsWithJIT(runtime, graph, args_no_crash);
 }
+
+TEST(StaticRuntime, ReplaceWithMaybeCopy) {
+  const std::string to = R"IR(
+    graph(%0 : Tensor):
+      %1: int = prim::Constant[value=4]()
+      %2: bool = prim::Constant[value=0]()
+      %3: None = prim::Constant()
+      %res : Tensor = aten::to(%0, %1, %2, %2, %3)
+      return (%res)
+  )IR";
+
+  at::Tensor a = at::tensor({1.1, 2.2, 3.3, 4.0}, at::ScalarType::Float);
+  std::vector<IValue> args{a};
+  auto g = std::make_shared<torch::jit::Graph>();
+  torch::jit::parseIR(to, g.get());
+
+  // Jit Interpreter.
+  Stack stack(args);
+  torch::jit::GraphExecutor graph_exec(g, "");
+  graph_exec.run(stack);
+  ASSERT_EQ(stack.size(), 1);
+  auto expected = stack[0].toTensor();
+
+  // Static Runtime.
+  torch::jit::StaticModule smodule(g);
+  auto actual = smodule(args, {}).toTensor();
+  smodule.runtime().check_for_memory_leak();
+
+  EXPECT_TRUE(expected.equal(actual));
+  EXPECT_FALSE(hasProcessedNodeWithName(smodule, "aten::to"));
+  EXPECT_TRUE(
+      hasProcessedNodeWithName(smodule, "static_runtime::to_maybe_copy_out"));
+}

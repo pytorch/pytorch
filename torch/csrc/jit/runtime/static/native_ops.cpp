@@ -594,5 +594,36 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       };
     });
 
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    static_runtime::select_tensor,
+    aten_select_tensor,
+    [](Node* n) -> SROperator {
+      TORCH_CHECK(n->inputs().size() == 3);
+      return [](ProcessedNode* p_node) {
+        const auto did_copy = p_node->Input(2).toBool();
+        DCHECK(p_node->Input(0).isTensor());
+        DCHECK(!did_copy || p_node->Input(1).isTensor());
+        // Check to avoid an unnecessary refcount bump. IValue in
+        // general doesn't do this check because it would probably
+        // result in code bloat and not hit often, but here we are
+        // likely to very often be assigning the same tensor.
+        if (did_copy) {
+          if (p_node->Output(0).isTensor() &&
+              p_node->Input(1).toTensor().is_same(
+                  p_node->Output(0).toTensor())) {
+            return;
+          }
+          p_node->Output(0) = p_node->Input(1);
+        } else {
+          if (p_node->Output(0).isTensor() &&
+              p_node->Input(0).toTensor().is_same(
+                  p_node->Output(0).toTensor())) {
+            return;
+          }
+          p_node->Output(0) = p_node->Input(0);
+        }
+      };
+    });
+
 } // namespace jit
 } // namespace torch
