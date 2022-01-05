@@ -13,6 +13,18 @@ def define_targets(rules):
     )
 
     rules.cc_library(
+        name = "alloc_cpu",
+        srcs = ["impl/alloc_cpu.cpp"],
+        hdrs = ["impl/alloc_cpu.h"],
+        visibility = ["//visibility:public"],
+        deps = [
+            ":alignment",
+            "//c10/macros:macros",
+            "//c10/util:base",
+        ],
+    )
+
+    rules.cc_library(
         name = "base",
         srcs = rules.glob(
             [
@@ -21,6 +33,7 @@ def define_targets(rules):
             ],
             exclude = [
                 "CPUAllocator.cpp",
+                "impl/alloc_cpu.cpp",
             ],
         ),
         hdrs = rules.glob(
@@ -30,6 +43,7 @@ def define_targets(rules):
             ],
             exclude = [
                 "CPUAllocator.h",
+                "impl/alloc_cpu.h",
             ],
         ),
         visibility = ["//visibility:public"],
