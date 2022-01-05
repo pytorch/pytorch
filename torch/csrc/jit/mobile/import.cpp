@@ -226,7 +226,6 @@ class BytecodeDeserializer final {
   // operators from the given model. If it's less than the current runtime,
   // upgrader will be applied at loading stage.
   uint64_t operator_version_;
-  std::atomic<bool> _upgrader_initialized{false};
 };
 
 BytecodeDeserializer::BytecodeDeserializer(
@@ -302,34 +301,8 @@ void BytecodeDeserializer::parseFunctionSchema(
 }
 
 void BytecodeDeserializer::init_upgrader(mobile::Function* function) {
-  // Upgrader should only be initialized once when runtime loads the first
-  // module. It no longer needs to initialized afterwards. Previously, instead
-  // of using an atomic variable, the upgrader will be initailized depends on
-  // whether byteCodeFunctionWithOperator.function.get_code().operators_ is
-  // empty. If it's empty, it means the operator from the upgrader is not
-  // initialized yet. However, it's not thread safe. When multiple thread loads
-  // module together, it's possible that they all consider it's the first
-  // module. Use an atomic variable here to make sure it's thread safe.
-  if (!_upgrader_initialized.load(std::memory_order_seq_cst)) {
-    for (auto& byteCodeFunctionWithOperator : getUpgraderBytecodeList()) {
-      // When kUpgraderByteCode is initialized in upgrader_mobile.h, the mobile
-      // function is initialized with everything (instruction, constants, types,
-      // registerer size and etc), except operator. The operator function is
-      // also static initialized and is available later. The oprator for the
-      // upgrader function will be initialized when the first module is loaded.
-      for (const auto& op : byteCodeFunctionWithOperator.operators) {
-        byteCodeFunctionWithOperator.function.append_operator(
-            op.name,
-            op.overload_name,
-            op.num_specified_args,
-            caffe2::serialize::kMaxSupportedFileFormatVersion);
-      }
-      // Add the upgrader function in code.
-      function->append_function(byteCodeFunctionWithOperator.function);
-    }
-    // Set the flag _upgrader_initialized to ture, and for the 2, 3, ...
-    // modules, no need to initalized again
-    _upgrader_initialized.store(true, std::memory_order_seq_cst);
+  for (auto& byteCodeFunctionWithOperator : getUpgraderBytecodeList()) {
+    function->append_function(byteCodeFunctionWithOperator.function);
   }
 }
 
