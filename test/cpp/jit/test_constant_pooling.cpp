@@ -12,7 +12,8 @@
 namespace torch {
 namespace jit {
 
-TEST(ConstantPoolingTest, Int) {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(constantPoolingTest, Int) {
   auto graph = std::make_shared<Graph>();
   parseIR(
       R"IR(
@@ -22,13 +23,14 @@ graph():
   return (%8, %10)
   )IR",
       &*graph);
-  ConstantPooling(graph);
+  constantPooling(graph);
   testing::FileCheck()
       .check_count("prim::Constant", 1, /*exactly*/ true)
       ->run(*graph);
 }
 
-TEST(ConstantPoolingTest, PoolingAcrossBlocks) {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(constantPoolingTest, PoolingAcrossBlocks) {
   auto graph = std::make_shared<Graph>();
   parseIR(
       R"IR(
@@ -46,14 +48,15 @@ graph(%cond : Tensor):
   return (%7)
   )IR",
       &*graph);
-  ConstantPooling(graph);
+  constantPooling(graph);
   testing::FileCheck()
       .check_count("prim::Constant[value=\"abc\"]", 1, /*exactly*/ true)
       ->check_count("prim::Constant[value=\"bcd\"]", 1, /*exactly*/ true)
       ->run(*graph);
 }
 
-TEST(ConstantPoolingTest, PoolingDifferentDevices) {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(constantPoolingTest, PoolingDifferentDevices) {
   auto graph = std::make_shared<Graph>();
   parseIR(
       R"IR(
@@ -76,7 +79,7 @@ graph():
   // three tensors created - two different devices among the three
   // don't have good support for parsing tensor constants
   ConstantPropagation(graph);
-  ConstantPooling(graph);
+  constantPooling(graph);
   testing::FileCheck()
       .check_count(
           "Float(2, strides=[1], requires_grad=0, device=cpu) = prim::Constant",
@@ -89,7 +92,8 @@ graph():
       ->run(*graph);
 }
 
-TEST(ConstantPoolingTest, DictConstantPooling) {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(constantPoolingTest, DictConstantPooling) {
   auto graph = std::make_shared<Graph>();
   parseIR(
       R"IR(
@@ -102,7 +106,7 @@ graph():
   )IR",
       &*graph);
   ConstantPropagation(graph);
-  ConstantPooling(graph);
+  constantPooling(graph);
   testing::FileCheck()
       .check_count(
           "Dict(int, int) = prim::Constant",

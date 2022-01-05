@@ -6,7 +6,7 @@
 
 namespace torch {
 namespace jit {
-TEST(EliminateDeadCodeTest, Basic) {
+TEST(eliminateDeadCodeTest, Basic) {
   auto graph = std::make_shared<Graph>();
 
   // Consider the following loop:
@@ -44,7 +44,7 @@ graph():
   return (%tot)
 )IR";
   parseIR(input, graph.get());
-  EliminateDeadCode(graph);
+  eliminateDeadCode(graph);
   // Check that dead code elimin
   testing::FileCheck().run(input, *graph);
 }

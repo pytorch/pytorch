@@ -10,7 +10,7 @@ struct Graph;
 
 // Transforms loops so that they can be represented as python
 // for or while loops
-TORCH_API void CanonicalizeModifiedLoops(std::shared_ptr<Graph>& graph);
+TORCH_API void canonicalizeModifiedLoops(std::shared_ptr<Graph>& graph);
 
 } // namespace jit
 } // namespace torch

@@ -132,10 +132,10 @@ bool isDifferentiable(Graph& g) {
 //
 // The output of compiled forward graph is [real_outputs, ctx]
 // The input of compiled backward graph is [ctx, grad_values]
-// We run LowerSimpleTuples afterwards to elmininate all tuples generated in
+// We run lowerSimpleTuples afterwards to elmininate all tuples generated in
 // this process. The original node and TupleConstruct nodes in forward graph
-// will be cleaned up later using EliminateDeadCode(block). TupleUnPack node in
-// backward graph will be removed in eliminateDeadcode(ReverseDetails) defined
+// will be cleaned up later using eliminateDeadCode(block). TupleUnPack node in
+// backward graph will be removed in eliminateDeadCode(ReverseDetails) defined
 // in this file.
 static c10::optional<std::vector<Value*>> build_script_grad(
     Node* node,
@@ -420,7 +420,7 @@ static ReverseDetails addReverseInline(Gradient& grad_desc) {
 
     value_list grad_inputs =
         linearGradientForNode(node, fmap(node->outputs(), get_grad));
-    LowerSimpleTuples(reverse_block);
+    lowerSimpleTuples(reverse_block);
 
     AT_ASSERT(grad_inputs.size() == node->inputs().size());
     for (size_t i = 0, num_inputs = grad_inputs.size(); i < num_inputs; ++i) {
@@ -643,7 +643,7 @@ static void eliminateDeadCode(ReverseDetails& rev_info) {
           rev_info.grad_map.erase(v);
         }
       };
-  EliminateDeadCode(rev_info.reverse_block, std::move(cb));
+  eliminateDeadCode(rev_info.reverse_block, std::move(cb));
 }
 
 static void Optimize(Gradient& grad_desc, ReverseDetails& rev_info) {
@@ -838,7 +838,7 @@ Gradient differentiate(std::shared_ptr<Graph>& graph) {
   auto rev_info = addReverseInline(grad_desc);
   Optimize(grad_desc, rev_info);
   // Clean up old nodes which has been replaced by forward graphs in torchscript
-  EliminateDeadCode(grad_desc.f->block());
+  eliminateDeadCode(grad_desc.f->block());
 
   // Fills in f, df, f_real_outputs, df_input_captures,
   // modifies df_input_vjps (new vjps are added for temporaries)

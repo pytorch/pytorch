@@ -150,7 +150,7 @@ void preprocessCaffe2Ops(Block* block) {
       }
     }
   }
-  EliminateDeadCode(
+  eliminateDeadCode(
       block, true, DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS);
 }
 
@@ -212,7 +212,7 @@ std::unordered_map<Value*, Value*> BlockToONNX(
     ctx.block->registerOutput(env.at(output));
   }
   // Run dce to clean-up unused functional and inplace ops.
-  EliminateDeadCode(
+  eliminateDeadCode(
       ctx.block,
       true,
       DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS);

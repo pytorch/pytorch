@@ -93,7 +93,7 @@ static void CanonicalizeOps(Block* block) {
 void CanonicalizeOps(const std::shared_ptr<Graph>& graph) {
   CanonicalizeOps(graph->block());
   GRAPH_DUMP("After CanonicalizeOps: ", graph);
-  EliminateDeadCode(graph);
+  eliminateDeadCode(graph);
 }
 
 } // namespace jit

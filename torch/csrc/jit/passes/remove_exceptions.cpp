@@ -41,7 +41,7 @@ void EliminateExceptions(std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("Before EliminateExceptions: ", graph);
   EliminateExceptions(graph->block());
   ConstantPropagation(graph);
-  ConstantPooling(graph);
+  constantPooling(graph);
   GRAPH_DUMP("After EliminateExceptions: ", graph);
 }
 

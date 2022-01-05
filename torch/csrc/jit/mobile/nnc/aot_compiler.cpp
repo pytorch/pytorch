@@ -138,7 +138,7 @@ std::pair<std::unique_ptr<Function>, const std::string> aotCompile(
   tensorexpr::annotateInputShapes(g, example_inputs);
   RemoveListMutation(g);
   RemoveTensorMutation(g);
-  EliminateDeadCode(g);
+  eliminateDeadCode(g);
   LowerAllTuples(g);
   GRAPH_DUMP("graph after compiler passes ", g);
 

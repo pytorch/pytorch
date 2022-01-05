@@ -10,7 +10,7 @@ namespace torch {
 namespace jit {
 
 // Convert a graph with Loads & Stores into SSA form
-TORCH_API void ConvertToSSA(std::shared_ptr<Graph>& graph);
+TORCH_API void convertToSSA(std::shared_ptr<Graph>& graph);
 
 } // namespace jit
 } // namespace torch

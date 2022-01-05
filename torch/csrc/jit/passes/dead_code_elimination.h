@@ -22,18 +22,18 @@ enum class DCESideEffectPolicy : uint8_t {
   ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS
 };
 
-TORCH_API void EliminateDeadCode(
+TORCH_API void eliminateDeadCode(
     const std::shared_ptr<Graph>& graph,
     DCESideEffectPolicy sideEffectPolicy =
         DCESideEffectPolicy::DONT_DELETE_NODES_WITH_SIDE_EFFECTS);
-TORCH_API void EliminateDeadCode(
+TORCH_API void eliminateDeadCode(
     Block* block,
     bool recurse = true,
     DCESideEffectPolicy sideEffectPolicy =
         DCESideEffectPolicy::DONT_DELETE_NODES_WITH_SIDE_EFFECTS);
 
 // Invoke the user-provided callback on all live values before deleting anything
-TORCH_API void EliminateDeadCode(
+TORCH_API void eliminateDeadCode(
     Block* block,
     std::function<void(const std::unordered_set<const Value*>&)> cb,
     DCESideEffectPolicy sideEffectPolicy =

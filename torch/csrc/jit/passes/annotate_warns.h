@@ -5,7 +5,7 @@
 namespace torch {
 namespace jit {
 
-TORCH_API void AnnotateWarns(const std::shared_ptr<Graph>& graph);
+TORCH_API void annotateWarns(const std::shared_ptr<Graph>& graph);
 
 } // namespace jit
 } // namespace torch

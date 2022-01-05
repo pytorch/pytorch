@@ -657,13 +657,13 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
         "After LowerGradOf, before specializeAutogradZero\n", *opt_graph);
     specializeAutogradZero(opt_graph);
     GRAPH_DEBUG(
-        "After specializeAutogradZero, before LowerSimpleTuples\n", *opt_graph);
-    LowerSimpleTuples(opt_graph);
+        "After specializeAutogradZero, before lowerSimpleTuples\n", *opt_graph);
+    lowerSimpleTuples(opt_graph);
     GRAPH_DEBUG(
-        "After LowerSimpleTuples, before ConstantPooling\n", *opt_graph);
-    ConstantPooling(opt_graph);
+        "After lowerSimpleTuples, before constantPooling\n", *opt_graph);
+    constantPooling(opt_graph);
     GRAPH_DEBUG(
-        "After ConstantPooling, before runRequiredPasses\n", *opt_graph);
+        "After constantPooling, before runRequiredPasses\n", *opt_graph);
 
     // Phase 1. Specialize to input definedness (this is very important for
     //          gradient graphs), and run required passes to bring the graph
@@ -729,7 +729,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
       runNondiffOptimization(opt_graph);
     }
     // Make sure there are no leftovers from any passes.
-    EliminateDeadCode(opt_graph);
+    eliminateDeadCode(opt_graph);
     GRAPH_DUMP("After compileSpec optimizations:", opt_graph);
     return ExecutionPlan(opt_graph, function_name_);
   }
@@ -813,7 +813,7 @@ void runRequiredPasses(const std::shared_ptr<Graph>& g) {
   // add valid expand nodes when the shapes are stable
   RemoveExpands(g);
   CanonicalizeOps(g);
-  EliminateDeadCode(g);
+  eliminateDeadCode(g);
 }
 
 void packGradient(const Gradient& gradient, Node* dnode) {
@@ -882,8 +882,8 @@ void runNondiffOptimization(
 
   // TupleConstruct / TupleUnpack pairs can still be present at this point
   // and must be removed for fusion.
-  LowerSimpleTuples(graph);
-  GRAPH_DEBUG("After LowerSimpleTuples, before BatchMM\n", *graph);
+  lowerSimpleTuples(graph);
+  GRAPH_DEBUG("After lowerSimpleTuples, before BatchMM\n", *graph);
 
   // Rewrite subgraphs with many MMs into expressions that batch them.
   BatchMM(graph);
@@ -912,10 +912,10 @@ void runOptimization(
     bool const_prop_user_classes) {
   // Basic graph preprocessing to eliminate noise.
   GRAPH_DEBUG(
-      "Before EliminateDeadCode (beginning of runOptimization)\n", *graph);
-  EliminateDeadCode(graph);
+      "Before eliminateDeadCode (beginning of runOptimization)\n", *graph);
+  eliminateDeadCode(graph);
   GRAPH_DEBUG(
-      "After EliminateDeadCode, before EliminateCommonSubexpression\n", *graph);
+      "After eliminateDeadCode, before EliminateCommonSubexpression\n", *graph);
   EliminateCommonSubexpression(graph);
   GRAPH_DEBUG(
       "After EliminateCommonSubexpression, before PeepholeOptimize\n", *graph);
@@ -928,10 +928,10 @@ void runOptimization(
   } else {
     ConstantPropagation(graph, true);
   }
-  GRAPH_DEBUG("After ConstantPropagation, before ConstantPooling\n", *graph);
+  GRAPH_DEBUG("After ConstantPropagation, before constantPooling\n", *graph);
 
-  ConstantPooling(graph);
-  GRAPH_DEBUG("After ConstantPooling\n", *graph);
+  constantPooling(graph);
+  GRAPH_DEBUG("After constantPooling\n", *graph);
 
   // Unroll small loops, and eliminate expressions that are the same at every
   // iteration.

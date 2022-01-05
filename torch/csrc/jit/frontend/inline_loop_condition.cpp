@@ -57,7 +57,7 @@ void inlineLoopCondition(Block* block) {
   }
 }
 
-void InlineLoopCondition(std::shared_ptr<Graph>& graph) {
+void inlineLoopCondition(std::shared_ptr<Graph>& graph) {
   inlineLoopCondition(graph->block());
 }
 

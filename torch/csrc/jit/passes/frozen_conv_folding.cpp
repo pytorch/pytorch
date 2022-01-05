@@ -365,17 +365,17 @@ void FoldFrozenConvMulOrDiv(Block* b) {
 
 void FoldFrozenConvBatchnorm(std::shared_ptr<Graph>& graph) {
   FoldFrozenConvBatchnorm(graph->block());
-  EliminateDeadCode(graph);
+  eliminateDeadCode(graph);
 }
 
 void FoldFrozenConvAddOrSub(std::shared_ptr<Graph>& graph) {
   FoldFrozenConvAddOrSub(graph->block());
-  EliminateDeadCode(graph);
+  eliminateDeadCode(graph);
 }
 
 void FoldFrozenConvMulOrDiv(std::shared_ptr<Graph>& graph) {
   FoldFrozenConvMulOrDiv(graph->block());
-  EliminateDeadCode(graph);
+  eliminateDeadCode(graph);
 }
 
 } // namespace jit

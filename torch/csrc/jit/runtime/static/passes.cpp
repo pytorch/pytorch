@@ -306,7 +306,7 @@ C10_UNUSED void SplitOutPrecomputeOpsForSparseNN(
 #ifdef FBCODE_CAFFE2
   PrecomputeMultiplierShiftForSigridHash(graph);
   ConstantPropagation(graph);
-  ConstantPooling(graph);
+  constantPooling(graph);
 #endif
 }
 } // namespace

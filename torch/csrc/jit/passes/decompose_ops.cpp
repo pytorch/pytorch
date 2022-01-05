@@ -227,7 +227,7 @@ void DecomposeOps(std::shared_ptr<Graph>& graph) {
     // we only re-run those passes when the graph get decomposed
     PropagateInputShapes(graph);
     ConstantPropagation(graph);
-    EliminateDeadCode(graph);
+    eliminateDeadCode(graph);
   }
 }
 

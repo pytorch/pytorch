@@ -197,7 +197,7 @@ bool UseVariadicOp(
   GRAPH_DUMP("Before " + pass_name, graph);
   bool changed = VariadicUpdater(graph, op, variadic_op).run();
   if (changed) {
-    ConstantPooling(graph);
+    constantPooling(graph);
     GRAPH_DUMP("After " + pass_name, graph);
   }
   return changed;

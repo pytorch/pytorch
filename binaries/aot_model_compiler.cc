@@ -227,7 +227,7 @@ int main(int argc, char** argv) {
   }
 
   torch::jit::RemoveTensorMutation(graph);
-  torch::jit::EliminateDeadCode(graph->block());
+  torch::jit::eliminateDeadCode(graph->block());
   graph = torch::jit::tensorexpr::removeUnusedSelfArgument(graph);
 
   torch::jit::tensorexpr::annotateInputShapes(graph, example_inputs);

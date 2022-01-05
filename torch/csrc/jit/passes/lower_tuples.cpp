@@ -318,23 +318,23 @@ static void EnsureNoTuples(Block* block) {
 void LowerAllTuples(const std::shared_ptr<Graph>& graph) {
   LowerAllTuples(graph->block());
   GRAPH_DUMP("After LowerAllTuples: ", graph);
-  EliminateDeadCode(graph->block());
+  eliminateDeadCode(graph->block());
   EnsureNoTuples(graph->block());
 }
 
-void LowerSimpleTuples(Block* block) {
+void lowerSimpleTuples(Block* block) {
   for (auto n : block->nodes()) {
     removeTupleNodes(n, /*must_remove_tuples*/ false);
     for (auto b : n->blocks()) {
-      LowerSimpleTuples(b);
+      lowerSimpleTuples(b);
     }
   }
 }
 
-void LowerSimpleTuples(const std::shared_ptr<Graph>& graph) {
-  LowerSimpleTuples(graph->block());
-  GRAPH_DUMP("After LowerSimpleTuples: ", graph);
-  EliminateDeadCode(graph);
+void lowerSimpleTuples(const std::shared_ptr<Graph>& graph) {
+  lowerSimpleTuples(graph->block());
+  GRAPH_DUMP("After lowerSimpleTuples: ", graph);
+  eliminateDeadCode(graph);
 }
 } // namespace jit
 } // namespace torch

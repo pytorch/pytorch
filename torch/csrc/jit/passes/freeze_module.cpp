@@ -106,7 +106,7 @@ class AttributePropagator {
           /* unroll_non_constant_loops? */ false,
           /* const_prop_user_classes? */ false);
       EliminateNoOps(subgraph);
-      LowerSimpleTuples(subgraph);
+      lowerSimpleTuples(subgraph);
     };
 
     for (auto function : preservedMethods_) {

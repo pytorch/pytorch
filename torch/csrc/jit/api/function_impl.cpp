@@ -114,7 +114,7 @@ void preoptimizeGraph(std::shared_ptr<Graph>& graph) {
 
   // AliasDb construction can be slow, so run it just on immutable types
   // to clean up constant Ifs & other easy wins
-  ConstantPropagationImmutableTypes(graph);
+  constantPropagationImmutableTypes(graph);
 
 #ifndef C10_MOBILE
   // Inject casts for automatic mixed precision
@@ -128,7 +128,7 @@ void preoptimizeGraph(std::shared_ptr<Graph>& graph) {
   Autocast(graph);
 #endif
 
-  ConstantPooling(graph);
+  constantPooling(graph);
 }
 
 GraphFunction* tryToGraphFunction(Function& function) noexcept {

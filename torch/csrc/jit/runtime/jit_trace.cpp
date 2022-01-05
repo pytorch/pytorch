@@ -281,7 +281,7 @@ std::shared_ptr<Graph> TraceGraph(std::shared_ptr<Graph> graph, Stack& stack) {
   TracingData td;
   GRAPH_DUMP("Before Inline:", graph);
   Inline(*graph.get());
-  EliminateDeadCode(graph);
+  eliminateDeadCode(graph);
   GRAPH_DUMP("After Inline:", graph);
   auto pr = ProfilingRecord::instrumentGraph(graph);
   for (auto inp : pr->profiled_graph_->inputs()) {
