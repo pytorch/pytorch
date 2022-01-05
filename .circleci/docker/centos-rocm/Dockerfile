@@ -38,8 +38,9 @@ ADD ./common/install_user.sh install_user.sh
 RUN bash ./install_user.sh && rm install_user.sh
 
 # Install conda and other packages (e.g., numpy, pytest)
-ENV PATH /opt/conda/bin:$PATH
 ARG ANACONDA_PYTHON_VERSION
+ENV ANACONDA_PYTHON_VERSION=$ANACONDA_PYTHON_VERSION
+ENV PATH /opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/bin:/opt/conda/bin:$PATH
 ADD ./common/install_conda.sh install_conda.sh
 RUN bash ./install_conda.sh && rm install_conda.sh
 
