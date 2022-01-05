@@ -623,7 +623,7 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
             # TODO(future PR): add FX rewrite support
             do_fx_comparison=False, do_torchscript_checks=False)
 
-    def test_prepare_custom_config_dict_non_traceable_module_class(self):
+    def _get_non_traceable_module_class_test_model(self):
         class M1(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -655,10 +655,13 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
                 x = self.m2(x)
                 return x
 
+        return M3().eval(), M1, M2, M3
+
+    def test_prepare_custom_config_dict_non_traceable_module_class_child_leaf(self):
 
         # if M1 is set as leaf, M2 and M3 should have auto_quant_state
         qconfig_dict = {'': torch.quantization.default_qconfig}
-        m = M3().eval()
+        m, M1, M2, M3 = self._get_non_traceable_module_class_test_model()
         prepare_custom_config_dict = {
             'non_traceable_module_class': [M1],
         }
@@ -682,9 +685,10 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
 
         # TODO(future PR): ensure modules in leaves do not get quantized
 
+    def test_prepare_custom_config_dict_non_traceable_module_class_mid_leaf(self):
         # if M2 is set as leaf, only M1 should have auto_quant_state
         qconfig_dict = {'': torch.quantization.default_qconfig}
-        m = M3().eval()
+        m, M1, M2, M3 = self._get_non_traceable_module_class_test_model()
         prepare_custom_config_dict = {
             'non_traceable_module_class': [M2],
         }

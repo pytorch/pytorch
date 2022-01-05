@@ -42,7 +42,6 @@ set(JIT_TEST_SRCS
   ${JIT_TEST_ROOT}/test_alias_analysis.cpp
   ${JIT_TEST_ROOT}/test_argument_spec.cpp
   ${JIT_TEST_ROOT}/test_autodiff.cpp
-  ${JIT_TEST_ROOT}/test_load_upgraders.cpp
   ${JIT_TEST_ROOT}/test_op_replacement.cpp
   ${JIT_TEST_ROOT}/test_upgrader_utils.cpp
   ${JIT_TEST_ROOT}/test_backend.cpp
