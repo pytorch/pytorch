@@ -927,23 +927,17 @@ void StaticRuntime::resetMemory() noexcept {
 }
 
 c10::IValue StaticRuntime::move_outputs_to_tuple(uint32_t num_outputs) {
-#ifndef NDEBUG
-  for (const auto i : c10::irange(num_outputs)) {
-    // The exact output tensor should never be managed.
-    DCHECK(!isManagedOutputTensor(*outputs_[i]));
-  }
-#endif
   switch (num_outputs) {
     case 1:
-      return c10::ivalue::Tuple::create(std::move(*outputs_[0]));
+      return c10::ivalue::Tuple::create(IValue(std::move(*outputs_[0])));
     case 2:
       return c10::ivalue::Tuple::create(
-          std::move(*outputs_[0]), std::move(*outputs_[1]));
+          IValue(std::move(*outputs_[0])), IValue(std::move(*outputs_[1])));
     case 3:
       return c10::ivalue::Tuple::create(
-          std::move(*outputs_[0]),
-          std::move(*outputs_[1]),
-          std::move(*outputs_[2]));
+          IValue(std::move(*outputs_[0])),
+          IValue(std::move(*outputs_[1])),
+          IValue(std::move(*outputs_[2])));
     default: {
       std::vector<c10::IValue> outputs;
       outputs.reserve(num_outputs);
@@ -1144,8 +1138,6 @@ c10::IValue StaticRuntime::run_impl(
   }
 
   DCHECK(check_for_memory_leak(/*output_returned*/ false));
-  // The exact output tensor should never be managed.
-  DCHECK(!isManagedOutputTensor(*outputs_[0]));
 
   // use move here. Otherwise, clean up outputs_[0] explicitly
   return std::move(*outputs_[0]);
@@ -1563,7 +1555,11 @@ bool StaticRuntime::check_for_memory_leak(bool output_returned) {
     for (const auto i : c10::irange(pnode.num_outputs())) {
       const IValue* ival = &pnode.Output(i);
       const Value* val = pnode.node()->output(i);
-      if (planner_ && isManagedOutputTensorValue(val)) {
+      // subtlety: isManagedOutputTensorValue may give a false
+      // negative here if an output is an alias of this value, so
+      // check the actual tensor!
+      if (planner_ &&
+          (isManagedOutputTensor(*ival) || isManagedOutputTensorValue(val))) {
         // `ival` contains a managed output tensor that the runtime doesn't
         // reclaim at the end of an iteration, but the client does so
         // by explicitly calling `StaticRuntime::deallocateOutputTensors`.
