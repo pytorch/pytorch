@@ -386,6 +386,22 @@ Tensor& unary_inplace_batch_rule(Tensor& self, optional<int64_t>, ExtraArgs... e
   return self;
 }
 
+inline int64_t get_bdim_size4(
+    const Tensor& a_value, optional<int64_t> a_bdim,
+    const Tensor& b_value, optional<int64_t> b_bdim,
+    const Tensor& c_value, optional<int64_t> c_bdim,
+    const Tensor& d_value, optional<int64_t> d_bdim) {
+  if (a_bdim)
+    return a_value.size(*a_bdim);
+  if (b_bdim)
+    return b_value.size(*b_bdim);
+  if (c_bdim)
+    return c_value.size(*c_bdim);
+  if (d_bdim)
+    return d_value.size(*d_bdim);
+  TORCH_INTERNAL_ASSERT(false);
+}
+
 inline int64_t get_bdim_size3(
     const Tensor& a_value, optional<int64_t> a_bdim,
     const Tensor& b_value, optional<int64_t> b_bdim,
