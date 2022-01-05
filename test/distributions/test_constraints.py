@@ -46,17 +46,24 @@ CONSTRAINTS = [
 ]
 
 
+def is_lapack_available():
+    return torch._C.has_lapack
+
+
 def build_constraint(constraint_fn, args, is_cuda=False):
     if not args:
         return constraint_fn
     t = torch.cuda.DoubleTensor if is_cuda else torch.DoubleTensor
     return constraint_fn(*(t(x) if isinstance(x, list) else x for x in args))
 
+
 @pytest.mark.parametrize('constraint_fn, result, value', EXAMPLES)
 @pytest.mark.parametrize('is_cuda', [False,
                                      pytest.param(True, marks=pytest.mark.skipif(not TEST_CUDA,
                                                                                  reason='CUDA not found.'))])
 def test_constraint(constraint_fn, result, value, is_cuda):
+    if not is_lapack_available():
+        pytest.skip("PyTorch compiled without Lapack")
     t = torch.cuda.DoubleTensor if is_cuda else torch.DoubleTensor
     assert constraint_fn.check(t(value)).all() == result
 
