@@ -558,11 +558,11 @@ CondValue to_ir::emitCondExpr(const Expr& expr) {
       // AN , NA-> statically IS_NOT always holds, IS never holds
       // MA, MM, MN, NM, NN, AM -> cannot prove anything statically
       bool its_is = expr.kind() == TK_IS;
-      if (lhs_none == ALWAYS && rhs_none == ALWAYS) {
+      if (lhs_none == NoneStatus::ALWAYS && rhs_none == NoneStatus::ALWAYS) {
         return CondValue(*graph, expr.range(), its_is, {});
       } else if (
-          (lhs_none == ALWAYS && rhs_none == NEVER) ||
-          (lhs_none == NEVER && rhs_none == ALWAYS)) {
+          (lhs_none == NoneStatus::ALWAYS && rhs_none == NoneStatus::NEVER) ||
+          (lhs_none == NoneStatus::NEVER && rhs_none == NoneStatus::ALWAYS)) {
         // lhs_val/rhs_val with A/M: only emit never_none_branch
         return CondValue(*graph, expr.range(), !its_is, {});
       } else {

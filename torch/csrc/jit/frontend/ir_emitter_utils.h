@@ -16,7 +16,7 @@ namespace jit {
 /*                  Program Status                 */
 /* =============================================== */
 
-enum NoneStatus { ALWAYS, MAYBE, NEVER };
+enum class NoneStatus { ALWAYS, MAYBE, NEVER };
 
 NoneStatus canBeNone(Value* v);
 
