@@ -746,9 +746,8 @@ MACOS_WORKFLOWS = [
 
 DOCKER_IMAGES = {
     f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-cuda10.2-cudnn7-py3.7-clang9",  # for pytorch/xla
-    f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm4.1-py3.7",                 # for rocm
-    f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm4.2-py3.7",                 # for rocm
     f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm4.3.1-py3.7",               # for rocm
+    f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm4.5-py3.7",                 # for rocm
 }
 
 DOCKER_IMAGES.update({
