@@ -128,7 +128,8 @@ Tensor& mean_out_quantized_cpu(
 #endif
 
   // Take average in the innermost dimensions
-  if (is_mean_inner_dim_fast_path(self, dim, opt_dtype)) {
+  if (self.is_contiguous(c10::MemoryFormat::Contiguous) &&
+      is_mean_inner_dim_fast_path(self, dim, opt_dtype)) {
     qmean_inner_dim_stub(self.device().type(), self, dim, keepdim, opt_dtype, result);
     return result;
   }
@@ -199,7 +200,8 @@ Tensor& std_out_quantized_cpu(
     bool keepdim,
     Tensor& result) {
   // Fast path
-  if (is_std_inner_dim_fast_path(self, dim, unbiased)) {
+  if (self.is_contiguous(c10::MemoryFormat::Contiguous) &&
+      is_std_inner_dim_fast_path(self, dim, unbiased)) {
     qstd_inner_dim_stub(self.device().type(), self, dim, unbiased, keepdim, result);
     return result;
   }
