@@ -367,6 +367,11 @@ struct CodeImpl {
     return result;
   }
 
+  void emitRaiseExcpetion(Node* node) {
+    size_t num_inputs = node->inputs().size();
+    insertInstruction(RAISE_EXCEPTION, 0, num_inputs);
+  }
+
   void emitConstant(Node* node) {
     if (node->output()->type()->kind() == FunctionType::Kind) {
       return;
@@ -606,10 +611,14 @@ struct CodeImpl {
 
   void emitNode(Node* node) {
     WithCurrentNode guard(&current_node_, node);
+    // std::cout << node->kind().toQualString() << std::endl;
     switch (node->kind()) {
       default:
         // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
         emitOperator(node);
+        break;
+      case prim::RaiseException:
+        emitRaiseExcpetion(node);
         break;
       case prim::Drop:
         emitDrop(node->inputs());
