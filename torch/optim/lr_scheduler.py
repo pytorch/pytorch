@@ -635,6 +635,7 @@ class SequentialLR(_LRScheduler):
         self._milestones = milestones
         self.last_epoch = last_epoch + 1
         self.optimizer = optimizer
+        self._last_lr = schedulers[0].get_last_lr()
 
     def step(self):
         self.last_epoch += 1
