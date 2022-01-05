@@ -1,6 +1,7 @@
 import argparse
 import datetime
 import re
+import sys
 import warnings
 from collections import defaultdict
 
@@ -267,5 +268,5 @@ if __name__ == "__main__":
     # we just warn for now until there is a policy.
     check_fc(slist)
 
-    # if not check_bc(slist):
-    #     sys.exit(1)
+    if not check_bc(slist):
+        sys.exit(1)
