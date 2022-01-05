@@ -13,6 +13,7 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/mkl/SparseBlasImpl.h>
 #include <ATen/native/sparse/SparseBlasImpl.h>
+#include <c10/util/irange.h>
 
 #include <algorithm>
 
@@ -60,7 +61,7 @@ void convert_indices_from_coo_to_csr_cpu(const Tensor& result, const Tensor& inp
 
   at::parallel_for(0, numel - 1, GRAIN_SIZE, [&](int64_t start, int64_t end) {
     input_t curr_value = data_in[start], next_value;
-    for (int64_t i = start; i < end; i++) {
+    for (const auto i : c10::irange(start, end)) {
       next_value = data_in[i + 1];
       for (; curr_value < next_value; curr_value++)
         data_out[curr_value + 1] = static_cast<output_t>(i + 1);

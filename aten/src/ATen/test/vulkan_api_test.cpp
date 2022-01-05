@@ -113,6 +113,29 @@ static void slice_tests(const std::unordered_map<int64_t, std::vector<int64_t>>&
   }
 }
 
+static void clone_test(const std::vector<int64_t>& size, c10::optional<at::MemoryFormat> optional_memory_format) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const auto in_cpu = at::rand(size, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_vulkan = in_cpu.vulkan();
+
+  // Act
+  const auto out_cpu = at::clone(in_cpu, optional_memory_format);
+  const auto out_vulkan = at::clone(in_vulkan, optional_memory_format);
+
+  // Assert
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
 } // namespace
 
 namespace {
@@ -2488,6 +2511,41 @@ TEST(VulkanAPITest, slice_invalidinputs_exceptions) {
   // Act: Vulkan doesn't support zero-sized slice (when start > end)
   EXPECT_THROW({
     slice_test({2, 3, 4, 5}, 3, 3, 2, 1);
+  }, ::c10::Error);
+}
+
+TEST(VulkanAPITest, clone_success) {
+  // Arrange
+  std::multimap<c10::optional<c10::MemoryFormat>, std::vector<int64_t>> mem2sizes {
+    {c10::MemoryFormat::Preserve, {2, 3, 5, 161}},    // 4D tensors with MemoryFormat::Preserve
+    {c10::MemoryFormat::Contiguous, {2, 3, 5, 161}},  // 4D tensors with MemoryFormat::Contiguous
+    {{}, {2, 3, 5, 161}},                             // 4D tensors with null
+    {c10::MemoryFormat::Preserve, {3, 5, 161}},       // 3D tensors with MemoryFormat::Preserve
+    {c10::MemoryFormat::Contiguous, {3, 5, 161}},     // 3D tensors with MemoryFormat::Contiguous
+    {{}, {3, 5, 161}},                                // 3D tensors with null
+    {c10::MemoryFormat::Preserve, {5, 161}},          // 2D tensors with MemoryFormat::Preserve
+    {c10::MemoryFormat::Contiguous, {5, 161}},        // 2D tensors with MemoryFormat::Contiguous
+    {{}, {5, 161}},                                   // 2D tensors with null
+    {c10::MemoryFormat::Preserve, {161}},             // 1D tensors with MemoryFormat::Preserve
+    {c10::MemoryFormat::Contiguous, {161}},           // 1D tensors with MemoryFormat::Contiguous
+    {{}, {161}},                                      // 1D tensors with null
+  };
+
+  // Act/Assert
+  for (const auto& mem2size : mem2sizes) {
+    clone_test(mem2size.second, mem2size.first);
+  }
+}
+
+TEST(VulkanAPITest, clone_invalidinputs_exceptions) {
+  // Act: Vulkan supports Preserve and Contiguous memory foramts
+  EXPECT_THROW({
+    clone_test({2, 3, 5, 161}, c10::MemoryFormat::ChannelsLast);
+  }, ::c10::Error);
+
+  // Act: Vulkan supports Preserve and Contiguous memory foramts
+  EXPECT_THROW({
+    clone_test({2, 3, 5, 161}, c10::MemoryFormat::ChannelsLast3d);
   }, ::c10::Error);
 }
 

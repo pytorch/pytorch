@@ -41,25 +41,22 @@ from quantization.core.test_workflow_module import TestFusedObsFakeQuantModule  
 # using eager mode.
 
 # 1. Eager mode post training quantization
-from quantization.eager.test_quantize_eager_ptq import TestPostTrainingStatic  # noqa: F401
-from quantization.eager.test_quantize_eager_ptq import TestPostTrainingDynamic  # noqa: F401
-from quantization.eager.test_quantize_eager_ptq import TestEagerModeActivationOps  # noqa: F401
-from quantization.eager.test_quantize_eager_ptq import TestFunctionalModule  # noqa: F401
-from quantization.eager.test_quantize_eager_ptq import TestQuantizeONNXExport  # noqa: F401
+from quantization.eager.test_quantize_eager_ptq import TestQuantizeEagerPTQStatic  # noqa: F401
+from quantization.eager.test_quantize_eager_ptq import TestQuantizeEagerPTQDynamic  # noqa: F401
+from quantization.eager.test_quantize_eager_ptq import TestQuantizeEagerOps  # noqa: F401
+from quantization.eager.test_quantize_eager_ptq import TestQuantizeEagerONNXExport  # noqa: F401
 # 2. Eager mode quantization aware training
-from quantization.eager.test_quantize_eager_qat import TestQuantizationAwareTraining  # noqa: F401
-from quantization.eager.test_quantize_eager_qat import TestQATActivationOps  # noqa: F401
-from quantization.eager.test_quantize_eager_qat import TestConvBNQATModule  # noqa: F401
-from quantization.eager.test_quantize_eager_qat import TestEmbeddingBagQATModule  # noqa: F401
+from quantization.eager.test_quantize_eager_qat import TestQuantizeEagerQAT  # noqa: F401
+from quantization.eager.test_quantize_eager_qat import TestQuantizeEagerQATNumerics  # noqa: F401
 # 3. Eager mode fusion passes
-from quantization.eager.test_fusion import TestFusion  # noqa: F401
+from quantization.eager.test_fuse_eager import TestFuseEager  # noqa: F401
 # 4. Testing model numerics between quanitzed and FP32 models
 from quantization.eager.test_model_numerics import TestModelNumericsEager  # noqa: F401
 # 5. Tooling: numeric_suite
-from quantization.eager.test_numeric_suite_eager import TestEagerModeNumericSuite  # noqa: F401
+from quantization.eager.test_numeric_suite_eager import TestNumericSuiteEager  # noqa: F401
 # 6. Equalization and Bias Correction
 from quantization.eager.test_equalize_eager import TestEqualizeEager  # noqa: F401
-from quantization.eager.test_bias_correction_eager import TestBiasCorrection  # noqa: F401
+from quantization.eager.test_bias_correction_eager import TestBiasCorrectionEager  # noqa: F401
 
 
 # FX GraphModule Graph Mode Quantization. Tests for the functionality of APIs and different features implemented
@@ -114,6 +111,8 @@ except ImportError:
 
 try:
     from quantization.dbr.test_quantize_dbr import TestQuantizeDBR  # noqa: F401
+    from quantization.dbr.test_quantize_dbr import TestQuantizeDBRIndividualOps  # noqa: F401
+    from quantization.dbr.test_quantize_dbr import TestQuantizeDBRMultipleOps  # noqa: F401
     from quantization.dbr.test_quantize_dbr import TestQuantizeDBRModels  # noqa: F401
 except ImportError:
     pass
