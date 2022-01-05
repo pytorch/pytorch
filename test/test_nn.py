@@ -16486,7 +16486,7 @@ class TestNNDeviceType(NNTestCase):
 
         ctc_loss = (
             nn.CTCLoss(reduction=reduction, zero_infinity=True)
-            if use_module_form 
+            if use_module_form
             else partial(torch.nn.functional.ctc_loss, reduction=reduction, zero_infinity=True)
         )
 
