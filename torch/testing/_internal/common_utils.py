@@ -1782,7 +1782,9 @@ class TestCase(expecttest.TestCase):
                 count = crow_indices[i + 1] - crow_indices[i]
                 col_indices[crow_indices[i]:crow_indices[i + 1]], _ = torch.sort(
                     torch.randperm(n_cols, dtype=index_dtype, device=device)[:count])
-            values = make_tensor([nnz], device=device, dtype=dtype, low=-1, high=1)
+            low = -1 if dtype != torch.uint8 else 0
+            high = 1 if dtype != torch.uint8 else 2
+            values = make_tensor([nnz], device=device, dtype=dtype, low=low, high=high)
             return values, crow_indices, col_indices
 
         values, crow_indices, col_indices = random_sparse_csr(size[0], size[1], nnz)
