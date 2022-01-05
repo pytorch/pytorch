@@ -6,7 +6,6 @@
 #include <ostream>
 #include <string>
 #include <vector>
-#include <stdexcept>
 
 namespace c10 {
 
