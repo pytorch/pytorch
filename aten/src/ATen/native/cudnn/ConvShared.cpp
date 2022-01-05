@@ -485,7 +485,7 @@ Tensor cudnn_convolution_relu(
   const Tensor weight = weight_t.contiguous(memory_format);
 
   // FuseFrozenConvAddRelu performs some tensor shape checking
-  auto output_t = at::detail::empty_cuda(
+  Tensor output_t = at::detail::empty_cuda(
       conv_output_size(
           input.sizes(), weight.sizes(), padding, stride, dilation),
       input.options().memory_format(memory_format));
@@ -556,7 +556,7 @@ Tensor cudnn_convolution_add_relu(
   const Tensor weight = weight_t.contiguous(memory_format);
 
   // FuseFrozenConvAddRelu performs some tensor shape checking
-  auto output_t = at::detail::empty_cuda(
+  Tensor output_t = at::detail::empty_cuda(
       conv_output_size(
           input.sizes(), weight.sizes(), padding, stride, dilation),
       input.options().memory_format(memory_format));
