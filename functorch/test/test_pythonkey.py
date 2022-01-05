@@ -17,7 +17,7 @@ from functorch import (
 )
 from functorch.compile import (
     nnc_jit, compiled_function, compiled_module,
-    partition_with_recompute_fwd_in_bwd, pythonkey_decompose, aot_function, aot_module, decomposition_table
+    partition_with_recompute_fwd_in_bwd, aot_function, aot_module, decomposition_table
 )
 
 from torch.testing._internal.common_device_type import ops
@@ -359,7 +359,7 @@ class TestEagerFusionOpInfo(TestCase):
 
             def get_grads(args):
                 return pytree.tree_map(lambda x: x.grad, args)
-            
+
             def nop(f, _):
                 # print(f.code)
                 return f
