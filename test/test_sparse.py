@@ -1255,7 +1255,7 @@ class TestSparse(TestCase):
         self.assertEqual(self.safeToDense(res), self.safeToDense(true_result))
 
     @coalescedonoff
-    @dtypes(torch.double, *((torch.cdouble,) if not is JETSON else ()))
+    @dtypes(torch.double, *((torch.cdouble,) if not IS_JETSON else ()))
     def test_sparse_addmm(self, device, dtype, coalesced):
         def test_shape(m, n, p, nnz, broadcast, alpha_beta=None):
             if alpha_beta is None:
@@ -3229,7 +3229,7 @@ class TestSparse(TestCase):
     # TODO: Check after why ROCm's cusparseXcsrgemm2Nnz function doesn't return the same nnz value as CUDA
     @skipIfRocm
     @coalescedonoff
-    @dtypes(*(torch.complex64, *((torch.complex128,) if not is JETSON else ())),
+    @dtypes(*(torch.complex64, *((torch.complex128,) if not IS_JETSON else ())),
             *get_all_fp_dtypes(include_half=False, include_bfloat16=False))
     @dtypesIfCUDA(*((torch.complex64,) if CUDA11OrLater else ()),
                   *((torch.complex128,) if CUSPARSE_SPMM_COMPLEX128_SUPPORTED else ()),
