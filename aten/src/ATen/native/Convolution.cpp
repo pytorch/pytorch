@@ -33,11 +33,11 @@ DEFINE_DISPATCH(mkldnn_convolution_backward_stub);
 DEFINE_DISPATCH(slow_conv_dilated2d_backward_stub);
 DEFINE_DISPATCH(slow_conv_dilated3d_backward_stub);
 DEFINE_DISPATCH(slow_conv_transpose2d_backward_stub);
-REGISTER_NO_CPU_DISPATCH(cudnn_convolution_backward_stub, cudnn_convolution_backward_fn);
-REGISTER_NO_CPU_DISPATCH(cudnn_convolution_transpose_backward_stub, cudnn_convolution_transpose_backward_fn);
-REGISTER_NO_CPU_DISPATCH(miopen_convolution_backward_stub, miopen_convolution_backward_fn);
-REGISTER_NO_CPU_DISPATCH(miopen_convolution_transpose_backward_stub, miopen_convolution_transpose_backward_fn);
-REGISTER_NO_CPU_DISPATCH(miopen_depthwise_convolution_backward_stub, miopen_depthwise_convolution_backward_fn);
+REGISTER_NO_CPU_DISPATCH(cudnn_convolution_backward_stub);
+REGISTER_NO_CPU_DISPATCH(cudnn_convolution_transpose_backward_stub);
+REGISTER_NO_CPU_DISPATCH(miopen_convolution_backward_stub);
+REGISTER_NO_CPU_DISPATCH(miopen_convolution_transpose_backward_stub);
+REGISTER_NO_CPU_DISPATCH(miopen_depthwise_convolution_backward_stub);
 
 std::ostream& operator<<(std::ostream & out, const ConvParams& params) {
   out << "ConvParams {"
