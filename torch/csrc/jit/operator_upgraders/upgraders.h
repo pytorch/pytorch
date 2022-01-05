@@ -1,6 +1,5 @@
 #pragma once
 #include <c10/macros/Export.h>
-#include <torch/csrc/jit/ir/ir.h>
 #include <iostream>
 #include <mutex>
 #include <string>
@@ -11,10 +10,9 @@ namespace jit {
 
 class UpgradersMap {
  public:
-  void set_content(
-      std::unordered_map<std::string, std::shared_ptr<Graph>>&& content);
+  void set_content(std::unordered_map<std::string, std::string>&& content);
   int count();
-  const std::unordered_map<std::string, std::shared_ptr<Graph>>& get_content();
+  const std::unordered_map<std::string, std::string>& get_content();
   // THESE METHODS ARE ONLY USED FOR TESTING PURPOSES
   void test_only_set_content(
       const std::unordered_map<std::string, std::string>& content);
@@ -22,17 +20,17 @@ class UpgradersMap {
       const std::unordered_map<std::string, std::string>& content);
 
  private:
-  std::unordered_map<std::string, std::shared_ptr<Graph>> content_;
+  std::unordered_map<std::string, std::string> content_;
   std::mutex lock;
   bool isPopulated = false;
 };
 
 TORCH_API void populate_upgraders_map(
-    std::unordered_map<std::string, std::shared_ptr<Graph>>&& content);
+    std::unordered_map<std::string, std::string>&& content);
 
 TORCH_API int get_upgraders_map_size();
 
-TORCH_API const std::unordered_map<std::string, std::shared_ptr<Graph>>&
+TORCH_API const std::unordered_map<std::string, std::string>&
 dump_upgraders_map();
 
 // THESE TWO METHODS BELOW ARE ONLY USED FOR TESTING
