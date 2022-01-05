@@ -3,7 +3,6 @@ import unittest
 
 import torch
 from torch.testing._internal.jit_utils import JitTestCase
-from itertools import product
 
 if __name__ == "__main__":
     raise RuntimeError(
