@@ -13428,8 +13428,10 @@ class TestNNDeviceType(NNTestCase):
 
         gradcheck(lambda x, y: F.conv3d(x, y, padding='same', dilation=2), (x, y),
                   check_forward_ad=check_forward_ad, nondet_tol=1e-5)
-        gradgradcheck(lambda x, y: F.conv3d(x, y, padding='same', dilation=2), (x, y),
-                      check_fwd_over_rev=True)
+        if torch.device(device).type != 'cuda':
+            # https://github.com/pytorch/pytorch/issues/70702
+            gradgradcheck(lambda x, y: F.conv3d(x, y, padding='same', dilation=2), (x, y),
+                          check_fwd_over_rev=True)
 
         # Asymmetric padding
         y = torch.rand(1, 1, 1, 4, 4, device=device, requires_grad=True)
@@ -13445,8 +13447,10 @@ class TestNNDeviceType(NNTestCase):
 
         gradcheck(lambda x, y: F.conv3d(x, y, padding='same'), (x, y),
                   check_forward_ad=check_forward_ad, nondet_tol=1e-5)
-        gradgradcheck(lambda x, y: F.conv3d(x, y, padding='same'), (x, y),
-                      check_fwd_over_rev=True)
+        if torch.device(device).type != 'cuda':
+            # https://github.com/pytorch/pytorch/issues/70702
+            gradgradcheck(lambda x, y: F.conv3d(x, y, padding='same'), (x, y),
+                          check_fwd_over_rev=True)
 
     def test_conv1d_valid_padding_backward(self, device):
         # Test F.conv1d gradients work with padding='valid'
