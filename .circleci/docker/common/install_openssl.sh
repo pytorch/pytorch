@@ -9,6 +9,6 @@ tar xf "${OPENSSL}.tar.gz"
 cd "${OPENSSL}"
 ./config --prefix=/opt/openssl -d '-Wl,--enable-new-dtags,-rpath,$(LIBRPATH)'
 # NOTE: opensl errors out when built with the -j option
-make install_sw
+make -j6 install_sw
 cd ..
 rm -rf "${OPENSSL}"
