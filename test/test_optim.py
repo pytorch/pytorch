@@ -597,8 +597,9 @@ class TestOptim(TestCase):
             optim.SparseAdam([{"params": [torch.zeros(3, layout=torch.sparse_coo)]}])
 
     # ROCm precision is too low to pass this test
+    #Tolerance Override Handles https://github.com/pytorch/pytorch/issues/69698
     @skipIfRocm
-    @toleranceOverride({torch.float32: tol(4e-3, 0),}) #Handles https://github.com/pytorch/pytorch/issues/69698
+    @toleranceOverride({torch.float32: tol(4e-3, 0)})
     def test_adadelta(self):
         for optimizer in [optim.Adadelta, optim_mt.Adadelta]:
             self._test_basic_cases(
@@ -620,7 +621,8 @@ class TestOptim(TestCase):
             with self.assertRaisesRegex(ValueError, "Invalid rho value: 1.1"):
                 optimizer(None, lr=1e-2, rho=1.1)
 
-    @toleranceOverride({torch.float32: tol(2e-2, 0),}) #Handles https://github.com/pytorch/pytorch/issues/69698
+    #Tolerance Override Handles https://github.com/pytorch/pytorch/issues/69698
+    @toleranceOverride({torch.float32: tol(2e-2, 0)})
     def test_adadelta_complex(self):
         for optimizer in [optim.Adadelta]:
             self._test_complex_optimizer(
