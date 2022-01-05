@@ -26,6 +26,7 @@
 # (smoke tests and upload jobs do not need the pytorch repo).
 binary_checkout: &binary_checkout
   name: Checkout pytorch/builder repo
+  no_output_timeout: "30m"
   command: .circleci/scripts/binary_checkout.sh
 
 # Parses circleci arguments in a consistent way, essentially routing to the

@@ -163,12 +163,12 @@ test_python_shard() {
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
     exit 1
   fi
-  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --exclude-fx2trt-tests --shard "$1" "$NUM_TEST_SHARDS" --verbose
+  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --shard "$1" "$NUM_TEST_SHARDS" --verbose
   assert_git_not_dirty
 }
 
 test_python() {
-  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --exclude-fx2trt-tests --verbose
+  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --verbose
   assert_git_not_dirty
 }
 
