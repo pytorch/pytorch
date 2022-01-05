@@ -37,7 +37,7 @@ def loop(op, in_dims, out_dim, batch_size, *batched_args, **kwarg_values):
     return loop_out
 
 
-def get_exhaustive_batched_inputs(arg_values, kwarg_values, batch_size=3, bdims=(0, -1)):
+def get_exhaustive_batched_inputs(arg_values, kwarg_values, batch_size=3, bdims=(0, -1), for_batch_norm=False):
     assert bdims == (0,) or bdims == (0, -1)
 
     def add_batch_dim(arg, bdim, batch_size=3):
@@ -64,6 +64,17 @@ def get_exhaustive_batched_inputs(arg_values, kwarg_values, batch_size=3, bdims=
                 batch_choices.append(((a, None),))
 
         flat_args, arg_spec = pytree.tree_flatten(tuple(arg_values))
+        if for_batch_norm:
+            # Batch norm is unique because the running_mean and running_var are updated in place.
+            # Therefore, they cannot be unbatched if the input is batched. The case where both are
+            # unbatched is added at the end
+            assert len(flat_args) >= 3  # batch_norm requires all 3 positional arguments
+            add_batch_choices(flat_args[0])  # input can be batched or unbatched
+            batch_choices.append((add_batch_dim(flat_args[1], bdim, batch_size),))  # running_mean must be batched
+            batch_choices.append((add_batch_dim(flat_args[2], bdim, batch_size),))  # running_var must be batched
+            orig_flat_args = flat_args
+            flat_args = flat_args[3:]
+
         for arg in flat_args:
             add_batch_choices(arg)
 
@@ -75,11 +86,33 @@ def get_exhaustive_batched_inputs(arg_values, kwarg_values, batch_size=3, bdims=
 
             yield pytree.tree_unflatten(batched_args, arg_spec), pytree.tree_unflatten(in_dims, arg_spec), kwarg_values
 
+        if for_batch_norm:
+            # Adds the case where input, running_mean, and running_var are all unbatched
+            batch_choices[0] = ((orig_flat_args[0], None),)
+            batch_choices[1] = ((orig_flat_args[1], None),)
+            batch_choices[2] = ((orig_flat_args[2], None),)
+            for batched_values in itertools.product(*batch_choices):
+                batched_args, in_dims = zip(*batched_values)
 
-def get_fallback_and_vmap_exhaustive(op, arg_values, kwarg_values, compute_loop_out=True, bdims=(0, -1)):
+                if all([i is None for i in in_dims]):
+                    continue
+
+                batched_args_tuple = pytree.tree_unflatten(batched_args, arg_spec)
+                in_dims_tuple = pytree.tree_unflatten(in_dims, arg_spec)
+                yield batched_args_tuple, in_dims_tuple, kwarg_values
+
+
+def get_exhaustive_batched_inputs_for_batch_norm(arg_values, kwarg_values, batch_size=3, bdims=(0, -1)):
+    return get_exhaustive_batched_inputs(arg_values, kwarg_values,
+                                         batch_size=batch_size, bdims=bdims, for_batch_norm=True)
+
+
+def get_fallback_and_vmap_exhaustive(op, arg_values, kwarg_values, opinfo=None, compute_loop_out=True, bdims=(0, -1)):
     out_dim = 0
     batch_size = 4
     generator = get_exhaustive_batched_inputs(arg_values, kwarg_values, batch_size, bdims=bdims)
+    if opinfo is not None and opinfo.name == "nn.functional.batch_norm":
+        generator = get_exhaustive_batched_inputs_for_batch_norm(arg_values, kwarg_values, batch_size, bdims=bdims)
     for batched_args, in_dims, kwarg_values in generator:
         if compute_loop_out:
             loop_out = loop(op, in_dims, out_dim, batch_size, *batched_args, **kwarg_values)
