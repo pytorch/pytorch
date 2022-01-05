@@ -992,8 +992,8 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         module_load.load_state_dict(state_dict_deser, strict=False)
 
         # Verify after load.
-        self.assert_sharded_tensor_equal(m.sharded_tensor1, module_load.sharded_tensor1)
-        self.assert_sharded_tensor_equal(m.submodule.sharded_tensor2, module_load.submodule.sharded_tensor2)
+        self.assertTrue(torch.equal(m.sharded_tensor1, module_load.sharded_tensor1))
+        self.assertTrue(torch.equal(m.submodule.sharded_tensor2, module_load.submodule.sharded_tensor2))
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -1028,8 +1028,8 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
             module_load.load_state_dict(state_dict_deser, strict=False)
 
         # Verify after load.
-        self.assert_sharded_tensor_equal(m.sharded_tensor1, module_load.sharded_tensor1)
-        self.assert_sharded_tensor_equal(m.submodule.sharded_tensor2, module_load.submodule.sharded_tensor2)
+        self.assertTrue(torch.equal(m.sharded_tensor1, module_load.sharded_tensor1))
+        self.assertTrue(torch.equal(m.submodule.sharded_tensor2, module_load.submodule.sharded_tensor2))
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -1102,6 +1102,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         buffer.seek(0)
         with self.assertRaisesRegex(RuntimeError, 'Need to initialize default process group'):
             state_dict_deser = torch.load(buffer)
+        rpc.shutdown()
 
 
 class TestShardedTensorEnumerable(ShardedTensorTestBase):
