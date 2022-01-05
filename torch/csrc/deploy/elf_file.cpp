@@ -1,5 +1,4 @@
 #include <torch/csrc/deploy/elf_file.h>
-
 namespace torch {
 namespace deploy {
 
@@ -33,6 +32,7 @@ at::optional<Section> ElfFile::findSection(const char* name) const {
       break;
     }
   }
+
   return found;
 }
 
