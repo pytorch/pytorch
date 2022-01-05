@@ -39,6 +39,12 @@ def _check_and_unexpand_args(func, ctx, expanded_args):
     if input.shape[0] == 0:
         raise RuntimeError("0 is not a valid batch size for Expanded Weights but got input tensor of "
                            f"{input} in function {func.__name__}")
+    batch_size = input.shape[0]
+    for arg in expanded_args:
+        if isinstance(arg, ExpandedWeight) and arg.batch_size != batch_size:
+            raise RuntimeError("Expected ExpandedWeights to have batch size matching input but got "
+                               f"input batch size of {batch_size} with ExpandedWeight of batch size {arg.batch_size}")
+
     unexpanded_args = tuple(arg.orig_weight if isinstance(arg, ExpandedWeight) else arg for arg in expanded_args)
     return unexpanded_args
 
@@ -51,7 +57,7 @@ def _check_and_detach_output(ctx, output, num_true_outs):
             raise RuntimeError(f"Got fewer outputs ({len(output)}) than expected ({num_true_outs}). "
                                "Issues in ExpandedWeights' autograd.Function")
         if num_true_outs == 1:
-            output = output[0]  # removes tuple wrapper
+            output = output[0]
         else:
             output = output[:num_true_outs]
     elif num_true_outs != 1:
@@ -61,7 +67,7 @@ def _check_and_detach_output(ctx, output, num_true_outs):
 
     def check_and_detach(output):
         if not isinstance(output, torch.Tensor):
-            raise RuntimeError("Can only ")
+            raise RuntimeError("ExpandedWeights only works with tensor outputs")
         return output.detach()
 
     # NB: currently only works for differentiable, Tensor outputs
@@ -85,7 +91,7 @@ def unpack_expanded_weight_or_tensor(maybe_expanded_weight, func=lambda x: x):
     if isinstance(maybe_expanded_weight, ExpandedWeight):
         orig_weight = maybe_expanded_weight.orig_weight
         return func(orig_weight)
-    elif isinstance(maybe_expanded_weight, torch.Tensor) and not torch.requires_grad:
+    elif isinstance(maybe_expanded_weight, torch.Tensor) and not maybe_expanded_weight.requires_grad:
         return func(maybe_expanded_weight)
     elif isinstance(maybe_expanded_weight, torch.Tensor):
         raise RuntimeError("ExpandedWeights currently does not support a mixture of ExpandedWeight parameters "
