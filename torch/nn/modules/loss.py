@@ -1695,7 +1695,7 @@ class CTCLoss(_Loss):
         >>>
         >>> # Initialize random batch of input vectors, for *size = (T,C)
         >>> input = torch.randn(T, C).log_softmax(2).detach().requires_grad_()
-        >>> input_lengths = torch.full(size=(), fill_value=T, dtype=torch.long)
+        >>> input_lengths = torch.tensor(T, dtype=torch.long)
         >>>
         >>> # Initialize random batch of targets (0 = blank, 1:C = classes)
         >>> target_lengths = torch.randint(low=1, high=T, size=(), dtype=torch.long)
