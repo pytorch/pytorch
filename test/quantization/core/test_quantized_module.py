@@ -646,16 +646,16 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
     def _test_batch_norm_serialization(self, get_model, data1, data2):
         m1 = get_model()
-        m1.qconfig = torch.quantization.default_qconfig
-        mp1 = torch.quantization.prepare(m1)
+        m1.qconfig = torch.ao.quantization.default_qconfig
+        mp1 = torch.ao.quantization.prepare(m1)
         mp1(data1)
-        mq1 = torch.quantization.convert(mp1)
+        mq1 = torch.ao.quantization.convert(mp1)
         ref1 = mq1(data2)
 
         m2 = get_model()
         m2.qconfig = torch.quantization.default_qconfig
-        mp2 = torch.quantization.prepare(m2)
-        mq2 = torch.quantization.convert(mp2)
+        mp2 = torch.ao.quantization.prepare(m2)
+        mq2 = torch.ao.quantization.convert(mp2)
 
         mq2.load_state_dict(mq1.state_dict())
         ref2 = mq2(data2)
@@ -668,9 +668,9 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
         def _get_model():
             return nn.Sequential(
-                torch.quantization.QuantStub(),
+                torch.ao.quantization.QuantStub(),
                 nn.BatchNorm2d(4),
-                torch.quantization.DeQuantStub()
+                torch.ao.quantization.DeQuantStub()
             ).eval()
 
         self._test_batch_norm_serialization(_get_model, data1, data2)
@@ -681,9 +681,9 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
         def _get_model():
             return nn.Sequential(
-                torch.quantization.QuantStub(),
+                torch.ao.quantization.QuantStub(),
                 nn.BatchNorm3d(4),
-                torch.quantization.DeQuantStub()
+                torch.ao.quantization.DeQuantStub()
             ).eval()
 
         self._test_batch_norm_serialization(_get_model, data1, data2)
