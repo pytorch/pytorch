@@ -12,7 +12,9 @@ TensorBase empty_cuda(
     c10::optional<Device> device_opt,
     c10::optional<c10::MemoryFormat> memory_format_opt) {
   at::globalContext().lazyInitCUDA();
-  const DeviceGuard device_guard(device_or_default(device_opt));
+  const auto device = device_or_default(device_opt);
+  TORCH_INTERNAL_ASSERT(device.is_cuda());
+  const DeviceGuard device_guard(device);
   auto* allocator = at::cuda::getCUDADeviceAllocator();
   constexpr c10::DispatchKeySet cuda_dks(c10::DispatchKey::CUDA);
   return at::detail::empty_generic(
@@ -26,8 +28,8 @@ TensorBase empty_cuda(
     c10::optional<Device> device_opt,
     c10::optional<bool> pin_memory_opt,
     c10::optional<c10::MemoryFormat> memory_format_opt) {
-  TORCH_INTERNAL_ASSERT(device_or_default(device_opt).is_cuda());
   TORCH_CHECK(!pin_memory_opt.has_value() || !*pin_memory_opt, "Only dense CPU tensors can be pinned");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(layout_or_default(layout_opt) == Layout::Strided);
 
   const auto dtype = dtype_or_default(dtype_opt);
   return at::detail::empty_cuda(size, dtype, device_opt, memory_format_opt);
@@ -50,7 +52,9 @@ TensorBase empty_strided_cuda(
     ScalarType dtype,
     c10::optional<Device> device_opt) {
   at::globalContext().lazyInitCUDA();
-  const DeviceGuard device_guard(device_or_default(device_opt));
+  const auto device = device_or_default(device_opt);
+  TORCH_INTERNAL_ASSERT(device.is_cuda());
+  const DeviceGuard device_guard(device);
   auto* allocator = at::cuda::getCUDADeviceAllocator();
   constexpr c10::DispatchKeySet cuda_dks(c10::DispatchKey::CUDA);
   return at::detail::empty_strided_generic(
@@ -64,11 +68,11 @@ TensorBase empty_strided_cuda(
     c10::optional<Layout> layout_opt,
     c10::optional<Device> device_opt,
     c10::optional<bool> pin_memory_opt) {
-  TORCH_INTERNAL_ASSERT(device_or_default(device_opt).is_cuda());
   TORCH_CHECK(!pin_memory_opt.has_value() || !*pin_memory_opt, "Only dense CPU tensors can be pinned");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(layout_or_default(layout_opt) == Layout::Strided);
 
   const auto dtype = dtype_or_default(dtype_opt);
-  return at::detail::empty_strided_cuda(size, stride, dtype);
+  return at::detail::empty_strided_cuda(size, stride, dtype, device_opt);
 }
 
 TensorBase empty_strided_cuda(
@@ -84,4 +88,4 @@ TensorBase empty_strided_cuda(
       options.pinned_memory_opt());
 }
 
-}}  // namespace at::cuda
+}}  // namespace at::detail
