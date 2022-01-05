@@ -41,8 +41,6 @@ TORCH_API bool convertibleToList(
     const TypePtr& type,
     const TypePtr& list_type_);
 
-TORCH_API std::string getFullSchemaName(const ::c10::FunctionSchema& schema);
-
 TORCH_API Value* emitBuiltinCall(
     const SourceRange& loc,
     Graph& graph,
