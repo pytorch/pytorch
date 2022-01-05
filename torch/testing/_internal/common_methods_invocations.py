@@ -9697,11 +9697,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types(),
            dtypesIfCUDA=all_types_and(torch.half),
            supports_autograd=False,
-           sample_inputs_func=sample_inputs_isin,
-           skips=(
-               # https://github.com/pytorch/pytorch/issues/67432
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='cpu'),  # noqa: B950
-           )),
+           sample_inputs_func=sample_inputs_isin),
     OpInfo('kthvalue',
            dtypes=all_types_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.float16),
