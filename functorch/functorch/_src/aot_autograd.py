@@ -3,7 +3,6 @@ import math
 import torch
 import torch.nn as nn
 from functorch import make_functional_with_buffers, make_fx
-from torch.fx.node import map_arg
 import torch.fx as fx
 from torch.fx import immutable_collections
 import torch.utils._pytree as pytree
@@ -34,9 +33,11 @@ def draw_graph(traced: torch.fx.GraphModule, fname: str, figname: str = "fx_grap
     x = g.get_main_dot_graph()
     getattr(x, "write_" + ext.lstrip("."))(f"{base}{ext}")
 
+
 class InvalidNodeBase(object):
     def __repr__(self):
         return "Invalid Node"
+
 
 InvalidNode = InvalidNodeBase()
 
@@ -158,7 +159,7 @@ def partition_with_recompute_fwd_in_bwd(joint_module: fx.GraphModule, _joint_inp
         import networkx as nx
     except ImportError:
         raise RuntimeError("Need networkx installed to perform smart recomputation heuristics")
-    draw_graph(joint_module, "joint.svg")
+    # draw_graph(joint_module, "joint.svg")
     full_bw_graph = joint_module.graph
 
     nx_graph = nx.DiGraph()
