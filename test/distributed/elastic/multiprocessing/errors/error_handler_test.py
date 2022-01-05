@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Owner(s): ["oncall: r2p"]
+
 import filecmp
 import json
 import os

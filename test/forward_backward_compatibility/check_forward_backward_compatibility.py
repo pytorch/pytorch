@@ -1,7 +1,7 @@
 import argparse
 import datetime
 import re
-import sys
+import warnings
 from collections import defaultdict
 
 import torch
@@ -36,6 +36,8 @@ ALLOW_LIST = [
     # Internal, profiler-specific ops
     ("profiler::_call_end_callbacks_on_jit_fut*", datetime.date(9999, 1, 1)),
     ("profiler::_record_function_enter", datetime.date(9999, 1, 1)),
+    ("aten::linalg_matrix_rank", datetime.date(2021, 10, 30)),
+    ("aten::linalg_pinv", datetime.date(2021, 10, 30)),
     ("aten::_cholesky_helper", datetime.date(9999, 1, 1)),
     ("aten::_lstsq_helper", datetime.date(9999, 1, 1)),
     ("aten::_syevd_helper", datetime.date(9999, 1, 1)),
@@ -46,12 +48,69 @@ ALLOW_LIST = [
     ("aten::slice_backward", datetime.date(9999, 1, 1)),
     ("aten::diagonal_backward", datetime.date(9999, 1, 1)),
     ("aten::rowwise_prune", datetime.date(9999, 1, 1)),
-    ("aten::_triangular_solve_helper", datetime.date(9999, 1, 1)),
     ("aten::adaptive_avg_pool3d_backward", datetime.date(9999, 1, 1)),
     ("aten::_embedding_bag_dense_backward", datetime.date(9999, 1, 1)),
     ("aten::randperm", datetime.date(9999, 1, 1)),
-    ("aten::thnn_conv2d_forward", datetime.date(2021, 9, 30)),
-    ("aten::thnn_conv2d_backward", datetime.date(2021, 9, 30)),
+    ("aten::cudnn_convolution_backward", datetime.date(2022, 1, 31)),
+    ("aten::cudnn_convolution_backward_input", datetime.date(2022, 1, 31)),
+    ("aten::cudnn_convolution_backward_weight", datetime.date(2022, 1, 31)),
+    ("aten::cudnn_convolution_transpose_backward", datetime.date(2022, 1, 31)),
+    ("aten::cudnn_convolution_transpose_backward_input", datetime.date(2022, 1, 31)),
+    ("aten::cudnn_convolution_transpose_backward_weight", datetime.date(2022, 1, 31)),
+    ("aten::mkldnn_convolution_backward", datetime.date(2022, 1, 31)),
+    ("aten::mkldnn_convolution_backward_input", datetime.date(2022, 1, 31)),
+    ("aten::mkldnn_convolution_backward_weights", datetime.date(2022, 1, 31)),
+    ("aten::_nnpack_spatial_convolution_backward", datetime.date(2022, 1, 31)),
+    ("aten::_nnpack_spatial_convolution_backward_input", datetime.date(2022, 1, 31)),
+    ("aten::_nnpack_spatial_convolution_backward_weight", datetime.date(2022, 1, 31)),
+    ("aten::_slow_conv2d_forward", datetime.date(2022, 1, 31)),
+    ("aten::_slow_conv2d_backward", datetime.date(2022, 1, 31)),
+    ("aten::slow_conv3d_forward", datetime.date(2022, 1, 31)),
+    ("aten::slow_conv3d_backward", datetime.date(2022, 1, 31)),
+    ("aten::slow_conv_dilated2d_backward", datetime.date(2022, 1, 31)),
+    ("aten::slow_conv_dilated3d_backward", datetime.date(2022, 1, 31)),
+    ("aten::slow_conv_transpose2d", datetime.date(2022, 1, 31)),
+    ("aten::slow_conv_transpose2d_backward", datetime.date(2022, 1, 31)),
+    ("aten::slow_conv_transpose3d", datetime.date(2022, 1, 31)),
+    ("aten::slow_conv_transpose3d_backward", datetime.date(2022, 1, 31)),
+    ("aten::_log_softmax_backward_data", datetime.date(2021, 10, 21)),
+    ("aten::_softmax_backward_data", datetime.date(2021, 10, 21)),
+    ("aten::fused_moving_avg_obs_fake_quant", datetime.date(2021, 10, 21)),
+    ("aten::_fused_moving_avg_obs_fq_helper", datetime.date(2021, 10, 21)),
+    ("aten::_baddbmm_mkl_", datetime.date(2021, 10, 31)),
+    ("aten::grid_sampler_2d_backward", datetime.date(2021, 10, 21)),
+    ("aten::index_add.alpha", datetime.date(2021, 12, 31)),
+    ("aten::index_add_.alpha", datetime.date(2021, 12, 31)),
+    ("prim::TensorExprDynamicGuard", datetime.date(2021, 11, 20)),
+    ("aten::split_with_sizes", datetime.date(2021, 11, 20)),
+    ("aten::split", datetime.date(2021, 12, 20)),
+    ("aten::vsplit", datetime.date(2021, 11, 20)),
+    ("aten::tensor_split", datetime.date(2021, 11, 20)),
+    ("aten::chunk", datetime.date(2021, 11, 20)),
+    ("aten::unbind", datetime.date(2021, 11, 20)),
+    ("aten::hsplit", datetime.date(2021, 11, 20)),
+    ("aten::dsplit", datetime.date(2021, 11, 20)),
+    ("aten::_convolution_nogroup", datetime.date(9999, 1, 1)),
+    ("aten::miopen_convolution_backward", datetime.date(9999, 1, 1)),
+    ("aten::miopen_convolution_backward_bias", datetime.date(9999, 1, 1)),
+    ("aten::miopen_convolution_backward_input", datetime.date(9999, 1, 1)),
+    ("aten::miopen_convolution_backward_weight", datetime.date(9999, 1, 1)),
+    ("aten::miopen_convolution_transpose_backward", datetime.date(9999, 1, 1)),
+    ("aten::miopen_convolution_transpose_backward_input", datetime.date(9999, 1, 1)),
+    ("aten::miopen_convolution_transpose_backward_weight", datetime.date(9999, 1, 1)),
+    ("aten::miopen_depthwise_convolution_backward", datetime.date(9999, 1, 1)),
+    ("aten::miopen_depthwise_convolution_backward_input", datetime.date(9999, 1, 1)),
+    ("aten::miopen_depthwise_convolution_backward_weight", datetime.date(9999, 1, 1)),
+    ("caffe2::", datetime.date(2021, 10, 23)),
+    ("prepacked::unpack_prepacked_sizes_conv2d", datetime.date(9999, 1, 1)),
+    ("prepacked::unpack_prepacked_sizes_linear", datetime.date(9999, 1, 1)),
+    ("q::_FloatToBfloat16Quantized", datetime.date(2021, 12, 21)),
+    ("q::_Bfloat16QuantizedToFloat", datetime.date(2021, 12, 21)),
+    ("aten::_inverse_helper", datetime.date(2021, 12, 31)),
+    ("aten::softplus_backward", datetime.date(2022, 1, 31)),
+    ("aten::softplus_backward.grad_input", datetime.date(2022, 1, 31)),
+    ("aten::quantile", datetime.date(2022, 9, 30)),
+    ("aten::nanquantile", datetime.date(2022, 9, 30)),
 ]
 
 ALLOW_LIST_COMPILED = [
@@ -77,7 +136,7 @@ def allow_listed(schema):
 dont_parse_list = [
     ("_TorchScriptTesting.*", datetime.date(2099, 9, 17)),
     ("test_backend", datetime.date(2099, 9, 17)),
-    ("dist_c10d", datetime.date(2021, 1, 30)),
+    ("dist_c10d", datetime.date(2099, 9, 17)),
 ]
 
 
@@ -148,8 +207,8 @@ def check_fc(existing_schemas):
         found = False
         possible_failure_reasons = []
         for matching_new_schema in matching_new_schemas:
-            is_fc, reason = matching_new_schema.check_forward_compatible_with(existing_schema)
-            if is_fc:
+            is_compatible, reason = matching_new_schema.check_forward_compatible_with(existing_schema)
+            if is_compatible:
                 found = True
                 break
             if reason != "":
@@ -165,7 +224,7 @@ def check_fc(existing_schemas):
             print(
                 "Refer to following reasons for failure "
                 "to find FC schema:\n[\n{}\n]".format(
-                    "\n\t".join(str(s) for r in possible_failure_reasons)
+                    "\n\t".join(str(r) for r in possible_failure_reasons)
                 )
             )
             broken_ops.append(str(existing_schema))
@@ -208,5 +267,5 @@ if __name__ == "__main__":
     # we just warn for now until there is a policy.
     check_fc(slist)
 
-    if not check_bc(slist):
-        sys.exit(1)
+    # if not check_bc(slist):
+    #     sys.exit(1)

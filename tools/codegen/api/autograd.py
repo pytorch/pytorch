@@ -371,6 +371,9 @@ def gen_differentiable_outputs(fn: NativeFunctionWithDifferentiabilityInfo) -> L
         for name, ret in zip(cpp.return_names(f), f.func.returns)]
     output_differentiability = info.output_differentiability if info else None
     if output_differentiability is not None:
+        if len(output_differentiability) != len(outputs):
+            raise RuntimeError(f"The length of output_differentiability ({len(output_differentiability)}), "
+                               f"does not match the number of outputs ({len(outputs)}).")
         differentiable_outputs: List[DifferentiableOutput] = []
         if False in output_differentiability and f.func.kind() == SchemaKind.inplace:
             raise RuntimeError("output_differentiability=False for inplace operation (version_counter won't get updated)")

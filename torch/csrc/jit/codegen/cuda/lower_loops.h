@@ -1,7 +1,7 @@
 
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 #include <torch/csrc/jit/codegen/cuda/compute_at_map.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
@@ -16,9 +16,9 @@ namespace fuser {
 namespace cuda {
 
 //! Loop nest generator pass will get IR that looks something like:
-//! T0[I0o{ceil(I0/4)}, I1o{ceil(I1/128)}, I0iU{4}, I1i{128}] = ...* for( i :
-//! I0o{ceil(I0/4)} ) { and will generate the loop nest structure for these
-//! exprs like:
+//! T0[I0o{ceil(I0/4)}, I1o{ceil(I1/128)}, I0iU{4}, I1i{128}] = ...
+
+//  and will generate the loop nest structure for these exprs like:
 //!
 //! for( i : I0o{ceil(I0/4)} ) {
 //!   for( j : I1o{ceil(I1/128)} ) {
@@ -37,7 +37,7 @@ class TORCH_CUDA_CU_API LoopNestGenerator {
 
   // Open a new inner most for loop, track which TV it was constructed from
   // according to the computeAt chain.
-  void openFor(IterDomain*);
+  void openFor(kir::IterDomain*);
 
   // Close the inner most for loop
   void closeFor();
@@ -58,8 +58,8 @@ class TORCH_CUDA_CU_API LoopNestGenerator {
   // stack of the active for_loops
   std::vector<kir::ForLoop*> for_loops_;
 
-  // How many loops can the next iteration close
-  std::ptrdiff_t max_close = -1;
+  // Loop structure of each expression
+  std::unordered_map<TensorView*, std::vector<IterDomain*>> loop_structures_;
 };
 
 } // namespace cuda

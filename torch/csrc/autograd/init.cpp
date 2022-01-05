@@ -6,8 +6,12 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 #include <ATen/autocast_mode.h>
+#include <ATen/cpp_custom_type_hack.h>
+#include <ATen/record_function.h>
 #include <torch/csrc/autograd/profiler.h>
+#include <torch/csrc/autograd/profiler_python.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/saved_variable.h>
@@ -15,6 +19,7 @@
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/autograd/utils/python_arg_parsing.h>
 #include <torch/csrc/autograd/python_mode.h>
+#include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <c10/core/ScalarType.h>
 
@@ -78,7 +83,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .def(py::init<ProfilerState,
           bool, /* record_input_shapes */
           bool, /* profile_memory */
-          bool, /* with_stac k*/
+          bool, /* with_stack */
           bool, /* with_flops */
           bool  /* with_modules */
           >());
@@ -232,22 +237,36 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
         py::arg("scopes") = std::unordered_set<at::RecordScope>());
   m.def("_disable_profiler", disableProfiler);
   m.def("_prepare_profiler", prepareProfiler);
+  m.def("_add_metadata_json", torch::profiler::impl::addMetadataJson);  // Only if `USE_KINETO` is set
+  m.def("kineto_available", []() { return torch::profiler::kKinetoAvailable; });
 
-  m.def("_add_metadata_json", [](const std::string& key, const std::string& value) {
-#ifdef USE_KINETO
-      addMetadataJson(key, value);
-#else
-      LOG(WARNING) << "Adding profiling metadata requires using "
-                   << "torch.profiler with Kineto support (USE_KINETO=1)";
-#endif // USE_KINETO
+  // NOTICE: These record functions are not torch operators and may not show up
+  // in TorchScript tracing, FX transforms, or operator serialization. For these
+  // use cases, please use `torch.profiler.record_function`.
+  // Creates a new profiling scope using RecordFunction and invokes its starting
+  // callbacks.
+  m.def("_record_function_with_args_enter", [](const std::string& name, py::args args) {
+    auto rec = std::make_unique<at::RecordFunction>(at::RecordScope::USER_SCOPE);
+    if (rec->isActive()) {
+      if (rec->needsInputs()) {
+        auto iv_inputs = std::vector<c10::IValue>();
+        for (const auto& arg : args) {
+            iv_inputs.push_back(torch::jit::toTypeInferredIValue(arg));
+        }
+        rec->before(name, iv_inputs);
+      } else {
+        rec->before(name);
+      }
+    }
+    return at::cpp_custom_type_hack::create(std::move(rec), at::TensorOptions());
   });
 
-  m.def("kineto_available", []() {
-#ifdef USE_KINETO
-    return true;
-#else
-    return false;
-#endif
+  // Ends the profiling scope created with record_function_with_param_enter.
+  m.def("_record_function_with_args_exit", [](const at::Tensor& handle) {
+    // We don't actually need to do anything with handle just need to persist the
+    // lifetime until now.
+    auto& rec = at::cpp_custom_type_hack::cast<at::RecordFunction>(handle);
+    rec.end();
   });
 
   m.def("_supported_activities", []() {
@@ -291,6 +310,11 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
     torch::autograd::PyDefaultSavedVariableHooks::reset_hooks();
   });
 
+  _C_m.def("_register_py_class_for_device", [](const std::string& device, py::object python_type_class) {
+    auto cls = python_type_class.ptr();
+    registerPythonTensorClass(device, cls);
+  });
+
   py::class_<c10::InferenceMode>(_C_m, "_InferenceMode")
       .def(py::init<bool>());
 
@@ -306,6 +330,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
         s.register_hooks(std::make_unique<torch::autograd::PySavedVariableHooks>(pack_hook, unpack_hook));
     });
 
+  torch::autograd::profiler::python_tracer::init();
   Py_RETURN_TRUE;
 }
 
@@ -390,14 +415,18 @@ static const char* scalarTypeName(const at::ScalarType type) {
 static PyObject * get_autocast_gpu_dtype(PyObject* _unused, PyObject *arg){
   HANDLE_TH_ERRORS
   at::ScalarType current_dtype = at::autocast::get_autocast_gpu_dtype();
-  return THPDtype_New(current_dtype, scalarTypeName(current_dtype));
+  auto dtype = (PyObject*)torch::getTHPDtype(current_dtype);
+  Py_INCREF(dtype);
+  return dtype;
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject * get_autocast_cpu_dtype(PyObject* _unused, PyObject *arg){
   HANDLE_TH_ERRORS
   at::ScalarType current_dtype = at::autocast::get_autocast_cpu_dtype();
-  return THPDtype_New(current_dtype, scalarTypeName(current_dtype));
+  auto dtype = (PyObject*)torch::getTHPDtype(current_dtype);
+  Py_INCREF(dtype);
+  return dtype;
   END_HANDLE_TH_ERRORS
 }
 

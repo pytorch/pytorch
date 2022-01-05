@@ -5,7 +5,7 @@
 #include <unordered_set>
 #include <vector>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/tensorexpr/fwd_decls.h>
 
 namespace torch {
@@ -550,32 +550,18 @@ class TORCH_API LoopNest {
 
   void eliminateDeadStores();
 
-  // Make the stmt ready for codegen. The optional argument 'interm_bufs' allows
-  // users to specify intermediate buffers that need runtime allocation. In
-  // default, we will insert 'Alloc/Free' stmts to allocate all intermediate
-  // buffers at runtime but users may have pre-allocated some of them at compile
-  // time, and in that case the user can specify what buffers to insert
-  // 'Alloc/Free' stmts for using 'interm_bufs'.
-  // TODO: refactor function 'prepareForCodegen' to remove argument
-  // 'interm_bufs'.
-  void prepareForCodegen(
-      const c10::optional<std::unordered_set<BufPtr>>& interm_bufs =
-          c10::nullopt);
+  void prepareForCodegen();
 
   const std::unordered_set<BufPtr> getInputBufs() const;
   const std::unordered_set<BufPtr> getOutputBufs() const {
     return output_bufs_;
   }
-  std::unordered_set<BufPtr> getIntermediateBufs() const;
+  std::vector<BufPtr> getIntermediateBufs() const;
 
  private:
   void initialize(
       const std::vector<Tensor>& output_tensors,
       const std::vector<Tensor>& tensors_to_compute);
-  StmtPtr insertAllocFree(
-      StmtPtr stmt,
-      const c10::optional<std::unordered_set<BufPtr>>& interm_bufs =
-          c10::nullopt);
 
   StmtPtr root_stmt_;
 

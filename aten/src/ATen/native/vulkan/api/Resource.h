@@ -290,8 +290,11 @@ struct Resource final {
 
     // Primary
 
-    Buffer buffer(const Buffer::Descriptor& descriptor);
-    Image image(const Image::Descriptor& descriptor);
+    Buffer create_buffer(const Buffer::Descriptor& descriptor);
+    void register_buffer_cleanup(const Buffer& buffer);
+    Image create_image(const Image::Descriptor& descriptor);
+    void register_image_cleanup(const Image& image);
+
     Fence fence();
     void purge();
 
@@ -334,9 +337,13 @@ struct Resource final {
   } pool;
 
   explicit Resource(const GPU& gpu)
-    : pool(gpu, Pool::Policy::linear()) {
+    : pool(gpu, nullptr) {
   }
 };
+
+void release_buffer(const Resource::Buffer& buffer);
+
+void release_image(const Resource::Image& image);
 
 //
 // Impl
@@ -426,7 +433,7 @@ inline Resource::Fence::operator bool() const {
 
 template<typename Block>
 inline Resource::Buffer Resource::Pool::uniform(const Block& block) {
-  Buffer uniform = this->buffer({
+  Buffer uniform = this->create_buffer({
       sizeof(Block),
       {
         VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
@@ -437,6 +444,7 @@ inline Resource::Buffer Resource::Pool::uniform(const Block& block) {
         },
       },
     });
+  this->register_buffer_cleanup(uniform);
 
   {
     Memory::Handle<Block*> memory = uniform.memory.template map<

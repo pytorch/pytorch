@@ -36,6 +36,9 @@ class CompilationUnit {
   std::vector<std::unique_ptr<Function>>& methods() {
     return methods_;
   }
+  const std::vector<std::unique_ptr<Function>>& methods() const {
+    return methods_;
+  }
   Function* find_function(const c10::QualifiedName& qn);
 
  private:
@@ -123,12 +126,16 @@ class TORCH_API Module {
     return has_debug_handles_;
   }
 
+  const CompilationUnit& compilation_unit() const {
+    return *cu_.get();
+  }
+
  private:
   c10::intrusive_ptr<c10::ivalue::Object> object_;
   std::unordered_map<std::string, std::string> metadata_;
   std::shared_ptr<CompilationUnit> cu_;
   MobileDebugTable debug_table_;
-  bool has_debug_handles_;
+  bool has_debug_handles_ = false;
 };
 } // namespace mobile
 } // namespace jit

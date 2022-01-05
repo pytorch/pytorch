@@ -179,7 +179,11 @@ class Event(torch._C._CudaEventBase):
         r"""Makes all future work submitted to the given stream wait for this
         event.
 
-        Use ``torch.cuda.current_stream()`` if no stream is specified."""
+        Use ``torch.cuda.current_stream()`` if no stream is specified.
+
+        .. note:: This is a wrapper around ``cudaStreamWaitEvent()``: see
+            `CUDA Event documentation`_ for more info.
+        """
         if stream is None:
             stream = torch.cuda.current_stream()
         super(Event, self).wait(stream)

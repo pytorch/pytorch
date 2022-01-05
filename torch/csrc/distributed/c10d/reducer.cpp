@@ -1291,6 +1291,12 @@ void Reducer::search_unused_parameters(
       // Graph is still static if the set of unused parameters did not change.
       ddp_graph_static_ =
           prev_iteration_unused_parameters_ == unused_parameters_;
+
+      if (!ddp_graph_static_) {
+        // Log graph is not static. Logger takes care of ensuring this is done
+        // only once to avoid overhead.
+        logger_.lock()->log_if_graph_static(false);
+      }
     }
     prev_iteration_unused_parameters_ = unused_parameters_;
   }
@@ -1383,8 +1389,6 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
   auto& replica = bucket.replicas[replica_index];
   for (const auto intra_bucket_index : c10::irange(replica.variables.size())) {
     auto& variable = replica.variables[intra_bucket_index];
-    const auto offset = replica.offsets[intra_bucket_index];
-    const auto length = replica.lengths[intra_bucket_index];
 
     bool global_unused = false;
     // See Note [Skip allreducing local_used_map_dev]
@@ -1425,6 +1429,9 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
     }
 
     if (!gradient_as_bucket_view_) {
+      RECORD_FUNCTION(
+          "torch.distributed.ddp.reducer::copy_bucket_to_grad",
+          std::vector<c10::IValue>({variable}));
       copy_bucket_to_grad(variable, replica, intra_bucket_index, global_unused);
     } else {
       const auto& bucket_view_out =
@@ -1634,6 +1641,7 @@ void Reducer::sync_bucket_indices(
     std::vector<size_t> bucket;
     bucket.reserve(bucket_size);
     for (const auto j : c10::irange(bucket_size)) {
+      (void)j;
       bucket.push_back(indices_accessor[indices_accessor_Index++]);
     }
     bucket_indices.emplace_back(std::move(bucket));
@@ -1762,15 +1770,6 @@ void Reducer::ensure_prior_reduction_finished() {
   // The variable `require_finalize_` is true until all gradients
   // have been computed and reduction of all buckets has been kicked off.
   if (require_finalize_) {
-    REDUCER_CHECK(
-        !static_graph_,
-        logger_,
-        "Expected to have finished reduction in the prior iteration before "
-        "starting a new one. "
-        "This error indicates that your training graph has changed ",
-        "in this iteration, e.g., one parameter is used in first ",
-        "iteration, but then got unused in the second iteration. ",
-        "this is not compatible with static_graph set to True.");
     // Collect unmarked parameter indices, additionally, in debug mode retrieve
     // parameter names.
     auto unmarked_param_indices = getUnmarkedParamIndicesForIteration();
@@ -1797,7 +1796,15 @@ void Reducer::ensure_prior_reduction_finished() {
         "value of `forward` of your module when reporting this issue (e.g. "
         "list, dict, iterable).";
 
-    if (!find_unused_parameters_) {
+    if (static_graph_) {
+      kBaseErrorMsg =
+          "Expected to have finished reduction in the prior iteration before "
+          "starting a new one. "
+          "This error indicates that your training graph has changed "
+          "in this iteration, e.g., one parameter is used in first "
+          "iteration, but then got unused in the second iteration. "
+          "this is not compatible with static_graph set to True.";
+    } else if (!find_unused_parameters_) {
       // Parameters may have been unused in forward pass, or not all outputs
       // were used in producing loss.
       kBaseErrorMsg +=

@@ -1,3 +1,4 @@
+# Owner(s): ["module: unknown"]
 
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests
@@ -110,7 +111,7 @@ class TestFunctionSchema(TestCase):
     def test_string_optional_parameter_default_value(self):
         schema_a = parse_schema("example::op(str? order=\"NCHW\") -> (Tensor)")
         schema_b = parse_schema(str(schema_a))
-        self.assertEquals(schema_a, schema_b)
+        self.assertEqual(schema_a, schema_b)
 
     def test_forward_compatible_arguments_without_out(self):
         old_schema = parse_schema('any(Tensor self, int a, int b=1) -> Tensor')

@@ -2,6 +2,7 @@ import ast
 import builtins
 import copy
 import inspect
+import logging
 import textwrap
 import warnings
 from types import FunctionType
@@ -10,11 +11,15 @@ from typing import Dict, Optional, Any, Type, Tuple, Set, List
 import torch.fx.experimental.fx_acc.acc_normalizer as acc_normalizer
 import torch.fx.experimental.fx_acc.acc_ops  # noqa: F401
 import torch
+import torch.jit as jit
 import torch.nn as nn
 from torch._sources import normalize_source_lines
 from torch.fx import Graph, Tracer
 from torch.fx.experimental.normalize import NormalizeArgs
 from torch.fx.passes import shape_prop
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def _get_exception_wrapper_attr_name(exc_type: Type[Exception]) -> str:
@@ -213,6 +218,8 @@ class AccRewritingTracer(Tracer):
         torch.nn.quantized.Linear,
         torch.nn.quantized.Conv2d,
         torch.nn.intrinsic.quantized.ConvReLU2d,
+        jit.ScriptModule,
+        jit.RecursiveScriptModule,
     }
 
     def is_leaf_module(self, m: nn.Module, mod_qual_name: str) -> bool:
@@ -250,6 +257,13 @@ def _rewrite(mod_to_rewrite: nn.Module, allow_list: Optional[Set] = None) -> nn.
     # functions that are attrs of this moodule. Return the new, rewritten module
     # hierarchy.
     def rewrite_module(m: nn.Module):
+        if isinstance(m, jit.ScriptModule):
+            # ScriptModule cannot be rewritten, so bypass it. The issue is it
+            # requires explicitly calling its `__init__()`, calling
+            # `nn.Module.__init__()` in the derived `RewrittenModule` is not
+            # enough. And even if we init it we can't do much with it.
+            return m
+
         base_class : Type[nn.Module] = type(m)
 
         # Keep track of all the ConditionalExceptionWrappers that the
@@ -268,7 +282,10 @@ def _rewrite(mod_to_rewrite: nn.Module, allow_list: Optional[Set] = None) -> nn.
             # Write all of the non-dunder or special methods from base_class
             # into RewrittenModule.
             for method_name in dir(base_class):
-                method = getattr(base_class, method_name)
+                method = getattr(base_class, method_name, None)
+                if method is None:
+                    _LOGGER.warning(f"{__qualname__} does not have attribute {method_name}")
+
                 if builtins.type(method) is not FunctionType:
                     continue
 
@@ -287,6 +304,7 @@ def _rewrite(mod_to_rewrite: nn.Module, allow_list: Optional[Set] = None) -> nn.
 
             def __init__(self, orig):
                 nn.Module.__init__(self)
+
                 # Iterate over all added exception wrappers and add
                 # ConditionalExceptionWrapper attrs for each.
                 for exc_type in all_added_wrappers:

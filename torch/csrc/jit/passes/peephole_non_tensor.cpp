@@ -61,6 +61,11 @@ bool trySimplifyAddOrSub(Node& node) {
     return false;
   }
 
+  if (constant == 0) {
+    node.output()->replaceAllUsesWith(node.input(0));
+    return true;
+  }
+
   auto& dep = *node.inputs()[0]->node();
   if (dep.kind() != aten::add && dep.kind() != aten::sub) {
     return false;
@@ -185,7 +190,7 @@ struct PeepholeOptimizeNonTensorImpl {
         // losing anything by calling unshapedType here
         auto input_type = unshapedType(node->input()->type());
         auto output_type = unshapedType(node->output()->type());
-        if (input_type->isSubtypeOf(output_type)) {
+        if (input_type->isSubtypeOf(*output_type)) {
           GRAPH_UPDATE(
               "Removing ",
               getHeader(node),
