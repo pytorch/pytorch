@@ -2391,14 +2391,25 @@ class DistributedDataParallelTest(
             l2 = nn.Linear(20, 20)
             l1.weight = l2.weight
             model = nn.Sequential(l1, l2)
-            self._test_ddp_checkpointing(
-                model,
-                process_group=process_group,
-                use_bucket_view=use_bucket_view,
-                static_graph=True,
-                run_checkpoint=True,
-                use_reentrant=use_reentrant,
+            # TODO: non-reentrant based checkpointing of DDP module with
+            # static_graph runs into the below issue, see
+            # https://github.com/pytorch/pytorch/issues/70865 and
+            # https://github.com/pytorch/pytorch/issues/58111 for details.
+            err_ctx = (
+                self.assertRaisesRegex(
+                    RuntimeError,
+                    "Your training graph has changed in this iteration"
+                ) if static_graph and not use_reentrant else suppress()
             )
+            with err_ctx:
+                self._test_ddp_checkpointing(
+                    model,
+                    process_group=process_group,
+                    use_bucket_view=use_bucket_view,
+                    static_graph=static_graph,
+                    run_checkpoint=True,
+                    use_reentrant=use_reentrant,
+                )
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)

@@ -2,8 +2,11 @@
 
 #include <bitset>
 #include <mutex>
+#include <sstream>
 #include <unordered_map>
 #include <vector>
+
+#include <torch/csrc/monitor/events.h>
 
 namespace torch {
 namespace monitor {
@@ -32,6 +35,8 @@ enum Aggregation {
   MIN = 6,
 };
 
+// aggregationName returns the human readable name corresponding to the
+// aggregation.
 const char* aggregationName(Aggregation agg);
 
 template <typename T>
@@ -55,6 +60,16 @@ void unregisterStat(Stat<double>* stat);
 void unregisterStat(Stat<int64_t>* stat);
 } // namespace detail
 
+// Stat is a base class for stats. These stats are used to compute summary
+// statistics in a performant way over repeating intervals. When the window
+// closes the stats are logged via the event handlers as a `torch.monitor.Stat`
+// event.
+//
+// Stats support double and int64_t data types depending on what needs to be
+// logged and needs to be templatized with one of them.
+//
+// When the Stat is destructed it will log any remaining data even if the window
+// hasn't elapsed.
 template <typename T>
 class Stat {
  private:
@@ -67,23 +82,24 @@ class Stat {
   };
 
  public:
-  Stat(
-      std::string name,
-      std::initializer_list<Aggregation> aggregations,
-      int64_t windowSize = -1)
-      : name_(std::move(name)),
-        aggregations_(merge(aggregations)),
-        windowSize_(windowSize) {
+  Stat(std::string name, std::initializer_list<Aggregation> aggregations)
+      : name_(std::move(name)), aggregations_(merge(aggregations)) {
     detail::registerStat(this);
   }
 
-  ~Stat() {
+  virtual ~Stat() {
+    {
+      // on destruction log if there's unlogged data
+      std::lock_guard<std::mutex> guard(mu_);
+      logLocked();
+    }
     detail::unregisterStat(this);
   }
 
   // add adds the value v to the current window.
-  void add(T v) noexcept {
+  void add(T v) {
     std::lock_guard<std::mutex> guard(mu_);
+    maybeLogLocked();
 
     if (aggregations_.test(VALUE)) {
       current_.value = v;
@@ -104,17 +120,11 @@ class Stat {
     }
 
     current_.count += 1;
-    if (windowSize_ > 0 && current_.count >= windowSize_) {
-      saveCurrentLocked();
-    }
+    maybeLogLocked();
   }
 
   const std::string& name() const noexcept {
     return name_;
-  }
-
-  int64_t windowSize() const noexcept {
-    return windowSize_;
   }
 
   // count returns the number of items in the current open window.
@@ -124,68 +134,131 @@ class Stat {
     return current_.count;
   }
 
-  // closeWindow finalizes the collected stats window so they can be accessed
-  // via get().
-  // If the Stat has a windowSize specified this doesn't do anything since the
-  // window is automatically closed when enough samples have been logged.
-  void closeWindow() noexcept {
-    if (windowSize_ <= 0) {
-      std::lock_guard<std::mutex> guard(mu_);
-
-      saveCurrentLocked();
-    }
+  std::unordered_map<Aggregation, T> get() noexcept {
+    std::lock_guard<std::mutex> guard(mu_);
+    return getLocked();
   }
 
-  std::vector<std::pair<Aggregation, T>> get() noexcept {
-    std::vector<std::pair<Aggregation, T>> out;
+ protected:
+  virtual void maybeLogLocked() = 0;
+
+  void logLocked() {
+    prev_ = current_;
+    current_ = Values();
+
+    // don't log event if there's no data
+    if (prev_.count == 0) {
+      return;
+    }
+
+    Event e;
+    e.type = "torch.monitor.Stat";
+    e.message = name_;
+    e.timestamp = std::chrono::system_clock::now();
+
+    auto stats = getLocked();
+    e.metadata.reserve(stats.size());
+    for (auto& kv : stats) {
+      std::stringstream key;
+      key << name_;
+      key << ".";
+      key << aggregationName(kv.first);
+      e.metadata[key.str()] = kv.second;
+    }
+
+    logEvent(e);
+  }
+
+  std::unordered_map<Aggregation, T> getLocked() const noexcept {
+    std::unordered_map<Aggregation, T> out;
     out.reserve(aggregations_.count());
 
-    std::lock_guard<std::mutex> guard(mu_);
-
     if (aggregations_.test(VALUE)) {
-      out.emplace_back(VALUE, prev_.value);
+      out.emplace(VALUE, prev_.value);
     }
     if (aggregations_.test(MEAN)) {
       if (prev_.count == 0) {
-        out.emplace_back(MEAN, 0);
+        out.emplace(MEAN, 0);
       } else {
-        out.emplace_back(MEAN, prev_.sum / prev_.count);
+        out.emplace(MEAN, prev_.sum / prev_.count);
       }
     }
     if (aggregations_.test(COUNT)) {
-      out.emplace_back(COUNT, prev_.count);
+      out.emplace(COUNT, prev_.count);
     }
     if (aggregations_.test(SUM)) {
-      out.emplace_back(SUM, prev_.sum);
+      out.emplace(SUM, prev_.sum);
     }
     if (aggregations_.test(MAX)) {
-      out.emplace_back(MAX, prev_.max);
+      out.emplace(MAX, prev_.max);
     }
     if (aggregations_.test(MIN)) {
-      out.emplace_back(MIN, prev_.min);
+      out.emplace(MIN, prev_.min);
     }
 
     return out;
   }
 
- private:
-  void saveCurrentLocked() {
-    prev_ = current_;
-    current_ = Values();
-  }
-
   const std::string name_;
   const std::bitset<NUM_AGGREGATIONS> aggregations_;
-  const int64_t windowSize_;
 
   std::mutex mu_;
   Values current_;
   Values prev_;
 };
 
-std::pair<
-    std::unordered_map<std::string, double>,
-    std::unordered_map<std::string, int64_t>>
-closeAndGetStats() noexcept;
+// IntervalStat is a Stat that logs the stat once every `windowSize` duration.
+// This should be set to something relatively high to avoid a huge number of
+// events being logged. Ex: 60s.
+template <typename T>
+class IntervalStat : public Stat<T> {
+ public:
+  IntervalStat(
+      std::string name,
+      std::initializer_list<Aggregation> aggregations,
+      std::chrono::milliseconds windowSize)
+      : Stat<T>(std::move(name), aggregations), windowSize_(windowSize) {}
+
+ protected:
+  virtual uint64_t currentWindowId() const {
+    auto now = std::chrono::steady_clock::now().time_since_epoch();
+    return now / windowSize_;
+  }
+
+ private:
+  void maybeLogLocked() override {
+    auto windowId = currentWindowId();
+    if (windowId_ != windowId) {
+      Stat<T>::logLocked();
+      windowId_ = windowId;
+    }
+  }
+
+  uint64_t windowId_{0};
+  const std::chrono::milliseconds windowSize_;
+};
+
+// FixedCountStat is a Stat that logs the stat every `windowSize` number of add
+// calls. For high performance stats this window size should be fairly large to
+// ensure that the event logging frequency is in the range of 1s to 60s under
+// normal usage. Core stats should error on the side of less frequent.
+template <typename T>
+class FixedCountStat : public Stat<T> {
+ public:
+  FixedCountStat(
+      std::string name,
+      std::initializer_list<Aggregation> aggregations,
+      int64_t windowSize)
+      : Stat<T>(std::move(name), aggregations), windowSize_(windowSize) {}
+
+ private:
+  void maybeLogLocked() override {
+    if (Stat<T>::current_.count >= windowSize_) {
+      Stat<T>::logLocked();
+    }
+  }
+
+  const int64_t windowSize_;
+};
 } // namespace monitor
 } // namespace torch
