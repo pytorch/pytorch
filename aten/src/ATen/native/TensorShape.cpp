@@ -1562,13 +1562,8 @@ static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t di
   return self;
 }
 
-static inline Tensor sparse_csr_transpose(const Tensor & self, int64_t dim0, int64_t dim1) {
+static inline Tensor sparse_csr_transpose(const Tensor & self) {
   TORCH_INTERNAL_ASSERT(self.is_sparse_csr());
-  auto dim0_ = maybe_wrap_dim(dim0, 2);
-  auto dim1_ = maybe_wrap_dim(dim1, 2);
-  if (dim0 == dim1) {
-    return self.clone();
-  }
 
   auto sizes = self.sizes();
   auto crow_indices = self.crow_indices();
@@ -1665,6 +1660,12 @@ Tensor & transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
     return self;
   }
 
+  // Sparse COO is an exceptional sparse format as it allows transpose
+  // to be a view operation which is a convinient property for
+  // in-place operations. For other sparse formats, the in-place
+  // transpose would not be possible without shuffling the specified
+  // values. So we don't support this as it would defeat the purpose
+  // of in-place opeations of being memory-efficient.
   if (self.is_sparse()) {
     return sparse_transpose_(self, dim0, dim1);
   }
@@ -1686,20 +1687,27 @@ Tensor transpose(const Tensor & self, int64_t dim0, int64_t dim1) {
   dim0 = maybe_wrap_dim(dim0, ndims);
   dim1 = maybe_wrap_dim(dim1, ndims);
 
-  if (self.is_sparse_csr()) {
-    // Sparse CSR transpose is a copy operation as the values of
-    // transposed CSR tensor are permuted values of the input CSR
-    // tensor.
-    return sparse_csr_transpose(self, dim0, dim1);
+  // Transpose of a sparse tensor is a copy operation because the
+  // compression scheme of specified values into a contiguous tensor
+  // is different for the transposed sparse tensor, in general.
+  if (self.is_sparse_csr() || self.is_sparse()) {
+    if (dim0 == dim1) {
+      return self.clone();
+    }
+    if (self.is_sparse_csr()) {
+      // Sparse CSR transpose is a copy operation as the values of
+      // transposed CSR tensor are permuted values of the input CSR
+      // tensor.
+      return sparse_csr_transpose(self);
+    } else {  // sparse COO
+      Tensor self_clone = self.clone();
+      return sparse_transpose_(self_clone, dim0, dim1);
+    }
   }
 
+  // Transpose of a strided tensor is a view operation.
   if (dim0 == dim1) {
     return self;
-  }
-
-  if (self.is_sparse()) {
-    Tensor self_clone = self.clone();  // yes, this is what THS does
-    return sparse_transpose_(self_clone, dim0, dim1);
   }
 
   if (self.is_mkldnn()) {
