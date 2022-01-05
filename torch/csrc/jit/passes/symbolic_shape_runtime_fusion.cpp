@@ -4,11 +4,14 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/symbolic_shape_runtime_fusion.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
+#include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
+#include <torch/csrc/jit/runtime/static/ops.h>
 #include <sstream>
 
 namespace torch {
@@ -248,6 +251,39 @@ bool GenerateGuard(Node* tensorexpr_graph_node, bool add_composed_op) {
   return true;
 }
 
+void inlineFallbackGraphAndAddSRCopyOutOp(std::shared_ptr<Graph> graph) {
+  DepthFirstGraphNodeIterator it(graph);
+
+  Node* n = nullptr;
+  while ((n = it.next()) != nullptr) {
+    if (n->kind() == prim::FallbackGraph) {
+      break;
+    }
+  }
+  TORCH_INTERNAL_ASSERT(n != nullptr, "Expected to find fallback graph");
+
+  auto if_node = n->owningBlock()->owningNode();
+  IfView if_v(if_node);
+  SubgraphUtils::unmergeSubgraph(n);
+
+  auto false_block = if_v.elseBlock();
+  std::vector<Value*> false_block_outputs(
+      if_v.elseOutputs().begin(), if_v.elseOutputs().end());
+  TORCH_INTERNAL_ASSERT(false_block_outputs.size() != 0);
+
+  for (auto out : false_block_outputs) {
+    TORCH_INTERNAL_ASSERT(out->type()->cast<TensorType>());
+  }
+  auto copy_node = graph->create(
+      prim::StaticRuntimeCopyOuts,
+      false_block_outputs,
+      false_block_outputs.size());
+  false_block->appendNode(copy_node);
+  for (size_t i = 0; i < false_block_outputs.size(); ++i) {
+    false_block->replaceOutput(i, copy_node->outputs().at(i));
+  }
+}
+
 // TODO: share more logic with tensorexpr_fuser ?
 void insertDynamicShapesGuard(
     const ShapeComputeGraphMapping& shape_mapping,
@@ -374,8 +410,43 @@ void insertDynamicShapesGuard(
     auto te_dyn_group = SubgraphUtils::createSingletonSubgraph(
         typecheck_node, prim::TensorExprDynamicGroup);
     SubgraphUtils::mergeNodeIntoSubgraph(versioning_if, te_dyn_group);
+    inlineFallbackGraphAndAddSRCopyOutOp(
+        SubgraphUtils::getSubgraph(te_dyn_group));
   }
 }
+
+// If there are tensors on the stack other than
+// the inputs, copies the inputs into the values
+// on the stack. Only used in SR.
+Operation StaticRuntimeCopyOuts(const Node* node) {
+  auto num_ten_inputs = node->inputs().size();
+  return [num_ten_inputs](Stack& stack) {
+    std::vector<IValue> inputs = pop(stack, num_ten_inputs);
+    // uncommon case - first run
+    if (stack.size() == 0) {
+      for (IValue elem : inputs) {
+        push(stack, std::move(elem));
+      }
+    } else {
+      at::ArrayRef<IValue> outputs = last(stack, num_ten_inputs);
+      for (size_t i = 0; i < inputs.size(); ++i) {
+        IValue out = outputs[i];
+        at::Tensor& out_t = out.toTensor();
+        fastResizeToZero(out_t);
+        out_t.resize_as_(inputs[i].toTensor());
+        out_t.copy_(inputs[i].toTensor());
+      }
+    }
+    return 0;
+  };
+}
+
+RegisterOperators SRCopyOuts({
+    torch::jit::Operator(
+        prim::StaticRuntimeCopyOuts,
+        StaticRuntimeCopyOuts,
+        AliasAnalysisKind::CONSERVATIVE),
+});
 
 // On each invocation of this guard, we need to check all of the static
 // information (dtype/device/requires grad/contiguity/static dims),
