@@ -56,7 +56,7 @@ cc_library(
         ]),
         [],
     ),
-    copts = ["-DCAFFE2_BUILD_MAIN_LIB"],
+    local_defines = ["C10_BUILD_MAIN_LIB"],
     deps = [
         ":headers",
         "@fmt",
