@@ -104,7 +104,10 @@ def output_csv(name, headers):
             open(name, "wb", buffering=0),
             "utf-8",
             write_through=True,
-        )
+        ),
+        delimiter = ",",
+        quotechar='"',
+        quoting=csv.QUOTE_MINIMAL
     )
     output.writerow(headers)
     return output
@@ -497,14 +500,16 @@ def merge_with_prefix(prefix, tmp_dir, out_dir, headers):
     results = []
     rfnames = glob.glob(os.path.join(tmp_dir, prefix + "*"))
     for rfname in rfnames:
-        results.extend(open(rfname).readlines()[1:]) #skip headr
+        results.extend(open(rfname).readlines()[1:]) #skip header
+
+    # the header shouldn't require quotations and the results should already be properly
+    # quoted via output_csv
     with open(os.path.join(out_dir, prefix + "acc.csv"), "a+") as acc_csv:
         acc_csv.write(",".join(headers) + "\n")
         for l in results:
             acc_csv.write(l)
 
 def merge_reformat(tmp_dir, out_dir):
-
     out_dir = args.output_dir
     # depending on the type of an experiment, fields can be in a different order
     # `get_field` deals with all three types including `error`
@@ -526,7 +531,7 @@ def merge_reformat(tmp_dir, out_dir):
 
         with open(csvf, "r") as csvfile:
             prefix = os.path.basename(csvf).split("_")[0]
-            csvreader = csv.reader(csvfile)
+            csvreader = csv.reader(csvfile, delimiter = ",", quotechar='"')
             # This skips the first row of the CSV file.
             next(csvreader)
 
@@ -543,12 +548,15 @@ def merge_reformat(tmp_dir, out_dir):
             
 
     amortized_header = f"amortized {args.inner_loop_repeat}x"
-    headers = ["name", "test", amortized_header, "unamortized", "error"]
-    with open(os.path.join(out_dir, "reformat.csv"), "w") as acc_csv:
-        acc_csv.write(",".join(headers) + "\n")
-        for k, v in table.items():
-            acc_csv.write(f"{k[0]},{k[1]},{v.get(amortized_header, 'N/A')},{v.get('unamortized', 'N/A')},{v.get('overhead', 'N/A')},{v.get('error', 'N/A')}\n")  
+    headers = ("name", "test", amortized_header, "unamortized", "error")
 
+    cw = output_csv(
+        os.path.join(out_dir, f"{args.test}_reformat.csv"),
+        headers
+    )
+
+    for k, v in table.items():
+        cw.writerow((k[0], k[1], v.get(amortized_header, 'N/A'), v.get('unamortized', 'N/A'), v.get('overhead', 'N/A'), v.get('error', 'N/A')))
 
 def save_error(name, test, error, dir):
     output_csv(
