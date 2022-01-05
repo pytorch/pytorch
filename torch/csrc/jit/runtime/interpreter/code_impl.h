@@ -70,6 +70,9 @@ struct CodeImpl {
 
   std::vector<IValue> constant_table_;
   std::vector<Operation> operator_table_;
+#ifndef NDEBUG
+  std::vector<Operator> full_operator_table_;
+#endif
   // map<(op name, num inputs), index in operator table>, to avoid duplicates,
   // not including vararg operators
   std::unordered_map<
@@ -321,7 +324,8 @@ struct CodeImpl {
     bool is_vararg = op.schema().is_vararg();
 
     int operation_index = add_to_operator_table(
-        op.getOperation(node),
+        op,
+        node,
         c10::toString(op.schema().operator_name()),
         num_inputs,
         is_vararg);
@@ -741,11 +745,14 @@ struct CodeImpl {
    * Add an operation to operator_table_ if not a duplicate and return its index
    */
   int add_to_operator_table(
-      const Operation& oper,
+      const Operator& op,
+      const Node* node,
       const std::string& op_name,
       const int num_inputs,
       const bool is_vararg) {
     int size = operator_table_.size();
+
+    const Operation& oper = op.getOperation(node);
 
     if (!is_vararg) {
       std::pair<std::string, int> key(op_name, num_inputs);
@@ -759,7 +766,31 @@ struct CodeImpl {
     }
 
     operator_table_.emplace_back(oper);
+#ifndef NDEBUG
+    full_operator_table_.emplace_back(op);
+#endif
     return size;
+  }
+
+  inline void assert_stack_size(
+      int32_t instruction_index,
+      size_t init_size,
+      size_t actual_size) const {
+#ifndef NDEBUG
+    const auto& schema = full_operator_table_[instruction_index].schema();
+    int64_t expected_size = static_cast<int64_t>(init_size) -
+        static_cast<int64_t>(schema.arguments().size()) +
+        static_cast<int64_t>(schema.returns().size());
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        expected_size == actual_size || schema.is_varret() ||
+            schema.is_vararg(),
+        "Expected to find ",
+        expected_size,
+        " values on the stack, but found ",
+        actual_size,
+        " on the stack after ",
+        toString(full_operator_table_[instruction_index].schema()));
+#endif
   }
 };
 
@@ -829,7 +860,8 @@ struct MobileCodeImpl : CodeImpl {
       if (op.hasOperation() && is_vararg) {
         emitLoadInputs(node->inputs());
         int operation_index = add_to_operator_table(
-            op.getOperation(node),
+            op,
+            node,
             unique_op_name,
             num_inputs,
             /* is_vararg */ true);
@@ -852,7 +884,7 @@ struct MobileCodeImpl : CodeImpl {
           emitLoadInputs(node->inputs(), num_include);
         }
         int operation_index = add_to_operator_table(
-            op.getOperation(node), unique_op_name, num_inputs, is_vararg);
+            op, node, unique_op_name, num_inputs, is_vararg);
         insertInstruction(OP, operation_index);
       }
     }

@@ -30,6 +30,7 @@ MODULE_TYPES_SAFE_TO_USE_BY_MULTIPLE_NODES = set([
     torch.nn.ReLU,
 ])
 
+# TODO: maybe rename this to MatchInputNode
 class MatchAllNode:
     """ A node pattern that matches all nodes
     """

@@ -247,6 +247,7 @@ endif()
 
 if(NOT INTERN_BUILD_MOBILE)
   set(AT_MKL_ENABLED 0)
+  set(AT_MKL_SEQUENTIAL 0)
   set(AT_MKL_MT 0)
   set(USE_BLAS 1)
   if(NOT (ATLAS_FOUND OR BLIS_FOUND OR GENERIC_BLAS_FOUND OR MKL_FOUND OR OpenBLAS_FOUND OR VECLIB_FOUND OR FlexiBLAS_FOUND))
@@ -258,9 +259,8 @@ if(NOT INTERN_BUILD_MOBILE)
   endif()
 
   if(MKL_FOUND)
-    add_definitions(-DTH_BLAS_MKL)
     if("${MKL_THREADING}" STREQUAL "SEQ")
-      add_definitions(-DTH_BLAS_MKL_SEQ=1)
+      set(AT_MKL_SEQUENTIAL 1)
     endif()
     if(MSVC AND MKL_LIBRARIES MATCHES ".*libiomp5md\\.lib.*")
       add_definitions(-D_OPENMP_NOFORCE_MANIFEST)
@@ -1745,6 +1745,7 @@ if(NOT INTERN_BUILD_MOBILE)
   endif()
 
   find_package(VSX) # checks VSX
+  find_package(ZVECTOR) # checks ZVECTOR
   # checks AVX and AVX2. Already called once in MiscCheck.cmake. Called again here for clarity --
   # cached results will be used so no extra overhead.
   find_package(AVX)
