@@ -1,6 +1,7 @@
 import torch
 from typing import Iterable
 from .aot_autograd import compiled_function, partition_with_recompute_fwd_in_bwd
+from .decompositions import decomposition_table
 
 
 def tensorexpr_compile(fx_module, flat_args):
@@ -90,7 +91,7 @@ def torchscript_nnc_operator_authoring(fn, partition_fn, hasher_type):
         fw_compiler,
         bw_compiler,
         partition_fn,
-        decompose=True,
+        decompositions=decomposition_table,
         hasher_type=hasher_type,
     )
 
@@ -103,7 +104,7 @@ def torchscript_nvfuser_operator_authoring(fn, partition_fn, hasher_type):
         fw_compiler,
         bw_compiler,
         partition_fn,
-        decompose=True,
+        decompositions=decomposition_table,
         hasher_type=hasher_type,
     )
 
@@ -116,7 +117,7 @@ def tensorexpr_operator_authoring(fn, partition_fn, hasher_type):
         fw_compiler,
         bw_compiler,
         partition_fn,
-        decompose=True,
+        decompositions=decomposition_table,
         hasher_type=hasher_type,
     )
 
