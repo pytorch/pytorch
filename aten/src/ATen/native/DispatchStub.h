@@ -183,16 +183,16 @@ private:
 };
 
 namespace {
-template <typename FnPtr, typename T>
+template <typename DispatchStub>
 struct RegisterCUDADispatch {
-  RegisterCUDADispatch(DispatchStub<FnPtr, T>& stub, FnPtr value) {
+  RegisterCUDADispatch(DispatchStub &stub, typename DispatchStub::FnPtr value) {
     stub.set_cuda_dispatch_ptr(value);
   }
 };
 
-template <typename FnPtr, typename T>
+template <typename DispatchStub>
 struct RegisterHIPDispatch {
-  RegisterHIPDispatch(DispatchStub<FnPtr, T>& stub, FnPtr value) {
+  RegisterHIPDispatch(DispatchStub &stub, typename DispatchStub::FnPtr value) {
     // TODO: make this point at hip_dispatch_ptr
     stub.set_cuda_dispatch_ptr(value);
   }
@@ -215,7 +215,7 @@ struct RegisterHIPDispatch {
 #define DEFINE_DISPATCH(name) struct name name
 
 #define REGISTER_ARCH_DISPATCH(name, arch, fn) \
-  template <> decltype(fn) DispatchStub<decltype(fn), struct name>::arch = fn;
+  template <> name::FnPtr DispatchStub<name::FnPtr, struct name>::arch = fn;
 
 #ifdef HAVE_AVX512_CPU_DEFINITION
 #define REGISTER_AVX512_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, AVX512, fn)
@@ -250,14 +250,14 @@ struct RegisterHIPDispatch {
   REGISTER_VSX_DISPATCH(name, fn)                                              \
   REGISTER_ZVECTOR_DISPATCH(name, fn)
 
-#define REGISTER_NO_CPU_DISPATCH(name, fn_type)                                \
-  REGISTER_ALL_CPU_DISPATCH(name, static_cast<fn_type>(nullptr))
+#define REGISTER_NO_CPU_DISPATCH(name)                                         \
+  REGISTER_ALL_CPU_DISPATCH(name, nullptr)
 
 #define REGISTER_CUDA_DISPATCH(name, fn) \
-  static RegisterCUDADispatch<decltype(fn), struct name> name ## __register(name, fn);
+  static RegisterCUDADispatch<struct name> name ## __register(name, fn);
 
 #define REGISTER_HIP_DISPATCH(name, fn) \
-  static RegisterHIPDispatch<decltype(fn), struct name> name ## __register(name, fn);
+  static RegisterHIPDispatch<struct name> name ## __register(name, fn);
 
 // NB: This macro must be used in an actual 'cu' file; if you try using
 // it from a 'cpp' file it will not work!
@@ -270,8 +270,8 @@ struct RegisterHIPDispatch {
 // #define REGISTER_DISPATCH(name, fn) REGISTER_HIP_DISPATCH(name, fn)
 #elif defined(CPU_CAPABILITY)
 #define REGISTER_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, CPU_CAPABILITY, fn)
-#define REGISTER_NO_AVX512_DISPATCH(name, fn_type)                             \
-  REGISTER_AVX512_DISPATCH(name, static_cast<fn_type>(nullptr))
+#define REGISTER_NO_AVX512_DISPATCH(name)       \
+  REGISTER_AVX512_DISPATCH(name, nullptr)
 #endif
 
 
