@@ -11012,16 +11012,22 @@
 - func: linalg_svd_rank_revealing.tartol(Tensor input, *, Tensor? atol=None, Tensor? rtol=None, bool full_matrices=True) -> (Tensor U, Tensor S, Tensor Vh, Tensor rank)
   python_module: linalg
   variants: function
+  dispatch:
+    CompositeExplicitAutograd: linalg_svd_rank_revealing
 
 - func: linalg_svd_rank_revealing.tartol_out(Tensor input, *, Tensor? atol=None, Tensor? rtol=None, bool full_matrices=True, Tensor(a!) U, Tensor(b!) S, Tensor(c!) Vh, Tensor(d!) rank) -> (Tensor(a!) U, Tensor(b!) S, Tensor(c!) Vh, Tensor(d!) rank)
   python_module: linalg
   variants: function
+  dispatch:
+    CompositeExplicitAutograd: linalg_svd_rank_revealing_out
 
 - func: linalg_svd_rank_revealing.fartol(Tensor input, *, float? atol=None, float? rtol=None, bool full_matrices=True) -> (Tensor U, Tensor S, Tensor Vh, Tensor rank)
+  cpp_no_default_args: ['atol', 'rtol']
   python_module: linalg
   variants: function
 
 - func: linalg_svd_rank_revealing.fartol_out(Tensor input, *, float? atol=None, float? rtol=None, bool full_matrices=True, Tensor(a!) U, Tensor(b!) S, Tensor(c!) Vh, Tensor(d!) rank) -> (Tensor(a!) U, Tensor(b!) S, Tensor(c!) Vh, Tensor(d!) rank)
+  cpp_no_default_args: ['atol', 'rtol']
   python_module: linalg
   variants: function
 

@@ -669,7 +669,7 @@ linalg_svd_rank_revealing_out(
     Tensor& rank) {
   Tensor atol_tensor, rtol_tensor;
   std::tie(atol_tensor, rtol_tensor) = get_atol_rtol(input, atol, rtol);
-  return linalg_svd_rank_revealing_out(input, atol_tensor, rtol_tensor, full_matrices, U, S, Vh, rank);
+  return at::linalg_svd_rank_revealing_outf(input, atol_tensor, rtol_tensor, full_matrices, U, S, Vh, rank);
 }
 
 std::tuple<Tensor&, Tensor&, Tensor&, Tensor&>
@@ -701,32 +701,17 @@ linalg_svd_rank_revealing_out(
   return at::linalg_svd_rank_revealing_outf(input, tol, rtol, full_matrices, U, S, Vh, rank);
 }
 
-static inline auto init_outs_svd_rank_revealing(const Tensor& input) {
+std::tuple<Tensor, Tensor, Tensor, Tensor>
+linalg_svd_rank_revealing(
+    const Tensor& input,
+    const c10::optional<Tensor>& atol,
+    const c10::optional<Tensor>& rtol,
+    bool full_matrices) {
   auto U = at::empty({0}, input.options());
   auto S = at::empty({0}, input.options());
   auto Vh = at::empty({0}, input.options());
   auto rank = at::empty({0}, input.options().dtype(ScalarType::Long));
-  return std::make_tuple(std::move(U), std::move(S), std::move(Vh), std::move(rank));
-}
-
-std::tuple<Tensor, Tensor, Tensor, Tensor>
-linalg_svd_rank_revealing(
-    const Tensor& input,
-    double tol,
-    bool full_matrices) {
-  Tensor U, S, Vh, rank;
-  std::tie(U, S, Vh, rank) = init_outs_svd_rank_revealing(input);
-  return at::linalg_svd_rank_revealing_outf(input, tol, full_matrices, U, S, Vh, rank);
-}
-
-std::tuple<Tensor, Tensor, Tensor, Tensor>
-linalg_svd_rank_revealing(
-    const Tensor& input,
-    const Tensor& tol,
-    bool full_matrices) {
-  Tensor U, S, Vh, rank;
-  std::tie(U, S, Vh, rank) = init_outs_svd_rank_revealing(input);
-  return at::linalg_svd_rank_revealing_outf(input, tol, full_matrices, U, S, Vh, rank);
+  return linalg_svd_rank_revealing_out(input, atol, rtol, full_matrices, U, S, Vh, rank);
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor>
@@ -737,20 +722,24 @@ linalg_svd_rank_revealing(
     bool full_matrices) {
   Tensor atol_tensor, rtol_tensor;
   std::tie(atol_tensor, rtol_tensor) = get_atol_rtol(input, atol, rtol);
-  Tensor U, S, Vh, rank;
-  std::tie(U, S, Vh, rank) = init_outs_svd_rank_revealing(input);
-  return at::linalg_svd_rank_revealing_outf(input, atol, rtol, full_matrices, U, S, Vh, rank);
+  return at::linalg_svd_rank_revealing(input, atol_tensor, rtol_tensor, full_matrices);
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor>
 linalg_svd_rank_revealing(
     const Tensor& input,
-    const c10::optional<Tensor>& atol,
-    const c10::optional<Tensor>& rtol,
+    const Tensor& tol,
     bool full_matrices) {
-  Tensor U, S, Vh, rank;
-  std::tie(U, S, Vh, rank) = init_outs_svd_rank_revealing(input);
-  return at::linalg_svd_rank_revealing_outf(input, atol, rtol, full_matrices, U, S, Vh, rank);
+  const auto rtol = at::zeros({}, tol.options());
+  return at::linalg_svd_rank_revealing(input, tol, rtol, full_matrices);
+}
+
+std::tuple<Tensor, Tensor, Tensor, Tensor>
+linalg_svd_rank_revealing(
+    const Tensor& input,
+    double tol,
+    bool full_matrices) {
+  return at::linalg_svd_rank_revealing(input, tol, /*rtol=*/0.0, full_matrices);
 }
 
 // multi_dot helper functions
