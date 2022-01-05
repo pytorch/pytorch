@@ -17,12 +17,11 @@
 #include <thread>
 #include <vector>
 
-#include "lazy_tensor_core/csrc/aten_ltc_bridge.h"
-#include "lazy_tensor_core/csrc/lazy_graph_executor.h"
+#include <torch/csrc/lazy/core/lazy_graph_executor.h>
 #include "lazy_tensor_core/csrc/python_util.h"
 #include "lazy_tensor_core/csrc/tensor_aten_ops.h"
 #include "lazy_tensor_core/csrc/tensor_distributed.h"
-#include "lazy_tensor_core/csrc/tensor_impl.h"
+#include <torch/csrc/lazy/core/tensor_impl.h>
 #include "lazy_tensor_core/csrc/ts_backend/backend_impl.h"
 #include "lazy_tensor_core/csrc/version.h"
 #include "lazy_tensors/computation_client/metrics_analysis.h"
@@ -60,7 +59,7 @@ void PrepareToExit() {
   // TODO(whc) should we hook this interface up? It does nothing currently
   torch::lazy::getBackend()->PrepareToExit();
   // TODO(whc) can I call this unconditionally?
-  LazyGraphExecutor::Get()->WaitDeviceOps({});
+  torch::lazy::LazyGraphExecutor::Get()->WaitDeviceOps({});
 }
 
 std::string GetTensorsDump(
@@ -70,7 +69,7 @@ std::string GetTensorsDump(
   std::vector<torch::lazy::Node*> nodes;
   std::vector<torch::lazy::Value> values;
   for (auto& tensor : tensors) {
-    LazyTensor xtensor = TryGetLtcTensor(tensor);
+    torch::lazy::LazyTensor xtensor = torch::lazy::TryGetLtcTensor(tensor);
     values.push_back(xtensor.GetIrValue());
     nodes.push_back(values.back().node.get());
   }
@@ -98,17 +97,17 @@ std::vector<torch::lazy::BackendDevice> GetLtcDevices(const std::vector<std::str
   return ltc_devices;
 }
 
-std::vector<LazyTensor> GetLtcTensors(const std::vector<at::Tensor>& tensors,
+std::vector<torch::lazy::LazyTensor> GetLtcTensors(const std::vector<at::Tensor>& tensors,
                                       bool want_all) {
-  std::vector<LazyTensor> xtensors;
+  std::vector<torch::lazy::LazyTensor> xtensors;
   xtensors.reserve(tensors.size());
   if (want_all) {
     for (auto& tensor : tensors) {
-      xtensors.push_back(TryGetLtcTensor(tensor));
+      xtensors.push_back(torch::lazy::TryGetLtcTensor(tensor));
     }
   } else {
     for (auto& tensor : tensors) {
-      auto xtensor = TryGetLtcTensor(tensor);
+      auto xtensor = torch::lazy::TryGetLtcTensor(tensor);
       if (xtensor) {
         xtensors.push_back(xtensor);
       }
@@ -161,7 +160,7 @@ std::shared_ptr<torch::lazy::Value> AllReduceInPlace(
     const std::string& reduce_type, const std::vector<at::Tensor>& tensors,
     const std::shared_ptr<torch::lazy::Value>& token, double scale,
     const std::vector<std::vector<int64_t>>& replica_groups) {
-  std::vector<LazyTensor> xtensors = GetLtcTensors(tensors, /*want_all=*/true);
+  std::vector<torch::lazy::LazyTensor> xtensors = GetLtcTensors(tensors, /*want_all=*/true);
   return std::make_shared<torch::lazy::Value>(
       lazy_tensor_distributed::all_reduce(&xtensors, *token,
                                           GetReduceType(reduce_type), scale,
@@ -172,13 +171,13 @@ std::pair<at::Tensor, std::shared_ptr<torch::lazy::Value>> AllReduce(
     const std::string& reduce_type, const at::Tensor& input,
     const std::shared_ptr<torch::lazy::Value>& token, double scale,
     const std::vector<std::vector<int64_t>>& replica_groups) {
-  LazyTensor result;
+  torch::lazy::LazyTensor result;
   torch::lazy::Value new_token;
   std::tie(result, new_token) = lazy_tensor_distributed::all_reduce(
-      TryGetLtcTensor(input), *token, GetReduceType(reduce_type), scale,
+      torch::lazy::TryGetLtcTensor(input), *token, GetReduceType(reduce_type), scale,
       replica_groups);
   return std::pair<at::Tensor, std::shared_ptr<torch::lazy::Value>>(
-      CreateAtenFromLtcTensor(std::move(result)),
+      torch::lazy::CreateAtenFromLtcTensor(std::move(result)),
       std::make_shared<torch::lazy::Value>(new_token));
 }
 
@@ -186,48 +185,48 @@ std::pair<at::Tensor, std::shared_ptr<torch::lazy::Value>> AllToAll(
     const at::Tensor& input, const std::shared_ptr<torch::lazy::Value>& token,
     int64_t split_dimension, int64_t concat_dimension, int64_t split_count,
     const std::vector<std::vector<int64_t>>& replica_groups) {
-  LazyTensor result;
+  torch::lazy::LazyTensor result;
   torch::lazy::Value new_token;
   std::tie(result, new_token) = lazy_tensor_distributed::all_to_all(
-      TryGetLtcTensor(input), *token, split_dimension, concat_dimension,
+      torch::lazy::TryGetLtcTensor(input), *token, split_dimension, concat_dimension,
       split_count, replica_groups);
   return std::pair<at::Tensor, std::shared_ptr<torch::lazy::Value>>(
-      CreateAtenFromLtcTensor(std::move(result)),
+      torch::lazy::CreateAtenFromLtcTensor(std::move(result)),
       std::make_shared<torch::lazy::Value>(new_token));
 }
 
 std::pair<at::Tensor, std::shared_ptr<torch::lazy::Value>> CollectivePermute(
     const at::Tensor& input, const std::shared_ptr<torch::lazy::Value>& token,
     const std::vector<std::pair<int64_t, int64_t>>& source_target_pairs) {
-  LazyTensor result;
+  torch::lazy::LazyTensor result;
   torch::lazy::Value new_token;
   std::tie(result, new_token) = lazy_tensor_distributed::collective_permute(
-      TryGetLtcTensor(input), *token, source_target_pairs);
+      torch::lazy::TryGetLtcTensor(input), *token, source_target_pairs);
   return std::pair<at::Tensor, std::shared_ptr<torch::lazy::Value>>(
-      CreateAtenFromLtcTensor(std::move(result)),
+      torch::lazy::CreateAtenFromLtcTensor(std::move(result)),
       std::make_shared<torch::lazy::Value>(new_token));
 }
 
 void SyncTensors(const std::vector<at::Tensor>& tensors,
                  const std::vector<std::string>& devices, bool wait,
                  bool sync_ltc_data) {
-  std::vector<LazyTensor> xtensors = GetLtcTensors(tensors, /*want_all=*/false);
-  LazyGraphExecutor::Get()->SyncTensorsGraph(&xtensors, devices, wait,
+  std::vector<torch::lazy::LazyTensor> xtensors = GetLtcTensors(tensors, /*want_all=*/false);
+  torch::lazy::LazyGraphExecutor::Get()->SyncTensorsGraph(&xtensors, devices, wait,
                                              sync_ltc_data);
 }
 
 void SyncLiveTensors(const std::string& device_str,
                      const std::vector<std::string>& devices, bool wait) {
   auto opt_device = GetOptionalDevice(device_str);
-  LazyGraphExecutor::Get()->SyncLiveTensorsGraph(
+  torch::lazy::LazyGraphExecutor::Get()->SyncLiveTensorsGraph(
       opt_device ? &opt_device.value() : nullptr, devices, wait);
 }
 
 void StepMarker(const std::string& device_str,
                 const std::vector<std::string>& devices, bool wait) {
   auto device = GetDeviceOrCurrent(device_str);
-  LazyGraphExecutor::Get()->SyncLiveTensorsGraph(&device, devices, wait);
-  LazyGraphExecutor::Get()->MarkStep(device);
+  torch::lazy::LazyGraphExecutor::Get()->SyncLiveTensorsGraph(&device, devices, wait);
+  torch::lazy::LazyGraphExecutor::Get()->MarkStep(device);
   bool debug_mode = lazy_tensors::sys_util::GetEnvBool("PT_LTC_DEBUG", false);
   if (C10_UNLIKELY(debug_mode)) {
     std::string report = lazy_tensors::metrics::CreatePerformanceReport();
@@ -246,23 +245,23 @@ void StepMarker(const std::string& device_str,
 
 void SetRngSeed(uint64_t seed, const std::string& device_str) {
   auto device = GetDeviceOrCurrent(device_str);
-  LazyGraphExecutor::Get()->SetRngSeed(device, seed);
+  torch::lazy::LazyGraphExecutor::Get()->SetRngSeed(device, seed);
 }
 
 uint64_t GetRngSeed(const std::string& device_str) {
-  return LazyGraphExecutor::Get()->GetRunningSeed(
+  return torch::lazy::LazyGraphExecutor::Get()->GetRunningSeed(
       GetDeviceOrCurrent(device_str));
 }
 
 std::string GetTensorsBackendGraph(const std::vector<at::Tensor>& tensors) {
-  std::vector<LazyTensor> xtensors = GetLtcTensors(tensors, /*want_all=*/false);
-  return LazyGraphExecutor::Get()->DumpBackendComputation(xtensors);
+  std::vector<torch::lazy::LazyTensor> xtensors = GetLtcTensors(tensors, /*want_all=*/false);
+  return torch::lazy::LazyGraphExecutor::Get()->DumpBackendComputation(xtensors);
 }
 
 std::string GetLiveTensorsReport(size_t nodes_threshold,
                                  const std::string& device_str) {
   auto opt_device = GetOptionalDevice(device_str);
-  auto tensors = LazyGraphExecutor::Get()->GetLiveTensors(
+  auto tensors = torch::lazy::LazyGraphExecutor::Get()->GetLiveTensors(
       opt_device ? &opt_device.value() : nullptr);
   std::stringstream ss;
   for (auto& tensor : tensors) {
@@ -290,12 +289,12 @@ std::string GetLiveTensorsReport(size_t nodes_threshold,
 }
 
 std::ptrdiff_t GetTensorViewAliasId(const at::Tensor& tensor) {
-  LazyTensor xtensor = TryGetLtcTensor(tensor);
+  torch::lazy::LazyTensor xtensor = torch::lazy::TryGetLtcTensor(tensor);
   return xtensor.GetViewAliasId();
 }
 
 std::ptrdiff_t GetTensorId(const at::Tensor& tensor) {
-  LazyTensor xtensor = TryGetLtcTensor(tensor);
+  torch::lazy::LazyTensor xtensor = torch::lazy::TryGetLtcTensor(tensor);
   return xtensor.GetUniqueId();
 }
 
@@ -308,8 +307,8 @@ std::vector<at::Tensor> GetLtcTensorsFromAten(
   std::vector<at::Tensor> lazy_tensors;
   lazy_tensors.reserve(data_handles.size());
   for (auto& data_handle : data_handles) {
-    LazyTensor lazy_tensor = LazyTensor::Create(std::move(data_handle));
-    lazy_tensors.push_back(CreateAtenFromLtcTensor(std::move(lazy_tensor)));
+    torch::lazy::LazyTensor lazy_tensor = torch::lazy::LazyTensor::Create(std::move(data_handle));
+    lazy_tensors.push_back(torch::lazy::CreateAtenFromLtcTensor(std::move(lazy_tensor)));
   }
   return lazy_tensors;
 }
@@ -321,7 +320,7 @@ std::shared_ptr<torch::lazy::Value> CreateToken(const std::string& device_str) {
   // device data (hence coming in as computation parameter) as otherwise the
   // backend compiler passes might remove it, vanishing its sequencing effects.
   auto device = GetDeviceOrCurrent(device_str);
-  torch::lazy::Value ir_value = LazyGraphExecutor::Get()->GetDeviceDataIrValue(
+  torch::lazy::Value ir_value = torch::lazy::LazyGraphExecutor::Get()->GetDeviceDataIrValue(
       0.0, c10::ScalarType::Float, device);
   return std::make_shared<torch::lazy::Value>(std::move(ir_value));
 }
@@ -365,11 +364,11 @@ py::object LtcNms(const at::Tensor& boxes, const at::Tensor& scores,
   {
     NoGilSection nogil;
     auto nms_result = lazy_tensor_aten_ops::nms(
-        TryGetLtcTensor(boxes), TryGetLtcTensor(scores),
-        TryGetLtcTensor(score_threshold),
-        TryGetLtcTensor(iou_threshold), output_size);
-    selected_indices = CreateAtenFromLtcTensor(std::move(nms_result.first));
-    num_valid = CreateAtenFromLtcTensor(std::move(nms_result.second));
+        torch::lazy::TryGetLtcTensor(boxes), torch::lazy::TryGetLtcTensor(scores),
+        torch::lazy::TryGetLtcTensor(score_threshold),
+        torch::lazy::TryGetLtcTensor(iou_threshold), output_size);
+    selected_indices = torch::lazy::CreateAtenFromLtcTensor(std::move(nms_result.first));
+    num_valid = torch::lazy::CreateAtenFromLtcTensor(std::move(nms_result.second));
   }
   auto result_tuple = py::tuple(2);
   result_tuple[0] =
@@ -381,14 +380,14 @@ py::object LtcNms(const at::Tensor& boxes, const at::Tensor& scores,
 
 std::vector<at::Tensor> LtcCreateTensorList(const at::TensorList& tensors) {
   std::vector<at::Tensor> aten_ltc_tensors(tensors.size());
-  std::vector<LazyTensor> ltc_tensors;
-  // We need to separate out the defined tensors first, GetLtcTensor() doesn't
+  std::vector<torch::lazy::LazyTensor> ltc_tensors;
+  // We need to separate out the defined tensors first, torch::lazy::GetLtcTensor() doesn't
   // work with undefined tensors.
   std::vector<bool> to_translate(tensors.size());
   for (size_t i = 0; i < tensors.size(); ++i) {
     const at::Tensor& tensor = tensors[i];
     if (tensor.defined()) {
-      auto xtensor = TryGetLtcTensor(tensor);
+      auto xtensor = torch::lazy::TryGetLtcTensor(tensor);
       if (xtensor) {
         to_translate[i] = true;
         ltc_tensors.push_back(xtensor);
@@ -398,7 +397,7 @@ std::vector<at::Tensor> LtcCreateTensorList(const at::TensorList& tensors) {
     }
   }
   auto defined_aten_ltc_tensors =
-      LazyGraphExecutor::Get()->GetTensors(&ltc_tensors);
+      torch::lazy::LazyGraphExecutor::Get()->GetTensors(&ltc_tensors);
   // Insert undefined tensors into the result, back into the original undefined
   // positions.
   for (size_t i = 0, defined_pos = 0; i < tensors.size(); ++i) {
@@ -655,7 +654,7 @@ void InitLtcModuleBindings(py::module m) {
         if (!devices.empty()) {
           LOG(ERROR) << "Non-empty devices are not supported.";
         }
-        LazyGraphExecutor::Get()->WaitDeviceOps({});
+        torch::lazy::LazyGraphExecutor::Get()->WaitDeviceOps({});
       },
       py::arg("devices"));
   m.def("_ltc_reset_metrics",
@@ -682,7 +681,7 @@ void InitLtcModuleBindings(py::module m) {
   // });
   m.def("_ltc_init_ts_backend", []() { compiler::InitTorchScriptBackend(); });
   m.def("_ltc_set_noop_execution_mode", [](bool enable_noop) {
-    LazyGraphExecutor::Get()->SetNoOpExecutionMode(enable_noop);
+    torch::lazy::LazyGraphExecutor::Get()->SetNoOpExecutionMode(enable_noop);
   });
 }  // namespace
 

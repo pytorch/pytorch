@@ -8,7 +8,6 @@
 
 #include "c10/core/Device.h"
 #include "cpp_test_util.h"
-#include "lazy_tensor_core/csrc/aten_ltc_bridge.h"
 #include "lazy_tensor_core/csrc/ts_backend/backend_impl.h"
 #include "torch_ltc_ts_test.h"
 

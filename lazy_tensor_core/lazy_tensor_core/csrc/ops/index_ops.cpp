@@ -10,8 +10,7 @@
 #include <torch/csrc/lazy/core/util.h>
 #include <torch/csrc/lazy/ts_backend/ts_node.h>
 
-#include "lazy_tensor_core/csrc/aten_ltc_bridge.h"
-#include "lazy_tensor_core/csrc/lazy_graph_executor.h"
+#include <torch/csrc/lazy/core/lazy_graph_executor.h>
 #include "lazy_tensor_core/csrc/ops/index_along_dim.h"
 #include "lazy_tensor_core/csrc/ops/index_get.h"
 #include "lazy_tensor_core/csrc/ops/index_put.h"
@@ -192,7 +191,7 @@ torch::lazy::Value EnsureRank1(const torch::lazy::Value& index) {
              : index;
 }
 
-torch::lazy::NodePtr IndexFill(const LazyTensor& base, int64_t dim, const LazyTensor& index,
+torch::lazy::NodePtr IndexFill(const torch::lazy::LazyTensor& base, int64_t dim, const torch::lazy::LazyTensor& index,
                   const at::Scalar& value) {
   CHECK_EQ(index.dtype(), at::ScalarType::Long)
       << "Fill index is expected to be of scalar type Long, but it is "
@@ -201,13 +200,13 @@ torch::lazy::NodePtr IndexFill(const LazyTensor& base, int64_t dim, const LazyTe
       << "Fill index is supposed to be a vector";
   return IndexFillOp(
       base.GetIrValue(), dim, index.GetIrValue(),
-      LazyGraphExecutor::Get()->GetIrValueForScalar(
+      torch::lazy::LazyGraphExecutor::Get()->GetIrValueForScalar(
           value, base.shape().Get().scalar_type(), base.GetDevice()));
 }
 
-torch::lazy::NodePtr IndexFill(const LazyTensor& base, int64_t dim,
-                               const LazyTensor& index,
-                               const LazyTensor& value) {
+torch::lazy::NodePtr IndexFill(const torch::lazy::LazyTensor& base, int64_t dim,
+                               const torch::lazy::LazyTensor& index,
+                               const torch::lazy::LazyTensor& value) {
   CHECK_EQ(index.dtype(), at::ScalarType::Long)
       << "Fill index is expected to be of scalar type Long, but it is "
       << index.dtype();
@@ -219,8 +218,8 @@ torch::lazy::NodePtr IndexFill(const LazyTensor& base, int64_t dim,
                      value.GetIrValue());
 }
 
-torch::lazy::Value IndexAdd(const LazyTensor& base, int64_t dim,
-                            const LazyTensor& index, const LazyTensor& source) {
+torch::lazy::Value IndexAdd(const torch::lazy::LazyTensor& base, int64_t dim,
+                            const torch::lazy::LazyTensor& index, const torch::lazy::LazyTensor& source) {
   CHECK(index.dtype() == at::ScalarType::Long ||
         index.dtype() == at::ScalarType::Int)
       << "Add index is expected to be of scalar type Long or scalar type Int, "
@@ -232,9 +231,9 @@ torch::lazy::Value IndexAdd(const LazyTensor& base, int64_t dim,
                     source.GetIrValue());
 }
 
-torch::lazy::Value IndexCopy(const LazyTensor& base, int64_t dim,
-                             const LazyTensor& index,
-                             const LazyTensor& source) {
+torch::lazy::Value IndexCopy(const torch::lazy::LazyTensor& base, int64_t dim,
+                             const torch::lazy::LazyTensor& index,
+                             const torch::lazy::LazyTensor& source) {
   CHECK_EQ(index.dtype(), at::ScalarType::Long)
       << "Copy index is expected to be of scalar type Long, but it is "
       << index.dtype();

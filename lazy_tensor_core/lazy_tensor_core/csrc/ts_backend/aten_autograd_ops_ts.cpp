@@ -3,7 +3,6 @@
 #include <ATen/Operators.h>
 #include <ATen/native/CPUFallback.h>
 
-#include "lazy_tensor_core/csrc/aten_ltc_bridge.h"
 #include "lazy_tensor_core/csrc/ts_backend/aten_eager_fallback.h"
 
 namespace torch_lazy_tensors {

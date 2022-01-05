@@ -60,9 +60,9 @@ def main() -> None:
     parser.add_argument(
         '--node_base_hdr', type=str, default=None, help='Path to header file defining custom Lazy IR Node base class')
     parser.add_argument(
-        '--tensor_class', type=str, default="LazyTensor", help='Name of backend specific custom Lazy Tensor class')
+        '--tensor_class', type=str, default="torch::lazy::LazyTensor", help='Name of backend specific custom Lazy Tensor class')
     parser.add_argument(
-        '--tensor_class_hdr', type=str, default="lazy_tensor_core/csrc/tensor.h",
+        '--tensor_class_hdr', type=str, default="torch/csrc/lazy/core/tensor.h",
         help='Path to header file defining custom Lazy Tensor class')
     options = parser.parse_args()
 
@@ -161,10 +161,9 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
         'includes': [f'#include <{path}>' for path in [
             tensor_class_hdr,
             "ATen/MetaFunctions.h",
+            "torch/csrc/lazy/core/lazy_graph_executor.h",
             "torch/csrc/lazy/core/metrics.h",
             "torch/csrc/lazy/core/shape.h",
-            "lazy_tensor_core/csrc/aten_ltc_bridge.h",
-            "lazy_tensor_core/csrc/lazy_graph_executor.h",
             f"{output_dir}/{backend_key}NativeFunctions.h",
             f"{output_dir}/{backend_key}LazyIr.h",
             f"{output_dir}/{backend_key}ShapeInference.h",
