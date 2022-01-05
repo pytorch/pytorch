@@ -794,7 +794,7 @@ def process_intentional_test_runs(runs: List[TestCase]) -> Tuple[int, int]:
 
 def assemble_flaky_test_stats(duplicated_tests_by_file: Dict[str, DuplicatedDict]) -> Any:
     flaky_tests = []
-    workflow_id = os.environ.get("WORKFLOW_ID", os.environ.get("CIRCLE_WORKFLOW_ID", None))
+    workflow_id = os.environ.get("GITHUB_RUN_ID", os.environ.get("CIRCLE_WORKFLOW_ID", None))
     for file_name, suite_to_dict in duplicated_tests_by_file.items():
         for suite_name, testcase_to_runs in suite_to_dict.items():
             for testcase_name, list_of_runs in testcase_to_runs.items():
