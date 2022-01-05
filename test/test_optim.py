@@ -1430,7 +1430,7 @@ class TestLRScheduler(TestCase):
         constant_lr_target = [0.005] * 3
         exponential_lr_target = [0.05, 0.04, 0.032]
         step_lr_target = [0.05, 0.05, 0.005, 0.005, 0.0005, 0.0005]
-        single_targets =  constant_lr_target + exponential_lr_target + step_lr_target
+        single_targets = constant_lr_target + exponential_lr_target + step_lr_target
         targets = [single_targets, [x * 10 for x in single_targets]]
         self._test_get_last_lr(scheduler, targets, epochs)
 
