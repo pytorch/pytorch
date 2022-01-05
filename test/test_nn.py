@@ -16485,9 +16485,9 @@ class TestNNDeviceType(NNTestCase):
             targets_no_bd = targets_no_bd.cpu()
 
         ctc_loss = (
-            partial(torch.nn.functional.ctc_loss, reduction=reduction, zero_infinity=True)
-            if use_module_form
-            else nn.CTCLoss(reduction=reduction, zero_infinity=True)
+            nn.CTCLoss(reduction=reduction, zero_infinity=True)
+            if use_module_form 
+            else partial(torch.nn.functional.ctc_loss, reduction=reduction, zero_infinity=True)
         )
 
         with torch.backends.cudnn.flags(enabled=has_cudnn):
