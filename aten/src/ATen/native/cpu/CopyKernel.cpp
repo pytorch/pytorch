@@ -1,6 +1,4 @@
-#include <ATen/core/op_registration/op_allowlist.h>
-#include <ATen/ATen.h>
-
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/Copy.h>
 #include <ATen/native/TensorIterator.h>
@@ -10,86 +8,70 @@
 
 namespace at {
 namespace native {
+inline namespace CPU_CAPABILITY {
+void neg_kernel(TensorIteratorBase &iter);
+void conj_kernel(TensorIteratorBase &iter);
+} // namespace CPU_CAPABILITY
+
 namespace {
 
-static void copy_kernel(TensorIterator& iter, bool non_blocking) {
+void direct_copy_kernel(TensorIteratorBase &iter) {
+  // TODO: we don't actually need separate instantiations per dtype;
+  // we only need a separate instantiation per dtype size. This would
+  // probably save us a little bit of code size here
+  // TODO: not sure if optimizer is able to compile two levels of
+  // conditionals into a single jump table.  We should have a
+  // single jump table here; might be worth just writing out the
+  // dispatch statement by hand instead of using AT_DISPATCH
+  ScalarType dtype = iter.dtype(0);
+  if (isQIntType(dtype)) {
+    AT_DISPATCH_QINT_TYPES(dtype, "copy_kernel", [&] {
+      cpu_kernel_vec(
+          iter,
+          [=](scalar_t a) -> scalar_t { return a; },
+          [=](Vectorized<scalar_t> a) -> Vectorized<scalar_t> { return a; });
+    });
+  } else if (dtype == ScalarType::ComplexHalf) {
+    cpu_kernel(iter, [=](c10::complex<at::Half> a) -> c10::complex<at::Half> { return a; });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+        kBool, kHalf, kBFloat16, dtype, "copy_kernel", [&] {
+      cpu_kernel_vec(
+          iter,
+          [=](scalar_t a) -> scalar_t { return a; },
+          [=](Vectorized<scalar_t> a) -> Vectorized<scalar_t> { return a; });
+    });
+  }
+}
+
+void neg_conj_kernel(TensorIteratorBase &iter) {
+  // fused a = b.neg().conj_physical()
+  AT_DISPATCH_COMPLEX_TYPES(iter.common_dtype(), "neg_conj_cpu", [&] {
+    cpu_kernel_vec(
+        iter,
+        [=](scalar_t a) -> scalar_t { return -conj_impl(a); },
+        [=](Vectorized<scalar_t> a) -> Vectorized<scalar_t> { return a.neg().conj(); });
+  });
+}
+
+void copy_kernel(TensorIterator& iter, bool non_blocking) {
   ScalarType dtype = iter.dtype(0);
   if (dtype == iter.dtype(1)) {
-    // TODO: as the majority of these operations can be done treating
-    // their datatypes as opaque bit patterns, we don't actually need
-    // separate instantiations per dtype; we only need a separate
-    // instantiation per dtype size.  This would probably save us a
-    // little bit of code size here
-    // TODO: not sure if optimizer is able to compile two levels of
-    // conditionals into a single jump table.  We should have a
-    // single jump table here; might be worth just writing out the
-    // dispatch statement by hand instead of using AT_DISPATCH
     if (iter.tensor(0).is_neg() == iter.tensor(1).is_neg()) {
-      if (dtype == ScalarType::Half) {
-        cpu_kernel(iter, [=](at::Half a) -> at::Half { return a; });
-      } else if (dtype == ScalarType::ComplexHalf) {
-        cpu_kernel(iter, [=](c10::complex<at::Half> a) -> c10::complex<at::Half> { return a; });
-      } else if (isQIntType(dtype)) {
-        AT_DISPATCH_QINT_TYPES(dtype, "copy_kernel", [&] {
-          cpu_kernel_vec(
-              iter,
-              [=](scalar_t a) -> scalar_t { return a; },
-              [=](Vectorized<scalar_t> a) -> Vectorized<scalar_t> { return a; });
-        });
-      } else if (isComplexType(dtype)) {
-        // This case should never actually happen since currently there's no way to get a complex tensor
-        // with negative bit.
-        if (iter.tensor(0).is_conj() == iter.tensor(1).is_conj()) {
-          AT_DISPATCH_COMPLEX_TYPES(dtype, "copy_kernel", [&] {
-              cpu_kernel_vec(
-                iter,
-                [=](scalar_t a) -> scalar_t { return a; },
-                [=](Vectorized<scalar_t> a) -> Vectorized<scalar_t> { return a; });
-            });
-        } else {
-          AT_DISPATCH_COMPLEX_TYPES(dtype, "conj_kernel", [&] {
-              cpu_kernel_vec(
-                iter,
-                [=](scalar_t a) -> scalar_t { return conj_impl(a); },
-                [=](Vectorized<scalar_t> a) -> Vectorized<scalar_t> { return a.conj(); });
-            });
-        }
+      // This case should never actually happen since currently there's no way to get a complex tensor
+      // with negative bit.
+      if (isComplexType(dtype) &&
+          (iter.tensor(0).is_conj() != iter.tensor(1).is_conj())) {
+        conj_kernel(iter);
       } else {
-        AT_DISPATCH_ALL_TYPES_AND2(
-            ScalarType::Bool, ScalarType::BFloat16,dtype, "copy_kernel", [&] {
-              cpu_kernel_vec(
-                  iter,
-                  [=](scalar_t a) -> scalar_t { return a; },
-                  [=](Vectorized<scalar_t> a) { return a; });
-            });
+        direct_copy_kernel(iter);
       }
     } else {
-      if (dtype == ScalarType::Half) {
-        cpu_kernel(iter, [=](at::Half a) -> at::Half { return -a; });
-      } else if (isComplexType(dtype)) {
-        if (iter.tensor(0).is_conj() == iter.tensor(1).is_conj()) {
-          AT_DISPATCH_COMPLEX_TYPES(dtype, "copy_kernel", [&] {
-              cpu_kernel_vec(
-                iter,
-                [=](scalar_t a) -> scalar_t { return -a; },
-                [=](Vectorized<scalar_t> a) -> Vectorized<scalar_t> { return a.neg(); });
-            });
-        } else {
-          AT_DISPATCH_COMPLEX_TYPES(dtype, "conj_kernel", [&] {
-              cpu_kernel_vec(
-                iter,
-                [=](scalar_t a) -> scalar_t { return -1 * conj_impl(a); },
-                [=](Vectorized<scalar_t> a) -> Vectorized<scalar_t> { return a.neg().conj(); });
-            });
-        }
+      if (isComplexType(dtype) &&
+          (iter.tensor(0).is_conj() != iter.tensor(1).is_conj())) {
+        neg_conj_kernel(iter);
       } else {
-          AT_DISPATCH_ALL_TYPES_AND2(
-            ScalarType::Bool, ScalarType::BFloat16,dtype, "copy_kernel", [&] {
-              cpu_kernel_vec(
-                  iter,
-                  [=](scalar_t a) -> scalar_t { return -a; },
-                  [=](Vectorized<scalar_t> a) -> Vectorized<scalar_t> { return a.neg(); });
-            });
+        neg_kernel(iter);
       }
     }
   } else {
