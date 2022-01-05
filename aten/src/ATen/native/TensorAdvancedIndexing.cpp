@@ -248,7 +248,7 @@ DEFINE_DISPATCH(index_put_with_sort_stub);
 DEFINE_DISPATCH(put_stub);
 DEFINE_DISPATCH(take_stub);
 DEFINE_DISPATCH(masked_fill_stub);
-REGISTER_NO_CPU_DISPATCH(index_put_with_sort_stub, index_put_with_sort_fn);
+REGISTER_NO_CPU_DISPATCH(index_put_with_sort_stub);
 DEFINE_DISPATCH(masked_select_serial_stub);
 DEFINE_DISPATCH(masked_select_stub);
 DEFINE_DISPATCH(masked_scatter_stub);
