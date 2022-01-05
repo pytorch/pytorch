@@ -7564,48 +7564,25 @@
   device_check: NoCheck   # TensorIterator
   variants: method, function
 
-# The following quantile signatures are DEPRECATED in favor of the new ones with the interpolation kwarg.
-- func: quantile.scalar_out(Tensor self, float q, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-
-- func: quantile.scalar(Tensor self, float q, int? dim=None, bool keepdim=False) -> Tensor
+- func: quantile(Tensor self, Tensor q, int? dim=None, bool keepdim=False, *, str interpolation='linear') -> Tensor
   variants: method, function
 
-- func: quantile.out(Tensor self, Tensor q, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: quantile.out(Tensor self, Tensor q, int? dim=None, bool keepdim=False, *, str interpolation='linear', Tensor(a!) out) -> Tensor(a!)
 
-- func: quantile(Tensor self, Tensor q, int? dim=None, bool keepdim=False) -> Tensor
+- func: quantile.scalar(Tensor self, float q, int? dim=None, bool keepdim=False, *, str interpolation='linear') -> Tensor
   variants: method, function
 
-- func: nanquantile.scalar_out(Tensor self, float q, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: quantile.scalar_out(Tensor self, float q, int? dim=None, bool keepdim=False, *, str interpolation='linear', Tensor(a!) out) -> Tensor(a!)
 
-- func: nanquantile.scalar(Tensor self, float q, int? dim=None, bool keepdim=False) -> Tensor
+- func: nanquantile(Tensor self, Tensor q, int? dim=None, bool keepdim=False, *, str interpolation='linear') -> Tensor
   variants: method, function
 
-- func: nanquantile.out(Tensor self, Tensor q, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: nanquantile.out(Tensor self, Tensor q, int? dim=None, bool keepdim=False, *, str interpolation='linear', Tensor(a!) out) -> Tensor(a!)
 
-- func: nanquantile(Tensor self, Tensor q, int? dim=None, bool keepdim=False) -> Tensor
+- func: nanquantile.scalar(Tensor self, float q, int? dim=None, bool keepdim=False, *, str interpolation='linear') -> Tensor
   variants: method, function
 
-# To keep backward and forward compatibility, and to avoid ambiguity with the original signatures, dim, keepdim and interpolation
-# parameters are required for now. Once the deprecated signatures are removed they will be made optional.
-- func: quantile.new_scalar_out(Tensor self, float q, int? dim, bool keepdim, *, str interpolation, Tensor(a!) out) -> Tensor(a!)
-
-- func: quantile.new_scalar(Tensor self, float q, int? dim, bool keepdim, *, str interpolation) -> Tensor
-  variants: method, function
-
-- func: quantile.new_out(Tensor self, Tensor q, int? dim, bool keepdim, *, str interpolation, Tensor(a!) out) -> Tensor(a!)
-
-- func: quantile.new(Tensor self, Tensor q, int? dim, bool keepdim, *, str interpolation) -> Tensor
-  variants: method, function
-
-- func: nanquantile.new_scalar_out(Tensor self, float q, int? dim, bool keepdim, *, str interpolation, Tensor(a!) out) -> Tensor(a!)
-
-- func: nanquantile.new_scalar(Tensor self, float q, int? dim, bool keepdim, *, str interpolation) -> Tensor
-  variants: method, function
-
-- func: nanquantile.new_out(Tensor self, Tensor q, int? dim, bool keepdim, *, str interpolation, Tensor(a!) out) -> Tensor(a!)
-
-- func: nanquantile.new(Tensor self, Tensor q, int? dim, bool keepdim, *, str interpolation) -> Tensor
-  variants: method, function
+- func: nanquantile.scalar_out(Tensor self, float q, int? dim=None, bool keepdim=False, *, str interpolation='linear', Tensor(a!) out) -> Tensor(a!)
 
 - func: sort.values(Tensor self, int dim=-1, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   device_check: NoCheck   # TensorIterator
