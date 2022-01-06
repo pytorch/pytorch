@@ -3,7 +3,6 @@
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
 #include <c10/util/complex.h>
-#include <c10/util/irange.h>
 #include <torch/csrc/lazy/backend/backend_device.h>
 #include <torch/csrc/lazy/backend/backend_interface.h>
 #include <torch/csrc/lazy/core/helpers.h>
@@ -50,7 +49,7 @@ std::vector<BackendDataPtr> CreateTensorsData(
   TORCH_CHECK(tensors.size() == devices.size());
   std::vector<BackendDataPtr> result;
   result.reserve(tensors.size());
-  for (const auto i : c10::irange(tensors.size())) {
+  for (size_t i = 0; i < tensors.size(); ++i) {
     result.push_back(TensorToDataHandle(tensors[i], devices[i]));
   }
   return result;

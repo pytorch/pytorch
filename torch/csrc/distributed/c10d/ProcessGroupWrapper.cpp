@@ -72,8 +72,7 @@ struct CollectiveFingerPrint {
     for (auto& tensor_shape : tensors_to_verify) {
       std::vector<at::Tensor> outputs;
       outputs.reserve(pg->getSize());
-      for (const auto i : c10::irange(pg->getSize())) {
-        (void)i; //Suppress unused variable warning
+      for (int i = 0; i < pg->getSize(); ++i) {
         outputs.emplace_back(at::zeros_like(tensor_shape));
       }
       output_tensors.emplace_back(outputs);

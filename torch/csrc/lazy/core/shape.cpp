@@ -1,4 +1,3 @@
-#include <c10/util/irange.h>
 #include <torch/csrc/lazy/core/shape.h>
 
 namespace torch {
@@ -27,7 +26,7 @@ std::vector<Shape> convertShapes(
 
   std::vector<Shape> shape;
   shape.reserve(dtypes.size());
-  for (const auto i : c10::irange(dtypes.size())) {
+  for (int i = 0; i < dtypes.size(); i++) {
     shape.emplace_back(dtypes[i], shapes[i]);
   }
 

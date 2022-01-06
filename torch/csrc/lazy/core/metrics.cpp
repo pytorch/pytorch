@@ -1,7 +1,6 @@
 #include <torch/csrc/lazy/core/metrics.h>
 
 #include <c10/util/Logging.h>
-#include <c10/util/irange.h>
 #include <torch/csrc/lazy/core/config.h>
 #include <torch/csrc/lazy/core/helpers.h>
 #include <torch/csrc/lazy/core/util.h>
@@ -67,7 +66,7 @@ void EmitMetricInfo(
         return s1.value < s2.value;
       });
   (*ss) << "  Percentiles: ";
-  for (const auto i : c10::irange(metrics_percentiles.size())) {
+  for (size_t i = 0; i < metrics_percentiles.size(); ++i) {
     size_t index = metrics_percentiles[i] * samples.size();
     if (i > 0) {
       (*ss) << "; ";
@@ -322,7 +321,7 @@ std::string MetricFnTime(double value) {
        {"us", 1e3, 7, 3, '0'}}};
   int count = 0;
   std::stringstream ss;
-  for (const auto i : c10::irange(time_parts.size())) {
+  for (size_t i = 0; i < time_parts.size(); ++i) {
     const TimePart& part = time_parts[i];
     double ctime = value / part.scaler;
     if (ctime >= 1.0 || count > 0 || i + 1 == time_parts.size()) {
