@@ -293,8 +293,10 @@ def module_inputs_torch_nn_GaussianNLLLoss(module_info, device, dtype, requires_
 def no_batch_dim_reference_fn(m, p, *args, **kwargs):
     """Reference function for modules supporting no batch dimensions.
 
-    The module is passed the input and target in batched form with a single item.
-    The output is squeezed to compare with the no-batch input.
+    Unbatched inputs are unsqueezed to form a
+    single batch input before passing them to the module.
+    The output is squeezed to compare with the
+    output of unbatched input to the module.
 
     Currently it only supports modules which return a single Tensor as output.
     You can bind the following kwargs.
@@ -337,8 +339,10 @@ def no_batch_dim_reference_fn(m, p, *args, **kwargs):
 def no_batch_dim_reference_mha(m, p, *args, **kwargs):
     """Reference function for MultiheadAttention supporting no batch dimensions.
 
-    The module is passed the input and target in batched form with a single item.
-    The output is squeezed to compare with the no-batch input.
+    Unbatched inputs are unsqueezed to form a
+    single batch input before passing them to the module.
+    The output is squeezed to compare with the
+    output of unbatched input to the module.
     """
     batch_dim = 0 if kwargs.get('batch_first', True) else 1
     if 'batch_first' in kwargs:
@@ -352,9 +356,12 @@ def no_batch_dim_reference_mha(m, p, *args, **kwargs):
 
 
 def no_batch_dim_reference_rnn_gru(m, p, *args, **kwargs):
-    """Reference function for RNN supporting no batch dimensions.
-    The module is passed the input and target in batched form with a single item.
-    The output is squeezed to compare with the no-batch input.
+    """Reference function for RNN and GRU supporting no batch dimensions.
+
+    Unbatched inputs are unsqueezed to form a
+    single batch input before passing them to the module.
+    The output is squeezed to compare with the
+    output of unbatched input to the module.
     """
     if len(args) == 1:
         inp, = args
