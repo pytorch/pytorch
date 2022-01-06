@@ -621,6 +621,58 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
             # TODO(future PR): add FX rewrite support
             do_fx_comparison=False, do_torchscript_checks=False)
 
+    def test_prepare_custom_config_dict_non_traceable_module_class(self):
+        class M1(torch.nn.Module):
+            def forward(self, x):
+                pass
+
+        class M2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m1 = M1()
+
+            def forward(self, x):
+                self.m1(x)
+                return x
+
+        class M3(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m2 = M2()
+
+            def forward(self, x):
+                self.m2(x)
+                return x
+
+
+        # if M1 is set as leaf, M2 and M3 should have auto_quant_state
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        m = M3().eval()
+        prepare_custom_config_dict = {
+            'non_traceable_module_class': [M1],
+        }
+        mp = _quantize_dbr.prepare(
+            m, qconfig_dict, (torch.randn(1, 1, 1, 1),),
+            prepare_custom_config_dict=prepare_custom_config_dict)
+        self.assertTrue(not hasattr(mp.m2.m1, '_auto_quant_state'))
+        self.assertTrue(hasattr(mp.m2, '_auto_quant_state'))
+        self.assertTrue(hasattr(mp, '_auto_quant_state'))
+        # TODO(future PR): ensure functions in leaves do not get quantized
+        # TODO(future PR): ensure modules in leaves do not get quantized
+
+        # if M2 is set as leaf, only M1 should have auto_quant_state
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        m = M3().eval()
+        prepare_custom_config_dict = {
+            'non_traceable_module_class': [M2],
+        }
+        mp = _quantize_dbr.prepare(
+            m, qconfig_dict, (torch.randn(1, 1, 1, 1),),
+            prepare_custom_config_dict=prepare_custom_config_dict)
+        self.assertTrue(not hasattr(mp.m2.m1, '_auto_quant_state'))
+        self.assertTrue(not hasattr(mp.m2, '_auto_quant_state'))
+        self.assertTrue(hasattr(mp, '_auto_quant_state'))
+
     @unittest.skip('TODO build this')
     def test_module_input_types(self):
         class M(torch.nn.Module):
