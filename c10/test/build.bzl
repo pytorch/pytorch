@@ -14,7 +14,7 @@ def define_targets(rules):
             ":complex_test_common",
             "@com_google_googletest//:gtest_main",
             "//c10/core:base",
-            "//c10/macros:macros",
+            "//c10/macros",
             "//c10/util:base",
             "//c10/util:typeid",
         ],
@@ -42,7 +42,7 @@ def define_targets(rules):
         hdrs = ["util/complex_test_common.h"],
         deps = [
             "@com_google_googletest//:gtest_main",
-            "//c10/macros:macros",
+            "//c10/macros",
             "//c10/util:base",
         ],
         testonly = True,
