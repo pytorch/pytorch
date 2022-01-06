@@ -571,6 +571,11 @@ class AutoQuantizationState(torch.nn.Module):
         needed.
         """
         self.needs_dtype_transform_on_outputs = False
+
+        if not len(self.output_qtensor_infos):
+            # if there are no tensor outputs, there is nothing to transform
+            return
+
         qtensor_info = self.output_qtensor_infos[0]
         if self.output_dtypes is not None:
             assert qtensor_info is not None
