@@ -316,6 +316,7 @@ class TestEagerFusionOpInfo(TestCase):
         xfail('linalg.cholesky'),
         xfail('linalg.inv'),
         xfail('matmul'),
+        xfail('msort'),
         xfail('nn.functional.linear'),
         xfail('nn.functional.dropout'),
         xfail('polar'),
