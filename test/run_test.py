@@ -118,6 +118,7 @@ TESTS = discover_tests(
         "distributed/launcher/bin/test_script_is_torchelastic_launched",
         "distributed/launcher/bin/test_script_local_rank",
         "distributed/test_c10d_spawn",
+        "distributed/test_ucc",
         'distributions/test_transforms',
         'distributions/test_utils',
         "fx2trt/test_quant_trt",
