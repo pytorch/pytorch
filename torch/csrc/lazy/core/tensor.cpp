@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/lazy/core/tensor.h>
 
 #include <torch/csrc/lazy/core/config.h>
@@ -5,6 +6,7 @@
 #include <torch/csrc/lazy/core/ir_dump_util.h>
 #include <torch/csrc/lazy/core/lazy_graph_executor.h>
 #include <torch/csrc/lazy/core/metrics.h>
+#include <torch/csrc/lazy/core/tensor_impl.h>
 #include <torch/csrc/lazy/core/tensor_util.h>
 #include <torch/csrc/lazy/ts_backend/ops/cast.h>
 #include <torch/csrc/lazy/ts_backend/ops/device_data.h>
@@ -12,6 +14,16 @@
 
 namespace torch {
 namespace lazy {
+namespace {
+LazyTensor GetOrCreateLtcTensor(const at::Tensor& tensor,
+                                const BackendDevice& device) {
+  if (!tensor.defined()) {
+    return LazyTensor();
+  }
+  auto lazy_tensor = TryGetLtcTensor(tensor);
+  return lazy_tensor ? lazy_tensor : LazyTensor::Create(tensor, device);
+}
+}  // namespace
 
 LazyTensor::Data::~Data() {
   LazyGraphExecutor::Get()->UnregisterTensor(this);
@@ -417,7 +429,7 @@ Value LazyTensor::CreateTensorNode(BackendDataPtr data, bool read_only) const {
 std::vector<LazyTensor> LazyTensor::MakeOutputTensors(NodePtr node) const {
   std::vector<LazyTensor> tensors;
   tensors.reserve(node->num_outputs());
-  for (size_t i = 0; i < node->num_outputs(); ++i) {
+  for (const auto i : c10::irange(node->num_outputs())) {
     tensors.push_back(Create(Value(node, i), GetDevice()));
   }
   return tensors;
@@ -445,6 +457,49 @@ void LazyTensor::ApplyPendingGraph() {
 int64_t LazyTensor::GetNextTensorId() {
   static std::atomic<int64_t>* id_generator = new std::atomic<int64_t>(1);
   return id_generator->fetch_add(1);
+}
+
+LazyTensor TryGetLtcTensor(const at::Tensor& tensor) {
+  auto* impl = dynamic_cast<LTCTensorImpl*>(tensor.unsafeGetTensorImpl());
+  if (impl == nullptr) {
+    return LazyTensor();
+  }
+  return impl->tensor();
+}
+
+LazyTensor GetLtcTensor(const at::Tensor& tensor) {
+  auto lazy_tensor = TryGetLtcTensor(tensor);
+  CHECK(lazy_tensor) << "Input tensor is not a lazy tensor: " << tensor.toString();
+  return lazy_tensor;
+}
+
+std::vector<LazyTensor> GetLtcTensors(c10::ArrayRef<at::Tensor> tensors) {
+  std::vector<LazyTensor> ltc_tensors;
+  ltc_tensors.reserve(tensors.size());
+  for (const auto& tensor : tensors) {
+    ltc_tensors.push_back(TryGetLtcTensor(tensor));
+  }
+  return ltc_tensors;
+}
+
+LazyTensor GetOrCreateLtcTensor(const c10::optional<at::Tensor>& tensor,
+                                const BackendDevice& device) {
+  return GetOrCreateLtcTensor(tensor.value_or(at::Tensor()), device);
+}
+
+LazyTensor GetLtcTensorOrCreateForWrappedNumber(const at::Tensor& tensor, const BackendDevice& device) {
+  return tensor.unsafeGetTensorImpl()->is_wrapped_number() ?
+      GetOrCreateLtcTensor(tensor, device) : GetLtcTensor(tensor);
+}
+
+at::Tensor CreateAtenFromLtcTensor(const LazyTensor& ltc_tensor) {
+  return ltc_tensor.is_null() ? at::Tensor()
+                              : at::Tensor(c10::make_intrusive<LTCTensorImpl>(ltc_tensor));
+}
+
+at::Tensor CreateAtenFromLtcTensor(LazyTensor&& ltc_tensor) {
+  return ltc_tensor.is_null() ? at::Tensor()
+                              : at::Tensor(c10::make_intrusive<LTCTensorImpl>(std::move(ltc_tensor)));
 }
 
 } // namespace lazy
