@@ -1,6 +1,6 @@
 import warnings
 from collections import OrderedDict, abc as container_abcs
-from itertools import islice
+from itertools import chain, islice
 import operator
 
 import torch
@@ -202,6 +202,21 @@ class ModuleList(Module):
         # To preserve numbering, self._modules is being reconstructed with modules after deletion
         str_indices = [str(i) for i in range(len(self._modules))]
         self._modules = OrderedDict(list(zip(str_indices, self._modules.values())))
+
+    def __add__(self, other: 'ModuleList') -> 'ModuleList':
+        r"""Concat two ModuleList instances.
+
+        Args:
+            other (ModuleList): modulelist to add
+        """
+        if not isinstance(other, ModuleList):
+            raise TypeError("ModuleList concatenation should only be "
+                            "used with another ModuleList instance, but "
+                            " got " + type(other).__name__)
+        combined = ModuleList()
+        for i, module in enumerate(chain(self, other)):
+            combined.add_module(str(i), module)
+        return combined
 
     @_copy_to_script_wrapper
     def __len__(self) -> int:
