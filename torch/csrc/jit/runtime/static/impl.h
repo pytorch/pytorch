@@ -57,7 +57,8 @@ TORCH_API inline bool doesNotHeapAllocateWhenStoredInIValue(const Type& type) {
 }
 
 TORCH_API inline bool borrowsOutputs(c10::Symbol kind) {
-  static const std::array<c10::Symbol, 2> symbols_with_borrowed_outputs = {
+  static const std::array<c10::Symbol, 3> symbols_with_borrowed_outputs = {
+      c10::Symbol::fromQualString("static_runtime::select_tensor"),
       c10::Symbol::fromQualString("static_runtime::dict_unpack"),
       c10::Symbol::fromQualString("static_runtime::VarTupleUnpack"),
   };
@@ -163,6 +164,10 @@ struct TORCH_API StaticModuleOptions {
   // graph, where storage is deallocated outside static runtime
   // (enable_out_variant must be true)
   bool manage_output_tensors{false};
+  // Gates the ReplaceWithMaybeCopy pass, which replaces ops that
+  // sometimes alias their outputs with subgraphs that include an out
+  // variant.
+  bool use_maybe_copy_variants{true};
   // enable TensorExpr fusion of ops at model loading time
   bool enable_tensorexpr_fusion{false};
 };
