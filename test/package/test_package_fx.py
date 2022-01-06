@@ -91,6 +91,7 @@ class TestPackageFX(PackageTestCase):
         input = torch.rand(2, 3)
         self.assertEqual(loaded(input), loaded2(input))
 
+    @skipIf(version_info < (3, 7), "selective intern uses __getattr__ a 3.7 feature")
     def test_package_fx_package_with_selective_intern(self):
         from package_a.test_module import SimpleTest
 

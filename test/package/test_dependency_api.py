@@ -515,6 +515,7 @@ class TestDependencyAPI(PackageTestCase):
         self.assertIsNot(torch.fx.symbolic_trace, foo.torch.fx.symbolic_trace)
         self.assertIs(torch.nn, foo.torch.nn)
 
+    @skipIf(version_info < (3, 7), "selective intern uses __getattr__ a 3.7 feature")
     def test_selective_intern_torch_fx(self):
         # test that selective intern works on torch.fx
 
