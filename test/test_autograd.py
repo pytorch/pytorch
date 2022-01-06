@@ -5913,16 +5913,16 @@ for shape in [(1,), ()]:
                 pass
 
     def test_setting_default_saved_variable_hooks_twice_should_use_inner(self):
-        with torch.autograd.graph.saved_tensors_hooks(lambda x: 2 * x, lambda x: 3 * x):
+        with torch.autograd.graph.saved_tensors_hooks(lambda x: 3 * x, lambda x: 3 * x):
             b = torch.randn(5, requires_grad=True)
-            with torch.autograd.graph.saved_tensors_hooks(lambda x: 5 * x, lambda x: 7 * x):
+            with torch.autograd.graph.saved_tensors_hooks(lambda x: 5 * x, lambda x: 5 * x):
                 a = torch.randn(5, requires_grad=True)
                 y = a * a
             z = b * b
         y.sum().backward()
         z.sum().backward()
-        self.assertEqual(5 * 7 * a, a.grad)
-        self.assertEqual(2 * 3 * a, a.grad)
+        self.assertEqual(2 * 5 * 5 * a, a.grad)
+        self.assertEqual(2 * 3 * 3 * b, b.grad)
 
     def test_save_on_cpu_and_checkpoint(self):
         a = torch.randn(2, 2, requires_grad=True)

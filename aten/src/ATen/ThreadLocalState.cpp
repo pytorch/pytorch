@@ -16,7 +16,7 @@ ThreadLocalState::ThreadLocalState()
       autograd_tls_(c10::AutogradState::get_tls_state()) {
   rf_tls_ = at::get_record_function_tls_();
 
-  saved_tensors_default_hooks_ at::SavedTensorDefaultHooks::get_stack();
+  saved_tensors_default_hooks_ = at::SavedTensorDefaultHooks::get_stack();
 
   bumped_record_all_functions_ = at::checkRecordAllFunctions();
   python_mode_state_ = at::impl::PythonModeTLS::get_state();
