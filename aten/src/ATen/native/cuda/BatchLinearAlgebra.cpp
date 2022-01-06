@@ -2750,7 +2750,6 @@ AT_ERROR("svd: MAGMA library not found in "
 
 std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_legacy(const Tensor& self, bool some, bool compute_uv) {
   std::vector<int64_t> infos(batchCount(self), 0);
-  int64_t m = self.size(-2);
 
   char jobchar = compute_uv ? (some ? 'S' : 'A') : 'N';
 
@@ -2762,9 +2761,7 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_legacy(const Tensor& self, b
   // _create_U_S_VT takes care of a part of these requirements (for U, S and VT)
   // For the input matrix, this requirements are being taken care of below.
   // Specify strides
-  auto self_col_major_strides = at::detail::defaultStrides(self.sizes());
-  self_col_major_strides[self.dim() - 2] = 1;
-  self_col_major_strides[self.dim() - 1] = m;
+  auto self_col_major_strides = at::native::contiguous_strides(self.sizes(), /*f_contig=*/true);
   // Create strided tensor in pinned memory
   auto self_working_copy = at::empty_strided(self.sizes(), self_col_major_strides,
                                               at::TensorOptions(at::kCPU).dtype(self.dtype()).pinned_memory(true));

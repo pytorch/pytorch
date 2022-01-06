@@ -4,10 +4,12 @@
 #include <c10/util/irange.h>
 #include <c10/util/Exception.h>
 #include <ATen/ATen.h>
+#include <ATen/core/DimVector.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/TensorIterator.h>
 #include <limits>
+#include <type_traits>
 #include <sstream>
 #include <cstring>
 #include <cctype>
@@ -37,6 +39,46 @@ static inline c10::MaybeOwned<Tensor> expect_resolved_conj(const Tensor& tensor)
   } else {
     return c10::MaybeOwned<Tensor>::borrowed(tensor);
   }
+}
+
+template<class Vec>
+static inline Vec contiguous_strides_template(const IntArrayRef sizes, const bool f_contig=false) {
+  static_assert(std::is_same<IntArrayRef::value_type, typename Vec::value_type>::value,
+                "Incompatible integral type of sizes and strides");
+  // f_contig chooses between the strides of a batch of Fortran (F-contiguous) and C-contiguous matrices
+  using Int = IntArrayRef::value_type;
+  constexpr auto one = Int{1};
+  const auto n = sizes.size();
+  if (n == 0) {
+    return Vec{};
+  } else if (n == 1) {
+    // Use initializer-list to initialize the vector
+    return Vec{one};
+  }
+  // Now we have a matrix or batch of matrices
+  auto strides = Vec(n);
+  const auto last_idx = n - 1;
+  const auto snd_last_idx = n - 2;
+  // We'll fill the first two strides afterwards, otherwise the first step
+  // in the for loop is wrong
+  strides[snd_last_idx] = std::max<int64_t>(sizes[last_idx], one);
+  for (int i = snd_last_idx - 1; i >= 0; --i) {
+    strides[i] = strides[i + 1] * std::max(sizes[i + 1], one);
+  }
+  strides[last_idx] = f_contig ? std::max(sizes[snd_last_idx], one) : one;
+  if (f_contig) {
+    // We filled the wrong stride before so we correct it
+    strides[snd_last_idx] = one;
+  }
+  return strides;
+}
+
+static inline DimVector contiguous_strides(const IntArrayRef sizes, const bool f_contig=false) {
+  return contiguous_strides_template<DimVector>(sizes, f_contig);
+}
+
+static inline std::vector<int64_t> contiguous_strides_vec(const IntArrayRef sizes, const bool f_contig=false) {
+  return contiguous_strides_template<std::vector<int64_t>>(sizes, f_contig);
 }
 
 /*
@@ -86,9 +128,7 @@ static inline Tensor copyBatchedColumnMajor(const Tensor& src, int64_t nrows = -
     ? desired_batch_sizes.value().vec()
     : IntArrayRef(src.sizes().data(), src.dim() - 2).vec();
   copy_sizes.insert(copy_sizes.end(), {nrows, src.size(-1)});
-  auto copy_strides = at::detail::defaultStrides(copy_sizes);
-  copy_strides[src.dim() - 2] = 1;
-  copy_strides[src.dim() - 1] = nrows;
+  const auto copy_strides = contiguous_strides(copy_sizes, /*f-contig*/true);
   auto copy = at::empty_strided(copy_sizes, copy_strides, src.options());
   copy.narrow(-2, 0, src.size(-2)).copy_(src);
   return copy;
@@ -424,13 +464,7 @@ static inline std::tuple<std::vector<int64_t>,
     q_sizes[input.dim() - 1] = n;
     n_columns_q = std::min(m, n);
   }
-  auto q_strides = at::detail::defaultStrides(q_sizes);
-
-  // Q should be a column-major or a batch of column-major matrices
-  // ... x m x n will have strides: ...., n, 1
-  // We require: ...., 1, m
-  q_strides[input.dim() - 1] = m;
-  q_strides[input.dim() - 2] = 1;
+  auto q_strides = contiguous_strides_vec(q_sizes, /*f-contig*/true);
   return std::make_tuple(q_sizes, q_strides, n_columns_q);
 }
 
@@ -447,12 +481,7 @@ static inline std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& in
   int64_t m = input.size(-2), n = input.size(-1);
 
   sizes[input.dim() - 1] = some ? std::min(m, n) : m;
-  auto u_strides = at::detail::defaultStrides(sizes);
-  // U should be a column-major or a batch of column-major matrices
-  // ... x m x ucol will have strides: ...., ucol, 1
-  // We require: ...., 1, m
-  u_strides[input.dim() - 1] = m;
-  u_strides[input.dim() - 2] = 1;
+  const auto u_strides = contiguous_strides(sizes, /*f-contig*/true);
 
   // cuSOLVER's gesvdjBatched fails with illegal memory access and
   // cuSOLVER's gesvdj fails with CUSOLVER_STATUS_EXECUTION_FAILED
@@ -466,11 +495,7 @@ static inline std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& in
   // VT should be a column-major or a batch of column-major matrices
   sizes[input.dim() - 2] = some ? std::min(m, n) : n;
   sizes[input.dim() - 1] = n;
-  auto vt_strides = at::detail::defaultStrides(sizes);
-  if (!svd_use_cusolver) {
-    vt_strides[input.dim() - 1] = sizes[input.dim() - 2];
-    vt_strides[input.dim() - 2] = 1;
-  }
+  const auto vt_strides = contiguous_strides(sizes, /*f-contig*/!svd_use_cusolver);
   Tensor VT_empty = (compute_uv || svd_use_cusolver)
       ? at::empty_strided(sizes, vt_strides, input.options().device(usvt_device))
       : at::empty({0}, input.options().device(usvt_device));
