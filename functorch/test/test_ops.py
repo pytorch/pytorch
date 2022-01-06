@@ -1017,7 +1017,8 @@ class TestDecompositionOpInfo(TestCase):
             # Some ops, like those involving reductions, are fundamentally non-decomposable with precision guarantees
             tol_table = {
                 # aggghhhhhhhhhh I hate reductions and floating point
-                (torch.bfloat16, aten.tanh_backward): (0.016, 1e-2),
+                (torch.float16, aten.huber_loss_backward): (0.002, 1e-5),
+                (torch.bfloat16, aten.tanh_backward): (0.03, 1e-4),
                 (torch.bfloat16, aten._softmax_backward_data): (0.016, 1e-2),
                 (torch.bfloat16, aten._log_softmax_backward_data): (0.016, 1e-2),
                 # (torch.float16, aten.im2col_backward): (0.016, 1e-2),
@@ -1028,7 +1029,8 @@ class TestDecompositionOpInfo(TestCase):
                 rtol, atol = _getDefaultRtolAndAtol(a.dtype, b.dtype)
             if not torch.allclose(a, b, rtol=rtol, atol=atol):
                 atol_diff = (a - b).abs().max()
-                msg = f"{op} decomposition failed, max abs: {atol_diff}"
+                rtol_diff = ((a - b).abs()/b.abs()).nan_to_num(0).max()
+                msg = f"{op.__name__} decomposition failed, max abs: {atol_diff}, max rel: {rtol_diff}"
                 raise RuntimeError(msg)
 
         # We check the correctness of each decomposition right after running it.
