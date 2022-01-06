@@ -214,10 +214,11 @@ class TestDeviceAnalysis(JitTestCase):
             self.assert_device_equal(fn, devices, out.device, shapes, subtest_str)
 
             # Test that without shapes, we either get the same device or None for the device
-            try:
-                self.assert_device_equal(fn, devices, out.device, subtest_str=subtest_str)
-            except AssertionError:
-                self.assert_device_equal(fn, devices, None, subtest_str=subtest_str)
+            # Aka that the code is convservative for tensor shapes.
+            graph = torch.jit.script(fn).graph
+            self.prop_device_on_graph(graph, devices)
+            actual_device = self.node_output_device(graph)
+            self.assertTrue((actual_device == out.device) or (actual_device is None))
 
     def test_zerodim_cpu(self):
         # Allow for minimal testing locally
