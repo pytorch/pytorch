@@ -108,7 +108,7 @@ class TORCH_API CodeGen {
       const bool pre_alloc);
 
   std::vector<BufPtr> getIntermediateBufs() const {
-    return buffers_to_alloc_;
+    return buffers_to_pre_alloc_;
   }
 
  protected:
@@ -119,7 +119,7 @@ class TORCH_API CodeGen {
   std::vector<BufferArg> buffer_args_;
   at::Device device_ = at::kCPU;
   std::string kernel_func_name_ = "func";
-  std::vector<BufPtr> buffers_to_alloc_;
+  std::vector<BufPtr> buffers_to_pre_alloc_;
 };
 
 class CodeGen::BufferArg {

@@ -187,20 +187,23 @@ std::vector<std::pair<BufPtr, BufPtr>> AllocBufsWithMemReuse(
 }
 
 void CodeGen::insertAllocFree(
-    std::vector<std::pair<BufPtr, BufPtr>>& buf_allocs,
+    std::vector<std::pair<BufPtr, BufPtr>>& buf_to_alloc_maps,
     const bool pre_alloc) {
   BlockPtr b = to<Block>(stmt_);
   if (!b) {
     b = alloc<Block>(std::vector<StmtPtr>({stmt_}));
   }
 
-  // Insert allocations and frees for temporary buffers at global scope.
-  for (auto rit = buf_allocs.rbegin(); rit != buf_allocs.rend(); ++rit) {
+  // Go through intermediate buffer list with reuse info to allocate these
+  // buffers.
+  for (auto rit = buf_to_alloc_maps.rbegin(); rit != buf_to_alloc_maps.rend();
+       ++rit) {
+    // Only allocate buffers that are mapped to selves.
     if (rit->first == rit->second) {
       BufPtr buf = rit->first;
       if (pre_alloc) {
         // Save buffers for buffer preallocation in TEK.
-        buffers_to_alloc_.emplace_back(buf);
+        buffers_to_pre_alloc_.emplace_back(buf);
         // Add preallocated buffers to args.
         buffer_args_.emplace_back(BufHandle(buf));
       } else {
@@ -248,11 +251,12 @@ void CodeGen::allocIntermediateBufs(const bool pre_alloc) {
   // For each intermediate buffer, we reuse the memory of an old buffer whose
   // liveness range does not overlap with the current buffer, or allocate memory
   // if reusing buffer is impossible.
-  auto buf_allocs = AllocBufsWithMemReuse(interm_bufs, interm_buf_ranges);
+  auto buf_to_alloc_maps =
+      AllocBufsWithMemReuse(interm_bufs, interm_buf_ranges);
 
   // Insert memory allocation/mapping nodes.
-  if (buf_allocs.size() > 0) {
-    insertAllocFree(buf_allocs, pre_alloc);
+  if (buf_to_alloc_maps.size() > 0) {
+    insertAllocFree(buf_to_alloc_maps, pre_alloc);
   }
 
   GRAPH_DEBUG("\nMemory Allocation:\n\n", *stmt(), "\n");

@@ -1146,7 +1146,7 @@ void TensorExprKernel::bindConstant(const torch::jit::Value* v) {
 
 void TensorExprKernel::preAllocIntermediateBufs(
     std::vector<BufPtr>& interm_bufs) {
-  for (auto buf: interm_bufs) {
+  for (auto buf : interm_bufs) {
     // Check if buf shape is static and compute its size if static.
     bool is_static = true;
     size_t size =
