@@ -2,7 +2,7 @@ from .._src.operator_authoring import pointwise_operator
 from .._src.memory_efficient_op_authoring import memory_efficient_pointwise_fusion, torchscript_nvfuser_compile
 from .._src.python_key import pythonkey_decompose, pythonkey_meta
 from .._src.decompositions import register_decomposition, decomposition_table
-from .._src.fx_minifier import minimizer
+from .._src.fx_minifier import minimizer, check_nvfuser_subprocess
 from .._src.aot_autograd import (
     aot_function,
     aot_module,
