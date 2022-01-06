@@ -109,8 +109,57 @@ bool TryGeneralizeInputDimensionsToSymbolicShapes(
   return true;
 }
 
+void moveConstantTensorsOutOfSubgraph(
+    Node* tensorexpr_graph_node,
+    std::shared_ptr<Graph> tensorexpr_graph) {
+  auto parent = tensorexpr_graph_node->owningGraph();
+
+  auto env = [&](Value* v) {
+    TORCH_INTERNAL_ASSERT(
+        false,
+        "this should never happen since constant nodes do not have any inputs",
+        v->debugName());
+    return v;
+  };
+
+  WithInsertPoint wip(tensorexpr_graph_node);
+  std::vector<Node*> to_destroy;
+  for (auto node : tensorexpr_graph->nodes()) {
+    if (node->kind() == prim::Constant) {
+      if (!node->output()->type()->cast<TensorType>()) {
+        continue;
+      }
+
+      // copy the constant and insert that copy into the parent graph.
+      auto copy = parent->createClone(node, env);
+      parent->insertNode(copy);
+
+      // add a new input to the te subgraph and replace the uses of the
+      // constant with this input.
+      auto new_const = tensorexpr_graph->addInput();
+      new_const->setType(node->output()->type());
+      node->output()->replaceAllUsesWith(new_const);
+
+      // add the copy as input to the te node
+      tensorexpr_graph_node->addInput(copy->output());
+
+      to_destroy.push_back(node);
+    }
+  }
+
+  for (auto n : to_destroy) {
+    n->destroy();
+  }
+}
+
 bool GenerateGuard(Node* tensorexpr_graph_node, bool add_composed_op) {
   auto tensorexpr_graph = SubgraphUtils::getSubgraph(tensorexpr_graph_node);
+
+  // Move constant tensors from the subgraph to the outer scope.
+  // This is necessary because symbolic shape analysis does not handle the
+  // case of broadcast(constant, symbolic_shape) well and that results in poor
+  // performance.
+  moveConstantTensorsOutOfSubgraph(tensorexpr_graph_node, tensorexpr_graph);
 
   // Generalize Inputs
   if (!TryGeneralizeInputDimensionsToSymbolicShapes(tensorexpr_graph)) {
@@ -147,7 +196,7 @@ void inlineFallbackGraphAndAddSRCopyOutOp(std::shared_ptr<Graph> graph) {
   auto if_node = n->owningBlock()->owningNode();
   IfView if_v(if_node);
   SubgraphUtils::unmergeSubgraph(n);
-
+  graph->dump();
   auto false_block = if_v.elseBlock();
   std::vector<Value*> false_block_outputs(
       if_v.elseOutputs().begin(), if_v.elseOutputs().end());
@@ -164,6 +213,7 @@ void inlineFallbackGraphAndAddSRCopyOutOp(std::shared_ptr<Graph> graph) {
   for (size_t i = 0; i < false_block_outputs.size(); ++i) {
     false_block->replaceOutput(i, copy_node->outputs().at(i));
   }
+  graph->dump();
 }
 
 // TODO: share more logic with tensorexpr_fuser ?
@@ -268,9 +318,27 @@ void insertDynamicShapesGuard(
   }
 }
 
-// If there are tensors on the stack other than
-// the inputs, copies the inputs into the values
-// on the stack. Only used in SR.
+// This operator is inserted at the end of the fallback block computing outputs
+// for the fusion group. We convert block1():
+//   %14 : Tensor = aten::mul(%0, %1)
+//   %15 : Tensor = aten::mul(%0, %14)
+//   -> (%15, %14)
+// return (%3, %4)
+// to
+// block1():
+//   %14 : Tensor = aten::mul(%0, %1)
+//   %15 : Tensor = aten::mul(%0, %14)
+//   %16 : Tensor, %17 : Tensor = prim::StaticRuntimeCopyOuts(%15, %14)
+//   -> (%16, %17)
+// Every output of the block is added as an input, and for each input there is
+// a StaticRuntimeCopyOuts output. SR invokes the composed operator first with
+// no tensors on the stack, in which case the Op will just return back the
+// inputs. Second it invokes it with pre-allocated tensors, one for each output
+// of the Fusion group, which is the same number of outputs of the fallback
+// block. In this case we copy over the values of the inputs to pre-allocated
+// tensors
+// Note: this logic is meant to reflect the invocation of the TE Kernel
+// and `runWithAllocatedOutputs` in tensorexpr_fuser.cpp
 Operation StaticRuntimeCopyOuts(const Node* node) {
   auto num_ten_inputs = node->inputs().size();
   return [num_ten_inputs](Stack& stack) {
