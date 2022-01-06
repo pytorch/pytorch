@@ -60,12 +60,12 @@ class RMSprop(Optimizer):
             the gradient is normalized by an estimation of its variance
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
         foreach (bool, optional): whether foreach implementation of optimizer
-            is used (default: False)
+            is used (default: None)
 
     """
 
     def __init__(self, params, lr=1e-2, alpha=0.99, eps=1e-8, weight_decay=0, momentum=0,
-                 centered=False, foreach=False):
+                 centered=False, foreach=None):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -158,17 +158,24 @@ def rmsprop(params: List[Tensor],
             square_avgs: List[Tensor],
             grad_avgs: List[Tensor],
             momentum_buffer_list: List[Tensor],
+            foreach: bool = None,
             *,
             lr: float,
             alpha: float,
             eps: float,
             weight_decay: float,
             momentum: float,
-            centered: bool,
-            foreach: bool):
+            centered: bool):
     r"""Functional API that performs rmsprop algorithm computation.
     See :class:`~torch.optim.RMSProp` for details.
     """
+
+    if foreach is None:
+        # Placeholder for more complex foreach logic to be added when value is not set
+        foreach = False
+
+    if foreach and torch.jit.is_scripting():
+        raise RuntimeError('torch.jit.script not supported with foreach optimizers')
 
     if foreach and not torch.jit.is_scripting():
         func = _multi_tensor_rmsprop
@@ -237,6 +244,9 @@ def _multi_tensor_rmsprop(params: List[Tensor],
                           weight_decay: float,
                           momentum: float,
                           centered: bool):
+
+    if len(params) == 0:
+        return
 
     if weight_decay != 0:
         torch._foreach_add_(grads, params, alpha=weight_decay)
