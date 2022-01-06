@@ -22,7 +22,7 @@ def call_for_per_sample_grads(module, batch_size, args, kwargs=None):
     Examples::
         >>> model = nn.Linear(4, 3)
         >>> batched_input = torch.randn(5, 4)  # batch size of 5
-        >>> res = per_sample_call(model, batched_input.shape[0], batched_input).sum()
+        >>> res = call_for_per_sample_grads(model, batched_input.shape[0], batched_input).sum()
         >>> res.backward()
         >>> assert model.weight.shape == (3, 4)
         >>> assert model.weight.grad_sample.shape == (5, 3, 4)

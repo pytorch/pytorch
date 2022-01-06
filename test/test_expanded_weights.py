@@ -35,6 +35,46 @@ class TestExpandedWeightAttributes(TestCase):
             if not func(getattr(expanded_weight, attr), orig_tensor):
                 raise RuntimeError(f"{attr} got unexpected value. Was {getattr(expanded_weight, attr)}")
 
+class TestExpandedWeightMethods(TestCase):
+    def test_expanded_weight_methods(self, device):
+        # certain functions like __float__, __array__, __index__ will cause errors
+        methods_equivalent = ['size', 'numel', 'stride', 'is_contiguous', 'requires_grad_', 'detach', 'dim', 'ndimension',
+                              '__len__', 'detach_']
+        methods_with_args = {'requires_grad_': (False, True), 'to': (device,), '__eq__': (torch.randn(4, device=device),), 
+                             '__getitem__': (0, 2), 'eq': (torch.randn(4, device=device))}
+        methods_special = {'__repr__': lambda attr, orig_weight: orig_weight.__repr__() in attr(),
+                           '__hash__': lambda attr, orig_weight: attr() != orig_weight.__hash__()}
+        supported_dtypes = common_dtype.floating_and_complex_types()
+        for (method, dtype) in product(methods_equivalent, supported_dtypes):
+            batch_size = 5
+            orig_tensor = make_tensor((4), device, dtype, requires_grad=True)
+            expanded_weight = ExpandedWeight(orig_tensor, batch_size)
+            if not hasattr(expanded_weight, method):
+                raise RuntimeError(f"Expanded Weight of type {dtype} didn't have method {method}")
+            actual = getattr(expanded_weight, method)()
+            expected = getattr(orig_tensor, method)()
+            self.assertEqual(expected, actual, f"Expected {method} to produce value {expected}, got {actual}")
+        for (method_and_args, dtype) in product(methods_with_args.items(), supported_dtypes):
+            method, args = method_and_args
+            batch_size = 5
+            orig_tensor = make_tensor((4), device, dtype, requires_grad=True)
+            expanded_weight = ExpandedWeight(orig_tensor, batch_size)
+            for arg in args:
+                if not hasattr(expanded_weight, method):
+                    raise RuntimeError(f"Expanded Weight of type {dtype} didn't have method {method}")
+                actual = getattr(expanded_weight, method)(arg)
+                expected = getattr(orig_tensor, method)(arg)
+                self.assertEqual(expected, actual, f"Expected {method} to produce value {expected}, got {actual}")
+        for (method_and_func, dtype) in product(methods_special.items(), supported_dtypes):
+            method, func = method_and_func
+            batch_size = 5
+            orig_tensor = make_tensor((4), device, dtype, requires_grad=True)
+            expanded_weight = ExpandedWeight(orig_tensor, batch_size)
+            assert hasattr(expanded_weight, method), f"Expanded Weight of type {dtype} didn't have attribute {method}"
+            if not func(getattr(expanded_weight, method), orig_tensor):
+                raise RuntimeError(f"{method} got unexpected value. Was {getattr(expanded_weight, method)}")
+
+
 class TestContext:
     pass
 
@@ -167,41 +207,6 @@ class TestExpandedWeightHelperFunction(TestCase):
         self.assertEqual(res, input)
 
 class TestExpandedWeightFunctional(TestCase):
-    def test_expanded_weight_methods(self, device):
-        methods_equivalent = ['size', 'numel', 'stride', 'is_contiguous', 'requires_grad_']
-        methods_with_args = {'requires_grad_': (False, True), 'to': (device,)}
-        methods_special = {'__repr__': lambda attr, orig_weight: orig_weight.__repr__() in attr(),
-                           '__hash__': lambda attr, orig_weight: attr() != orig_weight.__hash__()}
-        supported_dtypes = common_dtype.floating_and_complex_types()
-        for (method, dtype) in product(methods_equivalent, supported_dtypes):
-            batch_size = 5
-            orig_tensor = make_tensor((4), device, dtype, requires_grad=True)
-            expanded_weight = ExpandedWeight(orig_tensor, batch_size)
-            if not hasattr(expanded_weight, method):
-                raise RuntimeError(f"Expanded Weight of type {dtype} didn't have method {method}")
-            actual = getattr(expanded_weight, method)()
-            expected = getattr(orig_tensor, method)()
-            self.assertEqual(expected, actual, f"Expected {method} to produce value {expected}, got {actual}")
-        for (method_and_args, dtype) in product(methods_with_args.items(), supported_dtypes):
-            method, args = method_and_args
-            batch_size = 5
-            orig_tensor = make_tensor((4), device, dtype, requires_grad=True)
-            expanded_weight = ExpandedWeight(orig_tensor, batch_size)
-            for arg in args:
-                if not hasattr(expanded_weight, method):
-                    raise RuntimeError(f"Expanded Weight of type {dtype} didn't have method {method}")
-                actual = getattr(expanded_weight, method)(arg)
-                expected = getattr(orig_tensor, method)(arg)
-                self.assertEqual(expected, actual, f"Expected {method} to produce value {expected}, got {actual}")
-        for (method_and_func, dtype) in product(methods_special.items(), supported_dtypes):
-            method, func = method_and_func
-            batch_size = 5
-            orig_tensor = make_tensor((4), device, dtype, requires_grad=True)
-            expanded_weight = ExpandedWeight(orig_tensor, batch_size)
-            assert hasattr(expanded_weight, method), f"Expanded Weight of type {dtype} didn't have attribute {method}"
-            if not func(getattr(expanded_weight, method), orig_tensor):
-                raise RuntimeError(f"{method} got unexpected value. Was {getattr(expanded_weight, method)}")
-
     @ops(filter(lambda op: op.supports_expanded_weight, op_db), dtypes=OpDTypes.supported, allowed_dtypes=(torch.double,))
     def test_expanded_weight_per_sample_grad(self, device, dtype, op):
         sample_inputs = op.sample_inputs(device, dtype, requires_grad=True)
@@ -400,8 +405,9 @@ def clone_if_tensor(t):
     else:
         return t
 
-instantiate_device_type_tests(TestExpandedWeightFunctional, globals())
-instantiate_device_type_tests(TestExpandedWeightHelperFunction, globals())
 instantiate_device_type_tests(TestExpandedWeightAttributes, globals())
+instantiate_device_type_tests(TestExpandedWeightMethods, globals())
+instantiate_device_type_tests(TestExpandedWeightHelperFunction, globals())
+instantiate_device_type_tests(TestExpandedWeightFunctional, globals())
 if __name__ == '__main__':
     run_tests()

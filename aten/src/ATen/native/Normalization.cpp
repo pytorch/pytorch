@@ -621,6 +621,18 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _instance_norm_all_outputs(
   return std::make_tuple(out.view(input.sizes()), std::get<1>(outs), std::get<2>(outs), std::get<3>(outs), std::get<4>(outs));
 }
 
+std::tuple<Tensor, Tensor> batch_norm_update_stats_cpu(
+        const Tensor& self, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt, double momentum) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> running_mean_maybe_owned = at::borrow_from_optional_tensor(running_mean_opt);
+  const Tensor& running_mean = *running_mean_maybe_owned;
+  const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
+
+  return AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "batch_norm_update_stats_cpu", [&] {
+      return batch_norm_cpu_update_stats_template<scalar_t, Var>(self, running_mean, running_var, momentum, 0);
+    });
+}
+
 Tensor instance_norm(
     const Tensor& input, const c10::optional<Tensor>& weight_opt /* optional */, const c10::optional<Tensor>& bias_opt /* optional */, const c10::optional<Tensor>& running_mean_opt /* optional */, const c10::optional<Tensor>& running_var_opt /* optional */,
     bool use_input_stats, double momentum, double eps, bool cudnn_enabled) {
