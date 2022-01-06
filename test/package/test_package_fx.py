@@ -11,6 +11,8 @@ from torch.package import (
     sys_importer,
 )
 from torch.testing._internal.common_utils import run_tests
+from unittest import skipIf
+from sys import version_info
 
 try:
     from .common import PackageTestCase
