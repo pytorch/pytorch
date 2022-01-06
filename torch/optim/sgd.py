@@ -51,7 +51,7 @@ class SGD(Optimizer):
         maximize (bool, optional): maximize the params based on the objective, instead of
             minimizing (default: False)
         foreach (bool, optional): whether foreach implementation of optimizer
-            is used (default: False)
+            is used (default: None)
 
     Example:
         >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
@@ -89,7 +89,7 @@ class SGD(Optimizer):
     """
 
     def __init__(self, params, lr=required, momentum=0, dampening=0,
-                 weight_decay=0, nesterov=False, *, maximize=False, foreach=False):
+                 weight_decay=0, nesterov=False, *, maximize=False, foreach=None):
         if lr is not required and lr < 0.0:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if momentum < 0.0:
@@ -165,19 +165,26 @@ class SGD(Optimizer):
 def sgd(params: List[Tensor],
         d_p_list: List[Tensor],
         momentum_buffer_list: List[Optional[Tensor]],
+        has_sparse_grad: bool = False,
+        foreach: bool = None,
         *,
         weight_decay: float,
         momentum: float,
         lr: float,
         dampening: float,
         nesterov: bool,
-        maximize: bool,
-        has_sparse_grad: bool,
-        foreach: bool):
+        maximize: bool):
     r"""Functional API that performs SGD algorithm computation.
 
     See :class:`~torch.optim.SGD` for details.
     """
+
+    if foreach is None:
+        # Placeholder for more complex foreach logic to be added when value is not set
+        foreach = False
+
+    if foreach and torch.jit.is_scripting():
+        raise RuntimeError('torch.jit.script not supported with foreach optimizers')
 
     if foreach and not torch.jit.is_scripting():
         func = _multi_tensor_sgd
@@ -198,13 +205,13 @@ def sgd(params: List[Tensor],
 def _single_tensor_sgd(params: List[Tensor],
                        d_p_list: List[Tensor],
                        momentum_buffer_list: List[Optional[Tensor]],
+                       has_sparse_grad: bool = False,
                        *,
                        weight_decay: float,
                        momentum: float,
                        lr: float,
                        dampening: float,
                        nesterov: bool,
-                       has_sparse_grad: bool,
                        maximize: bool):
 
     for i, param in enumerate(params):
@@ -234,14 +241,17 @@ def _single_tensor_sgd(params: List[Tensor],
 def _multi_tensor_sgd(params: List[Tensor],
                       d_p_list: List[Tensor],
                       momentum_buffer_list: List[Optional[Tensor]],
+                      has_sparse_grad: bool = False,
                       *,
                       weight_decay: float,
                       momentum: float,
                       lr: float,
                       dampening: float,
                       nesterov: bool,
-                      has_sparse_grad: bool,
                       maximize: bool):
+
+    if len(params) == 0:
+        return
 
     if weight_decay != 0:
         if has_sparse_grad:
