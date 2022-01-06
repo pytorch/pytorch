@@ -10,6 +10,10 @@
 namespace at { namespace cuda { namespace jit {
 
 const std::string jit_common_types = R"ESCAPE(
+  #define POS_INFINITY __int_as_float(0x7f800000)
+  #define NEG_INFINITY __int_as_float(0xff800000)
+  #define NAN __int_as_float(0x7fffffff)
+
   typedef long long int int64_t;
   typedef unsigned int uint32_t;
   typedef signed char int8_t;
