@@ -40,14 +40,14 @@ class Adagrad(Optimizer):
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-10)
-        foreach (bool, optional): whether foreach implementation of optimizer is used (default: False)
+        foreach (bool, optional): whether foreach implementation of optimizer is used (default: None)
 
     .. _Adaptive Subgradient Methods for Online Learning and Stochastic
         Optimization: http://jmlr.org/papers/v12/duchi11a.html
     """
 
     def __init__(self, params, lr=1e-2, lr_decay=0, weight_decay=0, initial_accumulator_value=0,
-                 eps=1e-10, foreach=False):
+                 eps=1e-10, foreach=None):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= lr_decay:
@@ -129,17 +129,26 @@ def adagrad(params: List[Tensor],
             grads: List[Tensor],
             state_sums: List[Tensor],
             state_steps: List[int],
+            # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
+            # setting these as kwargs for now as functional API is compiled by torch/distributed/optim
+            has_sparse_grad: bool = False,
+            foreach: bool = None,
             *,
             lr: float,
             weight_decay: float,
             lr_decay: float,
-            eps: float,
-            has_sparse_grad: bool,
-            foreach: bool):
+            eps: float):
     r"""Functional API that performs Adagrad algorithm computation.
 
     See :class:`~torch.optim.Adagrad` for details.
     """
+
+    if foreach is None:
+        # Placeholder for more complex foreach logic to be added when value is not set
+        foreach = False
+
+    if foreach and torch.jit.is_scripting():
+        raise RuntimeError('torch.jit.script not supported with foreach optimizers')
 
     if foreach and not torch.jit.is_scripting() and (not has_sparse_grad):
         func = _multi_tensor_adagrad
@@ -167,12 +176,12 @@ def _single_tensor_adagrad(params: List[Tensor],
                            grads: List[Tensor],
                            state_sums: List[Tensor],
                            state_steps: List[int],
+                           has_sparse_grad: bool = False,
                            *,
                            lr: float,
                            weight_decay: float,
                            lr_decay: float,
-                           eps: float,
-                           has_sparse_grad: bool):
+                           eps: float):
 
     for (param, grad, state_sum, step) in zip(params, grads, state_sums, state_steps):
         if weight_decay != 0:
@@ -209,12 +218,16 @@ def _multi_tensor_adagrad(params: List[Tensor],
                           grads: List[Tensor],
                           state_sums: List[Tensor],
                           state_steps: List[int],
+                          has_sparse_grad: bool = False,
                           *,
                           lr: float,
                           weight_decay: float,
                           lr_decay: float,
-                          eps: float,
-                          has_sparse_grad: bool):
+                          eps: float):
+
+    # Foreach functions will throw errors if given empty lists
+    if len(params) == 0:
+        return
 
     if has_sparse_grad:
         return _single_tensor_adagrad(params,
