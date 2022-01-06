@@ -16,9 +16,7 @@ if [ -n "${IN_CI}" ]; then
   pip_install unittest-xml-reporting
 fi
 
-install_torch_ucc
-torch_ucc_path=$(python -c "import inspect; import torch; import torch_ucc; print(inspect.getfile(torch_ucc))")
-export TORCH_UCC_LIBRARY_PATH=${torch_ucc_path}
+export TORCH_UCC_LIBRARY_PATH=$(install_torch_ucc)
 
 python tools/download_mnist.py --quiet -d test/cpp/api/mnist
 OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api

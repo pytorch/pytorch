@@ -141,5 +141,6 @@ function install_torch_ucc() {
     pushd torch_ucc
     time python setup.py install --oss
     popd
+    python -c "import inspect; import torch; import torch_ucc; print(inspect.getfile(torch_ucc))"
   fi
 }
