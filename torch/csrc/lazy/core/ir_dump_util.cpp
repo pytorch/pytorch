@@ -1,7 +1,6 @@
 #include <torch/csrc/lazy/core/ir_dump_util.h>
 
 #include <c10/util/Optional.h>
-#include <c10/util/irange.h>
 #include <torch/csrc/lazy/backend/backend_interface.h>
 #include <torch/csrc/lazy/backend/lowering_context.h>
 #include <torch/csrc/lazy/core/ir_util.h>
@@ -95,7 +94,7 @@ NodeIdMap GenerateIdMap(c10::ArrayRef<Node*> post_order) {
 std::unordered_map<const Node*, size_t> GetRootsIds(
     c10::ArrayRef<Node*> roots) {
   std::unordered_map<const Node*, size_t> roots_ids;
-  for (const auto i : c10::irange(roots.size())) {
+  for (size_t i = 0; i < roots.size(); ++i) {
     roots_ids[roots[i]] = i;
   }
   return roots_ids;
@@ -211,7 +210,7 @@ std::string DumpUtil::PostOrderToDot(
   for (auto it = post_order.rbegin(); it != post_order.rend(); ++it) {
     const Node* node = *it;
     size_t id = id_map.at(node);
-    for (const auto i : c10::irange(node->operands().size())) {
+    for (size_t i = 0; i < node->operands().size(); ++i) {
       const Output& output = node->operand(i);
       ss << "  node" << id_map.at(output.node) << " -> node" << id;
       if (node->operands().size() > 1) {

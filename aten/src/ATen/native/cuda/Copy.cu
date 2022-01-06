@@ -90,13 +90,13 @@ void copy_device_to_device(TensorIterator& iter, bool non_blocking) {
     }
   } else {
     if (same_neg) {
-      if (!same_conj) {
+      if (!same_conj && same_type) {
         conj_kernel_cuda(iter);
       } else {
         direct_copy_kernel_cuda(iter);
       }
     } else {
-      if (!same_conj) {
+      if (!same_conj && same_type) {
         neg_conj_kernel_cuda(iter);
       } else {
         neg_kernel_cuda(iter);
