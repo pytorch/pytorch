@@ -11,7 +11,7 @@
 #include <unordered_set>
 
 #include "lazy_tensor_core/csrc/debug_util.h"
-#include "lazy_tensor_core/csrc/tensor.h"
+#include <torch/csrc/lazy/core/tensor.h>
 
 #define XLA_CPP_TEST_ENABLED(name)                          \
   do {                                                      \
@@ -48,7 +48,7 @@ static inline void AllClose(at::Tensor tensor, at::Tensor xla_tensor,
   EXPECT_TRUE(CloseValues(tensor, xla_tensor, rtol, atol));
 }
 
-static inline void AllClose(at::Tensor tensor, LazyTensor& xla_tensor,
+static inline void AllClose(at::Tensor tensor, torch::lazy::LazyTensor& xla_tensor,
                             double rtol = 1e-5, double atol = 1e-8) {
   EXPECT_TRUE(
       CloseValues(tensor, xla_tensor.ToTensor(/*detached=*/false), rtol, atol));

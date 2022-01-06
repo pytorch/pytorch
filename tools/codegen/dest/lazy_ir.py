@@ -20,12 +20,12 @@ def node_ctor_arg_rvalue_string(arg: NamedCType, schema: LazyIrSchema) -> str:
     if isValueType(arg.type):
         if isinstance(arg.type, BaseCType):
             if arg.name in schema.wrapped_scalar_names:
-                return f"LazyGraphExecutor::Get()->GetIrValueForScalarFromCodegen({arg.name})"
+                return f"torch::lazy::LazyGraphExecutor::Get()->GetIrValueForScalarFromCodegen({arg.name})"
             return f"lazy_{arg.name}.GetIrValue()"
         elif isinstance(arg.type, OptionalCType):
             if arg.name in schema.wrapped_scalar_names:
                 return f"{arg.name} ? " \
-                    f"c10::make_optional(LazyGraphExecutor::Get()->GetIrValueForScalarFromCodegen(*{arg.name})) : " \
+                    f"c10::make_optional(torch::lazy::LazyGraphExecutor::Get()->GetIrValueForScalarFromCodegen(*{arg.name})) : " \
                     "c10::nullopt"
             return f"lazy_{arg.name} ? " \
                    f"c10::make_optional(lazy_{arg.name}.GetIrValue()) : " \
@@ -151,12 +151,12 @@ def lazy_tensor_decls(value_types: List[NamedCType], tensor_class: str, schema: 
         if isinstance(t.type, BaseCType):
             lazy_tensor_decls.append(
                 f"{tensor_class} lazy_{t.name} = "
-                f"GetLtcTensorOrCreateForWrappedNumber({t.name}, *device);")
+                f"torch::lazy::GetLtcTensorOrCreateForWrappedNumber({t.name}, *device);")
         elif isinstance(t.type, OptionalCType):
             # TODO(alanwaketan): Maybe we want to apply GetLtcTensorOrCreateForWrappedNumber here, but hold it
             # until we encounter a real world example.
             lazy_tensor_decls.append(
-                f"    {tensor_class} lazy_{t.name} = TryGetLtcTensor({t.name}.value_or(at::Tensor()));")
+                f"    {tensor_class} lazy_{t.name} = torch::lazy::TryGetLtcTensor({t.name}.value_or(at::Tensor()));")
         else:
             raise AssertionError("TODO not sure if there are other valid types to handle here")
     return "\n    ".join(lazy_tensor_decls)
@@ -179,7 +179,7 @@ class GenLazyNativeFuncDefinition:
         returns_length = len(schema.returns)
 
         value_types_names = ", ".join([f"{t.name}" for t in value_types])
-        get_device_str = f"""auto device = bridge::GetBackendDevice({value_types_names});"""
+        get_device_str = f"""auto device = torch::lazy::GetBackendDevice({value_types_names});"""
         lazy_tensor_decls_str = lazy_tensor_decls(value_types, self.tensor_class, schema)
         node_ctor_input_str = node_ctor_inputs(schema)
 
@@ -206,13 +206,13 @@ class GenLazyNativeFuncDefinition:
 
         assert len(value_types) > 0, f"Only supporting tensor ops so far, none found in {sig}"
         first_tensor = value_types[0]
-        bridge_str = f"""auto result = CreateAtenFromLtcTensor(LazyTensor::Create(node, lazy_{first_tensor.name}.GetDevice()));"""
+        bridge_str = f"""auto result = torch::lazy::CreateAtenFromLtcTensor(torch::lazy::LazyTensor::Create(node, lazy_{first_tensor.name}.GetDevice()));"""
         if returns_length > 1:
             bridge_str = f"""std::vector<{self.tensor_class}> lazy_tensors;
         for (int i = 0; i < {returns_length}; i++) {{
-            lazy_tensors.push_back(LazyTensor::Create(torch::lazy::Value(node, i), lazy_{first_tensor.name}.GetDevice()));
+            lazy_tensors.push_back(torch::lazy::LazyTensor::Create(torch::lazy::Value(node, i), lazy_{first_tensor.name}.GetDevice()));
         }}
-        auto result = TupleAtenFromLtcTensors<{returns_length}>(lazy_tensors);"""
+        auto result = torch::lazy::TupleAtenFromLtcTensors<{returns_length}>(lazy_tensors);"""
         if schema.name.name.inplace:
             assert returns_length == 1, "We assumed there was no such case where an op is an in-place variant " \
                                         "and has tuple outputs."

@@ -51,7 +51,7 @@ DebugUtil::GraphFormat DebugUtil::GetDefaultGraphFormat() {
   return format;
 }
 
-std::string DebugUtil::GetTensorsGraphInfo(c10::ArrayRef<LazyTensor> tensors,
+std::string DebugUtil::GetTensorsGraphInfo(c10::ArrayRef<torch::lazy::LazyTensor> tensors,
                                            const std::vector<size_t>* indices,
                                            GraphFormat format) {
   std::vector<torch::lazy::Node*> root_nodes;
@@ -60,7 +60,7 @@ std::string DebugUtil::GetTensorsGraphInfo(c10::ArrayRef<LazyTensor> tensors,
   torch::lazy::Unique<torch::lazy::BackendDevice> unique_device;
   if (indices != nullptr) {
     for (auto index : *indices) {
-      const LazyTensor& tensor = tensors[index];
+      const torch::lazy::LazyTensor& tensor = tensors[index];
       torch::lazy::Value ir_value = tensor.CurrentIrValue();
       if (ir_value) {
         root_nodes.push_back(ir_value.node.get());
@@ -113,7 +113,7 @@ std::string DebugUtil::GetTensorsGraphInfo(c10::ArrayRef<LazyTensor> tensors,
 }
 
 void DebugUtil::SaveTensorsGraphInfo(const char* name,
-                                     c10::ArrayRef<LazyTensor> tensors,
+                                     c10::ArrayRef<torch::lazy::LazyTensor> tensors,
                                      const std::vector<size_t>* indices,
                                      GraphFormat format) {
   static const std::string save_file =

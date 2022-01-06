@@ -7,8 +7,7 @@
 #include <iostream>
 #include <string>
 
-#include "lazy_tensor_core/csrc/aten_ltc_bridge.h"
-#include "lazy_tensor_core/csrc/tensor_impl.h"
+#include <torch/csrc/lazy/core/tensor_impl.h>
 #include "lazy_tensors/computation_client/sys_util.h"
 
 namespace torch_lazy_tensors {
@@ -16,7 +15,7 @@ namespace cpp_test {
 namespace {
 
 bool IsLtcTensor(const at::Tensor& tensor) {
-  return dynamic_cast<LTCTensorImpl*>(tensor.unsafeGetTensorImpl());
+  return dynamic_cast<torch::lazy::LTCTensorImpl*>(tensor.unsafeGetTensorImpl());
 }
 
 void DumpDifferences(const at::Tensor& tensor1, const at::Tensor& tensor2) {
@@ -169,12 +168,12 @@ bool CloseValues(at::Tensor tensor1, at::Tensor tensor2, double rtol,
 }
 
 std::string GetTensorTextGraph(at::Tensor tensor) {
-  LazyTensor xtensor = TryGetLtcTensor(tensor);
+  torch::lazy::LazyTensor xtensor = torch::lazy::TryGetLtcTensor(tensor);
   return torch::lazy::DumpUtil::ToText({xtensor.GetIrValue().node.get()});
 }
 
 std::string GetTensorDotGraph(at::Tensor tensor) {
-  LazyTensor xtensor = TryGetLtcTensor(tensor);
+  torch::lazy::LazyTensor xtensor = torch::lazy::TryGetLtcTensor(tensor);
   return torch::lazy::DumpUtil::ToDot({xtensor.GetIrValue().node.get()});
 }
 
