@@ -2,7 +2,7 @@ def define_targets(rules):
     rules.cc_test(
         name = "tests",
         size = "small",
-        srcs = glob([
+        srcs = rules.glob([
             "util/*.cpp",
             "core/*.cpp",
             "core/impl/*.cpp",
