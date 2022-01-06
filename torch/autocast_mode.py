@@ -103,6 +103,23 @@ class autocast(object):
         # After exiting autocast, calls f_float16.float() to use with d_float32
         g_float32 = torch.mm(d_float32, f_bfloat16.float())
 
+    Example to use with jit trace in inference::
+
+        class TestModel(nn.Module):
+            def __init__(self, input_size, num_classes):
+                super(TestModel, self).__init__()
+                self.fc1 = nn.Linear(input_size, num_classes)
+            def forward(self, x):
+                return self.fc1(x)
+
+        input_size = 2
+        num_classes = 2
+        model = TestModel(input_size, num_classes).eval()
+
+        with torch.cpu.amp.autocast(cache_enabled=False):
+            model = torch.jit.trace(model, torch.randn(1, input_size))
+        print(model.graph_for(torch.randn(1, input_size)))
+
     Type mismatch errors *in* an autocast-enabled region are a bug; if this is what you observe,
     please file an issue.
 
