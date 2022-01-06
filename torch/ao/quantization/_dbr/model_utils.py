@@ -64,7 +64,8 @@ def pack_weights_for_functionals(
             elif seen_op_info.type == F.linear:
                 # fetch all the info needed for packed params
                 weight = getattr(module, seen_op_info.packable_tensor_idx_to_name[1])
-                bias = getattr(module, seen_op_info.packable_tensor_kwarg_name_to_name['bias'])
+                bias_name = seen_op_info.packable_tensor_kwarg_name_to_name['bias']
+                bias = getattr(module, bias_name) if bias_name else None
 
                 # quantize the weight
                 # TODO: create weight observers from qconfig.weight
