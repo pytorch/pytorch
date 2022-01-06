@@ -1830,6 +1830,14 @@ bool TranslateApplicableWelford::wouldTranslateToPersistent(
       [&original_to_test_map](auto welford) {
         return original_to_test_map.clone(welford);
       });
+  // Copied welfords will be invalidated on translation, but Vals will be
+  // reused, keep a reference to them.
+  std::vector<Val*> welford_avgs;
+  std::vector<Val*> welford_vars;
+  for (auto welford : copied_welfords) {
+    welford_avgs.push_back(welford->outAvg());
+    welford_vars.push_back(welford->outVar());
+  }
 
   // Translate the welford ops
   for (auto welford_to_translate : copied_welfords) {
@@ -1864,9 +1872,9 @@ bool TranslateApplicableWelford::wouldTranslateToPersistent(
     // If only average is used from welford, we should still translate, but we
     // might not detect persistence if variance isn't actually used/marked as an
     // output in the test.
-    for (auto welford_to_translate : copied_welfords) {
-      auto avg = welford_to_translate->outAvg();
-      auto var = welford_to_translate->outVar();
+    for (auto outs_i : c10::irange(welford_avgs.size())) {
+      auto avg = welford_avgs[outs_i];
+      auto var = welford_vars[outs_i];
       if (avg->uses().empty()) {
         test_group_outputs_.push_back(avg);
       }
