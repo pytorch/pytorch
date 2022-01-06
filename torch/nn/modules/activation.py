@@ -331,7 +331,9 @@ class Hardsigmoid(Module):
 
 
 class Tanh(Module):
-    r"""Applies the element-wise function:
+    r"""Applies the Hyperbolic Tangent (Tanh) function element-wise.
+
+    Tanh is defined as:
 
     .. math::
         \text{Tanh}(x) = \tanh(x) = \frac{\exp(x) - \exp(-x)} {\exp(x) + \exp(-x)}
@@ -780,10 +782,8 @@ class LogSigmoid(Module):
 
 
 class Softplus(Module):
-    r"""Applies the element-wise function:
-
-    .. math::
-        \text{Softplus}(x) = \frac{1}{\beta} * \log(1 + \exp(\beta * x))
+    r"""Applies the Softplus function :math:`\text{Softplus}(x) = \frac{1}{\beta} *
+    \log(1 + \exp(\beta * x))` element-wise.
 
     SoftPlus is a smooth approximation to the ReLU function and can be used
     to constrain the output of a machine to always be positive.
