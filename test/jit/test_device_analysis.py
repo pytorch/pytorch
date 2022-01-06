@@ -142,7 +142,9 @@ class TestDeviceAnalysis(JitTestCase):
             graph = torch.jit.script(fn).graph
             self.prop_device_on_graph(graph, devices)
             actual_device = self.node_output_device(graph)
-            self.assertTrue((actual_device == out.device) or (actual_device is None))
+            self.assertTrue(
+                (actual_device is None) or (actual_device.type == out.device.type)
+            )
 
     def test_zerodim_cpu(self):
         # Allow for minimal testing locally
