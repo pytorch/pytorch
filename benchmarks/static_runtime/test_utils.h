@@ -30,6 +30,8 @@ void testStaticRuntime(
     const bool use_equalnan = false,
     const bool check_resize = true);
 
+std::shared_ptr<Graph> getGraphFromScript(const std::string& jit_script);
+
 std::shared_ptr<Graph> getGraphFromIR(const std::string& ir);
 
 bool hasProcessedNodeWithName(
