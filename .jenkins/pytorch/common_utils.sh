@@ -121,10 +121,8 @@ function install_ucx() {
 
 export UCC_HOME='/usr'
 function install_ucc() {
-  echo "CUDA_VERSION: ${CUDA_VERSION}"
   rm -rf ucc
-  # git clone --recursive https://github.com/openucx/ucc.git
-  git clone --recursive https://github.com/zasdfgbnm/ucc.git -b fp16-fix
+  git clone --recursive https://github.com/openucx/ucc.git
   pushd ucc
   ./autogen.sh
   ./configure --prefix=$UCC_HOME      \
@@ -137,11 +135,13 @@ function install_ucc() {
 }
 
 function install_torch_ucc() {
-  install_ucx
-  install_ucc
+  if [[ "$BUILD_ENVIRONMENT" != *cuda10.2* ]]
+    install_ucx
+    install_ucc
 
-  git clone https://github.com/facebookresearch/torch_ucc.git
-  pushd torch_ucc
-  time python setup.py install --oss
-  popd
+    git clone https://github.com/facebookresearch/torch_ucc.git
+    pushd torch_ucc
+    time python setup.py install --oss
+    popd
+  fi
 }
