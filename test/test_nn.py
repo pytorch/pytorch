@@ -6511,6 +6511,15 @@ class TestNN(NNTestCase):
                      nn.GRUCell(*cell_shared_param)):
             self.assertRaises(Exception, lambda: cell(input, hx))
 
+    def test_RNN_cell_forward_zero_hidden_size(self):
+        input = torch.randn(3, 10)
+        hx = torch.randn(3, 0)
+        cell_shared_param = (10, 0)
+        for cell in (nn.RNNCell(*cell_shared_param, nonlinearity="relu"),
+                     nn.RNNCell(*cell_shared_param, nonlinearity="tanh"),
+                     nn.GRUCell(*cell_shared_param)):
+            self.assertEqual(cell(input, hx).shape, torch.Size([3, 0]))
+
     def _test_loss_equal_input_target_shape(self, cast):
         # Tests losses whose inputs should have the same size.
         losses = {
