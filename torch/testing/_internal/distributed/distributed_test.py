@@ -5454,6 +5454,9 @@ class DistributedTest:
 
         def _test_allgather_object(self, subgroup=None):
             # Only set device for NCCL backend since it must use GPUs.
+
+            gather_objects = COLLECTIVES_OBJECT_TEST_LIST.copy()
+
             backend = os.environ["BACKEND"]
             if backend == "nccl":
                 # Case where rank != GPU device.
@@ -5462,9 +5465,7 @@ class DistributedTest:
 
             # If GPU test, add object with GPU tensor
             if backend == "nccl":
-                COLLECTIVES_OBJECT_TEST_LIST.append(Foo(torch.randn(3, 3, device=0)))
-
-            gather_objects = COLLECTIVES_OBJECT_TEST_LIST
+                gather_objects.append(Foo(torch.randn(3, 3, device=0)))
 
             output_gathered = [None for _ in range(dist.get_world_size())]
             dist.all_gather_object(
@@ -5498,7 +5499,7 @@ class DistributedTest:
 
         def _test_gather_object(self, pg=None):
             # Ensure stateful objects can be gathered
-            gather_objects = COLLECTIVES_OBJECT_TEST_LIST
+            gather_objects = COLLECTIVES_OBJECT_TEST_LIST.copy()
             output_gathered = [None for _ in range(dist.get_world_size(pg))]
             gather_on_rank = 0
             my_rank = dist.get_rank(pg)
@@ -6241,6 +6242,11 @@ class DistributedTest:
                     loss.backward()
 
         def _test_broadcast_object_list(self, group=None):
+            gather_objects = COLLECTIVES_OBJECT_TEST_LIST.copy()
+
+
+
+
             # Only set device for NCCL backend since it must use GPUs.
             # Case where rank != GPU device.
             next_rank = (self.rank + 1) % int(self.world_size)
@@ -6251,12 +6257,16 @@ class DistributedTest:
             src_rank = 0
             # If GPU test, add object with GPU tensor
             if backend == "nccl":
-                COLLECTIVES_OBJECT_TEST_LIST.append(Foo(torch.randn(3, 3, device=0)))
+                gather_objects.append(Foo(torch.randn(3, 3, device=0)))
 
+            if IS_FBCODE:
+                # Create Tensor with > 2^31 Bytes storage requirements
+                # Only on FBCODE as testing OOMs in OSS
+                gather_objects.append(Foo(torch.randn(3, 178956971)))
             objects = (
-                COLLECTIVES_OBJECT_TEST_LIST
+                gather_objects
                 if self.rank == src_rank
-                else [None for _ in COLLECTIVES_OBJECT_TEST_LIST]
+                else [None for _ in gather_objects]
             )
 
             # Single object test with device specified. Backend="gloo", device=cpu
@@ -6264,12 +6274,12 @@ class DistributedTest:
                 single_obj_list = [objects[0]]
                 if self.rank != src_rank:
                     self.assertNotEqual(
-                        single_obj_list[0], COLLECTIVES_OBJECT_TEST_LIST[0]
+                        single_obj_list[0], gather_objects[0]
                     )
                 dist.broadcast_object_list(
                     single_obj_list, src=0, group=group, device=torch.device("cpu")
                 )
-                self.assertEqual(single_obj_list[0], COLLECTIVES_OBJECT_TEST_LIST[0])
+                self.assertEqual(single_obj_list[0], gather_objects[0])
 
             # Single object test with device specified. Backend="gloo", device=current_device+1
             # The test is gated by the fact GPU count is the same as world size to avoid the case
@@ -6278,37 +6288,37 @@ class DistributedTest:
                 single_obj_list = [objects[0]]
                 if self.rank != src_rank:
                     self.assertNotEqual(
-                        single_obj_list[0], COLLECTIVES_OBJECT_TEST_LIST[0]
+                        single_obj_list[0], gather_objects[0]
                     )
                 dist.broadcast_object_list(
                     single_obj_list, src=0, group=group, device=torch.device(next_rank)
                 )
-                self.assertEqual(single_obj_list[0], COLLECTIVES_OBJECT_TEST_LIST[0])
+                self.assertEqual(single_obj_list[0], gather_objects[0])
 
             # Single object test with device specified. Backend="nccl", device=current_device+1
             if backend == "nccl" and torch.cuda.device_count() == int(self.world_size):
                 single_obj_list = [objects[0]]
                 if self.rank != src_rank:
                     self.assertNotEqual(
-                        single_obj_list[0], COLLECTIVES_OBJECT_TEST_LIST[0]
+                        single_obj_list[0], gather_objects[0]
                     )
                 dist.broadcast_object_list(
                     single_obj_list, src=0, group=group, device=torch.device(next_rank)
                 )
-                self.assertEqual(single_obj_list[0], COLLECTIVES_OBJECT_TEST_LIST[0])
+                self.assertEqual(single_obj_list[0], gather_objects[0])
 
             # Single object test: backward compatibility with device unspecified
             single_obj_list = [objects[0]]
             if self.rank != src_rank:
-                self.assertNotEqual(single_obj_list[0], COLLECTIVES_OBJECT_TEST_LIST[0])
+                self.assertNotEqual(single_obj_list[0], gather_objects[0])
             dist.broadcast_object_list(single_obj_list, src=0, group=group)
-            self.assertEqual(single_obj_list[0], COLLECTIVES_OBJECT_TEST_LIST[0])
+            self.assertEqual(single_obj_list[0], gather_objects[0])
 
             # Multiple input objects test
             if self.rank != src_rank:
-                self.assertNotEqual(objects, COLLECTIVES_OBJECT_TEST_LIST)
+                self.assertNotEqual(objects, gather_objects)
             dist.broadcast_object_list(objects, src=0, group=group)
-            self.assertEqual(objects, COLLECTIVES_OBJECT_TEST_LIST)
+            self.assertEqual(objects, gather_objects)
 
         @require_backend(DistTestCases.backend_feature["gpu"])
         @require_n_gpus_for_nccl_backend(
@@ -8311,12 +8321,21 @@ class DistributedTest:
             rank = self.rank
             torch.cuda.set_device(rank)
             net = torch.nn.BatchNorm1d(128).cuda()
+            expected_buffer = torch.ones(5, device='cuda')
+            net.register_buffer('buf', expected_buffer.clone())
             net = torch.nn.parallel.DistributedDataParallel(
                 net,
                 device_ids=[rank],
                 output_device=rank,
             )
+            # Explicitly zero the non-zero rank buffers to make sure broadcast is
+            # working correctly during training loop.
+            if self.rank != 0:
+                net.module.buf.zero_()
+
             net.train()
+            if self.rank != 0:
+                self.assertNotEqual(net.module.buf, expected_buffer)
             input = torch.rand(64, 128, device='cuda')
             # Used to fail with "one of the variables needed for gradient
             # computation has been modified by an inplace operation", see
@@ -8325,12 +8344,22 @@ class DistributedTest:
                 o = net(input).sum() + net(input).sum()
                 o.backward()
 
+            # All DDP nets should have rank 0's buffer.
+            buf = net.module.buf
+            self.assertEqual(net.module.buf, expected_buffer)
+            print(f"Rank {rank} buf {buf}")
+
+
             # BN buffer should be correctly broadcasted.
             bn_buffers = list(net.module.buffers())
             all_bufs = [None for _ in range(dist.get_world_size())]
             torch.distributed.all_gather_object(all_bufs, bn_buffers)
             for buf_list in all_bufs[1:]:
                 self.assertEqual(buf_list, all_bufs[0])
+
+            # Should be the same as local
+            # local_buf = list(local_net.buffers())
+            # print(f"local buf {local_buf}")
 
         @skip_if_lt_x_gpu(2)
         @sandcastle_skip_if(

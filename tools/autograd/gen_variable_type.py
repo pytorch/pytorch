@@ -322,7 +322,8 @@ isFwGradDefined(${req_inp})\
 FW_DERIVATIVE_DEFINED_GRAD_TEMPLATE = CodeTemplate("""\
 auto ${inp}_t_raw = toNonOptFwGrad(${inp});
 auto ${inp}_tensor = toNonOptTensor(${inp});
-auto ${inp}_t = ${inp}_t_raw.defined() ? ${inp}_t_raw : at::_efficientzerotensor(${inp}_tensor.sizes(), ${inp}_tensor.options());
+auto ${inp}_t = (${inp}_t_raw.defined() || !${inp}_tensor.defined())
+  ? ${inp}_t_raw : at::${zeros_fn}(${inp}_tensor.sizes(), ${inp}_tensor.options());
 """)
 
 FW_DERIVATIVE_DEFINED_PRIMAL_TEMPLATE = CodeTemplate("""\
@@ -908,12 +909,13 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
 
             unpacked_arguments = ""
             for inp in differentiable_inputs:
+                zeros_fn = "zeros" if inplace and inp.name == "self" else "_efficientzerotensor"
                 if inp.name in derivative.required_inputs_fw_grad:
-                    unpacked_arguments += FW_DERIVATIVE_DEFINED_GRAD_TEMPLATE.substitute(inp=inp.name)
+                    unpacked_arguments += FW_DERIVATIVE_DEFINED_GRAD_TEMPLATE.substitute(inp=inp.name, zeros_fn=zeros_fn)
                 if inp.name in (derivative.required_inputs_primal or []):
                     unpacked_arguments += FW_DERIVATIVE_DEFINED_PRIMAL_TEMPLATE.substitute(inp=inp.name)
             if derivative.required_original_self_value:
-                unpacked_arguments += FW_DERIVATIVE_DEFINED_GRAD_TEMPLATE.substitute(inp="original_self")
+                unpacked_arguments += FW_DERIVATIVE_DEFINED_GRAD_TEMPLATE.substitute(inp="original_self", zeros_fn=zeros_fn)
                 unpacked_arguments += FW_DERIVATIVE_DEFINED_PRIMAL_TEMPLATE.substitute(inp="original_self")
             elif inplace and derivative.is_reusing_outplace_formula:
                 # The gradient wasn't already cloned, do it if grad mode is enabled
