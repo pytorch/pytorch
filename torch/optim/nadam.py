@@ -48,14 +48,14 @@ class NAdam(Optimizer):
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
         momentum_decay (float, optional): momentum momentum_decay (default: 4e-3)
         foreach (bool, optional): whether foreach implementation of optimizer
-            is used (default: False)
+            is used (default: None)
 
     .. _Incorporating Nesterov Momentum into Adam:
         https://openreview.net/forum?id=OM0jvwB8jIp57ZJjtNEZ
     """
 
     def __init__(self, params, lr=2e-3, betas=(0.9, 0.999), eps=1e-8,
-                 weight_decay=0, momentum_decay=4e-3, foreach=False):
+                 weight_decay=0, momentum_decay=4e-3, foreach=None):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -150,18 +150,25 @@ def nadam(params: List[Tensor],
           exp_avg_sqs: List[Tensor],
           mu_products: List[float],
           state_steps: List[int],
+          foreach: bool = None,
           *,
           beta1: float,
           beta2: float,
           lr: float,
           weight_decay: float,
           momentum_decay: float,
-          eps: float,
-          foreach: bool):
+          eps: float):
     r"""Functional API that performs NAdam algorithm computation.
 
     See :class:`~torch.optim.NAdam` for details.
     """
+
+    if foreach is None:
+        # Placeholder for more complex foreach logic to be added when value is not set
+        foreach = False
+
+    if foreach and torch.jit.is_scripting():
+        raise RuntimeError('torch.jit.script not supported with foreach optimizers')
 
     if foreach and not torch.jit.is_scripting():
         func = _multi_tensor_nadam
@@ -236,6 +243,9 @@ def _multi_tensor_nadam(params: List[Tensor],
                         weight_decay: float,
                         momentum_decay: float,
                         eps: float):
+
+    if len(params) == 0:
+        return
 
     bias_correction2 = [1 - beta2 ** step for step in state_steps]
     mus = [beta1 * (1. - 0.5 * (0.96 ** (step * momentum_decay))) for step in state_steps]
