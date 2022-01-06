@@ -21,13 +21,13 @@ class ASGD(Optimizer):
         t0 (float, optional): point at which to start averaging (default: 1e6)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
         foreach (bool, optional): whether foreach implementation of optimizer
-            is used (default: False)
+            is used (default: None)
 
     .. _Acceleration of stochastic approximation by averaging:
         https://dl.acm.org/citation.cfm?id=131098
     """
 
-    def __init__(self, params, lr=1e-2, lambd=1e-4, alpha=0.75, t0=1e6, weight_decay=0, foreach=False):
+    def __init__(self, params, lr=1e-2, lambd=1e-4, alpha=0.75, t0=1e6, weight_decay=0, foreach=None):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= weight_decay:
@@ -104,14 +104,21 @@ def asgd(params: List[Tensor],
          axs: List[Tensor],
          mus: List[float],
          etas: List[float],
+         foreach: bool = None,
          *,
          weight_decay: float,
-         lambd: float,
-         foreach: bool):
+         lambd: float):
     r"""Functional API that performs asgd algorithm computation.
 
     See :class:`~torch.optim.ASGD` for details.
     """
+
+    if foreach is None:
+        # Placeholder for more complex foreach logic to be added when value is not set
+        foreach = False
+
+    if foreach and torch.jit.is_scripting():
+        raise RuntimeError('torch.jit.script not supported with foreach optimizers')
 
     if foreach and not torch.jit.is_scripting():
         func = _multi_tensor_asgd
@@ -167,6 +174,8 @@ def _multi_tensor_asgd(params: List[Tensor],
                        weight_decay: float,
                        lambd: float):
 
+    if len(params) == 0:
+        return
 
     if weight_decay != 0:
         torch._foreach_add_(grads, params, alpha=weight_decay)
