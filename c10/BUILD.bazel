@@ -69,21 +69,3 @@ cc_library(
     alwayslink = True,
     visibility = ["//:__pkg__"],
 )
-
-cc_test(
-    name = "tests",
-    size = "small",
-    srcs = glob([
-        "test/util/*.cpp",
-        "test/util/*.h",
-        "test/core/*.cpp",
-        "test/core/impl/*.cpp",
-    ]),
-    copts = ["-Wno-deprecated-declarations"],
-    deps = [
-        ":c10",
-        ":headers",
-        "@com_google_googletest//:gtest_main",
-    ],
-    visibility = ["//:__pkg__"],
-)

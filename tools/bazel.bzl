@@ -1,4 +1,4 @@
-load("@rules_cc//cc:defs.bzl", "cc_library")
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 load("//c10/macros:cmake_configure_file.bzl", "cmake_configure_file")
 
 # Rules implementation for the Bazel build system. Since the common
@@ -6,6 +6,7 @@ load("//c10/macros:cmake_configure_file.bzl", "cmake_configure_file")
 # the rules simply forward to the Bazel definitions.
 rules = struct(
     cc_library = cc_library,
+    cc_test = cc_test,
     cmake_configure_file = cmake_configure_file,
     filegroup = native.filegroup,
     glob = native.glob,
