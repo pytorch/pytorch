@@ -548,7 +548,7 @@ def merge_reformat(tmp_dir, out_dir):
             
 
     amortized_header = f"amortized {args.inner_loop_repeat}x"
-    headers = ("name", "test", amortized_header, "unamortized", "error")
+    headers = ("name", "test", amortized_header, "unamortized", "overhead", "error")
 
     cw = output_csv(
         os.path.join(out_dir, f"{args.test}_reformat.csv"),
