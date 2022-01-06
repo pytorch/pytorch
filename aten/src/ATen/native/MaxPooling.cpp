@@ -4,6 +4,7 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/MaxPooling.h>
 #include <ATen/native/Pool.h>
+#include <iostream>
 
 namespace at {
 namespace native {
@@ -17,8 +18,6 @@ Tensor _max_pool1d_forward(
     IntArrayRef padding,
     IntArrayRef dilation,
     bool ceil_mode) {
-  NoNamesGuard guard;
-
   TORCH_CHECK(
       self.dim() == 2 || self.dim() == 3,
       "max_pool1d() Expected 2D or 3D input tensor, but got ", self.sizes());
@@ -80,9 +79,6 @@ Tensor _max_pool1d_forward(
     output.squeeze_(0);
   }
 
-  guard.reset();
-  namedinference::propagate_names(output, self);
-
   return output;
 }
 
@@ -103,7 +99,14 @@ Tensor max_pool1d(
     return std::get<0>(at::max_pool1d_with_indices(
         self, kernel_size, stride, padding, dilation, ceil_mode));
   }
-  return at::_max_pool1d_forward(self, kernel_size, stride, padding, dilation, ceil_mode);
+
+  Tensor result = [&]() {
+    NoNamesGuard guard;
+    return at::_max_pool1d_forward(
+        self, kernel_size, stride, padding, dilation, ceil_mode);
+  }();
+  namedinference::propagate_names(result, self);
+  return result;
 }
 
 } // namespace native
