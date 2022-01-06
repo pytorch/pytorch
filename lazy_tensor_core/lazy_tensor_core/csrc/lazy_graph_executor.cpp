@@ -707,14 +707,13 @@ LazyGraphExecutor::PostOrderData LazyGraphExecutor::RunPostOrder(
   po_data.post_order =
       torch::lazy::Util::ComputePostOrder(roots, &po_data.emission_map);
   std::unordered_map<torch::lazy::BackendData::Handle, size_t> data_handles;
+  bool print_recomp = false;
   for (auto node : po_data.post_order) {
     
     static auto const LTC_RECOMPUTATION_VERBOSE = std::getenv("LTC_RECOMPUTATION_VERBOSE");
     if (LTC_RECOMPUTATION_VERBOSE && GetComputedBackendDatas().count(node->lazy_tensor_id_) != 0
       && !torch::lazy::DeviceData::Cast(node)) {
-      auto roots_str = c10::fmap(roots, [](const Node* n) { return n->lazy_tensor_id_; });
-      std::cerr << "Computing the roots for [" << roots_str << " ]" << std::endl;
-      std::cerr << "Graphs for the said nodes: " << torch::lazy::DumpUtil::ToText(roots);
+      print_recomp = true;
       std::cerr << "Node with id " << node->lazy_tensor_id_ << " (" << node->ToString() << ") was already materialized" << std::endl;
     }
 
@@ -731,6 +730,13 @@ LazyGraphExecutor::PostOrderData LazyGraphExecutor::RunPostOrder(
         po_data.parameters_data.push_back(device_data->data());
       }
     }
+  }
+
+  if (print_recomp) {
+      std::cerr << "=====================================================" << std::endl;
+      auto roots_str = c10::fmap(roots, [](const Node* n) { return n->lazy_tensor_id_; });
+      std::cerr << "Computing the roots for [" << roots_str << " ]" << std::endl;
+      std::cerr << "Graphs for the said nodes: " << torch::lazy::DumpUtil::ToText(roots);
   }
   return po_data;
 }
