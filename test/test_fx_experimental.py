@@ -1526,6 +1526,9 @@ class TestNormalizeOperators(JitTestCase):
             'new_empty',
             'new_zeros',
             'new_full',
+            'normal',
+            'multinomial',
+            'bernoulli',
             "__getitem__",
             "__radd__",
             "__rsub__",
@@ -1542,6 +1545,7 @@ class TestNormalizeOperators(JitTestCase):
             "atleast_3d",
             "svd_lowrank",  # implemented with a lambda
             "pca_lowrank",  # implemented with a lambda
+            "column_stack",
         }
 
         # Unsupported input types
