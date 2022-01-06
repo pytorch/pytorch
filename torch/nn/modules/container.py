@@ -203,6 +203,17 @@ class ModuleList(Module):
         str_indices = [str(i) for i in range(len(self._modules))]
         self._modules = OrderedDict(list(zip(str_indices, self._modules.values())))
 
+    @_copy_to_script_wrapper
+    def __len__(self) -> int:
+        return len(self._modules)
+
+    @_copy_to_script_wrapper
+    def __iter__(self) -> Iterator[Module]:
+        return iter(self._modules.values())
+
+    def __iadd__(self, modules: Iterable[Module]) -> 'ModuleList':
+        return self.extend(modules)
+
     def __add__(self, other: 'ModuleList') -> 'ModuleList':
         r"""Concat two ModuleList instances.
 
@@ -217,17 +228,6 @@ class ModuleList(Module):
         for i, module in enumerate(chain(self, other)):
             combined.add_module(str(i), module)
         return combined
-
-    @_copy_to_script_wrapper
-    def __len__(self) -> int:
-        return len(self._modules)
-
-    @_copy_to_script_wrapper
-    def __iter__(self) -> Iterator[Module]:
-        return iter(self._modules.values())
-
-    def __iadd__(self, modules: Iterable[Module]) -> 'ModuleList':
-        return self.extend(modules)
 
     @_copy_to_script_wrapper
     def __dir__(self):
