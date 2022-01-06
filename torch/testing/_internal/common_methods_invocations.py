@@ -33,7 +33,6 @@ from torch.testing._internal.common_utils import \
      make_fullrank_matrices_with_distinct_singular_values,
      random_symmetric_pd_matrix, make_symmetric_matrices,
      make_symmetric_pd_matrices, random_square_matrix_of_rank,
-     random_fullrank_matrix_distinct_singular_value,
      TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, TEST_SCIPY,
      torch_to_numpy_dtype_dict, TEST_WITH_ASAN,
      GRADCHECK_NONDET_TOL, slowTest, noncontiguous_like,
@@ -1279,7 +1278,7 @@ def sample_inputs_tensor_split(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(make_input((S, S, S)), args=args)
 
 
-def sample_inputs_linalg_det(op_info, device, dtype, requires_grad):
+def sample_inputs_linalg_det(op_info, device, dtype, requires_grad, **kwargs):
     kw = dict(device=device, dtype=dtype)
     inputs = [
         make_tensor((S, S), **kw),
@@ -1292,13 +1291,13 @@ def sample_inputs_linalg_det(op_info, device, dtype, requires_grad):
         random_square_matrix_of_rank(S, 1, **kw),  # rank1
         random_square_matrix_of_rank(S, 2, **kw),  # rank2
 
-        random_fullrank_matrix_distinct_singular_value(S, **kw),  # distinct_singular_value
+        make_fullrank_matrices_with_distinct_singular_values(S, S, **kw),  # full rank
         make_tensor((3, 3, S, S), **kw),  # batched
         make_tensor((3, 3, 1, 1), **kw),  # batched_1x1
         random_symmetric_matrix(S, 3, **kw),  # batched_symmetric
         random_symmetric_psd_matrix(S, 3, **kw),  # batched_symmetric_psd
         random_symmetric_pd_matrix(S, 3, **kw),  # batched_symmetric_pd
-        random_fullrank_matrix_distinct_singular_value(S, 3, 3, **kw),  # batched_distinct_singular_values
+        make_fullrank_matrices_with_distinct_singular_values(S, 3, 3, **kw),  # batched fullrank
         make_tensor((0, 0), **kw),
         make_tensor((0, S, S), **kw),
     ]
@@ -1344,6 +1343,9 @@ def sample_inputs_linalg_det_singular(op_info, device, dtype, requires_grad, **k
 
 
 def sample_inputs_linalg_matrix_power(op_info, device, dtype, requires_grad):
+    make_fullrank = make_fullrank_matrices_with_distinct_singular_values
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+    make_arg_fullrank = partial(make_fullrank, dtype=dtype, device=device, requires_grad=requires_grad)
     # (<matrix_size>, (<batch_sizes, ...>))
     test_sizes = [
         (1, ()),
@@ -1351,18 +1353,15 @@ def sample_inputs_linalg_matrix_power(op_info, device, dtype, requires_grad):
         (2, (2,)),
     ]
 
-    inputs = []
-    for matrix_size, batch_sizes in test_sizes:
-        size = batch_sizes + (matrix_size, matrix_size)
-        for n in (0, 3, 5):
-            t = make_tensor(size, device, dtype, requires_grad=requires_grad)
-            inputs.append(SampleInput(t, args=(n,)))
-        for n in [-4, -2, -1]:
-            t = random_fullrank_matrix_distinct_singular_value(matrix_size, *batch_sizes, device=device, dtype=dtype)
-            t.requires_grad = requires_grad
-            inputs.append(SampleInput(t, args=(n,)))
+    def generate_inputs():
+        for matrix_size, batch_sizes in test_sizes:
+            size = batch_sizes + (matrix_size, matrix_size)
+            for n in (0, 3, 5):
+                yield SampleInput(make_arg(size), args=(n,))
+            for n in [-4, -2, -1]:
+                yield SampleInput(make_arg_fullrank(*size), args=(n,))
 
-    return inputs
+    return list(generate_inputs())
 
 def sample_inputs_hsplit(op_info, device, dtype, requires_grad):
     return (SampleInput(make_tensor((6,), device, dtype,
@@ -2592,8 +2591,7 @@ def sample_inputs_T(self, device, dtype, requires_grad, **kwargs):
 
 def sample_inputs_linalg_invertible(op_info, device, dtype, requires_grad=False, **kwargs):
     """
-    This function generates always invertible input for linear algebra ops using
-    random_fullrank_matrix_distinct_singular_value.
+    This function generates invertible inputs for linear algebra ops
     The input is generated as the itertools.product of 'batches' and 'ns'.
     In total this function generates 8 SampleInputs
     'batches' cases include:
@@ -2604,16 +2602,17 @@ def sample_inputs_linalg_invertible(op_info, device, dtype, requires_grad=False,
     'ns' gives 0x0 and 5x5 matrices.
     Zeros in dimensions are edge cases in the implementation and important to test for in order to avoid unexpected crashes.
     """
-    from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+    make_fn = make_fullrank_matrices_with_distinct_singular_values
+    make_arg = partial(make_fn, dtype=dtype, device=device, requires_grad=requires_grad)
 
     batches = [(), (0, ), (2, ), (1, 1)]
     ns = [5, 0]
-    out = []
-    for batch, n in product(batches, ns):
-        a = random_fullrank_matrix_distinct_singular_value(n, *batch, dtype=dtype, device=device)
-        a.requires_grad = requires_grad
-        out.append(SampleInput(a))
-    return out
+
+    def generate_samples():
+        for batch, n in product(batches, ns):
+            yield SampleInput(make_arg(*batch, n, n))
+
+    return list(generate_samples())
 
 def sample_inputs_linalg_pinv_singular(op_info, device, dtype, requires_grad=False, **kwargs):
     """
@@ -5198,7 +5197,7 @@ def sample_inputs_linalg_pinv_hermitian(op_info, device, dtype, requires_grad=Fa
 def sample_inputs_linalg_solve(op_info, device, dtype, requires_grad=False, vector_rhs_allowed=True, **kwargs):
     """
     This function generates always solvable input for torch.linalg.solve
-    Using random_fullrank_matrix_distinct_singular_value gives a non-singular (=invertible, =solvable) matrices 'a'.
+    We sample a fullrank square matrix (i.e. invertible) A
     The first input to torch.linalg.solve is generated as the itertools.product of 'batches' and 'ns'.
     The second input is generated as the product of 'batches', 'ns' and 'nrhs'.
     In total this function generates 18 SampleInputs
@@ -5218,7 +5217,9 @@ def sample_inputs_linalg_solve(op_info, device, dtype, requires_grad=False, vect
     Once torch.solve / triangular_solve / cholesky_solve and its testing are removed,
     'vector_rhs_allowed' may be removed here as well.
     """
-    from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+    make_fullrank = make_fullrank_matrices_with_distinct_singular_values
+    make_a = partial(make_fullrank, dtype=dtype, device=device, requires_grad=requires_grad)
+    make_b = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
     batches = [(), (0, ), (2, )]
     ns = [5, 0]
@@ -5226,14 +5227,12 @@ def sample_inputs_linalg_solve(op_info, device, dtype, requires_grad=False, vect
         nrhs = [(), (1,), (3,)]
     else:
         nrhs = [(1,), (3,)]
-    out = []
-    for n, batch, rhs in product(ns, batches, nrhs):
-        a = random_fullrank_matrix_distinct_singular_value(n, *batch, dtype=dtype, device=device)
-        a.requires_grad = requires_grad
-        b = torch.randn(*batch, n, *rhs, dtype=dtype, device=device)
-        b.requires_grad = requires_grad
-        out.append(SampleInput(a, args=(b,)))
-    return out
+
+    def generate_samples():
+        for n, batch, rhs in product(ns, batches, nrhs):
+            yield SampleInput(make_a(*batch, n, n), args=(make_b((batch + (n,) + rhs)),))
+
+    return list(generate_samples())
 
 def sample_inputs_linalg_solve_triangular(op_info, device, dtype, requires_grad=False, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device)
@@ -5450,93 +5449,34 @@ def sample_inputs_cov(op_info, device, dtype, requires_grad, **kwargs):
     return inputs
 
 
-def _sample_inputs_svd(op_info, device, dtype, requires_grad=False, is_linalg_svd=False):
-    """
-    This function generates input for torch.svd with distinct singular values so that autograd is always stable.
-    Matrices of different size:
-        square matrix - S x S size
-        tall marix - S x (S-2)
-        wide matrix - (S-2) x S
-    and batched variants of above are generated.
-    Each SampleInput has a function 'output_process_fn_grad' attached to it that is applied on the output of torch.svd
-    It is needed for autograd checks, because backward of svd doesn't work for an arbitrary loss function.
-    """
-    from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+def sample_inputs_svd(op_info, device, dtype, requires_grad=False, **kwargs):
+    make_fullrank = make_fullrank_matrices_with_distinct_singular_values
+    make_arg = partial(make_fullrank, dtype=dtype, device=device, requires_grad=requires_grad)
 
-    # svd and linalg.svd returns V and V.conj().T, respectively. So we need to slice
-    # along different dimensions when needed (this is used by
-    # test_cases2:wide_all and wide_all_batched below)
-    if is_linalg_svd:
-        def slice_V(v):
-            return v[..., :(S - 2), :]
+    is_linalg_svd = (op_info.name == "linalg.svd")
 
-        def uv_loss(usv):
-            u00 = usv[0][0, 0]
-            v00_conj = usv[2][0, 0]
-            return u00 * v00_conj
-    else:
-        def slice_V(v):
-            return v[..., :, :(S - 2)]
+    batches = [(), (0, ), (2, )]
+    ns = [0, 2, 5]
 
-        def uv_loss(usv):
-            u00 = usv[0][0, 0]
-            v00_conj = usv[2][0, 0].conj()
-            return u00 * v00_conj
+    # The .abs() is to make these functions invariant under multiplication by e^{i\theta}
+    # since the complex SVD is unique up to multiplication of the columns of U / V a z \in C with \norm{z} = 1
+    # See the docs of torch.linalg.svd for more info
+    def check_grads(usv):
+        S = usv[1]
+        k = S.shape[-1]
+        U = usv[0][..., :k]
+        Vh = usv[2] if is_linalg_svd else usv[2].mH
+        Vh = Vh[..., :k, :]
+        return (U.abs(), S, Vh.abs())
 
-    test_cases1 = (  # some=True (default)
-        # loss functions for complex-valued svd have to be "gauge invariant",
-        # i.e. loss functions shouldn't change when sigh of the singular vectors change.
-        # the simplest choice to satisfy this requirement is to apply 'abs'.
-        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype, device=device),
-            lambda usv: usv[1]),  # 'check_grad_s'
-        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype, device=device),
-            lambda usv: abs(usv[0])),  # 'check_grad_u'
-        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype, device=device),
-            lambda usv: abs(usv[2])),  # 'check_grad_v'
-        # this test is important as it checks the additional term that is non-zero only for complex-valued inputs
-        # and when the loss function depends both on 'u' and 'v'
-        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype, device=device),
-            uv_loss),  # 'check_grad_uv'
-        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype, device=device)[:(S - 2)],
-            lambda usv: (abs(usv[0]), usv[1], abs(usv[2][..., :, :(S - 2)]))),  # 'wide'
-        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype, device=device)[:, :(S - 2)],
-            lambda usv: (abs(usv[0]), usv[1], abs(usv[2]))),  # 'tall'
-        (random_fullrank_matrix_distinct_singular_value(S, 2, dtype=dtype, device=device),
-            lambda usv: (abs(usv[0]), usv[1], abs(usv[2]))),  # 'batched'
-        (random_fullrank_matrix_distinct_singular_value(S, 2, dtype=dtype, device=device)[..., :(S - 2), :],
-            lambda usv: (abs(usv[0]), usv[1], abs(usv[2]))),  # 'wide_batched'
-        (random_fullrank_matrix_distinct_singular_value(S, 2, dtype=dtype, device=device)[..., :, :(S - 2)],
-            lambda usv: (abs(usv[0]), usv[1], abs(usv[2]))),  # 'tall_batched'
-    )
-    test_cases2 = (  # some=False
-        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype, device=device)[:(S - 2)],
-            lambda usv: (abs(usv[0]), usv[1], abs(slice_V(usv[2])))),  # 'wide_all'
-        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype, device=device)[:, :(S - 2)],
-            lambda usv: (abs(usv[0][:, :(S - 2)]), usv[1], abs(usv[2]))),  # 'tall_all'
-        (random_fullrank_matrix_distinct_singular_value(S, 2, dtype=dtype, device=device)[..., :(S - 2), :],
-            lambda usv: (abs(usv[0]), usv[1], abs(slice_V(usv[2])))),  # 'wide_all_batched'
-        (random_fullrank_matrix_distinct_singular_value(S, 2, dtype=dtype, device=device)[..., :, :(S - 2)],
-            lambda usv: (abs(usv[0][..., :, :(S - 2)]), usv[1], abs(usv[2]))),  # 'tall_all_batched'
-    )
+    fullmat = 'full_matrices' if is_linalg_svd else 'some'
 
-    out = []
-    for a, out_fn in test_cases1:
-        a.requires_grad = requires_grad
-        if is_linalg_svd:
-            kwargs = {'full_matrices': False}
-        else:
-            kwargs = {'some': True}
-        out.append(SampleInput(a, kwargs=kwargs, output_process_fn_grad=out_fn))
+    def generate_inputs():
+        for batch, n, k, fullmat_val in product(batches, ns, ns, (True, False)):
+            shape = batch + (n, k)
+            yield SampleInput(make_arg(*shape), kwargs={fullmat: fullmat_val}, output_process_fn_grad=check_grads)
 
-    for a, out_fn in test_cases2:
-        a.requires_grad = requires_grad
-        if is_linalg_svd:
-            kwargs = {'full_matrices': True}
-        else:
-            kwargs = {'some': False}
-        out.append(SampleInput(a, kwargs=kwargs, output_process_fn_grad=out_fn))
-
-    return out
+    return list(generate_inputs())
 
 
 def sample_inputs_permute(op_info, device, dtype, requires_grad, **kwargs):
@@ -5609,12 +5549,6 @@ def sample_inputs_pow(op_info, device, dtype, requires_grad, **kwargs):
             make_arg((2, 2), requires_grad=requires_grad),
             args=(make_arg((2, 2), requires_grad=requires_grad),)))
     return tuple(samples)
-
-def sample_inputs_svd(op_info, device, dtype, requires_grad=False, **kwargs):
-    return _sample_inputs_svd(op_info, device, dtype, requires_grad, is_linalg_svd=False)
-
-def sample_inputs_linalg_svd(op_info, device, dtype, requires_grad=False, **kwargs):
-    return _sample_inputs_svd(op_info, device, dtype, requires_grad, is_linalg_svd=True)
 
 def sample_inputs_linalg_svdvals(op_info, device, dtype, requires_grad=False, **kwargs):
     batches = [(), (0, ), (2, ), (1, 1)]
@@ -12737,6 +12671,7 @@ op_db: List[OpInfo] = [
            op=torch.svd,
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_svd,
+           check_batched_gradgrad=False,
            decorators=[
                skipCUDAIfNoMagmaAndNoCusolver,
                skipCUDAIfRocm,
@@ -12746,7 +12681,8 @@ op_db: List[OpInfo] = [
            op=torch.linalg.svd,
            aten_name='linalg_svd',
            dtypes=floating_and_complex_types(),
-           sample_inputs_func=sample_inputs_linalg_svd,
+           sample_inputs_func=sample_inputs_svd,
+           check_batched_gradgrad=False,
            decorators=[
                skipCUDAIfNoMagmaAndNoCusolver,
                skipCUDAIfRocm,

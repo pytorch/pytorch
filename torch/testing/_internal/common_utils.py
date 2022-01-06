@@ -2641,23 +2641,6 @@ def random_hermitian_pd_matrix(matrix_size, *batch_dims, dtype, device):
                     dtype=dtype, device=device)
     return A @ A.mH + torch.eye(matrix_size, dtype=dtype, device=device)
 
-
-# TODO: remove this (prefer make_fullrank_matrices_with_distinct_singular_values below)
-def random_fullrank_matrix_distinct_singular_value(matrix_size, *batch_dims,
-                                                   **kwargs):
-    dtype = kwargs.get('dtype', torch.double)
-    device = kwargs.get('device', 'cpu')
-    silent = kwargs.get("silent", False)
-    if silent and not torch._C.has_lapack:
-        return torch.ones(matrix_size, matrix_size, dtype=dtype, device=device)
-
-    A = torch.randn(batch_dims + (matrix_size, matrix_size), dtype=dtype, device=device)
-    u, _, vh = torch.linalg.svd(A, full_matrices=False)
-    real_dtype = A.real.dtype if A.dtype.is_complex else A.dtype
-    s = torch.arange(1., matrix_size + 1, dtype=real_dtype, device=device).mul_(1.0 / (matrix_size + 1))
-    return (u * s.to(A.dtype)) @ vh
-
-
 # Creates a full rank matrix with distinct signular values or
 #   a batch of such matrices
 def make_fullrank_matrices_with_distinct_singular_values(*shape, device, dtype, requires_grad=False):
@@ -2667,8 +2650,18 @@ def make_fullrank_matrices_with_distinct_singular_values(*shape, device, dtype, 
         # TODO: improve the handling of complex tensors here
         real_dtype = t.real.dtype if t.dtype.is_complex else t.dtype
         k = min(shape[-1], shape[-2])
-        s = torch.arange(1., k + 1, dtype=real_dtype, device=device).mul_(1.0 / (k + 1))
-        x = (u * s.to(dtype)) @ vh
+        # We choose the singular values to be "around one"
+        # This is to make the matrix well conditioned
+        # s = [2, 3, ..., k+1]
+        s = torch.arange(2, k + 2, dtype=real_dtype, device=device)
+        # s = [2, -3, 4, ..., (-1)^k k+1]
+        s[1::2] *= -1.
+        # 1 + 1/s so that the singular values are in the range [2/3, 3/2]
+        # This gives a condition number of 9/4, which should be good enough
+        s.reciprocal_().add_(1.)
+        # Note that the singular values need not be ordered in an SVD so
+        # we don't need need to sort S
+        x = (u * s.to(u.dtype)) @ vh
     x.requires_grad_(requires_grad)
     return x
 
