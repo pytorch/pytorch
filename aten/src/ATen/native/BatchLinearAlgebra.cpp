@@ -218,12 +218,19 @@ TORCH_META_FUNC(triangular_solve)(const Tensor& self, const Tensor& A, bool uppe
     std::vector<int64_t> self_broadcast_size, A_broadcast_size;
     std::tie(self_broadcast_size, A_broadcast_size) = at::native::_linalg_broadcast_batch_dims(self, A);
 
+    auto ndim = self_broadcast_size.size();
+    auto nrows = A.size(-2);
+
     // make column major strides for BLAS
-    const auto solution_strides = at::native::contiguous_strides(self_broadcast_size, /*f-contig=*/true);
+    auto solution_strides = at::detail::defaultStrides(self_broadcast_size);
+    solution_strides[ndim - 2] = 1;
+    solution_strides[ndim - 1] = nrows;
     set_output(0, self_broadcast_size, solution_strides, self.options(), {});
 
     // make column major strides for BLAS
-    auto clone_A_strides = at::native::contiguous_strides(A_broadcast_size, /*f_contig=*/true);
+    auto clone_A_strides = at::detail::defaultStrides(A_broadcast_size);
+    clone_A_strides[ndim - 2] = 1;
+    clone_A_strides[ndim - 1] = nrows;
     set_output(1, A_broadcast_size, clone_A_strides, A.options(), {});
   } else if (A.layout() == Layout::SparseCsr) {
     // no broadcasting for non-strided layout
@@ -232,27 +239,6 @@ TORCH_META_FUNC(triangular_solve)(const Tensor& self, const Tensor& A, bool uppe
   } else {
     TORCH_INTERNAL_ASSERT(false, "triangular_solve: Got an unexpected layout.");
   }
-}
-
-TORCH_META_FUNC(linalg_lu_factor_ex)(const Tensor& A, bool pivot, bool check_errors) {
-  TORCH_CHECK(A.dim() >= 2, "torch.lu_factor: Expected tensor with 2 or more dimensions. Got size: ", A.sizes(), " instead");
-
-  auto sizes = A.sizes().vec();
-  const auto m = sizes.cend()[-2];
-  const auto n = sizes.cend()[-1];
-
-  // make column major strides for BLAS
-  auto LU_strides = at::native::contiguous_strides(sizes, /*f-contig*=*/true);
-  set_output(0, sizes, LU_strides, A.options(), {});
-
-  // Set sizes to the size of pivots
-  sizes.pop_back();
-  sizes.back() = std::min(m, n);
-  set_output(1, sizes, {}, A.options().dtype(kInt), {});
-
-  // Set sizes to the size of info
-  sizes.pop_back();
-  set_output(2, sizes, {}, A.options().dtype(kInt), {});
 }
 
 } // namespace meta
@@ -942,7 +928,7 @@ static Tensor& linalg_solve_out_info(Tensor& result, Tensor& infos, const Tensor
     result = result.unsqueeze_(-1);
   }
 
-  // lu_factor_stub+lu_solve_stub perform calculations in-place and 'result' must be a copy of 'other_broadcasted'
+  // lu_stub+lu_solve_stub perform calculations in-place and 'result' must be a copy of 'other_broadcasted'
   result.copy_(other_broadcasted);
 
   auto input_working_copy = cloneBatchedColumnMajor(input_broadcasted);
@@ -959,7 +945,7 @@ static Tensor& linalg_solve_out_info(Tensor& result, Tensor& infos, const Tensor
   auto pivots_shape = IntArrayRef(input_broadcasted.sizes().data(), input_broadcasted.dim() - 2).vec(); // input_broadcasted.shape[:-2]
   pivots_shape.push_back(std::min(input.size(-2), input.size(-1)));
   Tensor pivots = at::empty(pivots_shape, input.options().dtype(kInt));
-  lu_factor_stub(input.device().type(), input_working_copy, pivots, infos, /*compute_pivots=*/true);
+  lu_stub(input.device().type(), input_working_copy, pivots, infos, /*compute_pivots=*/true);
 
   // solve the linear system using the LU factorization
   lu_solve_stub(input.device().type(), result, input_working_copy, pivots);
@@ -1585,79 +1571,30 @@ Tensor cholesky_inverse(const Tensor &input, bool upper) {
   return result;
 }
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lu_factor ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lu ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-DEFINE_DISPATCH(lu_factor_stub);
+DEFINE_DISPATCH(lu_stub);
 
-TORCH_IMPL_FUNC(linalg_lu_factor_ex_out)(const Tensor& A,
-                                         bool pivot,
-                                         bool check_errors,
-                                         const Tensor& LU,
-                                         const Tensor& pivots,
-                                         const Tensor& info) {
-  const auto LU_f_contig = LU.transpose(-2, -1).is_contiguous() ;
+// TODO: remove check_errors argument
+// https://github.com/pytorch/pytorch/issues/64014
+std::tuple<Tensor, Tensor, Tensor> _lu_with_info(const Tensor& self, bool compute_pivots, bool check_errors) {
+  TORCH_CHECK(self.dim() >= 2,
+           "expected tensor with 2 or more dimensions, got size: ", self.sizes(),
+           " instead");
+  auto m = self.size(-2);
+  auto n = self.size(-1);
+  auto req_size = self.sizes().vec();
+  req_size.pop_back();
+  req_size.back() = std::min(m, n);
+  auto pivots_tensor = at::empty(req_size, self.options().dtype(kInt));
+  req_size.pop_back();
+  auto infos_tensor = at::zeros(req_size, self.options().dtype(kInt));
 
-  if (LU_f_contig && !LU.is_same(A)) {
-    LU.copy_(A);
-  }
-  const auto LU_ = borrow_else_clone(LU_f_contig, LU, A, /*C-contig*/false);
-
-  const auto pivots_contig = pivots.is_contiguous();
-  const auto pivots_ = borrow_else_clone(pivots_contig, pivots, pivots, /*C-contig*/true);
-
-  const auto info_contig = info.is_contiguous();
-  const auto info_ = borrow_else_clone(info_contig, info, info, /*C-contig*/true);
-
-  lu_factor_stub(A.device().type(), *LU_, *pivots_, *info_, pivot);
-
-  if (!LU_f_contig) {
-    LU.copy_(*LU_);
-  }
-  if (!pivots_contig) {
-    pivots.copy_(*pivots_);
-  }
-  if (!info_contig) {
-    info.copy_(*info_);
-  }
-
-  if (check_errors) {
-    if (A.dim() > 2) {
-      batchCheckErrors(info, "torch.linalg.lu_factor_ex");
-    } else {
-      singleCheckErrors(info.item<int64_t>(), "torch.linalg.lu_factor_ex");
-    }
-  }
-}
-
-std::tuple<Tensor&, Tensor&> linalg_lu_factor_out(const Tensor& A, bool pivot, Tensor& LU, Tensor& pivots) {
-  auto info = at::empty({0}, A.options().dtype(kInt));
-  // We pass check_errors as we want to use lu_factor rather than lu_factor_ex in the errors
-  at::linalg_lu_factor_ex_out(LU, pivots, info, A, pivot, /*check_errors=*/false);
-  if (A.dim() > 2) {
-    batchCheckErrors(info, "torch.linalg.lu_factor");
-  } else {
-    singleCheckErrors(info.item<int64_t>(), "torch.linalg.lu_factor");
-  }
-
-  return std::tie(LU, pivots);
-}
-
-std::tuple<Tensor, Tensor> linalg_lu_factor(const Tensor& A, bool pivot) {
-  Tensor LU, pivots, info;
-  std::tie(LU, pivots, info) = at::linalg_lu_factor_ex(A, pivot, /*check_errors=*/false);
-
-  if (A.dim() > 2) {
-    batchCheckErrors(info, "torch.linalg.lu_factor");
-  } else {
-    singleCheckErrors(info.item<int64_t>(), "torch.linalg.lu_factor");
-  }
-
-  return std::make_tuple(std::move(LU), std::move(pivots));
-}
-
-// TODO Deprecate this function in favour of linalg_lu_factor_ex
-std::tuple<Tensor, Tensor, Tensor> _lu_with_info(const Tensor& self, bool compute_pivots, bool) {
-  return at::linalg_lu_factor_ex(self, compute_pivots, false);
+  // lu_stub (apply_lu) requires batched column major (Fortran-contiguous) tensors
+  // 'lu' tensor is modified in-place and must be a copy of 'self'
+  Tensor lu = cloneBatchedColumnMajor(self);
+  lu_stub(self.device().type(), lu, pivots_tensor, infos_tensor, compute_pivots);
+  return std::make_tuple(lu, pivots_tensor, infos_tensor);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangular_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

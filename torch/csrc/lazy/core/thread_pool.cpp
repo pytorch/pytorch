@@ -1,7 +1,6 @@
 #include <torch/csrc/lazy/core/thread_pool.h>
 
 #include <c10/util/Logging.h>
-#include <c10/util/irange.h>
 #include <torch/csrc/lazy/core/config.h>
 #include <torch/csrc/lazy/core/metrics.h>
 
@@ -18,8 +17,7 @@ class ThreadPool {
  public:
   explicit ThreadPool(size_t num_threads) {
     threads_.reserve(num_threads);
-    for (const auto i : c10::irange(num_threads)) {
-      (void)i; //Suppress unused variable warning
+    for (size_t i = 0; i < num_threads; ++i) {
       threads_.emplace_back([this]() { Worker(); });
     }
   }

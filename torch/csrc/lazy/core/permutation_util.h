@@ -2,7 +2,6 @@
 
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
-#include <c10/util/irange.h>
 
 #include <vector>
 
@@ -26,7 +25,7 @@ std::vector<typename Container::value_type> PermuteDimensions(
       dimensions.size() == permutation.size() && IsPermutation(permutation),
       "Invalid permutation specified");
   std::vector<T> output(dimensions.size());
-  for (const auto i : c10::irange(permutation.size())) {
+  for (size_t i = 0; i < permutation.size(); ++i) {
     output[i] = dimensions[permutation[i]];
   }
   return output;
