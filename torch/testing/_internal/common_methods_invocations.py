@@ -8454,6 +8454,7 @@ op_db: List[OpInfo] = [
            dtypesIfROCM=floating_types_and(torch.half),
            supports_inplace_autograd=False,
            supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_addmv),
     OpInfo('addbmm',
            ref=lambda M, batch1, batch2, beta=1, alpha=1: np.add(np.multiply(np.asarray(beta, dtype=M.dtype), M),
@@ -8540,6 +8541,7 @@ op_db: List[OpInfo] = [
            # Reference: https://github.com/pytorch/pytorch/issues/50747
            supports_inplace_autograd=False,
            supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            skips=(
                # Reference: https://github.com/pytorch/pytorch/issues/50747
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager',
@@ -8876,6 +8878,7 @@ op_db: List[OpInfo] = [
                    dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
                    assert_autodiffed=True,
                    supports_forward_ad=True,
+                   supports_fwgrad_bwgrad=True,
                    skips=(
                        # Reference: https://github.com/pytorch/pytorch/issues/54841
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
@@ -8965,6 +8968,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and_complex_and(torch.half, *[torch.bfloat16] if CUDA11OrLater else []),
            sample_inputs_func=sample_inputs_corrcoef,
            supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            supports_out=False),
     UnaryUfuncInfo('cos',
                    ref=np.cos,
@@ -9067,12 +9071,14 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=partial(sample_inputs_cumulative_ops, supports_dtype_kwargs=False),
            supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     OpInfo('cummin',
            dtypes=all_types_and(torch.bool, torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=partial(sample_inputs_cumulative_ops, supports_dtype_kwargs=False),
            supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     UnaryUfuncInfo('deg2rad',
                    ref=np.radians,
@@ -12135,6 +12141,7 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_matmul,
            supports_out=False,
+           supports_fwgrad_bwgrad=True,
            decorators=(
                # https://github.com/pytorch/pytorch/issues/67470
                DecorateInfo(unittest.skip("67470!"),
@@ -12186,6 +12193,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_rbinops,
            supports_out=False,
            supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            skips=(
                # RuntimeError:
                # object has no attribute __rpow__:
@@ -14274,6 +14282,7 @@ op_db: List[OpInfo] = [
            op=lambda self, condition, other: torch.where(condition, self, other),
            sample_inputs_func=sample_inputs_where,
            supports_out=False,
+           supports_forward_ad=True,
            skips=(
                # test does not work with passing lambda for op
                # AssertionError: False is not true :
@@ -14879,6 +14888,7 @@ op_db: List[OpInfo] = [
         identity=0,
         nan_policy='propagate',
         supports_out=False,
+        supports_fwgrad_bwgrad=True,
         promotes_int_to_int64=False,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         skips=(
@@ -14905,6 +14915,7 @@ op_db: List[OpInfo] = [
         identity=1,
         nan_policy='propagate',
         supports_out=False,
+        supports_fwgrad_bwgrad=True,
         promotes_int_to_int64=True,
         # FIXME: "prod_cpu" not implemented for 'BFloat16'
         # FIXME: "prod_cpu" not implemented for 'Half'
@@ -14960,6 +14971,7 @@ op_db: List[OpInfo] = [
         method_variant=None,
         nan_policy='propagate',
         supports_out=False,
+        supports_fwgrad_bwgrad=True,
         promotes_int_to_float=True,
         dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
         skips=(
@@ -15002,6 +15014,7 @@ op_db: List[OpInfo] = [
         method_variant=None,
         nan_policy='propagate',
         supports_out=False,
+        supports_fwgrad_bwgrad=True,
         promotes_int_to_float=True,
         dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
         skips=(
