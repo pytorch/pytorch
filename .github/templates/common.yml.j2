@@ -67,6 +67,14 @@ concurrency:
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
 {%- endmacro -%}
 
+{%- macro chown_dir(dir) -%}
+      - name: Chown artifacts
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "!{{ dir }}:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+{%- endmacro -%}
+
 {%- macro setup_ec2_linux() -%}
       !{{ display_ec2_information() }}
       - name: Log in to ECR

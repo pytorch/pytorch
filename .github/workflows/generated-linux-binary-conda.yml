@@ -147,6 +147,11 @@ jobs:
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/conda/build.sh"
+      - name: Chown artifacts
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - uses: seemethere/upload-artifact-s3@v3
         with:
           name: conda-py3_7-cpu
@@ -512,6 +517,11 @@ jobs:
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/conda/build.sh"
+      - name: Chown artifacts
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - uses: seemethere/upload-artifact-s3@v3
         with:
           name: conda-py3_7-cuda10_2
@@ -887,6 +897,11 @@ jobs:
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/conda/build.sh"
+      - name: Chown artifacts
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - uses: seemethere/upload-artifact-s3@v3
         with:
           name: conda-py3_7-cuda11_1
@@ -1262,6 +1277,11 @@ jobs:
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/conda/build.sh"
+      - name: Chown artifacts
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - uses: seemethere/upload-artifact-s3@v3
         with:
           name: conda-py3_7-cuda11_3
@@ -1637,6 +1657,11 @@ jobs:
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/conda/build.sh"
+      - name: Chown artifacts
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - uses: seemethere/upload-artifact-s3@v3
         with:
           name: conda-py3_7-cuda11_5
@@ -2008,6 +2033,11 @@ jobs:
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/conda/build.sh"
+      - name: Chown artifacts
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - uses: seemethere/upload-artifact-s3@v3
         with:
           name: conda-py3_8-cpu
@@ -2373,6 +2403,11 @@ jobs:
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/conda/build.sh"
+      - name: Chown artifacts
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - uses: seemethere/upload-artifact-s3@v3
         with:
           name: conda-py3_8-cuda10_2
@@ -2748,6 +2783,11 @@ jobs:
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/conda/build.sh"
+      - name: Chown artifacts
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - uses: seemethere/upload-artifact-s3@v3
         with:
           name: conda-py3_8-cuda11_1
@@ -3123,6 +3163,11 @@ jobs:
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/conda/build.sh"
+      - name: Chown artifacts
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - uses: seemethere/upload-artifact-s3@v3
         with:
           name: conda-py3_8-cuda11_3
@@ -3498,6 +3543,11 @@ jobs:
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/conda/build.sh"
+      - name: Chown artifacts
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - uses: seemethere/upload-artifact-s3@v3
         with:
           name: conda-py3_8-cuda11_5
@@ -3869,6 +3919,11 @@ jobs:
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/conda/build.sh"
+      - name: Chown artifacts
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - uses: seemethere/upload-artifact-s3@v3
         with:
           name: conda-py3_9-cpu
@@ -4234,6 +4289,11 @@ jobs:
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/conda/build.sh"
+      - name: Chown artifacts
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - uses: seemethere/upload-artifact-s3@v3
         with:
           name: conda-py3_9-cuda10_2
@@ -4609,6 +4669,11 @@ jobs:
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/conda/build.sh"
+      - name: Chown artifacts
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - uses: seemethere/upload-artifact-s3@v3
         with:
           name: conda-py3_9-cuda11_1
@@ -4984,6 +5049,11 @@ jobs:
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/conda/build.sh"
+      - name: Chown artifacts
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - uses: seemethere/upload-artifact-s3@v3
         with:
           name: conda-py3_9-cuda11_3
@@ -5359,6 +5429,11 @@ jobs:
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/conda/build.sh"
+      - name: Chown artifacts
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - uses: seemethere/upload-artifact-s3@v3
         with:
           name: conda-py3_9-cuda11_5

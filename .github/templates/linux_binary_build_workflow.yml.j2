@@ -119,6 +119,7 @@ jobs:
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/!{{ config["package_type"] }}/build.sh"
+      !{{ common.chown_dir("${RUNNER_TEMP}/artifacts") }}
       - uses: !{{ common.upload_artifact_s3_action }}
         with:
           name: !{{ config["build_name"] }}
