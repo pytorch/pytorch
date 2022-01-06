@@ -7,10 +7,13 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.intrinsic as nni
+import torch.nn.quantized as nnq
+toq = torch.ops.quantized
 from torch.testing._internal.common_quantization import (
     skipIfNoFBGEMM,
     skip_if_no_torchvision,
     QuantizationTestCase,
+    NodeSpec,
 )
 from torch.quantization import (
     ObserverBase,
@@ -51,10 +54,10 @@ class QuantizeDBRTestCase(QuantizationTestCase):
     ):
         m_copy = copy.deepcopy(m)
 
-        m.qconfig = qconfig
+        qconfig_dict = {'': qconfig}
 
         mp = _quantize_dbr.prepare(
-            m, example_args, fuse_modules=fuse_modules)
+            m, qconfig_dict, example_args, fuse_modules=fuse_modules)
         out_p = mp(*example_args)
         # print(mp)
         mq = _quantize_dbr.convert(mp)
@@ -104,101 +107,11 @@ class QuantizeDBRTestCase(QuantizationTestCase):
             traced_rewritten_out = traced_rewritten(*example_args)
             self.assertTrue(_allclose(traced_rewritten_out, out_q))
 
-
 @skipIfNoFBGEMM
-class TestQuantizeDBR(QuantizeDBRTestCase):
-    def test_fusion(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv = torch.nn.Conv2d(1, 1, 1)
-                self.relu = torch.nn.ReLU()
-                self.child = nn.Sequential(
-                    nn.Conv2d(1, 1, 1),
-                    nn.ReLU(),
-                )
-
-            def forward(self, x):
-                x = self.conv(x)
-                x = self.relu(x)
-                x = self.child(x)
-                return x
-
-        m = M().eval()
-        m.qconfig = torch.quantization.default_qconfig
-        mp = _quantize_dbr.prepare(m, (torch.randn(1, 1, 1, 1),))
-        self.assertTrue(isinstance(mp.conv, nni.ConvReLU2d))
-        self.assertTrue(isinstance(mp.child[0], nni.ConvReLU2d))
-
-    def test_fusion2(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv = torch.nn.Conv2d(1, 1, 1)
-                self.bn = torch.nn.BatchNorm2d(1)
-                # self.conv2 = torch.nn.Conv2d(1, 1, 1)
-                self.relu = torch.nn.LeakyReLU()
-
-            def forward(self, x):
-                x = self.conv(x)
-                x = self.bn(x)
-                x = self.relu(x)
-                return x
-
-        m = M().eval()
-        qconfig = torch.quantization.default_qconfig
-        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
-
-    def test_fusion_called_multiple_times(self):
-        """
-        Tests that fusion works if the modules to fuse get called multiple
-        times in the same forward.
-        """
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv = torch.nn.Conv2d(1, 1, 1)
-                self.relu = torch.nn.ReLU()
-
-            def forward(self, x):
-                for _ in range(2):
-                    x = self.conv(x)
-                    x = self.relu(x)
-                return x
-
-        m = M().eval()
-        qconfig = torch.quantization.default_qconfig
-        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
-
-    def test_observers_not_touched_by_tracing(self):
-        """
-        Verifies that running dynamic tracing does not change any data
-        stored in observers and fake quants.
-        """
-        m = nn.Sequential(nn.Conv2d(1, 1, 1)).eval()
-        m.qconfig = torch.quantization.default_qconfig
-        mp = _quantize_dbr.prepare(m, (torch.randn(1, 1, 1, 1),))
-        for _, mod in mp.named_modules():
-            if isinstance(mod, (ObserverBase, FakeQuantizeBase)):
-                scale, zp = mod.calculate_qparams()
-                # Assume that if scale is 1.0 and zp is 0, no calibration
-                # has happened.
-                self.assertTrue(torch.allclose(scale, torch.ones(1)))
-                self.assertTrue(torch.equal(zp, torch.zeros(1, dtype=torch.long)))
-
-    def test_multiple_modules(self):
-        m = nn.Sequential(
-            nn.Sequential(nn.Conv2d(1, 1, 1)),
-            nn.Sequential(nn.Conv2d(1, 1, 1)),
-        ).eval()
-        qconfig = torch.quantization.default_qconfig
-        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
-
-    def test_child_modules(self):
-        m = nn.Sequential(nn.Sequential(nn.Conv2d(1, 1, 1))).eval()
-        qconfig = torch.quantization.default_qconfig
-        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
-
+class TestQuantizeDBRIndividualOps(QuantizeDBRTestCase):
+    """
+    Tests that DBR quantization covers individual ops
+    """
     def test_conv(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -213,34 +126,7 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
 
-    def test_conv_mod_qat(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv = torch.nn.Conv2d(1, 1, 1)
-
-            def forward(self, x):
-                x1 = self.conv(x)
-                return x1
-
-        m = M().eval()
-        qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
-        self._test_auto_tracing(
-            copy.deepcopy(m), qconfig, (torch.randn(1, 1, 2, 2),))
-
-        # test backprop does not crash
-        m.qconfig = qconfig
-        inputs = torch.randn(1, 1, 1, 1)
-        inputs.requires_grad = True
-        mp = _quantize_dbr.prepare(m, (inputs,))
-        output = mp(inputs)
-        labels = torch.randn(1, 1, 1, 1)
-        loss = (output - labels).sum()
-        loss.backward()
-        optim = torch.optim.SGD(mp.parameters(), lr=0.01)
-        optim.step()
-
-    def test_conv_functional_qat(self):
+    def test_conv_functional(self):
 
         class M(torch.nn.Module):
             def __init__(self, weight2d, bias2d):
@@ -258,38 +144,26 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
                     self.dilation2d, self.groups)
                 return x
 
-        m = M(torch.randn(1, 1, 1, 1), torch.randn(1)).eval()
-        qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
-        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
+        model_fp32 = M(torch.randn(1, 1, 1, 1), torch.randn(1)).eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
 
-        # test backprop does not crash
-        m.qconfig = qconfig
-        inputs = torch.randn(1, 1, 1, 1)
-        inputs.requires_grad = True
-        mp = _quantize_dbr.prepare(m, (inputs,))
-        output = mp(inputs)
-        labels = torch.randn(1, 1, 1, 1)
-        loss = (output - labels).sum()
-        loss.backward()
-        optim = torch.optim.SGD(mp.parameters(), lr=0.01)
-        optim.step()
-
-    def test_dropout_conv(self):
-        class M(torch.nn.Module):
+    def test_linear_functional(self):
+        class LinearFunctional(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.dropout = nn.Dropout()
-                self.conv = torch.nn.Conv2d(1, 1, 1)
+                self.w1 = nn.Parameter(torch.empty(4, 4))
+                self.b1 = nn.Parameter(torch.ones(4))
+                torch.nn.init.kaiming_uniform_(self.w1, a=math.sqrt(5))
 
             def forward(self, x):
-                # this can be sometimes inplace
-                x1 = self.dropout(x)
-                x1 = self.conv(x)
-                return x1
+                x = F.linear(x, self.w1, self.b1)
+                return x
 
-        m = M().eval()
+        model_fp32 = LinearFunctional().eval()
         qconfig = torch.quantization.default_qconfig
-        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
+        self._test_auto_tracing(
+            model_fp32, qconfig, (torch.randn(1, 1, 4, 4),))
 
     # TODO(future PR): implement observer sharing to match FX
     def test_cat_fp32(self):
@@ -325,217 +199,6 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
                 # FX graph mode quant does not support this yet
                 do_fx_comparison=False)
 
-    @unittest.skip('FX graph mode is using fake_quantize with PTQ, TODO verify')
-    def test_conv_unsupported_inplace_conv(self):
-        """
-        Verifies that having an quantizeable op which is inplace
-        is handled well
-        """
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv = torch.nn.Conv2d(1, 1, 1)
-                self.conv2 = torch.nn.Conv2d(1, 1, 1)
-
-            def forward(self, x):
-                x = self.conv(x)
-                x = F.hardsigmoid(x, inplace=True)
-                x = self.conv2(x)
-                return x
-
-        m = M().eval()
-        qconfig = torch.quantization.default_qconfig
-        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
-
-    def test_conv_flatten_linear(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv = torch.nn.Conv2d(1, 1, 1)
-                self.linear = torch.nn.Linear(1, 1)
-
-            def forward(self, x):
-                x1 = self.conv(x)
-                # TODO(future PR): unbreak this
-                # x1 = torch.nn.functional.adaptive_avg_pool2d(x, (1, 1))
-                x1 = torch.nn.functional.adaptive_avg_pool2d(x1, (1, 1))
-                x2 = torch.flatten(x1, 1)
-                x3 = self.linear(x2)
-                return x3
-
-        m = M().eval()
-        qconfig = torch.quantization.default_qconfig
-        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 1, 1),))
-
-    def test_conv_add(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv = torch.nn.Conv2d(1, 1, 1)
-
-            def forward(self, x):
-                x1 = self.conv(x)
-                print(x)
-                x2 = x1 + x
-                return x2
-
-        m = M().eval()
-        qconfig = torch.quantization.default_qconfig
-        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
-
-    def test_conv_scalar_add(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv = torch.nn.Conv2d(1, 1, 1)
-
-            def forward(self, x):
-                x = self.conv(x)
-                x = x + 1.0
-                return x
-
-        model_fp32 = M().eval()
-        qconfig = torch.quantization.default_qconfig
-        self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
-
-    def test_conv_relu_add(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv = torch.nn.Conv2d(1, 1, 1)
-                self.relu = torch.nn.ReLU()
-
-            def forward(self, x):
-                x1 = self.conv(x)
-                x2 = self.relu(x1)
-                x3 = x1 + x
-                return x3
-
-        model_fp32 = M().eval()
-
-        qconfig = torch.quantization.default_qconfig
-        self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
-
-    def test_linear_torch_relu(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.u1 = nn.Linear(1, 1)
-                self.v1 = nn.Linear(1, 1)
-                self.u2 = nn.Linear(1, 1)
-                self.v2 = nn.Linear(1, 1)
-                self.w = nn.Linear(1, 1)
-
-            def forward(self, x):
-                x = self.w(x)
-                x = x + torch.relu(self.v1(torch.relu(self.u1(x))))
-                return x + torch.relu(self.v2(torch.relu(self.u2(x))))
-
-        model_fp32 = M().eval()
-
-        qconfig = torch.quantization.default_qconfig
-        self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 1, 1),))
-
-    def test_conv_functional(self):
-
-        class M(torch.nn.Module):
-            def __init__(self, weight2d, bias2d):
-                super().__init__()
-                self.weight2d = torch.nn.Parameter(weight2d)
-                self.bias2d = torch.nn.Parameter(bias2d)
-                self.stride2d = (1, 1)
-                self.padding2d = (0, 0)
-                self.dilation2d = (1, 1)
-                self.groups = 1
-
-            def forward(self, x):
-                x = F.conv2d(
-                    x, self.weight2d, self.bias2d, self.stride2d, self.padding2d,
-                    self.dilation2d, self.groups)
-                return x
-
-        model_fp32 = M(torch.randn(1, 1, 1, 1), torch.randn(1)).eval()
-        qconfig = torch.quantization.default_qconfig
-        self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
-
-    def test_conv_functional_dynamic_weights(self):
-        class M(torch.nn.Module):
-            def __init__(self, weight2d, bias2d):
-                super().__init__()
-                self.weight2d = torch.nn.Parameter(weight2d)
-                self.bias2d = torch.nn.Parameter(bias2d)
-                self.stride2d = (1, 1)
-                self.padding2d = (0, 0)
-                self.dilation2d = (1, 1)
-                self.groups = 1
-
-            def forward(self, x):
-                updated_weight = self.weight2d * x
-                x = F.conv2d(
-                    x, updated_weight, self.bias2d, self.stride2d, self.padding2d,
-                    self.dilation2d, self.groups)
-                return x
-
-        model_fp32 = M(torch.randn(1, 1, 1, 1), torch.randn(1)).eval()
-        qconfig = torch.quantization.default_qconfig
-        self._test_auto_tracing(
-            model_fp32, qconfig, (torch.randn(1, 1, 2, 2),),
-            # FX implements this functionality instead of skipping it
-            do_fx_comparison=False,
-            # TODO enable scripting support for this
-            do_torchscript_checks=False)
-
-    def test_linear_functional(self):
-        class LinearFunctional(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.w1 = nn.Parameter(torch.empty(4, 4))
-                self.b1 = nn.Parameter(torch.ones(4))
-                torch.nn.init.kaiming_uniform_(self.w1, a=math.sqrt(5))
-
-            def forward(self, x):
-                x = F.linear(x, self.w1, self.b1)
-                return x
-
-        model_fp32 = LinearFunctional().eval()
-        qconfig = torch.quantization.default_qconfig
-        self._test_auto_tracing(
-            model_fp32, qconfig, (torch.randn(1, 1, 4, 4),))
-
-    def test_gelu_linear(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.gelu = torch.nn.GELU()
-                self.linear = torch.nn.Linear(1, 1)
-
-            def forward(self, x):
-                x = self.linear(x)
-                x = self.gelu(x)
-                return x
-
-        model_fp32 = M().eval()
-        qconfig = torch.quantization.default_qconfig
-        self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 1, 1),))
-
-    def test_dropout(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.dropout = nn.Dropout()
-                self.linear = torch.nn.Linear(1, 1)
-                self.linear2 = torch.nn.Linear(1, 1)
-
-            def forward(self, x):
-                x = self.linear(x)
-                x = self.dropout(x)
-                x = self.linear2(x)
-                return x
-
-        model_fp32 = M().eval()
-        qconfig = torch.quantization.default_qconfig
-        self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 1, 1),))
-
     def test_add(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -561,22 +224,6 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
             # FX graph mode quantization does not automatically detect
             # tensor inputs in non-float dtypes.
             do_fx_comparison=False)
-
-    def test_module_then_add(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(1, 1)
-
-            def forward(self, x):
-                x = self.linear(x)
-                x = x + 1.0
-                x = x + 1.0
-                return x
-
-        model_fp32 = M().eval()
-        qconfig = torch.quantization.default_qconfig
-        self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 1, 1),))
 
     def test_sub(self):
         class M(torch.nn.Module):
@@ -628,6 +275,250 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
 
+    def test_embedding(self):
+        # Note: this test is just testing that models with embeddings
+        # do not crash with a global qconfig defined. Embedding quantization
+        # is not actually happening in this prototype yet.
+        # TODO(future PR): fix this and update this code.
+
+        # test subclass
+        class EmbeddingSubclass(nn.Embedding):
+            pass
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.embedding = EmbeddingSubclass(1, 1)
+
+            def forward(self, x):
+                x = self.embedding(x)
+                return x
+
+        model_fp32 = M().eval()
+        qconfig = torch.quantization.default_dynamic_qconfig
+        self._test_auto_tracing(
+            model_fp32, qconfig, (torch.LongTensor([[0]]),),
+            fuse_modules=False)
+
+        # test regular embedding
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.embedding = nn.Embedding(1, 1)
+
+            def forward(self, x):
+                x = self.embedding(x)
+                return x
+
+        model_fp32 = M().eval()
+        qconfig = torch.quantization.default_dynamic_qconfig
+        self._test_auto_tracing(
+            model_fp32, qconfig, (torch.LongTensor([[0]]),),
+            fuse_modules=False)
+
+
+@skipIfNoFBGEMM
+class TestQuantizeDBR(QuantizeDBRTestCase):
+    def test_fusion(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+                self.relu = torch.nn.ReLU()
+                self.child = nn.Sequential(
+                    nn.Conv2d(1, 1, 1),
+                    nn.ReLU(),
+                )
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.relu(x)
+                x = self.child(x)
+                return x
+
+        m = M().eval()
+        qconfig = torch.quantization.default_qconfig
+        mp = _quantize_dbr.prepare(m, {'': qconfig}, (torch.randn(1, 1, 1, 1),))
+        self.assertTrue(isinstance(mp.conv, nni.ConvReLU2d))
+        self.assertTrue(isinstance(mp.child[0], nni.ConvReLU2d))
+
+    def test_fusion2(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+                self.bn = torch.nn.BatchNorm2d(1)
+                # self.conv2 = torch.nn.Conv2d(1, 1, 1)
+                self.relu = torch.nn.LeakyReLU()
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                x = self.relu(x)
+                return x
+
+        m = M().eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
+
+    def test_fusion_called_multiple_times(self):
+        """
+        Tests that fusion works if the modules to fuse get called multiple
+        times in the same forward.
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                for _ in range(2):
+                    x = self.conv(x)
+                    x = self.relu(x)
+                return x
+
+        m = M().eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
+
+    def test_observers_not_touched_by_tracing(self):
+        """
+        Verifies that running dynamic tracing does not change any data
+        stored in observers and fake quants.
+        """
+        m = nn.Sequential(nn.Conv2d(1, 1, 1)).eval()
+        qconfig = torch.quantization.default_qconfig
+        mp = _quantize_dbr.prepare(m, {'': qconfig}, (torch.randn(1, 1, 1, 1),))
+        for _, mod in mp.named_modules():
+            if isinstance(mod, (ObserverBase, FakeQuantizeBase)):
+                scale, zp = mod.calculate_qparams()
+                # Assume that if scale is 1.0 and zp is 0, no calibration
+                # has happened.
+                self.assertTrue(torch.allclose(scale, torch.ones(1)))
+                self.assertTrue(torch.equal(zp, torch.zeros(1, dtype=torch.long)))
+
+    def test_multiple_modules(self):
+        m = nn.Sequential(
+            nn.Sequential(nn.Conv2d(1, 1, 1)),
+            nn.Sequential(nn.Conv2d(1, 1, 1)),
+        ).eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
+
+    def test_child_modules(self):
+        m = nn.Sequential(nn.Sequential(nn.Conv2d(1, 1, 1))).eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
+
+    def test_conv_mod_qat(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x1 = self.conv(x)
+                return x1
+
+        m = M().eval()
+        qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
+        self._test_auto_tracing(
+            copy.deepcopy(m), qconfig, (torch.randn(1, 1, 2, 2),))
+
+        # test backprop does not crash
+        inputs = torch.randn(1, 1, 1, 1)
+        inputs.requires_grad = True
+        mp = _quantize_dbr.prepare(m, {'': qconfig}, (inputs,))
+        output = mp(inputs)
+        labels = torch.randn(1, 1, 1, 1)
+        loss = (output - labels).sum()
+        loss.backward()
+        optim = torch.optim.SGD(mp.parameters(), lr=0.01)
+        optim.step()
+
+    def test_conv_functional_qat(self):
+
+        class M(torch.nn.Module):
+            def __init__(self, weight2d, bias2d):
+                super().__init__()
+                self.weight2d = torch.nn.Parameter(weight2d)
+                self.bias2d = torch.nn.Parameter(bias2d)
+                self.stride2d = (1, 1)
+                self.padding2d = (0, 0)
+                self.dilation2d = (1, 1)
+                self.groups = 1
+
+            def forward(self, x):
+                x = F.conv2d(
+                    x, self.weight2d, self.bias2d, self.stride2d, self.padding2d,
+                    self.dilation2d, self.groups)
+                return x
+
+        m = M(torch.randn(1, 1, 1, 1), torch.randn(1)).eval()
+        qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
+        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
+
+        # test backprop does not crash
+        inputs = torch.randn(1, 1, 1, 1)
+        inputs.requires_grad = True
+        mp = _quantize_dbr.prepare(m, {'': qconfig}, (inputs,))
+        output = mp(inputs)
+        labels = torch.randn(1, 1, 1, 1)
+        loss = (output - labels).sum()
+        loss.backward()
+        optim = torch.optim.SGD(mp.parameters(), lr=0.01)
+        optim.step()
+
+    @unittest.skip('FX graph mode is using fake_quantize with PTQ, TODO verify')
+    def test_conv_unsupported_inplace_conv(self):
+        """
+        Verifies that having an quantizeable op which is inplace
+        is handled well
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+                self.conv2 = torch.nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = F.hardsigmoid(x, inplace=True)
+                x = self.conv2(x)
+                return x
+
+        m = M().eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
+
+    def test_conv_functional_dynamic_weights(self):
+        class M(torch.nn.Module):
+            def __init__(self, weight2d, bias2d):
+                super().__init__()
+                self.weight2d = torch.nn.Parameter(weight2d)
+                self.bias2d = torch.nn.Parameter(bias2d)
+                self.stride2d = (1, 1)
+                self.padding2d = (0, 0)
+                self.dilation2d = (1, 1)
+                self.groups = 1
+
+            def forward(self, x):
+                updated_weight = self.weight2d * x
+                x = F.conv2d(
+                    x, updated_weight, self.bias2d, self.stride2d, self.padding2d,
+                    self.dilation2d, self.groups)
+                return x
+
+        model_fp32 = M(torch.randn(1, 1, 1, 1), torch.randn(1)).eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(
+            model_fp32, qconfig, (torch.randn(1, 1, 2, 2),),
+            # FX implements this functionality instead of skipping it
+            do_fx_comparison=False,
+            # TODO enable scripting support for this
+            do_torchscript_checks=False)
+
     def test_method(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -639,21 +530,6 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         model_fp32 = M().eval()
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
-
-    def test_add_linear(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = nn.Linear(1, 1)
-
-            def forward(self, x):
-                x = x + x
-                x = self.linear(x)
-                return x
-
-        model_fp32 = M().eval()
-        qconfig = torch.quantization.default_qconfig
-        self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 1, 1),))
 
     def test_module_created_during_forward(self):
         """Some BERT models have this pattern"""
@@ -785,6 +661,29 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
 
+    def test_unsupported_ops_recorded(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv2d = nn.Conv2d(1, 1, 1)
+                self.softshrink = nn.Softshrink()
+
+            def forward(self, x):
+                # supported
+                x = self.conv2d(x)
+                x = x + x
+                # not supported
+                x = self.softshrink(x)
+                x = F.tanhshrink(x)
+                return x
+
+        m = M().eval()
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        mp = _quantize_dbr.prepare(m, qconfig_dict, (torch.randn(1, 1, 1, 1),))
+        expected = set([nn.Softshrink, F.tanhshrink])
+        self.assertTrue(
+            mp._auto_quant_state.seen_op_types_without_op_hooks == expected)
+
     def test_unknown_op_after_quantized(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -796,67 +695,6 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(
             model_fp32, qconfig, (torch.randn(1, 1, 2, 2),),
-            fuse_modules=False)
-
-    def test_embedding(self):
-        # Note: this test is just testing that models with embeddings
-        # do not crash with a global qconfig defined. Embedding quantization
-        # is not actually happening in this prototype yet.
-        # TODO(future PR): fix this and update this code.
-
-        # test subclass
-        class EmbeddingSubclass(nn.Embedding):
-            pass
-
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.embedding = EmbeddingSubclass(1, 1)
-
-            def forward(self, x):
-                x = self.embedding(x)
-                return x
-
-        model_fp32 = M().eval()
-        qconfig = torch.quantization.default_dynamic_qconfig
-        self._test_auto_tracing(
-            model_fp32, qconfig, (torch.LongTensor([[0]]),),
-            fuse_modules=False)
-
-        # test regular embedding
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.embedding = nn.Embedding(1, 1)
-
-            def forward(self, x):
-                x = self.embedding(x)
-                return x
-
-        model_fp32 = M().eval()
-        qconfig = torch.quantization.default_dynamic_qconfig
-        self._test_auto_tracing(
-            model_fp32, qconfig, (torch.LongTensor([[0]]),),
-            fuse_modules=False)
-
-    def test_inplace_add(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.embedding1 = nn.Embedding(1, 1)
-                self.embedding2 = nn.Embedding(1, 1)
-                self.layernorm = nn.LayerNorm(1)
-
-            def forward(self, x):
-                x1 = self.embedding1(x)
-                x1 += self.embedding2(x)
-                x2 = self.layernorm(x1)
-                return x
-
-        model_fp32 = M().eval()
-        qconfig = torch.quantization.default_qconfig
-        self._test_auto_tracing(
-            model_fp32, qconfig, (torch.LongTensor([[0]]),),
             fuse_modules=False)
 
     # this is broken because AutoQuantizationState appears in self.items
@@ -908,29 +746,6 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
             # the module is not symbolically traceable
             do_fx_comparison=False)
 
-    def test_lstm(self):
-        # building block of torchbenchmark/tts_angular
-        class LSTMWithProjection(nn.Module):
-            def __init__(self, input_size, hidden_size, proj_size):
-                super().__init__()
-                self.input_size = input_size
-                self.hidden_size = hidden_size
-                self.proj_size = proj_size
-                self.lstm = nn.LSTM(input_size, hidden_size, batch_first=True)
-                self.linear = nn.Linear(hidden_size, proj_size, bias=False)
-
-            def forward(self, x):
-                self.lstm.flatten_parameters()
-                o, (_, _) = self.lstm(x)
-                return self.linear(o)
-
-        m = LSTMWithProjection(1, 1, 1).eval()
-        qconfig = torch.quantization.default_qconfig
-        self._test_auto_tracing(
-            m, qconfig, (torch.randn(1, 1, 1),),
-            # the module is not symbolically traceable
-            do_fx_comparison=False)
-
     # TODO(future PR): move into a separate test file
     def test_numeric_suite(self):
         class M(torch.nn.Module):
@@ -946,9 +761,9 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
                 return x
 
         m = M().eval()
-        m.qconfig = torch.quantization.default_qconfig
+        qconfig = torch.quantization.default_qconfig
         example_args = (torch.randn(1, 1, 2, 2),)
-        mp = _quantize_dbr.prepare(m, example_args)
+        mp = _quantize_dbr.prepare(m, {'': qconfig}, example_args)
         out_p = mp(*example_args)
         mq = _quantize_dbr.convert(copy.deepcopy(mp))
         out_q = mq(*example_args)
@@ -974,6 +789,410 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
                 v['node_output']['mq'][0]['fqn'],
                 v['node_output']['mq'][0]['ref_node_target_type'],
                 v['node_output']['mq'][0]['sqnr']])
+
+    def test_qconfig_dict_global(self):
+        """
+        Verifies that the '' option of qconfig_dict works
+        """
+
+        # regular case
+        m = nn.Sequential(nn.Conv2d(1, 1, 1))
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        example_args = (torch.randn(1, 1, 1, 1),)
+        mp = _quantize_dbr.prepare(m, qconfig_dict, example_args)
+        mp(*example_args)
+        mq = _quantize_dbr.convert(mp)
+        mq(*example_args)
+        self.assertTrue(isinstance(mq[0], nnq.Conv2d))
+
+        # quantization turned off
+        m = nn.Sequential(nn.Conv2d(1, 1, 1))
+        qconfig_dict = {'': None}
+        example_args = (torch.randn(1, 1, 1, 1),)
+        mp = _quantize_dbr.prepare(m, qconfig_dict, example_args)
+        mp(*example_args)
+        mq = _quantize_dbr.convert(mp)
+        mq(*example_args)
+        self.assertTrue(isinstance(mq[0], nn.Conv2d))
+
+    def test_qconfig_dict_object_type_module(self):
+        """
+        Verifies that the 'object_type' option of qconfig_dict works
+        on module types.
+        """
+        m = nn.Sequential(
+            nn.Conv2d(1, 1, 1),
+            nn.Hardswish(),
+            nn.Conv2d(1, 1, 1),
+        )
+        qconfig_dict = {
+            '': torch.quantization.default_qconfig,
+            'object_type': [
+                (nn.Conv2d, torch.quantization.default_qconfig),
+                (nn.Hardswish, None),
+            ],
+        }
+        example_args = (torch.randn(1, 1, 1, 1),)
+        mp = _quantize_dbr.prepare(m, qconfig_dict, example_args)
+        mp(*example_args)
+        mq = _quantize_dbr.convert(mp)
+        mq(*example_args)
+        self.assertTrue(isinstance(mq[0], nnq.Conv2d))
+        self.assertTrue(isinstance(mq[1], nn.Hardswish))
+        self.assertTrue(isinstance(mq[2], nnq.Conv2d))
+
+    def test_qconfig_dict_object_type_function(self):
+        """
+        Verifies that the 'object_type' option of qconfig_dict works
+        on function types.
+        """
+        class M(nn.Module):
+            def forward(self, x):
+                x = x + x
+                x = x * x
+                return x
+
+        m = M()
+        qconfig_dict = {
+            '': torch.quantization.default_qconfig,
+            'object_type': [
+                (torch.add, None),
+            ],
+        }
+        example_args = (torch.randn(1, 1, 1, 1),)
+        mp = _quantize_dbr.prepare(m, qconfig_dict, example_args)
+        mp(*example_args)
+        mq = _quantize_dbr.convert(mp)
+        mq(*example_args)
+        rewritten = mq.rewrite_for_scripting()
+        expected_occurrence = {
+            NodeSpec.call_function(torch.add): 1,
+            NodeSpec.call_function(toq.add): 0,
+            NodeSpec.call_function(toq.mul): 1,
+        }
+        self.checkGraphModuleNodes(
+            rewritten, expected_node_occurrence=expected_occurrence)
+
+    def test_qconfig_dict_object_type_method(self):
+        """
+        Verifies that the 'object_type' option of qconfig_dict works
+        on method types.
+        """
+        class M(nn.Module):
+            def forward(self, x):
+                x = x.add(x)
+                x = x.mul(x)
+                return x
+
+        m = M()
+        qconfig_dict = {
+            '': torch.quantization.default_qconfig,
+            'object_type': [
+                (torch.Tensor.add, None),
+            ],
+        }
+        example_args = (torch.randn(1, 1, 1, 1),)
+        mp = _quantize_dbr.prepare(m, qconfig_dict, example_args)
+        mp(*example_args)
+        mq = _quantize_dbr.convert(mp)
+        mq(*example_args)
+        rewritten = mq.rewrite_for_scripting()
+        expected_occurrence = {
+            NodeSpec.call_function(torch.add): 1,
+            NodeSpec.call_function(toq.add): 0,
+            NodeSpec.call_function(toq.mul): 1,
+        }
+        self.checkGraphModuleNodes(
+            rewritten, expected_node_occurrence=expected_occurrence)
+
+    def test_qconfig_dict_object_type_function_global_none(self):
+        """
+        Verifies that the 'object_type' option of qconfig_dict works
+        on function types when global qconfig is None.
+        """
+        class M(nn.Module):
+            def forward(self, x):
+                x = x + x
+                return x
+
+        m = M()
+        qconfig_dict = {
+            '': None,
+            'object_type': [
+                (torch.add, torch.quantization.default_qconfig),
+            ],
+        }
+        example_args = (torch.randn(1, 1, 1, 1),)
+        mp = _quantize_dbr.prepare(m, qconfig_dict, example_args)
+        mp(*example_args)
+        mq = _quantize_dbr.convert(mp)
+        mq(*example_args)
+        rewritten = mq.rewrite_for_scripting()
+        expected_occurrence = {
+            NodeSpec.call_function(torch.add): 0,
+            NodeSpec.call_function(toq.add): 1,
+        }
+        self.checkGraphModuleNodes(
+            rewritten, expected_node_occurrence=expected_occurrence)
+
+    def test_qconfig_dict_module_name(self):
+        """
+        Verifies that the 'module_name' option of qconfig_dict works
+        on module types.
+        """
+        m = nn.Sequential(
+            nn.Sequential(
+                nn.Conv2d(1, 1, 1),
+            ),
+            nn.Conv2d(1, 1, 1),
+            nn.Sequential(
+                nn.Conv2d(1, 1, 1),
+                nn.Conv2d(1, 1, 1),
+            ),
+        )
+        qconfig_dict = {
+            '': torch.quantization.default_qconfig,
+            'module_name': [
+                ('0', torch.quantization.default_qconfig),
+                ('1', None),
+                ('2.0', None),
+            ],
+        }
+        example_args = (torch.randn(1, 1, 1, 1),)
+        mp = _quantize_dbr.prepare(m, qconfig_dict, example_args)
+        mp(*example_args)
+        mq = _quantize_dbr.convert(mp)
+        mq(*example_args)
+        self.assertTrue(isinstance(mq[0][0], nnq.Conv2d))
+        self.assertTrue(isinstance(mq[1], nn.Conv2d))
+        self.assertTrue(isinstance(mq[2][0], nn.Conv2d))
+        self.assertTrue(isinstance(mq[2][1], nnq.Conv2d))
+
+
+@skipIfNoFBGEMM
+class TestQuantizeDBRMultipleOps(QuantizeDBRTestCase):
+    """
+    Tests that DBR quantization covers interactions between multiple ops
+
+    Most of these tests were added when the code was an early prototype
+    and were one-off test cases for patterns which happened to break
+    the code on various models at the time of writing. A lot of these
+    can probably be removed in the future as they are replaced by more
+    systematic individual and fusion tests.
+    """
+    def test_dropout_conv(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.dropout = nn.Dropout()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                # this can be sometimes inplace
+                x1 = self.dropout(x)
+                x1 = self.conv(x)
+                return x1
+
+        m = M().eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
+
+    def test_conv_flatten_linear(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+                self.linear = torch.nn.Linear(1, 1)
+
+            def forward(self, x):
+                x1 = self.conv(x)
+                # TODO(future PR): unbreak this
+                # x1 = torch.nn.functional.adaptive_avg_pool2d(x, (1, 1))
+                x1 = torch.nn.functional.adaptive_avg_pool2d(x1, (1, 1))
+                x2 = torch.flatten(x1, 1)
+                x3 = self.linear(x2)
+                return x3
+
+        m = M().eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 1, 1),))
+
+    def test_conv_add(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x1 = self.conv(x)
+                x2 = x1 + x
+                return x2
+
+        m = M().eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
+
+    def test_conv_scalar_add(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = x + 1.0
+                return x
+
+        model_fp32 = M().eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
+
+    def test_conv_relu_add(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                x1 = self.conv(x)
+                x2 = self.relu(x1)
+                x3 = x1 + x
+                return x3
+
+        model_fp32 = M().eval()
+
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
+
+    def test_linear_torch_relu(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.u1 = nn.Linear(1, 1)
+                self.v1 = nn.Linear(1, 1)
+                self.u2 = nn.Linear(1, 1)
+                self.v2 = nn.Linear(1, 1)
+                self.w = nn.Linear(1, 1)
+
+            def forward(self, x):
+                x = self.w(x)
+                x = x + torch.relu(self.v1(torch.relu(self.u1(x))))
+                return x + torch.relu(self.v2(torch.relu(self.u2(x))))
+
+        model_fp32 = M().eval()
+
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 1, 1),))
+
+    def test_gelu_linear(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.gelu = torch.nn.GELU()
+                self.linear = torch.nn.Linear(1, 1)
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = self.gelu(x)
+                return x
+
+        model_fp32 = M().eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 1, 1),))
+
+    def test_dropout(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.dropout = nn.Dropout()
+                self.linear = torch.nn.Linear(1, 1)
+                self.linear2 = torch.nn.Linear(1, 1)
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = self.dropout(x)
+                x = self.linear2(x)
+                return x
+
+        model_fp32 = M().eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 1, 1),))
+
+    def test_module_then_add(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(1, 1)
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = x + 1.0
+                x = x + 1.0
+                return x
+
+        model_fp32 = M().eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 1, 1),))
+
+    def test_add_linear(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(1, 1)
+
+            def forward(self, x):
+                x = x + x
+                x = self.linear(x)
+                return x
+
+        model_fp32 = M().eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 1, 1),))
+
+    def test_inplace_add(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.embedding1 = nn.Embedding(1, 1)
+                self.embedding2 = nn.Embedding(1, 1)
+                self.layernorm = nn.LayerNorm(1)
+
+            def forward(self, x):
+                x1 = self.embedding1(x)
+                x1 += self.embedding2(x)
+                x2 = self.layernorm(x1)
+                return x
+
+        model_fp32 = M().eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(
+            model_fp32, qconfig, (torch.LongTensor([[0]]),),
+            fuse_modules=False)
+
+    def test_lstm(self):
+        # building block of torchbenchmark/tts_angular
+        class LSTMWithProjection(nn.Module):
+            def __init__(self, input_size, hidden_size, proj_size):
+                super().__init__()
+                self.input_size = input_size
+                self.hidden_size = hidden_size
+                self.proj_size = proj_size
+                self.lstm = nn.LSTM(input_size, hidden_size, batch_first=True)
+                self.linear = nn.Linear(hidden_size, proj_size, bias=False)
+
+            def forward(self, x):
+                self.lstm.flatten_parameters()
+                o, (_, _) = self.lstm(x)
+                return self.linear(o)
+
+        m = LSTMWithProjection(1, 1, 1).eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(
+            m, qconfig, (torch.randn(1, 1, 1),),
+            # the module is not symbolically traceable
+            do_fx_comparison=False)
+
 
 @skipIfNoFBGEMM
 class TestQuantizeDBRModels(QuantizeDBRTestCase):
