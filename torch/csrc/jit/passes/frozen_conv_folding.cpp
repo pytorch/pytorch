@@ -17,8 +17,8 @@
 #include <ATen/Functions.h>
 #else
 #include <ATen/ops/ones_like.h>
-#include <ATen/ops/zeros_like.h>
 #include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like.h>
 #endif
 
 namespace torch {
