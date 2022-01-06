@@ -61,6 +61,10 @@ from enum import Enum
 from statistics import mean
 import functools
 from .composite_compliance import no_dispatch
+from torch.testing._internal.common_dtype import get_all_dtypes
+
+# The implementation should be moved here as soon as the deprecation period is over.
+from torch.testing._legacy import get_all_device_types  # noqa: F401
 
 torch.backends.disable_global_flags()
 
@@ -1370,16 +1374,34 @@ try:
 except ImportError:
     print('Fail to import hypothesis in common_utils, tests are not derandomized')
 
+
+def remove_device_and_dtype_suffixes(test_name: str) -> str:
+    device_suffixes = get_all_device_types()
+    dtype_suffixes = [str(dt)[len("torch."):] for dt in get_all_dtypes()]
+
+    test_name_chunks = test_name.split("_")
+    if test_name_chunks[-1] in dtype_suffixes:
+        if test_name_chunks[-2] in device_suffixes:
+            return "_".join(test_name_chunks[0:-2])
+        return "_".join(test_name_chunks[0:-1])
+    return test_name
+
+
 def check_if_enable(test: unittest.TestCase):
     test_suite = str(test.__class__).split('\'')[1]
-    test_name = f'{test._testMethodName} ({test_suite})'
-    if slow_tests_dict is not None and test_name in slow_tests_dict:
+    raw_test_name = f'{test._testMethodName} ({test_suite})'
+    sanitized_test_name = f'{remove_device_and_dtype_suffixes(test._testMethodName)} ({test_suite})'
+    print(sanitized_test_name)
+    if slow_tests_dict is not None and raw_test_name in slow_tests_dict:
         getattr(test, test._testMethodName).__dict__['slow_test'] = True
         if not TEST_WITH_SLOW:
             raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
     if not IS_SANDCASTLE and disabled_tests_dict is not None:
-        if test_name in disabled_tests_dict:
-            issue_url, platforms = disabled_tests_dict[test_name]
+        for test, (issue_url, platforms) in disabled_tests_dict:
+            test_name = test.split()[0]
+            test_suite = test.split()[1][1:-1]
+            issue_url, platforms = disabled_tests_dict[sanitized_test_name] \
+                if sanitized_test_name in disabled_tests_dict else disabled_tests_dict[raw_test_name]
             platform_to_conditional: Dict = {
                 "mac": IS_MACOS,
                 "macos": IS_MACOS,
@@ -1390,11 +1412,12 @@ def check_if_enable(test: unittest.TestCase):
                 "asan": TEST_WITH_ASAN
             }
             if platforms == [] or any([platform_to_conditional[platform] for platform in platforms]):
-                raise unittest.SkipTest(
-                    f"Test is disabled because an issue exists disabling it: {issue_url}" +
-                    f" for {'all' if platforms == [] else ''}platform(s) {', '.join(platforms)}. " +
-                    "If you're seeing this on your local machine and would like to enable this test, " +
-                    "please make sure IN_CI is not set and you are not using the flag --import-disabled-tests.")
+                skip_msg = f"Test is disabled because an issue exists disabling it: {issue_url}" \
+                    f" for {'all' if platforms == [] else ''}platform(s) {', '.join(platforms)}. " \
+                    "If you're seeing this on your local machine and would like to enable this test, " \
+                    "please make sure IN_CI is not set and you are not using the flag --import-disabled-tests."
+                print(skip_msg)
+                raise unittest.SkipTest(skip_msg)
     if TEST_SKIP_FAST:
         if not getattr(test, test._testMethodName).__dict__.get('slow_test', False):
             raise unittest.SkipTest("test is fast; we disabled it with PYTORCH_TEST_SKIP_FAST")
