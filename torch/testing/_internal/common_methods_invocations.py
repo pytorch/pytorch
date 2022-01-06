@@ -11860,11 +11860,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_pow,
            supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           skips=(
-               # Passes for complex, but for float - Need: _s_where
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad',
-                            dtypes=[torch.float64]),),),
+           supports_fwgrad_bwgrad=True),
     OpInfo('qr',
            op=torch.qr,
            dtypes=floating_and_complex_types(),
@@ -12556,9 +12552,6 @@ op_db: List[OpInfo] = [
                    skips=(
                        # The complex formula might be wrong
                        DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD',
-                                    dtypes=complex_types()),
-                       # The complex formula might be wrong
-                       DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad',
                                     dtypes=complex_types()),
                    )),
     UnaryUfuncInfo('isfinite',
