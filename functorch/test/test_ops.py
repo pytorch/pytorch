@@ -995,7 +995,7 @@ class TestDecompositionOpInfo(TestCase):
         # copied from common_utils.py
         dtype_precisions = {
             torch.float16: (0.001, 1e-5),
-            torch.bfloat16: (0.016, 1e-4), # zzzz bfloat16 precision
+            torch.bfloat16: (0.016, 1e-4),  # zzzz bfloat16 precision
             torch.float32: (1.3e-6, 1e-5),
             torch.float64: (1e-7, 1e-7),
             torch.complex32: (0.001, 1e-5),
