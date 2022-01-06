@@ -121,7 +121,8 @@ Note that for FX quantization, the corresponding functionals are also supported.
 | | nn.Linear               | | Y               | | Y                |
 | | nn.Conv1d/2d/3d         | | Y               | | N                |
 +---------------------------+-------------------+--------------------+
-| | nn.LSTM                 | | N               | | Y                |
+| | nn.LSTM                 | | Y (through      | | Y                |
+| |                         | | custom modules) | |                  |
 | | nn.GRU                  | | N               | | Y                |
 +---------------------------+-------------------+--------------------+
 | | nn.RNNCell              | | N               | | Y                |
@@ -133,9 +134,10 @@ Note that for FX quantization, the corresponding functionals are also supported.
 +---------------------------+-------------------+--------------------+
 |nn.Embedding               | Y                 | N                  |
 +---------------------------+-------------------+--------------------+
-|nn.MultiheadAttention      |Not Supported      | Not supported      |
+| nn.MultiheadAttention     | Y (through        | Not supported      |
+|                           | custom modules)   |                    |
 +---------------------------+-------------------+--------------------+
-|Activations                |Broadly supported  | Un-changed,        |
+| Activations               | Broadly supported | Un-changed,        |
 |                           |                   | computations       |
 |                           |                   | stay in fp32       |
 +---------------------------+-------------------+--------------------+
