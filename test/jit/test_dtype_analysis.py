@@ -4,7 +4,7 @@ from unittest.case import expectedFailure
 
 import torch
 from torch import complex32, float32, float64, int32, int64
-from torch.jit.passes import _property_propagation
+from torch.jit._passes import _property_propagation
 from torch.testing._internal.common_methods_invocations import (
     SampleInput,
     sample_inputs_adaptive_avg_pool2d,
