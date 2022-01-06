@@ -445,26 +445,25 @@ def lazy_compute_experiment(args, experiment, results, benchmark, lazy_benchmark
     print(f"CIDEBUGOUTPUT,lazy_compute_experiment,{current_name},{current_device},{experiment},{args.test},{speedup:.4f},{pvalue:.2e},{args.warmup},{args.repeat},{warmup_time:.2f},{bench_time:.2f}")
     return (speedup, pvalue)
 
-# TODO(alanwaketan): The check_results family may need a proper re-design.
-def check_results_impl(correct_result, lazy_result, device):
-    correct_result = to_device(correct_result, device)
-    lazy_result = to_device(lazy_result, device)
-    return torch.allclose(correct_result, lazy_result)
-
-def check_tuple(correct_result, lazy_result, device):
-    assert type(correct_result) is tuple
-    assert type(lazy_result) is tuple
-    for correct, lazy in zip(correct_result, lazy_result):
-        if not check_results_impl(correct, lazy, device):
-            return False
-    return True
 
 def check_results(correct_result, lazy_result, device):
+    # to_device has recursive logic and special handling for
+    # extracting relevant tensors from huggingface data structures
+    correct_result = to_device(correct_result, device)
+    lazy_result = to_device(lazy_result, device)
+
+    # after to_device, tuples are still tuples, but their tensors are on an eager device
     if type(correct_result) is tuple:
-        return check_tuple(correct_result, lazy_result, device)
+        for c, l in zip(correct_result, lazy_result):
+            if not torch.allclose(c, l):
+                return False
+        return True
+
+    if type(correct_result) is dict:
+        raise NotImplementedError("TODO(whc) missing case for dict results here; not sure if it's actually needed")
 
     assert type(correct_result) is torch.Tensor, f"Expect torch.Tensor but got {type(correct_result)}."
-    return check_results_impl(correct_result, lazy_result, device)
+    return torch.allclose(correct_result, lazy_result)
 
 def check_fuser(args):
     if args.fuser == 'noopt':
