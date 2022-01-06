@@ -600,6 +600,27 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
             # TODO(future PR): add FX rewrite support
             do_fx_comparison=False, do_torchscript_checks=False)
 
+    def test_child_module_does_not_return_tensor(self):
+        class M1(torch.nn.Module):
+            def forward(self, x):
+                pass
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m1 = M1()
+
+            def forward(self, x):
+                self.m1(x)
+                return x
+
+        model_fp32 = M().eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(
+            model_fp32, qconfig, (torch.randn(1, 1, 1, 1),),
+            # TODO(future PR): add FX rewrite support
+            do_fx_comparison=False, do_torchscript_checks=False)
+
     @unittest.skip('TODO build this')
     def test_module_input_types(self):
         class M(torch.nn.Module):
