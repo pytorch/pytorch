@@ -166,6 +166,7 @@ def tensor_size(op_type, dims):
         NNAPI_OperandCode.TENSOR_INT32: 4,
         NNAPI_OperandCode.TENSOR_QUANT8_ASYMM: 1,
         NNAPI_OperandCode.TENSOR_QUANT16_SYMM: 2,
+        NNAPI_OperandCode.TENSOR_QUANT16_ASYMM: 2,
     }
     size = ITEM_SIZES[op_type]
     for d in dims:
@@ -319,7 +320,7 @@ def flex_name(op_id, dim):
 
 
 class _NnapiSerializer(object):
-    def __init__(self, config):
+    def __init__(self, config, use_int16_for_qint16=False):
         self.operands = []
         self.values = []
         self.operations = []
@@ -336,6 +337,7 @@ class _NnapiSerializer(object):
         self.cached_immediates = {}
         self.used_weights = []
         self.weight_offset = 0
+        self.use_int16_for_qint16 = use_int16_for_qint16
 
         if config is None:
             config = {}
@@ -365,8 +367,7 @@ class _NnapiSerializer(object):
         self.operands.append(oper)
         return operand_id
 
-    @staticmethod
-    def torch_tensor_to_operand(tensor, dim_order):
+    def torch_tensor_to_operand(self, tensor, dim_order):
         dtype = str(tensor.dtype).replace("torch.", "")
         scale = 0.0
         zero_point = 0
@@ -383,6 +384,20 @@ class _NnapiSerializer(object):
             scale = tensor.q_scale()
             zero_point = tensor.q_zero_point()
             assert zero_point == 0
+        elif dtype == "int16":
+            if self.use_int16_for_qint16:
+                nnapi_dtype = getattr(tensor, "nnapi_dtype", None)
+                op_codes = (NNAPI_OperandCode.TENSOR_QUANT16_SYMM, NNAPI_OperandCode.TENSOR_QUANT16_ASYMM)
+                if nnapi_dtype in op_codes:
+                    op_type = nnapi_dtype
+                    scale = tensor.nnapi_scale
+                    zero_point = tensor.nnapi_zero_point
+                else:
+                    raise Exception(f"`nnapi_type` needs to be one of {op_codes} for `int16`")
+            else:
+                raise Exception(
+                    "`int16` isn't supported. If you're trying to represent NNAPI"
+                    " qint16 with Pytorch int16, set `use_int16_for_qint16 = True`")
         else:
             raise Exception(f"Can't handle input with dtype '{tensor.dtype}'")
         return Operand(
@@ -513,8 +528,7 @@ class _NnapiSerializer(object):
                 f"Expected constant value of type {typekind}, but got {ctype.kind()} for value '{jitval!r}'")
         return record
 
-    @staticmethod
-    def operand_to_template_torchscript(op_id, oper, shape=None):
+    def operand_to_template_torchscript(self, op_id, oper, shape=None):
         """Return a TorchScript expression to build a template for a given operand."""
         if shape is None:
             shape = oper.shape
@@ -547,6 +561,14 @@ class _NnapiSerializer(object):
                 f"torch.zeros(1), scale={oper.scale}, zero_point={oper.zero_point}, dtype=torch.quint8)"
                 f".expand({shape_code}).contiguous()"
             )
+        elif oper.op_type in (NNAPI_OperandCode.TENSOR_QUANT16_ASYMM, NNAPI_OperandCode.TENSOR_QUANT16_SYMM):
+            if self.use_int16_for_qint16:
+                return f"torch.zeros({shape_code}, dtype=torch.int16)"
+            else:
+                raise Exception(
+                    "`int16` isn't supported. If you're trying to represent NNAPI"
+                    " qint16 with Pytorch int16, set `use_int16_for_qint16 = True`")
+
         raise Exception(f"Unsupported output operand type: {oper.op_type}")
 
     def forward_operand_shape(self, out_op_id, out_dim, in_op_id, in_dim):
@@ -2029,7 +2051,7 @@ class _NnapiSerializer(object):
                 )
 
 
-def serialize_model(module, inputs, *, config=None, return_shapes=None):
+def serialize_model(module, inputs, *, config=None, return_shapes=None, use_int16_for_qint16=False):
     """Convert to NNAPI and serialize torchscript module:
     Parameters:
         module: Torchscript module to convert
@@ -2038,6 +2060,7 @@ def serialize_model(module, inputs, *, config=None, return_shapes=None):
         return_shapes (optional): Specify shape of outputs if
             your module uses runtime flexible shapes to set output
             buffer size for NNAPI
+        use_int16_for_qint16 (optional): Use Pytorch int16 to represent NNAPI qint16 values
     """
 
-    return _NnapiSerializer(config).serialize_model(module, inputs, return_shapes)
+    return _NnapiSerializer(config, use_int16_for_qint16).serialize_model(module, inputs, return_shapes)
