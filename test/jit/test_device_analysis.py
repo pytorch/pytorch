@@ -215,6 +215,10 @@ class TestDeviceAnalysis(JitTestCase):
                 if devices[0] == devices[1]:
                     raise e
 
+                # Expect result device to be None for the failure cases.
+                self.assert_device_equal(fn, devices, None, shapes, subtest_str)
+                continue
+
             self.assert_device_equal(fn, devices, out.device, shapes, subtest_str)
 
             # Test that without shapes, we either get the same device or None for the device
