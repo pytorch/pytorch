@@ -4,8 +4,14 @@ from test_pytorch_common import TestCase, run_tests
 
 import torch
 import torch.onnx
-from torch.onnx import utils, OperatorExportTypes, TrainingMode, register_custom_op_symbolic
-from torch.onnx.symbolic_helper import _set_opset_version, _set_operator_export_type, _set_onnx_shape_inference
+from torch.onnx import (utils,
+                        OperatorExportTypes,
+                        TrainingMode,
+                        register_custom_op_symbolic,
+                        unregister_custom_op_symbolic)
+from torch.onnx.symbolic_helper import (_set_opset_version,
+                                        _set_operator_export_type,
+                                        _set_onnx_shape_inference)
 import torch.utils.cpp_extension
 from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion,
                                  skipIfUnsupportedMaxOpsetVersion)
@@ -795,6 +801,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         self.assertEqual(next(iter).kind(), "custom_namespace::custom_op")
 
     def test_custom_opsets_gelu(self):
+        self.addCleanup(unregister_custom_op_symbolic, "::gelu", 1)
+
         def gelu(g, self):
             return g.op("com.microsoft::Gelu", self).setType(self.type())
 
@@ -810,6 +818,23 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         self.assertEqual(graph.opset_import[0].version, self.opset_version)
         self.assertEqual(graph.opset_import[1].domain, "com.microsoft")
         self.assertEqual(graph.opset_import[1].version, 1)
+
+
+    def test_register_aten_custom_op_symbolic(self):
+        self.addCleanup(unregister_custom_op_symbolic, "aten::gelu", 1)
+
+        def gelu(g, self):
+            return g.op("com.microsoft::Gelu", self).setType(self.type())
+
+        register_custom_op_symbolic("aten::gelu", gelu, 1)
+        model = torch.nn.GELU()
+        x = torch.randn(3, 3)
+        f = io.BytesIO()
+        torch.onnx.export(model, (x, ), f, opset_version=self.opset_version)
+        graph = onnx.load(io.BytesIO(f.getvalue()))
+
+        self.assertEqual(graph.graph.node[0].op_type, "Gelu")
+        self.assertEqual(graph.opset_import[1].domain, "com.microsoft")
 
     def test_custom_opsets_inverse(self):
         class CustomInverse(torch.nn.Module):

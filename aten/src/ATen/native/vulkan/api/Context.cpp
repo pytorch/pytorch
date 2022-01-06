@@ -111,30 +111,16 @@ Context::Context(const Adapter& adapter)
               adapter.compute_queue_family_index),
           &VK_DELETER(Device)),
       queue_(acquire_queue(device(), adapter.compute_queue_family_index)),
-      command_(gpu()),
       shader_(gpu()),
       pipeline_(gpu()),
-      descriptor_(gpu()),
-      resource_(gpu()) {
+      threadcontext_(gpu()) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device_,
       "Invalid Vulkan device!");
 }
 
 Context::~Context() {
-  try {
-    flush();
-  }
-  catch (const std::exception& e) {
-    TORCH_WARN(
-        "Vulkan: Context destructor raised an exception! Error: ",
-        e.what());
-  }
-  catch (...) {
-    TORCH_WARN(
-        "Vulkan: Context destructor raised an exception! "
-        "Error: Unknown");
-  }
+  // Do not call flush() since all per-thread objects will be destroyed as each thread exits
 }
 
 void Context::flush() {

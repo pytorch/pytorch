@@ -28,22 +28,14 @@ WEIGHT_INDEX_DICT = {
 NON_QUANTIZABLE_WEIGHT_OPS = {torch.nn.functional.layer_norm, torch.nn.functional.group_norm, torch.nn.functional.instance_norm}
 
 BIAS_INDEX_DICT = {
-    torch.nn.functional.conv1d : 2,
-    torch.nn.functional.conv2d : 2,
-    torch.nn.functional.conv3d : 2,
-    torch.nn.functional.linear : 2,
-    torch.nn.functional.layer_norm : 3,
-    torch.nn.functional.group_norm : 3,
-    torch.nn.functional.instance_norm : 4,
+    torch.nn.functional.conv1d : [2],
+    torch.nn.functional.conv2d : [2],
+    torch.nn.functional.conv3d : [2],
+    torch.nn.functional.linear : [2],
+    torch.nn.functional.layer_norm : [3],
+    torch.nn.functional.group_norm : [3],
+    torch.nn.functional.instance_norm : [4],
 }
-
-# turn foo.bar -> ['foo', 'bar']
-def _parent_name(target):
-    r = target.rsplit('.', 1)
-    if len(r) == 1:
-        return '', r[0]
-    else:
-        return r[0], r[1]
 
 def graph_pretty_str(g, shorten=True) -> str:
     """Returns a printable representation of the ops in the graph of g.

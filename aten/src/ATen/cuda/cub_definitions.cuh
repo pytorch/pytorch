@@ -28,6 +28,14 @@
 #define USE_GLOBAL_CUB_WRAPPED_NAMESPACE() false
 #endif
 
+// cub support for cub::FutureValue is added to cub 1.15 in:
+// https://github.com/NVIDIA/cub/pull/305
+#if CUB_VERSION >= 101500
+#define CUB_SUPPORTS_FUTURE_VALUE() true
+#else
+#define CUB_SUPPORTS_FUTURE_VALUE() false
+#endif
+
 // cub support for UniqueByKey is added to cub 1.16 in:
 // https://github.com/NVIDIA/cub/pull/405
 #if CUB_VERSION >= 101600

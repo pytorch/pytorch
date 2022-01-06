@@ -8,7 +8,7 @@
 
 #include <sstream>
 
-namespace at { namespace native { namespace {
+namespace at { namespace native { inline namespace CPU_CAPABILITY {
 
 using namespace vec;
 

@@ -57,7 +57,7 @@ void histogramdd_check_inputs(const Tensor& input, const TensorList& bins, const
 
     const int64_t N = input.size(-1);
 
-    TORCH_CHECK(bins.size() == N, "torch.histogramdd: expected ", N, " sequences of bin edges for a ", N,
+    TORCH_CHECK(static_cast<int64_t>(bins.size()) == N, "torch.histogramdd: expected ", N, " sequences of bin edges for a ", N,
                 "-dimensional histogram but got ", bins.size());
 
     auto input_dtype = input.dtype();
@@ -206,7 +206,7 @@ std::pair<double, double> histc_select_outer_bin_edges(const Tensor& input,
     double leftmost_edge = min.to<double>();
     double rightmost_edge = max.to<double>();
 
-    if (leftmost_edge == rightmost_edge) {
+    if (leftmost_edge == rightmost_edge && input.numel() > 0) {
         auto extrema = _aminmax(input);
         leftmost_edge = std::get<0>(extrema).item<double>();
         rightmost_edge = std::get<1>(extrema).item<double>();

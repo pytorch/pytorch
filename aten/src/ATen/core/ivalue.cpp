@@ -30,9 +30,9 @@ void checkCustomClassType(const Type* expected_type, const Type* actual_type) {
   // Type's, this needs to be changed!
   TORCH_CHECK(actual_type == expected_type,
               "Tried to convert an IValue of type ",
-              actual_type->repr_str(),
+              actual_type ? actual_type->repr_str() : std::string("*NULL*"),
               " to custom class type ",
-              expected_type->repr_str());
+              expected_type ? expected_type->repr_str() : std::string("*NULL*"));
 }
 
 TORCH_API c10::intrusive_ptr<ConstantString> ConstantString::create(
@@ -839,6 +839,13 @@ IValue IValue::deepcopy(
       } else {
         copy = IValue(toObject()->deepcopy(memo));
       }
+    } break;
+    case IValue::Tag::Enum: {
+      auto enum_holder = toEnumHolder();
+      copy = IValue(c10::make_intrusive<ivalue::EnumHolder>(
+          enum_holder->type(),
+          enum_holder->name(),
+          enum_holder->value().deepcopy(memo)));
     } break;
     case IValue::Tag::String:
     case IValue::Tag::None:

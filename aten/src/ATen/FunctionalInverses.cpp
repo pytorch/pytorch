@@ -78,6 +78,11 @@ Tensor FunctionalInverses::_fw_primal_inverse(const at::Tensor& base, const at::
     return Tensor();
 }
 
+Tensor FunctionalInverses::_make_dual_inverse(const at::Tensor& base, const at::Tensor& mutated_view, const at::Tensor& tangent, int64_t level) {
+    TORCH_INTERNAL_ASSERT(false, "Attempted to call _make_dual() during the functionalization pass. For now, this is not supported.");
+    return Tensor();
+}
+
 Tensor FunctionalInverses::view_as_real_inverse(const Tensor& base, const Tensor& mutated_view) {
     return at::view_as_complex(mutated_view);
 }

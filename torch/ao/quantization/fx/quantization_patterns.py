@@ -4,9 +4,9 @@ from torch.fx.graph import (
     Node,
     Graph,
 )
-from ..fake_quantize import (
-    default_affine_fixed_qparams_fake_quant,
-    default_symmetric_fixed_qparams_fake_quant,
+from ..observer import (
+    default_affine_fixed_qparams_observer,
+    default_symmetric_fixed_qparams_observer,
 )
 
 from ..quantization_mappings import (
@@ -33,9 +33,8 @@ from .pattern_utils import (
     get_default_output_activation_post_process_map,
     Pattern,
 )
-
+from ..utils import _parent_name
 from .utils import (
-    _parent_name,
     all_node_args_have_no_tensors,
     quantize_node,
     get_per_tensor_qparams,
@@ -146,6 +145,7 @@ class QuantizeHandler(ABC):
         self,
         qconfig: Any,
         pattern: Pattern,
+        is_training: bool,
     ) -> Optional[Callable]:
         """
         Returns the constructor for the activation observer which should be
@@ -575,6 +575,7 @@ class CatQuantizeHandler(QuantizeHandler):
 @register_quant_pattern((torch.nn.ReLU, torch.nn.Conv3d))
 @register_quant_pattern((torch.nn.functional.relu, torch.nn.Conv2d))
 @register_quant_pattern((torch.nn.functional.relu, torch.nn.Conv3d))
+# TODO: rename Relu -> ReLU to be more consistent with other classes
 class ConvReluQuantizeHandler(QuantizeHandler):
     def __init__(self, node: Node, modules: Dict[str, torch.nn.Module]):
         super().__init__(node, modules)
@@ -634,7 +635,12 @@ class ConvReluQuantizeHandler(QuantizeHandler):
             output_activation_post_process = \
                 self._maybe_get_last_node_only_observer(modules)
             assert output_activation_post_process is not None
-            if is_reference:
+
+            # We'll always produce reference pattern for torch.nn.Conv*d,
+            # will remove the else branch after we migrated all use cases
+            if is_reference or \
+                    type(self.conv) in [torch.nn.Conv1d, torch.nn.Conv2d, torch.nn.Conv3d] and \
+                    dtypes in [(torch.quint8, torch.qint8, None)]:
                 # produce dequant - float_op - quant pattern
                 dtype = torch.float
                 if activation_int8_quantized:
@@ -681,7 +687,7 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                 # we can have a map from module to reference module
                 # and allow user to register new ones
                 qconv_cls = get_static_quant_module_class(
-                    type(float_conv), is_reference=is_reference)
+                    type(float_conv), is_reference=True)
                 ref_conv = qconv_cls.from_float(float_conv, weight_qparams)  # type: ignore[attr-defined]
                 # if the parent is a fused conv (Sequential), we can replace the first
                 # item to ref conv, otherwise we can update
@@ -1160,6 +1166,8 @@ class BatchNormQuantizeHandler(QuantizeHandler):
                 load_arg(quantized=[0])(self.bn_node.args),
                 load_arg(quantized=torch.float)(self.bn_node.kwargs))
 
+@register_quant_pattern(torch.nn.qat.Embedding)
+@register_quant_pattern(torch.nn.qat.EmbeddingBag)
 @register_quant_pattern(torch.nn.Embedding)
 @register_quant_pattern(torch.nn.EmbeddingBag)
 class EmbeddingQuantizeHandler(QuantizeHandler):
@@ -1414,18 +1422,18 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
                     op_out, activation_post_process,
                     node, modules, quantized_graph, node_name_to_scope, is_input=False)
 
-@register_quant_pattern(torch.nn.Hardsigmoid, default_affine_fixed_qparams_fake_quant)
-@register_quant_pattern(torch.nn.functional.hardsigmoid, default_affine_fixed_qparams_fake_quant)
-@register_quant_pattern('hardsigmoid', default_affine_fixed_qparams_fake_quant)
-@register_quant_pattern('hardsigmoid_', default_affine_fixed_qparams_fake_quant)
-@register_quant_pattern(torch.nn.Sigmoid, default_affine_fixed_qparams_fake_quant)
-@register_quant_pattern(torch.sigmoid, default_affine_fixed_qparams_fake_quant)
-@register_quant_pattern('sigmoid', default_affine_fixed_qparams_fake_quant)
-@register_quant_pattern('sigmoid_', default_affine_fixed_qparams_fake_quant)
-@register_quant_pattern(torch.nn.Tanh, default_symmetric_fixed_qparams_fake_quant)
-@register_quant_pattern(torch.tanh, default_symmetric_fixed_qparams_fake_quant)
-@register_quant_pattern('tanh', default_symmetric_fixed_qparams_fake_quant)
-@register_quant_pattern('tanh_', default_symmetric_fixed_qparams_fake_quant)
+@register_quant_pattern(torch.nn.Hardsigmoid, default_affine_fixed_qparams_observer)
+@register_quant_pattern(torch.nn.functional.hardsigmoid, default_affine_fixed_qparams_observer)
+@register_quant_pattern('hardsigmoid', default_affine_fixed_qparams_observer)
+@register_quant_pattern('hardsigmoid_', default_affine_fixed_qparams_observer)
+@register_quant_pattern(torch.nn.Sigmoid, default_affine_fixed_qparams_observer)
+@register_quant_pattern(torch.sigmoid, default_affine_fixed_qparams_observer)
+@register_quant_pattern('sigmoid', default_affine_fixed_qparams_observer)
+@register_quant_pattern('sigmoid_', default_affine_fixed_qparams_observer)
+@register_quant_pattern(torch.nn.Tanh, default_symmetric_fixed_qparams_observer)
+@register_quant_pattern(torch.tanh, default_symmetric_fixed_qparams_observer)
+@register_quant_pattern('tanh', default_symmetric_fixed_qparams_observer)
+@register_quant_pattern('tanh_', default_symmetric_fixed_qparams_observer)
 class FixedQParamsOpQuantizeHandler(QuantizeHandler):
     def __init__(self,
                  node: Node,
@@ -1441,10 +1449,10 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
         return activation_dtype(qconfig) in [torch.quint8, torch.qint8]
 
     # some qhandlers override the activations constructor
-    def get_activation_ctr(self, qconfig, pattern) -> Optional[Callable]:
+    def get_activation_ctr(self, qconfig, pattern, is_training) -> Optional[Callable]:
         act_dtype = activation_dtype(qconfig)
         if act_dtype == torch.quint8:
-            return get_default_output_activation_post_process_map().get(
+            return get_default_output_activation_post_process_map(is_training).get(
                 pattern, qconfig.activation)
         else:
             return qconfig.activation

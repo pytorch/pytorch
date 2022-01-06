@@ -370,6 +370,11 @@ class TestSortAndSelect(TestCase):
                         k = random.randint(1, testTensor.size(dim))
                         compare(testTensor, k, dim, dir)
 
+        # This tests the code path where on CUDA, topk is implemented with sort.
+        t = torch.randn((2, 100000), device=device)
+        compare(t, 2000, 1, True)
+        compare(t, 2000, 1, False)
+
     def test_topk_arguments(self, device):
         q = torch.randn(10, 2, 10, device=device)
         # Make sure True isn't mistakenly taken as the 2nd dimension (interpreted as 1)

@@ -41,6 +41,7 @@ inline void sub_check(const TensorBase& self, const Scalar& scalar) {
 }
 
 using structured_binary_fn_alpha = void(*)(TensorIteratorBase&, const Scalar& alpha);
+using structured_binary_fn_double = void(*)(TensorIteratorBase&, double);
 using structured_binary_fn = void(*)(TensorIteratorBase&);
 
 using binary_fn_alpha = void(*)(TensorIteratorBase&, const Scalar& alpha);
@@ -78,7 +79,7 @@ DECLARE_DISPATCH(structured_binary_fn, maximum_stub);
 DECLARE_DISPATCH(structured_binary_fn, minimum_stub);
 DECLARE_DISPATCH(structured_binary_fn, fmax_stub);
 DECLARE_DISPATCH(structured_binary_fn, fmin_stub);
-DECLARE_DISPATCH(binary_fn_double, smooth_l1_stub);
+DECLARE_DISPATCH(structured_binary_fn_double, smooth_l1_stub);
 DECLARE_DISPATCH(binary_fn_double, huber_stub);
 DECLARE_DISPATCH(structured_binary_fn, sigmoid_backward_stub);
 DECLARE_DISPATCH(binary_fn_alpha, logit_backward_stub);

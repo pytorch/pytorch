@@ -81,6 +81,9 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
     uint64_t rand_offset;
   };
 
+  using ExecutorCompileTimeInfoCache =
+      executor_utils::caching::ExecutorCompileTimeInfoCache;
+
   kir::Kernel* kernel() const {
     return lowered_.kernel();
   }
@@ -117,6 +120,11 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
       const LaunchParams& launch_params,
       const std::vector<at::Tensor>& args);
 
+  //! Internal knob used for debugging/profiling only
+  void disableLaunchParamCache() {
+    disable_parameter_cache_ = true;
+  }
+
  private:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   struct GlobalBuffers {
@@ -139,7 +147,8 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
 
   LaunchParams computeLaunchParams(
       const LaunchParams& launch_constraints,
-      kir::ExpressionEvaluator& expr_eval);
+      kir::ExpressionEvaluator& expr_eval,
+      const int warp_size);
 
   uint64_t computeSharedMemory(
       kir::ExpressionEvaluator& expr_eval,
@@ -164,11 +173,16 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
     return used_tvs_;
   };
 
+  ExecutorCompileTimeInfoCache* compileTimeDataCache() {
+    return &compile_time_info_cache_;
+  }
+
  private:
   Fusion fusion_;
 
   CompileOptions options_;
   size_t max_device_smem = std::numeric_limits<size_t>().max();
+  int warp_size_ = 0;
   executor_utils::NvrtcFunction compiled_kernel_;
 
   // TensorViews actually used in the kernel.
@@ -184,7 +198,7 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
   // launch kernels without re-inference parameters.
   std::unordered_map<size_t, ExecutorEntry> executor_entry_lookup_;
 
-  // Profiling support: knob to control whether we actually execute the
+  // Profiling support: knob to control wheter we actually execute the
   // kernel on the GPU or not
   bool execute_kernel_ = true;
 
@@ -193,6 +207,19 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
 
   // The last kernel execution time, if measure_kernel_time_ is true
   float kernel_time_ms_ = 0;
+
+  // Profiling support: knob to disable caching of launch params
+  bool disable_parameter_cache_ = false;
+
+  // Compile time information caching. This is used for shape inference
+  //  support. The cache stores graph information that are available
+  //  without shape information so that each shape inference call will
+  //  not need to re-compute them.
+  ExecutorCompileTimeInfoCache compile_time_info_cache_;
+
+  // Cached expr eval
+  std::unique_ptr<KernelPrecomputedIntegers> evaluator_precomputed_integers_ =
+      nullptr;
 };
 
 } // namespace cuda

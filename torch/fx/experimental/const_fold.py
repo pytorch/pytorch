@@ -171,6 +171,9 @@ def split_const_subgraphs(
     for node in non_const_gm.graph.nodes:
         if node.op == "call_module":
             setattr(split, node.target, getattr(non_const_gm, node.target))
+    for node in const_gm.graph.nodes:
+        if node.op == "call_module":
+            setattr(split, node.target, getattr(const_gm, node.target))
 
     # split_module currently does not use get_attrs for attrs. Instead it passes
     # them in as args from the parent module, which used get_attrs. Here we set

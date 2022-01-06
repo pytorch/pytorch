@@ -249,7 +249,8 @@ void IRPrinter::visit(VarPtr v) {
 
 void IRPrinter::visit(BufPtr v) {
   auto dtype = v->dtype();
-  os() << "Buf(dtype=" << dtypeToCppString(dtype);
+  os() << *v->base_handle();
+  os() << "(dtype=" << dtypeToCppString(dtype);
   if (v->qscale()) {
     os() << ", qscale=";
     v->qscale()->accept(this);
@@ -258,8 +259,17 @@ void IRPrinter::visit(BufPtr v) {
     os() << ", qzero=";
     v->qzero()->accept(this);
   }
-  os() << ", strides=[";
+  os() << ", sizes=[";
   size_t i = 0;
+  for (const ExprPtr& s : v->dims()) {
+    if (i++) {
+      os() << ", ";
+    }
+    s->accept(this);
+  }
+  os() << "]";
+  os() << ", strides=[";
+  i = 0;
   for (const ExprPtr& s : v->strides()) {
     if (i++) {
       os() << ", ";
@@ -471,6 +481,11 @@ void IRPrinter::visit(AllocatePtr v) {
 
 void IRPrinter::visit(FreePtr v) {
   os() << "Free(" << *v->buffer_var() << ");";
+}
+
+void IRPrinter::visit(PlacementAllocatePtr v) {
+  os() << "Alias(" << *v->buf()->base_handle() << ","
+       << *v->buf_to_reuse()->base_handle() << ");";
 }
 
 void IRPrinter::visit(LetPtr v) {

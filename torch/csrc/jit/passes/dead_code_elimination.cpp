@@ -299,6 +299,12 @@ class DeadCodeEliminator {
       // If we don't have alias information, all mutable ops have unknown
       // effects and can't be considered for elimination.
 
+      if (node->kind() == prim::SetAttr) {
+        // SetAttr is a special case: it doesn't have a schema, but does
+        // have untracked mutations
+        return true;
+      }
+
       // onnx export calls EliminateDeadCode but sometimes passes invalid
       // aten operators. So we call maybeSchema so we handle the cases when
       // there is no valid schema for a node

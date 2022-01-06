@@ -27,6 +27,82 @@ __device__ constexpr int64_t ceilDiv(int a, int64_t b) {
   return ceilDiv((int64_t)a, b);
 }
 
+__device__ constexpr int max(int a, int b) {
+  return ::max(a, b);
+}
+
+__device__ constexpr int64_t max(int64_t a, int b) {
+  return ::max(a, (int64_t)b);
+}
+
+__device__ constexpr int64_t max(int a, int64_t b) {
+  return ::max((int64_t)a, b);
+}
+
+__device__ constexpr int64_t max(int64_t a, int64_t b) {
+  return ::max(a, b);
+}
+
+__device__ double fmax(double a, double b) {
+  // check and propagate NaN
+  if (a != a) {
+    return a;
+  } else if (b != b) {
+    return b;
+  } else {
+    return ::fmax(a, b);
+  }
+}
+
+__device__ float fmax(float a, float b) {
+  // check and propagate NaN
+  if (a != a) {
+    return a;
+  } else if (b != b) {
+    return b;
+  } else {
+    return ::fmax(a, b);
+  }
+}
+
+__device__ constexpr int min(int a, int b) {
+  return ::min(a, b);
+}
+
+__device__ constexpr int64_t min(int64_t a, int b) {
+  return ::min(a, (int64_t)b);
+}
+
+__device__ constexpr int64_t min(int a, int64_t b) {
+  return ::min((int64_t)a, b);
+}
+
+__device__ constexpr int64_t min(int64_t a, int64_t b) {
+  return ::min(a, b);
+}
+
+__device__ double fmin(double a, double b) {
+  // check and propagate NaN
+  if (a != a) {
+    return a;
+  } else if (b != b) {
+    return b;
+  } else {
+    return ::fmin(a, b);
+  }
+}
+
+__device__ float fmin(float a, float b) {
+  // check and propagate NaN
+  if (a != a) {
+    return a;
+  } else if (b != b) {
+    return b;
+  } else {
+    return ::fmin(a, b);
+  }
+}
+
 __device__ constexpr int alignBufferSize(int buffer, int size) {
   return (buffer + (size - 1)) & ~(size - 1);
 }
@@ -68,6 +144,14 @@ __device__ double relu(double x) {
 }
 
 __device__ float relu(float x) {
+  return x <= 0 ? 0 : x;
+}
+
+__device__ float relu(int64_t x) {
+  return x <= 0 ? 0 : x;
+}
+
+__device__ float relu(int x) {
   return x <= 0 ? 0 : x;
 }
 
@@ -121,11 +205,11 @@ __device__ int64_t where(bool c, int64_t a, int64_t b) {
   return c ? a : b;
 }
 
-__device__ double randLike(Philox rnd) {
+__device__ double randLike(Philox& rnd) {
   return uniform(rnd(), rnd());
 }
 
-__device__ float randLikef(Philox rnd) {
+__device__ float randLikef(Philox& rnd) {
   return uniformf(rnd());
 }
 
@@ -141,4 +225,57 @@ __device__ constexpr int remainder(int a, int b) {
   if ((mod != 0) && ((b < 0) != (mod < 0)))
     mod += b;
   return mod;
+}
+
+__device__ constexpr int64_t fmod(int64_t a, int64_t b) {
+  return a % b;
+}
+
+__device__ constexpr int fmod(int a, int b) {
+  return a % b;
+}
+
+__device__ constexpr double fmod(double a, double b) {
+  return ::fmod(a, b);
+}
+
+__device__ constexpr float fmod(float a, float b) {
+  return ::fmod(a, b);
+}
+
+template <typename T>
+__device__ T pow(T a, T b) {
+  if (b < 0) {
+    if (a == 1) {
+      return 1;
+    } else if (a == -1) {
+      auto negative = (-b) % static_cast<T>(2);
+      return negative ? -1 : 1;
+    } else {
+      return 0;
+    }
+  } else {
+    T result = 1;
+    while (b) {
+      if (b & 1) {
+        result *= a;
+      }
+      b /= 2;
+      a *= a;
+    }
+    return result;
+  }
+}
+
+template int pow<int>(int a, int b);
+template int64_t pow<int64_t>(int64_t a, int64_t b);
+
+template <>
+float pow<float>(float a, float b) {
+  return ::pow(a, b);
+}
+
+template <>
+double pow<double>(double a, double b) {
+  return ::pow(a, b);
 }

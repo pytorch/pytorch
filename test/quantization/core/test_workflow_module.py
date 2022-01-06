@@ -12,15 +12,19 @@ from torch.ao.quantization import (
     PlaceholderObserver,
     NoopObserver,
     FakeQuantize,
-    FixedQParamsFakeQuantize,
+    FixedQParamsObserver,
     default_debug_qconfig,
     default_observer,
     default_histogram_observer,
     default_per_channel_weight_observer,
     get_observer_dict,
     prepare,
+    prepare_qat,
+    convert,
     QConfig,
     FusedMovingAvgObsFakeQuantize,
+    get_embedding_qat_module_mappings,
+    get_embedding_static_quant_module_mappings,
 )
 
 import torch.nn as nn
@@ -54,6 +58,10 @@ from torch.testing._internal.common_quantized import (
     _fake_quantize_per_channel_affine_reference,
     _fake_quantize_per_channel_affine_grad_reference,
     to_tensor,
+)
+
+from torch.testing._internal.common_quantization import (
+    DeFusedEmbeddingBagLinear,
 )
 
 NP_RANDOM_SEED = 19
@@ -361,9 +369,9 @@ class TestObserver(QuantizationTestCase):
         obs_list = [MinMaxObserver, MovingAverageMinMaxObserver,
                     PerChannelMinMaxObserver,
                     MovingAveragePerChannelMinMaxObserver, HistogramObserver,
-                    FakeQuantize, FixedQParamsFakeQuantize]
+                    FakeQuantize, FixedQParamsObserver]
         for obs_cls in obs_list:
-            if obs_cls is FixedQParamsFakeQuantize:
+            if obs_cls is FixedQParamsObserver:
                 obs = obs_cls(0.1, 0)
             else:
                 obs = obs_cls()
@@ -1136,12 +1144,13 @@ class TestFusedObsFakeQuantModule(TestCase):
         qconfigs = [torch.ao.quantization.default_embedding_qat_qconfig,
                     torch.ao.quantization.default_embedding_qat_qconfig_4bit]
         for qconfig in qconfigs:
-            model = Model()
+            model = Model().train()
             indices = torch.randint(0, 10, (5, 12))
 
             model.qconfig = qconfig
 
-            quant_model = torch.quantization.prepare_qat(model)
+            quant_model = prepare_qat(model,
+                                      mapping=get_embedding_qat_module_mappings())
 
             count_fake_quant = 0
             for name, mod in quant_model.named_modules():
@@ -1151,13 +1160,53 @@ class TestFusedObsFakeQuantModule(TestCase):
             self.assertEqual(count_fake_quant, 2)
 
             quant_model(indices)
-            inference_gm = torch.quantization.convert(quant_model.eval().cpu())
+
+            # Ensure that EmbeddingBags have float zero_point values
+            self.assertEqual(quant_model.emb1.weight_fake_quant.zero_point.dtype, torch.float32)
+            self.assertEqual(quant_model.emb2.weight_fake_quant.zero_point.dtype, torch.float32)
+
+            inference_gm = convert(quant_model.eval().cpu(),
+                                   mapping=get_embedding_static_quant_module_mappings())
 
             # Ensure that EmbeddingBags are now quantized with the appropriate bitwidth.
             self.assertEqual(type(inference_gm.emb1), torch.nn.quantized.EmbeddingBag)
             self.assertEqual(type(inference_gm.emb2), torch.nn.quantized.EmbeddingBag)
             self.assertEqual(inference_gm.emb1.dtype, qconfig.weight().dtype)
             self.assertEqual(inference_gm.emb2.dtype, qconfig.weight().dtype)
+
+    def test_embedding_qat_config(self):
+        for qengine in supported_qengines:
+            with override_quantized_engine(qengine):
+                model = DeFusedEmbeddingBagLinear()
+                indices = torch.randint(0, 10, (5, 12))
+                quant_model = prepare_qat(model,
+                                          mapping=get_embedding_qat_module_mappings())
+
+                count_fake_quant = 0
+                count_activation_postproc = 0
+                for name, mod in quant_model.named_modules():
+                    if name.endswith('weight_fake_quant'):
+                        count_fake_quant += 1
+                    if name.count('activation_post_process') == 1 and 'weight_fake_quant' not in name:
+                        count_activation_postproc += 1
+                # One for embeddings, one for linear layer.
+                self.assertEqual(count_fake_quant, 2)
+                # One for embeddings (but it is a NoOp), One for quantize, one for linear layer.
+                self.assertEqual(count_activation_postproc, 3)
+
+                self.assertEqual(type(quant_model.emb.weight_fake_quant), FakeQuantize)
+                self.assertEqual(quant_model.emb.weight_fake_quant.zero_point.dtype, torch.float32)
+                self.assertEqual(type(quant_model.emb.activation_post_process), NoopObserver)
+                self.assertEqual(type(quant_model.linear.weight_fake_quant), FusedMovingAvgObsFakeQuantize)
+                self.assertEqual(type(quant_model.linear.activation_post_process), FusedMovingAvgObsFakeQuantize)
+
+                quant_model(indices)
+                inference_gm = convert(quant_model,
+                                       mapping=get_embedding_static_quant_module_mappings())
+                # Ensure that Embedding is now quantized
+                self.assertEqual(type(inference_gm.emb), torch.nn.quantized.Embedding)
+                # Ensure that Linear is now quantized
+                self.assertEqual(type(inference_gm.linear), torch.nn.quantized.Linear)
 
     def test_default_fused_qat_config(self):
         class Model(nn.Module):
