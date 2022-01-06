@@ -940,7 +940,7 @@ def get_selected_tests(options):
             WINDOWS_BLOCKLIST.append("jit")
             WINDOWS_BLOCKLIST.append("jit_fuser")
 
-        # This is exception thats caused by this issue https://github.com/pytorch/pytorch/issues/69460
+        # This is exception that's caused by this issue https://github.com/pytorch/pytorch/issues/69460
         # This below code should be removed once this issue is solved
         if torch.version.cuda is not None and LooseVersion(torch.version.cuda) >= "11.5":
             WINDOWS_BLOCKLIST.append("test_cpp_extensions_aot")
@@ -968,6 +968,11 @@ def get_selected_tests(options):
         selected_tests = get_shard_based_on_S3(
             which_shard, num_shards, selected_tests, TEST_TIMES_FILE
         )
+
+    # skip all distributed tests if distributed package is not available.
+    if not dist.is_available():
+        selected_tests = exclude_tests(DISTRIBUTED_TESTS, selected_tests,
+                                       "PyTorch is built without distributed support.")
 
     return selected_tests
 
