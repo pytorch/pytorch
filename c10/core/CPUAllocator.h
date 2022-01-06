@@ -4,7 +4,7 @@
 #include <unordered_map>
 
 #include <c10/core/Allocator.h>
-#include <c10/core/alignment.h>  // legacy, update dependents to include this directly
+#include <c10/core/alignment.h> // legacy, update dependents to include this directly
 #include <c10/util/Logging.h>
 
 // TODO: rename to c10
