@@ -126,12 +126,22 @@ class TestDeviceAnalysis(JitTestCase):
             try:
                 out = fn(in0, in1)
             except Exception as e:
+                # Don't expect eager failures for CPU zerodim tensors
+                for i in range(len(devices)):
+                    if shapes[i] == () and devices[i] == self.cpu:
+                        raise e
+
+                # only expect eager failures on different devices
                 if devices[0] == devices[1]:
                     raise e
-                else:
-                    continue  # Ignore eager failures on different devices
 
             self.assert_device_equal(fn, devices, out.device, shapes, subtest_str)
+
+            # Test that without shapes, we either get the same device or None for the device
+            try:
+                self.assert_device_equal(fn, devices, out.device, subtest_str=subtest_str)
+            except AssertionError:
+                self.assert_device_equal(fn, devices, None, subtest_str=subtest_str)
 
     def test_zerodim_cpu(self):
         # Allow for minimal testing locally
