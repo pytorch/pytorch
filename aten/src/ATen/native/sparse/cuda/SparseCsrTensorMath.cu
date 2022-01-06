@@ -291,12 +291,11 @@ void _apply_sparse_csr_lu_solve(
     crow_indices_data_ptr, col_indices_data_ptr, b, tol, reorder, x, &_singularity);
 }
 
-/* Linear Solver using cuSolver backend with inputs on Host */
 void linalg_solve_sparse_csr_kernel(
   const Tensor& input,
   const Tensor& other,
-  Tensor& result) {
-  int singularity = -2;
+  Tensor& result,
+  int& singularity) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "sparse_csr_solve", [&] {
     if (input.scalar_type() == at::kComplexFloat || input.scalar_type() == at::kFloat) {
       _apply_sparse_csr_lu_solve<scalar_t, float>(input, other, result, singularity);
@@ -304,16 +303,10 @@ void linalg_solve_sparse_csr_kernel(
       _apply_sparse_csr_lu_solve<scalar_t, double>(input, other, result, singularity);
     }
   });
-
-  TORCH_CHECK(singularity == -1, "Expected singularity to be -1 but got: ", singularity,
-    ". There might be a bug in the implementation.");
 }
 
 Tensor& linalg_solve_sparse_csr_out(const Tensor& input, const Tensor& other, Tensor& result) {
   TORCH_INTERNAL_ASSERT(input.is_sparse_csr());
-  TORCH_INTERNAL_ASSERT(result.is_contiguous());
-  // Size of "result" and "other" needs to be same
-  TORCH_INTERNAL_ASSERT(other.layout() == kStrided);
 
   other.expect_contiguous();
   result.expect_contiguous();
@@ -330,7 +323,11 @@ Tensor& linalg_solve_sparse_csr_out(const Tensor& input, const Tensor& other, Te
     other.scalar_type() == result.scalar_type(),
     "other (got: ", result.scalar_type(), ") and out (got: ", result.scalar_type(), ") tensors must have same dtype.");
 
-  linalg_solve_sparse_csr_kernel(input, other, result);
+  int singularity = -2;
+  linalg_solve_sparse_csr_kernel(input, other, result, singularity);
+
+  TORCH_CHECK(singularity == -1, "Expected singularity to be -1 but got: ", singularity,
+    ". There might be a bug in the implementation.");
   return result;
 }
 
