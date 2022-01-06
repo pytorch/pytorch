@@ -31,6 +31,7 @@
 #include "torch/csrc/autograd/generated/variable_factories.h"
 #include "torch/csrc/utils/structseq.h"
 #include "torch/csrc/utils/cuda_lazy_init.h"
+#include "torch/csrc/autograd/python_return_types.h"
 
 #include <ATen/ATen.h>
 

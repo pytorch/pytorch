@@ -2,12 +2,11 @@
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/InitialTensorOptions.h>
-#include <ATen/native/cuda/Resize.cuh>
+#include <ATen/native/cuda/Resize.h>
 #include <ATen/native/TensorFactories.h>
 #include <ATen/NativeFunctions.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/Exception.h>
-#include <THC/THCGeneral.h>
 
 #include <algorithm>
 #include <cmath>
@@ -224,7 +223,7 @@ inline void get_coordinate_in_triu_trapezoid(
 
 template <typename scalar_t>
 __global__
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_1(512)
 #endif
 void tril_indices_kernel(scalar_t * tensor,

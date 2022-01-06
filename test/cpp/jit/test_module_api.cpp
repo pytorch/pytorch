@@ -13,7 +13,7 @@
 namespace torch {
 namespace jit {
 
-static const auto moduleInterfaceSrc = R"JIT(
+static constexpr c10::string_view moduleInterfaceSrc = R"JIT(
 class OneInterface(ModuleInterface):
     def one(self, x: Tensor, y: Tensor) -> Tensor:
         pass
@@ -27,7 +27,7 @@ def forward(self, x: Tensor) -> Tensor:
     return self.attr + x
 )JIT"};
 
-static const auto parentForward = R"JIT(
+static const std::string parentForward = R"JIT(
 def forward(self, x: Tensor) -> Tensor:
     return self.subMod1.one(x, x) + self.subMod2.one(x, x)
 )JIT";
@@ -258,6 +258,45 @@ TEST(ModuleAPITest, DeepCopyString) {
   // check string mutation is not reflected in the copied module
   str += "str";
   ASSERT_EQ(copied.attr(attr1).toString()->string(), original_str);
+}
+
+TEST(ModuleAPITest, DeepCopyEnum) {
+  auto cu = std::make_shared<CompilationUnit>();
+  auto cls = ClassType::create("foo.bar", cu, true);
+  auto enum_attr = "enum_attr";
+  auto int_enum_type = EnumType::create(
+      "enum_class",
+      IntType::get(),
+      {{"enum_name_1", 1}, {"enum_name_2", 2}},
+      cu);
+  cls->addAttribute(enum_attr, int_enum_type);
+  Module m(cu, cls);
+  m.setattr(
+      enum_attr,
+      IValue(c10::make_intrusive<ivalue::EnumHolder>(
+          int_enum_type, "enum_name_1", 1)));
+  Module m2 = m.deepcopy();
+
+  // Make sure deepcopy works
+  c10::ivalue::EnumHolder* m2_holder = m2.attr(enum_attr).toEnumHolder().get();
+  ASSERT_EQ(m2_holder->value().toInt(), 1);
+  ASSERT_EQ(m2_holder->name(), "enum_name_1");
+  ASSERT_EQ(m2_holder->type(), int_enum_type);
+
+  // Test overlaps
+  ASSERT_TRUE(!IValue(m2._ivalue()).overlaps(IValue(m._ivalue())));
+
+  // Deepcopy will preserve the type
+  ASSERT_EQ(m.type(), m2.type());
+
+  // Change original, should not affect deepcopy
+  m.setattr(
+      enum_attr,
+      IValue(c10::make_intrusive<ivalue::EnumHolder>(
+          int_enum_type, "enum_name_2", 2)));
+  ASSERT_NE(
+      m.attr(enum_attr).toEnumHolder().get()->value().toInt(),
+      m2.attr(enum_attr).toEnumHolder().get()->value().toInt());
 }
 
 TEST(ModuleAPITest, DeepCopyPreservesAliasing) {

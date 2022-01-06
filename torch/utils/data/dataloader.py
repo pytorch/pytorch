@@ -10,7 +10,7 @@ import threading
 import itertools
 import warnings
 import queue
-from typing import Any, Callable, TypeVar, Generic, Sequence, List, Optional
+from typing import Any, Callable, Iterable, TypeVar, Generic, Sequence, List, Optional, Union
 
 import multiprocessing as python_multiprocessing
 import torch
@@ -18,8 +18,10 @@ import torch.multiprocessing as multiprocessing
 from torch._utils import ExceptionWrapper
 from torch._six import string_classes
 
-from . import IterableDataset, Sampler, SequentialSampler, RandomSampler, BatchSampler, Dataset
+from . import IterDataPipe, IterableDataset, Sampler, SequentialSampler, RandomSampler, BatchSampler, Dataset
 from . import _utils
+
+import torch.utils.data.graph_settings
 
 T_co = TypeVar('T_co', covariant=True)
 T = TypeVar('T')
@@ -31,14 +33,16 @@ _worker_init_fn_t = Callable[[int], None]
 _collate_fn_t = Callable[[List[T]], Any]
 
 
-# This function used to be defined in this file. However, it was moved to
+# These functions used to be defined in this file. However, it was moved to
 # _utils/collate.py. Although it is rather hard to access this from user land
 # (one has to explicitly directly `import torch.utils.data.dataloader`), there
 # probably is user code out there using it. This aliasing maintains BC in this
 # aspect.
 default_collate: _collate_fn_t = _utils.collate.default_collate
+default_convert = _utils.collate.default_convert
 
 get_worker_info = _utils.worker.get_worker_info
+
 
 class _DatasetKind(object):
     Map = 0
@@ -154,14 +158,14 @@ class DataLoader(Generic[T_co]):
     pin_memory: bool
     drop_last: bool
     timeout: float
-    sampler: Sampler
+    sampler: Union[Sampler, Iterable]
     prefetch_factor: int
     _iterator : Optional['_BaseDataLoaderIter']
     __initialized = False
 
     def __init__(self, dataset: Dataset[T_co], batch_size: Optional[int] = 1,
-                 shuffle: bool = False, sampler: Optional[Sampler] = None,
-                 batch_sampler: Optional[Sampler[Sequence]] = None,
+                 shuffle: bool = False, sampler: Union[Sampler, Iterable, None] = None,
+                 batch_sampler: Union[Sampler[Sequence], Iterable[Sequence], None] = None,
                  num_workers: int = 0, collate_fn: Optional[_collate_fn_t] = None,
                  pin_memory: bool = False, drop_last: bool = False,
                  timeout: float = 0, worker_init_fn: Optional[_worker_init_fn_t] = None,
@@ -224,11 +228,14 @@ class DataLoader(Generic[T_co]):
             # option. If this turns out to be useful in future, we can re-enable
             # this, and support custom samplers that specify the assignments to
             # specific workers.
-            if shuffle is not False:
+            if isinstance(dataset, IterDataPipe):
+                torch.utils.data.graph_settings.apply_shuffle_settings(dataset, shuffle=shuffle)
+            elif shuffle is not False:
                 raise ValueError(
                     "DataLoader with IterableDataset: expected unspecified "
                     "shuffle option, but got shuffle={}".format(shuffle))
-            elif sampler is not None:
+
+            if sampler is not None:
                 # See NOTE [ Custom Samplers and IterableDataset ]
                 raise ValueError(
                     "DataLoader with IterableDataset: expected unspecified "
@@ -240,6 +247,8 @@ class DataLoader(Generic[T_co]):
                     "batch_sampler option, but got batch_sampler={}".format(batch_sampler))
         else:
             self._dataset_kind = _DatasetKind.Map
+
+
 
         if sampler is not None and shuffle:
             raise ValueError('sampler option is mutually exclusive with '

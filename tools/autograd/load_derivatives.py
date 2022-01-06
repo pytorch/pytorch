@@ -10,7 +10,7 @@ import yaml
 from tools.codegen.api.autograd import (Derivative, DifferentiabilityInfo,
                                         SavedAttribute, ForwardDerivative)
 from tools.codegen.api.types import (Binding, CppSignatureGroup, NamedCType, BaseCType, VectorCType,
-                                     intArrayRefT, tensorOptionsT, typeAndSizeT, intT, boolT,
+                                     intArrayRefT, tensorOptionsT, typeAndSizeT, longT, boolT,
                                      tensorGeometryT, scalarTypeT, SpecialArgName,
                                      OptionalCType, stringT)
 from tools.codegen.api import cpp
@@ -59,7 +59,8 @@ def load_derivatives(derivatives_yaml_path: str, native_yaml_path: str) -> Seque
 def cpp_arguments(f: NativeFunction) -> Sequence[Binding]:
     return CppSignatureGroup.from_native_function(f, method=False).signature.arguments()
 
-def create_derivative(f: NativeFunction, formula: str, var_names: Tuple[str, ...]) -> Derivative:
+def create_derivative(f: NativeFunction, formula: str, var_names: Tuple[str, ...],
+                      available_named_gradients: Sequence[str]) -> Derivative:
     original_formula = formula
     arguments: List[NamedCType] = [a.nctype.remove_const_ref() for a in cpp_arguments(f)]
 
@@ -70,6 +71,8 @@ def create_derivative(f: NativeFunction, formula: str, var_names: Tuple[str, ...
 
     formula, saved_inputs = saved_variables(formula, arguments, var_names)
     formula, saved_outputs = saved_variables(formula, named_returns, var_names)
+
+    used_named_gradients = {name for name in available_named_gradients if re.search(IDENT_REGEX.format(name), formula)}
 
     # Check that the referenced derivatives in the formula are in bounds
     for i in used_gradient_indices(formula):
@@ -85,6 +88,7 @@ def create_derivative(f: NativeFunction, formula: str, var_names: Tuple[str, ...
         var_names=var_names,
         saved_inputs=saved_inputs,
         saved_outputs=saved_outputs,
+        named_gradients=used_named_gradients,
     )
 
 def create_forward_derivative(f: NativeFunction, formula: str, names: Tuple[str, ...]) -> ForwardDerivative:
@@ -285,22 +289,26 @@ def create_differentiability_info(
         used with double backwards.
         """
 
-        used_grad = 0
-        used_grads = 0
-        fully_implemented = True
-        used_grads_indices: List[int] = []
+        uses_grad = False                   # true if any derivative uses "grad"
+        num_grads_uses = 0                  # count of uses of "grads" or "grads[INDEX]"
+        uses_named_grads = False            # true if any derivative uses "grad_{name}"
+        used_grads_indices: List[int] = []  # which indices of grads are used
         for d in derivatives:
             formula = d.formula
-            used_grad += len(re.findall(IDENT_REGEX.format('grad'), formula))
-            used_grads += len(re.findall(IDENT_REGEX.format('grads'), formula))
-            fully_implemented = \
-                fully_implemented and \
-                not re.search(IDENT_REGEX.format('not_implemented'), formula)
+            uses_grad = uses_grad or bool(re.findall(IDENT_REGEX.format('grad'), formula))
+            num_grads_uses += len(re.findall(IDENT_REGEX.format('grads'), formula))
+            uses_named_grads = uses_named_grads or bool(d.named_gradients)
             used_grads_indices.extend(used_gradient_indices(formula))
-        assert used_grads >= len(used_grads_indices)
-        only_used_grads_indices = used_grads == len(used_grads_indices)
+        # This is a basic sanity check: the number of places we see
+        # "grads" should be no fewer than the number of indices we see
+        # inside "grads". They may not be equal because we may use
+        # "grads" without an index.
+        assert num_grads_uses >= len(used_grads_indices)
+        # Thus if the number is equal, every use of grads is also
+        # indexed.
+        only_used_grads_indices = num_grads_uses == len(used_grads_indices)
 
-        if used_grad and used_grads:
+        if uses_grad and num_grads_uses > 0:
             raise RuntimeError(f"Derivative definition of {defn_name} in derivatives.yaml illegally "
                                "mixes use of 'grad' and 'grads'. Consider replacing "
                                "occurrences of 'grad' with 'grads[0]'")
@@ -312,11 +320,19 @@ def create_differentiability_info(
                                "otherwise, there is a likely error in your derivatives "
                                "declaration.")
 
+        if uses_named_grads and (uses_grad or num_grads_uses > 0):
+            raise RuntimeError(
+                f'Derivative definition of {defn_name} in derivatives.yaml illegally '
+                'mixes use of "grad_RETURN_NAME" and "grad" or "grads[x]". Use '
+                'only one method for identifying gradients.')
+
+
     @with_native_function
     def set_up_derivatives(f: NativeFunction) -> Tuple[
         Sequence[Derivative],
         Sequence[ForwardDerivative],
         Sequence[Binding],
+        Sequence[str],
         Sequence[str],
     ]:
         # Set up the derivative information
@@ -326,6 +342,26 @@ def create_differentiability_info(
         args_with_derivatives_set: Set[str] = set()
 
         all_arg_names = [a.name for a in cpp_arguments(f)]
+
+        # output_differentiability is captured from the enclosed
+        # scope. Don't modify it.
+        #
+        # If it is not present, then no output is explicitly
+        # undifferentiable.
+        #
+        # It may be present and shorter than the length of return
+        # values. If that's the case, any return value that does not
+        # have a corresponding entry is considered not differentiable.
+        differentiability = output_differentiability or [True] * len(f.func.returns)
+        # A return is available as a named gradient ...
+        available_named_gradients = [
+            f'grad_{ret.name}' for ret, differentiable in zip(f.func.returns, differentiability)
+            # if it has not been explicitly made undifferentiable
+            if differentiable
+            # and if it has a name
+            and ret.name is not None
+            # and if its type is differentiable
+            and ret.type.is_tensor_like()]
 
         for raw_names in sorted(defn.keys()):
             formula = defn[raw_names]
@@ -337,7 +373,8 @@ def create_differentiability_info(
                 if formula.lower().strip() == 'non_differentiable':
                     non_differentiable_arg_names += names
                 else:
-                    derivative = create_derivative(f, formula, names)
+                    derivative = create_derivative(f, formula, names,
+                                                   available_named_gradients)
                     derivatives.append(derivative)
                     args_with_derivatives_set |= set(names)
 
@@ -358,7 +395,8 @@ def create_differentiability_info(
         # Test to see if the use of 'grads' makes sense.
         check_grad_usage(defn_name, derivatives)
 
-        return derivatives, forward_derivatives, args_with_derivatives, non_differentiable_arg_names
+        return (derivatives, forward_derivatives, args_with_derivatives,
+                non_differentiable_arg_names, available_named_gradients)
 
     # NB: Removes 'name' from defn dictionary
     specification = defn.pop('name')
@@ -406,7 +444,12 @@ def create_differentiability_info(
                            "but this is only allowed for outputs."
                            "Please use a different name in native_functions.yaml.")
 
-    derivatives, forward_derivatives, args_with_derivatives, non_differentiable_arg_names = set_up_derivatives(canonical)
+    (derivatives, forward_derivatives, args_with_derivatives,
+     non_differentiable_arg_names, available_named_gradients) = set_up_derivatives(canonical)
+
+    used_named_gradients: Set[str] = set()
+    for d in derivatives:
+        used_named_gradients |= d.named_gradients
 
     # only assign an op name if we are actually going to calculate a derivative
     op = None
@@ -423,6 +466,8 @@ def create_differentiability_info(
         forward_derivatives=forward_derivatives,
         all_saved_inputs=dedup_vars([v for d in derivatives for v in d.saved_inputs]),
         all_saved_outputs=dedup_vars([v for d in derivatives for v in d.saved_outputs]),
+        available_named_gradients=available_named_gradients,
+        used_named_gradients=used_named_gradients,
         args_with_derivatives=args_with_derivatives,
         non_differentiable_arg_names=non_differentiable_arg_names,
         output_differentiability=output_differentiability,
@@ -458,6 +503,12 @@ def saved_variables(
             'suffix': '_sizes',
             'nctype': lambda name: NamedCType(name, BaseCType(intArrayRefT)),
         }),
+        # replace self->sizes() with self_sizes_opt
+        (r'{}->sizes\(\)', {
+            'suffix': '_sizes_opt',
+            'nctype': lambda name: NamedCType(name, OptionalCType(BaseCType(intArrayRefT))),
+            'expr': lambda name: f'{name}.has_value() ? c10::optional<IntArrayRef>({name}->sizes()) : c10::nullopt',
+        }),
         # replace self.options() with self_options
         (r'{}.options\(\)', {
             'suffix': '_options',
@@ -473,17 +524,17 @@ def saved_variables(
         # replace self.size(2) with self_size_2
         (r'{}.size\((\w+)\)', {
             'suffix': lambda m: '_argsize_{}'.format(*m.groups()),
-            'nctype': lambda name: NamedCType(name, BaseCType(intT)),
+            'nctype': lambda name: NamedCType(name, BaseCType(longT)),
         }),
         # replace self.numel() with self_numel
         (r'{}.numel\(\)', {
             'suffix': '_numel',
-            'nctype': lambda name: NamedCType(name, BaseCType(intT)),
+            'nctype': lambda name: NamedCType(name, BaseCType(longT)),
         }),
         # replace to_args_sizes(self) with self_args_sizes
         (r'to_args_sizes\({}\)', {
             'suffix': '_args_sizes',
-            'nctype': lambda name: NamedCType(name, VectorCType(VectorCType(BaseCType(intT)))),
+            'nctype': lambda name: NamedCType(name, VectorCType(VectorCType(BaseCType(longT)))),
         }),
         # replace to_args_scalartypes(self) with self_args_scalartypes
         (r'to_args_scalartypes\({}\)', {
@@ -502,7 +553,7 @@ def saved_variables(
         # replace self.dim() with self_dim
         (r'{}.dim\(\)', {
             'suffix': '_dim',
-            'nctype': lambda name: NamedCType(name, BaseCType(intT)),
+            'nctype': lambda name: NamedCType(name, BaseCType(longT)),
         }),
         # replace self.strides() with self_strides
         (r'{}.strides\(\)', {

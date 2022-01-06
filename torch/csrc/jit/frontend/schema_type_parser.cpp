@@ -1,8 +1,8 @@
 #include <torch/csrc/jit/frontend/schema_type_parser.h>
 
 #include <ATen/core/alias_info.h>
-#include <ATen/core/interned_strings.h>
 #include <ATen/core/jit_type.h>
+#include <ATen/core/symbol.h>
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parse_string_literal.h>
@@ -92,7 +92,6 @@ TypePtr SchemaTypeParser::parseBaseType() {
 // Tensor(a! -> a|b) // Tensor is in set a, written to,
 //                      and after the write is in set a AND b.
 c10::optional<AliasInfo> SchemaTypeParser::parseAliasAnnotation() {
-  std::set<Symbol> sets;
   AliasInfo alias_info;
   if (L.nextIf('(')) {
     // optional 'alias set annotation'

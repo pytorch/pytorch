@@ -1,8 +1,6 @@
 #ifndef THCP_CUDA_MODULE_INC
 #define THCP_CUDA_MODULE_INC
 
-extern THCState *state;
-
 void THCPModule_setDevice(int idx);
 PyObject * THCPModule_getDevice_wrap(PyObject *self);
 PyObject * THCPModule_setDevice_wrap(PyObject *self, PyObject *arg);

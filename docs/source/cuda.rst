@@ -26,11 +26,13 @@ torch.cuda
     ipc_collect
     is_available
     is_initialized
+    memory_usage
     set_device
     set_stream
     set_sync_debug_mode
     stream
     synchronize
+    utilization
 
 Random Number Generator
 -------------------------
@@ -71,8 +73,8 @@ Streams and events
     Stream
     Event
 
-Graphs (prototype)
-------------------
+Graphs (beta)
+-------------
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -90,6 +92,7 @@ Memory management
 
      empty_cache
      list_gpu_processes
+     mem_get_info
      memory_stats
      memory_summary
      memory_snapshot

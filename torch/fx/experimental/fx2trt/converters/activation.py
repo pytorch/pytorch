@@ -1,9 +1,9 @@
 import torch
 import numpy as np
 import tensorrt as trt
-from torch.fx.experimental.fx2trt.fx2trt import tensorrt_converter
+from torch.fx.experimental.fx2trt.converter_registry import tensorrt_converter
 
-from .helper_functions import mark_as_int8_layer
+from .converter_utils import mark_as_int8_layer
 
 def common_activation(network, mod, input_val, activation_type, activation_dyn_range_fn, layer_name):
     layer = network.add_activation(

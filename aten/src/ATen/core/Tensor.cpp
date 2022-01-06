@@ -1,6 +1,8 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/Formatting.h>
 #include <ATen/core/VariableHooksInterface.h>
+#include <ATen/core/LegacyTypeDispatch.h>
+#include <ATen/FunctionalTensorWrapper.h>
 
 #include <iostream>
 
@@ -13,6 +15,18 @@ const TensorBase& get_tensor_base(const Tensor &t) {
 TensorBase TensorBase::__dispatch_contiguous(c10::MemoryFormat memory_format) const {
   OptionalTensorRef self(*this);
   return at::_ops::contiguous::call(*self, memory_format);
+}
+
+const TensorBase& TensorBase::fill_(const c10::Scalar &fill_value) const {
+  Tensor self(*this);
+  at::_ops::fill__Scalar::call(self, fill_value);
+  return *this;
+}
+
+const TensorBase& TensorBase::zero_() const {
+  Tensor self(*this);
+  at::_ops::zero_::call(self);
+  return *this;
 }
 
 void TensorBase::enforce_invariants() {
@@ -101,7 +115,7 @@ const TensorBase& TensorBase::requires_grad_(bool _requires_grad) const {
   return *this;
 }
 
-// View Variables
+// View Methods
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 bool TensorBase::is_view() const {

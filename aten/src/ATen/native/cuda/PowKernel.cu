@@ -1,9 +1,11 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/Pow.h>
+#include <c10/core/Scalar.h>
 
 namespace at { namespace native {
 
@@ -150,10 +152,8 @@ void pow_tensor_scalar_kernel(TensorIteratorBase& iter, const Scalar& exp_scalar
       pow_tensor_scalar_kernel_impl<scalar_t>(iter, exp);
     });
   } else {
-    const auto exp = exp_scalar.to<float>();
-    AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "pow_cuda", [&]() {
-      pow_tensor_scalar_kernel_impl<scalar_t>(iter, exp);
-    });
+    TORCH_INTERNAL_ASSERT(false, "invalid combination of type in Pow function, common dtype:", iter.common_dtype(),
+                                 "exp is integral?", exp_scalar.isIntegral(false));
   }
 }
 

@@ -10,7 +10,7 @@ project(cpuinfo-download NONE)
 
 include(ExternalProject)
 ExternalProject_Add(cpuinfo
-  GIT_REPOSITORY https://github.com/Maratyszcza/cpuinfo.git
+  GIT_REPOSITORY https://github.com/pytorch/cpuinfo.git
   GIT_TAG master
   SOURCE_DIR "${CONFU_DEPENDENCIES_SOURCE_DIR}/cpuinfo"
   BINARY_DIR "${CONFU_DEPENDENCIES_BINARY_DIR}/cpuinfo"

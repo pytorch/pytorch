@@ -130,7 +130,7 @@ class BackwardHook(object):
                 tensors.append(arg)
                 requires_grad |= arg.requires_grad
 
-        if not requires_grad:
+        if not (requires_grad and torch.is_grad_enabled()):
             return args, None
 
         new_tensors = torch.nn.modules._functions.BackwardHookFunction.apply(*tensors)

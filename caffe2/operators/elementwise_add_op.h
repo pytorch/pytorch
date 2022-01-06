@@ -13,9 +13,6 @@ namespace caffe2 {
 
 template <class Context>
 struct AddFunctor {
-  explicit AddFunctor(bool allow_broadcast_fastpath=false)
-    : allow_broadcast_fastpath_(allow_broadcast_fastpath) {}
-
   template <typename TIn, typename TOut>
   bool Forward(
       const std::vector<int>& A_dims,
@@ -62,7 +59,7 @@ struct AddFunctor {
         dC,
         dA,
         context,
-        allow_broadcast_fastpath_);
+        true);
     math::ReduceSum(
         C_dims.size(),
         C_dims.data(),
@@ -71,11 +68,9 @@ struct AddFunctor {
         dC,
         dB,
         context,
-        allow_broadcast_fastpath_);
+        true);
     return true;
   }
-
-  const bool allow_broadcast_fastpath_;
 };
 
 } // namespace caffe2
