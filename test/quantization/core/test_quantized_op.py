@@ -2437,7 +2437,7 @@ class TestQuantizedOps(TestCase):
                 torch.nn.LSTM: torch.nn.quantizable.LSTM
             },
             'observed_to_quantized_custom_module_class': {
-                torch.nn.quantizable.LSTM: torch.nn.quantizable.LSTM
+                torch.nn.quantizable.LSTM: torch.nn.quantized.LSTM
             }
         }
 
