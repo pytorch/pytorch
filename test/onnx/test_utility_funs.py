@@ -1143,9 +1143,9 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 z = self._module_4(y * z)
                 return z
 
-        module = RenamedIntermediateModuled()
+        module = RenamedIntermediateModule()
 
-        g, p, o = torch_model_to_graph(module, torch.ones(1, 10), output_names=['y'])
+        g, p, o = utils._model_to_graph(module, torch.ones(1, 10), output_names=['y'])
         renamed_intermediate = 0
         for n in g.nodes():
             for v in n.inputs():
