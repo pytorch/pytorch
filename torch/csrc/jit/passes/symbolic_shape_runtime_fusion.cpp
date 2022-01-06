@@ -106,8 +106,57 @@ bool TryGeneralizeInputDimensionsToSymbolicShapes(
   return true;
 }
 
+void moveConstantTensorsOutOfSubgraph(
+    Node* tensorexpr_graph_node,
+    std::shared_ptr<Graph> tensorexpr_graph) {
+  auto parent = tensorexpr_graph_node->owningGraph();
+
+  auto env = [&](Value* v) {
+    TORCH_INTERNAL_ASSERT(
+        false,
+        "this should never happen since constant nodes do not have any inputs",
+        v->debugName());
+    return v;
+  };
+
+  WithInsertPoint wip(tensorexpr_graph_node);
+  std::vector<Node*> to_destroy;
+  for (auto node : tensorexpr_graph->nodes()) {
+    if (node->kind() == prim::Constant) {
+      if (!node->output()->type()->cast<TensorType>()) {
+        continue;
+      }
+
+      // copy the constant and insert that copy into the parent graph.
+      auto copy = parent->createClone(node, env);
+      parent->insertNode(copy);
+
+      // add a new input to the te subgraph and replace the uses of the
+      // constant with this input.
+      auto new_const = tensorexpr_graph->addInput();
+      new_const->setType(node->output()->type());
+      node->output()->replaceAllUsesWith(new_const);
+
+      // add the copy as input to the te node
+      tensorexpr_graph_node->addInput(copy->output());
+
+      to_destroy.push_back(node);
+    }
+  }
+
+  for (auto n : to_destroy) {
+    n->destroy();
+  }
+}
+
 bool GenerateGuard(Node* tensorexpr_graph_node, bool add_composed_op) {
   auto tensorexpr_graph = SubgraphUtils::getSubgraph(tensorexpr_graph_node);
+
+  // Move constant tensors from the subgraph to the outer scope.
+  // This is necessary because symbolic shape analysis does not handle the
+  // case of broadcast(constant, symbolic_shape) well and that results in poor
+  // performance.
+  moveConstantTensorsOutOfSubgraph(tensorexpr_graph_node, tensorexpr_graph);
 
   // Generalize Inputs
   if (!TryGeneralizeInputDimensionsToSymbolicShapes(tensorexpr_graph)) {
