@@ -30,14 +30,19 @@ def apply_input_props_using_example(graph, example_input):
 
     if not len(graph_inputs) == len(example_input):
         raise RuntimeError(
-            "Number of inputs in graph does not match number of inputs in the example")
+            "Number of inputs in graph does not match number of inputs in the example"
+        )
 
     for i, (graph_i, example_i) in enumerate(zip(graph_inputs, example_input)):
         if example_i is None:
             continue  # Skip the type check
 
-        if isinstance(example_i, torch.Tensor) != isinstance(graph_i.type(), torch.TensorType):
-            raise RuntimeError(f"Input {i} does not match type of example", graph_i, example_i)
+        if isinstance(example_i, torch.Tensor) != isinstance(
+            graph_i.type(), torch.TensorType
+        ):
+            raise RuntimeError(
+                f"Input {i} does not match type of example", graph_i, example_i
+            )
 
         if isinstance(example_i, torch.Tensor):
             graph_i.setType(torch.TensorType.create_from_tensor(example_i))  # type: ignore[arg-type]
@@ -177,7 +182,6 @@ class TestDeviceAnalysis(JitTestCase):
         self.assert_device_equal(type_as_fn, [self.cuda, None], None)
         self.assert_device_equal(type_as_fn, [None, self.mkldnn], self.mkldnn)
 
-
     def zerodim_test_core(self, device_pairs):
         # Test the support of zerodim tensors with non-zerodim tensors
         def mul(x, y):
@@ -218,7 +222,9 @@ class TestDeviceAnalysis(JitTestCase):
             graph = torch.jit.script(fn).graph
             self.prop_device_on_graph(graph, devices)
             actual_device = self.node_output_device(graph)
-            self.assertTrue((actual_device == out.device) or (actual_device is None))
+            self.assertTrue(
+                (actual_device is None) or (actual_device.type == out.device.type)
+            )
 
     def test_zerodim_cpu(self):
         # Allow for minimal testing locally
