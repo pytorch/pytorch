@@ -1,6 +1,5 @@
 #pragma once
 
-#include <c10/util/irange.h>
 #include <c10d/Store.hpp>
 #include <c10d/Types.hpp>
 
@@ -189,7 +188,7 @@ inline std::string retrieveDesyncReport(
   std::vector<int> missingRanks;
   TraceMap traceMap;
 
-  for (const auto rank : c10::irange(worldSize)) {
+  for (int rank = 0; rank < worldSize; rank++) {
     // Build traceMapStart.
     uint64_t seqStart;
     {

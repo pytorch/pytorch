@@ -1163,7 +1163,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     // Sanity check dimensionality across ranks.
     {
       const auto expected = metadata[context->rank].sizes();
-      for (const auto i : c10::irange(context->size)) {
+      for (auto i = 0; i < context->size; i++) {
         if (i == context->rank) {
           continue;
         }
@@ -1181,7 +1181,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     AT_ASSERT(static_cast<int>(values.size()) == context->size);
     auto output = at::sparse_coo_tensor(
         indices[0], values[0], input.sizes(), input.options());
-    for (const auto i : c10::irange(1, context->size)) {
+    for (auto i = 1; i < context->size; i++) {
       output += at::sparse_coo_tensor(
           indices[i], values[i], input.sizes(), input.options());
     }
@@ -1209,7 +1209,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     // Prepare metadata vector (1 entry per rank)
     std::vector<SparseTensorMetadata> metadata;
     metadata.reserve(context->size);
-    for (const auto i : c10::irange(context->size)) {
+    for (auto i = 0; i < context->size; i++) {
       metadata.emplace_back(buffer.select(0, i));
     }
 
