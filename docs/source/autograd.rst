@@ -77,7 +77,6 @@ may be confused with the two.
 .. autosummary::
     :toctree: generated
     :nosignatures:
-    :noindex:
 
     no_grad
     enable_grad
