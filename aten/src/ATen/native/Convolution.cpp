@@ -1245,7 +1245,6 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const c10::option
     const Tensor& gO_r, const Tensor& weight_r, const Tensor& input,
     IntArrayRef stride_, IntArrayRef padding_, IntArrayRef dilation_,
     bool transposed_, IntArrayRef output_padding_, int64_t groups_,
-    bool benchmark, bool deterministic, bool cudnn_enabled, bool allow_tf32,
     std::array<bool, 3> output_mask) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> ggI_maybe_owned = at::borrow_from_optional_tensor(ggI_opt);
@@ -1274,10 +1273,6 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const c10::option
   } else {
     params.groups = groups_;
   }
-  params.benchmark = benchmark;
-  params.deterministic = deterministic;
-  params.cudnn_enabled = cudnn_enabled;
-  params.allow_tf32 = allow_tf32;
 
   // Compute ggO = conv(ggI, w) + conv(i, ggW) + ggb
   Tensor ggO;
