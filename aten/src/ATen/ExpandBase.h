@@ -18,6 +18,6 @@ c10::MaybeOwned<Tensor> expand_size(TensorBase &&to_expand, IntArrayRef sizes) =
 inline c10::MaybeOwned<TensorBase> expand_inplace(const TensorBase &tensor, const TensorBase &to_expand) {
   return expand_size(to_expand, tensor.sizes());
 }
-c10::MaybeOwned<TensorBase> expand_size(const TensorBase &tensor, const TensorBase &to_expand) = delete;
+c10::MaybeOwned<TensorBase> expand_inplace(const TensorBase &tensor, TensorBase &&to_expand) = delete;
 
 } // namespace at
