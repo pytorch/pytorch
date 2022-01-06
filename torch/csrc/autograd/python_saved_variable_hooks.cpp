@@ -60,6 +60,7 @@ namespace torch { namespace autograd {
       Py_XDECREF(pack_hook);
       Py_XDECREF(unpack_hook);
     }
+    at::SavedTensorDefaultHooks::pop_hooks();
   }
 
   std::unique_ptr<SavedVariableHooks> PyDefaultSavedVariableHooks::get_hooks() {

@@ -5913,12 +5913,43 @@ for shape in [(1,), ()]:
                 pass
 
     def test_setting_default_saved_variable_hooks_twice_should_use_inner(self):
-        with torch.autograd.graph.saved_tensors_hooks(lambda x: 3 * x, lambda x: 3 * x):
+        with torch.autograd.graph.saved_tensors_hooks(lambda x: 2 * x, lambda x: 3 * x):
+            b = torch.randn(5, requires_grad=True)
             with torch.autograd.graph.saved_tensors_hooks(lambda x: 5 * x, lambda x: 7 * x):
                 a = torch.randn(5, requires_grad=True)
                 y = a * a
+            z = b * b
         y.sum().backward()
+        z.sum().backward()
         self.assertEqual(5 * 7 * a, a.grad)
+        self.assertEqual(2 * 3 * a, a.grad)
+
+    def test_save_on_cpu_and_checkpoint(self):
+        a = torch.randn(2, 2, requires_grad=True)
+
+        b = a.exp().exp().exp()
+        b.sum().backward()
+        b_grad = a.grad
+
+        with torch.autograd.graph.save_on_cpu():
+            h = a.exp()
+            h = checkpoint(torch.exp, h, use_reentrant=False).sum()
+            c = h.exp()
+        c.sum().backward()
+        c_grad = a.grad
+
+        def f(a):
+            h = a.exp()
+            with torch.autograd.graph.save_on_cpu():
+                h = torch.exp(h)
+            return h.exp()
+
+        d = checkpoint(f, a, use_reentrant=False)
+        d.sum().backward()
+        d_grad = a.grad
+
+        self.assertEqual(b_grad, c_grad)
+        self.assertEqual(b_grad, d_grad)
 
     def test_pack_hook_with_inplace_modification_should_fail(self):
         a = torch.randn(5, requires_grad=True)

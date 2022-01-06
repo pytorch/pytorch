@@ -54,7 +54,7 @@ class TORCH_API ThreadLocalState {
   std::shared_ptr<TorchDispatchTypeObject> python_mode_state_;
 
   // TLS for saved tensors default hooks
-  std::pair<PyObject*, PyObject*> saved_tensors_default_hooks_;
+  std::vector<PyObject*, PyObject*> saved_tensors_default_hooks_;
 
   // Whether pre-sampling RecordFunction optimization was enabled
   bool bumped_record_all_functions_ = false;
