@@ -67,6 +67,96 @@ mse_loss_backward_batch_rule(
   return std::make_tuple(result, 0);
 };
 
+static Tensor apply_loss_reduction(const at::Tensor& unreduced, int64_t reduction) {
+  if (reduction == at::Reduction::Mean) {
+    return unreduced.mean();
+  } else if (reduction == at::Reduction::Sum) {
+    return unreduced.sum();
+  }
+  return unreduced;
+}
+
+Tensor binary_cross_entropy_plumbing(
+    const Tensor& self, const Tensor& target,
+    const optional<Tensor>& weight, int64_t reduction) {
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor target_value;
+  optional<int64_t> target_bdim;
+  std::tie(target_value, target_bdim) = unwrapTensorAtLevel(target, cur_level);
+
+  Tensor result;
+  if (self_bdim || target_bdim) {
+    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    const auto bdim_size = get_bdim_size2(self_value, self_bdim, target_value, target_bdim);
+    auto self_ = moveBatchDimToFront(self_value, self_bdim);
+    auto target_ = moveBatchDimToFront(target_value, target_bdim);
+    self_ = ensure_has_bdim(self_, self_bdim.has_value(), bdim_size);
+    target_ = ensure_has_bdim(target_, target_bdim.has_value(), bdim_size);
+    result = at::binary_cross_entropy(self_, target_, nullopt, Reduction::None);
+    result = makeBatched(result, 0, cur_level);
+  } else {
+    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    result = at::binary_cross_entropy(self_value, target_value, nullopt, Reduction::None);
+  }
+  if (weight.has_value() && weight->defined()) {
+    result = result * weight.value();
+  }
+  return apply_loss_reduction(result, reduction);
+}
+
+Tensor binary_cross_entropy_backward_plumbing(
+    const Tensor& grad, const Tensor& input, const Tensor& target,
+    const c10::optional<Tensor>& weight_opt, int64_t reduction) {
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor grad_value;
+  optional<int64_t> grad_bdim;
+  std::tie(grad_value, grad_bdim) = unwrapTensorAtLevel(
+      reduction == Reduction::None ? grad : grad.expand_as(input), cur_level);
+  Tensor input_value;
+  optional<int64_t> input_bdim;
+  std::tie(input_value, input_bdim) = unwrapTensorAtLevel(input, cur_level);
+  Tensor target_value;
+  optional<int64_t> target_bdim;
+  std::tie(target_value, target_bdim) = unwrapTensorAtLevel(target, cur_level);
+
+  Tensor grad_input;
+  if (grad_bdim || input_bdim || target_bdim) {
+    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    const auto bdim_size = get_bdim_size3(
+        grad_value, grad_bdim, input_value, input_bdim, target_value, target_bdim);
+
+    auto grad_ = moveBatchDimToFront(grad_value, grad_bdim);
+    auto input_ = moveBatchDimToFront(input_value, input_bdim);
+    auto target_ = moveBatchDimToFront(target_value, target_bdim);
+
+    grad_ = ensure_has_bdim(grad_, grad_bdim.has_value(), bdim_size);
+    input_ = ensure_has_bdim(input_, input_bdim.has_value(), bdim_size);
+    target_ = ensure_has_bdim(target_, target_bdim.has_value(), bdim_size);
+
+    grad_input = at::binary_cross_entropy_backward(
+        grad_, input_, target_, nullopt, Reduction::None);
+    grad_input = makeBatched(grad_input, 0, cur_level);
+  } else {
+    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    grad_input = at::binary_cross_entropy_backward(
+        grad_value, input_value, target_value, nullopt, Reduction::None);
+  }
+  if (weight_opt.has_value() && weight_opt->defined()) {
+    grad_input = grad_input * weight_opt.value();
+  }
+  if (reduction == Reduction::Mean) {
+    grad_input.div_(input.numel());
+  }
+  return grad_input;
+}
+
 std::tuple<Tensor, Tensor> nll_loss_forward_decomposition(
     const Tensor & self,
     const Tensor & target,
@@ -201,6 +291,8 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("nll_loss2d_backward", nll_loss_backward_decomposition);
   VMAP_SUPPORT("mse_loss", mse_loss_batch_rule);
   VMAP_SUPPORT("mse_loss_backward", mse_loss_backward_batch_rule);
+  m.impl("binary_cross_entropy", binary_cross_entropy_plumbing);
+  m.impl("binary_cross_entropy_backward", binary_cross_entropy_backward_plumbing);
 }
 
 }}

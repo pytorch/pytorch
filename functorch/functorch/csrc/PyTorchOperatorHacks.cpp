@@ -123,11 +123,78 @@ Tensor linear_hack(const Tensor& input, const Tensor& weight, const c10::optiona
   return output;
 }
 
+Tensor binary_cross_entropy_with_logits_backward_hack(
+    const Tensor& grad, const Tensor& input, const Tensor& target,
+    const c10::optional<Tensor>& weight_opt,
+    const c10::optional<Tensor>& pos_weight_opt, int64_t reduction) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
+  const Tensor& pos_weight = c10::value_or_else(pos_weight_opt, [] {return Tensor();});
+
+  Tensor grad_input;
+  if (pos_weight.defined()) {
+    auto t = pos_weight.mul(target);
+    grad_input = t.add(1).sub_(target).mul(input.sigmoid()).sub_(t).mul(grad);
+  } else {
+    grad_input = (input.sigmoid() - target).mul(grad);
+  }
+
+  if (weight.defined()) {
+    grad_input.mul(weight);
+  }
+
+  if (reduction == at::Reduction::Mean) {
+    return grad_input / input.numel();
+  }
+
+  return grad_input;
+}
+
+static inline at::Tensor apply_loss_reduction(const at::Tensor& unreduced, int64_t reduction) {
+  if (reduction == at::Reduction::Mean) {
+    return unreduced.mean();
+  } else if (reduction == at::Reduction::Sum) {
+    return unreduced.sum();
+  }
+  return unreduced;
+}
+
+Tensor binary_cross_entropy_with_logits_hack(
+    const Tensor& input,
+    const Tensor& target,
+    const c10::optional<Tensor>& weight_opt,
+    const c10::optional<Tensor>& pos_weight_opt,
+    int64_t reduction) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
+  const Tensor& pos_weight = c10::value_or_else(pos_weight_opt, [] {return Tensor();});
+
+  Tensor loss;
+  auto max_val = (-input).clamp_min_(0);
+  if (pos_weight.defined()) {
+    // pos_weight need to be broadcasted, thus mul(target) is not inplace.
+    auto log_weight = (pos_weight - 1).mul(target).add_(1);
+    loss = (1 - target).mul(input).add(log_weight.mul(((-max_val).exp_().add((-input - max_val).exp_())).log_().add_(max_val)));
+  } else {
+    loss = (1 - target).mul(input).add_(max_val).add_((-max_val).exp_().add((-input -max_val).exp_()).log_());
+  }
+
+  if (weight.defined()) {
+    loss = loss * weight;
+  }
+
+  return apply_loss_reduction(loss, reduction);
+}
+
 TORCH_LIBRARY_IMPL(aten, FT_DYNAMIC_LAYER_FRONT_MODE_KEY, m) {
   m.impl("value_selecting_reduction_backward", value_selecting_reduction_backward_hack);
   m.impl("index_select_backward", index_select_backward_hack);
   m.impl("frobenius_norm.dim", frobenius_norm_dim_hack);
   m.impl("linear", linear_hack);
+  m.impl("binary_cross_entropy_with_logits_backward", binary_cross_entropy_with_logits_backward_hack);
+  m.impl("binary_cross_entropy_with_logits", binary_cross_entropy_with_logits_hack);
 }
 
 }}
