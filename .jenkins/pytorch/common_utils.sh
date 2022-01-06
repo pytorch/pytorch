@@ -106,7 +106,7 @@ function clone_pytorch_xla() {
 
 export UCX_HOME='/usr'
 function install_ucx() {
-  apt-get install -y
+  apt-get install -y libtool
   git clone --recursive https://github.com/openucx/ucx.git
   pushd ucx
   ./autogen.sh
