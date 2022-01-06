@@ -426,6 +426,7 @@ class TestOperators(TestCase):
         skip('nn.functional.fractional_max_pool2d'),  # fails on cuda, runs okay on cpu
         xfail('nn.functional.fractional_max_pool3d'),
         skip('nn.functional.conv_transpose3d'),  # numerical precision problem
+        xfail('nn.functional.binary_cross_entropy'),  # testing problem
     }))
     def test_vjpvjp(self, device, dtype, op):
         if not op.supports_autograd:
