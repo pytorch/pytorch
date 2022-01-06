@@ -5788,87 +5788,72 @@ class TestLinalg(TestCase):
             with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
                 torch.linalg.householder_product(reflectors, tau)
 
-    @precisionOverride({torch.complex64: 5e-6})
-    @skipCUDAIfNoMagma
+    @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
+    @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
-    @dtypes(torch.double, torch.cfloat, torch.cdouble)
-    def test_lu(self, device, dtype):
+    @dtypes(*floating_and_complex_types())
+    def test_linalg_lu_factor_and_lu(self, device, dtype):
+        # Tests lu, linalg.lu_factor and linalg.lu_factor_ex
         from torch.testing._internal.common_utils import random_matrix
 
-        def run_test(device, pivot):
-            def run_subtest(matrix_size, batches, device, pivot, singular=False, a=None):
-                if isinstance(matrix_size, int):
-                    rows = columns = matrix_size
-                else:
-                    rows, columns = matrix_size
-                if a is None:
-                    a = random_matrix(rows, columns, *batches, **dict(singular=singular, dtype=dtype, device=device))
-                a_LU_info, pivots_info, info_ = a.lu(pivot=pivot, get_infos=True)
-                self.assertEqual(a_LU_info.size(), torch.Size(batches + (rows, columns)))
-                self.assertEqual(pivots_info.size(), torch.Size(batches + (min(rows, columns),)))
-                self.assertEqual(info_.size(), torch.Size(batches))
-                # If a randomly generated input matrix is singular,
-                # then info_ contains indices i such that U[i, i] ==
-                # 0. This however conveys that the factorization was
-                # successful albeit with a singular input. Therefore,
-                # we require info.min() >= 0
-                self.assertGreaterEqual(info_.min(), 0)
-                a_LU, pivots = a.lu(pivot=pivot)
-                self.assertEqual(a_LU, a_LU_info)
-                self.assertEqual(pivots_info, pivots)
+        def run_test(A, pivot, singular, fn):
+            k = min(A.shape[-2:])
+            batch = A.shape[:-2]
+            check_errors = (fn == torch.linalg.lu_factor)
+            if singular and check_errors:
+                # It may or may not throw as the LU decomposition without pivoting
+                # may still succeed for singular matrices
+                try:
+                    LU, pivots = fn(A, pivot=pivot)
+                except RuntimeError:
+                    return
+            else:
+                LU, pivots = fn(A, pivot=pivot)[:2]
 
+            self.assertEqual(LU.size(), A.shape)
+            self.assertEqual(pivots.size(), batch + (k,))
 
-                P, L, U = torch.lu_unpack(a_LU, pivots)
-                P_ = P.cpu().numpy()
-                L_ = L.cpu().numpy()
-                U_ = U.cpu().numpy()
+            if not pivot:
+                self.assertEqual(pivots, torch.arange(1, 1 + k, device=device, dtype=torch.int32).expand(batch + (k, )))
 
-                self.assertEqual(np.matmul(P_, np.matmul(L_, U_)), a)
+            P, L, U = torch.lu_unpack(LU, pivots)
 
-                if self.device_type == 'cuda':
-                    # lu without pivoting is implemented only for cuda device
-                    a_LU_info_nopiv, nopiv, info_nopiv = a.lu(pivot=False, get_infos=True)
-                    P_nopiv, L_nopiv, U_nopiv = torch.lu_unpack(a_LU_info_nopiv, nopiv)
-                    P_nopiv_ = P_nopiv.cpu().numpy()
-                    L_nopiv_ = L_nopiv.cpu().numpy()
-                    U_nopiv_ = U_nopiv.cpu().numpy()
+            self.assertEqual(P @ L @ U, A)
 
-                    self.assertEqual(np.matmul(P_nopiv_, np.matmul(L_nopiv_, U_nopiv_)), a)
+        sizes = ((3, 3), (5, 5), (4, 2), (3, 4), (0, 0), (0, 1), (1, 0))
+        batches = ((0,), (2,), (3,), (1, 0), (3, 5))
+        # Non pivoting just implemented for CUDA
+        pivots = (True, False) if self.device_type == "cuda" else (True,)
+        fns = (partial(torch.lu, get_infos=True), torch.linalg.lu_factor, torch.linalg.lu_factor_ex)
+        for ms, batch, pivot, singular, fn in itertools.product(sizes, batches, pivots, (True, False), fns):
+            m, n = ms
+            A = random_matrix(m, n, *batch, singular=singular, dtype=dtype, device=device)
+            # Just do one of them on singular matrices
+            if A.numel() == 0 and not singular:
+                continue
+            run_test(A, pivot, singular, fn)
 
-                    k = min(rows, columns)
-                    self.assertEqual(nopiv, torch.arange(1, 1 + k, device=device, dtype=torch.int32).expand(a.shape[:-2] + (k, )))
-                    if not singular:
-                        # It is not guaranteed that LU factorization
-                        # without pivoting is able to determine if a
-                        # matrix is singular while LU factorization
-                        # with pivoting is. Therefore, we require the
-                        # equality of info-s only for non-singular
-                        # matrices.
-                        # NOTE: infor_ is reshaped because info_nopiv might have
-                        # squashed batch dimensions for complex types on CUDA,
-                        # see the TODOs above.
-                        self.assertEqual(info_.reshape(info_nopiv.shape), info_nopiv)
+            # Reproducer of a magma bug,
+            # see https://bitbucket.org/icl/magma/issues/13/getrf_batched-kernel-produces-nans-on
+            # This is also a bug in cuSOLVER < 11.3
+            if (dtype == torch.double
+               and singular
+               and (torch.version.cuda is None or
+                    torch.version.cuda.split('.') >= ["11", "3"])):
+                A = torch.ones(batch + ms, dtype=dtype, device=device)
+                run_test(A, pivot, singular, fn)
 
-            for ms, batch in itertools.product([3, 5, 7, (4, 2), (3, 4)], [(), (2,), (3,), (3, 5)]):
-                run_subtest(ms, batch, device, pivot)
-                run_subtest(ms, batch, device, pivot, singular=True)
-
-                # Reproducer of a magma bug, see https://bitbucket.org/icl/magma/issues/13/getrf_batched-kernel-produces-nans-on
-                a = torch.ones(batch + (ms if isinstance(ms, tuple) else (ms, ms)), dtype=torch.double, device=device)
-                run_subtest(ms, batch, device, pivot, singular=True, a=a)
-
-            # Info should be positive for rank deficient matrices
-            a = torch.ones(5, 3, 3, device=device)
-            self.assertGreater(a.lu(pivot=pivot, get_infos=True)[2][0], 0)
-
-        run_test(device, True)
+        # Info should be positive for rank deficient matrices
+        A = torch.ones(5, 3, 3, device=device)
+        self.assertTrue((torch.linalg.lu_factor_ex(A, pivot=True).info >= 0).all())
 
         if self.device_type == 'cpu':
             # Error checking, no pivoting variant on CPU
-            with self.assertRaisesRegex(RuntimeError, 'lu without pivoting is not implemented on the CPU'):
+            with self.assertRaisesRegex(RuntimeError, 'LU without pivoting is not implemented on the CPU'):
                 torch.lu(torch.empty(1, 2, 2), pivot=False)
-        else:
-            run_test(device, False)
+
+            with self.assertRaisesRegex(RuntimeError, 'LU without pivoting is not implemented on the CPU'):
+                torch.linalg.lu_factor(torch.empty(1, 2, 2), pivot=False)
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
@@ -7316,8 +7301,9 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
                 torch.linalg.slogdet(a, out=(sign_out, logabsdet_out))
 
-    @slowTest
-    @skipCUDAIfNoMagma
+    @skipCUDAIf(torch.version.cuda is not None
+                and torch.version.cuda.split(".") < ["11", "3"], "There's a bug in cuSOLVER < 11.3")
+    @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_det_logdet_slogdet(self, device, dtype):
@@ -7335,15 +7321,15 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
             # Test det
             self.assertEqual(det, target_sdet * target_logabsdet.exp(),
-                             atol=1e-7, rtol=0, msg='{} (det)'.format(desc))
+                             atol=1e-6, rtol=0, msg='{} (det)'.format(desc))
 
             # Test slogdet
             # Compare the overall value rather than individual parts because of
             # precision issues when det is near zero.
             self.assertEqual(sdet * logabsdet.exp(), target_sdet * target_logabsdet.exp(),
-                             atol=1e-7, rtol=0, msg='{} (slogdet)'.format(desc))
+                             atol=1e-6, rtol=0, msg='{} (slogdet)'.format(desc))
             self.assertEqual(linalg_sdet * linalg_logabsdet.exp(), target_sdet * target_logabsdet.exp(),
-                             atol=1e-7, rtol=0, msg='{} (linalg_slogdet)'.format(desc))
+                             atol=1e-6, rtol=0, msg='{} (linalg_slogdet)'.format(desc))
 
             # Test logdet
             # Compare logdet against our own pytorch slogdet because they should
@@ -7354,7 +7340,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 self.assertTrue(logdet.item() != logdet.item(), '{} (logdet negative case)'.format(desc))
             else:
                 self.assertEqual(logdet.exp(), target_logabsdet.exp(),
-                                 atol=1e-7, rtol=0, msg='{} (logdet non-negative case)'.format(desc))
+                                 atol=1e-6, rtol=0, msg='{} (logdet non-negative case)'.format(desc))
 
         eye = torch.eye(5, dtype=dtype, device=device)
         test_single_det(eye, (torch.ones((), dtype=dtype, device=device), torch.zeros((), dtype=dtype, device=device)), 'identity')

@@ -2660,16 +2660,17 @@ def random_fullrank_matrix_distinct_singular_value(matrix_size, *batch_dims,
 
 # Creates a full rank matrix with distinct signular values or
 #   a batch of such matrices
-# Shape must be a square matrix or batch of square matrices
-def make_fullrank_matrices_with_distinct_singular_values(*shape, device, dtype):
-    assert shape[-1] == shape[-2]
-    t = make_tensor(shape, device=device, dtype=dtype)
-    u, _, vh = torch.linalg.svd(t, full_matrices=False)
-    # TODO: improve the handling of complex tensors here
-    real_dtype = t.real.dtype if t.dtype.is_complex else t.dtype
-    s = torch.arange(1., shape[-1] + 1, dtype=real_dtype, device=device).mul_(1.0 / (shape[-1] + 1))
-    return (u * s.to(dtype)) @ vh
-
+def make_fullrank_matrices_with_distinct_singular_values(*shape, device, dtype, requires_grad=False):
+    with torch.no_grad():
+        t = make_tensor(shape, device=device, dtype=dtype)
+        u, _, vh = torch.linalg.svd(t, full_matrices=False)
+        # TODO: improve the handling of complex tensors here
+        real_dtype = t.real.dtype if t.dtype.is_complex else t.dtype
+        k = min(shape[-1], shape[-2])
+        s = torch.arange(1., k + 1, dtype=real_dtype, device=device).mul_(1.0 / (k + 1))
+        x = (u * s.to(dtype)) @ vh
+    x.requires_grad_(requires_grad)
+    return x
 
 def random_matrix(rows, columns, *batch_dims, **kwargs):
     """Return rectangular matrix or batches of rectangular matrices.
@@ -2687,6 +2688,8 @@ def random_matrix(rows, columns, *batch_dims, **kwargs):
         return torch.ones(rows, columns, dtype=dtype, device=device)
 
     A = torch.randn(batch_dims + (rows, columns), dtype=dtype, device=device)
+    if A.numel() == 0:
+        return A
     u, _, vh = torch.linalg.svd(A, full_matrices=False)
     k = min(rows, columns)
     s = torch.linspace(1 / (k + 1), 1, k, dtype=dtype, device=device)

@@ -932,9 +932,10 @@
   other: zeros_like(other)
   result: self_t.zero_()
 
-- name: _lu_with_info(Tensor self, bool pivot=True, bool check_errors=True) -> (Tensor LU, Tensor pivots, Tensor info)
-  self: _lu_with_info_backward(grad, self, LU, pivots)
-  LU: _lu_with_info_jvp(self_t, LU, pivots)
+- name: linalg_lu_factor_ex(Tensor A, *, bool pivot=True, bool check_errors=False) -> (Tensor LU, Tensor pivots, Tensor info)
+  A: lu_factor_ex_backward(grad, A, LU, pivots)
+  LU: lu_factor_ex_jvp(A_t, LU, pivots)
+  output_differentiability: [True, False, False]
 
 - name: lu_solve(Tensor self, Tensor LU_data, Tensor LU_pivots) -> Tensor
   self, LU_data: lu_solve_backward(grad, result, LU_data, LU_pivots, grad_input_mask)

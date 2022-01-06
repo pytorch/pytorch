@@ -5,6 +5,8 @@
 #include <ATen/cuda/PinnedMemoryAllocator.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 
+#include <c10/util/Exception.h>
+
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cuda/MiscUtils.h>
 #include <ATen/native/Resize.h>
@@ -1806,12 +1808,10 @@ REGISTER_CUDA_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl);
   For further details, please see the MAGMA documentation for magma_dgetrf_gpu.
 */
 template <typename scalar_t>
-static void apply_lu_looped_magma(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
+static void apply_lu_factor_looped_magma(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
 #if !AT_MAGMA_ENABLED()
-  TORCH_CHECK(
-      false,
-      "Calling torch.lu on a CUDA tensor requires compiling ",
-      "PyTorch with MAGMA. Please rebuild with MAGMA.");
+  // This should never be thrown if the calling functions are correct.
+  AT_ERROR("linalg.lu_factor: PyTorch was not compiled with MAGMA support.");
 #else
   // magmaLu and magmaLuNoPiv require infos and pivots tensor to be on CPU
   // the data is later copied back to the appropriate output tensor
@@ -1835,20 +1835,15 @@ static void apply_lu_looped_magma(const Tensor& input, const Tensor& pivots, con
       int* infos_working_ptr = &infos_data[i];
       magmaLu<scalar_t>(m, n, input_working_ptr, leading_dimension, pivots_working_ptr, infos_working_ptr);
     }
-    pivots.copy_(pivots_cpu, /*non_blocking=*/true);
+    pivots.copy_(pivots_cpu);
   } else {
     for (decltype(batch_size) i = 0; i < batch_size; i++) {
       scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
       int* infos_working_ptr = &infos_data[i];
       magmaLuNoPiv<scalar_t>(m, n, input_working_ptr, leading_dimension, infos_working_ptr);
     }
-
-    // fill the pivots tensor with indices using 1-based (Fortran) indexing
-    auto k = std::min(m, n);
-    Tensor pivots_tmp = at::arange(1, k + 1, input.options().dtype(at::kInt)).expand_as(pivots);
-    pivots.copy_(pivots_tmp);
   }
-  infos.copy_(infos_cpu, /*non_blocking=*/true);
+  infos.copy_(infos_cpu);
 #endif
 }
 
@@ -1867,7 +1862,7 @@ static void apply_lu_looped_magma(const Tensor& input, const Tensor& pivots, con
   For further details, please see the MAGMA documentation for magma_dgetrf_batched.
 */
 template <typename scalar_t>
-static void apply_lu_batched_magma(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
+static void apply_lu_factor_batched_magma(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
 #if !AT_MAGMA_ENABLED()
   TORCH_CHECK(
       false,
@@ -1878,13 +1873,6 @@ static void apply_lu_batched_magma(const Tensor& input, const Tensor& pivots, co
   auto infos_data = infos.data_ptr<magma_int_t>();
   auto input_matrix_stride = matrixStride(input);
   magma_int_t batch_size = magma_int_cast(batchCount(input), "batchCount");
-
-  // magmaLuBatched doesn't work with zero batch dimensions
-  // it gives CUDA error: invalid configuration argument
-  if (batch_size == 0) {
-    infos.fill_(0);
-    return;
-  }
 
   magma_int_t m = magma_int_cast(input.size(-2), "m");
   magma_int_t n = magma_int_cast(input.size(-1), "n");
@@ -1915,11 +1903,6 @@ static void apply_lu_batched_magma(const Tensor& input, const Tensor& pivots, co
     magmaLuBatched<scalar_t>(m, n, input_array, leading_dimension, pivots_array, infos_data, batch_size, magma_queue);
   } else {
     magmaLuNoPivBatched<scalar_t>(m, n, input_array, leading_dimension, infos_data, batch_size, magma_queue);
-
-    // fill the pivots tensor with indices using 1-based (Fortran) indexing
-    auto k = std::min(m, n);
-    Tensor pivots_tmp = at::arange(1, k + 1, input.options().dtype(at::kInt)).expand_as(pivots);
-    pivots.copy_(pivots_tmp);
   }
 
   // block CPU until all operations on the queue are finished
@@ -1928,57 +1911,98 @@ static void apply_lu_batched_magma(const Tensor& input, const Tensor& pivots, co
 #endif
 }
 
-static void lu_looped_magma(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "lu_magma_looped", [&]{
-    apply_lu_looped_magma<scalar_t>(input, pivots, infos, compute_pivots);
+static void lu_factor_looped_magma(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "lu_factor_magma_looped", [&]{
+    apply_lu_factor_looped_magma<scalar_t>(input, pivots, infos, compute_pivots);
   });
 }
 
-static void lu_batched_magma(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "lu_magma_batched", [&]{
-    apply_lu_batched_magma<scalar_t>(input, pivots, infos, compute_pivots);
+static void lu_factor_batched_magma(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "lu_factor_magma_batched", [&]{
+    apply_lu_factor_batched_magma<scalar_t>(input, pivots, infos, compute_pivots);
   });
 }
 
-static void apply_lu(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
-  int64_t batch_size = batchCount(input);
+static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
+  auto batch_size = batchCount(input);
+  // MAGMA does not work with batch_size == 0.
+  // CuSolver does not work when the matrices have no elements
+  if (input.numel() == 0) {
+    // zero out the infos as it will have one element if the input is a matrix of size (0, 0)
+    infos.zero_();
+    return;
+  }
+
+#if AT_MAGMA_ENABLED()
+  const auto lu_factor_magma = [batch_size](const Tensor& input, const Tensor& pivots, const Tensor& infos, const bool compute_pivots) {
+    if (batch_size == 1) {
+        lu_factor_looped_magma(input, pivots, infos, compute_pivots);
+    } else {
+      // There is a bug in lu_factor_batched_magma in MAGMA < 2.5.2, see
+      // https://bitbucket.org/icl/magma/issues/13/getrf_batched-kernel-produces-nans-on
+      std::tuple<magma_int_t, magma_int_t, magma_int_t> version;
+      magma_version(&std::get<0>(version), &std::get<1>(version), &std::get<2>(version));
+      if (version >= std::make_tuple<magma_int_t, magma_int_t, magma_int_t>(2, 5, 2)) {
+        lu_factor_batched_magma(input, pivots, infos, compute_pivots);
+      } else {
+        lu_factor_looped_magma(input, pivots, infos, compute_pivots);
+      }
+    }
+  };
+#endif
+
 #ifdef USE_CUSOLVER
   auto preferred_backend = at::globalContext().linalgPreferredBackend();
   switch (preferred_backend) {
     case at::LinalgBackend::Cusolver:
-      lu_looped_cusolver(input, pivots, infos, compute_pivots);
+      lu_factor_looped_cusolver(input, pivots, infos, compute_pivots, use_magma_);
       break;
     case at::LinalgBackend::Magma:
-      if (batch_size == 1) {
-        lu_looped_magma(input, pivots, infos, compute_pivots);
-      } else {
-        lu_batched_magma(input, pivots, infos, compute_pivots);
-      }
+#if AT_MAGMA_ENABLED()
+      lu_factor_magma(input, pivots, infos, compute_pivots);
       break;
+#endif
     default:
-      // Use a heuristic to determine that cusolver is faster than MAGMA for the following sizes.
-      auto m = input.size(-2);
-      // exclude complex128 since nan_to_num_ does not work with it.
-      if ((batch_size == 1 ||
-            (batch_size <= 8 && m <= 16) ||
-            !use_magma_)
-          && !input.is_complex()) {
-        lu_looped_cusolver(input, pivots, infos, compute_pivots);
+#if AT_MAGMA_ENABLED()
+      // We do not use cuSOLVER for complex inputs if !get_pivots since nan_to_num_ does not work with it.
+      // See https://github.com/pytorch/pytorch/issues/59247 for more info
+      // Provided the above, use a heuristic to determine that cusolver is faster than MAGMA
+      const auto m = input.size(-2);
+      const auto use_cusolver = ((batch_size == 1 || (batch_size <= 8 && m <= 16))
+                                 && (!input.is_complex() || compute_pivots));
+      if (use_cusolver) {
+        lu_factor_looped_cusolver(input, pivots, infos, compute_pivots, use_magma_);
       } else {
-        lu_batched_magma(input, pivots, infos, compute_pivots);
+        lu_factor_magma(input, pivots, infos, compute_pivots);
       }
+#else // USE_CUSOLVER && !AT_MAGMA_ENABLED
+      lu_factor_looped_cusolver(input, pivots, infos, compute_pivots, use_magma_);
+#endif
   }
+#else // !USE_CUSOLVER
+#if AT_MAGMA_ENABLED()
+    if (batch_size == 1) {
+      lu_factor_looped_magma(input, pivots, infos, compute_pivots);
+    } else {
+      lu_factor_magma(input, pivots, infos, compute_pivots);
+    }
 #else
-  if (batch_size == 1) {
-    lu_looped_magma(input, pivots, infos, compute_pivots);
-  }
-  else {
-    lu_batched_magma(input, pivots, infos, compute_pivots);
-  }
+  TORCH_CHECK(
+      false,
+      "Calling linalg.lu_factor on a CUDA tensor requires compiling ",
+      "PyTorch with MAGMA or cuSolver. Please rebuild with MAGMA.");
+#endif // AT_MAGMA_ENABLED
 #endif // USE_CUSOLVER
+
+  // We return the trivial permutation of pivots starting with 1 (FORTRAN indexing)
+  if (!compute_pivots) {
+    auto k = std::min(input.size(-2), input.size(-1));
+    auto pivots_tmp = at::arange(1, k + 1, input.options().dtype(at::kInt));
+    pivots.copy_(pivots_tmp);
+  }
 }
 
-REGISTER_CUDA_DISPATCH(lu_stub, &apply_lu);
+REGISTER_CUDA_DISPATCH(lu_factor_stub, &lu_factor);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangular_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -2795,8 +2819,8 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda(const Tensor& self, bool som
   Args:
   * `b` -  [in] the right hand side matrix B
            [out] the solution matrix X
-  * `lu` - [in] the LU factorization of matrix A (see at::_lu_with_info)
-  * `pivots` - [in] the pivot indices (see at::_lu_with_info)
+  * `lu` - [in] the LU factorization of matrix A (see at::linalg_lu_factor)
+  * `pivots` - [in] the pivot indices (see at::linalg_lu_factor)
 
   For further details, please see the MAGMA documentation for magma_dgetrs_gpu.
 */
@@ -2849,8 +2873,8 @@ static void apply_lu_solve_looped_magma(const Tensor& b, const Tensor& lu, const
   Args:
   * `b` -  [in] the right hand side matrix B
            [out] the solution matrix X
-  * `lu` - [in] the LU factorization of matrix A (see at::_lu_with_info)
-  * `pivots` - [in] the pivot indices (see at::_lu_with_info)
+  * `lu` - [in] the LU factorization of matrix A (see at::linalg_lu_factor)
+  * `pivots` - [in] the pivot indices (see at::linalg_lu_factor)
 
   For further details, please see the MAGMA documentation for magma_dgetrs_batched.
 */
