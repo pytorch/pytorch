@@ -15,6 +15,7 @@ from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     NodeSpec,
 )
+from torch.testing import FileCheck
 from torch.quantization import (
     ObserverBase,
     FakeQuantizeBase,
@@ -621,10 +622,11 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
             # TODO(future PR): add FX rewrite support
             do_fx_comparison=False, do_torchscript_checks=False)
 
-    def test_prepare_custom_config_dict_non_traceable_module_class(self):
+    def _get_non_traceable_module_class_test_model(self):
         class M1(torch.nn.Module):
             def forward(self, x):
-                pass
+                x = x + x
+                return x
 
         class M2(torch.nn.Module):
             def __init__(self):
@@ -632,7 +634,8 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
                 self.m1 = M1()
 
             def forward(self, x):
-                self.m1(x)
+                x = self.m1(x)
+                x = x + x
                 return x
 
         class M3(torch.nn.Module):
@@ -641,13 +644,16 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
                 self.m2 = M2()
 
             def forward(self, x):
-                self.m2(x)
+                x = self.m2(x)
                 return x
 
+        return M3().eval(), M1, M2, M3
+
+    def test_prepare_custom_config_dict_non_traceable_module_class_child_leaf(self):
 
         # if M1 is set as leaf, M2 and M3 should have auto_quant_state
         qconfig_dict = {'': torch.quantization.default_qconfig}
-        m = M3().eval()
+        m, M1, M2, M3 = self._get_non_traceable_module_class_test_model()
         prepare_custom_config_dict = {
             'non_traceable_module_class': [M1],
         }
@@ -657,12 +663,22 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         self.assertTrue(not hasattr(mp.m2.m1, '_auto_quant_state'))
         self.assertTrue(hasattr(mp.m2, '_auto_quant_state'))
         self.assertTrue(hasattr(mp, '_auto_quant_state'))
-        # TODO(future PR): ensure functions in leaves do not get quantized
+        mq = _quantize_dbr.convert(mp)
+        mqt = torch.jit.trace(mq, (torch.randn(1, 1, 1, 1),))
+
+        # mqt.m2.m1 should not have quantized ops
+        FileCheck().check_count("aten::add", 1, exactly=True).run(mqt.m2.m1.graph)
+        FileCheck().check_count("quantized::add", 0, exactly=True).run(mqt.m2.m1.graph)
+        # mqt.m2.m1 should have quantized ops
+        FileCheck().check_count("aten::add", 0, exactly=True).run(mqt.m2.graph)
+        FileCheck().check_count("quantized::add", 1, exactly=True).run(mqt.m2.graph)
+
         # TODO(future PR): ensure modules in leaves do not get quantized
 
+    def test_prepare_custom_config_dict_non_traceable_module_class_mid_leaf(self):
         # if M2 is set as leaf, only M1 should have auto_quant_state
         qconfig_dict = {'': torch.quantization.default_qconfig}
-        m = M3().eval()
+        m, M1, M2, M3 = self._get_non_traceable_module_class_test_model()
         prepare_custom_config_dict = {
             'non_traceable_module_class': [M2],
         }
@@ -672,6 +688,14 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         self.assertTrue(not hasattr(mp.m2.m1, '_auto_quant_state'))
         self.assertTrue(not hasattr(mp.m2, '_auto_quant_state'))
         self.assertTrue(hasattr(mp, '_auto_quant_state'))
+        mq = _quantize_dbr.convert(mp)
+        mqt = torch.jit.trace(mq, (torch.randn(1, 1, 1, 1),))
+
+        # mqt.m2 and all children should not have quantized ops
+        FileCheck().check_count("aten::add", 1, exactly=True).run(mqt.m2.m1.graph)
+        FileCheck().check_count("quantized::add", 0, exactly=True).run(mqt.m2.m1.graph)
+        FileCheck().check_count("aten::add", 1, exactly=True).run(mqt.m2.graph)
+        FileCheck().check_count("quantized::add", 0, exactly=True).run(mqt.m2.graph)
 
     @unittest.skip('TODO build this')
     def test_module_input_types(self):
