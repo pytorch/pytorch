@@ -154,6 +154,31 @@ class TestDeviceAnalysis(JitTestCase):
         # Allow for minimal testing locally
         self.zerodim_test_core([(self.cpu, self.cpu)])
 
+    def test_zerodim_no_device(self):
+        # If device is missing, you should never be able to infer device type.
+        def mul(x, y):
+            return x * y
+
+        def add(x, y):
+            return x + y
+
+        fns = [mul, add]
+
+        device_pairs = [
+            (self.cpu, None),
+            (None, self.cpu),
+            (None, None),
+        ]
+
+        input_shapes = [
+            ((1, 2, 2), (2, 2)),  # Different dim, non-zerodim
+            ((1, 2, 2), ()),  # one zerodim
+            ((), ()),  # both zerodim
+        ]
+
+        for fn, shapes, devices in product(fns, input_shapes, device_pairs):
+            self.assert_device_equal(fn, devices, None, shapes)
+
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_zerodim_gpu(self):
         device_pairs = [
