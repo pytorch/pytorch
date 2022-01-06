@@ -56,7 +56,16 @@ SparseTensor& mul_out_sparse_zerodim(SparseTensor& r, const SparseTensor& t, con
   AT_ASSERT(value.dim() == 0);
 
   // Resolve a possibly sparse COO value to a strided tensor.
-  auto& value_ = (value.is_sparse() ? value._values() : value);
+  Tensor value_;
+  if (value.is_sparse()) {
+    if (value._nnz() == 0) {
+      r.resize_as_(t);
+      return r.zero_();
+    }
+    value_ = value.values();
+  } else {
+    value_ = value;
+  }
   // With broadcasting in action, value_ may be a 1-D tensor as long
   // as its shape is (1,).
   AT_ASSERT(value_.numel() == 1);
