@@ -135,7 +135,7 @@ function install_ucc() {
 }
 
 function install_torch_ucc() {
-  if [[ "$BUILD_ENVIRONMENT" != *cuda10.2* ]]
+  if [[ "$BUILD_ENVIRONMENT" != *cuda10.2* ]]; then
     install_ucx
     install_ucc
 
