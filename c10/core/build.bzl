@@ -41,7 +41,7 @@ def define_targets(rules):
         visibility = ["//visibility:public"],
         deps = [
             ":alignment",
-            "//c10/macros:macros",
+            "//c10/macros",
             "//c10/util:base",
         ],
     )
@@ -73,7 +73,7 @@ def define_targets(rules):
         visibility = ["//visibility:public"],
         deps = [
             ":ScalarType",
-            "//c10/macros:macros",
+            "//c10/macros",
             "//c10/util:TypeCast",
             "//c10/util:base",
             "//c10/util:typeid",

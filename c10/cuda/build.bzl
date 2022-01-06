@@ -26,7 +26,7 @@ def define_targets(rules):
             ":Macros",
             "@cuda",
             "//c10/core:base",
-            "//c10/macros:macros",
+            "//c10/macros",
             "//c10/util:base",
         ],
     )
