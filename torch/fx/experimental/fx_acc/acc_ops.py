@@ -705,6 +705,11 @@ def pow(*, input, exponent):
 def relu(*, input, inplace=False):
     return nn.functional.relu(**locals())
 
+@register_acc_op_properties(AccOpProperty.pointwise, AccOpProperty.unary)
+@register_acc_op_mapping(op_and_target=("call_function", torch.nn.functional.leaky_relu))
+@register_acc_op
+def leaky_relu(*, input, negative_slope=0.01, inplace=False):
+    return nn.functional.leaky_relu(**locals())
 
 @register_custom_acc_mapper_fn(
     op_and_target=("call_function", torch.log1p),
