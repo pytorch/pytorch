@@ -53,14 +53,14 @@ class RAdam(Optimizer):
             numerical stability (default: 1e-8)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
         foreach (bool, optional): whether foreach implementation of optimizer
-            is used (default: False)
+            is used (default: None)
 
     .. _On the variance of the adaptive learning rate and beyond:
         https://arxiv.org/abs/1908.03265
     """
 
     def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
-                 weight_decay=0, foreach=False):
+                 weight_decay=0, foreach=None):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -140,17 +140,24 @@ def radam(params: List[Tensor],
           exp_avgs: List[Tensor],
           exp_avg_sqs: List[Tensor],
           state_steps: List[int],
+          foreach: bool = None,
           *,
           beta1: float,
           beta2: float,
           lr: float,
           weight_decay: float,
-          eps: float,
-          foreach: bool):
+          eps: float):
     r"""Functional API that performs RAdam algorithm computation.
 
     See :class:`~torch.optim.RAdam` for details.
     """
+
+    if foreach is None:
+        # Placeholder for more complex foreach logic to be added when value is not set
+        foreach = False
+
+    if foreach and torch.jit.is_scripting():
+        raise RuntimeError('torch.jit.script not supported with foreach optimizers')
 
     if foreach and not torch.jit.is_scripting():
         func = _multi_tensor_radam
@@ -226,6 +233,9 @@ def _multi_tensor_radam(params: List[Tensor],
                         lr: float,
                         weight_decay: float,
                         eps: float):
+
+    if len(params) == 0:
+        return
 
     # maximum length of the approximated SMA
     rho_inf = 2 / (1 - beta2) - 1
