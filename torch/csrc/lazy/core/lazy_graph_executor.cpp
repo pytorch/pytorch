@@ -1,5 +1,6 @@
 #include <torch/csrc/lazy/core/lazy_graph_executor.h>
 
+#include <aten/src/ATen/ops/scalar_tensor.h>
 #include <c10/util/Logging.h>
 #include <torch/csrc/lazy/core/config.h>
 #include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
