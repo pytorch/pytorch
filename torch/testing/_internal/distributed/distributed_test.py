@@ -8347,19 +8347,6 @@ class DistributedTest:
             # All DDP nets should have rank 0's buffer.
             buf = net.module.buf
             self.assertEqual(net.module.buf, expected_buffer)
-            print(f"Rank {rank} buf {buf}")
-
-
-            # BN buffer should be correctly broadcasted.
-            bn_buffers = list(net.module.buffers())
-            all_bufs = [None for _ in range(dist.get_world_size())]
-            torch.distributed.all_gather_object(all_bufs, bn_buffers)
-            for buf_list in all_bufs[1:]:
-                self.assertEqual(buf_list, all_bufs[0])
-
-            # Should be the same as local
-            # local_buf = list(local_net.buffers())
-            # print(f"local buf {local_buf}")
 
         @skip_if_lt_x_gpu(2)
         @sandcastle_skip_if(

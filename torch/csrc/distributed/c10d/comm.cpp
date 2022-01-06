@@ -31,7 +31,7 @@ class BroadcastWork {
         flat_tensor_.front(), bucket_tensors_);
     TORCH_INTERNAL_ASSERT(output_tensors.size() == bucket_tensors_.size());
     for(const auto i : c10::irange(output_tensors.size())) {
-      bucket_tensors_[i].data().copy_(output_tensors[i]);
+      bucket_tensors_[i].data().copy_(output_tensors[i], /*non_blocking=*/true);
     }
   }
 
