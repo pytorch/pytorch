@@ -2,6 +2,7 @@ from itertools import product
 import unittest
 
 import torch
+from torchvision import models
 from torch.testing._internal.common_utils import TEST_CUDA
 from torch.testing._internal.jit_utils import JitTestCase
 
@@ -11,6 +12,35 @@ if __name__ == "__main__":
         "\tpython test/test_jit.py TESTNAME\n\n"
         "instead."
     )
+
+# TODO: Delete this when PR #67786 is merged.
+def apply_input_props_using_example(graph, example_input):
+    """
+    Applies properties for each tensor in the graph inputs
+    using the example supplied.
+    """
+    graph_inputs = list(graph.inputs())
+    if len(graph_inputs) == 0:
+        return
+
+    # Strip self args off for methods
+    in_0 = graph_inputs[0]
+    if isinstance(in_0.type(), torch._C.ClassType) and in_0.debugName() == "self":
+        graph_inputs = graph_inputs[1:]
+
+    if not len(graph_inputs) == len(example_input):
+        raise RuntimeError(
+            "Number of inputs in graph does not match number of inputs in the example")
+
+    for i, (graph_i, example_i) in enumerate(zip(graph_inputs, example_input)):
+        if example_i is None:
+            continue  # Skip the type check
+
+        if isinstance(example_i, torch.Tensor) != isinstance(graph_i.type(), torch.TensorType):
+            raise RuntimeError(f"Input {i} does not match type of example", graph_i, example_i)
+
+        if isinstance(example_i, torch.Tensor):
+            graph_i.setType(torch.TensorType.create_from_tensor(example_i))  # type: ignore[arg-type]
 
 
 class TestDeviceAnalysis(JitTestCase):
@@ -75,6 +105,28 @@ class TestDeviceAnalysis(JitTestCase):
         graph_input.setType(graph_input.type().with_device(self.cpu))
         # self.prop_device_on_graph(graph, [self.cpu])
         self.assertEqual(graph_input.type().device(), self.cpu)
+
+    def test_mobilenet(self):
+        in_cpu = torch.randn(1, 3, 224, 224, device=self.cpu)
+        in_example = in_cpu
+
+        expected_device = self.cpu
+        m = torch.jit.script(models.mobilenet_v3_small())
+        m.eval()
+        graph = torch.jit.freeze(m).graph
+        # torch._C._jit_pass_erase_shape_information(graph)
+        apply_input_props_using_example(graph, in_example)
+        torch._C._jit_pass_propagate_shapes_on_graph(graph)
+        torch._C._jit_pass_propagate_device(graph)
+
+        actual_device = self.node_output_device(graph)
+
+        if expected_device is None or actual_device is None:
+            self.assertEqual(actual_device, expected_device)
+        else:
+            self.assertEqual(
+                actual_device.type, expected_device.type, "Failed Verification"
+            )
 
     def test_simple(self):
         def add_self(x):
@@ -150,12 +202,22 @@ class TestDeviceAnalysis(JitTestCase):
             try:
                 out = fn(in0, in1)
             except Exception as e:
+                # Don't expect eager failures for CPU zerodim tensors
+                for i in range(len(devices)):
+                    if shapes[i] == () and devices[i] == self.cpu:
+                        raise e
+
+                # only expect eager failures on different devices
                 if devices[0] == devices[1]:
                     raise e
-                else:
-                    continue  # Ignore eager failures on different devices
 
             self.assert_device_equal(fn, devices, out.device, shapes, subtest_str)
+
+            # Test that without shapes, we either get the same device or None for the device
+            try:
+                self.assert_device_equal(fn, devices, out.device, subtest_str=subtest_str)
+            except AssertionError:
+                self.assert_device_equal(fn, devices, None, subtest_str=subtest_str)
 
     def test_zerodim_cpu(self):
         # Allow for minimal testing locally
