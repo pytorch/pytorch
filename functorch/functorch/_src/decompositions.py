@@ -155,7 +155,6 @@ def diagonal_backward(grad_output: Tensor, input_sizes: List[int], offset: int, 
     return aten.diagonal_scatter(grad_input, grad_output, offset, dim1, dim2)
 
 
-
 # @register_decomposition(aten.cudnn_batch_norm)
 # def cudnn_batch_norm(input: Tensor, weight: Tensor, bias: Optional[Tensor], running_mean: Optional[Tensor], running_var: Optional[Tensor], training: bool, exponential_average_factor: float, epsilon: float):
 #     return aten._batch_norm_impl_index(input, weight, bias, running_mean, running_var, training, exponential_average_factor, epsilon, False)[:4]
@@ -212,6 +211,7 @@ def native_dropout_decomposition(input, p, generator=None):
     res = bool_mask * input * float(1.0 / p)
     return [res, bool_mask]
 
+
 @register_decomposition(aten._softmax)
 def _softmax(x: Tensor, dim: int, half_to_float: bool):
     return aten.exp(x) / aten.sum(aten.exp(x), dim=dim, keepdim=True)
@@ -226,6 +226,7 @@ def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta=1, alpha=1):
     if beta == 0:
         return out
     return beta * self + out
+
 
 @register_decomposition(aten.clamp_min)
 def clamp_min(self: Tensor, min: float):
