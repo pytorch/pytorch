@@ -149,7 +149,7 @@ that, you can install in `develop` mode again.
 
 * A prerequisite to installing PyTorch is CMake. We recommend installing it with [Homebrew](https://brew.sh/)
 with `brew install cmake` if you are developing on MacOS or Linux system.
-* Our `setup.py` requires Python >= 3.6
+* Our `setup.py` requires Python >= 3.7
 * If a commit is simple and doesn't affect any code (keep in mind that some docstrings contain code
   that is used in tests), you can add `[skip ci]` (case sensitive) somewhere in your commit message to
   [skip all build / test steps](https://github.blog/changelog/2021-02-08-github-actions-skip-pull-request-and-push-workflows-with-skip-ci/).
