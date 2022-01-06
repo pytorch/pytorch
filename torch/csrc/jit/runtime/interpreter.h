@@ -6,7 +6,7 @@
 #include <ATen/ThreadLocalState.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/frontend/source_range.h>
 
 C10_DECLARE_bool(torch_jit_disable_warning_prints);
@@ -82,7 +82,7 @@ struct TORCH_API MobileCode : Code {
       const std::shared_ptr<Graph>& graph,
       std::string function_name,
       bool emit_default_input_instructions = true,
-      bool support_default_args_before_out = false,
+      bool support_default_args_before_out = true,
       size_t remaining_bailout_depth = 0);
   ~MobileCode();
 };

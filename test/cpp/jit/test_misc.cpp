@@ -10,7 +10,9 @@
 
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
+#include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/frontend/code_template.h>
@@ -46,6 +48,7 @@
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
+#include <torch/csrc/jit/runtime/jit_trace.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
 #include <torch/csrc/jit/runtime/symbolic_script.h>
 #include <torch/csrc/jit/serialization/import.h>
@@ -58,6 +61,8 @@
 #include <c10/util/Exception.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
 
+#include <torch/csrc/jit/passes/freeze_module.h>
+#include <torch/csrc/jit/passes/frozen_graph_optimizations.h>
 #include <algorithm>
 #include <cstddef>
 #include <functional>
@@ -67,11 +72,10 @@
 #include <stdexcept>
 #include <string>
 #include <tuple>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
-
-using namespace torch::autograd::profiler;
 
 namespace torch {
 namespace jit {
@@ -152,29 +156,22 @@ TEST(THNNConvTest, Basic) {
   at::Tensor bias = torch::randn({out_channels});
 
   // run forward eagerly
-  at::Tensor output, finput, fgradinput;
-  std::tie(output, finput, fgradinput) = at::thnn_conv2d_forward(
+  at::Tensor output = at::_slow_conv2d_forward(
       input, weight, kernel_size, bias, stride, padding);
 
   // make grad_outputs
   at::Tensor grad_output =
       torch::randn_like(output, at::MemoryFormat::Preserve);
-  at::Tensor grad_finput =
-      torch::zeros_like(finput, at::MemoryFormat::Preserve);
-  at::Tensor grad_fgradinput =
-      torch::zeros_like(fgradinput, at::MemoryFormat::Preserve);
 
   // run backward eagerly
   at::Tensor grad_input, grad_weight, grad_bias;
-  std::tie(grad_input, grad_weight, grad_bias) = at::thnn_conv2d_backward(
+  std::tie(grad_input, grad_weight, grad_bias) = at::_slow_conv2d_backward(
       grad_output,
       input,
       weight,
       kernel_size,
       stride,
       padding,
-      finput,
-      fgradinput,
       {true, true, true});
 
   // make JIT graph
@@ -188,7 +185,7 @@ TEST(THNNConvTest, Basic) {
   auto biasg = graph->addInput("bias");
 
   Value* conv = graph->insert(
-      aten::thnn_conv2d_forward,
+      aten::_slow_conv2d_forward,
       {inputg, weightg, ksz_val, biasg, kst_val, pad_val});
   auto outputs = conv->node()->outputs();
   for (auto output : outputs) {
@@ -211,8 +208,6 @@ TEST(THNNConvTest, Basic) {
 
   tensor_list tensor_grads_in;
   tensor_grads_in.push_back(grad_output);
-  tensor_grads_in.push_back(grad_finput);
-  tensor_grads_in.push_back(grad_fgradinput);
 
   // Get outputs from the interpreter
   tensor_list tensors_out, tensor_grads_out;
@@ -222,8 +217,6 @@ TEST(THNNConvTest, Basic) {
   // prepare expected structs
   tensor_list expected_tensors_out, expected_tensor_grads_out;
   expected_tensors_out.push_back(output);
-  expected_tensors_out.push_back(finput);
-  expected_tensors_out.push_back(fgradinput);
   expected_tensor_grads_out.push_back(grad_input);
   expected_tensor_grads_out.push_back(grad_weight);
   expected_tensor_grads_out.push_back(grad_bias);
@@ -474,7 +467,7 @@ TEST(ControlFlowTest, Basic) {
   auto cu = compile(cf_examples);
 
   auto run = [&](const std::string& name, std::vector<IValue> stack) {
-    auto graph = cu->get_function(name).graph();
+    auto graph = toGraphFunction(cu->get_function(name)).graph();
     Code code(graph, "");
     InterpreterState interp(code);
     interp.run(stack);
@@ -503,21 +496,21 @@ TEST(SchemaParserTest, NestedArrays) {
   // nested arrays
   auto s = parseSchema("at::what(int[][4] foo) -> ()");
   ASSERT_TRUE(s.arguments().at(0).N() == 4);
-  ASSERT_TRUE(IntType::get()->isSubtypeOf(s.arguments()
-                                              .at(0)
-                                              .type()
-                                              ->expectRef<ListType>()
-                                              .getElementType()
-                                              ->expectRef<ListType>()
-                                              .getElementType()));
+  ASSERT_TRUE(IntType::get()->isSubtypeOf(*s.arguments()
+                                               .at(0)
+                                               .type()
+                                               ->expectRef<ListType>()
+                                               .getElementType()
+                                               ->expectRef<ListType>()
+                                               .getElementType()));
   auto s2 = parseSchema("at::what(int[][] foo) -> ()");
-  ASSERT_TRUE(IntType::get()->isSubtypeOf(s2.arguments()
-                                              .at(0)
-                                              .type()
-                                              ->expectRef<ListType>()
-                                              .getElementType()
-                                              ->expectRef<ListType>()
-                                              .getElementType()));
+  ASSERT_TRUE(IntType::get()->isSubtypeOf(*s2.arguments()
+                                               .at(0)
+                                               .type()
+                                               ->expectRef<ListType>()
+                                               .getElementType()
+                                               ->expectRef<ListType>()
+                                               .getElementType()));
 }
 
 TEST(SchemaParserTest, OutVariant) {
@@ -555,7 +548,7 @@ TEST(SchemaParserTest, Futures) {
   // futures
   auto s4 = parseSchema("at::what(Future(int) foo) -> ()");
   ASSERT_TRUE(IntType::get()->isSubtypeOf(
-      s4.arguments().at(0).type()->expectRef<FutureType>().getElementType()));
+      *s4.arguments().at(0).type()->expectRef<FutureType>().getElementType()));
 }
 
 TEST(SchemaParserTest, AnnotatedAliasSets) {
@@ -569,15 +562,16 @@ TEST(SchemaParserTest, BeforeAfterSets) {
       " -> (Tensor(b|c)[](a!))");
 
   // The list itself is annotated with `a`
-  const auto& aliasInfo = *s.arguments().at(0).alias_info();
+  const AliasInfo* aliasInfo = s.arguments().at(0).alias_info();
+  ASSERT_NE(aliasInfo, nullptr);
   ASSERT_TRUE(
-      aliasInfo.beforeSets() ==
+      aliasInfo->beforeSets() ==
       std::unordered_set<Symbol>{Symbol::fromQualString("alias::a")});
-  ASSERT_TRUE(aliasInfo.isWrite());
+  ASSERT_TRUE(aliasInfo->isWrite());
 
   // Check the contained types
-  ASSERT_TRUE(!aliasInfo.containedTypes().empty());
-  const auto& containedAliasInfo = aliasInfo.containedTypes()[0];
+  ASSERT_TRUE(!aliasInfo->containedTypes().empty());
+  const auto& containedAliasInfo = aliasInfo->containedTypes()[0];
   const auto expected = std::unordered_set<Symbol>{
       Symbol::fromQualString("alias::b"),
       Symbol::fromQualString("alias::c"),
@@ -593,19 +587,20 @@ TEST(SchemaParserTest, BeforeAfterSets2) {
       " -> (Tensor(b|c)[](a!))");
 
   // The list itself is annotated with `a`
-  const auto& aliasInfo = *s.arguments().at(0).alias_info();
+  const AliasInfo* aliasInfo = s.arguments().at(0).alias_info();
+  ASSERT_NE(aliasInfo, nullptr);
   ASSERT_EQ(
-      aliasInfo.beforeSets(),
+      aliasInfo->beforeSets(),
       std::unordered_set<Symbol>{Symbol::fromQualString("alias::a")});
   ASSERT_EQ(
-      aliasInfo.afterSets(),
+      aliasInfo->afterSets(),
       std::unordered_set<Symbol>{Symbol::fromQualString("alias::a")});
-  ASSERT_TRUE(aliasInfo.isWrite());
-  ASSERT_EQ(aliasInfo.containedTypes().size(), 1);
+  ASSERT_TRUE(aliasInfo->isWrite());
+  ASSERT_EQ(aliasInfo->containedTypes().size(), 1);
 
   // Check the contained types
-  ASSERT_TRUE(!aliasInfo.containedTypes().empty());
-  const auto& containedAliasInfo = aliasInfo.containedTypes()[0];
+  ASSERT_TRUE(!aliasInfo->containedTypes().empty());
+  const auto& containedAliasInfo = aliasInfo->containedTypes()[0];
   const auto expectedBefore = std::unordered_set<Symbol>{
       Symbol::fromQualString("alias::b"),
   };
@@ -806,15 +801,15 @@ void checkScopeCallbacks() {
   at::addGlobalCallback(at::RecordFunctionCallback(
       [](const at::RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
         if (fn.scope() == at::RecordScope::FUNCTION &&
-            std::string(fn.name().str()) == "test_function") {
+            std::string(fn.name()) == "test_function") {
           found_function_scope = true;
         }
         if (fn.scope() == at::RecordScope::TORCHSCRIPT_FUNCTION &&
-            std::string(fn.name().str()) == "test_method") {
+            std::string(fn.name()) == "test_method") {
           found_method_scope = true;
         }
         if (fn.scope() == at::RecordScope::USER_SCOPE &&
-            std::string(fn.name().str()) == "test_user_scope") {
+            std::string(fn.name()) == "test_user_scope") {
           found_user_scope = true;
         }
         return nullptr;
@@ -864,9 +859,9 @@ std::unique_ptr<at::ObserverContext> tracedInputsCallback(
         sizes.push_back(std::vector<int64_t>());
       }
     }
-    traced_inputs.push_back(std::make_tuple(fn.name().str(), sizes));
+    traced_inputs.push_back(std::make_tuple(fn.name(), sizes));
   } else if (fn.scope() == RecordScope::TORCHSCRIPT_FUNCTION) {
-    ts_input_names.insert(fn.name().str());
+    ts_input_names.insert(fn.name());
   }
   return nullptr;
 }
@@ -882,9 +877,9 @@ void tracedOutputsCallback(const RecordFunction& fn, ObserverContext* ctx_ptr) {
         sizes.emplace_back();
       }
     }
-    traced_outputs.push_back(std::make_tuple(fn.name().str(), sizes));
+    traced_outputs.push_back(std::make_tuple(fn.name(), sizes));
   } else if (fn.scope() == RecordScope::TORCHSCRIPT_FUNCTION) {
-    ts_output_names.insert(fn.name().str());
+    ts_output_names.insert(fn.name());
   }
 }
 
@@ -936,7 +931,7 @@ TEST(RecordFunctionTest, TracedTestInputsOutputs) {
 
 static int sampled_cb_ctr = 0;
 std::unique_ptr<ObserverContext> sampledCallback(const RecordFunction& fn) {
-  if (std::string(fn.name().str()) == "test") {
+  if (std::string(fn.name()) == "test") {
     ++sampled_cb_ctr;
   }
   return nullptr;
@@ -944,7 +939,7 @@ std::unique_ptr<ObserverContext> sampledCallback(const RecordFunction& fn) {
 
 static int non_sampled_cb_ctr = 0;
 std::unique_ptr<ObserverContext> nonSampledCallback(const RecordFunction& fn) {
-  if (std::string(fn.name().str()) == "test") {
+  if (std::string(fn.name()) == "test") {
     ++non_sampled_cb_ctr;
   }
   return nullptr;
@@ -1011,7 +1006,7 @@ TEST(RecordFunctionTest, RecordFunctionGuard) {
       [](const RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
         std::lock_guard<std::mutex> lock(guard_mtx);
         // NOLINTNEXTLINE(modernize-use-emplace)
-        fn_names.push_back(fn.name().str());
+        fn_names.push_back(fn.name());
         return nullptr;
       }));
   {
@@ -1221,7 +1216,7 @@ TEST(RecordFunctionTest, Basic) {
     RecordFunctionGuard enable_rec_fn;
     auto handle = addThreadLocalCallback(RecordFunctionCallback(
         [](const RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
-          recorded_op = fn.name().str();
+          recorded_op = fn.name();
           return nullptr;
         }));
     ThreadLocalState state;
@@ -1608,7 +1603,7 @@ TEST(LoopPeelerTest, NoInductionVariableUse) {
     )JIT";
 
   auto cu = compile(str_func_def);
-  auto& f = cu->get_function("test_peel_n_times");
+  auto& f = toGraphFunction(cu->get_function("test_peel_n_times"));
   auto stack = createStack({});
   // peeling loop once
   {
@@ -1650,7 +1645,7 @@ TEST(LoopPeelerTest, YesInductionVariableUse) {
     )JIT";
 
   auto cu = compile(str_func_def);
-  auto& f = cu->get_function("test_peel_n_times");
+  auto& f = toGraphFunction(cu->get_function("test_peel_n_times"));
   auto stack = createStack({});
   // peeling loop once
   {
@@ -1696,7 +1691,7 @@ TEST(LoopPeelerTest, LoopWithTerminationCondition) {
   // the peel changes the termination condition to false
   // so the original loop doesn't run
   auto cu = compile(str_func_def);
-  auto& f = cu->get_function("test_with_cond_times");
+  auto& f = toGraphFunction(cu->get_function("test_with_cond_times"));
   auto stack = createStack({});
   // peeling 5 iterations should update the termination
   // condition to false
@@ -1741,7 +1736,7 @@ TEST(LoopPeelerTest, SimpleNestedLoops) {
     )JIT";
 
   auto cu = compile(str_func_def);
-  auto& f = cu->get_function("test_nested_loops");
+  auto& f = toGraphFunction(cu->get_function("test_nested_loops"));
   auto stack = createStack({});
 
   {
@@ -1781,7 +1776,7 @@ TEST(LoopPeelerTest, SimpleNestedLoops2) {
     )JIT";
 
   auto cu = compile(str_func_def);
-  auto& f = cu->get_function("test_nested_loops");
+  auto& f = toGraphFunction(cu->get_function("test_nested_loops"));
   auto stack = createStack({});
   {
     LoopsPeeler peeler(true_pred, 1);
@@ -1806,6 +1801,55 @@ TEST(LoopPeelerTest, SimpleNestedLoops2) {
   }
 }
 
+TEST(JitTracing, Basic) {
+  constexpr int batch_size = 4;
+  constexpr int input_size = 256;
+
+  int hidden_size = 2 * input_size;
+
+  auto input = at::randn({batch_size, input_size}, at::kCPU);
+  auto hx = at::randn({batch_size, hidden_size}, at::kCPU);
+  auto cx = at::randn({batch_size, hidden_size}, at::kCPU);
+  auto w_ih = t_def(at::randn({4 * hidden_size, input_size}, at::kCPU));
+  auto w_hh = t_def(at::randn({4 * hidden_size, hidden_size}, at::kCPU));
+
+  auto graph = build_lstm();
+  auto stack = createStack({input, hx, cx, w_ih, w_hh});
+  auto traced = TraceGraph(graph, stack);
+
+  // Check that the inputs of traced graph have the same type as the inputs
+  // specified here.
+  ASSERT_EQ(*traced->inputs().at(0)->type(), *TensorType::create(input));
+  ASSERT_EQ(*traced->inputs().at(1)->type(), *TensorType::create(hx));
+  ASSERT_EQ(*traced->inputs().at(2)->type(), *TensorType::create(cx));
+  ASSERT_EQ(*traced->inputs().at(3)->type(), *TensorType::create(w_ih));
+  ASSERT_EQ(*traced->inputs().at(4)->type(), *TensorType::create(w_hh));
+
+  Tensor prof_out;
+  pop(stack, prof_out);
+
+  {
+    stack = createStack({input, hx, cx, w_ih, w_hh});
+    Code cd(traced, "traced");
+    InterpreterState is{cd};
+    is.run(stack);
+    Tensor traced_out;
+    pop(stack, traced_out);
+    torch::allclose(prof_out, traced_out);
+  }
+
+  {
+    stack = createStack({input, hx, cx, w_ih, w_hh});
+    Code cd(graph, "graph");
+    InterpreterState is{cd};
+    is.run(stack);
+    Tensor scripted_out;
+    pop(stack, scripted_out);
+    torch::allclose(prof_out, scripted_out);
+  }
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InsertAndEliminateRedundantGuardsTest, Basic) {
   static const auto basic_example = R"JIT(
   def basic(x, y):
@@ -1818,7 +1862,7 @@ TEST(InsertAndEliminateRedundantGuardsTest, Basic) {
   )JIT";
 
   auto cu = compile(basic_example);
-  auto& fun = cu->get_function("basic");
+  auto& fun = toGraphFunction(cu->get_function("basic"));
   auto pr = ProfilingRecord::instrumentGraph(fun.graph());
   auto x = at::randn({2, 3}, at::kCPU);
   auto y = at::randn({2, 3}, at::kCPU);
@@ -1869,7 +1913,7 @@ TEST(InsertBailOutsTest, Basic) {
   )JIT";
 
   auto cu = compile(basic_example);
-  auto& fun = cu->get_function("basic_loop");
+  auto& fun = toGraphFunction(cu->get_function("basic_loop"));
   auto pr = ProfilingRecord::instrumentGraph(fun.graph());
   auto x = at::randn({2, 3}, at::kCPU);
   auto y = at::randn({2, 3}, at::kCPU);
@@ -1963,7 +2007,7 @@ def foo(x):
     return bar(x)*baz(x)*11
   )";
   auto cu = compile(text);
-  const Function& foo = cu->get_function("foo");
+  const auto& foo = toGraphFunction(cu->get_function("foo"));
   for (Node* n : foo.optimized_graph()->nodes()) {
     if (n->kind() == prim::Constant) {
       if (!n->hasAttribute(attr::value) ||
@@ -2004,7 +2048,7 @@ def foo(x):
   }
 
   // Check that inlining doesn't corrupt callstack of the callee's nodes.
-  const Function& baz = cu->get_function("baz");
+  const auto& baz = toGraphFunction(cu->get_function("baz"));
   for (Node* n : baz.optimized_graph()->nodes()) {
     if (n->kind() == prim::Constant) {
       if (!n->hasAttribute(attr::value) ||
@@ -2045,7 +2089,7 @@ def c(x):
     return x
   )";
   auto cu = compile(text);
-  const Function& baz = cu->get_function("c");
+  const auto& baz = toGraphFunction(cu->get_function("c"));
   std::unordered_map<std::string, InlinedCallStack*> callstack_objects;
   for (Node* n : baz.optimized_graph()->nodes()) {
     if (n->kind() == prim::Constant) {
@@ -2090,7 +2134,8 @@ TEST(InlinedCallStackTest, BlockAnnotation) {
       return self.A0.forward(x, y, z) + self.B0.forward(x)
   )");
 
-  auto graph = c.get_method("forward").function().optimized_graph();
+  auto graph =
+      toGraphFunction(c.get_method("forward").function()).optimized_graph();
   std::stringstream add_ss, mul_ss;
   for (Node* n : graph->nodes()) {
     if (n->kind() == prim::If) {
@@ -2151,7 +2196,8 @@ TEST(InlinedCallStackTest, SelfCallMethods) {
       return self.A0.forward(x, y) + self.call_b(x)
   )");
 
-  auto graph = c.get_method("forward").function().optimized_graph();
+  auto graph =
+      toGraphFunction(c.get_method("forward").function()).optimized_graph();
   std::unordered_map<std::string, size_t> module_hierarchies;
   for (Node* n : graph->nodes()) {
     auto hierarchy = torch::jit::utils::getNodesModuleHierarchy(*n);
@@ -2258,6 +2304,13 @@ TEST(FuturesTest, Error) {
   ASSERT_TRUE(strcmp(f1->tryRetrieveErrorMessage().c_str(), "Failed") == 0);
   ASSERT_EQ(sat1, 1);
   ASSERT_EQ(sat2, 1);
+  try {
+    (void)f1->constValue();
+    ASSERT_TRUE(false); // Supposed to throw.
+  } catch (const std::exception& e) {
+    // Original error should be logged.
+    ASSERT_TRUE(std::string(e.what()).find("Failed") != std::string::npos);
+  }
 }
 
 // then
@@ -2610,7 +2663,8 @@ TEST(ComputeFlopsTest, Basic) {
 
   // Test unknown operator
   std::unordered_map<std::string, c10::IValue> extra_args;
-  flops = computeFlops(std::string("aten::unknown"), extra_args);
+  flops = torch::profiler::impl::computeFlops(
+      std::string("aten::unknown"), extra_args);
   ASSERT_EQ(flops, 0);
 
   // Test aten::conv2d
@@ -2626,7 +2680,8 @@ TEST(ComputeFlopsTest, Basic) {
   extra_args["padding"] = at::IValue(at::IntArrayRef(padding));
   extra_args["stride"] = at::IValue(at::IntArrayRef(stride));
   extra_args["dilation"] = at::IValue(at::IntArrayRef(dilation));
-  flops = computeFlops(std::string("aten::conv2d"), extra_args);
+  flops = torch::profiler::impl::computeFlops(
+      std::string("aten::conv2d"), extra_args);
   ASSERT_EQ(flops, 13440);
 
   // Test aten::conv2d fail
@@ -2634,7 +2689,8 @@ TEST(ComputeFlopsTest, Basic) {
   weight_size = {4, 5, 6};
   extra_args["input_size"] = at::IValue(at::IntArrayRef(input_size));
   extra_args["weight_size"] = at::IValue(at::IntArrayRef(weight_size));
-  flops = computeFlops(std::string("aten::conv2d"), extra_args);
+  flops = torch::profiler::impl::computeFlops(
+      std::string("aten::conv2d"), extra_args);
   ASSERT_EQ(flops, 0);
 
   // Test aten::conv2d fail 2
@@ -2642,14 +2698,16 @@ TEST(ComputeFlopsTest, Basic) {
   stride = {0, 0};
   extra_args["weight_size"] = at::IValue(at::IntArrayRef(input_size));
   extra_args["stride"] = at::IValue(at::IntArrayRef(stride));
-  flops = computeFlops(std::string("aten::conv2d"), extra_args);
+  flops = torch::profiler::impl::computeFlops(
+      std::string("aten::conv2d"), extra_args);
   ASSERT_EQ(flops, 0);
 
   // Test aten::conv2d fail 3
   extra_args.clear();
   input_size = {4, 5, 6, 7};
   extra_args["input_size"] = at::IValue(at::IntArrayRef(input_size));
-  flops = computeFlops(std::string("aten::conv2d"), extra_args);
+  flops = torch::profiler::impl::computeFlops(
+      std::string("aten::conv2d"), extra_args);
   ASSERT_EQ(flops, 0);
 
   // Test aten::mm
@@ -2658,30 +2716,50 @@ TEST(ComputeFlopsTest, Basic) {
   std::vector<int64_t> mat2_sizes = {6, 5, 4, 3};
   extra_args["mat1_size"] = at::IValue(at::IntArrayRef(mat1_sizes));
   extra_args["mat2_size"] = at::IValue(at::IntArrayRef(mat2_sizes));
-  flops = computeFlops(std::string("aten::mm"), extra_args);
+  flops =
+      torch::profiler::impl::computeFlops(std::string("aten::mm"), extra_args);
   ASSERT_EQ(flops, 43200);
 
   // Test aten::addmm
-  flops = computeFlops(std::string("aten::addmm"), extra_args);
+  flops = torch::profiler::impl::computeFlops(
+      std::string("aten::addmm"), extra_args);
   ASSERT_EQ(flops, 43200);
+
+  // Test aten::bmm
+  extra_args.clear();
+  mat1_sizes = {7, 5, 6};
+  mat2_sizes = {7, 6, 3};
+  extra_args["mat1_size"] = at::IValue(at::IntArrayRef(mat1_sizes));
+  extra_args["mat2_size"] = at::IValue(at::IntArrayRef(mat2_sizes));
+  flops =
+      torch::profiler::impl::computeFlops(std::string("aten::bmm"), extra_args);
+  ASSERT_EQ(flops, 1260);
+
+  // Test aten::baddbmm
+  flops = torch::profiler::impl::computeFlops(
+      std::string("aten::baddbmm"), extra_args);
+  ASSERT_EQ(flops, 1260);
 
   // Test mm out of range
   extra_args.clear();
-  flops = computeFlops(std::string("aten::mm"), extra_args);
+  flops =
+      torch::profiler::impl::computeFlops(std::string("aten::mm"), extra_args);
   ASSERT_EQ(flops, 0);
 
   // Test aten::add.Tensor
   extra_args.clear();
   std::vector<int64_t> mat_sizes = {3, 4, 5, 6};
   extra_args["mat_size"] = at::IValue(at::IntArrayRef(mat_sizes));
-  flops = computeFlops(std::string("aten::add"), extra_args);
+  flops =
+      torch::profiler::impl::computeFlops(std::string("aten::add"), extra_args);
   ASSERT_EQ(flops, 360);
 
   // Test aten::mul.Tensor
   extra_args.clear();
   mat_sizes = {3, 4, 5, 6};
   extra_args["mat_size"] = at::IValue(at::IntArrayRef(mat_sizes));
-  flops = computeFlops(std::string("aten::mul"), extra_args);
+  flops =
+      torch::profiler::impl::computeFlops(std::string("aten::mul"), extra_args);
   ASSERT_EQ(flops, 360);
 }
 

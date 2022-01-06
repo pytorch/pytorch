@@ -3,11 +3,12 @@
 #include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/vec256/vsx/vsx_helpers.h>
 #include <c10/util/complex.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace vec {
-// See Note [Acceptable use of anonymous namespace in header]
-namespace {
+// See Note [CPU_CAPABILITY namespace]
+inline namespace CPU_CAPABILITY {
 using ComplexDbl = c10::complex<double>;
 
 template <>
@@ -167,7 +168,7 @@ class Vectorized<ComplexDbl> {
   Vectorized<ComplexDbl> map(ComplexDbl (*const f)(ComplexDbl)) const {
     __at_align__ ComplexDbl tmp[size()];
     store(tmp);
-    for (int i = 0; i < size(); i++) {
+    for (const auto i : c10::irange(size())) {
       tmp[i] = f(tmp[i]);
     }
     return loadu(tmp);
@@ -176,7 +177,7 @@ class Vectorized<ComplexDbl> {
   Vectorized<ComplexDbl> map(ComplexDbl (*const f)(const ComplexDbl&)) const {
     __at_align__ ComplexDbl tmp[size()];
     store(tmp);
-    for (int i = 0; i < size(); i++) {
+    for (const auto i : c10::irange(size())) {
       tmp[i] = f(tmp[i]);
     }
     return loadu(tmp);
@@ -356,11 +357,6 @@ class Vectorized<ComplexDbl> {
     return {vec_sqrt(_vec0), vec_sqrt(_vec1)};
   }
 
-  void dump() const {
-    std::cout << _vec0[0] << "," << _vec0[1] << ",";
-    std::cout << _vec1[0] << "," << _vec1[1] << std::endl;
-  }
-
   Vectorized<ComplexDbl> sqrt() const {
     return map(std::sqrt);
   }
@@ -459,7 +455,7 @@ class Vectorized<ComplexDbl> {
     __at_align__ ComplexDbl y_tmp[size()];
     store(x_tmp);
     exp.store(y_tmp);
-    for (int i = 0; i < size(); i++) {
+    for (const auto i : c10::irange(size())) {
       x_tmp[i] = std::pow(x_tmp[i], y_tmp[i]);
     }
     return loadu(x_tmp);

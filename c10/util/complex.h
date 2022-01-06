@@ -507,7 +507,7 @@ namespace c10_internal {
 template <typename T>
 C10_HOST_DEVICE constexpr thrust::complex<T>
 cuda101bug_cast_c10_complex_to_thrust_complex(const c10::complex<T>& x) {
-#if defined(CUDA_VERSION) && (CUDA_VERSION < 10200)
+#if defined(CUDA_VERSION) && (CUDA_VERSION < 10020)
   // This is to circumvent a CUDA compilation bug. See
   // https://github.com/pytorch/pytorch/pull/38941 . When the bug is fixed, we
   // should do static_cast directly.
@@ -541,7 +541,7 @@ C10_HOST_DEVICE T abs(const c10::complex<T>& z) {
 #endif
 }
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 #define ROCm_Bug(x)
 #else
 #define ROCm_Bug(x) x
@@ -587,7 +587,9 @@ C10_HOST_DEVICE complex<T> polar(const T& r, const T& theta = T()) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
   return static_cast<complex<T>>(thrust::polar(r, theta));
 #else
-  return static_cast<complex<T>>(std::polar(r, theta));
+  // std::polar() requires r >= 0, so spell out the explicit implementation to
+  // avoid a branch.
+  return complex<T>(r * std::cos(theta), r * std::sin(theta));
 #endif
 }
 

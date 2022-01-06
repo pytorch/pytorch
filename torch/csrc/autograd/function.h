@@ -3,16 +3,17 @@
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/anomaly_mode.h>
-#include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/saved_variable.h>
 #include <torch/csrc/autograd/input_metadata.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/utils/python_stub.h>
 #include <torch/csrc/utils/variadic.h>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/record_function.h>
 #include <ATen/SequenceNumber.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -181,12 +182,12 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   /// Adds the type and shape metadata for a new input. Returns the index of
   /// of the new input.
   uint32_t add_input_metadata(
-    const at::TensorOptions& options
-  , at::IntArrayRef shape
-  , at::Device device) noexcept {
+    const at::TensorOptions& options,
+    at::IntArrayRef shape,
+    bool is_tensor_subclass) noexcept {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     uint32_t input_nr = input_metadata_.size();
-    input_metadata_.emplace_back(options, shape, device);
+    input_metadata_.emplace_back(options, shape, is_tensor_subclass);
     return input_nr;
   }
 
@@ -361,7 +362,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   /// Returns true if any of the output edges in any of the ranges are active.
   bool should_compute_output(std::initializer_list<IndexRange> idxs) const {
     return std::any_of(idxs.begin(), idxs.end(), [this](IndexRange range) {
-      for (auto i = range.first; i < range.second; i++) {
+      for (const auto i : c10::irange(range.first, range.second)) {
         if (should_compute_output(i))
           return true;
       }

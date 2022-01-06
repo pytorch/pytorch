@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Owner(s): ["oncall: r2p"]
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -91,6 +92,9 @@ class ElasticLaunchTest(unittest.TestCase):
         shutil.rmtree(self.test_dir)
 
     def test_launch_user_script_python(self):
+        self._test_launch_user_script_python()
+
+    def _test_launch_user_script_python(self):
         run_id = str(uuid.uuid4().int)
         nnodes = 1
         nproc_per_node = 4

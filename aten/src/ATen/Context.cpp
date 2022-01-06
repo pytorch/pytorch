@@ -20,9 +20,7 @@
 
 namespace at {
 
-Context::Context()
-    : thc_state(nullptr, [](THCState* p) { /* no-op */ }),
-      thh_state(nullptr, [](THHState* p) { /* no-op */ }) {}
+Context::Context() = default;
 
 // TODO: This could be bad juju if someone calls globalContext() in the
 // destructor of an object with static lifetime.
@@ -62,18 +60,32 @@ bool Context::deterministicAlgorithms() const {
   return _deterministic_algorithms;
 }
 
-void Context::setDeterministicAlgorithms(bool b) {
+bool Context::deterministicAlgorithmsWarnOnly() const {
+  return _deterministic_algorithms_warn_only;
+}
+
+void Context::setDeterministicAlgorithms(bool b, bool warn_only=false) {
   _deterministic_algorithms = b;
+  _deterministic_algorithms_warn_only = warn_only;
 }
 
 void Context::alertNotDeterministic(c10::string_view const& caller) {
   if (globalContext().deterministicAlgorithms()) {
-    TORCH_CHECK(false,
-      caller, " does not have a deterministic implementation, but you set "
-      "'torch.use_deterministic_algorithms(True)'. You can turn off determinism ",
-      "just for this operation if that's acceptable for your application. You "
-      "can also file an issue at https://github.com/pytorch/pytorch/issues "
-      "to help us prioritize adding deterministic support for this operation.");
+    if (globalContext().deterministicAlgorithmsWarnOnly()) {
+      TORCH_WARN(
+        caller, " does not have a deterministic implementation, but you set "
+        "'torch.use_deterministic_algorithms(True, warn_only=True)'. "
+        "You can file an issue at https://github.com/pytorch/pytorch/issues "
+        "to help us prioritize adding deterministic support for this operation.");
+    } else {
+      TORCH_CHECK(false,
+        caller, " does not have a deterministic implementation, but you set "
+        "'torch.use_deterministic_algorithms(True)'. You can turn off "
+        "determinism just for this operation, or you can use the "
+        "'warn_only=True' option, if that's acceptable for your application. "
+        "You can also file an issue at https://github.com/pytorch/pytorch/issues "
+        "to help us prioritize adding deterministic support for this operation.");
+    }
   }
 }
 
@@ -131,6 +143,29 @@ bool Context::allowTF32CuBLAS() const {
 
 void Context::setAllowTF32CuBLAS(bool b) {
   allow_tf32_cublas = b;
+}
+
+at::LinalgBackend Context::linalgPreferredBackend() const {
+  return linalg_preferred_backend;
+}
+
+void Context::setLinalgPreferredBackend(at::LinalgBackend b) {
+  linalg_preferred_backend = b;
+  if (b != at::LinalgBackend::Default) {
+    TORCH_WARN_ONCE(
+      "torch.backends.cuda.preferred_linalg_library is an experimental feature. "
+      "If you see any error or unexpected behavior when this flag is set "
+      "please file an issue on GitHub."
+    );
+  }
+}
+
+bool Context::allowFP16ReductionCuBLAS() const {
+  return allow_fp16_reduction_cublas;
+}
+
+void Context::setAllowFP16ReductionCuBLAS(bool b) {
+  allow_fp16_reduction_cublas = b;
 }
 
 bool Context::hasMKL() {

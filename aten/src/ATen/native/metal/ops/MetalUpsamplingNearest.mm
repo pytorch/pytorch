@@ -86,7 +86,7 @@ Tensor upsample_nearest2d_vec(
 }
 
 TORCH_LIBRARY_IMPL(aten, Metal, m) {
-  m.impl("upsample_nearest2d.vec", TORCH_FN(upsample_nearest2d_vec));
+  m.impl(TORCH_SELECTIVE_NAME("aten::upsample_nearest2d.vec"), TORCH_FN(upsample_nearest2d_vec));
 };
 
 }

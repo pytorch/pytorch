@@ -115,4 +115,4 @@ TEST(CommonSubexpressionEliminationTest, TestFromExternal) {
 
 } // namespace
 
-} // namespace Caffe2
+} // namespace caffe2
