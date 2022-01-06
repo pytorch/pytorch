@@ -57,18 +57,18 @@ log = logging.getLogger(__name__)
 # disabled, but should be removed from these lists once fixed
 SKIP = {
     # out of memory test
-    "fastNLP_Bert",
-    "vision_maskrcnn",
-    "speech_trasformer",
-    "nvidia_deeprecommender",
-    "pytorch_struct",
-    "dlrm",
-    "LearningToPaint",
-    "vision_maskrcnn",
-    "drq",
-    "moco",
+    #"fastNLP_Bert",
+    #"vision_maskrcnn",
+    #"speech_trasformer",
+    #"nvidia_deeprecommender",
+    #"pytorch_struct",
+    #"dlrm",
+    #"LearningToPaint",
+    #"vision_maskrcnn",
+    #"drq",
+    #"moco",
     # slow tests
-    "maml",
+    #"maml",
 }
 SKIP_TRAIN_ONLY = {
     # out of memory test
