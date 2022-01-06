@@ -10,9 +10,6 @@ from torch._jit_internal import _copy_to_script_wrapper
 
 from typing import Any, Dict, Iterable, Iterator, Mapping, Optional, TYPE_CHECKING, overload, Tuple, TypeVar, Union
 
-if TYPE_CHECKING:
-    from torch.nn import Parameter
-
 T = TypeVar('T', bound=Module)
 
 
@@ -579,7 +576,7 @@ class ParameterDict(Module):
 
     def __init__(self, parameters: Optional[Mapping[str, Any]] = None) -> None:
         super(ParameterDict, self).__init__()
-        self._idxs = {}
+        self._idxs: Dict[Any, None] = {}
         # BC-breaking if this was passed plain Tensors before
         if parameters is not None:
             self.update(parameters)
@@ -703,7 +700,7 @@ class ParameterDict(Module):
         """
         return (self[k] for k in self._idxs)
 
-    def update(self, parameters: Mapping[str, Any]) -> None:
+    def update(self, parameters: Union[Mapping[str, Any], 'ParameterDict']) -> None:
         r"""Update the :class:`~torch.nn.ParameterDict` with the key-value pairs from a
         mapping or an iterable, overwriting existing keys.
 
