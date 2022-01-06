@@ -378,7 +378,7 @@ jobs:
       - name: Setup miniconda
         uses: conda-incubator/setup-miniconda@v2
         with:
-          miniconda-version: "4.11.0"
+          miniconda-version: "latest"
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -750,7 +750,7 @@ jobs:
       - name: Setup miniconda
         uses: conda-incubator/setup-miniconda@v2
         with:
-          miniconda-version: "4.11.0"
+          miniconda-version: "latest"
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -1125,7 +1125,7 @@ jobs:
       - name: Setup miniconda
         uses: conda-incubator/setup-miniconda@v2
         with:
-          miniconda-version: "4.11.0"
+          miniconda-version: "latest"
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -1500,7 +1500,7 @@ jobs:
       - name: Setup miniconda
         uses: conda-incubator/setup-miniconda@v2
         with:
-          miniconda-version: "4.11.0"
+          miniconda-version: "latest"
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -1875,7 +1875,7 @@ jobs:
       - name: Setup miniconda
         uses: conda-incubator/setup-miniconda@v2
         with:
-          miniconda-version: "4.11.0"
+          miniconda-version: "latest"
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -2239,7 +2239,7 @@ jobs:
       - name: Setup miniconda
         uses: conda-incubator/setup-miniconda@v2
         with:
-          miniconda-version: "4.11.0"
+          miniconda-version: "latest"
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -2611,7 +2611,7 @@ jobs:
       - name: Setup miniconda
         uses: conda-incubator/setup-miniconda@v2
         with:
-          miniconda-version: "4.11.0"
+          miniconda-version: "latest"
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -2986,7 +2986,7 @@ jobs:
       - name: Setup miniconda
         uses: conda-incubator/setup-miniconda@v2
         with:
-          miniconda-version: "4.11.0"
+          miniconda-version: "latest"
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -3361,7 +3361,7 @@ jobs:
       - name: Setup miniconda
         uses: conda-incubator/setup-miniconda@v2
         with:
-          miniconda-version: "4.11.0"
+          miniconda-version: "latest"
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -3736,7 +3736,7 @@ jobs:
       - name: Setup miniconda
         uses: conda-incubator/setup-miniconda@v2
         with:
-          miniconda-version: "4.11.0"
+          miniconda-version: "latest"
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -4100,7 +4100,7 @@ jobs:
       - name: Setup miniconda
         uses: conda-incubator/setup-miniconda@v2
         with:
-          miniconda-version: "4.11.0"
+          miniconda-version: "latest"
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -4472,7 +4472,7 @@ jobs:
       - name: Setup miniconda
         uses: conda-incubator/setup-miniconda@v2
         with:
-          miniconda-version: "4.11.0"
+          miniconda-version: "latest"
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -4847,7 +4847,7 @@ jobs:
       - name: Setup miniconda
         uses: conda-incubator/setup-miniconda@v2
         with:
-          miniconda-version: "4.11.0"
+          miniconda-version: "latest"
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -5222,7 +5222,7 @@ jobs:
       - name: Setup miniconda
         uses: conda-incubator/setup-miniconda@v2
         with:
-          miniconda-version: "4.11.0"
+          miniconda-version: "latest"
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
@@ -5597,7 +5597,7 @@ jobs:
       - name: Setup miniconda
         uses: conda-incubator/setup-miniconda@v2
         with:
-          miniconda-version: "4.11.0"
+          miniconda-version: "latest"
       - name: Install dependencies
         run: |
           conda install -yq anaconda-client
