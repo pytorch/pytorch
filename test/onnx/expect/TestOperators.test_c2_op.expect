@@ -3,10 +3,10 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "scores"
-    input: "bbox_deltas"
-    input: "im_info"
-    input: "anchors"
+    input: "_caffe2::GenerateProposals_0"
+    input: "_caffe2::GenerateProposals_1"
+    input: "_caffe2::GenerateProposals_2"
+    input: "_caffe2::GenerateProposals_3"
     output: "4"
     output: "5"
     name: "GenerateProposals_0"
@@ -65,7 +65,7 @@ graph {
   }
   name: "torch-jit-export"
   input {
-    name: "scores"
+    name: "_caffe2::GenerateProposals_0"
     type {
       tensor_type {
         elem_type: 1
@@ -87,7 +87,7 @@ graph {
     }
   }
   input {
-    name: "bbox_deltas"
+    name: "_caffe2::GenerateProposals_1"
     type {
       tensor_type {
         elem_type: 1
@@ -109,7 +109,7 @@ graph {
     }
   }
   input {
-    name: "im_info"
+    name: "_caffe2::GenerateProposals_2"
     type {
       tensor_type {
         elem_type: 1
@@ -125,7 +125,7 @@ graph {
     }
   }
   input {
-    name: "anchors"
+    name: "_caffe2::GenerateProposals_3"
     type {
       tensor_type {
         elem_type: 1
