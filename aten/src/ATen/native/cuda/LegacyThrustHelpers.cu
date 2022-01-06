@@ -8,6 +8,7 @@
 #include <thrust/sort.h>
 #include <thrust/unique.h>
 #include <thrust/device_ptr.h>
+#include <thrust/iterator/constant_iterator.h>
 
 namespace at { namespace native {
 

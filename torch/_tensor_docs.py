@@ -563,6 +563,18 @@ atan2_(other) -> Tensor
 In-place version of :meth:`~Tensor.atan2`
 """)
 
+add_docstr_all('arctan2', r"""
+arctan2(other) -> Tensor
+
+See :func:`torch.arctan2`
+""")
+
+add_docstr_all('arctan2_', r"""
+atan2_(other) -> Tensor
+
+In-place version of :meth:`~Tensor.arctan2`
+""")
+
 add_docstr_all('atanh', r"""
 atanh() -> Tensor
 
@@ -2867,13 +2879,13 @@ Returns the quantization scheme of a given QTensor.
 """)
 
 add_docstr_all('quantile', r"""
-quantile(q, dim=None, keepdim=False) -> Tensor
+quantile(q, dim=None, keepdim=False, *, interpolation='linear') -> Tensor
 
 See :func:`torch.quantile`
 """)
 
 add_docstr_all('nanquantile', r"""
-nanquantile(q, dim=None, keepdim=False) -> Tensor
+nanquantile(q, dim=None, keepdim=False, *, interpolation='linear') -> Tensor
 
 See :func:`torch.nanquantile`
 """)
@@ -4701,7 +4713,7 @@ See :func:`torch.pinverse`
 
 add_docstr_all('index_add',
                r"""
-index_add(dim, index, source) -> Tensor
+index_add(dim, index, source, *, alpha=1) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.index_add_`.
 """)

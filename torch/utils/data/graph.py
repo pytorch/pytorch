@@ -1,7 +1,7 @@
 import io
 import pickle
 
-from torch.utils.data import IterableDataset
+from torch.utils.data import IterDataPipe
 
 from typing import Any, Dict, Generator
 
@@ -40,19 +40,22 @@ def list_connected_datapipes(scan_obj, exclude_primitive):
             captured_connections.append(obj)
             return stub_unpickler, ()
 
-    # TODO(VitalyFedyunin):  Better do it as `with` context for safety
-    IterableDataset.set_reduce_ex_hook(reduce_hook)
-    if exclude_primitive:
-        IterableDataset.set_getstate_hook(getstate_hook)
-    p.dump(scan_obj)
-    IterableDataset.set_reduce_ex_hook(None)
-    if exclude_primitive:
-        IterableDataset.set_getstate_hook(None)
+    try:
+        IterDataPipe.set_reduce_ex_hook(reduce_hook)
+        if exclude_primitive:
+            IterDataPipe.set_getstate_hook(getstate_hook)
+        p.dump(scan_obj)
+    except AttributeError:  # unpickable DataPipesGraph
+        pass  # TODO(VitalyFedyunin): We need to tight this requirement after migrating from old DataLoader
+    finally:
+        IterDataPipe.set_reduce_ex_hook(None)
+        if exclude_primitive:
+            IterDataPipe.set_getstate_hook(None)
     return captured_connections
 
 
 def traverse(datapipe, exclude_primitive=False):
-    if not isinstance(datapipe, IterableDataset):
+    if not isinstance(datapipe, IterDataPipe):
         raise RuntimeError("Expected `IterDataPipe`, but {} is found".format(type(datapipe)))
 
     items = list_connected_datapipes(datapipe, exclude_primitive)

@@ -88,6 +88,7 @@ Indexing, Slicing, Joining, Mutating Ops
     :toctree: generated
     :nosignatures:
 
+    adjoint
     argwhere
     cat
     concat
@@ -99,6 +100,7 @@ Indexing, Slicing, Joining, Mutating Ops
     gather
     hsplit
     hstack
+    index_add
     index_select
     masked_select
     movedim
@@ -108,7 +110,11 @@ Indexing, Slicing, Joining, Mutating Ops
     permute
     reshape
     row_stack
+    select
     scatter
+    diagonal_scatter
+    select_scatter
+    slice_scatter
     scatter_add
     split
     squeeze
@@ -293,6 +299,7 @@ Pointwise Ops
     atanh
     arctanh
     atan2
+    arctan2
     bitwise_not
     bitwise_and
     bitwise_or
@@ -512,6 +519,7 @@ Other Operations
     gcd
     histc
     histogram
+    histogramdd
     meshgrid
     lcm
     logcumsumexp

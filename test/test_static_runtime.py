@@ -18,10 +18,7 @@ class StaticModule:
             self.static_module = torch._C._jit_to_static_module(scripted.graph)
 
     def __call__(self, *args, **kwargs):
-        if not kwargs:
-            return self.static_module(args, {})
-        else:
-            return self.static_module(args, kwargs)
+        return self.static_module(*args, **kwargs)
 
     def benchmark(self, args, kwargs, warmup_runs, main_runs):
         self.static_module.benchmark(args, kwargs, warmup_runs, main_runs)

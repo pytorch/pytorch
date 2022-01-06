@@ -65,6 +65,23 @@ struct HostAllocator
 
   cudaError_t malloc(void** ptr, size_t size)
   {
+    // Fast/efficient path for size 0 malloc request.
+    // If we let it proceed, it will very likely
+    // 1) consume a block with size > 0 which is a waste of pinned memory, or
+    // 2) request cudaHostAlloc with size 0 which is expensive but meaningless.
+    //
+    // This happens because there can be only one zero-sized block having
+    // {key:0, val:Block(0, 0, true)} if the cudaHostAlloc simply returns *ptr = 0 for
+    // a size 0 malloc request.
+    //
+    // NOTE: Ideally, a well-written GPU app should not call malloc with size 0.
+    if (size == 0) {
+        // This is what cudaHostAlloc would have returned. Also no need to acquire
+        // lock and add to `block` as free() simply returns true for nullptrs.
+        *ptr = 0;
+        return cudaSuccess;
+    }
+
     std::lock_guard<std::mutex> lock(mutex);
 
     // process outstanding cuda events which may have occurred
@@ -111,11 +128,12 @@ struct HostAllocator
 
   cudaError_t free(void* ptr)
   {
-    std::lock_guard<std::mutex> lock(mutex);
-
+    // Fast return path for nullptr
     if (!ptr) {
       return cudaSuccess;
     }
+
+    std::lock_guard<std::mutex> lock(mutex);
 
     // process outstanding cuda events which may have occurred
     cudaError_t err = processEvents();

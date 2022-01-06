@@ -135,7 +135,7 @@ class TORCH_API Module {
   std::unordered_map<std::string, std::string> metadata_;
   std::shared_ptr<CompilationUnit> cu_;
   MobileDebugTable debug_table_;
-  bool has_debug_handles_;
+  bool has_debug_handles_ = false;
 };
 } // namespace mobile
 } // namespace jit

@@ -1,17 +1,27 @@
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/mobile/function.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
+#include <torch/csrc/jit/mobile/parse_bytecode.h>
+#include <torch/csrc/jit/mobile/parse_operators.h>
 #include <torch/csrc/jit/mobile/prim_ops_registery.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/serialization/import_export_constants.h>
 
 namespace torch {
 namespace jit {
 
 char const* toString(OpCode op);
 namespace mobile {
-Function::Function(c10::QualifiedName name)
-    : name_(std::move(name)), code_(std::make_shared<Code>()) {}
+Function::Function(c10::QualifiedName name) : name_(std::move(name)) {}
+
+Function::Function(
+    c10::QualifiedName name,
+    Code code,
+    at::optional<c10::FunctionSchema> schema)
+    : name_(std::move(name)),
+      code_(std::move(code)),
+      schema_(std::move(schema)) {}
 
 const c10::QualifiedName& Function::qualname() const {
   return name_;
@@ -22,8 +32,8 @@ void Function::append_instruction(OpCode op, int X, int N, int64_t dbg_handle) {
       isOpSupportedInMobile(op),
       toString(op),
       " is not supported in mobile module.");
-  code_->instructions_.emplace_back(op, X, N);
-  code_->debug_handles_.emplace_back(dbg_handle);
+  code_.instructions_.emplace_back(op, X, N);
+  code_.debug_handles_.emplace_back(dbg_handle);
 }
 
 void Function::append_instruction(OpCode op, int X, int N) {
@@ -31,7 +41,7 @@ void Function::append_instruction(OpCode op, int X, int N) {
       isOpSupportedInMobile(op),
       toString(op),
       " is not supported in mobile module.");
-  code_->instructions_.emplace_back(op, X, N);
+  code_.instructions_.emplace_back(op, X, N);
 }
 
 bool Function::append_operator(
@@ -41,12 +51,94 @@ bool Function::append_operator(
     int64_t model_version) { /* TODO: T90339189 deprecate all v3 when v3 models
                                 are removed */
   // Keep the original opname in code_
-  code_->op_names_.emplace_back(name, overload_name);
-  const auto& opname = code_->op_names_.back();
-  const auto full_name = c10::toString(opname);
+  code_.op_names_.emplace_back(name, overload_name);
+  const auto& opname = code_.op_names_.back();
+  code_.operator_input_sizes_.emplace_back(num_specified_args.value_or(-1));
+  auto func = makeOperatorFunction(opname, num_specified_args, model_version);
+  if (!func.has_value()) {
+    return false;
+  }
+  code_.operators_.emplace_back(*func);
+  return true;
+}
 
+void Function::append_constant(const c10::IValue& constant) {
+  code_.constants_.push_back(constant);
+}
+
+void Function::append_type(const at::TypePtr& type) {
+  code_.types_.push_back(type);
+}
+
+void Function::append_function(mobile::Function& function) {
+  code_.functions_.push_back(&function);
+}
+
+void Function::set_register_size(size_t size) {
+  code_.register_size_ = size;
+}
+
+int64_t Function::get_debug_handle(size_t pc) const {
+  TORCH_CHECK(
+      pc < code_.debug_handles_.size(),
+      "Module debug info index out of boundary.");
+  return code_.debug_handles_[pc];
+}
+
+torch::jit::Function& Function::setSchema(c10::FunctionSchema schema) {
+  schema_ = std::move(schema);
+  return *this;
+}
+
+bool Function::hasSchema() const {
+  return schema_.has_value();
+}
+
+const c10::FunctionSchema& Function::getSchema() const {
+  return *schema_;
+}
+
+void Function::run(Stack& stack) {
+  if (hasSchema()) { // if we have a schema then resolve optional args if any
+    getSchema().checkAndNormalizeInputs(
+        stack, std::unordered_map<std::string, IValue>{} /*kwargs*/);
+  }
+  InterpreterState interp_state(code_);
+  interp_state.run(stack);
+}
+
+at::IValue Function::operator()(Stack& stack) {
+  run(stack);
+  return stack.front();
+}
+
+size_t Function::num_inputs() const {
+  return schema_->arguments().size();
+}
+
+bool Function::call(Stack&, c10::function_ref<void(const mobile::Code&)> f) {
+  f(code_);
+  return true;
+}
+
+const Code& Function::get_code() const {
+  return code_;
+}
+
+Code& Function::get_code() {
+  return code_;
+}
+
+const std::vector<int64_t>& Function::getExceptionDebugHandles() const {
+  return getInterpretersExceptionDebugHandles();
+}
+
+c10::optional<std::function<void(Stack&)>> makeOperatorFunction(
+    c10::OperatorName opname,
+    c10::optional<int> num_specified_args,
+    int64_t model_version) {
   std::function<void(Stack&)> fn;
-
+  const auto full_name = c10::toString(opname);
   const std::vector<c10::Argument>* pArgs = nullptr;
   bool promoted_op = mobile::hasPrimOpsFn(full_name);
   if (promoted_op) {
@@ -66,7 +158,7 @@ bool Function::append_operator(
           TORCH_CHECK(false, "arguments are missing for operator ", opname);
         }
       } else {
-        return false;
+        return c10::nullopt;
       }
     }
   }
@@ -125,76 +217,38 @@ bool Function::append_operator(
       }
     }
   }
-  code_->operators_.emplace_back(fn);
-  return true;
+  return fn;
 }
 
-void Function::append_constant(const c10::IValue& constant) {
-  code_->constants_.push_back(constant);
-}
-
-void Function::append_type(const at::TypePtr& type) {
-  code_->types_.push_back(type);
-}
-
-void Function::append_function(mobile::Function& function) {
-  code_->functions_.push_back(&function);
-}
-
-void Function::set_register_size(size_t size) {
-  code_->register_size_ = size;
-}
-
-int64_t Function::get_debug_handle(size_t pc) const {
-  TORCH_CHECK(code_, "Valid code must exist.");
-  TORCH_CHECK(
-      pc < code_->debug_handles_.size(),
-      "Module debug info index out of boundary.");
-  return code_->debug_handles_[pc];
-}
-
-torch::jit::Function& Function::setSchema(c10::FunctionSchema schema) {
-  schema_ = std::move(schema);
-  return *this;
-}
-
-bool Function::hasSchema() const {
-  return schema_.has_value();
-}
-
-const c10::FunctionSchema& Function::getSchema() const {
-  return *schema_;
-}
-
-void Function::run(Stack& stack) {
-  if (hasSchema()) { // if we have a schema then resolve optional args if any
-    getSchema().checkAndNormalizeInputs(
-        stack, std::unordered_map<std::string, IValue>{} /*kwargs*/);
+Function& Function::registerFunc(
+    const std::string& qualified_name,
+    const std::vector<Instruction>& instructions,
+    const std::vector<c10::IValue>& constants,
+    const std::vector<c10::TypePtr>& types,
+    const size_t register_size) {
+  static std::unordered_map<c10::QualifiedName, Function>
+      upgrader_function_holder;
+  c10::QualifiedName name = c10::QualifiedName(qualified_name);
+  auto found = upgrader_function_holder.find(name);
+  // Register the function if it's not found in the map.
+  if (found == upgrader_function_holder.end()) {
+    auto name_function_pair =
+        upgrader_function_holder.emplace(name, Function(name));
+    auto& func = name_function_pair.first->second;
+    for (auto const& inst : instructions) {
+      func.append_instruction(inst.op, inst.X, inst.N);
+    }
+    for (auto const& constant : constants) {
+      func.append_constant(constant);
+    }
+    for (auto const& type : types) {
+      func.append_type(type);
+    }
+    func.set_register_size(register_size);
+    return func;
   }
-  InterpreterState interp_state(*code_);
-  interp_state.run(stack);
-}
-
-at::IValue Function::operator()(Stack& stack) {
-  run(stack);
-  return stack.front();
-}
-
-size_t Function::num_inputs() const {
-  return schema_->arguments().size();
-}
-
-bool Function::call(Stack&, c10::function_ref<void(const mobile::Code&)> f) {
-  f(*code_);
-  return true;
-}
-
-const std::shared_ptr<Code> Function::get_code() const {
-  return code_;
-}
-
-const std::vector<int64_t>& Function::getExceptionDebugHandles() const {
-  return getInterpretersExceptionDebugHandles();
+  auto& upgrader_function_in_holder = found->second;
+  return upgrader_function_in_holder;
 }
 
 } // namespace mobile

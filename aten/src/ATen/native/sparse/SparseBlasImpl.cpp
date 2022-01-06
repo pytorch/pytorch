@@ -59,6 +59,24 @@ void add_out_sparse_csr(
 #endif
 }
 
+void triangular_solve_out_sparse_csr(
+    const Tensor& A,
+    const Tensor& B,
+    const Tensor& X,
+    bool upper,
+    bool transpose,
+    bool unitriangular) {
+#if !AT_MKL_ENABLED()
+  TORCH_CHECK(
+      false,
+      "Calling triangular_solve on a sparse CPU tensor requires compiling PyTorch with MKL. ",
+      "Please use PyTorch built MKL support.");
+#else
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(A.is_sparse_csr());
+  sparse::impl::mkl::triangular_solve_out_sparse_csr(A, B, X, upper, transpose, unitriangular);
+#endif
+}
+
 } // namespace cpu
 } // namespace impl
 } // namespace sparse

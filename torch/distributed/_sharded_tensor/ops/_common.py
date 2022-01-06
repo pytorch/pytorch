@@ -1,3 +1,5 @@
+# coding=utf-8
+
 from typing import List
 
 import torch
@@ -5,6 +7,10 @@ import torch.distributed as dist
 from torch.distributed._sharding_spec._internals import (
     get_split_size,
     get_chunked_dim_size,
+)
+from torch.distributed.nn.functional import (
+    all_gather,
+    all_to_all_single,
 )
 
 
@@ -17,9 +23,11 @@ def _handle_col_wise_sharding_base(
     weight,
     local_shard,
     pg,
+    gathered_inputs=None,
     mode=None,
     gathered_per_sample_weights=None,
     gathered_offsets=None,
+    padding_idx=None,
 ):
     """
     For col-wise sharding of weight, lots of logic are common.
@@ -38,15 +46,23 @@ def _handle_col_wise_sharding_base(
         weight: shareded weight tensor.
         local_shard: col-wise sharded weight tensor.
         pg: process group.
+        gathered_inputs: list of inputs from all ranks. If specified, we
+            don't need to communicate with each rank any more.
         mode: aggregation mode of EmbeddingBag.
         gathered_per_sample_weights: per_sample_weights across all ranks.
         gathered_offsets: offsets across all ranks.
+        padding_idx: If specified, the entries at padding_idx do
+            not contribute to the gradient; therefore, the embedding
+            vector at padding_idx is not updated during training,
+            i.e. it remains as a fixed “pad”.
+            Note that the embedding vector at padding_idx is
+            excluded from the reduction.
 
     Return: final result of input being applied with the op.
     """
-    # allgather the inputs first.
-    gathered_inputs = [torch.zeros_like(input) for _ in range(world_size)]
-    dist.all_gather(gathered_inputs, input, group=pg)
+    if gathered_inputs is None:
+        # allgather the inputs first.
+        gathered_inputs = all_gather(input, group=pg)
 
     # run the operator's function for all the inputs.
     results = []
@@ -60,6 +76,13 @@ def _handle_col_wise_sharding_base(
                 per_sample_weights=gathered_per_sample_weights[i]
                 if gathered_per_sample_weights is not None
                 else None,
+                padding_idx=padding_idx,
+            )
+        elif op_func == torch.nn.functional.embedding:
+            result = op_func(
+                inp,
+                local_shard,
+                padding_idx=padding_idx,
             )
         else:
             result = op_func(inp, local_shard)
@@ -110,7 +133,7 @@ def _result_distribute_with_col_rearrange(
         )
 
     # distribute the outputs using all2all.
-    dist.all_to_all_single(
+    output = all_to_all_single(
         output, combined_results, output_split_sizes=output_split_sizes, group=pg
     )
 
@@ -138,18 +161,27 @@ def _result_distribute_with_col_rearrange(
     return output.index_select(0, torch.tensor(indices, device=output.device))
 
 
-def _handle_row_wise_lookup_distribute(input_sorted, input, world_size, weight):
+def _handle_row_wise_lookup_distribute(
+    input_sorted, input, world_size, weight, rank, padding_idx
+):
     """
     In the circumstance of row-wise sharding of weight, we need to distribute
     the sorted lookup IDs of embedding/embeddingBag to each rank.
     If the index in the placement is not equal to the rank number, we need to
     do the rearrangement based on the order given by the Sharding Spec (placement).
 
+    In addition, we do two things for padding_idx. The first thing is to only
+    set it if it's within the range of the current rank and the other thing
+    is to do the modularization of it by sharded_dim_size_max.
+
     Args:
         input_sorted: sorted lookup IDs of embedding/embeddingBag.
         input: tensor to be applied op on.
         world_size: number of ranks.
         weight: shareded weight tensor.
+        rank: # of cuda process.
+        padding_idx: If specified, the entries at padding_idx do
+            not contribute to the gradient and reduction.
 
     Return:
         input_sorted: sorted lookup IDs of embedding/embeddingBag
@@ -160,6 +192,9 @@ def _handle_row_wise_lookup_distribute(input_sorted, input, world_size, weight):
         rearrange_indices_1d_second_order: reverse indices of row
             rearrangement, which will be used to restore the original
             order.
+        padding_idx: Same as input if padding_idx is within the range
+            of the given rank; otherwise, None is returned. It is
+            also modularized by sharded_dim_size_max.
     """
     # Decide which rank the input goes to by check the sharding range.
     split_size = get_split_size(weight.size(0), world_size)
@@ -167,6 +202,8 @@ def _handle_row_wise_lookup_distribute(input_sorted, input, world_size, weight):
     indices_flatten = None
     input_split_sizes: List[int] = [0] * world_size
     input_split_start_indices: List[int] = [0] * world_size
+    start_row_idx_rank = None
+    end_row_idx_rank = None
     # When we do the chunk split, we always ensure the first N - 1 chunks get max out
     # and then the Nth chunk gets the rest. So input_split_sizes like [3, 3, 3, 4]
     # are not possible. The expected split size will be [4, 4, 4, 1].
@@ -181,6 +218,17 @@ def _handle_row_wise_lookup_distribute(input_sorted, input, world_size, weight):
         input_split_start_indices[placement.rank()] = int(start_idx)
         if placement.rank() != idx:
             rearrange_rows = True
+        # Store the range of the current rank.
+        if placement.rank() == rank:
+            start_row_idx_rank = start_row_idx
+            end_row_idx_rank = end_row_idx
+
+    # Perform the modular if padding_idx is within the range.
+    if padding_idx is not None:
+        if padding_idx < start_row_idx_rank or padding_idx >= end_row_idx_rank:
+            padding_idx = None
+        else:
+            padding_idx = padding_idx % sharded_dim_size_max
 
     rearrange_indices_1d_second_order = None
     if rearrange_rows:
@@ -205,6 +253,7 @@ def _handle_row_wise_lookup_distribute(input_sorted, input, world_size, weight):
         sharded_dim_size_max,
         torch.tensor(indices_flatten, device=input.device) if rearrange_rows else None,
         rearrange_indices_1d_second_order,
+        padding_idx,
     )
 
 
@@ -268,3 +317,65 @@ def _communicate_list_to_each_rank(
         group=pg,
     )
     return output_tensor_list
+
+
+def _handle_max_norm_col_wise(
+    max_norm,
+    norm_type,
+    local_shard,
+    input,
+    world_size,
+    pg,
+):
+    """
+    For col-wise sharding of weight, we need to aggregate the
+    norm across all ranks before we can perform the proper re-norm.
+    Note that, the max_norm logic is only applied to the embedding
+    indices that are looked up and not the whole shard.
+
+    Args:
+        max_norm: If given, each embedding vector with norm larger
+            than max_norm is renormalized to have norm max_norm.
+            Note: this will modify weight in-place.
+        norm_type: The p in the p-norm to compute for the max_norm option.
+        local_shard: col-wise shared local weight used for lookup.
+        input: tensor to be applied op to.
+        world_size: number of ranks.
+        pg: process group.
+
+    Return:
+        local_shard_norm_renormed: local_shard re-normed to max_norm if the norm is larger
+            than it.
+        gathered_inputs: list of inputs from all ranks.
+    """
+    norm_type = norm_type if norm_type is not None else 2.0
+    # allgather the inputs first.
+    gathered_inputs = [torch.zeros_like(input) for _ in range(world_size)]
+    dist.all_gather(gathered_inputs, input, group=pg)
+    unique_inp = torch.unique(torch.cat(gathered_inputs))
+    local_shard_sum = torch.sum(
+        torch.pow(torch.abs(local_shard), norm_type), dim=1, dtype=local_shard.dtype
+    )
+    # For col-wise sharding, we need to first aggregate the powered sum
+    # from each rank first and then calculate the norm.
+    dist.all_reduce(local_shard_sum, group=pg)
+    local_shard_norm = torch.pow(local_shard_sum, 1.0 / norm_type)
+    max_norm_tensor = torch.full(
+        (local_shard.size(0),),
+        float("inf"),
+        dtype=local_shard.dtype,
+        device=input.device,
+    )
+    max_norm_tensor[unique_inp] = max_norm
+    local_shard_t = local_shard.t().contiguous()
+    normalized_tensor = torch.where(
+        local_shard_norm > max_norm_tensor, max_norm_tensor, local_shard_norm
+    )
+    # Make sure divisor is not zero.
+    local_shard_norm[local_shard_norm == 0.0] = 1.0
+    local_shard_norm_renormed = (
+        torch.div(torch.mul(local_shard_t, normalized_tensor), local_shard_norm)
+        .t()
+        .contiguous()
+    )
+    return local_shard_norm_renormed, gathered_inputs

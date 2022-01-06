@@ -20,6 +20,7 @@ TEST(ShapeTest, Basic1) {
 TEST(ShapeTest, Basic2) {
   auto shape = Shape(c10::ScalarType::Float, {1, 2, 3});
 
+  EXPECT_EQ(shape.numel(), 6);
   EXPECT_STREQ(shape.to_string().c_str(), "Float[1,2,3]");
   EXPECT_EQ(shape.scalar_type(), c10::ScalarType::Float);
   EXPECT_EQ(shape.dim(), 3);
@@ -36,6 +37,8 @@ TEST(ShapeTest, Basic3) {
   EXPECT_STREQ(shape.to_string().c_str(), "Float[]");
   EXPECT_EQ(shape.scalar_type(), c10::ScalarType::Float);
   EXPECT_EQ(shape.dim(), 0);
+  // this is surprising, but it's in line with how 0-D tensors behave
+  EXPECT_EQ(shape.numel(), 1);
   EXPECT_TRUE(shape.sizes().empty());
   EXPECT_THROW(shape.size(0), std::out_of_range);
 }

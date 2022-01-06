@@ -11,6 +11,12 @@ at::Tensor& reshape_copy_out(
     const at::Tensor& self,
     const std::vector<int64_t>& proposed_shape,
     bool infer_size = true);
+at::Tensor& to_copy_out(
+    Tensor& out,
+    const Tensor& self,
+    bool non_blocking,
+    bool copy_strides,
+    c10::optional<MemoryFormat> memory_format);
 } // namespace native
 } // namespace at
 
@@ -113,6 +119,14 @@ inline at::Tensor create_empty_from(
       t.device(),
       c10::nullopt,
       memory_format);
+}
+
+inline at::Tensor create_empty_from(
+    const at::Tensor& t,
+    c10::ScalarType dtype,
+    c10::MemoryFormat memory_format) {
+  return at::detail::empty_cpu(
+      {0}, dtype, t.layout(), t.device(), c10::nullopt, memory_format);
 }
 
 inline bool checkResizedDataPtr(at::Tensor& t) {

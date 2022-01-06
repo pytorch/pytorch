@@ -37,6 +37,12 @@ ExprHandle promoteToDtype(ExprHandle e, ScalarType dt) {
     break;
     AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
 #undef TYPE_CASE
+    case ScalarType::QUInt8:
+      e = cast<c10::quint8>(e);
+      break;
+    case ScalarType::QInt8:
+      e = cast<c10::qint8>(e);
+      break;
     default:
       throw unsupported_dtype();
   }
@@ -451,6 +457,21 @@ Tensor computeReshape(
         // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
         return A.load(orig_buf_indexes);
       });
+}
+
+Tensor computeFlatten(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
+  std::vector<int64_t> outputShapeVec;
+  for (const auto dim : c10::irange(outputShape.size())) {
+    outputShapeVec.push_back(outputShape[dim].AsNode<LongImm>()->value());
+  }
+  std::vector<ArgValue> reshapeInputs;
+  reshapeInputs.push_back(inputs[0]);
+  reshapeInputs.emplace_back(outputShapeVec);
+  return computeReshape(reshapeInputs, outputShape, outputType, device);
 }
 
 static std::pair<ScalarType, std::vector<BufHandle>> processCatList(
