@@ -141,7 +141,7 @@ jobs:
             --detach \
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
             -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${GITHUB_WORKSPACE}/artifacts:/artifacts" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
             -w / \
             "${DOCKER_IMAGE}"
           )
@@ -153,7 +153,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            artifacts/*
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -506,7 +506,7 @@ jobs:
             --detach \
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
             -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${GITHUB_WORKSPACE}/artifacts:/artifacts" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
             -w / \
             "${DOCKER_IMAGE}"
           )
@@ -518,7 +518,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            artifacts/*
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -881,7 +881,7 @@ jobs:
             --detach \
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
             -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${GITHUB_WORKSPACE}/artifacts:/artifacts" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
             -w / \
             "${DOCKER_IMAGE}"
           )
@@ -893,7 +893,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            artifacts/*
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -1256,7 +1256,7 @@ jobs:
             --detach \
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
             -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${GITHUB_WORKSPACE}/artifacts:/artifacts" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
             -w / \
             "${DOCKER_IMAGE}"
           )
@@ -1268,7 +1268,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            artifacts/*
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -1631,7 +1631,7 @@ jobs:
             --detach \
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
             -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${GITHUB_WORKSPACE}/artifacts:/artifacts" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
             -w / \
             "${DOCKER_IMAGE}"
           )
@@ -1643,7 +1643,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            artifacts/*
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -2002,7 +2002,7 @@ jobs:
             --detach \
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
             -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${GITHUB_WORKSPACE}/artifacts:/artifacts" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
             -w / \
             "${DOCKER_IMAGE}"
           )
@@ -2014,7 +2014,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            artifacts/*
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -2367,7 +2367,7 @@ jobs:
             --detach \
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
             -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${GITHUB_WORKSPACE}/artifacts:/artifacts" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
             -w / \
             "${DOCKER_IMAGE}"
           )
@@ -2379,7 +2379,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            artifacts/*
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -2742,7 +2742,7 @@ jobs:
             --detach \
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
             -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${GITHUB_WORKSPACE}/artifacts:/artifacts" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
             -w / \
             "${DOCKER_IMAGE}"
           )
@@ -2754,7 +2754,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            artifacts/*
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -3117,7 +3117,7 @@ jobs:
             --detach \
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
             -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${GITHUB_WORKSPACE}/artifacts:/artifacts" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
             -w / \
             "${DOCKER_IMAGE}"
           )
@@ -3129,7 +3129,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            artifacts/*
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -3492,7 +3492,7 @@ jobs:
             --detach \
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
             -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${GITHUB_WORKSPACE}/artifacts:/artifacts" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
             -w / \
             "${DOCKER_IMAGE}"
           )
@@ -3504,7 +3504,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            artifacts/*
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -3863,7 +3863,7 @@ jobs:
             --detach \
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
             -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${GITHUB_WORKSPACE}/artifacts:/artifacts" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
             -w / \
             "${DOCKER_IMAGE}"
           )
@@ -3875,7 +3875,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            artifacts/*
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -4228,7 +4228,7 @@ jobs:
             --detach \
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
             -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${GITHUB_WORKSPACE}/artifacts:/artifacts" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
             -w / \
             "${DOCKER_IMAGE}"
           )
@@ -4240,7 +4240,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            artifacts/*
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -4603,7 +4603,7 @@ jobs:
             --detach \
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
             -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${GITHUB_WORKSPACE}/artifacts:/artifacts" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
             -w / \
             "${DOCKER_IMAGE}"
           )
@@ -4615,7 +4615,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            artifacts/*
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -4978,7 +4978,7 @@ jobs:
             --detach \
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
             -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${GITHUB_WORKSPACE}/artifacts:/artifacts" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
             -w / \
             "${DOCKER_IMAGE}"
           )
@@ -4990,7 +4990,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            artifacts/*
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -5353,7 +5353,7 @@ jobs:
             --detach \
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
             -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${GITHUB_WORKSPACE}/artifacts:/artifacts" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
             -w / \
             "${DOCKER_IMAGE}"
           )
@@ -5365,7 +5365,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            artifacts/*
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
