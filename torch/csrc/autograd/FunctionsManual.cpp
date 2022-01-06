@@ -4100,7 +4100,7 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
     0, input.narrow(-1, 0, 1), sigma.narrow(-1, 0, 1),
     K, /*left=*/true
   );
-  for (int64_t i = 0; i < k; ++i) {
+  for (const auto i : c10::irange(k)) {
     // NOTE: narrow will unsqueeze(-1)
     auto v_i = input.narrow(-1, i, 1);
     auto t_i = tau.narrow(-1, i, 1);
@@ -4189,7 +4189,7 @@ Tensor householder_product_jvp(
   auto H_minus = at::diag_embed(at::ones({1}, V.options()).expand(batch_vector_shape));
 
   auto dprod = at::zeros_like(prod);
-  for (int64_t i = 0; i < k; ++i) {
+  for (const auto i : c10::irange(k)) {
     auto v_i = V.narrow(-1, i, 1);
     auto dv_i = dV.narrow(-1, i, 1);
     auto tau_i = tau.narrow(-1, i, 1);
