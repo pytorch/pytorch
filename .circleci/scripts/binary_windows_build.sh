@@ -10,7 +10,7 @@ export SCCACHE_BUCKET=ossci-compiler-cache-windows
 export NIGHTLIES_PYTORCH_ROOT="$PYTORCH_ROOT"
 export VC_YEAR=2019
 
-if [[ "${BUILD_ENVIRONMENT}" == *"cuda11"* ]]; then
+if [[ "${DESIRED_CUDA}" == *"cu11"* ]]; then
     export BUILD_SPLIT_CUDA=ON
 fi
 
