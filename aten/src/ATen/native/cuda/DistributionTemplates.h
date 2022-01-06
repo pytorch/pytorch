@@ -2,6 +2,7 @@
 
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
+#include <ATen/ExpandBase.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <c10/util/Half.h>
@@ -626,18 +627,15 @@ void bernoulli_kernel(const TensorBase &self, const TensorBase &p_, RNG gen) {
   }
   TORCH_CHECK(at::isFloatingType(p_.scalar_type()), "expected probabilities tensor to have floating type, got ", p_.scalar_type());
   // cast probabilities tensor to double for double `self` tensor, and to `float` for everything else
-  TensorBase p;
-  if (self.dtype() == at::kDouble) {
-    p = p_.to(at::kDouble);
-  } else {
-    p = p_.to(at::kFloat);
-  }
+  const auto p_type = self.dtype() == at::kDouble ? at::kDouble : at::kFloat;
+  auto p_cuda = p_.to(TensorOptions().device(self.device()).dtype(p_type));
+  auto p = expand_inplace(self, p_cuda);
   AT_DISPATCH_ALL_TYPES_AND3(
     at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool, self.scalar_type(), "bernoulli_tensor_cuda_self_", [&] {
       if (std::is_same<scalar_t, double>::value) {
-        return bernoulli_tensor_cuda_kernel<double, double>(self, p, rng_engine_inputs);
+        return bernoulli_tensor_cuda_kernel<double, double>(self, *p, rng_engine_inputs);
       } else {
-        return bernoulli_tensor_cuda_kernel<scalar_t, float>(self, p, rng_engine_inputs);
+        return bernoulli_tensor_cuda_kernel<scalar_t, float>(self, *p, rng_engine_inputs);
       }
    });
 }

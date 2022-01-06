@@ -12,8 +12,8 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/ones_like_native.h>
 #include <ATen/ops/full.h>
+#include <ATen/ops/ones_like_native.h>
 #endif
 
 #include <c10/util/Optional.h>
