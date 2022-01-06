@@ -3,10 +3,10 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "0"
-    input: "1"
-    input: "2"
-    input: "3"
+    input: "scores"
+    input: "bbox_deltas"
+    input: "im_info"
+    input: "anchors"
     output: "4"
     output: "5"
     name: "GenerateProposals_0"
@@ -65,7 +65,7 @@ graph {
   }
   name: "torch-jit-export"
   input {
-    name: "0"
+    name: "scores"
     type {
       tensor_type {
         elem_type: 1
@@ -87,7 +87,7 @@ graph {
     }
   }
   input {
-    name: "1"
+    name: "bbox_deltas"
     type {
       tensor_type {
         elem_type: 1
@@ -109,7 +109,7 @@ graph {
     }
   }
   input {
-    name: "2"
+    name: "im_info"
     type {
       tensor_type {
         elem_type: 1
@@ -125,7 +125,7 @@ graph {
     }
   }
   input {
-    name: "3"
+    name: "anchors"
     type {
       tensor_type {
         elem_type: 1
