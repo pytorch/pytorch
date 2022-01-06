@@ -13,9 +13,6 @@
 
 namespace at {
 namespace native {
-
-
-
 namespace {
 
 template <typename scalar_t, typename accscalar_t>
@@ -463,55 +460,50 @@ static void upsample_bilinear2d_backward_out_cuda_template(
 template <typename scalar_t, typename accscalar_t, int interp_size>
 C10_LAUNCH_BOUNDS_1(1024)
 __global__ void upsample_gen2d_aa_out_frame(
-    const int num_elements,
-    const accscalar_t rheight,
-    const accscalar_t rwidth,
+    const accscalar_t height_scale,
+    const accscalar_t width_scale,
     const bool align_corners,
     const PackedTensorAccessor64<scalar_t, 4> idata,
     PackedTensorAccessor64<scalar_t, 4> odata) {
-  int index = threadIdx.x + blockIdx.x * blockDim.x;
 
   const int batchsize = idata.size(0);
   const int channels = idata.size(1);
-  const int height1 = idata.size(2);
-  const int width1 = idata.size(3);
-  const int height2 = odata.size(2);
-  const int width2 = odata.size(3);
+  const int input_height = idata.size(2);
+  const int input_width = idata.size(3);
+  const int output_height = odata.size(2);
+  const int output_width = odata.size(3);
 
-  if (index >= num_elements) {
+  const int output_x = threadIdx.x + blockIdx.x * blockDim.x;
+  const int output_y = threadIdx.y + blockIdx.y * blockDim.y;
+
+  if (output_x >= output_width || output_y >= output_height) {
     return;
   }
 
-  const int w2 = index % width2; // 0:width2-1
-  const int h2 = index / width2; // 0:height2-1
-
   const accscalar_t support_h = static_cast<accscalar_t>(
-      (rheight >= 1.0) ? (interp_size * 0.5) * rheight : interp_size * 0.5);
+      (height_scale >= 1.0) ? (interp_size * 0.5) * height_scale : interp_size * 0.5);
   const accscalar_t support_w = static_cast<accscalar_t>(
-      (rwidth >= 1.0) ? (interp_size * 0.5) * rwidth : interp_size * 0.5);
+      (width_scale >= 1.0) ? (interp_size * 0.5) * width_scale : interp_size * 0.5);
 
   const int interp_height = (int)ceilf(support_h) * 2 + 1;
   const int interp_width = (int)ceilf(support_w) * 2 + 1;
 
-  // Setup temporary buffers using shared memory
-  // extern __shared__ int smem[];
-  // scalar_t *wx = reinterpret_cast<scalar_t*>(smem);
-  // scalar_t *wy = reinterpret_cast<scalar_t*>(smem);
-  // scalar_t *buffer1 = reinterpret_cast<scalar_t*>(smem);
-  // scalar_t *buffer2 = reinterpret_cast<scalar_t*>(smem);
-  // // split wx, wy, buffer1, buffer2 and assign to each thread
-  // const int offset = (interp_width + interp_height) * 2;
-  // wx = &wx[threadIdx.x * offset];
-  // wy = &wy[interp_width + threadIdx.x * offset];
-  // buffer1 = &buffer1[interp_width + interp_height + threadIdx.x * offset];
-  // buffer2 = &buffer2[interp_width + interp_height + interp_width + threadIdx.x * offset];
-  scalar_t wx[256];
-  scalar_t wy[256];
-  scalar_t buffer1[256];
-  scalar_t buffer2[256];
+  // Setup weights using shared memory
+  extern __shared__ int smem[];
+  scalar_t *wx = reinterpret_cast<scalar_t*>(smem);
+  scalar_t *wy = reinterpret_cast<scalar_t*>(smem);
+  // split wx, wy
+  wx = &wx[interp_width * threadIdx.x];
+  wy = &wy[interp_width * blockDim.x + interp_height * threadIdx.y];
 
-  // Compute weights
+  // Compute weights and kernel spans
   int xmin, xsize, ymin, ysize;
+  accscalar_t xcenter, ycenter;
+  upsample_antialias::_compute_weights_span(
+      output_x, input_width, width_scale, support_w, xmin, xsize, xcenter);
+  upsample_antialias::_compute_weights_span(
+      output_y, input_height, height_scale, support_h, ymin, ysize, ycenter);
+
   typedef scalar_t (*aa_filter_fn_t)(scalar_t);
   aa_filter_fn_t filter_fn;
   if (interp_size == 2) {
@@ -520,26 +512,34 @@ __global__ void upsample_gen2d_aa_out_frame(
     filter_fn = upsample_antialias::bicubic_filter;
   }
 
-  upsample_antialias::_compute_weights(
-      w2,
-      width1,
-      rwidth,
-      support_w,
-      wx,
-      interp_width,
-      filter_fn,
-      xmin,
-      xsize);
-  upsample_antialias::_compute_weights(
-      h2,
-      height1,
-      rheight,
-      support_h,
-      wy,
-      interp_height,
-      filter_fn,
-      ymin,
-      ysize);
+  if (threadIdx.y == 0)
+  {
+    // All threadIdx.y have the same wx weights
+    upsample_antialias::_compute_weights(
+        wx,
+        width_scale,
+        interp_width,
+        filter_fn,
+        xmin - xcenter,
+        xsize);
+  }
+
+  if (threadIdx.x == 0)
+  {
+    // All threadIdx.x have the same wy weights
+    upsample_antialias::_compute_weights(
+        wy,
+        height_scale,
+        interp_height,
+        filter_fn,
+        ymin - ycenter,
+        ysize);
+  }
+
+  __syncthreads();
+
+  scalar_t buffer1[256];
+  scalar_t buffer2[256];
 
   for (int n = 0; n < batchsize; n++) {
     for (int c = 0; c < channels; c++) {
@@ -555,7 +555,7 @@ __global__ void upsample_gen2d_aa_out_frame(
             upsample_antialias::interpolate_aa_single_dim<scalar_t, accscalar_t>(
                 buffer1, wx, xsize));
       }
-      odata[n][c][h2][w2] = static_cast<scalar_t>(
+      odata[n][c][output_y][output_x] = static_cast<scalar_t>(
           upsample_antialias::interpolate_aa_single_dim<scalar_t, accscalar_t>(
               buffer2, wy, ysize));
     }
@@ -566,13 +566,11 @@ __global__ void upsample_gen2d_aa_out_frame(
 template <typename scalar_t, typename accscalar_t, int interp_size>
 C10_LAUNCH_BOUNDS_1(1024)
 __global__ void upsample_gen2d_aa_backward_out_frame(
-    const int num_elements,
     const accscalar_t height_scale,
     const accscalar_t width_scale,
     const bool align_corners,
     PackedTensorAccessor64<scalar_t, 4> idata,
     const PackedTensorAccessor64<scalar_t, 4> odata) {
-  int index = threadIdx.x + blockIdx.x * blockDim.x;
 
   const int batchsize = idata.size(0);
   const int channels = idata.size(1);
@@ -581,16 +579,17 @@ __global__ void upsample_gen2d_aa_backward_out_frame(
   const int output_height = odata.size(2);
   const int output_width = odata.size(3);
 
-  if (index >= num_elements) {
+  const int output_x = threadIdx.x + blockIdx.x * blockDim.x;
+  const int output_y = threadIdx.y + blockIdx.y * blockDim.y;
+
+  if (output_x >= output_width || output_y >= output_height) {
     return;
   }
 
-  const int output_x = index % output_width;
-  const int output_y = index / output_width;
   // special case: output just copy
   if (input_height == output_height && input_width == output_width) {
     for (int n = 0; n < batchsize; n++) {
-      for (int c = 0; c < channels; ++c) {
+      for (int c = 0; c < channels; c++) {
         const scalar_t val = odata[n][c][output_y][output_x];
         idata[n][c][output_y][output_x] = val;
       }
@@ -608,45 +607,58 @@ __global__ void upsample_gen2d_aa_backward_out_frame(
   const int interp_height = (int)ceilf(support_h) * 2 + 1;
   const int interp_width = (int)ceilf(support_w) * 2 + 1;
 
-  // Setup local buffers
-  // TODO: maybe we can specify dynamic shared memory size before calling the
-  // cuda code, however we should then ensure that device has enough shared
-  // memory
-  scalar_t wx[256];
-  scalar_t wy[256];
+  // Setup weights using shared memory
+  extern __shared__ int smem[];
+  scalar_t *wx = reinterpret_cast<scalar_t*>(smem);
+  scalar_t *wy = reinterpret_cast<scalar_t*>(smem);
+  // split wx, wy
+  wx = &wx[interp_width * threadIdx.x];
+  wy = &wy[interp_width * blockDim.x + interp_height * threadIdx.y];
 
-  // Compute weights
+  // Compute weights and kernel spans
   int xmin, xsize, ymin, ysize;
+  accscalar_t xcenter, ycenter;
+  upsample_antialias::_compute_weights_span(
+      output_x, input_width, width_scale, support_w, xmin, xsize, xcenter);
+  upsample_antialias::_compute_weights_span(
+      output_y, input_height, height_scale, support_h, ymin, ysize, ycenter);
+
   typedef scalar_t (*aa_filter_fn_t)(scalar_t);
   aa_filter_fn_t filter_fn;
   if (interp_size == 2) {
     filter_fn = upsample_antialias::bilinear_filter;
-  } else if (interp_size == 4) {
+  } else {
     filter_fn = upsample_antialias::bicubic_filter;
   }
-  upsample_antialias::_compute_weights(
-      output_x,
-      input_width,
-      width_scale,
-      support_w,
-      wx,
-      interp_width,
-      filter_fn,
-      xmin,
-      xsize);
-  upsample_antialias::_compute_weights(
-      output_y,
-      input_height,
-      height_scale,
-      support_h,
-      wy,
-      interp_height,
-      filter_fn,
-      ymin,
-      ysize);
+
+  if (threadIdx.y == 0)
+  {
+    // All threadIdx.y have the same wx weights
+    upsample_antialias::_compute_weights(
+        wx,
+        width_scale,
+        interp_width,
+        filter_fn,
+        xmin - xcenter,
+        xsize);
+  }
+
+  if (threadIdx.x == 0)
+  {
+    // All threadIdx.x have the same wy weights
+    upsample_antialias::_compute_weights(
+        wy,
+        height_scale,
+        interp_height,
+        filter_fn,
+        ymin - ycenter,
+        ysize);
+  }
+
+  __syncthreads();
 
   for (int n = 0; n < batchsize; n++) {
-    for (int c = 0; c < channels; ++c) {
+    for (int c = 0; c < channels; c++) {
       scalar_t out_value = odata[n][c][output_y][output_x];
       for (int y = 0; y < ysize; y++) {
         for (int x = 0; x < xsize; x++) {
@@ -684,10 +696,19 @@ static void upsample_gen2d_aa_out_cuda_template(
   int input_height = input.size(2);
   int input_width = input.size(3);
 
-  const int num_kernels = output_height * output_width;
   const int num_threads = std::min(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
+  int* maxThreadsDim = at::cuda::getCurrentDeviceProperties()->maxThreadsDim;
+  int block_x = std::min<int>(maxThreadsDim[0], at::cuda::warp_size());
+  int block_y = std::min<int>(maxThreadsDim[1], num_threads / block_x);
+  const dim3 block(block_x, block_y);
+
+  int* maxGridSize = at::cuda::getCurrentDeviceProperties()->maxGridSize;
+  int grid_x = std::min<int>(maxGridSize[0], ceil_div(output_width, block_x));
+  int grid_y = std::min<int>(maxGridSize[1], ceil_div(output_height, block_y));
+  const dim3 grid(grid_x, grid_y);
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       input.scalar_type(), "upsample_bilinear2d_out_frame", [&] {
@@ -696,26 +717,33 @@ static void upsample_gen2d_aa_out_cuda_template(
         auto idata = input.packed_accessor64<scalar_t, 4>();
         auto odata = output.packed_accessor64<scalar_t, 4>();
 
-        const accscalar_t rheight = area_pixel_compute_scale<accscalar_t>(
+        const accscalar_t height_scale = area_pixel_compute_scale<accscalar_t>(
             input_height, output_height, align_corners, scales_h);
-        const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
+        const accscalar_t width_scale = area_pixel_compute_scale<accscalar_t>(
             input_width, output_width, align_corners, scales_w);
 
         // We are using local buffer memory of 256 * sizeof(float) per thread
         // to store weights
+        // TORCH_CHECK(
+        //     height_scale < (255 / interp_size),
+        //     "Max supported scale factor is 127 (bilinear), 63 (bicubic)");
+        // TORCH_CHECK(
+        //     width_scale < (255 / interp_size),
+        //     "Max supported scale factor is 127 (bilinear), 63 (bicubic)");
+
+        size_t weights_per_block =
+            (size_t) (width_scale * interp_size + 3) * block_x + (size_t)(height_scale * interp_size + 3) * block_y;
+        size_t shmem_size = weights_per_block * sizeof(scalar_t);
+        size_t sharedMemPerBlock = at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock;
         TORCH_CHECK(
-            rheight < (255 / interp_size),
-            "Max supported scale factor is 127 (bilinear), 63 (bicubic)");
-        TORCH_CHECK(
-            rwidth < (255 / interp_size),
-            "Max supported scale factor is 127 (bilinear), 63 (bicubic)");
+            shmem_size <= sharedMemPerBlock,
+            "Too much shared memory required: ", shmem_size, " vs ", sharedMemPerBlock);
 
         upsample_gen2d_aa_out_frame<scalar_t, accscalar_t, interp_size>
-            <<<ceil_div(num_kernels, num_threads),
-               num_threads,
-               0,
-               stream>>>(
-                num_kernels, rheight, rwidth, align_corners, idata, odata);
+            <<<grid,
+               block,
+               shmem_size,
+               stream>>>(height_scale, width_scale, align_corners, idata, odata);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
 }
@@ -730,8 +758,7 @@ static void upsample_gen2d_aa_backward_out_cuda_template(
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
 
-  // Copied and adapted from
-  // UpSampleBicubic2d.cu::upsample_bicubic2d_backward_out_cuda_template
+  // Inspired from UpSampleBicubic2d.cu::upsample_bicubic2d_backward_out_cuda_template
   TensorArg grad_input_arg{grad_input, "grad_input", 1},
       grad_output_arg{grad_output_, "grad_output_", 2};
   checkAllSameGPU(
@@ -749,10 +776,19 @@ static void upsample_gen2d_aa_backward_out_cuda_template(
 
   grad_input.zero_();
 
-  const int num_kernels = output_height * output_width;
   const int num_threads = std::min(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
+  int* maxThreadsDim = at::cuda::getCurrentDeviceProperties()->maxThreadsDim;
+  int block_x = std::min<int>(maxThreadsDim[0], at::cuda::warp_size());
+  int block_y = std::min<int>(maxThreadsDim[1], num_threads / block_x);
+  const dim3 block(block_x, block_y);
+
+  int* maxGridSize = at::cuda::getCurrentDeviceProperties()->maxGridSize;
+  int grid_x = std::min<int>(maxGridSize[0], ceil_div(output_width, block_x));
+  int grid_y = std::min<int>(maxGridSize[1], ceil_div(output_height, block_y));
+  const dim3 grid(grid_x, grid_y);
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       grad_output.scalar_type(), "upsample_gen2d_backward_out_frame", [&] {
@@ -761,27 +797,24 @@ static void upsample_gen2d_aa_backward_out_cuda_template(
         auto idata = grad_input.packed_accessor64<scalar_t, 4>();
         auto odata = grad_output.packed_accessor64<scalar_t, 4>();
 
-        const accscalar_t rheight = area_pixel_compute_scale<accscalar_t>(
+        const accscalar_t height_scale = area_pixel_compute_scale<accscalar_t>(
             input_height, output_height, align_corners, scales_h);
-        const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
+        const accscalar_t width_scale = area_pixel_compute_scale<accscalar_t>(
             input_width, output_width, align_corners, scales_w);
 
-        // We are using static buffer memory of 256 * sizeof(float) per thread
-        // to store weights. Size of weights array is
-        // interp_size = scale * 2 + 1 for bilinear mode
+        size_t weights_per_block =
+            (size_t) (width_scale * interp_size + 3) * block_x + (size_t)(height_scale * interp_size + 3) * block_y;
+        size_t shmem_size = weights_per_block * sizeof(scalar_t);
+        size_t sharedMemPerBlock = at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock;
         TORCH_CHECK(
-            rheight < (255 / interp_size),
-            "Max supported scale factor is 127 (bilinear), 63 (bicubic)");
-        TORCH_CHECK(
-            rwidth < (255 / interp_size),
-            "Max supported scale factor is 127 (bilinear), 63 (bicubic)");
+            shmem_size <= sharedMemPerBlock,
+            "Too much shared memory required: ", shmem_size, " vs ", sharedMemPerBlock);
 
         upsample_gen2d_aa_backward_out_frame<scalar_t, accscalar_t, interp_size>
-            <<<ceil_div(num_kernels, num_threads),
-               num_threads,
-               0,
-               stream>>>(
-                num_kernels, rheight, rwidth, align_corners, idata, odata);
+            <<<grid,
+               block,
+               shmem_size,
+               stream>>>(height_scale, width_scale, align_corners, idata, odata);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
 }
