@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import cast, Any, BinaryIO, Callable, Dict, List, Optional, Union
 from weakref import WeakValueDictionary
-
+import pdb
 import torch
 from torch.serialization import _get_restore_location, _maybe_decode_ascii
 
@@ -202,8 +202,6 @@ class PackageImporter(Importer):
             assert isinstance(saved_id, tuple)
             typename = _maybe_decode_ascii(saved_id[0])
             data = saved_id[1:]
-            # print(saved_id)
-            # print('\n\n')
             if typename == "storage":
                 storage_type, key, location, size = data
                 dtype = storage_type.dtype
@@ -298,29 +296,15 @@ class PackageImporter(Importer):
         )
 
     def _read_selective_extern(self):
-        try:
+        filename = ".data/selective_extern_packages"
+        if self.zip_reader.has_record(filename):
             return (
-                self.zip_reader.get_record(".data/selective_extern_packages")
+                self.zip_reader.get_record(filename)
                 .decode("utf-8")
                 .splitlines(keepends=False)
             )
-        except BaseException:
+        else:
             return []
-
-    def _is_selective_extern_node(self, name):
-        return name in self.selective_extern_packages
-
-    def _is_package_or_module_node(self, name):
-        cur: _PathNode = self.root
-        atoms = name.split(".")
-        for atom in atoms:
-            if cur is None:
-                return False
-            elif isinstance(cur, _ExternNode):
-                return False
-            elif isinstance(cur, (_PackageNode, _SelectiveExternNode)):
-                cur = cur.children.get(atom, _PathNode())
-        return isinstance(cur, (_PackageNode, _ModuleNode))
 
     def _make_module(
         self, name: str, filename: Optional[str], is_package: bool, parent: str
@@ -349,18 +333,16 @@ class PackageImporter(Importer):
             ns["_extern_copy"] = importlib.import_module(name)
 
             def get_selectively_interned_module_names(cur_node, name):
-                if isinstance(cur_node, _ExternNode):
-                    return []
-                elif isinstance(cur_node, (_PackageNode, _SelectiveExternNode)):
-                    module_names = []
+                module_names = set()
+                if isinstance(cur_node, (_PackageNode, _SelectiveExternNode)):
                     if isinstance(cur_node, _PackageNode):
-                        module_names.append(name)
+                        module_names.add(name)
                     for child_name, child_node in cur_node.children.items():
-                        module_names.extend(get_selectively_interned_module_names(child_node, f"{name}.{child_name}"))
-                    return module_names
+                        module_names.union(get_selectively_interned_module_names(child_node, f"{name}.{child_name}"))
                 elif isinstance(cur_node, _ModuleNode):
-                    return [name]
-            interned_modules = set(get_selectively_interned_module_names(node, name))
+                    module_names.add(name)
+                return module_names
+            interned_modules = get_selectively_interned_module_names(node, name)
 
             def __getattr__(self, name_):
                 if name_ not in interned_modules:
@@ -395,6 +377,11 @@ class PackageImporter(Importer):
 
     def _check_if_viable_parent(self, cur, child, name):
         if isinstance(cur, _SelectiveExternNode):
+            """
+            By default all submodules of a selective extern module are externed.
+            However, it can still be a parent to an interned package/module, so
+            it can appear as a parent when looking for a _PackageNode or _ModuleNode.
+            """
             return
         if not isinstance(cur, (_PackageNode)) or child not in cur.children:
             raise ModuleNotFoundError(
@@ -407,40 +394,50 @@ class PackageImporter(Importer):
         cur: _PathNode = self.root
         atoms = name.split(".")
         for atom in atoms[:-1]:
-            if isinstance(cur, _ExternNode):
-                return cur
+            # if isinstance(cur, _ExternNode):
+            #     return cur
             if isinstance(cur, (_SelectiveExternNode, _PackageNode)):
                 self._check_if_viable_parent(cur, atom, name)
                 cur = cur.children[atom]
-        if isinstance(cur, (_SelectiveExternNode, _PackageNode)):
-            self._check_if_viable_parent(cur, atoms[-1], name)
-            return cur.children[atoms[-1]]
-        elif isinstance(cur, _ExternNode):
-            return cur
+        assert isinstance(cur, (_SelectiveExternNode, _PackageNode))
+        return cur.children[atoms[-1]]
 
 
 
     def _load_module(self, name: str, parent: str):
         cur: _PathNode = self.root
         for atom in name.split("."):
+
+            if isinstance(cur, _ExternNode):
+                break
+
             self._check_if_viable_parent(cur, atom, name)
             if isinstance(cur, _SelectiveExternNode):
                 if atom not in cur.children:
                     module = self.modules[name] = importlib.import_module(name)
                     return module
 
-            if isinstance(cur, (_PackageNode, _SelectiveExternNode)):
-                cur = cur.children[atom]
+            assert isinstance(cur, (_PackageNode, _SelectiveExternNode))
+            cur = cur.children[atom]
 
-            if isinstance(cur, _ExternNode):
-                module = self.modules[name] = importlib.import_module(name)
-                return module
+        if isinstance(cur, _ExternNode):
+            module = self.modules[name] = importlib.import_module(name)
+            return module
 
-        if isinstance(cur, (_PackageNode, _SelectiveExternNode, _ModuleNode)):
+        assert isinstance(cur, (_PackageNode, _ModuleNode, _SelectiveExternNode))
+        if isinstance(cur, (_PackageNode, _ModuleNode)):
             return self._make_module(
                 name,
                 cur.source_file,
-                isinstance(cur, (_PackageNode, _SelectiveExternNode)),
+                isinstance(cur, (_PackageNode)),
+                parent,
+            )  # type: ignore[attr-defined]
+
+        if isinstance(cur, _SelectiveExternNode):
+            return self._make_module(
+                name,
+                None,
+                True,
                 parent,
             )  # type: ignore[attr-defined]
 
@@ -637,14 +634,6 @@ class PackageImporter(Importer):
 
         cur: _PathNode = self.root
 
-        if (
-            atoms[0] in self.selective_extern_packages
-            and isinstance(cur, _PackageNode)
-            and atoms[0] not in cur.children
-        ):
-            node = cur.children[atoms[0]] = _SelectiveExternNode(None)
-
-            return node
         for i, atom in enumerate(atoms):
 
             assert isinstance(cur, (_PackageNode, _SelectiveExternNode))
@@ -663,7 +652,7 @@ class PackageImporter(Importer):
             assert isinstance(node, (_PackageNode, _SelectiveExternNode))
             cur = node  # type: ignore
 
-        assert isinstance(node, (_PackageNode, _SelectiveExternNode))
+        assert isinstance(cur, (_PackageNode, _SelectiveExternNode))
         return cur  # type: ignore[return-value]
 
     def _add_file(self, filename: str):
@@ -681,7 +670,9 @@ class PackageImporter(Importer):
                 f"inconsistent module structure. package contains a module file {filename}"
                 f" that is a subpackage of a module marked external."
             )
+
         if last == "__init__.py":
+            assert isinstance(package, (_PackageNode))
             package.source_file = filename
         elif last.endswith(".py"):
             package_name = last[: -len(".py")]
@@ -698,7 +689,7 @@ class PackageImporter(Importer):
 
         atoms = selective_extern_name.split(".")
         assert(len(atoms) == 1)
-        package = self._get_or_create_package(atoms)
+        self.root.children[atoms[0]] = _SelectiveExternNode()
 
 
 _NEEDS_LOADING = object()
@@ -735,8 +726,7 @@ class _ExternNode(_PathNode):
 
 
 class _SelectiveExternNode(_PathNode):
-    def __init__(self, source_file: Optional[str]):
-        self.source_file = source_file
+    def __init__(self):
         self.children: Dict[str, _PathNode] = {}
 
     def __repr__(self):

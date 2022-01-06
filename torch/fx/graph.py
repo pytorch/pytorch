@@ -10,10 +10,10 @@ from contextlib import contextmanager
 import copy
 import torch
 import keyword
+import re
 import builtins
 import math
 import warnings
-import re
 
 
 if TYPE_CHECKING:
@@ -952,7 +952,6 @@ class Graph:
 
         def emit_node(node : Node):
             maybe_type_annotation = '' if node.type is None else f' : {type_repr(node.type)}'
-
             if node.op == 'placeholder':
                 assert isinstance(node.target, str)
                 maybe_default_arg = '' if not node.args else f' = {repr(node.args[0])}'
@@ -992,7 +991,6 @@ class Graph:
                 return
             elif node.op == 'call_module':
                 assert isinstance(node.target, str)
-
                 body.append(f'{repr(node)}{maybe_type_annotation} = '
                             f'{_format_target(root_module, node.target)}({_format_args(node.args, node.kwargs)})')
                 return

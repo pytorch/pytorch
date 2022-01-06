@@ -12,7 +12,6 @@ from torch.package.package_exporter import PackagingError
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests
 
-
 try:
     from .common import PackageTestCase
 except ImportError:

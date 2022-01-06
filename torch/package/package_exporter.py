@@ -191,7 +191,7 @@ class PackageExporter:
         self,
         f: Union[str, Path, BinaryIO],
         importer: Union[Importer, Sequence[Importer]] = sys_importer,
-        do_selective_intern: bool = False,
+        do_selective_intern: bool = True,
     ):
         """
         Create an exporter.
@@ -1051,13 +1051,6 @@ class PackageExporter:
         package_path = package.replace(".", "/")
         resource = _normalize_path(resource)
         return f"{package_path}/{resource}"
-
-    def _check_if_selectively_externed(self, module_name: str) -> bool:
-        for pattern, pattern_info in self.patterns.items():
-            if pattern_info.action == _ModuleProviderAction.SELECTIVE_EXTERN:
-                if pattern.matches(module_name):
-                    return True
-        return False
 
     def _can_implicitly_extern(self, module_name: str) -> bool:
         top_level_package_name = module_name.partition(".")[0]

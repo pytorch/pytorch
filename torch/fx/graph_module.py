@@ -15,6 +15,7 @@ import traceback
 from pathlib import Path
 import os
 import warnings
+
 # Normal exec loses the source code, however we can work with
 # the linecache module to recover it.
 # Using _exec_with_source will add it to our local cache
@@ -160,6 +161,7 @@ def _deserialize_graph_module(forward, body: Dict[Any, Any]) -> torch.nn.Module:
     com = CodeOnlyModule(body)
 
     graph = KeepModules().trace(com)
+
     # Manually set Tracer class on the reconstructed Graph, to avoid
     # referencing the private local subclass KeepModules.
     graph._tracer_cls = tracer_cls

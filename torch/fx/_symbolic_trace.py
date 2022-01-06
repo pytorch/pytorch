@@ -23,6 +23,7 @@ _orig_module_call : Callable = torch.nn.Module.__call__
 _orig_module_getattr : Callable = torch.nn.Module.__getattr__
 
 _proxyable_classes : Dict[Type, None] = {}
+
 @compatibility(is_backward_compatible=True)
 class ProxyableClassMeta(type):
     """
@@ -515,6 +516,7 @@ class Tracer(TracerBase):
 
         tracer_cls: Optional[Type['Tracer']] = getattr(self, '__class__', None)
         self.graph = Graph(tracer_cls=tracer_cls)
+
         # When we encounter a Tensor value that's not a parameter, we look if it
         # is some other attribute on the model. Construct a dict mapping Tensor
         # values to the qualified name here for efficiency. This is used downstream
@@ -534,6 +536,7 @@ class Tracer(TracerBase):
 
         fn_globals = fn.__globals__  # run before it gets patched
         fn, args = self.create_args_for_root(fn, isinstance(root, torch.nn.Module), concrete_args)
+
         parameter_proxy_cache : Dict[str, Proxy] = {}  # Reduce number of get_attr calls
 
         # Method dispatch on parameters is not recorded unless it's directly used.
@@ -551,6 +554,7 @@ class Tracer(TracerBase):
             _autowrap_check(patcher, getattr(getattr(mod, "forward", mod), "__globals__", {}),
                             self._autowrap_function_ids)
             return self.call_module(mod, forward, args, kwargs)
+
         with _Patcher() as patcher:
             # allow duplicate patches to support the case of nested calls
             patcher.patch_method(torch.nn.Module, "__getattr__", module_getattr_wrapper, deduplicate=False)
@@ -561,7 +565,9 @@ class Tracer(TracerBase):
                 _autowrap_check(patcher, module.__dict__, self._autowrap_function_ids)
             self.create_node('output', 'output', (self.create_arg(fn(*args)),), {},
                              type_expr=fn.__annotations__.get('return', None))
+
         self.submodule_paths = None
+
         return self.graph
 
 
