@@ -598,7 +598,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // tensors. Currently we only special case its key_set_ but
   // there's also potential to share version_counter_ directly
   // without creating first and then override in as_view.
-  enum ImplType { VIEW };
+  enum class ImplType : int8_t { VIEW };
 
   /**
    * Construct a 1-dim 0-size tensor backed by the given storage.
