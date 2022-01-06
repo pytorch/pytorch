@@ -3437,63 +3437,48 @@ void dequantize_tensor_per_tensor_affine_sub_byte_cpu(
 // So, until Quantization support for Windows is fixed for AVX512,
 // AVX2 kernels would be used instead. Ref: GH 56992.
 #if defined(CPU_CAPABILITY_AVX512) && defined(_WIN32)
-REGISTER_NO_AVX512_DISPATCH(dequantize_tensor_per_channel_affine_stub,
-                            dequantize_tensor_per_channel_affine_fn);
-REGISTER_NO_AVX512_DISPATCH(dequantize_tensor_per_tensor_affine_stub,
-                            dequantize_tensor_per_tensor_affine_fn);
-REGISTER_NO_AVX512_DISPATCH(dequantize_tensor_per_channel_float_qparams_stub,
-                            dequantize_tensor_per_channel_float_qparams_fn);
-REGISTER_NO_AVX512_DISPATCH(fake_quant_grad_learnable_tensor_stub,
-                            fake_quant_learnable_grad_tensor_fn);
-REGISTER_NO_AVX512_DISPATCH(fake_quant_per_channel_cachemask_stub,
-                            fake_quant_per_channel_cachemask_fn);
-REGISTER_NO_AVX512_DISPATCH(fake_quant_tensor_cachemask_stub,
-                            fake_quant_tensor_cachemask_fn);
-REGISTER_NO_AVX512_DISPATCH(fake_quant_tensor_cachemask_tensor_qparams_stub,
-                            fake_quant_tensor_cachemask_tensor_qparams_fn);
-REGISTER_NO_AVX512_DISPATCH(qadaptive_avg_pool2d_nhwc_stub,
-                            qadaptive_avg_pool2d_fn);
-REGISTER_NO_AVX512_DISPATCH(qadaptive_avg_pool3d_ndhwc_stub,
-                            qadaptive_avg_pool3d_fn);
-REGISTER_NO_AVX512_DISPATCH(qadd_relu_stub, qbinary_fn);
-REGISTER_NO_AVX512_DISPATCH(qadd_scalar_relu_stub, qadd_scalar_fn);
-REGISTER_NO_AVX512_DISPATCH(qadd_scalar_stub, qadd_scalar_fn);
-REGISTER_NO_AVX512_DISPATCH(qadd_stub, qbinary_fn);
-REGISTER_NO_AVX512_DISPATCH(qavg_pool2d_nhwc_stub, qavg_pool2d_fn);
-REGISTER_NO_AVX512_DISPATCH(qavg_pool3d_nhwc_stub, qavg_pool3d_fn);
-REGISTER_NO_AVX512_DISPATCH(qbatch_norm_relu_stub, qbatch_norm_fn);
-REGISTER_NO_AVX512_DISPATCH(qbatch_norm_stub, qbatch_norm_fn);
-REGISTER_NO_AVX512_DISPATCH(qcat_nhwc_stub, qcat_nhwc_fn);
-REGISTER_NO_AVX512_DISPATCH(qcat_relu_nhwc_stub, qcat_nhwc_fn);
-REGISTER_NO_AVX512_DISPATCH(qclamp_stub, qclamp_fn);
-REGISTER_NO_AVX512_DISPATCH(qclamp_min_stub, qclamp_minmax_fn);
-REGISTER_NO_AVX512_DISPATCH(qclamp_max_stub, qclamp_minmax_fn);
-REGISTER_NO_AVX512_DISPATCH(qelu_stub, qelu_fn);
-REGISTER_NO_AVX512_DISPATCH(qhardsigmoid_stub, qhardsigmoid_fn);
-REGISTER_NO_AVX512_DISPATCH(qhardswish_stub, qhardswish_fn);
-REGISTER_NO_AVX512_DISPATCH(qmaxpool_2d_nhwc_stub, qmaxpool_2d_fn);
-REGISTER_NO_AVX512_DISPATCH(qmul_relu_stub, qbinary_fn);
-REGISTER_NO_AVX512_DISPATCH(qmul_stub, qbinary_fn);
-REGISTER_NO_AVX512_DISPATCH(qrelu_leaky_stub, qrelu_leaky_fn);
-REGISTER_NO_AVX512_DISPATCH(qrelu_stub, qrelu_fn);
-REGISTER_NO_AVX512_DISPATCH(qsigmoid_stub, qsigmoid_fn);
-REGISTER_NO_AVX512_DISPATCH(qtanh_stub, qtanh_fn);
-REGISTER_NO_AVX512_DISPATCH(qthreshold_stub, qthreshold_fn);
-REGISTER_NO_AVX512_DISPATCH(qtopk_stub, qtopk_fn);
-REGISTER_NO_AVX512_DISPATCH(fake_quant_grad_learnable_channel_stub,
-                            fake_quant_learnable_per_channel_fn);
-REGISTER_NO_AVX512_DISPATCH(quantize_tensor_per_tensor_affine_stub,
-                            quantize_tensor_per_tensor_affine_fn);
-REGISTER_NO_AVX512_DISPATCH(quantize_tensor_per_channel_affine_stub,
-                            quantize_tensor_per_channel_affine_fn);
-REGISTER_NO_AVX512_DISPATCH(quantize_tensor_per_channel_float_qparams_stub,
-                            quantize_tensor_per_channel_float_qparams_fn);
-REGISTER_NO_AVX512_DISPATCH(quantized_normalize_stub, qnormalize_fn);
-REGISTER_NO_AVX512_DISPATCH(qupsample_bilinear2d_nhwc_stub, qupsample_bilinear2d_fn);
-REGISTER_NO_AVX512_DISPATCH(quantize_tensor_per_tensor_affine_sub_byte_stub,
-                            quantize_tensor_per_tensor_affine_sub_byte_fn);
-REGISTER_NO_AVX512_DISPATCH(dequantize_tensor_per_tensor_affine_sub_byte_stub,
-                            dequantize_tensor_per_tensor_affine_sub_byte_fn);
+REGISTER_NO_AVX512_DISPATCH(dequantize_tensor_per_channel_affine_stub);
+REGISTER_NO_AVX512_DISPATCH(dequantize_tensor_per_tensor_affine_stub);
+REGISTER_NO_AVX512_DISPATCH(dequantize_tensor_per_channel_float_qparams_stub);
+REGISTER_NO_AVX512_DISPATCH(fake_quant_grad_learnable_tensor_stub);
+REGISTER_NO_AVX512_DISPATCH(fake_quant_per_channel_cachemask_stub);
+REGISTER_NO_AVX512_DISPATCH(fake_quant_tensor_cachemask_stub);
+REGISTER_NO_AVX512_DISPATCH(fake_quant_tensor_cachemask_tensor_qparams_stub);
+REGISTER_NO_AVX512_DISPATCH(qadaptive_avg_pool2d_nhwc_stub);
+REGISTER_NO_AVX512_DISPATCH(qadaptive_avg_pool3d_ndhwc_stub);
+REGISTER_NO_AVX512_DISPATCH(qadd_relu_stub);
+REGISTER_NO_AVX512_DISPATCH(qadd_scalar_relu_stub);
+REGISTER_NO_AVX512_DISPATCH(qadd_scalar_stub);
+REGISTER_NO_AVX512_DISPATCH(qadd_stub);
+REGISTER_NO_AVX512_DISPATCH(qavg_pool2d_nhwc_stub);
+REGISTER_NO_AVX512_DISPATCH(qavg_pool3d_nhwc_stub);
+REGISTER_NO_AVX512_DISPATCH(qbatch_norm_relu_stub);
+REGISTER_NO_AVX512_DISPATCH(qbatch_norm_stub);
+REGISTER_NO_AVX512_DISPATCH(qcat_nhwc_stub);
+REGISTER_NO_AVX512_DISPATCH(qcat_relu_nhwc_stub);
+REGISTER_NO_AVX512_DISPATCH(qclamp_stub);
+REGISTER_NO_AVX512_DISPATCH(qclamp_min_stub);
+REGISTER_NO_AVX512_DISPATCH(qclamp_max_stub);
+REGISTER_NO_AVX512_DISPATCH(qelu_stub);
+REGISTER_NO_AVX512_DISPATCH(qhardsigmoid_stub);
+REGISTER_NO_AVX512_DISPATCH(qhardswish_stub);
+REGISTER_NO_AVX512_DISPATCH(qmaxpool_2d_nhwc_stub);
+REGISTER_NO_AVX512_DISPATCH(qmul_relu_stub);
+REGISTER_NO_AVX512_DISPATCH(qmul_stub);
+REGISTER_NO_AVX512_DISPATCH(qrelu_leaky_stub);
+REGISTER_NO_AVX512_DISPATCH(qrelu_stub);
+REGISTER_NO_AVX512_DISPATCH(qsigmoid_stub);
+REGISTER_NO_AVX512_DISPATCH(qtanh_stub);
+REGISTER_NO_AVX512_DISPATCH(qthreshold_stub);
+REGISTER_NO_AVX512_DISPATCH(qtopk_stub);
+REGISTER_NO_AVX512_DISPATCH(fake_quant_grad_learnable_channel_stub);
+REGISTER_NO_AVX512_DISPATCH(quantize_tensor_per_tensor_affine_stub);
+REGISTER_NO_AVX512_DISPATCH(quantize_tensor_per_channel_affine_stub);
+REGISTER_NO_AVX512_DISPATCH(quantize_tensor_per_channel_float_qparams_stub);
+REGISTER_NO_AVX512_DISPATCH(quantized_normalize_stub);
+REGISTER_NO_AVX512_DISPATCH(qupsample_bilinear2d_nhwc_stub);
+REGISTER_NO_AVX512_DISPATCH(quantize_tensor_per_tensor_affine_sub_byte_stub);
+REGISTER_NO_AVX512_DISPATCH(dequantize_tensor_per_tensor_affine_sub_byte_stub);
 #else
 REGISTER_DISPATCH(dequantize_tensor_per_channel_affine_stub,
                   &dequantize_tensor_per_channel_affine_cpu);
