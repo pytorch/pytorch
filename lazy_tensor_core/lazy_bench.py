@@ -19,6 +19,8 @@ from scipy.stats import ttest_ind
 import importlib
 import glob
 import time
+import collections
+import csv
 
 def get_unique_suffix():
     return f"{time.time()}_{os.getpid()}"
@@ -55,18 +57,18 @@ log = logging.getLogger(__name__)
 # disabled, but should be removed from these lists once fixed
 SKIP = {
     # out of memory test
-    "fastNLP_Bert",
-    "vision_maskrcnn",
-    "speech_trasformer",
-    "nvidia_deeprecommender",
-    "pytorch_struct",
-    "dlrm",
-    "LearningToPaint",
-    "vision_maskrcnn",
-    "drq",
-    "moco",
+    #"fastNLP_Bert",
+    #"vision_maskrcnn",
+    #"speech_trasformer",
+    #"nvidia_deeprecommender",
+    #"pytorch_struct",
+    #"dlrm",
+    #"LearningToPaint",
+    #"vision_maskrcnn",
+    #"drq",
+    #"moco",
     # slow tests
-    "maml",
+    #"maml",
 }
 SKIP_TRAIN_ONLY = {
     # out of memory test
@@ -102,7 +104,10 @@ def output_csv(name, headers):
             open(name, "wb", buffering=0),
             "utf-8",
             write_through=True,
-        )
+        ),
+        delimiter = ",",
+        quotechar='"',
+        quoting=csv.QUOTE_MINIMAL
     )
     output.writerow(headers)
     return output
@@ -197,7 +202,7 @@ def short_name(name, limit=20):
     """Truncate a model name to limit chars"""
     return name if len(name) <= limit else f"{name[:limit - 3].rstrip('_')}..."
 
-def iter_models(args):
+def iter_models(args, dirpath):
     from fastNLP.core import logger
 
     logger.setLevel(logging.WARNING)
@@ -210,6 +215,7 @@ def iter_models(args):
             or name in SKIP
             or (name in SKIP_TRAIN_ONLY and args.test == "train")
         ):
+            save_error(name, args.test, "in SKIP or SKIP_TRAIN_ONLY", dirpath)
             continue
         # TODO(whc) better to support list of devices;
         # curently since env var needs to be set for GPU, have to launch one dev at a time
@@ -387,7 +393,7 @@ def lazy_overhead_experiment(args, results, benchmark, lazy_benchmark):
     overhead = median[1] / median[0]
     results.append(overhead)
     output_csv(
-        os.path.join(args.output_dir, f"lazy_overheads_{args.test}_{get_unique_suffix()}.csv"),
+        os.path.join(args.output_dir, f"lazy-overheads_{args.test}_{get_unique_suffix()}.csv"),
         ("dev", "name", "test", "overhead", "pvalue"),
     ).writerow([current_device, current_name, args.test,  f"{overhead:.4f}", f"{pvalue:.4e}"])
     print(f"{short_name(name, limit=30):<30} {current_device:<4} {args.test:<5} {'trace overheads':<20} overhead: {overhead:.3f} pvalue: {pvalue:.2e}")
@@ -432,7 +438,7 @@ def lazy_compute_experiment(args, experiment, results, benchmark, lazy_benchmark
     speedup = median[0] / median[1]
     results.append(speedup)
     output_csv(
-        os.path.join(args.output_dir, f"lazy_compute_{args.test}_{get_unique_suffix()}.csv"),
+        os.path.join(args.output_dir, f"lazy-compute_{args.test}_{get_unique_suffix()}.csv"),
         ("name", "dev", "experiment", "test", "speedup", "pvalue"),
     ).writerow([current_name, current_device, experiment, args.test, f"{speedup:.4f}", f"{pvalue:.2e}"])
     print(f"{short_name(current_name, limit=30):<30} {current_device:<4} {args.test:<5} {experiment:<20} speedup:  {speedup:.3f} pvalue: {pvalue:.2e}")
@@ -494,11 +500,63 @@ def merge_with_prefix(prefix, tmp_dir, out_dir, headers):
     results = []
     rfnames = glob.glob(os.path.join(tmp_dir, prefix + "*"))
     for rfname in rfnames:
-        results.extend(open(rfname).readlines()[1:]) #skip headr
+        results.extend(open(rfname).readlines()[1:]) #skip header
+
+    # the header shouldn't require quotations and the results should already be properly
+    # quoted via output_csv
     with open(os.path.join(out_dir, prefix + "acc.csv"), "a+") as acc_csv:
         acc_csv.write(",".join(headers) + "\n")
         for l in results:
             acc_csv.write(l)
+
+def merge_reformat(tmp_dir, out_dir):
+    out_dir = args.output_dir
+    # depending on the type of an experiment, fields can be in a different order
+    # `get_field` deals with all three types including `error`
+    def get_field(row, name, file_type):
+        headers = {
+            "error": ("name", "test", "error"),
+            "lazy-compute" : ("name", "dev", "experiment", "test", "speedup", "pvalue"),
+            "lazy-overheads" : ("dev", "name", "test", "overhead", "pvalue") 
+        }
+
+        header = headers[file_type]
+        r = row[header.index(name)] if name in header else "N/A"
+        return r
+
+    table = collections.defaultdict(dict)
+
+    csv_files = glob.glob(os.path.join(tmp_dir, "*.csv"))
+    for csvf in csv_files:
+
+        with open(csvf, "r") as csvfile:
+            prefix = os.path.basename(csvf).split("_")[0]
+            csvreader = csv.reader(csvfile, delimiter = ",", quotechar='"')
+            # This skips the first row of the CSV file.
+            next(csvreader)
+
+            for r in csvreader:
+                key = (get_field(r, "name", prefix), get_field(r, "test", prefix))
+                entry = table[key]
+
+            if prefix == "error":
+                entry["error"] = get_field(r, "error", prefix)
+            elif prefix == "lazy-overheads":
+                entry["overhead"] = get_field(r, "overhead", prefix)
+            else:
+                entry[get_field(r, "experiment", prefix)] = get_field(r, "speedup", prefix)
+            
+
+    amortized_header = f"amortized {args.inner_loop_repeat}x"
+    headers = ("name", "test", amortized_header, "unamortized", "overhead", "error")
+
+    cw = output_csv(
+        os.path.join(out_dir, f"{args.test}_reformat.csv"),
+        headers
+    )
+
+    for k, v in table.items():
+        cw.writerow((k[0], k[1], v.get(amortized_header, 'N/A'), v.get('unamortized', 'N/A'), v.get('overhead', 'N/A'), v.get('error', 'N/A')))
 
 def save_error(name, test, error, dir):
     output_csv(
@@ -601,7 +659,7 @@ if __name__ == "__main__" :
     import subprocess
     import tempfile
     dirpath = tempfile.mkdtemp()
-    for model_name in iter_models(args):
+    for model_name in iter_models(args, dirpath):
         # if `--run_in_subprocess` is specified, it will override any filters and excludes
         # pass the rest of arguments intact such as device, test, repeat, etc
         # note, the latest output_dir will override the original one and this is exactly what we want
@@ -619,6 +677,7 @@ if __name__ == "__main__" :
             print(f"{model_name} timed out after {args.timeout // 60} minutes! Include it in SKIP or SKIP_TRAIN_ONLY")
             save_error(model_name, args.test, "Timed out.", dirpath)
 
-    merge_with_prefix("lazy_overheads_", dirpath, args.output_dir, ("dev", "name", "test", "overhead", "pvalue"))
-    merge_with_prefix("lazy_compute_", dirpath, args.output_dir, ("name", "dev", "experiment", "test", "speedup", "pvalue"))
+    merge_with_prefix("lazy-overheads_", dirpath, args.output_dir, ("dev", "name", "test", "overhead", "pvalue"))
+    merge_with_prefix("lazy-compute_", dirpath, args.output_dir, ("name", "dev", "experiment", "test", "speedup", "pvalue"))
     merge_with_prefix("error_", dirpath, args.output_dir, ("name", "test", "error"))
+    merge_reformat(dirpath, args)
