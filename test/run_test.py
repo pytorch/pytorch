@@ -1088,6 +1088,7 @@ def main():
 
     if options.continue_through_error and has_failed:
         for err in failure_messages:
+            print(err)
             print_to_stderr(err)
         sys.exit(1)
 
