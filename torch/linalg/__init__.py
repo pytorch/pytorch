@@ -336,11 +336,6 @@ Supports input of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
 the output has the same batch dimensions.
 
-""" + fr"""
-.. note:: This function is computed using :func:`torch.lu`.
-          {common_notes["sync_note"]}
-""" + r"""
-
 .. seealso::
 
         :func:`torch.linalg.slogdet` computes the sign (resp. angle) and natural logarithm of the
