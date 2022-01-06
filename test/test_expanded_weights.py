@@ -16,7 +16,6 @@ from torch._expanded_weights.expanded_weights_utils import forward_helper, grad_
 class TestExpandedWeightAttributes(TestCase):
     def test_expanded_weight_has_attributes(self, device):
         attrs_equivalent = ['dtype', 'shape', 'requires_grad', 'is_sparse', 'is_quantized', 'device']
-        attrs_special = {'grad': lambda attr, _: attr is None}
         supported_dtypes = common_dtype.floating_and_complex_types()
         for (attr, dtype) in product(attrs_equivalent, supported_dtypes):
             batch_size = 5
@@ -26,21 +25,13 @@ class TestExpandedWeightAttributes(TestCase):
             actual = getattr(expanded_weight, attr)
             expected = getattr(orig_tensor, attr)
             self.assertEqual(expected, actual, f"Expected {attr} to have value {expected}, got {actual}")
-        for (attr_and_func, dtype) in product(attrs_special.items(), supported_dtypes):
-            attr, func = attr_and_func
-            batch_size = 5
-            orig_tensor = make_tensor((4), device, dtype, requires_grad=True)
-            expanded_weight = ExpandedWeight(orig_tensor, batch_size)
-            assert hasattr(expanded_weight, attr), f"Expanded Weight of type {dtype} didn't have attribute {attr}"
-            if not func(getattr(expanded_weight, attr), orig_tensor):
-                raise RuntimeError(f"{attr} got unexpected value. Was {getattr(expanded_weight, attr)}")
 
 class TestExpandedWeightMethods(TestCase):
     def test_expanded_weight_methods(self, device):
         # certain functions like __float__, __array__, __index__ will cause errors
         methods_equivalent = ['size', 'numel', 'stride', 'is_contiguous', 'requires_grad_', 'detach', 'dim', 'ndimension',
                               '__len__', 'detach_']
-        methods_with_args = {'requires_grad_': (False, True), 'to': (device,), '__eq__': (torch.randn(4, device=device),), 
+        methods_with_args = {'requires_grad_': (False, True), 'to': (device,), '__eq__': (torch.randn(4, device=device),),
                              '__getitem__': (0, 2), 'eq': (torch.randn(4, device=device))}
         methods_special = {'__repr__': lambda attr, orig_weight: orig_weight.__repr__() in attr(),
                            '__hash__': lambda attr, orig_weight: attr() != orig_weight.__hash__()}

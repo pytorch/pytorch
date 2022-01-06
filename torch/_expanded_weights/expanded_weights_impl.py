@@ -43,7 +43,7 @@ class ExpandedWeight(torch.Tensor):
         ret = torch.Tensor._make_subclass(cast(_TensorBase, cls), orig_weight, orig_weight.requires_grad)
         return ret
 
-    supported_methods = (Tensor.size, Tensor.numel, Tensor.is_contiguous, Tensor.stride, Tensor.requires_grad_, 
+    supported_methods = (Tensor.size, Tensor.numel, Tensor.is_contiguous, Tensor.stride, Tensor.requires_grad_,
                          Tensor.__format__, Tensor.__eq__, Tensor.__getitem__, Tensor.detach, Tensor.dim,
                          Tensor.ndimension, Tensor.register_hook, Tensor.__len__, Tensor.__index__, Tensor.__bool__,
                          Tensor.__int__, Tensor.__float__, Tensor.__long__, Tensor.__nonzero__, Tensor.__setstate__,
@@ -74,10 +74,6 @@ class ExpandedWeight(torch.Tensor):
     @property
     def dtype(self):
         return self.orig_weight.dtype
-
-    @property
-    def grad(self):
-        return None
 
     @property
     def requires_grad(self):
@@ -111,20 +107,17 @@ class ExpandedWeight(torch.Tensor):
     def ndim(self):
         return self.orig_weight.ndim
 
-    @grad.setter
-    def grad(self, value):
-        if value is None:
-            return
-        else:
-            raise RuntimeError("ExpandedWeights should never have a grad value set on it.")
+    @property
+    def grad(self):
+        raise RuntimeError("Should not be calling grad on an ExpandedWeights object")
 
     def to(self, device):
         if device == self.orig_weight.device:
             return self
         return ExpandedWeight(self.orig_weight.to(device), self.batch_size)
 
-    def __deep_copy__(self):
-        return ExpandedWeight(self.orig_weight.__deepcopy__(), self.batch_size)
+    def __deepcopy__(self, memo):
+        return ExpandedWeight(self.orig_weight.__deepcopy__(memo), self.batch_size)
 
     def __hash__(self):
         return id(self)
