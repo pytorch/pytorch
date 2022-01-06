@@ -169,7 +169,18 @@ def trace_with_inputs(
 
 # TODO(future PR): verify correctness of this for all
 # quantizeable modules
-def is_leaf(m: torch.nn.Module) -> bool:
+def is_leaf(
+    m: torch.nn.Module,
+    prepare_custom_config_dict: Optional[Dict[str, Any]],
+) -> bool:
+    if prepare_custom_config_dict is None:
+        prepare_custom_config_dict = {}
+
+    if 'non_traceable_module_class' in prepare_custom_config_dict:
+        for target_cls in prepare_custom_config_dict['non_traceable_module_class']:
+            if isinstance(m, target_cls):
+                return True
+
     return (
         # allowlist everything in torch.nn except nn.Sequential
         (m.__module__.startswith('torch.nn') and (

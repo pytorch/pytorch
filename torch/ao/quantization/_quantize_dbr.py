@@ -28,6 +28,9 @@ def prepare(model, qconfig_dict, example_inputs, inplace=False, allow_list=None,
     Requires `example_inputs` to build
     the graph before calibration or quantization aware training can proceed.
 
+    Supported `prepare_custom_config_dict` keys:
+      * `non_traceable_module_class` - same meaning as in prepare_fx
+
     TODO(future PR): better docblock
     """
     assert example_inputs is not None, 'example_inputs must be specified'
@@ -46,13 +49,22 @@ def prepare(model, qconfig_dict, example_inputs, inplace=False, allow_list=None,
     if fuse_modules:
         # automatically fuse modules
         old_class = model.__class__
-        model = add_auto_observation(model, qconfig_dict, example_inputs)
+        model = add_auto_observation(
+            model, qconfig_dict, example_inputs,
+            prepare_custom_config_dict=prepare_custom_config_dict)
         module_fusion_fqns = get_module_fusion_fqns(model)
         if len(module_fusion_fqns):
             model = torch.quantization.fuse_modules(model, module_fusion_fqns)
-        # TODO: also delete _auto_quant_staate of all children
-        if hasattr(model, '_auto_quant_state'):
-            del model._auto_quant_state
+
+        # delete all the DBR state from the model, so add_auto_observation
+        # can start from a clean slate
+        parents_to_delete_auto_quant_state = []
+        for k, v in model.named_modules():
+            if hasattr(v, '_auto_quant_state'):
+                parents_to_delete_auto_quant_state.append(v)
+        for v in parents_to_delete_auto_quant_state:
+            del v._auto_quant_state
+
         # the model hierarchy might have changed during fusion, so we
         # have to delete the cached module hook types
         for k, v in model.named_modules():
@@ -79,7 +91,9 @@ def prepare(model, qconfig_dict, example_inputs, inplace=False, allow_list=None,
         model, inplace, allow_list, observer_non_leaf_module_list,
         prepare_custom_config_dict)
     assert not inplace
-    model = add_auto_observation(model, qconfig_dict, example_inputs)
+    model = add_auto_observation(
+        model, qconfig_dict, example_inputs,
+        prepare_custom_config_dict=prepare_custom_config_dict)
     return model
 
 def convert(model: torch.nn.Module) -> torch.nn.Module:
