@@ -112,7 +112,6 @@ function install_ucx() {
   ./autogen.sh
   ./configure --prefix=$UCX_HOME      \
       --enable-mt                     \
-      --with-cuda=/usr/local/cuda/    \
       --enable-profiling              \
       --enable-stats
   time make -j
@@ -127,9 +126,7 @@ function install_ucc() {
   pushd ucc
   ./autogen.sh
   ./configure --prefix=$UCC_HOME      \
-      --with-ucx=$UCX_HOME            \
-      --with-nccl=/usr                \
-      --with-cuda=/usr/local/cuda/
+      --with-ucx=$UCX_HOME
   time make -j
   sudo make install
   popd
