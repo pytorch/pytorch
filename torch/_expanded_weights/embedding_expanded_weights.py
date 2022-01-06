@@ -1,4 +1,3 @@
-
 import torch
 import torch.nn.functional as F
 from .expanded_weights_impl import implements_per_sample_grads
@@ -29,7 +28,7 @@ class EmbeddingPerSampleGrad(torch.autograd.Function):
                     padding_idx = weight.shape[0] + padding_idx
             else:
                 padding_idx = -1
-            return torch.embedding_grad(grad_output, input, weight.shape[0], padding_idx, scale_grad_by_freq, sparse)
+            return torch.ops.aten.embedding_backward(grad_output, input, weight.shape[0], padding_idx, scale_grad_by_freq, sparse)
 
         def weight_per_sample_grad(weight):
             batch_size = input.shape[0]

@@ -40,7 +40,7 @@ class TestExpandedWeightMethods(TestCase):
         # certain functions like __float__, __array__, __index__ will cause errors
         methods_equivalent = ['size', 'numel', 'stride', 'is_contiguous', 'requires_grad_', 'detach', 'dim', 'ndimension',
                               '__len__', 'detach_']
-        methods_with_args = {'requires_grad_': (False, True), 'to': (device,), '__eq__': (torch.randn(4, device=device),), 
+        methods_with_args = {'requires_grad_': (False, True), 'to': (device,), '__eq__': (torch.randn(4, device=device),),
                              '__getitem__': (0, 2), 'eq': (torch.randn(4, device=device))}
         methods_special = {'__repr__': lambda attr, orig_weight: orig_weight.__repr__() in attr(),
                            '__hash__': lambda attr, orig_weight: attr() != orig_weight.__hash__()}
