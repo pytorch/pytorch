@@ -670,6 +670,7 @@ if __name__ == "__main__" :
             exit(1)
         exit(0)
 
+    import psutil
     import subprocess
     import tempfile
     dirpath = tempfile.mkdtemp()
@@ -687,19 +688,23 @@ if __name__ == "__main__" :
             if args.verbose:
                 cp = subprocess.run("nvidia-smi --query-gpu=timestamp,utilization.memory,memory.total,memory.free,memory.used --format=csv,noheader", capture_output=True, text=True, shell=True)
                 print(f"CIDEBUGOUTPUT,BEFORE subprocess.run,{model_name},{cp.stdout}")
-            rc = subprocess.run(launch_command,
+            proc = subprocess.Popen(launch_command,
                         env=env,
-                        timeout = args.timeout,
                         shell=True,
                         stderr=subprocess.STDOUT)
             
-            rc = rc.returncode
+            outs, errs = proc.communicate(timeout=args.timeout)
+            rc = proc.poll()
         except subprocess.TimeoutExpired:
             print(f"{model_name} timed out after {args.timeout // 60} minutes! Include it in SKIP or SKIP_TRAIN_ONLY")
             save_error(model_name, args.test, "Timed out.", dirpath)
             # to visualize highlight timeouts, they will also have 
             # "timed out" in the error column
             rc = 17
+            process = psutil.Process(proc.pid)
+            for p in process.children(recursive=True):
+                p.kill()
+            process.kill()
         if args.verbose:
             cp = subprocess.run("nvidia-smi --query-gpu=timestamp,utilization.memory,memory.total,memory.free,memory.used --format=csv,noheader", capture_output=True, text=True, shell=True)
             print(f"CIDEBUGOUTPUT,AFTER subprocess.run,{model_name},{args.test},{cp.stdout}")
