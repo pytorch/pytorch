@@ -10,9 +10,7 @@ namespace native {
 
 DEFINE_DISPATCH(max_pool1d_stub);
 
-namespace {
-
-Tensor max_pool1d_impl(
+Tensor _max_pool1d_forward(
     const Tensor& self,
     IntArrayRef kernel_size,
     IntArrayRef stride,
@@ -88,8 +86,6 @@ Tensor max_pool1d_impl(
   return output;
 }
 
-} // namespace
-
 Tensor max_pool1d(
     const Tensor& self,
     IntArrayRef kernel_size,
@@ -107,8 +103,7 @@ Tensor max_pool1d(
     return std::get<0>(at::max_pool1d_with_indices(
         self, kernel_size, stride, padding, dilation, ceil_mode));
   }
-  return max_pool1d_impl(
-      self, kernel_size, stride, padding, dilation, ceil_mode);
+  return at::_max_pool1d_forward(self, kernel_size, stride, padding, dilation, ceil_mode);
 }
 
 } // namespace native
