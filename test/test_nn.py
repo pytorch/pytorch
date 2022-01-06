@@ -73,8 +73,6 @@ if TEST_SCIPY:
 if TEST_NUMPY:
     import numpy as np
 
-DOUBLE_TENSORTYPES = [torch.double]
-
 
 # WARNING: If you add a new top-level test case to this file, you MUST
 # update test/run_test.py to list it, otherwise it will NOT be run in
@@ -10922,49 +10920,6 @@ class TestNN(NNTestCase):
 
         gradcheck(lambda i, w, b, pad: F.conv_tbc(i, w, b, pad), (inp, weight, bias, 3))
 
-    def run_conv_double_back_test(self, kern, stride, padding, chan_in, chan_out, batch_size,
-                                  inp_size, dilation, no_weight, groups=1, use_cuda=False,
-                                  use_bias=True, dtype=torch.double):
-        if use_cuda:
-            device = torch.device("cuda")
-        else:
-            device = torch.device("cpu")
-
-        x = torch.randn(batch_size, chan_in, inp_size, inp_size, device=device,
-                        dtype=dtype, requires_grad=True)
-        weight = torch.randn(chan_out, chan_in // groups, kern, kern, device=device,
-                             dtype=dtype, requires_grad=not no_weight)
-        if use_bias:
-            bias = torch.randn(chan_out, device=device, dtype=dtype, requires_grad=True)
-        else:
-            bias = None
-
-        def func(*inputs):
-            if use_bias:
-                lx, lweight, lbias = inputs
-            else:
-                lx, lweight = inputs
-                lbias = None
-            # We disable cudnn during forward to avoid finite difference imprecision issues
-            with cudnn.flags(enabled=False):
-                out = F.conv2d(lx, lweight, lbias, stride, padding, dilation, groups)
-            return out
-
-        if use_bias:
-            inputs = x, weight, bias
-        else:
-            inputs = x, weight
-
-        dummy_out = func(*inputs)
-        grad_y = torch.randn_like(dummy_out, device=device, dtype=dtype, requires_grad=True)
-
-        # Issue #15353: test mkldnn double backward, don't run gradgradcheck due
-        # to imprecision issues
-        if dtype == torch.float:
-            g, = torch.autograd.grad(dummy_out.sum(), x, create_graph=True)
-            return g.requires_grad
-
-        return gradgradcheck(func, inputs, (grad_y,))
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
@@ -11004,69 +10959,6 @@ class TestNN(NNTestCase):
         out = conv(input)
         self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
 
-
-    def test_conv_double_backward_no_bias(self):
-        kern = 3
-        stride = 2
-        chan_in, chan_out = 2, 4
-        batch_size = 2
-        inp_size = 5
-        padding = 1
-        dilation = 1
-        no_weight = False
-        use_bias = True
-        result = self.run_conv_double_back_test(kern, stride,
-                                                padding, chan_in, chan_out,
-                                                batch_size, inp_size, dilation,
-                                                no_weight, use_bias=use_bias)
-        self.assertTrue(result,
-                        "Conv double backward test failed with parameters:" +
-                        "\nkern: " + str(kern) +
-                        "\nstride: " + str(stride) +
-                        "\npadding: " + str(padding) +
-                        "\nchan_in: " + str(chan_in) +
-                        "\nchan_out: " + str(chan_out) +
-                        "\nbatch_size: " + str(batch_size) +
-                        "\ninp_size: " + str(inp_size) +
-                        "\ndilation: " + str(dilation))
-
-    def test_conv_double_backward_groups(self):
-        kern = 3
-        stride = 1
-        padding = 2
-        chan_in, chan_out = 2, 4
-        batch_size = 2
-        inp_size = 6
-        dilation = 1
-        no_weight = False
-        groups = 2
-        result = self.run_conv_double_back_test(kern, stride,
-                                                padding, chan_in * groups, chan_out * groups,
-                                                batch_size, inp_size, dilation,
-                                                no_weight, groups=groups)
-        self.assertTrue(result,
-                        "Conv double backward test failed with parameters:" +
-                        "\nkern: " + str(kern) +
-                        "\nstride: " + str(stride) +
-                        "\npadding: " + str(padding) +
-                        "\nchan_in: " + str(chan_in) +
-                        "\nchan_out: " + str(chan_out) +
-                        "\nbatch_size: " + str(batch_size) +
-                        "\ninp_size: " + str(inp_size) +
-                        "\ndilation: " + str(dilation) +
-                        "\ngroups: " + str(groups))
-
-    def test_conv_double_backward_stride(self):
-        batch_size = 2
-
-        # Cannot provide ggW when stride is > 1
-        for kern, inp_size, dilations in [(3, 5, [1, 2]), (3, 7, [1])]:
-            for stride, padding, chan_in, chan_out, dilation in product([2], [0, 1], [1], [2], dilations):
-                no_weight = False
-                self.run_conv_double_back_test(kern, stride,
-                                               padding, chan_in, chan_out,
-                                               batch_size, inp_size, dilation,
-                                               no_weight)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_cudnn_noncontiguous_weight(self):
@@ -12519,6 +12411,50 @@ def _buildEquivalentAffineTransforms3d(device, input_size, output_size, angle_ra
 
 
 class TestNNDeviceType(NNTestCase):
+    def run_conv_double_back_test(self, kern, stride, padding, chan_in, chan_out, batch_size,
+                                  inp_size, dilation, no_weight, groups=1, use_cuda=False,
+                                  use_bias=True, dtype=torch.double):
+        if use_cuda:
+            device = torch.device("cuda")
+        else:
+            device = torch.device("cpu")
+
+        x = torch.randn(batch_size, chan_in, inp_size, inp_size, device=device,
+                        dtype=dtype, requires_grad=True)
+        weight = torch.randn(chan_out, chan_in // groups, kern, kern, device=device,
+                             dtype=dtype, requires_grad=not no_weight)
+        if use_bias:
+            bias = torch.randn(chan_out, device=device, dtype=dtype, requires_grad=True)
+        else:
+            bias = None
+
+        def func(*inputs):
+            if use_bias:
+                lx, lweight, lbias = inputs
+            else:
+                lx, lweight = inputs
+                lbias = None
+            # We disable cudnn during forward to avoid finite difference imprecision issues
+            with cudnn.flags(enabled=False):
+                out = F.conv2d(lx, lweight, lbias, stride, padding, dilation, groups)
+            return out
+
+        if use_bias:
+            inputs = x, weight, bias
+        else:
+            inputs = x, weight
+
+        dummy_out = func(*inputs)
+        grad_y = torch.randn_like(dummy_out, device=device, dtype=dtype, requires_grad=True)
+
+        # Issue #15353: test mkldnn double backward, don't run gradgradcheck due
+        # to imprecision issues
+        if dtype == torch.float:
+            g, = torch.autograd.grad(dummy_out.sum(), x, create_graph=True)
+            return g.requires_grad
+
+        return gradgradcheck(func, inputs, (grad_y,))
+
     def _test_dropout(self, cls, device, input, memory_format=torch.contiguous_format):
         p = 0.2
         input = input.to(device).fill_(1 - p)
@@ -13211,7 +13147,7 @@ class TestNNDeviceType(NNTestCase):
 
 
     @onlyCUDA
-    @dtypes(*DOUBLE_TENSORTYPES)
+    @dtypes(torch.double)
     def test_conv_double_backward(self, device, dtype):
         with torch.backends.cudnn.flags(deterministic=True):
             # Double backward only runs with DoubleTensor due to precision reason
@@ -13233,6 +13169,72 @@ class TestNNDeviceType(NNTestCase):
                                     "\nbatch_size: " + str(batch_size) +
                                     "\ninp_size: " + str(inp_size) +
                                     "\ndilation: " + str(dilation))
+
+
+    def test_conv_double_backward_no_bias(self):
+        kern = 3
+        stride = 2
+        chan_in, chan_out = 2, 4
+        batch_size = 2
+        inp_size = 5
+        padding = 1
+        dilation = 1
+        no_weight = False
+        use_bias = True
+        result = self.run_conv_double_back_test(kern, stride,
+                                                padding, chan_in, chan_out,
+                                                batch_size, inp_size, dilation,
+                                                no_weight, use_bias=use_bias)
+        self.assertTrue(result,
+                        "Conv double backward test failed with parameters:" +
+                        "\nkern: " + str(kern) +
+                        "\nstride: " + str(stride) +
+                        "\npadding: " + str(padding) +
+                        "\nchan_in: " + str(chan_in) +
+                        "\nchan_out: " + str(chan_out) +
+                        "\nbatch_size: " + str(batch_size) +
+                        "\ninp_size: " + str(inp_size) +
+                        "\ndilation: " + str(dilation))
+
+
+    def test_conv_double_backward_groups(self):
+        kern = 3
+        stride = 1
+        padding = 2
+        chan_in, chan_out = 2, 4
+        batch_size = 2
+        inp_size = 6
+        dilation = 1
+        no_weight = False
+        groups = 2
+        result = self.run_conv_double_back_test(kern, stride,
+                                                padding, chan_in * groups, chan_out * groups,
+                                                batch_size, inp_size, dilation,
+                                                no_weight, groups=groups)
+        self.assertTrue(result,
+                        "Conv double backward test failed with parameters:" +
+                        "\nkern: " + str(kern) +
+                        "\nstride: " + str(stride) +
+                        "\npadding: " + str(padding) +
+                        "\nchan_in: " + str(chan_in) +
+                        "\nchan_out: " + str(chan_out) +
+                        "\nbatch_size: " + str(batch_size) +
+                        "\ninp_size: " + str(inp_size) +
+                        "\ndilation: " + str(dilation) +
+                        "\ngroups: " + str(groups))
+
+
+    def test_conv_double_backward_stride(self):
+        batch_size = 2
+
+        # Cannot provide ggW when stride is > 1
+        for kern, inp_size, dilations in [(3, 5, [1, 2]), (3, 7, [1])]:
+            for stride, padding, chan_in, chan_out, dilation in product([2], [0, 1], [1], [2], dilations):
+                no_weight = False
+                self.run_conv_double_back_test(kern, stride,
+                                               padding, chan_in, chan_out,
+                                               batch_size, inp_size, dilation,
+                                               no_weight)
 
 
     def test_conv1d_same_padding(self, device):
