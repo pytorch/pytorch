@@ -13,7 +13,7 @@
 #include <algorithm>
 #include <string>
 
-torch::class_<LinearPackedParamsBase> register_linear_params();
+int register_linear_params();
 
 #ifdef USE_FBGEMM
 template <bool ReluFused>
@@ -275,6 +275,8 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
       "quantized::linear(): Input tensor rank should be >= 2");
   auto input_contig = input.contiguous();
 
+  // Weight packing is not thread safe
+  std::lock_guard<std::mutex> lock(qnnp_mutex_);
   auto packB = w.get();
   size_t rows_w = bias_.size(0);
   size_t cols_w = input_contig.size(input_contig.dim() - 1);
@@ -301,7 +303,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
         w_zero_points[0]);
     auto* qnnp_w_data = qnnp_weight.data_ptr<c10::quint8>();
     auto wt_numel = weight_contig.numel();
-    for (int i = 0; i < wt_numel; ++i) {
+    for (const auto i : c10::irange(wt_numel)) {
       qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
     }
     // Original bias was float, so we requantize it here.

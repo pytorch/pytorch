@@ -1,3 +1,5 @@
+# Owner(s): ["module: tests"]
+
 import torch
 import numpy as np
 
@@ -5,11 +7,14 @@ import random
 from torch._six import nan
 from itertools import permutations, product
 
-from torch.testing import all_types, all_types_and, make_tensor
+from torch.testing import make_tensor
+from torch.testing._internal.common_dtype import (
+    all_types, all_types_and, floating_types_and, get_all_dtypes, get_all_int_dtypes, get_all_fp_dtypes,
+)
 from torch.testing._internal.common_utils import \
     (TEST_WITH_ROCM, TestCase, run_tests, slowTest)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, dtypes, onlyOnCPUAndCUDA,
+    (instantiate_device_type_tests, dtypes, onlyNativeDeviceTypes,
      skipCUDAIfRocm, onlyCUDA, dtypesIfCUDA, dtypesIfCPU, onlyCPU, largeTensorTest)
 
 # TODO: remove this
@@ -128,7 +133,7 @@ class TestSortAndSelect(TestCase):
                                  'random with NaNs')
 
     # FIXME: remove torch.bool from unsupported types once support is added for cub sort
-    @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bool, torch.complex64, torch.complex128})
+    @dtypes(*set(get_all_dtypes()) - {torch.bool, torch.complex64, torch.complex128})
     def test_stable_sort(self, device, dtype):
         if TEST_WITH_ROCM and dtype == torch.bfloat16:
             return
@@ -223,11 +228,11 @@ class TestSortAndSelect(TestCase):
             self.assertEqual(values, values_cont)
 
     # FIXME: remove torch.bool from unsupported types once support is added for cub sort
-    @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bool, torch.complex64, torch.complex128})
+    @dtypes(*set(get_all_dtypes()) - {torch.bool, torch.complex64, torch.complex128})
     def test_stable_sort_against_numpy(self, device, dtype):
         if TEST_WITH_ROCM and dtype == torch.bfloat16:
             return
-        if dtype in torch.testing.floating_types_and(torch.float16, torch.bfloat16):
+        if dtype in floating_types_and(torch.float16, torch.bfloat16):
             inf = float('inf')
             neg_inf = -float('inf')
             nan = float('nan')
@@ -288,7 +293,7 @@ class TestSortAndSelect(TestCase):
             idx_numpy = np.argsort(sample_numpy, axis=dim, kind='stable')
             self.assertEqual(idx_torch, idx_numpy)
 
-    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
+    @dtypes(*(get_all_int_dtypes() + get_all_fp_dtypes()))
     def test_msort(self, device, dtype):
         if TEST_WITH_ROCM and dtype == torch.bfloat16:
             return
@@ -364,6 +369,11 @@ class TestSortAndSelect(TestCase):
                         dim = random.randrange(testTensor.ndimension())
                         k = random.randint(1, testTensor.size(dim))
                         compare(testTensor, k, dim, dir)
+
+        # This tests the code path where on CUDA, topk is implemented with sort.
+        t = torch.randn((2, 100000), device=device)
+        compare(t, 2000, 1, True)
+        compare(t, 2000, 1, False)
 
     def test_topk_arguments(self, device):
         q = torch.randn(10, 2, 10, device=device)
@@ -634,7 +644,7 @@ class TestSortAndSelect(TestCase):
         for curr_size in (small, large):
             self._test_topk_dtype(device, dtype, False, curr_size)
 
-    @dtypesIfCUDA(*torch.testing.get_all_fp_dtypes())
+    @dtypesIfCUDA(*get_all_fp_dtypes())
     @dtypes(torch.float, torch.double, torch.bfloat16)
     def test_topk_nonfinite(self, device, dtype):
         if TEST_WITH_ROCM and dtype == torch.bfloat16:
@@ -664,12 +674,12 @@ class TestSortAndSelect(TestCase):
         self.assertEqual(val, expected_val, atol=0, rtol=0)
         self.assertEqual(ind, expected_ind, atol=0, rtol=0)
 
-    @onlyOnCPUAndCUDA
-    @dtypesIfCUDA(*(torch.testing.get_all_dtypes(include_complex=False,
-                                                 include_bool=False,
-                                                 include_half=False,
-                                                 include_bfloat16=True)))
-    @dtypes(*(torch.testing.get_all_dtypes(include_complex=False, include_bool=False, include_half=False, include_bfloat16=False)))
+    @onlyNativeDeviceTypes
+    @dtypesIfCUDA(*(get_all_dtypes(include_complex=False,
+                                   include_bool=False,
+                                   include_half=False,
+                                   include_bfloat16=True)))
+    @dtypes(*(get_all_dtypes(include_complex=False, include_bool=False, include_half=False, include_bfloat16=False)))
     def test_topk_zero(self, device, dtype):
         if TEST_WITH_ROCM and dtype == torch.bfloat16:
             return
@@ -726,8 +736,8 @@ class TestSortAndSelect(TestCase):
                 self.assertEqual(expected_inverse.view(additional_shape), y_inverse)
                 self.assertEqual(expected_counts, y_counts)
 
-    @dtypesIfCPU(*set(torch.testing.get_all_dtypes()) - {torch.complex64, torch.complex128})
-    @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bfloat16, torch.complex64, torch.complex128})
+    @dtypesIfCPU(*set(get_all_dtypes()) - {torch.complex64, torch.complex128})
+    @dtypes(*set(get_all_dtypes()) - {torch.bfloat16, torch.complex64, torch.complex128})
     def test_unique(self, device, dtype):
         if dtype is torch.half and self.device_type == 'cpu':
             return  # CPU does not have half support
@@ -786,8 +796,8 @@ class TestSortAndSelect(TestCase):
                                 count += 1
                         self.assertEqual(j, count)
 
-    @dtypesIfCPU(*set(torch.testing.get_all_dtypes()) - {torch.complex64, torch.complex128})
-    @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bfloat16, torch.complex64, torch.complex128})
+    @dtypesIfCPU(*set(get_all_dtypes()) - {torch.complex64, torch.complex128})
+    @dtypes(*set(get_all_dtypes()) - {torch.bfloat16, torch.complex64, torch.complex128})
     def test_unique_consecutive(self, device, dtype):
         if dtype is torch.half and self.device_type == 'cpu':
             return  # CPU does not have half support
@@ -875,19 +885,8 @@ class TestSortAndSelect(TestCase):
             self.assertEqual(res1val[:, :], res2val[:, :, k - 1], atol=0, rtol=0)
             self.assertEqual(res1ind[:, :], res2ind[:, :, k - 1], atol=0, rtol=0)
 
-    # test overlapping output
-    @dtypes(torch.double)
-    @onlyOnCPUAndCUDA   # Fails on XLA
-    def test_kthvalue_overlap(self, device, dtype):
-        S = 10
-        k = 5
-        a = torch.randn(S, device=device)
-        indices = torch.empty((), device=device, dtype=torch.long)
-        with self.assertRaisesRegex(RuntimeError, "unsupported operation:"):
-            torch.kthvalue(a, k, out=(a, indices))
-
     @dtypes(torch.float)
-    @onlyOnCPUAndCUDA   # Fails on XLA
+    @onlyNativeDeviceTypes   # Fails on XLA
     def test_kthvalue_scalar(self, device, dtype):
         # Test scalar input (test case from https://github.com/pytorch/pytorch/issues/30818)
         # Tests that passing a scalar tensor or 1D tensor with 1 element work either way

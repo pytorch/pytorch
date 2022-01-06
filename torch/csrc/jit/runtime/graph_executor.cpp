@@ -158,8 +158,8 @@ struct CaptureList {
         case CAPTURE_LIST: {
           c10::List<at::Tensor> lst;
           auto size = *size_it++;
-          // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
           for (const auto i : c10::irange(size)) {
+            (void)i;
             lst.emplace_back(var_capture_it->unpack(saved_for));
             var_capture_it++;
           }
@@ -781,10 +781,6 @@ const ExecutionPlan& GraphExecutor::getPlanFor(
   return pImpl->getPlanFor(inputs, remaining_bailout_depth);
 }
 
-std::shared_ptr<Graph> GraphExecutor::graph() const {
-  return pImpl->graph;
-}
-
 GraphExecutorState GraphExecutor::getDebugState() {
   return pImpl->getDebugState();
 }
@@ -797,6 +793,10 @@ void GraphExecutor::debugFlushCompilationCache() {
     // we are deprecating legacy executor
     TORCH_INTERNAL_ASSERT("Not Implemented for Legacy Executor");
   }
+}
+
+bool GraphExecutor::isOptimized() const {
+  return pImpl && pImpl->isOptimized();
 }
 
 TORCH_API bool IsNewExecutorEnabled() {
@@ -908,7 +908,7 @@ void runNondiffOptimization(
 
 void runOptimization(
     std::shared_ptr<Graph>& graph,
-    bool unroll,
+    bool unroll_non_constant_loops,
     bool const_prop_user_classes) {
   // Basic graph preprocessing to eliminate noise.
   GRAPH_DEBUG(
@@ -935,9 +935,17 @@ void runOptimization(
 
   // Unroll small loops, and eliminate expressions that are the same at every
   // iteration.
-  if (unroll) {
-    UnrollLoops(graph);
+  bool unroll_success = false;
+  if (unroll_non_constant_loops) {
+    unroll_success = UnrollLoops(graph);
     GRAPH_DEBUG("After UnrollLoops, before RemoveListMutation\n", *graph);
+  } else {
+    unroll_success = UnrollConstantLoops(graph);
+    GRAPH_DEBUG(
+        "After UnrollConstantLoops, before RemoveListMutation\n", *graph);
+  }
+
+  if (unroll_success) {
     // run again with unrolled loops
     RemoveListMutation(graph);
     GRAPH_DEBUG("After RemoveListMutation, before PeepholeOptimize\n", *graph);

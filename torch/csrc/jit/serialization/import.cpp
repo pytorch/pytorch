@@ -10,6 +10,7 @@
 #endif
 #include <torch/csrc/jit/frontend/script_type_parser.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/operator_upgraders/upgraders_entry.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 #include <torch/csrc/jit/serialization/import_source.h>
@@ -20,6 +21,7 @@
 #include <caffe2/serialize/file_adapter.h>
 #include <caffe2/serialize/inline_container.h>
 #include <caffe2/serialize/istream_adapter.h>
+#include <caffe2/serialize/versions.h>
 
 #include <ATen/ATen.h>
 #include <fmt/format.h>
@@ -47,7 +49,8 @@ void postSetStateValidate(const IValue& v) {
     // const auto attrType = objType->getAttribute(i);
     // Verify that all the non-optional attributes have been initialized
     // TODO: Issue #20497
-    if (attrType->kind() != TypeKind::OptionalType &&
+    if (attrType->kind() != TypeKind::UnionType &&
+        attrType->kind() != TypeKind::OptionalType &&
         attrType->kind() != TypeKind::NoneType) {
       TORCH_CHECK(
           !slot.isNone(),
@@ -238,6 +241,10 @@ graph(%x, %packed_params, %stride, %padding, %dilation, %groups, %r_scale, %r_ze
 Module ScriptModuleDeserializer::deserialize(
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
+  // we populate the upgraders map before any load starts
+#if ENABLE_UPGRADERS
+  populate_upgraders_graph_map();
+#endif
   C10_LOG_API_USAGE_ONCE("torch.script.load");
   device_ = device;
   // Load extra files.

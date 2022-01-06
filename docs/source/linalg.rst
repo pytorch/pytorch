@@ -33,6 +33,7 @@ Decompositions
 
     cholesky
     qr
+    lu_factor
     eig
     eigvals
     eigh
@@ -48,6 +49,7 @@ Solvers
     :nosignatures:
 
     solve
+    solve_triangular
     lstsq
 
 Inverses
@@ -60,6 +62,16 @@ Inverses
     inv
     pinv
 
+Matrix Functions
+----------------
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    matrix_exp
+    matrix_power
+
 Matrix Products
 ---------------
 
@@ -67,7 +79,8 @@ Matrix Products
     :toctree: generated
     :nosignatures:
 
-    matrix_power
+    cross
+    matmul
     multi_dot
     householder_product
 
@@ -89,3 +102,4 @@ Experimental Functions
 
     cholesky_ex
     inv_ex
+    lu_factor_ex

@@ -496,6 +496,7 @@ The following Tensor methods are related to sparse tensors:
     Tensor.sparse_dim
     Tensor.sparse_mask
     Tensor.to_sparse
+    Tensor.to_sparse_coo
     Tensor.to_sparse_csr
     Tensor.indices
     Tensor.values

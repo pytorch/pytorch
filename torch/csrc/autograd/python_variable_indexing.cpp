@@ -2,7 +2,7 @@
 
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
-#include <torch/csrc/THP_export.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
@@ -211,6 +211,9 @@ static inline Variable applySlicing(
 static inline bool treatSequenceAsTuple(PyObject* index) {
   if (PyTuple_Check(index)) {
     return true;
+  }
+  if (THPVariable_Check(index)) {
+    return false;
   }
   if (!PySequence_Check(index)) {
     return false;

@@ -1,8 +1,8 @@
 #include <torch/csrc/jit/frontend/schema_type_parser.h>
 
 #include <ATen/core/alias_info.h>
-#include <ATen/core/interned_strings.h>
 #include <ATen/core/jit_type.h>
+#include <ATen/core/symbol.h>
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parse_string_literal.h>
@@ -32,6 +32,7 @@ using c10::StringType;
 using c10::Symbol;
 using c10::TensorType;
 using c10::TupleType;
+using c10::UnionType;
 using c10::VarType;
 
 namespace torch {
@@ -91,7 +92,6 @@ TypePtr SchemaTypeParser::parseBaseType() {
 // Tensor(a! -> a|b) // Tensor is in set a, written to,
 //                      and after the write is in set a AND b.
 c10::optional<AliasInfo> SchemaTypeParser::parseAliasAnnotation() {
-  std::set<Symbol> sets;
   AliasInfo alias_info;
   if (L.nextIf('(')) {
     // optional 'alias set annotation'
@@ -331,6 +331,18 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
     L.expect(')');
     alias_info = parseAliasAnnotation();
     value = DictType::create(key_type, value_type);
+  } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Union") {
+    L.next();
+    L.expect('(');
+    std::vector<TypePtr> types;
+    types.emplace_back(parseType().first);
+    while (L.cur().kind != ')') {
+      L.expect(',');
+      types.emplace_back(parseType().first);
+    }
+    L.expect(')');
+    alias_info = parseAliasAnnotation();
+    value = UnionType::create(types);
   } else if (
       complete_tensor_types && L.cur().kind == TK_IDENT &&
       parseTensorDType(L.cur().text())) {

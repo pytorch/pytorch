@@ -7,7 +7,7 @@
 
 __device__ __forceinline__ unsigned int ACTIVE_MASK()
 {
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
     return __activemask();
 #else
 // will be ignored anyway
@@ -15,7 +15,7 @@ __device__ __forceinline__ unsigned int ACTIVE_MASK()
 #endif
 }
 
-#if defined(__HIP_PLATFORM_HCC__)
+#if defined(USE_ROCM)
 __device__ __forceinline__ unsigned long long int WARP_BALLOT(int predicate)
 {
 return __ballot(predicate);
@@ -23,7 +23,7 @@ return __ballot(predicate);
 #else
 __device__ __forceinline__ unsigned int WARP_BALLOT(int predicate, unsigned int mask = 0xffffffff)
 {
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
     return __ballot_sync(mask, predicate);
 #else
     return __ballot(predicate);
@@ -34,7 +34,7 @@ __device__ __forceinline__ unsigned int WARP_BALLOT(int predicate, unsigned int 
 template <typename T>
 __device__ __forceinline__ T WARP_SHFL_XOR(T value, int laneMask, int width = warpSize, unsigned int mask = 0xffffffff)
 {
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
     return __shfl_xor_sync(mask, value, laneMask, width);
 #else
     return __shfl_xor(value, laneMask, width);
@@ -44,7 +44,7 @@ __device__ __forceinline__ T WARP_SHFL_XOR(T value, int laneMask, int width = wa
 template <typename T>
 __device__ __forceinline__ T WARP_SHFL(T value, int srcLane, int width = warpSize, unsigned int mask = 0xffffffff)
 {
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
     return __shfl_sync(mask, value, srcLane, width);
 #else
     return __shfl(value, srcLane, width);
@@ -54,7 +54,7 @@ __device__ __forceinline__ T WARP_SHFL(T value, int srcLane, int width = warpSiz
 template <typename T>
 __device__ __forceinline__ T WARP_SHFL_UP(T value, unsigned int delta, int width = warpSize, unsigned int mask = 0xffffffff)
 {
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
     return __shfl_up_sync(mask, value, delta, width);
 #else
     return __shfl_up(value, delta, width);
@@ -64,14 +64,14 @@ __device__ __forceinline__ T WARP_SHFL_UP(T value, unsigned int delta, int width
 template <typename T>
 __device__ __forceinline__ T WARP_SHFL_DOWN(T value, unsigned int delta, int width = warpSize, unsigned int mask = 0xffffffff)
 {
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
     return __shfl_down_sync(mask, value, delta, width);
 #else
     return __shfl_down(value, delta, width);
 #endif
 }
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 template<>
 __device__ __forceinline__ int64_t WARP_SHFL_DOWN<int64_t>(int64_t value, unsigned int delta, int width , unsigned int mask)
 {
@@ -98,7 +98,7 @@ __device__ __forceinline__ c10::BFloat16 WARP_SHFL_DOWN<c10::BFloat16>(c10::BFlo
 template <typename T>
 __device__ __forceinline__ c10::complex<T> WARP_SHFL_DOWN(c10::complex<T> value, unsigned int delta, int width = warpSize, unsigned int mask = 0xffffffff)
 {
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
     return c10::complex<T>(
         __shfl_down_sync(mask, value.real_, delta, width),
         __shfl_down_sync(mask, value.imag_, delta, width));
@@ -106,5 +106,17 @@ __device__ __forceinline__ c10::complex<T> WARP_SHFL_DOWN(c10::complex<T> value,
     return c10::complex<T>(
         __shfl_down(value.real_, delta, width),
         __shfl_down(value.imag_, delta, width));
+#endif
+}
+
+/**
+ * For CC 3.5+, perform a load using __ldg
+ */
+template <typename T>
+__device__ __forceinline__ T doLdg(const T* p) {
+#if __CUDA_ARCH__ >= 350 && !defined(USE_ROCM)
+  return __ldg(p);
+#else
+  return *p;
 #endif
 }

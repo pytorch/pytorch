@@ -25,6 +25,8 @@ void initStaticModuleBindings(PyObject* module) {
       .def_readonly(
           "output_dealloc_time",
           &StaticRuntime::IndividualMetrics::output_dealloc_time)
+      .def_readonly(
+          "first_iter_time", &StaticRuntime::IndividualMetrics::first_iter_time)
       .def_readonly("total_time", &StaticRuntime::IndividualMetrics::total_time)
       .def_readonly(
           "out_nodes_count", &StaticRuntime::IndividualMetrics::out_nodes_count)
@@ -46,16 +48,19 @@ void initStaticModuleBindings(PyObject* module) {
   static_module
       .def(
           "__call__",
-          py::overload_cast<const std::vector<at::Tensor>&>(
-              &StaticModule::operator()))
-      .def(
-          "__call__",
           [](StaticModule& self,
-             const std::vector<at::Tensor>& args,
-             const std::unordered_map<std::string, at::Tensor>& kwargs) {
-            std::vector<c10::IValue> arg_ivalues{args.begin(), args.end()};
-            std::unordered_map<std::string, c10::IValue> kwarg_ivalues{
-                kwargs.begin(), kwargs.end()};
+             const py::args& args,
+             const py::kwargs& kwargs) {
+            std::vector<c10::IValue> arg_ivalues;
+            std::unordered_map<std::string, c10::IValue> kwarg_ivalues;
+            for (size_t i = 0; i < args.size(); ++i) {
+              auto ivalue = torch::jit::toIValue(args[i], c10::AnyType::get());
+              arg_ivalues.push_back(ivalue);
+            }
+            for (const auto& kv : kwargs) {
+              kwarg_ivalues[py::cast<std::string>(kv.first)] =
+                  torch::jit::toIValue(kv.second, c10::AnyType::get());
+            }
             c10::IValue ret = self(arg_ivalues, kwarg_ivalues);
             return toPyObject(ret);
           })
@@ -70,7 +75,7 @@ void initStaticModuleBindings(PyObject* module) {
             std::unordered_map<std::string, c10::IValue> kwarg_ivalues{
                 kwargs.begin(), kwargs.end()};
             self.runtime().benchmark(
-                arg_ivalues, kwarg_ivalues, warmup_runs, main_runs);
+                {arg_ivalues}, {kwarg_ivalues}, warmup_runs, main_runs);
           })
       .def(
           "benchmark_individual_ops",
@@ -83,7 +88,7 @@ void initStaticModuleBindings(PyObject* module) {
             std::unordered_map<std::string, c10::IValue> kwarg_ivalues{
                 kwargs.begin(), kwargs.end()};
             return self.runtime().benchmark_individual_ops(
-                arg_ivalues, kwarg_ivalues, warmup_runs, main_runs);
+                {arg_ivalues}, {kwarg_ivalues}, warmup_runs, main_runs);
           });
   m.def(
        "_jit_to_static_module",

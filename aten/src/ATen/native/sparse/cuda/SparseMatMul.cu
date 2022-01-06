@@ -13,11 +13,10 @@
 #include <thrust/for_each.h>
 #include <thrust/sequence.h>
 
-#include <THC/THCThrustAllocator.cuh>
-
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDADataType.h>
 #include <ATen/cuda/CUDAUtils.h>
+#include <ATen/cuda/ThrustAllocator.h>
 #include <cusparse.h>
 #include <ATen/native/sparse/cuda/SparseCUDABlas.h>
 #include <c10/cuda/CUDACachingAllocator.h>
@@ -657,6 +656,13 @@ void sparse_sparse_matmul_cuda_kernel(
         std::is_same<c10::complex<double>, scalar_t>::value,
     "sparse_sparse_matmul_cuda_kernel only supports data type of half, bfloat16, float, double and complex float, double.");
 
+  // older versions of cusparse on Windows segfault for complex128 dtype
+#if defined(_WIN32) && defined(CUSPARSE_VERSION) && CUSPARSE_VERSION < 11400
+  TORCH_CHECK(
+      !(mat1.scalar_type() == ScalarType::ComplexDouble),
+      "Sparse multiplication with complex128 dtype inputs is not supported with current CUDA version. Please upgrade to CUDA Toolkit 11.2.1+");
+#endif
+
   Tensor mat1_indices_ = mat1._indices().contiguous();
   Tensor mat1_values = mat1._values().contiguous();
 
@@ -728,7 +734,7 @@ void sparse_sparse_matmul_cuda_kernel(
 
   auto major_dim = result.size(0);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+  at::cuda::ThrustAllocator allocator;
   auto policy = thrust::cuda::par(allocator).on(stream);
 
   // Filling the COO row indices

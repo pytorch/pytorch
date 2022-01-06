@@ -308,6 +308,8 @@ cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
   } else {
     // It's ok to capture cudaMallocs, as long as we never cudaFree those
     // addresses before replay.
+    // Capturing cudaMalloc behaves nicely: it gives the graph new VA,
+    // but is ignored (won't leakily allocate new memory) in replays.
     at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
     return cudaMalloc(p, size);
   }
@@ -359,7 +361,7 @@ class CachingAllocatorConfig {
             size_t val2 = stoi(kv[1]);
             TORCH_CHECK(
                 val2 > kLargeBuffer / (1024 * 1024),
-                "CachingAllocator option max_split_size_mb too small, must be >= ",
+                "CachingAllocator option max_split_size_mb too small, must be > ",
                 kLargeBuffer / (1024 * 1024),
                 "");
             val2 = std::max(val2, kLargeBuffer / (1024 * 1024));

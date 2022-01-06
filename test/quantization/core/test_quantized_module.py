@@ -1,12 +1,14 @@
+# Owner(s): ["oncall: quantization"]
+
 import torch
 import torch.nn as nn
 import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
-import torch.quantization
+import torch.ao.quantization
 
-from torch.quantization import (
+from torch.ao.quantization import (
     get_default_static_quant_module_mappings,
     default_float_qparams_observer,
     PerChannelMinMaxObserver,
@@ -22,6 +24,7 @@ from torch.testing._internal.common_quantized import (
     _calculate_dynamic_qparams,
     override_quantized_engine,
     override_qengines,
+    qengine_is_qnnpack,
 )
 from hypothesis import assume, given
 from hypothesis import strategies as st
@@ -103,8 +106,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         zero_point = 3
         qlinear = class_map[use_fused](in_features, out_features)
 
-        qlinear_copy = qlinear  # deepcopy does not work right now
-        # qlinear_copy = copy.deepcopy(qlinear)
+        qlinear_copy = copy.deepcopy(qlinear)
         self.checkScriptable(qlinear_copy, [[X_q]], check_save_load=True)
         # Run module with default-initialized parameters.
         # This tests that the constructor is correct.
@@ -155,15 +157,16 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                          linear_unpack(loaded_qlinear._packed_params._packed_params))
         self.assertEqual(qlinear.scale, loaded_qlinear.scale)
         self.assertEqual(qlinear.zero_point, loaded_qlinear.zero_point)
-        # make sure loaded_qlinear has the same dir as qlinear since
-        # scripting the module will add __overloads__ to __dict__
-        self.checkScriptable(loaded_qlinear, [[X_q]], check_save_load=True)
+        # scripting will add __overloads__ to __dict__, which is why we script a copy
+        # to be able to do the check in the next line
+        self.checkScriptable(copy.deepcopy(loaded_qlinear), [[X_q]], check_save_load=True)
         self.assertTrue(dir(qlinear) == dir(loaded_qlinear))
         self.assertEqual(qlinear._weight_bias(), loaded_qlinear._weight_bias())
         self.assertEqual(qlinear._weight_bias(), torch.ops.quantized.linear_unpack(qlinear._packed_params._packed_params))
         Z_q2 = loaded_qlinear(X_q)
         self.assertEqual(Z_q, Z_q2)
 
+        # Test serialization
         b = io.BytesIO()
         torch.save(qlinear, b)
         b.seek(0)
@@ -171,6 +174,25 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self.assertEqual(qlinear.weight(), loaded.weight())
         self.assertEqual(qlinear.scale, loaded.scale)
         self.assertEqual(qlinear.zero_point, loaded.zero_point)
+
+        # Test copy and deepcopy
+        copied_linear = copy.copy(qlinear)
+        self.assertEqual(copied_linear.bias(), qlinear.bias())
+        self.assertEqual(copied_linear.scale, qlinear.scale)
+        self.assertEqual(copied_linear.zero_point,
+                         qlinear.zero_point)
+        Y_copied = copied_linear(X_q)
+        np.testing.assert_array_almost_equal(
+            Z_q.int_repr().numpy(), Y_copied.int_repr().numpy(), decimal=0)
+
+        deepcopied_linear = copy.deepcopy(qlinear)
+        self.assertEqual(deepcopied_linear.bias(), qlinear.bias())
+        self.assertEqual(deepcopied_linear.scale, qlinear.scale)
+        self.assertEqual(deepcopied_linear.zero_point,
+                         qlinear.zero_point)
+        Y_deepcopied = copied_linear(X_q)
+        np.testing.assert_array_almost_equal(
+            Z_q.int_repr().numpy(), Y_deepcopied.int_repr().numpy(), decimal=0)
 
         # Test JIT
         self.checkScriptable(qlinear, [[X_q]], check_save_load=True)
@@ -181,12 +203,12 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         for mut in modules_under_test:
             # Test from_float.
             float_linear = mut(in_features, out_features).float()
-            float_linear.qconfig = torch.quantization.default_qconfig
-            torch.quantization.prepare(float_linear, inplace=True)
+            float_linear.qconfig = torch.ao.quantization.default_qconfig
+            torch.ao.quantization.prepare(float_linear, inplace=True)
             float_linear(X.float())
             # Sequential allows swapping using "convert".
             quantized_float_linear = torch.nn.Sequential(float_linear)
-            quantized_float_linear = torch.quantization.convert(quantized_float_linear, inplace=True)
+            quantized_float_linear = torch.ao.quantization.convert(quantized_float_linear, inplace=True)
 
             # Smoke test to make sure the module actually runs
             quantized_float_linear(X_q)
@@ -342,13 +364,13 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
         # Test from_float
         fused_conv_module = torch.nn.intrinsic._FusedModule(conv_module)
-        fused_conv_module.qconfig = torch.quantization.default_qconfig
-        torch.quantization.prepare(fused_conv_module, inplace=True)
+        fused_conv_module.qconfig = torch.ao.quantization.default_qconfig
+        torch.ao.quantization.prepare(fused_conv_module, inplace=True)
         fused_conv_module(X.float())
         converted_qconv_module = fused_conv_module
         reference_mapping = get_default_static_quant_module_mappings()
         reference_mapping[type(conv_module)] = type(qconv_module)
-        torch.quantization.convert(converted_qconv_module, mapping=reference_mapping, inplace=True)
+        torch.ao.quantization.convert(converted_qconv_module, mapping=reference_mapping, inplace=True)
 
         # Smoke test to make sure the module actually runs
         if use_bias:
@@ -622,6 +644,50 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self.assertEqual(quant_ref.int_repr().numpy(), qy.int_repr().numpy(),
                          msg="BatchNorm3d module API failed")
 
+    def _test_batch_norm_serialization(self, get_model, data1, data2):
+        m1 = get_model()
+        m1.qconfig = torch.ao.quantization.default_qconfig
+        mp1 = torch.ao.quantization.prepare(m1)
+        mp1(data1)
+        mq1 = torch.ao.quantization.convert(mp1)
+        ref1 = mq1(data2)
+
+        m2 = get_model()
+        m2.qconfig = torch.quantization.default_qconfig
+        mp2 = torch.ao.quantization.prepare(m2)
+        mq2 = torch.ao.quantization.convert(mp2)
+
+        mq2.load_state_dict(mq1.state_dict())
+        ref2 = mq2(data2)
+
+        self.assertTrue(torch.allclose(ref1, ref2))
+
+    def test_batch_norm2d_serialization(self):
+        data1 = torch.randn(2, 4, 6, 8)
+        data2 = torch.randn(2, 4, 6, 8)
+
+        def _get_model():
+            return nn.Sequential(
+                torch.ao.quantization.QuantStub(),
+                nn.BatchNorm2d(4),
+                torch.ao.quantization.DeQuantStub()
+            ).eval()
+
+        self._test_batch_norm_serialization(_get_model, data1, data2)
+
+    def test_batch_norm3d_serialization(self):
+        data1 = torch.randn(2, 4, 6, 8, 1)
+        data2 = torch.randn(2, 4, 6, 8, 1)
+
+        def _get_model():
+            return nn.Sequential(
+                torch.ao.quantization.QuantStub(),
+                nn.BatchNorm3d(4),
+                torch.ao.quantization.DeQuantStub()
+            ).eval()
+
+        self._test_batch_norm_serialization(_get_model, data1, data2)
+
     def test_layer_norm(self):
         """Tests the correctness of the layernorm module.
         The correctness is defined against the functional implementation.
@@ -867,7 +933,187 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             self.checkEmbeddingSerialization(qemb, num_embeddings, embedding_dim, indices,
                                              offsets, set_qconfig, is_emb_bag=True, dtype=qdtype)
 
+
 class TestDynamicQuantizedModule(QuantizationTestCase):
+    def _test_qconv_impl(self, q_mod, dq_mod, dim, dtype, bias):
+        in_channels = 3
+        out_channels = 10
+        kernel_size = 2
+        stride = 1
+        padding = 0
+        dilation = 1
+        groups = 1
+        padding_mode = 'zeros'
+
+        if qengine_is_qnnpack():
+            reduce_range = False
+        else:
+            reduce_range = True
+
+        X_fp32 = torch.randn(*([in_channels] * dim))
+        s, z = _calculate_dynamic_qparams(X_fp32, dtype, reduce_range)
+        X_q = torch.quantize_per_tensor(X_fp32, s, z, dtype)
+        X_dq = torch.dequantize(X_q)
+
+        quantized_module = q_mod(in_channels, out_channels, kernel_size, stride=stride, padding=padding,
+                                 dilation=dilation, groups=groups, bias=bias, padding_mode=padding_mode)
+        dynamic_module = dq_mod(in_channels, out_channels, kernel_size, stride=stride, padding=padding,
+                                dilation=dilation, groups=groups, bias=bias, padding_mode=padding_mode)
+
+        quantized_module.scale, quantized_module.zero_point = s, z
+        dynamic_module.set_weight_bias(*quantized_module._weight_bias())
+
+        Y_q_ref = quantized_module(X_q)
+        Y_ref = torch.dequantize(Y_q_ref)
+
+        Y = dynamic_module(X_dq, reduce_range)
+
+        self.assertEqual(Y, Y_ref)
+
+        # Test serialization of quantized Conv Module using state_dict
+        W_q, b = dynamic_module._weight_bias()
+        model_dict = dynamic_module.state_dict()
+        self.assertEqual(model_dict['weight'], W_q)
+        self.assertEqual(model_dict['bias'], b)
+        bytes_io = io.BytesIO()
+        torch.save(model_dict, bytes_io)
+        bytes_io.seek(0)
+        loaded_dict = torch.load(bytes_io)
+        for key in loaded_dict:
+            self.assertEqual(model_dict[key], loaded_dict[key])
+        loaded_qconv_module = type(dynamic_module)(
+            in_channels, out_channels, kernel_size, stride=stride, padding=padding,
+            dilation=dilation, groups=groups, bias=bias, padding_mode=padding_mode)
+        loaded_qconv_module.load_state_dict(loaded_dict)
+
+        self.assertTrue(dir(loaded_qconv_module) == dir(dynamic_module))
+        self.assertTrue(dynamic_module._get_name() == loaded_qconv_module._get_name())
+        self.assertTrue(hasattr(loaded_qconv_module, '_packed_params'))
+        self.assertTrue(hasattr(loaded_qconv_module, '_weight_bias'))
+
+        self.assertEqual(dynamic_module.weight(), loaded_qconv_module.weight())
+        if bias:
+            self.assertEqual(dynamic_module.bias(), loaded_qconv_module.bias())
+        self.assertEqual(dynamic_module.scale, loaded_qconv_module.scale)
+        self.assertEqual(dynamic_module.zero_point,
+                         loaded_qconv_module.zero_point)
+        Y_loaded = loaded_qconv_module(X_fp32, reduce_range)
+        np.testing.assert_array_almost_equal(
+            Y.numpy(), Y_loaded.numpy(), decimal=0)
+
+        # Test serialization
+        b = io.BytesIO()
+        torch.save(dynamic_module, b)
+        b.seek(0)
+        loaded_conv = torch.load(b)
+
+        self.assertEqual(loaded_conv.bias(), dynamic_module.bias())
+        self.assertEqual(loaded_conv.scale, dynamic_module.scale)
+        self.assertEqual(loaded_conv.zero_point,
+                         dynamic_module.zero_point)
+
+        # Test copy and deepcopy
+        copied_conv = copy.copy(dynamic_module)
+        self.assertEqual(copied_conv.bias(), dynamic_module.bias())
+        self.assertEqual(copied_conv.scale, dynamic_module.scale)
+        self.assertEqual(copied_conv.zero_point,
+                         dynamic_module.zero_point)
+        Y_copied = copied_conv(X_fp32, reduce_range)
+        np.testing.assert_array_almost_equal(
+            Y.numpy(), Y_copied.numpy(), decimal=0)
+
+        deepcopied_conv = copy.deepcopy(dynamic_module)
+        self.assertEqual(deepcopied_conv.bias(), dynamic_module.bias())
+        self.assertEqual(deepcopied_conv.scale, dynamic_module.scale)
+        self.assertEqual(deepcopied_conv.zero_point,
+                         dynamic_module.zero_point)
+        Y_deepcopied = copied_conv(X_fp32, reduce_range)
+        np.testing.assert_array_almost_equal(
+            Y.numpy(), Y_deepcopied.numpy(), decimal=0)
+
+        # need to fix this
+        # JIT testing
+        self.checkScriptable(
+            dynamic_module, [[X_dq]],
+            check_save_load=True)
+
+        # Test from_float
+        conv_module = dynamic_module._FLOAT_MODULE(in_channels, out_channels, kernel_size)
+        conv_module.qconfig = torch.ao.quantization.default_dynamic_qconfig  # type: ignore[assignment]
+        prepare_dynamic(conv_module)
+        conv_module(X_dq)
+        quantized_conv_module = dq_mod.from_float(conv_module)
+
+        # Smoke test to make sure the module actually runs
+        quantized_conv_module(X_dq)
+
+        # Smoke test extra_repr
+        self.assertEqual(dynamic_module._get_name(), quantized_conv_module._get_name())
+
+    @override_qengines
+    def test_dynamic_conv1d(self):
+        q_mod = torch.nn.quantized.Conv1d
+        dq_mod = torch.nn.quantized.dynamic.Conv1d
+        dim = 3
+        dtype = torch.quint8
+
+        for bias in [True, False]:
+            self._test_qconv_impl(q_mod, dq_mod, dim, dtype, bias)
+
+    @override_qengines
+    def test_dynamic_conv2d(self):
+        q_mod = torch.nn.quantized.Conv2d
+        dq_mod = torch.nn.quantized.dynamic.Conv2d
+        dim = 4
+        dtype = torch.quint8
+
+        for bias in [True, False]:
+            self._test_qconv_impl(q_mod, dq_mod, dim, dtype, bias)
+
+    @override_qengines
+    def test_dynamic_conv3d(self):
+        q_mod = torch.nn.quantized.Conv3d
+        dq_mod = torch.nn.quantized.dynamic.Conv3d
+        dim = 5
+        dtype = torch.quint8
+
+        if qengine_is_qnnpack():
+            return  # qnnpack doesn't support unpacking conv3d
+        for bias in [True, False]:
+            self._test_qconv_impl(q_mod, dq_mod, dim, dtype, bias)
+
+    @override_qengines
+    def test_dynamic_convtranspose1d(self):
+        q_mod = torch.nn.quantized.ConvTranspose1d
+        dq_mod = torch.nn.quantized.dynamic.ConvTranspose1d
+        dim = 3
+        dtype = torch.quint8
+
+        for bias in [True, False]:
+            self._test_qconv_impl(q_mod, dq_mod, dim, dtype, bias)
+
+    @override_qengines
+    def test_dynamic_convtranspose2d(self):
+        q_mod = torch.nn.quantized.ConvTranspose2d
+        dq_mod = torch.nn.quantized.dynamic.ConvTranspose2d
+        dim = 4
+        dtype = torch.quint8
+
+        for bias in [True, False]:
+            self._test_qconv_impl(q_mod, dq_mod, dim, dtype, bias)
+
+    @override_qengines
+    def test_dynamic_convtranspose3d(self):
+        q_mod = torch.nn.quantized.ConvTranspose3d
+        dq_mod = torch.nn.quantized.dynamic.ConvTranspose3d
+        dim = 5
+        dtype = torch.quint8
+
+        if qengine_is_qnnpack():
+            return  # qnnpack doesn't support unpacking conv3d
+        for bias in [True, False]:
+            self._test_qconv_impl(q_mod, dq_mod, dim, dtype, bias)
+
     @given(
         batch_size=st.integers(1, 5),
         in_features=st.integers(16, 32),
@@ -948,7 +1194,7 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
             # Test from_float
             float_linear = mut(in_features, out_features).float()
             if use_default_observer:
-                float_linear.qconfig = torch.quantization.default_dynamic_qconfig
+                float_linear.qconfig = torch.ao.quantization.default_dynamic_qconfig
             prepare_dynamic(float_linear)
             float_linear(X.float())
             quantized_float_linear = nnqd.Linear.from_float(float_linear)

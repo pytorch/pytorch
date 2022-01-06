@@ -65,7 +65,8 @@ struct TORCH_API PerTensorAffineQuantizer : public AffineQuantizer {
         zero_point_(zero_point) {}
 
   Tensor quantize(const Tensor& tensor) override;
-  Tensor dequantize(const Tensor& tensor) override;
+  Tensor dequantize(const Tensor& qtensor) override;
+  Tensor& dequantize_out(Tensor& rtensor, const Tensor& qtensor) override;
 
   QScheme qscheme() const override {
     return kPerTensorAffine;
@@ -135,7 +136,8 @@ struct TORCH_API PerChannelAffineQuantizer : public AffineQuantizer {
   }
 
   Tensor quantize(const Tensor& tensor) override;
-  Tensor dequantize(const Tensor& tensor) override;
+  Tensor dequantize(const Tensor& qtensor) override;
+  Tensor& dequantize_out(Tensor& rtensor, const Tensor& qtensor) override;
 
   bool equalTo(QuantizerPtr other) override {
     if (!other.get() || other->qscheme() != kPerChannelAffine) {
@@ -185,7 +187,8 @@ struct TORCH_API PerChannelAffineFloatQParamsQuantizer : public PerChannelAffine
   }
 
   Tensor quantize(const Tensor& tensor) override;
-  Tensor dequantize(const Tensor& tensor) override;
+  Tensor dequantize(const Tensor& qtensor) override;
+  Tensor& dequantize_out(Tensor& rtensor, const Tensor& qtensor) override;
 
   bool equalTo(QuantizerPtr other) override {
     if (!other.get() || other->qscheme() != kPerChannelAffineFloatQParams) {
@@ -205,7 +208,7 @@ struct TORCH_API PerChannelAffineFloatQParamsQuantizer : public PerChannelAffine
 // setters/getters for QTensorImpl fields; otherwise, you should use
 // the low level setters/getters that were implemented using this.
 // This may be called repeatedly, so make sure it's pretty cheap.
-TORCH_API QTensorImpl* get_qtensorimpl(const Tensor& self);
+TORCH_API QTensorImpl* get_qtensorimpl(const TensorBase& self);
 
 // double and int64_t are because of the native function API, we only have these
 // argument types right now in native functions
@@ -226,6 +229,15 @@ TORCH_API Tensor new_qtensor(
     QuantizerPtr quantizer);
 
 TORCH_API void set_quantizer_(const Tensor& self, ConstQuantizerPtr quantizer);
+
+TORCH_API Tensor from_blob_quantized_per_tensor_affine(
+    void* data,
+    IntArrayRef sizes,
+    IntArrayRef strides,
+    std::function<void(void*)> deleter,
+    const float scale,
+    const int64_t zeroPoint,
+    const TensorOptions& options);
 
 TORCH_API Tensor from_blob_quantized_per_tensor_affine(
     void* data,

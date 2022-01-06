@@ -15,7 +15,8 @@ def concurrency_key(filename: Path) -> str:
     workflow_name = filename.with_suffix("").name.replace("_", "-")
     if workflow_name.startswith("generated-"):
         workflow_name = workflow_name[len("generated-"):]
-    return f"{workflow_name}-${{{{ github.event.pull_request.number || github.sha }}}}"
+    return f"{workflow_name}-${{{{ github.event.pull_request.number || github.sha }}}}" \
+        "-${{ github.event_name == 'workflow_dispatch' }}"
 
 
 def should_check(filename: Path) -> bool:
@@ -45,9 +46,18 @@ if __name__ == "__main__":
             "group": concurrency_key(filename),
             "cancel-in-progress": True,
         }
-        if data.get("concurrency", None) != expected:
+        actual = data.get("concurrency", None)
+        if actual != expected:
             print(
                 f"'concurrency' incorrect or not found in '{filename.relative_to(REPO_ROOT)}'",
+                file=sys.stderr,
+            )
+            print(
+                f"expected: {expected}",
+                file=sys.stderr,
+            )
+            print(
+                f"actual:   {actual}",
                 file=sys.stderr,
             )
             errors_found = True

@@ -290,6 +290,8 @@ TEST(PlanExecutorTest, BlockingErrorPlan) {
 #endif
 #endif
 
+  testing::GTEST_FLAG(death_test_style) = "threadsafe";
+
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_DEATH(
       [] {

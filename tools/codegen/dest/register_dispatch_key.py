@@ -5,11 +5,11 @@ from dataclasses import dataclass
 import textwrap
 
 from tools.codegen.context import method_with_native_function, native_function_manager
-from tools.codegen.utils import Target, mapMaybe
+from tools.codegen.utils import Target, mapMaybe, assert_never
 from tools.codegen.model import (DispatchKey, NativeFunction,
                                  NativeFunctionsGroup, SchemaKind,
                                  TensorOptionsArguments,
-                                 DeviceCheckType, Argument, assert_never,
+                                 DeviceCheckType, Argument,
                                  is_cuda_dispatch_key, BackendIndex,
                                  gets_generated_out_inplace_wrapper)
 from tools.codegen.api.types import (BaseCType, Binding, ConstRefCType,
@@ -23,6 +23,27 @@ import tools.codegen.api.structured as structured
 from tools.codegen.api.translate import translate
 from tools.codegen.selective_build.selector import SelectiveBuilder
 
+def gen_registration_headers(
+        backend_index: BackendIndex,
+        per_operator_headers: bool,
+) -> List[str]:
+    use_native_empty = backend_index.dispatch_key in (DispatchKey.CPU, DispatchKey.CUDA)
+
+    if not per_operator_headers:
+        return [
+            "#include <ATen/Functions.h>",
+            "#include <ATen/NativeFunctions.h>"]
+
+    headers = ["#include <ATen/ops/as_strided_native.h>"]
+    if use_native_empty:
+        headers += [
+            "#include <ATen/ops/empty_native.h>",
+            "#include <ATen/ops/empty_strided_native.h>"]
+    else:
+        headers += [
+            "#include <ATen/ops/empty.h>",
+            "#include <ATen/ops/empty_strided.h>"]
+    return headers
 
 def gen_create_out_helper(backend_index: BackendIndex) -> List[str]:
     if backend_index.dispatch_key == DispatchKey.Meta:
@@ -88,11 +109,32 @@ void resize_out(const Tensor &out, IntArrayRef sizes, IntArrayRef strides, const
 }
 """]
 
+def gen_check_inplace_helper(backend_index: BackendIndex) -> List[str]:
+    return ["""
+void check_inplace(const Tensor &self, IntArrayRef sizes, const TensorOptions &options) {
+  // These checks are needed on those operators that:
+  //   1) don't use 'TensorIterator' (e.g. 'addmm' and 'baddbmm')
+  //   2) have particular typing rules (e.g. 'cumsum' and 'cumprod')
+  // For other operators (e.g. 'add'), 'TensorIterator' already checks
+  // these things separately.
+  TORCH_CHECK(options.dtype() == self.dtype(),
+      "Bad in-place call: ",
+      "input tensor dtype ", self.dtype(), " and output tensor dtype ", options.dtype(), " should match");
+  TORCH_CHECK(options.device() == self.device(),
+      "Bad in-place call: ",
+      "input tensor device ", self.device(), " and output tensor device ", options.device(), " should match");
+  TORCH_CHECK(sizes == self.sizes(),
+      "Bad in-place call: ",
+      "input tensor size ", self.sizes(), " and output tensor size ", sizes, " should match");
+}
+"""]
+
 
 def gen_registration_helpers(backend_index: BackendIndex) -> List[str]:
     return [
         *gen_create_out_helper(backend_index),
-        *gen_resize_out_helper(backend_index)
+        *gen_resize_out_helper(backend_index),
+        *gen_check_inplace_helper(backend_index)
     ]
 
 
@@ -318,7 +360,8 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 args_exprs_str = ', '.join(a.name for a in args)
 
                 device_check = '  // No device check\n'
-                if is_cuda_dispatch_key(self.backend_index.dispatch_key):
+                # Backends that require device guards presumably also require device checks.
+                if self.backend_index.device_guard:
                     device_check_args = itertools.chain(
                         f.func.arguments.out,
                         f.func.arguments.flat_positional
@@ -326,12 +369,16 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                     device_check = RegisterDispatchKey.gen_device_check(f.device_check, list(device_check_args), name)
 
                 device_guard = "// DeviceGuard omitted"  # default
-                if f.device_guard and is_cuda_dispatch_key(self.backend_index.dispatch_key):
+                if f.device_guard and self.backend_index.device_guard:
                     has_tensor_options = any(isinstance(a.argument, TensorOptionsArguments) for a in args)
                     if has_tensor_options:
                         # kernel is creating a tensor
-                        device_guard = """globalContext().lazyInitCUDA();
+                        device_guard = """
   const DeviceGuard device_guard(device_or_default(device));"""
+
+                        # CUDA requires special handling
+                        if is_cuda_dispatch_key(self.backend_index.dispatch_key):
+                            device_guard = f"globalContext().lazyInitCUDA();\n{device_guard}"
                     else:
                         # kernel is operating on existing tensors
 
@@ -423,7 +470,9 @@ if (C10_UNLIKELY(current_device.has_value())) {
             return f"""{maybe_set_guard_line}
 outputs_[output_idx] = create_out(sizes, strides, options);"""
         elif k is SchemaKind.inplace:
-            return maybe_set_guard
+            return f"""{maybe_set_guard_line}
+const auto& out = outputs_[output_idx].get();
+check_inplace(out, sizes, options);"""
         elif k is SchemaKind.out:
             return f"""{maybe_set_guard_line}
 const auto& out = outputs_[output_idx].get();
@@ -560,7 +609,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 class_name = f"structured_{metadata.kernel}_{k.name}"
                 parent_class = f"{self.cpp_namespace}::structured_{metadata.kernel}"
 
-            if is_cuda_dispatch_key(self.backend_index.dispatch_key):
+            if self.backend_index.device_guard:
                 device_check_args = itertools.chain(
                     f.func.arguments.out,
                     f.func.arguments.flat_positional
@@ -584,7 +633,29 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                     method=False
                 )
             )
-            sig_body.append(f"op.meta({meta_exprs});")
+
+            if self.g.out.precomputed:
+                # If this function group has precomputed elements, the meta function
+                # returns a struct containing them which must be saved so that it
+                # can be unpacked when generating code to call the impl.
+                sig_body.append(f"auto precompute = op.meta({meta_exprs});")
+
+                # Put all of the contents of the precompute struct into the context
+                # so that translate will be able to return the correct args for the
+                # call to the impl.
+                for precomputed_elems in self.g.out.precomputed.replace.values():
+                    for arg in precomputed_elems:
+                        context.append(Expr(
+                            expr=f"precompute.{arg.name}",
+                            type=structured.argument_type(arg, binds=arg.name),
+                        ))
+
+                # Add a use of the precompute struct so FB internal compilers don't
+                # complain that there is an unused variable.
+                sig_body.append("(void)precompute;")
+            else:
+                sig_body.append(f"op.meta({meta_exprs});")
+
 
             # After running meta, op.outputs_ is guaranteed to be valid;
             # add it to the context

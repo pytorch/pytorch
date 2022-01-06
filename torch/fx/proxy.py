@@ -8,11 +8,15 @@ from .graph import magic_methods, reflectable_magic_methods, Graph
 from typing import Tuple, Dict, Optional, Iterable, Any, Iterator, Callable
 from .node import Target, Node, Argument, base_types, map_aggregate
 from ._compatibility import compatibility
+from .operator_schemas import check_for_mutable_operation
 
 @compatibility(is_backward_compatible=True)
 class TracerBase:
     graph: Graph
     record_stack_traces : bool = False
+    # Feature flag for mutable schema checking
+    # Enableby default in 1.12
+    check_mutable_operations : bool = False
 
     @compatibility(is_backward_compatible=True)
     def create_node(self, kind : str, target : Target,
@@ -25,6 +29,9 @@ class TracerBase:
         modification of values used in node creation. For example, one might
         want to disallow in-place operations from being recorded.
         """
+        if kind == 'call_function' and self.check_mutable_operations:
+            check_for_mutable_operation(target, args, kwargs)
+
         return self.graph.create_node(kind, target, args, kwargs, name, type_expr)
 
     @compatibility(is_backward_compatible=True)
@@ -252,18 +259,32 @@ class Proxy:
                            "this call to be recorded, please call torch.fx.wrap('len') at "
                            "module scope")
 
-    def __torch_function__(self, orig_method, types, args=None, kwargs=None):
+    @classmethod
+    def __torch_function__(cls, orig_method, types, args=None, kwargs=None):
         args = args if args else ()
         kwargs = kwargs if kwargs else {}
 
+        tracers : Dict[Any, None] = {}
+
+        def find_tracer(a):
+            if isinstance(a, cls):
+                tracers[a.tracer] = None
+        torch.fx.node.map_aggregate(args, find_tracer)
+        torch.fx.node.map_aggregate(kwargs, find_tracer)
+
+        if len(tracers) > 1:
+            raise RuntimeError(f'Found multiple different tracers {list(tracers.keys())} while '
+                               f'trying to trace operations {orig_method}')
+        tracer = next(iter(tracers.keys()))
+
         if isinstance(orig_method, torch._C.ScriptMethod):
             args = (orig_method.owner,) + args
-            return self.tracer.create_proxy('call_method', orig_method.name, args, kwargs)
+            return tracer.create_proxy('call_method', orig_method.name, args, kwargs)
         if torch.overrides.is_tensor_method_or_property(orig_method):
-            return self.tracer.create_proxy('call_method', orig_method.__name__, args, kwargs)
+            return tracer.create_proxy('call_method', orig_method.__name__, args, kwargs)
         else:
-            return self.tracer.create_proxy('call_function', orig_method, args, kwargs,
-                                            name=self.tracer.graph._target_to_str(orig_method.__name__))
+            return tracer.create_proxy('call_function', orig_method, args, kwargs,
+                                       name=tracer.graph._target_to_str(orig_method.__name__))
 
 @compatibility(is_backward_compatible=True)
 class Attribute(Proxy):
@@ -330,12 +351,12 @@ for method in magic_methods:
             target = getattr(operator, method)
             return tracer.create_proxy('call_function', target, args, kwargs)
         impl.__name__ = method
-        as_magic = f'__{method}__'
+        as_magic = f'__{method.strip("_")}__'
         setattr(Proxy, as_magic, impl)
     _scope(method)
 
 def _define_reflectable(orig_method_name):
-    method_name = f'__r{orig_method_name}__'
+    method_name = f'__r{orig_method_name.strip("_")}__'
 
     def impl(self, rhs):
         target = getattr(operator, orig_method_name)

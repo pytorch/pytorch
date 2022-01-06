@@ -16,13 +16,15 @@ from torch.utils.data.datapipes.iter.combining import (
 from torch.utils.data.datapipes.iter.filelister import (
     FileListerIterDataPipe as FileLister,
 )
-from torch.utils.data.datapipes.iter.fileloader import (
+from torch.utils.data.datapipes.iter.fileopener import (
     FileLoaderIterDataPipe as FileLoader,
+    FileOpenerIterDataPipe as FileOpener,
 )
 from torch.utils.data.datapipes.iter.grouping import (
     BatcherIterDataPipe as Batcher,
     BucketBatcherIterDataPipe as BucketBatcher,
     GrouperIterDataPipe as Grouper,
+    ShardingFilterIterDataPipe as ShardingFilter,
     UnBatcherIterDataPipe as UnBatcher,
 )
 from torch.utils.data.datapipes.iter.httpreader import (
@@ -54,16 +56,22 @@ __all__ = ['Batcher',
            'BucketBatcher',
            'Collator',
            'Concater',
+           'DFIterDataPipe',
+           'Demultiplexer',
            'FileLister',
            'FileLoader',
+           'FileOpener',
            'Filter',
+           'Forker',
            'Grouper',
            'HttpReader',
            'IterableWrapper',
            'LineReader',
            'Mapper',
+           'Multiplexer',
            'RoutedDecoder',
            'Sampler',
+           'ShardingFilter',
            'Shuffler',
            'StreamReader',
            'TarArchiveReader',

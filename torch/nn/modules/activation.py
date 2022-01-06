@@ -131,6 +131,8 @@ class RReLU(Module):
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
         - Output: :math:`(*)`, same shape as the input.
 
+    .. image:: ../scripts/activation_images/RReLU.png
+
     Examples::
 
         >>> m = nn.RReLU(0.1, 0.3)
@@ -308,6 +310,8 @@ class Hardsigmoid(Module):
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
         - Output: :math:`(*)`, same shape as the input.
 
+    .. image:: ../scripts/activation_images/Hardsigmoid.png
+
     Examples::
 
         >>> m = nn.Hardsigmoid()
@@ -327,7 +331,9 @@ class Hardsigmoid(Module):
 
 
 class Tanh(Module):
-    r"""Applies the element-wise function:
+    r"""Applies the Hyperbolic Tangent (Tanh) function element-wise.
+
+    Tanh is defined as:
 
     .. math::
         \text{Tanh}(x) = \tanh(x) = \frac{\exp(x) - \exp(-x)} {\exp(x) + \exp(-x)}
@@ -367,6 +373,8 @@ class SiLU(Module):
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
         - Output: :math:`(*)`, same shape as the input.
 
+    .. image:: ../scripts/activation_images/SiLU.png
+
     Examples::
 
         >>> m = nn.SiLU()
@@ -400,6 +408,8 @@ class Mish(Module):
     Shape:
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
         - Output: :math:`(*)`, same shape as the input.
+
+    .. image:: ../scripts/activation_images/Mish.png
 
     Examples::
 
@@ -440,6 +450,8 @@ class Hardswish(Module):
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
         - Output: :math:`(*)`, same shape as the input.
 
+    .. image:: ../scripts/activation_images/Hardswish.png
+
     Examples::
 
         >>> m = nn.Hardswish()
@@ -462,7 +474,11 @@ class Hardswish(Module):
 
 
 class ELU(Module):
-    r"""Applies the element-wise function:
+    r"""Applies the Exponential Linear Unit (ELU) function, element-wise, as described
+    in the paper: `Fast and Accurate Deep Network Learning by Exponential Linear
+    Units (ELUs) <https://arxiv.org/abs/1511.07289>`__.
+
+    ELU is defined as:
 
     .. math::
         \text{ELU}(x) = \begin{cases}
@@ -766,10 +782,8 @@ class LogSigmoid(Module):
 
 
 class Softplus(Module):
-    r"""Applies the element-wise function:
-
-    .. math::
-        \text{Softplus}(x) = \frac{1}{\beta} * \log(1 + \exp(\beta * x))
+    r"""Applies the Softplus function :math:`\text{Softplus}(x) = \frac{1}{\beta} *
+    \log(1 + \exp(\beta * x))` element-wise.
 
     SoftPlus is a smooth approximation to the ReLU function and can be used
     to constrain the output of a machine to always be positive.
@@ -951,18 +965,22 @@ class MultiheadAttention(Module):
                 need_weights: bool = True, attn_mask: Optional[Tensor] = None) -> Tuple[Tensor, Optional[Tensor]]:
         r"""
     Args:
-        query: Query embeddings of shape :math:`(L, N, E_q)` when ``batch_first=False`` or :math:`(N, L, E_q)`
-            when ``batch_first=True``, where :math:`L` is the target sequence length, :math:`N` is the batch size,
-            and :math:`E_q` is the query embedding dimension ``embed_dim``. Queries are compared against
-            key-value pairs to produce the output. See "Attention Is All You Need" for more details.
-        key: Key embeddings of shape :math:`(S, N, E_k)` when ``batch_first=False`` or :math:`(N, S, E_k)` when
-            ``batch_first=True``, where :math:`S` is the source sequence length, :math:`N` is the batch size, and
-            :math:`E_k` is the key embedding dimension ``kdim``. See "Attention Is All You Need" for more details.
-        value: Value embeddings of shape :math:`(S, N, E_v)` when ``batch_first=False`` or :math:`(N, S, E_v)` when
-            ``batch_first=True``, where :math:`S` is the source sequence length, :math:`N` is the batch size, and
-            :math:`E_v` is the value embedding dimension ``vdim``. See "Attention Is All You Need" for more details.
+        query: Query embeddings of shape :math:`(L, E_q)` for unbatched input, :math:`(L, N, E_q)` when ``batch_first=False``
+            or :math:`(N, L, E_q)` when ``batch_first=True``, where :math:`L` is the target sequence length,
+            :math:`N` is the batch size, and :math:`E_q` is the query embedding dimension ``embed_dim``.
+            Queries are compared against key-value pairs to produce the output.
+            See "Attention Is All You Need" for more details.
+        key: Key embeddings of shape :math:`(S, E_k)` for unbatched input, :math:`(S, N, E_k)` when ``batch_first=False``
+            or :math:`(N, S, E_k)` when ``batch_first=True``, where :math:`S` is the source sequence length,
+            :math:`N` is the batch size, and :math:`E_k` is the key embedding dimension ``kdim``.
+            See "Attention Is All You Need" for more details.
+        value: Value embeddings of shape :math:`(S, E_v)` for unbatched input, :math:`(S, N, E_v)` when
+            ``batch_first=False`` or :math:`(N, S, E_v)` when ``batch_first=True``, where :math:`S` is the source
+            sequence length, :math:`N` is the batch size, and :math:`E_v` is the value embedding dimension ``vdim``.
+            See "Attention Is All You Need" for more details.
         key_padding_mask: If specified, a mask of shape :math:`(N, S)` indicating which elements within ``key``
-            to ignore for the purpose of attention (i.e. treat as "padding"). Binary and byte masks are supported.
+            to ignore for the purpose of attention (i.e. treat as "padding"). For unbatched `query`, shape should be :math:`(S)`.
+            Binary and byte masks are supported.
             For a binary mask, a ``True`` value indicates that the corresponding ``key`` value will be ignored for
             the purpose of attention. For a byte mask, a non-zero value indicates that the corresponding ``key``
             value will be ignored.
@@ -978,14 +996,19 @@ class MultiheadAttention(Module):
             the attention weight.
 
     Outputs:
-        - **attn_output** - Attention outputs of shape :math:`(L, N, E)` when ``batch_first=False`` or
-          :math:`(N, L, E)` when ``batch_first=True``, where :math:`L` is the target sequence length, :math:`N` is
-          the batch size, and :math:`E` is the embedding dimension ``embed_dim``.
-        - **attn_output_weights** - Attention output weights of shape :math:`(N, L, S)`, where :math:`N` is the batch
-          size, :math:`L` is the target sequence length, and :math:`S` is the source sequence length. Only returned
-          when ``need_weights=True``.
+        - **attn_output** - Attention outputs of shape :math:`(L, E)` when input is unbatched,
+          :math:`(L, N, E)` when ``batch_first=False`` or :math:`(N, L, E)` when ``batch_first=True``,
+          where :math:`L` is the target sequence length, :math:`N` is the batch size, and :math:`E` is the
+          embedding dimension ``embed_dim``.
+        - **attn_output_weights** - Attention output weights of shape :math:`(L, S)` when input is unbatched
+          or :math:`(N, L, S)`, where :math:`N` is the batch size, :math:`L` is the target sequence length, and
+          :math:`S` is the source sequence length. Only returned when ``need_weights=True``.
+
+        .. note::
+            `batch_first` argument is ignored for unbatched inputs.
         """
-        if self.batch_first:
+        is_batched = query.dim() == 3
+        if self.batch_first and is_batched:
             query, key, value = [x.transpose(1, 0) for x in (query, key, value)]
 
         if not self._qkv_same_embed_dim:
@@ -1008,7 +1031,7 @@ class MultiheadAttention(Module):
                 training=self.training,
                 key_padding_mask=key_padding_mask, need_weights=need_weights,
                 attn_mask=attn_mask)
-        if self.batch_first:
+        if self.batch_first and is_batched:
             return attn_output.transpose(1, 0), attn_output_weights
         else:
             return attn_output, attn_output_weights
@@ -1236,8 +1259,8 @@ class Softmax2d(Module):
     apply `Softmax` to each location :math:`(Channels, h_i, w_j)`
 
     Shape:
-        - Input: :math:`(N, C, H, W)`
-        - Output: :math:`(N, C, H, W)` (same shape as input)
+        - Input: :math:`(N, C, H, W)` or :math:`(C, H, W)`.
+        - Output: :math:`(N, C, H, W)` or :math:`(C, H, W)` (same shape as input)
 
     Returns:
         a Tensor of the same dimension and shape as the input with
@@ -1252,8 +1275,8 @@ class Softmax2d(Module):
     """
 
     def forward(self, input: Tensor) -> Tensor:
-        assert input.dim() == 4, 'Softmax2d requires a 4D tensor as input'
-        return F.softmax(input, 1, _stacklevel=5)
+        assert input.dim() == 4 or input.dim() == 3, 'Softmax2d requires a 3D or 4D tensor as input'
+        return F.softmax(input, -3, _stacklevel=5)
 
 
 class LogSoftmax(Module):

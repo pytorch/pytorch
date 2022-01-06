@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/tensorexpr/fwd_decls.h>
 
 #include <sstream>
@@ -83,6 +83,8 @@ class malformed_ir : public std::runtime_error {
       : std::runtime_error(
             "MALFORMED IR: " + err + " - " + std::to_string(stmt)) {}
 };
+
+TORCH_API std::string buildErrorMessage(const std::string& s = "");
 
 } // namespace tensorexpr
 } // namespace jit

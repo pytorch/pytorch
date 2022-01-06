@@ -84,7 +84,7 @@ class SparseLengthsFused8BitRowwiseFakeFP16Op final : public Operator<Context> {
     const auto scale_bias_offset = 8 / sizeof(uint8_t);
     const int64_t fused_block_size = block_size + scale_bias_offset;
     int64_t current = 0;
-    for (int m = 0; m < output_size; ++m) {
+    for (const auto m : c10::irange(output_size)) {
       memset(out, 0, sizeof(float) * block_size);
       memset(rowTempSums[0].data(), 0, sizeof(float) * block_size);
       memset(rowTempSums[1].data(), 0, sizeof(float) * block_size);
@@ -152,7 +152,7 @@ class SparseLengthsFused8BitRowwiseFakeFP16Op final : public Operator<Context> {
 
         // Fake fp16 rounding of input/ it is already ints
         std::vector<float> input_rounded(block_size);
-        for (int j = 0; j < block_size; ++j) {
+        for (const auto j : c10::irange(block_size)) {
           input_rounded[j] =
               input[fused_block_size * indices_data[current] + j];
         }
@@ -164,7 +164,7 @@ class SparseLengthsFused8BitRowwiseFakeFP16Op final : public Operator<Context> {
           TypedAxpy<float, float>(
               block_size, scale, input_rounded.data(), product_rounded.data());
 
-          for (int j = 0; j < block_size; ++j) {
+          for (const auto j : c10::irange(block_size)) {
             product_rounded[j] += bias;
           }
 
@@ -215,7 +215,7 @@ class SparseLengthsFused8BitRowwiseFakeFP16Op final : public Operator<Context> {
               block_size,
               FLAGS_caffe2_fbgemm_fake_fp16_clamp);
 
-          for (int j = 0; j < block_size; ++j) {
+          for (const auto j : c10::irange(block_size)) {
             product_rounded[j] += bias;
           }
           // Fake fp16 rounding of w x scale x input + w x bias
@@ -239,7 +239,7 @@ class SparseLengthsFused8BitRowwiseFakeFP16Op final : public Operator<Context> {
               block_size,
               FLAGS_caffe2_fbgemm_fake_fp16_clamp);
         } else if (use_acc_fp32) {
-          for (int j = 0; j < block_size; ++j) {
+          for (const auto j : c10::irange(block_size)) {
             float deqVal = fake_fp16::fmafp32_avx_emulation(
                 scale,
                 input_rounded[j],
@@ -256,7 +256,7 @@ class SparseLengthsFused8BitRowwiseFakeFP16Op final : public Operator<Context> {
 
           TypedAxpy<float, float>(block_size, scale, input_rounded.data(), out);
 
-          for (int j = 0; j < block_size; ++j) {
+          for (const auto j : c10::irange(block_size)) {
             out[j] += bias;
           }
         }
@@ -264,7 +264,7 @@ class SparseLengthsFused8BitRowwiseFakeFP16Op final : public Operator<Context> {
       }
 
       if (use_nnpi_fma || use_acc_fp32) {
-        for (int j = 0; j < block_size; ++j) {
+        for (const auto j : c10::irange(block_size)) {
           out[j] = rowTempSums[0][j] + rowTempSums[1][j];
         }
       }

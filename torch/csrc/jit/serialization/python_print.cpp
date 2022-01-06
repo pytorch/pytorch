@@ -1,19 +1,22 @@
 #include <torch/csrc/jit/serialization/python_print.h>
 
+#include <algorithm>
+
 #include <ATen/core/qualified_name.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/irange.h>
+#include <caffe2/serialize/versions.h>
+#include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/frontend/versioned_symbols.h>
 #include <torch/csrc/jit/ir/attributes.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/ir_views.h>
+#include <torch/csrc/jit/operator_upgraders/version_map.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/runtime/calculate_necessary_args.h>
-
-#include <algorithm>
 
 using c10::QualifiedName;
 
@@ -511,13 +514,31 @@ struct PythonPrintImpl {
     }
     indent();
     printValueList(body_, lhs);
+    // We need to preserve Union/Optional type annotations, but only if
+    // we're not assigning values as part of a tuple unpacking statement
+    // (Python doesn't allow type annotations in multiple assignment)
+    if (lhs.size() == 1) {
+      Value* v = lhs.at(0);
+      if (!annotated_unions_.count(v) && !expr_table_.count(v) &&
+          (v->type()->kind() == UnionType::Kind ||
+           v->type()->kind() == OptionalType::Kind)) {
+        body_ << " : " << v->type()->annotation_str();
+        annotated_unions_.insert(v);
+      }
+    }
     body_ << " = ";
+    // or if value is being assigned to something of a union type
     printValueList(body_, rhs);
     body_ << "\n";
   }
 
   bool requiresAnnotation(Value* lhs, Value* rhs) {
-    return *lhs->type() != *rhs->type();
+    if (lhs->type()->kind() == UnionType::Kind ||
+        lhs->type()->kind() == OptionalType::Kind) {
+      return annotated_unions_.insert(lhs).second;
+    } else {
+      return *lhs->type() != *rhs->type();
+    }
   }
 
   void printAnnotatedAssignment(
@@ -722,9 +743,22 @@ struct PythonPrintImpl {
     }
   }
 
-  void checkVersion(const Node* const node) {
+  void checkVersion(Node* node) {
+#if ENABLE_UPGRADERS
+    if (auto schema = node->maybeSchema()) {
+      auto schema_name = getFullSchemaName(*schema);
+      auto version_entry = get_operator_version_map().find(schema_name);
+      if (version_entry != get_operator_version_map().end()) {
+        const auto& entry = version_entry->second;
+        // TODO (tugsuu) move this calculation into a seperate step.
+        min_version_ = std::max(
+            min_version_, uint64_t(entry[entry.size() - 1].bumped_at_version));
+      }
+    }
+#else
     min_version_ =
         std::max(min_version_, get_min_version_for_kind(node->kind()));
+#endif
   }
 
   void printNode(Node* node, bool print_const) {
@@ -1099,7 +1133,7 @@ struct PythonPrintImpl {
         // we cannot recover the type of unwrap_optional(None),
         // using normal schema matching, so we route around this by rewriting
         // the call to unwrap_optional(annotated(Optional[T], None))
-        if (node->input()->type()->isSubtypeOf(NoneType::get()) ||
+        if (node->input()->type()->isSubtypeOf(*NoneType::get()) ||
             node->input()->mustBeNone()) {
           auto input_type = OptionalType::create(node->output()->type());
           stmt << "annotate(" << input_type->annotation_str(type_printer_)
@@ -1283,9 +1317,8 @@ struct PythonPrintImpl {
   void printFunction(
       const Function& func,
       bool print_first_argument_type = true) {
-    TORCH_INTERNAL_ASSERT(func.isGraphFunction());
     const FunctionSchema& schema = func.getSchema();
-    Graph& graph = *func.graph();
+    Graph& graph = *toGraphFunction(func).graph();
     used_names_.clear(); // each graph can reuse local names
 
     WithSourceRange guard(&source_range_stack_, graph.param_node());
@@ -1302,10 +1335,12 @@ struct PythonPrintImpl {
         body_ << arg_name;
         if (print_first_argument_type) {
           body_ << ": " << arg.type()->annotation_str(type_printer_);
+          annotated_unions_.insert(*param_it);
         }
       } else {
         body_ << ",\n    " << arg_name << ": "
               << arg.type()->annotation_str(type_printer_);
+        annotated_unions_.insert(*param_it);
       }
       if (arg.default_value()) {
         printDefaultValue(arg, body_, *arg.default_value());
@@ -1559,6 +1594,12 @@ struct PythonPrintImpl {
   // table.
   PrintDepsTable& deps_table_;
 
+  // We need to preserve Union/Optional type annotations, but we should
+  // only print the annotation on variable declaration (not on any
+  // following uses). This set tracks the Value*s that we've already
+  // printed with annotations
+  std::unordered_set<Value*> annotated_unions_;
+
   // A function that, given a named type, returns us the correct string to print
   // for it.
   c10::TypePrinter type_printer_;
@@ -1568,7 +1609,11 @@ struct PythonPrintImpl {
   bool enforce_importable_;
 
   // The least version that supports all printed ops
+#if ENABLE_UPGRADERS
+  uint64_t min_version_ = caffe2::serialize::kMinSupportedFileFormatVersion;
+#else
   uint64_t min_version_ = 0;
+#endif
 };
 
 PythonPrint::PythonPrint(

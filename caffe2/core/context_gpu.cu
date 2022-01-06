@@ -21,6 +21,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/utils/string_utils.h"
+#include "caffe2/utils/cub_namespace.cuh"
 
 C10_DEFINE_string(
     caffe2_cuda_memory_pool,

@@ -129,7 +129,7 @@ std::unique_ptr<ScriptCall> ScriptCall::fromMessage(const Message& message) {
       *RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
       message.tensors());
 
-  auto values = value.toTuple()->elements();
+  auto values = value.toTupleRef().elements().vec();
   return fromIValues(values);
 }
 

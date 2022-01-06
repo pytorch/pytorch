@@ -2,13 +2,13 @@
 // Originally developed by George Papandreou
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/ceil_div.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
+#include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/native/cuda/UpSample.cuh>
-#include <THC/THCAtomics.cuh>
 
 namespace at {
 namespace native {
@@ -143,7 +143,7 @@ static void upsample_linear1d_out_cuda_template(
           input_width, output_width, align_corners, scales);
 
         upsample_linear1d_out_frame<scalar_t, accscalar_t>
-            <<<cuda::ATenCeilDiv(num_kernels, num_threads),
+            <<<ceil_div(num_kernels, num_threads),
                num_threads,
                0,
                stream>>>(num_kernels, rwidth, align_corners, idata, odata);
@@ -188,7 +188,7 @@ static void upsample_linear1d_backward_out_cuda_template(
             input_width, output_width, align_corners, scales);
 
         upsample_linear1d_out_frame_backward<scalar_t, accscalar_t>
-            <<<cuda::ATenCeilDiv(num_kernels, num_threads),
+            <<<ceil_div(num_kernels, num_threads),
                num_threads,
                0,
                stream>>>(num_kernels, rwidth, align_corners, idata, odata);

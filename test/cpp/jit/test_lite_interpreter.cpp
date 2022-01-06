@@ -9,14 +9,19 @@
 #include <torch/csrc/jit/mobile/backport.h>
 #include <torch/csrc/jit/mobile/backport_manager.h>
 #include <torch/csrc/jit/mobile/import.h>
+#include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/model_compatibility.h>
 #include <torch/csrc/jit/mobile/module.h>
+#include <torch/csrc/jit/mobile/parse_bytecode.h>
+#include <torch/csrc/jit/mobile/parse_operators.h>
 #include <torch/csrc/jit/mobile/runtime_compatibility.h>
+#include <torch/csrc/jit/mobile/upgrader_mobile.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/custom_class.h>
 #include <torch/torch.h>
 
+#include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <unordered_set>
 
 // Tests go in torch::jit
@@ -178,7 +183,7 @@ TEST(LiteInterpreterTest, Tuple) {
   mobile::Module bc = _load_for_mobile(ss);
   std::vector<torch::jit::IValue> inputs({torch::ones({})});
   auto output = bc.get_method("forward")(inputs);
-  AT_ASSERT(output.toTuple()->elements()[1].toInt() == 2);
+  AT_ASSERT(output.toTupleRef().elements()[1].toInt() == 2);
 }
 
 TEST(LiteInterpreterTest, Dict) {
@@ -359,7 +364,7 @@ struct ClassNamespaceValue : public SugaredValue {
 
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
-      Function& m,
+      GraphFunction& m,
       const std::string& name) override {
     const auto fullName = c10::QualifiedName(basename_, name);
 
@@ -384,7 +389,7 @@ struct ClassNamespaceValue : public SugaredValue {
 struct TestModuleResolver : public Resolver {
   std::shared_ptr<SugaredValue> resolveValue(
       const std::string& name,
-      Function& m,
+      GraphFunction& m,
       const SourceRange& loc) override {
     if (name == "torch") {
       return std::make_shared<BuiltinModule>("aten");
@@ -456,149 +461,20 @@ TEST(LiteInterpreterTest, BuiltinFunction) {
 }
 
 #if !defined FB_XPLAT_BUILD
-TEST(LiteInterpreterTest, ModuleInfoBasic) {
-  Module m("M");
-  m.define(R"JIT(
-    def forward(self, x):
-      return 2 * x
-  )JIT");
-
-  std::stringstream ss;
-  m._save_for_mobile(ss, {}, true);
-  mobile::Module bc = _load_for_mobile(ss);
-
-  std::unordered_set<std::string> module_debug_info_set;
-  size_t pc = 0;
-  while (true) {
-    try {
-      std::string module_info = bc.get_forward_method_debug_info(pc);
-      if (!module_info.empty() &&
-          (module_info.find("debug_handle") == std::string::npos)) {
-        module_debug_info_set.insert(module_info);
-      }
-      ++pc;
-    } catch (const std::exception& e) {
-      break;
-    }
-  }
-
-  AT_ASSERT(module_debug_info_set.count("top(M)::<unknown>.aten::mul"));
-}
-
-TEST(LiteInterpreterTest, NotSaveModuleInfo) {
-  Module m("M");
-  m.define(R"JIT(
-    def forward(self, x):
-      return x + 5
-  )JIT");
-
-  std::stringstream ss;
-  m._save_for_mobile(ss);
-  mobile::Module bc = _load_for_mobile(ss);
-
-  size_t pc = 0;
-  while (true) {
-    try {
-      std::string module_info = bc.get_forward_method_debug_info(pc);
-      AT_ASSERT(
-          module_info.empty() ||
-          (module_info.find("debug_handle") != std::string::npos));
-      ++pc;
-    } catch (const std::exception& e) {
-      break;
-    }
-  }
-}
-
-TEST(LiteInterpreterTest, OneSubmoduleModuleInfo) {
-  Module a("A");
-  a.define(R"JIT(
-    def forward(self, x):
-      return 2 * x + 5
-  )JIT");
-  Module b("B");
-  b.register_module("A0", a);
-  b.define(R"JIT(
-    def forward(self, x):
-      return self.A0.forward(x) + 1
-  )JIT");
-
-  std::stringstream ss;
-  b._save_for_mobile(ss, {}, true);
-  mobile::Module bc = _load_for_mobile(ss);
-
-  std::set<std::string> module_debug_info_set;
-  size_t pc = 0;
-  while (true) {
-    try {
-      std::string module_info = bc.get_forward_method_debug_info(pc);
-      if (!module_info.empty() &&
-          (module_info.find("debug_handle") == std::string::npos)) {
-        module_debug_info_set.insert(module_info);
-      }
-      ++pc;
-    } catch (const std::exception& e) {
-      break;
-    }
-  }
-
-  AT_ASSERT(module_debug_info_set.count("top(B)::<unknown>.aten::add"));
-  AT_ASSERT(module_debug_info_set.count(
-      "top(B)::<unknown>.A0(A)::forward.aten::add"));
-  AT_ASSERT(module_debug_info_set.count(
-      "top(B)::<unknown>.A0(A)::forward.aten::mul"));
-}
-
-TEST(LiteInterpreterTest, TwoSubmodulesModuleInfo) {
-  Module a("A");
-  a.define(R"JIT(
-    def forward(self, x):
-      return x + 1
-  )JIT");
-  Module b("B");
-  b.define(R"JIT(
-    def forward(self, x):
-      return x + 2
-  )JIT");
-  Module c("C");
-  c.register_module("A0", a);
-  c.register_module("B0", b);
-  c.define(R"JIT(
-    def forward(self, x):
-      return self.A0.forward(x) + self.B0.forward(x)
-  )JIT");
-
-  std::stringstream ss;
-  c._save_for_mobile(ss, {}, true);
-  mobile::Module bc = _load_for_mobile(ss);
-
-  std::set<std::string> module_debug_info_set;
-  size_t pc = 0;
-  while (true) {
-    try {
-      std::string module_info = bc.get_forward_method_debug_info(pc);
-      if (!module_info.empty() &&
-          (module_info.find("debug_handle") == std::string::npos)) {
-        module_debug_info_set.insert(module_info);
-      }
-      ++pc;
-    } catch (const std::exception& e) {
-      break;
-    }
-  }
-
-  AT_ASSERT(module_debug_info_set.count("top(C)::<unknown>.aten::add"));
-  AT_ASSERT(module_debug_info_set.count(
-      "top(C)::<unknown>.A0(A)::forward.aten::add"));
-  AT_ASSERT(module_debug_info_set.count(
-      "top(C)::<unknown>.B0(B)::forward.aten::add"));
-}
-
 TEST(LiteInterpreterTest, GetRuntimeByteCodeVersion) {
   auto runtime_bytecode_version = _get_runtime_bytecode_version();
   AT_ASSERT(
       runtime_bytecode_version ==
       caffe2::serialize::kMaxSupportedBytecodeVersion);
+}
+
+TEST(LiteInterpreterTest, GetRuntimeOperatorsVersion) {
+  auto runtime_operators_version = _get_runtime_operators_min_max_versions();
+  AT_ASSERT(
+      runtime_operators_version.first ==
+          caffe2::serialize::kMinSupportedFileFormatVersion &&
+      runtime_operators_version.second ==
+          caffe2::serialize::kMaxSupportedFileFormatVersion);
 }
 
 /**
@@ -618,18 +494,34 @@ TEST(LiteInterpreterTest, GetByteCodeVersion) {
   auto version_v4 = _get_model_bytecode_version(test_model_file_v4);
   AT_ASSERT(version_v4 == 4);
 }
+
 #endif // !defined(FB_XPLAT_BUILD)
+
+TEST(LiteInterpreterTest, GetContainTypes) {
+  Module m("m");
+  m.define(R"(
+    def forward(self):
+      return 3
+  )");
+
+  std::stringstream ss;
+  m._save_for_mobile(ss, {}, true);
+
+  auto contained_types = _get_mobile_model_contained_types(ss);
+  AT_ASSERT(contained_types.size() >= 0);
+}
 
 namespace {
 
 void compareModelOutput(
-    const std::vector<IValue>& actual_result_list,
+    c10::ArrayRef<IValue> actual_result_list,
     const std::vector<Tensor>& expect_result_list) {
   AT_ASSERT(actual_result_list.size() == expect_result_list.size());
   AT_ASSERT(actual_result_list[0].toTensor().equal(expect_result_list[0]));
   AT_ASSERT(
       actual_result_list[1].toTensor().dim() == expect_result_list[1].dim());
   AT_ASSERT(actual_result_list[2].toTensor().equal(expect_result_list[2]));
+  AT_ASSERT(actual_result_list[3].toTensor().equal(expect_result_list[3]));
 }
 
 void runAndCheckTorchScriptModel(
@@ -645,7 +537,7 @@ void runAndCheckTorchScriptModel(
   Module m_mobile = load(input_model_stream);
 
   auto actual_result = m_mobile.forward(input_data);
-  std::vector<IValue> actual_result_list = actual_result.toTuple()->elements();
+  const auto& actual_result_list = actual_result.toTupleRef().elements();
   compareModelOutput(actual_result_list, expect_result_list);
 }
 
@@ -662,7 +554,7 @@ void runAndCheckBytecodeModel(
   Module m_mobile = load(input_model_stream);
 
   auto actual_result = m_mobile.forward(input_data);
-  std::vector<IValue> actual_result_list = actual_result.toTuple()->elements();
+  const auto& actual_result_list = actual_result.toTupleRef().elements();
 
   compareModelOutput(actual_result_list, expect_result_list);
 }
@@ -724,7 +616,12 @@ TEST(LiteInterpreterTest, BackPortByteCodeModelAllVersions) {
       x1 = torch.zeros(2, 2)
       x2 = torch.empty_like(torch.empty(2, 2))
       x3 = torch._convolution(input, self.weight, self.bias, [1, 1], [0, 0], [1, 1], False, [0, 0], 1, False, False, True, True)
-      return (x1, x2, x3)
+      # Add torch.add operator to cover bytecode version bump from 6 to 7
+      # for bytecode version 7, the main change is to support defaults arguments with out arguments
+      x = 2 * torch.ones(1)
+      h = torch.ones(1)
+      torch.add(x, h, out=x)
+      return (x1, x2, x3, x)
   )");
 
   torch::jit::Module module_freeze = freeze(module);
@@ -738,6 +635,8 @@ TEST(LiteInterpreterTest, BackPortByteCodeModelAllVersions) {
   expect_result_list.emplace_back(at::ones({2, 2}, ScalarType::Float));
   expect_result_list.emplace_back(
       at::ones({1, 20, 24, 24}, ScalarType::Float) * 26);
+  expect_result_list.emplace_back(3 * at::ones({1}));
+
   backportAllVersionCheck(
       input_model_stream,
       input_data,
@@ -759,8 +658,12 @@ TEST(LiteInterpreterTest, isCompatibleSuccess) {
   std::unordered_map<std::string, OperatorInfo> model_ops;
   model_ops["aten::add.Scalar"] = OperatorInfo{2};
 
+  std::unordered_set<std::string> types = {"List", "int", "NamedTuple"};
   auto model_info = ModelCompatibilityInfo{
-      caffe2::serialize::kMaxSupportedBytecodeVersion, model_ops};
+      caffe2::serialize::kMaxSupportedBytecodeVersion,
+      model_ops,
+      types,
+      _get_runtime_bytecode_min_max_versions().first};
 
   AT_ASSERT(
       is_compatible(runtime_info, model_info).status ==
@@ -776,7 +679,11 @@ TEST(LiteInterpreterTest, isCompatibleFail) {
   std::unordered_map<std::string, OperatorInfo> runtime_ops;
   runtime_ops["aten::add.Int"] = OperatorInfo{2};
   auto runtime_info = RuntimeCompatibilityInfo{
-      caffe2::serialize::kMaxSupportedBytecodeVersion, runtime_ops};
+      std::pair<uint64_t, uint64_t>(
+          caffe2::serialize::kMinSupportedBytecodeVersion,
+          caffe2::serialize::kMaxSupportedBytecodeVersion),
+      runtime_ops,
+      _get_mobile_supported_types()};
 
   auto result = is_compatible(runtime_info, model_info);
   AT_ASSERT(result.status = ModelCompatibilityStatus::ERROR);
@@ -784,197 +691,60 @@ TEST(LiteInterpreterTest, isCompatibleFail) {
       result.errors[0] ==
       "Operator 'aten::add.Scalar' missing from runtime (not found)");
 
-  // test trivial failure due to bytecode
+  // test trivial failure due to bytecode greater than max supported bytecode
+  // version
   runtime_ops["aten::add.Scalar"] = OperatorInfo{2};
   runtime_info = RuntimeCompatibilityInfo{
-      caffe2::serialize::kMaxSupportedBytecodeVersion, runtime_ops};
+      std::pair<uint64_t, uint64_t>(
+          caffe2::serialize::kMinSupportedBytecodeVersion,
+          caffe2::serialize::kMaxSupportedBytecodeVersion),
+      runtime_ops,
+      _get_mobile_supported_types()};
   model_info.bytecode_version =
       caffe2::serialize::kMaxSupportedBytecodeVersion + 1;
 
   result = is_compatible(runtime_info, model_info);
   AT_ASSERT(result.status = ModelCompatibilityStatus::ERROR);
+
+  // test trivial failure due to bytecode less than min supported bytecode
+  // version
+  runtime_ops["aten::add.Scalar"] = OperatorInfo{2};
+  runtime_info = RuntimeCompatibilityInfo{
+      std::pair<uint64_t, uint64_t>(
+          caffe2::serialize::kMinSupportedBytecodeVersion,
+          caffe2::serialize::kMaxSupportedBytecodeVersion),
+      runtime_ops,
+      _get_mobile_supported_types()};
+  model_info.bytecode_version =
+      caffe2::serialize::kMinSupportedBytecodeVersion - 1;
+
+  result = is_compatible(runtime_info, model_info);
+  AT_ASSERT(result.status = ModelCompatibilityStatus::ERROR);
+
+  // test trivial failure due to type
+  runtime_info = RuntimeCompatibilityInfo::get();
+  std::unordered_set<std::string> types = {"List", "int", "Sequence"};
+
+  model_info = ModelCompatibilityInfo{
+      caffe2::serialize::kMaxSupportedBytecodeVersion,
+      model_ops,
+      types,
+      _get_runtime_bytecode_min_max_versions().first};
+
+  AT_ASSERT(
+      is_compatible(runtime_info, model_info).status ==
+      ModelCompatibilityStatus::ERROR);
+
+  // test trivial failure due to operator version
+  runtime_info = RuntimeCompatibilityInfo::get();
+
+  model_info = ModelCompatibilityInfo{
+      caffe2::serialize::kMaxSupportedBytecodeVersion, model_ops, {}, 0};
+
+  AT_ASSERT(
+      is_compatible(runtime_info, model_info).status ==
+      ModelCompatibilityStatus::ERROR);
 }
-
-#if !defined FB_XPLAT_BUILD
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(LiteInterpreterTest, SequentialModuleInfo) {
-  Module a("A");
-  a.define(R"JIT(
-    def forward(self, x):
-      return x + 1
-  )JIT");
-  Module b("B");
-  b.define(R"JIT(
-    def forward(self, x):
-      return x + 2
-  )JIT");
-  Module c("C");
-  c.register_module("A0", a);
-  c.register_module("B0", b);
-  c.define(R"JIT(
-    def forward(self, x):
-      return self.A0.forward(self.B0.forward(x))
-  )JIT");
-
-  std::stringstream ss;
-  c._save_for_mobile(ss, {}, true);
-  mobile::Module bc = _load_for_mobile(ss);
-
-  std::set<std::string> module_debug_info_set;
-  size_t pc = 0;
-  while (true) {
-    try {
-      std::string module_info = bc.get_forward_method_debug_info(pc);
-      if (!module_info.empty() &&
-          (module_info.find("debug_handle") == std::string::npos)) {
-        module_debug_info_set.insert(module_info);
-      }
-      ++pc;
-    } catch (const std::exception& e) {
-      break;
-    }
-  }
-
-  // class A(nn.Module):
-  //   def __init__(self):
-  //     super(A, self).__init__()
-
-  //   def forward(self, x):
-  //     return x + 1
-
-  // class B(nn.Module):
-  //   def __init__(self):
-  //     super(B, self).__init__()
-
-  //   def forward(self, x):
-  //     return x + 2
-
-  // class C(nn.Module):
-  //   def __init__(self):
-  //     super(C, self).__init__()
-  //     self.A0 = A()
-  //     self.B0 = B()
-
-  //   def forward(self, x):
-  //     return self.A0.forward(self.B0.forward(x))
-
-  AT_ASSERT(module_debug_info_set.count("top(C)::<unknown>.prim::Return"));
-  AT_ASSERT(module_debug_info_set.count(
-      "top(C)::<unknown>.A0(A)::forward.aten::add"));
-  AT_ASSERT(module_debug_info_set.count(
-      "top(C)::<unknown>.B0(B)::forward.aten::add"));
-}
-
-TEST(LiteInterpreterTest, HierarchyModuleInfo) {
-  Module a("A");
-  a.define(R"JIT(
-    def forward(self, x):
-      return x + 1
-  )JIT");
-  Module b("B");
-  b.register_module("A0", a);
-  b.define(R"JIT(
-    def forward(self, x):
-      return self.A0.forward(x) + 1
-  )JIT");
-  Module c("C");
-  c.register_module("B0", b);
-  c.define(R"JIT(
-    def forward(self, x):
-      return self.B0.forward(x) + 1
-  )JIT");
-
-  std::stringstream ss;
-  c._save_for_mobile(ss, {}, true);
-  mobile::Module bc = _load_for_mobile(ss);
-
-  std::set<std::string> module_debug_info_set;
-  size_t pc = 0;
-  while (true) {
-    try {
-      std::string module_info = bc.get_forward_method_debug_info(pc);
-      if (!module_info.empty() &&
-          (module_info.find("debug_handle") == std::string::npos)) {
-        module_debug_info_set.insert(module_info);
-      }
-      ++pc;
-    } catch (const std::exception& e) {
-      break;
-    }
-  }
-
-  // There are 3 module information strings here.
-  // "top(C).forward": for the add operator in top.
-  // "top(C).B0(B).forward": for the add operator in B0.
-  // "top(C).B0(B).forward.A0(A).forward": for the add operator in A0.
-  AT_ASSERT(module_debug_info_set.count("top(C)::<unknown>.aten::add"));
-  AT_ASSERT(module_debug_info_set.count(
-      "top(C)::<unknown>.B0(B)::forward.aten::add"));
-  AT_ASSERT(module_debug_info_set.count(
-      "top(C)::<unknown>.B0(B)::forward.A0(A)::forward.aten::add"));
-}
-
-TEST(LiteInterpreterTest, DuplicatedClassTypeModuleInfo) {
-  Module a("A");
-  a.define(R"JIT(
-    def forward(self, x):
-      return x + 5
-  )JIT");
-  Module b("B");
-  b.register_module("A0", a);
-  b.register_module("A1", a);
-  b.define(R"JIT(
-    def forward(self, x):
-      return self.A0.forward(x) + self.A1.forward(x)
-  )JIT");
-
-  std::stringstream ss;
-  b._save_for_mobile(ss, {}, true);
-  mobile::Module bc = _load_for_mobile(ss);
-
-  std::set<std::string> module_debug_info_set;
-  size_t pc = 0;
-  while (true) {
-    try {
-      std::string module_info = bc.get_forward_method_debug_info(pc);
-      if (!module_info.empty() &&
-          (module_info.find("debug_handle") == std::string::npos)) {
-        module_debug_info_set.insert(module_info);
-      }
-      ++pc;
-    } catch (const std::exception& e) {
-      break;
-    }
-  }
-
-  // class A(nn.Module):
-  //   def __init__(self):
-  //     super(A, self).__init__()
-
-  //   def forward(self, x):
-  //     return x + 5
-
-  // class B(nn.Module):
-  //   def __init__(self):
-  //     super(B, self).__init__()
-  //     self.A0 = A()
-  //     self.A1 = A()
-
-  //   def forward(self, x):
-  //     return self.A0.forward(x) + self.A1.forward(x)
-
-  // There are 3 module information strings here.
-  // "top(B).forward": for the add operator in top.
-  // "top(B).A0(A).forward": for the add operator in A0.
-  // "top(B).A1(A).forward": for the add operator in A1.
-
-  AT_ASSERT(module_debug_info_set.count("top(B)::<unknown>.aten::add"));
-  AT_ASSERT(module_debug_info_set.count(
-      "top(B)::<unknown>.A0(A)::forward.aten::add"));
-  AT_ASSERT(module_debug_info_set.count(
-      "top(B)::<unknown>.A1(A)::forward.aten::add"));
-}
-#endif // !defined(FB_XPLAT_BUILD)
 
 TEST(LiteInterpreterTest, Eval) {
   std::vector<torch::jit::IValue> inputs;
@@ -1205,6 +975,136 @@ TEST(LiteInterpreterTest, DefaultArgsConv) {
   AT_ASSERT(output.equal(outputref));
 }
 
+TEST(RunTimeTest, ParseBytecode) {
+  // A simple example to show a simple bytecode that can be used independent of
+  // PyTorch TorchScript serialization (unpickler, etc) and operator library.
+  // It has basic control flow (if, else) and basic data orchestration (list
+  // construction). The original PyTorch program:
+
+  //  class Module(torch.nn.Module):
+  //
+  //    def __init__(self):
+  //      super().__init__()
+  //
+  //    def forward(self, x: int, h: int, xfirst: bool):
+  //      if xfirst:
+  //        return [x, h]
+  //      else:
+  //        return [h, x]
+
+  // 1. Prepare for the bytecode. In reality it can be from a customized
+  // deserializer.
+  std::vector<IValue> instructions{
+      to_tuple({"STOREN", 1, 4}),
+      to_tuple({"DROPR", 1, 0}),
+      to_tuple({"MOVE", 4, 0}),
+      to_tuple({"JF", 5, 0}),
+      to_tuple({"LOAD", 2, 0}),
+      to_tuple({"LOAD", 3, 0}),
+      to_tuple({"LIST_CONSTRUCT", 0, 2}),
+      to_tuple({"JMP", 4, 0}),
+      to_tuple({"LOAD", 3, 0}),
+      to_tuple({"LOAD", 2, 0}),
+      to_tuple({"LIST_CONSTRUCT", 1, 2}),
+      to_tuple({"STORE", 5, 0}),
+      to_tuple({"DROPR", 3, 0}),
+      to_tuple({"DROPR", 2, 0}),
+      to_tuple({"MOVE", 5, 0}),
+      to_tuple({"RET", 0, 0}),
+  };
+  std::vector<IValue> operators; // empty for this example
+  std::vector<IValue> constants; // empty for this example
+
+  std::vector<IValue> types{"List[int]", "List[int]"};
+  // 2. Parse the function
+  std::string function_name("test_function");
+  auto function = std::unique_ptr<mobile::Function>(
+      new mobile::Function(c10::QualifiedName(function_name)));
+  c10::ivalue::TupleElements debug_handles_m_tuple;
+  parseInstructions(
+      function_name,
+      std::move(*c10::ivalue::Tuple::create(instructions)).elements(),
+      debug_handles_m_tuple,
+      function.get());
+  parseTypes(c10::ivalue::Tuple::create(types)->elements(), function.get());
+  const size_t rsize = 5;
+  parseRegisterSize(rsize, function.get());
+
+  // 3. Prepare for inputs and run the function
+  // Note that the first input is reserved for Module object.
+  // Since this is a function test and Module object is not required,
+  // a dummy IValue (0) is added here.
+  std::vector<IValue> inputs{0, 1, 2, true};
+  function->run(inputs);
+  auto output = inputs[0].toList();
+  ASSERT_EQ(output[0], 1);
+  ASSERT_EQ(output[1], 2);
+
+  std::vector<IValue> inputs1{0, 1, 2, false};
+  function->run(inputs1);
+  auto output1 = inputs1[0].toList();
+  ASSERT_EQ(output1[0], 2);
+  ASSERT_EQ(output1[1], 1);
+}
+
+TEST(RunTimeTest, ParseOperator) {
+  // A simple example to show a simple bytecode that can be used independent of
+  // PyTorch TorchScript serialization (unpickler, etc) and operator library.
+  // It has one operator and we should be able to register it. The original
+  // PyTorch program:
+
+  // class Add(torch.nn.Module):
+  //     def __init__(self):
+  //         super(Add, self).__init__()
+
+  //     def forward(self, a, b):
+  //         return a + b
+
+  // 1. Prepare for the bytecode. In reality it can be from a customized
+  // deserializer.
+  std::vector<IValue> instructions{
+      to_tuple({"STOREN", 1, 3}),
+      to_tuple({"DROPR", 1, 0}),
+      to_tuple({"MOVE", 2, 0}),
+      to_tuple({"MOVE", 3, 0}),
+      to_tuple({"OP", 0, 0}),
+      to_tuple({"RET", 0, 0}),
+  };
+  std::vector<IValue> operators{
+      to_tuple({"aten::add", "Tensor", 2}),
+  };
+  std::vector<IValue> constants{
+      to_tuple({1}),
+  };
+  int64_t model_version = caffe2::serialize::kProducedBytecodeVersion;
+  // 2. Parse the function
+  std::string function_name("test_function");
+  auto function = std::unique_ptr<mobile::Function>(
+      new mobile::Function(c10::QualifiedName(function_name)));
+  c10::ivalue::TupleElements debug_handles_m_tuple;
+  parseInstructions(
+      function_name,
+      std::move(*c10::ivalue::Tuple::create(instructions)).elements(),
+      debug_handles_m_tuple,
+      function.get());
+  parseOperators(
+      std::move(*c10::ivalue::Tuple::create(operators)).elements(),
+      model_version,
+      1,
+      function.get());
+  const size_t rsize = 5;
+  parseRegisterSize(rsize, function.get());
+
+  // 3. Prepare for inputs and run the function
+  // Note that the first input is reserved for Module object.
+  // Since this is a function test and Module object is not required,
+  // a dummy IValue (0) is added here.
+  std::vector<IValue> inputs{0, at::tensor(1), at::tensor(2)};
+  function->run(inputs);
+  auto output = inputs[0];
+  ASSERT_EQ(output, at::tensor(3));
+}
+
 namespace {
 void testLiteModuleCompareResultTensors(
     Module& m,
@@ -1332,26 +1232,86 @@ TEST(LiteInterpreterTest, DefaultArgsPinv) {
   //                  None)),)))))
 }
 
-TEST(LiteInterpreterTest, DefaultArgsPinvSpecifyDefault) {
+TEST(LiteInterpreterTest, DefaultArgsTensorinvSpecifyDefault) {
   // The second argument is specified, but the value is the same as the default
   // value. It's treated as "not specified" since the value can be fetched from
   // schema.
   Module m("m");
   m.define(R"(
     def forward(self, input):
-      return torch.linalg_pinv(input, 1e-15)
+      return torch.linalg_tensorinv(input, 2)
   )");
   torch::jit::MobileCode code(m.get_method("forward").graph(), "forward");
   auto arg_nums = code.op_to_num_specified_args();
   ASSERT_EQ(arg_nums.size(), 1);
-  ASSERT_EQ(arg_nums["aten::linalg_pinv"], 1);
+  ASSERT_EQ(arg_nums["aten::linalg_tensorinv"], 1);
   std::vector<torch::jit::IValue> inputs;
-  const int N = 28;
-  auto input = torch::range(1, N * N, 1);
-  input[0] = 1; // a more stable matrix
-  input = input.view({N, N});
+  const int N = 4;
+  auto input = torch::rand({N, N, N, N});
   inputs.push_back(input);
   testLiteModuleCompareResultTensors(m, inputs);
+}
+
+void testDefaultArgsPinvWithOutArg(int num_args) {
+  Module m("m");
+  if (num_args == 1) {
+    m.define(R"(
+      def forward(self, input):
+        return torch.linalg_pinv(input, out=input)
+    )");
+  } else if (num_args == 2) {
+    m.define(R"(
+      def forward(self, input):
+        return torch.linalg_pinv(input, 1e-5, out=input)
+    )");
+  } else if (num_args == 3) {
+    m.define(R"(
+      def forward(self, input):
+        return torch.linalg_pinv(input, 1e-5, True, out=input)
+    )");
+  }
+
+  const int N = 28;
+  auto input = torch::range(1, N * N, 1);
+  input[0] = 10000; // a more stable matrix
+  input = input.view({N, N});
+  auto ref = m.run_method("forward", input);
+  TORCH_CHECK(!input.equal(torch::range(1, N * N, 1)));
+  TORCH_CHECK(input.equal(ref.toTensor()));
+}
+
+TEST(LiteInterpreterTest, DefaultArgsPinvWithOutArg) {
+  // Test with different number of specified arguments + out arg.
+  // Arguments not specified take default value.
+  for (int num_args = 1; num_args <= 3; ++num_args) {
+    testDefaultArgsPinvWithOutArg(num_args);
+  }
+}
+
+TEST(LiteInterpreterTest, DefaultArgsWithOutArg) {
+  Module m("m");
+  m.define(R"(
+    def forward(self, x, h):
+      torch.add(x, h, out=x)
+  )");
+
+  std::vector<IValue> inputs;
+  auto input_x = 2 * torch::ones({});
+  auto input_h = torch::ones({});
+  auto ref = m.run_method("forward", input_x, input_h);
+
+  std::stringstream ss;
+
+  m._save_for_mobile(ss, {}, true);
+  mobile::Module bc = _load_for_mobile(ss);
+  bc.run_method("forward", input_x, input_h);
+  AT_ASSERT(input_x.equal(4 * torch::ones({})));
+
+  auto ops = _get_model_ops_and_info(ss);
+  auto op = ops.find("aten::add.out");
+  TORCH_CHECK(
+      op != ops.end() && op->second.num_schema_args.has_value() &&
+      op->second.num_schema_args.value() == 3);
 }
 
 TEST(LiteInterpreterTest, TestExceptionStackWithTwoLevelModuleHierarchy) {
@@ -1457,6 +1417,592 @@ TEST(LiteInterpreterTest, OperatorCacheDifferentiatesDefaultArgs) {
   testLiteModuleCompareResultTensors(m, inputs, "forward");
   testLiteModuleCompareResultTensors(m, inputs, "forward2");
   testLiteModuleCompareResultTensors(m, inputs, "forward3");
+}
+
+TEST(RunTimeTest, RuntimeCall) {
+  //     def call(x):
+  //         return x + x
+  //
+  //     def forward(a):
+  //         x = a + call(a)
+  //         y = a + call(x)
+  //         return y
+
+  std::vector<IValue> instructionsCall{
+      to_tuple({"STORE", 1, 0}),
+      to_tuple({"LOAD", 1, 0}),
+      to_tuple({"MOVE", 1, 0}),
+      to_tuple({"LOADC", 0, 0}),
+      to_tuple({"OP", 0, 0}),
+      to_tuple({"RET", 0, 0}),
+  };
+  std::vector<IValue> instructionsFoo{
+      to_tuple({"STORE", 1, 0}),
+      to_tuple({"LOAD", 1, 0}),
+      to_tuple({"LOAD", 1, 0}),
+      to_tuple({"MOVE", 1, 0}),
+      to_tuple({"CALL", 0, 0}),
+      to_tuple({"LOADC", 0, 0}),
+      to_tuple({"OP", 0, 0}),
+      to_tuple({"CALL", 0, 0}),
+      to_tuple({"LOADC", 0, 0}),
+      to_tuple({"OP", 0, 0}),
+      to_tuple({"RET", 0, 0}),
+  };
+  std::vector<IValue> operatorsFoo{
+      to_tuple({"aten::add", "Tensor", 3}),
+  };
+  std::vector<IValue> constantsFoo{
+      1,
+  };
+  std::vector<IValue> operatorsCall{
+      to_tuple({"aten::add", "Tensor", 3}),
+  };
+  std::vector<IValue> constantsCall{
+      1,
+  };
+  int64_t model_version = caffe2::serialize::kProducedBytecodeVersion;
+
+  auto foo = std::make_unique<mobile::Function>(c10::QualifiedName("foo"));
+  c10::ivalue::TupleElements debug_handles_m_tuple;
+  parseInstructions(
+      "foo",
+      std::move(*c10::ivalue::Tuple::create(instructionsFoo)).elements(),
+      debug_handles_m_tuple,
+      foo.get());
+  parseOperators(
+      std::move(*c10::ivalue::Tuple::create(operatorsFoo)).elements(),
+      model_version,
+      1,
+      foo.get());
+  parseConstants(
+      std::move(*c10::ivalue::Tuple::create(constantsFoo)).elements(),
+      foo.get());
+  const size_t rsize = 5;
+  parseRegisterSize(rsize, foo.get());
+
+  auto call = std::make_unique<mobile::Function>(c10::QualifiedName("call"));
+  parseInstructions(
+      "call",
+      std::move(*c10::ivalue::Tuple::create(instructionsCall)).elements(),
+      debug_handles_m_tuple,
+      call.get());
+  parseOperators(
+      std::move(*c10::ivalue::Tuple::create(operatorsCall)).elements(),
+      model_version,
+      1,
+      call.get());
+  parseConstants(
+      std::move(*c10::ivalue::Tuple::create(constantsCall)).elements(),
+      call.get());
+  parseRegisterSize(rsize, call.get());
+
+  foo->append_function(*call);
+
+  std::vector<IValue> inputs{at::tensor(1)};
+  foo->run(inputs);
+  auto output = inputs[0];
+  ASSERT_EQ(output, at::tensor(7));
+}
+
+TEST(LiteInterpreterTest, OperatorSize1) {
+  Module m("m");
+  m.define(R"(
+    def forward(self, input: Tensor, scale:float):
+      return torch.upsample_nearest2d(input, [1, 1], float(scale), float(scale))
+  )");
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  const auto& func = bc.get_method("forward").function();
+  ASSERT_EQ(
+      func.get_code().operator_input_sizes_.size(),
+      func.get_code().operators_.size());
+}
+
+TEST(LiteInterpreterTest, OperatorTest2) { // NOLINT (use =delete in gtest)
+  const std::vector<std::string> test_programs{
+      // test invoking a method with default parameter
+      R"(
+      def test_func(self, x, b : int = 4):
+        return self.foo + x + b
+      )",
+      // inner method call with default parameter (gets inlined)
+      R"(
+      def add_with_default_arg(self, x, b : int = 4):
+        return self.foo + x + b
+      def test_func(self, x):
+        return self.add_with_default_arg(x)  # invoke method w/ default arg
+      )",
+      // simple method call
+      R"(
+      def test_func(self, x):
+        b = 4
+        return self.foo + x + b
+      )",
+  };
+  for (const auto& test_program : test_programs) {
+    Module m("m");
+    m.register_parameter("foo", torch::ones({}), false);
+    m.define(test_program);
+
+    std::stringstream ss;
+    m._save_for_mobile(ss);
+    mobile::Module bc = _load_for_mobile(ss);
+    const auto& func = bc.get_method("test_func").function();
+    ASSERT_EQ(
+        func.get_code().operator_input_sizes_.size(),
+        func.get_code().operators_.size());
+  }
+}
+
+#if !defined FB_XPLAT_BUILD
+// The following test run in fbcode only
+TEST(LiteInterpreterUpgraderTest, DivTensorV2) {
+  std::string filePath(__FILE__);
+  auto test_model_file = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file.append("upgrader_models/test_versioned_div_tensor_v2.ptl");
+  /*
+  (('__torch__.MyModule.forward',
+    (('instructions',
+      (('STOREN', 1, 3),
+       ('DROPR', 1, 0),
+       ('LOAD', 2, 0),
+       ('LOAD', 3, 0),
+       ('OP', 0, 0),
+       ('LOAD', 2, 0),
+       ('LOAD', 3, 0),
+       ('OP', 1, 0),
+       ('MOVE', 2, 0),
+       ('MOVE', 3, 0),
+       ('OP', 2, 0),
+       ('TUPLE_CONSTRUCT', 3, 0),
+       ('RET', 0, 0))),
+     ('operators',
+      (('aten::div', 'Tensor'),
+       ('aten::div', 'Tensor'),
+       ('aten::div', 'Tensor'))),
+     ('constants', ()),
+     ('types', ()),
+     ('register_size', 3))),)
+
+  */
+  mobile::Module m_module = _load_for_mobile(test_model_file);
+  auto intrsuction_list =
+      m_module.get_method("forward").function().get_code().instructions_;
+  uint64_t number_of_call_instruction = 0;
+  for (auto& instruction : intrsuction_list) {
+    number_of_call_instruction += (instruction.op == OpCode::CALL);
+  }
+  // 3 operators will use upgrader
+  ASSERT_EQ(number_of_call_instruction, 3);
+
+  std::vector<IValue> inputs = {
+      IValue(6 * torch::ones({1})), IValue(3 * torch::ones({1}))};
+  auto actual_output = m_module.forward(inputs);
+  auto expect_output = 2.0 * torch::ones({1});
+  auto actual_output_list = actual_output.toTuple()->elements();
+  ASSERT_TRUE(actual_output_list[0].toTensor().equal(expect_output));
+}
+
+TEST(LiteInterpreterUpgraderTest, DivTensorOutV2) {
+  std::string filePath(__FILE__);
+  auto test_model_file = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file.append(
+      "upgrader_models/test_versioned_div_tensor_out_v2.ptl");
+  /*
+  (('__torch__.MyModule.forward',
+    (('instructions',
+      (('STOREN', 1, 4),
+       ('DROPR', 1, 0),
+       ('MOVE', 2, 0),
+       ('MOVE', 3, 0),
+       ('MOVE', 4, 0),
+       ('OP', 0, 0),
+       ('RET', 0, 0))),
+     ('operators', (('aten::div', 'out'),)),
+     ('constants', ()),
+     ('types', ()),
+     ('register_size', 4))),)
+  */
+  mobile::Module m_module = _load_for_mobile(test_model_file);
+
+  auto intrsuction_list =
+      m_module.get_method("forward").function().get_code().instructions_;
+  uint64_t number_of_call_instruction = 0;
+  for (auto& instruction : intrsuction_list) {
+    number_of_call_instruction += (instruction.op == OpCode::CALL);
+  }
+  // One operator will use upgrader
+  ASSERT_EQ(number_of_call_instruction, 1);
+
+  std::vector<IValue> inputs{
+      IValue(6 * torch::ones({1})),
+      IValue(3 * torch::ones({1})),
+      IValue(torch::empty({1}))};
+  m_module.forward(inputs);
+  auto expect_output = 2.0 * torch::ones({1});
+  auto actual_output = inputs[2].toTensor();
+  // The out argument will be overwritten with the output
+  ASSERT_TRUE(actual_output.equal(expect_output));
+}
+
+TEST(LiteInterpreterUpgraderTest, DivTensorInplaceV2) {
+  std::string filePath(__FILE__);
+  auto test_model_file = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file.append(
+      "upgrader_models/test_versioned_div_tensor_inplace_v2.ptl");
+  /*
+  (('__torch__.MyModule.forward',
+    (('instructions',
+      (('STOREN', 1, 3),
+       ('DROPR', 1, 0),
+       ('MOVE', 2, 0),
+       ('MOVE', 3, 0),
+       ('OP', 0, 0),
+       ('RET', 0, 0))),
+     ('operators', (('aten::div_', 'Tensor'),)),
+     ('constants', ()),
+     ('types', ()),
+     ('register_size', 3))),)
+  */
+  mobile::Module m_module = _load_for_mobile(test_model_file);
+
+  auto intrsuction_list =
+      m_module.get_method("forward").function().get_code().instructions_;
+  uint64_t number_of_call_instruction = 0;
+  for (auto& instruction : intrsuction_list) {
+    number_of_call_instruction += (instruction.op == OpCode::CALL);
+  }
+  // One operator will use upgrader
+  ASSERT_EQ(number_of_call_instruction, 1);
+
+  std::vector<IValue> inputs{
+      IValue(6 * torch::ones({1})), IValue(3 * torch::ones({1}))};
+  m_module.forward(inputs);
+  auto expect_output = 2.0 * torch::ones({1});
+  auto actual_output = inputs[0].toTensor();
+  // The out argument will be overwritten with the output
+  ASSERT_TRUE(actual_output.equal(expect_output));
+}
+
+TEST(LiteInterpreterUpgraderTest, DivScalarFloatV2) {
+  std::string filePath(__FILE__);
+  auto test_model_file = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file.append(
+      "upgrader_models/test_versioned_div_scalar_float_v2.ptl");
+  /*
+  (('__torch__.MyModuleFloat.forward',
+    (('instructions',
+    (('STOREN', 1, 3),
+    ('DROPR', 1, 0),
+    ('MOVE', 2, 0),
+    ('MOVE', 3, 0),
+    ('OP', 0, 0),
+    ('RET', 0, 0))),
+    ('operators', (('aten::div', 'Scalar'),)),
+    ('constants', ()),
+    ('types', ()),
+    ('register_size', 3))),)
+  */
+
+  mobile::Module m_module = _load_for_mobile(test_model_file);
+
+  auto intrsuction_list =
+      m_module.get_method("forward").function().get_code().instructions_;
+  uint64_t number_of_call_instruction = 0;
+  for (auto& instruction : intrsuction_list) {
+    number_of_call_instruction += (instruction.op == OpCode::CALL);
+  }
+  // One operator will use upgrader
+  ASSERT_EQ(number_of_call_instruction, 1);
+
+  std::vector<IValue> inputs{IValue(6 * torch::ones({1})), IValue(3.0)};
+  auto output = m_module.forward(inputs);
+  auto expect_output = 2.0 * torch::ones({1});
+  auto actual_output = output.toTensor();
+
+  // The out argument will be overwritten with the output
+  ASSERT_TRUE(actual_output.equal(expect_output));
+}
+
+TEST(LiteInterpreterUpgraderTest, DivScalarReciprocalFloatV2) {
+  std::string filePath(__FILE__);
+  auto test_model_file = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file.append(
+      "upgrader_models/test_versioned_div_scalar_reciprocal_float_v2.ptl");
+  /*
+  (('__torch__.MyModuleFloat.forward',
+    (('instructions',
+      (('STOREN', 1, 3),
+      ('DROPR', 1, 0),
+      ('MOVE', 2, 0),
+      ('OP', 0, 0),
+      ('MOVE', 3, 0),
+      ('OP', 1, 0),
+      ('RET', 0, 0))),
+    ('operators', (('aten::reciprocal', ''), ('aten::mul', 'Scalar'))),
+    ('constants', ()),
+    ('types', ()),
+    ('register_size', 3))),)
+  */
+  mobile::Module m_module = _load_for_mobile(test_model_file);
+
+  auto intrsuction_list =
+      m_module.get_method("forward").function().get_code().instructions_;
+  uint64_t number_of_call_instruction = 0;
+  for (auto& instruction : intrsuction_list) {
+    number_of_call_instruction += (instruction.op == OpCode::CALL);
+  }
+  // No operator will use upgrader
+  ASSERT_EQ(number_of_call_instruction, 0);
+
+  std::vector<IValue> inputs{IValue(6 * torch::ones({1})), IValue(3.0)};
+  auto output = m_module.forward(inputs);
+  auto expect_output = 0.5 * torch::ones({1});
+  auto actual_output = output.toTensor();
+  std::cout << "expect output: " << expect_output;
+  std::cout << "actual output: " << actual_output;
+  // The out argument will be overwritten with the output
+  ASSERT_TRUE(actual_output.equal(expect_output));
+}
+
+TEST(LiteInterpreterUpgraderTest, DivScalarReciprocalIntV2) {
+  std::string filePath(__FILE__);
+  auto test_model_file = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file.append(
+      "upgrader_models/test_versioned_div_scalar_reciprocal_int_v2.ptl");
+  /*
+  (('__torch__.MyModuleInt.forward',
+  (('instructions',
+    (('STOREN', 1, 3),
+     ('DROPR', 1, 0),
+     ('MOVE', 2, 0),
+     ('OP', 0, 0),
+     ('MOVE', 3, 0),
+     ('OP', 1, 0),
+     ('RET', 0, 0))),
+   ('operators', (('aten::reciprocal', ''), ('aten::mul', 'Scalar'))),
+   ('constants', ()),
+   ('types', ()),
+   ('register_size', 3))),)
+  */
+  mobile::Module m_module = _load_for_mobile(test_model_file);
+
+  auto intrsuction_list =
+      m_module.get_method("forward").function().get_code().instructions_;
+  uint64_t number_of_call_instruction = 0;
+  for (auto& instruction : intrsuction_list) {
+    number_of_call_instruction += (instruction.op == OpCode::CALL);
+  }
+  // No operator will use upgrader
+  ASSERT_EQ(number_of_call_instruction, 0);
+
+  std::vector<IValue> inputs{IValue(6 * torch::ones({1})), IValue(3.0)};
+  auto output = m_module.forward(inputs);
+  auto expect_output = 0.5 * torch::ones({1});
+  auto actual_output = output.toTensor();
+
+  // The out argument will be overwritten with the output
+  ASSERT_TRUE(actual_output.equal(expect_output));
+}
+
+TEST(LiteInterpreterUpgraderTest, DivScalarScalarV2) {
+  std::string filePath(__FILE__);
+  auto test_model_file = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file.append(
+      "upgrader_models/test_versioned_div_scalar_scalar_v2.ptl");
+  /*
+  (('__torch__.MyModule.forward',
+    (('instructions',
+      (('STOREN', 1, 5),
+      ('DROPR', 1, 0),
+      ('LOAD', 2, 0),
+      ('LOAD', 3, 0),
+      ('OP', 0, 0),
+      ('MOVE', 2, 0),
+      ('LOAD', 4, 0),
+      ('OP', 1, 0),
+      ('LOAD', 3, 0),
+      ('MOVE', 4, 0),
+      ('OP', 2, 0),
+      ('MOVE', 3, 0),
+      ('MOVE', 5, 0),
+      ('OP', 3, 0),
+      ('TUPLE_CONSTRUCT', 4, 0),
+      ('RET', 0, 0))),
+    ('operators',
+      (('aten::div', ''),
+      ('aten::div', 'float'),
+      ('aten::div', ''),
+      ('aten::div', 'int'))),
+    ('constants', ()),
+    ('types', ()),
+    ('register_size', 5))),)
+  */
+  mobile::Module m_module = _load_for_mobile(test_model_file);
+  auto intrsuction_list =
+      m_module.get_method("forward").function().get_code().instructions_;
+  uint64_t number_of_call_instruction = 0;
+  for (auto& instruction : intrsuction_list) {
+    number_of_call_instruction += (instruction.op == OpCode::CALL);
+  }
+  // No operator will use upgrader
+  ASSERT_EQ(number_of_call_instruction, 0);
+
+  std::vector<IValue> inputs{IValue(20.0), IValue(10), IValue(2.0), IValue(5)};
+  auto output = m_module.forward(inputs);
+  auto output_list = output.toTupleRef().elements();
+  auto expect_output = std::vector<IValue>(
+      {IValue(2.0), IValue(10.0), IValue(5.0), IValue(2.0)});
+  // auto actual_output = output.toTensor();
+  for (size_t i = 0; i < expect_output.size(); i++) {
+    ASSERT_EQ(output_list[i], expect_output[i]);
+  }
+}
+
+TEST(LiteInterpreterUpgraderTest, DivScalarIntV2) {
+  std::string filePath(__FILE__);
+  auto test_model_file = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file.append(
+      "upgrader_models/test_versioned_div_scalar_int_v2.ptl");
+  /*
+  (('__torch__.MyModuleInt.forward',
+    (('instructions',
+      (('STOREN', 1, 3),
+      ('DROPR', 1, 0),
+      ('MOVE', 2, 0),
+      ('MOVE', 3, 0),
+      ('OP', 0, 0),
+      ('RET', 0, 0))),
+    ('operators', (('aten::div', 'Scalar'),)),
+    ('constants', ()),
+    ('types', ()),
+    ('register_size', 3))),)
+  */
+  mobile::Module m_module = _load_for_mobile(test_model_file);
+
+  auto intrsuction_list =
+      m_module.get_method("forward").function().get_code().instructions_;
+  uint64_t number_of_call_instruction = 0;
+  for (auto& instruction : intrsuction_list) {
+    number_of_call_instruction += (instruction.op == OpCode::CALL);
+  }
+  // One operator will use upgrader
+  ASSERT_EQ(number_of_call_instruction, 1);
+
+  std::vector<IValue> inputs{IValue(6 * torch::ones({1})), IValue(3)};
+  auto output = m_module.forward(inputs);
+  auto expect_output = 2.0 * torch::ones({1});
+  auto actual_output = output.toTensor();
+
+  // The out argument will be overwritten with the output
+  ASSERT_TRUE(actual_output.equal(expect_output));
+}
+
+TEST(LiteInterpreterUpgraderTest, DivScalarInplaceFloatV2) {
+  std::string filePath(__FILE__);
+  auto test_model_file = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file.append(
+      "upgrader_models/test_versioned_div_scalar_inplace_float_v2.ptl");
+  /*
+  (('__torch__.MyModuleFloat.forward',
+    (('instructions',
+      (('STOREN', 1, 3),
+      ('DROPR', 1, 0),
+      ('MOVE', 2, 0),
+      ('MOVE', 3, 0),
+      ('OP', 0, 0),
+      ('RET', 0, 0))),
+    ('operators', (('aten::div_', 'Scalar'),)),
+    ('constants', ()),
+    ('types', ()),
+    ('register_size', 3))),)
+  */
+
+  mobile::Module m_module = _load_for_mobile(test_model_file);
+
+  auto intrsuction_list =
+      m_module.get_method("forward").function().get_code().instructions_;
+  uint64_t number_of_call_instruction = 0;
+  for (auto& instruction : intrsuction_list) {
+    number_of_call_instruction += (instruction.op == OpCode::CALL);
+  }
+  // One operator will use upgrader
+  ASSERT_EQ(number_of_call_instruction, 1);
+
+  std::vector<IValue> inputs{IValue(6 * torch::ones({1})), IValue(3.0)};
+  auto output = m_module.forward(inputs);
+  auto expect_output = 2.0 * torch::ones({1});
+  auto actual_output = output.toTensor();
+
+  // The out argument will be overwritten with the output
+  ASSERT_TRUE(actual_output.equal(expect_output));
+}
+
+TEST(LiteInterpreterUpgraderTest, DivScalarInplaceIntV2) {
+  std::string filePath(__FILE__);
+  auto test_model_file = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file.append(
+      "upgrader_models/test_versioned_div_scalar_inplace_int_v2.ptl");
+  /*
+  (('__torch__.MyModuleInt.forward',
+    (('instructions',
+      (('STOREN', 1, 3),
+       ('DROPR', 1, 0),
+       ('MOVE', 2, 0),
+       ('MOVE', 3, 0),
+       ('OP', 0, 0),
+       ('RET', 0, 0))),
+     ('operators', (('aten::div_', 'Scalar'),)),
+     ('constants', ()),
+     ('types', ()),
+     ('register_size', 3))),)
+  */
+
+  mobile::Module m_module = _load_for_mobile(test_model_file);
+
+  auto intrsuction_list =
+      m_module.get_method("forward").function().get_code().instructions_;
+  uint64_t number_of_call_instruction = 0;
+  for (auto& instruction : intrsuction_list) {
+    number_of_call_instruction += (instruction.op == OpCode::CALL);
+  }
+  // One operator will use upgrader
+  ASSERT_EQ(number_of_call_instruction, 1);
+
+  std::vector<IValue> inputs{IValue(6 * torch::ones({1})), IValue(3)};
+  auto output = m_module.forward(inputs);
+  auto expect_output = 2.0 * torch::ones({1});
+  auto actual_output = output.toTensor();
+
+  // The out argument will be overwritten with the output
+  ASSERT_TRUE(actual_output.equal(expect_output));
+}
+
+#endif // !defined(FB_XPLAT_BUILD)
+
+TEST(LiteInterpreterUpgraderTest, Upgrader) {
+  std::vector<mobile::Function> upgrader_functions;
+
+  for (auto& byteCodeFunctionWithOperator : getUpgraderBytecodeList()) {
+    ASSERT_EQ(
+        byteCodeFunctionWithOperator.function.get_code().operators_.size(),
+        byteCodeFunctionWithOperator.function.get_code().op_names_.size());
+    if (byteCodeFunctionWithOperator.function.get_code().operators_.empty()) {
+      for (const auto& op : byteCodeFunctionWithOperator.operators) {
+        byteCodeFunctionWithOperator.function.append_operator(
+            op.name,
+            op.overload_name,
+            op.num_specified_args,
+            caffe2::serialize::kMaxSupportedFileFormatVersion);
+      }
+    }
+    upgrader_functions.push_back(byteCodeFunctionWithOperator.function);
+  }
+
+  ASSERT_EQ(getUpgraderBytecodeList().size(), upgrader_functions.size());
 }
 
 } // namespace jit

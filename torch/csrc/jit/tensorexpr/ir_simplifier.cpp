@@ -2351,7 +2351,9 @@ ExprPtr buf_flat_size(BufPtr v) {
 StmtPtr TermExpander::mutate(AllocatePtr v) {
   BufPtr buf = v->buf();
   BufPtr buf_new = to<Buf>(v->buf()->accept_mutator(this));
-  TORCH_INTERNAL_ASSERT(buf_new);
+  TORCH_INTERNAL_ASSERT(
+      buf_new,
+      buildErrorMessage("TermExpander mutation produced null for Buf."));
   ExprPtr flattened = buf_flat_size(buf_new);
 
   if (flattened->isConstant() && immediateEquals(flattened, 0)) {
@@ -2368,7 +2370,9 @@ StmtPtr TermExpander::mutate(AllocatePtr v) {
 StmtPtr TermExpander::mutate(FreePtr v) {
   BufPtr buf = v->buf();
   BufPtr buf_new = to<Buf>(v->buf()->accept_mutator(this));
-  TORCH_INTERNAL_ASSERT(buf_new);
+  TORCH_INTERNAL_ASSERT(
+      buf_new,
+      buildErrorMessage("TermExpander mutation produced null for Buf."));
 
   if (eliminated_allocations_.count(buf_new->base_handle())) {
     eliminated_allocations_.erase(buf_new->base_handle());
@@ -2871,10 +2875,31 @@ ExprPtr SimplifierUnderContext::mutate(DivPtr v) {
 
   std::ostringstream oss;
   if (auto ret = distributeDiv(lhs, rhs, var_bound_info_)) {
+    GRAPH_DEBUG("SimplifierUnderContext: ", *v, " => ", *ret);
     // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
-    oss << "SimplifierUnderContext: " << *v << " => " << *ret << "\n";
-    GRAPH_DEBUG(oss.str());
     return ret->accept_mutator(this);
+  }
+
+  // i / N -> 0 if the range of i's values is a subset of [0, N)
+  // where N is an integer constant
+  auto lhsVar = to<Var>(lhs);
+  ExprPtr rhsScalar = rhs->isConstant() ? rhs : nullptr;
+  if (lhsVar && rhsScalar && !rhsScalar->dtype().is_floating_point()) {
+    auto got = var_bound_info_.find(lhsVar);
+    if (got != var_bound_info_.end()) {
+      auto start = got->second.first;
+      auto end = got->second.second;
+      ExprPtr check_start = IRSimplifier::simplify(
+          alloc<CompareSelect>(start, immLike(start, 0), kGE));
+      ExprPtr check_end =
+          IRSimplifier::simplify(alloc<CompareSelect>(end, rhsScalar, kLE));
+      if (check_start->isConstant() && check_end->isConstant() &&
+          immediateEquals(check_start, 1) && immediateEquals(check_end, 1)) {
+        GRAPH_DEBUG(
+            "SimplifierUnderContext: ", *v, " => ", *immLike(lhsVar, 0));
+        return immLike(lhsVar, 0);
+      }
+    }
   }
 
   ExprPtr lhs_new = lhs->accept_mutator(this);
@@ -2891,8 +2916,7 @@ ExprPtr SimplifierUnderContext::mutate(ModPtr v) {
 
   std::ostringstream oss;
   if (auto ret = distributeMod(lhs, rhs, var_bound_info_)) {
-    oss << "SimplifierUnderContext: " << *v << " => " << *ret << "\n";
-    GRAPH_DEBUG(oss.str());
+    GRAPH_DEBUG("SimplifierUnderContext: ", *v, " => ", *ret);
     // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     return ret->accept_mutator(this);
   }
@@ -2912,8 +2936,7 @@ ExprPtr SimplifierUnderContext::mutate(ModPtr v) {
           IRSimplifier::simplify(alloc<CompareSelect>(end, rhsScalar, kLE));
       if (check_start->isConstant() && check_end->isConstant() &&
           immediateEquals(check_start, 1) && immediateEquals(check_end, 1)) {
-        oss << "SimplifierUnderContext: " << *v << " => " << *lhsVar << "\n";
-        GRAPH_DEBUG(oss.str());
+        GRAPH_DEBUG("SimplifierUnderContext: ", *v, " => ", *lhsVar);
         return lhsVar;
       }
     }

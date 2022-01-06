@@ -5,6 +5,7 @@
 #include <c10/core/WrapDimMinimal.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/Optional.h>
+#include <c10/util/irange.h>
 
 C10_DEFINE_bool(
     caffe2_keep_on_shrink,
@@ -25,7 +26,7 @@ static std::string noop_name_fn(const PyInterpreter*) {
   return "<unloaded interpreter>";
 }
 
-static void noop_decref_fn(const PyInterpreter*, PyObject*) {
+static void noop_decref_fn(const PyInterpreter*, PyObject*, bool) {
   // no-op
 }
 
@@ -84,8 +85,9 @@ const at::Tensor& TensorImpl::grad() const {
   return autograd_meta_->grad();
 }
 
-const at::Tensor& TensorImpl::_fw_grad(uint64_t level, const at::Tensor& self)
-    const {
+const at::Tensor& TensorImpl::_fw_grad(
+    uint64_t level,
+    const at::TensorBase& self) const {
   // See TensorImpl::grad() above for explanation about the line below
   if (!autograd_meta_)
     return impl::GetAutogradMetaFactory()->undefined_tensor();
@@ -93,8 +95,8 @@ const at::Tensor& TensorImpl::_fw_grad(uint64_t level, const at::Tensor& self)
 }
 
 void TensorImpl::_set_fw_grad(
-    const at::Tensor& new_grad,
-    const at::Tensor& self,
+    const at::TensorBase& new_grad,
+    const at::TensorBase& self,
     uint64_t level,
     bool is_inplace_op) {
   if (!autograd_meta_)
@@ -334,7 +336,7 @@ bool TensorImpl::compute_non_overlapping_and_dense() const {
   }
   SmallVector<int64_t, 5> perm;
   perm.resize(dim());
-  for (int64_t i = 0; i < dim(); i++) {
+  for (const auto i : c10::irange(dim())) {
     perm[i] = i;
   }
   // Sort by strides, leaving 0 and 1 sized dims at the end of the array
@@ -348,7 +350,7 @@ bool TensorImpl::compute_non_overlapping_and_dense() const {
         sizes_and_strides_.stride_at_unchecked(b);
   });
   auto require_stride = 1;
-  for (int64_t i = 0; i < dim(); i++) {
+  for (const auto i : c10::irange(dim())) {
     const auto size_perm_i = sizes_and_strides_.size_at_unchecked(perm[i]);
     if (size_perm_i < 2) {
       return true;
@@ -369,7 +371,8 @@ void TensorImpl::release_resources() {
   if (owns_pyobj_) {
     TORCH_INTERNAL_ASSERT(pyobj_interpreter_ != nullptr);
     TORCH_INTERNAL_ASSERT(pyobj_ != nullptr);
-    pyobj_interpreter_.load(std::memory_order_acquire)->decref(pyobj_);
+    pyobj_interpreter_.load(std::memory_order_acquire)
+        ->decref(pyobj_, /*is_tensor*/ true);
     // NB: this destructor can only be entered when there are no
     // references to this C++ object (obviously), NOR any references
     // to the PyObject (if there are references to the PyObject,
@@ -615,7 +618,7 @@ TorchDispatchTypeObject::TorchDispatchTypeObject(
     : data_(type_object), pyinterpreter_(pyinterpreter) {}
 
 TorchDispatchTypeObject::~TorchDispatchTypeObject() {
-  pyinterpreter_->decref(data_);
+  pyinterpreter_->decref(data_, /*is_tensor*/ false);
 }
 
 c10::impl::PyInterpreter* TorchDispatchTypeObject::pyinterpreter() const {

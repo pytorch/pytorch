@@ -60,7 +60,7 @@ class TestWorkspace(unittest.TestCase):
         self.assertTupleEqual(
             op_cost,
             namedtuple("Cost", ["flops", "bytes_written", "bytes_read"])(
-                1152, 256, 2084
+                1152, 256, 4168
             ),
         )
 

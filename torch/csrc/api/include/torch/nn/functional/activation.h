@@ -645,8 +645,8 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
 
       if (!key.defined()) {
         TORCH_INTERNAL_ASSERT(!value.defined());
-        k = {};
-        v = {};
+        k.reset();
+        v.reset();
       } else {
         // This is inline in_proj function with in_proj_weight and in_proj_bias
         _b = in_proj_bias;

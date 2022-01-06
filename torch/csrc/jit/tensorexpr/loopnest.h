@@ -5,7 +5,7 @@
 #include <unordered_set>
 #include <vector>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/tensorexpr/fwd_decls.h>
 
 namespace torch {
@@ -108,6 +108,17 @@ class TORCH_API LoopNest {
   std::vector<std::vector<ForPtr>> getAllLoopNestsWritingToBuf(BufPtr) const;
 
   StmtPtr simplify();
+
+  // Sanitize variables and buffer names.
+  // The pass assigns predefined names for loop index variables
+  // (i,j,k,l,m,n,o,p,i1,j1,k1,...) and ensures these names are not conflicting
+  // anywhere. It also removes duplicates from other Buf nad Var names as well
+  // as replaces illegal characters in them with underscores.
+  //
+  // Note: since it's currently technically possible to use the same variable
+  // as index in two different loops, this transformation finds such cases and
+  // introduces new variables to avoid duplication.
+  static StmtPtr sanitizeNames(StmtPtr s);
 
   bool computeInline(StmtPtr s);
   bool computeInline(BufPtr b);
@@ -538,19 +549,19 @@ class TORCH_API LoopNest {
   void vectorizeInnerLoops();
 
   void eliminateDeadStores();
+
   void prepareForCodegen();
 
   const std::unordered_set<BufPtr> getInputBufs() const;
   const std::unordered_set<BufPtr> getOutputBufs() const {
     return output_bufs_;
   }
+  std::vector<BufPtr> getIntermediateBufs() const;
 
  private:
   void initialize(
       const std::vector<Tensor>& output_tensors,
       const std::vector<Tensor>& tensors_to_compute);
-  StmtPtr insertAllocFree(StmtPtr stmt);
-  const std::unordered_set<BufPtr> getIntermediateBufs() const;
 
   StmtPtr root_stmt_;
 
@@ -575,6 +586,9 @@ struct BufLoadOrStoreUse {
  */
 std::unordered_map<BufPtr, std::vector<BufLoadOrStoreUse>> findLoadOrStoreUses(
     StmtPtr s);
+
+// replaces all invalid characters with underscore
+TORCH_API std::string sanitizeName(const std::string& input_name);
 
 } // namespace tensorexpr
 } // namespace jit

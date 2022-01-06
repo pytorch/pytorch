@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/core/alias_info.h>
+#include <ATen/core/interned_strings.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/edit_distance.h>
 
@@ -241,6 +242,7 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       prim::CudaFusionGroup, // optimization pass adds it
       prim::CudaFusionGuard, // optimization pass adds it
       prim::TensorExprGroup, // optimization pass adds it
+      prim::TensorExprDynamicGroup, // optimization pass adds it
       prim::StaticSubgraph, // optimization pass adds it
       prim::ConstantMKLDNNTensor, // optimization pass adds it
       prim::BroadcastMKLDNNTensors, // optimization pass adds it
@@ -281,6 +283,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::CudaFusionGroup,
       prim::DifferentiableGraph,
       prim::TensorExprGroup,
+      prim::TensorExprDynamicGroup,
       prim::StaticSubgraph,
       prim::FunctionalGraph,
       prim::Constant,
@@ -353,10 +356,10 @@ void registerOperator(Operator&& op) {
           op.schema().name(),
           ". File a bug to add a case for this operator.\n");
     }
-    if (!aliasAnalysisHasSpecialCaseFor(s) &&
+    if (aliasAnalysisHasSpecialCaseFor(s) &&
         op.aliasAnalysisKind() == AliasAnalysisKind::CONSERVATIVE) {
       AT_ERROR(
-          "Missing special case in alias analysis for non-schematized"
+          "Conflict in special casing in alias analysis for non-schematized"
           " operator ",
           op.schema().name(),
           ". File a bug to add a case for this operator.\n");
