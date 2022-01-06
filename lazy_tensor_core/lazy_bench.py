@@ -362,6 +362,15 @@ def to_device(tensors, device):
     except ImportError:
         pass
 
+    try:
+        import torchbenchmark.models.soft_actor_critic.nets
+        if isinstance(tensors, torchbenchmark.models.soft_actor_critic.nets.SquashedNormal):
+            # a SquashedNormal is a py class that holds a loc and scale torch tensor,
+            # so convert it to a tuple for compatibility with downstream check_results
+            tensors = (tensors.loc, tensors.scale)
+    except ImportError:
+        pass
+
     if isinstance(tensors, tuple) or isinstance(tensors, list):
         return tuple(to_device(i, device) for i in tensors)
     elif isinstance(tensors, dict):
