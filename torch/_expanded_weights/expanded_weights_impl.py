@@ -58,7 +58,8 @@ class ExpandedWeight(torch.Tensor):
         if func == torch.nn.functional.conv2d:
             remaining_kwargs = 7 - len(args)
             remaining_kwargs_options = cls.conv_kwarg_options[4 - remaining_kwargs:]
-            kwargs = {key: cls.conv_kwarg_defaults[key] for key in remaining_kwargs_options} | kwargs
+            ordered_kwargs = tuple(kwargs.get(key, cls.conv_kwarg_defaults[key]) for key in remaining_kwargs_options)
+            return cls.handled_functions[torch.nn.functional.conv2d].apply(*(args + ordered_kwargs))
         if func in cls.handled_functions:
             return cls.handled_functions[func].apply(*(args + tuple(kwargs.values())))
         if func in cls.supported_methods:
