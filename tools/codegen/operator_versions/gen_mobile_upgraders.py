@@ -8,13 +8,20 @@ import torch
 from tools.codegen.code_template import CodeTemplate
 from torch.jit.operator_upgraders import generate_bytecode
 
-
 class ByteCode(Enum):
     instructions = 1
     constants = 2
     types = 3
     operators = 4
     register_size = 5
+
+EXCLUDED_OP_SET = ([
+    "aten::full.names", "aten::full.out", "aten::full",
+])
+
+EXCLUE_UPGRADER_SET = ([
+    "full_0_4", "full_out_0_4"
+])
 
 ONE_INSTRUCTION = CodeTemplate("""
     Instruction{OpCode::${operator_name}, ${X}, ${N}},""")
@@ -94,6 +101,7 @@ UPGRADER_CPP_SRC = CodeTemplate("""/**
  * cd ~/pytorch && python torch/csrc/jit/mobile/upgrader_mobile.cpp
  */
 
+#include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/mobile/upgrader_mobile.h>
 #include <ATen/core/ivalue.h>
 
@@ -107,10 +115,24 @@ namespace jit {
 // From operator_versions_map
 ${operator_version_map}
 
-std::vector<ByteCodeFunctionWithOperator> getUpgraderBytecodeList() {
-  static std::vector<ByteCodeFunctionWithOperator> upgraderBytecodeList({
-       ${upgrader_bytecode}
-  });
+const std::vector<ByteCodeFunctionWithOperator>& getUpgraderBytecodeList() {
+  auto generate_upgrader_bytecode_list = []() {
+    std::vector<ByteCodeFunctionWithOperator> upgrader_function_list({
+               ${upgrader_bytecode}
+            });
+    for (const auto& upgrader_function : upgrader_function_list) {
+      for (const auto& op : upgrader_function.operators) {
+        upgrader_function.function.append_operator(
+            op.name,
+            op.overload_name,
+            op.num_specified_args,
+            caffe2::serialize::kMaxSupportedFileFormatVersion);
+      }
+    }
+    return upgrader_function_list;
+  };
+  static std::vector<ByteCodeFunctionWithOperator> upgraderBytecodeList =
+      generate_upgrader_bytecode_list();
   return upgraderBytecodeList;
 }
 
@@ -155,6 +177,8 @@ def construct_constants(constants_list_from_yaml: List[Any]) -> str:
             convert_constant = "true" if constant_from_yaml else "false"
         elif constant_from_yaml is None:
             convert_constant = ""
+        elif isinstance(constant_from_yaml, int):
+            convert_constant = str(constant_from_yaml)
         else:
             raise ValueError(
                 f"The type of {constant_from_yaml} is {type(constant_from_yaml)}. "
@@ -222,7 +246,7 @@ def construct_version_maps(upgrader_bytecode_function_to_index_map: Dict[str, An
     for op_name in sorted_version_map:
         upgraders_in_version_map_part = []
         # TODO: remove the skip after these two operators schemas are fixed
-        if op_name == "aten::full.names" or op_name == "aten::full.out":
+        if op_name in EXCLUDED_OP_SET:
             continue
         for upgrader_entry in sorted_version_map[op_name]:
             # Split a string by "_" and filter empty string in the list
@@ -268,7 +292,7 @@ def write_cpp(cpp_path: str, upgrader_dict: List[Dict[str, Any]]) -> None:
     for upgrader_bytecode in upgrader_dict:
         for upgrader_name, bytecode in upgrader_bytecode.items():
             # TODO: remove the skip after these two operators schemas are fixed
-            if upgrader_name == "full_names_0_4" or upgrader_name == "full_out_0_4":
+            if upgrader_name in EXCLUE_UPGRADER_SET:
                 continue
             instruction_list_str = ""
             constant_list_str = ""
