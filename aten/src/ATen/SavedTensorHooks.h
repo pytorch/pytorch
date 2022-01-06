@@ -8,7 +8,8 @@
 namespace at {
 
 struct TORCH_API SavedTensorDefaultHooks {
-  static void set_hooks(PyObject* pack_hook, PyObject* unpack_hook);
+  static void push_hooks(PyObject* pack_hook, PyObject* unpack_hook);
+  static void pop_hooks();
   static std::pair<PyObject*, PyObject*> get_hooks();
   static void enable();
 };
