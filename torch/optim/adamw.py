@@ -60,7 +60,7 @@ class AdamW(Optimizer):
         maximize (bool, optional): maximize the params based on the objective, instead of
             minimizing (default: False)
         foreach (bool, optional): whether foreach implementation of optimizer
-            is used (default: False)
+            is used (default: None)
 
     .. _Decoupled Weight Decay Regularization:
         https://arxiv.org/abs/1711.05101
@@ -69,7 +69,7 @@ class AdamW(Optimizer):
     """
 
     def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
-                 weight_decay=1e-2, amsgrad=False, foreach=False, *, maximize: bool = False):
+                 weight_decay=1e-2, amsgrad=False, foreach=None, *, maximize: bool = False):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -169,6 +169,7 @@ def adamw(params: List[Tensor],
           exp_avg_sqs: List[Tensor],
           max_exp_avg_sqs: List[Tensor],
           state_steps: List[int],
+          foreach: bool = None,
           *,
           amsgrad: bool,
           beta1: float,
@@ -176,12 +177,18 @@ def adamw(params: List[Tensor],
           lr: float,
           weight_decay: float,
           eps: float,
-          maximize: bool,
-          foreach: bool):
+          maximize: bool):
     r"""Functional API that performs AdamW algorithm computation.
 
     See :class:`~torch.optim.AdamW` for details.
     """
+
+    if foreach is None:
+        # Placeholder for more complex foreach logic to be added when value is not set
+        foreach = False
+
+    if foreach and torch.jit.is_scripting():
+        raise RuntimeError('torch.jit.script not supported with foreach optimizers')
 
     if foreach and not torch.jit.is_scripting():
         func = _multi_tensor_adamw
@@ -260,6 +267,9 @@ def _multi_tensor_adamw(params: List[Tensor],
                         weight_decay: float,
                         eps: float,
                         maximize: bool):
+
+    if len(params) == 0:
+        return
 
     if maximize:
         grads = torch._foreach_neg(tuple(grads))  # type: ignore[assignment]

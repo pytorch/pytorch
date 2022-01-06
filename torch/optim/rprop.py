@@ -49,10 +49,10 @@ class Rprop(Optimizer):
         step_sizes (Tuple[float, float], optional): a pair of minimal and
             maximal allowed step sizes (default: (1e-6, 50))
         foreach (bool, optional): whether foreach implementation of optimizer
-            is used (default: False)
+            is used (default: None)
     """
 
-    def __init__(self, params, lr=1e-2, etas=(0.5, 1.2), step_sizes=(1e-6, 50), foreach=False):
+    def __init__(self, params, lr=1e-2, etas=(0.5, 1.2), step_sizes=(1e-6, 50), foreach=None):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 < etas[0] < 1.0 < etas[1]:
@@ -122,16 +122,23 @@ def rprop(params: List[Tensor],
           grads: List[Tensor],
           prevs: List[Tensor],
           step_sizes: List[Tensor],
+          foreach: bool = None,
           *,
           step_size_min: float,
           step_size_max: float,
           etaminus: float,
-          etaplus: float,
-          foreach: bool):
+          etaplus: float):
     r"""Functional API that performs rprop algorithm computation.
 
     See :class:`~torch.optim.Rprop` for details.
     """
+
+    if foreach is None:
+        # Placeholder for more complex foreach logic to be added when value is not set
+        foreach = False
+
+    if foreach and torch.jit.is_scripting():
+        raise RuntimeError('torch.jit.script not supported with foreach optimizers')
 
     if foreach and not torch.jit.is_scripting():
         func = _multi_tensor_rprop
@@ -191,6 +198,9 @@ def _multi_tensor_rprop(params: List[Tensor],
                         step_size_max: float,
                         etaminus: float,
                         etaplus: float):
+
+    if len(params) == 0:
+        return
 
     signs = torch._foreach_mul(grads, prevs)
     signs = [s.sign() for s in signs]
