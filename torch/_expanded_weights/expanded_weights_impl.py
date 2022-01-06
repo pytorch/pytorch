@@ -1,6 +1,8 @@
+from torch._C import _TensorBase
 import torch
 import functools
 
+from torch import Tensor
 from typing import Callable, Dict, cast
 
 HANDLED_FUNCTIONS: Dict[Callable, torch.autograd.Function] = {}
@@ -37,32 +39,37 @@ class ExpandedWeight(torch.Tensor):
     conv_kwarg_options = ['stride', 'padding', 'dilation', 'groups']
     conv_kwarg_defaults = {'stride': 1, 'padding': 0, 'dilation': 1, 'groups': 1}
 
-    def __new__(cls, orig_weight, batch_size):
-        ret = torch.Tensor._make_subclass(cls, orig_weight.detach(), orig_weight.requires_grad)
-        ret = cast(ExpandedWeight, ret)
-        ret.batch_size = batch_size
+    def __new__(cls, orig_weight, _):
+        ret = torch.Tensor._make_subclass(cast(_TensorBase, cls), orig_weight, orig_weight.requires_grad)
         return ret
+
+    supported_methods = (Tensor.size, Tensor.numel, Tensor.is_contiguous, Tensor.stride, Tensor.requires_grad_, 
+                         Tensor.__format__, Tensor.__eq__, Tensor.__getitem__, Tensor.detach, Tensor.dim,
+                         Tensor.ndimension, Tensor.register_hook, Tensor.__len__, Tensor.__index__, Tensor.__bool__,
+                         Tensor.__int__, Tensor.__float__, Tensor.__long__, Tensor.__nonzero__, Tensor.__setstate__,
+                         Tensor.__contains__, Tensor.__array__, Tensor.__array_wrap__, Tensor.eq, Tensor.__iter__,
+                         Tensor.detach_)
 
     @classmethod
     def __torch_function__(cls, func, _, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
-        if func not in cls.handled_functions:
-            # We cannot use a fallback here because we do not know the batch dimension for any regular tensor inputs,
-            # i.e. torch.add(torch.Tensor, ExpandedWeight)
-            raise RuntimeError(f"Expanded Weights encountered but cannot handle function {func.__name__}")
         if func == torch.nn.functional.conv2d:
             remaining_kwargs = 7 - len(args)
             remaining_kwargs_options = cls.conv_kwarg_options[4 - remaining_kwargs:]
             kwargs = {key: cls.conv_kwarg_defaults[key] for key in remaining_kwargs_options} | kwargs
-        return cls.handled_functions[func].apply(*(args + tuple(kwargs.values())))
+        if func in cls.handled_functions:
+            return cls.handled_functions[func].apply(*(args + tuple(kwargs.values())))
+        if func in cls.supported_methods:
+            return func(args[0].orig_weight, *args[1:])
+        # We cannot use a fallback here because we do not know the batch dimension for any regular tensor inputs,
+        # i.e. torch.add(torch.Tensor, ExpandedWeight)
+        raise RuntimeError(f"Expanded Weights encountered but cannot handle function {func.__name__}")
+
 
     @property
     def shape(self):
         return self.orig_weight.shape
-
-    def size(self):
-        return self.orig_weight.size()
 
     @property
     def dtype(self):
@@ -72,13 +79,6 @@ class ExpandedWeight(torch.Tensor):
     def grad(self):
         return None
 
-    @grad.setter
-    def grad(self, value):
-        if value is None:
-            return
-        else:
-            raise RuntimeError("ExpandedWeights should never have a grad value set on it.")
-
     @property
     def requires_grad(self):
         return self.orig_weight.requires_grad
@@ -86,23 +86,6 @@ class ExpandedWeight(torch.Tensor):
     @property
     def grad_fn(self):
         return None
-
-    def requires_grad_(self, mode=True):
-        return self.orig_weight.requires_grad_(mode)
-
-    def numel(self):
-        return self.orig_weight.numel()
-
-    def stride(self):
-        return self.orig_weight.stride()
-
-    def is_contiguous(self):
-        return self.orig_weight.is_contiguous()
-
-    def to(self, device):
-        if device == self.orig_weight.device:
-            return self
-        return ExpandedWeight(self.orig_weight.to(device), self.batch_size)
 
     @property
     def is_sparse(self):
@@ -116,14 +99,35 @@ class ExpandedWeight(torch.Tensor):
     def device(self):
         return self.orig_weight.device
 
-    def __eq__(self, other):
-        return self.orig_weight.__eq__(other)
+    @property
+    def is_cuda(self):
+        return self.orig_weight.is_cuda
+
+    @property
+    def layout(self):
+        return self.orig_weight.layout
+
+    @property
+    def ndim(self):
+        return self.orig_weight.ndim
+
+    @grad.setter
+    def grad(self, value):
+        if value is None:
+            return
+        else:
+            raise RuntimeError("ExpandedWeights should never have a grad value set on it.")
+
+    def to(self, device):
+        if device == self.orig_weight.device:
+            return self
+        return ExpandedWeight(self.orig_weight.to(device), self.batch_size)
+
+    def __deep_copy__(self):
+        return ExpandedWeight(self.orig_weight.__deepcopy__(), self.batch_size)
 
     def __hash__(self):
         return id(self)
-
-    def __format__(self, format_spec):
-        return self.orig_weight.__format__(format_spec)
 
     def __repr__(self):
         return "ExpandedWeight for:\n" + self.orig_weight.__repr__() + f" with batch size {self.batch_size}"
