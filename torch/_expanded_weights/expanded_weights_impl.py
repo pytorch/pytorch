@@ -32,7 +32,7 @@ class ExpandedWeight(torch.Tensor):
             raise RuntimeError("Can only build ExpandedWeights objects of tensors that require_grad")
         self.batch_size = batch_size
         self.orig_weight = orig_weight
-        self._grad = None  # for mypy typing of a read-write property
+        self._expanded_weight_grad = None  # for mypy typing of a read-write property
 
     handled_functions = HANDLED_FUNCTIONS
 
@@ -44,7 +44,7 @@ class ExpandedWeight(torch.Tensor):
         ret = torch.Tensor._make_subclass(cast(_TensorBase, cls), orig_weight, orig_weight.requires_grad)
         return ret
 
-    supported_methods = (Tensor.size, Tensor.numel, Tensor.is_contiguous, Tensor.stride, Tensor.requires_grad_, 
+    supported_methods = (Tensor.size, Tensor.numel, Tensor.is_contiguous, Tensor.stride, Tensor.requires_grad_,
                          Tensor.__format__, Tensor.__eq__, Tensor.__getitem__, Tensor.detach, Tensor.dim,
                          Tensor.ndimension, Tensor.register_hook, Tensor.__len__, Tensor.__index__, Tensor.__bool__,
                          Tensor.__int__, Tensor.__float__, Tensor.__long__, Tensor.__nonzero__, Tensor.__setstate__,
@@ -110,7 +110,7 @@ class ExpandedWeight(torch.Tensor):
 
     @property
     def grad(self):
-        return self._grad
+        return self._expanded_weight_grad
 
     @grad.setter
     def grad(self, value):
@@ -124,8 +124,8 @@ class ExpandedWeight(torch.Tensor):
             return self
         return ExpandedWeight(self.orig_weight.to(device), self.batch_size)
 
-    def __deep_copy__(self):
-        return ExpandedWeight(self.orig_weight.__deepcopy__(), self.batch_size)
+    def __deepcopy__(self, memo):
+        return ExpandedWeight(self.orig_weight.__deepcopy__(memo), self.batch_size)
 
     def __hash__(self):
         return id(self)
