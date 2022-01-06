@@ -38,6 +38,8 @@ class TORCH_API FileStore : public Store {
       const std::vector<std::string>& keys,
       const std::chrono::milliseconds& timeout) override;
 
+  int getWorldSize() override;
+
   // Returns the path used by the FileStore.
   const std::string& getPath() const noexcept {
     return path_;

@@ -852,9 +852,8 @@ std::unique_ptr<TCPClient> TCPClient::connect(
     const SocketAddress& addr,
     const TCPStoreOptions& opts) {
   auto timeout = std::chrono::duration_cast<std::chrono::seconds>(opts.timeout);
-  Socket socket = Socket::connect(addr.host,
-                                  addr.port,
-                                  SocketOptions{}.connect_timeout(timeout));
+  Socket socket = Socket::connect(
+      addr.host, addr.port, SocketOptions{}.connect_timeout(timeout));
 
   return std::make_unique<TCPClient>(std::move(socket));
 }
@@ -926,9 +925,8 @@ std::unique_ptr<TCPCallbackClient> TCPCallbackClient::connect(
     const SocketAddress& addr,
     const TCPStoreOptions& opts) {
   auto timeout = std::chrono::duration_cast<std::chrono::seconds>(opts.timeout);
-  Socket socket = Socket::connect(addr.host,
-                                  addr.port,
-                                  SocketOptions{}.connect_timeout(timeout));
+  Socket socket = Socket::connect(
+      addr.host, addr.port, SocketOptions{}.connect_timeout(timeout));
 
   int rawSocket = socket.handle();
 
@@ -953,8 +951,6 @@ void TCPCallbackClient::setCallback(
 
 } // namespace detail
 
-using detail::Socket;
-
 // TCPStore class methods
 TCPStore::TCPStore(
     const std::string& masterAddr,
@@ -977,7 +973,7 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
     : Store{opts.timeout},
       addr_{std::move(host)},
       numWorkers_{opts.numWorkers} {
-  Socket::initialize();
+  detail::Socket::initialize();
 
   if (opts.isServer) {
     server_ = detail::TCPServer::start(opts);
@@ -994,9 +990,15 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
   }
 
   callbackClient_ = detail::TCPCallbackClient::connect(addr_, opts);
+
+  // increment world size
+  add(worldSizeKey_, 1);
 }
 
-TCPStore::~TCPStore() = default;
+TCPStore::~TCPStore() {
+  // decrement world size
+  add(worldSizeKey_, -1);
+};
 
 void TCPStore::waitForWorkers() {
   if (numWorkers_ == c10::nullopt) {
@@ -1138,6 +1140,12 @@ void TCPStore::doWait(
   if (response != detail::WaitResponseType::STOP_WAITING) {
     TORCH_CHECK(false, "Stop_waiting response is expected");
   }
+}
+
+int TCPStore::getWorldSize() {
+  std::vector<uint8_t> dataVec = get(worldSizeKey_);
+  std::string worldSizeStr(dataVec.begin(), dataVec.end());
+  return std::stoi(worldSizeStr);
 }
 
 } // namespace c10d

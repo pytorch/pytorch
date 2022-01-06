@@ -57,6 +57,10 @@ class TORCH_API Store : public torch::CustomClassHolder {
       const std::vector<std::string>& keys,
       const std::chrono::milliseconds& timeout) = 0;
 
+  virtual int getWorldSize() {
+    TORCH_INTERNAL_ASSERT(false, "Not implemented.");
+  }
+
   virtual const std::chrono::milliseconds& getTimeout() const noexcept;
 
   virtual void setTimeout(const std::chrono::milliseconds& timeout);
@@ -79,6 +83,7 @@ class TORCH_API Store : public torch::CustomClassHolder {
 
  protected:
   std::chrono::milliseconds timeout_;
+  std::string worldSizeKey_ = "world_size/";
 };
 
 } // namespace c10d

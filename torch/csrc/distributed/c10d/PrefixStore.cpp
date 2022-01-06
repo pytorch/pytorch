@@ -79,4 +79,8 @@ void PrefixStore::setTimeout(const std::chrono::milliseconds& timeout) {
   store_->setTimeout(timeout);
 }
 
+int PrefixStore::getWorldSize() {
+  return store_->getWorldSize();
+}
+
 } // namespace c10d

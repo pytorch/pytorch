@@ -42,6 +42,8 @@ class TORCH_API PrefixStore : public Store {
 
   void watchKey(const std::string& key, WatchKeyCallback callback) override;
 
+  int getWorldSize() override;
+
  protected:
   std::string prefix_;
   c10::intrusive_ptr<Store> store_;

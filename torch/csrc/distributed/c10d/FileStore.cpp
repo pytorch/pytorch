@@ -271,7 +271,10 @@ FileStore::FileStore(const std::string& path, int numWorkers)
       pos_(0),
       numWorkers_(numWorkers),
       cleanupKey_("cleanup/"),
-      regularPrefix_("/") {}
+      regularPrefix_("/") {
+  // increment world size
+  add(worldSizeKey_, 1);
+}
 
 FileStore::~FileStore() {
   // If the file does not exist - exit.
@@ -298,6 +301,9 @@ FileStore::~FileStore() {
     // Best effort removal without checking the return
     std::remove(path_.c_str());
   }
+
+  // decrement world size
+  add(worldSizeKey_, -1);
 }
 
 void FileStore::set(const std::string& key, const std::vector<uint8_t>& value) {
@@ -352,8 +358,13 @@ std::vector<uint8_t> FileStore::get(const std::string& key) {
       const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
           std::chrono::steady_clock::now() - start);
       if (timeout_ != kNoTimeout && elapsed > timeout_) {
-          auto err = c10::str("Timeout waiting for key: ", key, " after ", timeout_.count(), " ms");
-          TORCH_CHECK(false, err);
+        auto err = c10::str(
+            "Timeout waiting for key: ",
+            key,
+            " after ",
+            timeout_.count(),
+            " ms");
+        TORCH_CHECK(false, err);
       }
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
       continue;
@@ -442,6 +453,12 @@ void FileStore::wait(
     /* sleep override */
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
+}
+
+int FileStore::getWorldSize() {
+  std::vector<uint8_t> dataVec = get(worldSizeKey_);
+  std::string worldSizeStr(dataVec.begin(), dataVec.end());
+  return std::stoi(worldSizeStr);
 }
 
 } // namespace c10d
