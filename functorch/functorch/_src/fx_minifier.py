@@ -171,7 +171,7 @@ def minimizer(fail_f: fx.GraphModule, inps, module_fails):
                 if graph_fails(new_graph, new_inps):
                     print(
                         f"SUCCESS: Removed ({start_range}:{end_range}] - Went from {starting_placeholders} "
-                        "placeholders to {len(_get_placeholders(new_graph))}"
+                        f"placeholders to {len(_get_placeholders(new_graph))}"
                     )
                     return (new_graph, new_inps), True
             gap //= 2
@@ -204,21 +204,20 @@ def minimizer(fail_f: fx.GraphModule, inps, module_fails):
             break
     failing_fx = fx.GraphModule(fail_f, failing_graph)
     print(failing_fx.code)
-    print([i.shape for i in inps])
+    print([(i.shape, i.dtype) for i in inps])
     return failing_fx, inps
 
 
 def check_nvfuser_subprocess(f, inps):
-
     f.to_folder("temp")
     with open("_temp.py", 'w') as fil:
         fil.write(f'''
-    import torch
-    from temp import FxModule
-    f = FxModule().cuda()
-    inps = {[(i.shape, i.dtype) for i in inps]}
-    inps = [torch.randn(shape, dtype=dtype, device='cuda') for shape, dtype in inps]
-    with torch.jit.fuser("fuser2"):
+import torch
+from temp import FxModule
+f = FxModule().cuda()
+inps = {[(i.shape, i.dtype) for i in inps]}
+inps = [torch.randn(shape, dtype=dtype, device='cuda') for shape, dtype in inps]
+with torch.jit.fuser("fuser2"):
     nf = torch.jit.script(f)
     for _ in range(5):
         nf(*inps)

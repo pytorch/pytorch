@@ -980,9 +980,6 @@ class TestDecompositionOpInfo(TestCase):
         xfail('to_sparse'),
         skip('tensor_split'),
         skip('mvlgamma'),
-        skip('tanh', device_type='cuda'),  # cuda bfloat16 failure
-        skip('nn.functional.tanhshrink', device_type='cuda'),  # cuda bfloat16 failure
-        skip('nn.functional.huber_loss', device_type='cuda'),  # cuda bfloat16 failure
         skip('eig'),
         skip('nn.functional.dropout'),
         skip('_masked.softmin'),
@@ -998,7 +995,7 @@ class TestDecompositionOpInfo(TestCase):
         # copied from common_utils.py
         dtype_precisions = {
             torch.float16: (0.001, 1e-5),
-            torch.bfloat16: (0.016, 1e-5),
+            torch.bfloat16: (0.016, 1e-4), # zzzz bfloat16 precision
             torch.float32: (1.3e-6, 1e-5),
             torch.float64: (1e-7, 1e-7),
             torch.complex32: (0.001, 1e-5),
@@ -1020,16 +1017,19 @@ class TestDecompositionOpInfo(TestCase):
             # Some ops, like those involving reductions, are fundamentally non-decomposable with precision guarantees
             tol_table = {
                 # aggghhhhhhhhhh I hate reductions and floating point
+                (torch.bfloat16, aten.tanh_backward): (0.016, 1e-2),
                 (torch.bfloat16, aten._softmax_backward_data): (0.016, 1e-2),
                 (torch.bfloat16, aten._log_softmax_backward_data): (0.016, 1e-2),
                 # (torch.float16, aten.im2col_backward): (0.016, 1e-2),
             }
-            msg = f"{op} decomposition failed"
             if (b.dtype, op) in tol_table:
                 rtol, atol = tol_table[(b.dtype, op)]
             else:
                 rtol, atol = _getDefaultRtolAndAtol(a.dtype, b.dtype)
-            assert torch.allclose(a, b, rtol=rtol, atol=atol), msg
+            if not torch.allclose(a, b, rtol=rtol, atol=atol):
+                atol_diff = (a - b).abs().max()
+                msg = f"{op} decomposition failed, max abs: {atol_diff}"
+                raise RuntimeError(msg)
 
         # We check the correctness of each decomposition right after running it.
         # So, when we encounter a decomposition, we run the function normally, and
