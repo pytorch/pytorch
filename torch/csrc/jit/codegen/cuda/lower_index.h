@@ -17,10 +17,9 @@ namespace cuda {
 
 // TODO: Need kir mutator as IndexLowering is replacing expr's with versions
 // that are doing indexing
-class TORCH_CUDA_CU_API IndexLowering : private kir::OptOutConstDispatch {
+class TORCH_CUDA_CU_API IndexLowering : private OptOutConstDispatch {
  public:
-  static std::vector<kir::Expr*> getIndexedExprs(
-      std::vector<kir::Expr*> incoming_exprs) {
+  static std::vector<Expr*> getIndexedExprs(std::vector<Expr*> incoming_exprs) {
     FUSER_PERF_SCOPE("GpuLower::Lower::IndexLowering::getIndexedExprs");
     IndexLowering il;
     il.generate(incoming_exprs);
@@ -30,26 +29,27 @@ class TORCH_CUDA_CU_API IndexLowering : private kir::OptOutConstDispatch {
  private:
   IndexLowering();
 
-  void pushBack(kir::Expr*);
+  void pushBack(Expr*);
+
+  void handle(const UnaryOp*) final;
+  void handle(const BinaryOp*) final;
+  void handle(const TernaryOp*) final;
+  void handle(const ReductionOp*) final;
+  void handle(const WelfordOp*) final;
+  void handle(const BroadcastOp*) final;
 
   void handle(const kir::ForLoop*) final;
   void handle(const kir::IfThenElse*) final;
-  void handle(const kir::UnaryOp*) final;
-  void handle(const kir::BinaryOp*) final;
-  void handle(const kir::TernaryOp*) final;
-  void handle(const kir::ReductionOp*) final;
-  void handle(const kir::WelfordOp*) final;
-  void handle(const kir::BroadcastOp*) final;
   void handle(const kir::Allocate*) final;
   void handle(const kir::Sync*) final;
 
-  void generate(const std::vector<kir::Expr*>& exprs);
+  void generate(const std::vector<Expr*>& exprs);
 
-  kir::Val* lowerSrcIndex(kir::Val* val, kir::Val* dst) const;
-  kir::Val* lowerDstIndex(kir::Val* dst) const;
+  Val* lowerSrcIndex(Val* val, Val* dst) const;
+  Val* lowerDstIndex(Val* dst) const;
 
  private:
-  std::vector<kir::Expr*> lowered_exprs_;
+  std::vector<Expr*> lowered_exprs_;
 
   // This is a slight work around as scope has a couple definitions, we have the
   // Scope that's in ForLoop/IfThenElse which is really just a wrapper around
@@ -58,7 +58,10 @@ class TORCH_CUDA_CU_API IndexLowering : private kir::OptOutConstDispatch {
   // could be either the body or else body of the IfThenElse. However, we want
   // to understand the nesting of IfThenElse/ForLoop nodes.
   kir::Scope* active_scope_ = nullptr;
-  kir::Expr* active_scope_expr_ = nullptr;
+
+  // Track for loops to send to indexing. Similar to what's done in
+  // kir::IrVisitor
+  std::vector<kir::ForLoop*> for_loops_;
 
   kir::IrBuilder ir_builder_;
 };

@@ -127,6 +127,10 @@ static const char* val_type2string(ValType t) {
       return "Scalar";
     case ValType::NamedScalar:
       return "NamedScalar";
+    case ValType::Predicate:
+      return "Predicate";
+    case ValType::TensorIndex:
+      return "TensorIndex";
     default:
       TORCH_INTERNAL_ASSERT(false, "No string found for val type.");
   }
@@ -144,12 +148,38 @@ static const char* expr_type2string(ExprType t) {
       return "ReductionOp";
     case ExprType::BroadcastOp:
       return "BroadcastOp";
+    case ExprType::WelfordOp:
+      return "WelfordOp";
+    case ExprType::TransposeOp:
+      return "TransposeOp";
     case ExprType::ShiftOp:
       return "ShiftOp";
+    case ExprType::GatherOp:
+      return "GatherOp";
+    case ExprType::ViewOp:
+      return "ViewOp";
     case ExprType::Split:
       return "Split";
     case ExprType::Merge:
       return "Merge";
+    case ExprType::Allocate:
+      return "Allocate";
+    case ExprType::Sync:
+      return "Sync";
+    case ExprType::InitMagicZero:
+      return "InitMagicZero";
+    case ExprType::UpdateMagicZero:
+      return "UpdateMagicZero";
+    case ExprType::ForLoop:
+      return "ForLoop";
+    case ExprType::IfThenElse:
+      return "IfThenElse";
+    case ExprType::GridReduction:
+      return "GridReduction";
+    case ExprType::GridBroadcast:
+      return "GridBroadcast";
+    case ExprType::GridWelford:
+      return "GridWelford";
     default:
       TORCH_INTERNAL_ASSERT(false, "No string found for expr type.");
   }

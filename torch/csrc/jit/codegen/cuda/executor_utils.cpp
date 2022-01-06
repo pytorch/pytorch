@@ -9,7 +9,6 @@
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
 #include <torch/csrc/jit/codegen/fuser/cuda/fused_kernel.h>
 #include <torch/csrc/jit/resource_guard.h>
 
@@ -418,12 +417,12 @@ void validateVectorizedSplits(
     TORCH_INTERNAL_ASSERT(
         input_extent.has_value(),
         "Could not check if a split with vectorization is divisible because the extent, ",
-        kir::toString(extent_factor.first),
+        extent_factor.first->toString(),
         ", is not possible to evaluate.");
     TORCH_INTERNAL_ASSERT(
         input_extent.has_value(),
         "Could not check if a split with vectorization is divisible because the split factor, ",
-        kir::toString(extent_factor.second),
+        extent_factor.second->toString(),
         ", is not possible to evaluate.");
     TORCH_INTERNAL_ASSERT(
         input_extent.value() % split_factor.value() == 0,
@@ -530,7 +529,7 @@ kir::ExpressionEvaluator bindKernelInputs(
   for (const auto i : c10::irange(inputs.size())) {
     const auto input = inputs[i];
 
-    if (auto tensor_input = dynamic_cast<kir::TensorView*>(input)) {
+    if (auto tensor_input = dynamic_cast<TensorView*>(input)) {
       TORCH_INTERNAL_ASSERT(
           aten_inputs[i].isTensor(),
           "Something went wrong configuring launch. Inputs no longer match at index:",
@@ -538,7 +537,7 @@ kir::ExpressionEvaluator bindKernelInputs(
 
       const auto aten_tensor = aten_inputs[i].toTensor();
       const auto root_domain =
-          kir::TensorDomain::noReductions(tensor_input->domain()->rootDomain());
+          TensorDomain::noReductions(tensor_input->domain()->getRootDomain());
       TORCH_INTERNAL_ASSERT(
           aten_tensor.ndimension() == static_cast<int>(root_domain.size()),
           "Something went wrong configuring launch. Inputs no longer match.");
@@ -553,7 +552,7 @@ kir::ExpressionEvaluator bindKernelInputs(
             TORCH_CHECK(
                 *prev_value == value,
                 "Attempting to bind ",
-                kir::toString(extent),
+                extent->toString(),
                 " to ",
                 value,
                 "but it's already set to ",
@@ -561,7 +560,7 @@ kir::ExpressionEvaluator bindKernelInputs(
             should_bind = false;
           }
         }
-        if (should_bind && !extent->isConst()) {
+        if (should_bind && !extent->isConstScalar()) {
           expr_eval.bind(extent, value);
         }
       }

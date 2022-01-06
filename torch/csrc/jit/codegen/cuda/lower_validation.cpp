@@ -5,7 +5,6 @@
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
@@ -506,7 +505,7 @@ void validateParallelize(Fusion* fusion) {
   auto exprs = ExprSort::getExprs(fusion);
 
   for (auto expr : exprs) {
-    if (!ir_utils::isTVOp(expr)) {
+    if (!ir_utils::isTvOp(expr)) {
       continue;
     }
     // Validate parallelization of each consumer by itself

@@ -19,13 +19,9 @@ namespace cuda {
 
 class ThreadPredicateMap;
 
-using IterDomainMap = std::unordered_map<kir::IterDomain*, kir::IterDomain*>;
+using IterDomainMap = std::unordered_map<IterDomain*, IterDomain*>;
 
 namespace scope_utils {
-
-//! Returns the list of nesting loops starting at `scope`
-// Primarily used in indexing, maybe could be moved there
-std::vector<kir::ForLoop*> getLoops(kir::Expr* scope);
 
 //! Create an **empty** Forloop and copy the metadata.
 kir::ForLoop* cloneForLoop(kir::IrBuilder& ir_builder, kir::ForLoop* for_loop);
@@ -68,71 +64,38 @@ std::vector<IterDomain*> iterDomainInputsOfOrderedAs(
     const std::vector<IterDomain*>& of,
     const std::vector<IterDomain*>& order);
 
+// Returns if Val is a TensorView or TensorIndex
 bool isTV(const Val* const);
 
-TORCH_CUDA_CU_API bool isTVOp(const Expr*);
+// Returns is Expr is a TensorView or TensorIndex Expr.
+TORCH_CUDA_CU_API bool isTvOp(const Expr*);
 
-bool isTVOp(const kir::Expr* expr);
-
-TensorView* getTVOutput(const Expr*);
-kir::TensorView* getTVOutput(const kir::Expr*);
-
-bool isScalarOp(const Expr*);
-
-// TODO(kir): remove
-Expr* asExpr(Statement*);
-
-// TODO(kir): Remove in favor of ->as<TensorView>()
-TensorView* asTV(Val*);
-
-//! Get kir::TensorView potentially via kir::TensorIndex. Returns nullptr if
-//! cast fails.
-kir::TensorView* getTv(kir::Val*);
-
-//! Get only kir::TensorView potentially via kir::TensorIndex.
-std::vector<kir::TensorView*> getTvs(const std::vector<kir::Val*>& vals);
-
-//! Get kir::TensorView potentially via kir::TensorIndex. Error if cast fails.
-kir::TensorView* asTv(kir::Val*);
-
-//! Get kir::TensorView potentially via kir::TensorIndex. Error if cast fails.
-std::vector<kir::TensorView*> asTvs(const std::vector<kir::Val*>& vals);
+// Returns the first output of Expr that is a TensorView
+TensorView* getTvOutput(const Expr*);
 
 bool hasBlockSync(const Expr* expr, const ThreadPredicateMap& pred_map);
-bool hasBlockSync(const kir::Expr* expr, const ThreadPredicateMap& pred_map);
-
-// expr_replacement_map maps an expression to its replacement.
-//
-// The applyReplacement function serves two purposes.
-//
-// 1. If expr is found in expr_replacement_map, return the value for expr key.
-// Otherwise, return the original expression.
-//
-// 2. If a replacement is not found and the expression is a ForLoop or an
-// IfThenElse, it modifies the expressions in its scope by running the
-// handle_scope function
-//
-// The handle_scope function iterates over the expressions in the scope.
-// For each expression, it updates the expression the value returned by
-// applyReplacement.
-kir::Expr* applyReplacements(
-    const std::unordered_map<kir::Expr*, kir::Expr*>& expr_replacement_map,
-    kir::Expr* expr);
 
 //! Returns the Fuser iterdomain that maps to the thread dimension grouped
 //!  to warps. Returns nullopt if the reduction is not to be lowered to
 //!  a warp reduction.
-c10::optional<IterDomain*> getMaybeWarpReductionDim(
-    const kir::ReductionOp* node);
-
 c10::optional<IterDomain*> getMaybeWarpReductionDim(const ReductionOp* node);
+
+bool isScalarOp(const Expr*);
+
+//! Get TensorView potentially via kir::TensorIndex. Returns nullptr if
+//! cast fails.
+TensorView* getTv(Val*);
+
+//! Get only TensorView potentially via kir::TensorIndex.
+// TODO: Remove in favor of filterByType
+std::vector<TensorView*> getTvs(const std::vector<Val*>& vals);
 
 //! Return true if axis is derived from a root axis that is an input
 //! to a CA leaf axis.
 bool derivedFromRootCAAxes(const TensorView* tv, IterDomain* axis);
 
-std::unordered_map<ParallelType, kir::IterDomain*, TypeHash> getParallelDomains(
-    kir::Val* val);
+std::unordered_map<ParallelType, IterDomain*, TypeHash> getParallelDomains(
+    Val* val);
 
 } // namespace ir_utils
 
@@ -168,14 +131,14 @@ BasicAllocInfo getAllocInformation(
 } // namespace loop_utils
 
 // Replace value pass on Kernel IR.
-//  Replace each use of any kir::Val* that apears in the given `replacement_map`
+//  Replace each use of any Val* that apears in the given `replacement_map`
 //  Keeps the predicate carried by each expr
 //
 // Warning: Blindly replaces all use based on pointer
 // Warning: May invalidate indexing if replacing uses of allocated values
-std::vector<kir::Expr*> replaceInputsInExpr(
-    const std::vector<kir::Expr*>& exprs,
-    const std::unordered_map<kir::Val*, kir::Val*>& replacement_map);
+std::vector<Expr*> replaceInputsInExpr(
+    const std::vector<Expr*>& exprs,
+    const std::unordered_map<Val*, Val*>& replacement_map);
 
 } // namespace cuda
 } // namespace fuser

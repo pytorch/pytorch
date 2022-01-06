@@ -13,21 +13,30 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
+class Fusion;
+namespace kir {
+class Kernel;
+class Scope;
+} // namespace kir
+
 //! Define pretty printing functions for IR nodes
 //!
 //! This class is intended for debug printing, so it attempts
 //! to handle invalid states as well.
 //!
 class TORCH_CUDA_CU_API IrPrinter : public OptInConstDispatch {
+  static constexpr char const* kTab = "  ";
+
  public:
   explicit IrPrinter(std::ostream& os) : os_(os) {}
 
   // Indent the generated code
-  void indent() {
+  std::ostream& indent() {
     for (const auto i : c10::irange(indent_size_)) {
       (void)i; // Suppress unused variable warning
       os_ << "  ";
     }
+    return os_;
   }
 
   void resetIndent() {
@@ -37,6 +46,8 @@ class TORCH_CUDA_CU_API IrPrinter : public OptInConstDispatch {
   bool printInline() const {
     return print_inline_;
   }
+
+  using OptInConstDispatch::handle;
 
   virtual void handle(Fusion* f);
 
@@ -52,13 +63,18 @@ class TORCH_CUDA_CU_API IrPrinter : public OptInConstDispatch {
     handle(&f);
   }
 
+  virtual void handle(const kir::Kernel* kernel);
+  virtual void handle(kir::Kernel& kernel);
+
+  void handleScope(const kir::Scope& scope);
+
   void handle(const Statement* s) final;
   void handle(const Val* v) final;
   void handle(const Expr* e) final;
 
+  void handle(const IterDomain*) final;
   void handle(const TensorDomain*) final;
   void handle(const TensorView*) final;
-  void handle(const IterDomain*) final;
 
   void handle(const Bool*) final;
   void handle(const Double*) final;
@@ -75,6 +91,19 @@ class TORCH_CUDA_CU_API IrPrinter : public OptInConstDispatch {
   void handle(const ShiftOp*) final;
   void handle(const GatherOp*) final;
   void handle(const ViewOp*) final;
+
+  void handle(const kir::Predicate*) final;
+  void handle(const kir::TensorIndex*) final;
+
+  void handle(const kir::GridBroadcast*) final;
+  void handle(const kir::GridReduction*) final;
+  void handle(const kir::GridWelford*) final;
+  void handle(const kir::ForLoop*) final;
+  void handle(const kir::IfThenElse*) final;
+  void handle(const kir::Allocate*) final;
+  void handle(const kir::Sync*) final;
+  void handle(const kir::InitMagicZero*) final;
+  void handle(const kir::UpdateMagicZero*) final;
 
   // IR math printer overrides these to prevent them from printing, keep
   // override

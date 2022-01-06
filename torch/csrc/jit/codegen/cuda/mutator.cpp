@@ -1,6 +1,7 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/mutator.h>
 
 #include <vector>
@@ -12,6 +13,22 @@ namespace cuda {
 
 // MUTATE FUNCTIONS FOR VALS
 
+Statement* OptOutMutator::mutate(Bool* b) {
+  return b;
+}
+
+Statement* OptOutMutator::mutate(Double* d) {
+  return d;
+}
+
+Statement* OptOutMutator::mutate(Int* i) {
+  return i;
+}
+
+Statement* OptOutMutator::mutate(NamedScalar* ns) {
+  return ns;
+}
+
 Statement* OptOutMutator::mutate(IterDomain* id) {
   Val* start = mutateAsVal(id->start())->asVal();
   Val* extent = mutateAsVal(id->extent())->asVal();
@@ -21,7 +38,8 @@ Statement* OptOutMutator::mutate(IterDomain* id) {
     return id;
   }
 
-  Val* mutated_val = new IterDomain(
+  Val* mutated_val = IrBuilder::create<IterDomain>(
+      id->container(),
       start,
       extent,
       stop_offset,
@@ -43,8 +61,12 @@ Statement* OptOutMutator::mutate(TensorDomain* td) {
   }
 
   if (mutated) {
-    Val* mutated_val = new TensorDomain(
-        td->getRootDomain(), td->getRFactorDomain(), dom, td->contiguity());
+    Val* mutated_val = IrBuilder::create<TensorDomain>(
+        td->container(),
+        td->getRootDomain(),
+        td->getRFactorDomain(),
+        dom,
+        td->contiguity());
     registerMutation(td, mutated_val);
     return mutated_val;
   }
@@ -55,57 +77,23 @@ Statement* OptOutMutator::mutate(TensorView* tv) {
   TensorDomain* td = mutateAsVal(tv->domain())->as<TensorDomain>();
 
   if (!tv->domain()->sameAs(td)) {
-    TensorView* mutated_tv = new TensorView(td, tv->getDataType().value());
+    TensorView* mutated_tv = IrBuilder::create<TensorView>(
+        tv->container(), td, tv->getDataType().value());
     registerMutation(tv, mutated_tv);
     return mutated_tv;
   }
   return tv;
 }
 
-Statement* OptOutMutator::mutate(Bool* b) {
-  return b;
+Statement* OptOutMutator::mutate(kir::Predicate*) {
+  TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
 }
 
-Statement* OptOutMutator::mutate(Double* d) {
-  return d;
-}
-
-Statement* OptOutMutator::mutate(Int* i) {
-  return i;
-}
-
-Statement* OptOutMutator::mutate(NamedScalar* ns) {
-  return ns;
+Statement* OptOutMutator::mutate(kir::TensorIndex*) {
+  TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
 }
 
 // MUTATE FUNCTIONS FOR EXPRESSIONS.
-
-Statement* OptOutMutator::mutate(Split* s) {
-  IterDomain* ot = mutateAsVal(s->outer())->as<IterDomain>();
-  IterDomain* inr = mutateAsVal(s->inner())->as<IterDomain>();
-  IterDomain* in = mutateAsVal(s->in())->as<IterDomain>();
-  Val* fact = mutateAsVal(s->factor())->as<Val>();
-
-  if (ot->sameAs(s->outer()) && inr->sameAs(s->inner()) &&
-      in->sameAs(s->in()) && areEqualScalars(fact, s->factor())) {
-    return s;
-  }
-  FusionGuard::getCurFusion()->removeExpr(s);
-  return new Split(ot, inr, in, fact, s->innerSplit());
-}
-
-Statement* OptOutMutator::mutate(Merge* m) {
-  IterDomain* ot = mutateAsVal(m->out())->as<IterDomain>();
-  IterDomain* otr = mutateAsVal(m->outer())->as<IterDomain>();
-  IterDomain* in = mutateAsVal(m->inner())->as<IterDomain>();
-
-  if (ot->sameAs(m->out()) && otr->sameAs(m->outer()) && in->sameAs(m->inner()))
-    return m;
-
-  FusionGuard::getCurFusion()->removeExpr(m);
-  return new Merge(ot, otr, in);
-}
-
 Statement* OptOutMutator::mutate(UnaryOp* uop) {
   Val* out = mutateAsVal(uop->out())->asVal();
   Val* in = mutateAsVal(uop->in())->asVal();
@@ -113,7 +101,8 @@ Statement* OptOutMutator::mutate(UnaryOp* uop) {
   if (out->sameAs(uop->out()) && in->sameAs(uop->in()))
     return uop;
   FusionGuard::getCurFusion()->removeExpr(uop);
-  return new UnaryOp(uop->getUnaryOpType(), out, in);
+  return IrBuilder::create<UnaryOp>(
+      uop->container(), uop->getUnaryOpType(), out, in);
 }
 
 Statement* OptOutMutator::mutate(BinaryOp* bop) {
@@ -123,7 +112,8 @@ Statement* OptOutMutator::mutate(BinaryOp* bop) {
   if (out == bop->out() && lhs == bop->lhs() && rhs == bop->rhs())
     return bop;
   FusionGuard::getCurFusion()->removeExpr(bop);
-  return new BinaryOp(bop->getBinaryOpType(), out, lhs, rhs);
+  return IrBuilder::create<BinaryOp>(
+      bop->container(), bop->getBinaryOpType(), out, lhs, rhs);
 }
 
 Statement* OptOutMutator::mutate(TernaryOp* top) {
@@ -135,7 +125,8 @@ Statement* OptOutMutator::mutate(TernaryOp* top) {
       in3 == top->in3())
     return top;
   FusionGuard::getCurFusion()->removeExpr(top);
-  return new TernaryOp(top->getTernaryOpType(), out, in1, in2, in3);
+  return IrBuilder::create<TernaryOp>(
+      top->container(), top->getTernaryOpType(), out, in1, in2, in3);
 }
 
 Statement* OptOutMutator::mutate(ReductionOp* rop) {
@@ -146,7 +137,8 @@ Statement* OptOutMutator::mutate(ReductionOp* rop) {
       init->sameAs(rop->init()))
     return rop;
 
-  return new ReductionOp(rop->getReductionOpType(), init, out, in);
+  return IrBuilder::create<ReductionOp>(
+      rop->container(), rop->getReductionOpType(), init, out, in);
 }
 
 namespace {
@@ -184,7 +176,8 @@ Statement* OptOutMutator::mutate(WelfordOp* wop) {
   if (out_compare && init_compare && in_compare) {
     return wop;
   } else {
-    return new WelfordOp(
+    return IrBuilder::create<WelfordOp>(
+        wop->container(),
         out_avg,
         out_var,
         out_N,
@@ -201,6 +194,33 @@ Statement* OptOutMutator::mutate(BroadcastOp* bop) {
   return bop;
 }
 
+Statement* OptOutMutator::mutate(Split* s) {
+  IterDomain* ot = mutateAsVal(s->outer())->as<IterDomain>();
+  IterDomain* inr = mutateAsVal(s->inner())->as<IterDomain>();
+  IterDomain* in = mutateAsVal(s->in())->as<IterDomain>();
+  Val* fact = mutateAsVal(s->factor())->as<Val>();
+
+  if (ot->sameAs(s->outer()) && inr->sameAs(s->inner()) &&
+      in->sameAs(s->in()) && areEqualScalars(fact, s->factor())) {
+    return s;
+  }
+  FusionGuard::getCurFusion()->removeExpr(s);
+  return IrBuilder::create<Split>(
+      s->container(), ot, inr, in, fact, s->innerSplit());
+}
+
+Statement* OptOutMutator::mutate(Merge* m) {
+  IterDomain* ot = mutateAsVal(m->out())->as<IterDomain>();
+  IterDomain* otr = mutateAsVal(m->outer())->as<IterDomain>();
+  IterDomain* in = mutateAsVal(m->inner())->as<IterDomain>();
+
+  if (ot->sameAs(m->out()) && otr->sameAs(m->outer()) && in->sameAs(m->inner()))
+    return m;
+
+  FusionGuard::getCurFusion()->removeExpr(m);
+  return IrBuilder::create<Merge>(m->container(), ot, otr, in);
+}
+
 Statement* OptOutMutator::mutate(TransposeOp* top) {
   return top;
 }
@@ -213,7 +233,8 @@ Statement* OptOutMutator::mutate(ShiftOp* sop) {
     return sop;
   auto offsets = sop->offsets();
   FusionGuard::getCurFusion()->removeExpr(sop);
-  return new ShiftOp(out, in, offsets, sop->pad());
+  return IrBuilder::create<ShiftOp>(
+      sop->container(), out, in, offsets, sop->pad());
 }
 
 Statement* OptOutMutator::mutate(GatherOp* op) {
@@ -225,11 +246,40 @@ Statement* OptOutMutator::mutate(GatherOp* op) {
   auto window_shape = op->windowShape();
   auto pad_width = op->padWidth();
   FusionGuard::getCurFusion()->removeExpr(op);
-  return new GatherOp(out, in, window_shape, pad_width);
+  return IrBuilder::create<GatherOp>(
+      op->container(), out, in, window_shape, pad_width);
 }
 
 Statement* OptOutMutator::mutate(ViewOp* vop) {
   return vop;
+}
+
+Statement* OptOutMutator::mutate(kir::Allocate*) {
+  TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
+}
+Statement* OptOutMutator::mutate(kir::Sync*) {
+  TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
+}
+Statement* OptOutMutator::mutate(kir::InitMagicZero*) {
+  TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
+}
+Statement* OptOutMutator::mutate(kir::UpdateMagicZero*) {
+  TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
+}
+Statement* OptOutMutator::mutate(kir::ForLoop*) {
+  TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
+}
+Statement* OptOutMutator::mutate(kir::IfThenElse*) {
+  TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
+}
+Statement* OptOutMutator::mutate(kir::GridReduction*) {
+  TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
+}
+Statement* OptOutMutator::mutate(kir::GridBroadcast*) {
+  TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
+}
+Statement* OptOutMutator::mutate(kir::GridWelford*) {
+  TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
 }
 
 } // namespace cuda

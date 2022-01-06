@@ -322,7 +322,7 @@ void SegmentedFusion::draw() {
 
   for (auto group : groups()) {
     for (auto expr : group->exprs()) {
-      if (ir_utils::isTVOp(expr)) {
+      if (ir_utils::isTvOp(expr)) {
         expr_color_map[expr] = group_index;
       }
     }
@@ -659,8 +659,8 @@ TensorView* castIntermediateValueInCompleteFusion(
     }
 
     // Create the actual domain and tv.
-    return new TensorView(
-        new TensorDomain(
+    return IrBuilder::create<TensorView>(
+        IrBuilder::create<TensorDomain>(
             new_root_domain, std::vector<bool>(new_root_domain.size(), true)),
         data_type);
   };
@@ -680,8 +680,8 @@ TensorView* castIntermediateValueInCompleteFusion(
   }
 
   // Insert the cast ops.
-  new UnaryOp(UnaryOpType::Cast, half_precision_tv, original_tv);
-  new UnaryOp(UnaryOpType::Cast, fp32_tv, half_precision_tv);
+  IrBuilder::create<UnaryOp>(UnaryOpType::Cast, half_precision_tv, original_tv);
+  IrBuilder::create<UnaryOp>(UnaryOpType::Cast, fp32_tv, half_precision_tv);
 
   // Return the new tv to replace original tv with
   //  on the segmented edges.
@@ -1924,7 +1924,7 @@ void TranslateApplicableWelford::translateSingleWelford(WelfordOp* welford) {
 
   // Create scalar version of the feature element
   //  counting.
-  Val* num_features = new Double(1);
+  Val* num_features = IrBuilder::create<Double>(1);
   std::vector<bool> broadcast_mask(in_root.size(), false);
   for (const auto i : c10::irange(in_root.size())) {
     if (out_root[i]->isReduction()) {
@@ -1937,7 +1937,7 @@ void TranslateApplicableWelford::translateSingleWelford(WelfordOp* welford) {
   // Build a normalization expression group that is
   //  equivalent to a welford operation.
   auto x_sum = sum(in_val, red_axes);
-  new BinaryOp(BinaryOpType::Div, out_avg, x_sum, num_features);
+  IrBuilder::create<BinaryOp>(BinaryOpType::Div, out_avg, x_sum, num_features);
   // welford.avg may be broadcast. Reuse it if found.
   TensorView* x_avg_bcast = nullptr;
   for (auto& use_expr : out_avg->uses()) {
@@ -1973,8 +1973,12 @@ void TranslateApplicableWelford::translateSingleWelford(WelfordOp* welford) {
   }
 
   auto x_mean_sub_pow = mul(x_mean_sub, x_mean_sub);
-  new ReductionOp(BinaryOpType::Add, new Double(0.0), out_var, x_mean_sub_pow);
-  new UnaryOp(UnaryOpType::Set, out_N, num_features);
+  IrBuilder::create<ReductionOp>(
+      BinaryOpType::Add,
+      IrBuilder::create<Double>(0.0),
+      out_var,
+      x_mean_sub_pow);
+  IrBuilder::create<UnaryOp>(UnaryOpType::Set, out_N, num_features);
 
   // out_avg, out_N are now outputs of a pointwise ops and we
   //  need to clear out its reduction domains.

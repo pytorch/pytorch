@@ -19,20 +19,20 @@ namespace {
 //!  and their corresponding allocations
 class EliminateDeadBroadcastAndAllocate {
  public:
-  static std::vector<kir::Expr*> run(const std::vector<kir::Expr*>& exprs) {
+  static std::vector<Expr*> run(const std::vector<Expr*>& exprs) {
     EliminateDeadBroadcastAndAllocate dce(exprs);
     return dce.result_exprs_;
   }
 
  private:
-  EliminateDeadBroadcastAndAllocate(const std::vector<kir::Expr*>& exprs)
+  EliminateDeadBroadcastAndAllocate(const std::vector<Expr*>& exprs)
       : ir_builder_(GpuLower::current()->kernel()) {
     findLiveTvs(exprs);
     findDeadTvs();
     eliminateDeadCode(exprs);
   }
 
-  void findLiveTvs(const std::vector<kir::Expr*>& exprs) {
+  void findLiveTvs(const std::vector<Expr*>& exprs) {
     for (auto expr : exprs) {
       if (auto for_loop = dynamic_cast<kir::ForLoop*>(expr)) {
         findLiveTvs(for_loop->body().exprs());
@@ -45,8 +45,7 @@ class EliminateDeadBroadcastAndAllocate {
 
       if (auto allocate = dynamic_cast<kir::Allocate*>(expr)) {
         if (allocate->memoryType() == MemoryType::Local) {
-          if (auto kir_tv =
-                  dynamic_cast<kir::TensorView*>(allocate->buffer())) {
+          if (auto kir_tv = dynamic_cast<TensorView*>(allocate->buffer())) {
             // We know only tvs that we'd want to consider are broadcast outputs
             if (kir_tv->fuserTv()->definition()->isA<BroadcastOp>()) {
               candidate_tv_set_.insert(kir_tv);
@@ -73,18 +72,18 @@ class EliminateDeadBroadcastAndAllocate {
     }
   }
 
-  void eliminateDeadCode(const std::vector<kir::Expr*>& exprs) {
+  void eliminateDeadCode(const std::vector<Expr*>& exprs) {
     result_exprs_ = eliminateDeadCodeInScope(exprs);
   }
 
-  bool shouldEliminate(kir::Expr* expr) {
+  bool shouldEliminate(Expr* expr) {
     if (auto allocate = dynamic_cast<kir::Allocate*>(expr)) {
-      if (auto buffer_tv = dynamic_cast<kir::TensorView*>(allocate->buffer())) {
+      if (auto buffer_tv = dynamic_cast<TensorView*>(allocate->buffer())) {
         if (dead_tvs_.count(buffer_tv)) {
           return true;
         }
       }
-    } else if (auto broadcast = dynamic_cast<kir::BroadcastOp*>(expr)) {
+    } else if (auto broadcast = dynamic_cast<BroadcastOp*>(expr)) {
       if (auto out_ti = dynamic_cast<kir::TensorIndex*>(broadcast->out())) {
         if (dead_tvs_.count(out_ti->view())) {
           return true;
@@ -96,9 +95,8 @@ class EliminateDeadBroadcastAndAllocate {
 
   //! Returns a new vector of exprs with dead exprs
   //!  eliminated.
-  std::vector<kir::Expr*> eliminateDeadCodeInScope(
-      const std::vector<kir::Expr*>& exprs) {
-    std::vector<kir::Expr*> result_exprs;
+  std::vector<Expr*> eliminateDeadCodeInScope(const std::vector<Expr*>& exprs) {
+    std::vector<Expr*> result_exprs;
 
     for (auto expr : exprs) {
       auto result_expr = expr;
@@ -156,11 +154,11 @@ class EliminateDeadBroadcastAndAllocate {
   }
 
  private:
-  std::unordered_set<kir::TensorView*> live_tvs_;
-  std::unordered_set<kir::TensorView*> dead_tvs_;
-  std::unordered_set<kir::TensorView*> candidate_tv_set_;
+  std::unordered_set<TensorView*> live_tvs_;
+  std::unordered_set<TensorView*> dead_tvs_;
+  std::unordered_set<TensorView*> candidate_tv_set_;
 
-  std::vector<kir::Expr*> result_exprs_;
+  std::vector<Expr*> result_exprs_;
   kir::IrBuilder ir_builder_;
 };
 
@@ -192,7 +190,7 @@ class EliminateDeadBroadcastAndAllocate {
 //!    and corresponding allocations if they're un-used after step 2.
 class FuseBroadcastWithWarpReduce : private kir::IrVisitor {
  public:
-  static std::vector<kir::Expr*> fuse(const std::vector<kir::Expr*>& exprs) {
+  static std::vector<Expr*> fuse(const std::vector<Expr*>& exprs) {
     FuseBroadcastWithWarpReduce fuse_broadcast_map(exprs);
     const auto replaced_inputs =
         replaceInputsInExpr(exprs, fuse_broadcast_map.val_replacement_map_);
@@ -200,22 +198,21 @@ class FuseBroadcastWithWarpReduce : private kir::IrVisitor {
   }
 
  private:
-  FuseBroadcastWithWarpReduce(const std::vector<kir::Expr*>& exprs) {
+  FuseBroadcastWithWarpReduce(const std::vector<Expr*>& exprs) {
     // open stack space for global scope
     // The scope stack for kir_tv_to_allocate wouldn't be needed
     //  if the allocations are guaranteed to be once and unique,
     //  which can currently be assumed but this pass tries not
     //  to rely on this assumption.
     running_kir_tv_to_allocate_map_.emplace_back(
-        std::make_unique<
-            std::unordered_map<kir::TensorView*, kir::Allocate*>>());
+        std::make_unique<std::unordered_map<TensorView*, kir::Allocate*>>());
     running_visible_allocation_stack_.emplace_back(
         std::make_unique<std::vector<kir::Allocate*>>());
     kir::IrVisitor::handle(exprs);
   }
 
-  void handle(kir::Expr* expr) final {
-    if (ir_utils::isTVOp(expr)) {
+  void handle(Expr* expr) final {
+    if (ir_utils::isTvOp(expr)) {
       // Process expr inputs if needs replacement
       for (auto inp : expr->inputs()) {
         if (auto input_ti = dynamic_cast<kir::TensorIndex*>(inp)) {
@@ -228,12 +225,12 @@ class FuseBroadcastWithWarpReduce : private kir::IrVisitor {
     }
   }
 
-  bool openLoopNestLevel(kir::IterDomain* id) {
-    if (id->isThread() || id->parallelType() == ParallelType::Unswitch) {
+  bool openLoopNestLevel(IterDomain* id) {
+    if (id->isThread() || id->getParallelType() == ParallelType::Unswitch) {
       return false;
     }
-    if (id->parallelType() == ParallelType::Serial ||
-        id->parallelType() == ParallelType::Unroll) {
+    if (id->getParallelType() == ParallelType::Serial ||
+        id->getParallelType() == ParallelType::Unroll) {
       return !id->isBroadcast();
     }
     return true;
@@ -244,8 +241,7 @@ class FuseBroadcastWithWarpReduce : private kir::IrVisitor {
     bool open_nest_level = openLoopNestLevel(for_loop->iter_domain());
     if (open_nest_level) {
       running_kir_tv_to_allocate_map_.emplace_back(
-          std::make_unique<
-              std::unordered_map<kir::TensorView*, kir::Allocate*>>());
+          std::make_unique<std::unordered_map<TensorView*, kir::Allocate*>>());
       running_visible_allocation_stack_.emplace_back(
           std::make_unique<std::vector<kir::Allocate*>>());
     }
@@ -279,7 +275,7 @@ class FuseBroadcastWithWarpReduce : private kir::IrVisitor {
     if (allocate->memoryType() != MemoryType::Local) {
       return;
     }
-    if (auto kir_tv = dynamic_cast<kir::TensorView*>(allocate->buffer())) {
+    if (auto kir_tv = dynamic_cast<TensorView*>(allocate->buffer())) {
       auto fuser_tv = kir_tv->fuserTv();
       if (fuser_tv->definition()) {
         if (fuser_tv->definition()->isA<ReductionOp>() ||
@@ -305,7 +301,7 @@ class FuseBroadcastWithWarpReduce : private kir::IrVisitor {
   //! Iterate backwards on the currently visible loop scopes
   //!  and find the first allocation corresponding to the
   //!  given tv.
-  kir::Allocate* getActiveAllocateFor(kir::TensorView* tv) {
+  kir::Allocate* getActiveAllocateFor(TensorView* tv) {
     for (auto frame_it = running_visible_allocation_stack_.rbegin();
          frame_it != running_visible_allocation_stack_.rend();
          frame_it++) {
@@ -323,7 +319,7 @@ class FuseBroadcastWithWarpReduce : private kir::IrVisitor {
     return nullptr;
   }
 
-  Expr* getFuserTVExpr(kir::Expr* expr) {
+  Expr* getFuserTVExpr(Expr* expr) {
     auto out = expr->outputs()[0];
     auto out_ti = dynamic_cast<kir::TensorIndex*>(out);
     if (!out_ti) {
@@ -332,10 +328,10 @@ class FuseBroadcastWithWarpReduce : private kir::IrVisitor {
     return out_ti->view()->fuserTv()->definition();
   }
 
-  bool isOpInputRegisterTV(kir::Expr* expr) {
+  bool isOpInputRegisterTV(Expr* expr) {
     for (auto inp : expr->inputs()) {
       if (auto inp_ti = dynamic_cast<kir::TensorIndex*>(inp)) {
-        if (inp_ti->view()->memoryType() != MemoryType::Local) {
+        if (inp_ti->view()->getMemoryType() != MemoryType::Local) {
           return false;
         }
       }
@@ -344,10 +340,10 @@ class FuseBroadcastWithWarpReduce : private kir::IrVisitor {
     return true;
   }
 
-  bool isOpOutputRegisterTV(kir::Expr* expr) {
+  bool isOpOutputRegisterTV(Expr* expr) {
     for (auto out : expr->outputs()) {
       if (auto out_ti = dynamic_cast<kir::TensorIndex*>(out)) {
-        if (out_ti->view()->memoryType() != MemoryType::Local) {
+        if (out_ti->view()->getMemoryType() != MemoryType::Local) {
           return false;
         }
       }
@@ -358,7 +354,7 @@ class FuseBroadcastWithWarpReduce : private kir::IrVisitor {
 
   //! Updates map of serially visible reduction tvs, see comment on
   //!  running_kir_tv_to_allocate_map_.
-  void handle(kir::ReductionOp* reduction) final {
+  void handle(ReductionOp* reduction) final {
     if (!isOpOutputRegisterTV(reduction)) {
       return;
     }
@@ -373,7 +369,7 @@ class FuseBroadcastWithWarpReduce : private kir::IrVisitor {
         reduction_ti_out->view()) = reduction_allocate;
   }
 
-  void handle(kir::BroadcastOp* broadcast) final {
+  void handle(BroadcastOp* broadcast) final {
     if (!isOpInputRegisterTV(broadcast) || !isOpOutputRegisterTV(broadcast)) {
       return;
     }
@@ -383,7 +379,7 @@ class FuseBroadcastWithWarpReduce : private kir::IrVisitor {
   //! Detects if this broadcast can be fused with the producer reduction.
   //!  adds the output of broadcast to replacement map if all above mentioned
   //!  conditions check.
-  void tryAddOutputToReplaceMap(kir::BroadcastOp* broadcast) {
+  void tryAddOutputToReplaceMap(BroadcastOp* broadcast) {
     if (auto in_ti = dynamic_cast<kir::TensorIndex*>(broadcast->in())) {
       if (!in_ti->view()->fuserTv()->definition()->isA<ReductionOp>()) {
         return;
@@ -498,7 +494,7 @@ class FuseBroadcastWithWarpReduce : private kir::IrVisitor {
   //!  could need some extension for more precise scope based analysis in the
   //!  future especially if we have more complex IfThenElse blocks than
   //!  predicates and unroll.
-  std::unordered_map<kir::TensorView*, kir::TensorIndex*>
+  std::unordered_map<TensorView*, kir::TensorIndex*>
       running_tv_replacement_map_;
 
   //! Keeps track of the allocated buffers that the exprs will write/read
@@ -514,8 +510,7 @@ class FuseBroadcastWithWarpReduce : private kir::IrVisitor {
   //!  visibility on the generated kernel. The model of IfThenElse assumes the
   //!  only ITE's we have are predicates and unrolls, which might need to be
   //!  more precise.
-  std::vector<
-      std::unique_ptr<std::unordered_map<kir::TensorView*, kir::Allocate*>>>
+  std::vector<std::unique_ptr<std::unordered_map<TensorView*, kir::Allocate*>>>
       running_kir_tv_to_allocate_map_;
 
   //! This map is the final output of this pass and a val replacement map will
@@ -523,12 +518,12 @@ class FuseBroadcastWithWarpReduce : private kir::IrVisitor {
   //!  it. All keys and values are TensorIndex's, and before this pass each
   //!  TensorIndex is uniquely generated by lower_index pass for each access of
   //!  a kir_tv.
-  std::unordered_map<kir::Val*, kir::Val*> val_replacement_map_;
+  std::unordered_map<Val*, Val*> val_replacement_map_;
 };
 
 } // namespace
 
-std::vector<kir::Expr*> fuseWarpReduce(const std::vector<kir::Expr*> exprs) {
+std::vector<Expr*> fuseWarpReduce(const std::vector<Expr*> exprs) {
   return FuseBroadcastWithWarpReduce::fuse(exprs);
 }
 

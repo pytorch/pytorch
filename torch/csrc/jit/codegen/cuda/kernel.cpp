@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
+#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/kernel.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 
 #include <iostream>
@@ -11,6 +11,9 @@ namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
+
+IrBuilderPasskey::IrBuilderPasskey(kir::Kernel* kernel) : kernel(kernel) {}
+
 namespace kir {
 
 namespace {
@@ -20,8 +23,8 @@ namespace {
 class KernelIrScanner : private OptOutConstDispatch {
  public:
   explicit KernelIrScanner(const Kernel* kernel) {
-    for (const auto& ir_node : kernel->irNodes()) {
-      OptOutConstDispatch::handle(ir_node.get());
+    for (const auto& stmts : kernel->irStmts()) {
+      OptOutConstDispatch::handle(stmts.get());
     }
     const auto gpu_lower = GpuLower::current();
     for (auto split : gpu_lower->nonDivisibleSplitInfo().splitsToValidate()) {
@@ -65,8 +68,8 @@ class KernelIrScanner : private OptOutConstDispatch {
     }
   }
 
-  void handle(const kir::UnaryOp* unary_op) final {
-    if (unary_op->operation() == UnaryOpType::RandLike) {
+  void handle(const UnaryOp* unary_op) final {
+    if (unary_op->getUnaryOpType() == UnaryOpType::RandLike) {
       // This kernel is using random numbers
       summary_.is_stochastic = true;
     }
@@ -86,7 +89,7 @@ class KernelIrScanner : private OptOutConstDispatch {
 
     // Update the largest smem data type
     if (domain->hasBlockReduction() || domain->hasGridReduction() ||
-        tv->memoryType() == MemoryType::Shared) {
+        tv->getMemoryType() == MemoryType::Shared) {
       const auto data_type = tv->dtype();
       const size_t type_size = dataTypeSize(data_type);
       if (type_size > max_smem_type_size_) {
@@ -97,7 +100,7 @@ class KernelIrScanner : private OptOutConstDispatch {
 
     // Update Welford
     if (tensor_index->definition() != nullptr &&
-        tensor_index->definition()->isA<kir::WelfordOp>()) {
+        tensor_index->definition()->isA<WelfordOp>()) {
       summary_.has_welford = true;
       summary_.has_block_welford =
           summary_.has_block_welford || domain->hasBlockReduction();
@@ -139,7 +142,7 @@ class KernelIrScanner : private OptOutConstDispatch {
     const auto gpu_lower = GpuLower::current();
     for (const auto i : c10::irange(dom->nDims())) {
       const auto id =
-          gpu_lower->caParallelMap().getConcreteMappedID(dom->domain()[i]);
+          gpu_lower->caParallelMap().kirGetConcreteMappedID(dom->domain()[i]);
 
       summary_.has_cooperative_grid_reduction =
           summary_.has_cooperative_grid_reduction ||
@@ -178,8 +181,8 @@ class ValidateAllocation : private OptOutConstDispatch {
  private:
   explicit ValidateAllocation(const Kernel* kernel) {
     live_allocations_.emplace_back(std::vector<const Allocate*>());
-    for (const auto& ir_node : kernel->topLevelExprs()) {
-      OptOutConstDispatch::handle(ir_node);
+    for (const auto& expr : kernel->topLevelExprs()) {
+      OptOutConstDispatch::handle(expr);
     }
     live_allocations_.pop_back();
     TORCH_INTERNAL_ASSERT(live_allocations_.empty());
@@ -200,23 +203,23 @@ class ValidateAllocation : private OptOutConstDispatch {
     const auto gpu_lower = GpuLower::current();
     for (const auto& allocations : live_allocations_) {
       for (const auto& allocate : allocations) {
-        const auto tv = dynamic_cast<kir::TensorView*>(allocate->buffer());
+        const auto tv = dynamic_cast<TensorView*>(allocate->buffer());
         if (tv == nullptr) {
           continue;
         }
         for (const auto& axis : tv->domain()->domain()) {
-          if (!gpu_lower->caParallelMap().areMapped(loop_id, axis)) {
+          if (!gpu_lower->caParallelMap().kirAreMapped(loop_id, axis)) {
             continue;
           }
-          if (isParallelTypeThreadDim(loop_id->parallelType())) {
+          if (isParallelTypeThreadDim(loop_id->getParallelType())) {
             TORCH_INTERNAL_ASSERT(
-                tv->memoryType() == MemoryType::Shared ||
-                    tv->memoryType() == MemoryType::Global,
+                tv->getMemoryType() == MemoryType::Shared ||
+                    tv->getMemoryType() == MemoryType::Global,
                 "Tensor t",
                 tv->name(),
                 " must be allocated on SMEM or GMEM.");
-          } else if (isParallelTypeBlockDim(loop_id->parallelType())) {
-            TORCH_INTERNAL_ASSERT(tv->memoryType() == MemoryType::Global);
+          } else if (isParallelTypeBlockDim(loop_id->getParallelType())) {
+            TORCH_INTERNAL_ASSERT(tv->getMemoryType() == MemoryType::Global);
           }
         }
       }
@@ -225,7 +228,7 @@ class ValidateAllocation : private OptOutConstDispatch {
 
   void handle(const kir::ForLoop* for_loop) final {
     if (for_loop->stop() != for_loop->iter_domain()->extent() &&
-        isParallelTypeThread(for_loop->iter_domain()->parallelType())) {
+        isParallelTypeThread(for_loop->iter_domain()->getParallelType())) {
       validate(for_loop);
     }
 
@@ -251,9 +254,23 @@ class ValidateAllocation : private OptOutConstDispatch {
 
 } // namespace
 
+void Kernel::registerIrStmt(
+    IrBuilderPasskey passkey,
+    std::unique_ptr<Statement> stmt) {
+  TORCH_INTERNAL_ASSERT(passkey.kernel == this);
+  ir_stmts_.push_back(std::move(stmt));
+  auto stmt_ptr = ir_stmts_.back().get();
+  if (stmt_ptr->isA<Expr>()) {
+    Expr* expr = stmt_ptr->as<Expr>();
+    for (auto out : expr->outputs()) {
+      out->setDefinition(expr);
+    }
+  }
+}
+
 // TODO(kir): Kernel IR validation
-void Kernel::finalize(std::vector<kir::Expr*> top_level_exprs) {
-  TORCH_CHECK(top_level_exprs_.empty());
+void Kernel::finalize(std::vector<Expr*> top_level_exprs) {
+  TORCH_INTERNAL_ASSERT(top_level_exprs_.empty());
   top_level_exprs_ = std::move(top_level_exprs);
   predicate_map_ = std::make_unique<ThreadPredicateMap>(
       GpuLower::current()->threadPredMap());
@@ -270,8 +287,8 @@ void Kernel::analyze() {
 }
 
 void Kernel::print() const {
-  kir::IrPrinter ir_printer(std::cout);
-  ir_printer.printKernel(this);
+  IrPrinter ir_printer(std::cout);
+  ir_printer.handle(this);
 }
 
 } // namespace kir

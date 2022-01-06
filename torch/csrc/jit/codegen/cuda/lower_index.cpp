@@ -15,28 +15,26 @@ namespace cuda {
 
 IndexLowering::IndexLowering() : ir_builder_(GpuLower::current()->kernel()) {}
 
-kir::Val* IndexLowering::lowerSrcIndex(kir::Val* src, kir::Val* dst) const {
-  if (auto tv = dynamic_cast<kir::TensorView*>(src)) {
-    TORCH_INTERNAL_ASSERT(dst->isA<kir::TensorView>());
+Val* IndexLowering::lowerSrcIndex(Val* src, Val* dst) const {
+  if (auto tv = dynamic_cast<TensorView*>(src)) {
+    TORCH_INTERNAL_ASSERT(dst->isA<TensorView>());
     return Index::getProducerIndex(
-        tv->fuserTv(),
-        dst->as<kir::TensorView>()->fuserTv(),
-        scope_utils::getLoops(active_scope_expr_));
+        tv->fuserTv(), dst->as<TensorView>()->fuserTv(), for_loops_);
   } else {
     return src;
   }
 }
 
-kir::Val* IndexLowering::lowerDstIndex(kir::Val* dst) const {
-  if (auto tv = dynamic_cast<kir::TensorView*>(dst)) {
+Val* IndexLowering::lowerDstIndex(Val* dst) const {
+  if (auto tv = dynamic_cast<TensorView*>(dst)) {
     return Index::getConsumerIndex(
-        tv->fuserTv(), scope_utils::getLoops(active_scope_expr_));
+        tv->fuserTv(), for_loops_);
   } else {
     return dst;
   }
 }
 
-void IndexLowering::pushBack(kir::Expr* expr) {
+void IndexLowering::pushBack(Expr* expr) {
   if (active_scope_ == nullptr) {
     lowered_exprs_.push_back(expr);
   } else {
@@ -45,77 +43,73 @@ void IndexLowering::pushBack(kir::Expr* expr) {
 }
 
 void IndexLowering::handle(const kir::IfThenElse* ite) {
-  const auto prev_scope_expr = active_scope_expr_;
   const auto prev_scope = active_scope_;
 
   // TODO(kir): try to avoid recreating new nodes and leaving old ones around
   auto new_ite = ir_builder_.create<kir::IfThenElse>(ite->predicate());
   pushBack(new_ite);
 
-  active_scope_expr_ = new_ite;
   active_scope_ = &new_ite->thenBody();
 
   for (auto expr : ite->thenBody().exprs()) {
-    kir::OptOutConstDispatch::handle(expr);
+    OptOutConstDispatch::handle(expr);
   }
 
   active_scope_ = &new_ite->elseBody();
 
   for (auto expr : ite->elseBody().exprs()) {
-    kir::OptOutConstDispatch::handle(expr);
+    OptOutConstDispatch::handle(expr);
   }
 
   active_scope_ = prev_scope;
-  active_scope_expr_ = prev_scope_expr;
 }
 
 void IndexLowering::handle(const kir::ForLoop* for_loop) {
-  const auto prev_scope_expr = active_scope_expr_;
   const auto prev_scope = active_scope_;
 
   auto new_for_loop = ir_builder_.create<kir::ForLoop>(for_loop);
   pushBack(new_for_loop);
 
-  active_scope_expr_ = new_for_loop;
   active_scope_ = &new_for_loop->body();
+  for_loops_.push_back(new_for_loop);
 
   for (auto expr : for_loop->body().exprs()) {
-    kir::OptOutConstDispatch::handle(expr);
+    OptOutConstDispatch::handle(expr);
   }
 
+  for_loops_.pop_back();
   active_scope_ = prev_scope;
-  active_scope_expr_ = prev_scope_expr;
 }
 
-void IndexLowering::handle(const kir::UnaryOp* uop) {
+void IndexLowering::handle(const UnaryOp* uop) {
   const auto in = lowerSrcIndex(uop->in(), uop->out());
   const auto out = lowerDstIndex(uop->out());
-  pushBack(ir_builder_.create<kir::UnaryOp>(uop->operation(), out, in));
+  pushBack(ir_builder_.create<UnaryOp>(uop->getUnaryOpType(), out, in));
 }
 
-void IndexLowering::handle(const kir::BinaryOp* bop) {
+void IndexLowering::handle(const BinaryOp* bop) {
   const auto lhs = lowerSrcIndex(bop->lhs(), bop->out());
   const auto rhs = lowerSrcIndex(bop->rhs(), bop->out());
   const auto out = lowerDstIndex(bop->out());
-  pushBack(ir_builder_.create<kir::BinaryOp>(bop->operation(), out, lhs, rhs));
+  pushBack(ir_builder_.create<BinaryOp>(bop->getBinaryOpType(), out, lhs, rhs));
 }
 
-void IndexLowering::handle(const kir::TernaryOp* top) {
+void IndexLowering::handle(const TernaryOp* top) {
   const auto in1 = lowerSrcIndex(top->in1(), top->out());
   const auto in2 = lowerSrcIndex(top->in2(), top->out());
   const auto in3 = lowerSrcIndex(top->in3(), top->out());
   const auto out = lowerDstIndex(top->out());
-  pushBack(
-      ir_builder_.create<kir::TernaryOp>(top->operation(), out, in1, in2, in3));
+  pushBack(ir_builder_.create<TernaryOp>(
+      top->getTernaryOpType(), out, in1, in2, in3));
 }
 
 namespace {
 
 // Get the size of the temporary work buffer for grid communication, this can be
 // grid reduction, broadcast, or grid welford.
-kir::Val* getGridCommWorkBufferSize(
+Val* getGridCommWorkBufferSize(
     kir::IrBuilder& ir_builder,
-    const kir::TensorDomain* td) {
+    const TensorDomain* td) {
   // The buffer size is the number of thread blocks multiplied by the
   // number of threads not used for reduction domains.
   // Note: Previously it was calculated based on the shape of the
@@ -125,7 +119,7 @@ kir::Val* getGridCommWorkBufferSize(
   // size if the parallel dimensions are exact, but otherwise, just
   // computing the buffer size based on the tensor shape isn't
   // sufficient since there could be extra threads/blocks.
-  kir::Val* buffer_size = ir_builder.create<kir::Int>(1);
+  Val* buffer_size = ir_builder.create<Int>(1);
   for (auto pt : kParallelTypeThreads) {
     auto pt_dim = GpuLower::current()->parallelDimensionMap().get(pt);
     if (pt_dim == nullptr || pt_dim->isOneInt()) {
@@ -133,7 +127,7 @@ kir::Val* getGridCommWorkBufferSize(
     }
     if (isParallelTypeThreadDim(pt) &&
         std::any_of(td->domain().begin(), td->domain().end(), [&](auto out_id) {
-          return out_id->parallelType() == pt &&
+          return out_id->getParallelType() == pt &&
               (out_id->isReduction() || out_id->isBroadcast());
         })) {
       continue;
@@ -143,18 +137,16 @@ kir::Val* getGridCommWorkBufferSize(
   return buffer_size;
 }
 
-kir::Val* getGridSyncBufferSize(
-    kir::IrBuilder& ir_builder,
-    const kir::TensorDomain* td) {
+Val* getGridSyncBufferSize(kir::IrBuilder& ir_builder, const TensorDomain* td) {
   // See the comment above for getGridCommWorkBufferSize.
-  kir::Val* buffer_size = ir_builder.create<kir::Int>(1);
+  Val* buffer_size = ir_builder.create<Int>(1);
   for (auto pt : kParallelTypeBIDs) {
     auto pt_dim = GpuLower::current()->parallelDimensionMap().get(pt);
     if (pt_dim == nullptr || pt_dim->isOneInt()) {
       continue;
     }
     if (std::any_of(td->domain().begin(), td->domain().end(), [&](auto out_id) {
-          return out_id->parallelType() == pt &&
+          return out_id->getParallelType() == pt &&
               (out_id->isReduction() || out_id->isBroadcast());
         })) {
       continue;
@@ -168,25 +160,24 @@ kir::Val* getGridSyncBufferSize(
 // welford reduce, grid broadcast.
 kir::Allocate* allocGlobalBufferForGridComm(
     kir::IrBuilder& ir_builder,
-    kir::Val* buffer_size,
+    Val* buffer_size,
     DataType dtype,
     bool zero_init) {
-  const std::vector<kir::IterDomain*> new_buffer_ids = {
-      ir_builder.create<kir::IterDomain>(ir_builder.zeroVal(), buffer_size)};
-  const auto buffer_domain =
-      ir_builder.create<kir::TensorDomain>(new_buffer_ids);
-  const auto buffer_tv = ir_builder.create<kir::TensorView>(
-      dtype, buffer_domain, MemoryType::Global);
+  const std::vector<IterDomain*> new_buffer_ids = {
+      ir_builder.create<IterDomain>(ir_builder.zeroVal(), buffer_size)};
+  const auto buffer_domain = ir_builder.create<TensorDomain>(new_buffer_ids);
+  const auto buffer_tv =
+      ir_builder.create<TensorView>(buffer_domain, dtype, MemoryType::Global);
   return ir_builder.create<kir::Allocate>(
-      buffer_tv, buffer_tv->memoryType(), nullptr, zero_init);
+      buffer_tv, buffer_tv->getMemoryType(), nullptr, zero_init);
 }
 
 } // namespace
 
-void IndexLowering::handle(const kir::ReductionOp* rop) {
-  TORCH_INTERNAL_ASSERT(ir_utils::isTVOp(rop));
+void IndexLowering::handle(const ReductionOp* rop) {
+  TORCH_INTERNAL_ASSERT(ir_utils::isTvOp(rop));
 
-  const auto out_tv = rop->out()->as<kir::TensorView>();
+  const auto out_tv = rop->out()->as<TensorView>();
   const auto out_domain = out_tv->domain();
 
   const bool is_block_reduce = out_domain->hasBlockReduction();
@@ -199,7 +190,7 @@ void IndexLowering::handle(const kir::ReductionOp* rop) {
         std::none_of(
             out_domain->domain().begin(),
             out_domain->domain().end(),
-            [](kir::IterDomain* id) {
+            [](IterDomain* id) {
               return !id->isThread() && id->isReduction() &&
                   !id->extent()->isOneInt();
             }),
@@ -212,11 +203,11 @@ void IndexLowering::handle(const kir::ReductionOp* rop) {
   const auto out = lowerDstIndex(rop->out());
   const auto in = lowerSrcIndex(rop->in(), rop->out());
 
-  kir::ReductionOp* block_reduction_op = nullptr;
+  ReductionOp* block_reduction_op = nullptr;
 
   if (is_block_reduce) {
-    block_reduction_op = ir_builder_.create<kir::ReductionOp>(
-        rop->operation(), rop->init(), out, in);
+    block_reduction_op = ir_builder_.create<ReductionOp>(
+        rop->getReductionOpType(), rop->init(), out, in);
     if (rop->predicate()) {
       block_reduction_op->setPredicate(rop->predicate());
     }
@@ -240,8 +231,8 @@ void IndexLowering::handle(const kir::ReductionOp* rop) {
         true);
 
     const auto grid_reduction_op = (block_reduction_op == nullptr)
-        ? ir_builder_.create<kir::ReductionOp>(
-              rop->operation(), rop->init(), out, in)
+        ? ir_builder_.create<ReductionOp>(
+              rop->getReductionOpType(), rop->init(), out, in)
         : block_reduction_op;
 
     // The thread predicate for GridReduction needs to be set
@@ -278,14 +269,15 @@ void IndexLowering::handle(const kir::ReductionOp* rop) {
 
   if (!is_block_reduce && !is_grid_reduce) {
     // TODO(kir): this breaks our "SSA" form
-    pushBack(ir_builder_.create<kir::BinaryOp>(rop->operation(), out, out, in));
+    pushBack(
+        ir_builder_.create<BinaryOp>(rop->getReductionOpType(), out, out, in));
   }
 }
 
-void IndexLowering::handle(const kir::WelfordOp* wop) {
-  TORCH_INTERNAL_ASSERT(ir_utils::isTVOp(wop));
+void IndexLowering::handle(const WelfordOp* wop) {
+  TORCH_INTERNAL_ASSERT(ir_utils::isTvOp(wop));
 
-  const auto out_tv = wop->outAvg()->as<kir::TensorView>();
+  const auto out_tv = wop->outAvg()->as<TensorView>();
   const auto out_domain = out_tv->domain();
 
   const bool is_block_reduce = out_domain->hasBlockReduction();
@@ -298,7 +290,7 @@ void IndexLowering::handle(const kir::WelfordOp* wop) {
         std::none_of(
             out_domain->domain().begin(),
             out_domain->domain().end(),
-            [](kir::IterDomain* id) {
+            [](IterDomain* id) {
               return !id->isThread() && id->isReduction();
             }),
         "Found a reduction stage that has both a non-parallelized ",
@@ -322,18 +314,18 @@ void IndexLowering::handle(const kir::WelfordOp* wop) {
   auto out_var = lowerDstIndex(wop->outVar());
   auto out_N = lowerDstIndex(wop->outN());
 
-  kir::WelfordOp* welford_op = ir_builder_.create<kir::WelfordOp>(
-      out_var,
+  WelfordOp* welford_op = ir_builder_.create<WelfordOp>(
       out_avg,
+      out_var,
       out_N,
-      wop->initVar(),
       wop->initAvg(),
+      wop->initVar(),
       wop->initN(),
-      in_var,
       in_avg,
+      in_var,
       in_N);
 
-  kir::WelfordOp* block_welford_op = nullptr;
+  WelfordOp* block_welford_op = nullptr;
 
   if (is_block_reduce) {
     block_welford_op = welford_op;
@@ -400,14 +392,15 @@ void IndexLowering::handle(const kir::WelfordOp* wop) {
   }
 }
 
-void IndexLowering::handle(const kir::BroadcastOp* bop) {
-  TORCH_INTERNAL_ASSERT(ir_utils::isTVOp(bop));
+void IndexLowering::handle(const BroadcastOp* bop) {
+  TORCH_INTERNAL_ASSERT(ir_utils::isTvOp(bop));
 
-  const auto out_tv = bop->out()->as<kir::TensorView>();
+  const auto out_tv = bop->out()->as<TensorView>();
 
   const auto out = lowerDstIndex(bop->out());
   const auto in = lowerSrcIndex(bop->in(), bop->out());
-  auto indexed_expr = ir_builder_.create<kir::BroadcastOp>(out, in);
+  auto indexed_expr =
+      ir_builder_.create<BroadcastOp>(out, in, bop->getBroadcastDimFlags());
 
   const ParallelTypeBitmap parallel_bitmap =
       GpuLower::current()->threadPredMap().getParallelBroadcastDomains(
@@ -463,9 +456,9 @@ void IndexLowering::handle(const kir::Sync* sync) {
   pushBack(const_cast<kir::Sync*>(sync)); // NOLINT
 }
 
-void IndexLowering::generate(const std::vector<kir::Expr*>& exprs) {
+void IndexLowering::generate(const std::vector<Expr*>& exprs) {
   for (auto expr : exprs) {
-    kir::OptOutConstDispatch::handle(expr);
+    OptOutConstDispatch::handle(expr);
   }
 }
 

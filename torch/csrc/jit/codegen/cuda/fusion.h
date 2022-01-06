@@ -5,6 +5,7 @@
 #include <c10/macros/Export.h>
 
 #include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_container.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 
 #include <unordered_map>
@@ -69,14 +70,14 @@ class TORCH_CUDA_CU_API FusionGuard {
 
 //! Fusion is mutable but unique. Nodes cannot be copied in any way from one
 //! Fusion to another. If anything like that is desired, it would require
-//! duplicating all associated values and exprs. Fusion is considered to SSA,
+//! duplicating all associated values and exprs. Fusion is considered to be SSA,
 //! though this could also change in the future if there is a good reason to do
 //! so.
 //!
 //! The Fusion owns the whole IR graph (Vals and Exprs)
 //!
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-class TORCH_CUDA_CU_API Fusion final {
+class TORCH_CUDA_CU_API Fusion final : public IrContainer {
   typedef std::unordered_map<int, std::vector<int64_t>> PermutationMap;
 
  public:
@@ -96,11 +97,11 @@ class TORCH_CUDA_CU_API Fusion final {
 
   //! Break dependency chains associated with Expr, remove references to expr
   //! delete expr
-  void removeExpr(Expr* expr);
+  void removeExpr(Expr* expr) override;
 
   //! Completely remove val from the fusion, break all dependencies associated
   //! with it
-  void removeVal(Val* val);
+  void removeVal(Val* val) override;
 
   //! Register input as an input of the fusion
   // TODO: Rename to register
@@ -151,17 +152,6 @@ class TORCH_CUDA_CU_API Fusion final {
   //! Lower the fusion and print a kernel
   void printKernel();
 
-  //! Register the Val with this fusion
-  StmtNameType registerVal(Val* val);
-
-  //! Register expr with this fusion.
-  //! When we register an expression, we want to update the dependency tracking
-  //! of Vals. We add expr to our general expr_set_,
-  StmtNameType registerExpr(Expr* expr);
-
-  //! Register stmt with this fusion
-  StmtNameType registerStatement(Statement* stmt);
-
   //! Return a list of topologically sorted expressions. This only includes
   //! exprs required to genereate registered outputs.
   std::vector<Expr*> exprs();
@@ -173,7 +163,7 @@ class TORCH_CUDA_CU_API Fusion final {
   const std::unordered_set<Val*>& vals() const noexcept;
 
   //! Return in insertion order
-  const std::deque<Val*>& deterministic_vals() const noexcept;
+  const std::deque<Val*> deterministic_vals() const noexcept;
 
   //! Return all Vals in math expressions that cannot be eliminated.
   //!
@@ -269,28 +259,20 @@ class TORCH_CUDA_CU_API Fusion final {
 
   static IrCloner copy(const Fusion* from, Fusion* to);
 
- private:
-  // Return an int that monotonically increases for each val/expr, some are
-  // explicitly incremented by type.
-  StmtNameType getValName(ValType vtype);
-  StmtNameType getExprName();
+  //! Register the Val with this fusion
+  void registerVal(Val* val) override;
 
+  //! Register expr with this fusion.
+  //! When we register an expression, we want to update the dependency tracking
+  //! of Vals. We add expr to our general expr_set_,
+  void registerExpr(Expr* expr) override;
+
+ private:
   // Determine if the two values are compatible for aliasing
   // Same DataType, ValType, and number of dimensions
   bool isAliasCompatible(Val* left, Val* right);
 
  private:
-  // Sets of all Vals/Exprs registered with this fusion
-  // (val_deque_ is not owning the objects)
-  std::unordered_set<Val*> val_set_;
-  std::deque<Val*> val_deque_;
-  std::unordered_set<Expr*> expr_set_;
-
-  // Values names counters
-  std::unordered_map<ValType, StmtNameType, TypeHash> val_type_name_map_;
-
-  // Expression names counter
-  StmtNameType expr_name_counter_ = 0;
 
   // Fusion inputs and outputs
   std::vector<Val*> inputs_;

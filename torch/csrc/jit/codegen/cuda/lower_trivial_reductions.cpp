@@ -105,30 +105,34 @@ void TrivialReductionInfo::build(Fusion* fusion, GpuLower* gpu_lower) {
 
 void TrivialReductionInfo::buildKir(Fusion* fusion, GpuLower* gpu_lower) {
   for (auto id : domains_) {
-    auto kir_trivial_id = gpu_lower->lowerValue(id)->as<kir::IterDomain>();
+    auto kir_trivial_id = gpu_lower->lowerValue(id)->as<IterDomain>();
     kir_domains_.insert(kir_trivial_id);
   }
 
   for (auto id : domains_derived_from_root_) {
-    auto kir_trivial_id = gpu_lower->lowerValue(id)->as<kir::IterDomain>();
+    auto kir_trivial_id = gpu_lower->lowerValue(id)->as<IterDomain>();
     kir_domains_derived_from_root_.insert(kir_trivial_id);
   }
 }
 
 bool TrivialReductionInfo::isDerived(IterDomain* id) const {
+  TORCH_INTERNAL_ASSERT(!id->isKirStmt());
   return domains_.find(id) != domains_.end();
 }
 
 bool TrivialReductionInfo::isDerivedFromRoot(IterDomain* id) const {
+  TORCH_INTERNAL_ASSERT(!id->isKirStmt());
   return domains_derived_from_root_.find(id) !=
       domains_derived_from_root_.end();
 }
 
-bool TrivialReductionInfo::isDerived(kir::IterDomain* id) const {
+bool TrivialReductionInfo::kirIsDerived(IterDomain* id) const {
+  TORCH_INTERNAL_ASSERT(id->isKirStmt());
   return kir_domains_.find(id) != kir_domains_.end();
 }
 
-bool TrivialReductionInfo::isDerivedFromRoot(kir::IterDomain* id) const {
+bool TrivialReductionInfo::kirIsDerivedFromRoot(IterDomain* id) const {
+  TORCH_INTERNAL_ASSERT(id->isKirStmt());
   return kir_domains_derived_from_root_.find(id) !=
       kir_domains_derived_from_root_.end();
 }

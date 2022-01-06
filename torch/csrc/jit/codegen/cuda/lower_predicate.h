@@ -13,8 +13,8 @@ namespace cuda {
 
 //! Update predicates with valid bool conditionals
 //!
-std::vector<kir::Expr*> generateConditionalFromPredicate(
-    const std::vector<kir::Expr*>& exprs);
+std::vector<Expr*> generateConditionalFromPredicate(
+    const std::vector<Expr*>& exprs);
 
 class TORCH_CUDA_CU_API PredicateElimination : public IterVisitor {
  public:
@@ -28,10 +28,9 @@ class TORCH_CUDA_CU_API PredicateElimination : public IterVisitor {
   //! True if expr does not need a predicate
   //!
   //! \param expr KIR tensor expr
-  bool canOmitPredicate(const kir::Expr* expr) const;
-
+  bool canKirOmitPredicate(const Expr* expr) const;
   //! Value to initialize out-of-bound regions
-  kir::Val* getInitValue(TensorView* tv) const;
+  Val* getInitValue(TensorView* tv) const;
 
   //! Dump to string for debugging
   std::string toString() const;

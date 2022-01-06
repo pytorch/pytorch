@@ -1,10 +1,11 @@
 
 #pragma once
 
+#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/jit/codegen/cuda/dispatch.h>
 #include <c10/macros/Export.h>
 #include <torch/csrc/jit/codegen/cuda/evaluator_common.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_dispatch.h>
 
 #include <c10/util/Optional.h>
 

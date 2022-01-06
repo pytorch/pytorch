@@ -15,7 +15,7 @@ namespace {
 
 class MagicZeroInserter : public kir::ExprMutator {
  public:
-  static std::vector<kir::Expr*> insert(const std::vector<kir::Expr*>& exprs) {
+  static std::vector<Expr*> insert(const std::vector<Expr*>& exprs) {
     MagicZeroInserter inserter(exprs);
     return inserter.exprs_;
   }
@@ -26,7 +26,7 @@ class MagicZeroInserter : public kir::ExprMutator {
     kir::ForLoop* fl = nullptr;
   };
 
-  MagicZeroInserter(const std::vector<kir::Expr*>& exprs)
+  MagicZeroInserter(const std::vector<Expr*>& exprs)
       : ir_builder(GpuLower::current()->kernel()) {
     TORCH_INTERNAL_ASSERT(exprs.size());
     kir::ExprMutator::registerInsertBefore(
@@ -57,17 +57,17 @@ class MagicZeroInserter : public kir::ExprMutator {
 
 } // namespace
 
-std::vector<kir::Expr*> insertMagicZero(const std::vector<kir::Expr*>& exprs) {
+std::vector<Expr*> insertMagicZero(const std::vector<Expr*>& exprs) {
   FUSER_PERF_SCOPE("GpuLower::Lower::insertMagicZero");
   // Check if magic zero was even used, if not we don't have to define it or
   // update it.
   const auto gpu_lower = GpuLower::current();
   auto kernel = gpu_lower->kernel();
   const bool has_magic_zero = std::any_of(
-      kernel->irNodes().begin(),
-      kernel->irNodes().end(),
-      [](const std::unique_ptr<kir::Node>& ir_node) {
-        return ir_node->isA<kir::Val>() && isMagicZero(ir_node->as<kir::Val>());
+      kernel->irStmts().begin(),
+      kernel->irStmts().end(),
+      [](const std::unique_ptr<Statement>& ir_node) {
+        return ir_node->isA<Val>() && isMagicZero(ir_node->as<Val>());
       });
 
   if (!has_magic_zero) {
@@ -77,8 +77,8 @@ std::vector<kir::Expr*> insertMagicZero(const std::vector<kir::Expr*>& exprs) {
   return MagicZeroInserter::insert(exprs);
 }
 
-bool isMagicZero(kir::Val* val) {
-  auto ns = dynamic_cast<kir::NamedScalar*>(val);
+bool isMagicZero(Val* val) {
+  auto ns = dynamic_cast<NamedScalar*>(val);
   if (ns == nullptr) {
     return false;
   }
@@ -86,9 +86,9 @@ bool isMagicZero(kir::Val* val) {
       ns->name() == std::string(kMagicZeroName);
 }
 
-bool isProtectedWithMagicZero(kir::Val* val) {
-  auto def = dynamic_cast<kir::BinaryOp*>(val->definition());
-  return def && def->operation() == BinaryOpType::Add &&
+bool isProtectedWithMagicZero(Val* val) {
+  auto def = dynamic_cast<BinaryOp*>(val->definition());
+  return def && def->getBinaryOpType() == BinaryOpType::Add &&
       isMagicZero(def->rhs());
 }
 

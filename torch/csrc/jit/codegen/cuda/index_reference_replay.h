@@ -35,8 +35,8 @@ class IndexReferenceReplay : public OptInDispatch {
   IterDomain* idCopy(IterDomain* id);
 
   // Use the compute at map to get the fusion IterDomain from the
-  // kir::IterDomain
-  IterDomain* toFusionID(kir::IterDomain* kir_id);
+  // IterDomain
+  IterDomain* toFusionID(IterDomain* kir_id);
 
   // Return the concrete entry of the non-reference id
   IterDomain* toConcrete(IterDomain* id);
@@ -87,10 +87,10 @@ class IndexReferenceReplay : public OptInDispatch {
 IndexCompute getReferenceIndexing(
     const std::vector<kir::ForLoop*>& loop_structure,
     TensorDomain* reference_domain,
-    std::unordered_map<kir::IterDomain*, kir::Val*> index_map,
-    std::unordered_set<kir::IterDomain*> zero_domains,
+    std::unordered_map<IterDomain*, Val*> index_map,
+    std::unordered_set<IterDomain*> zero_domains,
     std::unordered_set<IterDomain*> preferred_path,
-    std::unordered_map<kir::IterDomain*, kir::Val*> halo_extent_map = {});
+    std::unordered_map<IterDomain*, Val*> halo_extent_map = {});
 
 // Short cut for global TVs. Index into the reference based on all loop indicies
 // in the loop structure.

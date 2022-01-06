@@ -1,10 +1,10 @@
 #include <torch/csrc/jit/codegen/cuda/lower_alias_memory.h>
 
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
+#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 
@@ -22,7 +22,7 @@ namespace {
 //! Get string representation of Allocate size for symbolic comparison
 //!
 //!  TODO: Some expr simplifications could also be helpful
-class SymbolicSizePrinter : private kir::OptOutConstDispatch {
+class SymbolicSizePrinter : private OptOutConstDispatch {
  public:
   static std::string printSize(const kir::Allocate* allocate) {
     SymbolicSizePrinter printer;
@@ -31,11 +31,11 @@ class SymbolicSizePrinter : private kir::OptOutConstDispatch {
   }
 
  private:
-  using kir::OptOutConstDispatch::handle;
+  using OptOutConstDispatch::handle;
 
-  void handle(const kir::Int* node) final {
+  void handle(const Int* node) final {
     if (auto def = node->definition()) {
-      kir::OptOutConstDispatch::handle(def);
+      OptOutConstDispatch::handle(def);
     } else if (node->isConst()) {
       os_ << *node->value();
     } else {
@@ -43,21 +43,21 @@ class SymbolicSizePrinter : private kir::OptOutConstDispatch {
     }
   }
 
-  void handle(const kir::NamedScalar* named_scalar) final {
+  void handle(const NamedScalar* named_scalar) final {
     os_ << "@" << named_scalar->name();
   }
 
-  void handle(const kir::UnaryOp* unary_op) final {
-    os_ << unary_op->operation() << "(";
-    kir::OptOutConstDispatch::handle(unary_op);
+  void handle(const UnaryOp* unary_op) final {
+    os_ << unary_op->getUnaryOpType() << "(";
+    OptOutConstDispatch::handle(unary_op);
     os_ << ")";
   }
 
-  void handle(const kir::BinaryOp* binary_op) final {
-    os_ << binary_op->operation() << "(";
-    kir::OptOutConstDispatch::handle(binary_op->lhs());
+  void handle(const BinaryOp* binary_op) final {
+    os_ << binary_op->getBinaryOpType() << "(";
+    OptOutConstDispatch::handle(binary_op->lhs());
     os_ << ",";
-    kir::OptOutConstDispatch::handle(binary_op->rhs());
+    OptOutConstDispatch::handle(binary_op->rhs());
     os_ << ")";
   }
 
@@ -76,11 +76,11 @@ class BufferReuseDebugPrinter {
     DebugLineType line_type = DebugLineType::EXPR;
   };
 
-  using DebugEntry = std::pair<ExprInfo, kir::Expr*>;
+  using DebugEntry = std::pair<ExprInfo, Expr*>;
   using DebugEntryPtr = std::unique_ptr<DebugEntry>;
 
  public:
-  BufferReuseDebugPrinter() : ir_printer_(os_, false){};
+  BufferReuseDebugPrinter() : ir_printer_(os_){};
 
   std::string dumpDebugInfo() {
     os_.clear();
@@ -107,7 +107,7 @@ class BufferReuseDebugPrinter {
  private:
   friend class BufferUseDefInfo;
 
-  void pushBack(int lineno, kir::Expr* expr) {
+  void pushBack(int lineno, Expr* expr) {
     makeExprEntry(lineno, expr);
   }
 
@@ -119,7 +119,7 @@ class BufferReuseDebugPrinter {
     makeScopeEntry(DebugLineType::END_BLOCK);
   }
 
-  void makeExprEntry(int lineno, kir::Expr* expr) {
+  void makeExprEntry(int lineno, Expr* expr) {
     auto debug_entry_ptr = std::make_unique<DebugEntry>();
     debug_entry_ptr->first.lineno = lineno;
     debug_entry_ptr->second = expr;
@@ -136,14 +136,14 @@ class BufferReuseDebugPrinter {
     debug_info_.emplace_back(std::move(debug_entry_ptr));
   }
 
-  void handle(const kir::Expr* node) {
+  void handle(const Expr* node) {
     if (auto for_loop = dynamic_cast<const kir::ForLoop*>(node)) {
       handle(for_loop);
     } else if (auto ite = dynamic_cast<const kir::IfThenElse*>(node)) {
       handle(ite);
     } else {
       indent();
-      ir_printer_.printNode(node);
+      ir_printer_.handle(node);
     }
     if (auto alloc = dynamic_cast<const kir::Allocate*>(node)) {
       printAllocInfo(alloc);
@@ -153,9 +153,9 @@ class BufferReuseDebugPrinter {
   void handle(const kir::ForLoop* node) {
     indent();
     os_ << "FOR ";
-    ir_printer_.printNode(node->index());
+    ir_printer_.handle(node->index());
     os_ << " in ";
-    ir_printer_.printNode(node->iter_domain());
+    ir_printer_.handle(node->iter_domain());
     os_ << ":\n";
   }
 
@@ -188,7 +188,7 @@ class BufferReuseDebugPrinter {
 
  private:
   std::stringstream os_;
-  kir::IrPrinter ir_printer_;
+  IrPrinter ir_printer_;
   int indent_level_ = 0;
 
   std::vector<DebugEntryPtr> debug_info_;
@@ -342,7 +342,7 @@ class BufferUseDefInfo {
   static constexpr long kRegisterSizeThreshold = 1;
 
   BufferUseDefInfo(
-      const std::vector<kir::Expr*>& exprs,
+      const std::vector<Expr*>& exprs,
       BufferReuseDebugPrinter* debug_printer = nullptr)
       : debug_printer_(debug_printer) {
     if (debug_printer) {
@@ -412,7 +412,7 @@ class BufferUseDefInfo {
   }
 
  private:
-  void handle(kir::Expr* expr) {
+  void handle(Expr* expr) {
     current_pos_++;
     if (debug_printer_) {
       debug_printer_->pushBack(current_pos_, expr);
@@ -428,7 +428,7 @@ class BufferUseDefInfo {
     }
   }
 
-  void handleScope(const std::vector<kir::Expr*>& exprs) {
+  void handleScope(const std::vector<Expr*>& exprs) {
     if (debug_printer_) {
       debug_printer_->pushScope();
     }
@@ -462,7 +462,7 @@ class BufferUseDefInfo {
       return;
     }
 
-    auto kir_tv = dynamic_cast<kir::TensorView*>(alloc->buffer());
+    auto kir_tv = dynamic_cast<TensorView*>(alloc->buffer());
     if (!kir_tv) {
       return;
     }
@@ -470,7 +470,7 @@ class BufferUseDefInfo {
     // Collect the allocate info data
 
     // Collect memory type, skip global buffers
-    auto mem_type = kir_tv->memoryType();
+    auto mem_type = kir_tv->getMemoryType();
     if (mem_type != MemoryType::Local && mem_type != MemoryType::Shared) {
       return;
     }
@@ -510,7 +510,7 @@ class BufferUseDefInfo {
     map_tv_to_allocations_[kir_tv->name()] = alloc_info;
   }
 
-  void collectScopeUseDefInfo(const std::vector<kir::Expr*>& exprs) {
+  void collectScopeUseDefInfo(const std::vector<Expr*>& exprs) {
     // Reset position pointer
     resetExprCounter();
     TORCH_INTERNAL_ASSERT(global_scope_info_ != nullptr);
@@ -518,14 +518,14 @@ class BufferUseDefInfo {
     handleScope(exprs);
   }
 
-  void collectScopeInfo(const std::vector<kir::Expr*>& exprs) {
+  void collectScopeInfo(const std::vector<Expr*>& exprs) {
     // Reset position pointer
     resetExprCounter();
     collectScopeInfoWithinLoop(exprs, nullptr);
   }
 
   void collectScopeInfoWithinLoop(
-      const std::vector<kir::Expr*>& exprs,
+      const std::vector<Expr*>& exprs,
       kir::ForLoop* current_loop) {
     auto loop_info = makeScopeInfo(current_loop);
     for (auto expr : exprs) {
@@ -586,19 +586,18 @@ class BufferUseDefInfo {
 
   // Iterate over the inputs and outputs of exprs and update
   //  the liveness info of local buffers if applicaable.
-  void collectLivenessInfo(const kir::Expr* expr) {
-    if (!ir_utils::isTVOp(expr)) {
+  void collectLivenessInfo(const Expr* expr) {
+    if (!ir_utils::isTvOp(expr)) {
       return;
     }
 
-    auto out_tv = expr->outputs()[0]->as<kir::TensorView>();
+    auto out_tv = expr->outputs()[0]->as<TensorView>();
     auto fuser_out_tv = out_tv->fuserTv();
 
     // Collect all tv's that resolves broadcast in this
     //  expr. The current analysis isn't enough to capture
     //  their liveness range.
-    for (auto input_tv :
-         ir_utils::filterByType<kir::TensorView>(expr->inputs())) {
+    for (auto input_tv : ir_utils::filterByType<TensorView>(expr->inputs())) {
       auto maybe_alloc_info = getMaybeAllocInfoFromTV(input_tv);
       if (maybe_alloc_info.has_value()) {
         if (isSerialBroadcastResolution(input_tv->fuserTv(), fuser_out_tv)) {
@@ -623,8 +622,7 @@ class BufferUseDefInfo {
         }
       }
     }
-    for (auto output_tv :
-         ir_utils::filterByType<kir::TensorView>(expr->outputs())) {
+    for (auto output_tv : ir_utils::filterByType<TensorView>(expr->outputs())) {
       auto maybe_alloc_info = getMaybeAllocInfoFromTV(output_tv);
       if (maybe_alloc_info.has_value()) {
         maybe_alloc_info.value()->inner_live_interval->markWrite(current_pos_);
@@ -677,8 +675,7 @@ class BufferUseDefInfo {
     return nullptr;
   }
 
-  c10::optional<AllocationInfoPtr> getMaybeAllocInfoFromTV(
-      kir::TensorView* tv) {
+  c10::optional<AllocationInfoPtr> getMaybeAllocInfoFromTV(TensorView* tv) {
     auto alloc_it = map_tv_to_allocations_.find(tv->name());
     if (alloc_it == map_tv_to_allocations_.end()) {
       return c10::nullopt;
@@ -812,11 +809,11 @@ void BufferReuseDebugPrinter::printAllocInfo(const kir::Allocate* alloc) {
 //! Reuse Allocation nodes via pointer aliasing
 class AllocateReuseModifier {
  public:
-  static void modify(const std::vector<kir::Expr*>& exprs) {
+  static void modify(const std::vector<Expr*>& exprs) {
     AllocateReuseModifier modifier(exprs);
   }
 
-  static void debugPrint(const std::vector<kir::Expr*>& exprs) {
+  static void debugPrint(const std::vector<Expr*>& exprs) {
     BufferReuseDebugPrinter debug_printer;
     AllocateReuseModifier modifier(exprs, &debug_printer);
     std::cout << debug_printer.dumpDebugInfo();
@@ -824,7 +821,7 @@ class AllocateReuseModifier {
 
  private:
   AllocateReuseModifier(
-      const std::vector<kir::Expr*>& exprs,
+      const std::vector<Expr*>& exprs,
       BufferReuseDebugPrinter* debug_printer_ = nullptr)
       : buffer_info_(exprs, debug_printer_) {
     // Perform in-place sharing first and then outer liveness
@@ -943,7 +940,7 @@ class AllocateReuseModifier {
     return false;
   }
 
-  void handle(kir::Expr* expr) {
+  void handle(Expr* expr) {
     if (auto ite = dynamic_cast<kir::IfThenElse*>(expr)) {
       handle(ite);
     } else if (auto for_loop = dynamic_cast<kir::ForLoop*>(expr)) {
@@ -962,7 +959,7 @@ class AllocateReuseModifier {
         "lower_alias_memory: IfThenElse before unrolling is not yet supported");
   }
 
-  void handleScope(const std::vector<kir::Expr*>& exprs) {
+  void handleScope(const std::vector<Expr*>& exprs) {
     current_visible_buffer_stack_.emplace_back(
         std::make_unique<AllocationInfoList>());
     for (auto expr : exprs) {
@@ -992,9 +989,8 @@ class AllocateReuseModifier {
     // Assume inputs are TV allocations, which should have been checked
     //  before reaching this point.
     auto this_tv =
-        alloc_info->alloc_expr->buffer()->as<kir::TensorView>()->fuserTv();
-    auto reuse_tv =
-        to_reuse->alloc_expr->buffer()->as<kir::TensorView>()->fuserTv();
+        alloc_info->alloc_expr->buffer()->as<TensorView>()->fuserTv();
+    auto reuse_tv = to_reuse->alloc_expr->buffer()->as<TensorView>()->fuserTv();
 
     // Check the values in between the two buffers.
     auto vals_between_this_and_reuse =
@@ -1069,8 +1065,8 @@ class AllocateReuseModifier {
   }
 
   bool allocationDomainsIndexMapped(
-      std::vector<kir::IterDomain*>& alloc_domains,
-      std::vector<kir::IterDomain*>& reuse_domains) {
+      std::vector<IterDomain*>& alloc_domains,
+      std::vector<IterDomain*>& reuse_domains) {
     // Require that the allocated domains are exactly mapped.
     if (alloc_domains.size() != reuse_domains.size()) {
       return false;
@@ -1078,7 +1074,7 @@ class AllocateReuseModifier {
 
     // Check index map for the corresponding axes.
     for (const auto id_it : c10::irange(alloc_domains.size())) {
-      if (!GpuLower::current()->caIndexMap().areMapped(
+      if (!GpuLower::current()->caIndexMap().kirAreMapped(
               alloc_domains[id_it], reuse_domains[id_it])) {
         return false;
       }
@@ -1100,7 +1096,7 @@ class AllocateReuseModifier {
   // Do we have a true pointwise op?
   // (ie. a TV op, excluding direct assignments and reductions)
   bool isPointwiseTvOp(const Expr* expr) {
-    if (ir_utils::isTVOp(expr)) {
+    if (ir_utils::isTvOp(expr)) {
       return expr->isA<UnaryOp>() || expr->isA<BinaryOp>() ||
           expr->isA<TernaryOp>();
     }
@@ -1109,7 +1105,7 @@ class AllocateReuseModifier {
 
   // Utility to capture reduction ops
   bool isReductionTvOp(const Expr* expr) {
-    if (!ir_utils::isTVOp(expr)) {
+    if (!ir_utils::isTvOp(expr)) {
       return false;
     }
     return expr->isA<ReductionOp>() || expr->isA<WelfordOp>();
@@ -1117,7 +1113,7 @@ class AllocateReuseModifier {
 
   // Utility to capture reduction ops
   bool isBroadcastTvOp(const Expr* expr) {
-    if (!ir_utils::isTVOp(expr)) {
+    if (!ir_utils::isTvOp(expr)) {
       return false;
     }
     return expr->isA<BroadcastOp>();
@@ -1139,8 +1135,7 @@ class AllocateReuseModifier {
 
 } // namespace
 
-std::vector<kir::Expr*> reuseMemoryAllocations(
-    const std::vector<kir::Expr*>& exprs) {
+std::vector<Expr*> reuseMemoryAllocations(const std::vector<Expr*>& exprs) {
   FUSER_PERF_SCOPE("reuseMemoryAllocations");
   bool debug_print = isDebugDumpEnabled(DebugDumpOption::BufferReuseInfo);
   if (debug_print) {

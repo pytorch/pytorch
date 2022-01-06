@@ -129,41 +129,41 @@ Val* IrBuilder::minExpr(Val* lhs, Val* rhs) {
 
 Int* IrBuilder::zeroVal() {
   if (zero_ == nullptr) {
-    zero_ = create<kir::Int>(0);
+    zero_ = create<Int>(0);
   }
   return zero_;
 }
 
 Int* IrBuilder::oneVal() {
   if (one_ == nullptr) {
-    one_ = create<kir::Int>(1);
+    one_ = create<Int>(1);
   }
   return one_;
 }
 
 Bool* IrBuilder::falseVal() {
   if (false_ == nullptr) {
-    false_ = create<kir::Bool>(false);
+    false_ = create<Bool>(false);
   }
   return false_;
 }
 
 Bool* IrBuilder::trueVal() {
   if (true_ == nullptr) {
-    true_ = create<kir::Bool>(true);
+    true_ = create<Bool>(true);
   }
   return true_;
 }
 
 NamedScalar* IrBuilder::magicZeroVal() {
   if (magic_zero_ == nullptr) {
-    magic_zero_ = create<kir::NamedScalar>(kMagicZeroName, DataType::Int);
+    magic_zero_ = create<NamedScalar>(kMagicZeroName, DataType::Int);
   }
   return magic_zero_;
 }
 
 Val* SimplifyingIrBuilder::negExpr(Val* val) {
-  if (auto int_val = dynamic_cast<kir::Int*>(val)) {
+  if (auto int_val = dynamic_cast<Int*>(val)) {
     if (int_val->isConst()) {
       return create<Int>(-int_val->value().value());
     }
@@ -188,13 +188,13 @@ Val* SimplifyingIrBuilder::addExpr(Int* lhs, Int::ScalarType rhs) {
   if (rhs == 0) {
     return lhs;
   } else if (lhs == nullptr) {
-    return IrBuilder::create<kir::Int>(rhs);
+    return IrBuilder::create<Int>(rhs);
   } else if (lhs->isConst()) {
-    return IrBuilder::create<kir::Int>(lhs->value().value() + rhs);
+    return IrBuilder::create<Int>(lhs->value().value() + rhs);
   } else if (rhs > 0) {
-    return IrBuilder::addExpr(lhs, IrBuilder::create<kir::Int>(rhs));
+    return IrBuilder::addExpr(lhs, IrBuilder::create<Int>(rhs));
   } else {
-    return IrBuilder::subExpr(lhs, IrBuilder::create<kir::Int>(-rhs));
+    return IrBuilder::subExpr(lhs, IrBuilder::create<Int>(-rhs));
   }
 }
 
@@ -233,7 +233,7 @@ Val* SimplifyingIrBuilder::addExpr(Val* lhs, Int::ScalarType rhs) {
   if (lhs_int != nullptr) {
     return addExpr(lhs_int, rhs);
   } else {
-    return addExpr(lhs, create<kir::Int>(rhs));
+    return addExpr(lhs, create<Int>(rhs));
   }
 }
 
@@ -292,7 +292,7 @@ Val* minOrMaxExpr(
   } else if (lhs == nullptr) {
     return rhs;
   } else if (lhs->isConst() && rhs->isConst()) {
-    return builder->create<kir::Int>(
+    return builder->create<Int>(
         int_func(lhs->value().value(), rhs->value().value()));
   } else {
     return ir_builder_func(lhs, rhs);

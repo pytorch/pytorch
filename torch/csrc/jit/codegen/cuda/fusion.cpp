@@ -37,14 +37,6 @@ void swap(Fusion& a, Fusion& b) noexcept {
 
   using std::swap;
 
-  // Swap the content
-  swap(a.val_set_, b.val_set_);
-  swap(a.expr_set_, b.expr_set_);
-  swap(a.val_deque_, b.val_deque_);
-
-  swap(a.val_type_name_map_, b.val_type_name_map_);
-  swap(a.expr_name_counter_, b.expr_name_counter_);
-
   swap(a.inputs_, b.inputs_);
   swap(a.outputs_, b.outputs_);
 
@@ -52,26 +44,7 @@ void swap(Fusion& a, Fusion& b) noexcept {
   swap(a.permuted_input_map_, b.permuted_input_map_);
   swap(a.permuted_output_map_, b.permuted_output_map_);
 
-  // Fixup the Statement::fusion_ links for a
-  for (auto val : a.val_set_) {
-    val->fusion_ = &a;
-  }
-  for (auto expr : a.expr_set_) {
-    expr->fusion_ = &a;
-  }
-
-  // Fixup the Statement::fusion_ links for b
-  for (auto val : b.val_set_) {
-    val->fusion_ = &b;
-  }
-  for (auto expr : b.expr_set_) {
-    expr->fusion_ = &b;
-  }
-}
-
-Fusion::Fusion(const Fusion& other) {
-  FUSER_PERF_SCOPE("Fusion copy");
-  Fusion::copy(&other, this);
+  swap(static_cast<IrContainer&>(a), static_cast<IrContainer&>(b));
 }
 
 std::unique_ptr<SegmentedFusion> Fusion::segment(
@@ -82,27 +55,12 @@ std::unique_ptr<SegmentedFusion> Fusion::segment(
 
 IrCloner Fusion::copy(const Fusion* from, Fusion* to) {
   to->clear();
-  IrCloner ir_cloner(to);
+  auto ir_cloner = IrContainer::copy(from, to);
 
-  for (auto val : from->val_set_) {
-    to->val_set_.insert(ir_cloner.clone(val));
-  }
-
-  for (auto expr : from->expr_set_) {
-    to->expr_set_.insert(ir_cloner.clone(expr));
-  }
-
-  for (auto val : from->val_deque_) {
-    to->val_deque_.push_back(ir_cloner.clone(val));
-  }
-
-  for (auto val : from->val_set_) {
+  for (auto val : from->vals_) {
     ir_cloner.clone(val)->setDefinition(ir_cloner.clone(val->definition_));
     ir_cloner.clone(val)->setUses(ir_cloner.clone(val->uses_));
   }
-
-  to->val_type_name_map_ = from->val_type_name_map_;
-  to->expr_name_counter_ = from->expr_name_counter_;
 
   to->inputs_ = ir_cloner.clone(from->inputs_);
   to->outputs_ = ir_cloner.clone(from->outputs_);
@@ -117,7 +75,20 @@ IrCloner Fusion::copy(const Fusion* from, Fusion* to) {
   to->permuted_input_map_ = from->permuted_input_map_;
   to->permuted_output_map_ = from->permuted_output_map_;
 
+  to->all_tv_uses_valid_ = from->all_tv_uses_valid_;
+  // This should never be true on copy, but copying for completeness.
+  to->is_during_update_uses_ = from->is_during_update_uses_;
+
   return ir_cloner;
+}
+
+// Clang tidy complains when using default constructor for IrContainer instead
+// of copy constructor. Fusion::copy has a call to IrContainer::copy, so it's
+// redundant to use the IrContainer copy constructor, but it is harmless since
+// Fusion::copy starts by calling clear().
+Fusion::Fusion(const Fusion& other) : IrContainer(other) {
+  FUSER_PERF_SCOPE("Fusion copy");
+  Fusion::copy(&other, this);
 }
 
 Fusion::Fusion(Fusion&& other) noexcept {
@@ -147,32 +118,18 @@ Fusion::~Fusion() {
 void Fusion::clear() noexcept {
   FUSER_PERF_SCOPE("Fusion clear");
 
-  // Free the owned values
-  for (auto ptr : val_set_) {
-    delete ptr;
-  }
-
-  // Free the owned expressions
-  for (auto ptr : expr_set_) {
-    delete ptr;
-  }
-
-  val_set_.clear();
-  val_deque_.clear();
-  expr_set_.clear();
-
-  for (auto& kv : val_type_name_map_) {
-    kv.second = 0;
-  }
-
-  expr_name_counter_ = 0;
+  IrContainer::clear();
 
   inputs_.clear();
   outputs_.clear();
 
   io_alias_.clear();
+
   permuted_input_map_.clear();
   permuted_output_map_.clear();
+
+  all_tv_uses_valid_ = false;
+  is_during_update_uses_ = false;
 }
 
 void Fusion::removeExpr(Expr* expr) {
@@ -194,9 +151,7 @@ void Fusion::removeExpr(Expr* expr) {
     }
   }
 
-  expr_set_.erase(expr);
-
-  delete expr;
+  IrContainer::removeExpr(expr);
 }
 
 void Fusion::removeVal(Val* val) {
@@ -213,18 +168,10 @@ void Fusion::removeVal(Val* val) {
   if (orig != nullptr)
     removeExpr(val->definition());
 
-  for (Expr* use : unordered_uses(val))
+  for (Expr* use : unordered_uses(val)) {
     removeExpr(use);
-
-  val_set_.erase(val);
-
-  for (auto it = val_deque_.begin(); it != val_deque_.end(); it++)
-    if (*it == val) {
-      val_deque_.erase(it);
-      break;
-    }
-
-  delete val;
+  }
+  IrContainer::removeVal(val);
 }
 
 void Fusion::addInput(Val* input) {
@@ -311,14 +258,7 @@ bool Fusion::inFusion(const Statement* stmt) const {
   bool in_fusion = stmt->fusion() == this;
   Statement* nonconst_stmt = const_cast<Statement*>(stmt); // NOLINT
 
-  if (stmt->isExpr()) {
-    in_fusion &= expr_set_.find(nonconst_stmt->as<Expr>()) != expr_set_.end();
-  }
-  if (stmt->isVal()) {
-    in_fusion &= val_set_.find(nonconst_stmt->as<Val>()) != val_set_.end();
-  }
-
-  return in_fusion;
+  return inContainer(stmt);
 }
 
 void Fusion::assertInFusion(const Statement* stmt, const std::string& msg)
@@ -412,30 +352,30 @@ void Fusion::printTransforms() {
   t_exprs.handle(this);
 }
 
-StmtNameType Fusion::registerVal(Val* val) {
-  if (val->fusion()) {
-    if (val->fusion() != this) {
-      TORCH_CHECK(false, val, " was not found in the active fusion.");
-    }
-    if (inFusion(val)) {
-      return val->name();
-    }
+void Fusion::registerVal(Val* val) {
+  if (inFusion(val)) {
+    return;
   }
 
-  val_set_.emplace(val);
-  val_deque_.push_back(val);
-  return getValName(*(val->getValType()));
+  if (val->fusion()) {
+    TORCH_CHECK(
+        val->fusion() == this, val, " was not found in the active fusion.");
+  }
+
+  IrContainer::registerVal(val);
 }
 
-StmtNameType Fusion::registerExpr(Expr* expr) {
-  if (expr->fusion()) {
-    if (expr->fusion() != this) {
-      TORCH_CHECK(false, expr, " was not found in the active fusion.");
-    }
-    if (inFusion(expr)) {
-      return expr->name();
-    }
+void Fusion::registerExpr(Expr* expr) {
+  if (inFusion(expr)) {
+    return;
   }
+
+  if (expr->fusion()) {
+    TORCH_CHECK(
+        expr->fusion() == this, expr, " was not found in the active fusion.");
+  }
+
+  IrContainer::registerExpr(expr);
 
   for (Val* input : expr->inputs()) {
     assertInFusion(input, "Input to expr is invalid, ");
@@ -455,26 +395,7 @@ StmtNameType Fusion::registerExpr(Expr* expr) {
     output->setDefinition(expr);
   }
 
-  expr_set_.emplace(expr);
-
   resetTvUses();
-  return getExprName();
-}
-
-StmtNameType Fusion::registerStatement(Statement* stmt) {
-  if (inFusion(stmt))
-    return stmt->name();
-
-  if (stmt->isVal()) {
-    return registerVal(stmt->as<Val>());
-  } else if (stmt->isExpr()) {
-    return registerExpr(stmt->as<Expr>());
-  }
-
-  TORCH_INTERNAL_ASSERT(
-      false,
-      "Could not register statement as Fusion could not recognize its type.");
-  return kInvalidStmName;
 }
 
 void Fusion::resetTvUses() {
@@ -484,7 +405,7 @@ void Fusion::resetTvUses() {
   // getExprs only uses definition, so even if we've modified uses already to
   // remove dead exprs, this could reinsert them. getExprs is also boundeds by
   // inputs as registered inputs will return nullptr as their definition.
-  const auto all_tvs = ir_utils::filterByType<TensorView>(val_set_);
+  const auto all_tvs = ir_utils::filterByType<TensorView>(vals_);
   const auto used_exprs = ExprSort::getExprs(this);
 
   for (auto tv : all_tvs) {
@@ -508,11 +429,17 @@ void Fusion::resetTvUses() {
 }
 
 const std::unordered_set<Val*>& Fusion::vals() const noexcept {
-  return val_set_;
+  return vals_;
 }
 
-const std::deque<Val*>& Fusion::deterministic_vals() const noexcept {
-  return val_deque_;
+const std::deque<Val*> Fusion::deterministic_vals() const noexcept {
+  std::deque<Val*> vals_deque;
+  std::transform(
+      vals_up_.begin(),
+      vals_up_.end(),
+      std::back_inserter(vals_deque),
+      [](const std::unique_ptr<Val>& val_up) { return val_up.get(); });
+  return vals_deque;
 }
 
 std::vector<Val*> Fusion::usedMathVals() {
@@ -554,7 +481,7 @@ std::vector<Val*> Fusion::usedMathVals() {
 }
 
 const std::unordered_set<Expr*>& Fusion::unordered_exprs() const noexcept {
-  return expr_set_;
+  return exprs_;
 }
 
 std::unordered_set<Expr*> Fusion::unordered_uses(Val* val) const {
@@ -574,14 +501,6 @@ bool Fusion::hasInput(const Val* val) const {
 bool Fusion::hasOutput(const Val* val) const {
   assertInFusion(val, "Cannot check if val is an output, ");
   return val->isFusionOutput();
-}
-
-StmtNameType Fusion::getValName(ValType vtype) {
-  return val_type_name_map_[vtype]++;
-}
-
-StmtNameType Fusion::getExprName() {
-  return expr_name_counter_++;
 }
 
 // Indicate to kernel to set itself up to generate random numbers

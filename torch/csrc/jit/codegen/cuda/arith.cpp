@@ -3,6 +3,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
@@ -23,15 +24,15 @@ Val* newScalar(ValType vtype, DataType dtype) {
     case (ValType::Scalar):
       switch (dtype) {
         case DataType::Bool:
-          return new Bool();
+          return IrBuilder::create<Bool>();
         case DataType::Double:
         case DataType::Float:
         case DataType::Half:
         case DataType::BFloat16:
-          return new Double();
+          return IrBuilder::create<Double>();
         case DataType::Int32:
         case DataType::Int:
-          return new Int();
+          return IrBuilder::create<Int>();
         default:
           break;
       }
@@ -104,10 +105,10 @@ TensorView* newOutputTV(const std::vector<Val*>& vals, DataType dtype) {
   }
   for (const auto dim_i : c10::irange(out_domain.size())) {
     if (extent_vals[dim_i] != nullptr) {
-      out_domain[dim_i] = new IterDomain(
-          new Int(start_offsets[dim_i]),
+      out_domain[dim_i] = IrBuilder::create<IterDomain>(
+          IrBuilder::create<Int>(start_offsets[dim_i]),
           extent_vals[dim_i],
-          new Int(stop_offsets[dim_i]),
+          IrBuilder::create<Int>(stop_offsets[dim_i]),
           ParallelType::Serial,
           iter_types[dim_i]);
     } else {
@@ -122,13 +123,17 @@ TensorView* newOutputTV(const std::vector<Val*>& vals, DataType dtype) {
           break;
         }
       }
-      out_domain[dim_i] =
-          new IterDomain(new Int(0), new Int(1), ParallelType::Serial, itype);
+      out_domain[dim_i] = IrBuilder::create<IterDomain>(
+          IrBuilder::create<Int>(0),
+          IrBuilder::create<Int>(1),
+          ParallelType::Serial,
+          itype);
     }
   }
 
-  return new TensorView(
-      new TensorDomain(out_domain, std::vector<bool>(out_domain.size(), true)),
+  return IrBuilder::create<TensorView>(
+      IrBuilder::create<TensorDomain>(
+          out_domain, std::vector<bool>(out_domain.size(), true)),
       dtype);
 }
 
@@ -196,7 +201,7 @@ Val* castOp(DataType dtype, Val* v1) {
   }
 
   Val* out = newValLike(v1, dtype);
-  new UnaryOp(UnaryOpType::Cast, out, v1);
+  IrBuilder::create<UnaryOp>(UnaryOpType::Cast, out, v1);
   return out;
 }
 
@@ -220,7 +225,7 @@ Val* unaryOp(UnaryOpType type, Val* v1) {
   // }
 
   Val* out = newValLike(v1, v1->getDataType().value());
-  new UnaryOp(type, out, v1);
+  IrBuilder::create<UnaryOp>(type, out, v1);
   return out;
 }
 
@@ -380,7 +385,7 @@ Val* binaryOp(BinaryOpType type, Val* v1, Val* v2, DataType common_dtype) {
   } else {
     out = newScalar(out_vtype, out_dtype);
   }
-  new BinaryOp(type, out, vals[0], vals[1]);
+  IrBuilder::create<BinaryOp>(type, out, vals[0], vals[1]);
   return out;
 }
 
@@ -590,7 +595,7 @@ static TensorView* newForReduction(
         " of tensor ",
         tv);
 
-    new_domain.push_back(new IterDomain(
+    new_domain.push_back(IrBuilder::create<IterDomain>(
         id->start(),
         id->extent(),
         id->stopOffset(),
@@ -598,12 +603,12 @@ static TensorView* newForReduction(
         isReduction ? IterType::Reduction : id->getIterType()));
   }
 
-  TensorDomain* td =
-      new TensorDomain(new_domain, std::vector<bool>(new_domain.size(), true));
+  TensorDomain* td = IrBuilder::create<TensorDomain>(
+      new_domain, std::vector<bool>(new_domain.size(), true));
 
   data_type =
       data_type == DataType::Null ? tv->getDataType().value() : data_type;
-  return new TensorView(td, data_type);
+  return IrBuilder::create<TensorView>(td, data_type);
 }
 
 TensorView* reductionOp(
@@ -653,7 +658,7 @@ TensorView* reductionOp(
       out_type,
       " and ",
       init_type);
-  new ReductionOp(reduction_op_type, init, out, tv);
+  IrBuilder::create<ReductionOp>(reduction_op_type, init, out, tv);
 
   if (keep_dim) {
     auto tv_root = TensorDomain::noReductions(tv->getRootDomain());
@@ -674,9 +679,9 @@ TensorView* sum(
   Val* init = nullptr;
   auto dtype = v1->getDataType().value();
   if (isFloatingPointType(dtype)) {
-    init = new Double(0.0);
+    init = IrBuilder::create<Double>(0.0);
   } else if (isIntegralType(dtype)) {
-    init = new Int(0);
+    init = IrBuilder::create<Int>(0);
   } else {
     TORCH_CHECK(
         false,
@@ -694,13 +699,13 @@ TensorView* max(
   Val* init = nullptr;
   switch (v1->getDataType().value()) {
     case (DataType::Double):
-      init = new Double(std::numeric_limits<double>::lowest());
+      init = IrBuilder::create<Double>(std::numeric_limits<double>::lowest());
       break;
     case (DataType::Float):
-      init = new Double(std::numeric_limits<float>::lowest());
+      init = IrBuilder::create<Double>(std::numeric_limits<float>::lowest());
       break;
     case (DataType::Int):
-      init = new Int(INT_MIN);
+      init = IrBuilder::create<Int>(INT_MIN);
       break;
     default:
       TORCH_CHECK(
@@ -719,13 +724,13 @@ TensorView* min(
   Val* init = nullptr;
   switch (v1->getDataType().value()) {
     case (DataType::Double):
-      init = new Double(DBL_MAX);
+      init = IrBuilder::create<Double>(DBL_MAX);
       break;
     case (DataType::Float):
-      init = new Double(FLT_MAX);
+      init = IrBuilder::create<Double>(FLT_MAX);
       break;
     case (DataType::Int):
-      init = new Int(INT_MAX);
+      init = IrBuilder::create<Int>(INT_MAX);
       break;
     default:
       TORCH_CHECK(
@@ -768,9 +773,9 @@ TensorView* broadcast(
   size_t iinp = 0, ibdim = 0;
   while (ibdim < is_broadcast_dim.size()) {
     if (is_broadcast_dim[ibdim]) {
-      out_domain.push_back(new IterDomain(
-          new Int(0),
-          new Int(1),
+      out_domain.push_back(IrBuilder::create<IterDomain>(
+          IrBuilder::create<Int>(0),
+          IrBuilder::create<Int>(1),
           ParallelType::Serial,
           IterType::BroadcastWithoutStride));
     } else {
@@ -780,10 +785,11 @@ TensorView* broadcast(
     ibdim++;
   }
 
-  TensorView* out_tensor = new TensorView(
-      new TensorDomain(out_domain, std::vector<bool>(out_domain.size(), true)),
+  TensorView* out_tensor = IrBuilder::create<TensorView>(
+      IrBuilder::create<TensorDomain>(
+          out_domain, std::vector<bool>(out_domain.size(), true)),
       inp->getDataType().value());
-  new BroadcastOp(out_tensor, inp, is_broadcast_dim);
+  IrBuilder::create<BroadcastOp>(out_tensor, inp, is_broadcast_dim);
   return out_tensor;
 }
 
@@ -799,6 +805,10 @@ WelfordResult Welford(
 
   TORCH_CHECK(tv->nDims() > 0, "Tried to reduce a 0-dim tensor");
   TORCH_CHECK(axes.size() > 0, "No reduction axis specified");
+
+  if (init_N == nullptr) {
+    init_N = IrBuilder::create<Int>(0);
+  }
 
   // Initial values for welford op are tensors, so their dims have to match the
   // output dim,
@@ -820,8 +830,8 @@ WelfordResult Welford(
     init_avg_val = init_avg;
     init_var_val = init_var;
   } else {
-    init_avg_val = new Double(0);
-    init_var_val = new Double(0);
+    init_avg_val = IrBuilder::create<Double>(0);
+    init_var_val = IrBuilder::create<Double>(0);
   }
 
   // Check and collect reduction axes
@@ -848,7 +858,7 @@ WelfordResult Welford(
   TensorView* out_var = newForReduction(tv, uint_axes);
   TensorView* out_N = newForReduction(tv, uint_axes, DataType::Int);
 
-  new WelfordOp(
+  IrBuilder::create<WelfordOp>(
       out_avg,
       out_var,
       out_N, /*out var/avg/count */
@@ -857,7 +867,7 @@ WelfordResult Welford(
       init_N, /*init var/avg/count */
       tv,
       nullptr,
-      new Int(1)); /*in var/avg/count */
+      IrBuilder::create<Int>(1)); /*in var/avg/count */
 
   return WelfordResult(out_avg, out_var, out_N);
 }
@@ -889,10 +899,11 @@ TensorView* transpose(
     out_domain[i] = in_id->clone();
   }
 
-  TensorView* out_tensor = new TensorView(
-      new TensorDomain(out_domain, std::vector<bool>(out_domain.size(), true)),
+  TensorView* out_tensor = IrBuilder::create<TensorView>(
+      IrBuilder::create<TensorDomain>(
+          out_domain, std::vector<bool>(out_domain.size(), true)),
       inp->getDataType().value());
-  new TransposeOp(out_tensor, inp, new2old);
+  IrBuilder::create<TransposeOp>(out_tensor, inp, new2old);
   return out_tensor;
 }
 
@@ -1025,7 +1036,8 @@ Val* where(Val* c, Val* v1, Val* v2) {
   } else {
     out = newScalar(out_vtype, out_dtype);
   }
-  new TernaryOp(TernaryOpType::Where, out, vals[0], vals[1], vals[2]);
+  IrBuilder::create<TernaryOp>(
+      TernaryOpType::Where, out, vals[0], vals[1], vals[2]);
   return out;
 }
 
@@ -1065,7 +1077,8 @@ Val* threshold(Val* in, Val* thresh, Val* value) {
   value = optionalCast(in->getDataType().value(), value);
   Val* out = newValLike(in, in->getDataType().value());
 
-  new TernaryOp(TernaryOpType::Threshold, out, in, thresh, value);
+  IrBuilder::create<TernaryOp>(
+      TernaryOpType::Threshold, out, in, thresh, value);
   return out;
 }
 
@@ -1085,7 +1098,7 @@ Val* clamp(Val* in, Val* min_val, Val* max_val) {
   max_val = optionalCast(in->getDataType().value(), max_val);
   Val* out = newValLike(in, in->getDataType().value());
 
-  new TernaryOp(TernaryOpType::Clamp, out, in, min_val, max_val);
+  IrBuilder::create<TernaryOp>(TernaryOpType::Clamp, out, in, min_val, max_val);
   return out;
 }
 
@@ -1231,18 +1244,20 @@ TensorView* shift(TensorView* inp, const std::vector<int>& offsets, bool pad) {
       if (offset > 0) {
         // shift to right; extent remains the same, start and stop
         // positions are moved right
-        out_start_offset = new Int(cur_start_offset_value + offset);
-        out_stop_offset =
-            new Int(std::max(cur_stop_offset_value - offset, int64_t(0)));
+        out_start_offset =
+            IrBuilder::create<Int>(cur_start_offset_value + offset);
+        out_stop_offset = IrBuilder::create<Int>(
+            std::max(cur_stop_offset_value - offset, int64_t(0)));
       } else {
         // shift to left; extent remains the same, start and stop
         // positions are moved left
-        out_start_offset =
-            new Int(std::max(cur_start_offset_value + offset, int64_t(0)));
-        out_stop_offset = new Int(cur_stop_offset_value - offset);
+        out_start_offset = IrBuilder::create<Int>(
+            std::max(cur_start_offset_value + offset, int64_t(0)));
+        out_stop_offset =
+            IrBuilder::create<Int>(cur_stop_offset_value - offset);
       }
 
-      out_dom.push_back(new IterDomain(
+      out_dom.push_back(IrBuilder::create<IterDomain>(
           out_start_offset,
           inp_axis->extent(),
           out_stop_offset,
@@ -1250,20 +1265,21 @@ TensorView* shift(TensorView* inp, const std::vector<int>& offsets, bool pad) {
           inp_axis->getIterType()));
     }
 
-    out = new TensorView(
-        new TensorDomain(out_dom, std::vector<bool>(out_dom.size(), true)),
+    out = IrBuilder::create<TensorView>(
+        IrBuilder::create<TensorDomain>(
+            out_dom, std::vector<bool>(out_dom.size(), true)),
         inp->getDataType().value());
   }
 
-  new ShiftOp(out, inp, offsets, pad);
+  IrBuilder::create<ShiftOp>(out, inp, offsets, pad);
   return out;
 }
 
 namespace {
 
-// Return a new TensorDomain with given root domains. Apply strides if
-// necessary. With non-unit strides, strided domains become an rfactor
-// domain.
+// Return a new TensorDomain with given root domains. Apply
+// strides if necessary. With non-unit strides, strided domains become an
+// rfactor domain.
 TensorDomain* generateTensorDomainWithStrides(
     const std::vector<IterDomain*>& root_domains,
     const std::vector<int>& strides) {
@@ -1273,7 +1289,7 @@ TensorDomain* generateTensorDomainWithStrides(
   if (strides.empty() || std::all_of(strides.begin(), strides.end(), [](int s) {
         return s == 1;
       })) {
-    return new TensorDomain(
+    return IrBuilder::create<TensorDomain>(
         root_domains, std::vector<bool>(root_domains.size(), true));
   }
 
@@ -1293,7 +1309,7 @@ TensorDomain* generateTensorDomainWithStrides(
 
   auto contig_vector_size = strided_domains.size();
 
-  auto strided_td = new TensorDomain(
+  auto strided_td = IrBuilder::create<TensorDomain>(
       root_domains,
       strided_domains,
       strided_domains,
@@ -1364,18 +1380,18 @@ TensorView* gather(
     const auto extent_adjustment = -(-window_dim + 1 + pad_left + pad_right);
     out_axis_dim = extent_adjustment == 0
         ? inp_axis->extent()
-        : sub(inp_axis->extent(), new Int(extent_adjustment));
+        : sub(inp_axis->extent(), IrBuilder::create<Int>(extent_adjustment));
     // TODO: out_axis_dim is assumed to be the same as the extent of
     // the input domain. Throw an error if it isn't the case.
-    out_root_domains.push_back(new IterDomain(
-        new Int(0),
+    out_root_domains.push_back(IrBuilder::create<IterDomain>(
+        IrBuilder::create<Int>(0),
         out_axis_dim,
         ParallelType::Serial,
         inp_axis->getIterType()));
     // create a new axis for the gathered domain
-    out_gather_dom.push_back(new IterDomain(
-        new Int(0),
-        new Int(window_dim),
+    out_gather_dom.push_back(IrBuilder::create<IterDomain>(
+        IrBuilder::create<Int>(0),
+        IrBuilder::create<Int>(window_dim),
         ParallelType::Serial,
         IterType::Gather));
   }
@@ -1385,9 +1401,10 @@ TensorView* gather(
 
   auto out_td = generateTensorDomainWithStrides(out_root_domains, strides);
 
-  auto out_tv = new TensorView(out_td, inp->getDataType().value());
+  auto out_tv =
+      IrBuilder::create<TensorView>(out_td, inp->getDataType().value());
 
-  new GatherOp(out_tv, inp, window_shape, pad_width);
+  IrBuilder::create<GatherOp>(out_tv, inp, window_shape, pad_width);
   return out_tv;
 }
 

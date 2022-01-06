@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
+#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/ir_internal_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
@@ -135,14 +136,15 @@ class MergeTransform final : public ViewTransform {
     auto merged_extent =
         mul(merged_id->extent(), new_root_domain[index_ + 1]->extent());
 
-    auto new_merged_id = new IterDomain(
-        new Int(0),
+    auto new_merged_id = IrBuilder::create<IterDomain>(
+        IrBuilder::create<Int>(0),
         merged_extent,
         ParallelType::Serial,
         IterType::Iteration,
         true);
 
-    new Merge(new_merged_id, merged_id, new_root_domain[index_ + 1]);
+    IrBuilder::create<Merge>(
+        new_merged_id, merged_id, new_root_domain[index_ + 1]);
 
     rfactor_domain.push_back(new_merged_id);
   }
@@ -181,7 +183,7 @@ class SplitTransform final : public ViewTransform {
         "\t Domain Size:\t",
         new_root_domain.size());
 
-    auto factor = new Int(split_factor_);
+    auto factor = IrBuilder::create<Int>(split_factor_);
 
     IterDomain* id = nullptr;
     if (is_last_axis_rfactor_) {
@@ -195,18 +197,22 @@ class SplitTransform final : public ViewTransform {
     Val* remainder = ceilDiv(id->extent(), factor);
 
     // outer loop IterDomain
-    IterDomain* factor_id = new IterDomain(
-        new Int(0), factor, id->getParallelType(), id->getIterType(), true);
+    IterDomain* factor_id = IrBuilder::create<IterDomain>(
+        IrBuilder::create<Int>(0),
+        factor,
+        id->getParallelType(),
+        id->getIterType(),
+        true);
 
     // inner loop IterDomain
-    IterDomain* remainder_id = new IterDomain(
-        new Int(0),
+    IterDomain* remainder_id = IrBuilder::create<IterDomain>(
+        IrBuilder::create<Int>(0),
         remainder->as<Int>(),
         ParallelType::Serial,
         IterType::Iteration,
         true);
 
-    new Split(factor_id, remainder_id, id, factor, false);
+    IrBuilder::create<Split>(factor_id, remainder_id, id, factor, false);
 
     rfactor_domain.push_back(factor_id);
     rfactor_domain.push_back(remainder_id);
@@ -701,7 +707,7 @@ TensorDomain* createViewDomain(
     t->createRfactorDomain(new_root_domain, rfactor_domain);
   }
 
-  return new TensorDomain(
+  return IrBuilder::create<TensorDomain>(
       new_root_domain,
       rfactor_domain,
       rfactor_domain,

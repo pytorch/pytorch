@@ -6,7 +6,6 @@
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
 #include <torch/csrc/jit/codegen/cuda/lower_alias_memory.h>
 #include <torch/csrc/jit/codegen/cuda/lower_allocation.h>
 #include <torch/csrc/jit/codegen/cuda/lower_expr_sort.h>
@@ -172,13 +171,12 @@ std::unordered_map<Val*, Val*> getSimplificationMap(Fusion* fusion) {
   return extent_to_min_input_id_extent;
 }
 
-class KIRCleaner : public kir::OptOutDispatch {
+class KIRCleaner : public OptOutDispatch {
  public:
   //! Remove nop IR nodes
-  static std::vector<kir::Expr*> cleanUp(
-      const std::vector<kir::Expr*>& loop_nests) {
+  static std::vector<Expr*> cleanUp(const std::vector<Expr*>& loop_nests) {
     KIRCleaner cleaner;
-    std::vector<kir::Expr*> out_loop_nests;
+    std::vector<Expr*> out_loop_nests;
     for (auto loop_nest : loop_nests) {
       cleaner.handle(loop_nest);
       // No need to keep the loop nest if it's determined to be nop
@@ -190,9 +188,10 @@ class KIRCleaner : public kir::OptOutDispatch {
   }
 
  private:
-  void handle(kir::Expr* expr) final {
+  using OptOutDispatch::handle;
+  void handle(Expr* expr) final {
     if (expr->isA<kir::ForLoop>() || expr->isA<kir::IfThenElse>()) {
-      kir::OptOutDispatch::handle(expr);
+      OptOutDispatch::handle(expr);
     } else {
       // Any non-scoping expr is not considered nop
       is_nop_ = false;
@@ -249,8 +248,8 @@ class KIRCleaner : public kir::OptOutDispatch {
     // block.
     if (then_nop && !else_nop) {
       kir::SimplifyingIrBuilder ir_builder(GpuLower::current()->kernel());
-      kir::Bool* pred = ite->predicate()->value();
-      kir::Bool* not_pred = ir_builder.notExpr(pred)->as<kir::Bool>();
+      Bool* pred = ite->predicate()->value();
+      Bool* not_pred = ir_builder.notExpr(pred)->as<Bool>();
       ite->predicate()->setValue(not_pred);
       for (auto expr : ite->elseBody().exprs()) {
         ite->thenBody().push_back(expr);
@@ -324,7 +323,7 @@ void GpuLower::replaceSymbolicSizes() {
           !orig_size->isFusionInput() && !orig_size->isConstScalar()) {
         std::stringstream ss;
         ss << "T" << tv->name() << ".size[" << dim++ << "]";
-        kir_val_map_[orig_size] = ir_builder.create<kir::NamedScalar>(
+        kir_val_map_[orig_size] = ir_builder.create<NamedScalar>(
             ss.str(), orig_size->getDataType().value());
       } else {
         dim++;
@@ -400,7 +399,6 @@ void GpuLower::collectPaddedParallelDims() {
 
 void GpuLower::lower() {
   FUSER_PERF_SCOPE("GpuLower::lower");
-
   TORCH_INTERNAL_ASSERT(fusion_ != nullptr);
   TORCH_INTERNAL_ASSERT(
       active_gpu_lower == nullptr, "Nested lowering passes are not supported");
@@ -447,7 +445,6 @@ void GpuLower::lower() {
 
   parallelDimensionMap().build(fusion_);
   if (isDebugDumpEnabled(DebugDumpOption::ParallelDimensions)) {
-    std::cout << parallelDimensionMap().toString();
   }
 
   // Compute thread predicates. Depends on parallel_dimension_map_
@@ -498,17 +495,18 @@ void GpuLower::lower() {
   // Reuse memory locations
   const auto reuse_mem_exprs = reuseMemoryAllocations(raw_sync_exprs);
 
-  // Inserts predicates after this, need to be careful in later passes when
-  // inserting in loop nest structure as insertions could be on if then else
-  // instead of directly on a for loop
-  const auto unrolled_loops = UnrollPass::runPass(fusion_, reuse_mem_exprs);
+  // Insert SyncThreads at end of for-loop to avoid WAR race condition
+  const auto war_sync_exprs = insertWarThreadSynchronization(reuse_mem_exprs);
+
+  // This pass inserts predicates as well as branches in the code. Up until now
+  // the code is explicitly single shot for loop based. Need to be careful in
+  // later passes when doing any kind of insertions in loop nest structure as
+  // insertions could be on if then or else instead of directly on a for loop.
+  const auto unrolled_loops = UnrollPass::runPass(fusion_, war_sync_exprs);
 
   const auto unrolled_mv_loops = processMisalignedVectorization(unrolled_loops);
 
-  // Insert SyncThreads at end of for-loop to avoid WAR race condition
-  const auto war_sync_exprs = insertWarThreadSynchronization(unrolled_mv_loops);
-
-  const auto indexed_loops = IndexLowering::getIndexedExprs(war_sync_exprs);
+  const auto indexed_loops = IndexLowering::getIndexedExprs(unrolled_mv_loops);
 
   // TODO: It seems this type of optimization would be far easier to implement
   // on fusion ir than kernel ir. We should likely refactor this to at least run
@@ -539,7 +537,7 @@ class GpuLower::KernelIrMapper : private OptInConstDispatch {
   explicit KernelIrMapper(GpuLower* gpu_lower)
       : gpu_lower_(gpu_lower), ir_builder_(gpu_lower->kernel()) {}
 
-  kir::Val* lowerValue(const Val* value) {
+  Val* lowerValue(const Val* value) {
     const auto it = gpu_lower_->kir_val_map_.find(value);
     if (it != gpu_lower_->kir_val_map_.end()) {
       return it->second;
@@ -560,7 +558,7 @@ class GpuLower::KernelIrMapper : private OptInConstDispatch {
     }
   }
 
-  kir::Expr* lowerExpr(const Expr* expr) {
+  Expr* lowerExpr(const Expr* expr) {
     const auto it = gpu_lower_->kir_expr_map_.find(expr);
     if (it != gpu_lower_->kir_expr_map_.end()) {
       return it->second;
@@ -577,43 +575,43 @@ class GpuLower::KernelIrMapper : private OptInConstDispatch {
   using OptInConstDispatch::handle;
 
   void handle(const TensorDomain* node) final {
-    const auto lowered_node = ir_builder_.create<kir::TensorDomain>(node);
+    const auto lowered_node = ir_builder_.create<TensorDomain>(node);
     TORCH_CHECK(gpu_lower_->kir_val_map_.insert({node, lowered_node}).second);
   }
 
   void handle(const IterDomain* node) final {
-    const auto lowered_node = ir_builder_.create<kir::IterDomain>(node);
+    const auto lowered_node = ir_builder_.create<IterDomain>(node);
     TORCH_CHECK(gpu_lower_->kir_val_map_.insert({node, lowered_node}).second);
   }
 
   void handle(const TensorView* node) final {
-    const auto lowered_node = ir_builder_.create<kir::TensorView>(node);
+    const auto lowered_node = ir_builder_.create<TensorView>(node);
     TORCH_CHECK(gpu_lower_->kir_val_map_.insert({node, lowered_node}).second);
   }
 
   void handle(const Bool* node) final {
-    const auto lowered_node = ir_builder_.create<kir::Bool>(node);
+    const auto lowered_node = ir_builder_.create<Bool>(node->value());
     TORCH_CHECK(gpu_lower_->kir_val_map_.insert({node, lowered_node}).second);
   }
 
   void handle(const Double* node) final {
-    const auto lowered_node = ir_builder_.create<kir::Double>(node);
+    const auto lowered_node = ir_builder_.create<Double>(node->value());
     TORCH_CHECK(gpu_lower_->kir_val_map_.insert({node, lowered_node}).second);
   }
 
   void handle(const Int* node) final {
-    const auto lowered_node = ir_builder_.create<kir::Int>(node);
+    const auto lowered_node = ir_builder_.create<Int>(node->value());
     TORCH_CHECK(gpu_lower_->kir_val_map_.insert({node, lowered_node}).second);
   }
 
   void handle(const NamedScalar* node) final {
-    const auto lowered_node = ir_builder_.create<kir::NamedScalar>(
+    const auto lowered_node = ir_builder_.create<NamedScalar>(
         node->name(), node->getDataType().value());
     TORCH_CHECK(gpu_lower_->kir_val_map_.insert({node, lowered_node}).second);
   }
 
   void handle(const UnaryOp* node) final {
-    const auto lowered_node = ir_builder_.create<kir::UnaryOp>(
+    const auto lowered_node = ir_builder_.create<UnaryOp>(
         node->getUnaryOpType(),
         lowerValue(node->out()),
         lowerValue(node->in()));
@@ -621,7 +619,7 @@ class GpuLower::KernelIrMapper : private OptInConstDispatch {
   }
 
   void handle(const BinaryOp* node) final {
-    const auto lowered_node = ir_builder_.create<kir::BinaryOp>(
+    const auto lowered_node = ir_builder_.create<BinaryOp>(
         node->getBinaryOpType(),
         lowerValue(node->out()),
         lowerValue(node->lhs()),
@@ -630,7 +628,7 @@ class GpuLower::KernelIrMapper : private OptInConstDispatch {
   }
 
   void handle(const TernaryOp* node) final {
-    const auto lowered_node = ir_builder_.create<kir::TernaryOp>(
+    const auto lowered_node = ir_builder_.create<TernaryOp>(
         node->getTernaryOpType(),
         lowerValue(node->out()),
         lowerValue(node->in1()),
@@ -653,14 +651,14 @@ class GpuLower::KernelIrMapper : private OptInConstDispatch {
                 return true;
               }
             })) {
-      const auto lowered_node = ir_builder_.create<kir::UnaryOp>(
+      const auto lowered_node = ir_builder_.create<UnaryOp>(
           UnaryOpType::Set, lowerValue(node->out()), lowerValue(node->in()));
       TORCH_CHECK(
           gpu_lower_->kir_expr_map_.insert({node, lowered_node}).second);
       return;
     }
 
-    const auto lowered_node = ir_builder_.create<kir::ReductionOp>(
+    const auto lowered_node = ir_builder_.create<ReductionOp>(
         node->getReductionOpType(),
         lowerValue(node->init()),
         lowerValue(node->out()),
@@ -670,46 +668,48 @@ class GpuLower::KernelIrMapper : private OptInConstDispatch {
 
   void handle(const WelfordOp* node) final {
     auto lowerOptional = [&](Val* v) { return v ? lowerValue(v) : nullptr; };
-    const auto lowered_node = ir_builder_.create<kir::WelfordOp>(
-        lowerValue(node->outVar()),
+    const auto lowered_node = ir_builder_.create<WelfordOp>(
         lowerValue(node->outAvg()),
+        lowerValue(node->outVar()),
         lowerValue(node->outN()),
-        lowerValue(node->initVar()),
         lowerValue(node->initAvg()),
+        lowerValue(node->initVar()),
         lowerValue(node->initN()),
-        lowerOptional(node->inVar()),
         lowerValue(node->inAvg()),
+        lowerOptional(node->inVar()),
         lowerValue(node->inN()));
 
     TORCH_CHECK(gpu_lower_->kir_expr_map_.insert({node, lowered_node}).second);
   }
 
   void handle(const BroadcastOp* node) final {
-    const auto lowered_node = ir_builder_.create<kir::BroadcastOp>(
-        lowerValue(node->out()), lowerValue(node->in()));
+    const auto lowered_node = ir_builder_.create<BroadcastOp>(
+        lowerValue(node->out()),
+        lowerValue(node->in()),
+        node->getBroadcastDimFlags());
     TORCH_CHECK(gpu_lower_->kir_expr_map_.insert({node, lowered_node}).second);
   }
 
   void handle(const TransposeOp* node) final {
-    const auto lowered_node = ir_builder_.create<kir::UnaryOp>(
+    const auto lowered_node = ir_builder_.create<UnaryOp>(
         UnaryOpType::Set, lowerValue(node->out()), lowerValue(node->in()));
     TORCH_CHECK(gpu_lower_->kir_expr_map_.insert({node, lowered_node}).second);
   }
 
   void handle(const ShiftOp* node) final {
-    const auto lowered_node = ir_builder_.create<kir::UnaryOp>(
+    const auto lowered_node = ir_builder_.create<UnaryOp>(
         UnaryOpType::Set, lowerValue(node->out()), lowerValue(node->in()));
     TORCH_CHECK(gpu_lower_->kir_expr_map_.insert({node, lowered_node}).second);
   }
 
   void handle(const GatherOp* node) final {
-    const auto lowered_node = ir_builder_.create<kir::UnaryOp>(
+    const auto lowered_node = ir_builder_.create<UnaryOp>(
         UnaryOpType::Set, lowerValue(node->out()), lowerValue(node->in()));
     TORCH_CHECK(gpu_lower_->kir_expr_map_.insert({node, lowered_node}).second);
   }
 
   void handle(const ViewOp* node) final {
-    const auto lowered_node = ir_builder_.create<kir::UnaryOp>(
+    const auto lowered_node = ir_builder_.create<UnaryOp>(
         UnaryOpType::Set, lowerValue(node->out()), lowerValue(node->in()));
     TORCH_CHECK(gpu_lower_->kir_expr_map_.insert({node, lowered_node}).second);
   }
@@ -719,12 +719,12 @@ class GpuLower::KernelIrMapper : private OptInConstDispatch {
   kir::IrBuilder ir_builder_;
 };
 
-kir::Val* GpuLower::lowerValue(const Val* val) {
+Val* GpuLower::lowerValue(const Val* val) {
   KernelIrMapper kir_mapper(this);
   return kir_mapper.lowerValue(val);
 }
 
-kir::Expr* GpuLower::lowerExpr(const Expr* expr) {
+Expr* GpuLower::lowerExpr(const Expr* expr) {
   KernelIrMapper kir_mapper(this);
   return kir_mapper.lowerExpr(expr);
 }

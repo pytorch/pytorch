@@ -24,8 +24,8 @@ class TORCH_CUDA_CU_API TrivialReductionInfo {
   bool isDerived(IterDomain* id) const;
   bool isDerivedFromRoot(IterDomain* id) const;
 
-  bool isDerived(kir::IterDomain* id) const;
-  bool isDerivedFromRoot(kir::IterDomain* id) const;
+  bool kirIsDerived(IterDomain* id) const;
+  bool kirIsDerivedFromRoot(IterDomain* id) const;
 
  private:
   //! Convert the sets to KIR sets
@@ -49,8 +49,8 @@ class TORCH_CUDA_CU_API TrivialReductionInfo {
   //! for-loops.
   std::unordered_set<IterDomain*> domains_derived_from_root_;
 
-  std::unordered_set<kir::IterDomain*> kir_domains_;
-  std::unordered_set<kir::IterDomain*> kir_domains_derived_from_root_;
+  std::unordered_set<IterDomain*> kir_domains_;
+  std::unordered_set<IterDomain*> kir_domains_derived_from_root_;
 };
 
 } // namespace cuda

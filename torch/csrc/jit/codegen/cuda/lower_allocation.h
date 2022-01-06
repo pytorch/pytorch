@@ -16,7 +16,7 @@ namespace cuda {
 //!  logic duplication
 struct LocalAllocationInfo {
   kir::Allocate* alloc_expr = nullptr;
-  std::vector<kir::IterDomain*> alloc_domains;
+  std::vector<IterDomain*> alloc_domains;
   bool has_halo = false;
 };
 
@@ -24,7 +24,7 @@ using LocalAllocationInfoMap =
     std::unordered_map<kir::Allocate*, std::unique_ptr<LocalAllocationInfo>>;
 
 //! Insert buffer allocations
-std::vector<kir::Expr*> insertAllocations(const std::vector<kir::Expr*>& exprs);
+std::vector<Expr*> insertAllocations(const std::vector<Expr*>& exprs);
 
 } // namespace cuda
 } // namespace fuser

@@ -1,9 +1,9 @@
 #pragma once
 
-#include <torch/csrc/jit/codegen/cuda/utils.h>
-
 #include <c10/util/Exception.h>
 #include <c10/macros/Export.h>
+
+#include <torch/csrc/jit/codegen/cuda/utils.h>
 
 #include <unordered_map>
 
@@ -60,14 +60,13 @@ class Val;
 class IterDomain;
 class TensorDomain;
 class TensorView;
+
 class Bool;
 class Double;
 class Int;
 class NamedScalar;
 
 // Exprs
-class Split;
-class Merge;
 class UnaryOp;
 class BinaryOp;
 class TernaryOp;
@@ -78,6 +77,29 @@ class TransposeOp;
 class ShiftOp;
 class GatherOp;
 class ViewOp;
+
+// Exprs
+class Split;
+class Merge;
+class TransposeOp;
+class ShiftOp;
+class GatherOp;
+class ViewOp;
+
+namespace kir {
+class Predicate;
+class TensorIndex;
+
+class Allocate;
+class Sync;
+class ForLoop;
+class IfThenElse;
+class GridReduction;
+class GridBroadcast;
+class GridWelford;
+class InitMagicZero;
+class UpdateMagicZero;
+} // namespace kir
 
 // By default, all IR nodes are handled in this dispatch, and will call an empty
 // function on all nodes.
@@ -100,24 +122,38 @@ class TORCH_CUDA_CU_API OptOutConstDispatch : public PolymorphicBase {
   virtual void handle(const Int* stmt);
   virtual void handle(const NamedScalar* stmt);
 
+  virtual void handle(const kir::Predicate*);
+  virtual void handle(const kir::TensorIndex*);
+
   // Exprs
-  virtual void handle(const Split* stmt);
-  virtual void handle(const Merge* stmt);
   virtual void handle(const UnaryOp* stmt);
   virtual void handle(const BinaryOp* stmt);
   virtual void handle(const TernaryOp* stmt);
   virtual void handle(const ReductionOp* stmt);
   virtual void handle(const WelfordOp* stmt);
   virtual void handle(const BroadcastOp* stmt);
+
+  virtual void handle(const Split* stmt);
+  virtual void handle(const Merge* stmt);
   virtual void handle(const TransposeOp* stmt);
   virtual void handle(const ShiftOp* stmt);
   virtual void handle(const GatherOp* stmt);
   virtual void handle(const ViewOp* stmt);
+
+  virtual void handle(const kir::Allocate*);
+  virtual void handle(const kir::Sync*);
+  virtual void handle(const kir::InitMagicZero*);
+  virtual void handle(const kir::UpdateMagicZero*);
+  virtual void handle(const kir::ForLoop*);
+  virtual void handle(const kir::IfThenElse*);
+  virtual void handle(const kir::GridReduction*);
+  virtual void handle(const kir::GridBroadcast*);
+  virtual void handle(const kir::GridWelford*);
 };
 
 class TORCH_CUDA_CU_API OptOutDispatch : public PolymorphicBase {
  protected:
-  virtual void unhandled(Statement*) {}
+  virtual void unhandled(Statement*);
 
  public:
   // Hierarchal dispatch functions for handle
@@ -126,27 +162,41 @@ class TORCH_CUDA_CU_API OptOutDispatch : public PolymorphicBase {
   virtual void handle(Val*);
 
   // Vals
-  virtual void handle(IterDomain* stmt);
-  virtual void handle(TensorDomain* stmt);
-  virtual void handle(TensorView* stmt);
   virtual void handle(Bool* stmt);
   virtual void handle(Double* stmt);
   virtual void handle(Int* stmt);
   virtual void handle(NamedScalar* stmt);
+  virtual void handle(IterDomain* stmt);
+  virtual void handle(TensorDomain* stmt);
+  virtual void handle(TensorView* stmt);
+
+  virtual void handle(kir::Predicate*);
+  virtual void handle(kir::TensorIndex*);
 
   // Exprs
-  virtual void handle(Split* stmt);
-  virtual void handle(Merge* stmt);
   virtual void handle(UnaryOp* stmt);
   virtual void handle(BinaryOp* stmt);
   virtual void handle(TernaryOp* stmt);
   virtual void handle(ReductionOp* stmt);
   virtual void handle(WelfordOp* stmt);
   virtual void handle(BroadcastOp* stmt);
+
+  virtual void handle(Split* stmt);
+  virtual void handle(Merge* stmt);
   virtual void handle(TransposeOp* stmt);
   virtual void handle(ShiftOp* stmt);
   virtual void handle(GatherOp* stmt);
   virtual void handle(ViewOp* stmt);
+
+  virtual void handle(kir::Allocate*);
+  virtual void handle(kir::Sync*);
+  virtual void handle(kir::InitMagicZero*);
+  virtual void handle(kir::UpdateMagicZero*);
+  virtual void handle(kir::ForLoop*);
+  virtual void handle(kir::IfThenElse*);
+  virtual void handle(kir::GridReduction*);
+  virtual void handle(kir::GridBroadcast*);
+  virtual void handle(kir::GridWelford*);
 };
 
 class TORCH_CUDA_CU_API OptInConstDispatch : public OptOutConstDispatch {
@@ -178,44 +228,50 @@ class TORCH_CUDA_CU_API OptOutMutator : public PolymorphicBase {
   // below function or manually cast to use mutate(Val* v) we can't intercept
   // and mutate by capturing mutate(Val* v), which is what we do when we want to
   // replace all instances of a value.
-  Statement* mutateAsVal(Val* v) {
-    return mutate(v);
-  }
+  Statement* mutateAsVal(Val* v);
 
-  void registerMutation(Val* val, Val* mutation) {
-    TORCH_INTERNAL_ASSERT(
-        mutations.find(val) == mutations.end(),
-        " The same value is incorrectly being mutated twice.",
-        " One mutation per mutation pass is allowed.");
-    mutations[val] = mutation;
-  }
+  void registerMutation(Val* val, Val* mutation);
 
   std::unordered_map<Val*, Val*> mutations;
 
   //****Functions below defined in mutator.cpp*****
 
   // Vals
-  virtual Statement* mutate(IterDomain*);
-  virtual Statement* mutate(TensorDomain*);
-  virtual Statement* mutate(TensorView*);
   virtual Statement* mutate(Bool*);
   virtual Statement* mutate(Double*);
   virtual Statement* mutate(Int*);
   virtual Statement* mutate(NamedScalar*);
+  virtual Statement* mutate(IterDomain*);
+  virtual Statement* mutate(TensorDomain*);
+  virtual Statement* mutate(TensorView*);
+
+  virtual Statement* mutate(kir::Predicate*);
+  virtual Statement* mutate(kir::TensorIndex*);
 
   // Exprs
-  virtual Statement* mutate(Split*);
-  virtual Statement* mutate(Merge*);
   virtual Statement* mutate(UnaryOp*);
   virtual Statement* mutate(BinaryOp*);
   virtual Statement* mutate(TernaryOp*);
   virtual Statement* mutate(ReductionOp*);
   virtual Statement* mutate(WelfordOp*);
   virtual Statement* mutate(BroadcastOp*);
+
+  virtual Statement* mutate(Split*);
+  virtual Statement* mutate(Merge*);
   virtual Statement* mutate(TransposeOp*);
   virtual Statement* mutate(ShiftOp*);
   virtual Statement* mutate(GatherOp*);
   virtual Statement* mutate(ViewOp*);
+
+  virtual Statement* mutate(kir::Allocate*);
+  virtual Statement* mutate(kir::Sync*);
+  virtual Statement* mutate(kir::InitMagicZero*);
+  virtual Statement* mutate(kir::UpdateMagicZero*);
+  virtual Statement* mutate(kir::ForLoop*);
+  virtual Statement* mutate(kir::IfThenElse*);
+  virtual Statement* mutate(kir::GridReduction*);
+  virtual Statement* mutate(kir::GridBroadcast*);
+  virtual Statement* mutate(kir::GridWelford*);
 };
 
 } // namespace cuda

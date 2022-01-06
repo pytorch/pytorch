@@ -114,7 +114,9 @@ TORCH_CUDA_CU_API WelfordResult Welford(
     const std::vector<int>& axes,
     TensorView* init_avg = nullptr,
     TensorView* init_var = nullptr,
-    Int* init_N = new Int(0));
+    // Initializes to 0 in function definition, doing this so we don't have to
+    // import IrBuilder just for this one interface.
+    Int* init_N = nullptr);
 
 // UNARY OPERATIONS
 // abs

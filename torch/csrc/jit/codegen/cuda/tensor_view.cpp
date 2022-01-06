@@ -3,10 +3,12 @@
 #include <torch/csrc/jit/codegen/cuda/compute_at.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
 #include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
+#include <torch/csrc/jit/codegen/cuda/lower2device.h>
 
 // Cleanup
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
@@ -24,8 +26,14 @@ DataType aten_opt_type_map(const c10::optional<at::ScalarType>& scalar_type) {
 }
 } // namespace
 
-TensorView::TensorView(TensorDomain* domain, DataType dtype, MemoryType mtype)
-    : Val(ValType::TensorView, dtype), domain_(domain), memory_type_(mtype) {
+TensorView::TensorView(
+    IrBuilderPasskey passkey,
+    TensorDomain* domain,
+    DataType dtype,
+    MemoryType mtype)
+    : Val(passkey, ValType::TensorView, dtype),
+      domain_(domain),
+      memory_type_(mtype) {
   // Don't do this after transforms
   if (domain_->domain() == domain_->getRootDomain()) {
     // Mark the size-1 axes as broadcast to support implicit broadcast semantic
@@ -38,10 +46,13 @@ TensorView::TensorView(TensorDomain* domain, DataType dtype, MemoryType mtype)
   }
 }
 
-TensorView::TensorView(const std::shared_ptr<c10::TensorType>& tensor_type)
-    : Val(ValType::TensorView,
-          aten_opt_type_map(tensor_type->scalarType()),
-          false) {
+TensorView::TensorView(
+    IrBuilderPasskey passkey,
+    const std::shared_ptr<c10::TensorType>& tensor_type)
+    : Val(passkey,
+          ValType::TensorView,
+          aten_opt_type_map(tensor_type->scalarType())) {
+  TORCH_INTERNAL_ASSERT(!isKirStmt(), "Function invalid for kir.");
   std::vector<IterDomain*> sizes;
 
   TORCH_CHECK(
@@ -51,13 +62,14 @@ TensorView::TensorView(const std::shared_ptr<c10::TensorType>& tensor_type)
     if (tensor_type->sizes()[i].has_value() &&
         tensor_type->sizes()[i].value() == 1) {
       // If size is known to be 1, assuem it needs to be broadcasted.
-      sizes.push_back(new IterDomain(
-          new Int(0),
-          new Int(1),
+      sizes.push_back(IrBuilder::create<IterDomain>(
+          IrBuilder::create<Int>(0),
+          IrBuilder::create<Int>(1),
           ParallelType::Serial,
           IterType::BroadcastWithStride));
     } else {
-      sizes.push_back(new IterDomain(new Int(0), new Int()));
+      sizes.push_back(IrBuilder::create<IterDomain>(
+          IrBuilder::create<Int>(0), IrBuilder::create<Int>()));
     }
   }
 
@@ -92,8 +104,14 @@ TensorView::TensorView(const std::shared_ptr<c10::TensorType>& tensor_type)
     }
   }
 
-  domain_ = new TensorDomain(sizes, contig_info);
-  name_ = fusion_->registerVal(this);
+  domain_ = IrBuilder::create<TensorDomain>(sizes, contig_info);
+}
+
+TensorView::TensorView(
+    IrBuilderPasskey passkey,
+    const std::shared_ptr<Value>& jit_value)
+    : TensorView(passkey, jit_value->type()->cast<c10::TensorType>()) {
+  TORCH_INTERNAL_ASSERT(!isKirStmt(), "Function invalid for kir.");
 }
 
 TensorView::TensorView(const TensorView* src, IrCloner* ir_cloner)
@@ -103,9 +121,23 @@ TensorView::TensorView(const TensorView* src, IrCloner* ir_cloner)
       max_producer_pos_(src->max_producer_pos_),
       memory_type_(src->memory_type_),
       swizzle_type_(src->swizzle_type_) {
+  TORCH_INTERNAL_ASSERT(
+      !src->isKirStmt() && !isKirStmt(), "Function invalid for kir.");
   for (const auto id : src->axesToSwizzle()) {
     axes_to_swizzle_.push_back(ir_cloner->clone(id));
   }
+}
+
+// TODO: Remove, only used for lowering
+TensorView::TensorView(
+    IrBuilderPasskey passkey,
+    const fuser::cuda::TensorView* tv)
+    : Val(passkey, ValType::TensorView, tv->getDataType().value()),
+      fuser_tv_(tv) {
+  TORCH_INTERNAL_ASSERT(isKirStmt(), "Function invalid for fusion.");
+  setName(passkey, tv->name());
+  domain_ = GpuLower::current()->lowerValue(tv->domain())->as<TensorDomain>();
+  memory_type_ = tv->getMemoryType();
 }
 
 bool TensorView::hasAnyReduction() const {
@@ -167,6 +199,7 @@ IterDomain* TensorView::axis(int pos) const {
 }
 
 void TensorView::setComputeAt(unsigned int pos, bool decrease) {
+  TORCH_INTERNAL_ASSERT(!isKirStmt(), "Function invalid for kir.");
   if (pos <= compute_at_pos_ && !decrease) {
     return;
   }
@@ -182,6 +215,7 @@ void TensorView::setComputeAt(unsigned int pos, bool decrease) {
 }
 
 void TensorView::setMaxProducer(unsigned int pos, bool decrease) {
+  TORCH_INTERNAL_ASSERT(!isKirStmt(), "Function invalid for kir.");
   if (pos <= max_producer_pos_ && !decrease) {
     return;
   }
@@ -200,6 +234,7 @@ TensorView* TensorView::computeAt(
     TensorView* consumer,
     int position,
     ComputeAtMode mode) {
+  TORCH_INTERNAL_ASSERT(!isKirStmt(), "Function invalid for kir.");
   // Make sure this and consumer are not the same tensor, that's illegal
   TORCH_CHECK(!sameAs(consumer), "Cannot call this->computeAt(this, ...)");
 
@@ -228,6 +263,7 @@ TensorView* TensorView::computeWith(
     TensorView* consumer,
     int position,
     ComputeAtMode mode) {
+  TORCH_INTERNAL_ASSERT(!isKirStmt(), "Function invalid for kir.");
   // Make sure this and consumer are not the same tensor, that's illegal
   TORCH_CHECK(!sameAs(consumer), "Cannot call this->computeAt(this, ...)");
 
@@ -290,7 +326,7 @@ TensorView* TensorView::split(
     unsigned int factor,
     bool inner_split,
     bool trim_out_of_bounds) {
-  split(axis, new Int(factor), inner_split, trim_out_of_bounds);
+  split(axis, IrBuilder::create<Int>(factor), inner_split, trim_out_of_bounds);
   return this;
 }
 
@@ -336,6 +372,7 @@ TensorView* TensorView::merge(int axis_o, int axis_i) {
 }
 
 TensorView* TensorView::reorder(const std::unordered_map<int, int>& old2new_) {
+  TORCH_INTERNAL_ASSERT(!isKirStmt(), "Function invalid for kir.");
   TORCH_INTERNAL_ASSERT(
       !(nDims() == 0 && old2new_.size() > 0),
       "Tried to reorder a 0-dim TensorView");
@@ -383,6 +420,7 @@ TensorView* TensorView::reorder(const std::unordered_map<int, int>& old2new_) {
 TensorView* TensorView::swizzle(
     SwizzleType type,
     const std::vector<int>& axes) {
+  TORCH_INTERNAL_ASSERT(!isKirStmt(), "Function invalid for kir.");
   swizzle_type_ = type;
 
   // Clear previously set swizzle axes if any
@@ -432,6 +470,7 @@ TensorView* TensorView::swizzle(
 }
 
 TensorView* TensorView::rFactor(const std::vector<int>& axes) {
+  TORCH_INTERNAL_ASSERT(!isKirStmt(), "Function invalid for kir.");
   // TODO: I think we should do this but
   // NVFuserTest.FusionSmemBlockGemmCache_CUDA prevents it from going in at the
   // moment.
@@ -462,7 +501,8 @@ TensorView* TensorView::rFactor(const std::vector<int>& axes) {
   auto consumer_domain = domain_pair.second;
 
   // This domain will be the consumer, so create the producer
-  TensorView* producer = new TensorView(producer_domain, getDataType().value());
+  TensorView* producer =
+      IrBuilder::create<TensorView>(producer_domain, getDataType().value());
 
   // Set domain of consumer
   setDomain(consumer_domain);
@@ -470,14 +510,14 @@ TensorView* TensorView::rFactor(const std::vector<int>& axes) {
 
   // Setup dependency chain, inserting producer before this op.
   // Expr* producer_definition =
-  new ReductionOp(
+  IrBuilder::create<ReductionOp>(
       this_definition->getReductionOpType(),
       this_definition->init(),
       producer,
       this_definition->in());
 
   // Expr* consumer_definition =
-  new ReductionOp(
+  IrBuilder::create<ReductionOp>(
       this_definition->getReductionOpType(),
       this_definition->init(),
       consumer,
@@ -489,6 +529,7 @@ TensorView* TensorView::rFactor(const std::vector<int>& axes) {
 TensorView* TensorView::welfordRfactorHelper(
     TensorView* tv,
     const std::vector<int>& axes) {
+  TORCH_INTERNAL_ASSERT(!isKirStmt(), "Function invalid for kir.");
   // Hack:
   // Semantically we should always keep the outputs of welfordOp scheduled
   // the same but the user end cannot guarantee that.
@@ -520,7 +561,8 @@ TensorView* TensorView::welfordRfactorHelper(
     std::vector<bool> new_contig(
         tv->domain()->contiguity().begin(), tv->domain()->contiguity().end());
     // replace tensor domain of target tv
-    tv->setDomain(new TensorDomain(tv->getRootDomain(), new_id, new_contig));
+    tv->setDomain(IrBuilder::create<TensorDomain>(
+        tv->getRootDomain(), new_id, new_contig));
   }
 
   // Split tensor view into 2 parts
@@ -532,7 +574,7 @@ TensorView* TensorView::welfordRfactorHelper(
 
   // This domain will be the consumer, so create the producer
   TensorView* producer =
-      new TensorView(producer_domain, tv->getDataType().value());
+      IrBuilder::create<TensorView>(producer_domain, tv->getDataType().value());
 
   // Set domain of consumer
   tv->setDomain(consumer_domain);
@@ -545,6 +587,7 @@ WelfordResult TensorView::rFactor(
     TensorView* avg,
     TensorView* var,
     TensorView* n) {
+  TORCH_INTERNAL_ASSERT(!isKirStmt(), "Function invalid for kir.");
   TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to rFactor a 0-dim TensorView");
   FusionGuard fg(fusion());
   TORCH_CHECK(
@@ -588,7 +631,7 @@ WelfordResult TensorView::rFactor(
 
   // Setup dependency chain, inserting producer before this op.
   // Expr* producer_definition =
-  new WelfordOp(
+  IrBuilder::create<WelfordOp>(
       producer_avg,
       producer_var,
       producer_n, /*out var/avg/count */
@@ -600,7 +643,7 @@ WelfordResult TensorView::rFactor(
       wop->inN());
 
   // Expr* consumer_definition =
-  new WelfordOp(
+  IrBuilder::create<WelfordOp>(
       avg,
       var,
       n,
@@ -615,6 +658,7 @@ WelfordResult TensorView::rFactor(
 }
 
 TensorView* TensorView::cache_before() {
+  TORCH_INTERNAL_ASSERT(!isKirStmt(), "Function invalid for kir.");
   FusionGuard fg(fusion());
 
   TORCH_CHECK(
@@ -652,8 +696,10 @@ TensorView* TensorView::cache_before() {
   // This domain will be the consumer which needs a new domain, so replace the
   // producers domain with this domain.
 
-  TensorView* producer = new TensorView(
-      new TensorDomain(
+  TensorView* producer = IrBuilder::create<TensorView>(
+      container(),
+      IrBuilder::create<TensorDomain>(
+          container(),
           domain()->getRootDomain(),
           domain()->getRFactorDomain(),
           domain()->domain(),
@@ -671,8 +717,10 @@ TensorView* TensorView::cache_before() {
     new_root_domain[i++] = dom->clone();
   }
 
-  consumer->setDomain(new TensorDomain(
-      new_root_domain, std::vector<bool>(new_root_domain.size(), true)));
+  consumer->setDomain(IrBuilder::create<TensorDomain>(
+      container(),
+      new_root_domain,
+      std::vector<bool>(new_root_domain.size(), true)));
 
   // Insert producer - Cache_Before (CB) - before this TV.
   // Before: Prev TV -> [Definition Op] -> This TV
@@ -684,7 +732,7 @@ TensorView* TensorView::cache_before() {
   ir_utils::replaceValInExpr(definition(), this, producer);
 
   // Expr* producer_uses =
-  new UnaryOp(UnaryOpType::Set, consumer, producer);
+  IrBuilder::create<UnaryOp>(container(), UnaryOpType::Set, consumer, producer);
 
   // definition_ is no longer valid
   // setDefinition(nullptr);
@@ -697,6 +745,7 @@ TensorView* TensorView::cache_before() {
 }
 
 TensorView* TensorView::cache_fork() {
+  TORCH_INTERNAL_ASSERT(!isKirStmt(), "Function invalid for kir.");
   FusionGuard fg(fusion());
 
   // Before: [Expr] -> This TV (Global Output) -> [Usage Expr]
@@ -717,14 +766,16 @@ TensorView* TensorView::cache_fork() {
 
   // This domain will be the producer, so create the consumer
   auto root_domain = TensorDomain::noReductions(getMaybeRFactorDomain());
-  TensorView* new_output = new TensorView(
-      new TensorDomain(
+  TensorView* new_output = IrBuilder::create<TensorView>(
+      container(),
+      IrBuilder::create<TensorDomain>(
+          container(),
           IterDomain::clone(root_domain),
           std::vector<bool>(root_domain.size(), true)),
       getDataType().value());
 
   // Create write operation from this TV to new output
-  new UnaryOp(UnaryOpType::Set, new_output, this);
+  IrBuilder::create<UnaryOp>(container(), UnaryOpType::Set, new_output, this);
 
   // The new TV becomes an output.
   // New TV has global memory type.
@@ -739,6 +790,7 @@ TensorView* TensorView::cache_fork() {
 }
 
 TensorView* TensorView::cache_after() {
+  TORCH_INTERNAL_ASSERT(!isKirStmt(), "Function invalid for kir.");
   FusionGuard fg(fusion());
 
   const bool kIsFusionInput = fusion()->hasInput(this);
@@ -782,9 +834,12 @@ TensorView* TensorView::cache_after() {
   }
 
   // This domain will be the producer, so create the consumer
-  TensorView* consumer = new TensorView(
-      new TensorDomain(
-          new_root_domain, std::vector<bool>(new_root_domain.size(), true)),
+  TensorView* consumer = IrBuilder::create<TensorView>(
+      container(),
+      IrBuilder::create<TensorDomain>(
+          container(),
+          new_root_domain,
+          std::vector<bool>(new_root_domain.size(), true)),
       getDataType().value());
 
   // Set domain of producer - No Change
@@ -800,12 +855,13 @@ TensorView* TensorView::cache_after() {
   }
 
   // Expr* consumer_definition =
-  new UnaryOp(UnaryOpType::Set, consumer, producer);
+  IrBuilder::create<UnaryOp>(container(), UnaryOpType::Set, consumer, producer);
 
   return consumer;
 }
 
 void TensorView::setMemoryType(MemoryType mt) {
+  TORCH_INTERNAL_ASSERT(!isKirStmt(), "Function invalid for kir.");
   memory_type_ = mt;
   if (fusion()->hasInput(this) || fusion()->hasOutput(this)) {
     TORCH_INTERNAL_ASSERT(
@@ -832,7 +888,7 @@ void TensorView::clearReductionIterDomains() {
     }
   }
 
-  setDomain(new TensorDomain(new_root, new_contig));
+  setDomain(IrBuilder::create<TensorDomain>(container(), new_root, new_contig));
 }
 
 TensorViewBuilder& TensorViewBuilder::ndims(size_t ndims) {
@@ -872,7 +928,8 @@ TensorView* TensorViewBuilder::build() const {
   std::vector<IterDomain*> domain(ndims_, nullptr);
   for (const auto i : c10::irange(ndims_)) {
     if (shape_.empty() || shape_[i] == -1) {
-      domain[i] = new IterDomain(new Int(0), new Int());
+      domain[i] = IrBuilder::create<IterDomain>(
+          IrBuilder::create<Int>(0), IrBuilder::create<Int>());
     } else {
       TORCH_CHECK(
           shape_[i] >= 0,
@@ -880,19 +937,21 @@ TensorView* TensorViewBuilder::build() const {
           "For a tensor representing a single scalar use ndims = 0 with no sizes set.");
       if (shape_[i] == 1) {
         // If size is known to be 1, assume it needs to be broadcasted.
-        domain[i] = new IterDomain(
-            new Int(0),
-            new Int(1),
+        domain[i] = IrBuilder::create<IterDomain>(
+            IrBuilder::create<Int>(0),
+            IrBuilder::create<Int>(1),
             ParallelType::Serial,
             IterType::BroadcastWithStride);
       } else {
-        domain[i] = new IterDomain(new Int(0), new Int(shape_[i]));
+        domain[i] = IrBuilder::create<IterDomain>(
+            IrBuilder::create<Int>(0), IrBuilder::create<Int>(shape_[i]));
       }
     }
   }
 
   // Create the final TensorView
-  return new TensorView(new TensorDomain(domain, contiguity_), dtype_);
+  return IrBuilder::create<TensorView>(
+      IrBuilder::create<TensorDomain>(domain, contiguity_), dtype_);
 }
 
 } // namespace cuda

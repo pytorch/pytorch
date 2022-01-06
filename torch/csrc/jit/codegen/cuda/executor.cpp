@@ -9,7 +9,6 @@
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 
 #include <ATen/core/LegacyTypeDispatch.h>
@@ -208,7 +207,7 @@ void FusionExecutor::compileFusion(
     std::stringstream ss;
     ss << "Allocations must be based on constant integers for local memory. However, found: ";
     for (auto alloc : kernel_summary.dynamic_lmem_allocations) {
-      ss << toString(alloc->buffer(), false) << ", ";
+      ss << alloc->buffer()->toString() << ", ";
     }
     ss << " have dynamic allocations but are placed in local memory.";
     TORCH_INTERNAL_ASSERT(false, ss.str());
@@ -239,8 +238,8 @@ void FusionExecutor::compileFusion(
 namespace {
 
 at::Tensor inferAndAlloc(
-    const kir::TensorView* tv,
-    const std::vector<kir::Val*>& sizes,
+    const TensorView* tv,
+    const std::vector<Val*>& sizes,
     kir::ExpressionEvaluator& expr_eval,
     const CompileOptions& options,
     bool zero_init = false) {
@@ -254,9 +253,9 @@ at::Tensor inferAndAlloc(
     TORCH_INTERNAL_ASSERT(
         inferred_val.has_value(),
         "Could not launch kernel as program could not infer ",
-        kir::toString(size),
+        size->toString(),
         " for the buffer ",
-        kir::toString(tv));
+        tv->toString());
     inferred_sizes.push_back(inferred_val.value());
   }
 
@@ -277,19 +276,20 @@ at::Tensor inferAndAlloc(
 }
 
 at::Tensor inferAndAllocOutput(
-    const kir::TensorView* tv,
+    const TensorView* tv,
     kir::ExpressionEvaluator& expr_eval,
     const CompileOptions& options,
     bool zero_init = false) {
   const auto domain = tv->domain();
-  const auto maybe_rfactor_domain =
-      domain->hasRFactor() ? domain->rfactorDomain() : domain->rootDomain();
+  const auto maybe_rfactor_domain = domain->hasRFactor()
+      ? domain->getRFactorDomain()
+      : domain->getRootDomain();
 
-  std::vector<kir::Val*> sizes;
+  std::vector<Val*> sizes;
 
   for (const auto id : maybe_rfactor_domain) {
     if (id->isReduction() || id->isStride() ||
-        id->iterType() == IterType::BroadcastWithoutStride) {
+        id->getIterType() == IterType::BroadcastWithoutStride) {
       continue;
     }
     sizes.push_back(id->extent());
@@ -531,9 +531,9 @@ FusionExecutor::GlobalBuffers FusionExecutor::allocGlobalVals(
   const auto& kernel_summary = lowered_.kernel()->summary();
   for (auto alloc : kernel_summary.global_allocations) {
     TORCH_INTERNAL_ASSERT(
-        alloc->buffer()->isA<kir::TensorView>(),
+        alloc->buffer()->isA<TensorView>(),
         "Cannot allocate global buffers that are not tensors.");
-    auto tv = alloc->buffer()->as<kir::TensorView>();
+    auto tv = alloc->buffer()->as<TensorView>();
     if (kernel->isOutput(tv)) {
       continue;
     }
@@ -560,9 +560,9 @@ std::vector<at::Tensor> FusionExecutor::allocOutputs(
   std::vector<at::Tensor> outputs;
   for (const auto i : c10::irange(kernel->outputs().size())) {
     TORCH_INTERNAL_ASSERT(
-        kernel->outputs()[i]->isA<kir::TensorView>(),
+        kernel->outputs()[i]->isA<TensorView>(),
         "Cannot allocate outputs that are not tensors.");
-    auto output = kernel->outputs()[i]->as<kir::TensorView>();
+    auto output = kernel->outputs()[i]->as<TensorView>();
     if (alias_indices.count(i) == 0) {
       outputs.push_back(
           inferAndAllocOutput(output, expr_eval, options_, false));

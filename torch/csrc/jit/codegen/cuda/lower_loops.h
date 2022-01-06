@@ -30,20 +30,20 @@ namespace cuda {
 //! nests to initialize reduction buffers.
 class TORCH_CUDA_CU_API LoopNestGenerator {
  public:
-  static std::vector<kir::Expr*> loweredExprs(const std::vector<Expr*>& exprs);
+  static std::vector<Expr*> loweredExprs(const std::vector<Expr*>& exprs);
 
  private:
   LoopNestGenerator(const std::vector<Expr*>& exprs);
 
   // Open a new inner most for loop, track which TV it was constructed from
   // according to the computeAt chain.
-  void openFor(kir::IterDomain*);
+  void openFor(IterDomain*);
 
   // Close the inner most for loop
   void closeFor();
 
   // Appends an expression to the current scope
-  void pushFront(kir::Expr* expr);
+  void pushFront(Expr* expr);
 
   void handle(Expr* expr);
 
@@ -52,7 +52,7 @@ class TORCH_CUDA_CU_API LoopNestGenerator {
 
  private:
   // Lowered exprs to return
-  std::vector<kir::Expr*> lowered_exprs_;
+  std::vector<Expr*> lowered_exprs_;
 
   // Keep all for loops conveniently to make unrolling easier, basically just a
   // stack of the active for_loops

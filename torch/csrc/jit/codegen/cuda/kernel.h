@@ -1,7 +1,9 @@
 #pragma once
 
 #include <c10/macros/Export.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
 #include <torch/csrc/jit/codegen/cuda/lower_warp_reduce.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
@@ -67,14 +69,14 @@ struct KernelSummary {
   std::vector<const kir::Allocate*> dynamic_lmem_allocations;
 
   //! ceilDiv extents that must be divisible
-  std::vector<std::pair<const kir::Val*, const kir::Val*>> splits_to_validate;
+  std::vector<std::pair<const Val*, const Val*>> splits_to_validate;
 };
 
 //! Container for a lowered Kernel IR
 //!
-//! TODO(kir): currently, it is just pointing to nodes owned
+//! TODO(kir): currently, it is just pointing to stmts owned
 //!  by a Fusion object. The goal is to have the Kernel object
-//!  own the Kernel IR nodes
+//!  own the Kernel IR stmts
 //!
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class TORCH_CUDA_CU_API Kernel final : public NonCopyable {
@@ -86,7 +88,7 @@ class TORCH_CUDA_CU_API Kernel final : public NonCopyable {
   //! At this point we have a complete kernel definition and we can
   //! run analysis passes to build a KernelSummary
   //!
-  void finalize(std::vector<kir::Expr*> top_level_exprs);
+  void finalize(std::vector<Expr*> top_level_exprs);
 
   //! Register input as an input of the kernel
   void addInput(Val* input) {
@@ -120,8 +122,8 @@ class TORCH_CUDA_CU_API Kernel final : public NonCopyable {
     return top_level_exprs_;
   }
 
-  const auto& irNodes() const {
-    return ir_nodes_;
+  const auto& irStmts() const {
+    return ir_stmts_;
   }
 
   const KernelSummary& summary() const {
@@ -132,18 +134,17 @@ class TORCH_CUDA_CU_API Kernel final : public NonCopyable {
     return *predicate_map_;
   }
 
-  //! Register a new Kernel IR node
+  //! Register a new Kernel IR stmt
   //!
   //! \note This is a specialized helper for kir::IrBuilder, not
-  //!   intendted for general use
+  //!   intended for general use
   //!
-  void registerIrNode(kir::Passkey passkey, std::unique_ptr<kir::Node> node) {
-    TORCH_CHECK(passkey.kernel == this);
-    ir_nodes_.push_back(std::move(node));
-  }
+  void registerIrStmt(
+      IrBuilderPasskey passkey,
+      std::unique_ptr<Statement> stmt);
 
   //! Allocates a new value identifier
-  kir::ValueId newValueId(kir::Passkey passkey) {
+  ValueId newValueId(IrBuilderPasskey passkey) {
     TORCH_CHECK(passkey.kernel == this);
     return next_value_id_++;
   }
@@ -166,11 +167,11 @@ class TORCH_CUDA_CU_API Kernel final : public NonCopyable {
   void analyze();
 
  private:
-  // Kernel IR nodes
-  std::vector<std::unique_ptr<kir::Node>> ir_nodes_;
+  // Kernel IR stmts
+  std::vector<std::unique_ptr<Statement>> ir_stmts_;
 
   // Top level statements
-  std::vector<kir::Expr*> top_level_exprs_;
+  std::vector<Expr*> top_level_exprs_;
 
   // Kernel inputs and outputs
   std::vector<Val*> inputs_;
@@ -179,7 +180,7 @@ class TORCH_CUDA_CU_API Kernel final : public NonCopyable {
   std::unordered_set<Val*> output_set_;
 
   // Used to allocate unique value IDs
-  kir::ValueId next_value_id_ = 1;
+  ValueId next_value_id_ = 1;
 
   // Summary of interesting kernel data
   KernelSummary summary_;

@@ -3,6 +3,7 @@
 #include <c10/macros/Export.h>
 #include <torch/csrc/jit/codegen/cuda/kernel.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
+#include <torch/csrc/jit/codegen/cuda/lower2device.h>
 
 #include <memory>
 
@@ -43,9 +44,9 @@ class TORCH_CUDA_CU_API IrBuilder {
   //! to the appropriate constructor
   template <class T, class... Args>
   T* create(Args&&... args) {
-    const kir::Passkey passkey(kernel_);
+    const IrBuilderPasskey passkey(kernel_);
     const auto node = new T(passkey, std::forward<Args>(args)...);
-    kernel_->registerIrNode(passkey, std::unique_ptr<T>(node));
+    kernel_->registerIrStmt(passkey, std::unique_ptr<T>(node));
     return node;
   }
 

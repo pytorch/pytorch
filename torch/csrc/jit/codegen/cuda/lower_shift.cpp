@@ -6,7 +6,6 @@
 #include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_shift.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
@@ -19,15 +18,15 @@ namespace fuser {
 namespace cuda {
 
 void ShiftPredicateInserter::insert(
-    kir::Expr* expr,
+    Expr* expr,
     const std::vector<kir::ForLoop*>& loops,
-    kir::Bool* thread_pred,
+    Bool* thread_pred,
     bool within_unswitch) {
   const auto gpu_lower = GpuLower::current();
   kir::IrBuilder ir_builder(gpu_lower->kernel());
 
-  kir::TensorView* out_tv = ir_utils::getTVOutput(expr);
-  TORCH_INTERNAL_ASSERT(out_tv != nullptr, "Missing kir::TensorView output");
+  TensorView* out_tv = ir_utils::getTvOutput(expr);
+  TORCH_INTERNAL_ASSERT(out_tv != nullptr, "Missing TensorView output");
 
   TensorView* out_fuser_tv = out_tv->fuserTv();
   const bool needs_shift_predicate =
@@ -87,8 +86,8 @@ void ShiftPredicateInserter::insert(
       PredicateType::Padding, expr, thread_pred);
   auto bounds_ite = ir_builder.create<kir::IfThenElse>(padding_pred);
   const int pad_value = 0;
-  auto pad_expr = ir_builder.create<kir::UnaryOp>(
-      UnaryOpType::Set, out_tv, ir_builder.create<kir::Int>(pad_value));
+  auto pad_expr = ir_builder.create<UnaryOp>(
+      UnaryOpType::Set, out_tv, ir_builder.create<Int>(pad_value));
   bounds_ite->thenBody().push_back(pad_expr);
   // Insert the else block
   shift_ite->elseBody().push_back(bounds_ite);
@@ -134,14 +133,17 @@ std::string AxisHaloInfo::toString() const {
 }
 
 bool HaloInfo::hasRootAxisInfo(IterDomain* id) const {
+  TORCH_INTERNAL_ASSERT(!id->isKirStmt());
   return root_axis_map_.find(id) != root_axis_map_.end();
 }
 
-bool HaloInfo::hasRootAxisInfo(kir::IterDomain* id) const {
+bool HaloInfo::kirHasRootAxisInfo(IterDomain* id) const {
+  TORCH_INTERNAL_ASSERT(id->isKirStmt());
   return kir_root_axis_map_.find(id) != kir_root_axis_map_.end();
 }
 
 const AxisHaloInfo& HaloInfo::getRootAxisInfo(IterDomain* id) const {
+  TORCH_INTERNAL_ASSERT(!id->isKirStmt());
   auto it = root_axis_map_.find(id);
   TORCH_INTERNAL_ASSERT(
       it != root_axis_map_.end(), "Halo root axis info not found for ", id);
@@ -149,13 +151,15 @@ const AxisHaloInfo& HaloInfo::getRootAxisInfo(IterDomain* id) const {
 }
 
 AxisHaloInfo& HaloInfo::getRootAxisInfo(IterDomain* id) {
+  TORCH_INTERNAL_ASSERT(!id->isKirStmt());
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   return const_cast<AxisHaloInfo&>(
       // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       const_cast<const HaloInfo*>(this)->getRootAxisInfo(id));
 }
 
-const AxisHaloInfo& HaloInfo::getRootAxisInfo(kir::IterDomain* id) const {
+const AxisHaloInfo& HaloInfo::kirGetRootAxisInfo(IterDomain* id) const {
+  TORCH_INTERNAL_ASSERT(id->isKirStmt());
   TORCH_INTERNAL_ASSERT(
       id->definition() == nullptr || id->isRFactorProduct(),
       "Invalid IterDomain: ",
@@ -164,24 +168,24 @@ const AxisHaloInfo& HaloInfo::getRootAxisInfo(kir::IterDomain* id) const {
   TORCH_INTERNAL_ASSERT(
       it != kir_root_axis_map_.end(),
       "Halo root axis info not found for ",
-      kir::toString(id));
+      id->toString());
   return it->second;
 }
 
-AxisHaloInfo& HaloInfo::getRootAxisInfo(kir::IterDomain* id) {
+AxisHaloInfo& HaloInfo::kirGetRootAxisInfo(IterDomain* id) {
+  TORCH_INTERNAL_ASSERT(id->isKirStmt());
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   return const_cast<AxisHaloInfo&>(
       // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-      const_cast<const HaloInfo*>(this)->getRootAxisInfo(id));
+      const_cast<const HaloInfo*>(this)->kirGetRootAxisInfo(id));
 }
 
 void HaloInfo::setRootAxisInfo(
     IterDomain* id,
     const AxisHaloInfo& root_axis_info) {
   root_axis_map_[id] = root_axis_info;
-  kir_root_axis_map_
-      [GpuLower::current()->lowerValue(id)->as<kir::IterDomain>()] =
-          root_axis_info;
+  kir_root_axis_map_[GpuLower::current()->lowerValue(id)->as<IterDomain>()] =
+      root_axis_info;
 
   initializeFromRootAxisInfo(id);
   return;
@@ -368,9 +372,8 @@ void HaloInfo::initializeFromRootAxisInfo(IterDomain* id) {
   }
 
   auto expanded_extent = ir_builder.addExpr(
-      gpu_lower->lowerValue(id->extent()),
-      ir_builder.create<kir::Int>(halo_width));
-  kir_extent_map_[gpu_lower->lowerValue(id)->as<kir::IterDomain>()] =
+      gpu_lower->lowerValue(id->extent()), ir_builder.create<Int>(halo_width));
+  kir_extent_map_[gpu_lower->lowerValue(id)->as<IterDomain>()] =
       expanded_extent;
   halo_width_map_[id] = halo_width;
 
@@ -451,8 +454,7 @@ void HaloInfo::build(TensorDomain* td) {
       auto expanded_extent = ir_builder.addExpr(
           gpu_lower->lowerValue(out_id->extent()), halo_width);
       kir_extent_map_.insert(
-          {gpu_lower->lowerValue(out_id)->as<kir::IterDomain>(),
-           expanded_extent});
+          {gpu_lower->lowerValue(out_id)->as<IterDomain>(), expanded_extent});
 
       setHaloWidth(split->outer(), 0);
       setHaloWidth(split->inner(), halo_width);
@@ -476,7 +478,7 @@ void HaloInfo::build(TensorDomain* td) {
         }
         auto expanded_extent = ir_builder.mulExpr(outer_extent, inner_extent);
         kir_extent_map_.insert(
-            {gpu_lower->lowerValue(merge->out())->as<kir::IterDomain>(),
+            {gpu_lower->lowerValue(merge->out())->as<IterDomain>(),
              expanded_extent});
         // Splitting the output of this merge is not allowed, so
         // remember it
@@ -549,7 +551,7 @@ void HaloInfo::validate(TensorView* tv) const {
 
     bool shared_mem_needed = false;
     for (auto use : tv->uses()) {
-      if (!ir_utils::isTVOp(use)) {
+      if (!ir_utils::isTvOp(use)) {
         continue;
       }
       if (use->isA<ShiftOp>() || use->isA<GatherOp>()) {
@@ -599,12 +601,14 @@ void HaloInfo::validate(TensorView* tv) const {
   return;
 }
 
-kir::Val* HaloInfo::getExtent(IterDomain* id) const {
-  auto kir_id = GpuLower::current()->lowerValue(id)->as<kir::IterDomain>();
-  return getExtent(kir_id);
+Val* HaloInfo::getExtent(IterDomain* id) const {
+  TORCH_INTERNAL_ASSERT(!id->isKirStmt());
+  auto kir_id = GpuLower::current()->lowerValue(id)->as<IterDomain>();
+  return kirGetExtent(kir_id);
 }
 
-kir::Val* HaloInfo::getExtent(kir::IterDomain* id) const {
+Val* HaloInfo::kirGetExtent(IterDomain* id) const {
+  TORCH_INTERNAL_ASSERT(id->isKirStmt());
   auto it = kir_extent_map_.find(id);
   if (it != kir_extent_map_.end()) {
     return it->second;
@@ -740,9 +744,18 @@ std::string HaloInfo::toString() const {
 }
 
 bool HaloInfo::needsShiftPredicate(Expr* expr) const {
-  auto consumer_td = ir_utils::getTVOutput(expr)->domain();
-  auto shift_expr = dynamic_cast<ShiftOp*>(expr);
-  auto gather_expr = dynamic_cast<GatherOp*>(expr);
+  Expr* fusion_expr = expr;
+  if (expr->isKirStmt()) {
+    const auto out_tv = expr->outputs()[0]->as<TensorView>();
+    fusion_expr = out_tv->fuserTv()->definition();
+    TORCH_INTERNAL_ASSERT(fusion_expr != nullptr);
+  } else {
+    TORCH_INTERNAL_ASSERT(ir_utils::isTvOp(expr), "Expr not a TV expr.");
+  }
+
+  auto consumer_td = ir_utils::getTvOutput(fusion_expr)->domain();
+  auto shift_expr = dynamic_cast<ShiftOp*>(fusion_expr);
+  auto gather_expr = dynamic_cast<GatherOp*>(fusion_expr);
   for (const auto i : c10::irange(consumer_td->getRootDomain().size())) {
     auto consumer_id = consumer_td->getRootDomain()[i];
     const auto consumer_halo_info = getRootAxisInfo(consumer_id);
@@ -755,13 +768,6 @@ bool HaloInfo::needsShiftPredicate(Expr* expr) const {
     }
   }
   return false;
-}
-
-bool HaloInfo::needsShiftPredicate(kir::Expr* expr) const {
-  const auto out_tv = expr->outputs()[0]->as<kir::TensorView>();
-  auto fuser_expr = out_tv->fuserTv()->definition();
-  TORCH_INTERNAL_ASSERT(fuser_expr != nullptr);
-  return needsShiftPredicate(fuser_expr);
 }
 
 } // namespace cuda

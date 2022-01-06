@@ -6,7 +6,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir_dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/predicate_compute.h>
@@ -22,15 +22,15 @@ class MisalignedVectorizationModifier : public kir::ExprMutator {
  public:
   MisalignedVectorizationModifier() = delete;
 
-  static std::vector<kir::Expr*> processMisalignedVectorization(
-      const std::vector<kir::Expr*>& exprs) {
+  static std::vector<Expr*> processMisalignedVectorization(
+      const std::vector<Expr*>& exprs) {
     FUSER_PERF_SCOPE("GpuLower::Lower::processMisalignedVectorization");
     MisalignedVectorizationModifier mvm(exprs);
     return mvm.exprs_;
   }
 
  private:
-  MisalignedVectorizationModifier(const std::vector<kir::Expr*>& exprs) {
+  MisalignedVectorizationModifier(const std::vector<Expr*>& exprs) {
     FUSER_PERF_SCOPE("GpuLower::Lower::MisalignedVectorizationModifier");
     // Run through loop nests
     // Find for-loops with misaligned vectorization domains
@@ -52,31 +52,30 @@ class MisalignedVectorizationModifier : public kir::ExprMutator {
 
   struct ReferenceTensors {
     // Input TensorView to Vectorize Set operation
-    kir::TensorView* in_tv = nullptr;
+    TensorView* in_tv = nullptr;
     // Output TensorView to Vectorize Set operation
-    kir::TensorView* out_tv = nullptr;
+    TensorView* out_tv = nullptr;
     // TensorView in global memory
-    kir::TensorView* global_tv = nullptr;
+    TensorView* global_tv = nullptr;
     // TensorView with vectorize IterDomain and not in global memory
-    kir::TensorView* vec_tv = nullptr;
+    TensorView* vec_tv = nullptr;
   };
 
-  ReferenceTensors getReferenceTensors(kir::Expr* vectorized_expr) {
+  ReferenceTensors getReferenceTensors(Expr* vectorized_expr) {
     TORCH_INTERNAL_ASSERT(vectorized_expr != nullptr);
     TORCH_INTERNAL_ASSERT(
-        vectorized_expr->outputs().front()->isA<kir::TensorView>());
-    TORCH_INTERNAL_ASSERT(
-        vectorized_expr->inputs().front()->isA<kir::TensorView>());
+        vectorized_expr->outputs().front()->isA<TensorView>());
+    TORCH_INTERNAL_ASSERT(vectorized_expr->inputs().front()->isA<TensorView>());
 
-    auto in_tv = vectorized_expr->inputs().front()->as<kir::TensorView>();
-    auto out_tv = vectorized_expr->outputs().front()->as<kir::TensorView>();
+    auto in_tv = vectorized_expr->inputs().front()->as<TensorView>();
+    auto out_tv = vectorized_expr->outputs().front()->as<TensorView>();
 
     const bool global_vectorize_write_op =
-        (out_tv->memoryType() == MemoryType::Global &&
-         in_tv->memoryType() == MemoryType::Local);
+        (out_tv->getMemoryType() == MemoryType::Global &&
+         in_tv->getMemoryType() == MemoryType::Local);
     const bool global_vectorize_read_op =
-        (out_tv->memoryType() == MemoryType::Local &&
-         in_tv->memoryType() == MemoryType::Global);
+        (out_tv->getMemoryType() == MemoryType::Local &&
+         in_tv->getMemoryType() == MemoryType::Global);
     TORCH_INTERNAL_ASSERT(
         global_vectorize_write_op || global_vectorize_read_op,
         "Unsupported vectorize memory configuration detected.");
@@ -84,25 +83,26 @@ class MisalignedVectorizationModifier : public kir::ExprMutator {
     // TensorView on global memory. This is the tensor that may have
     // a non-aligned base address.
     auto global_tv =
-        (out_tv->memoryType() == MemoryType::Global) ? out_tv : in_tv;
+        (out_tv->getMemoryType() == MemoryType::Global) ? out_tv : in_tv;
 
     // TensorView with the misaligned vec iterDomain. It is the consumer
     // of vectorized load or the producer of vectorized store. It is
     // assumed that when the output TV is not on global memory, this
     // expression is a vectorized load, so the output TV is vec_tv.
-    auto vec_tv = (out_tv->memoryType() != MemoryType::Global) ? out_tv : in_tv;
+    auto vec_tv =
+        (out_tv->getMemoryType() != MemoryType::Global) ? out_tv : in_tv;
 
     return {in_tv, out_tv, global_tv, vec_tv};
   }
 
   struct VectorizeData {
-    kir::Val* vector_size = nullptr;
-    kir::Val* shift = nullptr;
-    kir::Val* extent = nullptr;
-    kir::Val* remainder = nullptr;
-    kir::Val* extent_minus_remainder = nullptr;
-    kir::Val* last_root_domain_index = nullptr;
-    kir::Val* last_root_domain_index_shift = nullptr;
+    Val* vector_size = nullptr;
+    Val* shift = nullptr;
+    Val* extent = nullptr;
+    Val* remainder = nullptr;
+    Val* extent_minus_remainder = nullptr;
+    Val* last_root_domain_index = nullptr;
+    Val* last_root_domain_index_shift = nullptr;
   };
 
   // Create constants for handling misaligned addresses
@@ -113,7 +113,7 @@ class MisalignedVectorizationModifier : public kir::ExprMutator {
     kir::IrBuilder ir_builder(GpuLower::current()->kernel());
 
     // Generate vectorize index
-    auto indices = (tensors.out_tv->memoryType() == MemoryType::Global)
+    auto indices = (tensors.out_tv->getMemoryType() == MemoryType::Global)
         ? Index::getConsumerStridedIndices(
               tensors.out_tv->fuserTv(), for_loop_structure)
         : Index::getProducerStridedIndices(
@@ -124,11 +124,11 @@ class MisalignedVectorizationModifier : public kir::ExprMutator {
     // >>>>>>>>>>>>>
     // Number of elements in vectorize access
     auto vector_size =
-        tensors.vec_tv->domain()->domain().back()->extent()->as<kir::Int>();
+        tensors.vec_tv->domain()->domain().back()->extent()->as<Int>();
 
     // Size of memory type for the elements
-    kir::Int* data_size_in_bytes =
-        ir_builder.create<kir::Int>(dataTypeSize(tensors.vec_tv->dtype()));
+    Int* data_size_in_bytes =
+        ir_builder.create<Int>(dataTypeSize(tensors.vec_tv->dtype()));
 
     // The number of bytes in the vectorize access
     auto vector_size_in_bytes =
@@ -207,11 +207,11 @@ class MisalignedVectorizationModifier : public kir::ExprMutator {
 
     // Vectorize Range: [shift - (extent-remainder))
     // (last_root_domain_index + shift) < (extent - remainder)
-    kir::Val* vectorize_cond = ir_builder.ltExpr(
+    Val* vectorize_cond = ir_builder.ltExpr(
         params.last_root_domain_index_shift, params.extent_minus_remainder);
 
     kir::Predicate* vectorize_pred =
-        ir_builder.create<kir::Predicate>(vectorize_cond->as<kir::Bool>());
+        ir_builder.create<kir::Predicate>(vectorize_cond->as<Bool>());
     kir::IfThenElse* vectorize_ite =
         ir_builder.create<kir::IfThenElse>(vectorize_pred);
 
@@ -234,11 +234,11 @@ class MisalignedVectorizationModifier : public kir::ExprMutator {
 
     // Initial Range: [0 - shift)
     // last_root_domain_index == 0
-    kir::Val* initial_cond =
+    Val* initial_cond =
         ir_builder.eqExpr(params.last_root_domain_index, ir_builder.zeroVal());
 
     kir::Predicate* initial_pred =
-        ir_builder.create<kir::Predicate>(initial_cond->as<kir::Bool>());
+        ir_builder.create<kir::Predicate>(initial_cond->as<Bool>());
     kir::IfThenElse* initial_ite =
         ir_builder.create<kir::IfThenElse>(initial_pred);
 
@@ -261,14 +261,14 @@ class MisalignedVectorizationModifier : public kir::ExprMutator {
 
     // Remainder Range: [(extent-remainder) - extent)
     // (extent - remainder) <= last_root_domain_index + shift < extent
-    kir::Val* lower_bound = ir_builder.geExpr(
+    Val* lower_bound = ir_builder.geExpr(
         params.last_root_domain_index_shift, params.extent_minus_remainder);
-    kir::Val* upper_bound =
+    Val* upper_bound =
         ir_builder.ltExpr(params.last_root_domain_index_shift, params.extent);
-    kir::Val* remainder_cond = ir_builder.andExpr(lower_bound, upper_bound);
+    Val* remainder_cond = ir_builder.andExpr(lower_bound, upper_bound);
 
     kir::Predicate* remainder_pred =
-        ir_builder.create<kir::Predicate>(remainder_cond->as<kir::Bool>());
+        ir_builder.create<kir::Predicate>(remainder_cond->as<Bool>());
     kir::IfThenElse* remainder_ite =
         ir_builder.create<kir::IfThenElse>(remainder_pred);
 
@@ -331,17 +331,17 @@ class MisalignedVectorizationModifier : public kir::ExprMutator {
 
   // Determine that the expression is UnaryOpType::Set AND
   // the output TensorView domain is vectorized
-  bool isVectorizeSetOp(kir::ForLoop* fl, kir::Expr* expr) {
-    if (fl->iter_domain()->parallelType() !=
+  bool isVectorizeSetOp(kir::ForLoop* fl, Expr* expr) {
+    if (fl->iter_domain()->getParallelType() !=
         ParallelType::MisalignedVectorize) {
       return false;
     }
 
-    if (expr->isA<kir::UnaryOp>()) {
-      auto unaryOp = expr->as<kir::UnaryOp>();
-      if (unaryOp->out()->isA<kir::TensorView>()) {
-        auto out_tv = unaryOp->out()->as<kir::TensorView>();
-        return unaryOp->operation() == UnaryOpType::Set &&
+    if (expr->isA<UnaryOp>()) {
+      auto unaryOp = expr->as<UnaryOp>();
+      if (unaryOp->out()->isA<TensorView>()) {
+        auto out_tv = unaryOp->out()->as<TensorView>();
+        return unaryOp->getUnaryOpType() == UnaryOpType::Set &&
             out_tv->domain()->hasVectorize();
       }
     }
@@ -355,10 +355,10 @@ class MisalignedVectorizationModifier : public kir::ExprMutator {
   // shift value - Add shift to global indices generated within for loop
   std::vector<kir::ForLoop*> cloneForLoops(
       const std::vector<kir::ForLoop*>& for_loops_,
-      kir::Val* loop_stop,
-      kir::Val* pred_stop,
+      Val* loop_stop,
+      Val* pred_stop,
       bool vectorize,
-      kir::Val* vectorize_shift) {
+      Val* vectorize_shift) {
     kir::IrBuilder ir_builder(GpuLower::current()->kernel());
     std::vector<kir::ForLoop*> cloned_for_loops;
 
@@ -387,7 +387,7 @@ class MisalignedVectorizationModifier : public kir::ExprMutator {
       // make sure the loop itself is completely unrollable.
       if (pred_stop != nullptr) {
         auto body_pred = ir_builder.create<kir::Predicate>(
-            ir_builder.ltExpr(new_loop->index(), pred_stop)->as<kir::Bool>());
+            ir_builder.ltExpr(new_loop->index(), pred_stop)->as<Bool>());
         auto body_ite = ir_builder.create<kir::IfThenElse>(body_pred);
         body->push_back(body_ite);
         body = &body_ite->thenBody();
@@ -428,7 +428,7 @@ class MisalignedVectorizationModifier : public kir::ExprMutator {
   // Find the first vectorize set - either read or write
   // Add child For-Loop to for_loop_structure
   // Enable vectorize flag in child For-Loop
-  kir::Expr* findFirstVectorizedSetOp(
+  Expr* findFirstVectorizedSetOp(
       std::vector<kir::ForLoop*>& for_loop_structure,
       const std::vector<kir::ForLoop*>& for_loops_) {
     for (auto fl : for_loops_) {
@@ -443,9 +443,7 @@ class MisalignedVectorizationModifier : public kir::ExprMutator {
   }
 
   // Get full extent for the inner-most, merged root domain
-  kir::Val* getVectorizeExtent(
-      kir::TensorView* producer_tv,
-      kir::TensorView* consumer_tv) {
+  Val* getVectorizeExtent(TensorView* producer_tv, TensorView* consumer_tv) {
     const auto gpu_lower = GpuLower::current();
     kir::IrBuilder ir_builder(gpu_lower->kernel());
 
@@ -472,7 +470,7 @@ class MisalignedVectorizationModifier : public kir::ExprMutator {
     auto producer_root_domain = producer_fuser_tv->getMaybeRFactorDomain();
 
     // Calculate extent of merged root domains
-    kir::Val* extent = nullptr;
+    Val* extent = nullptr;
     auto consumer_root_idx =
         int(consumer_fuser_tv->getMaybeRFactorDomain().size()) - 1;
     for (int i = int(producer_root_domain.size()) - 1; i >= 0; --i) {
@@ -534,9 +532,9 @@ class MisalignedVectorizationModifier : public kir::ExprMutator {
     return extent;
   }
 
-  kir::Val* createNamedScalarFromValue(
+  Val* createNamedScalarFromValue(
       kir::Scope& body,
-      kir::Val* val,
+      Val* val,
       const std::string& name,
       bool address = false) {
     kir::IrBuilder ir_builder(GpuLower::current()->kernel());
@@ -554,8 +552,8 @@ class MisalignedVectorizationModifier : public kir::ExprMutator {
 
 } // namespace
 
-std::vector<kir::Expr*> processMisalignedVectorization(
-    const std::vector<kir::Expr*>& exprs) {
+std::vector<Expr*> processMisalignedVectorization(
+    const std::vector<Expr*>& exprs) {
   return MisalignedVectorizationModifier::processMisalignedVectorization(exprs);
 }
 
@@ -563,7 +561,7 @@ bool containsAnyDirectChildMisalignedVectorize(const kir::ForLoop* fl) {
   for (auto expr : fl->body().exprs()) {
     if (expr->isA<kir::ForLoop>()) {
       auto child_fl = expr->as<kir::ForLoop>();
-      if (child_fl->iter_domain()->parallelType() ==
+      if (child_fl->iter_domain()->getParallelType() ==
           ParallelType::MisalignedVectorize) {
         return true;
       }

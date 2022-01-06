@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
+#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/ops/alias.h>
 #include <torch/csrc/jit/codegen/cuda/transform_view.h>
 
@@ -39,10 +40,12 @@ TensorView* applyViewTransforms(
 
   TORCH_INTERNAL_ASSERT(!transforms.empty());
 
-  TensorView* consumer =
-      new TensorView(tv->domain()->view(transforms), tv->getDataType().value());
+  TensorView* consumer = IrBuilder::create<TensorView>(
+      tv->container(),
+      tv->domain()->view(transforms),
+      tv->getDataType().value());
 
-  new ViewOp(consumer, tv);
+  IrBuilder::create<ViewOp>(tv->container(), consumer, tv);
 
   return consumer;
 }
@@ -82,10 +85,7 @@ TensorView* squeeze(TensorView* x, const std::vector<int64_t>& sizes) {
   return (trivial_reduction_axes.empty()) ? x : sum(x, trivial_reduction_axes);
 }
 
-TensorView* squeeze(
-    TensorView* x,
-    const std::vector<int64_t>& sizes,
-    int64_t dim) {
+TensorView* squeeze(TensorView* x, const std::vector<int64_t>& sizes, int dim) {
   TORCH_INTERNAL_ASSERT(x->nDims() == sizes.size());
   if (dim < 0) {
     dim = x->nDims() + dim;
@@ -96,7 +96,7 @@ TensorView* squeeze(
   return sum(x, {dim});
 }
 
-TensorView* unsqueeze(TensorView* x, int64_t dim) {
+TensorView* unsqueeze(TensorView* x, int dim) {
   if (dim < 0) {
     dim = x->nDims() + dim + 1;
   }

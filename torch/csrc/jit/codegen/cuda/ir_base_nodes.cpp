@@ -1,8 +1,12 @@
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
 #include <torch/csrc/jit/codegen/cuda/ir_printer.h>
+#include <torch/csrc/jit/codegen/cuda/kernel.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir_dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/mutator.h>
 
 #include <torch/csrc/jit/ir/ir.h>
@@ -20,16 +24,20 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-Statement::Statement(const Statement* src, IrCloner* ir_cloner) {
-  // IRCloner when cloning to a new fusion will copy the names of the original
-  // fusion. If we're cloning into the same fusion, we let Val and Expr get
-  // their names as usual by registering with the current fusion in their
-  // constructors, so don't overwrite that here.
-  if (src->fusion() != ir_cloner->fusion()) {
-    name_ = src->name_;
-  }
-  fusion_ = ir_cloner->fusion();
-  ir_cloner->registerClone(src, this);
+Statement::Statement(IrBuilderPasskey passkey)
+    : is_kir_stmt_(passkey.ir_container_ != nullptr ? false : true) {}
+
+Statement::Statement(const Statement* src, IrCloner* ir_cloner)
+    : is_kir_stmt_(false) {
+  ir_container_ = ir_cloner->container();
+}
+
+void Statement::setName(IrContainerPasskey, StmtNameType name) {
+  name_ = name;
+}
+
+void Statement::setName(IrBuilderPasskey, StmtNameType name) {
+  name_ = name;
 }
 
 Val* Statement::asVal() {
@@ -42,21 +50,29 @@ Expr* Statement::asExpr() {
   return this->as<Expr>();
 }
 
-void Statement::print() const {
-  IrPrinter ir_printer(std::cout);
+std::string Statement::toString() const {
+  std::stringstream ss;
+  IrPrinter ir_printer(ss);
   ir_printer.handle(this);
-  std::cout << std::endl;
+  return ss.str();
+}
+
+Fusion* Statement::fusion() const {
+  TORCH_INTERNAL_ASSERT(!isKirStmt(), "Function invalid for kir.");
+  Fusion* fusion = dynamic_cast<Fusion*>(ir_container_);
+  TORCH_INTERNAL_ASSERT(
+      fusion != nullptr,
+      "Tried to grab fusion from a statement but was not constructed for a fusion object.");
+  return fusion;
 }
 
 // When we create a Val we immediately register them with the active fusion.
-Val::Val(ValType _vtype, DataType _dtype, bool register_val)
-    : vtype_(_vtype), dtype_(_dtype) {
-  Fusion* fusion = FusionGuard::getCurFusion();
-  TORCH_CHECK(
-      fusion != nullptr, "No active fusion group found when creating a Val.");
-  fusion_ = fusion;
-  if (register_val) {
-    name_ = fusion_->registerVal(this);
+Val::Val(IrBuilderPasskey passkey, ValType _vtype, DataType _dtype)
+    : Statement(passkey), vtype_(_vtype), dtype_(_dtype) {
+  ir_container_ = passkey.ir_container_;
+  if (passkey.kernel != nullptr) {
+    // NOLINTNEXTLINE: https://bugs.llvm.org/show_bug.cgi?id=48534
+    id_ = passkey.kernel->newValueId(passkey);
   }
 }
 
@@ -71,12 +87,7 @@ Val::Val(const Val* src, IrCloner* ir_cloner)
       vtype_(src->vtype_),
       dtype_(src->dtype_),
       is_fusion_input_(src->is_fusion_input_),
-      is_fusion_output_(src->is_fusion_output_) {
-  // If we're "cloning" into the same fusion, register with the fusion
-  if (src->fusion() == ir_cloner->fusion()) {
-    name_ = src->fusion()->registerVal(this);
-  }
-}
+      is_fusion_output_(src->is_fusion_output_) {}
 
 const std::vector<Expr*>& Val::uses() const {
   if (vtype_ == ValType::TensorView) {
@@ -137,15 +148,18 @@ class ConstCheck : private OptOutConstDispatch {
 } // namespace
 
 bool Val::isConstScalar() const {
-  if (!isScalar())
+  if (!isScalar()) {
     return false;
+  }
   return ConstCheck::isConst(this);
 }
 
 c10::optional<int64_t> Val::getInt() const {
   if (isConstScalar() && isAnInt()) {
     if (this->getValType() == ValType::Scalar) {
-      return this->as<Int>()->value();
+      if (this->isA<Int>()) {
+        return this->as<Int>()->value();
+      }
     }
   }
   return c10::optional<int64_t>();
@@ -168,6 +182,7 @@ c10::optional<DataType> Val::getDataType() const {
 }
 
 bool Val::isProducerOf(const Val* other) const {
+  TORCH_INTERNAL_ASSERT(!isKirStmt(), "Function invalid for kir.");
   TORCH_INTERNAL_ASSERT(other != nullptr);
   TORCH_INTERNAL_ASSERT(fusion() == other->fusion());
 
@@ -181,28 +196,22 @@ bool Val::isProducerOf(const Val* other) const {
 }
 
 bool Val::isConsumerOf(const Val* other) const {
+  TORCH_INTERNAL_ASSERT(!isKirStmt(), "Function invalid for kir.");
   return other->isProducerOf(this);
 }
 
 // We don't register with the active fusion in Expr as this needs to be done
 // after inputs and outputs are registered with the Expr
-Expr::Expr(ExprType etype) : etype_{etype} {
-  Fusion* fusion = FusionGuard::getCurFusion();
-  if (fusion == nullptr)
-    TORCH_CHECK(false, "No active fusion group found when creating an Expr.");
-  fusion_ = fusion;
+Expr::Expr(IrBuilderPasskey passkey, ExprType etype)
+    : Statement(passkey), etype_{etype} {
+  ir_container_ = passkey.ir_container_;
 }
 
 Expr::Expr(const Expr* src, IrCloner* ir_cloner)
     : Statement(src, ir_cloner),
       etype_(src->etype_),
       inputs_(ir_cloner->clone(src->inputs_)),
-      outputs_(ir_cloner->clone(src->outputs_)) {
-  // If we're "cloning" into the same fusion, register with the fusion
-  if (src->fusion() == ir_cloner->fusion()) {
-    name_ = src->fusion()->registerExpr(this);
-  }
-}
+      outputs_(ir_cloner->clone(src->outputs_)) {}
 
 bool Expr::sameAs(const Statement* other) const {
   if (this == other) {
@@ -225,6 +234,26 @@ bool Expr::sameAs(const Statement* other) const {
     }
   }
   return true;
+}
+
+kir::Predicate* Expr::predicate() const {
+  TORCH_INTERNAL_ASSERT(isKirStmt(), "Function invalid for fusion.");
+  return predicate_;
+}
+
+void Expr::setPredicate(kir::Predicate* predicate) {
+  TORCH_INTERNAL_ASSERT(isKirStmt(), "Function invalid for fusion.");
+  predicate_ = predicate;
+}
+
+kir::Predicate* Expr::writePredicate() const {
+  TORCH_INTERNAL_ASSERT(isKirStmt(), "Function invalid for fusion.");
+  return write_predicate_;
+}
+
+void Expr::setWritePredicate(kir::Predicate* write_predicate) {
+  TORCH_INTERNAL_ASSERT(isKirStmt(), "Function invalid for fusion.");
+  write_predicate_ = write_predicate;
 }
 
 } // namespace cuda

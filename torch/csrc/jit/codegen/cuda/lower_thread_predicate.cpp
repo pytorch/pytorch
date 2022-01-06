@@ -17,7 +17,7 @@ namespace cuda {
 
 namespace {
 
-kir::Bool* getPredicatePerParallelType(
+Bool* getPredicatePerParallelType(
     ParallelType pt,
     const ThreadPredicateMap::PredicateInfo& pred_info) {
   kir::SimplifyingIrBuilder ir_builder(GpuLower::current()->kernel());
@@ -35,21 +35,21 @@ kir::Bool* getPredicatePerParallelType(
   if (isParallelTypeBlockDim(pt) && pred_info.limited_types.get(pt)) {
     return ir_builder
         .eqExpr(
-            kir::NamedScalar::getParallelIndex(pt),
+            NamedScalar::getParallelIndex(pt),
             ir_builder.subExpr(
-                kir::NamedScalar::getParallelDim(pt), ir_builder.oneVal()))
-        ->as<kir::Bool>();
+                NamedScalar::getParallelDim(pt), ir_builder.oneVal()))
+        ->as<Bool>();
   }
 
   // Otherwise, only thread of index 0 executes the computation
   return ir_builder
-      .eqExpr(kir::NamedScalar::getParallelIndex(pt), ir_builder.zeroVal())
-      ->as<kir::Bool>();
+      .eqExpr(NamedScalar::getParallelIndex(pt), ir_builder.zeroVal())
+      ->as<Bool>();
 }
 
 } // namespace
 
-kir::Bool* ThreadPredicateMap::getPredicateFromPredicateInfo(
+Bool* ThreadPredicateMap::getPredicateFromPredicateInfo(
     const ThreadPredicateMap::PredicateInfo& pred_info) {
   kir::SimplifyingIrBuilder ir_builder(GpuLower::current()->kernel());
 
@@ -59,11 +59,11 @@ kir::Bool* ThreadPredicateMap::getPredicateFromPredicateInfo(
     return ir_builder.trueVal();
   }
 
-  kir::Bool* pred = nullptr;
+  Bool* pred = nullptr;
 
   for (const auto pt : pred_types) {
     const auto tp = getPredicatePerParallelType(pt, pred_info);
-    pred = ir_builder.andExpr(pred, tp)->as<kir::Bool>();
+    pred = ir_builder.andExpr(pred, tp)->as<Bool>();
   }
 
   TORCH_INTERNAL_ASSERT(pred != nullptr);
@@ -302,7 +302,7 @@ void ThreadPredicateMap::insert(
   thread_predicates_.insert({tv, pred_info});
 }
 
-kir::Bool* ThreadPredicateMap::getPredicate(const TensorView* tv) const {
+Bool* ThreadPredicateMap::getPredicate(const TensorView* tv) const {
   TORCH_INTERNAL_ASSERT(find(tv) != end(), "Couldn't find ", tv);
   auto pred_info = getPredicateInfo(tv);
   return getPredicateFromPredicateInfo(pred_info);

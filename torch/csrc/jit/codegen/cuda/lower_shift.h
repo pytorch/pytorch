@@ -75,7 +75,7 @@ class TORCH_CUDA_CU_API HaloInfo {
   //! Returns true if id has the root halo information set by
   //! setRootAxisInfo.
   bool hasRootAxisInfo(IterDomain* id) const;
-  bool hasRootAxisInfo(kir::IterDomain* id) const;
+  bool kirHasRootAxisInfo(IterDomain* id) const;
 
   //! Returns the registed AxisHaloInfo of a root axis.
   //!
@@ -84,8 +84,8 @@ class TORCH_CUDA_CU_API HaloInfo {
   const AxisHaloInfo& getRootAxisInfo(IterDomain* id) const;
   AxisHaloInfo& getRootAxisInfo(IterDomain* id);
   //! KIR version
-  const AxisHaloInfo& getRootAxisInfo(kir::IterDomain* id) const;
-  AxisHaloInfo& getRootAxisInfo(kir::IterDomain* id);
+  const AxisHaloInfo& kirGetRootAxisInfo(IterDomain* id) const;
+  AxisHaloInfo& kirGetRootAxisInfo(IterDomain* id);
 
   //! Query if an axis has a halo width.
   //!
@@ -100,8 +100,8 @@ class TORCH_CUDA_CU_API HaloInfo {
 
   //! Returns an extent if id is extended for halo. Nullptr is
   //! returned otherwise.
-  kir::Val* getExtent(IterDomain* id) const;
-  kir::Val* getExtent(kir::IterDomain* id) const;
+  Val* getExtent(IterDomain* id) const;
+  Val* kirGetExtent(IterDomain* id) const;
 
   //! Returns all child domains of a root domain that inherits the
   //! halo of the root domain.
@@ -133,7 +133,6 @@ class TORCH_CUDA_CU_API HaloInfo {
   //! interior and another for padding. Predicate insertion is done in
   //! the ShiftPredicateInserter class below.
   bool needsShiftPredicate(Expr* expr) const;
-  bool needsShiftPredicate(kir::Expr* expr) const;
 
   std::string toString() const;
 
@@ -170,10 +169,10 @@ class TORCH_CUDA_CU_API HaloInfo {
   //! Halo information of root axes
   std::unordered_map<IterDomain*, AxisHaloInfo> root_axis_map_;
   //! KIR version
-  std::unordered_map<kir::IterDomain*, AxisHaloInfo> kir_root_axis_map_;
+  std::unordered_map<IterDomain*, AxisHaloInfo> kir_root_axis_map_;
 
   //! Halo-extended extents. No mapping for axes without halo extension
-  std::unordered_map<kir::IterDomain*, kir::Val*> kir_extent_map_;
+  std::unordered_map<IterDomain*, Val*> kir_extent_map_;
 
   //! The halo width of an axis.
   //!
@@ -224,9 +223,9 @@ class ShiftPredicateInserter {
   //! the usual predicated expression, so the insertion is also done
   //! here.
   static void insert(
-      kir::Expr* expr,
+      Expr* expr,
       const std::vector<kir::ForLoop*>& loops,
-      kir::Bool* thread_pred,
+      Bool* thread_pred,
       bool within_unswitch);
 };
 

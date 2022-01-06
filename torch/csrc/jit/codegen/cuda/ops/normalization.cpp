@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
+#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/ops/normalization.h>
 
 namespace torch {
@@ -88,7 +89,7 @@ ForwardNormResult layer_norm(
 
   std::vector<int> inner_reduction_axes(kNormShapeNumDims);
   std::vector<bool> inner_broadcast_mask(kNumberOfDims, false);
-  Val* num_features = new Double(1);
+  Val* num_features = IrBuilder::create<Double>(x->container(), 1);
   for (const auto idx : c10::irange(kNormShapeNumDims)) {
     const size_t axis = kNumberOfDims - 1 - idx;
     inner_reduction_axes[idx] = axis;
@@ -156,7 +157,7 @@ BackwardNormResult layer_norm_backward(
 
   std::vector<int> inner_reduction_axes(kNormShapeNumDims);
   std::vector<bool> inner_broadcast_mask(kNumberOfDims, false);
-  Val* num_features = new Double(1);
+  Val* num_features = IrBuilder::create<Double>(x->container(), 1);
   for (const auto idx : c10::irange(kNormShapeNumDims)) {
     const size_t axis = kNumberOfDims - 1 - idx;
     inner_reduction_axes[idx] = axis;
@@ -243,7 +244,7 @@ ForwardNormResult batch_norm(
 
   std::vector<int> reduction_axes;
   std::vector<bool> broadcast_mask(kNumberOfDims, false);
-  Val* num_features = new Double(1);
+  Val* num_features = IrBuilder::create<Double>(x->container(), 1);
 
   for (const auto axis : c10::irange(kNumberOfDims)) {
     if (axis != c_axis) {
@@ -267,12 +268,14 @@ ForwardNormResult batch_norm(
           kTraining,
           "When running stats are provided, batch stats should only be computed during training");
 
-      auto rev_momentum = sub(new Double(1.0), momentum);
+      auto rev_momentum =
+          sub(IrBuilder::create<Double>(x->container(), 1.0), momentum);
       auto current_mean_hat = mul(welford_out.avg, momentum);
       auto mean_hat = mul(running_mean, rev_momentum);
       auto new_mean_hat = add(mean_hat, current_mean_hat);
 
-      auto num_feature_decrement = sub(num_features, new Int(1));
+      auto num_feature_decrement =
+          sub(num_features, IrBuilder::create<Int>(x->container(), 1));
       auto unbiased_var =
           mul(welford_out.var_sum, reciprocal(num_feature_decrement));
       auto current_var_hat = mul(unbiased_var, momentum);
@@ -422,8 +425,11 @@ BackwardNormResult batch_norm_backward(
                      .dtype(input->getDataType().value())
                      .shape(std::vector<int64_t>(kNumberOfDims, 1))
                      .build();
-    new UnaryOp(
-        UnaryOpType::Set, weight_val->as<Val>(), (new Double(1.0))->as<Val>());
+    IrBuilder::create<UnaryOp>(
+        input->container(),
+        UnaryOpType::Set,
+        weight_val->as<Val>(),
+        (IrBuilder::create<Double>(input->container(), 1.0))->as<Val>());
   } else {
     weight_val = broadcast(weight, broadcast_mask);
   }
@@ -497,7 +503,7 @@ ForwardNormResult instance_norm(
 
   std::vector<int> x_reduction_axes;
   std::vector<bool> x_broadcast_mask(kNumberOfDims, false);
-  Val* N = new Double(1);
+  Val* N = IrBuilder::create<Double>(x->container(), 1);
   for (const auto axis : c10::irange(kNumberOfDims)) {
     if (axis != kBatchDim && axis != kChannelsDim) {
       x_reduction_axes.push_back(axis);
@@ -505,7 +511,7 @@ ForwardNormResult instance_norm(
       N = mul(N, x->domain()->domain()[axis]->extent());
     }
   }
-  Val* B = new Double(1);
+  Val* B = IrBuilder::create<Double>(x->container(), 1);
   B = mul(B, x->domain()->domain()[kBatchDim]->extent());
 
   std::vector<bool> channels_only_broadcast_mask(kNumberOfDims, false);
@@ -524,7 +530,8 @@ ForwardNormResult instance_norm(
 
     // updating running mean and running var
     if (running_mean != nullptr && running_var != nullptr) {
-      auto rev_momentum = sub(new Double(1.0), momentum);
+      auto rev_momentum =
+          sub(IrBuilder::create<Double>(x->container(), 1.0), momentum);
       auto current_mean_hat = mul(welford_out.avg, momentum);
       auto mean_hat = mul(running_mean, rev_momentum);
       auto new_mean_hat = add(mean_hat, current_mean_hat);
@@ -536,7 +543,8 @@ ForwardNormResult instance_norm(
       fusion->addOutput(new_mean_channels_only);
       fusion->aliasOutputToInput(new_mean_channels_only, running_mean);
 
-      auto num_feature_decrement = sub(N, new Int(1));
+      auto num_feature_decrement =
+          sub(N, IrBuilder::create<Int>(x->container(), 1));
       auto unbiased_var =
           mul(welford_out.var_sum, reciprocal(num_feature_decrement));
       auto current_var_hat = mul(unbiased_var, momentum);

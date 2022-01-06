@@ -7,7 +7,6 @@
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
 
@@ -20,27 +19,24 @@ namespace cuda {
 
 namespace {
 
-bool isTensorIndexOp(kir::Expr* expr) {
+bool isTensorIndexOp(Expr* expr) {
   const auto& outputs = expr->outputs();
   return outputs.size() >= 1 && outputs[0]->isA<kir::TensorIndex>();
 }
 
-bool isOutputLocal(const kir::Expr* expr) {
+bool isOutputLocal(const Expr* expr) {
   return std::all_of(
-      expr->outputs().begin(),
-      expr->outputs().end(),
-      [](const kir::Val* output) {
-        return !output->isA<kir::TensorView>() ||
-            output->as<kir::TensorView>()->memoryType() == MemoryType::Local;
+      expr->outputs().begin(), expr->outputs().end(), [](const Val* output) {
+        return !output->isA<TensorView>() ||
+            output->as<TensorView>()->getMemoryType() == MemoryType::Local;
       });
 }
 
 } // namespace
 
-bool ParallelizedDomainPredicate::PredicateInfo::addDomain(
-    kir::IterDomain* id) {
+bool ParallelizedDomainPredicate::PredicateInfo::addDomain(IterDomain* id) {
   const auto gpu_lower = GpuLower::current();
-  auto concrete_id = gpu_lower->caIndexMap().getConcreteMappedID(id);
+  auto concrete_id = gpu_lower->caIndexMap().kirGetConcreteMappedID(id);
   if (std::find(ids_.begin(), ids_.end(), concrete_id) == ids_.end()) {
     ids_.push_back(concrete_id);
     return true;
@@ -49,21 +45,21 @@ bool ParallelizedDomainPredicate::PredicateInfo::addDomain(
   }
 }
 
-kir::Bool* ParallelizedDomainPredicate::PredicateInfo::getPredicate() const {
+Bool* ParallelizedDomainPredicate::PredicateInfo::getPredicate() const {
   const auto gpu_lower = GpuLower::current();
   kir::SimplifyingIrBuilder ir_builder(gpu_lower->kernel());
 
-  kir::Bool* pred = nullptr;
+  Bool* pred = nullptr;
 
   auto index =
-      ir_builder.create<kir::NamedScalar>(stringifyThread(pt_), DataType::Int);
+      ir_builder.create<NamedScalar>(stringifyThread(pt_), DataType::Int);
 
   for (const auto& pred_id : ids()) {
     // Just sanity check that pred_id is concrete
     TORCH_INTERNAL_ASSERT(
-        pred_id == gpu_lower->caIndexMap().getConcreteMappedID(pred_id));
+        pred_id == gpu_lower->caIndexMap().kirGetConcreteMappedID(pred_id));
     auto new_pred = ir_builder.ltExpr(index, pred_id->extent());
-    pred = ir_builder.andExpr(pred, new_pred)->as<kir::Bool>();
+    pred = ir_builder.andExpr(pred, new_pred)->as<Bool>();
   }
 
   return pred;
@@ -107,7 +103,7 @@ std::unordered_set<Val*> getNonUnswitchedRootDomains(
 }
 
 bool isFullyUnswitched(
-    kir::IterDomain* loop_id,
+    IterDomain* loop_id,
     const std::unordered_set<Val*>& non_unswitched_root_domains) {
   const auto gpu_lower = GpuLower::current();
 
@@ -131,7 +127,7 @@ std::unordered_map<
     ParallelizedDomainPredicate::PredicateInfo,
     TypeHash>
 ParallelizedDomainPredicate::getPredicateMap(
-    const kir::Expr* expr,
+    const Expr* expr,
     const std::vector<kir::ForLoop*>& loops,
     kir::ForLoop* unswitched_loop) {
   const auto gpu_lower = GpuLower::current();
@@ -167,7 +163,7 @@ ParallelizedDomainPredicate::getPredicateMap(
     }
 
     auto loop_id = loop->iter_domain();
-    auto loop_ptype = loop_id->parallelType();
+    auto loop_ptype = loop_id->getParallelType();
 
     // Not necessary to add a predicate if the paralle type is exact
     if (!isParallelTypeThread(loop_ptype) ||
@@ -187,13 +183,13 @@ ParallelizedDomainPredicate::getPredicateMap(
           tv->domain()->domain().begin(),
           tv->domain()->domain().end(),
           [&](auto tv_id) {
-            return gpu_lower->caIndexMap().areMapped(loop_id, tv_id);
+            return gpu_lower->caIndexMap().kirAreMapped(loop_id, tv_id);
           });
       if (it == tv->domain()->domain().end()) {
         continue;
       }
 
-      kir::IterDomain* tv_id = *it;
+      IterDomain* tv_id = *it;
 
       // If the corresponding domain is a broadcast, it's not really used.
       if (tv_id->isBroadcast()) {
@@ -203,9 +199,9 @@ ParallelizedDomainPredicate::getPredicateMap(
       // If it's a root domain, it should be covered by the root
       // predicates, so no extra predicate is required.
       if (std::find(
-              tv->domain()->rootDomain().begin(),
-              tv->domain()->rootDomain().end(),
-              tv_id) != tv->domain()->rootDomain().end()) {
+              tv->domain()->getRootDomain().begin(),
+              tv->domain()->getRootDomain().end(),
+              tv_id) != tv->domain()->getRootDomain().end()) {
         continue;
       }
 
@@ -218,14 +214,14 @@ ParallelizedDomainPredicate::getPredicateMap(
   return map;
 }
 
-kir::Bool* ParallelizedDomainPredicate::getPredicate(
-    const kir::Expr* expr,
+Bool* ParallelizedDomainPredicate::getPredicate(
+    const Expr* expr,
     const std::vector<kir::ForLoop*>& loops) {
   kir::SimplifyingIrBuilder ir_builder(GpuLower::current()->kernel());
 
   auto pred_map = getPredicateMap(expr, loops);
 
-  kir::Val* pred = ir_builder.trueVal();
+  Val* pred = ir_builder.trueVal();
 
   for (auto pt : kParallelTypeThreads) {
     auto pred_info_it = pred_map.find(pt);
@@ -237,7 +233,7 @@ kir::Bool* ParallelizedDomainPredicate::getPredicate(
   }
 
   if (pred) {
-    return pred->as<kir::Bool>();
+    return pred->as<Bool>();
   } else {
     return nullptr;
   }
@@ -340,10 +336,10 @@ std::size_t UnswitchPredicateKeyHash::operator()(
   return h;
 };
 
-kir::Bool* PredicateCompute::getInlinePredicate(
-    const kir::Expr* expr,
+Bool* PredicateCompute::getInlinePredicate(
+    const Expr* expr,
     const std::vector<kir::ForLoop*>& loops,
-    kir::Bool* thread_pred,
+    Bool* thread_pred,
     PredicateType pred_type) {
   FUSER_PERF_SCOPE("GpuLower::Lower::getInlinePredicate");
 
@@ -360,10 +356,10 @@ kir::Bool* PredicateCompute::getInlinePredicate(
     return thread_pred;
   }
 
-  auto out_tv = ir_utils::getTVOutput(expr);
-  TORCH_INTERNAL_ASSERT(out_tv != nullptr, "Missing kir::TensorView output");
+  auto out_tv = ir_utils::getTvOutput(expr);
+  TORCH_INTERNAL_ASSERT(out_tv != nullptr, "Missing TensorView output");
 
-  if (gpu_lower->predicateElimination().canOmitPredicate(expr)) {
+  if (gpu_lower->predicateElimination().canKirOmitPredicate(expr)) {
     return thread_pred;
   }
 
@@ -372,7 +368,7 @@ kir::Bool* PredicateCompute::getInlinePredicate(
           out_tv, loops, nullptr, pred_type == PredicateType::Padding)
           .first;
 
-  std::vector<kir::Bool*> preds;
+  std::vector<Bool*> preds;
 
   // When pred_type is ReductionWrite, filter out predicates for
   // reduction axes. For blockReduce, this is necessary when reduction
@@ -426,15 +422,15 @@ kir::Bool* PredicateCompute::getInlinePredicate(
     return ir_builder.trueVal();
   }
 
-  kir::Val* cond = preds[0];
+  Val* cond = preds[0];
   for (const auto i : c10::irange(1, preds.size())) {
     cond = ir_builder.andExpr(cond, preds[i]);
   }
 
-  return cond->as<kir::Bool>();
+  return cond->as<Bool>();
 }
 
-kir::Bool* UnswitchPredicate::get(
+Bool* UnswitchPredicate::get(
     const std::vector<kir::ForLoop*>& outer_loops,
     kir::ForLoop* unrolled_loop) {
   FUSER_PERF_SCOPE("GpuLower::Lower::UnswitchPredicate::get");
@@ -443,15 +439,15 @@ kir::Bool* UnswitchPredicate::get(
 
   UnswitchPredicate up(outer_loops, unrolled_loop);
 
-  kir::Val* unswitch_pred = ir_builder.trueVal();
+  Val* unswitch_pred = ir_builder.trueVal();
   for (auto pred : up.predicates_) {
     unswitch_pred = ir_builder.andExpr(unswitch_pred, pred);
   }
 
-  return unswitch_pred->as<kir::Bool>();
+  return unswitch_pred->as<Bool>();
 }
 
-void UnswitchPredicate::predicateOn(kir::Expr* tv_expr) {
+void UnswitchPredicate::predicateOn(Expr* tv_expr) {
   FUSER_PERF_SCOPE("GpuLower::Lower::UnswitchPredicate::predicateOn");
 
   if (for_loops_.empty()) {
@@ -461,12 +457,12 @@ void UnswitchPredicate::predicateOn(kir::Expr* tv_expr) {
   const auto gpu_lower = GpuLower::current();
   kir::IrBuilder ir_builder(gpu_lower->kernel());
 
-  if (gpu_lower->predicateElimination().canOmitPredicate(tv_expr)) {
+  if (gpu_lower->predicateElimination().canKirOmitPredicate(tv_expr)) {
     return;
   }
 
-  auto out_tv = ir_utils::getTVOutput(tv_expr);
-  TORCH_INTERNAL_ASSERT(out_tv != nullptr, "Missing kir::TensorView output");
+  auto out_tv = ir_utils::getTvOutput(tv_expr);
+  TORCH_INTERNAL_ASSERT(out_tv != nullptr, "Missing TensorView output");
 
   auto ref_pred_info = Index::getReferenceRootPredicates(
       out_tv, for_loops_, unrolled_loop_, false);
@@ -495,7 +491,7 @@ void UnswitchPredicate::predicateOn(kir::Expr* tv_expr) {
     for (auto root_id : root_ids) {
       auto concrete_root_id =
           gpu_lower->caIndexMap().getConcreteMappedID(root_id);
-      auto kir_root_id = gpu_lower->lowerValue(root_id)->as<kir::IterDomain>();
+      auto kir_root_id = gpu_lower->lowerValue(root_id)->as<IterDomain>();
 
       if (kir_root_id->isBroadcast()) {
         continue;
@@ -603,7 +599,7 @@ void UnswitchPredicate::openLoop(kir::ForLoop* fl) {
   for_loops_.push_back(fl);
 
   for (auto expr : fl->body().exprs()) {
-    if (ir_utils::isTVOp(expr) || isTensorIndexOp(expr)) {
+    if (ir_utils::isTvOp(expr) || isTensorIndexOp(expr)) {
       predicateOn(expr);
     } else if (auto ite = dynamic_cast<kir::IfThenElse*>(expr)) {
       openIte(ite);
@@ -620,7 +616,7 @@ void UnswitchPredicate::openIte(kir::IfThenElse* ite) {
 
   // only expand the ite thenBody
   for (auto expr : ite->thenBody().exprs()) {
-    if (ir_utils::isTVOp(expr) || isTensorIndexOp(expr)) {
+    if (ir_utils::isTvOp(expr) || isTensorIndexOp(expr)) {
       predicateOn(expr);
     } else if (auto ite = dynamic_cast<kir::IfThenElse*>(expr)) {
       openIte(ite);
@@ -651,8 +647,8 @@ void UnswitchPredicate::finalize() {
 }
 
 void UnswitchPredicate::mergeUnswitchPredicateOffsets(
-    kir::Bool* predicate,
-    kir::Val* offset,
+    Bool* predicate,
+    Val* offset,
     MergedPredicates::Info& merged_predicate_info,
     bool is_start) {
   auto is_more_restrictive = [&is_start](int64_t new_val, int64_t current_val) {
@@ -663,7 +659,7 @@ void UnswitchPredicate::mergeUnswitchPredicateOffsets(
     }
   };
 
-  auto offset_int = dynamic_cast<kir::Int*>(offset);
+  auto offset_int = dynamic_cast<Int*>(offset);
   // If it's a static predicate, replace the current one if it's
   // more restrictive. If it's dynamic, just adds it to the dynamic
   // predicate list.

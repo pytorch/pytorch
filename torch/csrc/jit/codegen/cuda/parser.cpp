@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ops/all_ops.h>
 #include <torch/csrc/jit/codegen/cuda/type_inference.h>
@@ -1100,10 +1101,10 @@ class IrParser {
             list_val.pop_front();
             Val* low = value_map.count(node->inputs()[1]->unique()) != 0
                 ? *value_map[node->inputs()[1]->unique()]
-                : new Double(std::numeric_limits<float>::min());
+                : IrBuilder::create<Double>(std::numeric_limits<float>::min());
             Val* high = value_map.count(node->inputs()[2]->unique()) != 0
                 ? *value_map[node->inputs()[2]->unique()]
-                : new Double(std::numeric_limits<float>::max());
+                : IrBuilder::create<Double>(std::numeric_limits<float>::max());
 
             auto out = clamp(operand, low, high);
             value_map.emplace(node->output()->unique(), out);
@@ -1363,7 +1364,7 @@ class IrParser {
               Val* momentum_ptr = nullptr;
               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               if (auto momentum = constant_as<float>(node->input(6))) {
-                momentum_ptr = new Double(momentum.value());
+                momentum_ptr = IrBuilder::create<Double>(momentum.value());
               } else {
                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 momentum_ptr = value_map[node->input(6)->unique()];
@@ -1372,7 +1373,7 @@ class IrParser {
               Val* eps_ptr = nullptr;
               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               if (auto eps = constant_as<float>(node->input(7))) {
-                eps_ptr = new Double(eps.value());
+                eps_ptr = IrBuilder::create<Double>(eps.value());
               } else {
                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 eps_ptr = value_map[node->input(7)->unique()];
@@ -1457,7 +1458,7 @@ class IrParser {
               Val* momentum_ptr = nullptr;
               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               if (auto momentum = constant_as<float>(node->input(6))) {
-                momentum_ptr = new Double(momentum.value());
+                momentum_ptr = IrBuilder::create<Double>(momentum.value());
               } else {
                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 momentum_ptr = value_map[node->input(6)->unique()];
@@ -1466,7 +1467,7 @@ class IrParser {
               Val* eps_ptr = nullptr;
               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               if (auto eps = constant_as<float>(node->input(7))) {
-                eps_ptr = new Double(eps.value());
+                eps_ptr = IrBuilder::create<Double>(eps.value());
               } else {
                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 eps_ptr = value_map[node->input(7)->unique()];
@@ -1585,7 +1586,7 @@ class IrParser {
             Val* eps_ptr = nullptr;
             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             if (auto eps = constant_as<float>(node->input(9))) {
-              eps_ptr = new Double(eps.value());
+              eps_ptr = IrBuilder::create<Double>(eps.value());
             } else {
               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               eps_ptr = value_map[node->input(7)->unique()];
@@ -1703,7 +1704,7 @@ class IrParser {
 
               Val* eps_ptr = nullptr;
               if (auto eps = constant_as<float>(node->input(4))) {
-                eps_ptr = new Double(eps.value());
+                eps_ptr = IrBuilder::create<Double>(eps.value());
               } else {
                 eps_ptr = value_map[node->input(4)->unique()];
               }
@@ -2031,7 +2032,7 @@ class IrParser {
                 keepdim.has_value(),
                 "aten::mean cannot be fused with dynamic keepdim");
             auto o_sum = sum(self, dims, keepdim.value());
-            Val* num_features = new Double(1);
+            Val* num_features = IrBuilder::create<Double>(1);
             for (auto axis : dims) {
               if (axis < 0) {
                 axis += int(self->nDims());
@@ -2513,9 +2514,9 @@ class IrParser {
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       CgValue cg_val;
       if (auto ival = constant_as<double>(val)) {
-        cg_val = new Double(ival.value());
+        cg_val = IrBuilder::create<Double>(ival.value());
       } else {
-        cg_val = new Double();
+        cg_val = IrBuilder::create<Double>();
       }
       value_map_.emplace(val->unique(), cg_val);
       return true;
@@ -2524,9 +2525,9 @@ class IrParser {
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       CgValue cg_val;
       if (auto ival = constant_as<int64_t>(val)) {
-        cg_val = new Int(ival.value());
+        cg_val = IrBuilder::create<Int>(ival.value());
       } else {
-        cg_val = new Int();
+        cg_val = IrBuilder::create<Int>();
       }
       value_map_.emplace(val->unique(), cg_val);
       return true;
@@ -2535,9 +2536,9 @@ class IrParser {
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       CgValue cg_val;
       if (auto ival = constant_as<bool>(val)) {
-        cg_val = new Bool(ival.value());
+        cg_val = IrBuilder::create<Bool>(ival.value());
       } else {
-        cg_val = new Bool();
+        cg_val = IrBuilder::create<Bool>();
       }
       value_map_.emplace(val->unique(), cg_val);
       return true;
@@ -2623,7 +2624,7 @@ class IrParser {
             tensor_type->undefined());
       }
 
-      cg_val = new TensorView(tensor_type);
+      cg_val = IrBuilder::create<TensorView>(tensor_type);
       value_map_.emplace(val->unique(), ValueHolder(cg_val, format));
       return true;
     }

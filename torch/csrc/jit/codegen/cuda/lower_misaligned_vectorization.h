@@ -106,8 +106,8 @@ namespace cuda {
 //!   }
 //! }
 //!
-std::vector<kir::Expr*> processMisalignedVectorization(
-    const std::vector<kir::Expr*>& exprs);
+std::vector<Expr*> processMisalignedVectorization(
+    const std::vector<Expr*>& exprs);
 
 bool containsAnyDirectChildMisalignedVectorize(const kir::ForLoop* fl);
 

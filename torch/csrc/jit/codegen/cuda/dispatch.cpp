@@ -37,7 +37,7 @@ T* ptr(T* obj) {
  * }
  *
  * And therefore dispatch should never call:
- * ptr(mutator)->handle(this->as<Statement>());
+ * ptr(mutator)->mutate(this->as<Statement>());
  */
 
 template <typename T>
@@ -58,6 +58,10 @@ void Val::dispatch(T handler, Val* val) {
           break;
       }
       break;
+    case ValType::NamedScalar:
+      ptr(handler)->handle(val->as<NamedScalar>());
+      return;
+
     case ValType::IterDomain:
       ptr(handler)->handle(val->as<IterDomain>());
       return;
@@ -67,8 +71,11 @@ void Val::dispatch(T handler, Val* val) {
     case ValType::TensorView:
       ptr(handler)->handle(val->as<TensorView>());
       return;
-    case ValType::NamedScalar:
-      ptr(handler)->handle(val->as<NamedScalar>());
+    case ValType::Predicate:
+      ptr(handler)->handle(val->as<kir::Predicate>());
+      return;
+    case ValType::TensorIndex:
+      ptr(handler)->handle(val->as<kir::TensorIndex>());
       return;
     default:
       break;
@@ -79,12 +86,6 @@ void Val::dispatch(T handler, Val* val) {
 template <typename T>
 void Expr::dispatch(T handler, Expr* expr) {
   switch (*(expr->getExprType())) {
-    case ExprType::Split:
-      ptr(handler)->handle(expr->as<Split>());
-      return;
-    case ExprType::Merge:
-      ptr(handler)->handle(expr->as<Merge>());
-      return;
     case ExprType::UnaryOp:
       ptr(handler)->handle(expr->as<UnaryOp>());
       return;
@@ -103,6 +104,13 @@ void Expr::dispatch(T handler, Expr* expr) {
     case ExprType::BroadcastOp:
       ptr(handler)->handle(expr->as<BroadcastOp>());
       return;
+
+    case ExprType::Split:
+      ptr(handler)->handle(expr->as<Split>());
+      return;
+    case ExprType::Merge:
+      ptr(handler)->handle(expr->as<Merge>());
+      return;
     case ExprType::TransposeOp:
       ptr(handler)->handle(expr->as<TransposeOp>());
       return;
@@ -114,6 +122,34 @@ void Expr::dispatch(T handler, Expr* expr) {
       return;
     case ExprType::ViewOp:
       ptr(handler)->handle(expr->as<ViewOp>());
+      return;
+
+    case ExprType::Allocate:
+      ptr(handler)->handle(expr->as<kir::Allocate>());
+      return;
+    case ExprType::Sync:
+      ptr(handler)->handle(expr->as<kir::Sync>());
+      return;
+    case ExprType::InitMagicZero:
+      ptr(handler)->handle(expr->as<kir::InitMagicZero>());
+      return;
+    case ExprType::UpdateMagicZero:
+      ptr(handler)->handle(expr->as<kir::UpdateMagicZero>());
+      return;
+    case ExprType::ForLoop:
+      ptr(handler)->handle(expr->as<kir::ForLoop>());
+      return;
+    case ExprType::IfThenElse:
+      ptr(handler)->handle(expr->as<kir::IfThenElse>());
+      return;
+    case ExprType::GridReduction:
+      ptr(handler)->handle(expr->as<kir::GridReduction>());
+      return;
+    case ExprType::GridBroadcast:
+      ptr(handler)->handle(expr->as<kir::GridBroadcast>());
+      return;
+    case ExprType::GridWelford:
+      ptr(handler)->handle(expr->as<kir::GridWelford>());
       return;
     default:
       TORCH_INTERNAL_ASSERT(false, "Unknown exprtype in dispatch!");
@@ -148,6 +184,10 @@ void Val::constDispatch(T handler, const Val* val) {
           break;
       }
       break;
+    case ValType::NamedScalar:
+      ptr(handler)->handle(val->as<NamedScalar>());
+      return;
+
     case ValType::IterDomain:
       ptr(handler)->handle(val->as<IterDomain>());
       return;
@@ -157,8 +197,11 @@ void Val::constDispatch(T handler, const Val* val) {
     case ValType::TensorView:
       ptr(handler)->handle(val->as<TensorView>());
       return;
-    case ValType::NamedScalar:
-      ptr(handler)->handle(val->as<NamedScalar>());
+    case ValType::Predicate:
+      ptr(handler)->handle(val->as<kir::Predicate>());
+      return;
+    case ValType::TensorIndex:
+      ptr(handler)->handle(val->as<kir::TensorIndex>());
       return;
     default:
       break;
@@ -169,12 +212,6 @@ void Val::constDispatch(T handler, const Val* val) {
 template <typename T>
 void Expr::constDispatch(T handler, const Expr* expr) {
   switch (*(expr->getExprType())) {
-    case ExprType::Split:
-      ptr(handler)->handle(expr->as<Split>());
-      return;
-    case ExprType::Merge:
-      ptr(handler)->handle(expr->as<Merge>());
-      return;
     case ExprType::UnaryOp:
       ptr(handler)->handle(expr->as<UnaryOp>());
       return;
@@ -193,6 +230,13 @@ void Expr::constDispatch(T handler, const Expr* expr) {
     case ExprType::BroadcastOp:
       ptr(handler)->handle(expr->as<BroadcastOp>());
       return;
+
+    case ExprType::Split:
+      ptr(handler)->handle(expr->as<Split>());
+      return;
+    case ExprType::Merge:
+      ptr(handler)->handle(expr->as<Merge>());
+      return;
     case ExprType::TransposeOp:
       ptr(handler)->handle(expr->as<TransposeOp>());
       return;
@@ -204,6 +248,34 @@ void Expr::constDispatch(T handler, const Expr* expr) {
       return;
     case ExprType::ViewOp:
       ptr(handler)->handle(expr->as<ViewOp>());
+      return;
+
+    case ExprType::Allocate:
+      ptr(handler)->handle(expr->as<kir::Allocate>());
+      return;
+    case ExprType::Sync:
+      ptr(handler)->handle(expr->as<kir::Sync>());
+      return;
+    case ExprType::InitMagicZero:
+      ptr(handler)->handle(expr->as<kir::InitMagicZero>());
+      return;
+    case ExprType::UpdateMagicZero:
+      ptr(handler)->handle(expr->as<kir::UpdateMagicZero>());
+      return;
+    case ExprType::ForLoop:
+      ptr(handler)->handle(expr->as<kir::ForLoop>());
+      return;
+    case ExprType::IfThenElse:
+      ptr(handler)->handle(expr->as<kir::IfThenElse>());
+      return;
+    case ExprType::GridReduction:
+      ptr(handler)->handle(expr->as<kir::GridReduction>());
+      return;
+    case ExprType::GridBroadcast:
+      ptr(handler)->handle(expr->as<kir::GridBroadcast>());
+      return;
+    case ExprType::GridWelford:
+      ptr(handler)->handle(expr->as<kir::GridWelford>());
       return;
     default:
       TORCH_INTERNAL_ASSERT(false, "Unknown exprtype in dispatch!");
@@ -246,14 +318,19 @@ Statement* Val::mutatorDispatch(T mutator, Val* val) {
           break;
       }
       break;
+    case ValType::NamedScalar:
+      return ptr(mutator)->mutate(val->as<NamedScalar>());
+
     case ValType::IterDomain:
       return ptr(mutator)->mutate(val->as<IterDomain>());
     case ValType::TensorDomain:
       return ptr(mutator)->mutate(val->as<TensorDomain>());
     case ValType::TensorView:
       return ptr(mutator)->mutate(val->as<TensorView>());
-    case ValType::NamedScalar:
-      return ptr(mutator)->mutate(val->as<NamedScalar>());
+    case ValType::Predicate:
+      return ptr(mutator)->mutate(val->as<kir::Predicate>());
+    case ValType::TensorIndex:
+      return ptr(mutator)->mutate(val->as<kir::TensorIndex>());
     default:
       break;
   }
@@ -263,10 +340,6 @@ Statement* Val::mutatorDispatch(T mutator, Val* val) {
 template <typename T>
 Statement* Expr::mutatorDispatch(T mutator, Expr* expr) {
   switch (*(expr->getExprType())) {
-    case ExprType::Split:
-      return ptr(mutator)->mutate(expr->as<Split>());
-    case ExprType::Merge:
-      return ptr(mutator)->mutate(expr->as<Merge>());
     case ExprType::UnaryOp:
       return ptr(mutator)->mutate(expr->as<UnaryOp>());
     case ExprType::BinaryOp:
@@ -279,6 +352,11 @@ Statement* Expr::mutatorDispatch(T mutator, Expr* expr) {
       return ptr(mutator)->mutate(expr->as<WelfordOp>());
     case ExprType::BroadcastOp:
       return ptr(mutator)->mutate(expr->as<BroadcastOp>());
+
+    case ExprType::Split:
+      return ptr(mutator)->mutate(expr->as<Split>());
+    case ExprType::Merge:
+      return ptr(mutator)->mutate(expr->as<Merge>());
     case ExprType::TransposeOp:
       return ptr(mutator)->mutate(expr->as<TransposeOp>());
     case ExprType::ShiftOp:
@@ -287,6 +365,25 @@ Statement* Expr::mutatorDispatch(T mutator, Expr* expr) {
       return ptr(mutator)->mutate(expr->as<GatherOp>());
     case ExprType::ViewOp:
       return ptr(mutator)->mutate(expr->as<ViewOp>());
+
+    case ExprType::Allocate:
+      return ptr(mutator)->mutate(expr->as<kir::Allocate>());
+    case ExprType::Sync:
+      return ptr(mutator)->mutate(expr->as<kir::Sync>());
+    case ExprType::InitMagicZero:
+      return ptr(mutator)->mutate(expr->as<kir::InitMagicZero>());
+    case ExprType::UpdateMagicZero:
+      return ptr(mutator)->mutate(expr->as<kir::UpdateMagicZero>());
+    case ExprType::ForLoop:
+      return ptr(mutator)->mutate(expr->as<kir::ForLoop>());
+    case ExprType::IfThenElse:
+      return ptr(mutator)->mutate(expr->as<kir::IfThenElse>());
+    case ExprType::GridReduction:
+      return ptr(mutator)->mutate(expr->as<kir::GridReduction>());
+    case ExprType::GridBroadcast:
+      return ptr(mutator)->mutate(expr->as<kir::GridBroadcast>());
+    case ExprType::GridWelford:
+      return ptr(mutator)->mutate(expr->as<kir::GridWelford>());
     default:
       TORCH_INTERNAL_ASSERT(false, "Unknown exprtype in dispatch!");
   }
@@ -308,11 +405,11 @@ Statement* Statement::mutatorDispatch(T mutator, Statement* stmt) {
  * classes. Actual visitors/mutators should inhereit from these classes and call
  * ->dispatch(this) to avoid needing an explicit instantiation.
  */
-template void Statement::dispatch(OptOutDispatch, Statement*);
+template void Statement::dispatch(OptOutDispatch&, Statement*);
 template void Statement::dispatch(OptOutDispatch*, Statement*);
-template void Val::dispatch(OptOutDispatch, Val*);
+template void Val::dispatch(OptOutDispatch&, Val*);
 template void Val::dispatch(OptOutDispatch*, Val*);
-template void Expr::dispatch(OptOutDispatch, Expr*);
+template void Expr::dispatch(OptOutDispatch&, Expr*);
 template void Expr::dispatch(OptOutDispatch*, Expr*);
 
 template void Statement::dispatch(OptInDispatch, Statement*);
@@ -322,25 +419,25 @@ template void Val::dispatch(OptInDispatch*, Val*);
 template void Expr::dispatch(OptInDispatch, Expr*);
 template void Expr::dispatch(OptInDispatch*, Expr*);
 
-template void Statement::constDispatch(OptOutConstDispatch, const Statement*);
+template void Statement::constDispatch(OptOutConstDispatch&, const Statement*);
 template void Statement::constDispatch(OptOutConstDispatch*, const Statement*);
-template void Val::constDispatch(OptOutConstDispatch, const Val*);
+template void Val::constDispatch(OptOutConstDispatch&, const Val*);
 template void Val::constDispatch(OptOutConstDispatch*, const Val*);
-template void Expr::constDispatch(OptOutConstDispatch, const Expr*);
+template void Expr::constDispatch(OptOutConstDispatch&, const Expr*);
 template void Expr::constDispatch(OptOutConstDispatch*, const Expr*);
 
-template void Statement::constDispatch(OptInConstDispatch, const Statement*);
+template void Statement::constDispatch(OptInConstDispatch&, const Statement*);
 template void Statement::constDispatch(OptInConstDispatch*, const Statement*);
-template void Val::constDispatch(OptInConstDispatch, const Val*);
+template void Val::constDispatch(OptInConstDispatch&, const Val*);
 template void Val::constDispatch(OptInConstDispatch*, const Val*);
-template void Expr::constDispatch(OptInConstDispatch, const Expr*);
+template void Expr::constDispatch(OptInConstDispatch&, const Expr*);
 template void Expr::constDispatch(OptInConstDispatch*, const Expr*);
 
-template Statement* Statement::mutatorDispatch(OptOutMutator, Statement*);
+template Statement* Statement::mutatorDispatch(OptOutMutator&, Statement*);
 template Statement* Statement::mutatorDispatch(OptOutMutator*, Statement*);
-template Statement* Val::mutatorDispatch(OptOutMutator, Val*);
+template Statement* Val::mutatorDispatch(OptOutMutator&, Val*);
 template Statement* Val::mutatorDispatch(OptOutMutator*, Val*);
-template Statement* Expr::mutatorDispatch(OptOutMutator, Expr*);
+template Statement* Expr::mutatorDispatch(OptOutMutator&, Expr*);
 template Statement* Expr::mutatorDispatch(OptOutMutator*, Expr*);
 
 void OptOutDispatch::handle(Statement* s) {
@@ -382,6 +479,18 @@ Statement* OptOutMutator::mutate(Val* v) {
   return Val::mutatorDispatch(this, v);
 }
 
+Statement* OptOutMutator::mutateAsVal(Val* v) {
+  return mutate(v);
+}
+
+void OptOutMutator::registerMutation(Val* val, Val* mutation) {
+  TORCH_INTERNAL_ASSERT(
+      mutations.find(val) == mutations.end(),
+      " The same value is incorrectly being mutated twice.",
+      " One mutation per mutation pass is allowed.");
+  mutations[val] = mutation;
+}
+
 void OptInConstDispatch::unhandled(const Statement* stmt) {
   if (stmt->isExpr()) {
     TORCH_INTERNAL_ASSERT(
@@ -407,15 +516,6 @@ void OptInDispatch::unhandled(Statement* stmt) {
 }
 
 // Vals
-void OptOutConstDispatch::handle(const IterDomain* stmt) {
-  unhandled(stmt);
-}
-void OptOutConstDispatch::handle(const TensorDomain* stmt) {
-  unhandled(stmt);
-}
-void OptOutConstDispatch::handle(const TensorView* stmt) {
-  unhandled(stmt);
-}
 void OptOutConstDispatch::handle(const Bool* stmt) {
   unhandled(stmt);
 }
@@ -428,14 +528,24 @@ void OptOutConstDispatch::handle(const Int* stmt) {
 void OptOutConstDispatch::handle(const NamedScalar* stmt) {
   unhandled(stmt);
 }
+void OptOutConstDispatch::handle(const IterDomain* stmt) {
+  unhandled(stmt);
+}
+void OptOutConstDispatch::handle(const TensorDomain* stmt) {
+  unhandled(stmt);
+}
+void OptOutConstDispatch::handle(const TensorView* stmt) {
+  unhandled(stmt);
+}
+
+void OptOutConstDispatch::handle(const kir::Predicate* stmt) {
+  unhandled(stmt);
+}
+void OptOutConstDispatch::handle(const kir::TensorIndex* stmt) {
+  unhandled(stmt);
+}
 
 // Exprs
-void OptOutConstDispatch::handle(const Split* stmt) {
-  unhandled(stmt);
-}
-void OptOutConstDispatch::handle(const Merge* stmt) {
-  unhandled(stmt);
-}
 void OptOutConstDispatch::handle(const UnaryOp* stmt) {
   unhandled(stmt);
 }
@@ -454,6 +564,13 @@ void OptOutConstDispatch::handle(const WelfordOp* stmt) {
 void OptOutConstDispatch::handle(const BroadcastOp* stmt) {
   unhandled(stmt);
 }
+
+void OptOutConstDispatch::handle(const Split* stmt) {
+  unhandled(stmt);
+}
+void OptOutConstDispatch::handle(const Merge* stmt) {
+  unhandled(stmt);
+}
 void OptOutConstDispatch::handle(const TransposeOp* stmt) {
   unhandled(stmt);
 }
@@ -467,16 +584,37 @@ void OptOutConstDispatch::handle(const ViewOp* stmt) {
   unhandled(stmt);
 }
 
+void OptOutConstDispatch::handle(const kir::Allocate* stmt) {
+  unhandled(stmt);
+}
+void OptOutConstDispatch::handle(const kir::Sync* stmt) {
+  unhandled(stmt);
+}
+void OptOutConstDispatch::handle(const kir::InitMagicZero* stmt) {
+  unhandled(stmt);
+}
+void OptOutConstDispatch::handle(const kir::UpdateMagicZero* stmt) {
+  unhandled(stmt);
+}
+void OptOutConstDispatch::handle(const kir::ForLoop* stmt) {
+  unhandled(stmt);
+}
+void OptOutConstDispatch::handle(const kir::IfThenElse* stmt) {
+  unhandled(stmt);
+}
+void OptOutConstDispatch::handle(const kir::GridReduction* stmt) {
+  unhandled(stmt);
+}
+void OptOutConstDispatch::handle(const kir::GridBroadcast* stmt) {
+  unhandled(stmt);
+}
+void OptOutConstDispatch::handle(const kir::GridWelford* stmt) {
+  unhandled(stmt);
+}
+
+void OptOutDispatch::unhandled(Statement*) {}
+
 // Vals
-void OptOutDispatch::handle(IterDomain* stmt) {
-  unhandled(stmt);
-}
-void OptOutDispatch::handle(TensorDomain* stmt) {
-  unhandled(stmt);
-}
-void OptOutDispatch::handle(TensorView* stmt) {
-  unhandled(stmt);
-}
 void OptOutDispatch::handle(Bool* stmt) {
   unhandled(stmt);
 }
@@ -489,14 +627,24 @@ void OptOutDispatch::handle(Int* stmt) {
 void OptOutDispatch::handle(NamedScalar* stmt) {
   unhandled(stmt);
 }
+void OptOutDispatch::handle(IterDomain* stmt) {
+  unhandled(stmt);
+}
+void OptOutDispatch::handle(TensorDomain* stmt) {
+  unhandled(stmt);
+}
+void OptOutDispatch::handle(TensorView* stmt) {
+  unhandled(stmt);
+}
+
+void OptOutDispatch::handle(kir::Predicate* stmt) {
+  unhandled(stmt);
+}
+void OptOutDispatch::handle(kir::TensorIndex* stmt) {
+  unhandled(stmt);
+}
 
 // Exprs
-void OptOutDispatch::handle(Split* stmt) {
-  unhandled(stmt);
-}
-void OptOutDispatch::handle(Merge* stmt) {
-  unhandled(stmt);
-}
 void OptOutDispatch::handle(UnaryOp* stmt) {
   unhandled(stmt);
 }
@@ -515,6 +663,13 @@ void OptOutDispatch::handle(WelfordOp* stmt) {
 void OptOutDispatch::handle(BroadcastOp* stmt) {
   unhandled(stmt);
 }
+
+void OptOutDispatch::handle(Split* stmt) {
+  unhandled(stmt);
+}
+void OptOutDispatch::handle(Merge* stmt) {
+  unhandled(stmt);
+}
 void OptOutDispatch::handle(TransposeOp* stmt) {
   unhandled(stmt);
 }
@@ -525,6 +680,34 @@ void OptOutDispatch::handle(GatherOp* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(ViewOp* stmt) {
+  unhandled(stmt);
+}
+
+void OptOutDispatch::handle(kir::Allocate* stmt) {
+  unhandled(stmt);
+}
+void OptOutDispatch::handle(kir::Sync* stmt) {
+  unhandled(stmt);
+}
+void OptOutDispatch::handle(kir::InitMagicZero* stmt) {
+  unhandled(stmt);
+}
+void OptOutDispatch::handle(kir::UpdateMagicZero* stmt) {
+  unhandled(stmt);
+}
+void OptOutDispatch::handle(kir::ForLoop* stmt) {
+  unhandled(stmt);
+}
+void OptOutDispatch::handle(kir::IfThenElse* stmt) {
+  unhandled(stmt);
+}
+void OptOutDispatch::handle(kir::GridReduction* stmt) {
+  unhandled(stmt);
+}
+void OptOutDispatch::handle(kir::GridBroadcast* stmt) {
+  unhandled(stmt);
+}
+void OptOutDispatch::handle(kir::GridWelford* stmt) {
   unhandled(stmt);
 }
 

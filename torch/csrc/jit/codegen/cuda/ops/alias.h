@@ -28,9 +28,9 @@ TORCH_CUDA_CU_API TensorView* squeeze(
 TORCH_CUDA_CU_API TensorView* squeeze(
     TensorView* x,
     const std::vector<int64_t>& sizes,
-    int64_t dim);
+    int dim);
 
-TORCH_CUDA_CU_API TensorView* unsqueeze(TensorView* x, int64_t dim);
+TORCH_CUDA_CU_API TensorView* unsqueeze(TensorView* x, int dim);
 
 } // namespace cuda
 } // namespace fuser
