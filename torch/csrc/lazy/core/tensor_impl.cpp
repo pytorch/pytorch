@@ -121,8 +121,15 @@ void LTCTensorImpl::shallow_copy_from(
 }
 
 int64_t LTCTensorImpl::size(int64_t d) const {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   const_cast<LTCTensorImpl*>(this)->setup_size_properties();
   return c10::TensorImpl::size(d);
+}
+
+int64_t LTCTensorImpl::stride(int64_t d) const {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  const_cast<LTCTensorImpl*>(this)->setup_size_properties();
+  return c10::TensorImpl::stride(d);
 }
 
 void LTCTensorImpl::setup_size_properties() {
@@ -151,16 +158,25 @@ void LTCTensorImpl::setup_size_properties() {
 #ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
 
 at::IntArrayRef LTCTensorImpl::sizes() const {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   const_cast<LTCTensorImpl*>(this)->setup_size_properties();
   return c10::TensorImpl::sizes();
 }
 
+at::IntArrayRef LTCTensorImpl::strides() const {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  const_cast<LTCTensorImpl*>(this)->setup_size_properties();
+  return c10::TensorImpl::strides();
+}
+
 int64_t LTCTensorImpl::dim() const {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   const_cast<LTCTensorImpl*>(this)->setup_size_properties();
   return c10::TensorImpl::dim();
 }
 
 int64_t LTCTensorImpl::numel() const {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   const_cast<LTCTensorImpl*>(this)->setup_size_properties();
   return c10::TensorImpl::numel();
 }
