@@ -897,8 +897,8 @@ class TestNN(NNTestCase):
         w = torch.randn(6, 1, 5, 5)
 
         with self.assertRaisesRegex(RuntimeError,
-                                    'Expected 3D \(unbatched\) or 4D \(batched\) input to conv2d, but got ' +
-                                    'input of size: \[1, 10, 1, 28, 28\]'):
+                                    r'Expected 3D \(unbatched\) or 4D \(batched\) input to conv2d, but got ' +
+                                    r'input of size: \[1, 10, 1, 28, 28\]'):
 
             F.conv2d(x, w)
 

@@ -13005,7 +13005,7 @@ dedent """
                 return self.conv(x)
         foo = Foo()
         # testing that the correct error message propagates
-        with self.assertRaisesRegex(RuntimeError, "Expected 3D \(unbatched\) or 4D \(batched\) input to conv2d"):
+        with self.assertRaisesRegex(RuntimeError, r"Expected 3D \(unbatched\) or 4D \(batched\) input to conv2d"):
             foo(torch.ones([123]))  # wrong size
 
     def test_builtin_error_messsage(self):
