@@ -18,7 +18,7 @@
 #define CUB_SUPPORTS_NV_BFLOAT16() false
 #endif
 
-// cub sort support for CUB_WRAPPED_NAMESPACE is added to cub 1.13.1 in:
+// cub support for CUB_WRAPPED_NAMESPACE is added to cub 1.13.1 in:
 // https://github.com/NVIDIA/cub/pull/326
 // CUB_WRAPPED_NAMESPACE is defined globally in cmake/Dependencies.cmake
 // starting from CUDA 11.5
@@ -34,4 +34,12 @@
 #define CUB_SUPPORTS_FUTURE_VALUE() true
 #else
 #define CUB_SUPPORTS_FUTURE_VALUE() false
+#endif
+
+// cub support for UniqueByKey is added to cub 1.16 in:
+// https://github.com/NVIDIA/cub/pull/405
+#if CUB_VERSION >= 101600
+#define CUB_SUPPORTS_UNIQUE_BY_KEY() true
+#else
+#define CUB_SUPPORTS_UNIQUE_BY_KEY() false
 #endif
