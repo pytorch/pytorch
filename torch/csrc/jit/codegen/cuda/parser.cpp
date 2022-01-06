@@ -724,9 +724,9 @@ class IrParser {
                       node->kind() == aten::rsub ? rhs : lhs,
                       node->kind() == aten::rsub ? lhs : rhs,
                       TypePromotion::default_op_config)
-                : (node->kind() == aten::rsub ?
-                      op_mapping[node->kind()].second(rhs, lhs, alpha) :
-                      op_mapping[node->kind()].second(lhs, rhs, alpha));
+                : (node->kind() == aten::rsub
+                       ? op_mapping[node->kind()].second(rhs, lhs, alpha)
+                       : op_mapping[node->kind()].second(lhs, rhs, alpha));
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },

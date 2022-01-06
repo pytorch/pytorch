@@ -1,9 +1,9 @@
 #pragma once
 
 #include <c10/core/ScalarType.h>
+#include <c10/macros/Export.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
-#include <c10/macros/Export.h>
 
 #include <torch/csrc/jit/codegen/cuda/type.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>

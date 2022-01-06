@@ -27,8 +27,7 @@ Val* IndexLowering::lowerSrcIndex(Val* src, Val* dst) const {
 
 Val* IndexLowering::lowerDstIndex(Val* dst) const {
   if (auto tv = dynamic_cast<TensorView*>(dst)) {
-    return Index::getConsumerIndex(
-        tv->fuserTv(), for_loops_);
+    return Index::getConsumerIndex(tv->fuserTv(), for_loops_);
   } else {
     return dst;
   }

@@ -1,8 +1,8 @@
 #pragma once
 
 #include <ATen/core/ivalue.h>
-#include <c10/util/Exception.h>
 #include <c10/macros/Export.h>
+#include <c10/util/Exception.h>
 
 #include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_container.h>
@@ -273,7 +273,6 @@ class TORCH_CUDA_CU_API Fusion final : public IrContainer {
   bool isAliasCompatible(Val* left, Val* right);
 
  private:
-
   // Fusion inputs and outputs
   std::vector<Val*> inputs_;
   std::vector<Val*> outputs_;
