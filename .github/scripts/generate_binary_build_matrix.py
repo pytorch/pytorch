@@ -164,8 +164,11 @@ def generate_wheels_matrix() -> List[Dict[str, str]]:
 
 
 def generate_binary_build_matrix(os: str) -> List[Dict[str, str]]:
-    return [
-        *generate_conda_matrix(),
-        *generate_libtorch_matrix(),
-        *generate_wheels_matrix(),
-    ]
+    return {
+        "linux": [
+            *generate_conda_matrix(),
+            *generate_libtorch_matrix(abi_version=PRE_CXX11_ABI),
+            *generate_libtorch_matrix(abi_version=CXX11_ABI),
+            *generate_wheels_matrix(),
+        ]
+    }[os]
