@@ -3195,19 +3195,6 @@ def sample_inputs_gradient(op_info, device, dtype, requires_grad):
 
     return tuple(sample_inputs)
 
-def sample_inputs_index_select(op_info, device, dtype, requires_grad):
-    return (
-        SampleInput(
-            make_tensor((S, S, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
-            args=(0, index_variable(2, S, device=device))),
-        SampleInput(
-            make_tensor((), device, dtype, low=None, high=None, requires_grad=requires_grad),
-            args=(0, torch.tensor([0], dtype=torch.int64, device=device))),
-        SampleInput(
-            make_tensor((), device, dtype, low=None, high=None, requires_grad=requires_grad),
-            args=(0, torch.tensor(0, dtype=torch.int64, device=device))),
-    )
-
 def sample_inputs_getitem(op_info, device, dtype, requires_grad, **kwargs):
     test_args = [
         ([1, 2],),
@@ -3253,42 +3240,6 @@ def sample_inputs_index_put(op_info, device, dtype, requires_grad, **kwargs):
             kwargs=dict(accumulate=accumulate)))
 
     return inputs
-
-# Missing to test the nondeterminism of the operation
-# https://github.com/pytorch/pytorch/issues/53352
-def sample_inputs_index_add(op_info, device, dtype, requires_grad, **kwargs):
-    # These testa are pretty much the same as those from index_copy.
-    # Perhaps merge?
-    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
-
-    t = make_arg((S, S))
-    s = make_arg((S, S))
-    idx = make_arg((S,), dtype=torch.int64, low=0, high=S, requires_grad=False)
-
-    samples = [SampleInput(t.detach().clone().requires_grad_(requires_grad),
-                           args=(1,
-                                 idx.detach().clone(),
-                                 s.detach().clone().requires_grad_(requires_grad)))]
-
-    for alpha in (-1, 0, 2):
-        samples.append(SampleInput(t.detach().clone().requires_grad_(requires_grad),
-                                   args=(1,
-                                         idx.detach().clone(),
-                                         s.detach().clone().requires_grad_(requires_grad)),
-                                   kwargs=dict(alpha=alpha)))
-
-    # Add scalar cases
-    scalar_sizes = [(), (1,)]
-    ts = (make_arg(size) for size in scalar_sizes)
-    idxs = (make_arg(size, dtype=torch.int64, low=0, high=1, requires_grad=False) for size in scalar_sizes)
-    ss = (make_arg(size) for size in scalar_sizes)
-
-    samples.extend(SampleInput(t.detach().clone().requires_grad_(requires_grad),
-                               args=(0, idx.detach().clone(), s.detach().clone())) for t, idx, s in product(ts, idxs, ss))
-    samples.extend(SampleInput(t.detach().clone().requires_grad_(requires_grad),
-                               args=(0, idx.detach().clone(), s.detach().clone()),
-                               kwargs=dict(alpha=a)) for t, idx, s, a in product(ts, idxs, ss, [-1, 0, 2]))
-    return samples
 
 def sample_inputs_sort(op_info, device, dtype, requires_grad, **kwargs):
     def small_3d_unique():
@@ -3384,37 +3335,6 @@ def sample_inputs_unique_consecutive(*args, **kwargs):
         if not sample_input.kwargs["sorted"]:
             sample_input.kwargs.pop("sorted")
             yield sample_input
-
-def sample_inputs_index_fill(op_info, device, dtype, requires_grad, **kwargs):
-    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-    index_tensor = partial(torch.tensor, device=device, dtype=torch.long)
-
-    samples = []
-    fill_val = torch.tensor(-1 + 1j if dtype.is_complex else -1)
-    idx = index_variable(1, S, device=device)
-    ndim = 3
-    for d in range(ndim):
-        samples.append(SampleInput(make_arg((S,) * ndim), args=(d, idx, fill_val)))
-        samples.append(SampleInput(make_arg((S,) * ndim), args=(d, -idx - 1, fill_val)))
-
-
-    def unique_idx(numel, max_idx):
-        # Generate unique random indices vector of `numel`
-        # elements in range [0, max_idx).
-        indices = random.sample(range(max_idx), numel)
-        return index_tensor(indices)
-
-    samples.append(SampleInput(make_arg((S, S)), args=(0, unique_idx(2, S), 2)))
-    samples.append(SampleInput(make_arg((S, S)), args=(0, unique_idx(2, S), make_arg(()))))
-    samples.append(SampleInput(make_arg((S, S)), args=(0, index_tensor(0), 2)))
-    samples.append(SampleInput(make_arg(()), args=(0, index_tensor([0]), 2)))
-    samples.append(SampleInput(make_arg(()), args=(0, index_tensor(0), 2)))
-
-    # Duplicate indices
-    samples.append(SampleInput(make_arg((S, S)), args=(0, index_tensor([0, 0]), 2)))
-    samples.append(SampleInput(make_arg((S, S)), args=(0, index_tensor([0, 0, 2]), make_arg(()))))
-
-    return samples
 
 def sample_inputs_max_min_binary(op_info, device, dtype, requires_grad, **kwargs):
     inputs = []
@@ -4348,27 +4268,53 @@ def sample_inputs_dist(op_info, device, dtype, requires_grad):
 
 # Missing to test the nondeterminism of the operation
 # https://github.com/pytorch/pytorch/issues/53352
-def sample_inputs_index_copy(op_info, device, dtype, requires_grad, **kwargs):
-    def make_arg(shape, low=None, high=None, dtype=dtype, requires_grad=requires_grad):
-        return make_tensor(shape, device=device, dtype=dtype,
-                           low=low, high=high, requires_grad=requires_grad)
+def sample_inputs_index(op_info, device, dtype, requires_grad, **kwargs):
+    # target.index_select(dim, idx)
+    select = op_info.name == "index_select"
+    # target.index_add(dim, idx, source, *, alpha=1)
+    add = op_info.name == "index_add"
+    # target.index_copy(dim, idx, source)
+    copy = op_info.name == "index_copy"
+    # target.index_fill(dim, idx, value)
+    fill = op_info.name == "index_fill"
 
-    t = make_arg((S, S))
-    s = make_arg((S, S))
-    # idx is a permutation of 0...S-1 for this function to be deterministic
-    idx = torch.randperm(S, device=device, dtype=torch.int64)
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_permutation = partial(torch.randperm, device=device, dtype=torch.int64)
 
-    samples = [SampleInput(t, args=(1, idx, s))]
+    def make_idx(n):
+        return make_tensor((n,), device=device, dtype=torch.int64, low=0, high=n)
 
-    # Add scalar cases
-    scalar_sizes = [(), (1,)]
-    ts = (make_arg(size) for size in scalar_sizes)
-    idxs = (make_arg(size, dtype=torch.int64, low=0, high=1, requires_grad=False) for size in scalar_sizes)
-    ss = (make_arg(size) for size in scalar_sizes)
+    shapes = [(), (1,), (S, S)]
+    # extra parameter for add
+    alphas = (-1, 0, 2) if add else (None,)
 
-    samples.extend(SampleInput(t.detach().clone().requires_grad_(requires_grad),
-                               args=(0, idx, s)) for t, idx, s in product(ts, idxs, ss))
-    return samples
+    def generate_inputs():
+        for shape, alpha in product(shapes, alphas):
+            t = make_arg(shape)
+            args = []
+
+            # dim. We handle the scalar case
+            dim = 1 if t.ndim == 2 else 0
+            args.append(dim)
+
+            # idx They need to be different for copy and add to be deterministic
+            make_idx_fn = make_permutation if copy or add else make_idx
+            idx = make_idx_fn(t.shape[dim] if t.ndim != 0 else 1)
+            args.append(idx)
+
+            # source
+            if copy or add:
+                args.append(make_arg(shape))
+            elif fill:
+                # A weird number to catch errors
+                args.append(make_arg((1,)).item())
+
+            args = tuple(args)
+            kwargs = {} if alpha is None else {"alpha": alpha}
+
+            yield SampleInput(t, args=args, kwargs=kwargs)
+
+    return list(generate_inputs())
 
 def sample_inputs_mode(op_info, device, dtype, requires_grad):
     inputs = []
@@ -12999,7 +12945,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            # https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
-           sample_inputs_func=sample_inputs_index_fill),
+           sample_inputs_func=sample_inputs_index),
     OpInfo('index_copy',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_inplace_autograd=False,
@@ -13008,11 +12954,11 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            # https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
-           sample_inputs_func=sample_inputs_index_copy,
+           sample_inputs_func=sample_inputs_index,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     OpInfo('index_select',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
-           sample_inputs_func=sample_inputs_index_select,
+           sample_inputs_func=sample_inputs_index,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
@@ -13026,7 +12972,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            # https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
-           sample_inputs_func=sample_inputs_index_add,
+           sample_inputs_func=sample_inputs_index,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     OpInfo('__getitem__',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
