@@ -190,6 +190,10 @@ __global__ void compute_num_of_partial_segments(index_t *partials_per_segment, i
             partials_per_segment_offset[num_of_segments-1];
 }
 
+__global__ void write_num_of_segments_for_legacy_thrust_path(int64_t *num_of_segments_ptr, int64_t num_of_segments) {
+  *num_of_segments_ptr = num_of_segments;
+}
+
 } // anon namespace
 
 #if !CUB_SUPPORTS_UNIQUE_BY_KEY()
@@ -222,7 +226,11 @@ Tensor embedding_backward_cuda_kernel(
   AT_DISPATCH_INDEX_TYPES(orig_indices.scalar_type(), "embedding_backward_cuda_kernel", [&] () {
     auto segment_offsets = at::empty({numel}, orig_indices.options());
 #if !CUB_SUPPORTS_UNIQUE_BY_KEY()
+    auto num_of_segments_tensor = at::empty({}, grad.options().dtype(kLong));
+    int64_t *num_of_segments_ptr = num_of_segments_tensor.data_ptr<int64_t>();
     int64_t num_of_segments = embedding_backward_cuda_kernel_unique_by_key<index_t>(sorted_indices, segment_offsets);
+    write_num_of_segments_for_legacy_thrust_path<<<1, 1, 0, c10::cuda::getCurrentCUDAStream()>>>(num_of_segments_ptr, num_of_segments);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
 #else
     auto num_of_segments_tensor = at::empty({}, grad.options().dtype(kLong));
     cuda::cub::unique_by_key(
