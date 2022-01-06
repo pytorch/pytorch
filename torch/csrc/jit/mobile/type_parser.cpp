@@ -75,15 +75,15 @@ std::vector<TypePtr> TypeParser::parseList() {
   return typePtrs;
 }
 
-// The list of non-simple types supported by currrent parser.
-std::unordered_set<std::string> TypeParser::getNonSimpleType() {
+// The list of non-simple types supported by current parser.
+const std::unordered_set<std::string>& TypeParser::getNonSimpleType() {
   static std::unordered_set<std::string> nonSimpleTypes{
       "List", "Union", "Optional", "Future", "Dict", "Tuple"};
   return nonSimpleTypes;
 }
 
-// The list of custom types supported by currrent parser.
-std::unordered_set<std::string> TypeParser::getCustomType() {
+// The list of custom types supported by current parser.
+const std::unordered_set<std::string>& TypeParser::getCustomType() {
   static std::unordered_set<std::string> customeTypes{
       kTypeTorchbindCustomClass, kTypeNamedTuple};
   return customeTypes;

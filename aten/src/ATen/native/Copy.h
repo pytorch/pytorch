@@ -4,6 +4,7 @@
 
 namespace at {
 
+class Tensor;
 struct TensorIterator;
 class TensorBase;
 

@@ -1,7 +1,8 @@
 #pragma once
 
-#include <ATen/Dispatch.h>
 #include <ATen/CPUApplyUtils.h>
+#include <ATen/Dispatch.h>
+#include <ATen/ExpandBase.h>
 #include <ATen/core/DistributionsHelper.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
@@ -308,23 +309,25 @@ struct ExponentialKernel {
 // ================================================== Bernoulli =======================================================
 
 template<typename RNG>
-void bernoulli_kernel(const TensorBase &self, const TensorBase &p, RNG generator) {
+void bernoulli_kernel(const TensorBase &self, const TensorBase &p_, RNG generator) {
   AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::BFloat16, self.scalar_type(), "bernoulli_tensor_cpu_self_", [&] {
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(generator->mutex_);
     using self_t = scalar_t;
+    auto p_cpu = p_.to(kCPU);
+    auto p = expand_inplace(self, p_cpu);
     auto iter = TensorIteratorConfig()
         .add_output(self)
-        .add_input(p)
+        .add_input(*p)
         .check_all_same_dtype(false)
         .build();
-    if (p.scalar_type() == kDouble) {
+    if (p->scalar_type() == kDouble) {
       cpu_serial_kernel(iter, [&](const double p_val) -> self_t {
         at::bernoulli_distribution<double> bernoulli(p_val);
         return static_cast<self_t>(bernoulli(generator));
       });
     } else {
-      AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, p.scalar_type(), "bernoulli_tensor_cpu_p_", [&] {
+      AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, p->scalar_type(), "bernoulli_tensor_cpu_p_", [&] {
         using p_t = scalar_t;
         cpu_serial_kernel(iter, [&](const p_t p_val) -> self_t {
           at::bernoulli_distribution<float> bernoulli(p_val);
