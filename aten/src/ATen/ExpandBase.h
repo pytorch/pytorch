@@ -3,7 +3,7 @@
 // Broadcasting utilities for working with TensorBase
 namespace at {
 namespace internal {
-TensorBase expand_slow_path(const TensorBase &self, IntArrayRef size);
+TORCH_API TensorBase expand_slow_path(const TensorBase &self, IntArrayRef size);
 } // namespace internal
 
 inline c10::MaybeOwned<TensorBase> expand_size(const TensorBase &self, IntArrayRef size) {
