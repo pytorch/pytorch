@@ -304,15 +304,32 @@ void linalg_solve_sparse_csr_kernel(
       _apply_sparse_csr_lu_solve<scalar_t, double>(input, other, result, singularity);
     }
   });
-  if (singularity != -1) {
-    // raise error
-    TORCH_CHECK(false, "Something went wrong, got singularity as: ", singularity);
-  }
+
+  TORCH_CHECK(singularity == -1, "Expected singularity to be -1 but got: ", singularity,
+    ". There might be a bug in the implementation.");
 }
 
 Tensor& linalg_solve_sparse_csr_out(const Tensor& input, const Tensor& other, Tensor& result) {
   TORCH_INTERNAL_ASSERT(input.is_sparse_csr());
   TORCH_INTERNAL_ASSERT(result.is_contiguous());
+  // Size of "result" and "other" needs to be same
+  TORCH_INTERNAL_ASSERT(other.layout() == kStrided);
+
+  other.expect_contiguous();
+  result.expect_contiguous();
+
+  // the "other" Tensor needs to be a vector
+  TORCH_CHECK(
+    other.ndimension() == 1,
+    "other tensor must be a vector (1-dimensional), but got tensor with dimension: ",
+    other.ndimension());
+
+  at::native::resize_output(result, other.sizes());
+
+  TORCH_CHECK(
+    other.scalar_type() == result.scalar_type(),
+    "other (got: ", result.scalar_type(), ") and out (got: ", result.scalar_type(), ") tensors must have same dtype.");
+
   linalg_solve_sparse_csr_kernel(input, other, result);
   return result;
 }
