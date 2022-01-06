@@ -1170,8 +1170,6 @@ Tensor _sparse_sum(const SparseTensor& input, c10::optional<ScalarType> dtype) {
 }
 
 Tensor _sparse_sum(const SparseTensor& input, IntArrayRef dims_to_sum, c10::optional<ScalarType> dtype) {
-  TORCH_CHECK(input._nnz() > 0, "_sparse_sum: sparse tensor input._nnz() == 0, please call torch.sparse.sum(input) instead.")
-
   const int64_t input_dim = input.dim();
   auto dims_to_sum_b = dim_list_to_bitset(dims_to_sum, input_dim);
   auto dims_to_sum_v = dims_to_sum.vec();
@@ -1238,7 +1236,7 @@ Tensor _sparse_sum(const SparseTensor& input, IntArrayRef dims_to_sum, c10::opti
     if (sum_all_sparse_dim) new_sizes.emplace(new_sizes.begin(), 1);
 
     // use coalesce() to do sum reduction
-    SparseTensor new_sparse = at::_sparse_coo_tensor_with_dims_and_tensors(new_sparse_dim, new_dense_dim, new_sizes, new_indices, new_values, new_values.options().layout(kSparse));
+    SparseTensor new_sparse = at::_sparse_coo_tensor_with_dims_and_tensors(new_sparse_dim, new_dense_dim, new_sizes, new_indices, new_values, input.options().dtype(new_values.scalar_type()));
     new_sparse = new_sparse.coalesce();
     return new_sparse;
   }

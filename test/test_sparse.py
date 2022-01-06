@@ -1548,16 +1548,11 @@ class TestSparse(TestCase):
             {"dim": (0, 1), "dtype": dtype}
         ]
         for p in params:
-            self.assertEqual(torch.sparse.sum(x, **p).dtype, torch.sum(y, **p).dtype)
-
-        if dtype in get_all_int_dtypes():
-            self.assertEqual(torch.sparse.sum(x).dtype, torch.int64)
-            self.assertEqual(torch.sparse.sum(x, dim=0).dtype, torch.int64)
-            self.assertEqual(torch.sparse.sum(x, dim=(0, 1)).dtype, torch.int64)
-
-        self.assertEqual(torch.sparse.sum(x, dtype=dtype).dtype, dtype)
-        self.assertEqual(torch.sparse.sum(x, dim=0, dtype=dtype).dtype, dtype)
-        self.assertEqual(torch.sparse.sum(x, dim=(0, 1), dtype=dtype).dtype, dtype)
+            t = torch.sparse.sum(x, **p)
+            if t.is_sparse:
+                t = t.to_dense()
+            self.assertEqual(t, torch.sum(y, **p))
+            self.assertEqual(t.dtype, torch.sum(y, **p).dtype)
 
     def _test_basic_ops_shape(self, nnz_x1, nnz_x2, shape_i, shape_v, dtype, device, coalesced):
         shape = shape_i + (shape_v)
