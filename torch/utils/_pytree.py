@@ -40,7 +40,10 @@ def _register_pytree_node(typ: Any, flatten_fn: FlattenFunc, unflatten_fn: Unfla
     SUPPORTED_NODES[typ] = NodeDef(flatten_fn, unflatten_fn)
 
 def _dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
-    return list(d.values()), list(d.keys())
+    # Follow the flattening rules of Deepmind tree flattening.
+    keys = list(sorted(d.keys()))
+    values = [d[key] for key in keys]
+    return values, keys
 
 def _dict_unflatten(values: List[Any], context: Context) -> Dict[Any, Any]:
     return {key: value for key, value in zip(context, values)}
