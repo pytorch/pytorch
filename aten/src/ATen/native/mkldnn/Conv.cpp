@@ -31,7 +31,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_backward(
   TORCH_CHECK(false, "mkldnn_convolution_backward: ATen not compiled with MKLDNN support");
 }
 
-REGISTER_NO_CPU_DISPATCH(mkldnn_convolution_backward_stub, mkldnn_convolution_backward_fn);
+REGISTER_NO_CPU_DISPATCH(mkldnn_convolution_backward_stub);
 
 Tensor mkldnn_convolution_transpose(
     const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
