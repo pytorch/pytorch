@@ -275,8 +275,9 @@ class ValueHolder {
     if (iter_val != vals_.end()) {
       return iter_val->second;
     }
-    // patching scalar value, because memory format doesn't carry real meaning.
-    if (!is_tensor_view_) {
+    // patching scalar (tensor), memory format doesn't carry meaning and should
+    // just return the value as-is.
+    if (!is_tensor_view_ || rank() == 0) {
       return std::get<1>(getEntry());
     }
     MemoryFormat format_s;
