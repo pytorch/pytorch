@@ -66,7 +66,6 @@ class AccTracerTest(unittest.TestCase):
 
         a = torch.randn(*input_shape)
         traced = acc_tracer.trace(m, [a])
-
         ph_a = acc_op_node = None
         for node in traced.graph.nodes:
             if node.op == "placeholder":
@@ -1371,6 +1370,9 @@ class AccTracerTest(unittest.TestCase):
     def test_relu(self):
         self._make_acc_op_function_test(acc_ops.relu, torch.relu)
 
+    def test_leaky_relu(self):
+        self._make_acc_op_function_test(acc_ops.leaky_relu, torch.nn.functional.leaky_relu)
+
     def test_sigmoid(self):
         self._make_acc_op_function_test(acc_ops.sigmoid, torch.sigmoid)
 
@@ -1897,6 +1899,7 @@ class AccTracerTest(unittest.TestCase):
                 acc_ops.div,
                 acc_ops.pow,
                 acc_ops.relu,
+                acc_ops.leaky_relu,
                 acc_ops.tuple_construct,
                 acc_ops.unsqueeze,
                 acc_ops.sigmoid,
