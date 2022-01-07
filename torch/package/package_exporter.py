@@ -3,6 +3,7 @@ import importlib.machinery
 import io
 import linecache
 import pickletools
+import pickle
 import types
 from collections import OrderedDict, defaultdict
 from dataclasses import dataclass
@@ -582,7 +583,7 @@ class PackageExporter:
 
         try:
             pickler.dump(obj)
-        except (TypeError, PicklingError) as e:
+        except (TypeError, pickle.PicklingError) as e:
             debug_dumps(self.importer, obj)
 
         data_value = data_buf.getvalue()
