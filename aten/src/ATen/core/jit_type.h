@@ -30,8 +30,11 @@ inline bool is_contiguous_strides(
     const IntArrayRef sizes,
     const IntArrayRef strides) {
   int n_dim = static_cast<int>(sizes.size());
+  if (n_dim == 0) {
+    return true;
+  }
 
-  if (n_dim == 0 || strides[n_dim - 1] != 1) {
+  if (strides[n_dim - 1] != 1) {
     return false;
   }
 
