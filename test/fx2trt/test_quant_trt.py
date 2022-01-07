@@ -12,6 +12,7 @@ from torch.ao.quantization import (
 )
 from torch.ao.quantization.quantize_fx import (
     prepare_fx,
+    prepare_qat_fx,
     get_tensorrt_backend_config_dict,
 )
 from torch.ao.quantization._quantize_fx_do_not_use import (
@@ -26,6 +27,7 @@ from torch.testing._internal.common_quantization import (
 from torch.ao.quantization.fx.backend_config.observation_type import ObservationType
 
 import torch.nn.functional as F
+import torch.nn as nn
 import torch.nn.quantized._reference as nnqr
 
 from torch.testing._internal.common_cuda import TEST_CUDA
@@ -367,7 +369,8 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
             inputs,
             shape_ranges,
             no_prepare=None,
-            no_convert=None):
+            no_convert=None,
+            is_qat=False):
         """
         Args:
           m: the float module we want to test
@@ -382,8 +385,13 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
           no_prepare: node occurrence after prepare
           no_convert: node occurrence after convert
         """
-        m = m.eval()
-        prepared = prepare_fx(m, {"": self.qconfig}, backend_config_dict=self.trt_backend_config_dict)
+        if is_qat:
+            m = m.train()
+            prepare = prepare_qat_fx
+        else:
+            m = m.eval()
+            prepare = prepare_fx
+        prepared = prepare(m, {"": self.qconfig}, backend_config_dict=self.trt_backend_config_dict)
         self.checkGraphModuleNodes(prepared, expected_node_occurrence=no_prepare)
         # calibration
         prepared(*inputs)
@@ -421,7 +429,7 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
                 return self.relu(self.conv(x))
 
         # just testing conv2d since conv1d and conv3d are not supported in fx2trt
-        for dim, has_relu, f_relu in itertools.product([2], [True, False], [True, False]):
+        for dim, has_relu, f_relu, is_qat in itertools.product([2], [True, False], [True, False], [True, False]):
             # when has_relu=False, we have torch.nn.Identity, which would introduce
             # extra quant-dequat pair
             no_convert = {
@@ -434,7 +442,8 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
                 [((1, *conv_input[dim].shape[1:]),
                   (5, *conv_input[dim].shape[1:]),
                   (10, *conv_input[dim].shape[1:]))],
-                no_convert=no_convert)
+                no_convert=no_convert,
+                is_qat=is_qat)
 
     def test_linear_relu_module(self):
         class LinearModule(torch.nn.Module):
@@ -459,7 +468,7 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
              (5, 5),
              (10, 5))
         ]
-        for has_relu, f_relu in itertools.product([True, False], [True, False]):
+        for has_relu, f_relu, is_qat in itertools.product([True, False], [True, False], [True, False]):
             # when has_relu=False, we have torch.nn.Identity, which would introduce
             # extra quant-dequat pair
             no_convert = {
@@ -470,7 +479,8 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
                 LinearModule(has_relu, f_relu),
                 [linear_input],
                 shape_ranges,
-                no_convert=no_convert)
+                no_convert=no_convert,
+                is_qat=is_qat)
 
     def test_ops(self):
         class M(torch.nn.Module):
@@ -626,6 +636,109 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
             ns.call_method("dequantize"): 3,
         }
         self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+
+    def test_conv_add_standalone_module(self):
+        class Standalone(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x, y):
+                return self.relu(self.conv(x) + y)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+                self.standalone = Standalone()
+
+            def forward(self, x, y):
+                y = self.conv(x)
+                return self.standalone(x, y)
+
+        from torch.ao.quantization.fx.backend_config_dict.observation_type import ObservationType
+        weighted_op_quint8_dtype_config = {
+            # optional, input activation dtype
+            # TODO: change back to torch.qint8 after input_quantized_idxs and output_quantized_idxs
+            # are more flexible
+            "input_dtype": torch.quint8,
+            # optional, weight dtype
+            "weight_dtype": torch.qint8,
+            # optional, bias dtype
+            "bias_dtype": torch.float,
+            # optional, output activation dtype
+            "output_dtype": torch.quint8
+        }
+
+        conv_add_config = {
+            "pattern": (torch.nn.ReLU, (operator.add, torch.nn.Conv2d, MatchAllNode)),
+            "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
+            "dtype_configs": [
+                weighted_op_quint8_dtype_config,
+            ],
+            "root_module": torch.nn.Conv2d,
+            # "reference_quantized_module_for_root": torch.nn.quantized._reference.Conv2d,
+        }
+
+        conv_config = {
+            "pattern": torch.nn.Conv2d,
+            "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
+            "dtype_configs": [
+                weighted_op_quint8_dtype_config,
+            ],
+            "root_module": torch.nn.Conv2d,
+            # "reference_quantized_module_for_root": torch.nn.quantized._reference.Conv2d,
+        }
+
+        m = M().eval()
+        backend_config_dict = {
+            "configs": [
+                conv_add_config,
+                conv_config,
+            ]
+        }
+        prepare_custom_config_dict = {
+            "standalone_module_name": [("standalone", None, {"input_quantized_idxs": [0, 1]}, None)]
+        }
+        # TODO: use self.qconfig after input_quantized_idxs and output_quantized_idxs
+        # are more flexible
+        qconfig = torch.ao.quantization.QConfig(
+            activation=torch.ao.quantization.observer.HistogramObserver.with_args(
+                qscheme=torch.per_tensor_symmetric, dtype=torch.quint8
+            ),
+            weight=torch.ao.quantization.default_weight_observer
+        )
+        m = prepare_fx(
+            m,
+            {"": qconfig},
+            prepare_custom_config_dict=prepare_custom_config_dict,
+            backend_config_dict=backend_config_dict)
+        node_occurrence = {
+            # for input and output of conv, where input is used twice, once in conv and
+            # once in standalone module
+            ns.call_module(torch.ao.quantization.HistogramObserver): 2,
+        }
+        self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+        standalone_node_occurrence = {
+            # output of the standalone module
+            ns.call_module(torch.ao.quantization.HistogramObserver): 1,
+        }
+        self.checkGraphModuleNodes(m.standalone, expected_node_occurrence=standalone_node_occurrence)
+        m = _convert_fx_do_not_use(m, is_reference=True, backend_config_dict=backend_config_dict)
+        node_occurrence = {
+            ns.call_function(torch.quantize_per_tensor): 3,
+            ns.call_module(nn.Conv2d): 1,
+            ns.call_method("dequantize"): 1,
+        }
+        self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+        standalone_node_occurrence = {
+            ns.call_function(torch.quantize_per_tensor): 1,
+            ns.call_module(nn.Conv2d): 1,
+            ns.call_module(torch.nn.ReLU): 1,
+            ns.call_method("dequantize"): 3,
+        }
+        self.checkGraphModuleNodes(m.standalone, expected_node_occurrence=standalone_node_occurrence)
 
 if __name__ == "__main__":
     run_tests()
