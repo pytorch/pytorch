@@ -90,7 +90,7 @@ def unpack_dual(tensor, *, level=None):
         level = _current_level
 
     if level < 0:
-        return tensor, None
+        return UnpackedDualTensor(tensor, None)
 
     primal, dual = torch._VF._unpack_dual(tensor, level=level)
 

@@ -2,7 +2,7 @@
 
 #include <ATen/core/ivalue.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 #include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
@@ -77,6 +77,8 @@ class TORCH_CUDA_CU_API FusionGuard {
 //!
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class TORCH_CUDA_CU_API Fusion final {
+  typedef std::unordered_map<int, std::vector<int64_t>> PermutationMap;
+
  public:
   Fusion() = default;
 
@@ -226,29 +228,30 @@ class TORCH_CUDA_CU_API Fusion final {
   // TODO: alias should be made aware to segmentation, so we'll always include
   // the input tensor to the section where output is produced.
   void aliasOutputToInput(Val* output, Val* input);
+  Val* getOutputAlias(Val* output);
   std::unordered_set<int> getOutputAliasIndices() const;
   std::vector<std::pair<int, int>> getInputAliasIndices() const;
 
-  // mark input at index to be in channels last format
-  void setChannelsLastOnInput(int index) {
-    c_last_input_indices_.insert(index);
+  // mark input at index to be permuted by permutation
+  void setPermutationOnInput(int index, std::vector<int64_t> permutation) {
+    permuted_input_map_.insert({index, permutation});
   }
 
-  // mark output at index to be in channels last format
-  void setChannelsLastOutputIndices(int index) {
-    c_last_output_indices_.insert(index);
+  // mark output at index to be restored by permutation
+  void setPermutationOnOutput(int index, std::vector<int64_t> permutation) {
+    permuted_output_map_.insert({index, permutation});
   }
 
-  // return a set of indices that marks all input tensors in channels last
-  // format
-  const std::unordered_set<int>& getChannelsLastInputIndices() const {
-    return c_last_input_indices_;
+  // return a map of indices to permutation, which indicates all input tensors
+  // that needs to be permuted
+  const PermutationMap& getPermutationInputMap() const {
+    return permuted_input_map_;
   }
 
-  // return a set of indices that marks all output tensors in channels last
-  // format
-  const std::unordered_set<int>& getChannelsLastOutputIndices() const {
-    return c_last_output_indices_;
+  // return a map of indices to permutation, which indicates all output tensors
+  // that needs to be permuted
+  const PermutationMap& getPermutationOutputMap() const {
+    return permuted_output_map_;
   }
 
   bool isTVUseInfoValid() {
@@ -296,11 +299,11 @@ class TORCH_CUDA_CU_API Fusion final {
   // io alias pointing from output to input
   std::unordered_map<Val*, Val*> io_alias_;
 
-  // See Note [ Channels Last support in nvfuser ]
-  // indices of input tensor view that is permuted to channels last
-  std::unordered_set<int> c_last_input_indices_;
-  // indices of output tensor view that is permuted to channels last
-  std::unordered_set<int> c_last_output_indices_;
+  // See Note [ Permutation support in nvfuser ]
+  // map from indices of input tensor to permutation
+  PermutationMap permuted_input_map_;
+  // map from indices of output tensor to permutation
+  PermutationMap permuted_output_map_;
 
   // Records if the current use data in the IR nodes are valid
   //  the states are either all valid or all invalid
