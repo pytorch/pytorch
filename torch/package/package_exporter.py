@@ -514,7 +514,7 @@ class PackageExporter:
                                 f"or {module_obj.__name__}.__file__ has a value.")
         if not hasattr(module_obj, "__path__"):
             return False
-        elif isinstance(module_obj.__path__, list):  # type: ignore [attr-defined]
+        elif isinstance(module_obj.__path__, list):  # type: ignore[attr-defined]
             # check for regular packages have a list in their __path__ attribute
             return True
         try:
