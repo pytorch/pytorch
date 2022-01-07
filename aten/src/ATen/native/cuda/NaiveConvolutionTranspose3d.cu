@@ -7,6 +7,7 @@
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/CUDAContext.h>
 
+#include <ATen/native/ConvUtils.h>
 #include <ATen/native/cuda/vol2col.cuh>
 
 namespace at {
@@ -1001,6 +1002,8 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv_transpose3d_backward_cuda(
 
   return std::tuple<Tensor, Tensor, Tensor>(grad_input, grad_weight, grad_bias);
 }
+
+REGISTER_CUDA_DISPATCH(slow_conv_transpose3d_backward_stub, &slow_conv_transpose3d_backward_cuda);
 
 } // namespace native
 } // namespace at

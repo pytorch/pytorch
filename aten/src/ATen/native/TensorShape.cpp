@@ -1455,11 +1455,29 @@ Tensor _stack_cpu(TensorList tensors, int64_t dim) {
   return at::native::_stack_out_cpu(tensors, dim, result);
 }
 
+void check_stack_inputs(TensorList tensors, int64_t dim) {
+  at::IntArrayRef entry_shape = tensors[0].sizes();
+  for (const auto i : c10::irange(1, tensors.size())) {
+    TORCH_CHECK(tensors[i].sizes() == entry_shape,
+      "stack expects each tensor to be equal size, but got ", entry_shape,
+      " at entry 0 and ", tensors[i].sizes(), " at entry ", i);
+  }
+}
+
 // TODO(msubkhankulov): refactor to use _stack
 Tensor stack(TensorList tensors, int64_t dim) {
   TORCH_CHECK(tensors.size() > 0,
            "stack expects a non-empty TensorList");
-  return at::cat(get_stack_inputs(tensors, dim), dim);
+  auto wrapped_dim = maybe_wrap_dim(dim, tensors[0].ndimension()+1);
+  if (wrapped_dim < tensors[0].ndimension() && !tensors[0].is_sparse()) {
+    check_stack_inputs(tensors, wrapped_dim);
+    auto result_sizes = tensors[0].sizes().vec();
+    result_sizes.insert(result_sizes.begin() + wrapped_dim, tensors.size());
+    auto out = at::cat(tensors, wrapped_dim);
+    return out.view(result_sizes); // one can always split a dimension with view
+  } else { //dim = tensors[0].ndimension() cannot be efficiently handled by view
+    return at::cat(get_stack_inputs(tensors, dim), dim);
+  }
 }
 
 // CPU specific implementation
@@ -1480,7 +1498,24 @@ Tensor& _stack_out(TensorList tensors, int64_t dim, Tensor& result) {
 Tensor& stack_out(TensorList tensors, int64_t dim, Tensor& result) {
   TORCH_CHECK(tensors.size() > 0,
            "stack expects a non-empty TensorList");
+  auto wrapped_dim = maybe_wrap_dim(dim, tensors[0].ndimension()+1);
+  if (wrapped_dim < tensors[0].ndimension() && !tensors[0].is_sparse()) {
+    check_stack_inputs(tensors, wrapped_dim);
+    auto result_sizes = tensors[0].sizes().vec();
+    result_sizes.insert(result_sizes.begin() + wrapped_dim, tensors.size());
+    at::native::resize_output(result, result_sizes);
+    auto cat_sizes = tensors[0].sizes().vec();
+    cat_sizes[wrapped_dim] *= tensors.size();
+    auto strides = at::detail::computeStride(result.sizes(), result.strides(), cat_sizes);
+    if (strides.has_value()) {
+      //can take fast cat path
+      auto result_view = result.view(cat_sizes);
+      at::cat_out(result_view, tensors, wrapped_dim);
+      return result;
+    }
+  }
   return at::cat_out(result, get_stack_inputs(tensors, dim), dim);
+
 }
 
 Tensor hstack(TensorList tensors) {
@@ -1562,6 +1597,36 @@ static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t di
   return self;
 }
 
+static inline Tensor sparse_csr_transpose(const Tensor & self) {
+  TORCH_INTERNAL_ASSERT(self.is_sparse_csr());
+
+  auto sizes = self.sizes();
+  auto crow_indices = self.crow_indices();
+  auto col_indices = self.col_indices();
+  auto values = self.values();
+
+  // convert CSR indices to COO indices and swap its rows
+  const bool out_int32 = crow_indices.scalar_type() == ScalarType::Int;
+  Tensor indices_transposed = _convert_indices_from_csr_to_coo(crow_indices, col_indices, out_int32, true);
+
+  // sort transposed indices
+  auto indices_scalar = at::sparse::flatten_indices(indices_transposed, {sizes[1], sizes[0]});
+  auto indicesPermutation = std::get<1>(indices_scalar.sort(0));
+  auto indices_transposed_sorted = indices_transposed.index_select(1, indicesPermutation);
+
+  // construct a CSR tensor that is transpose of self
+  auto new_row_indices = indices_transposed_sorted.select(0, 0);
+  auto new_col_indices = indices_transposed_sorted.select(0, 1);
+  auto new_values = values.index_select(0, indicesPermutation);
+  Tensor new_crow_indices = _convert_indices_from_coo_to_csr(new_row_indices, sizes[1], out_int32);
+
+  return at::native::_sparse_csr_tensor_unsafe(new_crow_indices, new_col_indices, new_values,
+                                               {sizes[1], sizes[0]},
+                                               new_values.scalar_type(),
+                                               self.layout(),
+                                               new_values.device());
+}
+
 // torch.row_stack, alias for torch.vstack
 Tensor& row_stack_out(TensorList tensors, Tensor& result) {
   return at::vstack_out(result, tensors);
@@ -1630,6 +1695,12 @@ Tensor & transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
     return self;
   }
 
+  // Sparse COO is an exceptional sparse format as it allows transpose
+  // to be a view operation which is a convinient property for
+  // in-place operations. For other sparse formats, the in-place
+  // transpose would not be possible without shuffling the specified
+  // values. So we don't support this as it would defeat the purpose
+  // of in-place opeations of being memory-efficient.
   if (self.is_sparse()) {
     return sparse_transpose_(self, dim0, dim1);
   }
@@ -1650,13 +1721,28 @@ Tensor transpose(const Tensor & self, int64_t dim0, int64_t dim1) {
   auto ndims = self.dim();
   dim0 = maybe_wrap_dim(dim0, ndims);
   dim1 = maybe_wrap_dim(dim1, ndims);
-  if (dim0 == dim1) {
-    return self;
+
+  // Transpose of a sparse tensor is a copy operation because the
+  // compression scheme of specified values into a contiguous tensor
+  // is different for the transposed sparse tensor, in general.
+  if (self.is_sparse_csr() || self.is_sparse()) {
+    if (dim0 == dim1) {
+      return self.clone();
+    }
+    if (self.is_sparse_csr()) {
+      // Sparse CSR transpose is a copy operation as the values of
+      // transposed CSR tensor are permuted values of the input CSR
+      // tensor.
+      return sparse_csr_transpose(self);
+    } else {  // sparse COO
+      Tensor self_clone = self.clone();
+      return sparse_transpose_(self_clone, dim0, dim1);
+    }
   }
 
-  if (self.is_sparse()) {
-    Tensor self_clone = self.clone();  // yes, this is what THS does
-    return sparse_transpose_(self_clone, dim0, dim1);
+  // Transpose of a strided tensor is a view operation.
+  if (dim0 == dim1) {
+    return self;
   }
 
   if (self.is_mkldnn()) {
@@ -2122,7 +2208,7 @@ std::vector<Tensor> meshgrid(TensorList tensors,
   // swap the outputs if we swapped the inputs.
   //
   // * Why do we even support this function for exactly one input?
-  bool swap_first_and_second_tensors;
+  bool swap_first_and_second_tensors = false;
 
   if (indexing == "xy") {
     // We can only swap if there are multiple tensors.
@@ -2136,7 +2222,6 @@ std::vector<Tensor> meshgrid(TensorList tensors,
     TORCH_CHECK(indexing == "ij",
                 "torch.meshgrid: indexing must be one of \"xy\" or \"ij\", "
                 "but received: ", indexing);
-    swap_first_and_second_tensors = false;
   }
 
   std::vector<int64_t> shape(size);
