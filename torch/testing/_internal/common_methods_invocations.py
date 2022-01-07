@@ -10891,6 +10891,7 @@ op_db: List[OpInfo] = [
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":103, please report a bug to PyTorch.
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
            ),
+           supports_expanded_weight=True,
            supports_out=False,),
     OpInfo('nn.functional.conv2d',
            aliases=('conv2d',),
