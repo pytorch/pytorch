@@ -1,10 +1,5 @@
 #pragma once
 
-#include <algorithm>
-#include <atomic>
-#include <memory>
-#include <numeric>
-
 #include <c10/core/Backend.h>
 #include <c10/core/CopyBytes.h>
 #include <c10/core/DispatchKeySet.h>
@@ -21,6 +16,11 @@
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 #include <c10/util/python_stub.h>
+
+#include <algorithm>
+#include <atomic>
+#include <memory>
+#include <numeric>
 
 // A global boolean variable to control whether we free memory when a Tensor
 // is shrunk to a smaller size. As a result, a Tensor is always going to
@@ -60,7 +60,7 @@ namespace c10 {
 /**
  * A utility function to convert vector<int> to vector<int64_t>.
  */
-inline std::vector<int64_t> ToVectorint64_t(ArrayRef<int> src) {
+inline std::vector<int64_t> ToVectorint64_t(const ArrayRef<int>& src) {
   return std::vector<int64_t>(src.begin(), src.end());
 }
 
