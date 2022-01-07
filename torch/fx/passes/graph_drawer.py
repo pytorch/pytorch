@@ -74,6 +74,12 @@ if HAS_PYDOT:
 
                 self._dot_graphs[f"{name}_{node.target}"] = self._to_dot(leaf_node, f"{name}_{node.target}", ignore_getattr)
 
+        def get_dot_graph(self, submod_name=None) -> pydot.Dot:
+            if submod_name is None:
+                return self.get_main_dot_graph()
+            else:
+                return self.get_submod_dot_graph(submod_name)
+
         def get_main_dot_graph(self) -> pydot.Dot:
             return self._dot_graphs[self._name]
 
