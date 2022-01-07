@@ -203,10 +203,6 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: !{{ config["build_name"] }}-test
-    # For setup-miniconda
-    defaults:
-      run:
-        shell: bash -l {0}
     !{{ binary_env(config) }}
     steps:
       !{{ common.setup_ec2_linux() }}
@@ -228,14 +224,6 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - name: Setup miniconda
-        uses: conda-incubator/setup-miniconda@v2
-        with:
-          miniconda-version: "latest"
-      - name: Install dependencies
-        run: |
-          conda install -yq anaconda-client
-          pip install -q awscli
       - name: Upload binaries
         env:
           PKG_DIR: "${{ runner.temp }}/artifacts"
@@ -245,6 +233,16 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_SECRET_KEY }}
           ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
         run: |
-          .circleci/scripts/binary_upload.sh
+          docker run --rm -it \
+            -e PKG_DIR=/artifacts \
+            -e UPLOAD_SUBFOLDER \
+            -e AWS_ACCESS_KEY_ID \
+            -e AWS_SECRET_ACCESS_KEY \
+            -e ANACONDA_API_TOKEN \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -v "${GITHUB_WORKSPACE}:/v" \
+            -w /v \
+            308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
+            bash -c '.circleci/scripts/binary_upload.sh'
       !{{ common.teardown_ec2_linux() }}
 {%- endfor %}

@@ -310,10 +310,6 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-shared-with-deps-pre-cxx11-test
-    # For setup-miniconda
-    defaults:
-      run:
-        shell: bash -l {0}
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -383,14 +379,6 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - name: Setup miniconda
-        uses: conda-incubator/setup-miniconda@v2
-        with:
-          miniconda-version: "latest"
-      - name: Install dependencies
-        run: |
-          conda install -yq anaconda-client
-          pip install -q awscli
       - name: Upload binaries
         env:
           PKG_DIR: "${{ runner.temp }}/artifacts"
@@ -400,7 +388,17 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_SECRET_KEY }}
           ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
         run: |
-          .circleci/scripts/binary_upload.sh
+          docker run --rm -it \
+            -e PKG_DIR=/artifacts \
+            -e UPLOAD_SUBFOLDER \
+            -e AWS_ACCESS_KEY_ID \
+            -e AWS_SECRET_ACCESS_KEY \
+            -e ANACONDA_API_TOKEN \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -v "${GITHUB_WORKSPACE}:/v" \
+            -w /v \
+            308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
+            bash -c '.circleci/scripts/binary_upload.sh'
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -682,10 +680,6 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-shared-without-deps-pre-cxx11-test
-    # For setup-miniconda
-    defaults:
-      run:
-        shell: bash -l {0}
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -755,14 +749,6 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - name: Setup miniconda
-        uses: conda-incubator/setup-miniconda@v2
-        with:
-          miniconda-version: "latest"
-      - name: Install dependencies
-        run: |
-          conda install -yq anaconda-client
-          pip install -q awscli
       - name: Upload binaries
         env:
           PKG_DIR: "${{ runner.temp }}/artifacts"
@@ -772,7 +758,17 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_SECRET_KEY }}
           ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
         run: |
-          .circleci/scripts/binary_upload.sh
+          docker run --rm -it \
+            -e PKG_DIR=/artifacts \
+            -e UPLOAD_SUBFOLDER \
+            -e AWS_ACCESS_KEY_ID \
+            -e AWS_SECRET_ACCESS_KEY \
+            -e ANACONDA_API_TOKEN \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -v "${GITHUB_WORKSPACE}:/v" \
+            -w /v \
+            308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
+            bash -c '.circleci/scripts/binary_upload.sh'
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -1054,10 +1050,6 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-static-with-deps-pre-cxx11-test
-    # For setup-miniconda
-    defaults:
-      run:
-        shell: bash -l {0}
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -1127,14 +1119,6 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - name: Setup miniconda
-        uses: conda-incubator/setup-miniconda@v2
-        with:
-          miniconda-version: "latest"
-      - name: Install dependencies
-        run: |
-          conda install -yq anaconda-client
-          pip install -q awscli
       - name: Upload binaries
         env:
           PKG_DIR: "${{ runner.temp }}/artifacts"
@@ -1144,7 +1128,17 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_SECRET_KEY }}
           ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
         run: |
-          .circleci/scripts/binary_upload.sh
+          docker run --rm -it \
+            -e PKG_DIR=/artifacts \
+            -e UPLOAD_SUBFOLDER \
+            -e AWS_ACCESS_KEY_ID \
+            -e AWS_SECRET_ACCESS_KEY \
+            -e ANACONDA_API_TOKEN \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -v "${GITHUB_WORKSPACE}:/v" \
+            -w /v \
+            308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
+            bash -c '.circleci/scripts/binary_upload.sh'
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -1426,10 +1420,6 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-static-without-deps-pre-cxx11-test
-    # For setup-miniconda
-    defaults:
-      run:
-        shell: bash -l {0}
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -1499,14 +1489,6 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - name: Setup miniconda
-        uses: conda-incubator/setup-miniconda@v2
-        with:
-          miniconda-version: "latest"
-      - name: Install dependencies
-        run: |
-          conda install -yq anaconda-client
-          pip install -q awscli
       - name: Upload binaries
         env:
           PKG_DIR: "${{ runner.temp }}/artifacts"
@@ -1516,7 +1498,17 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_SECRET_KEY }}
           ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
         run: |
-          .circleci/scripts/binary_upload.sh
+          docker run --rm -it \
+            -e PKG_DIR=/artifacts \
+            -e UPLOAD_SUBFOLDER \
+            -e AWS_ACCESS_KEY_ID \
+            -e AWS_SECRET_ACCESS_KEY \
+            -e ANACONDA_API_TOKEN \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -v "${GITHUB_WORKSPACE}:/v" \
+            -w /v \
+            308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
+            bash -c '.circleci/scripts/binary_upload.sh'
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -1805,10 +1797,6 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda10_2-shared-with-deps-pre-cxx11-test
-    # For setup-miniconda
-    defaults:
-      run:
-        shell: bash -l {0}
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -1879,14 +1867,6 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - name: Setup miniconda
-        uses: conda-incubator/setup-miniconda@v2
-        with:
-          miniconda-version: "latest"
-      - name: Install dependencies
-        run: |
-          conda install -yq anaconda-client
-          pip install -q awscli
       - name: Upload binaries
         env:
           PKG_DIR: "${{ runner.temp }}/artifacts"
@@ -1896,7 +1876,17 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_SECRET_KEY }}
           ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
         run: |
-          .circleci/scripts/binary_upload.sh
+          docker run --rm -it \
+            -e PKG_DIR=/artifacts \
+            -e UPLOAD_SUBFOLDER \
+            -e AWS_ACCESS_KEY_ID \
+            -e AWS_SECRET_ACCESS_KEY \
+            -e ANACONDA_API_TOKEN \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -v "${GITHUB_WORKSPACE}:/v" \
+            -w /v \
+            308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
+            bash -c '.circleci/scripts/binary_upload.sh'
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -2185,10 +2175,6 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda10_2-shared-without-deps-pre-cxx11-test
-    # For setup-miniconda
-    defaults:
-      run:
-        shell: bash -l {0}
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -2259,14 +2245,6 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - name: Setup miniconda
-        uses: conda-incubator/setup-miniconda@v2
-        with:
-          miniconda-version: "latest"
-      - name: Install dependencies
-        run: |
-          conda install -yq anaconda-client
-          pip install -q awscli
       - name: Upload binaries
         env:
           PKG_DIR: "${{ runner.temp }}/artifacts"
@@ -2276,7 +2254,17 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_SECRET_KEY }}
           ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
         run: |
-          .circleci/scripts/binary_upload.sh
+          docker run --rm -it \
+            -e PKG_DIR=/artifacts \
+            -e UPLOAD_SUBFOLDER \
+            -e AWS_ACCESS_KEY_ID \
+            -e AWS_SECRET_ACCESS_KEY \
+            -e ANACONDA_API_TOKEN \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -v "${GITHUB_WORKSPACE}:/v" \
+            -w /v \
+            308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
+            bash -c '.circleci/scripts/binary_upload.sh'
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -2565,10 +2553,6 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda10_2-static-with-deps-pre-cxx11-test
-    # For setup-miniconda
-    defaults:
-      run:
-        shell: bash -l {0}
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -2639,14 +2623,6 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - name: Setup miniconda
-        uses: conda-incubator/setup-miniconda@v2
-        with:
-          miniconda-version: "latest"
-      - name: Install dependencies
-        run: |
-          conda install -yq anaconda-client
-          pip install -q awscli
       - name: Upload binaries
         env:
           PKG_DIR: "${{ runner.temp }}/artifacts"
@@ -2656,7 +2632,17 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_SECRET_KEY }}
           ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
         run: |
-          .circleci/scripts/binary_upload.sh
+          docker run --rm -it \
+            -e PKG_DIR=/artifacts \
+            -e UPLOAD_SUBFOLDER \
+            -e AWS_ACCESS_KEY_ID \
+            -e AWS_SECRET_ACCESS_KEY \
+            -e ANACONDA_API_TOKEN \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -v "${GITHUB_WORKSPACE}:/v" \
+            -w /v \
+            308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
+            bash -c '.circleci/scripts/binary_upload.sh'
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -2945,10 +2931,6 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda10_2-static-without-deps-pre-cxx11-test
-    # For setup-miniconda
-    defaults:
-      run:
-        shell: bash -l {0}
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -3019,14 +3001,6 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - name: Setup miniconda
-        uses: conda-incubator/setup-miniconda@v2
-        with:
-          miniconda-version: "latest"
-      - name: Install dependencies
-        run: |
-          conda install -yq anaconda-client
-          pip install -q awscli
       - name: Upload binaries
         env:
           PKG_DIR: "${{ runner.temp }}/artifacts"
@@ -3036,7 +3010,17 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_SECRET_KEY }}
           ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
         run: |
-          .circleci/scripts/binary_upload.sh
+          docker run --rm -it \
+            -e PKG_DIR=/artifacts \
+            -e UPLOAD_SUBFOLDER \
+            -e AWS_ACCESS_KEY_ID \
+            -e AWS_SECRET_ACCESS_KEY \
+            -e ANACONDA_API_TOKEN \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -v "${GITHUB_WORKSPACE}:/v" \
+            -w /v \
+            308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
+            bash -c '.circleci/scripts/binary_upload.sh'
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -3328,10 +3312,6 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_1-shared-with-deps-pre-cxx11-test
-    # For setup-miniconda
-    defaults:
-      run:
-        shell: bash -l {0}
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -3402,14 +3382,6 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - name: Setup miniconda
-        uses: conda-incubator/setup-miniconda@v2
-        with:
-          miniconda-version: "latest"
-      - name: Install dependencies
-        run: |
-          conda install -yq anaconda-client
-          pip install -q awscli
       - name: Upload binaries
         env:
           PKG_DIR: "${{ runner.temp }}/artifacts"
@@ -3419,7 +3391,17 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_SECRET_KEY }}
           ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
         run: |
-          .circleci/scripts/binary_upload.sh
+          docker run --rm -it \
+            -e PKG_DIR=/artifacts \
+            -e UPLOAD_SUBFOLDER \
+            -e AWS_ACCESS_KEY_ID \
+            -e AWS_SECRET_ACCESS_KEY \
+            -e ANACONDA_API_TOKEN \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -v "${GITHUB_WORKSPACE}:/v" \
+            -w /v \
+            308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
+            bash -c '.circleci/scripts/binary_upload.sh'
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -3711,10 +3693,6 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_1-shared-without-deps-pre-cxx11-test
-    # For setup-miniconda
-    defaults:
-      run:
-        shell: bash -l {0}
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -3785,14 +3763,6 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - name: Setup miniconda
-        uses: conda-incubator/setup-miniconda@v2
-        with:
-          miniconda-version: "latest"
-      - name: Install dependencies
-        run: |
-          conda install -yq anaconda-client
-          pip install -q awscli
       - name: Upload binaries
         env:
           PKG_DIR: "${{ runner.temp }}/artifacts"
@@ -3802,7 +3772,17 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_SECRET_KEY }}
           ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
         run: |
-          .circleci/scripts/binary_upload.sh
+          docker run --rm -it \
+            -e PKG_DIR=/artifacts \
+            -e UPLOAD_SUBFOLDER \
+            -e AWS_ACCESS_KEY_ID \
+            -e AWS_SECRET_ACCESS_KEY \
+            -e ANACONDA_API_TOKEN \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -v "${GITHUB_WORKSPACE}:/v" \
+            -w /v \
+            308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
+            bash -c '.circleci/scripts/binary_upload.sh'
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -4094,10 +4074,6 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_1-static-with-deps-pre-cxx11-test
-    # For setup-miniconda
-    defaults:
-      run:
-        shell: bash -l {0}
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -4168,14 +4144,6 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - name: Setup miniconda
-        uses: conda-incubator/setup-miniconda@v2
-        with:
-          miniconda-version: "latest"
-      - name: Install dependencies
-        run: |
-          conda install -yq anaconda-client
-          pip install -q awscli
       - name: Upload binaries
         env:
           PKG_DIR: "${{ runner.temp }}/artifacts"
@@ -4185,7 +4153,17 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_SECRET_KEY }}
           ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
         run: |
-          .circleci/scripts/binary_upload.sh
+          docker run --rm -it \
+            -e PKG_DIR=/artifacts \
+            -e UPLOAD_SUBFOLDER \
+            -e AWS_ACCESS_KEY_ID \
+            -e AWS_SECRET_ACCESS_KEY \
+            -e ANACONDA_API_TOKEN \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -v "${GITHUB_WORKSPACE}:/v" \
+            -w /v \
+            308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
+            bash -c '.circleci/scripts/binary_upload.sh'
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -4477,10 +4455,6 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_1-static-without-deps-pre-cxx11-test
-    # For setup-miniconda
-    defaults:
-      run:
-        shell: bash -l {0}
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -4551,14 +4525,6 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - name: Setup miniconda
-        uses: conda-incubator/setup-miniconda@v2
-        with:
-          miniconda-version: "latest"
-      - name: Install dependencies
-        run: |
-          conda install -yq anaconda-client
-          pip install -q awscli
       - name: Upload binaries
         env:
           PKG_DIR: "${{ runner.temp }}/artifacts"
@@ -4568,7 +4534,17 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_SECRET_KEY }}
           ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
         run: |
-          .circleci/scripts/binary_upload.sh
+          docker run --rm -it \
+            -e PKG_DIR=/artifacts \
+            -e UPLOAD_SUBFOLDER \
+            -e AWS_ACCESS_KEY_ID \
+            -e AWS_SECRET_ACCESS_KEY \
+            -e ANACONDA_API_TOKEN \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -v "${GITHUB_WORKSPACE}:/v" \
+            -w /v \
+            308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
+            bash -c '.circleci/scripts/binary_upload.sh'
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -4860,10 +4836,6 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_3-shared-with-deps-pre-cxx11-test
-    # For setup-miniconda
-    defaults:
-      run:
-        shell: bash -l {0}
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -4934,14 +4906,6 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - name: Setup miniconda
-        uses: conda-incubator/setup-miniconda@v2
-        with:
-          miniconda-version: "latest"
-      - name: Install dependencies
-        run: |
-          conda install -yq anaconda-client
-          pip install -q awscli
       - name: Upload binaries
         env:
           PKG_DIR: "${{ runner.temp }}/artifacts"
@@ -4951,7 +4915,17 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_SECRET_KEY }}
           ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
         run: |
-          .circleci/scripts/binary_upload.sh
+          docker run --rm -it \
+            -e PKG_DIR=/artifacts \
+            -e UPLOAD_SUBFOLDER \
+            -e AWS_ACCESS_KEY_ID \
+            -e AWS_SECRET_ACCESS_KEY \
+            -e ANACONDA_API_TOKEN \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -v "${GITHUB_WORKSPACE}:/v" \
+            -w /v \
+            308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
+            bash -c '.circleci/scripts/binary_upload.sh'
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -5243,10 +5217,6 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_3-shared-without-deps-pre-cxx11-test
-    # For setup-miniconda
-    defaults:
-      run:
-        shell: bash -l {0}
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -5317,14 +5287,6 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - name: Setup miniconda
-        uses: conda-incubator/setup-miniconda@v2
-        with:
-          miniconda-version: "latest"
-      - name: Install dependencies
-        run: |
-          conda install -yq anaconda-client
-          pip install -q awscli
       - name: Upload binaries
         env:
           PKG_DIR: "${{ runner.temp }}/artifacts"
@@ -5334,7 +5296,17 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_SECRET_KEY }}
           ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
         run: |
-          .circleci/scripts/binary_upload.sh
+          docker run --rm -it \
+            -e PKG_DIR=/artifacts \
+            -e UPLOAD_SUBFOLDER \
+            -e AWS_ACCESS_KEY_ID \
+            -e AWS_SECRET_ACCESS_KEY \
+            -e ANACONDA_API_TOKEN \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -v "${GITHUB_WORKSPACE}:/v" \
+            -w /v \
+            308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
+            bash -c '.circleci/scripts/binary_upload.sh'
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -5626,10 +5598,6 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_3-static-with-deps-pre-cxx11-test
-    # For setup-miniconda
-    defaults:
-      run:
-        shell: bash -l {0}
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -5700,14 +5668,6 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - name: Setup miniconda
-        uses: conda-incubator/setup-miniconda@v2
-        with:
-          miniconda-version: "latest"
-      - name: Install dependencies
-        run: |
-          conda install -yq anaconda-client
-          pip install -q awscli
       - name: Upload binaries
         env:
           PKG_DIR: "${{ runner.temp }}/artifacts"
@@ -5717,7 +5677,17 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_SECRET_KEY }}
           ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
         run: |
-          .circleci/scripts/binary_upload.sh
+          docker run --rm -it \
+            -e PKG_DIR=/artifacts \
+            -e UPLOAD_SUBFOLDER \
+            -e AWS_ACCESS_KEY_ID \
+            -e AWS_SECRET_ACCESS_KEY \
+            -e ANACONDA_API_TOKEN \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -v "${GITHUB_WORKSPACE}:/v" \
+            -w /v \
+            308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
+            bash -c '.circleci/scripts/binary_upload.sh'
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -6009,10 +5979,6 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_3-static-without-deps-pre-cxx11-test
-    # For setup-miniconda
-    defaults:
-      run:
-        shell: bash -l {0}
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -6083,14 +6049,6 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - name: Setup miniconda
-        uses: conda-incubator/setup-miniconda@v2
-        with:
-          miniconda-version: "latest"
-      - name: Install dependencies
-        run: |
-          conda install -yq anaconda-client
-          pip install -q awscli
       - name: Upload binaries
         env:
           PKG_DIR: "${{ runner.temp }}/artifacts"
@@ -6100,7 +6058,17 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_SECRET_KEY }}
           ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
         run: |
-          .circleci/scripts/binary_upload.sh
+          docker run --rm -it \
+            -e PKG_DIR=/artifacts \
+            -e UPLOAD_SUBFOLDER \
+            -e AWS_ACCESS_KEY_ID \
+            -e AWS_SECRET_ACCESS_KEY \
+            -e ANACONDA_API_TOKEN \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -v "${GITHUB_WORKSPACE}:/v" \
+            -w /v \
+            308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
+            bash -c '.circleci/scripts/binary_upload.sh'
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -6392,10 +6360,6 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_5-shared-with-deps-pre-cxx11-test
-    # For setup-miniconda
-    defaults:
-      run:
-        shell: bash -l {0}
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -6466,14 +6430,6 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - name: Setup miniconda
-        uses: conda-incubator/setup-miniconda@v2
-        with:
-          miniconda-version: "latest"
-      - name: Install dependencies
-        run: |
-          conda install -yq anaconda-client
-          pip install -q awscli
       - name: Upload binaries
         env:
           PKG_DIR: "${{ runner.temp }}/artifacts"
@@ -6483,7 +6439,17 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_SECRET_KEY }}
           ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
         run: |
-          .circleci/scripts/binary_upload.sh
+          docker run --rm -it \
+            -e PKG_DIR=/artifacts \
+            -e UPLOAD_SUBFOLDER \
+            -e AWS_ACCESS_KEY_ID \
+            -e AWS_SECRET_ACCESS_KEY \
+            -e ANACONDA_API_TOKEN \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -v "${GITHUB_WORKSPACE}:/v" \
+            -w /v \
+            308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
+            bash -c '.circleci/scripts/binary_upload.sh'
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -6775,10 +6741,6 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_5-shared-without-deps-pre-cxx11-test
-    # For setup-miniconda
-    defaults:
-      run:
-        shell: bash -l {0}
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -6849,14 +6811,6 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - name: Setup miniconda
-        uses: conda-incubator/setup-miniconda@v2
-        with:
-          miniconda-version: "latest"
-      - name: Install dependencies
-        run: |
-          conda install -yq anaconda-client
-          pip install -q awscli
       - name: Upload binaries
         env:
           PKG_DIR: "${{ runner.temp }}/artifacts"
@@ -6866,7 +6820,17 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_SECRET_KEY }}
           ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
         run: |
-          .circleci/scripts/binary_upload.sh
+          docker run --rm -it \
+            -e PKG_DIR=/artifacts \
+            -e UPLOAD_SUBFOLDER \
+            -e AWS_ACCESS_KEY_ID \
+            -e AWS_SECRET_ACCESS_KEY \
+            -e ANACONDA_API_TOKEN \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -v "${GITHUB_WORKSPACE}:/v" \
+            -w /v \
+            308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
+            bash -c '.circleci/scripts/binary_upload.sh'
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -7158,10 +7122,6 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_5-static-with-deps-pre-cxx11-test
-    # For setup-miniconda
-    defaults:
-      run:
-        shell: bash -l {0}
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -7232,14 +7192,6 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - name: Setup miniconda
-        uses: conda-incubator/setup-miniconda@v2
-        with:
-          miniconda-version: "latest"
-      - name: Install dependencies
-        run: |
-          conda install -yq anaconda-client
-          pip install -q awscli
       - name: Upload binaries
         env:
           PKG_DIR: "${{ runner.temp }}/artifacts"
@@ -7249,7 +7201,17 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_SECRET_KEY }}
           ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
         run: |
-          .circleci/scripts/binary_upload.sh
+          docker run --rm -it \
+            -e PKG_DIR=/artifacts \
+            -e UPLOAD_SUBFOLDER \
+            -e AWS_ACCESS_KEY_ID \
+            -e AWS_SECRET_ACCESS_KEY \
+            -e ANACONDA_API_TOKEN \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -v "${GITHUB_WORKSPACE}:/v" \
+            -w /v \
+            308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
+            bash -c '.circleci/scripts/binary_upload.sh'
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -7541,10 +7503,6 @@ jobs:
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_5-static-without-deps-pre-cxx11-test
-    # For setup-miniconda
-    defaults:
-      run:
-        shell: bash -l {0}
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -7615,14 +7573,6 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
           fi
-      - name: Setup miniconda
-        uses: conda-incubator/setup-miniconda@v2
-        with:
-          miniconda-version: "latest"
-      - name: Install dependencies
-        run: |
-          conda install -yq anaconda-client
-          pip install -q awscli
       - name: Upload binaries
         env:
           PKG_DIR: "${{ runner.temp }}/artifacts"
@@ -7632,7 +7582,17 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_SECRET_KEY }}
           ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
         run: |
-          .circleci/scripts/binary_upload.sh
+          docker run --rm -it \
+            -e PKG_DIR=/artifacts \
+            -e UPLOAD_SUBFOLDER \
+            -e AWS_ACCESS_KEY_ID \
+            -e AWS_SECRET_ACCESS_KEY \
+            -e ANACONDA_API_TOKEN \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -v "${GITHUB_WORKSPACE}:/v" \
+            -w /v \
+            308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
+            bash -c '.circleci/scripts/binary_upload.sh'
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
