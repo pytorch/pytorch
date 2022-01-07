@@ -489,9 +489,6 @@ _(aten, miopen_rnn) \
 _(aten, miopen_rnn_backward) \
 _(aten, mish) \
 _(aten, mkldnn_convolution) \
-_(aten, mkldnn_convolution_backward) \
-_(aten, mkldnn_convolution_backward_input) \
-_(aten, mkldnn_convolution_backward_weights) \
 _(aten, mm) \
 _(aten, mode) \
 _(aten, mse_loss) \
@@ -703,10 +700,8 @@ _(aten, thnn_conv_depthwise2d_backward) \
 _(aten, thnn_conv_depthwise2d_forward) \
 _(aten, slow_conv_dilated2d) \
 _(aten, slow_conv_dilated3d) \
-_(aten, slow_conv_dilated3d_backward) \
 _(aten, slow_conv_transpose2d) \
 _(aten, slow_conv_transpose3d) \
-_(aten, slow_conv_transpose3d_backward) \
 _(aten, threshold) \
 _(aten, threshold_backward) \
 _(aten, to) \
@@ -735,6 +730,9 @@ _(aten, _upsample_bilinear2d_aa_forward) \
 _(aten, upsample_bicubic2d) \
 _(aten, upsample_bicubic2d_backward) \
 _(aten, upsample_bicubic2d_forward) \
+_(aten, upsample_bicubic2d_aa) \
+_(aten, upsample_bicubic2d_backward_aa) \
+_(aten, upsample_bicubic2d_forward_aa) \
 _(aten, upsample_linear1d) \
 _(aten, upsample_linear1d_backward) \
 _(aten, upsample_linear1d_forward) \
