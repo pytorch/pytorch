@@ -1587,12 +1587,12 @@ class DistributedTest:
         def test_isend(self):
             self._test_isend(profiler_ctx=None)
 
-        @require_ucc_for_nccl()
+        @sandcastle_skip_if(BACKEND == "nccl", "Nccl does not support isend")
         def test_isend_autograd_profiler(self):
             autograd_profiler_ctx = _create_autograd_profiler()
             self._test_isend(profiler_ctx=autograd_profiler_ctx)
 
-        @require_ucc_for_nccl()
+        @sandcastle_skip_if(BACKEND == "nccl", "Nccl does not support isend")
         @sandcastle_skip_if(IS_FBCODE, "Kineto in fbcode code causes hang")
         @sandcastle_skip_if(
             IS_MACOS or IS_WINDOWS,
