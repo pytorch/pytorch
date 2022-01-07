@@ -3,6 +3,7 @@
 #include <c10/core/Device.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
+#include <jit/ir/ir_views.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/device_type_analysis.h>
@@ -167,6 +168,7 @@ struct DeviceTypePropagationPass {
       case prim::If:
         return processIf(n);
       case prim::Loop:
+        return processLoop(n);
       case prim::CallMethod:
       case prim::CallFunction:
         return; // Not handled for now
@@ -222,6 +224,42 @@ struct DeviceTypePropagationPass {
       }
     }
     return changed;
+  }
+
+  bool applyTensorProps(
+      const at::ArrayRef<Value*>& src,
+      const at::ArrayRef<Value*>& dst) {
+    TORCH_INTERNAL_ASSERT(src.size() == dst.size());
+    bool changed = false;
+    for (int i = 0; i < dst.size(); i++) {
+      auto src_type = src[i]->type()->cast<TensorType>();
+      changed |= setDeviceType(dst[i], src_type->device());
+    }
+    return changed;
+  }
+
+  void processLoop(Node* node) {
+    GRAPH_DEBUG("processLoop");
+    LoopView l(node);
+
+    applyTensorProps(l.carriedInputs(), l.bodyCarriedInputs());
+
+    int iter = 0;
+    for (; iter < 4; iter++) {
+      processBlock(l.bodyBlock());
+      bool inputs_changed = mergeAndApplyTensorProps(
+          l.carriedInputs(), l.bodyCarriedOutputs(), l.bodyCarriedInputs());
+      if (!inputs_changed) {
+        break;
+      }
+    }
+    TORCH_INTERNAL_ASSERT(
+        iter < 4, "Failed to apply tensor props to loop due to changing types");
+
+    // Note that the types of bodyCarriedOutputs and carriedInputs
+    // can be different, so we need the merged version of them, which
+    // is bodyCarriedInputs.
+    applyTensorProps(l.bodyCarriedInputs(), l.carriedOutputs());
   }
 
   void processIf(Node* node) {
