@@ -149,6 +149,26 @@ class TracerBase:
         we don't know the value of the proxy, but a custom tracer can attach more
         information to the graph node using create_node and can choose to return a value.
         """
+
+        # check if this boolean is used in an assertion, bytecode pattern for assertions
+        # is pretty stable for Python 3.7--3.9
+        frame = inspect.currentframe()
+        assert frame is not None
+        calling_frame = frame.f_back.f_back
+        assert calling_frame is not None
+        insts = list(dis.get_instructions(calling_frame.f_code))
+        cur = calling_frame.f_lasti // 2
+        inst = insts[cur]
+
+        if inst.opname == 'POP_JUMP_IF_TRUE':
+            first = insts[cur + 1]
+            last = insts[inst.arg // 2 - 1]
+            starts_with_assert = first.opname == 'LOAD_GLOBAL' and first.argval == 'AssertionError' or first.opname == 'LOAD_ASSERTION_ERROR'
+            if starts_with_assert and last.opname == 'RAISE_VARARGS':
+                self.create_proxy('call_function', assert_fn, (obj,), {})
+                return True
+
+
         raise TraceError('symbolically traced variables cannot be used as inputs to control flow')
 
     @compatibility(is_backward_compatible=True)
@@ -182,6 +202,10 @@ class GraphAppendingTracer(TracerBase):
     def __init__(self, graph: Graph):
         super().__init__()
         self.graph = graph
+
+@compatibility(is_backward_compatible=False)
+def assert_fn(x):
+    assert x
 
 @compatibility(is_backward_compatible=True)
 class TraceError(ValueError):
@@ -285,6 +309,7 @@ class Proxy:
         else:
             return tracer.create_proxy('call_function', orig_method, args, kwargs,
                                        name=tracer.graph._target_to_str(orig_method.__name__))
+
 
 @compatibility(is_backward_compatible=True)
 class Attribute(Proxy):
