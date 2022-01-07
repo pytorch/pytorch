@@ -5,7 +5,7 @@
 namespace torch {
 namespace lazy {
 
-class Permute : public TsNode {
+class TORCH_API Permute : public TsNode {
  public:
   Permute(const Value& input, std::vector<int64_t> dims);
 
