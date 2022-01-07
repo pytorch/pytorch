@@ -615,6 +615,54 @@ static void leaky_qrelu_out_kernel(Tensor& out, const Tensor& qx,
   });
 }
 
+void qgelu_kernel(const Tensor& qx, Tensor& qy) {
+  int64_t zero_point = qx.q_zero_point();
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+  float scale = qx.q_scale();
+  auto scale_vec = Vectorized<float>(scale);
+  auto zero_point_vec = Vectorized<float>((float)zero_point);
+  auto scale_neg_zp_premul_vec = scale_vec * zero_point_vec.neg();
+  int64_t output_zero_point = zero_point;
+  float output_scale = scale;
+  float inv_output_scale = 1.0 / output_scale;
+  const auto kAlphaVec = Vectorized<float>(M_SQRT1_2);
+  const auto kOneVec = Vectorized<float>(1);
+  const auto kPointFiveVec = Vectorized<float>(0.5);
+
+  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qgelu", [&]() {
+    qy = at::_empty_affine_quantized(
+        qx.sizes(),
+        // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
+        at::device(kCPU).dtype(SCALAR_TYPE).memory_format(qx.suggest_memory_format()),
+        output_scale,
+        output_zero_point,
+        c10::nullopt);
+    auto iter = TensorIterator::unary_op(qy, qx);
+
+    using Vec = Vectorized<scalar_t>;
+    cpu_kernel_vec(
+        iter,
+        [&](scalar_t value_qx) -> scalar_t {
+          const auto value_dx =
+              at::native::dequantize_val(scale, zero_point, value_qx);
+          const auto value_dy =
+              value_dx * 0.5 * (1 + std::erf(value_dx * M_SQRT1_2));
+          return at::native::quantize_val<scalar_t>(
+              output_scale, output_zero_point, value_dy);
+        },
+        [&](Vec value_qx) -> Vec {
+          auto value_dx = value_qx.dequantize(
+              scale_vec, zero_point_vec, scale_neg_zp_premul_vec);
+          for (auto & value : value_dx) {
+            value = value * kPointFiveVec * (kOneVec + (value * kAlphaVec).erf());
+          }
+          return Vec::quantize(
+              value_dx, output_scale, output_zero_point, inv_output_scale);
+        });
+  });
+}
+
+
 void qsigmoid_kernel(
     const Tensor& qx, Tensor& qy, double output_scale, int64_t output_zero_point ) {
   int64_t zero_point = qx.q_zero_point();
@@ -3467,6 +3515,7 @@ REGISTER_NO_AVX512_DISPATCH(qmul_relu_stub);
 REGISTER_NO_AVX512_DISPATCH(qmul_stub);
 REGISTER_NO_AVX512_DISPATCH(qrelu_leaky_stub);
 REGISTER_NO_AVX512_DISPATCH(qrelu_stub);
+REGISTER_NO_AVX512_DISPATCH(qgelu_stub);
 REGISTER_NO_AVX512_DISPATCH(qsigmoid_stub);
 REGISTER_NO_AVX512_DISPATCH(qtanh_stub);
 REGISTER_NO_AVX512_DISPATCH(qthreshold_stub);
@@ -3518,6 +3567,7 @@ REGISTER_DISPATCH(qmul_relu_stub, &qmul_kernel<true>);
 REGISTER_DISPATCH(qmul_stub, &qmul_kernel<false>);
 REGISTER_DISPATCH(qrelu_leaky_stub, &leaky_qrelu_out_kernel);
 REGISTER_DISPATCH(qrelu_stub, &qrelu_kernel);
+REGISTER_DISPATCH(qgelu_stub, &qgelu_kernel);
 REGISTER_DISPATCH(qsigmoid_stub, &qsigmoid_kernel);
 REGISTER_DISPATCH(qtanh_stub, &qtanh_kernel);
 REGISTER_DISPATCH(qthreshold_stub, &qthreshold_kernel);
