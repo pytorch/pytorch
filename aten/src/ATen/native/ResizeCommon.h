@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/NamedTensorUtils.h>
 #include <c10/util/irange.h>
 
