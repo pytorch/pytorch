@@ -377,7 +377,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.celu: lambda input, alhpa=1., inplace=False: -1,
         torch.chain_matmul: lambda *matrices, out=None: -1,
         torch.channel_shuffle: lambda input, groups : -1,
-        torch.cholesky: lambda input, upper=False, out=None: -1,
         torch.linalg.cholesky: lambda input, out=None: -1,
         torch.linalg.cholesky_ex: lambda input, check_errors=False, out=None: -1,
         torch.cholesky_inverse: lambda input, upper=False, out=None: -1,

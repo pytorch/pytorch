@@ -17,7 +17,7 @@ from functools import reduce, partial, wraps
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_SCIPY, IS_MACOS, IS_WINDOWS, slowTest,
      TEST_WITH_ASAN, TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU,
-     iter_indices, gradcheck, gradgradcheck,
+     iter_indices, gradcheck,
      make_fullrank_matrices_with_distinct_singular_values)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes,
@@ -556,103 +556,6 @@ class TestLinalg(TestCase):
         for shape in shapes:
             run_test(shape)
 
-    # NOTE: old_cholesky* tests were moved here from test_torch.py and test_autograd.py
-    @slowTest
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(torch.double)
-    def test_old_cholesky_batched_many_batches(self, device, dtype):
-        from torch.testing._internal.common_utils import random_symmetric_pd_matrix
-
-        def cholesky_test_helper(n, batchsize, device, upper):
-            A = random_symmetric_pd_matrix(n, batchsize, dtype=dtype, device=device)
-            chol_fact = torch.cholesky(A, upper=upper)
-            if upper:
-                # Correctness check
-                self.assertEqual(A, chol_fact.mT.matmul(chol_fact))
-                # Upper triangular check
-                self.assertEqual(chol_fact, chol_fact.triu())
-            else:
-                # Correctness check
-                self.assertEqual(A, chol_fact.matmul(chol_fact.mT))
-                # Lower triangular check
-                self.assertEqual(chol_fact, chol_fact.tril())
-
-        for upper, batchsize in itertools.product([True, False], [262144, 524288]):
-            cholesky_test_helper(2, batchsize, device, upper)
-
-    @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(*floating_and_complex_types())
-    def test_old_cholesky_batched(self, device, dtype):
-        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
-
-        def cholesky_test_helper(n, batch_dims, upper):
-            A = random_hermitian_pd_matrix(n, *batch_dims, dtype=dtype, device=device)
-            cholesky_exp = torch.stack([m.cholesky(upper=upper) for m in A.reshape(-1, n, n)])
-            cholesky_exp = cholesky_exp.reshape_as(A)
-            self.assertEqual(cholesky_exp, torch.cholesky(A, upper=upper))
-
-        for upper, batchsize in itertools.product([True, False], [(3,), (3, 4), (2, 3, 4)]):
-            cholesky_test_helper(3, batchsize, upper)
-
-    @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(*floating_and_complex_types())
-    @tf32_on_and_off(0.01)
-    def test_old_cholesky(self, device, dtype):
-        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
-
-        A = random_hermitian_pd_matrix(10, dtype=dtype, device=device)
-
-        # default Case
-        C = torch.cholesky(A)
-        B = torch.mm(C, C.t().conj())
-        self.assertEqual(A, B, atol=1e-14, rtol=0)
-
-        # test Upper Triangular
-        U = torch.cholesky(A, True)
-        B = torch.mm(U.t().conj(), U)
-        self.assertEqual(A, B, atol=1e-14, rtol=0, msg='cholesky (upper) did not allow rebuilding the original matrix')
-
-        # test Lower Triangular
-        L = torch.cholesky(A, False)
-        B = torch.mm(L, L.t().conj())
-        self.assertEqual(A, B, atol=1e-14, rtol=0, msg='cholesky (lower) did not allow rebuilding the original matrix')
-
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(*floating_and_complex_types())
-    def test_old_cholesky_empty(self, device, dtype):
-        def run_test(upper):
-            A = torch.empty(0, 0, dtype=dtype, device=device)
-            chol = torch.cholesky(A, upper)
-            chol_A = torch.matmul(chol, chol.t().conj())
-            self.assertEqual(A, chol_A)
-        for upper in [True, False]:
-            run_test(upper)
-
-    # Test for issue
-    # https://github.com/pytorch/pytorch/issues/57032
-    # torch.cholesky with upper=True for batched CUDA inputs was wrong
-    # it was using the lower triangular part instead of the upper one
-    @onlyCUDA
-    @skipCUDAIfNoMagma
-    @dtypes(*floating_and_complex_types())
-    def test_old_cholesky_batched_upper(self, device, dtype):
-        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
-
-        batchsize = 2
-        A = random_hermitian_pd_matrix(3, batchsize, dtype=dtype, device=device)
-        A_triu = A.triu()  # fill the lower triangular part with zero
-
-        U = torch.cholesky(A_triu, upper=True)
-
-        reconstruct_A = U.mH @ U
-        self.assertEqual(A, reconstruct_A)
-
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
@@ -722,30 +625,6 @@ class TestLinalg(TestCase):
         info = torch.empty(A.shape[:-2], dtype=torch.int64, device=device)
         with self.assertRaisesRegex(RuntimeError, "but got info with dtype Long"):
             torch.linalg.cholesky_ex(A, out=(L, info))
-
-    @onlyCPU
-    @skipCPUIfNoLapack
-    @dtypes(torch.float64, torch.complex128)
-    def test_old_cholesky_autograd(self, device, dtype):
-        def func(root, upper):
-            x = 0.5 * (root + root.mH)
-            return torch.cholesky(x, upper)
-
-        def run_test(upper, dims):
-            root = torch.rand(*dims, dtype=dtype, device=device, requires_grad=True)
-            root = root + torch.eye(dims[-1])
-
-            gradcheck(func, [root, upper])
-            gradgradcheck(func, [root, upper])
-
-            root = torch.rand(*dims, dtype=dtype, device=device)
-            root = torch.matmul(root, root.mH)
-            root.requires_grad_()
-            chol = root.cholesky().sum().backward()
-            self.assertEqual(root.grad, root.grad.mH)  # Check the gradient is hermitian
-
-        for upper, dims in itertools.product([True, False], [(3, 3), (4, 3, 2, 2)]):
-            run_test(upper, dims)
 
     def _test_addr_vs_numpy(self, device, dtype, beta=1, alpha=1):
         def check(m, a, b, beta, alpha):
@@ -3059,7 +2938,7 @@ class TestLinalg(TestCase):
 
         b = torch.randn(*b_dims, dtype=dtype, device=device)
         A = random_hermitian_pd_matrix(*A_dims, dtype=dtype, device=device)
-        L = torch.cholesky(A, upper=upper)
+        L = torch.linalg.cholesky(A, upper=upper)
         return b, A, L
 
     @skipCUDAIfNoMagma
@@ -3107,7 +2986,7 @@ class TestLinalg(TestCase):
             A = A.to(device).permute(0, 2, 1)
             b = b.to(device).permute(2, 1, 0)
             assert not A.is_contiguous() and not b.is_contiguous(), "contiguous inputs"
-            L = torch.cholesky(A, upper)
+            L = torch.linalg.cholesky(A, upper=upper)
             x = torch.cholesky_solve(b, L, upper=upper)
             self.assertEqual(x, x_exp)
 

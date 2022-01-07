@@ -235,7 +235,6 @@ _(aten, cartesian_prod) \
 _(aten, cauchy) \
 _(aten, ceil) \
 _(aten, celu) \
-_(aten, cholesky) \
 _(aten, cholesky_inverse) \
 _(aten, cholesky_solve) \
 _(aten, chunk) \
