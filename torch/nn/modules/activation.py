@@ -168,7 +168,7 @@ class RReLU(Module):
 
 
 class Hardtanh(Module):
-    r"""Applies the HardTanh function element-wise
+    r"""Applies the HardTanh function element-wise.
 
     HardTanh is defined as:
 
@@ -294,7 +294,9 @@ class Sigmoid(Module):
 
 
 class Hardsigmoid(Module):
-    r"""Applies the element-wise function:
+    r"""Applies the Hardsigmoid function element-wise.
+
+    Hardsigmoid is defined as:
 
     .. math::
         \text{Hardsigmoid}(x) = \begin{cases}
