@@ -509,7 +509,7 @@ class PackageExporter:
         error = BadPackageError(f"{module_obj.__name__} is an improperly formed package "
                                 f",so it cannot be interned. Please mock or extern {module_obj.__name__}."
                                 f"The package cannot be a regular package do to the lack of a List in the "
-                                f"{module_obj.__name__}.__path__ attribute. It also can't be a namespace " 
+                                f"{module_obj.__name__}.__path__ attribute. It also can't be a namespace "
                                 f"package because {module_obj.__name__}.__path__ is not an iterable "
                                 f"or {module_obj.__name__}.__file__ has a value.")
         if not hasattr(module_obj, "__path__"):
