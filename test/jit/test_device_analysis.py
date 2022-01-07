@@ -2,9 +2,13 @@ from itertools import product
 import unittest
 
 import torch
-from torchvision import models
 from torch.testing._internal.common_utils import TEST_CUDA
 from torch.testing._internal.jit_utils import JitTestCase
+
+try:
+    from torchvision import models
+except ImportError:
+    models = None
 
 if __name__ == "__main__":
     raise RuntimeError(
@@ -111,6 +115,7 @@ class TestDeviceAnalysis(JitTestCase):
         # self.prop_device_on_graph(graph, [self.cpu])
         self.assertEqual(graph_input.type().device(), self.cpu)
 
+    @unittest.skipIf(models is None, "Requires torchvision")
     def test_mobilenet(self):
         in_cpu = torch.randn(1, 3, 224, 224, device=self.cpu)
         in_example = in_cpu
