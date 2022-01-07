@@ -1159,7 +1159,7 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
 
         # Results should be the same after loading from serialized state_dict
         with tempfile.NamedTemporaryFile() as f:
-            torch.save(m.state_dict(), f.name)
+            torch.save(m.state_dict(), f)
             loaded_state_dict = torch.load(f.name)
             m2.load_state_dict(loaded_state_dict)
         expected = m(example_inputs[0])
