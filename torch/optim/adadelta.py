@@ -63,6 +63,11 @@ class Adadelta(Optimizer):
         defaults = dict(lr=lr, rho=rho, eps=eps, weight_decay=weight_decay, foreach=foreach)
         super(Adadelta, self).__init__(params, defaults)
 
+    def __setstate__(self, state):
+        super().__setstate__(state)
+        for group in self.param_groups:
+            group.setdefault('foreach', False)
+
     @torch.no_grad()
     def step(self, closure=None):
         """Performs a single optimization step.
