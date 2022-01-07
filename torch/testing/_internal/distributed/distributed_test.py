@@ -1357,12 +1357,16 @@ class DistributedTest:
         def test_send_recv(self):
             self._test_send_recv(profiler_ctx=None)
 
-        @require_ucc_for_nccl()
+        @sandcastle_skip_if(
+            BACKEND == "nccl", "NCCL send/recv tested by test_send_recv_nccl"
+        )
         def test_send_recv_autograd_profiler(self):
             autograd_profiler_ctx = _create_autograd_profiler()
             self._test_send_recv(profiler_ctx=autograd_profiler_ctx)
 
-        @require_ucc_for_nccl()
+        @sandcastle_skip_if(
+            BACKEND == "nccl", "NCCL send/recv tested by test_send_recv_nccl"
+        )
         @sandcastle_skip_if(IS_FBCODE, "Kineto in fbcode causes hang")
         @sandcastle_skip_if(
             IS_MACOS or IS_WINDOWS,
@@ -1514,12 +1518,16 @@ class DistributedTest:
         def test_send_recv_with_tag(self):
             self._test_send_recv_with_tag(profiler_ctx=None)
 
-        @require_ucc_for_nccl()
+        @sandcastle_skip_if(
+            BACKEND == "nccl", "NCCL send/recv tested by test_send_recv_nccl"
+        )
         def test_send_recv_with_tag_autograd_profiler(self):
             autograd_profiler_ctx = _create_autograd_profiler()
             return self._test_send_recv_with_tag(profiler_ctx=autograd_profiler_ctx)
 
-        @require_ucc_for_nccl()
+        @sandcastle_skip_if(
+            BACKEND == "nccl", "NCCL send/recv tested by test_send_recv_nccl"
+        )
         @sandcastle_skip_if(IS_FBCODE, "Kineto in fbcode code causes hang")
         @sandcastle_skip_if(
             IS_MACOS or IS_WINDOWS,
