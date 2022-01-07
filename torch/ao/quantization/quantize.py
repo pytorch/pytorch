@@ -353,7 +353,7 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
               configuration, qconfig applies to all submodules of a given
               module unless qconfig for the submodules are specified (when the
               submodule already has qconfig attribute). Entries in the dictionary
-              need to be QConfigDynamic instances.
+              need to be QConfig instances.
 
             - A set of types and/or submodule names to apply dynamic quantization to,
               in which case the `dtype` argument is used to specify the bit-width
@@ -435,6 +435,7 @@ def prepare_qat(model, mapping=None, inplace=False, allow_list=None):
         allow_list: a set that lists out allowable modules to be propagated with qconfig
     """
     torch._C._log_api_usage_once("quantization_api.quantize.prepare_qat")
+    assert model.training, "prepare_qat only works on models in training mode"
     if mapping is None:
         mapping = get_default_qat_module_mappings()
 
