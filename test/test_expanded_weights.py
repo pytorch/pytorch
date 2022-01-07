@@ -8,8 +8,8 @@ from torch.testing._internal.common_device_type import OpDTypes, instantiate_dev
 from torch.testing._internal.common_nn import TestBase, module_tests, new_module_tests
 from torch.testing._internal.common_utils import TestCase, freeze_rng_state, make_tensor, run_tests
 from torch.testing._internal.common_methods_invocations import SampleInput, op_db
-from torch._expanded_weights import ExpandedWeight
-from torch._expanded_weights.expanded_weights_utils import forward_helper, grad_if_exists, \
+from torch.nn.utils._expanded_weights import ExpandedWeight
+from torch.nn.utils._expanded_weights.expanded_weights_utils import forward_helper, grad_if_exists, \
     grad_if_exists_for_input, unpack_expanded_weight_or_tensor, sum_over_all_but_batch_and_last_n
 
 class TestContext:

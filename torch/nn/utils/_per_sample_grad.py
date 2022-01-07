@@ -1,6 +1,6 @@
 import torch
 from torch.nn.utils._stateless import functional_call
-from torch._expanded_weights.expanded_weights_impl import ExpandedWeight
+from torch.nn.utils._expanded_weights.expanded_weights_impl import ExpandedWeight
 
 # dependency on `functional_call` means that this can't be exposed in utils
 # without creating circular dependency
