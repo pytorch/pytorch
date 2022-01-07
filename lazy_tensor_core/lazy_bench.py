@@ -506,7 +506,7 @@ def merge_reformat(tmp_dir, out_dir, table):
         headers = {
             "error": ("name", "test", "error"),
             "lazy-compute" : ("name", "dev", "experiment", "test", "speedup", "pvalue"),
-            "lazy-overheads" : ("dev", "name", "test", "overhead", "pvalue") 
+            "lazy-overheads" : ("dev", "name", "test", "overhead", "pvalue")
         }
 
         header = headers[file_type]
@@ -682,7 +682,7 @@ if __name__ == "__main__" :
         except subprocess.TimeoutExpired:
             print(f"{model_name} timed out after {args.timeout // 60} minutes! Include it in SKIP or SKIP_TRAIN_ONLY")
             save_error(model_name, args.test, "Timed out.", dirpath)
-            # to visualize highlight timeouts, they will also have 
+            # to visualize highlight timeouts, they will also have
             # "timed out" in the error column
             rc = 17
             process = psutil.Process(proc.pid)
