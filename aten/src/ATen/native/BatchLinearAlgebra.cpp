@@ -1987,30 +1987,6 @@ std::tuple<Tensor&,Tensor&> linalg_qr_out(const Tensor& self, c10::string_view m
   return std::tuple<Tensor&, Tensor&>(Q, R);
 }
 
-std::tuple<Tensor,Tensor> qr(const Tensor& self, bool some) {
-  TORCH_WARN_ONCE(
-    "torch.qr is deprecated in favor of torch.linalg.qr and will be removed in a future PyTorch release.\n",
-    "The boolean parameter 'some' has been replaced with a string parameter 'mode'.\n",
-    "Q, R = torch.qr(A, some)\n",
-    "should be replaced with\n",
-    "Q, R = torch.linalg.qr(A, 'reduced' if some else 'complete')"
-  );
-  const char* mode = some ? "reduced" : "complete";
-  return at::linalg_qr(self, mode);
-}
-
-std::tuple<Tensor&,Tensor&> qr_out(const Tensor& self, bool some, Tensor& Q, Tensor& R) {
-  TORCH_WARN_ONCE(
-    "torch.qr is deprecated in favor of torch.linalg.qr and will be removed in a future PyTorch release.\n",
-    "The boolean parameter 'some' has been replaced with a string parameter 'mode'.\n",
-    "Q, R = torch.qr(A, some)\n",
-    "should be replaced with\n",
-    "Q, R = torch.linalg.qr(A, 'reduced' if some else 'complete')"
-  );
-  const char* mode = some ? "reduced" : "complete";
-  return at::linalg_qr_out(Q, R, self, mode);
-}
-
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ orgqr ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 DEFINE_DISPATCH(orgqr_stub);

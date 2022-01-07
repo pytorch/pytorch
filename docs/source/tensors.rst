@@ -553,7 +553,6 @@ Tensor class reference
     Tensor.pow_
     Tensor.prod
     Tensor.put_
-    Tensor.qr
     Tensor.qscheme
     Tensor.quantile
     Tensor.nanquantile

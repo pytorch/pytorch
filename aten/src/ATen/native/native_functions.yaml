@@ -7063,11 +7063,6 @@
   dispatch:
     CPU, CUDA: cholesky_inverse_out
 
-- func: qr.Q(Tensor self, bool some=True, *, Tensor(a!) Q, Tensor(b!) R) -> (Tensor(a!) Q, Tensor(b!) R)
-
-- func: qr(Tensor self, bool some=True) -> (Tensor Q, Tensor R)
-  variants: method, function
-
 - func: geqrf.a(Tensor self, *, Tensor(a!) a, Tensor(b!) tau) -> (Tensor(a!) a, Tensor(b!) tau)
   dispatch:
     CPU, CUDA: geqrf_out

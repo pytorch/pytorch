@@ -580,7 +580,6 @@ BLAS and LAPACK Operations
     ormqr
     outer
     pinverse
-    qr
     solve
     svd
     svd_lowrank

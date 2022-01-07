@@ -563,7 +563,6 @@ _(aten, prelu) \
 _(aten, prelu_backward) \
 _(aten, prod) \
 _(aten, put) \
-_(aten, qr) \
 _(aten, quantile) \
 _(aten, nanquantile) \
 _(aten, rad2deg) \

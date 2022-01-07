@@ -91,6 +91,8 @@ ALLOW_LIST = [
     ("aten::unbind", datetime.date(2021, 11, 20)),
     ("aten::hsplit", datetime.date(2021, 11, 20)),
     ("aten::dsplit", datetime.date(2021, 11, 20)),
+    ("aten::qr", datetime.date(9999, 1, 1)),
+    ("aten::qr.Q", datetime.date(9999, 1, 1)),
     ("aten::_convolution_nogroup", datetime.date(9999, 1, 1)),
     ("aten::miopen_convolution_backward", datetime.date(9999, 1, 1)),
     ("aten::miopen_convolution_backward_bias", datetime.date(9999, 1, 1)),

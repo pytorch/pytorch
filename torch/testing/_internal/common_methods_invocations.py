@@ -2630,8 +2630,8 @@ def sample_inputs_linalg_pinv_singular(op_info, device, dtype, requires_grad=Fal
         for k in range(min(3, min(m, n))):
             # Note that by making the columns of `a` and `b` orthonormal we make sure that
             # the product matrix `a @ b.t()` has condition number 1 when restricted to its image
-            a = torch.rand(*batch, m, k, device=device, dtype=dtype).qr().Q.requires_grad_(requires_grad)
-            b = torch.rand(*batch, n, k, device=device, dtype=dtype).qr().Q.requires_grad_(requires_grad)
+            a = torch.linalg.qr(torch.rand(*batch, m, k, device=device, dtype=dtype)).Q.requires_grad_(requires_grad)
+            b = torch.linalg.qr(torch.rand(*batch, n, k, device=device, dtype=dtype)).Q.requires_grad_(requires_grad)
             yield SampleInput(a, args=(b,))
 
 
@@ -11779,18 +11779,6 @@ op_db: List[OpInfo] = [
                # Passes for complex, but for float - Need: _s_where
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad',
                             dtypes=[torch.float64]),),),
-    OpInfo('qr',
-           op=torch.qr,
-           dtypes=floating_and_complex_types(),
-           sample_inputs_func=sample_inputs_linalg_qr,
-           # batched gradients do not work for empty inputs
-           # https://github.com/pytorch/pytorch/issues/50743#issuecomment-767376085
-           check_batched_gradgrad=False,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           # See https://github.com/pytorch/pytorch/issues/66357
-           check_batched_forward_grad=False,
-           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
     UnaryUfuncInfo('rad2deg',
                    ref=np.degrees,
                    decorators=(precisionOverride({torch.bfloat16: 7e-1,
