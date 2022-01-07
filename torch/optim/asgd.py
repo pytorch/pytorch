@@ -37,6 +37,11 @@ class ASGD(Optimizer):
                         weight_decay=weight_decay, foreach=foreach)
         super(ASGD, self).__init__(params, defaults)
 
+    def __setstate__(self, state):
+        super().__setstate__(state)
+        for group in self.param_groups:
+            group.setdefault('foreach', False)
+
     @torch.no_grad()
     def step(self, closure=None):
         """Performs a single optimization step.
