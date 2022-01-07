@@ -283,6 +283,10 @@ class TestMisc(PackageTestCase):
                 pe.intern("**")
                 pe.save_pickle("obj", "obj.pkl", obj2)
 
+        # test we can still extern bad packages
+        with PackageExporter(buffer) as pe:
+            pe.extern("**")
+            pe.save_pickle("obj", "obj.pkl", obj2)
 
 if __name__ == "__main__":
     run_tests()
