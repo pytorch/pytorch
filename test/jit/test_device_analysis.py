@@ -2,9 +2,13 @@ from itertools import product
 import unittest
 
 import torch
-from torchvision import models
 from torch.testing._internal.common_utils import TEST_CUDA
 from torch.testing._internal.jit_utils import JitTestCase
+
+try:
+    from torchvision import models
+except ImportError:
+    models = None
 
 if __name__ == "__main__":
     raise RuntimeError(
@@ -111,6 +115,7 @@ class TestDeviceAnalysis(JitTestCase):
         # self.prop_device_on_graph(graph, [self.cpu])
         self.assertEqual(graph_input.type().device(), self.cpu)
 
+    @unittest.skipIf(models is None, "Requires torchvision")
     def test_mobilenet(self):
         in_cpu = torch.randn(1, 3, 224, 224, device=self.cpu)
         in_example = in_cpu
@@ -300,3 +305,64 @@ class TestDeviceAnalysis(JitTestCase):
         self.assert_device_equal(test_fn, [self.cpu, self.cpu, None], self.cpu)
         self.assert_device_equal(test_fn, [self.mkldnn, self.mkldnn, None], self.mkldnn)
         self.assert_device_equal(test_fn, [self.cpu, self.cuda, None], None)
+
+    def test_loop_simple(self):
+        def test_fn(x, y, z: int):
+            for _ in range(z):
+                y = x
+            return y
+
+        self.assert_device_equal(test_fn, [self.cpu, self.cpu, None], self.cpu)
+        self.assert_device_equal(test_fn, [self.cpu, self.cuda, None], None)
+        self.assert_device_equal(test_fn, [self.cpu, None, None], None)
+
+    def test_loop_device_change(self):
+        def test_fn(x, z: int):
+            for _ in range(z):
+                x = x.cuda()
+            return x
+
+        self.assert_device_equal(test_fn, [self.cpu, None], None)
+        self.assert_device_equal(test_fn, [self.cuda, None], self.cuda)
+        self.assert_device_equal(test_fn, [None, None], None)
+
+    def test_while_change(self):
+        def test_fn(x, z: int):
+            while z > 0:
+                x = x.cuda()
+                z = 0
+            return x
+
+        self.assert_device_equal(test_fn, [self.cpu, None], None)
+        self.assert_device_equal(test_fn, [self.cuda, None], self.cuda)
+        self.assert_device_equal(test_fn, [None, None], None)
+
+    def test_nested_loops(self):
+        def test_fn(x, z: int):
+            for i in range(z):
+                x = x.cpu()
+                for _ in range(i):
+                    x = x + 1
+
+            return x
+
+        self.assert_device_equal(test_fn, [self.cpu, None], self.cpu)
+        self.assert_device_equal(test_fn, [self.cuda, None], None)
+        self.assert_device_equal(test_fn, [None, None], None)
+
+    def test_if_loop_mix(self):
+        def test_fn(x, y, z: bool, a: bool):
+            c = x
+            while a:
+                if z:
+                    c = x + 3
+                else:
+                    c = y * 2
+                a = False
+            return c
+
+        self.assert_device_equal(test_fn, [self.cpu, self.cpu, None, None], self.cpu)
+        self.assert_device_equal(
+            test_fn, [self.mkldnn, self.mkldnn, None, None], self.mkldnn
+        )
+        self.assert_device_equal(test_fn, [self.cpu, self.cuda, None, None], None)
