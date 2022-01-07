@@ -109,6 +109,33 @@ concurrency:
           rm -f ~/.ssh/authorized_keys
       - name: Set DOCKER_HOST
         run: echo "DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> "${GITHUB_ENV}"
+      - name: Runner System Information
+        run: |
+          cat /etc/os-release || true
+          cat /etc/apt/sources.list || true
+          cat /etc/apt/sources.list.d/rocm.list || true
+          cat /opt/rocm/.info/version || true
+          whoami
+      - name: rocm-smi
+        run: |
+          rocm-smi
+      - name: rocminfo
+        run: |
+          rocminfo
+      - name: GPU count
+        id: ngpu
+        run: |
+          echo "::set-output name=result::$(rocminfo | grep -E 'Name:.*\sgfx' | wc -l)"
+      - name: Ensure all 4 GPUs available
+        if: ${{ steps.ngpu.result != 4 }}
+        uses: actions/github-script@v3
+        with:
+          script: |
+            core.setFailed('Failed to detect 4 GPUs')
+      - name: Health check failure step
+        if: ${{ failure() }}
+        run: |
+          killall runsvc.sh
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
