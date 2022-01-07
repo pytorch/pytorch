@@ -4,10 +4,12 @@
 #include <c10/util/Exception.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/TensorUtils.h>
+
+#include <cctype>
+#include <cstring>
 #include <limits>
 #include <sstream>
-#include <cstring>
-#include <cctype>
+#include <type_traits>
 
 namespace at { namespace native {
 
@@ -29,6 +31,37 @@ c10::MaybeOwned<Tensor> expect_resolved_conj(const Tensor& tensor) {
   }
 }
 
+template<class Vec>
+Vec contiguous_strides_template(const IntArrayRef sizes, const bool f_contig=false) {
+  static_assert(std::is_same<IntArrayRef::value_type, typename Vec::value_type>::value,
+                "Incompatible integral type of sizes and strides");
+  // f_contig chooses between the strides of a batch of Fortran (F-contiguous) and C-contiguous matrices
+  using Int = IntArrayRef::value_type;
+  constexpr auto one = Int{1};
+  const auto n = sizes.size();
+  if (n == 0) {
+    return Vec{};
+  } else if (n == 1) {
+    // Use initializer-list to initialize the vector
+    return Vec{one};
+  }
+  // Now we have a matrix or batch of matrices
+  auto strides = Vec(n);
+  const auto last_idx = n - 1;
+  const auto snd_last_idx = n - 2;
+  // We'll fill the first two strides afterwards, otherwise the first step
+  // in the for loop is wrong
+  strides[snd_last_idx] = std::max<int64_t>(sizes[last_idx], one);
+  for (int i = snd_last_idx - 1; i >= 0; --i) {
+    strides[i] = strides[i + 1] * std::max(sizes[i + 1], one);
+  }
+  strides[last_idx] = f_contig ? std::max(sizes[snd_last_idx], one) : one;
+  if (f_contig) {
+    // We filled the wrong stride before so we correct it
+    strides[snd_last_idx] = one;
+  }
+  return strides;
+}
 
 DimVector contiguous_strides(const IntArrayRef sizes, const bool f_contig) {
   return contiguous_strides_template<DimVector>(sizes, f_contig);
@@ -154,10 +187,6 @@ void checkFloatingOrComplex(const Tensor& t, const char* const f_name) {
               f_name, ": Expected a floating point or complex tensor as input. Got ", toString(t.scalar_type()));
 }
 
-/*
- * Given a info int, obtained after a single operation, this function check if the computation
- * has been successful (info = 0) or not, and report in case of the latter.
- */
 void singleCheckErrors(int64_t info, const char* name, int64_t batch_id) {
   std::string batch_string{""};
   if (batch_id >= 0) {
@@ -169,26 +198,26 @@ void singleCheckErrors(int64_t info, const char* name, int64_t batch_id) {
   } else if (info > 0) {
     if (strstr(name, "inv")) {
       // inv, inverse, cholesky_inverse, etc.
-      TORCH_CHECK(false, name, batch_string,
+      TORCH_CHECK_LINALG(false, name, batch_string,
           ": The diagonal element ", info, " is zero, the inversion could not be completed because the input matrix is singular.");
     } else if (strstr(name, "solve")) {
       // solve, linalg_solve, cholesky_solve, etc.
-      TORCH_CHECK(false, name, batch_string,
+      TORCH_CHECK_LINALG(false, name, batch_string,
           ": The diagonal element ", info, " is zero, the solve could not be completed because the input matrix is singular.");
     } else if (strstr(name, "cholesky")) {
-      TORCH_CHECK(false, name, batch_string,
+      TORCH_CHECK_LINALG(false, name, batch_string,
           ": The factorization could not be completed because the input is not positive-definite (the leading minor of order ", info, " is not positive-definite).");
     } else if (strstr(name, "svd")) {
-      TORCH_CHECK(false, name, batch_string,
+      TORCH_CHECK_LINALG(false, name, batch_string,
           ": The algorithm failed to converge because the input matrix is ill-conditioned or has too many repeated singular values (error code: ", info, ").");
     } else if (strstr(name, "eig") || strstr(name, "syevd")) {
-      TORCH_CHECK(false, name, batch_string,
+      TORCH_CHECK_LINALG(false, name, batch_string,
           ": The algorithm failed to converge because the input matrix is ill-conditioned or has too many repeated eigenvalues (error code: ", info, ").");
     } else if (strstr(name, "lstsq")) {
-      TORCH_CHECK(false, name, batch_string,
+      TORCH_CHECK_LINALG(false, name, batch_string,
           ": The least squares solution could not be computed because the input matrix does not have full rank (error code: ", info, ").");
     } else if (strstr(name, "lu_factor")) {
-      TORCH_CHECK(false, name, batch_string,
+      TORCH_CHECK_LINALG(false, name, batch_string,
           ": U[", info, ",", info, "] is zero and using it on lu_solve would result in a division by zero. "
           "If you still want to perform the factorization, consider calling linalg.lu(A, pivot) or "
           "linalg.lu_factor_ex(A, pivot)");
@@ -197,7 +226,6 @@ void singleCheckErrors(int64_t info, const char* name, int64_t batch_id) {
     }
   }
 }
-
 
 /*
  * Given a vector of int64_t infos, obtained after a batch operations,
