@@ -3,6 +3,7 @@
 #include <ATen/core/TensorBody.h>
 #include <ATen/core/blob.h>
 #include <ATen/core/ivalue_to.h>
+#include <ATen/core/jit_type_base.h>
 #include <c10/util/C++17.h>
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/intrusive_ptr.h>
@@ -27,7 +28,6 @@ struct IValue;
 struct ClassType;
 struct Type;
 class RRefInterface;
-using TypePtr = std::shared_ptr<Type>;
 
 struct ClassType;
 using ClassTypePtr = std::shared_ptr<ClassType>;
@@ -288,12 +288,23 @@ private:
     // based on tensor impl. //TODO: find a way to use mkldnn storage
     if (a.is_mkldnn() || b.is_mkldnn()) {
       return a.unsafeGetTensorImpl() == b.unsafeGetTensorImpl();
-    } else if (a.is_sparse() || b.is_sparse()) {
-      if (a.is_sparse()) {
-        return isAliasOf(a._values(), b) || isAliasOf(a._indices(), b);
-      } else {
-        return isAliasOf(b._values(), a) || isAliasOf(b._indices(), a);
-      }
+    }
+
+    if (a.is_sparse()) {
+      return isAliasOf(a._values(), b) || isAliasOf(a._indices(), b);
+    }
+    if (b.is_sparse()) {
+      return isAliasOf(a, b._values()) || isAliasOf(a, b._indices());
+    }
+    if (a.is_sparse_csr()) {
+      return isAliasOf(a.values(), b) ||
+             isAliasOf(a.crow_indices(), b) ||
+             isAliasOf(a.col_indices(), b);
+    }
+    if (b.is_sparse_csr()) {
+      return isAliasOf(a, b.values()) ||
+             isAliasOf(a, b.crow_indices()) ||
+             isAliasOf(a, b.col_indices());
     }
 
     return a.is_alias_of(b);
@@ -892,6 +903,11 @@ public:
         // so this will detect overlap of sparse tensors that share a values
         // tensor, but not sparse tensors that share an indices tensor.
         return hashTensor(ten._values());
+      } else if (ten.is_sparse_csr()) {
+        // COO sparse tensors have a "values" tensor and an "indices" tensor
+        // so this will detect overlap of sparse tensors that share a values
+        // tensor, but not sparse tensors that share an indices tensor.
+        return hashTensor(ten.values());
       } else {
         return reinterpret_cast<size_t>(
             ten.storage().unsafeGetStorageImpl());
@@ -1162,10 +1178,10 @@ struct TORCH_API WeakIValue final {
 struct TORCH_API StrongTypePtr {
   StrongTypePtr(
       std::shared_ptr<torch::jit::CompilationUnit> cu,
-      std::shared_ptr<Type> type);
+      TypePtr type);
 
   std::shared_ptr<torch::jit::CompilationUnit> cu_;
-  std::shared_ptr<Type> type_;
+  TypePtr type_;
 };
 
 // [Constant Object Weak CompilationUnit Reference]
@@ -1176,10 +1192,10 @@ struct TORCH_API StrongTypePtr {
 struct TORCH_API WeakTypePtr {
   WeakTypePtr(
       std::weak_ptr<torch::jit::CompilationUnit> cu,
-      std::shared_ptr<Type> type);
+      TypePtr type);
 
   std::weak_ptr<torch::jit::CompilationUnit> cu_;
-  std::shared_ptr<Type> type_;
+  TypePtr type_;
 };
 
 // internal build errors with std::variant :/
