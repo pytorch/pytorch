@@ -78,7 +78,6 @@ cc_library(
     local_defines = ["C10_BUILD_MAIN_LIB"],
     deps = [
         ":headers",
-        "@fmt",
         "//c10/util:base",
     ] + if_cuda(
         ["@cuda"],
