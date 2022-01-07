@@ -1524,6 +1524,33 @@ TEST_F(Kernel, RunFast) {
 #endif
 }
 
+TEST_F(Kernel, RunWithAllocatedOutputs) {
+#ifdef TORCH_ENABLE_LLVM
+  const auto graph_string = R"IR(
+      graph(%0 : Float(5, 3, strides=[3, 1], device=cpu),
+            %1 : Float(5, 3, strides=[1, 5], device=cpu)):
+        %2 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %1)
+        %3 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %2)
+        return (%3))IR";
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  auto a = at::rand({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto b =
+      at::rand({3, 5}, TensorOptions(kCPU).dtype(at::kFloat)).transpose(0, 1);
+  auto o = at::zeros({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto ref = a * (a * b);
+  TensorExprKernel k(graph);
+
+  std::vector<at::Tensor> args = {o, a, b};
+  std::vector<IValue> stack = fmap<IValue>(args);
+  k.runWithAllocatedOutputs(stack);
+  for (size_t i = 0; i < 5 * 3; i++) {
+    CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
+  }
+#endif
+}
+
 TEST_F(Kernel, CodegenInspection) {
 #ifdef TORCH_ENABLE_LLVM
   const auto graph_string = R"IR(
@@ -1704,6 +1731,26 @@ TEST_F(Kernel, Strided1dWithinBounds) {
   for (size_t i = 0; i < 3; ++i) {
     CHECK_EQ(((float*)output.data_ptr())[i], ((float*)expect.data_ptr())[i]);
   }
+}
+
+TEST_F(Kernel, InputAsOutput) {
+  const auto graph_string = R"IR(
+      graph(%x : Float(5, 3, strides=[3, 1], device=cpu),
+            %y : Float(5, 3, strides=[1, 5], device=cpu)):
+        return (%x, %y))IR";
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  auto x = at::rand({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto y =
+      at::rand({3, 5}, TensorOptions(kCPU).dtype(at::kFloat)).transpose(0, 1);
+  TensorExprKernel k(graph);
+  std::vector<at::Tensor> inputs = {x, y};
+
+  std::vector<IValue> stack = fmap<IValue>(inputs);
+  k.run(stack);
+  CHECK(at::allclose(x, stack[0].toTensor()));
+  CHECK(at::allclose(y, stack[1].toTensor()));
 }
 
 } // namespace jit
