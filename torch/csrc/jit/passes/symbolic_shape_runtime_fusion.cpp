@@ -1,4 +1,5 @@
 #include <ATen/core/functional.h>
+#include <ATen/core/interned_strings.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
@@ -67,7 +68,8 @@ std::map<int64_t, Value*> InsertSymbolicShapesCompute(
 
 void insertDynamicShapesGuard(
     const ShapeComputeGraphMapping& shape_mapping,
-    Node* guarded_node);
+    Node* guarded_node,
+    bool add_composed_op);
 
 // Generalize Complete Shapes inputs to Symbolic Shapes.
 // Dimensions of value 1 will be preserved, otherwise
@@ -104,8 +106,57 @@ bool TryGeneralizeInputDimensionsToSymbolicShapes(
   return true;
 }
 
-bool GenerateGuard(Node* tensorexpr_graph_node) {
+void moveConstantTensorsOutOfSubgraph(
+    Node* tensorexpr_graph_node,
+    std::shared_ptr<Graph> tensorexpr_graph) {
+  auto parent = tensorexpr_graph_node->owningGraph();
+
+  auto env = [&](Value* v) {
+    TORCH_INTERNAL_ASSERT(
+        false,
+        "this should never happen since constant nodes do not have any inputs",
+        v->debugName());
+    return v;
+  };
+
+  WithInsertPoint wip(tensorexpr_graph_node);
+  std::vector<Node*> to_destroy;
+  for (auto node : tensorexpr_graph->nodes()) {
+    if (node->kind() == prim::Constant) {
+      if (!node->output()->type()->cast<TensorType>()) {
+        continue;
+      }
+
+      // copy the constant and insert that copy into the parent graph.
+      auto copy = parent->createClone(node, env);
+      parent->insertNode(copy);
+
+      // add a new input to the te subgraph and replace the uses of the
+      // constant with this input.
+      auto new_const = tensorexpr_graph->addInput();
+      new_const->setType(node->output()->type());
+      node->output()->replaceAllUsesWith(new_const);
+
+      // add the copy as input to the te node
+      tensorexpr_graph_node->addInput(copy->output());
+
+      to_destroy.push_back(node);
+    }
+  }
+
+  for (auto n : to_destroy) {
+    n->destroy();
+  }
+}
+
+bool GenerateGuard(Node* tensorexpr_graph_node, bool add_composed_op) {
   auto tensorexpr_graph = SubgraphUtils::getSubgraph(tensorexpr_graph_node);
+
+  // Move constant tensors from the subgraph to the outer scope.
+  // This is necessary because symbolic shape analysis does not handle the
+  // case of broadcast(constant, symbolic_shape) well and that results in poor
+  // performance.
+  moveConstantTensorsOutOfSubgraph(tensorexpr_graph_node, tensorexpr_graph);
 
   // Generalize Inputs
   if (!TryGeneralizeInputDimensionsToSymbolicShapes(tensorexpr_graph)) {
@@ -123,14 +174,16 @@ bool GenerateGuard(Node* tensorexpr_graph_node) {
   }
 
   // Insert Guard
-  insertDynamicShapesGuard(*maybe_shape_compute_mapping, tensorexpr_graph_node);
+  insertDynamicShapesGuard(
+      *maybe_shape_compute_mapping, tensorexpr_graph_node, add_composed_op);
   return true;
 }
 
 // TODO: share more logic with tensorexpr_fuser ?
 void insertDynamicShapesGuard(
     const ShapeComputeGraphMapping& shape_mapping,
-    Node* guarded_node) {
+    Node* guarded_node,
+    bool add_composed_op) {
   GRAPH_DEBUG(
       "Inserting a prim::TensorExprDynamicGuard guard for a node",
       *guarded_node);
@@ -217,6 +270,13 @@ void insertDynamicShapesGuard(
     subgraph->addInput(ss.str())->setType(IntType::get());
   }
   guarded_node->is_(attr::symbolic_shape_inputs, symbolic_shape_inputs);
+
+  if (add_composed_op) {
+    // Create a TensorExprDynamicGroup node
+    auto te_dyn_group = SubgraphUtils::createSingletonSubgraph(
+        typecheck_node, prim::TensorExprDynamicGroup);
+    SubgraphUtils::mergeNodeIntoSubgraph(versioning_if, te_dyn_group);
+  }
 }
 
 // On each invocation of this guard, we need to check all of the static
@@ -376,5 +436,32 @@ RegisterOperators reg_guard({
         },
         aliasAnalysisFromSchema()),
 });
+
+void runTensorExprDynamicGroup(std::shared_ptr<Graph> graph, Stack& stack) {
+  Code code(graph, "");
+  InterpreterState interpreter{code};
+  interpreter.run(stack);
+}
+
+Operation createTensorExprDynamicGroup(const Node* node) {
+  auto graph = node->g(attr::Subgraph);
+  // This implementation creates a Code object and InterpreterState on every
+  // call to TensorExprDynamicGroup, which affects performance. Ideally, we
+  // should be reusing Code and InterpreterState across calls to this op.
+  // But that is resulting in a "No frames found" error.
+  // TODO: Improve the performance of this by figuring out a better approach.
+  return [graph](Stack& stack) {
+    runTensorExprDynamicGroup(graph, stack);
+    return 0;
+  };
+}
+
+RegisterOperators TensorExprDynamicOp({
+    torch::jit::Operator(
+        prim::TensorExprDynamicGroup,
+        createTensorExprDynamicGroup,
+        AliasAnalysisKind::INTERNAL_SPECIAL_CASE),
+});
+
 } // namespace jit
 } // namespace torch
