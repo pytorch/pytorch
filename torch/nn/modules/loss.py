@@ -879,7 +879,7 @@ class SmoothL1Loss(_Loss):
         also known as delta for Huber). This leads to the following differences:
 
         * As beta -> 0, Smooth L1 loss converges to :class:`L1Loss`, while :class:`HuberLoss`
-          converges to a constant 0 loss.
+          converges to a constant 0 loss. When beta is 0, Smooth L1 loss is equivalent to L1 loss.
         * As beta -> :math:`+\infty`, Smooth L1 loss converges to a constant 0 loss, while
           :class:`HuberLoss` converges to :class:`MSELoss`.
         * For Smooth L1 loss, as beta varies, the L1 segment of the loss has a constant slope of 1.
