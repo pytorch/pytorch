@@ -1733,5 +1733,25 @@ TEST_F(Kernel, Strided1dWithinBounds) {
   }
 }
 
+TEST_F(Kernel, InputAsOutput) {
+  const auto graph_string = R"IR(
+      graph(%x : Float(5, 3, strides=[3, 1], device=cpu),
+            %y : Float(5, 3, strides=[1, 5], device=cpu)):
+        return (%x, %y))IR";
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  auto x = at::rand({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto y =
+      at::rand({3, 5}, TensorOptions(kCPU).dtype(at::kFloat)).transpose(0, 1);
+  TensorExprKernel k(graph);
+  std::vector<at::Tensor> inputs = {x, y};
+
+  std::vector<IValue> stack = fmap<IValue>(inputs);
+  k.run(stack);
+  CHECK(at::allclose(x, stack[0].toTensor()));
+  CHECK(at::allclose(y, stack[1].toTensor()));
+}
+
 } // namespace jit
 } // namespace torch

@@ -11,6 +11,9 @@
 namespace c10 {
 
 static_assert(
+    sizeof(SingletonOrSharedTypePtr<void>) == sizeof(std::shared_ptr<void>) && sizeof(std::shared_ptr<void>) == 2 * sizeof(void*),
+    "std::shared_ptr has an unexpected representation on this platform!");
+static_assert(
     std::is_same<decltype(getTypePtr<std::tuple<int64_t, int64_t>>()), const TupleTypePtr&>::value,
     "getTypePtr<std::tuple<int64_t, int64_t>> not returning const ref!");
 
@@ -157,7 +160,7 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
   return out;
 }
 
-const AnyTypePtr& AnyType::get() {
+AnyTypePtr AnyType::get() {
   static AnyTypePtr value(new AnyType());
   return value;
 }
@@ -168,63 +171,63 @@ const TensorTypePtr& TensorType::get() {
   return value;
 }
 
-const NumberTypePtr& NumberType::get() {
+NumberTypePtr NumberType::get() {
   static NumberTypePtr value(new NumberType());
   return value;
 }
-const IntTypePtr& IntType::get() {
+IntTypePtr IntType::get() {
   static IntTypePtr value(new IntType());
   return value;
 }
-const FloatTypePtr& FloatType::get() {
+FloatTypePtr FloatType::get() {
   static FloatTypePtr value(new FloatType());
   return value;
 }
-const ComplexTypePtr& ComplexType::get() {
+ComplexTypePtr ComplexType::get() {
   static ComplexTypePtr value(new ComplexType());
   return value;
 }
-const BoolTypePtr& BoolType::get() {
+BoolTypePtr BoolType::get() {
   static BoolTypePtr value(new BoolType());
   return value;
 }
-const StorageTypePtr& StorageType::get() {
+StorageTypePtr StorageType::get() {
   static StorageTypePtr value(new StorageType());
   return value;
 }
-const NoneTypePtr& NoneType::get() {
+NoneTypePtr NoneType::get() {
   static NoneTypePtr value(new NoneType());
   return value;
 }
-const GeneratorTypePtr& GeneratorType::get() {
+GeneratorTypePtr GeneratorType::get() {
   static GeneratorTypePtr value(new GeneratorType());
   return value;
 }
-const QuantizerTypePtr& QuantizerType::get() {
+QuantizerTypePtr QuantizerType::get() {
   static QuantizerTypePtr value(new QuantizerType());
   return value;
 }
-const QSchemeTypePtr& QSchemeType::get() {
+QSchemeTypePtr QSchemeType::get() {
   static QSchemeTypePtr value(new QSchemeType());
   return value;
 }
-const StringTypePtr& StringType::get() {
+StringTypePtr StringType::get() {
   static StringTypePtr value(new StringType());
   return value;
 }
-const DeviceObjTypePtr& DeviceObjType::get() {
+DeviceObjTypePtr DeviceObjType::get() {
   static DeviceObjTypePtr value(new DeviceObjType());
   return value;
 }
-const StreamObjTypePtr& StreamObjType::get() {
+StreamObjTypePtr StreamObjType::get() {
   static StreamObjTypePtr value(new StreamObjType());
   return value;
 }
-const ScalarTypeTypePtr& ScalarTypeType::get() {
+ScalarTypeTypePtr ScalarTypeType::get() {
 static ScalarTypeTypePtr value(new ScalarTypeType());
 return value;
 }
-const LayoutTypePtr& LayoutType::get() {
+LayoutTypePtr LayoutType::get() {
 static LayoutTypePtr value(new LayoutType());
 return value;
 }
@@ -232,11 +235,11 @@ OptionalTypePtr OptionalType::ofTensor() {
   static auto value = OptionalType::create(TensorType::get());
   return value;
 }
-const PyObjectTypePtr& PyObjectType::get() {
+PyObjectTypePtr PyObjectType::get() {
   static PyObjectTypePtr value(new PyObjectType());
   return value;
 }
-const CapsuleTypePtr& CapsuleType::get() {
+CapsuleTypePtr CapsuleType::get() {
   static CapsuleTypePtr value(new CapsuleType());
   return value;
 }
@@ -269,22 +272,22 @@ ListTypePtr ListType::ofStrings() {
   return value;
 }
 
-const AnyListTypePtr& AnyListType::get() {
+AnyListTypePtr AnyListType::get() {
   static AnyListTypePtr value(new AnyListType());
   return value;
 }
 
-const AnyTupleTypePtr& AnyTupleType::get() {
+AnyTupleTypePtr AnyTupleType::get() {
   static AnyTupleTypePtr value(new AnyTupleType());
   return value;
 }
 
-const AnyClassTypePtr& AnyClassType::get() {
+AnyClassTypePtr AnyClassType::get() {
   static AnyClassTypePtr value(new AnyClassType());
   return value;
 }
 
-const AnyEnumTypePtr& AnyEnumType::get() {
+AnyEnumTypePtr AnyEnumType::get() {
   static AnyEnumTypePtr value(new AnyEnumType());
   return value;
 }
@@ -554,9 +557,13 @@ TORCH_API TypePtr tryEvalTypeVariables(const TypePtr& type, std::unordered_map<s
     }
     return it->second;
   } else {
+    at::ArrayRef<TypePtr> contained = type->containedTypes();
+    if (contained.empty()) {
+      return type;
+    }
     std::vector<TypePtr> new_contained;
-    new_contained.reserve(type->containedTypes().size());
-    for (const TypePtr& t : type->containedTypes()) {
+    new_contained.reserve(contained.size());
+    for (const TypePtr& t : contained) {
       TypePtr r = tryEvalTypeVariables(t, type_env);
       if (!r) {
         return nullptr;
@@ -951,7 +958,7 @@ void standardizeVectorForUnion(std::vector<TypePtr>* to_flatten) {
   *to_flatten = to_fill;
 }
 
-UnionType::UnionType(std::vector<TypePtr> reference, TypeKind kind) : Type(kind) {
+UnionType::UnionType(std::vector<TypePtr> reference, TypeKind kind) : SharedType(kind) {
   TORCH_INTERNAL_ASSERT(!reference.empty(), "Cannot create an empty Union");
 
   standardizeVectorForUnion(reference, &types_);
@@ -1531,7 +1538,7 @@ TensorType::TensorType(
     const VaryingShape<Stride>& strides,
     c10::optional<bool> requires_grad,
     c10::optional<bool> undefined)
-    : Type(TypeKind::TensorType),
+    : SharedType(TypeKind::TensorType),
       scalar_type_(scalar_type),
       device_(device),
       sizes_(sizes),
