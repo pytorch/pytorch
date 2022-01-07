@@ -655,6 +655,10 @@ class BackendIndex:
     # Mainly important for structured kernels, this determines which variant in the operator group is used to implement the others.
     # All in-tree ops use out kernels, while XLA uses functional kernels.
     use_out_as_primary: bool
+    # Whether the backend requires a device guard, and device checks.
+    # For in-tree backends, this is currently just CUDA/HIP
+    # For out-of-tree backends, this is currently just Intel XPU
+    device_guard: bool
     # Whether the backend is in-tree (CPU/CUDA) or out-of-tree (XLA)
     external: bool
     # Other backend-specific information that is on a per-operator basis
