@@ -284,6 +284,9 @@ void _apply_sparse_csr_lu_solve(
   int n = crow_indices.numel() - 1; 
   int nnzA = input._nnz();
   value_t tol = 0.0;
+  // default reordering of symrcm
+  // Should reorder be an argument provided for users to choose between the following?
+  // symrcm, symamd, csrmetisnd (1, 2, 3)
   int reorder = 1;
   scalar_t *x = result.data_ptr<scalar_t>();
 
@@ -303,32 +306,6 @@ void linalg_solve_sparse_csr_kernel(
       _apply_sparse_csr_lu_solve<scalar_t, double>(input, other, result, singularity);
     }
   });
-}
-
-Tensor& linalg_solve_sparse_csr_out(const Tensor& input, const Tensor& other, Tensor& result) {
-  TORCH_INTERNAL_ASSERT(input.is_sparse_csr());
-
-  other.expect_contiguous();
-  result.expect_contiguous();
-
-  // the "other" Tensor needs to be a vector
-  TORCH_CHECK(
-    other.ndimension() == 1,
-    "other tensor must be a vector (1-dimensional), but got tensor with dimension: ",
-    other.ndimension());
-
-  at::native::resize_output(result, other.sizes());
-
-  TORCH_CHECK(
-    other.scalar_type() == result.scalar_type(),
-    "other (got: ", result.scalar_type(), ") and out (got: ", result.scalar_type(), ") tensors must have same dtype.");
-
-  int singularity = -2;
-  linalg_solve_sparse_csr_kernel(input, other, result, singularity);
-
-  TORCH_CHECK(singularity == -1, "Expected singularity to be -1 but got: ", singularity,
-    ". There might be a bug in the implementation.");
-  return result;
 }
 
 } // namespace native

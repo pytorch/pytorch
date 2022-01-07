@@ -585,5 +585,34 @@ TORCH_IMPL_FUNC(_convert_indices_from_csr_to_coo_structured_cpu) (
   }
 }
 
+Tensor& linalg_solve_sparse_csr_out(const Tensor& input, const Tensor& other, Tensor& result) {
+  #ifdef CUDART_VERSION
+    TORCH_INTERNAL_ASSERT(input.is_sparse_csr());
+
+    other.expect_contiguous();
+    result.expect_contiguous();
+
+    // the "other" Tensor needs to be a vector
+    TORCH_CHECK(
+      other.ndimension() == 1,
+      "other tensor must be a vector (1-dimensional), but got tensor with dimension: ",
+      other.ndimension());
+
+    at::native::resize_output(result, other.sizes());
+
+    TORCH_CHECK(
+      other.scalar_type() == result.scalar_type(),
+      "other (got: ", result.scalar_type(), ") and out (got: ", result.scalar_type(), ") tensors must have same dtype.");
+
+    int singularity = -1;
+    linalg_solve_sparse_csr_kernel(input, other, result, singularity);
+
+    TORCH_CHECK(singularity == -1, "Probably got a singular matrix as an input. Please check the input again.");
+    return result;
+  #else
+    TORCH_CHECK(false, "PyTorch was not built with CUDA support. Please rebuild again with USE_CUDA=1.");
+  #endif // CUDART_VERSION
+}
+
 } // namespace native
 } // namespace at
