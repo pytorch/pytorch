@@ -31,7 +31,7 @@ def define_targets(rules):
         name = "complex_math_test_common",
         hdrs = ["util/complex_math_test_common.h"],
         deps = [
-            "@com_google_googletest//:gtest_main",
+            "@com_google_googletest//:gtest",
             "//c10/util:base",
         ],
         testonly = True,
@@ -41,7 +41,7 @@ def define_targets(rules):
         name = "complex_test_common",
         hdrs = ["util/complex_test_common.h"],
         deps = [
-            "@com_google_googletest//:gtest_main",
+            "@com_google_googletest//:gtest",
             "//c10/macros",
             "//c10/util:base",
         ],
