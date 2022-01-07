@@ -574,7 +574,8 @@ else
   install_torchvision
   install_monkeytype
 
-  export TORCH_UCC_LIBRARY_PATH=$(install_torch_ucc)
+  TORCH_UCC_LIBRARY_PATH=$(install_torch_ucc)
+  export TORCH_UCC_LIBRARY_PATH
 
   test_python
   test_aten
