@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 
-from torch._expanded_weights.conv_utils import conv_backward
+from .conv_utils import conv_backward
 from .expanded_weights_impl import implements_per_sample_grads
 from .expanded_weights_utils import forward_helper
 

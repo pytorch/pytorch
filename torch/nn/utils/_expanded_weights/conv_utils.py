@@ -3,7 +3,7 @@ import torch.nn.functional as F
 
 import numpy as np
 
-from torch._expanded_weights.expanded_weights_utils import \
+from .expanded_weights_utils import \
     grad_if_exists, grad_if_exists_for_input, unpack_expanded_weight_or_tensor
 
 THRESHOLD = 257
@@ -70,7 +70,7 @@ def conv_unfold_weight_grad_sample(input, grad_output, weight, kernel_size, stri
                          dilation=(1, dilation[0]),
                          padding=(0, padding[0]),
                          stride=(1, stride[0])),
-        lambda: F.unfold(input, kernel_size, dilation=dilation, padding=padding, strides=stride),
+        lambda: F.unfold(input, kernel_size, dilation=dilation, padding=padding, stride=stride),
         lambda: unfold3d(input, kernel_size, dilation, padding, stride)
     )
 
