@@ -5927,26 +5927,28 @@ for shape in [(1,), ()]:
     def test_save_on_cpu_and_checkpoint(self):
         a = torch.randn(2, 2, requires_grad=True)
 
-        b = a.exp().exp().exp()
+        b = a.pow(2).pow(2).pow(2).pow(2)
         b.sum().backward()
-        b_grad = a.grad
+        b_grad = a.grad.clone()
+        a.grad.zero_()
 
         with torch.autograd.graph.save_on_cpu():
-            h = a.exp()
-            h = checkpoint(torch.exp, h, use_reentrant=False).sum()
-            c = h.exp()
+            h = a.pow(2)
+            h = checkpoint(lambda x: x.pow(2).pow(2), h, use_reentrant=False)
+            c = h.pow(2)
         c.sum().backward()
-        c_grad = a.grad
+        c_grad = a.grad.clone()
+        a.grad.zero_()
 
         def f(a):
-            h = a.exp()
+            h = a.pow(2)
             with torch.autograd.graph.save_on_cpu():
-                h = torch.exp(h)
-            return h.exp()
+                h = h.pow(2).pow(2)
+            return h.pow(2)
 
         d = checkpoint(f, a, use_reentrant=False)
         d.sum().backward()
-        d_grad = a.grad
+        d_grad = a.grad.clone()
 
         self.assertEqual(b_grad, c_grad)
         self.assertEqual(b_grad, d_grad)
