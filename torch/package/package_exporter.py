@@ -510,7 +510,7 @@ class PackageExporter:
                                 f",so it cannot be interned. Please mock or extern {module_obj.__name__}.")
         if not hasattr(module_obj, "__path__"):
             return False
-        elif isinstance(module_obj.__path__, list):
+        elif isinstance(module_obj.__path__, list):  # type: ignore [attr-defined]
             return True
         try:
             for i in module_obj.__name__:
