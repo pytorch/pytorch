@@ -945,7 +945,7 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(IValue::HashAliasedI
 
 StrongTypePtr::StrongTypePtr(
     std::shared_ptr<torch::jit::CompilationUnit> cu,
-    std::shared_ptr<Type> type) {
+    TypePtr type) {
   cu_ = std::move(cu);
   type_ = type;
   TORCH_INTERNAL_ASSERT(type_);
