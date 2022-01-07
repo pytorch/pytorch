@@ -504,7 +504,7 @@ class PackageExporter:
         module_obj: types.ModuleType
     ):
         """Checks if module_obj is a package and throws an error, if module_obj is an
-            invalid package.
+           invalid package.
         """
         error = BadPackageError(f"{module_obj.__name__} is an improperly formed package "
                                 f",so it cannot be interned. Please mock or extern {module_obj.__name__}."
@@ -518,7 +518,7 @@ class PackageExporter:
             # check for regular packages have a list in their __path__ attribute
             return True
         try:
-            # check for namespace packages which have a custom iterable in their 
+            # check for namespace packages which have a custom iterable in their
             # __path__ attribute and do not have a value in the __file__ attribute.
             for i in module_obj.__name__:
                 break
