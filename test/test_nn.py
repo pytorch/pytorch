@@ -39,7 +39,7 @@ from torch.testing._internal.common_utils import freeze_rng_state, run_tests, Te
     skipIfRocmVersionLessThan, skipIfNotMiopenSuggestNHWC, TEST_NUMPY, TEST_SCIPY, TEST_WITH_ROCM, download_file, \
     get_function_arglist, load_tests, ALL_TENSORTYPES, \
     ALL_TENSORTYPES2, suppress_warnings, TemporaryFileName, TEST_WITH_UBSAN, IS_PPC, \
-    parametrize as parametrize_test, subtest
+    parametrize as parametrize_test, subtest, instantiate_parametrized_tests
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
     module_tests, criterion_tests, loss_reference_fns, \
@@ -895,8 +895,8 @@ class TestNN(NNTestCase):
         w = torch.randn(6, 1, 5, 5)
 
         with self.assertRaisesRegex(RuntimeError,
-                                    r'Expected 4-dimensional input for 4-dimensional weight \[6, 1, 5, 5\],' +
-                                    r' but got 5-dimensional input of size \[1, 10, 1, 28, 28\] instead'):
+                                    r'Expected 3D \(unbatched\) or 4D \(batched\) input to conv2d, but got ' +
+                                    r'input of size: \[1, 10, 1, 28, 28\]'):
 
             F.conv2d(x, w)
 
@@ -5073,8 +5073,10 @@ class TestNN(NNTestCase):
         self.assertRaises(AssertionError, lambda: F.pad(inputs, (1,)))
 
     @unittest.skipIf(not TEST_NUMPY, "numpy not found")
-    def test_multihead_attention(self):
-        def _scaled_dot_attn_ref(Q, K, V, dims, unseen_mask=None, key_padding_mask=None):
+    @parametrize_test("average_attn_weights", [True, False])
+    def test_multihead_attention(self, average_attn_weights):
+        def _scaled_dot_attn_ref(Q, K, V, dims, unseen_mask=None, key_padding_mask=None,
+                                 average_attn_weights=average_attn_weights):
             """ Numpy-based reference implementation of scaled dot attention
             for testing"""
 
@@ -5097,7 +5099,8 @@ class TestNN(NNTestCase):
 
             reference = _softmax(QKT)
             ref_attn_weight = reference
-            ref_attn_weight = np.sum(ref_attn_weight, axis=1) / b2
+            if average_attn_weights:
+                ref_attn_weight = np.sum(ref_attn_weight, axis=1) / b2
             reference = _batchmatmul(reference, V)
             return reference, ref_attn_weight
 
@@ -5158,7 +5161,8 @@ class TestNN(NNTestCase):
             return (src_indices < src_lengths).int().detach()
 
         def _multihead_attn_test_helper(add_key_padding_mask=False, add_bias_kv=False, add_zero_attn=False,
-                                        saved_kv=False, same_embed_dim=False, byte_mask=False):
+                                        saved_kv=False, same_embed_dim=False, byte_mask=False,
+                                        average_attn_weights=average_attn_weights):
             for _ in range(100):
                 batch_sz, seq_len = [random.randint(2, 10) for r in range(2)]
                 d_head = random.randint(3, 10)
@@ -5229,7 +5233,8 @@ class TestNN(NNTestCase):
                         multihead_attn_module.add_zero_attn, multihead_attn_module.dropout,
                         multihead_attn_module.out_proj.weight, multihead_attn_module.out_proj.bias,
                         multihead_attn_module.training, key_padding_mask_tensor, True, attn_mask_tensor,
-                        static_k=saved_k_tensor, static_v=saved_v_tensor)
+                        static_k=saved_k_tensor, static_v=saved_v_tensor,
+                        average_attn_weights=average_attn_weights)
                 else:
                     result, result_weight = torch.nn.functional.multi_head_attention_forward(
                         _Q, _K, _V,
@@ -5241,7 +5246,8 @@ class TestNN(NNTestCase):
                         multihead_attn_module.training, key_padding_mask_tensor, True, attn_mask_tensor,
                         True, multihead_attn_module.q_proj_weight,
                         multihead_attn_module.k_proj_weight, multihead_attn_module.v_proj_weight,
-                        static_k=saved_k_tensor, static_v=saved_v_tensor)
+                        static_k=saved_k_tensor, static_v=saved_v_tensor,
+                        average_attn_weights=average_attn_weights)
 
                 result = result.squeeze(0).detach().numpy()
 
@@ -6172,9 +6178,9 @@ class TestNN(NNTestCase):
                        nn.Conv2d(3, 8, 3).to(dtype), nn.ConvTranspose2d(3, 8, 3).to(dtype),
                        nn.Conv3d(3, 8, 3).to(dtype), nn.ConvTranspose3d(3, 8, 3).to(dtype)]
 
-            invalid_input_dims = [(2, 4), (2, 4),
-                                  (3, 5), (3, 5),
-                                  (4, 6), (4, 6)]
+            invalid_input_dims = [(1, 4), (1, 4),
+                                  (2, 5), (2, 5),
+                                  (3, 6), (3, 6)]
 
             for invalid_dims, module in zip(invalid_input_dims, modules):
                 for dims in invalid_dims:
@@ -6510,6 +6516,15 @@ class TestNN(NNTestCase):
                      nn.RNNCell(*cell_shared_param, nonlinearity="tanh"),
                      nn.GRUCell(*cell_shared_param)):
             self.assertRaises(Exception, lambda: cell(input, hx))
+
+    def test_RNN_cell_forward_zero_hidden_size(self):
+        input = torch.randn(3, 10)
+        hx = torch.randn(3, 0)
+        cell_shared_param = (10, 0)
+        for cell in (nn.RNNCell(*cell_shared_param, nonlinearity="relu"),
+                     nn.RNNCell(*cell_shared_param, nonlinearity="tanh"),
+                     nn.GRUCell(*cell_shared_param)):
+            self.assertEqual(cell(input, hx).shape, torch.Size([3, 0]))
 
     def _test_loss_equal_input_target_shape(self, cast):
         # Tests losses whose inputs should have the same size.
@@ -13393,7 +13408,7 @@ class TestNNDeviceType(NNTestCase):
         gx_expect, gy_expect = x.grad, y.grad
         x.grad, y.grad = None, None
 
-        z = F.conv1d(x, y, padding='same')
+        z = F.conv2d(x, y, padding='same')
         z.sum().backward()
         self.assertEqual(gx_expect, x.grad)
         self.assertEqual(gy_expect, y.grad)
@@ -18379,7 +18394,7 @@ class TestNNDeviceType(NNTestCase):
         output_mask = [True, True, True]
         grad_grad_output, grad_input, grad_weight = torch.ops.aten._convolution_double_backward(
             ggI, ggW, ggB, gO, weight, input, stride, padding, dilation, transposed,
-            output_padding, groups, False, False, False, False, output_mask)
+            output_padding, groups, output_mask)
 
         # Make sure the correct shapes are computed.
         self.assertEqual(grad_grad_output.shape, gO.shape)
@@ -20114,6 +20129,7 @@ class TestStateDictHooks(TestCase):
 
 
 instantiate_device_type_tests(TestNNDeviceType, globals())
+instantiate_parametrized_tests(TestNN)
 
 if __name__ == '__main__':
     run_tests()
