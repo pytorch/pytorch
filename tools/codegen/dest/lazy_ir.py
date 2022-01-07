@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from tools.codegen.context import method_with_native_function
 from tools.codegen.model import (BackendIndex, NativeFunction,
                                  NativeFunctionsGroup)
-from tools.codegen.api.types import (BaseCType, OptionalCType, NamedCType, scalarT,
+from tools.codegen.api.types import (BaseCType, OptionalCType, NamedCType,
                                      VectorCType, kernel_signature)
 import tools.codegen.api.dispatcher as dispatcher
 from tools.codegen.api.lazy import LazyIrSchema, isValueType
