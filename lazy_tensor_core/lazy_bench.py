@@ -442,24 +442,29 @@ def lazy_compute_experiment(args, experiment, results, benchmark, lazy_benchmark
     return (speedup, pvalue)
 
 
+def check_results_impl(correct_result, lazy_result):
+    # recursive helper for dealing with nested data structures
+    if type(correct_result) is tuple:
+        for c, l in zip(correct_result, lazy_result):
+            return check_results_impl(c, l)
+
+    if type(correct_result) is dict:
+        print(correct_result.keys())
+        for k in correct_result:
+            assert k in lazy_result
+            return check_results_impl(correct_result[k], lazy_result[k])
+
+    assert type(correct_result) is torch.Tensor, f"Expect torch.Tensor but got {type(correct_result)}."
+    return torch.allclose(correct_result, lazy_result)
+
 def check_results(correct_result, lazy_result, device):
     # to_device has recursive logic and special handling for
     # extracting relevant tensors from huggingface data structures
     correct_result = to_device(correct_result, device)
     lazy_result = to_device(lazy_result, device)
 
-    # after to_device, tuples are still tuples, but their tensors are on an eager device
-    if type(correct_result) is tuple:
-        for c, l in zip(correct_result, lazy_result):
-            if not torch.allclose(c, l):
-                return False
-        return True
+    return check_results_impl(correct_result, lazy_result)
 
-    if type(correct_result) is dict:
-        raise NotImplementedError("TODO(whc) missing case for dict results here; not sure if it's actually needed")
-
-    assert type(correct_result) is torch.Tensor, f"Expect torch.Tensor but got {type(correct_result)}."
-    return torch.allclose(correct_result, lazy_result)
 
 def check_fuser(args):
     if args.fuser == 'noopt':
@@ -640,11 +645,11 @@ if __name__ == "__main__" :
                                 lazy_result = call_model_with(lazy_model, lazy_inputs)
                                 if not check_results(correct_result, lazy_result, device):
                                     print(f"INCORRECT: {name}")
-                                    save_error(name, "eval", "Incorrect results.", args.output_dir)
+                                    save_error(name, args.test, "Incorrect results.", args.output_dir)
                                     continue
                         except Exception as e:
                             print(f"ERROR: {name}: {e}")
-                            save_error(name, "eval", e, args.output_dir)
+                            save_error(name, args.test, e, args.output_dir)
                             continue
 
                         lazy_overhead_experiment(args, results, benchmark, lazy_benchmark)
@@ -653,7 +658,7 @@ if __name__ == "__main__" :
 
         except Exception as e:
             print(f"ERROR: {name}: {e}")
-            save_error(name, "eval", e, args.output_dir)
+            save_error(name, args.test, e, args.output_dir)
             exit(1)
         exit(0)
 
