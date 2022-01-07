@@ -6999,8 +6999,8 @@ def sample_inputs_where(op_info, device, dtype, requires_grad, **kwargs):
     for shape, mask_shape, other_shape_or_val, broadcasts_input in cases + cases_scalar:
         other = other_shape_or_val if isinstance(other_shape_or_val, float) else make_arg(other_shape_or_val)
         yield SampleInput(make_arg(shape),
-                            args=(make_bool_mask(mask_shape), other),
-                            broadcasts_input=broadcasts_input)
+                          args=(make_bool_mask(mask_shape), other),
+                          broadcasts_input=broadcasts_input)
 
 def sample_inputs_nonzero(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
