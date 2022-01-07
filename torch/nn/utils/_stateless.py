@@ -59,7 +59,11 @@ def _remove_swap(module, name: str) -> None:
 
 
 @contextlib.contextmanager
-def reparametrize_module(module: torch.nn.Module, parameters_and_buffers: Dict[str, Tensor], apply_parametrizations: bool) -> Iterator[None]:
+def reparametrize_module(
+    module: torch.nn.Module,
+    parameters_and_buffers: Dict[str, Tensor],
+    apply_parametrizations: bool
+) -> Iterator[None]:
     for name, tensor in parameters_and_buffers.items():
         _apply_func_submodules(
             _swap_parameters,
