@@ -193,15 +193,12 @@ Tensor sparse_csr_tensor(
     c10::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
-  std::array<int64_t, 2> size;
+  std::array<int64_t, 2> size = {0, 0};
   if (col_indices.numel() > 0) {
     AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "csr_construct_check", [&] {
       size[0] = crow_indices.numel() - 1;
       size[1] = col_indices.max().item<index_t>() + 1;
     });
-  } else {
-    size[0] = 0;
-    size[1] = 0;
   }
 
   at::native::_validate_sparse_csr_tensor_args(crow_indices, col_indices, values, size);

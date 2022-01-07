@@ -187,7 +187,7 @@ OptionalType::OptionalType(TypePtr contained)
   has_free_variables_ = contained_->hasFreeVariables();
 }
 
-UnionType::UnionType(std::vector<TypePtr> reference, TypeKind kind) : Type(kind) {
+UnionType::UnionType(std::vector<TypePtr> reference, TypeKind kind) : SharedType(kind) {
   TORCH_INTERNAL_ASSERT(!reference.empty(), "Cannot create an empty Union");
 
   standardizeVectorForUnion(reference, &types_);
