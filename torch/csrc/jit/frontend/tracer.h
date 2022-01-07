@@ -72,7 +72,7 @@ struct TORCH_API TracingState
   bool hasValue(const IValue& var) const;
 
   Node* createNode(c10::Symbol op_name, size_t num_outputs);
-  void insertNode(Node *node);
+  void insertNode(Node* node);
 
  private:
   using WeakIValue = at::WeakIValue;
