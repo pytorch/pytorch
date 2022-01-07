@@ -74,7 +74,7 @@ void insertDynamicShapesGuard(
     Node* guarded_node,
     bool add_composed_op,
     std::vector<std::vector<StrideInput>>& input_info,
-    std::vector<StrideInput>& output_info);
+    std::vector<StrideInput>& output_strides);
 
 std::string toString(StrideInput si) {
   switch (si) {
@@ -112,6 +112,10 @@ StrideInput strideInputFromString(const std::string& si) {
   }
 }
 
+
+// in the runtime guard, strides are serialized as one flat
+// vector. stride_inputs_offset indexes into that vector
+// where the strides of this tensor beegin
 inline StrideInput summarizeStrideDim(
     const c10::IntArrayRef sizes,
     const c10::IntArrayRef strides,
@@ -261,9 +265,9 @@ bool GenerateGuard(Node* tensorexpr_graph_node, bool add_composed_op) {
   moveConstantTensorsOutOfSubgraph(tensorexpr_graph_node, tensorexpr_graph);
 
   // Generalize Inputs
-  auto stride_info =
+  auto input_striding =
       TryGeneralizeInputDimensionsToSymbolicShapes(tensorexpr_graph);
-  if (!stride_info) {
+  if (!input_striding) {
     return false;
   }
 
@@ -295,7 +299,7 @@ bool GenerateGuard(Node* tensorexpr_graph_node, bool add_composed_op) {
       *maybe_shape_compute_mapping,
       tensorexpr_graph_node,
       add_composed_op,
-      *stride_info,
+      *input_striding,
       output_striding);
   return true;
 }
@@ -340,7 +344,7 @@ void insertDynamicShapesGuard(
     Node* guarded_node,
     bool add_composed_op,
     std::vector<std::vector<StrideInput>>& input_info,
-    std::vector<StrideInput>& output_info) {
+    std::vector<StrideInput>& output_strides) {
   GRAPH_DEBUG(
       "Inserting a prim::TensorExprDynamicGuard guard for a node",
       *guarded_node);
@@ -451,7 +455,7 @@ void insertDynamicShapesGuard(
   }
 
   std::vector<std::string> output_striding =
-      fmap(output_info, [&](StrideInput inp) { return toString(inp); });
+      fmap(output_strides, [&](StrideInput inp) { return toString(inp); });
   auto output_ival = IValue(input_striding);
   guarded_node->ival_(attr::striding_outputs_desc, output_ival);
 
@@ -709,8 +713,6 @@ void runTensorExprDynamicGroup(const Code& code, Stack& stack) {
   interpreter.run(stack);
 }
 
-// xxx: this is only created in Static Runtime, which is single-threaded
-// so, it is safe to create a single InterpreterState for the node
 Operation createTensorExprDynamicGroup(const Node* node) {
   auto graph = node->g(attr::Subgraph);
   Code code(graph, "");
@@ -719,11 +721,12 @@ Operation createTensorExprDynamicGroup(const Node* node) {
   // should be reusing Code and InterpreterState across calls to this op.
   // But that is resulting in a "No frames found" error.
   // TODO: Improve the performance of this by figuring out a better approach.
+  // NB: this is only run in SR, which is single-threaded
   return [code](Stack& stack) {
     runTensorExprDynamicGroup(code, stack);
     return 0;
   };
-};
+}
 
 RegisterOperators TensorExprDynamicOp({
     torch::jit::Operator(
