@@ -386,11 +386,14 @@ jobs:
           ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
         run: |
           docker run --rm -it \
-            -e PKG_DIR=/artifacts \
-            -e UPLOAD_SUBFOLDER \
+            -e ANACONDA_API_TOKEN \
             -e AWS_ACCESS_KEY_ID \
             -e AWS_SECRET_ACCESS_KEY \
-            -e ANACONDA_API_TOKEN \
+            -e DRY_RUN \
+            -e PACKAGE_TYPE \
+            -e PKG_DIR=/artifacts \
+            -e UPLOAD_CHANNEL \
+            -e UPLOAD_SUBFOLDER \
             -v "${RUNNER_TEMP}/artifacts:/artifacts" \
             -v "${GITHUB_WORKSPACE}:/v" \
             -w /v \
@@ -761,11 +764,14 @@ jobs:
           ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
         run: |
           docker run --rm -it \
-            -e PKG_DIR=/artifacts \
-            -e UPLOAD_SUBFOLDER \
+            -e ANACONDA_API_TOKEN \
             -e AWS_ACCESS_KEY_ID \
             -e AWS_SECRET_ACCESS_KEY \
-            -e ANACONDA_API_TOKEN \
+            -e DRY_RUN \
+            -e PACKAGE_TYPE \
+            -e PKG_DIR=/artifacts \
+            -e UPLOAD_CHANNEL \
+            -e UPLOAD_SUBFOLDER \
             -v "${RUNNER_TEMP}/artifacts:/artifacts" \
             -v "${GITHUB_WORKSPACE}:/v" \
             -w /v \
@@ -1139,11 +1145,14 @@ jobs:
           ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
         run: |
           docker run --rm -it \
-            -e PKG_DIR=/artifacts \
-            -e UPLOAD_SUBFOLDER \
+            -e ANACONDA_API_TOKEN \
             -e AWS_ACCESS_KEY_ID \
             -e AWS_SECRET_ACCESS_KEY \
-            -e ANACONDA_API_TOKEN \
+            -e DRY_RUN \
+            -e PACKAGE_TYPE \
+            -e PKG_DIR=/artifacts \
+            -e UPLOAD_CHANNEL \
+            -e UPLOAD_SUBFOLDER \
             -v "${RUNNER_TEMP}/artifacts:/artifacts" \
             -v "${GITHUB_WORKSPACE}:/v" \
             -w /v \
@@ -1517,11 +1526,14 @@ jobs:
           ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
         run: |
           docker run --rm -it \
-            -e PKG_DIR=/artifacts \
-            -e UPLOAD_SUBFOLDER \
+            -e ANACONDA_API_TOKEN \
             -e AWS_ACCESS_KEY_ID \
             -e AWS_SECRET_ACCESS_KEY \
-            -e ANACONDA_API_TOKEN \
+            -e DRY_RUN \
+            -e PACKAGE_TYPE \
+            -e PKG_DIR=/artifacts \
+            -e UPLOAD_CHANNEL \
+            -e UPLOAD_SUBFOLDER \
             -v "${RUNNER_TEMP}/artifacts:/artifacts" \
             -v "${GITHUB_WORKSPACE}:/v" \
             -w /v \
@@ -1895,11 +1907,14 @@ jobs:
           ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
         run: |
           docker run --rm -it \
-            -e PKG_DIR=/artifacts \
-            -e UPLOAD_SUBFOLDER \
+            -e ANACONDA_API_TOKEN \
             -e AWS_ACCESS_KEY_ID \
             -e AWS_SECRET_ACCESS_KEY \
-            -e ANACONDA_API_TOKEN \
+            -e DRY_RUN \
+            -e PACKAGE_TYPE \
+            -e PKG_DIR=/artifacts \
+            -e UPLOAD_CHANNEL \
+            -e UPLOAD_SUBFOLDER \
             -v "${RUNNER_TEMP}/artifacts:/artifacts" \
             -v "${GITHUB_WORKSPACE}:/v" \
             -w /v \
@@ -2262,11 +2277,14 @@ jobs:
           ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
         run: |
           docker run --rm -it \
-            -e PKG_DIR=/artifacts \
-            -e UPLOAD_SUBFOLDER \
+            -e ANACONDA_API_TOKEN \
             -e AWS_ACCESS_KEY_ID \
             -e AWS_SECRET_ACCESS_KEY \
-            -e ANACONDA_API_TOKEN \
+            -e DRY_RUN \
+            -e PACKAGE_TYPE \
+            -e PKG_DIR=/artifacts \
+            -e UPLOAD_CHANNEL \
+            -e UPLOAD_SUBFOLDER \
             -v "${RUNNER_TEMP}/artifacts:/artifacts" \
             -v "${GITHUB_WORKSPACE}:/v" \
             -w /v \
@@ -2637,11 +2655,14 @@ jobs:
           ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
         run: |
           docker run --rm -it \
-            -e PKG_DIR=/artifacts \
-            -e UPLOAD_SUBFOLDER \
+            -e ANACONDA_API_TOKEN \
             -e AWS_ACCESS_KEY_ID \
             -e AWS_SECRET_ACCESS_KEY \
-            -e ANACONDA_API_TOKEN \
+            -e DRY_RUN \
+            -e PACKAGE_TYPE \
+            -e PKG_DIR=/artifacts \
+            -e UPLOAD_CHANNEL \
+            -e UPLOAD_SUBFOLDER \
             -v "${RUNNER_TEMP}/artifacts:/artifacts" \
             -v "${GITHUB_WORKSPACE}:/v" \
             -w /v \
@@ -3015,11 +3036,14 @@ jobs:
           ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
         run: |
           docker run --rm -it \
-            -e PKG_DIR=/artifacts \
-            -e UPLOAD_SUBFOLDER \
+            -e ANACONDA_API_TOKEN \
             -e AWS_ACCESS_KEY_ID \
             -e AWS_SECRET_ACCESS_KEY \
-            -e ANACONDA_API_TOKEN \
+            -e DRY_RUN \
+            -e PACKAGE_TYPE \
+            -e PKG_DIR=/artifacts \
+            -e UPLOAD_CHANNEL \
+            -e UPLOAD_SUBFOLDER \
             -v "${RUNNER_TEMP}/artifacts:/artifacts" \
             -v "${GITHUB_WORKSPACE}:/v" \
             -w /v \
@@ -3393,11 +3417,14 @@ jobs:
           ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
         run: |
           docker run --rm -it \
-            -e PKG_DIR=/artifacts \
-            -e UPLOAD_SUBFOLDER \
+            -e ANACONDA_API_TOKEN \
             -e AWS_ACCESS_KEY_ID \
             -e AWS_SECRET_ACCESS_KEY \
-            -e ANACONDA_API_TOKEN \
+            -e DRY_RUN \
+            -e PACKAGE_TYPE \
+            -e PKG_DIR=/artifacts \
+            -e UPLOAD_CHANNEL \
+            -e UPLOAD_SUBFOLDER \
             -v "${RUNNER_TEMP}/artifacts:/artifacts" \
             -v "${GITHUB_WORKSPACE}:/v" \
             -w /v \
@@ -3771,11 +3798,14 @@ jobs:
           ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
         run: |
           docker run --rm -it \
-            -e PKG_DIR=/artifacts \
-            -e UPLOAD_SUBFOLDER \
+            -e ANACONDA_API_TOKEN \
             -e AWS_ACCESS_KEY_ID \
             -e AWS_SECRET_ACCESS_KEY \
-            -e ANACONDA_API_TOKEN \
+            -e DRY_RUN \
+            -e PACKAGE_TYPE \
+            -e PKG_DIR=/artifacts \
+            -e UPLOAD_CHANNEL \
+            -e UPLOAD_SUBFOLDER \
             -v "${RUNNER_TEMP}/artifacts:/artifacts" \
             -v "${GITHUB_WORKSPACE}:/v" \
             -w /v \
@@ -4138,11 +4168,14 @@ jobs:
           ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
         run: |
           docker run --rm -it \
-            -e PKG_DIR=/artifacts \
-            -e UPLOAD_SUBFOLDER \
+            -e ANACONDA_API_TOKEN \
             -e AWS_ACCESS_KEY_ID \
             -e AWS_SECRET_ACCESS_KEY \
-            -e ANACONDA_API_TOKEN \
+            -e DRY_RUN \
+            -e PACKAGE_TYPE \
+            -e PKG_DIR=/artifacts \
+            -e UPLOAD_CHANNEL \
+            -e UPLOAD_SUBFOLDER \
             -v "${RUNNER_TEMP}/artifacts:/artifacts" \
             -v "${GITHUB_WORKSPACE}:/v" \
             -w /v \
@@ -4513,11 +4546,14 @@ jobs:
           ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
         run: |
           docker run --rm -it \
-            -e PKG_DIR=/artifacts \
-            -e UPLOAD_SUBFOLDER \
+            -e ANACONDA_API_TOKEN \
             -e AWS_ACCESS_KEY_ID \
             -e AWS_SECRET_ACCESS_KEY \
-            -e ANACONDA_API_TOKEN \
+            -e DRY_RUN \
+            -e PACKAGE_TYPE \
+            -e PKG_DIR=/artifacts \
+            -e UPLOAD_CHANNEL \
+            -e UPLOAD_SUBFOLDER \
             -v "${RUNNER_TEMP}/artifacts:/artifacts" \
             -v "${GITHUB_WORKSPACE}:/v" \
             -w /v \
@@ -4891,11 +4927,14 @@ jobs:
           ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
         run: |
           docker run --rm -it \
-            -e PKG_DIR=/artifacts \
-            -e UPLOAD_SUBFOLDER \
+            -e ANACONDA_API_TOKEN \
             -e AWS_ACCESS_KEY_ID \
             -e AWS_SECRET_ACCESS_KEY \
-            -e ANACONDA_API_TOKEN \
+            -e DRY_RUN \
+            -e PACKAGE_TYPE \
+            -e PKG_DIR=/artifacts \
+            -e UPLOAD_CHANNEL \
+            -e UPLOAD_SUBFOLDER \
             -v "${RUNNER_TEMP}/artifacts:/artifacts" \
             -v "${GITHUB_WORKSPACE}:/v" \
             -w /v \
@@ -5269,11 +5308,14 @@ jobs:
           ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
         run: |
           docker run --rm -it \
-            -e PKG_DIR=/artifacts \
-            -e UPLOAD_SUBFOLDER \
+            -e ANACONDA_API_TOKEN \
             -e AWS_ACCESS_KEY_ID \
             -e AWS_SECRET_ACCESS_KEY \
-            -e ANACONDA_API_TOKEN \
+            -e DRY_RUN \
+            -e PACKAGE_TYPE \
+            -e PKG_DIR=/artifacts \
+            -e UPLOAD_CHANNEL \
+            -e UPLOAD_SUBFOLDER \
             -v "${RUNNER_TEMP}/artifacts:/artifacts" \
             -v "${GITHUB_WORKSPACE}:/v" \
             -w /v \
@@ -5647,11 +5689,14 @@ jobs:
           ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
         run: |
           docker run --rm -it \
-            -e PKG_DIR=/artifacts \
-            -e UPLOAD_SUBFOLDER \
+            -e ANACONDA_API_TOKEN \
             -e AWS_ACCESS_KEY_ID \
             -e AWS_SECRET_ACCESS_KEY \
-            -e ANACONDA_API_TOKEN \
+            -e DRY_RUN \
+            -e PACKAGE_TYPE \
+            -e PKG_DIR=/artifacts \
+            -e UPLOAD_CHANNEL \
+            -e UPLOAD_SUBFOLDER \
             -v "${RUNNER_TEMP}/artifacts:/artifacts" \
             -v "${GITHUB_WORKSPACE}:/v" \
             -w /v \
