@@ -649,7 +649,6 @@ _(aten, softplus_forward) \
 _(aten, softshrink) \
 _(aten, softshrink_backward) \
 _(aten, softshrink_forward) \
-_(aten, solve) \
 _(aten, sort) \
 _(aten, sparse_coo_tensor) \
 _(aten, sparse_csr_tensor) \
