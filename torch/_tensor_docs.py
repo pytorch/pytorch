@@ -2879,13 +2879,13 @@ Returns the quantization scheme of a given QTensor.
 """)
 
 add_docstr_all('quantile', r"""
-quantile(q, dim=None, keepdim=False) -> Tensor
+quantile(q, dim=None, keepdim=False, *, interpolation='linear') -> Tensor
 
 See :func:`torch.quantile`
 """)
 
 add_docstr_all('nanquantile', r"""
-nanquantile(q, dim=None, keepdim=False) -> Tensor
+nanquantile(q, dim=None, keepdim=False, *, interpolation='linear') -> Tensor
 
 See :func:`torch.nanquantile`
 """)
@@ -4713,7 +4713,7 @@ See :func:`torch.pinverse`
 
 add_docstr_all('index_add',
                r"""
-index_add(dim, index, source) -> Tensor
+index_add(dim, index, source, *, alpha=1) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.index_add_`.
 """)

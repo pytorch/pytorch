@@ -10,7 +10,7 @@
 namespace torch {
 namespace lazy {
 
-struct SelectInfo {
+struct TORCH_API SelectInfo {
   bool operator==(const SelectInfo& ref) const {
     return dim == ref.dim && start == ref.start && end == ref.end &&
         stride == ref.stride;
@@ -22,7 +22,7 @@ struct SelectInfo {
   int64_t stride = 0;
 };
 
-struct AsStridedInfo {
+struct TORCH_API AsStridedInfo {
   bool operator==(const AsStridedInfo& ref) const {
     return offset == ref.offset && stride == ref.stride;
   }
@@ -31,7 +31,7 @@ struct AsStridedInfo {
   int64_t offset = 0;
 };
 
-struct DiagonalInfo {
+struct TORCH_API DiagonalInfo {
   bool operator==(const DiagonalInfo& ref) const {
     return offset == ref.offset && dim1 == ref.dim1 && dim2 == ref.dim2;
   }
@@ -41,7 +41,7 @@ struct DiagonalInfo {
   int64_t dim2 = 1;
 };
 
-struct ViewInfo {
+struct TORCH_API ViewInfo {
   enum class Type {
     kInvalid,
     kNarrow,
@@ -96,7 +96,7 @@ struct ViewInfo {
 
 // When a "view" (capture by reference) is taken on a node, an Alias object is
 // created on the captured node itself, with its current IR Node value.
-class Alias {
+class TORCH_API Alias {
  public:
   struct UpdateData {
     Value ir_value;
@@ -127,7 +127,7 @@ class Alias {
   size_t generation_ = 0;
 };
 
-class LazyView {
+class TORCH_API LazyView {
  public:
   LazyView(Shape shape, std::shared_ptr<Alias> alias, ViewInfo view_info);
   LazyView(

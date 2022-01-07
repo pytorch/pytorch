@@ -4,7 +4,7 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/autograd/saved_variable_hooks.h>
 #include <torch/csrc/python_headers.h>
-#include <torch/csrc/THP_export.h>
+#include <torch/csrc/Export.h>
 #include <ATen/ATen.h>
 
 namespace py = pybind11;
