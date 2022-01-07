@@ -406,7 +406,8 @@ def lazy_overhead_experiment(args, results, benchmark, lazy_benchmark):
         ("dev", "name", "test", "overhead", "pvalue"),
     ).writerow([current_device, current_name, args.test,  f"{overhead:.4f}", f"{pvalue:.4e}"])
     print(f"{short_name(name, limit=30):<30} {current_device:<4} {args.test:<5} {'trace overheads':<20} overhead: {overhead:.3f} pvalue: {pvalue:.2e}")
-    print(f"CIDEBUGOUTPUT,lazy_overhead_experiment,{current_name},{args.test},{current_device},{overhead:.4f},{pvalue:.4e},{args.warmup},{args.repeat},{warmup_time:.2f},{bench_time:.2f}")
+    if args.verbose:
+        print(f"CIDEBUGOUTPUT,lazy_overhead_experiment,{current_name},{args.test},{current_device},{overhead:.4f},{pvalue:.4e},{args.warmup},{args.repeat},{warmup_time:.2f},{bench_time:.2f}")
     return (overhead, pvalue)
 
 def lazy_compute_experiment(args, experiment, results, benchmark, lazy_benchmark, sync_every_iter=False, to_dev_sync=None):
@@ -451,7 +452,8 @@ def lazy_compute_experiment(args, experiment, results, benchmark, lazy_benchmark
         ("name", "dev", "experiment", "test", "speedup", "pvalue"),
     ).writerow([current_name, current_device, experiment, args.test, f"{speedup:.4f}", f"{pvalue:.2e}"])
     print(f"{short_name(current_name, limit=30):<30} {current_device:<4} {args.test:<5} {experiment:<20} speedup:  {speedup:.3f} pvalue: {pvalue:.2e}")
-    print(f"CIDEBUGOUTPUT,lazy_compute_experiment,{current_name},{current_device},{experiment},{args.test},{speedup:.4f},{pvalue:.2e},{args.warmup},{args.repeat},{warmup_time:.2f},{bench_time:.2f}")
+    if args.verbose:
+        print(f"CIDEBUGOUTPUT,lazy_compute_experiment,{current_name},{current_device},{experiment},{args.test},{speedup:.4f},{pvalue:.2e},{args.warmup},{args.repeat},{warmup_time:.2f},{bench_time:.2f}")
     return (speedup, pvalue)
 
 
@@ -517,7 +519,7 @@ def merge_with_prefix(prefix, tmp_dir, out_dir, headers):
         for l in results:
             acc_csv.write(l)
 
-def merge_reformat(tmp_dir, out_dir):
+def merge_reformat(tmp_dir, out_dir, table):
     out_dir = args.output_dir
     # depending on the type of an experiment, fields can be in a different order
     # `get_field` deals with all three types including `error`
@@ -531,8 +533,6 @@ def merge_reformat(tmp_dir, out_dir):
         header = headers[file_type]
         r = row[header.index(name)] if name in header else "N/A"
         return r
-
-    table = collections.defaultdict(dict)
 
     csv_files = glob.glob(os.path.join(tmp_dir, "*.csv"))
     for csvf in csv_files:
@@ -556,7 +556,7 @@ def merge_reformat(tmp_dir, out_dir):
             
 
     amortized_header = f"amortized {args.inner_loop_repeat}x"
-    headers = ("name", "test", amortized_header, "unamortized", "overhead", "error")
+    headers = ("name", "test", amortized_header, "unamortized", "overhead", "error", "rc")
 
     cw = output_csv(
         os.path.join(out_dir, f"{args.test}_reformat.csv"),
@@ -564,7 +564,7 @@ def merge_reformat(tmp_dir, out_dir):
     )
 
     for k, v in table.items():
-        cw.writerow((k[0], k[1], v.get(amortized_header, 'N/A'), v.get('unamortized', 'N/A'), v.get('overhead', 'N/A'), v.get('error', 'N/A')))
+        cw.writerow((k[0], k[1], v.get(amortized_header, 'N/A'), v.get('unamortized', 'N/A'), v.get('overhead', 'N/A'), v.get('error', 'N/A'), v.get('rc')))
 
 def save_error(name, test, error, dir):
     output_csv(
@@ -584,6 +584,7 @@ if __name__ == "__main__" :
     parser.add_argument("--inner_loop_repeat", type=int, default=10, help="repeat the computation this many times per sample")
     parser.add_argument("--fuser", type=str, choices=['noopt', 'fuser0', 'fuser1', 'fuser2'], help="0=legacy, 1=nnc, 2=nvfuser")
     parser.add_argument("--test", type=str, choices=['eval', 'train'], default='eval')
+    parser.add_argument("--verbose", action='store_false')
     parser.add_argument("--torchbench_dir", type=str, help="path to torchbenchmark repo")
     parser.add_argument("--output_dir", type=str, default=".", help="path to write output files")
     parser.add_argument("--dump_lazy_counters", action='store_true', help="dump lazy counter values after each timing run")
@@ -600,73 +601,79 @@ if __name__ == "__main__" :
 
     copy_argv = [] + sys.argv
     if args.run_in_subprocess:
-        name = args.run_in_subprocess
-        benchmark_cls = get_benchmark_cls(args.run_in_subprocess)
-        bench_name = benchmark_cls.name if hasattr(benchmark_cls, 'name') else benchmark_cls.name()
-        for device in [args.device]:
+        try:
+            name = args.run_in_subprocess
+            benchmark_cls = get_benchmark_cls(args.run_in_subprocess)
+            bench_name = benchmark_cls.name if hasattr(benchmark_cls, 'name') else benchmark_cls.name()
+            for device in [args.device]:
 
-            # no try since we should've already filtered out models we can't create
-            torch.manual_seed(1337)
-            benchmark = benchmark_cls(device=device, jit=False)
-            torch.manual_seed(1337)
-            lazy_benchmark = benchmark_cls(device='lazy', jit=False)
-            # TODO: might be redundant
-            gc.collect()
+                # no try since we should've already filtered out models we can't create
+                torch.manual_seed(1337)
+                benchmark = benchmark_cls(device=device, jit=False)
+                torch.manual_seed(1337)
+                lazy_benchmark = benchmark_cls(device='lazy', jit=False)
+                # TODO: might be redundant
+                gc.collect()
 
-            current_name = name
-            current_device = device
+                current_name = name
+                current_device = device
 
-            if device == 'cuda':
-                assert 'LTC_TS_CUDA' in os.environ and bool(os.environ['LTC_TS_CUDA'])
+                if device == 'cuda':
+                    assert 'LTC_TS_CUDA' in os.environ and bool(os.environ['LTC_TS_CUDA'])
 
-            if args.run_tracing_execute_noops:
-                print(f"Profiling {name}")
-                run_tracing_execute_noops(args.test, lazy_benchmark)
-                # when profiling, we really don't want to do anything else
-                exit(0)
+                if args.run_tracing_execute_noops:
+                    print(f"Profiling {name}")
+                    run_tracing_execute_noops(args.test, lazy_benchmark)
+                    # when profiling, we really don't want to do anything else
+                    exit(0)
 
-            with pick_grad(args, name):
-                with fuser(args.fuser) if args.fuser != 'noopt' else optimized_execution(False):
-                    if args.fuser == 'noopt':
-                        # TODO(whc) cleaner way to configure the fusers; seems i have to set both optimized_execution(False)
-                        # _and_ disable fusers to get no-optimization
-                        torch._C._jit_override_can_fuse_on_cpu(False)
-                        torch._C._jit_override_can_fuse_on_gpu(False)
-                        torch._C._jit_set_texpr_fuser_enabled(False)
-                        torch._C._jit_set_nvfuser_enabled(False)
-                    if args.fuser == 'fuser2':
-                        # special case to disable nvfuser horizontal fusion as it is currently broken
-                        # TODO(whc) remove this once it's fixed
-                        torch._C._jit_set_nvfuser_horizontal_mode(False)
-                    try:
-                        if args.test == 'eval':
-                            # Correctness Check
-                            torch.manual_seed(1337)
-                            model, example_inputs = benchmark.get_module()
-                            model.eval()
-                            correct_result = call_model_with(model, example_inputs)
-                            torch.manual_seed(1337)
-                            lazy_model, lazy_inputs = lazy_benchmark.get_module()
-                            lazy_model.eval()
-                            lazy_result = call_model_with(lazy_model, lazy_inputs)
-                            if not check_results(correct_result, lazy_result, device):
-                                print(f"INCORRECT: {name}")
-                                save_error(name, "eval", "Incorrect results.", args.output_dir)
-                                continue
-                    except Exception as e:
-                        print(f"ERROR: {name}: {e}")
-                        save_error(name, "eval", e, args.output_dir)
-                        continue
+                with pick_grad(args, name):
+                    with fuser(args.fuser) if args.fuser != 'noopt' else optimized_execution(False):
+                        if args.fuser == 'noopt':
+                            # TODO(whc) cleaner way to configure the fusers; seems i have to set both optimized_execution(False)
+                            # _and_ disable fusers to get no-optimization
+                            torch._C._jit_override_can_fuse_on_cpu(False)
+                            torch._C._jit_override_can_fuse_on_gpu(False)
+                            torch._C._jit_set_texpr_fuser_enabled(False)
+                            torch._C._jit_set_nvfuser_enabled(False)
+                        if args.fuser == 'fuser2':
+                            # special case to disable nvfuser horizontal fusion as it is currently broken
+                            # TODO(whc) remove this once it's fixed
+                            torch._C._jit_set_nvfuser_horizontal_mode(False)
+                        try:
+                            if args.test == 'eval':
+                                # Correctness Check
+                                torch.manual_seed(1337)
+                                model, example_inputs = benchmark.get_module()
+                                model.eval()
+                                correct_result = call_model_with(model, example_inputs)
+                                torch.manual_seed(1337)
+                                lazy_model, lazy_inputs = lazy_benchmark.get_module()
+                                lazy_model.eval()
+                                lazy_result = call_model_with(lazy_model, lazy_inputs)
+                                if not check_results(correct_result, lazy_result, device):
+                                    print(f"INCORRECT: {name}")
+                                    save_error(name, "eval", "Incorrect results.", args.output_dir)
+                                    continue
+                        except Exception as e:
+                            print(f"ERROR: {name}: {e}")
+                            save_error(name, "eval", e, args.output_dir)
+                            continue
 
-                    lazy_overhead_experiment(args, results, benchmark, lazy_benchmark)
-                    lazy_compute_experiment(args, f"amortized {args.inner_loop_repeat}x", results, benchmark, lazy_benchmark)
-                    lazy_compute_experiment(args, "unamortized", results, benchmark, lazy_benchmark, sync_every_iter=True)
+                        lazy_overhead_experiment(args, results, benchmark, lazy_benchmark)
+                        lazy_compute_experiment(args, f"amortized {args.inner_loop_repeat}x", results, benchmark, lazy_benchmark)
+                        lazy_compute_experiment(args, "unamortized", results, benchmark, lazy_benchmark, sync_every_iter=True)
 
+        except Exception as e:
+            print(f"ERROR: {name}: {e}")
+            save_error(name, "eval", e, args.output_dir)
+            exit(1)
         exit(0)
 
     import subprocess
     import tempfile
     dirpath = tempfile.mkdtemp()
+    table = collections.defaultdict(dict)
     for model_name in iter_models(args, dirpath):
         # if `--run_in_subprocess` is specified, it will override any filters and excludes
         # pass the rest of arguments intact such as device, test, repeat, etc
@@ -675,17 +682,31 @@ if __name__ == "__main__" :
         launch_command = f"python {' '.join(copy_argv)} --run_in_subprocess '{model_name}' --output_dir={dirpath}"
         env = os.environ
         env["LTC_TS_CUDA"] = "1"
+        rc = 0
         try:
+            if args.verbose:
+                cp = subprocess.run("nvidia-smi --query-gpu=timestamp,utilization.memory,memory.total,memory.free,memory.used --format=csv,noheader", capture_output=True, text=True, shell=True)
+                print(f"CIDEBUGOUTPUT,BEFORE subprocess.run,{model_name},{cp.stdout}")
             rc = subprocess.run(launch_command,
                         env=env,
                         timeout = args.timeout,
                         shell=True,
                         stderr=subprocess.STDOUT)
+            
+            rc = rc.returncode
         except subprocess.TimeoutExpired:
             print(f"{model_name} timed out after {args.timeout // 60} minutes! Include it in SKIP or SKIP_TRAIN_ONLY")
             save_error(model_name, args.test, "Timed out.", dirpath)
+            # to visualize highlight timeouts, they will also have 
+            # "timed out" in the error column
+            rc = 17
+        if args.verbose:
+            cp = subprocess.run("nvidia-smi --query-gpu=timestamp,utilization.memory,memory.total,memory.free,memory.used --format=csv,noheader", capture_output=True, text=True, shell=True)
+            print(f"CIDEBUGOUTPUT,AFTER subprocess.run,{model_name},{args.test},{cp.stdout}")
 
+    entry = table[(model_name, args.test)]    
+    entry["rc"] = rc
     merge_with_prefix("lazy-overheads_", dirpath, args.output_dir, ("dev", "name", "test", "overhead", "pvalue"))
     merge_with_prefix("lazy-compute_", dirpath, args.output_dir, ("name", "dev", "experiment", "test", "speedup", "pvalue"))
     merge_with_prefix("error_", dirpath, args.output_dir, ("name", "test", "error"))
-    merge_reformat(dirpath, args)
+    merge_reformat(dirpath, args, table)
