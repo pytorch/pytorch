@@ -74,6 +74,7 @@ DEFAULTS = {
         "-torch/csrc/deploy/interpreter/interpreter.h",
         "-torch/csrc/deploy/interpreter/interpreter_impl.h",
         "-torch/csrc/deploy/interpreter/test_main.cpp",
+        "-torch/csrc/deploy/test_deploy_python_ext.cpp",
     ],
     "paths": ["torch/csrc/"],
     "include-dir": ["/usr/lib/llvm-11/include/openmp"] + clang_search_dirs(),
@@ -183,7 +184,8 @@ def main() -> None:
             f"Could not find '{options.clang_tidy_exe}'\n"
             + "We provide a custom build of clang-tidy that has additional checks.\n"
             + "You can install it by running:\n"
-            + "$ python3 tools/linter/install/clang_tidy.py"
+            + "$ python3 -m tools.linter.install.clang_tidy \n"
+            + "from the pytorch folder"
         )
         raise RuntimeError(msg)
 

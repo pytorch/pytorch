@@ -20,7 +20,6 @@ from torch._jit_internal import (
 )
 from torch.jit._script import (
     script,
-    _script_pdt,
     Attribute,
     ScriptModule,
     script_method,

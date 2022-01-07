@@ -282,7 +282,6 @@ bool geometry_is_contiguous(IntArrayRef sizes, IntArrayRef strides) {
   return contig_if_nonempty;
 }
 
-// Correspond to THCUNN_check_dim_size/THNN_check_dim_size
 void check_dim_size(
     const Tensor& tensor,
     int64_t dim,

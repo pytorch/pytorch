@@ -3114,6 +3114,84 @@ void lstsq_kernel(const Tensor& a, Tensor& b, Tensor& /*rank*/, Tensor& /*singul
 
 REGISTER_DISPATCH(lstsq_stub, &lstsq_kernel);
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ legacy_lstsq ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+std::tuple<Tensor, Tensor> legacy_lstsq_cuda(const Tensor &B, const Tensor &A) {
+  TORCH_WARN_ONCE(
+      "torch.lstsq is deprecated in favor of torch.linalg.lstsq and will be removed in a future PyTorch release.\n",
+      "torch.linalg.lstsq has reversed arguments and does not return the QR decomposition in "
+      "the returned tuple (although it returns other information about the problem).\n",
+      "To get the qr decomposition consider using torch.linalg.qr.\n",
+      "The returned solution in torch.lstsq stored the residuals of the solution in the ",
+      "last m - n columns of the returned value whenever m > n. In torch.linalg.lstsq, the ",
+      "residuals in the field 'residuals' of the returned named tuple.\n",
+      "The unpacking of the solution, as in\n",
+      "X, _ = torch.lstsq(B, A).solution[:A.size(1)]\n",
+      "should be replaced with\n",
+      "X = torch.linalg.lstsq(A, B).solution"
+    );
+
+#ifndef USE_MAGMA
+  TORCH_CHECK(false, "solve: MAGMA library not found in "
+              "compilation. Please rebuild with MAGMA.");
+#else
+  const auto dtype = A.scalar_type();
+  TORCH_CHECK(B.scalar_type() == dtype, "exepected A and B dtypes to match but found ",
+              dtype, " and ", B.scalar_type());
+  TORCH_CHECK(A.numel() > 0 && A.dim() == 2, "A should be (non-empty) 2 dimensional");
+  TORCH_CHECK(B.numel() > 0 && B.dim() == 2, "B should be (non-empty) 2 dimensional");
+  auto a_sizes = A.sizes();
+  auto b_sizes = B.sizes();
+  TORCH_CHECK(a_sizes[0] == b_sizes[0], "Expected A and b to have same size "
+      "at dim 0, but A has ", a_sizes[0], " rows and B has ", b_sizes[0], " rows");
+  TORCH_CHECK(a_sizes[0] >= a_sizes[1], "Expected A with shape (m x n) to have "
+      "m >= n. The case for m < n is not implemented yet.");
+
+  Tensor A_working = cloneBatchedColumnMajor(A);
+  Tensor B_working = cloneBatchedColumnMajor(B);
+
+  int64_t m = a_sizes[0];
+  int64_t n = a_sizes[1];
+  int64_t nrhs = b_sizes[1];
+
+  int info;
+  AT_DISPATCH_FLOATING_TYPES(A.scalar_type(), "legacy_lstsq_cuda", [&] {
+    scalar_t *a_data = A_working.data_ptr<scalar_t>();
+    scalar_t *b_data = B_working.data_ptr<scalar_t>();
+    scalar_t wkopt;
+    magmaGels(MagmaNoTrans, m, n, nrhs, a_data, m, b_data, m, &wkopt, -1, &info);
+
+    const auto hwork_size = static_cast<magma_int_t>(wkopt);
+    scalar_t *hwork = nullptr;
+    ALLOCATE_ARRAY(hwork, scalar_t, hwork_size);
+
+    magmaGels(MagmaNoTrans, m, n, nrhs, a_data, m, b_data, m, hwork, hwork_size, &info);
+  });
+
+  TORCH_CHECK(info == 0, "MAGMA gels : Argument %d : illegal value", -info);
+  return std::tuple<Tensor, Tensor>(B_working, A_working);
+#endif  // USE_MAGMA
+}
+
+std::tuple<Tensor&, Tensor&> legacy_lstsq_out_cuda(
+    const Tensor& B, const Tensor& A, Tensor& B_out, Tensor& A_out) {
+  const auto dtype = A.scalar_type();
+  TORCH_CHECK(B.scalar_type() == dtype, "exepected A and B dtypes to match but found ",
+              A.scalar_type(), " and ", B.scalar_type());
+  TORCH_CHECK(A_out.scalar_type() == dtype, "A_out to have scalar type ", dtype,
+              " but found", A_out.scalar_type());
+  TORCH_CHECK(B_out.scalar_type() == dtype, "A_out to have scalar type ", dtype,
+              " but found", B_out.scalar_type());
+  Tensor A_tmp, B_tmp;
+  std::tie(B_tmp, A_tmp) = native::legacy_lstsq_cuda(B, A);
+  resize_output(A_out, A_tmp.sizes());
+  A_out.copy_(A_tmp);
+  resize_output(B_out, B_tmp.sizes());
+  B_out.copy_(B_tmp);
+  return std::tuple<Tensor&, Tensor&>(B_out, A_out);
+}
+
+
 }}  // namespace at::native
 
 #undef ALLOCATE_ARRAY

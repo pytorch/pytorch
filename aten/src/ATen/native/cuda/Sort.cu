@@ -3,7 +3,6 @@
 #include <ATen/ATen.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/WrapDimUtils.h>
-#include <ATen/LegacyTHFunctionsCUDA.h>
 #include <ATen/core/Array.h>
 #include <ATen/cuda/cub.cuh>
 #include <ATen/cuda/CUDAContext.h>

@@ -9,6 +9,7 @@
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/runtime/register_ops_utils.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
 namespace torch {
@@ -55,6 +56,22 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     });
 
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    prim::TupleUnpack,
+    prim_TupleUnpack,
+    [](Node* n) -> SROperator {
+      return [](ProcessedNode* p_node) {
+        const auto& elems = p_node->Input(0).toTuple()->elements();
+        const size_t num_outputs = p_node->outputs().size();
+        TORCH_CHECK(
+            num_outputs == elems.size(),
+            "Number of outputs must match number of tuple elements.")
+        for (size_t i = 0; i < num_outputs; ++i) {
+          p_node->Output(i) = elems[i];
+        }
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
     prim::DictConstruct,
     prim_DictConstruct,
     [](Node* n) -> SROperator {
@@ -84,17 +101,25 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       if (n->inputs().size() != 2) {
         return nullptr;
       }
-      // TODO: make __getitem__ work for other container types
-      if (n->input(0)->type()->castRaw<DictType>() == nullptr) {
-        return nullptr;
+
+      if (n->input(0)->type()->castRaw<DictType>()) {
+        return [](ProcessedNode* p_node) {
+          auto dict = p_node->Input(0).toGenericDict();
+          auto key = p_node->Input(1);
+          auto value = dict.find(key);
+          TORCH_CHECK(value != dict.end(), "Key not in dict: ", key);
+          p_node->Output(0) = value->value();
+        };
+      } else if (n->input(0)->type()->castRaw<ListType>()) {
+        return [](ProcessedNode* p_node) {
+          auto list = p_node->Input(0).toList();
+          auto idx = p_node->Input(1).toInt();
+          p_node->Output(0) = getItem(list, idx);
+        };
       }
-      return [](ProcessedNode* p_node) {
-        auto dict = p_node->Input(0).toGenericDict();
-        auto key = p_node->Input(1);
-        auto value = dict.find(key);
-        TORCH_CHECK(value != dict.end(), "Key not in dict: ", key);
-        p_node->Output(0) = value->value();
-      };
+
+      // TODO(T98581096): make __getitem__ work for other container types
+      return nullptr;
     });
 
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
@@ -139,6 +164,16 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         for (const auto i : c10::irange(num_outputs)) {
           p_node->Output(i) = std::move(stack[i]);
         }
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::append,
+    aten_append,
+    [](Node* n) -> SROperator {
+      return [](ProcessedNode* p_node) {
+        auto list = p_node->Input(0).toList();
+        list.push_back(p_node->Input(1));
       };
     });
 
@@ -319,6 +354,37 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(aten::to, aten_to, [](Node* n) -> SROperator {
     }
   };
 });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::detach,
+    aten_detach,
+    [](Node* n) -> SROperator {
+      if (!n->matches(
+              torch::schema("aten::detach(Tensor(a) self) -> Tensor(a)"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+      return [](ProcessedNode* p_node) {
+        const auto& in0_t = p_node->Input(0).toTensor();
+        p_node->Output(0) = at::native::alias(in0_t);
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::expand_as,
+    aten_expand_as,
+    [](Node* n) -> SROperator {
+      if (!n->matches(torch::schema(
+              "aten::expand_as(Tensor(a) self, Tensor other) -> Tensor(a)"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+      return [](ProcessedNode* p_node) {
+        const auto& self = p_node->Input(0).toTensor();
+        const auto& other = p_node->Input(1).toTensor();
+        p_node->Output(0) = self.expand(other.sizes());
+      };
+    });
 
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
     prim::isinstance,

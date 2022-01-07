@@ -46,6 +46,9 @@ class DDPCommHookType(Enum):
     FP16_COMPRESS = partial(
         _ddp_comm_hook_wrapper, comm_hook=default.fp16_compress_hook
     )
+    BF16_COMPRESS = partial(
+        _ddp_comm_hook_wrapper, comm_hook=default.bf16_compress_hook
+    )
     QUANTIZE_PER_TENSOR = partial(
         _ddp_comm_hook_wrapper, comm_hook=quantization.quantization_pertensor_hook
     )

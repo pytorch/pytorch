@@ -56,6 +56,10 @@ TORCH_LIBRARY_IMPL(aten, Conjugate, m) {
   m.impl("view", torch::CppFunction::makeFallthrough());
   m.impl("_unsafe_view", torch::CppFunction::makeFallthrough());
   m.impl("reshape", torch::CppFunction::makeFallthrough());
+  m.impl("dot", torch::CppFunction::makeFallthrough());
+  m.impl("vdot", torch::CppFunction::makeFallthrough());
+  m.impl("dot.out", torch::CppFunction::makeFallthrough());
+  m.impl("vdot.out", torch::CppFunction::makeFallthrough());
 }
 
 } // namespace at

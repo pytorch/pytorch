@@ -77,7 +77,6 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
                 bar(input)
                 bar(input)
 
-                print(foo.graph_for(input))
                 self.assertGraphContainsExactly(foo.graph_for(input), 'prim::DifferentiableGraph', 1)
                 self.assertGraphContainsExactly(bar.graph_for(input), 'prim::DifferentiableGraph', 0)
 

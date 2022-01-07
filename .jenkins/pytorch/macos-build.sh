@@ -30,10 +30,6 @@ fi
 if [ -z "${CROSS_COMPILE_ARM64}" ]; then
   USE_DISTRIBUTED=1 python setup.py install
 else
-  pushd "${HOME}"
-  git clone https://github.com/malfet/pocketfft --depth 1 --branch cpp
-  popd
-  export POCKETFFT_HOME="${HOME}/pocketfft"
   export MACOSX_DEPLOYMENT_TARGET=11.0
   USE_DISTRIBUTED=1 CMAKE_OSX_ARCHITECTURES=arm64 USE_MKLDNN=OFF USE_NNPACK=OFF USE_QNNPACK=OFF BUILD_TEST=OFF python setup.py bdist_wheel
 fi

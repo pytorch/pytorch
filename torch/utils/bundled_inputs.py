@@ -21,13 +21,18 @@ class InflatableArg(NamedTuple):
         the appropriate input. It can use 'value' as an input to the format str. It must result
         in a value of the same type as 'value'.
 
+        'fmt_fn' is a formatable function code string that is executed to inflate the compressed
+        data into the appropriate input. It must result in a value of the same type as 'value'.
+        The function name should be the formatable part of the string.
+
     Note: Only top level InflatableArgs can be inflated. i.e. you cannot place
     an inflatable arg inside of some other structure. You should instead create
     an inflatable arg such that the fmt code string returns the full structure
     of your input.
     """
     value: Any
-    fmt: str
+    fmt: str = "{}"
+    fmt_fn: str = ""
 
 
 def bundle_inputs(
@@ -279,13 +284,21 @@ def augment_many_model_functions_with_bundled_inputs(
                 deflated_args = []
                 parts.append("(")
                 for arg_idx, arg in enumerate(args):
-                    deflated, inflater = _inflate_expr(arg, f"deflated[{inp_idx}][{arg_idx}]")
+                    inflate_helper_fn_name = _get_inflate_helper_fn_name(arg_idx, inp_idx, function_name)
+                    deflated, inflater, helper_definition = _inflate_expr(
+                        arg,
+                        f"deflated[{inp_idx}][{arg_idx}]",
+                        inflate_helper_fn_name,
+                    )
                     deflated_args.append(deflated)
                     parts.append(f"    {inflater},")
+                    if helper_definition:
+                        model.define(textwrap.dedent(helper_definition))
                 deflated_inputs.append(tuple(deflated_args))
                 parts.append("),")
             parts.append("")
             expr = "\n".join(parts)
+
             # Back-channel return this expr for debugging.
             if _receive_inflate_expr is not None:
                 _receive_inflate_expr.append(expr)
@@ -332,7 +345,6 @@ def augment_many_model_functions_with_bundled_inputs(
                     return len(self.get_all_bundled_inputs_for_forward())
                 """))
 
-
     # Define some high level helper methods that act on all bundled inputs
     model.define(textwrap.dedent("""
         def get_bundled_inputs_functions_and_info(self):
@@ -341,27 +353,44 @@ def augment_many_model_functions_with_bundled_inputs(
             return all_inputs
         """.format(template=get_bundled_inputs_functions_and_info_template)))
 
-def _inflate_expr(arg: T, ref: str) -> Tuple[Union[T, torch.Tensor], str]:
+def _inflate_expr(
+    arg: T, ref: str, inflate_helper_fn_name: str
+) -> Tuple[Union[T, torch.Tensor], str, Optional[str]]:
     # Allow custom inflation expressions any object.
     # For example, calling custom image-decoding ops.
     # Or just use "{}" as the format string to ignore size limits.
     if isinstance(arg, InflatableArg):
-        return arg.value, arg.fmt.format(ref)
+        if arg.fmt_fn:
+            if arg.fmt not in ["{}", ""]:
+                raise Exception(
+                    f"Bundled input argument at position '{ref}' has "
+                    f"both arg.fmt_fn => \n{arg.fmt_fn} "
+                    f"\n and arg.fmt  => {arg.fmt}. "
+                    "Please choose `arg.fmt` if the deflater is straightforward or "
+                    "`arg.fmt_fn` if you need a function."
+                )
+
+            helper_definition = arg.fmt_fn.format(inflate_helper_fn_name)
+            expr = f"self.{inflate_helper_fn_name}({ref})"
+
+            return arg.value, expr, helper_definition
+        else:
+            return arg.value, arg.fmt.format(ref), None
 
     if isinstance(arg, torch.Tensor):
         # Small-storage tensors can just be saved directly.
         if arg.storage().size() <= MAX_RAW_TENSOR_SIZE:
-            return arg, ref
+            return arg, ref, None
         # Small contiguous tensors can be cloned to have small storage.
         # TODO: Should we do this even for non-contiguous tensors?
         if arg.is_contiguous() and arg.numel() <= MAX_RAW_TENSOR_SIZE:
-            return arg.clone(), ref
+            return arg.clone(), ref, None
         # Example inputs commonly come from torch.zeros, torch.ones, or torch.full.
         # These can be represented compactly.
         for fmt in [torch.contiguous_format, torch.channels_last]:
             if arg.is_contiguous(memory_format=fmt) and (arg == arg.flatten()[0]).all().item():
                 return (arg.flatten()[0].clone().expand(*arg.size()),
-                        f"{ref}.contiguous(memory_format={fmt})")
+                        f"{ref}.contiguous(memory_format={fmt})", None)
         # Prevent big tensors from being bundled by default.
         # TODO: Provide more useful diagnostics.
         raise Exception(
@@ -370,7 +399,7 @@ def _inflate_expr(arg: T, ref: str) -> Tuple[Union[T, torch.Tensor], str]:
             f"You probably don't want to bundle this as an input. "
         )
     else:
-        return arg, ref
+        return arg, ref, None
 
 def _get_bundled_inputs_attributes_and_methods(script_module: torch.jit.ScriptModule) -> Tuple[List[str], List[str]]:
     methods: List[str] = []
@@ -389,7 +418,35 @@ def _get_bundled_inputs_attributes_and_methods(script_module: torch.jit.ScriptMo
             methods.append("get_all_bundled_inputs_for_" + function_name)
             methods.append("_generate_bundled_inputs_for_" + function_name)
             attributes.append("_bundled_inputs_deflated_" + function_name)
+
+            bundled_inputs_fn = getattr(
+                script_module,
+                f"get_all_bundled_inputs_for_{function_name}"
+            )
+            num_bundled_inputs: int = len(bundled_inputs_fn())
+
+            # Check inflate helper functions for each function, argument and bundled input
+            func = getattr(script_module, function_name, None)
+            for arg_idx in range(len(func.schema.arguments) - 1):
+                for input_idx in range(num_bundled_inputs):
+                    helper_fn_name = _get_inflate_helper_fn_name(
+                        arg_idx=arg_idx,
+                        input_idx=input_idx,
+                        function_name=function_name
+                    )
+                    # if the arg has an InflatableArg with fmt_fn, add the helper function name
+                    if hasattr(script_module, helper_fn_name):
+                        methods.append(helper_fn_name)
+
     return (methods, attributes)
+
+
+def _get_inflate_helper_fn_name(
+    arg_idx: int,
+    input_idx: int,
+    function_name: str,
+) -> str:
+    return f"_inflate_helper_for_{function_name}_input_{input_idx}_arg_{arg_idx}"
 
 
 

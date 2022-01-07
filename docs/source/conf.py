@@ -38,7 +38,7 @@ import pytorch_sphinx_theme
 
 # If your documentation needs a minimal Sphinx version, state it here.
 #
-needs_sphinx = '1.6'
+needs_sphinx = '3.1.2'
 
 # Add any Sphinx extension module names here, as strings. They can be
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
@@ -54,6 +54,7 @@ extensions = [
     'sphinx.ext.viewcode',
     'sphinxcontrib.katex',
     'sphinx.ext.autosectionlabel',
+    'sphinx_copybutton',
 ]
 
 # build the templated autosummary files
@@ -421,3 +422,6 @@ def patched_make_field(self, types, domain, items, **kw):
     return nodes.field('', fieldname, fieldbody)
 
 TypedField.make_field = patched_make_field
+
+copybutton_prompt_text = r'>>> |\.\.\. '
+copybutton_prompt_is_regexp = True

@@ -2,9 +2,6 @@
 
 #include <ATen/ATen.h>
 
-// Contents of this file are copied from THCUNN/common.h for the ease of porting
-// THCUNN functions into ATen.
-
 namespace at { namespace cuda { namespace detail {
 
 // CUDA: grid stride looping

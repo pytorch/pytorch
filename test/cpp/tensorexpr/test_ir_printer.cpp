@@ -17,7 +17,6 @@ namespace jit {
 using namespace torch::jit::tensorexpr;
 
 TEST(IRPrinter, BasicValueTest) {
-  KernelScope kernel_scope;
   ExprHandle a = IntImm::make(2), b = IntImm::make(3);
   ExprHandle c = Add::make(a, b);
 
@@ -27,7 +26,6 @@ TEST(IRPrinter, BasicValueTest) {
 }
 
 TEST(IRPrinter, BasicValueTest02) {
-  KernelScope kernel_scope;
   ExprHandle a(2.0f);
   ExprHandle b(3.0f);
   ExprHandle c(4.0f);
@@ -40,7 +38,6 @@ TEST(IRPrinter, BasicValueTest02) {
 }
 
 TEST(IRPrinter, CastTest) {
-  KernelScope kernel_scope;
   VarHandle x("x", kHalf);
   VarHandle y("y", kFloat);
   ExprHandle body = ExprHandle(2.f) +
@@ -52,38 +49,37 @@ TEST(IRPrinter, CastTest) {
 }
 
 TEST(IRPrinter, FunctionName) {
-  KernelScope kernel_scope;
   int M = 4;
   int N = 20;
 
-  Tensor* producer = Compute(
+  Tensor producer = Compute(
       "producer",
       {{M, "m"}, {N, "n"}},
       [&](const ExprHandle& m, const ExprHandle& n) { return m * n; });
 
-  Tensor* chunk_0 = Compute(
+  Tensor chunk_0 = Compute(
       "chunk",
       {{M, "m"}, {N / 2, "n"}},
       [&](const ExprHandle& m, const ExprHandle& n) {
-        return producer->load(m, n);
+        return producer.load(m, n);
       });
 
-  Tensor* chunk_1 = Compute(
+  Tensor chunk_1 = Compute(
       "chunk",
       {{M, "m"}, {N / 2, "n"}},
       [&](const ExprHandle& m, const ExprHandle& n) {
-        return producer->load(m, n + ExprHandle(N / 2));
+        return producer.load(m, n + ExprHandle(N / 2));
       });
 
-  Tensor* consumer = Compute(
+  Tensor consumer = Compute(
       "consumer",
       {{M, "i"}, {N / 2, "j"}},
       [&](const ExprHandle& i, const ExprHandle& j) {
-        return i * chunk_1->load(i, j);
+        return i * chunk_1.load(i, j);
       });
 
   LoopNest l({chunk_0, chunk_1, consumer});
-  auto* body = l.root_stmt();
+  auto body = l.root_stmt();
 
   std::stringstream ss;
   ss << *body;
