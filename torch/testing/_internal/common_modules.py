@@ -1039,23 +1039,23 @@ module_db: List[ModuleInfo] = [
                    # We could not generate a fallback
                    DecorateInfo(
                        unittest.expectedFailure, "TestModule", "test_grad",
-                       active_if=(TEST_CUDNN and not TEST_WITH_ROCM)
+                       active_if=(TEST_CUDNN and not TEST_WITH_ROCM), device_type='cuda'
                    ),
                    # NotImplementedError: the derivative for '_cudnn_rnn_backward' is not implemented.
                    # Double backwards is not supported for CuDNN RNNs due to limitations in the CuDNN API
                    DecorateInfo(
                        unittest.expectedFailure, "TestModule", "test_gradgrad",
-                       active_if=(TEST_CUDNN and not TEST_WITH_ROCM)
+                       active_if=(TEST_CUDNN and not TEST_WITH_ROCM), device_type='cuda'
                    ),
                    # CUDNN RNN doesn't accept non-contiguous hx
                    DecorateInfo(
                        unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors",
-                       active_if=(TEST_CUDNN and not TEST_WITH_ROCM)
+                       active_if=(TEST_CUDNN and not TEST_WITH_ROCM), device_type='cuda'
                    ),
                    # MIOPEN RNN doesn't accept non-contiguous hx (this is dispatched to miopen only for float).
                    DecorateInfo(
                        unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors",
-                       active_if=(TEST_CUDNN and TEST_WITH_ROCM), dtypes=(torch.float,)
+                       active_if=(TEST_CUDNN and TEST_WITH_ROCM), dtypes=(torch.float,), device_type='cuda'
                    ),
                )
                ),
@@ -1066,23 +1066,23 @@ module_db: List[ModuleInfo] = [
                    # We could not generate a fallback
                    DecorateInfo(
                        unittest.expectedFailure, "TestModule", "test_grad",
-                       active_if=(TEST_CUDNN and not TEST_WITH_ROCM)
+                       active_if=(TEST_CUDNN and not TEST_WITH_ROCM), device_type='cuda'
                    ),
                    # NotImplementedError: the derivative for '_cudnn_rnn_backward' is not implemented.
                    # Double backwards is not supported for CuDNN RNNs due to limitations in the CuDNN API
                    DecorateInfo(
                        unittest.expectedFailure, "TestModule", "test_gradgrad",
-                       active_if=(TEST_CUDNN and not TEST_WITH_ROCM)
+                       active_if=(TEST_CUDNN and not TEST_WITH_ROCM), device_type='cuda'
                    ),
                    # CUDNN GRU doesn't accept non-contiguous hx
                    DecorateInfo(
                        unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors",
-                       active_if=(TEST_CUDNN and not TEST_WITH_ROCM)
+                       active_if=(TEST_CUDNN and not TEST_WITH_ROCM), device_type='cuda'
                    ),
                    # MIOPEN GRU doesn't accept non-contiguous hx (this is dispatched to miopen only for float).
                    DecorateInfo(
                        unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors",
-                       active_if=(TEST_CUDNN and TEST_WITH_ROCM), dtypes=(torch.float,)
+                       active_if=(TEST_CUDNN and TEST_WITH_ROCM), dtypes=(torch.float,), device_type='cuda'
                    ),
                ))
 ]
