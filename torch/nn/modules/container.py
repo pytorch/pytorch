@@ -214,7 +214,7 @@ class ModuleList(Module):
     def __iadd__(self, modules: Iterable[Module]) -> 'ModuleList':
         return self.extend(modules)
 
-    def __add__(self, other: 'ModuleList') -> 'ModuleList':
+    def __add__(self, other: Iterable[Module]) -> 'ModuleList':
         r"""Concat two ModuleList instances.
 
         Args:
