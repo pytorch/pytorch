@@ -215,15 +215,6 @@ class ModuleList(Module):
         return self.extend(modules)
 
     def __add__(self, other: Iterable[Module]) -> 'ModuleList':
-        r"""Concat two ModuleList instances.
-
-        Args:
-            other (ModuleList): modulelist to add
-        """
-        if not isinstance(other, ModuleList):
-            raise TypeError("ModuleList concatenation should only be "
-                            "used with another ModuleList instance, but "
-                            " got " + type(other).__name__)
         combined = ModuleList()
         for i, module in enumerate(chain(self, other)):
             combined.add_module(str(i), module)
