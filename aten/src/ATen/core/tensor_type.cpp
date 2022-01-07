@@ -396,7 +396,7 @@ TensorType::TensorType(
     const VaryingShape<Stride>& strides,
     c10::optional<bool> requires_grad,
     c10::optional<bool> undefined)
-    : Type(TypeKind::TensorType),
+    : SharedType(TypeKind::TensorType),
       scalar_type_(scalar_type),
       device_(device),
       sizes_(sizes),
