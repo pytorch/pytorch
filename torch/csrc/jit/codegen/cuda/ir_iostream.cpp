@@ -165,15 +165,17 @@ void IrPrinter::handle(const TensorView* tv) {
     }
     handle(tv->domain());
 
-    if (tv->getComputeAtPosition() > 0) {
-      os_ << " ca_pos( ";
-      os_ << tv->getComputeAtPosition();
-      os_ << " )";
-    }
-    if (tv->getMaxProducerPosition() > 0) {
-      os_ << " produce_pos( ";
-      os_ << tv->getMaxProducerPosition();
-      os_ << ")";
+    if (!tv->isKirStmt()) {
+      if (tv->getComputeAtPosition() > 0) {
+        os_ << " ca_pos( ";
+        os_ << tv->getComputeAtPosition();
+        os_ << " )";
+      }
+      if (tv->getMaxProducerPosition() > 0) {
+        os_ << " produce_pos( ";
+        os_ << tv->getMaxProducerPosition();
+        os_ << ")";
+      }
     }
   }
 }
