@@ -550,7 +550,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.gaussian_nll_loss'),
         xfail('nn.functional.poisson_nll_loss'),
         xfail('fft.rfft2'),
-        xfail('lu'),
         skip('qr'),  # Nondetermistic
         xfail('_masked.prod'),  # calls aten::item
         xfail('stft'),
@@ -603,12 +602,10 @@ class TestOperators(TestCase):
 
         # Try to in-place batched tensor into non-batched tensor
         xfail('matrix_exp'),
-        xfail('lu'),
         xfail('fill_'),
         xfail('block_diag'),  # TODO: We expect this to fail in core, but it doesn't
         xfail('index_copy'),
         xfail('index_put'),
-        xfail('index_fill'),
         xfail('masked_fill'),
         xfail('masked_scatter'),
 
@@ -717,7 +714,6 @@ class TestOperators(TestCase):
         xfail('max', 'binary'),
         xfail('nn.functional.gaussian_nll_loss'),
         xfail('min', 'binary'),
-        xfail('index_fill'),
         xfail('index_put'),
         xfail('std_mean'),
         xfail('double', 'channels_last'),
@@ -727,7 +723,6 @@ class TestOperators(TestCase):
         xfail('scatter'),
         xfail('matrix_exp'),
         xfail('nanquantile'),
-        xfail('lu'),
         xfail('nn.functional.linear'),
         xfail('index_copy'),
         xfail('masked_scatter'),
