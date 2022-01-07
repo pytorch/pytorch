@@ -617,6 +617,9 @@ bool Type::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
                          return this->isSubtypeOfExt(*inner, why_not);
                        });
   }
+  if (auto dyn = rhs.castRaw<DynamicType>()) {
+    return DynamicType::create(*this)->isSubtypeOf(*dyn);
+  }
   return false;
 }
 
@@ -700,7 +703,7 @@ bool TensorType::matchTensor(const at::Tensor& t) {
     && is_null_or_equal(sizes().concrete_sizes(), t.sizes());
 }
 
-bool TensorType::operator==(const c10::Type& rhs) const {
+bool TensorType::equals(const c10::Type& rhs) const {
   if (rhs.kind() != kind()) {
     return false;
   }
@@ -843,6 +846,17 @@ TupleTypePtr TupleType::createNamed(const c10::optional<c10::QualifiedName>& qua
       /*returns=*/std::vector<Argument>{});
   return std::shared_ptr<TupleType>(new TupleType(
       field_types, qualName, schema)); // NOLINT(modernize-make-shared)
+}
+
+c10::optional<std::vector<c10::string_view>> TupleType::names() const {
+  if (!schema_) {
+    return {};
+  }
+  std::vector<c10::string_view> ret;
+  for (const auto& arg : schema_->arguments()) {
+    ret.emplace_back(arg.name());
+  }
+  return ret;
 }
 
 bool NoneType::isSubtypeOfExt(const Type& rhs, std::ostream *why_not) const {
@@ -1039,7 +1053,7 @@ UnionTypePtr UnionType::create(std::vector<TypePtr> reference) {
   return UnionTypePtr(union_type);
 }
 
-bool UnionType::operator==(const Type& rhs) const {
+bool UnionType::equals(const Type& rhs) const {
   if (auto union_rhs = rhs.cast<UnionType>()) {
     // We can't compare the type vectors for equality using `operator=`,
     // because the vectors hold `TypePtr`s and we want to compare `Type`
@@ -1245,7 +1259,7 @@ OptionalType::OptionalType(TypePtr contained)
   has_free_variables_ = contained_->hasFreeVariables();
 }
 
-bool OptionalType::operator==(const Type& rhs) const {
+bool OptionalType::equals(const Type& rhs) const {
   if (auto union_rhs = rhs.cast<UnionType>()) {
     auto optional_rhs = union_rhs->toOptional();
     // `**optional_rhs` = `*` to get value of `c10::optional<TypePtr>`,
@@ -1281,7 +1295,7 @@ bool OptionalType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const 
   }
 }
 
-bool NumberType::operator==(const Type& rhs) const {
+bool NumberType::equals(const Type& rhs) const {
   if (auto union_type = rhs.cast<UnionType>()) {
     return union_type->containedTypes().size() == 3 && union_type->canHoldType(*NumberType::get());
   } else {
@@ -1363,7 +1377,7 @@ bool ListType::isSubtypeOfExt(const Type& rhs_, std::ostream* why_not) const {
   return false;
 }
 
- bool TupleType::operator==(const Type& rhs) const {
+ bool TupleType::equals(const Type& rhs) const {
    bool typesSame =
        compare(rhs, [](const Type& a, const Type& b) { return a == b; });
    if (!typesSame) {
