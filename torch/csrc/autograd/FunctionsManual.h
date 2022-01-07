@@ -97,6 +97,7 @@ at::Tensor native_dropout_double_backward(const at::Tensor& ggI, const at::Tenso
 at::Tensor evenly_distribute_backward(at::Tensor grad, const at::Tensor & input, const at::Tensor & value);
 at::Tensor sgn_backward(Tensor result, Tensor grad, Tensor self);
 at::Tensor var_backward(at::Tensor grad, const at::Tensor& self, c10::optional<IntArrayRef> dim, c10::optional<int64_t> correction, bool keepdim);
+at::Tensor var_jvp(const at::Tensor& self_t, const at::Tensor& self_p, const at::Tensor& result, c10::optional<IntArrayRef> dim_opt, c10::optional<int64_t> correction_opt, bool keepdim);
 at::Tensor std_backward(const at::Tensor& result, const at::Tensor& grad, const at::Tensor& self, c10::optional<IntArrayRef> dim, c10::optional<int64_t> correction, bool keepdim);
 at::Tensor mean_backward(at::Tensor grad, const at::IntArrayRef sizes, at::IntArrayRef dim, bool keepdim);
 at::Tensor mean_backward(at::Tensor grad, const at::IntArrayRef sizes, int64_t numel);
@@ -367,17 +368,37 @@ Tensor lu_backward_base(
   const Tensor& L,
   const Tensor& U
 );
-Tensor _lu_with_info_backward(
+Tensor lu_factor_ex_backward(
   const Tensor& grad,
   const Tensor& self,
   const Tensor& LU,
   const Tensor& pivs
 );
-Tensor _lu_with_info_jvp(
+Tensor lu_factor_ex_jvp(
   const Tensor& dX,
   const Tensor& LU,
   const Tensor& pivs
 );
+
+
+Tensor convolution_jvp(
+  const Tensor& input_p, const Tensor& input_t,
+  const Tensor& weight_p, const Tensor& weight_t,
+  const Tensor& bias_p, const Tensor& bias_t,
+  IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
+  bool transposed, IntArrayRef output_padding, int64_t groups
+);
+
+Tensor _convolution_jvp(
+  const Tensor& input_p, const Tensor& input_t,
+  const Tensor& weight_p, const Tensor& weight_t,
+  const Tensor& bias_p, const Tensor& bias_t,
+  IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
+  bool transposed, IntArrayRef output_padding, int64_t groups,
+  bool benchmark, bool deterministic, bool cudnn_enabled, bool allow_tf32
+);
+
+Tensor convolution_backward_jvp_grad_bias(const Tensor& grad_out_t, const Tensor& grad_bias);
 
 Tensor cat_jvp(at::TensorList tensors, int64_t dim);
 Tensor stack_jvp(at::TensorList tensors, int64_t dim);
@@ -385,6 +406,11 @@ Tensor cumprod_jvp(Tensor self_t, Tensor self_p, Tensor result, int dim);
 Tensor gather_with_keepdimed_indices(const Tensor& input, int64_t dim, const Tensor& indices, bool keepdim);
 Tensor evenly_read_jvp(const Tensor& fw_grad, const Tensor & input, const Tensor & value);
 Tensor warn_backwards(const Tensor &grad_output);
+
+std::tuple<Tensor, Tensor> _cudnn_convolution_backward(
+    const at::Tensor & self, const at::Tensor & grad_output, const at::Tensor & weight, at::IntArrayRef padding,
+    at::IntArrayRef output_padding, at::IntArrayRef stride, at::IntArrayRef dilation, bool transposed, int64_t groups,
+    ::std::array<bool,2> output_mask);
 
 } // namespace details
 } // namespace generated

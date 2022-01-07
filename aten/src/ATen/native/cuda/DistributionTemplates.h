@@ -2,6 +2,7 @@
 
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
+#include <ATen/ExpandUtils.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <c10/util/Half.h>
@@ -624,15 +625,22 @@ void bernoulli_kernel(Tensor& self, const Tensor& p_, RNG gen) {
     std::lock_guard<std::mutex> lock(gen->mutex_);
     rng_engine_inputs = gen->philox_cuda_state(10);
   }
+  TORCH_CHECK(at::isFloatingType(p_.scalar_type()), "expected probabilities tensor to have floating type, got ", p_.scalar_type());
   auto p_CUDA = p_.to(kCUDA);
+  //cast probabilities tensor to double for double `self` tensor, and to `float` for everything else
+  if (self.dtype() == at::kDouble) {
+    p_CUDA = p_CUDA.to(at::kDouble);
+  } else {
+    p_CUDA = p_CUDA.to(at::kFloat);
+  }
   c10::MaybeOwned<Tensor> p = expand_inplace(self, p_CUDA);
   AT_DISPATCH_ALL_TYPES_AND3(
     at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool, self.scalar_type(), "bernoulli_tensor_cuda_self_", [&] {
-      using self_t = scalar_t;
-      AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, p->scalar_type(), "bernoulli_tensor_cuda_p_", [&] {
-        using p_t = scalar_t;
-        return bernoulli_tensor_cuda_kernel<self_t, p_t>(self, *p, rng_engine_inputs);
-      });
+      if (std::is_same<scalar_t, double>::value) {
+        return bernoulli_tensor_cuda_kernel<double, double>(self, *p, rng_engine_inputs);
+      } else {
+        return bernoulli_tensor_cuda_kernel<scalar_t, float>(self, *p, rng_engine_inputs);
+      }
    });
 }
 

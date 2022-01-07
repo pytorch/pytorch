@@ -66,7 +66,6 @@ class AccTracerTest(unittest.TestCase):
 
         a = torch.randn(*input_shape)
         traced = acc_tracer.trace(m, [a])
-
         ph_a = acc_op_node = None
         for node in traced.graph.nodes:
             if node.op == "placeholder":
@@ -105,11 +104,12 @@ class AccTracerTest(unittest.TestCase):
                 )
 
     def test_sum(self):
-        def torch_sum(x, *args, **kwargs):
-            return x.sum(*args, **kwargs)
+        self._make_acc_op_function_test(acc_ops.sum, torch.sum)
+        self._make_acc_op_function_test(acc_ops.sum, torch.sum, dim=(1,), keepdim=True)
 
-        self._make_acc_op_function_test(acc_ops.sum, torch_sum)
-        self._make_acc_op_function_test(acc_ops.sum, torch_sum, dim=(1,), keepdim=True)
+    def test_mean(self):
+        self._make_acc_op_function_test(acc_ops.mean, torch.mean)
+        self._make_acc_op_function_test(acc_ops.mean, torch.mean, dim=(1,), keepdim=True)
 
     def test_pad(self):
         self._make_acc_op_function_test(acc_ops.pad, torch.nn.functional.pad, pad=(2, 0))
@@ -1370,6 +1370,9 @@ class AccTracerTest(unittest.TestCase):
     def test_relu(self):
         self._make_acc_op_function_test(acc_ops.relu, torch.relu)
 
+    def test_leaky_relu(self):
+        self._make_acc_op_function_test(acc_ops.leaky_relu, torch.nn.functional.leaky_relu)
+
     def test_sigmoid(self):
         self._make_acc_op_function_test(acc_ops.sigmoid, torch.sigmoid)
 
@@ -1896,6 +1899,7 @@ class AccTracerTest(unittest.TestCase):
                 acc_ops.div,
                 acc_ops.pow,
                 acc_ops.relu,
+                acc_ops.leaky_relu,
                 acc_ops.tuple_construct,
                 acc_ops.unsqueeze,
                 acc_ops.sigmoid,
@@ -1943,6 +1947,7 @@ class AccTracerTest(unittest.TestCase):
                 acc_ops.linalg_norm,
                 acc_ops.slice_tensor,
                 acc_ops.hardsigmoid,
+                acc_ops.mean,
                 acc_ops.hardtanh,
                 acc_ops.gelu,
                 acc_ops.cumsum,

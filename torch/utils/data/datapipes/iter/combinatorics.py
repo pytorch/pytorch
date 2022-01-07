@@ -72,10 +72,12 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
     """
     datapipe: IterDataPipe[T_co]
     buffer_size: int
+    _shuffle_enabled: bool
 
     def __init__(self,
                  datapipe: IterDataPipe[T_co],
                  *,
+                 default: bool = True,
                  buffer_size: int = 10000,
                  unbatch_level: int = 0
                  ) -> None:
@@ -86,6 +88,7 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
         else:
             self.datapipe = datapipe.unbatch(unbatch_level=unbatch_level)
         self.buffer_size = buffer_size
+        self._shuffle_enabled = default
 
     @staticmethod
     def buffer_replace(buffer, x):
@@ -94,16 +97,23 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
         buffer[idx] = x
         return val
 
+    def set_shuffle_settings(self, shuffle=True):
+        self._shuffle_enabled = shuffle
+
     def __iter__(self) -> Iterator[T_co]:
-        buffer: List[T_co] = []
-        for x in self.datapipe:
-            if len(buffer) == self.buffer_size:
-                yield ShufflerIterDataPipe.buffer_replace(buffer, x)
-            else:
-                buffer.append(x)
-        random.shuffle(buffer)
-        while buffer:
-            yield buffer.pop()
+        if not self._shuffle_enabled:
+            for x in self.datapipe:
+                yield x
+        else:
+            buffer: List[T_co] = []
+            for x in self.datapipe:
+                if len(buffer) == self.buffer_size:
+                    yield ShufflerIterDataPipe.buffer_replace(buffer, x)
+                else:
+                    buffer.append(x)
+            random.shuffle(buffer)
+            while buffer:
+                yield buffer.pop()
 
     def __len__(self) -> int:
         if isinstance(self.datapipe, Sized):
