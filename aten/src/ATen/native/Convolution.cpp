@@ -1268,19 +1268,6 @@ at::Tensor _convolution(
   return output;
 }
 
-at::Tensor _convolution(
-    const Tensor& input_r, const Tensor& weight_r, const c10::optional<Tensor>& bias_r_opt,
-    IntArrayRef stride_, IntArrayRef padding_, IntArrayRef dilation_,
-    bool transposed_, IntArrayRef output_padding_, int64_t groups_,
-    bool benchmark, bool deterministic, bool cudnn_enabled)
-{
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> bias_r_maybe_owned = at::borrow_from_optional_tensor(bias_r_opt);
-  const Tensor& bias_r = *bias_r_maybe_owned;
-
-  return at::_convolution(input_r, weight_r, bias_r, stride_, padding_, dilation_, transposed_, output_padding_, groups_, benchmark, deterministic, cudnn_enabled, at::globalContext().allowTF32CuDNN());
-}
-
 std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
         const Tensor& grad_output, const Tensor& input, const Tensor& weight,
         IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
