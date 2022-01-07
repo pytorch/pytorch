@@ -4304,37 +4304,6 @@ class TestLinalg(TestCase):
         self.assertEqual(matrix_rank(a).item(), 9)
         self.assertEqual(matrix_rank(a, hermitian=True).item(), 9)
 
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(*floating_and_complex_types())
-    def test_old_matrix_rank(self, device, dtype):
-        a = torch.eye(10, dtype=dtype, device=device)
-        self.assertEqual(torch.matrix_rank(a).item(), 10)
-        self.assertEqual(torch.matrix_rank(a, True).item(), 10)
-
-        a[5, 5] = 0
-        self.assertEqual(torch.matrix_rank(a).item(), 9)
-        self.assertEqual(torch.matrix_rank(a, True).item(), 9)
-
-        a = torch.randn(24, 42, dtype=dtype, device=device)
-        self.assertEqual(torch.matrix_rank(a), torch.matrix_rank(a.t()))
-        aaT = torch.mm(a, a.conj().t())
-        self.assertEqual(torch.matrix_rank(aaT), torch.matrix_rank(aaT, True))
-        aTa = torch.mm(a.conj().t(), a)
-        self.assertEqual(torch.matrix_rank(aTa), torch.matrix_rank(aTa, True))
-
-        a = torch.randn(35, 75, dtype=dtype, device=device)
-        self.assertEqual(torch.matrix_rank(a), np.linalg.matrix_rank(a.cpu().numpy()))
-        self.assertEqual(torch.matrix_rank(a, 0.01), np.linalg.matrix_rank(a.cpu().numpy(), 0.01))
-
-        aaT = torch.mm(a, a.conj().t())
-        self.assertEqual(torch.matrix_rank(aaT), np.linalg.matrix_rank(aaT.cpu().numpy()))
-        self.assertEqual(torch.matrix_rank(aaT, 0.01), np.linalg.matrix_rank(aaT.cpu().numpy(), 0.01))
-
-        if np.lib.NumpyVersion(np.__version__) >= '1.14.0':
-            self.assertEqual(torch.matrix_rank(aaT, True), np.linalg.matrix_rank(aaT.cpu().numpy(), True))
-            self.assertEqual(torch.matrix_rank(aaT, 0.01, True), np.linalg.matrix_rank(aaT.cpu().numpy(), 0.01, True))
-
     @onlyNativeDeviceTypes
     @dtypes(torch.double)
     # This tests only the cases where torch.chain_matmul differs from torch.linalg.multi_dot which this is an "alias" for.
