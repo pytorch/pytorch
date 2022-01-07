@@ -962,7 +962,8 @@ class MultiheadAttention(Module):
         super(MultiheadAttention, self).__setstate__(state)
 
     def forward(self, query: Tensor, key: Tensor, value: Tensor, key_padding_mask: Optional[Tensor] = None,
-                need_weights: bool = True, attn_mask: Optional[Tensor] = None) -> Tuple[Tensor, Optional[Tensor]]:
+                need_weights: bool = True, attn_mask: Optional[Tensor] = None,
+                average_attn_weights: bool = True) -> Tuple[Tensor, Optional[Tensor]]:
         r"""
     Args:
         query: Query embeddings of shape :math:`(L, E_q)` for unbatched input, :math:`(L, N, E_q)` when ``batch_first=False``
@@ -994,15 +995,20 @@ class MultiheadAttention(Module):
             corresponding position is not allowed to attend. For a byte mask, a non-zero value indicates that the
             corresponding position is not allowed to attend. For a float mask, the mask values will be added to
             the attention weight.
+        average_attn_weights: If true, indicates that the returned ``attn_weights`` should be averaged across
+            heads. Otherwise, ``attn_weights`` are provided separately per head. Note that this flag only has an
+            effect when ``need_weights=True.``. Default: True (i.e. average weights across heads)
 
     Outputs:
         - **attn_output** - Attention outputs of shape :math:`(L, E)` when input is unbatched,
           :math:`(L, N, E)` when ``batch_first=False`` or :math:`(N, L, E)` when ``batch_first=True``,
           where :math:`L` is the target sequence length, :math:`N` is the batch size, and :math:`E` is the
           embedding dimension ``embed_dim``.
-        - **attn_output_weights** - Attention output weights of shape :math:`(L, S)` when input is unbatched
-          or :math:`(N, L, S)`, where :math:`N` is the batch size, :math:`L` is the target sequence length, and
-          :math:`S` is the source sequence length. Only returned when ``need_weights=True``.
+        - **attn_output_weights** - Only returned when ``need_weights=True``. If ``average_attn_weights=True``,
+          returns attention weights averaged across heads of shape :math:`(L, S)` when input is unbatched or
+          :math:`(N, L, S)`, where :math:`N` is the batch size, :math:`L` is the target sequence length, and
+          :math:`S` is the source sequence length. If ``average_weights=False``, returns attention weights per
+          head of shape :math:`(num_heads, L, S)` when input is unbatched or :math:`(N, num_heads, L, S)`.
 
         .. note::
             `batch_first` argument is ignored for unbatched inputs.
@@ -1021,7 +1027,7 @@ class MultiheadAttention(Module):
                 key_padding_mask=key_padding_mask, need_weights=need_weights,
                 attn_mask=attn_mask, use_separate_proj_weight=True,
                 q_proj_weight=self.q_proj_weight, k_proj_weight=self.k_proj_weight,
-                v_proj_weight=self.v_proj_weight)
+                v_proj_weight=self.v_proj_weight, average_attn_weights=average_attn_weights)
         else:
             attn_output, attn_output_weights = F.multi_head_attention_forward(
                 query, key, value, self.embed_dim, self.num_heads,
@@ -1030,7 +1036,7 @@ class MultiheadAttention(Module):
                 self.dropout, self.out_proj.weight, self.out_proj.bias,
                 training=self.training,
                 key_padding_mask=key_padding_mask, need_weights=need_weights,
-                attn_mask=attn_mask)
+                attn_mask=attn_mask, average_attn_weights=average_attn_weights)
         if self.batch_first and is_batched:
             return attn_output.transpose(1, 0), attn_output_weights
         else:

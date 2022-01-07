@@ -88,7 +88,7 @@ using DynamicTypePtr = std::shared_ptr<DynamicType>;
  * requirement of DynamicType to interface with existing JIT types, but we might
  * want to inherit from c10::Type to reduce the migration cost.
  */
-class DynamicType : public Type {
+class DynamicType : public SharedType {
   using ClassTypePtr = std::shared_ptr<const c10::ClassType>;
 
   /**
