@@ -52,7 +52,6 @@ cc_library(
     name = "c10",
     deps = [
         ":headers",
-        "@fmt",
         "//c10/core:CPUAllocator",
         "//c10/core:ScalarType",
         "//c10/core:alloc_cpu",

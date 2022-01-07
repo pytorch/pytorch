@@ -19,6 +19,9 @@ def define_targets(rules):
                 "CUDAMacros.h",
             ],
         ),
+        # This library uses registration. Don't let registered
+        # entities be removed.
+        alwayslink = True,
         linkstatic = True,
         local_defines = ["C10_BUILD_MAIN_LIB"],
         visibility = ["//visibility:public"],
