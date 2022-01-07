@@ -64,9 +64,9 @@ class Adamax(Optimizer):
         super(Adamax, self).__init__(params, defaults)
 
     def __setstate__(self, state):
-        super().__setstate__(state)
+        super(Adamax, self).__setstate__(state)
         for group in self.param_groups:
-            group.setdefault('foreach', False)
+            group.setdefault('foreach', None)
 
     @torch.no_grad()
     def step(self, closure=None):
