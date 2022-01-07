@@ -438,7 +438,7 @@ void IrPrinter::handle(const TransposeOp* top) {
 
 void IrPrinter::handle(const ShiftOp* sop) {
   indent() << sop->out() << " = shift( " << sop->in() << ", {" << sop->offsets()
-           << "}, padding = " << (sop->pad() ? "true" : "false") << " )\n";
+           << "}, {" << sop->padWidth() << "} )\n";
 }
 
 void IrPrinter::handle(const GatherOp* op) {

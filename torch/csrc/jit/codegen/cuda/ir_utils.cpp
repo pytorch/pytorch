@@ -237,7 +237,7 @@ struct SubstituteInExpr : public OptInDispatch {
         out,
         in,
         shift_expr->offsets(),
-        shift_expr->pad());
+        shift_expr->padWidth());
   }
 
   void handle(GatherOp* gather_expr) final {

@@ -234,7 +234,7 @@ Statement* OptOutMutator::mutate(ShiftOp* sop) {
   auto offsets = sop->offsets();
   FusionGuard::getCurFusion()->removeExpr(sop);
   return IrBuilder::create<ShiftOp>(
-      sop->container(), out, in, offsets, sop->pad());
+      sop->container(), out, in, offsets, sop->padWidth());
 }
 
 Statement* OptOutMutator::mutate(GatherOp* op) {

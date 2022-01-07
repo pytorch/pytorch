@@ -406,8 +406,8 @@ Val* getProducerOffsetWithGather(
   auto window_idx =
       index_map.at(gpu_lower->lowerValue(window_id)->as<IterDomain>());
 
-  // Positive (or negative) padding at offset zero means the indexing
-  // shifted to the negative (or positive) direction.
+  // Positive padding at offset zero means the indexing shifted to the
+  // negative direction.
   auto pad_width = gather_expr->padWidth()[consumer_root_axis][0];
 
   // producer offset: window_index - padding
@@ -2317,9 +2317,8 @@ bool needsPadding(TensorView* tv) {
   auto shift_expr = dynamic_cast<ShiftOp*>(tv->definition());
   auto gather_expr = dynamic_cast<GatherOp*>(tv->definition());
 
-  // Padding is only necessary for padded shift and
-  // gather
-  return (shift_expr != nullptr && shift_expr->pad()) || gather_expr != nullptr;
+  return (shift_expr != nullptr && shift_expr->hasPadding()) ||
+      (gather_expr != nullptr && gather_expr->hasPadding());
 }
 
 // Get an additional offset of a stop index when building a predicate
@@ -2388,31 +2387,20 @@ std::pair<Val*, Val*> getStartAndStopOffsetsForShift(
 
   const auto root_axis_pos = consumer_tv->domain()->rootPosOf(consumer_id);
 
-  // The consumer offset is zero.
-  auto consumer_offset = 0;
-  // The producer offset is based off the consumer offset.
-  auto producer_offset = 0;
+  // The first or last N elements, where N is the padding width,
+  // correspond to the padding predicate.
 
-  // When the shift operation is not padded, the start and stop positions of the
-  // consumer axis, i.e., consumer_id->start and
-  // consumer_id->stop_ofset, are adjusted accordingly, which includes
-  // the effect of the shift offset, so using the consumer offset is
-  // sufficient as the only predicate is sufficient.
+  const auto shift_offset = shift_expr->offset(root_axis_pos);
+  const auto pad_width = shift_expr->padWidth().at(root_axis_pos);
 
-  if (shift_expr->pad()) {
-    // Positive shift offset means shifting the input tensor to the
-    // positive direction, so the producer offset becomes negative.
-    auto shift_offset = shift_expr->offset(root_axis_pos);
-    producer_offset = -shift_offset;
+  int start_offset = 0;
+  int stop_offset = 0;
+
+  if (shift_offset > 0) {
+    start_offset = -pad_width;
+  } else if (shift_offset < 0) {
+    stop_offset = pad_width;
   }
-
-  // Since shift doesn't allow dynamic offsets, we can statically
-  // choose more restrictive offsets between the producer and consumer
-  // offsets. The start predicate uses greater-than, so using the
-  // smaller offset is sufficient. Similarly, for the stop predicate,
-  // using the larger offset is sufficient.
-  auto start_offset = std::min(consumer_offset, producer_offset);
-  auto stop_offset = std::max(consumer_offset, producer_offset);
 
   return {
       ir_builder.create<Int>(start_offset),
@@ -2459,16 +2447,49 @@ std::pair<Val*, Val*> getStartAndStopOffsetsForGather(
   // offset must be always larger than the consumer
   // offset. So, the consumer and produce offsets can be always used
   // for the start and stop offsets, respectively.
-  const auto no_padding =
-      consumer_tv->definition()->as<GatherOp>()->padWidth()[root_axis_pos][0] ==
-      0;
+  const auto pad_left =
+      consumer_tv->definition()->as<GatherOp>()->padWidth()[root_axis_pos][0];
+  const auto pad_right =
+      consumer_tv->definition()->as<GatherOp>()->padWidth()[root_axis_pos][1];
+  const auto window_size =
+      consumer_tv->definition()->as<GatherOp>()->windowShape()[root_axis_pos];
 
-  if (no_padding) {
+  // consumer index: index
+  // producer index: index + window_index - pad_left
+  //
+  // consumer extent: ext
+  // producer extent: ext + window_size - 1 - pad_left - pad_right
+  //
+  // consumer stop pred: index < ext
+  // producer stop pred: index + window_index - pad_left < ext + window_size - 1
+  // - pad_left - pad_right
+  //                  -> index + window_index - pad_left - (window_size - 1 -
+  //                  pad_left - pad_right) < ext
+  //                  -> index + window_index - (window_size - 1 - pad_right) <
+  //                  ext
+  //
+  // consumer start pred: index >= 0
+  // producer start pred: index + window_index - pad_left >= 0
+
+  const auto producer_ext_adj = window_size - 1 - pad_left - pad_right;
+  producer_stop_offset = ir_builder.subExpr(
+      producer_stop_offset, ir_builder.create<Int>(producer_ext_adj));
+
+  // As commented above, when pad_left is zero, the consumer predicate
+  // is always more restrictive than the producer predicate.
+  if (pad_left == 0) {
     start_offset = consumer_start_offset;
-    stop_offset = producer_stop_offset;
   } else {
     start_offset =
         ir_builder.minExpr(consumer_start_offset, producer_start_offset);
+  }
+
+  // As commented above, when pad_right is zero, the consumer
+  // predicate is always more restrictive than the producer
+  // predicate.
+  if (pad_right == 0) {
+    stop_offset = consumer_stop_offset;
+  } else {
     stop_offset =
         ir_builder.maxExpr(consumer_stop_offset, producer_stop_offset);
   }

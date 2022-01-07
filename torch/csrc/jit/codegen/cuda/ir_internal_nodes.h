@@ -341,7 +341,7 @@ class TORCH_CUDA_CU_API ShiftOp : public Expr {
       Val* out,
       Val* in,
       std::vector<int> offsets,
-      bool pad);
+      std::vector<int> pad_width);
 
   ShiftOp(const ShiftOp* src, IrCloner* ir_cloner);
 
@@ -360,8 +360,14 @@ class TORCH_CUDA_CU_API ShiftOp : public Expr {
     return offsets_;
   }
 
-  bool pad() const {
-    return pad_;
+  const std::vector<int>& padWidth() const {
+    return pad_width_;
+  }
+
+  bool hasPadding() const {
+    return std::any_of(pad_width_.begin(), pad_width_.end(), [](const auto p) {
+      return p > 0;
+    });
   }
 
   bool sameAs(const Statement* other) const override;
@@ -373,7 +379,7 @@ class TORCH_CUDA_CU_API ShiftOp : public Expr {
   //! offsets_. The sign of each value indicates the direction of
   //! shifting.
   const std::vector<int> offsets_;
-  const bool pad_;
+  const std::vector<int> pad_width_;
 };
 
 //! Gather a window around each element.
@@ -404,6 +410,12 @@ class TORCH_CUDA_CU_API GatherOp : public Expr {
 
   const auto& padWidth() const {
     return pad_width_;
+  }
+
+  bool hasPadding() const {
+    return std::any_of(pad_width_.begin(), pad_width_.end(), [](const auto& p) {
+      return p[0] > 0 || p[1] > 0;
+    });
   }
 
   bool sameAs(const Statement* other) const override;

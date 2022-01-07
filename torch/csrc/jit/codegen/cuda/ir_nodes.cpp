@@ -608,12 +608,12 @@ ShiftOp::ShiftOp(
     Val* out,
     Val* in,
     std::vector<int> offsets,
-    bool pad)
+    std::vector<int> pad_width)
     : Expr(passkey, ExprType::ShiftOp),
       out_(out),
       in_(in),
       offsets_(std::move(offsets)),
-      pad_(pad) {
+      pad_width_(std::move(pad_width)) {
   // clang-tidy complains about out_ that it may be null.
   TORCH_INTERNAL_ASSERT(out_ != nullptr);
   TORCH_INTERNAL_ASSERT(in_ != nullptr);
@@ -632,6 +632,13 @@ ShiftOp::ShiftOp(
       "Invalid offset vector: ",
       offsets_);
 
+  TORCH_INTERNAL_ASSERT(
+      pad_width_.size() ==
+          TensorDomain::noReductions(in_->as<TensorView>()->getRootDomain())
+              .size(),
+      "Invalid padding width vector: ",
+      pad_width_);
+
   addOutput(out);
   addInput(in);
 }
@@ -641,7 +648,7 @@ ShiftOp::ShiftOp(const ShiftOp* src, IrCloner* ir_cloner)
       out_(ir_cloner->clone(src->out_)),
       in_(ir_cloner->clone(src->in_)),
       offsets_(src->offsets_),
-      pad_(src->pad_) {
+      pad_width_(src->pad_width_) {
   TORCH_INTERNAL_ASSERT(
       !src->isKirStmt() && !isKirStmt(), "Function invalid for kir.");
 }
@@ -1014,8 +1021,9 @@ std::pair<IterDomain*, IterDomain*> IterDomain::split(
 }
 
 std::pair<IterDomain*, IterDomain*> IterDomain::stridedSplit(int factor) {
+  // Use partial split so that only valid values are retained
   auto split_out = IterDomain::split(
-      this, IrBuilder::create<Int>(container(), factor), true);
+      this, IrBuilder::create<Int>(container(), factor), true, true);
 
   split_out.second->iter_type_ = IterType::Stride;
   split_out.first->is_rfactor_domain_ = true;
