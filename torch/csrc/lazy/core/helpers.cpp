@@ -1,6 +1,7 @@
 #include <torch/csrc/lazy/core/helpers.h>
 
 #include <c10/util/Half.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/lazy/core/tensor_util.h>
 
 #include <limits>
@@ -13,7 +14,7 @@ std::vector<int64_t> DropDimensions(
     c10::ArrayRef<int64_t> drop_dims) {
   std::vector<int64_t> new_dims;
   size_t drop_index = 0;
-  for (size_t i = 0; i < sizes.size(); ++i) {
+  for (const auto i : c10::irange(sizes.size())) {
     if (drop_index < drop_dims.size() && i == drop_dims[drop_index]) {
       ++drop_index;
     } else {
@@ -99,7 +100,7 @@ std::vector<int64_t> GetPromotedShape(
   }
   // For the common dimensions, they must match, or one of them be 1.
   size_t min_size = std::min(shape1_dims.size(), shape2_dims.size());
-  for (int64_t i = 0; i < min_size; ++i) {
+  for (const auto i : c10::irange(min_size)) {
     int64_t dim1 = shape1_dims[shape1_dims.size() - min_size + i];
     int64_t dim2 = shape2_dims[shape2_dims.size() - min_size + i];
     TORCH_CHECK(
