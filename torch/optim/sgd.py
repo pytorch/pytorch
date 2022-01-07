@@ -109,6 +109,7 @@ class SGD(Optimizer):
         for group in self.param_groups:
             group.setdefault('nesterov', False)
             group.setdefault('maximize', False)
+            group.setdefault('foreach', None)
 
     @torch.no_grad()
     def step(self, closure=None):
