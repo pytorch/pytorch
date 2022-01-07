@@ -89,7 +89,7 @@ const std::unordered_set<std::string>& TypeParser::getCustomType() {
 // compatibility check between model and runtime. For example:
 // PyThon string: "Dict[int, Tuple[Tensor, Tensor, Tensor]]"
 // contained type is: [Dict, int, Tuple, Tensor]
-const std::unordered_set<std::string>& TypeParser::getContainedTypes() {
+std::unordered_set<std::string> TypeParser::getContainedTypes() {
   return contained_types_;
 }
 
