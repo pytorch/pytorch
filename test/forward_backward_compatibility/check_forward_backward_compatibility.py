@@ -46,6 +46,8 @@ ALLOW_LIST = [
     ("aten::_lu_with_info", datetime.date(9999, 1, 1)),
     ("aten::_linalg_solve_out_helper_", datetime.date(9999, 1, 1)),
     ("aten::select_backward", datetime.date(9999, 1, 1)),
+    ("aten::lstsq", datetime.date(9999, 1, 1)),
+    ("aten::lstsq.X", datetime.date(9999, 1, 1)),
     ("aten::slice_backward", datetime.date(9999, 1, 1)),
     ("aten::diagonal_backward", datetime.date(9999, 1, 1)),
     ("aten::rowwise_prune", datetime.date(9999, 1, 1)),

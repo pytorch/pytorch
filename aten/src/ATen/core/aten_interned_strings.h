@@ -447,7 +447,6 @@ _(aten, logdet) \
 _(aten, logspace) \
 _(aten, lstm) \
 _(aten, lstm_cell) \
-_(aten, lstsq) \
 _(aten, lu_solve) \
 _(aten, margin_ranking_loss) \
 _(aten, masked_fill) \

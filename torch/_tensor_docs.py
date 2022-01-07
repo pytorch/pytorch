@@ -2299,13 +2299,6 @@ logsumexp(dim, keepdim=False) -> Tensor
 See :func:`torch.logsumexp`
 """)
 
-add_docstr_all('lstsq',
-               r"""
-lstsq(A) -> (Tensor, Tensor)
-
-See :func:`torch.lstsq`
-""")
-
 add_docstr_all('lt', r"""
 lt(other) -> Tensor
 

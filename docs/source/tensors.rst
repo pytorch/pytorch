@@ -479,7 +479,6 @@ Tensor class reference
     Tensor.logit
     Tensor.logit_
     Tensor.long
-    Tensor.lstsq
     Tensor.lt
     Tensor.lt_
     Tensor.less
