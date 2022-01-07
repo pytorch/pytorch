@@ -15,7 +15,6 @@ function install_ucx() {
 }
 
 function install_ucc() {
-  rm -rf ucc
   git clone --recursive https://github.com/openucx/ucc.git
   pushd ucc
   git checkout ${UCC_COMMIT}
