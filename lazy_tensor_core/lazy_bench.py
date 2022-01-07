@@ -184,10 +184,10 @@ for dims in toy_dims:
 
     SKIP_TRAIN_ONLY.add("DivAddMulBenchmark(dims=[" + ','.join([str(d) for d in dims]) + '])')
     SKIP_TRAIN_ONLY.add("HardSwishBenchmark(dims=[" + ','.join([str(d) for d in dims]) + '])')
-def list_toy_models():
+def iter_toy_model_names():
     for dims in toy_dims:
         for model in toy_models:
-            yield model(dims=dims)
+            yield model(dims=dims).name
 
 def pick_grad(args, name):
     if args.test == 'train':
@@ -202,13 +202,14 @@ def short_name(name, limit=20):
     """Truncate a model name to limit chars"""
     return name if len(name) <= limit else f"{name[:limit - 3].rstrip('_')}..."
 
-def iter_models(args, dirpath):
-    from fastNLP.core import logger
+def iter_torchbench_model_names():
+    from torchbenchmark import _list_model_paths
+    for model_path in _list_model_paths():
+        model_name = os.path.basename(model_path)
+        yield model_name
 
-    logger.setLevel(logging.WARNING)
-    from torchbenchmark import list_models
-    for benchmark_cls in itertools.chain(list_toy_models(), list_models()):
-        name = benchmark_cls.name if hasattr(benchmark_cls, 'name') else benchmark_cls.name()
+def iter_models(args, dirpath):
+    for name in itertools.chain(iter_toy_model_names(), iter_torchbench_model_names()):
         if (
             (len(args.filter) and (not re.search("|".join(args.filter), name, re.I)))
             or (len(args.exclude) and re.search("|".join(args.exclude), name, re.I))
@@ -217,23 +218,7 @@ def iter_models(args, dirpath):
         ):
             save_error(name, args.test, "in SKIP or SKIP_TRAIN_ONLY", dirpath)
             continue
-        # TODO(whc) better to support list of devices;
-        # curently since env var needs to be set for GPU, have to launch one dev at a time
-        # check if we can run a benchmark for a given device
-        for device in [args.device]:
-            try:
-                torch.manual_seed(1337)
-                benchmark = benchmark_cls(device=device, jit=False)
-                torch.manual_seed(1337)
-                lazy_benchmark = benchmark_cls(device='lazy', jit=False)
-                gc.collect()
-                yield name
-            except NotImplementedError:
-                print(f"NotImplementedError for {name}")
-                pass
-            except Exception as e:
-                print(f"Exception in iter_models for {name}", e)
-                log.exception(f"misconfigured model {name}")
+        yield name
 
 def call_model_with(model, inputs):
     if isinstance(inputs, tuple) or isinstance(inputs, list):
@@ -602,6 +587,8 @@ if __name__ == "__main__" :
     copy_argv = [] + sys.argv
     if args.run_in_subprocess:
         try:
+            from fastNLP.core import logger
+            logger.setLevel(logging.WARNING)
             name = args.run_in_subprocess
             benchmark_cls = get_benchmark_cls(args.run_in_subprocess)
             bench_name = benchmark_cls.name if hasattr(benchmark_cls, 'name') else benchmark_cls.name()
