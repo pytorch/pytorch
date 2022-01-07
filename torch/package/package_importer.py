@@ -9,7 +9,6 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import cast, Any, BinaryIO, Callable, Dict, List, Optional, Union
 from weakref import WeakValueDictionary
-import pdb
 import torch
 from torch.serialization import _get_restore_location, _maybe_decode_ascii
 
@@ -636,8 +635,7 @@ class PackageImporter(Importer):
 
         for i, atom in enumerate(atoms):
 
-            assert isinstance(cur, (_PackageNode, _SelectiveExternNode))
-            node = cur.children.get(atom, _PathNode())  # type: ignore[assignment]
+            node = cur.children.get(atom, None)  # type: ignore[attr-defined]
 
             if isinstance(node, _ExternNode):
                 return node
@@ -647,9 +645,9 @@ class PackageImporter(Importer):
                     f"inconsistent module structure. module {name} is not a package, but has submodules"
                 )
 
-            if not isinstance(node, (_PackageNode, _SelectiveExternNode)) and isinstance(node, _PathNode):
-                node = cur.children[atom] = _PackageNode(None)
-            assert isinstance(node, (_PackageNode, _SelectiveExternNode))
+            if node is None:
+                node = cur.children[atom] = _PackageNode(None)  # type: ignore[attr-defined]
+
             cur = node  # type: ignore
 
         assert isinstance(cur, (_PackageNode, _SelectiveExternNode))
