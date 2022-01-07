@@ -1819,7 +1819,7 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
         >>> # Assumes backend is not NCCL
         >>> device = torch.device("cpu")
         >>> dist.broadcast_object_list(objects, src=0, device=device)
-        >>> broadcast_objects
+        >>> objects
         ['foo', 12, {1: 2}]
     """
     if _rank_not_in_group(group):
@@ -1864,7 +1864,7 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
         object_tensor = torch.cat(tensor_list)
     else:
         object_tensor = torch.empty(
-            torch.sum(object_sizes_tensor).int().item(),  # type: ignore[arg-type]
+            torch.sum(object_sizes_tensor).item(),  # type: ignore[arg-type]
             dtype=torch.uint8,
         )
 
