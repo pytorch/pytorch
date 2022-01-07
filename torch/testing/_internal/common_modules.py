@@ -9,7 +9,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import floating_types
 from torch.testing._internal.common_device_type import (
     _TestParametrizer, _update_param_kwargs, skipIf, toleranceOverride, tol,
-    skipCUDAIfCudnnVersionLessThan, skipCUDAIfRocm, precisionOverride)
+    skipCUDAIfCudnnVersionLessThan, skipCUDAIfRocm, precisionOverride, skipMeta)
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_nn import nllloss_reference, get_reduction
 from torch.testing._internal.common_utils import (
@@ -408,28 +408,24 @@ def module_inputs_torch_nn_BatchNorm3d(module_info, device, dtype, requires_grad
                     forward_input=FunctionInput(make_input(shape=(2, 3, 4, 4, 4))))]
 
 
-def module_inputs_torch_nn_Conv2d(module_info, device, dtype, requires_grad, **kwargs):
+def module_inputs_torch_nn_ConvNd(module_info, device, dtype, requires_grad, **kwargs):
+    N = kwargs['N']
+    lazy = kwargs.get('lazy', False)
+    transposed = kwargs.get('transposed', False)
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-
+    conv_kwargs_list = [{}] if transposed else [{}, {'padding': 'same'}]
+    kernel_size, C_in, C_out = 3, 4, 5
+    input_no_batch_shape = (C_in,) + tuple((i + 3 for i in range(N)))
+    input_batch_shape = (2,) + input_no_batch_shape
     return [
-        ModuleInput(constructor_input=FunctionInput(3, 4, 3),
-                    forward_input=FunctionInput(make_input(shape=(2, 3, 7, 5))))]
-
-
-def module_inputs_torch_nn_Conv3d(module_info, device, dtype, requires_grad, **kwargs):
-    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-
-    return [
-        ModuleInput(constructor_input=FunctionInput(2, 3, (2, 3, 2)),
-                    forward_input=FunctionInput(make_input(shape=(1, 2, 4, 5, 4))))]
-
-
-def module_inputs_torch_nn_ConvTranspose2d(module_info, device, dtype, requires_grad, **kwargs):
-    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-
-    return [
-        ModuleInput(constructor_input=FunctionInput(3, 4, 3, (3, 2), 1, (1, 1)),
-                    forward_input=FunctionInput(make_input(shape=(1, 3, 7, 6))))]
+        ModuleInput(constructor_input=(FunctionInput(C_out, kernel_size, **conv_kwargs) if lazy else
+                                       FunctionInput(C_in, C_out, kernel_size, **conv_kwargs)),
+                    forward_input=FunctionInput(make_input(
+                        shape=(input_batch_shape if with_batch else input_no_batch_shape))),
+                    desc=('' if with_batch else 'no_batch_dim'),
+                    reference_fn=(None if with_batch else no_batch_dim_reference_fn))
+        for with_batch, conv_kwargs in itertools.product([True, False], conv_kwargs_list)
+    ]
 
 
 def module_inputs_torch_nn_ELU(module_info, device, dtype, requires_grad, **kwargs):
@@ -818,54 +814,84 @@ module_db: List[ModuleInfo] = [
                    # Failure on ROCM for BatchNorm3d float32 issue #70125
                    DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),)
                ),
-    ModuleInfo(torch.nn.Conv2d,
-               module_inputs_func=module_inputs_torch_nn_Conv2d,
+    ModuleInfo(torch.nn.Conv1d,
+               module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=1, lazy=False),
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                module_memformat_affects_out=True,
                skips=(
-                   # NHWC is disabled for float64 input in CudNN Conv.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format', dtypes=[torch.float64]),
-                   # No channels_last support for Conv2d on cpu currently.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format', device_type='cpu'),),
-               decorators=(
-                   # Conv2d channels_last support on cuda requires cudnn >= 7603
+                   # channels_last support on cuda requires cudnn >= 7603
                    DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=7603), 'TestModule', 'test_memory_format'),
-                   # Failure on ROCM for Conv2d float32 issue #70125
+                   # Failure on ROCM for float32 issue #70125
                    DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),
-                   DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'))
                ),
-    ModuleInfo(torch.nn.Conv3d,
-               module_inputs_func=module_inputs_torch_nn_Conv3d,
+               decorators=(
+                   DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
+               )),
+    ModuleInfo(torch.nn.Conv2d,
+               module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=2, lazy=False),
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                module_memformat_affects_out=True,
                skips=(
-                   # NHWC is disabled for float64 input in CudNN Conv.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format', dtypes=[torch.float64]),
-                   # No channels_last support for Conv3d on cpu currently.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format', device_type='cpu'),
-                   # Greatest difference was 0.05072784423828125  > atol of 0.05
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_cpu_gpu_parity'),),
-               decorators=(
-                   # Conv3d channels_last support on cuda requires cudnn >= 8005
-                   DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=8005), 'TestModule', 'test_memory_format'),
-                   # Failure on ROCM for Conv3d float32 issue #70125
-                   DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]))
-               ),
-    ModuleInfo(torch.nn.ConvTranspose2d,
-               module_inputs_func=module_inputs_torch_nn_ConvTranspose2d,
-               gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-               module_memformat_affects_out=True,
-               skips=(
-                   # NHWC is disabled for float64 input in CudNN Conv.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format', dtypes=[torch.float64]),
-                   # No channels_last support for ConvTranspose2d on cpu currently.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format', device_type='cpu'),),
-               decorators=(
-                   # ConvTranspose2d channels_last support on cuda requires cudnn >= 7603
+                   # channels_last support on cuda requires cudnn >= 7603
                    DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=7603), 'TestModule', 'test_memory_format'),
-                   # Failure on ROCM for ConvTranspose2d float32 issue #70125
-                   DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]))
+                   # Failure on ROCM for float32 issue #70125
+                   DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),
                ),
+               decorators=(
+                   DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
+               )),
+    ModuleInfo(torch.nn.Conv3d,
+               module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=3, lazy=False),
+               gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+               module_memformat_affects_out=True,
+               skips=(
+                   # channels_last support on cuda requires cudnn >= 8005
+                   DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=8005), 'TestModule', 'test_memory_format'),
+                   # Failure on ROCM for float32 issue #70125
+                   DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),
+               ),
+               decorators=(
+                   DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
+               )),
+    ModuleInfo(torch.nn.ConvTranspose1d,
+               module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=1, lazy=False, transposed=True),
+               gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+               module_memformat_affects_out=True,
+               skips=(
+                   # channels_last support on cuda requires cudnn >= 7603
+                   DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=7603), 'TestModule', 'test_memory_format'),
+                   # Failure on ROCM for float32 issue #70125
+                   DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),
+               ),
+               decorators=(
+                   DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
+               )),
+    ModuleInfo(torch.nn.ConvTranspose2d,
+               module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=2, lazy=False, transposed=True),
+               gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+               module_memformat_affects_out=True,
+               skips=(
+                   # channels_last support on cuda requires cudnn >= 7603
+                   DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=7603), 'TestModule', 'test_memory_format'),
+                   # Failure on ROCM for float32 issue #70125
+                   DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),
+               ),
+               decorators=(
+                   DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
+               )),
+    ModuleInfo(torch.nn.ConvTranspose3d,
+               module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=3, lazy=False, transposed=True),
+               gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+               module_memformat_affects_out=True,
+               skips=(
+                   # channels_last support on cuda requires cudnn >= 8005
+                   DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=8005), 'TestModule', 'test_memory_format'),
+                   # Failure on ROCM for float32 issue #70125
+                   DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),
+               ),
+               decorators=(
+                   DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
+               )),
     ModuleInfo(torch.nn.ELU,
                module_inputs_func=module_inputs_torch_nn_ELU),
     ModuleInfo(torch.nn.L1Loss,
@@ -874,6 +900,102 @@ module_db: List[ModuleInfo] = [
                    # No channels_last support for loss functions.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
                ),
+    ModuleInfo(torch.nn.LazyConv1d,
+               module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=1, lazy=True),
+               gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+               module_memformat_affects_out=True,
+               skips=(
+                   # channels_last support on cuda requires cudnn >= 7603
+                   DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=7603), 'TestModule', 'test_memory_format'),
+                   # Failure on ROCM for float32 issue #70125
+                   DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),
+                   # Lazy modules don't currently play well with ModuleInfo tests on the meta device.
+                   # See https://github.com/pytorch/pytorch/issues/70505 for more info.
+                   DecorateInfo(skipMeta),
+               ),
+               decorators=(
+                   DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
+               )),
+    ModuleInfo(torch.nn.LazyConv2d,
+               module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=2, lazy=True),
+               gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+               module_memformat_affects_out=True,
+               skips=(
+                   # channels_last support on cuda requires cudnn >= 7603
+                   DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=7603), 'TestModule', 'test_memory_format'),
+                   # Failure on ROCM for float32 issue #70125
+                   DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),
+                   # Lazy modules don't currently play well with ModuleInfo tests on the meta device.
+                   # See https://github.com/pytorch/pytorch/issues/70505 for more info.
+                   DecorateInfo(skipMeta),
+               ),
+               decorators=(
+                   DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
+               )),
+    ModuleInfo(torch.nn.LazyConv3d,
+               module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=3, lazy=True),
+               gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+               module_memformat_affects_out=True,
+               skips=(
+                   # channels_last support on cuda requires cudnn >= 8005
+                   DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=8005), 'TestModule', 'test_memory_format'),
+                   # Failure on ROCM for float32 issue #70125
+                   DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),
+                   # Lazy modules don't currently play well with ModuleInfo tests on the meta device.
+                   # See https://github.com/pytorch/pytorch/issues/70505 for more info.
+                   DecorateInfo(skipMeta),
+               ),
+               decorators=(
+                   DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
+               )),
+    ModuleInfo(torch.nn.LazyConvTranspose1d,
+               module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=1, lazy=True, transposed=True),
+               gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+               module_memformat_affects_out=True,
+               skips=(
+                   # channels_last support on cuda requires cudnn >= 7603
+                   DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=7603), 'TestModule', 'test_memory_format'),
+                   # Failure on ROCM for float32 issue #70125
+                   DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),
+                   # Lazy modules don't currently play well with ModuleInfo tests on the meta device.
+                   # See https://github.com/pytorch/pytorch/issues/70505 for more info.
+                   DecorateInfo(skipMeta),
+               ),
+               decorators=(
+                   DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
+               )),
+    ModuleInfo(torch.nn.LazyConvTranspose2d,
+               module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=2, lazy=True, transposed=True),
+               gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+               module_memformat_affects_out=True,
+               skips=(
+                   # channels_last support on cuda requires cudnn >= 7603
+                   DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=7603), 'TestModule', 'test_memory_format'),
+                   # Failure on ROCM for float32 issue #70125
+                   DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),
+                   # Lazy modules don't currently play well with ModuleInfo tests on the meta device.
+                   # See https://github.com/pytorch/pytorch/issues/70505 for more info.
+                   DecorateInfo(skipMeta),
+               ),
+               decorators=(
+                   DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
+               )),
+    ModuleInfo(torch.nn.LazyConvTranspose3d,
+               module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=3, lazy=True, transposed=True),
+               gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+               module_memformat_affects_out=True,
+               skips=(
+                   # channels_last support on cuda requires cudnn >= 8005
+                   DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=8005), 'TestModule', 'test_memory_format'),
+                   # Failure on ROCM for float32 issue #70125
+                   DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),
+                   # Lazy modules don't currently play well with ModuleInfo tests on the meta device.
+                   # See https://github.com/pytorch/pytorch/issues/70505 for more info.
+                   DecorateInfo(skipMeta),
+               ),
+               decorators=(
+                   DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
+               )),
     ModuleInfo(torch.nn.Linear,
                module_inputs_func=module_inputs_torch_nn_Linear,
                skips=(
