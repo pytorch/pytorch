@@ -665,6 +665,8 @@ struct TORCH_API MultiheadAttentionForwardFuncOptions {
   TORCH_ARG(Tensor, static_k) = {};
 
   TORCH_ARG(Tensor, static_v) = {};
+
+  TORCH_ARG(bool, average_attn_weights) = true;
 };
 
 } // namespace functional
