@@ -29,6 +29,15 @@ c10::MaybeOwned<Tensor> expect_resolved_conj(const Tensor& tensor) {
   }
 }
 
+
+DimVector contiguous_strides(const IntArrayRef sizes, const bool f_contig) {
+  return contiguous_strides_template<DimVector>(sizes, f_contig);
+}
+
+std::vector<int64_t> contiguous_strides_vec(const IntArrayRef sizes, const bool f_contig) {
+  return contiguous_strides_template<std::vector<int64_t>>(sizes, f_contig);
+}
+
 /*
  * Clones a Tensor so that the following conditions hold:
  * If we think of a Tensor of having size (B, M, N), where B is any number
@@ -50,6 +59,15 @@ Tensor cloneBatchedColumnMajor(const Tensor& src) {
 }
 
 /*
+ * contig chooses between C-contig (true) and F-contig (false)
+ */
+c10::MaybeOwned<Tensor> borrow_else_clone(const bool cond, const Tensor& borrow, const Tensor& clone, const bool contig) {
+  return cond ? c10::MaybeOwned<Tensor>::borrowed(borrow)
+              : c10::MaybeOwned<Tensor>::owned(contig ? clone.clone(MemoryFormat::Contiguous)
+                                                      : cloneBatchedColumnMajor(clone));
+}
+
+/*
  * This method is designed to be a faster alternative to
  * `cloneBatchedColumnMajor` with some additional features,
  * namely:
@@ -60,16 +78,13 @@ Tensor cloneBatchedColumnMajor(const Tensor& src) {
  *  which is either the original batch size of the input, or its larger
  *  broadcasted shape.
  */
-Tensor copyBatchedColumnMajor(const Tensor& src, int64_t nrows,
-    c10::optional<IntArrayRef> desired_batch_sizes) {
+Tensor copyBatchedColumnMajor(const Tensor& src, int64_t nrows, c10::optional<IntArrayRef> desired_batch_sizes) {
   nrows = (nrows == -1) ? src.size(-2) : nrows;
   auto copy_sizes = desired_batch_sizes.has_value()
     ? desired_batch_sizes.value().vec()
     : IntArrayRef(src.sizes().data(), src.dim() - 2).vec();
   copy_sizes.insert(copy_sizes.end(), {nrows, src.size(-1)});
-  auto copy_strides = at::detail::defaultStrides(copy_sizes);
-  copy_strides[src.dim() - 2] = 1;
-  copy_strides[src.dim() - 1] = nrows;
+  const auto copy_strides = contiguous_strides(copy_sizes, /*f-contig*/true);
   auto copy = at::empty_strided(copy_sizes, copy_strides, src.options());
   copy.narrow(-2, 0, src.size(-2)).copy_(src);
   return copy;
@@ -172,6 +187,11 @@ void singleCheckErrors(int64_t info, const char* name, int64_t batch_id) {
     } else if (strstr(name, "lstsq")) {
       TORCH_CHECK(false, name, batch_string,
           ": The least squares solution could not be computed because the input matrix does not have full rank (error code: ", info, ").");
+    } else if (strstr(name, "lu_factor")) {
+      TORCH_CHECK(false, name, batch_string,
+          ": U[", info, ",", info, "] is zero and using it on lu_solve would result in a division by zero. "
+          "If you still want to perform the factorization, consider calling linalg.lu(A, pivot) or "
+          "linalg.lu_factor_ex(A, pivot)");
     } else {
       TORCH_INTERNAL_ASSERT(false, name, ": Unknown error code: ", info, ".");
     }
@@ -303,13 +323,7 @@ std::tuple<std::vector<int64_t>,
     q_sizes[input.dim() - 1] = n;
     n_columns_q = std::min(m, n);
   }
-  auto q_strides = at::detail::defaultStrides(q_sizes);
-
-  // Q should be a column-major or a batch of column-major matrices
-  // ... x m x n will have strides: ...., n, 1
-  // We require: ...., 1, m
-  q_strides[input.dim() - 1] = m;
-  q_strides[input.dim() - 2] = 1;
+  auto q_strides = contiguous_strides_vec(q_sizes, /*f-contig*/true);
   return std::make_tuple(q_sizes, q_strides, n_columns_q);
 }
 
@@ -326,12 +340,7 @@ std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& input, bool some
   int64_t m = input.size(-2), n = input.size(-1);
 
   sizes[input.dim() - 1] = some ? std::min(m, n) : m;
-  auto u_strides = at::detail::defaultStrides(sizes);
-  // U should be a column-major or a batch of column-major matrices
-  // ... x m x ucol will have strides: ...., ucol, 1
-  // We require: ...., 1, m
-  u_strides[input.dim() - 1] = m;
-  u_strides[input.dim() - 2] = 1;
+  const auto u_strides = contiguous_strides(sizes, /*f-contig*/true);
 
   // cuSOLVER's gesvdjBatched fails with illegal memory access and
   // cuSOLVER's gesvdj fails with CUSOLVER_STATUS_EXECUTION_FAILED
@@ -345,11 +354,7 @@ std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& input, bool some
   // VT should be a column-major or a batch of column-major matrices
   sizes[input.dim() - 2] = some ? std::min(m, n) : n;
   sizes[input.dim() - 1] = n;
-  auto vt_strides = at::detail::defaultStrides(sizes);
-  if (!svd_use_cusolver) {
-    vt_strides[input.dim() - 1] = sizes[input.dim() - 2];
-    vt_strides[input.dim() - 2] = 1;
-  }
+  const auto vt_strides = contiguous_strides(sizes, /*f-contig*/!svd_use_cusolver);
   Tensor VT_empty = (compute_uv || svd_use_cusolver)
       ? at::empty_strided(sizes, vt_strides, input.options().device(usvt_device))
       : at::empty({0}, input.options().device(usvt_device));
