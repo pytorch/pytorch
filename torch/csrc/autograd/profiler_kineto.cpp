@@ -324,7 +324,7 @@ struct KinetoThreadLocalState : public torch::profiler::impl::ProfilerThreadLoca
     std::unordered_map<uint64_t, libkineto::GenericTraceActivity*> tidSeq2activity;
     uint64_t fwd_bwd_link_id = 1;
 
-    for (size_t idx = 0; idx < cpu_trace->activities.size(); ++idx) {
+    for (const auto idx : c10::irange(cpu_trace->activities.size())) {
       auto& kineto_event = kineto_events_[idx];
       auto& activity = cpu_trace->activities[idx];
 
@@ -386,7 +386,7 @@ struct KinetoThreadLocalState : public torch::profiler::impl::ProfilerThreadLoca
 
     // Map PyTraceEvent* to sequential integers for JSON export.
     ska::flat_hash_map<python_tracer::PyTraceEvent*, std::string> py_event_indices_ {{ nullptr, std::string("null") }};
-    for (size_t i = 0; i < py_events.size(); i++) {
+    for (const auto i : c10::irange(py_events.size()))  {
       py_event_indices_.insert({ py_events[i].get(), std::to_string(i) });
     }
 
@@ -458,7 +458,7 @@ struct KinetoThreadLocalState : public torch::profiler::impl::ProfilerThreadLoca
     };
 
     TORCH_INTERNAL_ASSERT(activities.size() == kineto_events_.size());
-    for (size_t idx = 0; idx < activities.size(); ++idx) {
+    for (const auto idx : c10::irange(activities.size())) {
       auto& activity = activities[idx];
 
       // Add any python events that occurred between this Kineto event and the
