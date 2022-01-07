@@ -575,6 +575,30 @@ static void check_shape_backward(
   check_shape_forward(input, weight_sizes, /*bias=*/ Tensor(), params);
 }
 
+// Given an input tensor and an expected number of spatial dimensions, checks that the
+// input is a valid shape and returns the batched form of the input.
+//
+// Args:
+//     input (Tensor): Input tensor
+//     num_spatial_dims (int): Number of spatial dimensions expected for the input
+//     func_name (string): Function name to produce a nice error message for invalid input
+//
+// Returns a std::tuple containing:
+//     batched_input (Tensor): Input with a batch dimension
+//     is_batched (bool): Indicates whether the original input was already batched
+static std::tuple<Tensor, bool> batchify(
+    const Tensor& input,
+    const int64_t num_spatial_dims,
+    const std::string& func_name) {
+  const auto dim_count_no_batch = num_spatial_dims + 1;
+  const auto dim_count_batch = dim_count_no_batch + 1;
+  const auto is_batched = (input.dim() == dim_count_batch);
+  TORCH_CHECK(input.dim() == dim_count_no_batch || is_batched,
+      "Expected ", dim_count_no_batch, "D (unbatched) or ", dim_count_batch,
+      "D (batched) input to ", func_name, ", but got input of size: ", input.sizes());
+  return std::make_tuple(is_batched ? input : input.unsqueeze(0), is_batched);
+}
+
 static void check_input_same_type_as_parameters(
     const Tensor& input,
     const Tensor& weight,
@@ -618,36 +642,45 @@ static at::Tensor subtensor(at::Tensor& tensor, int dim, int groups, int g) {
 
 
 at::Tensor conv1d(
-    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
+    const Tensor& input_, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, int64_t groups) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-  return at::convolution(input, weight, bias, stride, padding, dilation,
-                         false, {0}, groups);
+  Tensor input;
+  bool is_batched;
+  std::tie(input, is_batched) = batchify(input_, /*num_spatial_dims=*/ 1, "conv1d");
+  auto output = at::convolution(input, weight, bias, stride, padding, dilation, false, {0}, groups);
+  return is_batched ? output : output.squeeze(0);
 }
 
 at::Tensor conv2d(
-    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
+    const Tensor& input_, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, int64_t groups) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-  return at::convolution(input, weight, bias, stride, padding, dilation,
-                         false, {{0, 0}}, groups);
+  Tensor input;
+  bool is_batched;
+  std::tie(input, is_batched) = batchify(input_, /*num_spatial_dims=*/ 2, "conv2d");
+  auto output = at::convolution(input, weight, bias, stride, padding, dilation, false, {{0, 0}}, groups);
+  return is_batched ? output : output.squeeze(0);
 }
 
 at::Tensor conv3d(
-    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
+    const Tensor& input_, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, int64_t groups) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-  return at::convolution(input, weight, bias, stride, padding, dilation,
-                         false, {{0, 0, 0}}, groups);
+  Tensor input;
+  bool is_batched;
+  std::tie(input, is_batched) = batchify(input_, /*num_spatial_dims=*/ 3, "conv3d");
+  auto output = at::convolution(input, weight, bias, stride, padding, dilation, false, {{0, 0, 0}}, groups);
+  return is_batched ? output : output.squeeze(0);
 }
 
 
@@ -736,60 +769,84 @@ Tensor _convolution_mode(
 }
 
 at::Tensor conv1d(
-    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias,
+    const Tensor& input_, const Tensor& weight, const c10::optional<Tensor>& bias,
     IntArrayRef stride, c10::string_view padding, IntArrayRef dilation,
     int64_t groups) {
-  return at::_convolution_mode(
+  Tensor input;
+  bool is_batched;
+  std::tie(input, is_batched) = batchify(input_, /*num_spatial_dims=*/ 1, "conv1d");
+  auto output = at::_convolution_mode(
       input, weight, bias, stride, std::move(padding), dilation, groups);
+  return is_batched ? output : output.squeeze(0);
 }
 
 at::Tensor conv2d(
-    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias,
+    const Tensor& input_, const Tensor& weight, const c10::optional<Tensor>& bias,
     IntArrayRef stride, c10::string_view padding, IntArrayRef dilation,
     int64_t groups) {
-  return at::_convolution_mode(
+  Tensor input;
+  bool is_batched;
+  std::tie(input, is_batched) = batchify(input_, /*num_spatial_dims=*/ 2, "conv2d");
+  auto output = at::_convolution_mode(
       input, weight, bias, stride, std::move(padding), dilation, groups);
+  return is_batched ? output : output.squeeze(0);
 }
 
 at::Tensor conv3d(
-    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias,
+    const Tensor& input_, const Tensor& weight, const c10::optional<Tensor>& bias,
     IntArrayRef stride, c10::string_view padding, IntArrayRef dilation,
     int64_t groups) {
-  return at::_convolution_mode(
+  Tensor input;
+  bool is_batched;
+  std::tie(input, is_batched) = batchify(input_, /*num_spatial_dims=*/ 3, "conv3d");
+  auto output = at::_convolution_mode(
       input, weight, bias, stride, std::move(padding), dilation, groups);
+  return is_batched ? output : output.squeeze(0);
 }
 
 at::Tensor conv_transpose1d(
-    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
+    const Tensor& input_, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef output_padding, int64_t groups, IntArrayRef dilation) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-  return at::convolution(input, weight, bias, stride, padding, dilation,
-                         true, output_padding, groups);
+  Tensor input;
+  bool is_batched;
+  std::tie(input, is_batched) = batchify(input_, /*num_spatial_dims=*/ 1, "conv_transpose1d");
+  auto output = at::convolution(
+      input, weight, bias, stride, padding, dilation, true, output_padding, groups);
+  return is_batched ? output : output.squeeze(0);
 }
 
 at::Tensor conv_transpose2d(
-    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
+    const Tensor& input_, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef output_padding, int64_t groups, IntArrayRef dilation) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-  return at::convolution(input, weight, bias, stride, padding, dilation,
-                         true, output_padding, groups);
+  Tensor input;
+  bool is_batched;
+  std::tie(input, is_batched) = batchify(input_, /*num_spatial_dims=*/ 2, "conv_transpose2d");
+  auto output = at::convolution(
+      input, weight, bias, stride, padding, dilation, true, output_padding, groups);
+  return is_batched ? output : output.squeeze(0);
 }
 
 at::Tensor conv_transpose3d(
-    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
+    const Tensor& input_, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef output_padding, int64_t groups, IntArrayRef dilation) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-  return at::convolution(input, weight, bias, stride, padding, dilation,
-                         true, output_padding, groups);
+  Tensor input;
+  bool is_batched;
+  std::tie(input, is_batched) = batchify(input_, /*num_spatial_dims=*/ 3, "conv_transpose3d");
+  auto output = at::convolution(
+      input, weight, bias, stride, padding, dilation, true, output_padding, groups);
+  return is_batched ? output : output.squeeze(0);
 }
 
 at::Tensor convolution(
