@@ -708,7 +708,8 @@ linalg_svd_rank_revealing(
     const c10::optional<Tensor>& rtol,
     bool full_matrices) {
   auto U = at::empty({0}, input.options());
-  auto S = at::empty({0}, input.options());
+  const auto real_dtype = at::toValueType(input.scalar_type());
+  auto S = at::empty({0}, input.options().dtype(real_dtype));
   auto Vh = at::empty({0}, input.options());
   auto rank = at::empty({0}, input.options().dtype(ScalarType::Long));
   return linalg_svd_rank_revealing_out(input, atol, rtol, full_matrices, U, S, Vh, rank);
@@ -730,8 +731,7 @@ linalg_svd_rank_revealing(
     const Tensor& input,
     const Tensor& tol,
     bool full_matrices) {
-  const auto rtol = at::zeros({}, tol.options());
-  return at::linalg_svd_rank_revealing(input, tol, rtol, full_matrices);
+  return at::linalg_svd_rank_revealing(input, tol, /*rtol=*/c10::nullopt, full_matrices);
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor>
