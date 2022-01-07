@@ -3713,6 +3713,7 @@
   python_module: nn
   dispatch:
     MkldnnCPU: mkldnn_gelu
+    QuantizedCPU: gelu_quantized_cpu
 
 - func: gelu_backward.grad_input(Tensor grad, Tensor self, *, Tensor(a!) grad_input) -> Tensor(a!)
   structured: True
