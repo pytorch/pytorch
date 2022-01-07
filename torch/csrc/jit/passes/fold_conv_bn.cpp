@@ -52,14 +52,6 @@ void replaceConvBiasWithGetAttr(Module& module) {
           %conv_out = aten::_convolution(%a, %w, %b, %stride, %padding, %dilation,
               %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled, %allow_tf32)
           return (%conv_out) )");
-    const PatternInfo& pattern_convolution_deprecated =
-        PatternInfo::parse_from_str(R"(
-        graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[],
-            %transposed:bool, %output_padding:int[], %groups:int, %benchmark:bool,
-            %deterministic:bool, %cudnn_enabled:bool):
-          %conv_out = aten::_convolution(%a, %w, %b, %stride, %padding, %dilation,
-              %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled)
-          return (%conv_out) )");
     auto replace_pattern = [&](const PatternInfo& pattern_convolution) {
       const Graph& pattern_convolution_graph =
           *pattern_convolution.pattern_graph;
@@ -82,7 +74,6 @@ void replaceConvBiasWithGetAttr(Module& module) {
       }
     };
     replace_pattern(pattern_convolution);
-    replace_pattern(pattern_convolution_deprecated);
   }
 }
 
