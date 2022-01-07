@@ -5,7 +5,7 @@
 namespace torch {
 namespace lazy {
 
-class NarrowViewUpdate : public TsNode {
+class TORCH_API NarrowViewUpdate : public TsNode {
  public:
   NarrowViewUpdate(
       const Value& input,

@@ -120,7 +120,8 @@ bool isTVOp(const Expr* expr) {
        expr->getExprType().value() == ExprType::BroadcastOp ||
        expr->getExprType().value() == ExprType::TransposeOp ||
        expr->getExprType().value() == ExprType::ShiftOp ||
-       expr->getExprType().value() == ExprType::GatherOp)) {
+       expr->getExprType().value() == ExprType::GatherOp ||
+       expr->getExprType().value() == ExprType::ViewOp)) {
     return true;
   }
   return false;
@@ -215,7 +216,7 @@ bool hasBlockSync(const Expr* expr, const ThreadPredicateMap& pred_map) {
   } else if (expr->isA<BroadcastOp>()) {
     const ParallelTypeBitmap pt_map =
         GpuLower::current()->threadPredMap().getParallelBroadcastDomains(tv);
-    return pt_map.hasTID();
+    return pt_map.any();
   }
 
   return false;
@@ -223,8 +224,8 @@ bool hasBlockSync(const Expr* expr, const ThreadPredicateMap& pred_map) {
 
 bool hasBlockSync(const kir::Expr* expr, const ThreadPredicateMap& pred_map) {
   if (expr->isA<kir::ReductionOp>() || expr->isA<kir::GridReduction>() ||
-      expr->isA<kir::BroadcastOp>() || expr->isA<kir::WelfordOp>() ||
-      expr->isA<kir::GridWelford>()) {
+      expr->isA<kir::GridBroadcast>() || expr->isA<kir::BroadcastOp>() ||
+      expr->isA<kir::WelfordOp>() || expr->isA<kir::GridWelford>()) {
     auto fuser_tv = getTVOutput(expr)->fuserTv();
     auto fuser_expr = fuser_tv->definition();
     TORCH_INTERNAL_ASSERT(fuser_expr != nullptr);
@@ -326,6 +327,26 @@ bool derivedFromRootCAAxes(const TensorView* tv, IterDomain* axis) {
         return std::find(ca_root_vals.begin(), ca_root_vals.end(), root) !=
             ca_root_vals.end();
       });
+}
+
+std::unordered_map<ParallelType, kir::IterDomain*, TypeHash> getParallelDomains(
+    kir::Val* val) {
+  kir::TensorView* kir_tv = nullptr;
+  if (val->isA<kir::TensorView>()) {
+    kir_tv = val->as<kir::TensorView>();
+  } else if (val->isA<kir::TensorIndex>()) {
+    kir_tv = val->as<kir::TensorIndex>()->view();
+  } else {
+    TORCH_INTERNAL_ASSERT("Provided val is not TensorIndex or TensorView.");
+  }
+
+  std::unordered_map<ParallelType, kir::IterDomain*, TypeHash> parallel_domains;
+  for (auto d : kir_tv->domain()->domain()) {
+    if (d->isThread()) {
+      parallel_domains.insert(std::make_pair(d->parallelType(), d));
+    }
+  }
+  return parallel_domains;
 }
 
 } // namespace ir_utils
