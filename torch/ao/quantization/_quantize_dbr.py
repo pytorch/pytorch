@@ -10,6 +10,7 @@ from .qconfig_dict_utils import (
 )
 from torch.ao.quantization.quantization_mappings import (
     get_default_static_quant_module_mappings,
+    get_default_dynamic_quant_module_mappings,
 )
 from ._dbr.module_swap_utils import _swap_child_modules
 
@@ -27,9 +28,15 @@ def prepare(model, qconfig_dict, example_inputs, inplace=False, allow_list=None,
     Requires `example_inputs` to build
     the graph before calibration or quantization aware training can proceed.
 
+    Supported `prepare_custom_config_dict` keys:
+      * `non_traceable_module_class` - same meaning as in prepare_fx
+
     TODO(future PR): better docblock
     """
     assert example_inputs is not None, 'example_inputs must be specified'
+
+    if prepare_custom_config_dict is None:
+        prepare_custom_config_dict = {}
 
     for qconfig_dict_option in ('module_name_regex', 'module_name_object_type_order'):
         assert qconfig_dict_option not in qconfig_dict, \
@@ -40,18 +47,38 @@ def prepare(model, qconfig_dict, example_inputs, inplace=False, allow_list=None,
     convert_dict_to_ordered_dict(qconfig_dict)
     flattened_qconfig_dict = get_flattened_qconfig_dict(qconfig_dict)
     torch.quantization.propagate_qconfig_(model, flattened_qconfig_dict)
+
+    # if parts of the model are non traceable, delete qconfig from
+    # them so they do not get swapped
+    non_traceable_module_class = \
+        prepare_custom_config_dict.get('non_traceable_module_class', [])
+    for name, child in model.named_modules():
+        for target_cls in non_traceable_module_class:
+            if isinstance(child, target_cls):
+                for _, child_child in child.named_modules():
+                    child_child.qconfig = None
+
     # TODO(future PR): QAT support
 
     if fuse_modules:
         # automatically fuse modules
         old_class = model.__class__
-        model = add_auto_observation(model, qconfig_dict, example_inputs)
+        model = add_auto_observation(
+            model, qconfig_dict, example_inputs,
+            prepare_custom_config_dict=prepare_custom_config_dict)
         module_fusion_fqns = get_module_fusion_fqns(model)
         if len(module_fusion_fqns):
             model = torch.quantization.fuse_modules(model, module_fusion_fqns)
-        # TODO: also delete _auto_quant_staate of all children
-        if hasattr(model, '_auto_quant_state'):
-            del model._auto_quant_state
+
+        # delete all the DBR state from the model, so add_auto_observation
+        # can start from a clean slate
+        parents_to_delete_auto_quant_state = []
+        for k, v in model.named_modules():
+            if hasattr(v, '_auto_quant_state'):
+                parents_to_delete_auto_quant_state.append(v)
+        for v in parents_to_delete_auto_quant_state:
+            del v._auto_quant_state
+
         # the model hierarchy might have changed during fusion, so we
         # have to delete the cached module hook types
         for k, v in model.named_modules():
@@ -78,7 +105,9 @@ def prepare(model, qconfig_dict, example_inputs, inplace=False, allow_list=None,
         model, inplace, allow_list, observer_non_leaf_module_list,
         prepare_custom_config_dict)
     assert not inplace
-    model = add_auto_observation(model, qconfig_dict, example_inputs)
+    model = add_auto_observation(
+        model, qconfig_dict, example_inputs,
+        prepare_custom_config_dict=prepare_custom_config_dict)
     return model
 
 def convert(model: torch.nn.Module) -> torch.nn.Module:
@@ -87,8 +116,9 @@ def convert(model: torch.nn.Module) -> torch.nn.Module:
     TODO(future PR): better docblock
     """
     static_mappings = get_default_static_quant_module_mappings()
+    dynamic_mappings = get_default_dynamic_quant_module_mappings()
     # swap the modules
-    _swap_child_modules(model, static_mappings)
+    _swap_child_modules(model, static_mappings, dynamic_mappings)
     # add dynamic handling for quants/dequants, functions and methods
     model = add_auto_convert(model)
     return model
