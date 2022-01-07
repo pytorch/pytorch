@@ -5,7 +5,7 @@
 namespace torch {
 namespace lazy {
 
-class Resize : public TsNode {
+class TORCH_API Resize : public TsNode {
  public:
   Resize(const Value& input, std::vector<int64_t> size);
 
