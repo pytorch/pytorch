@@ -696,8 +696,8 @@ if __name__ == "__main__" :
             cp = subprocess.run("nvidia-smi --query-gpu=timestamp,utilization.memory,memory.total,memory.free,memory.used --format=csv,noheader", capture_output=True, text=True, shell=True)
             print(f"CIDEBUGOUTPUT,AFTER subprocess.run,{model_name},{args.test},{cp.stdout}")
 
-    entry = table[(model_name, args.test)]    
-    entry["rc"] = rc
+        entry = table[(model_name, args.test)]
+        entry["rc"] = rc
     merge_with_prefix("lazy-overheads_", dirpath, args.output_dir, ("dev", "name", "test", "overhead", "pvalue"))
     merge_with_prefix("lazy-compute_", dirpath, args.output_dir, ("name", "dev", "experiment", "test", "speedup", "pvalue"))
     merge_with_prefix("error_", dirpath, args.output_dir, ("name", "test", "error"))
