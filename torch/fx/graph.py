@@ -14,6 +14,7 @@ import re
 import builtins
 import math
 import warnings
+import inspect
 
 
 if TYPE_CHECKING:
@@ -522,7 +523,8 @@ class Graph:
         return _InsertPoint(self, n.append)
 
     @compatibility(is_backward_compatible=True)
-    def placeholder(self, name: str, type_expr: Optional[Any] = None) -> Node:
+    def placeholder(self, name: str, type_expr: Optional[Any] = None,
+                    default_value : Any = inspect.Signature.empty) -> Node:
         """
         Insert a ``placeholder`` node into the Graph. A ``placeholder`` represents
         a function input.
@@ -537,11 +539,17 @@ class Graph:
                 cases for proper code generation (e.g. when the function is used
                 subsequently in TorchScript compilation).
 
+            default_value (Any): The default value this function argument should take
+                on. NOTE: to allow for `None` as a default value, `inspect.Signature.empty`
+                should be passed as this argument to specify that the parameter does _not_
+                have a default value.
+
         .. note::
             The same insertion point and type expression rules apply for this method
             as ``Graph.create_node``.
         """
-        return self.create_node('placeholder', name, type_expr=type_expr)
+        args = () if default_value is inspect.Signature.empty else (default_value,)
+        return self.create_node('placeholder', name, args=args, type_expr=type_expr)
 
     @compatibility(is_backward_compatible=True)
     def get_attr(self, qualified_name: str, type_expr: Optional[Any] = None) -> Node:
