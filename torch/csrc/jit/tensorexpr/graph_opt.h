@@ -85,6 +85,16 @@ TORCH_API std::vector<int64_t> makeShapesSymbolic(
     std::shared_ptr<Graph>& graph,
     const std::vector<int64_t>& sizes);
 
+// Inspect the graph and report whether it can be converted to TE IR.
+// TODO: add error reporting for graphs that can't be converted.
+TORCH_API bool isGraphCompilable(const std::shared_ptr<Graph>& graph);
+
+// Examine the graph and (hackily) fill in missing tensor type info, such as
+// scalar type, device, and strides. Ideally, this should be done by a proper
+// dtype/device/shape propagation passes, but until they are ready we can use
+// this, not always correct, workaround pass.
+TORCH_API void fixupMissingShapeInfo(const std::shared_ptr<Graph>& graph);
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
