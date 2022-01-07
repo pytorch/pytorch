@@ -36,6 +36,9 @@ def define_targets(rules):
                 "CPUAllocator.h",
             ],
         ),
+        # This library uses flags and registration. Do not let the
+        # linker remove them.
+        alwayslink = True,
         linkstatic = True,
         local_defines = ["C10_BUILD_MAIN_LIB"],
         visibility = ["//visibility:public"],
