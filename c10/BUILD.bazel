@@ -67,6 +67,5 @@ cc_library(
         ["//c10/cuda"],
         [],
     ),
-    alwayslink = True,
     visibility = ["//:__pkg__"],
 )
