@@ -53,31 +53,31 @@ log = logging.getLogger(__name__)
 
 # Models that are known to crash or otherwise not work with lazy tensor are
 # disabled, but should be removed from these lists once fixed
-SKIP = {
-}
-SKIP_TRAIN_ONLY = {
+SKIP = set({
+})
+SKIP_TRAIN_ONLY = set({
     # out of memory test
-    "squeezenet1_1",
-    "mobilenet_v2_quantized_qat",
-    "hf_Reformer",
-    "hf_GPT2",
-    "hf_BigBird",
-    "pyhpc_equation_of_state",
-    "pyhpc_isoneutral_mixing",
-    "densenet121",
-    "resnet50_quantized_qat",
-    "Background_Matting",
-    "hf_Bart",
-    "hf_Longformer",
+    # "squeezenet1_1",
+    # "mobilenet_v2_quantized_qat",
+    # "hf_Reformer",
+    # "hf_GPT2",
+    # "hf_BigBird",
+    # "pyhpc_equation_of_state",
+    # "pyhpc_isoneutral_mixing",
+    # "densenet121",
+    # "resnet50_quantized_qat",
+    # "Background_Matting",
+    # "hf_Bart",
+    # "hf_Longformer",
     # slow tests
-    "timm_efficientnet",
-    "Super_SloMo",
-    "BERT_pytorch",
-    "demucs",
-    "opacus_cifar10",
+    # "timm_efficientnet",
+    # "Super_SloMo",
+    # "BERT_pytorch",
+    # "demucs",
+    # "opacus_cifar10",
     # others
-    "hf_DistilBert",
-}
+    # "hf_DistilBert",
+})
 
 current_name = ""
 current_device = ""
