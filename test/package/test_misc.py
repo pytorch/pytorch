@@ -6,8 +6,9 @@ from io import BytesIO
 from textwrap import dedent
 
 from torch.package import PackageExporter, PackageImporter, is_from_package
-from torch.package.package_exporter import PackagingError
+from torch.package.package_exporter import PackagingError, BadPackageError
 from torch.testing._internal.common_utils import run_tests
+
 
 try:
     from .common import PackageTestCase
@@ -248,6 +249,44 @@ class TestMisc(PackageTestCase):
         mod = pi.load_pickle("obj", "obj.pkl")
         mod()
 
+    def test_bad_package(self):
+        """
+        Tests if error is thrown if we try to package an improperly defined package.
+        """
+        import package_e
+        import package_e.subpackage
+
+        obj = package_e.subpackage.PackageESubpackageObject()
+        obj2 = package_e.PackageEObject(obj)
+
+        # test that exporter works with regular packages
+        buffer = BytesIO()
+        with PackageExporter(buffer) as pe:
+            pe.intern("**")
+            pe.save_pickle("obj", "obj.pkl", obj2)
+
+        # all packages require an iterable as a __path__ attribute
+        og = package_e.__path__
+        package_e.__path__ = 0
+        with self.assertRaises(BadPackageError):
+            with PackageExporter(buffer) as pe:
+                pe.intern("**")
+                pe.save_pickle("obj", "obj.pkl", obj2)
+
+        # namespace packages have custom iterables for __path__
+        # and nonexistent/None __file__ attributes. In this case
+        # we have an iterable __path__ but __file__ still points
+        # to package_e.__init__
+        package_e.__path__ = "I am iterable"
+        with self.assertRaises(BadPackageError):
+            with PackageExporter(buffer) as pe:
+                pe.intern("**")
+                pe.save_pickle("obj", "obj.pkl", obj2)
+
+        # test we can still extern bad packages
+        with PackageExporter(buffer) as pe:
+            pe.extern("**")
+            pe.save_pickle("obj", "obj.pkl", obj2)
 
 if __name__ == "__main__":
     run_tests()

@@ -259,8 +259,6 @@ public:
 
   List(const List&) = default;
   List& operator=(const List&) = default;
-  List(List&&) noexcept;
-  List& operator=(List&&) noexcept;
 
   /**
    * Create a new List pointing to a deep copy of the same data.
