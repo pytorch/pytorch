@@ -24,6 +24,7 @@ constexpr int MIOPEN_DIM_MAX = 5;
 namespace at { namespace native {
 
 DEFINE_DISPATCH(conv_depthwise2d_backward_stub);
+DEFINE_DISPATCH(conv_depthwise3d_backward_stub);
 DEFINE_DISPATCH(cudnn_convolution_backward_stub);
 DEFINE_DISPATCH(cudnn_convolution_transpose_backward_stub);
 DEFINE_DISPATCH(slow_conv_transpose3d_backward_stub);
@@ -36,6 +37,7 @@ DEFINE_DISPATCH(slow_conv_dilated2d_backward_stub);
 DEFINE_DISPATCH(slow_conv_dilated3d_backward_stub);
 DEFINE_DISPATCH(slow_conv_transpose2d_backward_stub);
 REGISTER_NO_CPU_DISPATCH(conv_depthwise2d_backward_stub);
+REGISTER_NO_CPU_DISPATCH(conv_depthwise3d_backward_stub);
 REGISTER_NO_CPU_DISPATCH(cudnn_convolution_backward_stub);
 REGISTER_NO_CPU_DISPATCH(cudnn_convolution_transpose_backward_stub);
 REGISTER_NO_CPU_DISPATCH(miopen_convolution_backward_stub);
@@ -1626,9 +1628,9 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
     case ConvBackend::CudaDepthwise3d:
       TORCH_CHECK(input.ndimension() == 5);
       std::tie(backend_grad_input, backend_grad_weight, backend_grad_bias) =
-        at::conv_depthwise3d_backward(
-          grad_output.contiguous(), input.contiguous(), weight, kernel_size, params.stride, params.padding,
-          params.dilation, output_mask);
+        conv_depthwise3d_backward_stub(
+          input.device().type(), grad_output.contiguous(), input.contiguous(), weight, kernel_size, params.stride,
+          params.padding, params.dilation, output_mask);
       break;
     case ConvBackend::Cudnn:
     {
