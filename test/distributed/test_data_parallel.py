@@ -671,13 +671,13 @@ class TestDataParallel(TestCase):
     @sandcastle_skip_if(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_strided_grad_layout(self):
         class ConvNet(nn.Module):
-            def __init__(self, layouts, dtypes):
+            def __init__(self, layouts, dtype_list):
                 super(ConvNet, self).__init__()
-                self.dtypes = dtypes
-                self.conv0 = torch.nn.Conv2d(8, 16, (2, 2)).to(memory_format=layouts[0], dtype=dtypes[0])
-                self.conv1 = torch.nn.Conv2d(16, 32, (2, 2)).to(memory_format=layouts[1], dtype=dtypes[1])
-                self.conv2 = torch.nn.Conv2d(32, 16, (2, 2)).to(memory_format=layouts[2], dtype=dtypes[2])
-                self.conv3 = torch.nn.Conv2d(16, 8, (2, 2)).to(memory_format=layouts[3], dtype=dtypes[3])
+                self.dtypes = dtype_list
+                self.conv0 = torch.nn.Conv2d(8, 16, (2, 2)).to(memory_format=layouts[0], dtype=dtype_list[0])
+                self.conv1 = torch.nn.Conv2d(16, 32, (2, 2)).to(memory_format=layouts[1], dtype=dtype_list[1])
+                self.conv2 = torch.nn.Conv2d(32, 16, (2, 2)).to(memory_format=layouts[2], dtype=dtype_list[2])
+                self.conv3 = torch.nn.Conv2d(16, 8, (2, 2)).to(memory_format=layouts[3], dtype=dtype_list[3])
 
             def forward(self, x):
                 x = x.to(self.dtypes[0])
@@ -700,10 +700,10 @@ class TestDataParallel(TestCase):
         device_ids = list(range(ndevs))
 
         with torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False):
-            for formats, dtypes in product(layer_formats, layer_dtypes):
+            for formats, dtype_list in product(layer_formats, layer_dtypes):
                 model_msg = "formats = {} dtypes = {}".format(formats, dtypes)
                 try:
-                    m = ConvNet(formats, dtypes).cuda(device="cuda:0")
+                    m = ConvNet(formats, dtype_list).cuda(device="cuda:0")
                     m_dp = dp.DataParallel(deepcopy(m), device_ids=device_ids)
                     opt = torch.optim.SGD(m.parameters(), lr=0.1)
                     opt_dp = torch.optim.SGD(m_dp.parameters(), lr=0.1)
