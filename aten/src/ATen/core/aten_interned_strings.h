@@ -306,7 +306,6 @@ _(aten, dot) \
 _(aten, dropout) \
 _(aten, dsplit) \
 _(aten, dstack) \
-_(aten, eig) \
 _(aten, einsum) \
 _(aten, elu) \
 _(aten, elu_backward) \

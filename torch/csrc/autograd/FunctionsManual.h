@@ -231,8 +231,6 @@ Tensor linalg_qr_jvp_R(
 );
 Tensor linalg_qr_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
                           c10::string_view mode, const Tensor& Q, const Tensor& R);
-Tensor eig_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
-                    bool eigenvectors, const Tensor& lambda, const Tensor& v);
 Tensor linalg_matrix_exp_differential(const Tensor& self, const Tensor& grad, bool adjoint);
 Tensor linalg_det_backward(const Tensor & grad, const Tensor& self, const Tensor& det);
 std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(

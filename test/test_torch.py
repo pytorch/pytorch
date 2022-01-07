@@ -3424,10 +3424,6 @@ class TestTorchDeviceType(TestCase):
         # lstsq (gels)
         self.assertRaises(RuntimeError, lambda: torch.lstsq(zero_d, zero_d))
 
-        # eig
-        self.assertRaises(RuntimeError, lambda: torch.eig(zero_d, False))
-        self.assertRaises(RuntimeError, lambda: torch.eig(zero_d, True))
-
         # this is only implemented on cpu
         if (torch.device(device).type == 'cpu'):
             self.assertRaises(RuntimeError, lambda: torch.ormqr(zero_d, zero_d, zero_d))

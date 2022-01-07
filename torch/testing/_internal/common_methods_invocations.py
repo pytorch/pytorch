@@ -5511,42 +5511,6 @@ def sample_inputs_softshrink_hardshrink_hardtanh(op_info, device, dtype, require
                requires_grad=requires_grad)) for _ in range(1, N)]
     return tensors
 
-def sample_inputs_eig(op_info, device, dtype, requires_grad=False, **kwargs):
-    eigvecs = make_tensor((S, S), device=device, dtype=dtype,
-                          low=None, high=None)
-    eigvals = make_tensor((S,), device=device, dtype=dtype,
-                          low=None, high=None)
-    # we produce only diagonazible inputs which do not have
-    # complex eigenvalues for real inputs, as there is no
-    # backward implementation for real inputs with complex
-    # eigenvalues yet.
-    input = (eigvecs * eigvals.unsqueeze(-2)) @ eigvecs.inverse()
-    input.requires_grad_(requires_grad)
-
-    def process_output(eigpair):
-        eigvals, eigvecs = eigpair
-        if dtype.is_complex:
-            # eig produces eigenvectors which are normalized to 1 norm.
-            # Note that if v is an eigenvector, so is v * e^{i \phi},
-            # and |v| = |v * e^{i \phi}| = 1.
-            # This, however, makes the eigenvector backward computation process
-            # rather unstable unless the objective function is gauge-invariant,
-            # that is if f(z) == f(|z|), for example.
-            # Hence for complex inputs we ignore the phases and return only
-            # the absolute values.
-            return eigvals, eigvecs.abs()
-        else:
-            return eigvals, eigvecs
-
-    return [
-        SampleInput(
-            input,
-            kwargs=dict(eigenvectors=True),
-            output_process_fn_grad=process_output
-        ),
-    ]
-
-
 def sample_inputs_einsum(op_info, device, dtype, requires_grad=False, **kwargs):
     def c(t):
         return t.detach().clone().requires_grad_(requires_grad)
@@ -12604,15 +12568,6 @@ op_db: List[OpInfo] = [
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
            ),
-    OpInfo('eig',
-           op=torch.eig,
-           dtypes=floating_and_complex_types(),
-           sample_inputs_func=sample_inputs_eig,
-           decorators=[
-               skipCUDAIfNoMagma,
-               skipCPUIfNoLapack,
-               skipCUDAIfRocm
-           ],),
     OpInfo('einsum',
            # we need this lambda because SampleInput expects tensor input as the first argument
            # TODO(@heitorschueroff) update SampleInput to handle such cases
