@@ -840,6 +840,13 @@ IValue IValue::deepcopy(
         copy = IValue(toObject()->deepcopy(memo));
       }
     } break;
+    case IValue::Tag::Enum: {
+      auto enum_holder = toEnumHolder();
+      copy = IValue(c10::make_intrusive<ivalue::EnumHolder>(
+          enum_holder->type(),
+          enum_holder->name(),
+          enum_holder->value().deepcopy(memo)));
+    } break;
     case IValue::Tag::String:
     case IValue::Tag::None:
     case IValue::Tag::Double:
@@ -938,7 +945,7 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(IValue::HashAliasedI
 
 StrongTypePtr::StrongTypePtr(
     std::shared_ptr<torch::jit::CompilationUnit> cu,
-    std::shared_ptr<Type> type) {
+    TypePtr type) {
   cu_ = std::move(cu);
   type_ = type;
   TORCH_INTERNAL_ASSERT(type_);
