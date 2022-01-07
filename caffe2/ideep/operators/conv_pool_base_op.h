@@ -53,7 +53,7 @@ class IDEEPConvPoolOpBase : public ConvPoolOpBase<IDEEPContext> {
 
   bool RunOnDevice() override {
     if (!global_pooling_) {
-      for (int dim = 0; dim < kernel_.size(); ++dim) {
+      for (const auto dim : c10::irange(kernel_.size())) {
         CAFFE_ENFORCE_GT(kernel_[dim], 0);
       }
     }

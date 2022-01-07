@@ -5,7 +5,7 @@
 namespace torch {
 namespace lazy {
 
-class Select : public TsNode {
+class TORCH_API Select : public TsNode {
  public:
   Select(
       const Value& input,
