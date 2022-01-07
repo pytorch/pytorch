@@ -17,7 +17,7 @@ void VariableLengthSequencePadding(
     const int32_t* seqLengths,
     const T padValue,
     Context* /*context*/) {
-  for (int j = 0; j < B; j++) {
+  for (const auto j : c10::irange(B)) {
     for (int i = seqLengths[j]; i < N; i++) {
       EigenVectorArrayMap<T>(X + B * M * i + M * j, M).setConstant(padValue);
     }
