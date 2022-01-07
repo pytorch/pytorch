@@ -314,7 +314,7 @@ void inlineFallbackGraphAndAddSRCopyOutOp(std::shared_ptr<Graph> graph) {
   auto if_node = n->owningBlock()->owningNode();
   IfView if_v(if_node);
   SubgraphUtils::unmergeSubgraph(n);
-  graph->dump();
+
   auto false_block = if_v.elseBlock();
   std::vector<Value*> false_block_outputs(
       if_v.elseOutputs().begin(), if_v.elseOutputs().end());
