@@ -79,6 +79,9 @@ DynamicTypePtr DynamicType::create(Type& other) {
   return std::shared_ptr<DynamicType>(new DynamicType{other});
 }
 
+DynamicType::DynamicType(Tag tag, Arguments arguments)
+    : SharedType(Kind), tag_(tag), arguments_(std::move(arguments)) {}
+
 DynamicType::DynamicType(const Type& other) : SharedType(DynamicType::Kind) {
   auto kind = other.kind();
   TORCH_INTERNAL_ASSERT(kind != Kind);
