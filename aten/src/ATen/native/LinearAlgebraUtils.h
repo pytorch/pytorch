@@ -10,6 +10,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/native/TensorIterator.h>
 
+#include <type_traits>
 #include <functional>
 #include <string>
 #include <tuple>
@@ -29,14 +30,8 @@ char to_blas(TransposeType trans);
 
 TORCH_API c10::MaybeOwned<Tensor> expect_resolved_conj(const Tensor& tensor);
 
-TORCH_API Tensor cloneBatchedColumnMajor(const Tensor& src);
-
-Tensor copyBatchedColumnMajor(const Tensor& src, int64_t nrows = -1,
-    c10::optional<IntArrayRef> desired_batch_sizes = c10::nullopt);
-
-
 template<class Vec>
-Vec contiguous_strides_template(const IntArrayRef sizes, const bool f_contig=false) {
+static inline Vec contiguous_strides_template(const IntArrayRef sizes, const bool f_contig=false) {
   static_assert(std::is_same<IntArrayRef::value_type, typename Vec::value_type>::value,
                 "Incompatible integral type of sizes and strides");
   // f_contig chooses between the strides of a batch of Fortran (F-contiguous) and C-contiguous matrices
@@ -67,13 +62,16 @@ Vec contiguous_strides_template(const IntArrayRef sizes, const bool f_contig=fal
   return strides;
 }
 
-DimVector contiguous_strides(const IntArrayRef sizes, const bool f_contig=false);
+TORCH_API DimVector contiguous_strides(const IntArrayRef sizes, const bool f_contig=false);
 
-std::vector<int64_t> contiguous_strides_vec(const IntArrayRef sizes, const bool f_contig=false);
+TORCH_API std::vector<int64_t> contiguous_strides_vec(const IntArrayRef sizes, const bool f_contig=false);
+
+TORCH_API Tensor cloneBatchedColumnMajor(const Tensor& src);
 
 c10::MaybeOwned<Tensor> borrow_else_clone(const bool cond, const Tensor& borrow, const Tensor& clone, const bool contig);
 
-Tensor borrow_else_clone_tensor(const bool cond, const Tensor& borrow, const Tensor& clone, const bool contig);
+Tensor copyBatchedColumnMajor(const Tensor& src, int64_t nrows = -1,
+    c10::optional<IntArrayRef> desired_batch_sizes = c10::nullopt);
 
 TORCH_API int64_t batchCount(const Tensor& batched_matrices);
 
