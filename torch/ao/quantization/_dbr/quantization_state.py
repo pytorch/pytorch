@@ -1,4 +1,4 @@
-from typing import Callable, List, Tuple, Any, Optional, Dict
+from typing import Callable, List, Tuple, Any, Optional, Dict, Set
 
 import torch
 import torch.nn.functional as F
@@ -117,6 +117,10 @@ class AutoQuantizationState(torch.nn.Module):
         # to its final value after tracing.
         self.needs_dtype_transform_on_outputs = True
 
+        # For debugging only, stores the types of ops seen by the parent which
+        # did not require op hooks.
+        self.seen_op_types_without_op_hooks: Set[Callable] = set()
+
     def get_extra_state(self):
         return {"tensor_id_to_scale_zp": self.tensor_id_to_scale_zp}
 
@@ -153,6 +157,8 @@ class AutoQuantizationState(torch.nn.Module):
         for i in self.output_qtensor_infos:
             s += f"{i} "
         s += "]\n"
+        # seen_op_types_without_op_hooks
+        s += f"(seen_op_types_without_op_hooks): {self.seen_op_types_without_op_hooks}\n"
         # idx_to_packed_weight_name
         if len(self.idx_to_packed_weight_name):
             s += "(idx_to_packed_weight_name): {\n"
@@ -160,7 +166,7 @@ class AutoQuantizationState(torch.nn.Module):
                 s += f"  {k}: {v}\n"
             s += "}\n"
         else:
-            s += "(idx_to_packed_weight_name): {}\n"
+            s += "(idx_to_packed_weight_name): {}"
         if len(self.tensor_id_to_scale_zp):
             s += "(tensor_id_to_scale_zp): {\n"
             for k, v in self.tensor_id_to_scale_zp.items():  # type: ignore[assignment]
@@ -574,6 +580,11 @@ class AutoQuantizationState(torch.nn.Module):
         needed.
         """
         self.needs_dtype_transform_on_outputs = False
+
+        if not len(self.output_qtensor_infos):
+            # if there are no tensor outputs, there is nothing to transform
+            return
+
         qtensor_info = self.output_qtensor_infos[0]
         if self.output_dtypes is not None:
             assert qtensor_info is not None
@@ -836,10 +847,19 @@ class AutoQuantizationState(torch.nn.Module):
                 dtype_to_use = args[0][0]._qtensor_info.inf_dtype
             else:
                 dtype_to_use = args[0]._qtensor_info.inf_dtype
-        output._qtensor_info = QTensorInfo(qtensor_id[0], dtype_to_use)
-        self.idx_to_seen_op_infos[self.idx].output_tensor_infos.append(
-            output._qtensor_info)
-        qtensor_id[0] += 1
+
+        def _add_output_qtensor_info(output):
+            output._qtensor_info = QTensorInfo(qtensor_id[0], dtype_to_use)
+            self.idx_to_seen_op_infos[self.idx].output_tensor_infos.append(
+                output._qtensor_info)
+            qtensor_id[0] += 1
+
+        if isinstance(output, torch.Tensor):
+            _add_output_qtensor_info(output)
+        elif isinstance(output, tuple):
+            for element in output:
+                if isinstance(element, torch.Tensor):
+                    _add_output_qtensor_info(element)
 
     # This is a hack to enable nn.Sequential to properly work with
     # this class.
@@ -847,3 +867,6 @@ class AutoQuantizationState(torch.nn.Module):
     def forward(self, x):
         raise NotImplementedError('Calling AutoQuantizationState.forward is not supported')
         # return x
+
+    def add_seen_op_type_without_op_hooks(self, op_type: Callable) -> None:
+        self.seen_op_types_without_op_hooks.add(op_type)
