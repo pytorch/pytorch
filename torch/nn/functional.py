@@ -534,6 +534,12 @@ def fractional_max_pool3d_with_indices(
         return_indices: if ``True``, will return the indices along with the outputs.
                         Useful to pass to :func:`~torch.nn.functional.max_unpool3d`.
 
+    Shape:
+        - Input: :math:`(N, C, T_{in}, H_{in}, W_{in})` or :math:`(C, T_{in}, H_{in}, W_{in})`.
+        - Output: :math:`(N, C, T_{out}, H_{out}, W_{out})` or :math:`(C, T_{out}, H_{out}, W_{out})`, where
+          :math:`(T_{out}, H_{out}, W_{out})=\text{output\_size}` or
+          :math:`(T_{out}, H_{out}, W_{out})=\text{output\_ratio} \times (T_{in}, H_{in}, W_{in})`
+
     Examples::
         >>> input = torch.randn(20, 16, 50, 32, 16)
         >>> # pool of cubic window of size=3, and target output size 13x12x11
@@ -561,13 +567,14 @@ def fractional_max_pool3d_with_indices(
         assert output_ratio is not None
         _output_ratio = _triple(output_ratio)
         output_size = [
-            int(input.size(2) * _output_ratio[0]),
-            int(input.size(3) * _output_ratio[1]),
-            int(input.size(4) * _output_ratio[2]),
+            int(input.size(-3) * _output_ratio[0]),
+            int(input.size(-2) * _output_ratio[1]),
+            int(input.size(-1) * _output_ratio[2]),
         ]
 
     if _random_samples is None:
-        _random_samples = torch.rand(input.size(0), input.size(1), 3, dtype=input.dtype, device=input.device)
+        n_batch = 1 if input.dim() == 4 else input.size(0)
+        _random_samples = torch.rand(n_batch, input.size(-4), 3, dtype=input.dtype, device=input.device)
     return torch._C._nn.fractional_max_pool3d(input, kernel_size, output_size, _random_samples)
 
 
@@ -2991,9 +2998,9 @@ def binary_cross_entropy(
 
     Examples::
 
-        >>> input = torch.randn((3, 2), requires_grad=True)
-        >>> target = torch.rand((3, 2), requires_grad=False)
-        >>> loss = F.binary_cross_entropy(F.sigmoid(input), target)
+        >>> input = torch.randn(3, 2, requires_grad=True)
+        >>> target = torch.rand(3, 2, requires_grad=False)
+        >>> loss = F.binary_cross_entropy(torch.sigmoid(input), target)
         >>> loss.backward()
     """
     if has_torch_function_variadic(input, target, weight):
@@ -3348,7 +3355,7 @@ def multilabel_soft_margin_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:
-    r"""multilabel_soft_margin_loss(input, target, weight=None, size_average=None) -> Tensor
+    r"""multilabel_soft_margin_loss(input, target, weight=None, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.MultiLabelSoftMarginLoss` for details.
     """
@@ -3695,7 +3702,7 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
             be used directly for interpolation.
         antialias (bool, optional): flag to apply anti-aliasing. Default: ``False``. Using anti-alias
             option together with ``align_corners=False``, interpolation result would match Pillow
-            result for downsampling operation. Supported modes: ``'bilinear'``.
+            result for downsampling operation. Supported modes: ``'bilinear'``, ``'bicubic'``.
 
     .. note::
         With ``mode='bicubic'``, it's possible to cause overshoot, in other words it can produce
@@ -3835,8 +3842,8 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
             output_size = [int(math.floor(float(input.size(i + 2)) * scale_factors[i])) for i in range(dim)]
         scale_factors = None
 
-    if antialias and not (mode in ("bilinear", ) and input.ndim == 4):
-        raise ValueError("Anti-alias option is only supported for bilinear mode")
+    if antialias and not (mode in ("bilinear", "bicubic") and input.ndim == 4):
+        raise ValueError("Anti-alias option is only supported for bilinear and bicubic modes")
 
     if input.dim() == 3 and mode == "nearest":
         return torch._C._nn.upsample_nearest1d(input, output_size, scale_factors)
@@ -3885,6 +3892,13 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
         return torch._C._nn.upsample_trilinear3d(input, output_size, align_corners, scale_factors)
     if input.dim() == 4 and mode == "bicubic":
         assert align_corners is not None
+        # Enforce that the full call with the new kwarg is not invoked when scripting.
+        # TODO: Remove this scripting logic once the 2-week FC window has passed.
+        if antialias:
+            if not torch.jit.is_scripting():
+                return torch._C._nn._upsample_bicubic2d_aa(input, output_size, align_corners, scale_factors)
+            else:
+                raise RuntimeError("TorchScript currently does not support antialias in interpolate")
         return torch._C._nn.upsample_bicubic2d(input, output_size, align_corners, scale_factors)
 
     if input.dim() == 3 and mode == "bilinear":
@@ -5074,6 +5088,7 @@ def multi_head_attention_forward(
     v_proj_weight: Optional[Tensor] = None,
     static_k: Optional[Tensor] = None,
     static_v: Optional[Tensor] = None,
+    average_attn_weights: bool = True,
 ) -> Tuple[Tensor, Optional[Tensor]]:
     r"""
     Args:
@@ -5099,17 +5114,20 @@ def multi_head_attention_forward(
             a combination of q_proj_weight, k_proj_weight, v_proj_weight.
         q_proj_weight, k_proj_weight, v_proj_weight, in_proj_bias: input projection weight and bias.
         static_k, static_v: static key and value used for attention operators.
+        average_attn_weights: If true, indicates that the returned ``attn_weights`` should be averaged across heads.
+            Otherwise, ``attn_weights`` are provided separately per head. Note that this flag only has an effect
+            when ``need_weights=True.``. Default: True
 
 
     Shape:
         Inputs:
-        - query: :math:`(L, N, E)` where L is the target sequence length, N is the batch size, E is
+        - query: :math:`(L, E)` or :math:`(L, N, E)` where L is the target sequence length, N is the batch size, E is
           the embedding dimension.
-        - key: :math:`(S, N, E)`, where S is the source sequence length, N is the batch size, E is
+        - key: :math:`(S, E)` or :math:`(S, N, E)`, where S is the source sequence length, N is the batch size, E is
           the embedding dimension.
-        - value: :math:`(S, N, E)` where S is the source sequence length, N is the batch size, E is
+        - value: :math:`(S, E)` or :math:`(S, N, E)` where S is the source sequence length, N is the batch size, E is
           the embedding dimension.
-        - key_padding_mask: :math:`(N, S)` where N is the batch size, S is the source sequence length.
+        - key_padding_mask: :math:`(S)` or :math:`(N, S)` where N is the batch size, S is the source sequence length.
           If a ByteTensor is provided, the non-zero positions will be ignored while the zero positions
           will be unchanged. If a BoolTensor is provided, the positions with the
           value of ``True`` will be ignored while the position with the value of ``False`` will be unchanged.
@@ -5126,10 +5144,13 @@ def multi_head_attention_forward(
           N is the batch size, E is the embedding dimension. E/num_heads is the head dimension.
 
         Outputs:
-        - attn_output: :math:`(L, N, E)` where L is the target sequence length, N is the batch size,
+        - attn_output: :math:`(L, E)` or :math:`(L, N, E)` where L is the target sequence length, N is the batch size,
           E is the embedding dimension.
-        - attn_output_weights: :math:`(N, L, S)` where N is the batch size,
-          L is the target sequence length, S is the source sequence length.
+        - attn_output_weights: Only returned when ``need_weights=True``. If ``average_attn_weights=True``, returns
+          attention weights averaged across heads of shape :math:`(L, S)` when input is unbatched or
+          :math:`(N, L, S)`, where :math:`N` is the batch size, :math:`L` is the target sequence length, and
+          :math:`S` is the source sequence length. If ``average_weights=False``, returns attention weights per
+          head of shape :math:`(num_heads, L, S)` when input is unbatched or :math:`(N, num_heads, L, S)`.
     """
     tens_ops = (query, key, value, in_proj_weight, in_proj_bias, bias_k, bias_v, out_proj_weight, out_proj_bias)
     if has_torch_function(tens_ops):
@@ -5314,9 +5335,10 @@ def multi_head_attention_forward(
     attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
 
     if need_weights:
-        # average attention weights over heads
+        # optionally average attention weights over heads
         attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
-        attn_output_weights = attn_output_weights.sum(dim=1) / num_heads
+        if average_attn_weights:
+            attn_output_weights = attn_output_weights.sum(dim=1) / num_heads
 
         if not is_batched:
             # squeeze the output if input was unbatched
