@@ -9733,6 +9733,18 @@ dedent """
         scripted = torch.jit.script(foo)
         self.assertTrue(scripted())
 
+    def test_comment_ignore_indent(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+    # useless comment that is not indented correctly  # noqa: E115
+                super().__init__()
+
+            def forward(self):
+                return 5
+
+        # should compile without an error
+        self.checkModule(Model(), ())
+
     def test_script_outputs(self):
         with self.assertRaisesRegex(RuntimeError, "cannot be used as a tuple"):
             @torch.jit.script
