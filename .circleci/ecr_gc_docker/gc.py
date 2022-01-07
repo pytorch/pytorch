@@ -3,6 +3,7 @@
 import argparse
 import boto3
 import datetime
+import time
 import pytz
 import re
 import sys
@@ -163,56 +164,68 @@ def looks_like_git_sha(tag):
     return re.match(SHA_PATTERN, tag) is not None
 
 
-stable_window_tags = []
-for repo in repos(client):
-    repositoryName = repo["repositoryName"]
-    if not repositoryName.startswith(args.filter_prefix):
-        continue
-
-    # Keep list of image digests to delete for this repository
-    digest_to_delete = []
-
-    for image in images(client, repo):
-        tags = image.get("imageTags")
-        if not isinstance(tags, (list,)) or len(tags) == 0:
+def do_gc():
+    stable_window_tags = []
+    for repo in repos(client):
+        repositoryName = repo["repositoryName"]
+        if not repositoryName.startswith(args.filter_prefix):
             continue
-        created = image["imagePushedAt"]
-        age = now - created
-        for tag in tags:
-            if any([
-                    looks_like_git_sha(tag),
-                    tag.isdigit(),
-                    tag.count("-") == 4,  # TODO: Remove, this no longer applies as tags are now built using a SHA1
-                    tag in ignore_tags]):
-                window = stable_window
-                if tag in ignore_tags:
-                    stable_window_tags.append((repositoryName, tag, "", age, created))
-                elif age < window:
-                    stable_window_tags.append((repositoryName, tag, window, age, created))
-            else:
-                window = unstable_window
 
-            if tag in ignore_tags or age < window:
-                if args.debug:
-                    print("Ignoring {}:{} (age: {})".format(repositoryName, tag, age))
-                break
-        else:
+        # Keep list of image digests to delete for this repository
+        digest_to_delete = []
+
+        for image in images(client, repo):
+            tags = image.get("imageTags")
+            if not isinstance(tags, (list,)) or len(tags) == 0:
+                continue
+            created = image["imagePushedAt"]
+            age = now - created
             for tag in tags:
-                print("{}Deleting {}:{} (age: {})".format("(dry run) " if args.dry_run else "", repositoryName, tag, age))
-            digest_to_delete.append(image["imageDigest"])
-    if args.dry_run:
-        if args.debug:
-            print("Skipping actual deletion, moving on...")
-    else:
-        # Issue batch delete for all images to delete for this repository
-        # Note that as of 2018-07-25, the maximum number of images you can
-        # delete in a single batch is 100, so chunk our list into batches of
-        # 100
-        for c in chunks(digest_to_delete, 100):
-            client.batch_delete_image(
-                registryId="308535385114",
-                repositoryName=repositoryName,
-                imageIds=[{"imageDigest": digest} for digest in c],
-            )
+                if any([
+                        looks_like_git_sha(tag),
+                        tag.isdigit(),
+                        tag.count("-") == 4,  # TODO: Remove, this no longer applies as tags are now built using a SHA1
+                        tag in ignore_tags]):
+                    window = stable_window
+                    if tag in ignore_tags:
+                        stable_window_tags.append((repositoryName, tag, "", age, created))
+                    elif age < window:
+                        stable_window_tags.append((repositoryName, tag, window, age, created))
+                else:
+                    window = unstable_window
 
-        save_to_s3(args.filter_prefix, stable_window_tags)
+                if tag in ignore_tags or age < window:
+                    if args.debug:
+                        print("Ignoring {}:{} (age: {})".format(repositoryName, tag, age))
+                    break
+            else:
+                for tag in tags:
+                    print("{}Deleting {}:{} (age: {})".format("(dry run) " if args.dry_run else "", repositoryName, tag, age))
+                digest_to_delete.append(image["imageDigest"])
+        if args.dry_run:
+            if args.debug:
+                print("Skipping actual deletion, moving on...")
+        else:
+            # Issue batch delete for all images to delete for this repository
+            # Note that as of 2018-07-25, the maximum number of images you can
+            # delete in a single batch is 100, so chunk our list into batches of
+            # 100
+            for c in chunks(digest_to_delete, 100):
+                client.batch_delete_image(
+                    registryId="308535385114",
+                    repositoryName=repositoryName,
+                    imageIds=[{"imageDigest": digest} for digest in c],
+                )
+
+            save_to_s3(args.filter_prefix, stable_window_tags)
+
+
+# stupid retry
+for i in range(3):
+    try:
+        do_gc()
+    except Exception as e:
+        print(e)
+        time.sleep(10)
+    else:
+        break
