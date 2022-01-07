@@ -2551,7 +2551,6 @@ Tensor linalg_eig_backward(const Tensor& gL,
                            const Tensor& gV,
                            const Tensor& L,
                            const Tensor& V,
-                           const bool is_complex,
                            const bool is_hermitian,
                            const bool symeig_eigenvectors) {
   // https://arxiv.org/pdf/1701.00392.pdf Eq 4.77
@@ -2579,15 +2578,12 @@ Tensor linalg_eig_backward(const Tensor& gL,
   }
 
   // Shortcut for linalg.eigvals/eigvalsh
+  // Compute V^-H gL V^H
   if (!gV.defined()) {
     if (is_hermitian) {
-      // Compute V gL V^H
       return at::matmul(V * gL.unsqueeze(-2), V.mH());
     } else {
-      // Compute V^-H gL V^H
-      const auto gA = at::linalg_solve(V.mH(), gL.unsqueeze(-1) * V.mH());
-      // If it is real, we have to project the derivative onto the real numbers
-      return is_complex ? gA : at::real(gA);
+      return at::linalg_solve(V.mH(), gL.unsqueeze(-1) * V.mH());
     }
   }
   auto VhgV = at::matmul(V.mH(), gV);
@@ -2597,8 +2593,8 @@ Tensor linalg_eig_backward(const Tensor& gL,
   }
   const auto diag_VhgV = VhgV.diagonal(0, -2, -1);
 
-  // Check invariance of the loss function wrt the transformation V -> V e^{i\phi}
-  if (is_complex) {
+  if (V.is_complex()) {
+    // Check invariance of the loss function wrt the transformation V -> V e^{i\phi}
     const auto imdiag_VhgV = at::imag(diag_VhgV);
     TORCH_CHECK(at::allclose(imdiag_VhgV, at::zeros_like(imdiag_VhgV), /*rtol=*/1e-2, /*atol=*/1e-2),
                 is_hermitian ? "linalg_eigh_backward" : "linalg_eig_backward",
@@ -2638,9 +2634,7 @@ Tensor linalg_eig_backward(const Tensor& gL,
   if (is_hermitian) {
     return at::matmul(V, at::matmul(gA, V.mH()));
   } else {
-    gA = at::linalg_solve(V.mH(), at::matmul(gA, V.mH()));
-    // If it is real, we have to project the derivative onto the real numbers
-    return is_complex ? gA : at::real(gA);
+    return at::linalg_solve(V.mH(), at::matmul(gA, V.mH()));
   }
 }
 

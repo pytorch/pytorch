@@ -176,7 +176,6 @@ Tensor linalg_eig_backward(const Tensor& gL,
                            const Tensor& gV,
                            const Tensor& L,
                            const Tensor& V,
-                           const bool is_complex,
                            const bool is_hermitian,
                            const bool symeig_eigenvectors=true);
 Tensor linalg_lstsq_jvp(

@@ -603,7 +603,8 @@ The eigenvalues are returned in ascending order.
              `-1` in the real case or by :math:`e^{i \phi}, \phi \in \mathbb{R}` in the complex
              case produces another set of valid eigenvectors of the matrix.
              For this reason, the loss function shall not depend on the phase of the eigenvectors, as
-             this quantity is not well-defined. This will be checked when computing the gradients of the loss function.
+             this quantity is not well-defined.
+             This will be checked for complex inputs when computing the gradients of the loss function.
 
 .. warning:: Gradients computed using the `eigenvectors` tensor will only be finite when
              :attr:`A` has distinct eigenvalues.
