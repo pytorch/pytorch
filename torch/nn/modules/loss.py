@@ -323,11 +323,11 @@ class GaussianNLLLoss(_Loss):
             losses. Default: ``'mean'``.
 
     Shape:
-        - Input: :math:`(N, *)` where :math:`*` means any number of additional
+        - Input: :math:`(N, *)` or :math:`(*)` where :math:`*` means any number of additional
           dimensions
-        - Target: :math:`(N, *)`, same shape as the input, or same shape as the input
+        - Target: :math:`(N, *)` or :math:`(*)`, same shape as the input, or same shape as the input
           but with one dimension equal to 1 (to allow for broadcasting)
-        - Var: :math:`(N, *)`, same shape as the input, or same shape as the input but
+        - Var: :math:`(N, *)` or :math:`(*)`, same shape as the input, or same shape as the input but
           with one dimension equal to 1, or same shape as the input but with one fewer
           dimension (to allow for broadcasting)
         - Output: scalar if :attr:`reduction` is ``'mean'`` (default) or
@@ -879,7 +879,7 @@ class SmoothL1Loss(_Loss):
         also known as delta for Huber). This leads to the following differences:
 
         * As beta -> 0, Smooth L1 loss converges to :class:`L1Loss`, while :class:`HuberLoss`
-          converges to a constant 0 loss.
+          converges to a constant 0 loss. When beta is 0, Smooth L1 loss is equivalent to L1 loss.
         * As beta -> :math:`+\infty`, Smooth L1 loss converges to a constant 0 loss, while
           :class:`HuberLoss` converges to :class:`MSELoss`.
         * For Smooth L1 loss, as beta varies, the L1 segment of the loss has a constant slope of 1.
@@ -1070,7 +1070,7 @@ class CrossEntropyLoss(_WeightedLoss):
 
       .. math::
           \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \quad
-          l_n = - \sum_{c=1}^C w_c \log \frac{\exp(x_{n,c})}{\exp(\sum_{i=1}^C x_{n,i})} y_{n,c}
+          l_n = - \sum_{c=1}^C w_c \log \frac{\exp(x_{n,c})}{\sum_{i=1}^C \exp(x_{n,i})} y_{n,c}
 
       where :math:`x` is the input, :math:`y` is the target, :math:`w` is the weight,
       :math:`C` is the number of classes, and :math:`N` spans the minibatch dimension as well as

@@ -1,5 +1,7 @@
 #include <torch/csrc/lazy/core/view_ops/view.h>
 
+#include <ATen/InferSize.h>
+
 namespace torch {
 namespace lazy {
 

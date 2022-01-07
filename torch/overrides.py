@@ -148,7 +148,6 @@ def get_ignored_functions() -> Set[Callable]:
         torch.logspace,
         torch.mkldnn_adaptive_avg_pool2d,
         torch.mkldnn_convolution,
-        torch.mkldnn_convolution_backward_weights,
         torch.mkldnn_max_pool2d,
         torch.mkldnn_max_pool3d,
         torch.mkldnn_linear_backward_weights,
@@ -243,6 +242,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._conj,
         Tensor._conj_physical,
         Tensor._neg_view,
+        Tensor._is_zerotensor,
     }
 
 
@@ -617,6 +617,8 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.masked_scatter: lambda input, mask, source: -1,
         torch.masked_select: lambda input, mask, out=None: -1,
         torch.matmul: lambda input, other, out=None: -1,
+        torch.linalg.lu_factor: lambda input, pivot=True, out=None: -1,
+        torch.linalg.lu_factor_ex: lambda input, pivot=True, check_errors=False, out=None: -1,
         torch.linalg.matmul: lambda input, other, out=None: -1,  # alias for torch.matmul
         torch.matrix_power: lambda input, n: -1,
         torch.linalg.matrix_power: lambda input, n, out=None: -1,
@@ -843,8 +845,8 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.q_zero_point: lambda input: -1,
         torch.qr: lambda input, some=True, out=None: -1,
         torch.linalg.qr: lambda input, mode='reduced', out=None: -1,
-        torch.quantile: lambda input, q, dim=None, keepdim=False, out=None: -1,
-        torch.nanquantile: lambda input, q, dim=None, keepdim=False, out=None: -1,
+        torch.quantile: lambda input, q, dim=None, keepdim=False, interpolation='linear', out=None: -1,
+        torch.nanquantile: lambda input, q, dim=None, keepdim=False, interpolation='linear', out=None: -1,
         torch.quantize_per_channel: lambda input, scales, zero_points, axis, dtype: -1,
         torch.quantize_per_tensor: lambda input, scale, zero_point, dtype: -1,
         torch.quantize_per_tensor_dynamic: lambda input, dtype, reduce_range: -1,

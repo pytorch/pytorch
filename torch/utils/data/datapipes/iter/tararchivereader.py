@@ -11,6 +11,7 @@ import os
 import tarfile
 import warnings
 
+
 class TarArchiveReaderIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]]):
     r""":class:`TarArchiveReaderIterDataPipe`.
 
