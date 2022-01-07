@@ -1,7 +1,6 @@
 #pragma once
 
 #include <c10/util/variant.h>
-#include <torch/csrc/jit/passes/symbolic_shape_runtime_fusion.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/symbolic_shape_runtime_fusion.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
@@ -232,15 +231,6 @@ class TORCH_API TensorExprKernel {
   Tensor convertStaticShapeOutputToCorrectStrides(torch::jit::Value* v);
   Tensor convertOutputToCorrectStrides(std::vector<ExprHandle>& sizes, std::vector<size_t>& sorted_stride_indices_descending, std::vector<ExprPtr>& strides, BufPtr& buf);
 
-  // Captures the information for reduction operation nodes.
-  struct ReductionInfo {
-    std::vector<DimArg> reductionDims;
-    std::vector<DimArg> outputDims;
-    std::vector<size_t> axes;
-    bool keepdim;
-    c10::optional<Dtype> dtype;
-  };
-
   NNCLoweringFunction getCustomLoweringFor(c10::Symbol op) const;
   std::unordered_map<c10::Symbol, NNCLoweringFunction> getCustomLowerings()
       const {
@@ -254,7 +244,6 @@ class TORCH_API TensorExprKernel {
   std::vector<BufPtr> preAllocIntermediateBufs(
       const std::vector<BufPtr>& interm_bufs);
 
- private:
   struct UnpackedTensorOptions {
     c10::optional<c10::ScalarType> dtype;
     c10::optional<c10::Layout> layout;
@@ -269,6 +258,8 @@ class TORCH_API TensorExprKernel {
   };
 
   ExprHandle getVarForShape(const c10::ShapeSymbol& ss);
+  std::vector<ExprHandle> computeInputTensorDims(
+      const torch::jit::Value* input);
   ExprHandle getStrideArg(size_t tensor_input, size_t stride_index);
   std::vector<ExprHandle> sizesFromSymbolicShape(
       const c10::SymbolicShape& shape);
@@ -301,7 +292,6 @@ class TORCH_API TensorExprKernel {
   std::vector<std::vector<ExprHandle>> tensorOutputSymbolicSizes_;
   // A map from ShapeSymbol.value() to the corresponding Var.
   std::unordered_map<int64_t, VarHandle> shapeSymbolToVar_;
-  std::unordered_map<const Value*, std::vector<ExprHandle>> inputToStrides_;
   std::unordered_map<ExprPtr, size_t> shapeSymbolInputPos_;
   // List of values corresponding to the ShapeSymbols that are inputs to
   // kernel being compiled. The order of these values correspond to the order
