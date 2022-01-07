@@ -632,7 +632,7 @@ c10::optional<::c10::SymbolicShape> ComputeShapeFromReshape(
   }
   if (minus_one_pos != -1) {
     final_shape.push_back(
-        ShapeSymbol::fromStaticSize(static_cast<int64_t>(shape_ratio)));
+        c10::ShapeSymbol::fromStaticSize(static_cast<int64_t>(shape_ratio)));
   }
   for (auto i = minus_one_pos + 1; i < shape_size; i++) {
     c10::ShapeSymbol cur_shape(
