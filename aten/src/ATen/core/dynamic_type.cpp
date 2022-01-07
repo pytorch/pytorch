@@ -81,15 +81,15 @@ DynamicTypePtr DynamicType::create(Type& other) {
 }
 
 DynamicType::DynamicType(Tag tag, Arguments arguments)
-    : Type(Kind), tag_(tag), arguments_(std::move(arguments)) {}
+    : SharedType(Kind), tag_(tag), arguments_(std::move(arguments)) {}
 
 DynamicType::DynamicType(Tag tag, c10::string_view name, Arguments arguments)
-    : Type(Kind),
+    : SharedType(Kind),
       tag_(tag),
       name_(std::string{name}),
       arguments_(std::move(arguments)) {}
 
-DynamicType::DynamicType(const Type& other) : Type(DynamicType::Kind) {
+DynamicType::DynamicType(const Type& other) : SharedType(DynamicType::Kind) {
   auto kind = other.kind();
   TORCH_INTERNAL_ASSERT(kind != Kind);
   if (auto n = other.castRaw<NamedType>()) {
