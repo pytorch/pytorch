@@ -164,9 +164,7 @@ using OptionalTypePtr = std::shared_ptr<OptionalType>;
 //     - None <: Optional[T] for all T
 //     - Optional[T] == Union[T, None] for all T
 struct TORCH_API OptionalType : public UnionType {
-  static OptionalTypePtr create(TypePtr contained) {
-    return OptionalTypePtr(new OptionalType(std::move(contained)));
-  }
+  static OptionalTypePtr create(TypePtr contained);
 
   static const TypeKind Kind = TypeKind::OptionalType;
 
