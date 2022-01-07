@@ -31,7 +31,7 @@ from torch.utils.hooks import RemovableHandle
 from ._digraph import DiGraph
 from ._importlib import _normalize_path
 from ._mangling import demangle, is_mangled
-from ._package_pickler import create_pickler, debug_dumps
+from ._package_pickler import create_pickler
 from ._stdlib import is_stdlib_module
 from .find_file_dependencies import find_files_source_depends_on
 from .glob_group import GlobGroup, GlobPattern
@@ -586,10 +586,7 @@ class PackageExporter:
         data_buf = io.BytesIO()
         pickler = create_pickler(data_buf, self.importer, protocol=pickle_protocol)
         pickler.persistent_id = self._persistent_id
-        try:
-            pickler.dump(obj)
-        except (TypeError, PicklingError) as e:
-            debug_dumps(self.importer, obj)
+        pickler.dump(obj)
         data_value = data_buf.getvalue()
 
         name_in_dependency_graph = f"<{package}.{resource}>"
