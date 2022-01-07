@@ -2084,9 +2084,11 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::send(
     std::vector<at::Tensor>& tensors,
     int dstRank,
     int tag) {
+#ifdef USE_NCCL_WITH_UCC
   if (tensors[0].device().type() != at::DeviceType::CUDA && uccPG_ != nullptr) {
     return uccPG_->send(tensors, dstRank, tag);
   }
+#endif
   check_gpu_tensors(tensors);
   auto ret = pointToPoint(
       tensors,
@@ -2107,9 +2109,11 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::recv(
     std::vector<at::Tensor>& tensors,
     int srcRank,
     int tag) {
+#ifdef USE_NCCL_WITH_UCC
   if (tensors[0].device().type() != at::DeviceType::CUDA && uccPG_ != nullptr) {
     return uccPG_->recv(tensors, srcRank, tag);
   }
+#endif
   check_gpu_tensors(tensors);
   auto ret = pointToPoint(
       tensors,
