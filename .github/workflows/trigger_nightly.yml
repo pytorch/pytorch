@@ -1,0 +1,21 @@
+name: Trigger nightly builds
+
+on:
+  schedule:
+    # every night at midnight
+    - cron: 0 0 * * *
+
+jobs:
+  tag_nightly:
+    if: ${{ github.repository == 'pytorch/pytorch' }}
+    name: Tag nightly from viable/strict
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          ref: viable/strict
+          token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
+      - name: Tag nightly from viable/strict
+        run: |
+          git tag -f nightly
+          git push origin -f nightly
