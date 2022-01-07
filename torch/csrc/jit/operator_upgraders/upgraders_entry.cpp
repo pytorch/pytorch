@@ -69,12 +69,14 @@ std::shared_ptr<Graph> create_upgrader_graph(
 }
 using UpgraderMap = std::unordered_map<std::string, std::shared_ptr<Graph>>;
 void populate_upgraders_graph_map() {
-  UpgraderMap populate_content;
-  for (const auto& entry : kUpgradersEntryMap) {
-    auto upgrader_graph = create_upgrader_graph(entry.first, entry.second);
-    populate_content.insert(std::make_pair(entry.first, upgrader_graph));
+  if (!is_upgraders_map_populated()) {
+    UpgraderMap populate_content;
+    for (const auto& entry : kUpgradersEntryMap) {
+      auto upgrader_graph = create_upgrader_graph(entry.first, entry.second);
+      populate_content.insert(std::make_pair(entry.first, upgrader_graph));
+    }
+    populate_upgraders_map(std::forward<UpgraderMap>(populate_content));
   }
-  populate_upgraders_map(std::forward<UpgraderMap>(populate_content));
 }
 
 std::vector<ByteCodeEntry> generate_bytecode_list() {

@@ -2,7 +2,7 @@ from torch._C import _generate_upgraders_bytecode
 from typing import List
 
 def format_bytecode(table):
-    # given a nested tuples, convert them to nested list
+    # given a nested tuple, convert it to nested list
     def listify(content):
         if not isinstance(content, tuple):
             return content
@@ -19,8 +19,7 @@ def format_bytecode(table):
 def generate_bytecode() -> List:
     yaml_content = []
     upgraders = _generate_upgraders_bytecode()
-    for upgrader in upgraders:
-        upgrader_name, upgrader_bytecode = upgrader
+    for (upgrader_name, upgrader_bytecode) in upgraders:
         entry = {upgrader_name: format_bytecode(upgrader_bytecode)}
         yaml_content.append(entry)
     return yaml_content
