@@ -8,7 +8,7 @@ import os
 import unittest
 
 PYTORCH_COLLECT_COVERAGE = bool(os.environ.get("PYTORCH_COLLECT_COVERAGE"))
-pyvers = subprocess.run(['python','--version'], stderr=subprocess.PIPE, stdout=subprocess.PIPE).stderr.decode()
+pyvers = subprocess.run(['python', '--version'], stderr=subprocess.PIPE, stdout=subprocess.PIPE).stderr.decode()
 does_python_refer_to_2 = str(pyvers).split(' ')[-1].split('.')[0] == '2'
 
 # This is a very simple smoke test for the functional autograd benchmarking script.
