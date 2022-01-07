@@ -10195,8 +10195,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_masked_fill,
            supports_forward_ad=True,
-           supports_fwgrad_bwgrad=False,  # need: _s_where
-           # https://github.com/pytorch/pytorch/issues/66357
+           supports_fwgrad_bwgrad=True,
            check_batched_forward_grad=False,
            supports_out=False),
     OpInfo('masked_scatter',
@@ -10235,6 +10234,9 @@ op_db: List[OpInfo] = [
                                                                 *[torch.bfloat16] if (SM60OrLater and CUDA11OrLater) else []),
            assert_autodiffed=True,
            assert_jit_shape_analysis=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_matmul,
            skips=(
                # ROCm intermittently fails the test with standard atol/rtol
@@ -12137,7 +12139,9 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_matmul,
            supports_out=False,
+           supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           check_batched_forward_grad=False,
            decorators=(
                # https://github.com/pytorch/pytorch/issues/67470
                DecorateInfo(unittest.skip("67470!"),
@@ -14261,7 +14265,7 @@ op_db: List[OpInfo] = [
                    domain=(0, 1),
                    aliases=('special.logit', ),
                    supports_forward_ad=True,
-                   supports_fwgrad_bwgrad=False,  # need: _s_where
+                   supports_fwgrad_bwgrad=True,
                    decorators=(precisionOverride({torch.bfloat16: 5e-1,
                                                   torch.float16: 5e-1}),),
                    dtypes=all_types_and(torch.bool, torch.bfloat16),
@@ -14276,6 +14280,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_where,
            supports_out=False,
            supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            skips=(
                # test does not work with passing lambda for op
                # AssertionError: False is not true :
@@ -14881,6 +14886,7 @@ op_db: List[OpInfo] = [
         identity=0,
         nan_policy='propagate',
         supports_out=False,
+        supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         promotes_int_to_int64=False,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -14908,6 +14914,7 @@ op_db: List[OpInfo] = [
         identity=1,
         nan_policy='propagate',
         supports_out=False,
+        supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         promotes_int_to_int64=True,
         # FIXME: "prod_cpu" not implemented for 'BFloat16'
@@ -14964,6 +14971,7 @@ op_db: List[OpInfo] = [
         method_variant=None,
         nan_policy='propagate',
         supports_out=False,
+        supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         promotes_int_to_float=True,
         dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
@@ -15007,6 +15015,7 @@ op_db: List[OpInfo] = [
         method_variant=None,
         nan_policy='propagate',
         supports_out=False,
+        supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         promotes_int_to_float=True,
         dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
@@ -15129,6 +15138,8 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and(torch.bfloat16, torch.bool),
         dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         supports_out=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_cosine_embedding_loss,
     ),
     OpInfo(
@@ -15171,6 +15182,8 @@ op_db: List[OpInfo] = [
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_hinge_embedding_loss,
     ),
     OpInfo(
