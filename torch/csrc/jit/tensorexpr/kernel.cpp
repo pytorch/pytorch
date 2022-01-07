@@ -16,6 +16,7 @@
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <torch/csrc/jit/tensorexpr/loopnest_randomization.h>
 #include <torch/csrc/jit/tensorexpr/operators/operators.h>
+#include <torch/csrc/jit/tensorexpr/expr.h>
 
 using namespace torch::jit;
 using namespace torch::jit::tensorexpr;
