@@ -589,14 +589,14 @@ struct TORCH_API TupleTypeFactory<TupleType> {
 struct TORCH_API Tuple : c10::intrusive_ptr_target {
  private:
   TupleElements elements_;
-  mutable std::shared_ptr<Type> type_; // lazily computed for unnamed tuples
+  mutable c10::TypePtr type_; // lazily computed for unnamed tuples
 
  public:
   // named tuples have additional type information, so we
   // directly create them tagged
   static c10::intrusive_ptr<Tuple> createNamed(
       std::vector<IValue> elements_,
-      std::shared_ptr<Type> type_) {
+      c10::TypePtr type_) {
     return c10::make_intrusive<Tuple>(std::move(elements_), std::move(type_));
   }
 
@@ -725,7 +725,7 @@ struct TORCH_API Tuple : c10::intrusive_ptr_target {
   explicit Tuple(std::vector<IValue> elements)
     : elements_(std::move(elements)){}
 
-  explicit Tuple(std::vector<IValue> elements, std::shared_ptr<Type> type)
+  explicit Tuple(std::vector<IValue> elements, c10::TypePtr type)
     : elements_(std::move(elements)), type_(std::move(type)) {}
 
   explicit Tuple(TupleElements&& elements)
