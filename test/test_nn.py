@@ -895,8 +895,8 @@ class TestNN(NNTestCase):
         w = torch.randn(6, 1, 5, 5)
 
         with self.assertRaisesRegex(RuntimeError,
-                                    r'Expected 4-dimensional input for 4-dimensional weight \[6, 1, 5, 5\],' +
-                                    r' but got 5-dimensional input of size \[1, 10, 1, 28, 28\] instead'):
+                                    r'Expected 3D \(unbatched\) or 4D \(batched\) input to conv2d, but got ' +
+                                    r'input of size: \[1, 10, 1, 28, 28\]'):
 
             F.conv2d(x, w)
 
@@ -6172,9 +6172,9 @@ class TestNN(NNTestCase):
                        nn.Conv2d(3, 8, 3).to(dtype), nn.ConvTranspose2d(3, 8, 3).to(dtype),
                        nn.Conv3d(3, 8, 3).to(dtype), nn.ConvTranspose3d(3, 8, 3).to(dtype)]
 
-            invalid_input_dims = [(2, 4), (2, 4),
-                                  (3, 5), (3, 5),
-                                  (4, 6), (4, 6)]
+            invalid_input_dims = [(1, 4), (1, 4),
+                                  (2, 5), (2, 5),
+                                  (3, 6), (3, 6)]
 
             for invalid_dims, module in zip(invalid_input_dims, modules):
                 for dims in invalid_dims:
@@ -13402,7 +13402,7 @@ class TestNNDeviceType(NNTestCase):
         gx_expect, gy_expect = x.grad, y.grad
         x.grad, y.grad = None, None
 
-        z = F.conv1d(x, y, padding='same')
+        z = F.conv2d(x, y, padding='same')
         z.sum().backward()
         self.assertEqual(gx_expect, x.grad)
         self.assertEqual(gy_expect, y.grad)
