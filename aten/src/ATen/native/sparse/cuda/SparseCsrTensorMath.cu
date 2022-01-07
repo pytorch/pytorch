@@ -290,7 +290,7 @@ void _apply_sparse_csr_lu_solve(
   int reorder = 1;
   scalar_t *x = result.data_ptr<scalar_t>();
 
-  at::cuda::solver::linear_solve<scalar_t, value_t>(handle, n, nnzA, descrA.descriptor(), values_data_ptr,
+  at::cuda::solver::lsvlu<scalar_t, value_t>(handle, n, nnzA, descrA.descriptor(), values_data_ptr,
     crow_indices_data_ptr, col_indices_data_ptr, b, tol, reorder, x, &_singularity);
 }
 

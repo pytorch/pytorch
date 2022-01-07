@@ -163,8 +163,8 @@ void getrs<c10::complex<float>>(
 }
 
 template <>
-void linear_solve<float, float>(
-  CUSOLVER_LINEAR_SOLVE_ARGTYPES(float, float)) {
+void lsvlu<float, float>(
+  CUSOLVER_LSVLU_ARGTYPES(float, float)) {
     TORCH_CUSOLVER_CHECK(cusolverSpScsrlsvluHost(
         handle,
         n,
@@ -181,8 +181,8 @@ void linear_solve<float, float>(
   }
 
 template <>
-void linear_solve<double, double>(
-  CUSOLVER_LINEAR_SOLVE_ARGTYPES(double, double)) {
+void lsvlu<double, double>(
+  CUSOLVER_LSVLU_ARGTYPES(double, double)) {
     TORCH_CUSOLVER_CHECK(cusolverSpDcsrlsvluHost(
         handle,
         n,
@@ -199,8 +199,8 @@ void linear_solve<double, double>(
   }
 
 template <>
-void linear_solve<cuComplex, float>(
-  CUSOLVER_LINEAR_SOLVE_ARGTYPES(cuComplex, float)) {
+void lsvlu<cuComplex, float>(
+  CUSOLVER_LSVLU_ARGTYPES(cuComplex, float)) {
     TORCH_CUSOLVER_CHECK(cusolverSpCcsrlsvluHost(
         handle,
         n,
@@ -217,8 +217,8 @@ void linear_solve<cuComplex, float>(
   }
 
 template <>
-void linear_solve<cuDoubleComplex, double>(
-  CUSOLVER_LINEAR_SOLVE_ARGTYPES(cuDoubleComplex, double)) {
+void lsvlu<cuDoubleComplex, double>(
+  CUSOLVER_LSVLU_ARGTYPES(cuDoubleComplex, double)) {
     TORCH_CUSOLVER_CHECK(cusolverSpZcsrlsvluHost(
         handle,
         n,
