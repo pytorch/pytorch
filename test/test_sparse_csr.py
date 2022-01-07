@@ -205,6 +205,21 @@ class TestSparseCSR(TestCase):
 
     @skipMeta
     @dtypes(*get_all_dtypes())
+    def test_clone(self, device, dtype):
+        x = torch.sparse_csr_tensor([0, 2, 4],
+                                    [0, 1, 0, 1],
+                                    [1, 2, 3, 4],
+                                    dtype=dtype,
+                                    device=device)
+        y = x.clone()
+
+        self.assertEqual(x.shape, y.shape)
+        self.assertEqual(x.crow_indices(), y.crow_indices())
+        self.assertEqual(x.col_indices(), y.col_indices())
+        self.assertEqual(x.values(), y.values())
+
+    @skipMeta
+    @dtypes(*get_all_dtypes())
     def test_copy(self, device, dtype):
 
         def run_test(shape, nnz, index_type):
