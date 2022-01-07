@@ -3740,6 +3740,7 @@
   python_module: nn
   dispatch:
     MkldnnCPU: mkldnn_gelu
+    QuantizedCPU: gelu_quantized_cpu
 
 - func: gelu_backward.grad_input(Tensor grad, Tensor self, *, Tensor(a!) grad_input) -> Tensor(a!)
   structured: True
@@ -5003,6 +5004,7 @@
   dispatch:
     CompositeExplicitAutograd: clone
     SparseCPU, SparseCUDA: clone_sparse
+    SparseCsrCPU, SparseCsrCUDA: clone_sparse_csr
     MkldnnCPU: mkldnn_clone
     QuantizedCPU, QuantizedCUDA: quantized_clone
 
@@ -7119,8 +7121,6 @@
 
 - func: _lu_with_info(Tensor self, bool pivot=True, bool check_errors=True) -> (Tensor LU, Tensor pivots, Tensor info)
   variants: function
-  dispatch:
-    CPU, CUDA: _lu_with_info
 
 - func: lu_solve.out(Tensor self, Tensor LU_data, Tensor LU_pivots, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -7590,48 +7590,25 @@
   device_check: NoCheck   # TensorIterator
   variants: method, function
 
-# The following quantile signatures are DEPRECATED in favor of the new ones with the interpolation kwarg.
-- func: quantile.scalar_out(Tensor self, float q, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-
-- func: quantile.scalar(Tensor self, float q, int? dim=None, bool keepdim=False) -> Tensor
+- func: quantile(Tensor self, Tensor q, int? dim=None, bool keepdim=False, *, str interpolation='linear') -> Tensor
   variants: method, function
 
-- func: quantile.out(Tensor self, Tensor q, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: quantile.out(Tensor self, Tensor q, int? dim=None, bool keepdim=False, *, str interpolation='linear', Tensor(a!) out) -> Tensor(a!)
 
-- func: quantile(Tensor self, Tensor q, int? dim=None, bool keepdim=False) -> Tensor
+- func: quantile.scalar(Tensor self, float q, int? dim=None, bool keepdim=False, *, str interpolation='linear') -> Tensor
   variants: method, function
 
-- func: nanquantile.scalar_out(Tensor self, float q, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: quantile.scalar_out(Tensor self, float q, int? dim=None, bool keepdim=False, *, str interpolation='linear', Tensor(a!) out) -> Tensor(a!)
 
-- func: nanquantile.scalar(Tensor self, float q, int? dim=None, bool keepdim=False) -> Tensor
+- func: nanquantile(Tensor self, Tensor q, int? dim=None, bool keepdim=False, *, str interpolation='linear') -> Tensor
   variants: method, function
 
-- func: nanquantile.out(Tensor self, Tensor q, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: nanquantile.out(Tensor self, Tensor q, int? dim=None, bool keepdim=False, *, str interpolation='linear', Tensor(a!) out) -> Tensor(a!)
 
-- func: nanquantile(Tensor self, Tensor q, int? dim=None, bool keepdim=False) -> Tensor
+- func: nanquantile.scalar(Tensor self, float q, int? dim=None, bool keepdim=False, *, str interpolation='linear') -> Tensor
   variants: method, function
 
-# To keep backward and forward compatibility, and to avoid ambiguity with the original signatures, dim, keepdim and interpolation
-# parameters are required for now. Once the deprecated signatures are removed they will be made optional.
-- func: quantile.new_scalar_out(Tensor self, float q, int? dim, bool keepdim, *, str interpolation, Tensor(a!) out) -> Tensor(a!)
-
-- func: quantile.new_scalar(Tensor self, float q, int? dim, bool keepdim, *, str interpolation) -> Tensor
-  variants: method, function
-
-- func: quantile.new_out(Tensor self, Tensor q, int? dim, bool keepdim, *, str interpolation, Tensor(a!) out) -> Tensor(a!)
-
-- func: quantile.new(Tensor self, Tensor q, int? dim, bool keepdim, *, str interpolation) -> Tensor
-  variants: method, function
-
-- func: nanquantile.new_scalar_out(Tensor self, float q, int? dim, bool keepdim, *, str interpolation, Tensor(a!) out) -> Tensor(a!)
-
-- func: nanquantile.new_scalar(Tensor self, float q, int? dim, bool keepdim, *, str interpolation) -> Tensor
-  variants: method, function
-
-- func: nanquantile.new_out(Tensor self, Tensor q, int? dim, bool keepdim, *, str interpolation, Tensor(a!) out) -> Tensor(a!)
-
-- func: nanquantile.new(Tensor self, Tensor q, int? dim, bool keepdim, *, str interpolation) -> Tensor
-  variants: method, function
+- func: nanquantile.scalar_out(Tensor self, float q, int? dim=None, bool keepdim=False, *, str interpolation='linear', Tensor(a!) out) -> Tensor(a!)
 
 - func: sort.values(Tensor self, int dim=-1, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   device_check: NoCheck   # TensorIterator
@@ -8580,10 +8557,10 @@
     CPU: _convert_indices_from_coo_to_csr_structured_cpu
     CUDA: _convert_indices_from_coo_to_csr_structured_cuda
 
-- func: _convert_indices_from_csr_to_coo(Tensor crow_indices, Tensor col_indices, *, bool out_int32=False) -> Tensor
+- func: _convert_indices_from_csr_to_coo(Tensor crow_indices, Tensor col_indices, *, bool out_int32=False, bool transpose=False) -> Tensor
   structured_delegate: _convert_indices_from_csr_to_coo.out
 
-- func: _convert_indices_from_csr_to_coo.out(Tensor crow_indices, Tensor col_indices, *, bool out_int32=False, Tensor(a!) out) -> Tensor(a!)
+- func: _convert_indices_from_csr_to_coo.out(Tensor crow_indices, Tensor col_indices, *, bool out_int32=False, bool transpose=False, Tensor(a!) out) -> Tensor(a!)
   structured: True
   dispatch:
     CPU: _convert_indices_from_csr_to_coo_structured_cpu
@@ -9275,15 +9252,14 @@
 
 - func: fractional_max_pool2d_backward.grad_input(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] output_size, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
-  dispatch:
-    CPU: fractional_max_pool2d_backward_out_cpu
-    CUDA: fractional_max_pool2d_backward_out_cuda
-
-- func: fractional_max_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] output_size, Tensor indices) -> Tensor
-  python_module: nn
+  structured: True
   dispatch:
     CPU: fractional_max_pool2d_backward_cpu
     CUDA: fractional_max_pool2d_backward_cuda
+
+- func: fractional_max_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] output_size, Tensor indices) -> Tensor
+  python_module: nn
+  structured_delegate: fractional_max_pool2d_backward.grad_input
 
 # Return: (Tensor output, Tensor indices)
 - func: fractional_max_pool3d.output(Tensor self, int[3] kernel_size, int[3] output_size, Tensor random_samples, *, Tensor(a!) output, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
@@ -10021,18 +9997,6 @@
   dispatch:
     CPU: slow_conv_transpose3d_cpu
     CUDA: slow_conv_transpose3d_cuda
-
-- func: slow_conv_transpose3d_backward.grad_output(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, int[3] output_padding, int[3] dilation, *, Tensor(a!) grad_input, Tensor(b!) grad_weight, Tensor(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
-  python_module: nn
-  dispatch:
-    CPU: slow_conv_transpose3d_backward_out_cpu
-    CUDA: slow_conv_transpose3d_backward_out_cuda
-
-- func: slow_conv_transpose3d_backward.output_mask(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, int[3] output_padding, int[3] dilation, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
-  python_module: nn
-  dispatch:
-    CPU: slow_conv_transpose3d_backward_cpu
-    CUDA: slow_conv_transpose3d_backward_cuda
 
 - func: thnn_conv2d.out(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -10829,6 +10793,27 @@
   python_module: linalg
   dispatch:
     CPU, CUDA: linalg_cross_out
+
+# linalg.lu_factor
+- func: linalg_lu_factor(Tensor A, *, bool pivot=True) -> (Tensor LU, Tensor pivots)
+  python_module: linalg
+  variants: function
+
+- func: linalg_lu_factor.out(Tensor A, *, bool pivot=True, Tensor(a!) LU, Tensor(b!) pivots) -> (Tensor(a!) LU, Tensor(b!) pivots)
+  python_module: linalg
+  variants: function
+
+- func: linalg_lu_factor_ex(Tensor A, *, bool pivot=True, bool check_errors=False) -> (Tensor LU, Tensor pivots, Tensor info)
+  python_module: linalg
+  structured_delegate: linalg_lu_factor_ex.out
+  variants: function
+
+- func: linalg_lu_factor_ex.out(Tensor A, *, bool pivot=True, bool check_errors=False, Tensor(a!) LU, Tensor(b!) pivots, Tensor(c!) info) -> (Tensor(a!) LU, Tensor(b!) pivots, Tensor(c!) info)
+  python_module: linalg
+  variants: function
+  structured: True
+  dispatch:
+    CPU, CUDA: linalg_lu_factor_ex_out
 
 - func: linalg_det(Tensor self) -> Tensor
   python_module: linalg
