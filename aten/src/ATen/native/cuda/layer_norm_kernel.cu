@@ -559,10 +559,6 @@ __global__ void GammaBetaBackwardCUDAKernel(
   alignas(sizeof(double)) extern __shared__ char s_data1[];
   T_ACC * s_data_typed = reinterpret_cast<T_ACC*>(&s_data1);
   const int64_t j = blockIdx.x * blockDim.x + threadIdx.x;
-  T_ACC dg_sum1 = 0;
-  T_ACC dg_sum2 = 0;
-  T_ACC db_sum1 = 0;
-  T_ACC db_sum2 = 0;
   constexpr int unroll = 8;
   T dYs[unroll];
   T Xs[unroll];
