@@ -18394,7 +18394,7 @@ class TestNNDeviceType(NNTestCase):
         output_mask = [True, True, True]
         grad_grad_output, grad_input, grad_weight = torch.ops.aten._convolution_double_backward(
             ggI, ggW, ggB, gO, weight, input, stride, padding, dilation, transposed,
-            output_padding, groups, False, False, False, False, output_mask)
+            output_padding, groups, output_mask)
 
         # Make sure the correct shapes are computed.
         self.assertEqual(grad_grad_output.shape, gO.shape)
