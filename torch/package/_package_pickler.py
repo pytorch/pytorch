@@ -254,22 +254,10 @@ class DebugPickler(PackagePickler):
                     idx_to_skip.add(idx + 1)
                     idx_to_skip.add(idx + 2)
                     continue
-            if isinstance(obj, (ListElement, DictElement, TupleElement, SetElement)):
+            if isinstance(obj, DictElement):
                 # Fold [ListElement, obj] into just [ListElement]
                 traced_stack.append(obj)
                 idx_to_skip.add(idx + 1)
-                continue
-            elif isinstance(obj, SetElementPreProtocol4Flag):
-                # handle sets for protocol < 4 where set is converted to ([set],) / a list nested in a tuple
-                assert isinstance(stack[idx + 2], TupleElement)
-                assert isinstance(stack[idx + 4], ListElement)
-                idx_to_skip.add(idx + 1)
-                idx_to_skip.add(idx + 2)
-                idx_to_skip.add(idx + 3)
-                idx_to_skip.add(idx + 4)
-                idx_to_skip.add(idx + 5)
-                bad_element = stack[idx + 4].value
-                traced_stack.append(SetElement(bad_element))
                 continue
             traced_stack.append(obj)
 
