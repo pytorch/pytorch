@@ -171,8 +171,7 @@ Tensor slice_backward_wrapper(
 Tensor linalg_eig_backward(const Tensor& gL,
                            const Tensor& gV,
                            const Tensor& L,
-                           const Tensor& V,
-                           const bool is_complex);
+                           const Tensor& V);
 std::tuple<Tensor, Tensor> linalg_eig_jvp(const Tensor& dA,
                                           const Tensor& L,
                                           const Tensor& V);

@@ -2550,8 +2550,7 @@ Tensor eig_backward(const std::vector<torch::autograd::Variable> &grads, const T
 Tensor linalg_eig_backward(const Tensor& gL,
                            const Tensor& gV,
                            const Tensor& L,
-                           const Tensor& V,
-                           const bool is_complex) {
+                           const Tensor& V) {
   // https://arxiv.org/pdf/1701.00392.pdf Eq 4.77
   // For A = VLV^{-1}, denoting the gradients gA, gV and gL, we have
   // gA = V^{-H}(diag_embed(gL) + (V^H gV -V^HV diag(real(V^H gV))) / E*)V^H
@@ -2572,9 +2571,7 @@ Tensor linalg_eig_backward(const Tensor& gL,
   // Shortcut for linalg.eigvals
   if (!gV.defined()) {
     // Compute V^-H gL V^H
-    const auto gA = at::linalg_solve(V.mH(), gL.unsqueeze(-1) * V.mH());
-    // If it is real, we have to project the derivative onto the real numbers
-    return is_complex ? gA : at::real(gA);
+    return at::linalg_solve(V.mH(), gL.unsqueeze(-1) * V.mH());
   }
 
   auto Econj = [&L]{
@@ -2590,8 +2587,8 @@ Tensor linalg_eig_backward(const Tensor& gL,
   const auto VhgV = at::matmul(V.mH(), gV);
   const auto diag_VhgV = VhgV.diagonal(0, -2, -1);
 
-  // Check invariance of the loss function wrt the transformation V -> V e^{i\phi}
-  if (is_complex) {
+  {
+    // Check invariance of the loss function wrt the transformation V -> V e^{i\phi}
     const auto imdiag_VhgV = at::imag(diag_VhgV);
     TORCH_CHECK(at::allclose(imdiag_VhgV, at::zeros_like(imdiag_VhgV), /*rtol=*/1e-2, /*atol=*/1e-2),
                 "linalg_eig_backward: The eigenvectors in the complex case are specified up to multiplication "
@@ -2611,9 +2608,7 @@ Tensor linalg_eig_backward(const Tensor& gL,
   }
 
   // Conjugate by V^{-H}
-  gA = at::linalg_solve(V.mH(), at::matmul(gA, V.mH()));
-  // If it is real, we have to project the derivative onto the real numbers
-  return is_complex ? gA : at::real(gA);
+  return at::linalg_solve(V.mH(), at::matmul(gA, V.mH()));
 }
 
 std::tuple<Tensor, Tensor> linalg_eig_jvp(const Tensor& dA,
