@@ -85,8 +85,8 @@ struct TORCH_API SugaredValue
       const SourceRange& loc,
       Function& m,
       // note: names for args will be 'argument 0', 'argument 1', etc..
-      at::ArrayRef<NamedValue> args,
-      at::ArrayRef<NamedValue> kwargs,
+      at::MutableArrayRef<NamedValue> args,
+      at::MutableArrayRef<NamedValue> kwargs,
       size_t n_binders) {
     // n_binders is always set to the number of variables an expression is
     // syntactically bound to:
@@ -184,8 +184,8 @@ struct TORCH_API SimpleValue : public SugaredValue {
       const SourceRange& loc,
       Function& m,
       // note: names for args will be 'argument 0', 'argument 1', etc..
-      at::ArrayRef<NamedValue> args,
-      at::ArrayRef<NamedValue> kwargs,
+      at::MutableArrayRef<NamedValue> args,
+      at::MutableArrayRef<NamedValue> kwargs,
       size_t n_binders) override;
 
   std::shared_ptr<SugaredValue> iter(const SourceRange& loc, Function& m)
@@ -221,8 +221,8 @@ struct TORCH_API BuiltinFunction : public SugaredValue {
   std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
       Function& m,
-      at::ArrayRef<NamedValue> args,
-      at::ArrayRef<NamedValue> kwargs,
+      at::MutableArrayRef<NamedValue> args,
+      at::MutableArrayRef<NamedValue> kwargs,
       size_t n_binders) override;
 
   // try to create this builtin but if it doesn't exist or the self argument
@@ -341,8 +341,8 @@ struct TORCH_API ClassValue : public SugaredValue {
   std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
       Function& m,
-      at::ArrayRef<NamedValue> args,
-      at::ArrayRef<NamedValue> kwargs,
+      at::MutableArrayRef<NamedValue> args,
+      at::MutableArrayRef<NamedValue> kwargs,
       size_t n_binders) override;
 
   std::shared_ptr<SugaredValue> attr(
@@ -363,8 +363,8 @@ struct TORCH_API NamedTupleConstructor : public SugaredValue {
   std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
       Function& m,
-      at::ArrayRef<NamedValue> args,
-      at::ArrayRef<NamedValue> kwargs,
+      at::MutableArrayRef<NamedValue> args,
+      at::MutableArrayRef<NamedValue> kwargs,
       size_t n_binders) override;
 
   std::string kind() const override {
@@ -393,8 +393,8 @@ struct FunctionValue : public SugaredValue {
   std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
       Function& f,
-      at::ArrayRef<NamedValue> args,
-      at::ArrayRef<NamedValue> kwargs,
+      at::MutableArrayRef<NamedValue> args,
+      at::MutableArrayRef<NamedValue> kwargs,
       size_t n_binders) override {
     std::vector<const FunctionSchema*> schemas;
     for (Function* callee : callees_) {
@@ -451,8 +451,8 @@ struct MethodValue : public SugaredValue {
   std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
       Function& f,
-      at::ArrayRef<NamedValue> args,
-      at::ArrayRef<NamedValue> kwargs,
+      at::MutableArrayRef<NamedValue> args,
+      at::MutableArrayRef<NamedValue> kwargs,
       size_t n_binders) override {
     std::vector<NamedValue> argsWithSelf = {self_};
     argsWithSelf.insert(argsWithSelf.end(), args.begin(), args.end());
@@ -494,8 +494,8 @@ struct TORCH_API PrintValue : public SugaredValue {
   std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
       Function& m,
-      at::ArrayRef<NamedValue> args,
-      at::ArrayRef<NamedValue> kwargs,
+      at::MutableArrayRef<NamedValue> args,
+      at::MutableArrayRef<NamedValue> kwargs,
       size_t n_binders) override;
 };
 
@@ -508,8 +508,8 @@ struct TORCH_API CastValue : public BuiltinFunction {
   std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
       Function& m,
-      at::ArrayRef<NamedValue> args,
-      at::ArrayRef<NamedValue> kwargs,
+      at::MutableArrayRef<NamedValue> args,
+      at::MutableArrayRef<NamedValue> kwargs,
       size_t n_binders) override {
     if (args.size() == 1 && kwargs.size() == 0) {
       auto len_op = std::make_shared<BuiltinFunction>(aten::len, at::nullopt);
@@ -546,8 +546,8 @@ struct TORCH_API TensorCastValue : public SugaredValue {
   std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
       Function& m,
-      at::ArrayRef<NamedValue> args,
-      at::ArrayRef<NamedValue> kwargs,
+      at::MutableArrayRef<NamedValue> args,
+      at::MutableArrayRef<NamedValue> kwargs,
       size_t n_binders) override {
     TORCH_INTERNAL_ASSERT(args.size() == 0 && kwargs.size() == 0);
     Value* dtype_const = m.graph()->insertConstant(dtype_, loc);
@@ -579,8 +579,8 @@ struct TORCH_API MagicMethod : public SugaredValue {
   std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
       Function& m,
-      at::ArrayRef<NamedValue> args,
-      at::ArrayRef<NamedValue> kwargs,
+      at::MutableArrayRef<NamedValue> args,
+      at::MutableArrayRef<NamedValue> kwargs,
       size_t n_binders) override;
 
  private:
@@ -666,7 +666,7 @@ struct TORCH_API IterableTree : SugaredValue {
   IterableTree(
       const SourceRange& range,
       Function& m,
-      at::ArrayRef<SugaredValuePtr> children) {
+      at::MutableArrayRef<SugaredValuePtr> children) {
     for (const auto& child : children) {
       addChild(range, m, child);
     }
@@ -715,7 +715,7 @@ struct TORCH_API IterableTree : SugaredValue {
 
 static inline std::vector<Value*> toValues(
     Graph& g,
-    at::ArrayRef<NamedValue> nvs) {
+    at::MutableArrayRef<NamedValue> nvs) {
   return fmap(nvs, [&](const NamedValue& v) { return v.value(g); });
 }
 
@@ -760,8 +760,8 @@ struct TORCH_API ExceptionValue : public SugaredValue {
   std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
       Function& m,
-      at::ArrayRef<NamedValue> args,
-      at::ArrayRef<NamedValue> /*attributes*/,
+      at::MutableArrayRef<NamedValue> args,
+      at::MutableArrayRef<NamedValue> /*attributes*/,
       size_t /*n_binders*/) override {
     auto exception_message = insertConstant(*m.graph(), message_ + ": ", loc);
     for (auto& input : args) {

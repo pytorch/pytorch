@@ -43,8 +43,8 @@ TORCH_API Value* emitBuiltinCall(
     const SourceRange& loc,
     Graph& graph,
     Symbol name,
-    at::ArrayRef<NamedValue> args,
-    at::ArrayRef<NamedValue> kwargs,
+    at::MutableArrayRef<NamedValue> args,
+    at::MutableArrayRef<NamedValue> kwargs,
     const c10::optional<NamedValue>& self = c10::nullopt);
 
 TORCH_API c10::optional<size_t> findInputWithName(

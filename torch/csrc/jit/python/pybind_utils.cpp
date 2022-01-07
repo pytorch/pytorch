@@ -310,6 +310,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       return obj.cast<std::shared_ptr<PythonFutureWrapper>>()->fut;
     }
     case TypeKind::AnyType:
+    case TypeKind::UninferredType:
       return toTypeInferredIValue(obj);
     case TypeKind::FunctionType:
     case TypeKind::GeneratorType:

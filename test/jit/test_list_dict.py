@@ -87,14 +87,6 @@ class TestList(JitTestCase):
             return
         self.checkScript(reassign_arity_change, (), optimize=False)
 
-        def reassign_from_empty_literal():
-            x = []
-            if 1 == 1:
-                x = [1, 2, 3]
-            return
-        with self.assertRaisesRegexWithHighlight(RuntimeError, r"previously has type List\[Tensor\]", "x"):
-            self.checkScript(reassign_from_empty_literal, (), optimize=False)
-
         def reassign_from_empty_builtin():
             x = torch.jit.annotate(List[int], [])
             if 1 == 1:
@@ -125,6 +117,30 @@ class TestList(JitTestCase):
             return
         with self.assertRaisesRegexWithHighlight(RuntimeError, "previously has type", "x"):
             self.checkScript(reassign_nested, (), optimize=False)
+
+    def test_list_delayed_typing(self):
+        def fn():
+            x = []
+            x.append("foo")
+            if torch.jit.isinstance(x, List[str]):
+                print(x[0])
+            elif isinstance(x, int):
+                print("bar")
+            else:
+                print("baz")
+
+        self.checkScript(fn, ())
+
+    def test_list_delayed_typing_cannot_be_retyped(self):
+        def fn():
+            x = []
+            x.append("foo")
+            x.append(1)
+
+        with self.assertRaisesRegex(RuntimeError, "Could not match type"
+                                    " int to t in argument"):
+            scripted = torch.jit.script(fn)
+            scripted()
 
     def test_del(self):
         def inputs():

@@ -17,6 +17,7 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
 #include <c10/util/ArrayRef.h>
+#include <c10/util/MutableArrayRef.h>
 #include <c10/util/Exception.h>
 
 #include <functional>

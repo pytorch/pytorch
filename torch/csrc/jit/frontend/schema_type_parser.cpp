@@ -63,6 +63,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
       {"NoneType", NoneType::get()},
       {"Capsule", CapsuleType::get()},
       {"Any", at::AnyType::get()},
+      {"Uninferred", at::UninferredType::get()},
       {"AnyClassType", at::AnyClassType::get()},
       {"AnyEnumType", at::AnyEnumType::get()},
   };

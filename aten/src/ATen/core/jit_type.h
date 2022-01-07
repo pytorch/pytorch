@@ -49,6 +49,32 @@ struct TORCH_API AnyType : public Type {
   AnyType() : Type(TypeKind::AnyType) {}
 };
 
+struct UninferredType;
+using UninferredTypePtr = std::shared_ptr<UninferredType>;
+// UninferredType represents a type that will be set later in the
+// program. For example, a empty list is typed as
+// `List[UninferredType]`. Currently, UninferredType is only
+// used as the internal element in lists and dicts, but we may expand
+// this later
+struct TORCH_API UninferredType : public Type {
+  static UninferredTypePtr create() {
+    return UninferredTypePtr(
+        new UninferredType()); // NOLINT(modernize-make-shared)
+  }
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "Uninferred";
+  }
+  static const TypeKind Kind = TypeKind::UninferredType;
+
+  static UninferredTypePtr get();
+
+ private:
+  UninferredType() : Type(TypeKind::UninferredType) {}
+};
+
 inline std::string toString(TypePtr typePtr) {
   return typePtr->str();
 }
@@ -741,6 +767,7 @@ struct TORCH_API ListType
   static ListTypePtr ofComplexDoubles();
   static ListTypePtr ofBools();
   static ListTypePtr ofStrings();
+  static ListTypePtr ofUninferred();
 
  private:
   ListType(TypePtr elem) : SingleElementType(elem) {}

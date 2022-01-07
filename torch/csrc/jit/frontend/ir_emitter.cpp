@@ -390,14 +390,6 @@ struct Environment {
               << " but is now being assigned to a value of type "
               << as_simple_value->type()->repr_str();
 
-        // Special-cased error msg if we're trying to assign to a tensor list.
-        if (simple_parent->type()->kind() == TypeKind::ListType &&
-            as_simple_value->type()->kind() == TypeKind::ListType) {
-          error << "\nEmpty lists default to List[Tensor]. Add a variable "
-                   "annotation to the assignment to create an empty list "
-                   "of another type (torch.jit.annotate(List[T, []]) where T "
-                   "is the type of elements in the list for Python 2)";
-        }
         error << "\n" << why_not.str();
         throw error;
       }
@@ -651,6 +643,10 @@ struct to_ir {
           << "methods must have a self argument";
     }
     method.setSchema(emitDef(def, self, graph->block()));
+
+    if (method.getSchema().name().find("foo") != std::string::npos) {
+      int x= 5;
+    }
 
     // NB ORDERING: SSA conversion has to occur before
     // lifting of closures and forks, this way closures are converted
@@ -1300,7 +1296,7 @@ struct to_ir {
     // unrolled and of length 0, then we emit a List of tensors
     Value* list_value = graph->insertNode(graph->create(prim::ListConstruct, 1))
                             ->output()
-                            ->setType(ListType::ofTensors());
+                            ->setType(ListType::ofUninferred());
     bool type_set = false;
     if (type_hint) {
       if (!type_hint->cast<ListType>()) {
@@ -1823,8 +1819,9 @@ struct to_ir {
         return false;
       }
       bool maybeOfKind(TypeKind kind, const TypePtr& actual_type) {
-        if (actual_type->kind() == AnyType::Kind) {
-          return true;
+        if (actual_type->kind() == AnyType::Kind ||
+            actual_type->kind() == UninferredType::Kind) {
+              return true;
         }
         if (auto op = actual_type->cast<OptionalType>()) {
           return op->getElementType()->kind() == kind;
@@ -4831,7 +4828,34 @@ std::vector<Function*> CompilationUnit::define(
       self);
 }
 
+void defaultToTensor(std::shared_ptr<Graph>& graph) {
+  std::stack<Block*> blocks_to_visit;
+  blocks_to_visit.push(graph->block());
+  while (!blocks_to_visit.empty()) {
+    Block* block = blocks_to_visit.top();
+    blocks_to_visit.pop();
+    for (Node* n : block->nodes()) {
+      for (Value* v : n->inputs()) {
+        if (v->type()->kind() == ListType::Kind
+            && v->type()->expect<ListType>()->getElementType() == UninferredType::get()) {
+            v->setType(ListType::create(TensorType::get()));
+        }
+      }
+      for (Block* subblock : n->blocks()) {
+        blocks_to_visit.push(subblock);
+      }
+    }
+  }
+}
+
 void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
+  // If we still have variables of type `Uninferred`, change their
+  // actual type to `Tensor`. The ONLY reason this needs to happen is
+  // because Uninferred types don't play nicely in the interpreter.
+  // TODO: Remove this pass and add support for Uninferred type as an
+  // IValue?
+  defaultToTensor(to_clean);
+
   liftClosures(to_clean);
   inlineForkedClosures(to_clean);
   if (getInlineEverythingMode()) {

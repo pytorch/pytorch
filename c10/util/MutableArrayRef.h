@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <c10/util/ArrayRef.h>
 #include <c10/util/C++17.h>
 #include <c10/util/Deprecated.h>
 #include <c10/util/Exception.h>
@@ -29,7 +30,7 @@ namespace c10 {
 /// This class does not own the underlying data. It is expected to be used in
 /// situations where the data resides in some other buffer, whose lifetime
 /// extends past that of the MutableArrayRef. For this reason, it is not in general
-/// safe to store an MutableArrayRef.
+/// safe to store a MutableArrayRef.
 ///
 /// This is intended to be trivially copyable, so it should be passed by
 /// value.
@@ -60,33 +61,33 @@ class MutableArrayRef final {
   /// Construct an empty MutableArrayRef
   /* implicit */ MutableArrayRef() : Data(nullptr), Length(0) {}
 
-  /// Construct an MutableArrayRef from a single element
+  /// Construct a MutableArrayRef from a single element
   MutableArrayRef(T& OneElt) : Data(&OneElt), Length(1) {}
 
-  /// Construct an MutableArrayRef from a pointer and length.
+  /// Construct a MutableArrayRef from a pointer and length.
   /// CUDA 9.2 fails to compile of host-only function on device
   C10_HOST_CONSTEXPR_EXCEPT_CUDA92 MutableArrayRef(T* data, size_t length)
       : Data(data), Length(length) {
     debugCheckNullptrInvariant();
   }
 
-  /// Construct an MutableArrayRef from a range.
+  /// Construct a MutableArrayRef from a range.
   /// CUDA 9.2 fails to compile of host-only function on device
   C10_HOST_CONSTEXPR_EXCEPT_CUDA92 MutableArrayRef(T* begin, T* end)
       : Data(begin), Length(end - begin) {
     debugCheckNullptrInvariant();
   }
 
-  /// Construct an MutableArrayRef from a SmallVector. This is templated in order to
+  /// Construct a MutableArrayRef from a SmallVector. This is templated in order to
   /// avoid instantiating SmallVectorTemplateCommon<T> whenever we
-  /// copy-construct an MutableArrayRef
+  /// copy-construct a MutableArrayRef
   template <typename U>
   /* implicit */ MutableArrayRef(const SmallVectorTemplateCommon<T, U>& Vec)
       : Data(Vec.data()), Length(Vec.size()) {
     debugCheckNullptrInvariant();
   }
 
-  /// Construct an MutableArrayRef from a generic Container
+  /// Construct a MutableArrayRef from a generic Container
   template <
       typename Container,
       typename = std::enable_if_t<std::is_same<
@@ -97,7 +98,7 @@ class MutableArrayRef final {
     debugCheckNullptrInvariant();
   }
 
-  /// Construct an MutableArrayRef from a std::vector
+  /// Construct a MutableArrayRef from a std::vector
   template <typename A>
   /* implicit */ MutableArrayRef(const std::vector<T, A>& Vec)
       : Data(Vec.data()), Length(Vec.size()) {
@@ -106,19 +107,19 @@ class MutableArrayRef final {
         "MutableArrayRef<bool> cannot be constructed from a std::vector<bool> bitfield.");
   }
 
-  /// Construct an MutableArrayRef from a std::array
+  /// Construct a MutableArrayRef from a std::array
   template <size_t N>
   /* implicit */ MutableArrayRef(const std::array<T, N>& Arr)
       : Data(Arr.data()), Length(N) {}
 
-  /// Construct an MutableArrayRef from a C array
+  /// Construct a MutableArrayRef from a C array
   template <size_t N>
   /* implicit */ MutableArrayRef(T (&Arr)[N]) : Data(Arr), Length(N) {}
 
-  /// Construct an MutableArrayRef from a std::initializer_list
-  /* implicit */ MutableArrayRef(const std::initializer_list<T>& Vec)
+  /// Construct a MutableArrayRef from a std::initializer_list
+  /* implicit */ MutableArrayRef(std::initializer_list<T>& Vec)
       : Data(
-            std::begin(Vec) == std::end(Vec) ? static_cast<T*>(nullptr)
+            std::begin(Vec) == std::end(Vec) ? nullptr
                                              : std::begin(Vec)),
         Length(Vec.size()) {}
 
@@ -167,11 +168,7 @@ class MutableArrayRef final {
     return Data[Length - 1];
   }
 
-  bool equals(MutableArrayRef RHS) const {
-    return Length == RHS.Length && std::equal(begin(), end(), RHS.begin());
-  }
-
-  bool equals(ArrayRef RHS) const {
+  constexpr bool equals(MutableArrayRef RHS) const {
     return Length == RHS.Length && std::equal(begin(), end(), RHS.begin());
   }
 

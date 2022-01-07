@@ -32,6 +32,7 @@ const std::unordered_map<std::string, TypePtr>& string_to_type_lut() {
       {"None", NoneType::get()},
       {"NoneType", NoneType::get()},
       {"Any", AnyType::get()},
+      {"Uninferred", UninferredType::get()},
       {"Capsule", CapsuleType::get()},
       {"list", AnyListType::get()},
       {"tuple", AnyTupleType::get()}};

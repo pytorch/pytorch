@@ -138,6 +138,11 @@ AnyTypePtr AnyType::get() {
   return value;
 }
 
+UninferredTypePtr UninferredType::get() {
+  static auto value = UninferredType::create();
+  return value;
+}
+
 TensorTypePtr TensorType::get() {
   static auto value = TensorType::create(
       {}, {}, SymbolicShape(), VaryingShape<Stride>{}, {});
@@ -242,6 +247,11 @@ ListTypePtr ListType::ofBools() {
 }
 ListTypePtr ListType::ofStrings() {
   static auto value = ListType::create(StringType::get());
+  return value;
+}
+
+ListTypePtr ListType::ofUninferred() {
+  static auto value = ListType::create(UninferredType::get());
   return value;
 }
 
@@ -557,7 +567,7 @@ TORCH_API bool elementTypeCanBeInferredFromMembers(const TypePtr& elem_type) {
     // construct which interface the list holds from the members alone
     return false;
   }
-  if (elem_type->kind() == AnyType::Kind) {
+  if (elem_type->kind() == AnyType::Kind || elem_type->kind() == UninferredType::Kind) {
     // List of Any can contains heterogenous types
     return false;
   }
@@ -866,6 +876,9 @@ bool TupleType::isSubtypeOfExt(const TypePtr& rhs_, std::ostream* why_not) const
 
 bool ListType::isSubtypeOfExt(const TypePtr& rhs_, std::ostream* why_not) const {
   if (Type::isSubtypeOfExt(rhs_, why_not)) {
+    return true;
+  }
+  if (rhs_->kind() == ListType::Kind && rhs_->expect<ListType>()->getElementType() == UninferredType::get()) {
     return true;
   }
   if (rhs_->kind() == AnyListType::Kind) {

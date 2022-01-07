@@ -56,6 +56,7 @@ class MutableTypePtrHelper {
       case TypeKind::OptionalType:
         return getMutableType(type->castRaw<OptionalType>()->getElementType());
       case TypeKind::AnyType:
+      case TypeKind::UninferredType:
         return type;
       case TypeKind::FutureType: {
         if (auto elem =
@@ -90,7 +91,9 @@ bool isMutableTypeImpl(
   // check common cases to avoid recursively constructing type in
   // getMutableTypePtrImpl
   auto kind = type->kind();
-  if (kind == TypeKind::TensorType || kind == TypeKind::ListType ||
+  if (kind == TypeKind::TensorType ||
+      (kind == TypeKind::ListType &&
+       type->expect<ListType>()->getElementType() != UninferredType::get()) ||
       kind == TypeKind::ClassType || kind == TypeKind::DictType) {
     return true;
   }
@@ -1083,7 +1086,7 @@ void AliasDb::makePointerTo(const Value* from, const Value* to) {
       expected_kind = expected_kind ||
           (kind == TypeKind::OptionalType || kind == TypeKind::FutureType ||
            kind == TypeKind::TupleType) // immutable type containers
-          || kind == TypeKind::AnyType;
+          || kind == TypeKind::AnyType || kind == TypeKind::UninferredType;
     }
     TORCH_INTERNAL_ASSERT(
         expected_kind, from->type()->str(), to->type()->str());

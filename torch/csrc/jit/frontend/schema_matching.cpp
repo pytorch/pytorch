@@ -16,6 +16,25 @@ static inline TypePtr unwrapOptional(TypePtr opt_type) {
   return opt_type;
 }
 
+// Resolves any Uninferred type to `to`, then returns a pair indicating
+// whether or not anything was changed (bool) as well as the resulting
+// type (TypePtr). It's faster to return the boolean flag than call
+// `unifyTypes` on the result later
+static inline std::pair<bool, TypePtr> resolveNestedUninferred(TypePtr orig, TypePtr to) {
+  if (orig == UninferredType::get()) {
+    TORCH_INTERNAL_ASSERT(to != UninferredType::get(), "Uninferred "
+                          "type cannot be resolved to Uninferred type");
+    return {true, to};
+  }
+  else if (auto lst = orig->cast<ListType>()) {
+    bool changed;
+    TypePtr internal;
+    std::tie(changed, internal) = resolveNestedUninferred(lst->getElementType(), to);
+    return {changed, ListType::create(internal)};
+  }
+  return {false, orig};
+}
+
 static inline bool isIntOrFloatUsedAsList(
     const Value* value,
     const Argument& arg) {
@@ -199,15 +218,6 @@ static Value* tryMatchArgument(
               "' to be of type 'Tensor' ",
               "because it was not annotated with an explicit type.\n");
           ostream << inferred_type_hint;
-        }
-      }
-
-      if (auto v = value->type()->cast<ListType>()) {
-        if (v->getElementType()->isSubtypeOf(TensorType::get())) {
-          ostream << "Empty lists default to List[Tensor]. Add a variable "
-                     "annotation to the assignment to create an empty list "
-                     "of another type (torch.jit.annotate(List[T, []]) where T "
-                     "is the type of elements in the list for Python 2)\n";
         }
       }
 
@@ -610,11 +620,45 @@ Value* emitBuiltinCall(
     const SourceRange& loc,
     Graph& graph,
     Symbol name,
-    at::ArrayRef<NamedValue> args,
-    at::ArrayRef<NamedValue> kwargs,
-    const c10::optional<NamedValue>& self) {
+    at::MutableArrayRef<NamedValue> args,
+    at::MutableArrayRef<NamedValue> kwargs,
+    c10::optional<NamedValue>& self) {
   const auto& variants = getAllOperatorsFor(name);
   const auto& builtin_functions = getAllBuiltinFunctionsFor(name);
+
+  std::string comp("aten::append");
+  if (name.toQualString() == comp) {
+    // We either have `x.append(y)` or `append(x, y)`
+    TORCH_INTERNAL_ASSERT((args.size() == 1 && self.has_value())
+                          || args.size() == 2);
+
+    bool use_self = args.size() == 1;
+
+    TypePtr to = use_self ? args[0].type() : args[1].type();
+    Value* self_val = use_self ? (*self).unsafeGetValue() : args[0].unsafeGetValue();
+
+    bool changed;
+    TypePtr resolved;
+    std::tie(changed, resolved) = resolveNestedUninferred(self_val->type(), to);
+
+    if (changed) {
+      self_val->setType(resolved);
+    }
+  }
+
+  std::string comp2("aten::cat");
+  if (name.toQualString() == comp2) {
+    int x = 5;
+  }
+
+  for (size_t i = 0; i < args.size(); ++i) {
+    bool changed;
+    TypePtr resolved;
+    std::tie(changed, resolved) = resolveNestedUninferred(args[i].type(), TensorType::get());
+    if (changed) {
+      args[0].value(graph)->setType(resolved);
+    }
+  }
 
   std::stringstream failure_messages;
   std::vector<const FunctionSchema*> schemas;

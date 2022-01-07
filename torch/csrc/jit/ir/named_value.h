@@ -61,6 +61,10 @@ struct NamedValue {
     return value_;
   }
 
+  Value* unsafeGetValue() {
+    return value_;
+  }
+
   const std::string& name() const {
     AT_ASSERT(name_);
     return *name_;

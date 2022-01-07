@@ -202,6 +202,9 @@ struct EraseLoadStores {
           auto var = environment_stack->findInAnyFrame(name);
           TORCH_INTERNAL_ASSERT(
               var, "Typechecking should ensure the variable name is set");
+          if (var->type() == UninferredType::get()) {
+            var->setType(n->output()->type());
+          }
           n->output()->replaceAllUsesWith(var);
           n->destroy();
         } break;

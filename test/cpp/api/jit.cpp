@@ -50,8 +50,8 @@ TEST(TorchScriptTest, TestNestedIValueModuleArgMatching) {
   list_of_lists.push_back(list);
   module->run_method("nested_loop", list_of_lists, b);
 
-  auto generic_list = c10::impl::GenericList(at::TensorType::get());
-  auto empty_generic_list = c10::impl::GenericList(at::ListType::create(at::TensorType::get()));
+  auto generic_list = c10::impl::GenericList(at::UninferredType::get());
+  auto empty_generic_list = c10::impl::GenericList(at::ListType::create(at::UninferredType::get()));
   empty_generic_list.push_back(generic_list);
   module->run_method("nested_loop", empty_generic_list, b);
 

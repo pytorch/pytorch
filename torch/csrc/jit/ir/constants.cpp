@@ -187,7 +187,7 @@ c10::optional<IValue> toIValue(const Value* v) {
   } else if (type == StreamObjType::get()) {
     auto s = c10::Stream::unpack(node->i(attr::value));
     return s;
-  } else if (node->mustBeNone()) {
+  } else if (node->mustBeNone() || type == UninferredType::get()) {
     return IValue();
   } else if (type->cast<EnumType>()) {
     const auto& enum_val = node->ival(attr::value);

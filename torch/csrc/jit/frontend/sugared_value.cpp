@@ -50,8 +50,8 @@ builtin_cast_method_to_scalar_type() {
 std::shared_ptr<SugaredValue> BuiltinFunction::call(
     const SourceRange& loc,
     Function& m,
-    at::ArrayRef<NamedValue> args,
-    at::ArrayRef<NamedValue> kwargs,
+    at::MutableArrayRef<NamedValue> args,
+    at::MutableArrayRef<NamedValue> kwargs,
     size_t n_binders) {
   return std::make_shared<SimpleValue>(
       emitBuiltinCall(loc, *m.graph(), symbol, args, kwargs, self));
