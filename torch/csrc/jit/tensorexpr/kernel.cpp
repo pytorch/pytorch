@@ -155,6 +155,17 @@ c10::optional<at::Device> pickDeviceType(const std::shared_ptr<Graph>& graph) {
       }
     }
   }
+  for (auto const& input : graph->inputs()) {
+    if (auto tt = input->type()->cast<TensorType>()) {
+      if (auto inputDevice = tt->device()) {
+        TORCH_INTERNAL_ASSERT(
+            !device || *device == *inputDevice,
+            buildErrorMessage(
+                "Different devices specified for inputs to the fuser."));
+        device = inputDevice;
+      }
+    }
+  }
   TORCH_INTERNAL_ASSERT(
       device,
       buildErrorMessage("Could not find device in fuser graph inputs."));
@@ -892,91 +903,94 @@ static std::vector<ExprHandle> toExprHandles(const std::vector<T>& sizes) {
   return dims;
 }
 
-std::vector<ExprHandle>& TensorExprKernel::getStridesForValue(
-    const torch::jit::Value* v) {
-  auto it = inputToStrides_.find(v);
-  if (it != inputToStrides_.end()) {
-    return it->second;
-  }
-  std::vector<ExprHandle> strides;
-  auto tt = v->type()->cast<TensorType>();
-  auto rank = tt->symbolic_sizes().rank();
-  auto concrete_strides = tt->strides().concrete_sizes();
-  TORCH_INTERNAL_ASSERT(concrete_strides, "Only concrete strides are handled");
-  for (auto cs : *concrete_strides) {
-    strides.push_back(LongImm::make(cs));
-  }
-  inputToStrides_.emplace(v, std::move(strides));
-  return inputToStrides_[v];
-}
-
-BufHandle TensorExprKernel::bindSymbolicShapeInput(
-    const torch::jit::Value* input,
-    const std::string& name) {
+std::vector<ExprHandle> TensorExprKernel::computeInputTensorDims(
+    const torch::jit::Value* input) {
   auto tt = input->type()->expect<TensorType>();
+
+  // First case - static shapes
+  if (input->isCompleteTensor()) {
+    if (isContiguous(input)) {
+      return toExprHandles(*tt->sizes().concrete_sizes());
+    }
+
+    // Non-contiguous tensors are represented as 1-d buffers in NNC
+    ExprHandle flat_size = 1;
+    for (size_t i = 0; i < *tt->sizes().size(); i++) {
+      auto size = *tt->sizes()[i];
+      if (size == 0) {
+        flat_size = 0;
+        break;
+      }
+      flat_size = flat_size + (size - 1) * *tt->strides()[i];
+    }
+    flat_size = IRSimplifier::simplify(flat_size);
+    return {flat_size};
+  }
+
+  // Second case - symbolic shapes
+  // We only handle symbolic shape input tensors that are contiguous.
+  // TODO: Handle strided tensors with symbolic shapes.
   auto const& symbolicShape = tt->symbolic_sizes();
   auto rank = symbolicShape.rank();
   if (!rank) {
     throw std::runtime_error("Symbolic shapes must have static ranks.");
   }
-  // We only handle symbolic shape input tensors that are contiguous.
-  // TODO: Handle strided tensors with symbolic shapes.
   std::vector<ExprHandle> inputTensorDims;
   for (const auto i : c10::irange(*rank)) {
     inputTensorDims.emplace_back(getVarForShape(symbolicShape[i]));
   }
-  BufHandle inBuffer(
-      name,
-      inputTensorDims,
-      ToDtype(static_cast<ScalarType>(*tt->scalarType())));
-  return inBuffer;
+  return inputTensorDims;
 }
 
 Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
   auto const& t = input->type();
+  auto const& outputs = input->owningGraph()->outputs();
+  std::unordered_set<const Value*> outputs_set(outputs.begin(), outputs.end());
   Tensor result(nullptr, nullptr);
   switch (t->kind()) {
     case TypeKind::TensorType: {
       auto tt = input->type()->cast<TensorType>();
-      if (!input->isCompleteTensor()) {
-        auto bufHandle =
-            bindSymbolicShapeInput(input, "t" + input_name_map_[input]);
-        bufs_.emplace(input, bufHandle.node());
-        bufferArgs_.emplace_back(bufHandle);
-        break;
-      }
-      if (isContiguous(input)) {
-        BufHandle inBuffer(
-            "t" + input_name_map_[input],
-            toExprHandles(*tt->sizes().concrete_sizes()),
-            ToDtype(static_cast<ScalarType>(*tt->scalarType())));
-        bufs_.emplace(input, inBuffer.node());
-        bufferArgs_.emplace_back(inBuffer);
-        break;
-      }
-      ExprHandle flat_size = 1;
-      for (size_t i = 0; i < *tt->sizes().size(); i++) {
-        auto size = *tt->sizes()[i];
-        if (size == 0) {
-          flat_size = 0;
-          break;
-        }
-        flat_size = flat_size + (size - 1) * *tt->strides()[i];
-      }
-      flat_size = IRSimplifier::simplify(flat_size);
+      auto inputTensorDims = computeInputTensorDims(input);
+
       BufHandle inBuffer(
           "t" + input_name_map_[input],
-          {flat_size},
+          inputTensorDims,
           ToDtype(static_cast<ScalarType>(*tt->scalarType())));
-      std::vector<DimArg> inputTensorDims;
-      for (size_t i = 0; i < *tt->sizes().size(); i++) {
-        auto const size = *tt->sizes()[i];
-        inputTensorDims.emplace_back(DimArg(size, "i" + c10::to_string(i)));
+      bufferArgs_.emplace_back(inBuffer);
+
+      // We don't need to copy the input if:
+      //  1) it is not an output AND
+      //  2) it is contiguous
+      //
+      // For static shapes we can check (2) directly, for symbolic shapes we
+      // currently *assume* it is contiguous.
+      //
+      // TODO: update this logic as soon as we start supporting symbolic
+      // strides.
+      if (!outputs_set.count(input) &&
+          (!input->isCompleteTensor() || isContiguous(input))) {
+        bufs_.emplace(input, inBuffer.node());
+        break;
       }
+
+      // Symbolic shapes case:
+      if (!input->isCompleteTensor()) {
+        TORCH_INTERNAL_ASSERT(outputs_set.count(input));
+        result = Compute(
+            "input" + c10::to_string(bufs_.size() + 1),
+            c10::fmap<DimArg>(inputTensorDims),
+            [&](const std::vector<VarHandle>& axes) {
+              return inBuffer.load(axes);
+            });
+        bufs_.emplace(input, result.buf());
+        break;
+      }
+
+      // Static shapes, non-contiguous case:
       auto const strides = tt->strides();
       result = Compute(
           "input" + c10::to_string(bufs_.size() + 1),
-          inputTensorDims,
+          c10::fmap<DimArg>(*tt->sizes().concrete_sizes()),
           [&](const std::vector<VarHandle>& axes) {
             ExprHandle idx = 0;
             for (size_t i = 0; i < axes.size(); i++) {
@@ -985,7 +999,6 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
             return inBuffer.load(idx);
           });
       bufs_.emplace(input, result.buf());
-      bufferArgs_.emplace_back(inBuffer);
       break;
     }
     case TypeKind::FloatType: {
