@@ -2,19 +2,23 @@ import torch
 import numpy as np
 
 import math
-from typing import Dict, List
+from typing import Dict, List, Sequence
 import random
 from functools import partial
 from itertools import product, combinations, permutations
 import warnings
 
 from torch._six import inf, nan
+from torch.testing import (
+    integral_types_and, floating_and_complex_types_and)
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, skipIfNoSciPy, slowTest, torch_to_numpy_dtype_dict,
     IS_WINDOWS, make_tensor)
 from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests, onlyCPU, dtypes, dtypesIfCUDA, dtypesIfCPU,
-    onlyOnCPUAndCUDA, onlyCUDA, largeTensorTest, precisionOverride)
+    OpDTypes, instantiate_device_type_tests, onlyCPU, dtypes, dtypesIfCUDA, dtypesIfCPU,
+    onlyOnCPUAndCUDA, onlyCUDA, largeTensorTest, ops, precisionOverride)
+from torch.testing._internal.common_methods_invocations import (
+    ReductionOpInfo, reduction_ops)
 
 # TODO: replace with make_tensor
 def _generate_input(shape, dtype, device, with_extremal):
@@ -53,7 +57,248 @@ def _rand_shape(dim, min_size, max_size):
         shape.append(random.randint(min_size, max_size))
     return tuple(shape)
 
+def _reduced_shape(shape, dim=None, keepdim=False):
+    """Computes the expected reduced shape given dim and keepdim
+
+    Args:
+        shape: The shape to reduce
+        dim : The dimensions to reduce
+        keepdim: If true, reduced dimensions have size 1 in the reduced shape,
+            otherwise they are removed from the reduced shape.
+
+    Returns:
+        The reduced shape
+    """
+    if dim is None:
+        return [1] * len(shape) if keepdim else []
+
+    # Wrap negative dims
+    dim = dim if isinstance(dim, Sequence) else [dim]
+    dim = set(i if i >= 0 else len(shape) + i for i in dim)
+
+    result = []
+    for i, size in enumerate(shape):
+        if i not in dim:
+            result.append(size)
+        elif keepdim:
+            result.append(1)
+
+    return result
+
 class TestReductions(TestCase):
+
+    ###########################################################################
+    # ReductionOpInfo unit tests
+    ###########################################################################
+
+    def _test_dim_keepdim(self, op: ReductionOpInfo, device, *, ndim, **dim_keepdim):
+        """Tests output shape for input with ndim and dim and keepdim kwargs"""
+        shape = torch.randint(2, 5, (ndim,)).tolist()
+        t = make_tensor(shape, device, torch.float)
+        args, kwargs = next(op.generate_args_kwargs(t, **dim_keepdim))
+        result = op(t, *args, **dim_keepdim, **kwargs)
+        expected_shape = _reduced_shape(shape, **dim_keepdim)
+        self.assertEqual(result.shape, expected_shape, f"""
+        expected output shape to be {expected_shape} but got {list(result.shape)}
+        for input shape {shape} and {dim_keepdim}
+        """)
+
+    # TODO(@heitorschueroff) combine cases with and without keepdim once
+    # there's support for a @parametrize decorator.
+
+    @ops(reduction_ops, dtypes=OpDTypes.none)
+    def test_dim_default(self, device, op: ReductionOpInfo):
+        """Tests that the default dim reduces all dimensions."""
+        for ndim in range(3):
+            self._test_dim_keepdim(op, device, ndim=ndim)
+
+    @ops(reduction_ops, dtypes=OpDTypes.none)
+    def test_dim_default_keepdim(self, device, op: ReductionOpInfo):
+        """Tests that the default dim, when keepdim=True, reduces all dimensions to size 1."""
+        for ndim in range(3):
+            self._test_dim_keepdim(op, device, ndim=ndim, keepdim=True)
+
+    @ops(reduction_ops, dtypes=OpDTypes.none)
+    def test_dim_none(self, device, op: ReductionOpInfo):
+        """Tests that dim=None reduces all dimensions."""
+        for ndim in range(3):
+            self._test_dim_keepdim(op, device, ndim=ndim, dim=None)
+
+    @ops(reduction_ops, dtypes=OpDTypes.none)
+    def test_dim_none_keepdim(self, device, op: ReductionOpInfo):
+        """Tests that dim=None, when keepdim=True, reduces all dimensions to size 1."""
+        for ndim in range(3):
+            self._test_dim_keepdim(op, device, ndim=ndim, dim=None, keepdim=True)
+
+    @ops(reduction_ops, dtypes=OpDTypes.none)
+    def test_dim_single(self, device, op: ReductionOpInfo):
+        """Tests that dim=i reduces dimension i."""
+        self._test_dim_keepdim(op, device, ndim=0, dim=0)
+        self._test_dim_keepdim(op, device, ndim=1, dim=0)
+        self._test_dim_keepdim(op, device, ndim=2, dim=-1)
+        self._test_dim_keepdim(op, device, ndim=3, dim=1)
+
+    @ops(reduction_ops, dtypes=OpDTypes.none)
+    def test_dim_single_keepdim(self, device, op: ReductionOpInfo):
+        """Tests that dim=i, when keepdim=True, reduces dimension i to size 1."""
+        self._test_dim_keepdim(op, device, ndim=0, dim=0, keepdim=True)
+        self._test_dim_keepdim(op, device, ndim=1, dim=0, keepdim=True)
+        self._test_dim_keepdim(op, device, ndim=2, dim=-1, keepdim=True)
+        self._test_dim_keepdim(op, device, ndim=3, dim=1, keepdim=True)
+
+    @ops(filter(lambda op: op.supports_multiple_dims, reduction_ops), dtypes=OpDTypes.none)
+    def test_dim_empty(self, device, op: ReductionOpInfo):
+        """Tests that dim=[] is a no-op"""
+        self._test_dim_keepdim(op, device, ndim=0, dim=[])
+        self._test_dim_keepdim(op, device, ndim=2, dim=[])
+
+    @ops(filter(lambda op: op.supports_multiple_dims, reduction_ops), dtypes=OpDTypes.none)
+    def test_dim_empty_keepdim(self, device, op: ReductionOpInfo):
+        """Tests that dim=[], when keepdim=True, is a no-op"""
+        self._test_dim_keepdim(op, device, ndim=0, dim=[], keepdim=True)
+        self._test_dim_keepdim(op, device, ndim=2, dim=[], keepdim=True)
+
+    @ops(filter(lambda op: op.supports_multiple_dims, reduction_ops), dtypes=OpDTypes.none)
+    def test_dim_multi(self, device, op: ReductionOpInfo):
+        """Tests that dim=[i, j, ...] reduces dimensions i, j, ...."""
+        self._test_dim_keepdim(op, device, ndim=1, dim=[0])
+        self._test_dim_keepdim(op, device, ndim=3, dim=[0, 2])
+
+    @ops(filter(lambda op: op.supports_multiple_dims, reduction_ops), dtypes=OpDTypes.none)
+    def test_dim_multi_keepdim(self, device, op: ReductionOpInfo):
+        """Tests that dim=[i, j, ...], when keepdim=True, reduces dimensions i, j, .... to size 1."""
+        self._test_dim_keepdim(op, device, ndim=1, dim=[0], keepdim=True)
+        self._test_dim_keepdim(op, device, ndim=3, dim=[0, 2], keepdim=True)
+
+    @ops(filter(lambda op: op.supports_multiple_dims, reduction_ops), dtypes=OpDTypes.none)
+    def test_dim_multi_unsorted(self, device, op: ReductionOpInfo):
+        """Tests that operator correctly handles unsorted dim list."""
+        self._test_dim_keepdim(op, device, ndim=4, dim=[3, 0, 2])
+
+    @ops(filter(lambda op: op.supports_multiple_dims, reduction_ops), dtypes=OpDTypes.none)
+    def test_dim_multi_unsorted_keepdim(self, device, op: ReductionOpInfo):
+        """Tests that operator correctly handles unsorted dim list when keepdim=True."""
+        self._test_dim_keepdim(op, device, ndim=4, dim=[3, 0, 2], keepdim=True)
+
+    @ops(filter(lambda op: op.supports_multiple_dims, reduction_ops), dtypes=OpDTypes.none)
+    def test_dim_multi_duplicate(self, device, op: ReductionOpInfo):
+        """Tests that an error is raised if dim has duplicate entries."""
+        with self.assertRaises(RuntimeError):
+            self._test_dim_keepdim(op, device, ndim=3, dim=[0, 1, 1, 2])
+
+    @ops(filter(lambda op: not op.supports_multiple_dims, reduction_ops), dtypes=OpDTypes.none)
+    def test_dim_multi_unsupported(self, device, op: ReductionOpInfo):
+        """Tests that ops claiming to not support multi dim actually don't."""
+        with self.assertRaises(TypeError):
+            self._test_dim_keepdim(op, device, ndim=3, dim=[0, 2])
+
+    @ops(reduction_ops, dtypes=OpDTypes.none)
+    def test_dim_offbounds(self, device, op: ReductionOpInfo):
+        """Tests that passing an off-bounds dim throws"""
+        with self.assertRaises(IndexError):
+            self._test_dim_keepdim(op, device, ndim=2, dim=2)
+
+    @ops(reduction_ops, dtypes=OpDTypes.none)
+    def test_dim_ndim_limit(self, device, op: ReductionOpInfo):
+        """Tests that an exception is raised when reducing a tensor with more
+        than 64 dims along some specific dimensions. dim=None is ok"""
+        t = make_tensor([1] * 65, device, torch.float)
+        with self.assertRaisesRegex(RuntimeError, "only tensors with up to 64 dims are supported"):
+            op(t, dim=0)
+
+    @ops(filter(lambda op: op.identity is not None, reduction_ops), dtypes=OpDTypes.supported)
+    def test_identity(self, device, dtype, op: ReductionOpInfo):
+        """Tests that the identity value is an identity for the operator"""
+        t = make_tensor((10,), device, dtype)
+        t[1::2] = op.identity
+        args, kwargs = next(op.generate_args_kwargs(t))
+        result = op(t[::2], *args, **kwargs)
+        result_with_identity = op(t, *args, **kwargs)
+        self.assertEqual(result, result_with_identity, """
+        Adding identity value to the input tensor should not change the result.
+        """)
+
+    # TODO(@heitorschueroff) Update these to use the nan_policy kwarg once
+    # it is added to reduction operators.
+
+    @ops(filter(lambda op: op.nan_policy == 'propagate', reduction_ops), dtypes=OpDTypes.supported,
+         allowed_dtypes=floating_and_complex_types_and(torch.bfloat16, torch.float16))
+    def test_nan_policy_propagate(self, device, dtype, op: ReductionOpInfo):
+        """Tests that nan is propagated to the output by default"""
+        t = make_tensor((5,), device, dtype)
+        t[2] = torch.nan
+        args, kwargs = next(op.generate_args_kwargs(t))
+        result = op(t, *args, **kwargs)
+        self.assertTrue(result.isnan())
+
+    @ops(filter(lambda op: op.nan_policy == 'omit', reduction_ops), dtypes=OpDTypes.supported,
+         allowed_dtypes=floating_and_complex_types_and(torch.bfloat16, torch.float16))
+    def test_nan_policy_omit(self, device, dtype, op: ReductionOpInfo):
+        """Tests that NaN values do not affect the result."""
+        t = make_tensor((10,), device, dtype)
+        t[1::2] = torch.nan
+        args, kwargs = next(op.generate_args_kwargs(t))
+        result = op(t[::2], *args, **kwargs)
+        result_with_nan = op(t, *args, **kwargs)
+        self.assertEqual(result, result_with_nan)
+
+    @ops(reduction_ops, dtypes=OpDTypes.supported)
+    def test_result_dtype(self, device, dtype, op: ReductionOpInfo):
+        """Tests that the result has the correct dtype"""
+        t = make_tensor((5,), device, dtype)
+        args, kwargs = next(op.generate_args_kwargs(t))
+        result: torch.Tensor = op(t, *args, **kwargs)
+        is_integral = dtype in integral_types_and(torch.bool)
+        if op.promotes_int_to_float and is_integral:
+            self.assertTrue(torch.is_floating_point(result.dtype))
+        elif op.promotes_int_to_int64 and is_integral:
+            self.assertEqual(result.dtype, torch.int64)
+        elif op.result_dtype is not None:
+            self.assertEqual(result.dtype, op.result_dtype)
+        else:
+            self.assertEqual(result.dtype, dtype)
+
+    @ops(reduction_ops, dtypes=OpDTypes.none)
+    def test_empty_tensor_empty_slice(self, device, op: ReductionOpInfo):
+        """Tests for consistent behavior when reducing over an empty slice.
+
+        The rules for reducing over an empty slice are as follows:
+            - Return the identity value if the operator has one
+            - Otherwise, return NaN if the operator promotes integral dtype to
+              floating point dtypes.
+            - Otherwise, raise an error
+
+        See discussion here https://github.com/pytorch/pytorch/issues/61901
+        """
+        t = make_tensor((0, 2, 3), device, torch.float)
+        for dim in [0] + [[0, 2]] if op.supports_multiple_dims else []:
+            args, kwargs = next(op.generate_args_kwargs(t, dim=dim))
+            if op.identity is not None:
+                # Reducing along empty slice should return identity
+                result = op(t, *args, dim=dim, **kwargs)
+                self.assertEqual(result, torch.full_like(result, op.identity))
+            elif op.promotes_int_to_float:
+                # Reducing along empty slice should return NaN
+                result = op(t, *args, dim=dim, **kwargs)
+                self.assertEqual(result, torch.full_like(result, torch.nan))
+            else:
+                # Reducing along empty slice should raise an error
+                with self.assertRaises(IndexError):
+                    op(t, *args, dim=dim, **kwargs)
+
+    @ops(reduction_ops, dtypes=OpDTypes.none)
+    def test_empty_tensor_nonempty_slice(self, device, op: ReductionOpInfo):
+        """Tests that reducing a nonempty slice of an empty tensor returns an
+        empty tensor with the dimensions reduced."""
+        t = make_tensor((0, 2, 3), device, torch.float)
+        for dim in [1] + [[1, 2]] if op.supports_multiple_dims else []:
+            args, kwargs = next(op.generate_args_kwargs(t, dim=dim))
+            result = op(t, *args, dim=dim, **kwargs)
+            self.assertEqual(result.shape, _reduced_shape(t.shape, dim))
+
+    ###########################################################################
+    # TODO: Legacy tests - port to ReductionOpInfo
+    ###########################################################################
 
     def test_var_unbiased(self, device):
         tensor = torch.randn(100, device=device)
@@ -1011,6 +1256,23 @@ class TestReductions(TestCase):
         test_output_dtype(torch.int32, False)
         test_output_dtype(torch.int64, True)
 
+        # scalar type bfloat16
+        if self.device_type == 'cpu':
+            def test_dtype_bfloat16(values_bf16=False, boundaries_bf16=False):
+                values_1d_float = values_1d.to(torch.float32)
+                boundaries = torch.tensor([0.9, 1, 2, 2, 3, 3, 4, 4.1, 9, 9], device=device, dtype=torch.float32)
+                if values_bf16:
+                    values_1d_float = values_1d_float.to(torch.bfloat16)
+                if boundaries_bf16:
+                    boundaries = boundaries.to(torch.bfloat16)
+                expected_result = torch.tensor([1, 2, 4, 6, 8, 8, 8, 8, 8], device=device, dtype=torch.int32)
+                self.assertEqual(torch.searchsorted(boundaries, values_1d_float, out_int32=True), expected_result)
+                self.assertEqual(torch.bucketize(values_1d_float, boundaries, out_int32=True), expected_result)
+
+            test_dtype_bfloat16(True, False)
+            test_dtype_bfloat16(False, True)
+            test_dtype_bfloat16(True, True)
+
     @dtypes(*torch.testing.get_all_dtypes(include_bool=False, include_complex=False))
     def test_nansum(self, device, dtype):
         args = product(
@@ -1771,7 +2033,7 @@ class TestReductions(TestCase):
         run_test(torch.zeros(64, 61, dtype=dtype, device=device))
         run_test(torch.zeros(64, 1, dtype=dtype, device=device))
 
-    @slowTest
+    @onlyCUDA
     def test_argminmax_large_axis(self, device):
         # Regression test for gh-32863
         x = torch.zeros(2**31, device=device, dtype=torch.int8)
@@ -2664,36 +2926,38 @@ class TestReductions(TestCase):
             self.assertEqual(np_function(np_input, axis=-1), fn(master_input, dim=-1).cpu().numpy(), msg=error_msg,
                              exact_dtype=False)
 
-            self.assertEqual(torch.empty((2, 0, 1), device=device), fn(master_input, dim=2, keepdim=True), msg=error_msg)
+            self.assertEqual(torch.empty((2, 0, 1), device=device), fn(master_input, dim=2, keepdim=True),
+                             msg=error_msg)
             self.assertEqual(np_function(np_input, axis=2, keepdims=True), fn(master_input, dim=2, keepdim=True),
                              msg=error_msg, exact_dtype=False)
 
-            self.assertEqual(torch.empty((2, 0, 1), device=device), fn(master_input, dim=-1, keepdim=True), msg=error_msg)
+            self.assertEqual(torch.empty((2, 0, 1), device=device), fn(master_input, dim=-1, keepdim=True),
+                             msg=error_msg)
             self.assertEqual(np_function(np_input, axis=-1, keepdims=True), fn(master_input, dim=-1, keepdim=True),
                              msg=error_msg, exact_dtype=False)
 
-            # Check if returned data is correct.
-            check_func = (torch.testing.assert_allclose if math.isnan(return_value) or math.isinf(return_value) else
-                          self.assertEqual)
-
-            check_func(torch.full((2, 4), return_value, device=device), fn(master_input, dim=1), msg=error_msg)
-            check_func(torch.full((2, 4), return_value, device=device), fn(master_input, dim=-2), msg=error_msg)
-            check_func(torch.full((2, 1, 4), return_value, device=device), fn(master_input, dim=1, keepdim=True), msg=error_msg)
-            check_func(torch.full((2, 1, 4), return_value, device=device), fn(master_input, dim=-2, keepdim=True), msg=error_msg)
+            self.assertEqual(torch.full((2, 4), return_value, device=device), fn(master_input, dim=1), msg=error_msg)
+            self.assertEqual(torch.full((2, 4), return_value, device=device), fn(master_input, dim=-2), msg=error_msg)
+            self.assertEqual(torch.full((2, 1, 4), return_value, device=device), fn(master_input, dim=1, keepdim=True),
+                             msg=error_msg)
+            self.assertEqual(torch.full((2, 1, 4), return_value, device=device), fn(master_input, dim=-2, keepdim=True),
+                             msg=error_msg)
 
             if name != 'logsumexp':
                 # The scipy function does not work for reduction the zero dimension
-                check_func(np.float32(np_function(np_input, axis=1)), fn(master_input, dim=1).cpu().numpy(), msg=error_msg)
-                check_func(np.float32(np_function(np_input, axis=-2)), fn(master_input, dim=-2).cpu().numpy(), msg=error_msg)
-                check_func(np.float32(np_function(np_input, axis=1, keepdims=True)),
-                           fn(master_input, dim=1, keepdim=True).cpu().numpy(),
-                           msg=error_msg)
-                check_func(np.float32(np_function(np_input, axis=-2, keepdims=True)),
-                           fn(master_input, dim=-2, keepdim=True).cpu().numpy(),
-                           msg=error_msg)
+                self.assertEqual(np.float32(np_function(np_input, axis=1)), fn(master_input, dim=1).cpu().numpy(),
+                                 msg=error_msg)
+                self.assertEqual(np.float32(np_function(np_input, axis=-2)), fn(master_input, dim=-2).cpu().numpy(),
+                                 msg=error_msg)
+                self.assertEqual(np.float32(np_function(np_input, axis=1, keepdims=True)),
+                                 fn(master_input, dim=1, keepdim=True).cpu().numpy(),
+                                 msg=error_msg)
+                self.assertEqual(np.float32(np_function(np_input, axis=-2, keepdims=True)),
+                                 fn(master_input, dim=-2, keepdim=True).cpu().numpy(),
+                                 msg=error_msg)
 
                 # logsumexp throws a type error when not specifying dim so test separately.
-                check_func(torch.full((), return_value, device=device), fn(master_input), msg=error_msg)
+                self.assertEqual(torch.full((), return_value, device=device), fn(master_input), msg=error_msg)
             else:
                 self.assertRaises(TypeError, lambda: fn(master_input))
 

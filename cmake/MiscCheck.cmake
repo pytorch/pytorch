@@ -178,10 +178,12 @@ endif()
 # -to add all (including unused) symbols into the dynamic symbol
 # -table. We need this to get symbols when generating backtrace at
 # -runtime.
-check_cxx_compiler_flag("-rdynamic" COMPILER_SUPPORTS_RDYNAMIC)
-if(${COMPILER_SUPPORTS_RDYNAMIC})
-  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -rdynamic")
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -rdynamic")
+if(NOT MSVC)
+  check_cxx_compiler_flag("-rdynamic" COMPILER_SUPPORTS_RDYNAMIC)
+  if(${COMPILER_SUPPORTS_RDYNAMIC})
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -rdynamic")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -rdynamic")
+  endif()
 endif()
 
 # ---[ If we are using msvc, set no warning flags

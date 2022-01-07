@@ -1,6 +1,8 @@
 #include <ATen/miopen/Descriptors.h>
 #include <ATen/ATen.h>
 
+#include <iostream>
+
 namespace at { namespace native {
 
 namespace {

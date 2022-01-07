@@ -1039,6 +1039,20 @@ class RpcTest(RpcAgentTestFixture):
             )
             self.assertEqual(ret, torch.ones(n, n) * 2)
 
+    @dist_init
+    def test_future_wait_twice(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        futs = []
+        for i in range(20):
+            futs.append(rpc.rpc_async(dst, raise_func))
+
+        with self.assertRaisesRegex(ValueError, "Expected error"):
+            torch.futures.wait_all(futs)
+
+        for fut in futs:
+            with self.assertRaisesRegex(ValueError, "Expected error"):
+                fut.wait()
+
     def _run_uneven_workload(self, num_repeat=30):
         # worker0 drives and waits for worker1 and worker2
         # throughout the test.
@@ -3210,7 +3224,7 @@ class RpcTest(RpcAgentTestFixture):
             # Ensure that we have the attribute on this module. Otherwise, the test could fail due to a caller-side pickling error.
             self.assertTrue(hasattr(this_module, "foo_add"))
             with self.assertRaisesRegex(
-                AttributeError, "RPC pickler does not serialize"
+                RuntimeError, "RPC pickler does not serialize"
             ):
                 rpc.rpc_sync(callee_worker, foo_add, args=())
 

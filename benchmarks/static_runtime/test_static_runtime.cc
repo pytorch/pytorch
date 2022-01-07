@@ -69,6 +69,7 @@ Node* getNodeWithKind(const StaticModule& smodule, const std::string& kind) {
 
 TEST(StaticRuntime, InPlace) {
   EXPECT_TRUE(testHasInplaceOp(reshape_inplace_script));
+  EXPECT_TRUE(testHasInplaceOp(reshape_inplace_script_1));
   EXPECT_TRUE(testHasInplaceOp(sigmoid_inplace_script));
   EXPECT_FALSE(testHasInplaceOp(sigmoid_out_script));
 }
@@ -208,6 +209,13 @@ TEST(StaticRuntime, EmbeddingBag) {
 }
 
 TEST(StaticRuntime, LayerNorm) {
+#ifdef FBCODE_CAFFE2
+  script::Module module("module");
+  module.define(layer_norm_with_weights);
+  torch::jit::StaticModule smodule(module);
+  ASSERT_EQ(getNodeWithKind(smodule, "aten::layer_norm"), nullptr);
+  ASSERT_NE(getNodeWithKind(smodule, "static_runtime::layer_norm"), nullptr);
+#endif
   const auto a = torch::rand({1, 2, 2, 2});
   const auto b = torch::rand({3, 2, 2, 2});
   for (int normalized_size : {2, 3}) {
@@ -254,6 +262,15 @@ TEST(StaticRuntime, Addmm) {
   testStaticRuntime(addmm_script, args);
   testStaticRuntime(addmm_script, args1);
   testStaticRuntime(addmm_script, args, args1);
+}
+
+TEST(StaticRuntime, IndividualOps_Abs) {
+  auto a = at::randn({2, 3});
+  auto b = at::randn({4, 2, 3});
+  std::vector<IValue> args{a};
+  std::vector<IValue> args2{b};
+  testStaticRuntime(abs_script, args);
+  testStaticRuntime(abs_script, args, args2);
 }
 
 TEST(StaticRuntime, IndividualOps_Binary) {
@@ -589,15 +606,35 @@ TEST(StaticRuntime, IndividualOps_to) {
   test_to(at::ScalarType::Half, false, true, c10::MemoryFormat::ChannelsLast);
 }
 
+TEST(StaticRuntime, IndividualOps_Detach) {
+  auto a = at::randn({4, 3, 1, 2});
+  auto b = at::randn({3, 2, 2});
+  std::vector<IValue> args{a};
+  std::vector<IValue> args2{b};
+  testStaticRuntime(detach_script_0, args);
+  testStaticRuntime(detach_script_0, args, args2);
+  testStaticRuntime(detach_script_1, args);
+  testStaticRuntime(detach_script_1, args, args2);
+}
+
+TEST(StaticRuntime, IndividualOps_ExpandAs) {
+  auto a = at::randn({3,1});
+  auto b = at::randn({3,2});
+  auto c = at::randn({4,1});
+  auto d = at::randn({4,2});
+  std::vector<IValue> args{a, b};
+  std::vector<IValue> args2{c, d};
+  testStaticRuntime(expand_as_script, args);
+  testStaticRuntime(expand_as_script, args, args2);
+}
+
 TEST(StaticRuntime, IndividualOps_Full) {
   auto dtype = at::ScalarType::Int;
   auto cpu = at::Device(DeviceType::CPU);
   c10::List<int64_t> size0{4, 5};
-  std::vector<IValue> args{
-    size0, 4, dtype, at::kStrided, cpu, false};
+  std::vector<IValue> args{size0, 4, dtype, at::kStrided, cpu, false};
   c10::List<int64_t> size1{5, 6};
-  std::vector<IValue> args2{
-    size1, 5, dtype, at::kStrided, cpu, false};
+  std::vector<IValue> args2{size1, 5, dtype, at::kStrided, cpu, false};
   testStaticRuntime(full_script, args);
   testStaticRuntime(full_script, args, args2);
 }
@@ -1045,19 +1082,30 @@ TEST(StaticRuntime, IndividualOps_Argmin) {
   testStaticRuntime(argmin_with_keep_dim_script, args_a, args_b);
 }
 
-TEST(StaticRuntime, IndividualOps_GetItem) {
+TEST(StaticRuntime, IndividualOps_GetItem_Dict) {
   int int_key = 0;
   std::string str_key = "str";
 
   // No need to test these multiple times, args are not tensors
-  testStaticRuntime(getitem_int_script, {int_key});
-  testStaticRuntime(getitem_str_script, {str_key});
+  testStaticRuntime(getitem_dict_int_script, {int_key});
+  testStaticRuntime(getitem_dict_str_script, {str_key});
 
   auto a = torch::tensor({1});
   auto b = torch::tensor({1, 1});
 
-  testStaticRuntime(getitem_tensor_script, {a});
-  testStaticRuntime(getitem_tensor_script, {a}, {b});
+  testStaticRuntime(getitem_dict_tensor_script, {a});
+  testStaticRuntime(getitem_dict_tensor_script, {a}, {b});
+}
+
+TEST(StaticRuntime, IndividualOps_GetItem_List) {
+  testStaticRuntime(getitem_list_int_script, {1});
+  testStaticRuntime(getitem_list_int_script, {-1});
+
+  auto a = torch::tensor({1});
+  auto b = torch::tensor({1, 1});
+
+  testStaticRuntime(getitem_list_tensor_script, {a, 1});
+  testStaticRuntime(getitem_list_tensor_script, {a, 1}, {b, -1});
 }
 
 TEST(StaticRuntime, IndividualOps_Transpose) {
@@ -1122,4 +1170,90 @@ TEST(StaticRuntime, IndividualOps_Narrow) {
 
   testStaticRuntime(narrow_with_int_script, args_a);
   testStaticRuntime(narrow_with_int_script, args_a, args_b);
+}
+
+TEST(StaticRuntime, InvidualOps_TupleUnpack) {
+  auto two_tup = c10::ivalue::Tuple::create({at::randn({1}), at::randn({1})});
+  auto two_tup_large =
+      c10::ivalue::Tuple::create({at::randn({2, 2}), at::randn({2, 2})});
+
+  auto three_tup = c10::ivalue::Tuple::create(
+      {at::randn({1}), at::randn({1}), at::randn({1})});
+  auto three_tup_large = c10::ivalue::Tuple::create(
+      {at::randn({2, 2}), at::randn({2, 2}), at::randn({2, 2})});
+
+  testStaticRuntime(two_tuple_unpack_script, {two_tup});
+  testStaticRuntime(two_tuple_unpack_script, {two_tup}, {two_tup_large});
+
+  testStaticRuntime(three_tuple_unpack_script, {three_tup});
+  testStaticRuntime(three_tuple_unpack_script, {three_tup}, {three_tup_large});
+}
+
+TEST(StaticRuntime, IndividualOps_Append) {
+  std::vector<IValue> args_int{1};
+
+  testStaticRuntime(append_int_script, args_int);
+
+  std::vector<IValue> args_tensor{at::randn({1})};
+  std::vector<IValue> args_tensor_large{at::randn({2, 2})};
+
+  testStaticRuntime(append_tensor_script, args_tensor);
+  testStaticRuntime(append_tensor_script, args_tensor, args_tensor_large);
+}
+
+TEST(StaticRuntime, QuantizedLinear) {
+  at::Tensor weight =
+      at::quantize_per_tensor(torch::randn({3, 2}), 2, 3, torch::kQInt8);
+  at::Tensor input =
+      at::quantize_per_tensor(torch::randn({3, 2}), 2, 3, torch::kQUInt8);
+
+  at::Tensor weight_2 =
+      at::quantize_per_tensor(torch::randn({4, 3}), 2, 3, torch::kQInt8);
+  at::Tensor input_2 =
+      at::quantize_per_tensor(torch::randn({4, 3}), 2, 3, torch::kQUInt8);
+
+  testStaticRuntime(quantize_script, {input, weight}, {input_2, weight_2});
+}
+
+TEST(StaticRuntime, IndividualOps_VarStack) {
+  // 2D tensors - stack dim = 0
+  std::vector<IValue> args1 = {at::randn({6, 6}), at::randn({6, 6}), 0};
+  testStaticRuntime(var_stack_script, args1);
+
+  // 3D tensors - stack dim = 1
+  std::vector<IValue> args2 = {at::randn({4, 5, 6}), at::randn({4, 5, 6}), 1};
+  testStaticRuntime(var_stack_script, args2);
+
+  // 3D tensors - stack dim = 2
+  std::vector<IValue> args3 = {at::randn({4, 5, 6}), at::randn({4, 5, 6}), 2};
+  testStaticRuntime(var_stack_script, args3);
+
+  testStaticRuntime(var_stack_script, args1, args2);
+}
+
+TEST(StaticRuntime, IndividualOps_FmodTensor) {
+  // fmod tensor version
+  auto a = at::randn({2, 3});
+  auto b = at::randn({2, 3});
+  std::vector<IValue> args0{a, b};
+  testStaticRuntime(fmod_tensor, args0);
+
+  // check for dynamic shapes
+  auto c = at::randn({4, 3, 2});
+  auto d = at::randn({4, 3, 2});
+  std::vector<IValue> args1{c, d};
+  testStaticRuntime(fmod_tensor, args0, args1);
+}
+
+TEST(StaticRuntime, IndividualOps_FmodScalar) {
+  auto a = at::randn({2, 3});
+
+  // fmod scalar version
+  std::vector<IValue> args2{a, 3};
+  testStaticRuntime(fmod_scalar, args2);
+
+  // check for dynamic shapes
+  auto c = at::randn({4, 3, 2});
+  std::vector<IValue> args3{c, 4};
+  testStaticRuntime(fmod_scalar, args2, args3);
 }

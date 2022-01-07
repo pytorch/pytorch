@@ -51,6 +51,7 @@ ALLOW_LIST = [
     ("aten::_svd_helper", datetime.date(2021, 1, 31)),
     ("aten::_syevd_helper", datetime.date(9999, 1, 1)),
     ("aten::_lu_solve_helper", datetime.date(9999, 1, 1)),
+    ("aten::_lu_with_info", datetime.date(9999, 1, 1)),
     ("aten::_linalg_solve_out_helper_", datetime.date(9999, 1, 1)),
     ("aten::_cudnn_rnn_flatten_weight", datetime.date(2020, 12, 31)),
     ("aten::_cudnn_rnn", datetime.date(2020, 12, 31)),

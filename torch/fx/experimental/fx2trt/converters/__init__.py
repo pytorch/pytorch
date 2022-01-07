@@ -8,3 +8,4 @@ from .maxpool import *  # noqa: F403
 from .mul import *  # noqa: F403
 from .transformation import *  # noqa: F403
 from .quantization import *  # noqa: F403
+from .acc_ops_converters import *  # noqa: F403

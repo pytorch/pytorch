@@ -4,7 +4,6 @@
 #include <cassert>
 #include <complex>
 #include <cstdlib>
-#include <iostream>
 #include <memory>
 #include <mutex>
 #include <type_traits>

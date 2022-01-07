@@ -353,8 +353,19 @@ inline void dot_check(const Tensor& self, const Tensor& other) {
 } // anonymous namespace
 
 Tensor dot_cuda(const Tensor& self, const Tensor& other) {
-  at::NoNamesGuard guard;
+  if (self.is_complex()) {
+    if (self.is_conj()) {
+      if (other.is_conj()) {
+        return (dot_cuda(self.conj(), other.conj())).conj();
+       } else {
+         return vdot_cuda(self.conj(), other);
+       }
+    } else if (other.is_conj()) {
+      return vdot_cuda(other.conj(), self);
+    }
+  }
 
+  at::NoNamesGuard guard;
   dot_check(self, other);
 
   const int n = static_cast<int>(self.numel());
@@ -389,6 +400,16 @@ return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
 Tensor vdot_cuda(const Tensor& self, const Tensor& other) {
   if (!self.is_complex()) {
     return dot_cuda(self, other);
+  }
+
+  if (self.is_conj()) {
+    if (other.is_conj()) {
+      return vdot_cuda(other.conj(), self.conj());
+    } else {
+      return dot_cuda(self.conj(), other);
+    }
+  } else if (other.is_conj()) {
+    return (dot_cuda(self, other.conj())).conj();
   }
 
   at::NoNamesGuard guard;

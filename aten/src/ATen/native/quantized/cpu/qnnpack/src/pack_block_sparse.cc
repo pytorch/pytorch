@@ -6,6 +6,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 #include <cassert>
+#include <iostream>
 
 #include <pack_block_sparse.h>
 
@@ -77,5 +78,25 @@ block_scanned:
   bcsr_mat.row_block_size = row_block_size;
   bcsr_mat.col_block_size = col_block_size;
   return bcsr_mat_ptr;
+}
+
+void BCSRMatrix::print() const {
+  std::cout << "row block size:" << row_block_size << std::endl;
+  std::cout << "col block size:" << col_block_size << std::endl;
+  std::cout << "row ptr\n";
+  for (const auto& t : row_values) {
+    std::cout << t << ", ";
+  }
+  std::cout << std::endl;
+  std::cout << "col indices\n";
+  for (const auto& t : col_indices) {
+    std::cout << t << ", ";
+  }
+  std::cout << std::endl;
+  std::cout << "Actual values\n";
+  for (const auto& t : values) {
+    std::cout << (uint32_t)t << ", ";
+  }
+  std::cout << std::endl;
 }
 } // namsepace qnnpack

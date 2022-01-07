@@ -19,6 +19,7 @@ constexpr DispatchKeySet backend_dispatch_keyset = autogradother_backends |
         DispatchKey::PrivateUse3,
         DispatchKey::MLC,
         DispatchKey::HPU,
+        DispatchKey::ORT,
         DispatchKey::Meta,
     });
 
@@ -31,8 +32,8 @@ bool isBackendDispatchKey(DispatchKey t) {
 // math_dispatch_keyset contains all keys in backend_dispatch_keyset and
 // autograd_dispatch_keyset Alias key DispatchKey::CompositeImplicitAutograd
 // maps to math_dispatch_keyset.
-constexpr DispatchKeySet math_dispatch_keyset =
-    backend_dispatch_keyset | autograd_dispatch_keyset;
+constexpr DispatchKeySet math_dispatch_keyset = backend_dispatch_keyset |
+    autograd_dispatch_keyset | DispatchKeySet({DispatchKey::FuncTorchBatched});
 
 DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
   TORCH_INTERNAL_ASSERT(t != DispatchKey::Undefined);

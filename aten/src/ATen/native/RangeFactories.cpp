@@ -113,7 +113,7 @@ Tensor& logspace_cpu_out(const Scalar& start, const Scalar& end, c10::optional<i
 }
 
 Tensor& range_cpu_out(const Scalar& start, const Scalar& end, const Scalar& step, Tensor& result) {
-  AT_DISPATCH_ALL_TYPES(result.scalar_type(), "range_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, result.scalar_type(), "range_cpu", [&]() {
     using accscalar_t = at::acc_type<scalar_t, false>;
     auto xstart = start.to<accscalar_t>();
     auto xend = end.to<accscalar_t>();
@@ -133,7 +133,7 @@ Tensor& range_cpu_out(const Scalar& start, const Scalar& end, const Scalar& step
     scalar_t *data_ptr = r.data_ptr<scalar_t>();
 
     at::parallel_for(0, size, internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
-      scalar_t is = p_begin;
+      accscalar_t is = p_begin;
       for (int64_t i = p_begin; i < p_end; ++i, ++is) {
         data_ptr[i] = xstart + is * xstep;
       }

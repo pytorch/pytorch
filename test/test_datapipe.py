@@ -34,7 +34,6 @@ from unittest import skipIf
 import numpy as np
 
 import torch
-import torch.nn as nn
 import torch.utils.data.backward_compatibility
 import torch.utils.data.datapipes as dp
 import torch.utils.data.graph
@@ -55,13 +54,6 @@ from torch.utils.data.datapipes.utils.decoder import (
 )
 
 try:
-    import torchvision.transforms
-    HAS_TORCHVISION = True
-except ImportError:
-    HAS_TORCHVISION = False
-skipIfNoTorchVision = skipIf(not HAS_TORCHVISION, "no torchvision")
-
-try:
     import dill
     # XXX: By default, dill writes the Pickler dispatch table to inject its
     # own logic there. This globally affects the behavior of the standard library
@@ -73,7 +65,7 @@ except ImportError:
     HAS_DILL = False
 skipIfNoDill = skipIf(not HAS_DILL, "no dill")
 
-T_co = TypeVar('T_co', covariant=True)
+T_co = TypeVar("T_co", covariant=True)
 
 
 def create_temp_dir_and_files():
@@ -110,15 +102,57 @@ def create_temp_dir_and_files():
 
 
 class TestDataChunk(TestCase):
+    def setUp(self):
+        self.elements = list(range(10))
+        random.shuffle(self.elements)
+        self.chunk: DataChunk[int] = DataChunk(self.elements)
+
+    def test_getitem(self):
+        for i in range(10):
+            self.assertEqual(self.elements[i], self.chunk[i])
+
+    def test_iter(self):
+        for ele, dc in zip(self.elements, iter(self.chunk)):
+            self.assertEqual(ele, dc)
+
+    def test_len(self):
+        self.assertEqual(len(self.elements), len(self.chunk))
 
     def test_as_string(self):
+        self.assertEqual(str(self.chunk), str(self.elements))
+
+        batch = [self.elements] * 3
+        chunks: List[DataChunk[int]] = [DataChunk(self.elements)] * 3
+        self.assertEqual(str(batch), str(chunks))
+
+    def test_sort(self):
+        chunk: DataChunk[int] = DataChunk(self.elements)
+        chunk.sort()
+        self.assertTrue(isinstance(chunk, DataChunk))
+        for i, d in enumerate(chunk):
+            self.assertEqual(i, d)
+
+    def test_reverse(self):
+        chunk: DataChunk[int] = DataChunk(self.elements)
+        chunk.reverse()
+        self.assertTrue(isinstance(chunk, DataChunk))
+        for i in range(10):
+            self.assertEqual(chunk[i], self.elements[9 - i])
+
+    def test_random_shuffle(self):
         elements = list(range(10))
-        chunk : DataChunk[int] = DataChunk(elements)
-        self.assertEquals(str(chunk), str(elements))
+        chunk: DataChunk[int] = DataChunk(elements)
+
+        rng = random.Random(0)
+        rng.shuffle(chunk)
+
+        rng = random.Random(0)
+        rng.shuffle(elements)
+
+        self.assertEqual(chunk, elements)
 
 
 class TestIterableDataPipeBasic(TestCase):
-
     def setUp(self):
         ret = create_temp_dir_and_files()
         self.temp_dir = ret[0][0]
@@ -135,7 +169,7 @@ class TestIterableDataPipeBasic(TestCase):
 
     def test_listdirfiles_iterable_datapipe(self):
         temp_dir = self.temp_dir.name
-        datapipe = dp.iter.ListDirFiles(temp_dir, '')
+        datapipe = dp.iter.FileLister(temp_dir, '')
 
         count = 0
         for pathname in datapipe:
@@ -144,7 +178,7 @@ class TestIterableDataPipeBasic(TestCase):
         self.assertEqual(count, len(self.temp_files))
 
         count = 0
-        datapipe = dp.iter.ListDirFiles(temp_dir, '', recursive=True)
+        datapipe = dp.iter.FileLister(temp_dir, '', recursive=True)
         for pathname in datapipe:
             count = count + 1
             self.assertTrue((pathname in self.temp_files) or (pathname in self.temp_sub_files))
@@ -153,13 +187,13 @@ class TestIterableDataPipeBasic(TestCase):
     def test_loadfilesfromdisk_iterable_datapipe(self):
         # test import datapipe class directly
         from torch.utils.data.datapipes.iter import (
-            ListDirFiles,
-            LoadFilesFromDisk,
+            FileLister,
+            FileLoader,
         )
 
         temp_dir = self.temp_dir.name
-        datapipe1 = ListDirFiles(temp_dir, '')
-        datapipe2 = LoadFilesFromDisk(datapipe1)
+        datapipe1 = FileLister(temp_dir, '')
+        datapipe2 = FileLoader(datapipe1)
 
         count = 0
         for rec in datapipe2:
@@ -178,9 +212,9 @@ class TestIterableDataPipeBasic(TestCase):
             tar.add(self.temp_files[0])
             tar.add(self.temp_files[1])
             tar.add(self.temp_files[2])
-        datapipe1 = dp.iter.ListDirFiles(temp_dir, '*.tar')
-        datapipe2 = dp.iter.LoadFilesFromDisk(datapipe1)
-        datapipe3 = dp.iter.ReadFilesFromTar(datapipe2)
+        datapipe1 = dp.iter.FileLister(temp_dir, '*.tar')
+        datapipe2 = dp.iter.FileLoader(datapipe1)
+        datapipe3 = dp.iter.TarArchiveReader(datapipe2)
         # read extracted files before reaching the end of the tarfile
         for rec, temp_file in itertools.zip_longest(datapipe3, self.temp_files):
             self.assertTrue(rec is not None and temp_file is not None)
@@ -205,9 +239,9 @@ class TestIterableDataPipeBasic(TestCase):
             myzip.write(self.temp_files[0])
             myzip.write(self.temp_files[1])
             myzip.write(self.temp_files[2])
-        datapipe1 = dp.iter.ListDirFiles(temp_dir, '*.zip')
-        datapipe2 = dp.iter.LoadFilesFromDisk(datapipe1)
-        datapipe3 = dp.iter.ReadFilesFromZip(datapipe2)
+        datapipe1 = dp.iter.FileLister(temp_dir, '*.zip')
+        datapipe2 = dp.iter.FileLoader(datapipe1)
+        datapipe3 = dp.iter.ZipArchiveReader(datapipe2)
         # read extracted files before reaching the end of the zipfile
         for rec, temp_file in itertools.zip_longest(datapipe3, self.temp_files):
             self.assertTrue(rec is not None and temp_file is not None)
@@ -229,8 +263,8 @@ class TestIterableDataPipeBasic(TestCase):
         temp_pngfile_pathname = os.path.join(temp_dir, "test_png.png")
         png_data = np.array([[[1., 0., 0.], [1., 0., 0.]], [[1., 0., 0.], [1., 0., 0.]]], dtype=np.single)
         np.save(temp_pngfile_pathname, png_data)
-        datapipe1 = dp.iter.ListDirFiles(temp_dir, ['*.png', '*.txt'])
-        datapipe2 = dp.iter.LoadFilesFromDisk(datapipe1)
+        datapipe1 = dp.iter.FileLister(temp_dir, ['*.png', '*.txt'])
+        datapipe2 = dp.iter.FileLoader(datapipe1)
 
         def _png_decoder(extension, data):
             if extension != 'png':
@@ -279,10 +313,10 @@ class TestIterableDataPipeBasic(TestCase):
                     f.write('12345abcde')
                 tar.add(file_pathname)
 
-        datapipe1 = dp.iter.ListDirFiles(temp_dir, '*.tar')
-        datapipe2 = dp.iter.LoadFilesFromDisk(datapipe1)
-        datapipe3 = dp.iter.ReadFilesFromTar(datapipe2)
-        datapipe4 = dp.iter.GroupByKey(datapipe3, group_size=2)
+        datapipe1 = dp.iter.FileLister(temp_dir, '*.tar')
+        datapipe2 = dp.iter.FileLoader(datapipe1)
+        datapipe3 = dp.iter.TarArchiveReader(datapipe2)
+        datapipe4 = dp.iter.ByKeyGrouper(datapipe3, group_size=2)
 
         expected_result = [("a.png", "a.json"), ("c.png", "c.json"), ("b.png", "b.json"), ("d.png", "d.json"), (
             "f.png", "f.json"), ("g.png", "g.json"), ("e.png", "e.json"), ("h.json", "h.txt")]
@@ -405,13 +439,14 @@ class TestIterableDataPipeHttp(TestCase):
             create_temp_files_for_serving(tmpdir, test_file_count,
                                           test_file_size, file_url_template)
 
-            datapipe_dir_f = dp.iter.ListDirFiles(tmpdir, '*_list')
-            datapipe_f_lines = dp.iter.ReadLinesFromFile(datapipe_dir_f)
+            datapipe_dir_f = dp.iter.FileLister(tmpdir, '*_list')
+            datapipe_stream = dp.iter.FileLoader(datapipe_dir_f)
+            datapipe_f_lines = dp.iter.LineReader(datapipe_stream)
             datapipe_line_url: IterDataPipe[str] = \
-                dp.iter.Map(datapipe_f_lines, _get_data_from_tuple_fn, (1,))
+                dp.iter.Mapper(datapipe_f_lines, _get_data_from_tuple_fn, (1,))
             datapipe_http = dp.iter.HttpReader(datapipe_line_url,
                                                timeout=timeout)
-            datapipe_tob = dp.iter.ToBytes(datapipe_http, chunk=chunk)
+            datapipe_tob = dp.iter.StreamReader(datapipe_http, chunk=chunk)
 
             for (url, data) in datapipe_tob:
                 self.assertGreater(len(url), 0)
@@ -497,18 +532,18 @@ class TestFunctionalIterDataPipe(TestCase):
     def _test_picklable(self):
         arr = range(10)
         picklable_datapipes: List[Tuple[Type[IterDataPipe], IterDataPipe, Tuple, Dict[str, Any]]] = [
-            (dp.iter.Map, IDP(arr), (), {}),
-            (dp.iter.Map, IDP(arr), (_fake_fn, (0, ), {'test': True}), {}),
-            (dp.iter.Collate, IDP(arr), (), {}),
-            (dp.iter.Collate, IDP(arr), (_fake_fn, (0, ), {'test': True}), {}),
+            (dp.iter.Mapper, IDP(arr), (), {}),
+            (dp.iter.Mapper, IDP(arr), (_fake_fn, (0, ), {'test': True}), {}),
+            (dp.iter.Collator, IDP(arr), (), {}),
+            (dp.iter.Collator, IDP(arr), (_fake_fn, (0, ), {'test': True}), {}),
             (dp.iter.Filter, IDP(arr), (_fake_filter_fn, (0, ), {'test': True}), {}),
         ]
         for dpipe, input_dp, dp_args, dp_kwargs in picklable_datapipes:
             p = pickle.dumps(dpipe(input_dp, *dp_args, **dp_kwargs))  # type: ignore[call-arg]
 
         unpicklable_datapipes: List[Tuple[Type[IterDataPipe], IterDataPipe, Tuple, Dict[str, Any]]] = [
-            (dp.iter.Map, IDP(arr), (lambda x: x, ), {}),
-            (dp.iter.Collate, IDP(arr), (lambda x: x, ), {}),
+            (dp.iter.Mapper, IDP(arr), (lambda x: x, ), {}),
+            (dp.iter.Collator, IDP(arr), (lambda x: x, ), {}),
             (dp.iter.Filter, IDP(arr), (lambda x: x >= 5, ), {}),
         ]
         for dpipe, input_dp, dp_args, dp_kwargs in unpicklable_datapipes:
@@ -524,10 +559,10 @@ class TestFunctionalIterDataPipe(TestCase):
         input_dp2 = IDP(range(5))
 
         with self.assertRaisesRegex(ValueError, r"Expected at least one DataPipe"):
-            dp.iter.Concat()
+            dp.iter.Concater()
 
         with self.assertRaisesRegex(TypeError, r"Expected all inputs to be `IterDataPipe`"):
-            dp.iter.Concat(input_dp1, ())  # type: ignore[arg-type]
+            dp.iter.Concater(input_dp1, ())  # type: ignore[arg-type]
 
         concat_dp = input_dp1.concat(input_dp2)
         self.assertEqual(len(concat_dp), 15)
@@ -707,52 +742,48 @@ class TestFunctionalIterDataPipe(TestCase):
     def test_bucket_batch_datapipe(self):
         input_dp = IDP(range(20))
         with self.assertRaises(AssertionError):
-            input_dp.bucket_batch(batch_size=0)
+            dp.iter.BucketBatcher(input_dp, batch_size=0)
 
         input_dp_nl = IDP_NoLen(range(20))
-        bucket_dp_nl = input_dp_nl.bucket_batch(batch_size=7)
+        bucket_dp_nl = dp.iter.BucketBatcher(input_dp_nl, batch_size=7)
         with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
             len(bucket_dp_nl)
 
-        # Test Bucket Batch without sort_key
         def _helper(**kwargs):
-            arrs = list(range(100))
+            data_len = 100
+            arrs = list(range(data_len))
             random.shuffle(arrs)
             input_dp = IDP(arrs)
-            bucket_dp = input_dp.bucket_batch(**kwargs)
-            if kwargs["sort_key"] is None:
-                # BatchDataset as reference
-                ref_dp = input_dp.batch(batch_size=kwargs['batch_size'], drop_last=kwargs['drop_last'])
-                for batch, rbatch in zip(bucket_dp, ref_dp):
-                    self.assertEqual(batch, rbatch)
-            else:
-                bucket_size = bucket_dp.bucket_size
-                bucket_num = (len(input_dp) - 1) // bucket_size + 1
-                it = iter(bucket_dp)
-                for i in range(bucket_num):
-                    ref = sorted(arrs[i * bucket_size: (i + 1) * bucket_size])
-                    bucket: List = []
-                    while len(bucket) < len(ref):
-                        try:
-                            batch = next(it)
-                            bucket += batch
-                        # If drop last, stop in advance
-                        except StopIteration:
-                            break
-                    if len(bucket) != len(ref):
-                        ref = ref[:len(bucket)]
-                    # Sorted bucket
-                    self.assertEqual(bucket, ref)
+            bucket_dp = dp.iter.BucketBatcher(input_dp, **kwargs)
 
-        _helper(batch_size=7, drop_last=False, sort_key=None)
-        _helper(batch_size=7, drop_last=True, bucket_size_mul=5, sort_key=None)
+            self.assertEqual(len(bucket_dp), data_len // 3 if kwargs['drop_last'] else data_len // 3 + 1)
 
-        # Test Bucket Batch with sort_key
+            def _verify_bucket_sorted(bucket):
+                # Sort batch in a bucket
+                bucket = sorted(bucket, key=lambda x: x[0])
+                flat = [item for batch in bucket for item in batch]
+                # Elements in the bucket should be sorted
+                self.assertEqual(flat, sorted(flat))
+
+            batch_num = kwargs['batch_num'] if 'batch_num' in kwargs else 100
+            bucket = []
+            for idx, d in enumerate(bucket_dp):
+                self.assertEqual(d, sorted(d))
+                bucket.append(d)
+                if idx % batch_num == batch_num - 1:
+                    _verify_bucket_sorted(bucket)
+                    bucket = []
+            _verify_bucket_sorted(bucket)
+
         def _sort_fn(data):
-            return data
+            return sorted(data)
 
-        _helper(batch_size=7, drop_last=False, bucket_size_mul=5, sort_key=_sort_fn)
-        _helper(batch_size=7, drop_last=True, bucket_size_mul=5, sort_key=_sort_fn)
+        # In-batch shuffle
+        _helper(batch_size=3, drop_last=False, batch_num=5, sort_key=_sort_fn)
+        _helper(batch_size=3, drop_last=False, batch_num=2, bucket_num=2, sort_key=_sort_fn)
+        _helper(batch_size=3, drop_last=True, batch_num=2, sort_key=_sort_fn)
+        _helper(batch_size=3, drop_last=True, batch_num=2, bucket_num=2, sort_key=_sort_fn)
+
 
     def test_filter_datapipe(self):
         input_ds = IDP(range(10))
@@ -875,59 +906,17 @@ class TestFunctionalIterDataPipe(TestCase):
         with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
             len(shuffle_dp_nl)
 
-    @skipIfNoTorchVision
-    def test_transforms_datapipe(self):
-        torch.set_default_dtype(torch.float)
-        # A sequence of numpy random numbers representing 3-channel images
-        w = h = 32
-        inputs = [np.random.randint(0, 255, (h, w, 3), dtype=np.uint8) for i in range(10)]
-        tensor_inputs = [torch.tensor(x, dtype=torch.float).permute(2, 0, 1) / 255. for x in inputs]
-
-        input_dp = IDP(inputs)
-        # Raise TypeError for python function
-        with self.assertRaisesRegex(TypeError, r"`transforms` are required to be"):
-            input_dp.legacy_transforms(_fake_fn)
-
-        # transforms.Compose of several transforms
-        transforms = torchvision.transforms.Compose([
-            torchvision.transforms.ToTensor(),
-            torchvision.transforms.Pad(1, fill=1, padding_mode='constant'),
-        ])
-        tsfm_dp = input_dp.legacy_transforms(transforms)
-        self.assertEqual(len(tsfm_dp), len(input_dp))
-        for tsfm_data, input_data in zip(tsfm_dp, tensor_inputs):
-            self.assertEqual(tsfm_data[:, 1:(h + 1), 1:(w + 1)], input_data)
-
-        # nn.Sequential of several transforms (required to be instances of nn.Module)
-        input_dp = IDP(tensor_inputs)
-        transforms = nn.Sequential(
-            torchvision.transforms.Pad(1, fill=1, padding_mode='constant'),
-        )
-        tsfm_dp = input_dp.legacy_transforms(transforms)
-        self.assertEqual(len(tsfm_dp), len(input_dp))
-        for tsfm_data, input_data in zip(tsfm_dp, tensor_inputs):
-            self.assertEqual(tsfm_data[:, 1:(h + 1), 1:(w + 1)], input_data)
-
-        # Single transform
-        input_dp = IDP_NoLen(inputs)  # type: ignore[assignment]
-        transform = torchvision.transforms.ToTensor()
-        tsfm_dp = input_dp.legacy_transforms(transform)
-        with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
-            len(tsfm_dp)
-        for tsfm_data, input_data in zip(tsfm_dp, tensor_inputs):
-            self.assertEqual(tsfm_data, input_data)
-
     def test_zip_datapipe(self):
         with self.assertRaises(TypeError):
-            dp.iter.Zip(IDP(range(10)), list(range(10)))  # type: ignore[arg-type]
+            dp.iter.Zipper(IDP(range(10)), list(range(10)))  # type: ignore[arg-type]
 
-        zipped_dp = dp.iter.Zip(IDP(range(10)), IDP_NoLen(range(5)))  # type: ignore[var-annotated]
+        zipped_dp = dp.iter.Zipper(IDP(range(10)), IDP_NoLen(range(5)))  # type: ignore[var-annotated]
         with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
             len(zipped_dp)
         exp = list((i, i) for i in range(5))
         self.assertEqual(list(zipped_dp), exp)
 
-        zipped_dp = dp.iter.Zip(IDP(range(10)), IDP(range(5)))
+        zipped_dp = dp.iter.Zipper(IDP(range(10)), IDP(range(5)))
         self.assertEqual(len(zipped_dp), 5)
         self.assertEqual(list(zipped_dp), exp)
         # Reset
@@ -941,8 +930,8 @@ class TestFunctionalMapDataPipe(TestCase):
         picklable_datapipes: List[
             Tuple[Type[MapDataPipe], MapDataPipe, Tuple, Dict[str, Any]]
         ] = [
-            (dp.map.Map, MDP(arr), (), {}),
-            (dp.map.Map, MDP(arr), (_fake_fn, (0,), {'test': True}), {}),
+            (dp.map.Mapper, MDP(arr), (), {}),
+            (dp.map.Mapper, MDP(arr), (_fake_fn, (0,), {'test': True}), {}),
         ]
         for dpipe, input_dp, dp_args, dp_kwargs in picklable_datapipes:
             p = pickle.dumps(dpipe(input_dp, *dp_args, **dp_kwargs))  # type: ignore[call-arg]
@@ -950,7 +939,7 @@ class TestFunctionalMapDataPipe(TestCase):
         unpicklable_datapipes: List[
             Tuple[Type[MapDataPipe], MapDataPipe, Tuple, Dict[str, Any]]
         ] = [
-            (dp.map.Map, MDP(arr), (lambda x: x,), {}),
+            (dp.map.Mapper, MDP(arr), (lambda x: x,), {}),
         ]
         for dpipe, input_dp, dp_args, dp_kwargs in unpicklable_datapipes:
             with warnings.catch_warnings(record=True) as wa:
@@ -967,10 +956,10 @@ class TestFunctionalMapDataPipe(TestCase):
         input_dp2 = MDP(range(5))
 
         with self.assertRaisesRegex(ValueError, r"Expected at least one DataPipe"):
-            dp.map.Concat()
+            dp.map.Concater()
 
         with self.assertRaisesRegex(TypeError, r"Expected all inputs to be `MapDataPipe`"):
-            dp.map.Concat(input_dp1, ())  # type: ignore[arg-type]
+            dp.map.Concater(input_dp1, ())  # type: ignore[arg-type]
 
         concat_dp = input_dp1.concat(input_dp2)
         self.assertEqual(len(concat_dp), 15)

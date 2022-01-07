@@ -4,7 +4,7 @@ Train script
 -------------
 
 If your train script works with ``torch.distributed.launch`` it will continue
-working with ``torch.distributed.run`` with these differences:
+working with ``torchrun`` with these differences:
 
 1. No need to manually pass ``RANK``, ``WORLD_SIZE``,
    ``MASTER_ADDR``, and ``MASTER_PORT``.

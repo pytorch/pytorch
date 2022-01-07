@@ -28,8 +28,12 @@ from torch.testing._internal.common_utils import (
     TestCase,
     load_tests,
     run_tests,
-    TEST_WITH_TSAN,
+    TEST_WITH_DEV_DBG_ASAN,
 )
+
+if TEST_WITH_DEV_DBG_ASAN:
+    print("Multiprocessing spawn is not compatible with dev/dbg asan", file=sys.stderr)
+    sys.exit(0)
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -438,37 +442,31 @@ class AbstractDistributedDataParallelTest(object):
         return fut.then(fut_then)
 
 
-# TSAN is not fork-safe since we're forking in a multi-threaded environment
-if not TEST_WITH_TSAN:
+class DistributedDataParallelTest(
+    AbstractDistributedDataParallelTest, MultiProcessTestCase
+):
+    def setUp(self):
+        super(DistributedDataParallelTest, self).setUp()
+        self._spawn_processes()
 
-    class DistributedDataParallelTest(
-        AbstractDistributedDataParallelTest, MultiProcessTestCase
-    ):
-        def setUp(self):
-            super(DistributedDataParallelTest, self).setUp()
-            if sys.platform == "win32":
-                self._spawn_processes()
-            else:
-                self._fork_processes()
-
-        def test_invalid_powerSGD_state(self):
-            for start_powerSGD_iter, use_error_feedback, warm_start in product(
-                [0, 1], [True, False], [True, False]
+    def test_invalid_powerSGD_state(self):
+        for start_powerSGD_iter, use_error_feedback, warm_start in product(
+            [0, 1], [True, False], [True, False]
+        ):
+            if not use_error_feedback and not warm_start:
+                continue
+            with self.assertRaisesRegex(
+                ValueError,
+                "Expect `start_powerSGD_iter` > 1 if `use_error_feedback` or `warm_start` is enabled, "
+                "because PowerSGD can only be applied after the first two iterations in DDP.",
             ):
-                if not use_error_feedback and not warm_start:
-                    continue
-                with self.assertRaisesRegex(
-                    ValueError,
-                    "Expect `start_powerSGD_iter` > 1 if `use_error_feedback` or `warm_start` is enabled, "
-                    "because PowerSGD can only be applied after the first two iterations in DDP.",
-                ):
-                    state = powerSGD.PowerSGDState(
-                        process_group=None,
-                        matrix_approximation_rank=1,
-                        start_powerSGD_iter=start_powerSGD_iter,
-                        use_error_feedback=use_error_feedback,
-                        warm_start=warm_start,
-                    )
+                state = powerSGD.PowerSGDState(
+                    process_group=None,
+                    matrix_approximation_rank=1,
+                    start_powerSGD_iter=start_powerSGD_iter,
+                    use_error_feedback=use_error_feedback,
+                    warm_start=warm_start,
+                )
 
 
 class ComputeBucketAssignmentTest(TestCase):
@@ -656,49 +654,42 @@ class AbstractCommTest(object):
             dist.all_gather_object(obj_list, subgroup_seq, group=subgroup)
             self.assertEqual(len(set(obj_list)), 1)
 
+class CommTest(AbstractCommTest, MultiProcessTestCase):
+    def setUp(self):
+        super(CommTest, self).setUp()
+        self._spawn_processes()
 
-# TSAN is not fork-safe since we're forking in a multi-threaded environment
-if not TEST_WITH_TSAN:
+    def tearDown(self):
+        super(CommTest, self).tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
 
-    class CommTest(AbstractCommTest, MultiProcessTestCase):
-        def setUp(self):
-            super(CommTest, self).setUp()
-            if sys.platform == "win32":
-                self._spawn_processes()
-            else:
-                self._fork_processes()
+    def test_distributed_debug_mode(self):
+        # Default should be off
+        default_debug_mode = dist._get_debug_mode()
+        self.assertEqual(default_debug_mode, dist._DistributedDebugLevel.OFF)
+        mapping = {
+            "OFF": dist._DistributedDebugLevel.OFF,
+            "INFO": dist._DistributedDebugLevel.INFO,
+            "DETAIL": dist._DistributedDebugLevel.DETAIL,
+        }
+        invalid_debug_modes = ["foo", 0, 1, -1]
 
-        def tearDown(self):
-            super(CommTest, self).tearDown()
-            try:
-                os.remove(self.file_name)
-            except OSError:
-                pass
+        for mode in mapping.keys():
+            os.environ["TORCH_DISTRIBUTED_DEBUG"] = str(mode)
+            set_debug_mode = dist._get_debug_mode()
+            self.assertEqual(
+                set_debug_mode,
+                mapping[mode],
+                f"Expected {mode} to map to {mapping[mode]} but got {set_debug_mode}",
+            )
 
-        def test_distributed_debug_mode(self):
-            # Default should be off
-            default_debug_mode = dist._get_debug_mode()
-            self.assertEqual(default_debug_mode, dist._DistributedDebugLevel.OFF)
-            mapping = {
-                "OFF": dist._DistributedDebugLevel.OFF,
-                "INFO": dist._DistributedDebugLevel.INFO,
-                "DETAIL": dist._DistributedDebugLevel.DETAIL,
-            }
-            invalid_debug_modes = ["foo", 0, 1, -1]
-
-            for mode in mapping.keys():
-                os.environ["TORCH_DISTRIBUTED_DEBUG"] = str(mode)
-                set_debug_mode = dist._get_debug_mode()
-                self.assertEqual(
-                    set_debug_mode,
-                    mapping[mode],
-                    f"Expected {mode} to map to {mapping[mode]} but got {set_debug_mode}",
-                )
-
-            for mode in invalid_debug_modes:
-                os.environ["TORCH_DISTRIBUTED_DEBUG"] = str(mode)
-                with self.assertRaisesRegex(RuntimeError, "to be one of"):
-                    dist._get_debug_mode()
+        for mode in invalid_debug_modes:
+            os.environ["TORCH_DISTRIBUTED_DEBUG"] = str(mode)
+            with self.assertRaisesRegex(RuntimeError, "to be one of"):
+                dist._get_debug_mode()
 
 
 if __name__ == "__main__":
