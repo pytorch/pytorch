@@ -524,7 +524,8 @@ llvm::Type* LLVMCodeGenImpl::dtypeToLLVMPtr(Dtype dtype) {
 }
 
 void LLVMCodeGenImpl::emitWrapper(const std::vector<llvm::Type*>& params) {
-  auto voidPtrPtrTy = llvm::Type::getInt8PtrTy(getContext())->getPointerTo();
+  auto voidPtrTy = llvm::Type::getInt8PtrTy(getContext());
+  auto voidPtrPtrTy = voidPtrTy->getPointerTo();
   auto wrapper = llvm::Function::Create(
       llvm::FunctionType::get(IntTy_, {voidPtrPtrTy}, false),
       llvm::Function::ExternalLinkage,
@@ -535,14 +536,19 @@ void LLVMCodeGenImpl::emitWrapper(const std::vector<llvm::Type*>& params) {
   llvm::SmallVector<llvm::Value*, 6> wrappedArgs;
   for (const auto i : c10::irange(params.size())) {
     auto argp = irb_.CreateGEP(
-        wrapper->arg_begin(), llvm::ConstantInt::getSigned(IntTy_, i));
+        voidPtrTy,
+        wrapper->arg_begin(),
+        llvm::ConstantInt::getSigned(IntTy_, i));
     if (params[i]->isPointerTy()) {
-      auto arg = irb_.CreatePointerCast(irb_.CreateLoad(argp), params[i]);
+      auto arg = irb_.CreatePointerCast(
+          irb_.CreateLoad(argp->getType()->getPointerElementType(), argp),
+          params[i]);
       wrappedArgs.push_back(arg);
     } else {
       auto p = irb_.CreatePointerCast(
-          irb_.CreateLoad(argp), params[i]->getPointerTo());
-      auto arg = irb_.CreateLoad(p);
+          irb_.CreateLoad(argp->getType()->getPointerElementType(), argp),
+          params[i]->getPointerTo());
+      auto arg = irb_.CreateLoad(p->getType()->getPointerElementType(), p);
       wrappedArgs.push_back(arg);
     }
   }
@@ -1159,8 +1165,9 @@ void LLVMCodeGenImpl::visit(RampPtr v) {
 llvm::Value* LLVMCodeGenImpl::emitUnmaskedLoad(
     llvm::Value* base,
     llvm::Value* idx) {
-  auto addr = irb_.CreateGEP(base, idx);
-  return irb_.CreateLoad(addr);
+  auto addr = irb_.CreateGEP(
+      base->getType()->getScalarType()->getPointerElementType(), base, idx);
+  return irb_.CreateLoad(addr->getType()->getPointerElementType(), addr);
 }
 
 llvm::Value* LLVMCodeGenImpl::emitMaskedLoad(
@@ -1178,8 +1185,9 @@ llvm::Value* LLVMCodeGenImpl::emitMaskedLoad(
 
   // Do the load
   irb_.SetInsertPoint(condblock);
-  auto addr = irb_.CreateGEP(base, idx);
-  auto load = irb_.CreateLoad(addr);
+  auto addr = irb_.CreateGEP(
+      base->getType()->getScalarType()->getPointerElementType(), base, idx);
+  auto load = irb_.CreateLoad(addr->getType()->getPointerElementType(), addr);
   irb_.CreateBr(tailblock);
 
   // Merge the masked and unmasked CFG edges
@@ -1232,13 +1240,16 @@ void LLVMCodeGenImpl::visit(LoadPtr v) {
       idx_ramp->base()->accept(this);
       auto first_idx = this->value_;
 
-      auto addr = irb_.CreateGEP(base, first_idx);
+      auto addr = irb_.CreateGEP(
+          base->getType()->getScalarType()->getPointerElementType(),
+          base,
+          first_idx);
       auto vaddr = irb_.CreateBitOrPointerCast(
           addr, llvm::PointerType::get(loadType, 0));
-#if LLVM_VERSION_MAJOR >= 13
-      value_ = irb_.CreateAlignedLoad(vaddr, llvm::MaybeAlign(4));
+#if LLVM_VERSION_MAJOR >= 12
+      value_ = irb_.CreateAlignedLoad(loadType, vaddr, llvm::MaybeAlign(4));
 #else
-      value_ = irb_.CreateAlignedLoad(vaddr, 4);
+      value_ = irb_.CreateAlignedLoad(loadType, vaddr, 4);
 #endif
       return;
     }
@@ -1279,7 +1290,7 @@ llvm::Value* LLVMCodeGenImpl::packFuncArgs(
   llvm::Value* packed = irb_.CreateAlloca(packed_type, one);
   for (const auto i : c10::irange(func_args.size())) {
     llvm::Value* dst_ptr = irb_.CreateInBoundsGEP(
-        packed, {zero, llvm::ConstantInt::get(IntTy_, i)});
+        packed_type, packed, {zero, llvm::ConstantInt::get(IntTy_, i)});
     irb_.CreateStore(func_args[i], dst_ptr);
   }
   return packed;
@@ -1293,9 +1304,11 @@ std::vector<llvm::Value*> LLVMCodeGenImpl::unpackFuncArgs(
   std::vector<llvm::Value*> func_args(arg_count);
   llvm::Value* zero = llvm::ConstantInt::get(IntTy_, 0);
   for (const auto i : c10::irange(arg_count)) {
+    llvm::Type* packed_type = packed->getType()->getPointerElementType();
     llvm::Value* dst_ptr = irb_.CreateInBoundsGEP(
-        packed, {zero, llvm::ConstantInt::get(IntTy_, i)});
-    func_args[i] = irb_.CreateLoad(dst_ptr);
+        packed_type, packed, {zero, llvm::ConstantInt::get(IntTy_, i)});
+    func_args[i] =
+        irb_.CreateLoad(dst_ptr->getType()->getPointerElementType(), dst_ptr);
   }
   return func_args;
 }
@@ -1468,7 +1481,8 @@ void LLVMCodeGenImpl::emitUnmaskedStore(
     llvm::Value* base,
     llvm::Value* idx,
     llvm::Value* val) {
-  auto addr = irb_.CreateGEP(base, idx);
+  auto addr = irb_.CreateGEP(
+      base->getType()->getScalarType()->getPointerElementType(), base, idx);
   irb_.CreateStore(val, addr);
 }
 
@@ -1487,7 +1501,8 @@ void LLVMCodeGenImpl::emitMaskedStore(
 
   // Do the store
   irb_.SetInsertPoint(condblock);
-  auto addr = irb_.CreateGEP(base, idx);
+  auto addr = irb_.CreateGEP(
+      base->getType()->getScalarType()->getPointerElementType(), base, idx);
   irb_.CreateStore(val, addr);
   irb_.CreateBr(tailblock);
 
@@ -1523,7 +1538,10 @@ void LLVMCodeGenImpl::visit(StorePtr v) {
       idx_ramp->base()->accept(this);
       auto first_idx = value_;
 
-      auto addr = irb_.CreateGEP(base, first_idx);
+      auto addr = irb_.CreateGEP(
+          base->getType()->getScalarType()->getPointerElementType(),
+          base,
+          first_idx);
       auto vaddr = irb_.CreateBitOrPointerCast(
           addr, llvm::PointerType::get(val->getType(), 0));
 
@@ -1912,7 +1930,7 @@ void LLVMCodeGenImpl::visit(ExternalCallPtr v) {
   for (BufPtr b : bufs) {
     // Store value for buf pointer
     auto gep = irb_.CreateInBoundsGEP(
-        buf_ptrs, {llvm::ConstantInt::getSigned(IntTy_, i)});
+        Int8PtrTy_, buf_ptrs, llvm::ConstantInt::getSigned(IntTy_, i));
     b->base_handle()->accept(this);
     auto buf_ptr = this->value_;
     auto buf_void_ptr = irb_.CreatePointerCast(buf_ptr, Int8PtrTy_);
@@ -1920,21 +1938,21 @@ void LLVMCodeGenImpl::visit(ExternalCallPtr v) {
 
     // Store dtype of the buf
     gep = irb_.CreateInBoundsGEP(
-        buf_dtypes, {llvm::ConstantInt::getSigned(IntTy_, i)});
+        ByteTy_, buf_dtypes, llvm::ConstantInt::getSigned(IntTy_, i));
     irb_.CreateStore(
         llvm::ConstantInt::getSigned(ByteTy_, (int8_t)b->dtype().scalar_type()),
         gep);
 
     // Store rank of the buf
     gep = irb_.CreateInBoundsGEP(
-        buf_ranks, {llvm::ConstantInt::getSigned(IntTy_, i)});
+        LongTy_, buf_ranks, llvm::ConstantInt::getSigned(IntTy_, i));
     irb_.CreateStore(
         llvm::ConstantInt::getSigned(LongTy_, b->dims().size()), gep);
 
     // Store dims of the buf
     for (const auto dim : c10::irange(b->dims().size())) {
       gep = irb_.CreateInBoundsGEP(
-          buf_dims, {llvm::ConstantInt::getSigned(IntTy_, dim_idx)});
+          LongTy_, buf_dims, llvm::ConstantInt::getSigned(IntTy_, dim_idx));
       b->dims()[dim]->accept(this);
       auto dim_val = this->value_;
       irb_.CreateStore(irb_.CreateZExt(dim_val, LongTy_), gep);
@@ -1944,7 +1962,9 @@ void LLVMCodeGenImpl::visit(ExternalCallPtr v) {
     // Store strides of the buf
     for (const auto dim : c10::irange(b->dims().size())) {
       gep = irb_.CreateInBoundsGEP(
-          buf_strides, {llvm::ConstantInt::getSigned(IntTy_, stride_idx)});
+          LongTy_,
+          buf_strides,
+          llvm::ConstantInt::getSigned(IntTy_, stride_idx));
       b->strides()[dim]->accept(this);
       auto stride_val = this->value_;
       irb_.CreateStore(irb_.CreateZExt(stride_val, LongTy_), gep);
@@ -1957,7 +1977,7 @@ void LLVMCodeGenImpl::visit(ExternalCallPtr v) {
   i = 0;
   for (ExprPtr arg : v->args()) {
     auto gep = irb_.CreateInBoundsGEP(
-        extra_args, {llvm::ConstantInt::getSigned(IntTy_, i)});
+        LongTy_, extra_args, llvm::ConstantInt::getSigned(IntTy_, i));
     arg->accept(this);
     irb_.CreateStore(irb_.CreateZExtOrBitCast(this->value_, LongTy_), gep);
     i++;
