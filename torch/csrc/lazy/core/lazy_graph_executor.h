@@ -196,7 +196,7 @@ class TORCH_API LazyGraphExecutor {
       std::vector<LazyTensor>* tensors,
       SyncTensorCollection* coll,
       PostOrderData* po_data,
-      bool use_current_thread););
+      bool use_current_thread);
 
   CompilationResult Compile(
       const std::vector<LazyTensor>& tensors,

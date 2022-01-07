@@ -1,7 +1,7 @@
 #include "lazy_tensor_core/csrc/ts_backend/EagerFallback.h"
 
 #include <sstream>
-#include "lazy_tensor_core/csrc/lazy_graph_executor.h"
+#include <torch/csrc/lazy/core/lazy_graph_executor.h>
 #include <ATen/Functions.h>
 #include <ATen/core/boxing/KernelFunction.h>
 #include <ATen/native/CPUFallback.h>
@@ -9,6 +9,8 @@
 
 namespace torch_lazy_tensors {
 namespace {
+using torch::lazy::LazyTensor;
+using torch::lazy::GetLtcTensor;
 
 std::vector<at::Tensor> to_eager(const at::TensorList& tensors,
                                  c10::DeviceType eager_device_type, bool use_main_thread) {
@@ -39,7 +41,7 @@ std::vector<at::Tensor> to_eager(const at::TensorList& tensors,
   }
 
   // Transfer all the lazy tensors as one computation rather than calling .to on each one
-  auto eager_valid_tensors = LazyGraphExecutor::Get()->GetTensors(&lazy_tensors, use_main_thread);
+  auto eager_valid_tensors = torch::lazy::LazyGraphExecutor::Get()->GetTensors(&lazy_tensors, use_main_thread);
 
   for (size_t i = 0, defined_pos = 0; i < tensors.size(); ++i) {
     if (to_translate[i]) {
