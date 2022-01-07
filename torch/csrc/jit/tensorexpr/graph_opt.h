@@ -63,6 +63,11 @@ TORCH_API void annotateInputShapes(
     const std::vector<c10::optional<at::Tensor>>& example_inputs);
 TORCH_API std::shared_ptr<Graph> removeUnusedSelfArgument(
     const std::shared_ptr<Graph>& graph);
+TORCH_API std::shared_ptr<Graph> removeGraphOutput(
+    const std::shared_ptr<Graph>& graph,
+    size_t idx);
+TORCH_API std::shared_ptr<Graph> replaceListOutputWithTuple(
+    const std::shared_ptr<Graph>& graph);
 
 // Scan all values in the given graph and replace each dimension with a size Xi
 // present in \p SIZES with a symbolic shape Yi. Return a vector of symbol
