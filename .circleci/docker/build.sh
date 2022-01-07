@@ -358,6 +358,8 @@ docker build \
        --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH:-gfx900;gfx906}" \
        --build-arg "IMAGE_NAME=${IMAGE_NAME}" \
        --build-arg "INSTALL_CUDNN=${INSTALL_CUDNN}" \
+       --build-arg "UCX_COMMIT=${UCX_COMMIT}" \
+       --build-arg "UCC_COMMIT=${UCC_COMMIT}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        -t "$tmp_tag" \
        "$@" \
