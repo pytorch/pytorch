@@ -656,6 +656,36 @@ class AbstractCommTest(object):
             dist.all_gather_object(obj_list, subgroup_seq, group=subgroup)
             self.assertEqual(len(set(obj_list)), 1)
 
+    def _test_warn_not_in_group(self, backend):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend,
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        in_group_ranks = list(filter(lambda x: x % 2 == 0, range(self.world_size)))
+        group = dist.new_group(in_group_ranks)
+
+        x = torch.zeros(2, 2).cuda(self.rank)
+        xs = [torch.zeros(2, 2).cuda(self.rank) for _ in range(len(in_group_ranks))]
+        if self.rank not in in_group_ranks:
+            msg = ".*{}.*does not belong to.*"
+            with self.assertWarnsOnceRegex(UserWarning, msg.format("all_gather")):
+                dist.all_gather(xs, x, group=group)
+            with self.assertWarnsOnceRegex(UserWarning, msg.format("all_reduce")):
+                dist.all_reduce(x, group=group)
+            with self.assertWarnsOnceRegex(UserWarning, msg.format("barrier")):
+                dist.barrier(group=group)
+            with self.assertWarnsOnceRegex(UserWarning, msg.format("broadcast")):
+                dist.broadcast(x, src=0, group=group)
+        else:
+            dist.all_gather(xs, x, group=group)
+            dist.all_reduce(x, group=group)
+            dist.barrier(group=group)
+            dist.broadcast(x, src=0, group=group)
+
+
 class CommTest(AbstractCommTest, MultiProcessTestCase):
     def setUp(self):
         super(CommTest, self).setUp()
@@ -762,13 +792,13 @@ class DummyProcessGroup(dist.ProcessGroup):
         return DummyWork()
 
 
-class PythonProcessGroupTest(MultiProcessTestCase):
+class PythonProcessGroupExtensionTest(MultiProcessTestCase):
     def setUp(self):
-        super(PythonProcessGroupTest, self).setUp()
+        super(PythonProcessGroupExtensionTest, self).setUp()
         self._spawn_processes()
 
     def tearDown(self):
-        super(PythonProcessGroupTest, self).tearDown()
+        super(PythonProcessGroupExtensionTest, self).tearDown()
         try:
             os.remove(self.file_name)
         except OSError:
@@ -781,12 +811,12 @@ class PythonProcessGroupTest(MultiProcessTestCase):
     def test_backend_class_attr(self):
         dist.Backend.register_backend(
             "dummy",
-            PythonProcessGroupTest.create_dummy
+            PythonProcessGroupExtensionTest.create_dummy
         )
         self.assertEqual(dist.Backend.DUMMY, "DUMMY")
         self.assertEqual(
             dist.Backend._plugins["DUMMY"],
-            PythonProcessGroupTest.create_dummy
+            PythonProcessGroupExtensionTest.create_dummy
         )
 
     @staticmethod
@@ -794,7 +824,7 @@ class PythonProcessGroupTest(MultiProcessTestCase):
         return DummyProcessGroup(rank, size)
 
     def test_collectives(self):
-        dist.Backend.register_backend("dummy", PythonProcessGroupTest.create_dummy)
+        dist.Backend.register_backend("dummy", PythonProcessGroupExtensionTest.create_dummy)
 
         os.environ['MASTER_ADDR'] = 'localhost'
         os.environ['MASTER_PORT'] = '6789'
@@ -828,7 +858,7 @@ class PythonProcessGroupTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
     def test_send_recv(self):
-        dist.Backend.register_backend("dummy", PythonProcessGroupTest.create_dummy)
+        dist.Backend.register_backend("dummy", PythonProcessGroupExtensionTest.create_dummy)
 
         os.environ['MASTER_ADDR'] = 'localhost'
         os.environ['MASTER_PORT'] = '6789'

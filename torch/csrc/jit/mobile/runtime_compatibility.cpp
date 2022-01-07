@@ -18,6 +18,12 @@ uint64_t _get_runtime_bytecode_version() {
   return caffe2::serialize::kMaxSupportedBytecodeVersion;
 }
 
+std::pair<uint64_t, uint64_t> _get_runtime_bytecode_min_max_versions() {
+  return std::pair<uint64_t, uint64_t>(
+      caffe2::serialize::kMinSupportedBytecodeVersion,
+      caffe2::serialize::kMaxSupportedBytecodeVersion);
+}
+
 std::pair<uint64_t, uint64_t> _get_runtime_operators_min_max_versions() {
   return std::pair<uint64_t, uint64_t>(
       caffe2::serialize::kMinSupportedFileFormatVersion,
@@ -63,9 +69,10 @@ std::unordered_map<std::string, OperatorInfo> _get_runtime_ops_and_info() {
 
 RuntimeCompatibilityInfo RuntimeCompatibilityInfo::get() {
   return RuntimeCompatibilityInfo{
-      _get_runtime_bytecode_version(),
+      _get_runtime_bytecode_min_max_versions(),
       _get_runtime_ops_and_info(),
-      _get_mobile_supported_types()};
+      _get_mobile_supported_types(),
+      _get_runtime_operators_min_max_versions()};
 }
 
 std::unordered_set<std::string> _get_mobile_supported_types() {

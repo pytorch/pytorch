@@ -3,7 +3,7 @@
 import torch
 import torch.fx.experimental.fx_acc.acc_ops as acc_ops
 import torch.nn as nn
-from caffe2.torch.fb.fx2trt.tests.test_utils import AccTestCase
+from torch.testing._internal.common_fx2trt import AccTestCase
 from parameterized import parameterized
 
 
@@ -12,6 +12,7 @@ class TestGetitemConverter(AccTestCase):
         [
             ("slice_batch_dim", slice(None, None, None)),
             ("slice_basic", (slice(None, None, None), slice(0, 3, 2))),
+            ("slice_full", (slice(None, None, None), slice(0, 10, 3))),
             ("ellipsis", (slice(None, None, None), ..., slice(0, 3, 2))),
             (
                 "slice_all_none",

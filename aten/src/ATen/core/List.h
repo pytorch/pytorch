@@ -1,13 +1,14 @@
 #pragma once
 
 #include <ATen/core/ivalue_to.h>
+#include <ATen/core/jit_type_base.h>
 #include <c10/macros/Macros.h>
+#include <c10/macros/Export.h>
 #include <c10/util/TypeTraits.h>
 #include <c10/util/TypeList.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <vector>
 
 namespace at {
@@ -17,7 +18,6 @@ namespace c10 {
 struct IValue;
 template<class T> class List;
 struct Type;
-using TypePtr = std::shared_ptr<Type>;
 
 namespace detail {
 
@@ -259,8 +259,6 @@ public:
 
   List(const List&) = default;
   List& operator=(const List&) = default;
-  List(List&&) noexcept;
-  List& operator=(List&&) noexcept;
 
   /**
    * Create a new List pointing to a deep copy of the same data.

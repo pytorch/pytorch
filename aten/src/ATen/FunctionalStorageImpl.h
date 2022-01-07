@@ -65,8 +65,8 @@ struct ViewMeta {
 class Alias {
   public:
     struct Update {
-        const at::Tensor& new_val;
-        const std::vector<ViewMeta>& view_metas;
+        const at::Tensor new_val;
+        const std::vector<ViewMeta> view_metas;
     };
     explicit Alias(const at::Tensor& base);
     const at::Tensor& base() const;

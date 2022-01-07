@@ -12,14 +12,9 @@
 #include <iostream>
 #include <string>
 
-int main(int argc, char* argv[]) {
-  ::testing::InitGoogleTest(&argc, argv);
-  int rc = RUN_ALL_TESTS();
-  return rc;
-}
-
 void compare_torchpy_jit(const char* model_filename, const char* jit_filename) {
   // Test
+
   torch::deploy::InterpreterManager m(1);
   torch::deploy::Package p = m.loadPackage(model_filename);
   auto model = p.loadPickle("model", "model.pkl");
@@ -29,12 +24,12 @@ void compare_torchpy_jit(const char* model_filename, const char* jit_filename) {
     eg = I.self.attr("load_pickle")({"model", "example.pkl"}).toIValue();
   }
 
-  at::Tensor output = model(eg.toTuple()->elements()).toTensor();
+  at::Tensor output = model(eg.toTupleRef().elements()).toTensor();
 
   // Reference
   auto ref_model = torch::jit::load(jit_filename);
   at::Tensor ref_output =
-      ref_model.forward(eg.toTuple()->elements()).toTensor();
+      ref_model.forward(eg.toTupleRef().elements()).toTensor();
 
   ASSERT_TRUE(ref_output.allclose(output, 1e-03, 1e-05));
 }
@@ -483,3 +478,9 @@ TEST(TorchpyTest, TestPyYAML) {
   EXPECT_EQ(kDocument, dump.toIValue().toString()->string());
 }
 #endif
+
+int main(int argc, char* argv[]) {
+  ::testing::InitGoogleTest(&argc, argv);
+  int rc = RUN_ALL_TESTS();
+  return rc;
+}

@@ -1,9 +1,11 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_NO_OPERATORS
+#include <ATen/native/cuda/TensorTopK.h>
+#include <ATen/core/TensorBase.h>
 #include <ATen/ceil_div.h>
+#include <ATen/Dispatch.h>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/cuda/ScanUtils.cuh>
-#include <ATen/native/Resize.h>
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/SortingRadixSelect.cuh>
 #include <ATen/native/cuda/SortUtils.cuh>
@@ -161,26 +163,15 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<T, IndexType> input,
 
 } // namespace
 
-TORCH_IMPL_FUNC(topk_out_cuda)
-  (const Tensor& self,
-   int64_t k, int64_t dim, bool largest, bool sorted,
-   const Tensor& values,
-   const Tensor& indices) {
-  TensorArg topK_arg{values, "topK", 1}, indices_arg{indices, "indices", 2}, input_arg{self, "self", 3};
-  checkAllSameGPU(__func__, {topK_arg, indices_arg, input_arg});
-  dim = at::maybe_wrap_dim(dim, self);
-
+void launch_gather_topk_kernel(
+    const TensorBase& self, int64_t k, int64_t dim, bool largest, bool sorted,
+    const TensorBase& values, const TensorBase& indices) {
   int numDims = self.dim();
   numDims = numDims == 0 ? 1 : numDims;
   TORCH_CHECK(numDims <= MAX_DIMS, "input tensor has too many dimensions");
   int64_t sliceSize = self.dim() == 0 ? 1 : self.size(dim);
 
-  Tensor input = self.contiguous();
-
-  // If k is 0 the result is an empty tensor, so we don't need to launch a kernel.
-  if (k == 0) {
-    return;
-  }
+  auto input = self.contiguous();
   // static_cast is required to ensure that the correct type (INDEX_T)
   // is provided to the kernel for the arguments.
 
@@ -297,32 +288,6 @@ TORCH_IMPL_FUNC(topk_out_cuda)
 #undef RUN_DIM
 #undef RUN_DIR
 #undef RUN_K
-
-  // Sort the results if the user wants them sorted, since our
-  // selection routine does not ensure sorting
-  if (sorted && values.numel() > 1) {
-    if (should_use_small_sort(values, dim)) {
-      // This avoids any memory allocations and performs all sorting
-      // work inplace along the slice
-
-      sortKeyValueInplace(values, indices, dim, largest);
-    } else {
-      // Depend upon the backup sort that returns indices, which we
-      // can use in conjunction with gather to produce the original
-      // indices.
-      // This is not the most efficient implementation, especially since
-      // there are memory allocations performed here. If the user desires
-      // greater performance, they should torch.gather() the results
-      // themselves using the reported indices, providing previously
-      // allocated tensors to receive the results.
-
-      Tensor sortedIndices = at::empty_like(indices);
-      Tensor sortedValues = at::empty_like(values);
-      sort_out_cuda(values, dim, largest, sortedValues, sortedIndices);
-      indices.copy_(indices.gather(dim, sortedIndices));
-      values.copy_(sortedValues);
-    }
-  }
 }
 
 } // at::native

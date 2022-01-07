@@ -1,9 +1,11 @@
 import functools
 import traceback
+from dataclasses import dataclass
 from enum import Enum, auto
 from typing import (
     TYPE_CHECKING,
     Any,
+    Callable,
     Dict,
     List,
     Optional,
@@ -22,6 +24,8 @@ from torch.distributed.distributed_c10d import _get_default_group
 from torch.nn.parameter import Parameter
 
 from .flatten_params_wrapper import FlattenParamsWrapper
+from .wrap import _recursive_wrap
+
 from .utils import (
     _apply_to_tensors,
 )
@@ -29,6 +33,39 @@ from .utils import (
 if TYPE_CHECKING:
     from collections import OrderedDict  # noqa: F401
 
+
+@dataclass
+class CPUOffload:
+    offload_params: bool = False
+    # TODO: state dict offloading, activation offloading
+    # https://github.com/pytorch/pytorch/issues/67224
+
+class BackwardPrefetch_(Enum):
+    """
+    Specify where to prefetch next layer's full parameters
+    during backward pass.
+    BACKWARD_PRE: prefetch right before current layer's backward computation
+                  starts, this approach will increase backward communication
+                  and computation overalpping and potentialy improve training
+                  performance, but it may increase the peak memory usage as
+                  the prefetched full parameters will be kept in the GPU memory
+                  until next layer's backward computation is done.
+    BACKWARD_POST: prefetch right after current layer's backward computation finishes,
+                   this approach will not increase peak memory as prefetching happens
+                   after current layer's full parameters are freed.
+                   It could potentially improve backward communication and computation
+                   overlapping as it avoids all_gather and reduce_scatter are blocked
+                   each other in the single NCCL stream. However, based on our experiments,
+                   for some models, the backward post backward hook fire order is not always
+                   the reversed forward computation order, so this
+                   approach may prefetch full parameters for layers ahead of next layer,
+                   this 'ahead' all_gather could delay next layer's all_gather in the
+                   single NCCL stream and cause the next layer's computation delay. So it may
+                   cause some performance regession for some models.
+    """
+    BACKWARD_PRE = auto()
+    BACKWARD_POST = auto()
+    # TODO, BACKWARD_PRE_CPU, prefetch full parameters and keep them in the CPU memory
 
 class TrainingState_(Enum):
     """
@@ -78,22 +115,68 @@ class FullyShardedDataParallel(nn.Module):
             module to be wrapped with FSDP.
         process_group (Optional[ProcessGroup]):
             process group for sharding
+        cpu_offload (Optional [CPUOffload]):
+            CPU offloading config. Currently, only parameter and gradient CPU
+            offload is supported. It can be enabled via passing in
+            ``cpu_offload=CPUOffload(offload_params=True)``. Note that this
+            currently implicitly enables gradient offloading to CPU in order for
+            params and grads to be on same device to work with optimizer. This
+            API is subject to change. Default is ``None`` in which case there
+            will be no offloading.
+        fsdp_auto_wrap_policy: (Optional [callable]):
+            A callable specifying a policy to recursively wrap layers with FSDP.
+            Note that this policy currently will only apply to child modules of
+            the passed in module. The remainder modules are always wrapped in
+            the returned FSDP root instance.
+        backward_prefetch: (Optional[BackwardPrefetch_]):
+            This is an experimental feature that is subject to change in the
+            the near future. It allows users to enable two different backward_prefetch
+            algorithms to help backward communication and computation overlapping.
+            Pros and cons of each algorithm is explained in the class ``BackwardPrefetch_``.
     """
 
     def __init__(
         self,
         module: nn.Module,
         process_group: Optional[ProcessGroup] = None,
+        cpu_offload: Optional[CPUOffload] = None,
+        fsdp_auto_wrap_policy: Optional[Callable] = None,
+        backward_prefetch: Optional[BackwardPrefetch_] = None,
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
+        # if fsdp_auto_wrap_policy is specified, submodules should not be
+        # already wrapped, otherwise we'd attempt to double wrap them resulting
+        # in errors.
+        if fsdp_auto_wrap_policy is not None:
+            self._check_wrapped(
+                module,
+                check_fn=lambda mod: not isinstance(mod, FullyShardedDataParallel),
+                err_fn=lambda mod: f"Expected {mod} to NOT be FullyShardedDataParallel if auto_wrap is enabled.",
+            )
+            _recursive_wrap(
+                module,
+                auto_wrap_policy=fsdp_auto_wrap_policy,
+                wrapper_cls=FullyShardedDataParallel,
+                # Note that we have the recursive_wrap skip wrapping for
+                # the outermost (this) module otherwise it will result in a
+                # double-wrap causing issues.
+                only_wrap_children=True,
+                # FSDP arguments follow.
+                process_group=process_group,
+                cpu_offload=cpu_offload,
+                # Note that recursive_wap should not call FSDP with wrapping
+                # enabled, as this recursive call handles all wrapping,
+                # including for nested children.
+                fsdp_auto_wrap_policy=None,
+            )
+
         self.process_group = process_group or _get_default_group()
         self.rank = self.process_group.rank()
         self.world_size = self.process_group.size()
         # device for computation, if module is on GPU, use module.device;
         # if module is on CPU, use current device;
         self.compute_device = _get_default_cuda_device(module)
-        self.compute_dtype = _get_data_type(module)
 
         # Free full params and keep shard only after forward
         self.reshard_after_forward = True
@@ -107,6 +190,8 @@ class FullyShardedDataParallel(nn.Module):
         )
 
         self.numel_padded_per_param: List[int] = []
+        self.cpu_offload = cpu_offload or CPUOffload()
+        self.backward_prefetch = backward_prefetch
 
         # Only handle params which are not already sharded. This enables
         # sharding individual layers of a Module, with an outer wrapper to
@@ -139,6 +224,19 @@ class FullyShardedDataParallel(nn.Module):
 
         # Flag to guard against preparing gradients multiple times per backward pass.
         self._pre_backward_hook_has_run = False
+        # Used for prefetching all gather full params in post backward hook
+        self._need_rebuild_full_params = False
+
+        # If specified, offload parameter shard to CPU.
+        if self.cpu_offload.offload_params:
+            for p in self.params:
+                self._offload_to_cpu(p)
+
+    @classmethod
+    def _check_wrapped(cls, begin_module, check_fn, err_fn):
+        for _, mod in begin_module.named_modules():
+            if not check_fn(mod):
+                raise ValueError(err_fn(mod))
 
     @property
     def module(self) -> FlattenParamsWrapper:
@@ -153,6 +251,17 @@ class FullyShardedDataParallel(nn.Module):
         while world_size % factor == 0 and world_size / factor > factor:
             factor *= 2
         return float(factor)
+
+    def _offload_to_cpu(self, p):
+        """
+        Offloads parameter to CPU from self.compute_device. If the parameter is
+        already on CPU then this is a noop.
+        """
+        cpu_device = torch.device("cpu")
+        if p.device == cpu_device:
+            return
+        with torch.no_grad():
+            p.data = p.to(cpu_device)
 
     def _cast_buffers(
         self, device: Optional[torch.device] = None, memo: Optional[Set] = None
@@ -278,6 +387,8 @@ class FullyShardedDataParallel(nn.Module):
         """
         self._is_root: Optional[bool] = None
         self._streams: Dict[str, torch.cuda.Stream] = {}
+        self._fsdp_graph_order: List[nn.Module] = []
+        self._my_fsdp_idx_in_graph: Optional[int] = None
         for p in self.params:
             if hasattr(p, "_local_shard"):
                 # reset attributes that are added in _init_param_attributes, as
@@ -309,7 +420,9 @@ class FullyShardedDataParallel(nn.Module):
             # Don't free the full params for the outer-most (root) instance,
             # In most cases, root instance contains params in the last layers
             # or has no params. In these cases, those params will be needed
-            # immediately after for the backward pass.
+            # immediately after for the backward pass. Note that this only
+            # applies currently when freeing parameters at end of layer's
+            # forward pass.
             self.reshard_after_forward = False
 
             # Due to the use of streams, we need to make sure the previous
@@ -342,11 +455,44 @@ class FullyShardedDataParallel(nn.Module):
         assert hasattr(p, "_is_sharded") and hasattr(
             p, "_orig_size"
         ), "Parameters should have been sharded during construction."
+        # If _local_shard has been set in the first lazy init and
+        # current parameter is pointed to _local_shard, no need to
+        # set the _local_shard again.
         if hasattr(p, "_local_shard"):
+            # If CPU offloading, p._local_shard should have been placed on CPU
+            # during its first lazy construction.
+            if self.cpu_offload.offload_params:
+                assert p._local_shard.device == torch.device(  # type: ignore[attr-defined]
+                    "cpu"
+                ), (
+                    "Expected p._local_shard to be on CPU, "  # type: ignore[attr-defined]
+                    f"but it's on {p._local_shard.device}"  # type: ignore[attr-defined]
+                )
             return
 
-        # A single shard of the parameters.
+        # A single shard of the parameters. Also makes p._local_shard to be on
+        # CPU if we are CPU offloading, since p.data would be on CPU during
+        # init.
+        if self.cpu_offload.offload_params:
+            assert p.device == torch.device(
+                "cpu"
+            ), ("Expected param to be on CPU when cpu_offloading is enabled. "
+                "If CPU offloading is enabled correctly, you may be "
+                "accidentally moving the model to CUDA after FSDP initialization."
+                )
         p._local_shard = p.data  # type: ignore[attr-defined]
+        # If CPU offloading, pin the memory to enable faster CPU -> GPU device
+        # transfer.
+        if self.cpu_offload.offload_params:
+            assert p._local_shard.device == torch.device("cpu")  # type: ignore[attr-defined]
+            p._local_shard.pin_memory()  # type: ignore[attr-defined]
+            # When offloading parameters, also move the grad shard to CPU during
+            # backward pass. In this case, it's important to pre-allocate the
+            # CPU grad shard in pinned memory so that we can do a non-blocking
+            # transfer.
+            p._cpu_grad = torch.zeros_like(  # type: ignore[attr-defined]
+                p, device=torch.device("cpu")
+            ).pin_memory()
 
         # We also maintain a full-sized parameter of type self.compute_dtype.
         # We resize the storage to size 0 at init (here) and only materialize
@@ -357,7 +503,7 @@ class FullyShardedDataParallel(nn.Module):
             p._full_param_padded = torch.zeros(  # type: ignore[attr-defined]
                 p.numel() * self.world_size,
                 device=self.compute_device,
-                dtype=self.compute_dtype,
+                dtype=p.dtype,
             )
             _free_storage(p._full_param_padded)  # type: ignore[attr-defined]
 
@@ -405,6 +551,7 @@ class FullyShardedDataParallel(nn.Module):
         for n, m in self.named_modules():
             if n != "" and isinstance(m, FullyShardedDataParallel):
                 m._streams = self._streams
+                m._fsdp_graph_order = self._fsdp_graph_order
 
     def _wait_for_previous_optim_step(self) -> None:
         """
@@ -416,14 +563,40 @@ class FullyShardedDataParallel(nn.Module):
             return
         self._streams["all_gather"].wait_stream(torch.cuda.current_stream())
 
+    def _need_prefetch_pre_backward_hook(self) -> bool:
+        if (
+            self.backward_prefetch == BackwardPrefetch_.BACKWARD_PRE
+            and self._fsdp_graph_order is not None
+            and self._my_fsdp_idx_in_graph is not None and self._my_fsdp_idx_in_graph > 0
+            and self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1].training_state != TrainingState_.BACKWARD_POST
+        ):
+            return True
+        else:
+            return False
+
+    def _need_prefetch_post_backward_hook(self) -> bool:
+        if (
+            self.backward_prefetch == BackwardPrefetch_.BACKWARD_POST
+            and self._fsdp_graph_order is not None
+            and self._my_fsdp_idx_in_graph is not None and self._my_fsdp_idx_in_graph > 0
+            and self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1].training_state != TrainingState_.BACKWARD_POST
+            and self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1]._need_rebuild_full_params
+        ):
+            return True
+        else:
+            return False
+
     def forward(self, *args: Any, **kwargs: Any) -> Any:
         self._lazy_init()
 
         # Start of a forward pass.
         self.training_state = TrainingState_.FORWARD
 
-        # All-gather full parameters.
+        # All-gather full parameters, moving them to compute_device if
+        # necessary.
         self._rebuild_full_params()
+        # Wait for all_gather full parameters to finish before computation
+        torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
 
         # Register backward hooks to reshard params and reduce-scatter grads.
         # These need to be re-registered every forward pass in some cases where grad_fn
@@ -431,6 +604,10 @@ class FullyShardedDataParallel(nn.Module):
         self._register_post_backward_hooks()
 
         outputs = self.module(*args, **kwargs)
+
+        if self not in self._fsdp_graph_order:
+            self._my_fsdp_idx_in_graph = len(self._fsdp_graph_order)
+            self._fsdp_graph_order.append(self)
 
         if self.reshard_after_forward:
             self._free_full_params()
@@ -457,6 +634,9 @@ class FullyShardedDataParallel(nn.Module):
         Returns:
             outputs: new outputs with hooks registered if they requires gradient.
         """
+        # Reset before each backward pass
+        self._need_rebuild_full_params = False
+
         if not torch.is_grad_enabled():
             return outputs  # don't register hooks if grad isn't enabled
 
@@ -480,7 +660,22 @@ class FullyShardedDataParallel(nn.Module):
             if self._is_root:
                 self._queue_wait_for_post_backward()
 
+            if self._need_prefetch_pre_backward_hook():
+                # Always wait for all_gather before rebuilding full params, just
+                # in case full params have already been prefetched in previous layer's
+                # pre-backward hook.
+                torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
+
+            # All-gather full parameters, moving them to compute device if
+            # necessary.
             self._rebuild_full_params()
+            # Wait for all_gather to finish before computation
+            torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
+
+            # Prefetch next layer's full params in backward pass,
+            # since it is prefetching, no need to wait for all_gather stream.
+            if self._need_prefetch_pre_backward_hook():
+                self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1]._rebuild_full_params()  # type: ignore[operator]
 
             self._pre_backward_hook_has_run = True
             # Prepare p.grad so that it is in the right shape, device, accumulated values, etc.
@@ -492,6 +687,7 @@ class FullyShardedDataParallel(nn.Module):
         def _register_hook(t: torch.Tensor) -> torch.Tensor:
             if t.requires_grad:
                 t.register_hook(_pre_backward_hook)
+                self._need_rebuild_full_params = True
             return t
 
         # Attach hooks to Tensor outputs.
@@ -584,9 +780,20 @@ class FullyShardedDataParallel(nn.Module):
         # Switch to local shard after backward.
         self._use_param_local_shard([param])
 
+        # Prefetch previous layer's full params in backward pass post backward hook,
+        # If next layer's backward computation is done and full params are freed,
+        # no need to prefetch the full params again.
+        # Only prefetch full params if any of the next layer's outputs requires grad
+        if self._need_prefetch_post_backward_hook():
+            self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1]._rebuild_full_params()  # type: ignore[operator]
+            # Next layer's computation will start right after this all_gather,
+            # Wait for all_gather to finish before computation.
+            torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
+
         # Wait for all work in the current stream to finish, then start the
         # reductions in post_backward stream.
         self._streams["post_backward"].wait_stream(torch.cuda.current_stream())
+
         with torch.cuda.stream(self._streams["post_backward"]):
             orig_grad_data = param.grad.data
 
@@ -616,6 +823,23 @@ class FullyShardedDataParallel(nn.Module):
                     self.world_size == 1
                 ), "Currently the only way for _is_sharded to be False is \
                     world_size == 1"
+
+            # Regardless of sharding or not, offload the grad to CPU if we are
+            # offloading params. This is so param and grad reside on same device
+            # which is needed for the optimizer step.
+            if self.cpu_offload.offload_params:
+                # We specify non_blocking=True
+                # and ensure the appropriate synchronization is done by waiting
+                # streams in _wait_for_post_backward.
+                param._cpu_grad.copy_(  # type: ignore[attr-defined]
+                    param.grad.detach(), non_blocking=True
+                )
+                # Don't let this memory get reused until after the transfer.
+                param.grad.data.record_stream(torch.cuda.current_stream())
+                # Point param.grad.data to CPU grad to offload it. Note that
+                # the transfer is async so it is not necessarily done until we
+                # explicitly synchronize in backward.
+                param.grad.data = param._cpu_grad  # type: ignore[attr-defined]
 
             # After _post_backward_hook returns, orig_grad_data will eventually
             # go out of scope, at which point it could otherwise be freed for
@@ -651,6 +875,14 @@ class FullyShardedDataParallel(nn.Module):
             self._assert_state(TrainingState_.BACKWARD_PRE)
 
         torch.cuda.current_stream().wait_stream(self._streams["post_backward"])
+        if self.cpu_offload.offload_params:
+            # We need to wait for the non-blocking GPU ->
+            # CPU grad transfers to finish. We need to do this for GPU -> CPU
+            # copies because when grad is on CPU, it won't wait for any CUDA
+            # stream to finish GPU -> CPU copies unless we explicitly block the
+            # host-side with synchronize().
+            torch.cuda.current_stream().synchronize()
+
         # A backward pass is done, clean up below.
 
         def _remove_shard_bwd_hook(fsdp_module: FullyShardedDataParallel) -> None:
@@ -712,6 +944,13 @@ class FullyShardedDataParallel(nn.Module):
 
         with torch.cuda.stream(self._streams["all_gather"]):
             for p in self.params:
+                if self.cpu_offload.offload_params:
+                    # Move params to GPU if needed. Note that we don't use
+                    # self._full_param_padded.device here because the attr is
+                    # not set always, i.e. when world_size=1 and
+                    # p._is_sharded = False. However when it is set, the
+                    # device is always self.compute_device.
+                    p.data = p.data.to(self.compute_device, non_blocking=True)
                 # e.g., when world_size == 1
                 if not p._is_sharded:  # type: ignore[attr-defined]
                     continue
@@ -724,7 +963,6 @@ class FullyShardedDataParallel(nn.Module):
                     continue
                 else:
                     # If full param has not been rebuilt or has been freed, call all gather
-                    # Move params in CPU to CUDA for the all-gather.
                     p_data = p.data  # type: ignore[attr-defined]
                     p_full_size = p._full_param_padded.size()  # type: ignore[attr-defined]
                     assert (
@@ -745,8 +983,6 @@ class FullyShardedDataParallel(nn.Module):
                     # Set p.data = output_tensor (with padding trimmed)
                     update_p_data(output_tensor)
 
-        torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
-
     @torch.no_grad()
     def _prep_grads_for_backward(self) -> None:
         """Make sure p.grad has the correct size/device, otherwise set it to None."""
@@ -759,7 +995,9 @@ class FullyShardedDataParallel(nn.Module):
 
     @torch.no_grad()
     def _free_full_params(self, params: Optional[List[Parameter]] = None) -> None:
-        """Free up storage for full parameters."""
+        """
+        Free up storage for full parameters.
+        """
         if params is None:
             params = self.params
         current_stream = torch.cuda.current_stream()
@@ -780,10 +1018,18 @@ class FullyShardedDataParallel(nn.Module):
 
     @torch.no_grad()
     def _use_param_local_shard(self, params: Optional[List[Parameter]] = None) -> None:
-        """Use local shard for a list of params."""
+        """Use local shard for a list of params. Also implicitly offloads
+        parameters back to CPU if we are CPU offloading."""
         if params is None:
             params = self.params
         for p in params:
+            if self.cpu_offload.offload_params:
+                # Ensure local_shard resides in CPU if we are offloading params.
+                assert p._local_shard.device == torch.device(  # type: ignore[attr-defined]
+                    "cpu"
+                ), (
+                    "Expected p._local_shard to be on CPU"
+                )
             p.data = p._local_shard  # type: ignore[attr-defined]
 
     def _assert_state(self, state: Union[TrainingState_, List[TrainingState_]]) -> None:
@@ -820,17 +1066,6 @@ def _get_default_cuda_device(module: nn.Module) -> torch.device:
     # Fall back to current CUDA device
     return torch.device("cuda")
 
-def _get_data_type(module: nn.Module) -> torch.dtype:
-    """Try to infer data type from module parameters."""
-    try:
-        dtype = next(module.parameters()).dtype
-        return dtype
-    # e.g., if module does not have parameters, it will throw StopIteration,
-    # in this case, instead of raising exception, return torch.float32.
-    except StopIteration:
-        pass
-    # Fall back to torch.float32
-    return torch.float32
 
 def _free_storage(data: torch.Tensor) -> None:
     """Free underlying storage of a Tensor."""

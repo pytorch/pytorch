@@ -66,10 +66,20 @@ Tensor computeReshape(
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType,
     at::Device device);
+Tensor computeFlatten(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device);
 Tensor computeCatWoConditionals(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape);
 Tensor computeCat(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device);
+Tensor computeEmbedding(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType,

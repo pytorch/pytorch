@@ -1,8 +1,9 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 #include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
+#include <torch/csrc/jit/codegen/cuda/lower_warp_reduce.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 
 #include <memory>
@@ -37,10 +38,11 @@ struct KernelSummary {
   bool has_block_reductions = false;
 
   //! Number of static grid reductions
-  int number_of_grid_reductions = 0;
+  bool has_grid_reductions = false;
 
-  //! Do we have any grid reduction in a loop?
-  bool has_grid_reduction_in_loop = false;
+  //! Do we have any grid reduction in a loop, or grid reductions dependent on
+  //! grid reductions
+  bool has_cooperative_grid_reduction = false;
 
   //! Do we have any block broadcasts?
   bool has_block_broadcasts = false;
@@ -63,6 +65,9 @@ struct KernelSummary {
   //! List of dynamic local memory buffers.
   //! Only used for debugging.
   std::vector<const kir::Allocate*> dynamic_lmem_allocations;
+
+  //! ceilDiv extents that must be divisible
+  std::vector<std::pair<const kir::Val*, const kir::Val*>> splits_to_validate;
 };
 
 //! Container for a lowered Kernel IR
@@ -143,6 +148,16 @@ class TORCH_CUDA_CU_API Kernel final : public NonCopyable {
     return next_value_id_++;
   }
 
+  //! Checks if parallel type is padded
+  bool isParallelTypePadded(ParallelType ptype) const {
+    return ptype == ParallelType::TIDx &&
+        warp_padded_parallel_info_.is_tidx_padded;
+  }
+
+  const WarpPaddedParallelInfo& getWarpPaddedParallelInfo() const {
+    return warp_padded_parallel_info_;
+  }
+
   //! Debug dump of the Kernel IR
   void print() const;
 
@@ -172,6 +187,7 @@ class TORCH_CUDA_CU_API Kernel final : public NonCopyable {
   // Predicate map
   // TODO(kir): consider a simpler, kernel IR based version
   std::unique_ptr<ThreadPredicateMap> predicate_map_;
+  WarpPaddedParallelInfo warp_padded_parallel_info_;
 };
 
 } // namespace kir

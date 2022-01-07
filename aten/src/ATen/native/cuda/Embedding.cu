@@ -6,7 +6,7 @@
 #include <c10/util/Exception.h>
 #include <c10/macros/Macros.h>
 
-#include <ATen/cuda/cub.cuh>
+#include <ATen/cuda/cub.h>
 
 #include <ATen/native/cuda/EmbeddingBackwardKernel.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>

@@ -16,8 +16,8 @@ std::string lookupMainModule(InterpreterManager& m) {
   return ss.str();
 }
 
-int doMain(int /* argc */, char** /* argv */) {
-  std::shared_ptr<Environment> env = std::make_shared<XarEnvironment>();
+int doMain(int /* argc */, char** argv) {
+  std::shared_ptr<Environment> env = std::make_shared<XarEnvironment>(argv[0]);
   InterpreterManager m(2, env);
 
   auto mainModule = lookupMainModule(m);

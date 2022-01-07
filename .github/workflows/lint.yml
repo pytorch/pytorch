@@ -105,7 +105,8 @@ jobs:
       - name: Ensure all test files have header containing ownership information
         if: always()
         run: |
-          (! git grep -L "# Owner(s): \[" ./test/distributed/**/test_*.py || (printf "The above test files are missing a comment header with ownership information; please add the following line\n\n# Owner(s): [\"<owner: label>\"]\n\nto the top of each test file. The owner should be an existing pytorch/pytorch label."; false))
+          python3 -m pip install boto3==1.19.12
+          .github/scripts/lint_test_ownership.py
 
   clang-format:
     runs-on: ubuntu-18.04
@@ -465,17 +466,17 @@ jobs:
       - name: Install dependencies
         run: |
           set -eux
-          pip3 install -r requirements.txt --user
-          pip3 install numpy==1.20 --user # https://github.com/pytorch/pytorch/pull/60472
-          pip3 install expecttest==0.1.3 mypy==0.812 --user
+          python3 -mpip install -r requirements.txt --user
+          python3 -mpip install numpy==1.20 --user # https://github.com/pytorch/pytorch/pull/60472
+          python3 -mpip install expecttest==0.1.3 mypy==0.812 --user
           # Needed to check tools/render_junit.py
-          pip3 install junitparser==2.1.1 rich==10.9.0 --user
+          python3 -mpip install junitparser==2.1.1 rich==10.9.0 --user
       - name: Run autogen
         run: |
           set -eux
-          time python -mtools.generate_torch_version --is_debug=false
-          time python -mtools.codegen.gen -s aten/src/ATen -d build/aten/src/ATen
-          time python -mtools.pyi.gen_pyi --native-functions-path aten/src/ATen/native/native_functions.yaml --deprecated-functions-path "tools/autograd/deprecated.yaml"
+          time python3 -mtools.generate_torch_version --is_debug=false
+          time python3 -mtools.codegen.gen -s aten/src/ATen -d build/aten/src/ATen
+          time python3 -mtools.pyi.gen_pyi --native-functions-path aten/src/ATen/native/native_functions.yaml --deprecated-functions-path "tools/autograd/deprecated.yaml"
       - name: Run mypy
         env:
           MYPY_FORCE_COLOR: 1
@@ -484,7 +485,7 @@ jobs:
           set -eux
           STATUS=
           for CONFIG in mypy*.ini; do
-            if ! mypy --config="$CONFIG"; then
+            if ! python3 -mmypy --config="$CONFIG"; then
               STATUS=fail
             fi
           done

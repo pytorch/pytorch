@@ -4,6 +4,7 @@
 #include <torch/csrc/lazy/core/config.h>
 #include <torch/csrc/lazy/core/ir.h>
 #include <torch/csrc/lazy/core/ir_metadata.h>
+#include <torch/csrc/lazy/ts_backend/ts_node.h>
 
 namespace torch {
 namespace lazy {
@@ -13,7 +14,7 @@ class TestLeafNode : public Node {
   explicit TestLeafNode(size_t param)
       : Node(OpKind(), /* num_outputs */ 1, /* hash_seed */ Hash(param)),
         param_(param) {}
-  ~TestLeafNode() override {}
+  ~TestLeafNode() override = default;
 
   const std::vector<Output>& operands() const override {
     TORCH_INTERNAL_ASSERT(false, "Can't access operands of leaf node");
@@ -74,6 +75,25 @@ TEST(IrTest, MetaDataTest) {
   EXPECT_EQ(metaWithSourceLoc.frame_info[0].function, "function");
   EXPECT_EQ(metaWithSourceLoc.frame_info[0].line, 10);
   FLAGS_torch_lazy_ir_debug = restore_FLAGS_torch_lazy_ir_debug;
+}
+
+TEST(IrTest, TsNode) {
+  NodePtr node1 = MakeNode<TsNode>(
+      OpKind(at::aten::view),
+      Shape(),
+      /*num_outputs*/ 1,
+      /*hash_seed*/ kHashSeed);
+  NodePtr node2 = MakeNode<TsNode>(
+      OpKind(at::aten::view),
+      Shape(),
+      /*num_outputs*/ 1,
+      /*hash_seed*/ kHashSeed);
+  EXPECT_EQ(node1->hash(), node2->hash());
+
+  EXPECT_EQ(node1->num_outputs(), 1);
+
+  const TsNode* leafptr = NodeCast<TsNode>(node1.get(), OpKind(at::aten::view));
+  EXPECT_TRUE(leafptr != nullptr);
 }
 
 } // namespace lazy

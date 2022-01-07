@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/passes/clear_profiling.h>
+#include <torch/csrc/jit/passes/eliminate_no_ops.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
@@ -104,6 +105,7 @@ class AttributePropagator {
           subgraph,
           /* unroll_non_constant_loops? */ false,
           /* const_prop_user_classes? */ false);
+      EliminateNoOps(subgraph);
       LowerSimpleTuples(subgraph);
     };
 
@@ -647,6 +649,7 @@ class AttributePropagator {
       recordReferencedAttrs(graph);
       handleSharedClassType(module_, graph);
       removeExtraWaitCalls(graph->block());
+      toGraphFunction(*function).clear_optimized_graphs();
     }
     removeUnusedAttrs();
   }

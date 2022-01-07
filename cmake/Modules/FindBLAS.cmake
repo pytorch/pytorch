@@ -380,6 +380,16 @@ IF (BLAS_LIBRARIES)
   cmake_pop_check_state()
 ENDIF(BLAS_LIBRARIES)
 
+# Blas has bfloat16 support?
+IF(BLAS_LIBRARIES)
+  SET(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
+  check_function_exists("sbgemm_" BLAS_HAS_SBGEMM)
+  set(CMAKE_REQUIRED_LIBRARIES)
+  IF(BLAS_HAS_SBGEMM)
+    add_compile_options(-DBLAS_HAS_SBGEMM)
+  ENDIF(BLAS_HAS_SBGEMM)
+ENDIF(BLAS_LIBRARIES)
+
 # epilogue
 
 if(BLAS_LIBRARIES)

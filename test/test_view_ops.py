@@ -9,8 +9,10 @@ from functools import partial
 import random
 
 from torch.testing import make_tensor
-from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, suppress_warnings)
+from torch.testing._internal.common_utils import (
+    TestCase, run_tests, suppress_warnings, gradcheck, gradgradcheck,
+    torch_to_numpy_dtype_dict,
+)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, onlyCPU, dtypes, onlyNativeDeviceTypes)
 from torch.testing._internal.common_dtype import (
@@ -126,54 +128,122 @@ class TestViewOps(TestCase):
         self.assertTrue(s is t)
 
     @onlyNativeDeviceTypes
-    @dtypes(*get_all_fp_dtypes(include_bfloat16=False), torch.complex64)
-    def test_view_dtype(self, device, dtype):
-        int_dtype = {
-            torch.half: torch.int16,
-            torch.bfloat16: torch.int16,
-            torch.float: torch.int,
-            torch.double: torch.long,
-            torch.complex64: torch.long,
-        }[dtype]
-        numpy_dtype = {
-            torch.half: np.int16,
-            torch.bfloat16: np.int16,
-            torch.float: np.int32,
-            torch.double: np.int64,
-            torch.complex64: np.int64,
-        }[dtype]
+    @dtypes(*get_all_dtypes(include_bfloat16=False))
+    def test_view_dtype_new(self, device, dtype):
+        dtypes = torch_to_numpy_dtype_dict.copy()
+        del dtypes[torch.bool]
 
         def generate_inputs():
-            yield make_tensor((5, 5, 5), device, dtype, low=-5, high=5)
-            yield make_tensor((5, 5, 5), device, dtype, low=-5, high=5).permute(2, 0, 1)
-            yield make_tensor((1, 5, 1), device, dtype, low=-5, high=5).expand(5, 5, 5)
-            yield make_tensor((10, 5, 10), device, dtype, low=-5, high=5)[::2, :, ::2]
-            yield make_tensor((0, 5, 10), device, dtype, low=-5, high=5)
+            yield make_tensor((4, 4, 64), device, dtype, low=-5, high=5)
+            yield make_tensor((4, 4, 64), device, dtype, low=-5, high=5).permute(1, 0, 2)
+            yield make_tensor((4, 64, 4), device, dtype, low=-5, high=5).permute(2, 0, 1)
+            yield make_tensor((1, 5, 1), device, dtype, low=-5, high=5).expand(5, 5, 64)
+            yield make_tensor((2, 5, 256), device, dtype, low=-5, high=5)[1::2, 1:, ::2]
+            yield make_tensor((0, 5, 64), device, dtype, low=-5, high=5)
             yield make_tensor((), device, dtype, low=-5, high=5)
 
-        def run_test(fp_tensor):
-            self.assertRaises(RuntimeError, lambda: fp_tensor.view(torch.complex128))
-            self.assertRaises(RuntimeError, lambda: fp_tensor.view(torch.int8))
+        def calc_expected_size_and_stride(a, view_dtype):
+            dtype_size = torch._utils._element_size(a.dtype)
+            view_dtype_size = torch._utils._element_size(view_dtype)
 
-            int_tensor = fp_tensor.view(int_dtype)
-            self.assertEqual(int_tensor.dtype, int_dtype)
-            self.assertEqual(int_tensor.shape, fp_tensor.shape)
-            self.assertEqual(int_tensor.stride(), fp_tensor.stride())
+            if dtype_size == view_dtype_size:
+                return a.size(), a.stride()
 
-            self.assertEqual(fp_tensor, int_tensor.view(dtype), rtol=0, atol=0)
-            self.assertEqual(fp_tensor.cpu().numpy().view(numpy_dtype), int_tensor, rtol=0, atol=0)
+            elif dtype_size > view_dtype_size:
+                size_ratio = dtype_size // view_dtype_size
 
-            fp_tensor.zero_()
-            self.assertEqual(fp_tensor, torch.zeros_like(fp_tensor), rtol=0, atol=0)
+                view_size = list(a.size())
+                view_size[-1] = view_size[-1] * size_ratio
 
-        for fp_tensor in generate_inputs():
-            run_test(fp_tensor)
+                view_stride = [stride * size_ratio for stride in a.stride()]
+                view_stride[-1] = 1
+                return torch.Size(view_size), tuple(view_stride)
 
-        # Test that requires_grad is dropped, because view(dtype) does not support backward
-        if dtype is torch.double:
-            t = make_tensor((5, 5, 5), device, torch.double, low=-5, high=5, requires_grad=True)
-            self.assertFalse(t.view(torch.complex64).requires_grad)
+            else:
+                size_ratio = view_dtype_size // dtype_size
 
+                view_size = list(a.size())
+                view_size[-1] = view_size[-1] // size_ratio
+
+                view_stride = [stride // size_ratio for stride in a.stride()]
+                view_stride[-1] = 1
+                return torch.Size(view_size), tuple(view_stride)
+
+        for a in generate_inputs():
+            a_np = a.cpu().numpy()
+            a_np_contiguous = a.cpu().contiguous().numpy()
+
+            for view_dtype, np_view_dtype in dtypes.items():
+                equal_element_size = torch._utils._element_size(dtype) == torch._utils._element_size(view_dtype)
+
+                if not equal_element_size and a.dim() == 0:
+                    with self.assertRaisesRegex(RuntimeError, r"self.dim\(\) cannot be 0"):
+                        a.view(view_dtype)
+                    continue
+
+                if not equal_element_size and a.stride(-1) != 1:
+                    with self.assertRaisesRegex(RuntimeError, r"self.stride\(-1\) must be 1"):
+                        a.view(view_dtype)
+                    continue
+
+                a_view = a.view(view_dtype)
+                self.assertEqual(a_view.dtype, view_dtype)
+                self.assertEqual(a.data_ptr(), a_view.data_ptr())
+
+                expected_size, expected_stride = calc_expected_size_and_stride(a, view_dtype)
+                self.assertEqual(a_view.size(), expected_size)
+                self.assertEqual(a_view.stride(), expected_stride)
+
+                self.assertEqual(a_view.view(dtype), a, rtol=0, atol=0)
+
+                # NumPy's dtype view requires contiguous input if target
+                # dtype is a different size
+                if equal_element_size:
+                    a_np_view = a_np.view(np_view_dtype)
+
+                else:
+                    a_np_view = a_np_contiguous.view(np_view_dtype)
+
+                self.assertEqual(a_view, a_np_view)
+
+        # Test that requires_grad is dropped for floating point casts,
+        # because view(dtype) does not support backward yet
+        # TODO: Remove this when autograd support is added
+        if dtype.is_floating_point or dtype.is_complex:
+            for view_dtype in [*get_all_fp_dtypes(), *get_all_complex_dtypes()]:
+                t = make_tensor((5, 5, 64), device, dtype, low=-5, high=5, requires_grad=True)
+                self.assertFalse(t.view(view_dtype).requires_grad)
+
+    # Test the extra error checks that happen when the view dtype
+    # has a greater element size than the original dtype
+    @onlyNativeDeviceTypes
+    @dtypes(*get_all_dtypes())
+    def test_view_dtype_upsize_errors(self, device, dtype):
+        dtype_size = torch._utils._element_size(dtype)
+
+        for view_dtype in get_all_dtypes():
+            view_dtype_size = torch._utils._element_size(view_dtype)
+            if view_dtype_size <= dtype_size:
+                continue
+
+            size_ratio = view_dtype_size // dtype_size
+            a = make_tensor((4, 4, size_ratio + 1), device, dtype, low=-5, high=5)
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    rf"self.size\(-1\) must be divisible by {size_ratio}"):
+                a.view(view_dtype)
+
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    rf"self.storage_offset\(\) must be divisible by {size_ratio}"):
+                a[:, :, 1:].view(view_dtype)
+
+            a = make_tensor((4, 4, size_ratio), device, dtype, low=-5, high=5)
+            a = a.as_strided((4, 4, size_ratio), (size_ratio, 1, 1))
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    rf"self.stride\(1\) must be divisible by {size_ratio}"):
+                a.view(view_dtype)
 
     @onlyNativeDeviceTypes
     def test_view_as_complex(self, device):
@@ -430,6 +500,26 @@ class TestViewOps(TestCase):
             v[0] = idx + 1
             self.assertEqual(t[idx, 0], v[0])
 
+    # TODO: opinfo this or move to unbind's test suite
+    def test_unbind(self):
+        stacked = torch.randn(3, 10, 10, requires_grad=True)
+        x, y, z = stacked.unbind()
+        grad = torch.randn(3, 10, 10)
+        torch.autograd.backward([x, y, z], grad.unbind())
+        self.assertEqual(stacked.grad, grad)
+        # check that it works with only one gradient provided (#9977)
+        for i in range(3):
+            stacked = torch.randn(3, 10, 10, requires_grad=True)
+            outs = stacked.unbind()
+            gi = grad.unbind()[i]
+            g, = torch.autograd.grad(outs[i], stacked, gi)
+            g_expected = torch.stack([gi if j == i else torch.zeros_like(gi)
+                                      for j in range(3)], dim=0)
+            self.assertEqual(g, g_expected)
+        # Check with gradcheck
+        stacked = torch.randn(3, 10, 10, dtype=torch.double, requires_grad=True)
+        gradcheck(lambda x: x.unbind(), (stacked,), check_forward_ad=True)
+
     def test_expand_view(self, device) -> None:
         t = torch.ones((5, 1), device=device)
         v = t.expand(5, 5)
@@ -573,6 +663,52 @@ class TestViewOps(TestCase):
         self.assertTrue(self.is_view_of(t, v))
         v[6] = 0
         self.assertEqual(t[1, 1], v[6])
+
+    def test_as_strided_gradients(self):
+        def test(x, prepro_fn, size, strides, offset=None):
+            x = x.to(torch.double).detach().requires_grad_()
+
+            # Check that forward will **not** resize storage because it may
+            # cause NaN in output and fail numerical Jacobian check consequently
+            with torch.no_grad():
+                y = prepro_fn(x) if prepro_fn is not None else x
+                max_offset = sum((si - 1) * st for si, st in zip(size, strides))
+                max_offset += offset if offset is not None else y.storage_offset()
+                assert max_offset < len(y.storage()), "test case resizes storage"
+
+            def closure(x):
+                if prepro_fn is not None:
+                    x = prepro_fn(x)
+                return x.as_strided(size, strides, offset)
+
+            gradcheck(closure, [x], check_forward_ad=True)
+            gradgradcheck(closure, [x])
+
+        # test
+        test(torch.arange(0, 25), lambda x: x.view(5, 5), [3, 3], [6, 2], 2)
+
+        # test crazy stride at dim with size 1 case
+        test(torch.randn(12), None, [1, 2, 1, 5], [0, 5, 100, 1], 2)
+
+        # test expand case
+        test(torch.randn(5), None, [3, 3, 3], [0, 1, 0], 2)
+        test(torch.randn(5), None, [3, 3, 3], [0, 0, 0], 4)
+        test(torch.randn(5), lambda x: x.expand(5, 5), [5, 5], [0, 1], 0)
+
+        # test non-expand overlapping case
+        test(torch.randn(35), None, [6, 6], [5, 1], 2)
+        test(torch.randn(15), None, [3, 2], [3, 6], 2)
+
+        # test transpose case
+        test(torch.randn(3, 4), None, [4, 3], [1, 4])
+
+        # test "getting things outside the input" case
+        x = torch.randn(6, 2)
+        test(x[3:], None, [3, 2], [2, 1], 0)  # should be all zeros
+        self.assertEqual(x[3:].as_strided([3, 2], [2, 1], 0), x[:3])
+
+        # test select on expanded input case
+        test(torch.randn(2, 3), lambda x: x.expand(10, 2, 3), [2, 3], [3, 1], 0)
 
     def test_view_view(self, device):
         t = torch.ones(5, 5, device=device)
@@ -1265,6 +1401,35 @@ class TestOldViewOps(TestCase):
         self._test_atleast_dim(torch.atleast_1d, np.atleast_1d, device, dtype)
         self._test_atleast_dim(torch.atleast_2d, np.atleast_2d, device, dtype)
         self._test_atleast_dim(torch.atleast_3d, np.atleast_3d, device, dtype)
+
+    # TODO: OpInfo this
+    def _test_atleast(self, device, torch_fn):
+        # 0-dim
+        s = torch.tensor(0.5, dtype=torch.double, requires_grad=True)
+
+        gradcheck(lambda x: torch_fn(x), s)
+        gradgradcheck(lambda x: torch_fn(x), s)
+
+        # 1-dim
+        a = torch.rand(4, dtype=torch.double, requires_grad=True)
+
+        gradcheck(lambda x: torch_fn(x), a)
+        gradgradcheck(lambda x: torch_fn(x), a)
+
+        # 2,3,4-dim
+        b = torch.rand(4, 3, dtype=torch.double, requires_grad=True)
+        c = torch.rand(4, 3, 2, dtype=torch.double, requires_grad=True)
+        d = torch.rand(4, 3, 2, 1, dtype=torch.double, requires_grad=True)
+
+        input_tuple = (s, a, b, c, d)
+        gradcheck(lambda s, w, x, y, z: torch_fn(s, w, x, y, z), input_tuple)
+        gradgradcheck(lambda s, w, x, y, z: torch_fn(s, w, x, y, z), input_tuple)
+
+    def test_atleast_gradient(self, device):
+        self._test_atleast(device, torch.atleast_1d)
+        self._test_atleast(device, torch.atleast_2d)
+        self._test_atleast(device, torch.atleast_3d)
+
 
     @onlyCPU
     @dtypes(torch.float)

@@ -22,6 +22,7 @@
 #include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/decompose_ops.h>
+#include <torch/csrc/jit/passes/dtype_analysis.h>
 #include <torch/csrc/jit/passes/erase_number_types.h>
 #include <torch/csrc/jit/passes/fold_conv_bn.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
@@ -72,6 +73,7 @@
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/remove_inplace_ops.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
+#include <torch/csrc/jit/passes/replacement_of_old_operators.h>
 #include <torch/csrc/jit/passes/restore_mutation.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
@@ -282,6 +284,11 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_onnx_function_extraction", onnx::ONNXFunctionExtraction)
       .def("_jit_pass_fuse", FuseGraph)
       .def(
+          "_jit_pass_replace_old_ops_with_upgraders",
+          [](std::shared_ptr<Graph>& g) {
+            return ReplaceOldOperatorsWithUpgraders(g);
+          })
+      .def(
           "_jit_pass_dce",
           [](std::shared_ptr<Graph>& g) {
             return EliminateDeadCode(g->block()); // overload resolution
@@ -377,6 +384,13 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_fuse_frozen_conv_add_relu", &FuseFrozenConvAddRelu)
       .def("_jit_pass_transpose_frozen_linear", &FrozenLinearTranspose)
       .def("_jit_pass_optimize_frozen_graph", &OptimizeFrozenGraph)
+      .def(
+          "_jit_pass_optimize_for_inference",
+          [](Module& module, std::vector<std::string> other_methods) {
+            optimize_for_inference(module, other_methods);
+          },
+          py::arg("module"),
+          py::arg("other_methods") = std::vector<std::string>())
       .def("_jit_pass_fuse_linear", &FuseLinear)
       .def(
           "_jit_pass_fuse_add_relu",
@@ -431,6 +445,7 @@ void initJITBindings(PyObject* module) {
               std::vector<std::pair<std::string, std::string>>())
       .def("_jit_pass_constant_pooling", ConstantPooling)
       // RemoveInplaceOps is used by CoreML so it must be removed with care.
+      .def("_jit_pass_propagate_dtype", DtypePropagation)
       .def(
           "_jit_pass_remove_inplace_ops",
           [](const std::shared_ptr<Graph>& g) { return RemoveInplaceOps(g); })
@@ -458,11 +473,11 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& g) { return InlineFunctionalGraphs(g); })
       .def(
           "_jit_pass_peephole",
-          [](const std::shared_ptr<Graph>& g, bool addmm_fusion_enabled) {
-            return PeepholeOptimize(g, addmm_fusion_enabled);
+          [](const std::shared_ptr<Graph>& g, bool disable_shape_peepholes) {
+            return PeepholeOptimize(g, disable_shape_peepholes);
           },
           py::arg("graph"),
-          py::arg("addmm_fusion_enabled") = false)
+          py::arg("disable_shape_peepholes") = false)
       .def(
           "_jit_pass_peephole_list_idioms",
           [](const std::shared_ptr<Graph>& g, bool refine_list_len) {
@@ -540,6 +555,26 @@ void initJITBindings(PyObject* module) {
             }
             return TraceGraph(graph, stack);
           })
+      .def(
+          "_jit_trace_module",
+          [](Module& model, const py::tuple& inputs) {
+            auto graph = model.get_method("forward").graph();
+            Stack stack;
+            stack.reserve(inputs.size() + 1); // captures?
+            push(stack, model._ivalue());
+            for (auto& obj : inputs) {
+              stack.push_back(toTypeInferredIValue(obj));
+            }
+            auto traced = TraceGraph(graph, stack);
+            GRAPH_DUMP("Traced Graph", traced);
+
+            // the easiest way to replace a graph in a module is
+            // to remove all the nodes in the original graph
+            // clone everything from the traced one
+            graph->block()->clear();
+            graph->block()->cloneFrom(traced->block(), nullptr);
+            GRAPH_DUMP("Copied Graph", graph);
+          })
       .def("_jit_pass_remove_expands", RemoveExpands)
       .def("_jit_pass_erase_number_types", EraseNumberTypes)
       .def("_jit_pass_inline_fork_wait", InlineForkWait)
@@ -587,9 +622,15 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_pass_create_autodiff_subgraphs",
-          [](const std::shared_ptr<Graph>& graph) {
-            CreateAutodiffSubgraphs(graph);
-          })
+          [](const std::shared_ptr<Graph>& graph, py::object threshold) {
+            if (threshold.is(py::none())) {
+              CreateAutodiffSubgraphs(graph);
+            } else {
+              CreateAutodiffSubgraphs(graph, py::cast<int>(threshold));
+            }
+          },
+          py::arg("graph"),
+          py::arg("threshold") = py::none())
 #if defined(BUILDING_TESTS) && !defined(USE_ROCM)
       .def(
           "_jit_run_cpp_tests",
@@ -652,6 +693,18 @@ void initJITBindings(PyObject* module) {
             checkAliasAnnotation(g, std::move(stack), unqualified_op_name);
           })
       .def("_jit_set_nvfuser_enabled", &RegisterCudaFuseGraph::registerPass)
+      .def(
+          "_jit_set_nvfuser_single_node_mode",
+          [](bool flag) { return fuser::cuda::setSingletonFusion(flag); })
+      .def(
+          "_jit_nvfuser_single_node_mode",
+          []() { return fuser::cuda::getSingletonFusion(); })
+      .def(
+          "_jit_set_nvfuser_horizontal_mode",
+          [](bool flag) { return fuser::cuda::setHorizontalFusion(flag); })
+      .def(
+          "_jit_nvfuser_horizontal_mode",
+          []() { return fuser::cuda::getHorizontalFusion(); })
       .def(
           "_jit_set_nvfuser_guard_mode",
           [](bool profiling_flag) {
@@ -1336,6 +1389,13 @@ void initJITBindings(PyObject* module) {
           "is_backward_compatible_with",
           [](const FunctionSchema& self, const FunctionSchema& old_schema) {
             return self.isBackwardCompatibleWith(old_schema);
+          })
+      .def(
+          "check_forward_compatible_with",
+          [](const FunctionSchema& self, const FunctionSchema& old_schema) {
+            std::ostringstream out;
+            auto result = self.isForwardCompatibleWith(old_schema, out);
+            return std::make_pair(result, out.str());
           })
       .def(
           "__eq__",

@@ -1,3 +1,4 @@
+import collections.abc
 import copy
 from dataclasses import dataclass
 from typing import Callable, Any
@@ -319,12 +320,23 @@ class DistributedDataParallel(Module, Joinable):
         :class:`torch.distributed.optim.DistributedOptimizer` for optimizing
         parameters.
 
+    .. note::
+        DistributedDataParallel currently offers limited support for gradient
+        checkpointing with :meth:`torch.utils.checkpoint`. DDP will work as
+        expected when there are no unused parameters in the model and each layer
+        is checkpointed at most once (make sure you are not passing
+        `find_unused_parameters=True` to DDP). We currently do not support the
+        case where a layer is checkpointed multiple times, or when there unused
+        parameters in the checkpointed model.
+
         Example::
 
             >>> import torch.distributed.autograd as dist_autograd
             >>> from torch.nn.parallel import DistributedDataParallel as DDP
+            >>> import torch
             >>> from torch import optim
             >>> from torch.distributed.optim import DistributedOptimizer
+            >>> import torch.distributed.rpc as rpc
             >>> from torch.distributed.rpc import RRef
             >>>
             >>> t1 = torch.rand((3, 3), requires_grad=True)
@@ -345,9 +357,9 @@ class DistributedDataParallel(Module, Joinable):
             >>>
             >>> with dist_autograd.context() as context_id:
             >>>     pred = ddp_model(rref.to_here())
-            >>>     loss = loss_func(pred, loss)
-            >>>     dist_autograd.backward(context_id, loss)
-            >>>     dist_optim.step()
+            >>>     loss = loss_func(pred, target)
+            >>>     dist_autograd.backward(context_id, [loss])
+            >>>     dist_optim.step(context_id)
 
     .. note::
         To let a non-DDP model load a state dict from a DDP model,
@@ -1011,10 +1023,22 @@ class DistributedDataParallel(Module, Joinable):
                 return [type(obj)(*args) for args in zip(*map(to_map, obj))]
             if isinstance(obj, tuple) and len(obj) > 0:
                 return list(zip(*map(to_map, obj)))
-            if isinstance(obj, list) and len(obj) > 0:
-                return [list(i) for i in zip(*map(to_map, obj))]
-            if isinstance(obj, dict) and len(obj) > 0:
-                return [type(obj)(i) for i in zip(*map(to_map, obj.items()))]
+            if isinstance(obj, str):
+                # Needs to be checked, otherwise it's taken as a sequence infinitely.
+                # This is because the elements of a string are also strings, and so on.
+                return [obj]
+            if isinstance(obj, collections.abc.Sequence) and len(obj) > 0:
+                try:
+                    return [type(obj)(i) for i in zip(*map(to_map, obj))]
+                except TypeError:
+                    # The sequence type may not support `__init__(iterable)` (e.g., `range`).
+                    return [list(i) for i in zip(*map(to_map, obj))]
+            if isinstance(obj, collections.abc.Mapping) and len(obj) > 0:
+                try:
+                    return [type(obj)(i) for i in zip(*map(to_map, obj.items()))]
+                except TypeError:
+                    # The mapping type may not support `__init__(iterable)`.
+                    return [dict(i) for i in zip(*map(to_map, obj.items()))]
             return [obj]
 
         # Avoid reference cycle
@@ -1543,10 +1567,10 @@ class DistributedDataParallel(Module, Joinable):
                 or int(torch.version.cuda.split('.')[0]) < 11
                 or not dist.is_available()
                 or not dist.is_nccl_available()
-                or torch.cuda.nccl.version() < (2, 9, 7)
+                or torch.cuda.nccl.version() < (2, 10)
             )
         ):
-            self._log_and_throw(TypeError, "BF16 all reduce communication hook required CUDA 11+ and NCCL 2.9.7+.")
+            self._log_and_throw(TypeError, "BF16 all reduce communication hook required CUDA 11+ and NCCL 2.10+.")
 
     @property
     def _distributed_rank(self):

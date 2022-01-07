@@ -1147,9 +1147,10 @@ class {test_classname}(torch.nn.Module):
                 self.linear = torch.nn.Linear(2, 2)
                 self.attr = torch.randn(2)
                 self.register_buffer("attr2", torch.randn(2))
+                self.register_buffer("attr3", torch.ones(2, dtype=torch.int32))
 
             def forward(self, x):
-                return self.linear(self.seq(self.W + self.attr + self.attr2 + x))
+                return self.linear(self.seq(self.W + self.attr + self.attr2 + self.attr3 + x))
 
         mod = symbolic_trace(Test())
         module_name = "Foo"
@@ -1463,8 +1464,10 @@ class TestNormalizeOperators(JitTestCase):
         # Sorted and one entry on each line to minimize merge conflicts.
         op_skip = {
             # See: https://github.com/pytorch/pytorch/issues/64997
+            "as_strided",
             "block_diag",
             "broadcast_tensors",
+            "cartesian_prod",
             "contiguous",
             "einsum",
             "expand",
@@ -1481,7 +1484,12 @@ class TestNormalizeOperators(JitTestCase):
             "index_put",
             "nn.functional.conv2d",
             "nn.functional.dropout",
+            "nn.functional.dropout2d",
             "nn.functional.embedding",  # Implemented with a lambda
+            "nn.functional.embedding_bag",  # Implemented with a lambda
+            "nn.functional.rrelu",  # Implemented with a lambda
+            "nn.functional.feature_alpha_dropout",  # Implemented with a lambda
+            "nonzero",
             "polygamma",
             "special.polygamma",
             "repeat",
@@ -1489,6 +1497,7 @@ class TestNormalizeOperators(JitTestCase):
             "resize_",
             "resize_as_",
             "special.zeta",
+            "sum_to_size",
             "to_sparse",
             "unique",
             "unique_consecutive",
@@ -1512,6 +1521,15 @@ class TestNormalizeOperators(JitTestCase):
             'randn_like',
             'zeros_like',
             'full_like',
+            'rand_like',
+            'randint_like',
+            'new_ones',
+            'new_empty',
+            'new_zeros',
+            'new_full',
+            'normal',
+            'multinomial',
+            'bernoulli',
             "__getitem__",
             "__radd__",
             "__rsub__",
@@ -1523,6 +1541,12 @@ class TestNormalizeOperators(JitTestCase):
             '__ror__',
             '__rxor__',
             "__rmatmul__",
+            "atleast_1d",
+            "atleast_2d",
+            "atleast_3d",
+            "svd_lowrank",  # implemented with a lambda
+            "pca_lowrank",  # implemented with a lambda
+            "column_stack",
         }
 
         # Unsupported input types

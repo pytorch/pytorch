@@ -4,7 +4,7 @@
 #include <unordered_map>
 
 #include <ATen/core/functional.h>
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
 #include <c10/util/Exception.h>
 #include <c10/util/hash.h>
 #include <c10/util/irange.h>
@@ -107,8 +107,8 @@ bool ivaluesEqual(const IValue& a1, const IValue& a2) {
     return attributesEqual(a1.toListRef(), a2.toListRef());
   }
   if (a1.isTuple()) {
-    at::ArrayRef<IValue> a1_elem = a1.toTuple()->elements();
-    at::ArrayRef<IValue> a2_elem = a2.toTuple()->elements();
+    at::ArrayRef<IValue> a1_elem = a1.toTupleRef().elements();
+    at::ArrayRef<IValue> a2_elem = a2.toTupleRef().elements();
     return attributesEqual(a1_elem, a2_elem);
   }
   if (a1.isGenericDict()) {

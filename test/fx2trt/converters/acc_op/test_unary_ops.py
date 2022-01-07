@@ -5,7 +5,7 @@ from typing import Callable
 import torch
 import torch.fx.experimental.fx_acc.acc_ops as acc_ops
 import torch.nn as nn
-from caffe2.torch.fb.fx2trt.tests.test_utils import AccTestCase
+from torch.testing._internal.common_fx2trt import AccTestCase
 from parameterized import parameterized
 
 unary_ops = [
@@ -25,6 +25,7 @@ unary_ops = [
     (torch.exp, acc_ops.exp),
     (torch.floor, acc_ops.floor),
     (torch.ceil, acc_ops.ceil),
+    (torch.sign, acc_ops.sign),
 ]
 
 

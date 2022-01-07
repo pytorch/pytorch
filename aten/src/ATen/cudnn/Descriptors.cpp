@@ -25,6 +25,12 @@ inline cudnnDataType_t getDataType(const at::Tensor& t) {
 } // anonymous namespace
 
 
+void TensorDescriptor::set(const at::Tensor &t, at::MemoryFormat memory_format, size_t pad) {
+  set(getDataType(t), t.sizes(), t.strides(), pad,
+    memory_format == at::MemoryFormat::ChannelsLast ||
+    memory_format == at::MemoryFormat::ChannelsLast3d);
+}
+
 void TensorDescriptor::set(const at::Tensor &t, size_t pad) {
   auto memory_format = t.suggest_memory_format();
   set(getDataType(t), t.sizes(), t.strides(), pad,
@@ -124,7 +130,10 @@ void FilterDescriptor::set(const at::Tensor &t, const at::MemoryFormat memory_fo
   // Tensor whose data pointer is passed to cuDNN.  Nevertheless,
   // that is the common case, so we can catch most client errors with this test.
   TORCH_CHECK(t.is_contiguous(memory_format),
-      "cuDNN filters (a.k.a. weights) must be contiguous in desired memory_format");
+    "cuDNN filters (a.k.a. weights) must be contiguous in desired memory_format\n",
+    "Weight sizes: ", t.sizes(), "\n",
+    "Weight strides: ", t.strides(), "\n",
+    "cuDNN suggested memory_format: ", memory_format);
 
   int size[CUDNN_DIM_MAX];
   for (const auto i : c10::irange(dim)) {

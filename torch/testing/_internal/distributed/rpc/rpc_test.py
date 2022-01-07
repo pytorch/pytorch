@@ -1344,6 +1344,31 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
             )
         rpc.shutdown()
 
+    @dist_init(setup_rpc=False)
+    def test_pg_init_no_rpc_init(self):
+        dist.init_process_group(
+            backend='gloo',
+            init_method=self.file_init_method,
+            rank=self.rank,
+            world_size=self.world_size)
+
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = torch.nn.Linear(3, 4)
+
+            def forward(self, x):
+                return self.lin(x)
+
+        model = MyModel()
+        model.train()
+        model = torch.nn.parallel.DistributedDataParallel(model)
+
+        with self.assertRaisesRegex(RuntimeError, 'Current RPC agent is not set! Did you initialize the RPC framework'):
+            params = []
+            for param in model.parameters():
+                params.append(RRef(param))
+
     def test_world_size_one(self):
         self._world_size_one(
             torch.ones(2, 2),
