@@ -377,9 +377,12 @@ def lazy_overhead_experiment(args, results, benchmark, lazy_benchmark):
         os.path.join(args.output_dir, f"lazy-overheads_{args.test}_{get_unique_suffix()}.csv"),
         ("dev", "name", "test", "overhead", "pvalue"),
     ).writerow([current_device, current_name, args.test, f"{overhead:.4f}", f"{pvalue:.4e}"])
-    print(f"{short_name(name, limit=30):<30} {current_device:<4} {args.test:<5} {'trace overheads':<20} overhead: {overhead:.3f} pvalue: {pvalue:.2e}")
+    print(f"{short_name(name, limit=30):<30} {current_device:<4} {args.test:<5} "
+          f"{'trace overheads':<20} overhead: {overhead:.3f} pvalue: {pvalue:.2e}")
     if args.verbose:
-        print(f"CIDEBUGOUTPUT,lazy_overhead_experiment,{current_name},{args.test},{current_device},{overhead:.4f},{pvalue:.4e},{args.warmup},{args.repeat},{warmup_time:.2f},{bench_time:.2f}")
+        print(f"CIDEBUGOUTPUT,lazy_overhead_experiment,"
+              f"{current_name},{args.test},{current_device},{overhead:.4f},"
+              f"{pvalue:.4e},{args.warmup},{args.repeat},{warmup_time:.2f},{bench_time:.2f}")
     return (overhead, pvalue)
 
 def lazy_compute_experiment(args, experiment, results, benchmark, lazy_benchmark, sync_every_iter=False, to_dev_sync=None):
@@ -423,9 +426,12 @@ def lazy_compute_experiment(args, experiment, results, benchmark, lazy_benchmark
         os.path.join(args.output_dir, f"lazy-compute_{args.test}_{get_unique_suffix()}.csv"),
         ("name", "dev", "experiment", "test", "speedup", "pvalue"),
     ).writerow([current_name, current_device, experiment, args.test, f"{speedup:.4f}", f"{pvalue:.2e}"])
-    print(f"{short_name(current_name, limit=30):<30} {current_device:<4} {args.test:<5} {experiment:<20} speedup:  {speedup:.3f} pvalue: {pvalue:.2e}")
+    print(f"{short_name(current_name, limit=30):<30} {current_device:<4} "
+          f"{args.test:<5} {experiment:<20} speedup:  {speedup:.3f} pvalue: {pvalue:.2e}")
     if args.verbose:
-        print(f"CIDEBUGOUTPUT,lazy_compute_experiment,{current_name},{current_device},{experiment},{args.test},{speedup:.4f},{pvalue:.2e},{args.warmup},{args.repeat},{warmup_time:.2f},{bench_time:.2f}")
+        print(f"CIDEBUGOUTPUT,lazy_compute_experiment,"
+              f"{current_name},{current_device},{experiment},{args.test},{speedup:.4f},"
+              f"{pvalue:.2e},{args.warmup},{args.repeat},{warmup_time:.2f},{bench_time:.2f}")
     return (speedup, pvalue)
 
 
@@ -536,7 +542,8 @@ def merge_reformat(tmp_dir, out_dir, table):
     )
 
     for k, v in table.items():
-        cw.writerow((k[0], k[1], v.get(amortized_header, 'N/A'), v.get('unamortized', 'N/A'), v.get('overhead', 'N/A'), v.get('error', 'N/A'), v.get('rc')))
+        cw.writerow((k[0], k[1], v.get(amortized_header, 'N/A'),
+                     v.get('unamortized', 'N/A'), v.get('overhead', 'N/A'), v.get('error', 'N/A'), v.get('rc')))
 
 def save_error(name, test, error, dir):
     output_csv(
@@ -560,7 +567,8 @@ if __name__ == "__main__" :
     parser.add_argument("--torchbench_dir", type=str, help="path to torchbenchmark repo")
     parser.add_argument("--output_dir", type=str, default=".", help="path to write output files")
     parser.add_argument("--dump_lazy_counters", action='store_true', help="dump lazy counter values after each timing run")
-    parser.add_argument("--run_tracing_execute_noops", action='store_true', help="Run the tracing portion only, with noop backend, useful for running under a profiler.")
+    parser.add_argument("--run_tracing_execute_noops", action='store_true',
+                        help="Run the tracing portion only, with noop backend, useful for running under a profiler.")
     parser.add_argument("--run_in_subprocess", "-s", type=str, help="which model run in subprocess.This will ignore filter and exclude")
     args = parser.parse_args()
     results = []
@@ -660,7 +668,9 @@ if __name__ == "__main__" :
         rc = 0
         try:
             if args.verbose:
-                cp = subprocess.run("nvidia-smi --query-gpu=timestamp,utilization.memory,memory.total,memory.free,memory.used --format=csv,noheader", capture_output=True, text=True, shell=True)
+                cp = subprocess.run("nvidia-smi --query-gpu=timestamp,utilization.memory,memory.total,memory.free,memory.used"
+                                    " --format=csv,noheader",
+                                    capture_output=True, text=True, shell=True)
                 print(f"CIDEBUGOUTPUT,BEFORE subprocess.run,{model_name},{cp.stdout}")
             proc = subprocess.Popen(launch_command,
                                     env=env,
@@ -680,7 +690,9 @@ if __name__ == "__main__" :
                 p.kill()
             process.kill()
         if args.verbose:
-            cp = subprocess.run("nvidia-smi --query-gpu=timestamp,utilization.memory,memory.total,memory.free,memory.used --format=csv,noheader", capture_output=True, text=True, shell=True)
+            cp = subprocess.run("nvidia-smi --query-gpu=timestamp,utilization.memory,memory.total,memory.free,memory.used"
+                                " --format=csv,noheader",
+                                capture_output=True, text=True, shell=True)
             print(f"CIDEBUGOUTPUT,AFTER subprocess.run,{model_name},{args.test},{cp.stdout}")
 
         entry = table[(model_name, args.test)]
