@@ -237,6 +237,98 @@ class DebugPickler(PackagePickler):
 
     dispatch[list] = save_list
 
+    def save_tuple(self, obj):
+        if not obj:  # tuple is empty
+            if self.bin:
+                self.write(EMPTY_TUPLE)
+            else:
+                self.write(MARK + TUPLE)
+            return
+
+        n = len(obj)
+        save = self.save
+        memo = self.memo
+        idx = 0
+        if n <= 3 and self.proto >= 2:
+            for element in obj:
+                self.obj_stack.append(TupleElement(idx, element))
+                save(element)
+                self.obj_stack.pop()
+                idx += 1
+            # Subtle.  Same as in the big comment below.
+            if id(obj) in memo:
+                get = self.get(memo[id(obj)][0])
+                self.write(POP * n + get)
+            else:
+                self.write(_tuplesize2code[n])
+                self.memoize(obj)
+            return
+
+        # proto 0 or proto 1 and tuple isn't empty, or proto > 1 and tuple
+        # has more than 3 elements.
+        write = self.write
+        write(MARK)
+        for element in obj:
+            self.obj_stack.append(TupleElement(idx, element))
+            save(element)
+            self.obj_stack.pop()
+            idx += 1
+
+        if id(obj) in memo:
+            # Subtle.  d was not in memo when we entered save_tuple(), so
+            # the process of saving the tuple's elements must have saved
+            # the tuple itself:  the tuple is recursive.  The proper action
+            # now is to throw away everything we put on the stack, and
+            # simply GET the tuple (it's already constructed).  This check
+            # could have been done in the "for element" loop instead, but
+            # recursive tuples are a rare thing.
+            get = self.get(memo[id(obj)][0])
+            if self.bin:
+                write(POP_MARK + get)
+            else:  # proto 0 -- POP_MARK not available
+                write(POP * (n + 1) + get)
+            return
+
+        # No recursion.
+        write(TUPLE)
+        self.memoize(obj)
+
+    dispatch[tuple] = save_tuple
+
+    def save_set(self, obj, set_type=set):
+        save = self.save
+        write = self.write
+
+        if self.proto < 4:
+            self.obj_stack.append(SetElementPreProtocol4Flag(self.proto))
+            self.save_reduce(set_type, (list(obj),), obj=obj)
+            self.obj_stack.pop()
+            return
+
+        write(EMPTY_SET)
+        self.memoize(obj)
+
+        it = iter(obj)
+        while True:
+            batch = list(islice(it, self._BATCHSIZE))
+            n = len(batch)
+            if n > 0:
+                write(MARK)
+                for item in batch:
+                    self.obj_stack.append(SetElement(item))
+                    save(item)
+                    self.obj_stack.pop()
+                write(ADDITEMS)
+            if n < self._BATCHSIZE:
+                return
+
+    dispatch[set] = save_set
+
+    def save_frozenset(self, obj, settype=set):
+        self.save_set(obj, set_type=frozenset)
+
+    dispatch[frozenset] = save_frozenset
+
     def save(self, obj, save_persistent_id=True):
         self.obj_stack.append(obj)
         super().save(obj, save_persistent_id)
@@ -272,10 +364,22 @@ class DebugPickler(PackagePickler):
                     idx_to_skip.add(idx + 1)
                     idx_to_skip.add(idx + 2)
                     continue
-            if isinstance(obj, (ListElement, DictElement)):
+            if isinstance(obj, (ListElement, DictElement, TupleElement, SetElement)):
                 # Fold [ListElement, obj] into just [ListElement]
                 traced_stack.append(obj)
                 idx_to_skip.add(idx + 1)
+                continue
+            elif isinstance(obj, SetElementPreProtocol4Flag):
+                # handle sets for protocol < 4 where set is converted to ([set],) / a list nested in a tuple
+                assert isinstance(stack[idx + 2], TupleElement)
+                assert isinstance(stack[idx + 4], ListElement)
+                idx_to_skip.add(idx + 1)
+                idx_to_skip.add(idx + 2)
+                idx_to_skip.add(idx + 3)
+                idx_to_skip.add(idx + 4)
+                idx_to_skip.add(idx + 5)
+                bad_element = stack[idx + 4].value
+                traced_stack.append(SetElement(bad_element))
                 continue
             traced_stack.append(obj)
 
