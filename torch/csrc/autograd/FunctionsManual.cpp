@@ -2774,9 +2774,9 @@ Tensor eigh_jvp_eigenvectors(
 }
 
 Tensor eigh_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
-                     bool eigenvectors, const Tensor& L, const Tensor& V) {
-  // This function is used for both torch.symeig and torch.linalg.eigh.
-  // eigh (and torch.symeig) operates only on symmetric (resp. Hermitian) inputs.
+                     const Tensor& L, const Tensor& V) {
+  // This function is used for torch.linalg.eigh.
+  // eigh operates only on symmetric (resp. Hermitian) inputs.
 
   // [Note: eigh backward]
   // General considerations of the differential and adjoint
@@ -2813,11 +2813,6 @@ Tensor eigh_backward(const std::vector<torch::autograd::Variable> &grads, const 
   //   - E_ij = L_i - L_j if i != j
   //   - diag_embed takes a vector into a diagonal matrix
   //   - The division by E is done just outside of the diagonal. In the diagonal it is set to zero
-
-  // This check just can be triggered in the backwards of torch.symeig
-  TORCH_CHECK(eigenvectors,
-           "eigh_backward: torch.symeig(A, eigenvectors=False) is not differentiable. ",
-           "Use torch.linalg.eigvalsh(A) instead.");
 
   const auto gL = grads[0];
   const auto gV = grads[1];

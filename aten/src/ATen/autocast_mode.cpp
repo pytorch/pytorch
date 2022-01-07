@@ -687,12 +687,6 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
                                  std::tuple<Tensor, Tensor, Tensor> (const Tensor &, bool, bool),
                                  &ADD_NS(svd)>::type::call)));
 
-  m.impl(TORCH_SELECTIVE_NAME("aten::symeig"),
-         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
-                                 std::tuple<Tensor, Tensor> (const Tensor &, bool, bool),
-                                 std::tuple<Tensor, Tensor> (const Tensor &, bool, bool),
-                                 &ADD_NS(symeig)>::type::call)));
-
   m.impl(TORCH_SELECTIVE_NAME("aten::triangular_solve"),
          TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
                                  std::tuple<Tensor, Tensor> (const Tensor &, const Tensor &, bool, bool, bool),

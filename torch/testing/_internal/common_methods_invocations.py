@@ -5064,16 +5064,6 @@ def sample_inputs_linalg_cholesky(op_info, device, dtype, requires_grad=False, *
         out.append(SampleInput(a, kwargs={"upper": upper}))
     return out
 
-def sample_inputs_symeig(op_info, device, dtype, requires_grad=False):
-    out = sample_inputs_linalg_invertible(op_info, device, dtype, requires_grad)
-
-    for o in out:
-        o.kwargs = {"upper": bool(np.random.choice([True, False])),
-                    "eigenvectors": True}
-        # A gauge-invariant function
-        o.output_process_fn_grad = lambda output: (output[0], abs(output[1]))
-    return out
-
 def sample_inputs_linalg_eig(op_info, device, dtype, requires_grad=False):
     """
     This function generates input for torch.linalg.eigh with UPLO="U" or "L" keyword argument.
@@ -8764,12 +8754,6 @@ op_db: List[OpInfo] = [
                # RuntimeError: inputSet && outputSet
                # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":118
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),),),
-    OpInfo('symeig',
-           dtypes=floating_and_complex_types(),
-           check_batched_gradgrad=False,
-           sample_inputs_func=sample_inputs_symeig,
-           gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
-           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
     # NOTE: clamp has seperate opinfos for scalar min/max (unary op) vs. tensors
     OpInfo('clamp',
            aliases=('clip',),

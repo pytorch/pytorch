@@ -3770,13 +3770,6 @@ svd(some=True, compute_uv=True) -> (Tensor, Tensor, Tensor)
 See :func:`torch.svd`
 """)
 
-add_docstr_all('symeig',
-               r"""
-symeig(eigenvectors=False, upper=True) -> (Tensor, Tensor)
-
-See :func:`torch.symeig`
-""")
-
 add_docstr_all('swapdims', r"""
 swapdims(dim0, dim1) -> Tensor
 
