@@ -12,7 +12,8 @@ from torch import nn
 from torch.cuda.amp import autocast
 import torch.nn.parallel as dp
 from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, TestCase, repeat_test_for_types, ALL_TENSORTYPES
+from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, onlyCUDA, skipMeta
+from torch.testing._internal.common_utils import run_tests, TestCase, ALL_TENSORTYPES
 from torch.testing._internal.common_utils import _assertGradAndGradgradChecks, gradcheck
 from torch.testing._internal.common_utils import dtype2prec_DONTUSE
 from torch.testing._internal.common_utils import sandcastle_skip_if
@@ -434,93 +435,6 @@ class TestDataParallel(TestCase):
         output = dp.data_parallel(Net(), input, gpus)
         self.assertEqual(output, fn(input))
 
-    @sandcastle_skip_if(not TEST_CUDA, "CUDA unavailable")
-    @repeat_test_for_types(ALL_TENSORTYPES)
-    def test_data_parallel_module(self, dtype=torch.float):
-        l = nn.Linear(10, 5).to("cuda", dtype)
-        i = torch.randn(20, 10, device="cuda", dtype=dtype)
-        expected_out = l(i)
-        net = nn.DataParallel(l)
-        out = net(i)
-        self.assertEqual(out.get_device(), 0)
-        self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
-
-    @sandcastle_skip_if(not TEST_CUDA, "CUDA unavailable")
-    @repeat_test_for_types(ALL_TENSORTYPES)
-    def test_data_parallel_module_kwargs_only(self, dtype=torch.float):
-        class Net(nn.Module):
-            def __init__(self):
-                super(Net, self).__init__()
-                self.l = l
-
-            def forward(self, input):
-                return self.l(input)
-
-        l = nn.Linear(10, 5).to("cuda", dtype)
-        i = torch.randn(20, 10, device="cuda", dtype=dtype)
-        expected_out = l(i)
-        n = nn.DataParallel(Net())
-        out = n(input=i)
-        self.assertEqual(out.get_device(), 0)
-        self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
-
-    @sandcastle_skip_if(not TEST_CUDA, "CUDA unavailable")
-    @repeat_test_for_types(ALL_TENSORTYPES)
-    def test_data_parallel_module_kwargs_only_empty_list(self, dtype=torch.float):
-        class Net(nn.Module):
-            def __init__(self):
-                super(Net, self).__init__()
-                self.l = l
-
-            def forward(self, input):
-                return self.l(input['data'])
-
-        l = nn.Linear(10, 5).to("cuda", dtype)
-        i = torch.randn(20, 10, device="cuda", dtype=dtype)
-        expected_out = l(i)
-        n = nn.DataParallel(Net())
-        out = n(input={'data': i, 'unused': []})
-        self.assertEqual(out.get_device(), 0)
-        self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
-
-    @sandcastle_skip_if(not TEST_CUDA, "CUDA unavailable")
-    @repeat_test_for_types(ALL_TENSORTYPES)
-    def test_data_parallel_module_kwargs_only_empty_dict(self, dtype=torch.float):
-        class Net(nn.Module):
-            def __init__(self):
-                super(Net, self).__init__()
-                self.l = l
-
-            def forward(self, input):
-                return self.l(input['data'])
-
-        l = nn.Linear(10, 5).to("cuda", dtype)
-        i = torch.randn(20, 10, device="cuda", dtype=dtype)
-        expected_out = l(i)
-        n = nn.DataParallel(Net())
-        out = n(input={'data': i, 'unused': {}})
-        self.assertEqual(out.get_device(), 0)
-        self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
-
-    @sandcastle_skip_if(not TEST_CUDA, "CUDA unavailable")
-    @repeat_test_for_types(ALL_TENSORTYPES)
-    def test_data_parallel_module_kwargs_only_empty_tuple(self, dtype=torch.float):
-        class Net(nn.Module):
-            def __init__(self):
-                super(Net, self).__init__()
-                self.l = l
-
-            def forward(self, input):
-                return self.l(input['data'])
-
-        l = nn.Linear(10, 5).to("cuda", dtype)
-        i = torch.randn(20, 10, device="cuda", dtype=dtype)
-        expected_out = l(i)
-        n = nn.DataParallel(Net())
-        out = n(input={'data': i, 'unused': ()})
-        self.assertEqual(out.get_device(), 0)
-        self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
-
     @sandcastle_skip_if(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_module_zero_inputs(self):
         class TestModule(nn.Module):
@@ -854,6 +768,103 @@ class TestDataParallel(TestCase):
                 r"nn\.ParameterDict is being used with DataParallel but this"):
             model(input)
 
+
+class TestDataParallelDeviceType(TestCase):
+
+    @onlyCUDA
+    @skipMeta
+    @dtypes(*ALL_TENSORTYPES)
+    def test_data_parallel_module(self, device, dtype):
+        l = nn.Linear(10, 5).to(device, dtype)
+        i = torch.randn(20, 10, device=device, dtype=dtype)
+        expected_out = l(i)
+        net = nn.DataParallel(l)
+        out = net(i)
+        self.assertEqual(out.get_device(), 0)
+        self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
+
+    @onlyCUDA
+    @skipMeta
+    @dtypes(*ALL_TENSORTYPES)
+    def test_data_parallel_module_kwargs_only(self, device, dtype):
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.l = l
+
+            def forward(self, input):
+                return self.l(input)
+
+        l = nn.Linear(10, 5).to(device, dtype)
+        i = torch.randn(20, 10, device=device, dtype=dtype)
+        expected_out = l(i)
+        n = nn.DataParallel(Net())
+        out = n(input=i)
+        self.assertEqual(out.get_device(), 0)
+        self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
+
+    @onlyCUDA
+    @skipMeta
+    @dtypes(*ALL_TENSORTYPES)
+    def test_data_parallel_module_kwargs_only_empty_list(self, device, dtype):
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.l = l
+
+            def forward(self, input):
+                return self.l(input['data'])
+
+        l = nn.Linear(10, 5).to(device, dtype)
+        i = torch.randn(20, 10, device=device, dtype=dtype)
+        expected_out = l(i)
+        n = nn.DataParallel(Net())
+        out = n(input={'data': i, 'unused': []})
+        self.assertEqual(out.get_device(), 0)
+        self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
+
+    @onlyCUDA
+    @skipMeta
+    @dtypes(*ALL_TENSORTYPES)
+    def test_data_parallel_module_kwargs_only_empty_dict(self, device, dtype):
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.l = l
+
+            def forward(self, input):
+                return self.l(input['data'])
+
+        l = nn.Linear(10, 5).to(device, dtype)
+        i = torch.randn(20, 10, device=device, dtype=dtype)
+        expected_out = l(i)
+        n = nn.DataParallel(Net())
+        out = n(input={'data': i, 'unused': {}})
+        self.assertEqual(out.get_device(), 0)
+        self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
+
+    @onlyCUDA
+    @skipMeta
+    @dtypes(*ALL_TENSORTYPES)
+    def test_data_parallel_module_kwargs_only_empty_tuple(self, device, dtype):
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.l = l
+
+            def forward(self, input):
+                return self.l(input['data'])
+
+        l = nn.Linear(10, 5).to(device, dtype)
+        i = torch.randn(20, 10, device=device, dtype=dtype)
+        expected_out = l(i)
+        n = nn.DataParallel(Net())
+        out = n(input={'data': i, 'unused': ()})
+        self.assertEqual(out.get_device(), 0)
+        self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
+
+
+instantiate_device_type_tests(TestDataParallelDeviceType, globals())
 
 if __name__ == '__main__':
     run_tests()
