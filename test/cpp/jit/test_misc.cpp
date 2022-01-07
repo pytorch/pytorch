@@ -7,6 +7,7 @@
 #include <test/cpp/jit/test_utils.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
+#include <torch/csrc/jit/tensorexpr/kernel.h>
 
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
@@ -2824,7 +2825,29 @@ graph(%x.1 : Tensor):
   testing::FileCheck().check_not("aten::relu(")->run(*graph);
 }
 
-TEST(TestComposedOp, ComposedOp) {
+// TODO: move to test_kernel when global settings are explicit
+// fusion parameters
+class Composed : public ::testing::Test {
+ public:
+  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
+  void SetUp() {
+    torch::jit::tensorexpr::getTEMustUseLLVMOnCPU() = false;
+  }
+};
+
+TEST_F(Composed, ComposedOp) {
+  struct WithCPUFuser {
+    WithCPUFuser(bool val = true) : cpuFuserEnabled(canFuseOnCPU()) {
+      overrideCanFuseOnCPU(val);
+    }
+
+    ~WithCPUFuser() {
+      overrideCanFuseOnCPU(cpuFuserEnabled);
+    }
+
+    bool cpuFuserEnabled;
+  };
+
 #ifdef TORCH_ENABLE_LLVM
   const auto graph_string = R"IR(
       graph(%0 : Float(5, 3, strides=[3, 1], device=cpu),
@@ -2842,7 +2865,10 @@ TEST(TestComposedOp, ComposedOp) {
                .transpose(0, 1);
   auto ref1 = a * (a * b);
   auto ref2 = a * ref1;
+  WithCPUFuser g(true);
   bool dynamic_enabled = tensorExprFuserEnabled();
+  bool fusable_on_device = torch::jit::tensorexpr::getTEMustUseLLVMOnCPU();
+  torch::jit::tensorexpr::getTEMustUseLLVMOnCPU() = false;
   setTensorExprDynamicShapeFusionEnabled(true);
   FuseTensorExprs(
       graph, 2, /*disable_size_checks*/ false, /*add_composed_op*/ true);
@@ -2854,6 +2880,7 @@ TEST(TestComposedOp, ComposedOp) {
   at::Tensor out1 = pop(stack).toTensor();
   ASSERT_TRUE(at::allclose(ref1, out1));
   ASSERT_TRUE(at::allclose(ref2, out2));
+  graph->dump();
 
   auto inp_1 = at::ones({4, 4}, TensorOptions(kCPU).dtype(at::kFloat));
   auto inp_2 = at::ones({4, 4}, TensorOptions(kCPU).dtype(at::kFloat));
@@ -2869,7 +2896,7 @@ TEST(TestComposedOp, ComposedOp) {
   ASSERT_TRUE(at::allclose(inp_1, ref2));
   ASSERT_TRUE(at::allclose(inp_2, ref1));
   setTensorExprDynamicShapeFusionEnabled(dynamic_enabled);
-
+  torch::jit::tensorexpr::getTEMustUseLLVMOnCPU() = fusable_on_device;
 #endif
 }
 
