@@ -416,15 +416,6 @@ for more information on how to implement your own parametrizations.
 
     parametrize.ParametrizationList
 
-Per Sample Gradient API
------------------------
-
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
-    _per_sample_grad.call_for_per_sample_grads
-
 Utility functions in other modules
 
 .. currentmodule:: torch
