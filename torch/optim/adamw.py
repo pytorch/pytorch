@@ -89,7 +89,7 @@ class AdamW(Optimizer):
         super(AdamW, self).__setstate__(state)
         for group in self.param_groups:
             group.setdefault('amsgrad', False)
-            group.setdefault('foreach', False)
+            group.setdefault('foreach', None)
 
     @torch.no_grad()
     def step(self, closure=None):
