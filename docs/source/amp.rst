@@ -109,7 +109,6 @@ Ops that can autocast to ``float16``
 ``addr``,
 ``baddbmm``,
 ``bmm``,
-``chain_matmul``,
 ``multi_dot``,
 ``conv1d``,
 ``conv2d``,

@@ -335,7 +335,6 @@ void handleBlock(Block* block, AutocastContext initial_state) {
       case aten::addbmm:
       case aten::baddbmm:
       case aten::bmm:
-      case aten::chain_matmul:
       case aten::_thnn_fused_lstm_cell:
       case aten::_thnn_fused_gru_cell:
       case aten::lstm_cell:

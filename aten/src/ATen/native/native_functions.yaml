@@ -1124,13 +1124,6 @@
     SparseCPU, SparseCUDA: ceil_sparse_out
     SparseCsrCPU, SparseCsrCUDA: ceil_sparse_csr_out
 
-# alias for torch.linalg.multi_dot
-- func: chain_matmul(Tensor[] matrices) -> Tensor
-  variants: function
-
-# alias for torch.linalg.multi_dot
-- func: chain_matmul.out(Tensor[] matrices, *, Tensor(a!) out) -> Tensor(a!)
-
 - func: unsafe_chunk(Tensor self, int chunks, int dim=0) -> Tensor[]
   variants: function, method
   device_check: NoCheck

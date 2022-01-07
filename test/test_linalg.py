@@ -4336,21 +4336,6 @@ class TestLinalg(TestCase):
             self.assertEqual(torch.matrix_rank(aaT, 0.01, True), np.linalg.matrix_rank(aaT.cpu().numpy(), 0.01, True))
 
     @onlyNativeDeviceTypes
-    @dtypes(torch.double)
-    # This tests only the cases where torch.chain_matmul differs from torch.linalg.multi_dot which this is an "alias" for.
-    def test_chain_matmul(self, device, dtype):
-        # chain_matmul accepts a single input tensor while multi_dot does not
-        t = make_tensor((2, 2), device, dtype)
-        self.assertEqual(t, torch.chain_matmul(t))
-        with self.assertRaisesRegex(RuntimeError, r"chain_matmul\(\): Expected one or more matrices"):
-            torch.chain_matmul()
-
-        # chain_matmul expects all tensors to be 2D whereas multi_dot allows the first and last tensors to
-        # be either 1D or 2D
-        with self.assertRaisesRegex(RuntimeError, r"Tensor dimension is 1, expected 2 instead"):
-            torch.chain_matmul(make_tensor(1, device, dtype), make_tensor(1, device, dtype))
-
-    @onlyNativeDeviceTypes
     @dtypes(torch.double, torch.cdouble)
     def test_multi_dot(self, device, dtype):
         def check(*shapes, noncontiguous=False):
