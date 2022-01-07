@@ -71,6 +71,11 @@ class Adagrad(Optimizer):
                     else initial_accumulator_value
                 state['sum'] = torch.full_like(p, init_value, memory_format=torch.preserve_format)
 
+    def __setstate__(self, state):
+        super().__setstate__(state)
+        for group in self.param_groups:
+            group.setdefault('foreach', False)
+
     def share_memory(self):
         for group in self.param_groups:
             for p in group['params']:
