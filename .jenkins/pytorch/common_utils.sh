@@ -104,39 +104,8 @@ function clone_pytorch_xla() {
   fi
 }
 
-export UCX_HOME='/usr'
-function install_ucx() {
-  sudo apt-get install -y libtool
-  git clone --recursive https://github.com/openucx/ucx.git
-  pushd ucx
-  ./autogen.sh
-  ./configure --prefix=$UCX_HOME      \
-      --enable-mt                     \
-      --enable-profiling              \
-      --enable-stats
-  time make -j
-  sudo make install
-  popd
-}
-
-export UCC_HOME='/usr'
-function install_ucc() {
-  rm -rf ucc
-  git clone --recursive https://github.com/openucx/ucc.git
-  pushd ucc
-  ./autogen.sh
-  ./configure --prefix=$UCC_HOME      \
-      --with-ucx=$UCX_HOME
-  time make -j
-  sudo make install
-  popd
-}
-
 function install_torch_ucc() {
-  if [[ "$BUILD_ENVIRONMENT" != *cuda10.2* ]]; then
-    install_ucx
-    install_ucc
-
+  if [[ /usr/bin/libucc.so ]]; then
     git clone https://github.com/facebookresearch/torch_ucc.git
     pushd torch_ucc
     time python setup.py install --oss
