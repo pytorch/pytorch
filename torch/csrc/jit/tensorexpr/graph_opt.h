@@ -69,6 +69,16 @@ TORCH_API std::shared_ptr<Graph> removeGraphOutput(
 TORCH_API std::shared_ptr<Graph> replaceListOutputWithTuple(
     const std::shared_ptr<Graph>& graph);
 
+// Perform \p ITERS rounds of "trimming" for the given \p GRAPH.
+//
+// Trimming means that we try to remove a small portion of the graph while
+// keeping it valid. This is useful for debugging when we try to find a minimal
+// example reproducing the issue at hand. When ITERS is 0, the graph remains
+// unchanged, when ITERS is a big number, the graph usually becomes empty.
+TORCH_API std::shared_ptr<Graph> trimGraph(
+    const std::shared_ptr<Graph>& graph,
+    int64_t iters);
+
 // Scan all values in the given graph and replace each dimension with a size Xi
 // present in \p SIZES with a symbolic shape Yi. Return a vector of symbol
 // values [Y0, Y1, .., Yn].
