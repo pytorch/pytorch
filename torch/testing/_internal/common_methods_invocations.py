@@ -2673,7 +2673,8 @@ def clone_sample(sample, **kwargs):
     return SampleInput(
         clone_tensor(sample.input),
         args=tuple(map(clone_tensor, sample.args)),
-        kwargs=dict(((k, clone_tensor(v)) for k, v in sample_kwargs.items()))
+        kwargs=dict(((k, clone_tensor(v)) for k, v in sample_kwargs.items())),
+        output_process_fn_grad = sample.output_process_fn_grad
     )
 
 
@@ -5491,7 +5492,7 @@ def _sample_inputs_svd(op_info, device, dtype, requires_grad=False, is_linalg_sv
 
     out = []
     for a, out_fn in test_cases1:
-        a.requires_grad = requires_grad
+        a.requires_grad_(requires_grad)
         if is_linalg_svd:
             kwargs = {'full_matrices': False}
         else:
@@ -5499,7 +5500,7 @@ def _sample_inputs_svd(op_info, device, dtype, requires_grad=False, is_linalg_sv
         out.append(SampleInput(a, kwargs=kwargs, output_process_fn_grad=out_fn))
 
     for a, out_fn in test_cases2:
-        a.requires_grad = requires_grad
+        a.requires_grad_(requires_grad)
         if is_linalg_svd:
             kwargs = {'full_matrices': True}
         else:
@@ -5585,6 +5586,35 @@ def sample_inputs_svd(op_info, device, dtype, requires_grad=False, **kwargs):
 
 def sample_inputs_linalg_svd(op_info, device, dtype, requires_grad=False, **kwargs):
     return _sample_inputs_svd(op_info, device, dtype, requires_grad, is_linalg_svd=True)
+
+def sample_inputs_linalg_svd_rank_revealing(op_info, device, dtype, requires_grad=False, **kwargs):
+    real_dtype_dict = {
+        torch.cfloat: torch.float,
+        torch.cdouble: torch.double
+    }
+    tol_dtype = real_dtype_dict[dtype] if dtype.is_complex else dtype
+
+    def merge_dicts(*dicts):
+        merged_dict = {}
+        for d in dicts:
+            merged_dict.update(d)
+        return merged_dict
+
+    for sample in sample_inputs_linalg_svd(op_info, device, dtype, requires_grad, **kwargs):
+        # such tol to make equivalent to linalg_svd
+        tol = -1e-10
+        tol_tensor = torch.tensor(tol, dtype=tol_dtype, device=device)
+
+        yield sample
+        yield clone_sample(sample)
+        yield clone_sample(sample, **merge_dicts(dict(tol=tol), sample.kwargs))
+        yield clone_sample(sample, **merge_dicts(dict(tol=tol_tensor), sample.kwargs))
+        yield clone_sample(sample, **merge_dicts(dict(atol=tol), sample.kwargs))
+        yield clone_sample(sample, **merge_dicts(dict(atol=tol_tensor), sample.kwargs))
+        yield clone_sample(sample, **merge_dicts(dict(atol=tol, rtol=tol), sample.kwargs))
+        yield clone_sample(sample, **merge_dicts(dict(atol=tol_tensor, rtol=tol_tensor), sample.kwargs))
+        yield clone_sample(sample, **merge_dicts(dict(atol=tol, rtol=tol_tensor), sample.kwargs))
+        yield clone_sample(sample, **merge_dicts(dict(atol=tol_tensor, rtol=tol), sample.kwargs))
 
 def sample_inputs_linalg_svdvals(op_info, device, dtype, requires_grad=False, **kwargs):
     batches = [(), (0, ), (2, ), (1, 1)]
@@ -12716,6 +12746,23 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_linalg_svd,
            decorators=[
+               skipCUDAIfNoMagmaAndNoCusolver,
+               skipCUDAIfRocm,
+               skipCPUIfNoLapack,
+           ]),
+    OpInfo('linalg.svd_rank_revealing',
+           op=torch.linalg.svd_rank_revealing,
+           aten_name='linalg_svd_rank_revealing',
+           variant_test_name='full_rank',
+           dtypes=floating_and_complex_types(),
+           sample_inputs_func=sample_inputs_linalg_svd_rank_revealing,
+           # Disable as grads are filled in parts which
+           # makes Vmap unhappy because of unavoidable
+           # in-place operations
+           check_batched_grad=False,
+           check_batched_gradgrad=False,
+           decorators=[
+               slowTest,
                skipCUDAIfNoMagmaAndNoCusolver,
                skipCUDAIfRocm,
                skipCPUIfNoLapack,

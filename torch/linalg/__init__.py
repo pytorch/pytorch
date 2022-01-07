@@ -1645,7 +1645,7 @@ Returns:
     `U` and `Vh` will have the same dtype as :attr:`A`. The left / right singular vectors will be given by
     the columns of `U` and the rows of `Vh` respectively.
 
-    `rank` is an integer tensor that stores the rank of :attr:`A` or the ranks of each matric in :attr:`A`
+    `rank` is an integer tensor that stores the rank of :attr:`A` or the ranks of each matrix in :attr:`A`
     if :attr:`A` is batched.
 
 Examples::
