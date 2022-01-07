@@ -35,7 +35,7 @@ struct LpNormFunctor {
       r_x[i] = T(0);
     }
 
-    if (n % kILP == 0 && chunk_size & kILP == 0 && is_aligned(x)) {
+    if (n % kILP == 0 && (chunk_size & kILP) == 0 && is_aligned(x)) {
       for (int i_start = threadIdx.x; i_start * kILP < n && i_start * kILP < chunk_size; i_start += blockDim.x) {
         // load
         load_store(r_x, x, 0, i_start);
