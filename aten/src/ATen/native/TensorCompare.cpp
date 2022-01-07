@@ -364,7 +364,6 @@ Tensor where(const Tensor& condition, const Tensor& self, const Scalar& other) {
 }
 
 Tensor where(const Tensor& condition, const Scalar& self, const Scalar& other) {
-  const auto device = condition.device();
   // Refer: [NOTE] `where` type promotion
   auto common_dtype = at::result_type(self, other);
 
