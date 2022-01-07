@@ -33,7 +33,7 @@ class OpOverload:
         self._schema = schema
         self._overloadpacket = overloadpacket
 
-    # it's a no-op since OpOverload object is immutable and must be for a given op overload.
+    # it's a no-op since OpOverload object is immutable and must be unique for a given op overload.
     def __deepcopy__(self, memo=None):
         return self
 
@@ -75,7 +75,7 @@ class OpOverloadPacket:
         self._op_name = op_name
         self._op = op
 
-    # it's a no-op since OpOverloadPacket object is immutable and must be for a given op.
+    # it's a no-op since OpOverloadPacket object is immutable and must be unique for a given op.
     def __deepcopy__(self, memo=None):
         return self
 

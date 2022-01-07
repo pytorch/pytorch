@@ -2346,7 +2346,6 @@ class TestCase(expecttest.TestCase):
             if hasattr(self, "assertMultiLineEqual"):
                 # Python 2.7 only
                 # NB: Python considers lhs "old" and rhs "new".
-                self.maxDiff = None
                 self.assertMultiLineEqual(expected, s)
             else:
                 self.assertEqual(s, expected)
