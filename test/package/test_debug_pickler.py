@@ -60,6 +60,123 @@ class TestDebugPickler(PackageTestCase):
         self.assertEqual(str(e3.exception), error)
         self.assertEqual(str(e4.exception), error)
 
+    def test_nested_lists(self):
+        from package_a.bad_pickle import BadPickle, GoodPickle
+
+        obj = [
+            GoodPickle(),
+            [GoodPickle(), GoodPickle(), [GoodPickle(), [BadPickle()]]],
+        ]
+        self.assertTrue(isinstance(obj[1][2][1][0], BadPickle))
+        with self.assertRaises(PicklingError) as e3:
+            debug_dumps(sys_importer, obj, protocol=3)
+
+        with self.assertRaises(PicklingError) as e4:
+            debug_dumps(sys_importer, obj, protocol=4)
+        error = dedent(
+            """\
+            I can't be pickled!.
+
+            We think the problematic object is found at:
+            <pickled object> (<class 'list'>)
+              <object @ idx 1> (<class 'list'>)
+              <object @ idx 2> (<class 'list'>)
+              <object @ idx 1> (<class 'list'>)
+              <object @ idx 0> (<class 'package_a.bad_pickle.BadPickle'>)
+            """
+        )
+        self.assertEqual(str(e3.exception), error)
+        self.assertEqual(str(e4.exception), error)
+
+    def test_nested_list_obj(self):
+        from package_a.bad_pickle import BadPickle, GoodPickle
+
+        a = GoodPickle()
+        a.b = GoodPickle()
+        a.b.c = GoodPickle()
+        a.b.c.d = BadPickle()
+        obj = [GoodPickle(), [GoodPickle(), GoodPickle(), [GoodPickle(), [a]]]]
+        with self.assertRaises(PicklingError) as e3:
+            debug_dumps(sys_importer, obj, protocol=3)
+
+        with self.assertRaises(PicklingError) as e4:
+            debug_dumps(sys_importer, obj, protocol=4)
+        error = dedent(
+            """\
+            I can't be pickled!.
+
+            We think the problematic object is found at:
+            <pickled object> (<class 'list'>)
+              <object @ idx 1> (<class 'list'>)
+              <object @ idx 2> (<class 'list'>)
+              <object @ idx 1> (<class 'list'>)
+              <object @ idx 0> (<class 'package_a.bad_pickle.GoodPickle'>)
+              .b (<class 'package_a.bad_pickle.GoodPickle'>)
+              .c (<class 'package_a.bad_pickle.GoodPickle'>)
+              .d (<class 'package_a.bad_pickle.BadPickle'>)
+            """
+        )
+        self.assertEqual(str(e3.exception), error)
+        self.assertEqual(str(e4.exception), error)
+
+    def test_in_list_msg(self):
+        from package_a.bad_pickle import BadPickle, GoodPickle
+
+        a = GoodPickle()
+        a.bad_list = [GoodPickle(), GoodPickle(), BadPickle()]
+        with self.assertRaises(PicklingError) as e3:
+            debug_dumps(sys_importer, a, protocol=3)
+        with self.assertRaises(PicklingError) as e4:
+            debug_dumps(sys_importer, a, protocol=4)
+        error = dedent(
+            """\
+            I can't be pickled!.
+
+            We think the problematic object is found at:
+            <pickled object> (<class 'package_a.bad_pickle.GoodPickle'>)
+              .bad_list (<class 'list'>)
+              <object @ idx 2> (<class 'package_a.bad_pickle.BadPickle'>)
+            """
+        )
+        self.assertEqual(str(e3.exception), error)
+        self.assertEqual(str(e4.exception), error)
+
+    def test_nested_list_dict(self):
+        from package_a.bad_pickle import BadPickle, GoodPickle
+
+        a = GoodPickle()
+        a.b = GoodPickle()
+        a.b.c = GoodPickle()
+        a.b.c.d = BadPickle()
+        obj = {
+            "foo": GoodPickle(),
+            "bar": [GoodPickle(), [GoodPickle(), GoodPickle(), [GoodPickle(), [a]]]],
+        }
+
+        with self.assertRaises(PicklingError) as e3:
+            debug_dumps(sys_importer, obj, protocol=3)
+
+        with self.assertRaises(PicklingError) as e4:
+            debug_dumps(sys_importer, obj, protocol=4)
+        error = dedent(
+            """\
+            I can't be pickled!.
+
+            We think the problematic object is found at:
+            <pickled object> (<class 'dict'>)
+              <object @ key bar> (<class 'list'>)
+              <object @ idx 1> (<class 'list'>)
+              <object @ idx 2> (<class 'list'>)
+              <object @ idx 1> (<class 'list'>)
+              <object @ idx 0> (<class 'package_a.bad_pickle.GoodPickle'>)
+              .b (<class 'package_a.bad_pickle.GoodPickle'>)
+              .c (<class 'package_a.bad_pickle.GoodPickle'>)
+              .d (<class 'package_a.bad_pickle.BadPickle'>)
+            """
+        )
+        self.assertEqual(str(e3.exception), error)
+        self.assertEqual(str(e4.exception), error)
+
     def test_good_pickle(self):
         """Passing an object that actually pickles should raise a ValueError."""
         from package_a.bad_pickle import GoodPickle

@@ -219,6 +219,24 @@ class DebugPickler(PackagePickler):
 
     dispatch[dict] = save_dict
 
+    def save_list(self, obj):
+        if self.bin:
+            self.write(EMPTY_LIST)
+        else:  # proto 0 -- can't use EMPTY_LIST
+            self.write(MARK + LIST)
+
+        self.memoize(obj)
+        save = self.save
+        write = self.write
+
+        for idx, x in enumerate(obj):
+            self.obj_stack.append(ListElement(idx, x))
+            save(x)
+            write(APPEND)
+            self.obj_stack.pop()
+
+    dispatch[list] = save_list
+
     def save(self, obj, save_persistent_id=True):
         self.obj_stack.append(obj)
         super().save(obj, save_persistent_id)
@@ -254,7 +272,7 @@ class DebugPickler(PackagePickler):
                     idx_to_skip.add(idx + 1)
                     idx_to_skip.add(idx + 2)
                     continue
-            if isinstance(obj, DictElement):
+            if isinstance(obj, (ListElement, DictElement)):
                 # Fold [ListElement, obj] into just [ListElement]
                 traced_stack.append(obj)
                 idx_to_skip.add(idx + 1)
