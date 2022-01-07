@@ -4703,8 +4703,6 @@ class TestNN(NNTestCase):
         m = pickle.loads(pickle.dumps(m))
         self.assertIsInstance(m, nn.Linear)
 
-    # FIXME: Rewrite this test using functions not depending on LAPACK
-    #        and remove the `@skipIfNoLapack` (see #70995)
     @skipIfNoLapack
     def test_orthogonal_parametrization(self):
         # Orthogonal implements 6 algorithms (3x parametrizations times 2 options of use_trivialization)
@@ -4825,8 +4823,6 @@ class TestNN(NNTestCase):
                     opt.step()
                     assert_is_orthogonal(m.weight)
 
-    # FIXME: Rewrite this test using functions not depending on LAPACK
-    #        and remove the `@skipIfNoLapack` (see #70995)
     @skipIfNoLapack
     def test_orthogonal_errors(self):
         m = nn.Linear(3, 4)
