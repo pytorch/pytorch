@@ -59,16 +59,19 @@ def full_out_0_4(size:List[int], fill_value:number, *, out:Tensor) -> Tensor:
 
 using UpgraderMap = std::unordered_map<std::string, std::shared_ptr<Graph>>;
 void populate_upgraders_graph_map() {
-  UpgraderMap populate_content;
-  for (const auto& entry : kUpgradersEntryMap) {
-    auto cu = std::make_shared<CompilationUnit>();
-    cu->define(c10::nullopt, entry.second, nativeResolver(), nullptr);
-    Function& jitFunc = cu->get_function(entry.first);
-    GraphFunction& graphFunction = toGraphFunction(jitFunc);
-    populate_content.insert(std::make_pair(entry.first, graphFunction.graph()));
-  }
+  if (!is_upgraders_map_populated()) {
+    UpgraderMap populate_content;
+    for (const auto& entry : kUpgradersEntryMap) {
+      auto cu = std::make_shared<CompilationUnit>();
+      cu->define(c10::nullopt, entry.second, nativeResolver(), nullptr);
+      Function& jitFunc = cu->get_function(entry.first);
+      GraphFunction& graphFunction = toGraphFunction(jitFunc);
+      populate_content.insert(
+          std::make_pair(entry.first, graphFunction.graph()));
+    }
 
-  populate_upgraders_map(std::forward<UpgraderMap>(populate_content));
+    populate_upgraders_map(std::forward<UpgraderMap>(populate_content));
+  }
 }
 
 } // namespace jit
