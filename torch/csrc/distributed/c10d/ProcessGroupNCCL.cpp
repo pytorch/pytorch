@@ -2190,11 +2190,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::scatter(
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::recvAnysource(
-    std::vector<at::Tensor>& tensors,
-    int tag) {
-  if (tensors[0].device().type() != at::DeviceType::CUDA && uccPG_ != nullptr) {
-    return uccPG_->recvAnysource(tensors, tag);
-  }
+    std::vector<at::Tensor>& /* unused */,
+    int /* unused */) {
   TORCH_CHECK(false, "ProcessGroupNCCL does not support recvAnysource");
 }
 
