@@ -6503,6 +6503,7 @@ TEST(NVFuserTest, FusionGridReduction3dim0_CUDA) {
   int numel_y = 100;
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
   at::Tensor input = at::randn({numel_x, numel_y}, options);
 
   FusionExecutor fe;
@@ -6723,6 +6724,119 @@ TEST(NVFuserTest, FusionGridReduction7_CUDA) {
   auto aten_output = input.sum({0});
 
   testValidate(&fusion, out, {input}, {aten_output}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionGridReduction8_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = sum(tv0, {0});
+  fusion.addOutput(tv1);
+
+  tv1->axis(0)->parallelize(ParallelType::BIDx);
+  tv1->axis(1)->parallelize(ParallelType::TIDx);
+
+  const int numel_x = 2;
+  const int numel_y = 4;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::randn({numel_x, numel_y}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto out = fe.runFusion({input});
+
+  auto aten_output = input.sum({0});
+
+  testValidate(&fusion, out, {input}, {aten_output}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionGridReduction9_CUDA) {
+  if (at::cuda::getDeviceProperties(0)->major < 6) {
+    return;
+  }
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+  auto tv1 = sum(tv0, {1});
+
+  auto tv2 = makeSymbolicTensor(1);
+  fusion.addInput(tv2);
+
+  auto tv3 = add(tv2, tv1);
+  fusion.addOutput(tv3);
+
+  tv1->split(1, 2);
+
+  tv1->axis(1)->parallelize(ParallelType::BIDx);
+  tv1->axis(2)->parallelize(ParallelType::BIDy);
+
+  tv1->computeAt(tv3, 1);
+
+  const int numel_x = 4;
+  const int numel_y = 10;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({numel_x, numel_y}, options);
+  at::Tensor t2 = at::randn({numel_x}, options);
+
+  at::ArrayRef<IValue> aten_inputs = {t0, t2};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_output = fe.runFusion(aten_inputs);
+
+  auto aten_output = t0.sum({1}).add(t2);
+
+  testValidate(&fusion, cg_output, {t0, t2}, {aten_output}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionGridReduction10_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(4);
+  fusion.addInput(tv0);
+
+  auto tv1 = sum(tv0, {-1});
+  auto tv2 = sum(tv1, {-1});
+  auto tv3 = sum(tv2, {-1});
+
+  fusion.addOutput(tv3);
+  tv1->axis(0)->parallelize(ParallelType::TIDx);
+  tv1->axis(1)->parallelize(ParallelType::BIDx);
+  tv1->axis(2)->parallelize(ParallelType::TIDy);
+  tv1->axis(3)->parallelize(ParallelType::TIDz);
+
+  tv2->axis(0)->parallelize(ParallelType::TIDx);
+  tv2->axis(1)->parallelize(ParallelType::BIDx);
+  tv2->axis(2)->parallelize(ParallelType::TIDy);
+
+  tv3->axis(0)->parallelize(ParallelType::TIDx);
+  tv3->axis(1)->parallelize(ParallelType::BIDx);
+
+  tv0->computeAt(tv3, 1);
+
+  const int numel_w = 2;
+  const int numel_x = 3;
+  const int numel_y = 4;
+  const int numel_z = 5;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({numel_w, numel_x, numel_y, numel_z}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_output = fe.runFusion({t0});
+
+  auto aten_output = t0.sum({1, 2, 3});
+
+  testValidate(&fusion, cg_output, {t0}, {aten_output}, __LINE__, __FILE__);
 }
 
 TEST(NVFuserTest, FusionNonRedAxisBind_CUDA) {
@@ -7001,10 +7115,12 @@ TEST(NVFuserTest, FusionZeroDimBroadcast_CUDA) {
   fusion.addOutput(tv4);
 
   tv3->computeAt(tv4, -1);
+  tv3->axis(-2)->parallelize(ParallelType::TIDx);
+  tv3->axis(-1)->parallelize(ParallelType::TIDy);
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  at::Tensor t0 = at::randint(1, 20, {}, options);
-  at::Tensor t1 = at::randint(1, 20, {10, 10}, options);
+  at::Tensor t0 = at::randn({}, options);
+  at::Tensor t1 = at::randn({10, 10}, options);
 
   auto aten_output = (t0.unsqueeze(-1).unsqueeze(-1).expand({10, 10}) + t1)
                          .to(at::kDouble)
@@ -7142,7 +7258,7 @@ TEST(NVFuserTest, FusionReductionKeepDimBasic_CUDA) {
   TensorView* tv0 = makeConcreteTensor({2, 3, 4, 5, 6});
   fusion.addInput(tv0);
 
-  TensorView* tv1 = sum(tv0, {0, 2, 4}, /*keep_dim=*/true);
+  TensorView* tv1 = sum(tv0, {0, 2, -1}, /*keep_dim=*/true);
 
   fusion.addOutput(tv1);
 
@@ -7151,7 +7267,7 @@ TEST(NVFuserTest, FusionReductionKeepDimBasic_CUDA) {
 
   at::Tensor aten_input = at::randn({2, 3, 4, 5, 6}, options);
   auto aten_output =
-      aten_input.to(at::kDouble).sum({0, 2, 4}, /*keepdim=*/true);
+      aten_input.to(at::kDouble).sum({0, 2, -1}, /*keepdim=*/true);
 
   FusionExecutor fe;
   fe.compileFusion(&fusion);
@@ -11857,11 +11973,11 @@ __global__ void kernel1(
     float in = inp[ blockIdx.x  * inp.stride[0]+
                     blockIdx.y  * inp.stride[1]+
                     threadIdx.x * inp.stride[2]];
-    bool T_pred;
     block_sync::init();
-    T_pred=welford::gridWelford<
+    welford::gridWelford<
         true,true,false,
-        true,false,false
+        true,false,false,
+        false
     >(
         tmp_avg,
         tmp_M2,
@@ -11879,7 +11995,7 @@ __global__ void kernel1(
         threadIdx.x<out_var.size[0],
         threadIdx.x<out_var.size[0],
         0.f);
-    if(T_pred){
+    if(blockIdx.x == gridDim.x - 1 && blockIdx.y == gridDim.y - 1){
         out_avg[threadIdx.x*out_avg.stride[0]]=tmp_avg;
         out_var[threadIdx.x*out_var.stride[0]]=tmp_M2/tmp_N;
     }
@@ -13346,21 +13462,162 @@ TEST(NVFuserTest, FusionTransposeWithSwizzle1DThreadBlock_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-// Grid reduction can be executed only once in a kernel. Should result
-// in an error at the time of compilation.
-TEST(NVFuserTest, FusionGridReductionInLoop_CUDA) {
+TEST(NVFuserTest, FusionGridPersistence_CUDA) {
+  if (at::cuda::getDeviceProperties(0)->major < 6) {
+    return;
+  }
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = sum(tv0, {0});
+  auto tv2 = broadcast(tv1, {true});
+  auto tv3 = add(tv0, tv2);
+  fusion.addOutput(tv3);
+
+  std::vector<TensorView*> tvs = {tv1, tv2, tv3};
+  for (auto tv : tvs) {
+    tv->split(0, 2);
+    tv->axis(0)->parallelize(ParallelType::BIDx);
+    tv->axis(1)->parallelize(ParallelType::BIDy);
+  }
+
+  const int numel_x = 10;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::randn({numel_x}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto out = fe.runFusion({input});
+
+  auto aten_output = input.sum({0}).unsqueeze(-1).add(input);
+
+  testValidate(&fusion, out, {input}, {aten_output}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionGridPersistence2_CUDA) {
+  if (at::cuda::getDeviceProperties(0)->major < 6) {
+    return;
+  }
   Fusion fusion;
   FusionGuard fg(&fusion);
 
   auto tv0 = makeSymbolicTensor(2);
   fusion.addInput(tv0);
-  auto tv1 = sum(tv0, {1});
-  fusion.addOutput(tv1);
 
-  tv1->axis(1)->parallelize(ParallelType::BIDx);
+  auto tv1 = sum(tv0, {0});
+  auto tv2 = broadcast(tv1, {true, false});
+  auto tv3 = add(tv0, tv2);
+  fusion.addOutput(tv3);
+
+  std::vector<TensorView*> tvs = {tv1, tv2, tv3};
+  for (auto tv : tvs) {
+    tv->split(0, 2);
+    tv->axis(0)->parallelize(ParallelType::BIDx);
+    tv->axis(1)->parallelize(ParallelType::TIDy);
+    tv->axis(2)->parallelize(ParallelType::TIDx);
+  }
+
+  const int numel_x = 10;
+  const int numel_y = 3;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::randn({numel_x, numel_y}, options);
 
   FusionExecutor fe;
-  ASSERT_ANY_THROW(fe.compileFusion(&fusion));
+  fe.compileFusion(&fusion);
+  auto out = fe.runFusion({input});
+
+  auto aten_output = input.sum({0}).unsqueeze(0).add(input);
+
+  testValidate(&fusion, out, {input}, {aten_output}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionWelfordPersistence_CUDA) {
+  if (at::cuda::getDeviceProperties(0)->major < 6) {
+    return;
+  }
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tvs = Welford(tv0, {0});
+  auto tv4 = add(tvs.avg, tvs.var_sum);
+  auto tv5 = broadcast(tv4, {true});
+  auto tv6 = add(tv0, tv5);
+  fusion.addOutput(tv6);
+
+  std::vector<TensorView*> schedule_tvs = {
+      tvs.avg, tvs.var_sum, tvs.n, tv5, tv6};
+
+  for (auto tv : schedule_tvs) {
+    tv->split(0, 2);
+    tv->axis(0)->parallelize(ParallelType::BIDx);
+    tv->axis(1)->parallelize(ParallelType::BIDy);
+  }
+
+  const int numel_x = 10;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::randn({numel_x}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto out = fe.runFusion({input});
+
+  auto aten_output = (input.mean({0}) + (input.var({0}, false) * numel_x))
+                         .unsqueeze(-1)
+                         .add(input);
+
+  testValidate(&fusion, out, {input}, {aten_output}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionWelfordPersistence2_CUDA) {
+  if (at::cuda::getDeviceProperties(0)->major < 6) {
+    return;
+  }
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tvs = Welford(tv0, {0});
+  auto tv4 = add(tvs.avg, tvs.var_sum);
+  auto tv5 = broadcast(tv4, {true, false});
+  auto tv6 = add(tv0, tv5);
+  fusion.addOutput(tv6);
+
+  std::vector<TensorView*> schedule_tvs = {
+      tvs.avg, tvs.var_sum, tvs.n, tv5, tv6};
+  for (auto tv : schedule_tvs) {
+    tv->split(0, 2);
+    tv->axis(0)->parallelize(ParallelType::BIDx);
+    tv->axis(1)->parallelize(ParallelType::TIDy);
+    tv->axis(2)->parallelize(ParallelType::TIDx);
+  }
+  tv4->axis(0)->parallelize(ParallelType::TIDx);
+
+  const int numel_x = 10;
+  const int numel_y = 3;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::randn({numel_x, numel_y}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto out = fe.runFusion({input});
+
+  auto aten_output = (input.mean({0}) + (input.var({0}, false) * numel_x))
+                         .unsqueeze(0)
+                         .add(input);
+
+  testValidate(&fusion, out, {input}, {aten_output}, __LINE__, __FILE__);
 }
 
 TEST(NVFuserTest, FusionIssue633_CUDA) {
@@ -13898,6 +14155,348 @@ TEST(NVFuserTest, FusionVectorizeMisalignedStrideFail_CUDA) {
 
   // Failure because the input + output tensors do not have the same stride
   ASSERT_ANY_THROW(fe.runFusion(aten_inputs));
+}
+
+TEST(NVFuserTest, FusionViewOutput_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  std::vector<int64_t> input_shape{2, 10, 40};
+  std::vector<int64_t> output_shape{2, 10, 4, 10};
+
+  TensorView* x = makeSymbolicTensor(input_shape.size());
+  TensorView* bias = makeSymbolicTensor(input_shape.size());
+  fusion.addInput(x);
+  fusion.addInput(bias);
+
+  auto x_add_bias = add(x, bias);
+  auto x_view = view(x_add_bias, input_shape, output_shape);
+  fusion.addOutput(x_view);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor at_x = at::randn(input_shape, options);
+  at::Tensor at_bias = at::randn(input_shape, options);
+  std::vector<IValue> aten_inputs = {at_x, at_bias};
+
+  auto lparams = schedulePointwise(&fusion, aten_inputs);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion(aten_inputs, lparams);
+
+  auto at_x_add_bias = at_x + at_bias;
+  auto at_x_view = at::native::view(at_x_add_bias, output_shape);
+
+  testValidate(&fusion, outputs, aten_inputs, {at_x_view}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionViewFailMismatchSize_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // The number of elements in input and output shapes do not match,
+  // so this view transformation is invalid.
+  // 2 * 10 * 40 != 2 * 50 * 4 * 10
+
+  std::vector<int64_t> input_shape{2, 10, 40};
+  std::vector<int64_t> output_shape{2, 50, 4, 10};
+
+  TensorView* x = makeSymbolicTensor(input_shape.size());
+  TensorView* bias = makeSymbolicTensor(input_shape.size());
+  fusion.addInput(x);
+  fusion.addInput(bias);
+
+  auto x_add_bias = add(x, bias);
+  ASSERT_ANY_THROW(view(x_add_bias, input_shape, output_shape));
+}
+
+TEST(NVFuserTest, FusionViewFailMulitDimInference_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Only one dimension can be inferred in the output shape.
+  // Otherwise, the size of the dimensions is ambiguous.
+  std::vector<int64_t> input_shape{2, 10, 40};
+  std::vector<int64_t> output_shape{2, -1, 4, -1};
+
+  TensorView* x = makeSymbolicTensor(input_shape.size());
+  TensorView* bias = makeSymbolicTensor(input_shape.size());
+  fusion.addInput(x);
+  fusion.addInput(bias);
+
+  auto x_add_bias = add(x, bias);
+  ASSERT_ANY_THROW(view(x_add_bias, input_shape, output_shape));
+}
+
+TEST(NVFuserTest, FusionViewFailReduction_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  // View is only supported by the pointwise scheduler,
+  // so it should fail with any reduction operations
+  std::vector<int64_t> input_shape{2, 10, 40};
+  std::vector<int64_t> output_shape{2, 10, 2, 20};
+
+  TensorView* x = makeSymbolicTensor(input_shape.size());
+  TensorView* bias = makeSymbolicTensor(input_shape.size());
+  fusion.addInput(x);
+  fusion.addInput(bias);
+
+  auto x_add_bias = add(x, bias);
+  auto x_view = view(x_add_bias, input_shape, output_shape);
+  auto x_sum = sum(x_view, {-1});
+
+  fusion.addOutput(x_sum);
+
+  const auto options =
+      at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::Tensor at_x = at::randn(input_shape, options);
+  at::Tensor at_bias = at::randn(input_shape, options);
+
+  FusionExecutorCache fusion_executor_cache(std::move(fusion_ptr));
+  ASSERT_ANY_THROW(fusion_executor_cache.runFusionWithInputs({at_x, at_bias}));
+}
+
+TEST(NVFuserTest, FusionViewFailPersistent_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  // View is only supported by the pointwise scheduler,
+  // so it should fail with any persistent normalization operations
+  std::vector<int64_t> input_shape{2, 10, 40};
+  std::vector<int64_t> output_shape{2, 10, 2, 20};
+
+  TensorView* x = makeSymbolicTensor(input_shape.size());
+  TensorView* bias = makeSymbolicTensor(input_shape.size());
+  fusion.addInput(x);
+  fusion.addInput(bias);
+
+  auto x_add_bias = add(x, bias);
+  auto x_view = view(x_add_bias, input_shape, output_shape);
+  auto x_softmax = softmax(x_view, -1);
+
+  fusion.addOutput(x_softmax);
+
+  const auto options =
+      at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::Tensor at_x = at::randn(input_shape, options);
+  at::Tensor at_bias = at::randn(input_shape, options);
+
+  FusionExecutorCache fusion_executor_cache(std::move(fusion_ptr));
+  ASSERT_ANY_THROW(fusion_executor_cache.runFusionWithInputs({at_x, at_bias}));
+}
+
+void addViewGeluFusion(
+    std::vector<int64_t>& input_shape,
+    std::vector<int64_t>& output_shape) {
+  for (auto hasImplicitBroadcast : {false, true}) {
+    Fusion fusion;
+    FusionGuard fg(&fusion);
+
+    TensorView* x = (hasImplicitBroadcast)
+        ? makeConcreteTensor(input_shape)
+        : makeSymbolicTensor(input_shape.size());
+    TensorView* bias = (hasImplicitBroadcast)
+        ? makeConcreteTensor(input_shape)
+        : makeSymbolicTensor(input_shape.size());
+    fusion.addInput(x);
+    fusion.addInput(bias);
+
+    auto x_add_bias = add(x, bias);
+    auto x_view = view(x_add_bias, input_shape, output_shape);
+    auto y = gelu(x_view);
+    fusion.addOutput(y);
+
+    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+    at::Tensor at_x = at::randn(input_shape, options);
+    at::Tensor at_bias = at::randn(input_shape, options);
+    std::vector<IValue> aten_inputs = {at_x, at_bias};
+
+    auto lparams = schedulePointwise(&fusion, aten_inputs);
+
+    FusionExecutor fe;
+    fe.compileFusion(&fusion);
+    auto outputs = fe.runFusion(aten_inputs, lparams);
+
+    auto at_x_add_bias = at_x + at_bias;
+    auto at_x_view = at::native::view(at_x_add_bias, output_shape);
+    auto at_y = at::gelu(at_x_view);
+
+    testValidate(&fusion, outputs, aten_inputs, {at_y}, __LINE__, __FILE__);
+  }
+}
+
+TEST(NVFuserTest, FusionViewSplit_CUDA) {
+  std::vector<int64_t> input_shape{80};
+  std::vector<int64_t> output_shape{2, 4, 10};
+  addViewGeluFusion(input_shape, output_shape);
+}
+
+TEST(NVFuserTest, FusionViewBroadcast_CUDA) {
+  std::vector<int64_t> input_shape{80};
+  std::vector<int64_t> output_shape{1, 80};
+  addViewGeluFusion(input_shape, output_shape);
+}
+
+TEST(NVFuserTest, FusionViewMerge_CUDA) {
+  std::vector<int64_t> input_shape{2, 40, 7};
+  std::vector<int64_t> output_shape{560};
+  addViewGeluFusion(input_shape, output_shape);
+}
+
+TEST(NVFuserTest, FusionViewAllShmoo_CUDA) {
+  typedef std::vector<int64_t> shape;
+  typedef std::pair<shape, shape> view_example;
+
+  std::vector<view_example> examples = {
+      {{1, 19, 1, 12, 7, 1, 99}, {1, 19, 1, 3, 2772}},
+      {{3, 17, 80, 1}, {51, 1, 2, 4, 10}},
+      {{3, 17, 80, 1, 9}, {51, 1, 2, 4, 10, 9}},
+      {{2, 3, 4, 5}, {1, 6, 1, 2, 2, 5, 1}},
+      {{22, 22, 2}, {22, 11, 1, 1, 4}},
+      {{37, 9, 7, 6, 10}, {333, 2, 2, 3, 35}},
+      {{1, 1, 333, 1}, {1, 1, 333, 1}},
+      {{8, 1, 1, 8, 1, 8}, {8, 2, 4, 1, 8}},
+      {{1, 333, 1}, {1, 37, 9, 1}},
+      {{1, 333}, {1, 1, 1, 111, 1, 3}},
+      {{22, 1, 22, 1}, {484}},
+      {{1, 333, 1}, {333}},
+      {{1, 27454, 1, 2}, {1, 7844, 1, 7}},
+      {{1, 7844, 1, 7}, {1, 27454, 2}}};
+
+  for (auto e : examples) {
+    addViewGeluFusion(e.first, e.second);
+  }
+}
+
+TEST(NVFuserTest, FusionViewInferShmoo_CUDA) {
+  typedef std::vector<int64_t> shape;
+  typedef std::pair<shape, shape> view_example;
+
+  std::vector<view_example> examples = {
+      {{1, 19, 1, 12, 7, 1, 99}, {1, 19, -1, 3, 2772}},
+      {{3, 17, 80, 1}, {51, 1, 2, 4, -1}},
+      {{3, 17, 80, 1, 9}, {-1, 1, 2, 4, 10, 9}},
+      {{2, 3, 4, 5}, {1, 6, 1, -1, 2, 5, 1}},
+      {{22, 22, 2}, {22, -1, 1, 1, 4}},
+      {{37, 9, 7, 6, 10}, {333, 2, -1, 3, 35}},
+      {{1, 1, 333, 1}, {1, 1, -1, 1}},
+      {{8, 1, 1, 8, 1, 8}, {8, 2, 4, 1, -1}},
+      {{1, 333, 1}, {1, 37, -1, 1}},
+      {{1, 333}, {1, 1, 1, -1, 1, 3}},
+      {{22, 1, 22, 1}, {-1}},
+      {{1, 333, 1}, {-1}},
+      {{1, 27454, 1, 2}, {1, 7844, 1, -1}},
+      {{1, 7844, 1, 7}, {1, -1, 2}}};
+
+  for (auto e : examples) {
+    addViewGeluFusion(e.first, e.second);
+  }
+}
+
+void geluViewAddFusion(
+    std::vector<int64_t> input_shape,
+    std::vector<int64_t> output_shape) {
+  for (auto hasImplicitBroadcast : {false, true}) {
+    Fusion fusion;
+    FusionGuard fg(&fusion);
+
+    TensorView* x = (hasImplicitBroadcast)
+        ? makeConcreteTensor(input_shape)
+        : makeSymbolicTensor(input_shape.size());
+    TensorView* bias = (hasImplicitBroadcast)
+        ? makeConcreteTensor(output_shape)
+        : makeSymbolicTensor(output_shape.size());
+    fusion.addInput(x);
+    fusion.addInput(bias);
+
+    auto x_gelu = gelu(x);
+    auto x_view = view(x_gelu, input_shape, output_shape);
+    auto y = add(x_view, bias);
+    fusion.addOutput(y);
+
+    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+    at::Tensor at_x = at::randn(input_shape, options);
+    at::Tensor at_bias = at::randn(output_shape, options);
+    std::vector<IValue> aten_inputs = {at_x, at_bias};
+
+    auto lparams = schedulePointwise(&fusion, aten_inputs);
+
+    FusionExecutor fe;
+    fe.compileFusion(&fusion);
+    auto outputs = fe.runFusion(aten_inputs, lparams);
+
+    auto at_x_gelu = at::gelu(at_x);
+    auto at_x_view = at::native::view(at_x_gelu, output_shape);
+    auto at_y = at_x_view + at_bias;
+
+    testValidate(&fusion, outputs, aten_inputs, {at_y}, __LINE__, __FILE__);
+  }
+}
+
+TEST(NVFuserTest, FusionViewStride_CUDA) {
+  typedef std::vector<int64_t> shape;
+  typedef std::pair<shape, shape> view_example;
+
+  std::vector<view_example> examples = {
+      {{1, 27454, 2}, {1, 7844, 7}},
+      {{1, 19, 1, 12, 7, 1, 99}, {1, 19, 1, 3, 2772}},
+      {{1, 7844, 1, 7}, {1, 27454, 2}}};
+
+  for (auto e : examples) {
+    geluViewAddFusion(e.first, e.second);
+  }
+}
+
+void geluViewBinaryAddFusion(
+    std::vector<int64_t> input_shape1,
+    std::vector<int64_t> input_shape2,
+    std::vector<int64_t> output_shape) {
+  for (auto hasImplicitBroadcast : {false, true}) {
+    Fusion fusion;
+    FusionGuard fg(&fusion);
+
+    TensorView* x = (hasImplicitBroadcast)
+        ? makeConcreteTensor(input_shape1)
+        : makeSymbolicTensor(input_shape1.size());
+    TensorView* bias = (hasImplicitBroadcast)
+        ? makeConcreteTensor(input_shape2)
+        : makeSymbolicTensor(input_shape2.size());
+    fusion.addInput(x);
+    fusion.addInput(bias);
+
+    auto x_gelu = gelu(x);
+    auto x_view = view(x_gelu, input_shape1, output_shape);
+    auto bias_view = view(bias, input_shape2, output_shape);
+    auto y = add(x_view, bias_view);
+    fusion.addOutput(y);
+
+    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+    at::Tensor at_x = at::randn(input_shape1, options);
+    at::Tensor at_bias = at::randn(input_shape2, options);
+    std::vector<IValue> aten_inputs = {at_x, at_bias};
+
+    auto lparams = schedulePointwise(&fusion, aten_inputs);
+
+    FusionExecutor fe;
+    fe.compileFusion(&fusion);
+    auto outputs = fe.runFusion(aten_inputs, lparams);
+
+    auto at_x_gelu = at::gelu(at_x);
+    auto at_x_view = at::native::view(at_x_gelu, output_shape);
+    auto at_bias_view = at::native::view(at_bias, output_shape);
+    auto at_y = at_x_view + at_bias_view;
+
+    testValidate(&fusion, outputs, aten_inputs, {at_y}, __LINE__, __FILE__);
+  }
+}
+
+TEST(NVFuserTest, FusionViewBinary_CUDA) {
+  geluViewBinaryAddFusion({27454, 2}, {54908}, {7844, 7});
 }
 
 TEST(NVFuserTest, FusionVectorization1_CUDA) {
@@ -17692,7 +18291,7 @@ TEST(NVFuserTest, FusionPredicateParallelizedDomains_CUDA) {
 
 // Repro of #1102 and #1129
 TEST(NVFuserTest, FusionSmemPredicateUnswitch_CUDA) {
-  if (at::cuda::getDeviceProperties(0)->major < 6) {
+  if (at::cuda::getDeviceProperties(0)->major < 7) {
     return;
   }
   Fusion fusion;
@@ -18062,7 +18661,7 @@ TEST(NVFuserTest, FusionTestWarpSoftMax_CUDA) {
 }
 
 TEST(NVFuserTest, FusionIssue1133_CUDA) {
-  if (at::cuda::getDeviceProperties(0)->major < 6) {
+  if (at::cuda::getDeviceProperties(0)->major < 7) {
     return;
   }
   Fusion fusion;
@@ -18509,7 +19108,7 @@ TEST(NVFuserTest, PersistentBufferProjection_CUDA) {
 }
 
 TEST(NVFuserTest, FusionIssue1223_CUDA) {
-  if (at::cuda::getDeviceProperties(0)->major < 6) {
+  if (at::cuda::getDeviceProperties(0)->major < 7) {
     return;
   }
   Fusion fusion;
@@ -18606,6 +19205,424 @@ TEST(NVFuserTest, FusionRfactorPredication1_CUDA) {
 
   testValidate(
       &fusion, cg_outputs, {at_t0, at_t3}, {at_t2, at_t4}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionRfactorPredication2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = min(tv0, {0});
+  fusion.addOutput(tv1);
+
+  // Make TIDx non-exact
+  auto tv2 = makeContigTensor(1);
+  fusion.addInput(tv2);
+
+  auto tv3 = add(tv2, new Double(1));
+  fusion.addOutput(tv3);
+
+  tv1->split(0, 4);
+  auto tv4 = tv1->rFactor({0});
+
+  tv1->split(0, 3);
+
+  // tv0->computeAt(tv1, 3);
+  tv4->reorder({{0, 1}});
+  tv4->split(0, 3);
+  tv4->setMemoryType(MemoryType::Shared);
+
+  // tv0: [I]
+  // tv4: [4/3, 3, I/4]
+  // tv1: [4/3, 3]
+
+  tv1->axis(0)->parallelize(ParallelType::TIDx);
+  scheduler_utils::parallelizeAllLike(tv1, {tv4});
+
+  tv3->axis(0)->parallelize(ParallelType::TIDx);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  at::Tensor at_t0 = at::randn({9}, options);
+  at_t0 = at::abs(at_t0);
+  at::Tensor at_t3 = at::randn({128}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion({at_t0, at_t3});
+
+  auto at_t2 = std::get<0>(at_t0.min(0));
+  auto at_t4 = at_t3 + 1;
+
+  testValidate(
+      &fusion, cg_outputs, {at_t0, at_t3}, {at_t2, at_t4}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionNonDivisibleSplit1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = sum(tv0, {0});
+  fusion.addOutput(tv1);
+
+  // [I]
+  tv1->split(0, 5);
+  // [ceilDiv(I, 5), 5]
+
+  // This second split is non-divisible. The split domain must be predicated.
+  tv1->split(1, 3);
+  // [ceilDiv(I, 5), 2, 3]
+
+  auto tv2 = sum(tv0, {0});
+  fusion.addOutput(tv2);
+
+  // tv2 shouldn't need to have another predicate
+  tv2->split(0, 4);
+  tv2->split(1, 2);
+
+  GpuLower gpulw(&fusion);
+  TORCH_CHECK(
+      gpulw.nonDivisibleSplitInfo().splitsToValidate().empty(),
+      "There must be no split to validate");
+  TORCH_CHECK(
+      gpulw.nonDivisibleSplitInfo().splitsToPredicate().size() == 1,
+      "Only tv1 should have a non-divisible predicate.");
+  for (auto tv : {tv1}) {
+    auto it = gpulw.nonDivisibleSplitInfo().splitsToPredicate().find(tv);
+    TORCH_CHECK(
+        it != gpulw.nonDivisibleSplitInfo().splitsToPredicate().end(),
+        "No info found for ",
+        tv);
+    const auto& splits_to_predicate = it->second;
+    TORCH_CHECK(
+        splits_to_predicate.size() == 1,
+        "There must be one split to predicate");
+  }
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  at::Tensor t0 = at::randn({24}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion({t0});
+
+  auto ref = t0.sum();
+
+  testValidate(&fusion, cg_outputs, {t0}, {ref, ref}, __LINE__, __FILE__);
+}
+
+// Repro of issue #1074
+TEST(NVFuserTest, FusionNonDivisibleSplit2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = add(tv1, new Double(1));
+  fusion.addOutput(tv2);
+
+  tv2->split(0, 2);
+  tv2->split(-1, 4);
+  tv2->reorder({{1, 2}, {2, 1}});
+  tv0->computeAt(tv2, 2);
+
+  tv2->split(-1, 3);
+
+  // To make the sanitizer catch the invalid accesses. Not necessary
+  // to expose the bug.
+  tv1->setMemoryType(MemoryType::Shared);
+
+  GpuLower gpulw(&fusion);
+  TORCH_CHECK(
+      gpulw.nonDivisibleSplitInfo().splitsToValidate().empty(),
+      "There must be no split to validate");
+  TORCH_CHECK(
+      gpulw.nonDivisibleSplitInfo().splitsToPredicate().size() == 1,
+      "Only tv2 should have a non-divisible predicate.");
+  for (auto tv : {tv2}) {
+    auto it = gpulw.nonDivisibleSplitInfo().splitsToPredicate().find(tv);
+    TORCH_CHECK(
+        it != gpulw.nonDivisibleSplitInfo().splitsToPredicate().end(),
+        "No info found for ",
+        tv);
+    const auto& splits_to_predicate = it->second;
+    TORCH_CHECK(
+        splits_to_predicate.size() == 1,
+        "There must be one split to predicate");
+  }
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  at::Tensor t0 = at::randn({13, 17}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion({t0});
+
+  auto ref = t0 + 2;
+
+  testValidate(&fusion, cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+// Similar to FusionNonDivisibleSplit1 but with unswitch
+TEST(NVFuserTest, FusionNonDivisibleSplit3_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = sum(tv1, {0});
+  fusion.addOutput(tv2);
+
+  tv2->split(0, 5);
+  tv2->split(1, 3);
+
+  tv0->computeAt(tv2, -1);
+
+  tv2->axis(0)->parallelize(ParallelType::Unswitch);
+
+  GpuLower gpulw(&fusion);
+  TORCH_CHECK(
+      gpulw.nonDivisibleSplitInfo().splitsToValidate().empty(),
+      "There must be no split to validate");
+  TORCH_CHECK(
+      gpulw.nonDivisibleSplitInfo().splitsToPredicate().size() == 2,
+      "Both tv1 and tv2 should have a non-divisible predicate.");
+  for (auto tv : {tv1, tv2}) {
+    auto it = gpulw.nonDivisibleSplitInfo().splitsToPredicate().find(tv);
+    TORCH_CHECK(
+        it != gpulw.nonDivisibleSplitInfo().splitsToPredicate().end(),
+        "No info found for ",
+        tv);
+    const auto& splits_to_predicate = it->second;
+    TORCH_CHECK(
+        splits_to_predicate.size() == 1,
+        "There must be one split to predicate");
+  }
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  at::Tensor t0 = at::randn({24}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion({t0});
+
+  auto ref = (t0 + 1).sum();
+
+  testValidate(&fusion, cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+// Non-divisible split through merge
+TEST(NVFuserTest, FusionNonDivisibleSplit4_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = sum(tv1, {0, 1});
+  fusion.addOutput(tv2);
+
+  tv2->split(0, 5);
+  tv2->merge(1, 2);
+  tv2->split(1, 3);
+
+  tv0->computeAt(tv2, -1);
+
+  GpuLower gpulw(&fusion);
+  TORCH_CHECK(
+      gpulw.nonDivisibleSplitInfo().splitsToValidate().empty(),
+      "There must be no split to validate");
+  TORCH_CHECK(
+      gpulw.nonDivisibleSplitInfo().splitsToPredicate().size() == 2,
+      "Both tv1 and tv2 should have a non-divisible predicate.");
+  for (auto tv : {tv1, tv2}) {
+    auto it = gpulw.nonDivisibleSplitInfo().splitsToPredicate().find(tv);
+    TORCH_CHECK(
+        it != gpulw.nonDivisibleSplitInfo().splitsToPredicate().end(),
+        "No info found for ",
+        tv);
+    const auto& splits_to_predicate = it->second;
+    TORCH_CHECK(
+        splits_to_predicate.size() == 1,
+        "There must be one split to predicate");
+  }
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  at::Tensor t0 = at::randn({24, 2}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion({t0});
+
+  auto ref = (t0 + 1).sum();
+
+  testValidate(&fusion, cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+// Nested splits
+TEST(NVFuserTest, FusionNonDivisibleSplit5_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = sum(tv1, {0});
+  fusion.addOutput(tv2);
+
+  // [I]
+  tv2->split(0, 8);
+  // [I/8, 8]
+  tv2->split(1, 2);
+  // [I/8, 4, 2]
+  tv2->split(1, 3); // non-divisible split of outer output
+  // [I/8, 2, 3, 2]
+
+  tv0->computeAt(tv2, -1);
+
+  GpuLower gpulw(&fusion);
+  TORCH_CHECK(
+      gpulw.nonDivisibleSplitInfo().splitsToValidate().empty(),
+      "There must be no split to validate");
+  TORCH_CHECK(
+      gpulw.nonDivisibleSplitInfo().splitsToPredicate().size() == 2,
+      "Both tv1 and tv2 should have a non-divisible predicate.");
+  for (auto tv : {tv1, tv2}) {
+    auto it = gpulw.nonDivisibleSplitInfo().splitsToPredicate().find(tv);
+    TORCH_CHECK(
+        it != gpulw.nonDivisibleSplitInfo().splitsToPredicate().end(),
+        "No info found for ",
+        tv);
+    const auto& splits_to_predicate = it->second;
+    TORCH_CHECK(
+        splits_to_predicate.size() == 1,
+        "There must be one split to predicate");
+  }
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  at::Tensor t0 = at::randn({24}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion({t0});
+
+  auto ref = (t0 + 1).sum();
+
+  testValidate(&fusion, cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+// Vectorized non-divisible split. Must be validated at run time
+TEST(NVFuserTest, FusionNonDivisibleSplitVectorize1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = set(tv0);
+  fusion.addOutput(tv1);
+
+  tv1->split(0, 8, false);
+  tv1->split(1, 4);
+
+  tv1->axis(-1)->parallelize(ParallelType::Vectorize);
+
+  GpuLower gpulw(&fusion);
+  TORCH_CHECK(
+      gpulw.nonDivisibleSplitInfo().splitsToValidate().size() == 1,
+      "There should be one split to validate");
+  for (const auto& kv : gpulw.nonDivisibleSplitInfo().splitsToPredicate()) {
+    const auto& splits_to_predicate = kv.second;
+    TORCH_CHECK(
+        splits_to_predicate.empty(),
+        "There must be no split to predicate, but tensor t",
+        kv.first->name(),
+        " has:",
+        splits_to_predicate);
+  }
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+
+  auto t0 = at::randn({32}, options);
+  auto cg_outputs = fe.runFusion({t0});
+
+  auto ref = t0;
+
+  testValidate(&fusion, cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
+
+  auto t0_non_divisible = at::randn({8}, options);
+  // Since ceilDiv(8, 8) is not divisible by 4, the vectorization is
+  // illegal. The run-time validation of vectorization should throw an error.
+  ASSERT_ANY_THROW(fe.runFusion({t0_non_divisible}));
+}
+
+// If a split is validated at run time, it's not necessary to predicate.
+TEST(NVFuserTest, FusionNonDivisibleSplitVectorize2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = set(tv0);
+  auto tv2 = add(tv1, new Double(1));
+  auto tv3 = sum(tv2, {0});
+  fusion.addOutput(tv3);
+
+  tv3->split(0, 8, false);
+  tv3->split(1, 4);
+  TransformPropagator::from(tv3);
+
+  tv3->axis(1)->parallelize(ParallelType::TIDx);
+  scheduler_utils::parallelizeAllLike(tv3, {tv1, tv2});
+
+  tv1->axis(2)->parallelize(ParallelType::Vectorize);
+
+  GpuLower gpulw(&fusion);
+  TORCH_CHECK(
+      gpulw.nonDivisibleSplitInfo().splitsToValidate().size() == 1,
+      "There should be one split to validate");
+  for (const auto& kv : gpulw.nonDivisibleSplitInfo().splitsToPredicate()) {
+    const auto& splits_to_predicate = kv.second;
+    TORCH_CHECK(
+        splits_to_predicate.empty(),
+        "There must be no split to predicate, but tensor t",
+        kv.first->name(),
+        " has:",
+        splits_to_predicate);
+  }
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+
+  auto t0 = at::randn({1024}, options);
+  auto cg_outputs = fe.runFusion({t0});
+
+  auto ref = (t0 + 1).sum();
+
+  testValidate(&fusion, cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
 }
 
 } // namespace jit
