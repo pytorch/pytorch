@@ -112,7 +112,6 @@ core_sources_common = [
     "torch/csrc/jit/mobile/type_parser.cpp",
     "torch/csrc/jit/mobile/runtime_compatibility.cpp",
     "torch/csrc/jit/operator_upgraders/version_map.cpp",
-    "torch/csrc/jit/operator_upgraders/upgraders_entry.cpp",
     "torch/csrc/jit/operator_upgraders/upgraders_guard.cpp",
     "torch/csrc/jit/runtime/instruction.cpp",
     "torch/csrc/jit/runtime/jit_exception.cpp",
@@ -500,6 +499,7 @@ libtorch_distributed_sources = libtorch_distributed_base_sources + libtorch_dist
 
 jit_sources_full = [
     "torch/csrc/jit/codegen/cuda/interface.cpp",
+    "torch/csrc/jit/operator_upgraders/upgraders_entry.cpp",
     "torch/csrc/jit/passes/lower_graph.cpp",
     "torch/csrc/jit/runtime/register_c10_ops.cpp",
     "torch/csrc/jit/runtime/register_prim_ops.cpp",
