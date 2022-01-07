@@ -85,6 +85,11 @@ class StoreTestBase(object):
         self.assertEqual(b"value2", fs.get("key2"))
         self.assertEqual(b"21", fs.get("key3"))
 
+        fs.set("-key3", "7")
+        self.assertEqual(b"7", fs.get("-key3"))
+        fs.delete_key("-key3")
+        self.assertEqual(fs.num_keys(), self.num_keys_total)
+
     def test_set_get(self):
         self._test_set_get(self._create_store())
 
