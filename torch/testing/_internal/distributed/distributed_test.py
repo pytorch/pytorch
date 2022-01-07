@@ -1450,13 +1450,6 @@ class DistributedTest:
                 )
                 self._barrier()
 
-<<<<<<< HEAD
-        @require_ucc_for_nccl()
-        def test_send_recv_any_source(self):
-            self._test_send_recv_any_source(profiler_ctx=None)
-
-        @require_ucc_for_nccl()
-=======
         @sandcastle_skip_if(
             BACKEND in DistTestCases.skip_collective["sendrecv anysource"], f"{BACKEND} does not support send/recv from any source"
         )
@@ -1466,18 +1459,13 @@ class DistributedTest:
         @sandcastle_skip_if(
             BACKEND in DistTestCases.skip_collective["sendrecv anysource"], f"{BACKEND} does not support send/recv from any source"
         )
->>>>>>> create-ucc-pg
         def test_send_recv_any_source_autograd_profiler(self):
             autograd_profiler_ctx = _create_autograd_profiler()
             self._test_send_recv_any_source(profiler_ctx=autograd_profiler_ctx)
 
-<<<<<<< HEAD
-        @require_ucc_for_nccl()
-=======
         @sandcastle_skip_if(
             BACKEND in DistTestCases.skip_collective["sendrecv anysource"], f"{BACKEND} does not support send/recv from any source"
         )
->>>>>>> create-ucc-pg
         @sandcastle_skip_if(IS_FBCODE, "Kineto in fbcode code causes hang")
         @sandcastle_skip_if(
             IS_MACOS or IS_WINDOWS,
