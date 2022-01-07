@@ -432,9 +432,10 @@ class Mish(Module):
         return inplace_str
 
 class Hardswish(Module):
-    r"""Applies the hardswish function, element-wise, as described in the paper:
+    r"""Applies the Hardswish function, element-wise, as described in the paper:
+    `Searching for MobileNetV3 <https://arxiv.org/abs/1905.02244>`__.
 
-    `Searching for MobileNetV3`_.
+    Hardswish is defined as:
 
     .. math::
         \text{Hardswish}(x) = \begin{cases}
@@ -457,9 +458,6 @@ class Hardswish(Module):
         >>> m = nn.Hardswish()
         >>> input = torch.randn(2)
         >>> output = m(input)
-
-    .. _`Searching for MobileNetV3`:
-        https://arxiv.org/abs/1905.02244
     """
     __constants__ = ['inplace']
 
