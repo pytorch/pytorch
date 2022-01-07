@@ -12,6 +12,7 @@ function install_ucx() {
   time make -j
   sudo make install
   popd
+  rm -rf ucx
 }
 
 function install_ucc() {
@@ -23,6 +24,7 @@ function install_ucc() {
   time make -j
   sudo make install
   popd
+  rm -rf ucc
 }
 
 install_ucx
