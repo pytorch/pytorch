@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/tensorexpr/graph_opt.h>
 
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/runtime/symbolic_shape_registry_util.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
@@ -419,6 +420,71 @@ std::shared_ptr<Graph> replaceListOutputWithTuple(
   auto tuple_node = graph->createTuple(out_node->inputs());
   tuple_node->insertAfter(out_node);
   out->replaceAllUsesWith(tuple_node->output());
+  return graph;
+}
+
+bool trimGraphOnce(const std::shared_ptr<Graph>& graph) {
+  Node* ret = graph->return_node();
+  std::unordered_set<Value*> graph_inputs(
+      graph->inputs().begin(), graph->inputs().end());
+  std::unordered_set<Value*> outputs(
+      graph->outputs().begin(), graph->outputs().end());
+  bool changed = false;
+  for (int idx = 0; idx < ret->inputs().size(); idx++) {
+    auto v = ret->inputs()[idx];
+    if (graph_inputs.count(v)) {
+      continue;
+    }
+    // Delete the graph output IDX and add all inputs of the node producing that
+    // value to the graph outputs
+    graph->eraseOutput(idx);
+    for (auto v_ins : v->node()->inputs()) {
+      if (outputs.count(v_ins)) {
+        continue;
+      }
+      if (v_ins->node()->kind() == prim::Constant) {
+        continue;
+      }
+
+      graph->registerOutput(v_ins);
+    }
+    changed = true;
+    break;
+  }
+  return changed;
+}
+
+std::shared_ptr<Graph> dequantizeResults(const std::shared_ptr<Graph>& graph) {
+  for (auto v : graph->outputs()) {
+    auto& t = v->type();
+    if (t->kind() == TypeKind::TensorType) {
+      auto tt = t->cast<TensorType>();
+      if (!tt->scalarType() || !c10::isQIntType(*tt->scalarType())) {
+        continue;
+      }
+      Node* deq = graph->create(aten::dequantize, {v});
+      graph->appendNode(deq);
+      deq->output()->setType(tt->withScalarType(c10::kFloat));
+      v->replaceAllUsesAfterNodeWith(deq, deq->output());
+    }
+  }
+  return graph;
+}
+
+std::shared_ptr<Graph> trimGraph(
+    const std::shared_ptr<Graph>& graph,
+    int64_t iters) {
+  bool changed = true;
+  int64_t iter = 0;
+  while (changed && iter++ < iters) {
+    changed = trimGraphOnce(graph);
+    EliminateDeadCode(graph->block());
+  }
+  // Avoid letting quantized values to graph outputs.
+  // Ideally we should allow quantized outputs as well, but currently the main
+  // user of this pass - AOT NNC - does not support it.
+  // TODO: remove output dequantization once NNC supports quantized outputs.
+  dequantizeResults(graph);
   return graph;
 }
 
