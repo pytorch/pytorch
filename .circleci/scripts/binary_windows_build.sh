@@ -10,10 +10,11 @@ export SCCACHE_BUCKET=ossci-compiler-cache-windows
 export NIGHTLIES_PYTORCH_ROOT="$PYTORCH_ROOT"
 export VC_YEAR=2019
 
-if [[ ${BUILD_ENVIRONMENT} == *"nightly"* ]]; then
-    export USE_SCCACHE=0
+# It's a simple way to not use distributed cache in nightly builds.
+if [[ "${CIRCLE_JOB}" == *"nightly"* ]]; then
+    unset SCCACHE_BUCKET
 fi
-          
+
 if [[ "${DESIRED_CUDA}" == "cu111" || "${DESIRED_CUDA}" == "cu113" ]]; then
     export BUILD_SPLIT_CUDA="ON"
 fi
