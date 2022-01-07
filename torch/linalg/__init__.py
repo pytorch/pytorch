@@ -450,7 +450,7 @@ the output has the same batch dimensions.
              by :math:`e^{i \phi}, \phi \in \mathbb{R}` produces another set of valid eigenvectors
              of the matrix.  For this reason, the loss function shall not depend on the phase of the
              eigenvectors, as this quantity is not well-defined.
-             This will be checked when computing the gradients of the loss function.
+             This is checked when computing the gradients of this function.
 
 .. warning:: Gradients computed using the `eigenvectors` tensor will only be finite when
              :attr:`A` has distinct eigenvalues.
@@ -604,7 +604,7 @@ The eigenvalues are returned in ascending order.
              case produces another set of valid eigenvectors of the matrix.
              For this reason, the loss function shall not depend on the phase of the eigenvectors, as
              this quantity is not well-defined.
-             This will be checked for complex inputs when computing the gradients of the loss function.
+             This is checked for complex inputs when computing the gradients of this function.
 
 .. warning:: Gradients computed using the `eigenvectors` tensor will only be finite when
              :attr:`A` has distinct eigenvalues.
