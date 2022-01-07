@@ -24,6 +24,9 @@ namespace py = pybind11;
 // https://pybind11.readthedocs.io/en/stable/advanced/smart_ptrs.html#custom-smart-pointers
 PYBIND11_DECLARE_HOLDER_TYPE(T, c10::intrusive_ptr<T>, true);
 
+PYBIND11_DECLARE_HOLDER_TYPE(T, c10::SingletonOrSharedTypePtr<T>);
+PYBIND11_DECLARE_HOLDER_TYPE(T, c10::SingletonTypePtr<T>, true);
+
 namespace pybind11 { namespace detail {
 
 // torch.Tensor <-> at::Tensor conversions (without unwrapping)
