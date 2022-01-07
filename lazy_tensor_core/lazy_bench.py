@@ -18,9 +18,7 @@ from os.path import abspath
 from scipy.stats import ttest_ind
 import importlib
 import glob
-import time
 import collections
-import csv
 
 def get_unique_suffix():
     return f"{time.time()}_{os.getpid()}"
@@ -34,7 +32,7 @@ def get_benchmark_cls(model_name):
         module = importlib.import_module(f'.models.{model_name}', package="torchbenchmark")
         Model = getattr(module, 'Model', None)
         if Model is None:
-             raise RuntimeError(f"{module} does not define attribute Model, skip it")
+            raise RuntimeError(f"{module} does not define attribute Model, skip it")
         if not hasattr(Model, 'name'):
             Model.name = model_name
         return Model
@@ -56,19 +54,6 @@ log = logging.getLogger(__name__)
 # Models that are known to crash or otherwise not work with lazy tensor are
 # disabled, but should be removed from these lists once fixed
 SKIP = {
-    # out of memory test
-    #"fastNLP_Bert",
-    #"vision_maskrcnn",
-    #"speech_trasformer",
-    #"nvidia_deeprecommender",
-    #"pytorch_struct",
-    #"dlrm",
-    #"LearningToPaint",
-    #"vision_maskrcnn",
-    #"drq",
-    #"moco",
-    # slow tests
-    #"maml",
 }
 SKIP_TRAIN_ONLY = {
     # out of memory test
@@ -105,7 +90,7 @@ def output_csv(name, headers):
             "utf-8",
             write_through=True,
         ),
-        delimiter = ",",
+        delimiter=",",
         quotechar='"',
         quoting=csv.QUOTE_MINIMAL
     )
@@ -339,8 +324,10 @@ def to_device(tensors, device):
 
     try:
         import transformers.modeling_outputs
-        if isinstance(tensors, transformers.modeling_outputs.MaskedLMOutput) \
-        or isinstance(tensors, transformers.modeling_outputs.Seq2SeqLMOutput):
+        if (
+            isinstance(tensors, transformers.modeling_outputs.MaskedLMOutput) or
+            isinstance(tensors, transformers.modeling_outputs.Seq2SeqLMOutput)
+        ):
             # huggingface transformers return classes as model output with many attributes
             # we don't want to sync (such as hidden states of every layer) - just sync the logits
             tensors = tensors.logits
@@ -389,10 +376,13 @@ def lazy_overhead_experiment(args, results, benchmark, lazy_benchmark):
     output_csv(
         os.path.join(args.output_dir, f"lazy-overheads_{args.test}_{get_unique_suffix()}.csv"),
         ("dev", "name", "test", "overhead", "pvalue"),
-    ).writerow([current_device, current_name, args.test,  f"{overhead:.4f}", f"{pvalue:.4e}"])
-    print(f"{short_name(name, limit=30):<30} {current_device:<4} {args.test:<5} {'trace overheads':<20} overhead: {overhead:.3f} pvalue: {pvalue:.2e}")
+    ).writerow([current_device, current_name, args.test, f"{overhead:.4f}", f"{pvalue:.4e}"])
+    print(f"{short_name(name, limit=30):<30} {current_device:<4} {args.test:<5} "
+          f"{'trace overheads':<20} overhead: {overhead:.3f} pvalue: {pvalue:.2e}")
     if args.verbose:
-        print(f"CIDEBUGOUTPUT,lazy_overhead_experiment,{current_name},{args.test},{current_device},{overhead:.4f},{pvalue:.4e},{args.warmup},{args.repeat},{warmup_time:.2f},{bench_time:.2f}")
+        print(f"CIDEBUGOUTPUT,lazy_overhead_experiment,"
+              f"{current_name},{args.test},{current_device},{overhead:.4f},"
+              f"{pvalue:.4e},{args.warmup},{args.repeat},{warmup_time:.2f},{bench_time:.2f}")
     return (overhead, pvalue)
 
 def lazy_compute_experiment(args, experiment, results, benchmark, lazy_benchmark, sync_every_iter=False, to_dev_sync=None):
@@ -425,7 +415,7 @@ def lazy_compute_experiment(args, experiment, results, benchmark, lazy_benchmark
         print("WARNING: lazy cached compile count indicates fallbacks, or something else")
     fallbacks = {k: v for (k, v) in lazy_metrics.items() if 'aten::' in k}
     if len(fallbacks):
-        print("WARNING: lazy-eager fallbacks detected for ["+ ",".join(fallbacks.keys()) + ']')
+        print("WARNING: lazy-eager fallbacks detected for [" + ",".join(fallbacks.keys()) + ']')
     if args.dump_lazy_counters:
         print(lazy_metrics)
     pvalue = ttest_ind(timings[:, 0], timings[:, 1]).pvalue
@@ -436,9 +426,12 @@ def lazy_compute_experiment(args, experiment, results, benchmark, lazy_benchmark
         os.path.join(args.output_dir, f"lazy-compute_{args.test}_{get_unique_suffix()}.csv"),
         ("name", "dev", "experiment", "test", "speedup", "pvalue"),
     ).writerow([current_name, current_device, experiment, args.test, f"{speedup:.4f}", f"{pvalue:.2e}"])
-    print(f"{short_name(current_name, limit=30):<30} {current_device:<4} {args.test:<5} {experiment:<20} speedup:  {speedup:.3f} pvalue: {pvalue:.2e}")
+    print(f"{short_name(current_name, limit=30):<30} {current_device:<4} "
+          f"{args.test:<5} {experiment:<20} speedup:  {speedup:.3f} pvalue: {pvalue:.2e}")
     if args.verbose:
-        print(f"CIDEBUGOUTPUT,lazy_compute_experiment,{current_name},{current_device},{experiment},{args.test},{speedup:.4f},{pvalue:.2e},{args.warmup},{args.repeat},{warmup_time:.2f},{bench_time:.2f}")
+        print(f"CIDEBUGOUTPUT,lazy_compute_experiment,"
+              f"{current_name},{current_device},{experiment},{args.test},{speedup:.4f},"
+              f"{pvalue:.2e},{args.warmup},{args.repeat},{warmup_time:.2f},{bench_time:.2f}")
     return (speedup, pvalue)
 
 
@@ -500,7 +493,7 @@ def merge_with_prefix(prefix, tmp_dir, out_dir, headers):
     results = []
     rfnames = glob.glob(os.path.join(tmp_dir, prefix + "*"))
     for rfname in rfnames:
-        results.extend(open(rfname).readlines()[1:]) #skip header
+        results.extend(open(rfname).readlines()[1:])  # skip header
 
     # the header shouldn't require quotations and the results should already be properly
     # quoted via output_csv
@@ -511,13 +504,14 @@ def merge_with_prefix(prefix, tmp_dir, out_dir, headers):
 
 def merge_reformat(tmp_dir, out_dir, table):
     out_dir = args.output_dir
+
     # depending on the type of an experiment, fields can be in a different order
     # `get_field` deals with all three types including `error`
     def get_field(row, name, file_type):
         headers = {
             "error": ("name", "test", "error"),
             "lazy-compute" : ("name", "dev", "experiment", "test", "speedup", "pvalue"),
-            "lazy-overheads" : ("dev", "name", "test", "overhead", "pvalue") 
+            "lazy-overheads" : ("dev", "name", "test", "overhead", "pvalue")
         }
 
         header = headers[file_type]
@@ -529,7 +523,7 @@ def merge_reformat(tmp_dir, out_dir, table):
 
         with open(csvf, "r") as csvfile:
             prefix = os.path.basename(csvf).split("_")[0]
-            csvreader = csv.reader(csvfile, delimiter = ",", quotechar='"')
+            csvreader = csv.reader(csvfile, delimiter=",", quotechar='"')
             # This skips the first row of the CSV file.
             next(csvreader)
 
@@ -543,7 +537,6 @@ def merge_reformat(tmp_dir, out_dir, table):
                 entry["overhead"] = get_field(r, "overhead", prefix)
             else:
                 entry[get_field(r, "experiment", prefix)] = get_field(r, "speedup", prefix)
-            
 
     amortized_header = f"amortized {args.inner_loop_repeat}x"
     headers = ("name", "test", amortized_header, "unamortized", "overhead", "error", "rc")
@@ -554,7 +547,8 @@ def merge_reformat(tmp_dir, out_dir, table):
     )
 
     for k, v in table.items():
-        cw.writerow((k[0], k[1], v.get(amortized_header, 'N/A'), v.get('unamortized', 'N/A'), v.get('overhead', 'N/A'), v.get('error', 'N/A'), v.get('rc')))
+        cw.writerow((k[0], k[1], v.get(amortized_header, 'N/A'),
+                     v.get('unamortized', 'N/A'), v.get('overhead', 'N/A'), v.get('error', 'N/A'), v.get('rc')))
 
 def save_error(name, test, error, dir):
     output_csv(
@@ -578,7 +572,8 @@ if __name__ == "__main__" :
     parser.add_argument("--torchbench_dir", type=str, help="path to torchbenchmark repo")
     parser.add_argument("--output_dir", type=str, default=".", help="path to write output files")
     parser.add_argument("--dump_lazy_counters", action='store_true', help="dump lazy counter values after each timing run")
-    parser.add_argument("--run_tracing_execute_noops", action='store_true', help="Run the tracing portion only, with noop backend, useful for running under a profiler.")
+    parser.add_argument("--run_tracing_execute_noops", action='store_true',
+                        help="Run the tracing portion only, with noop backend, useful for running under a profiler.")
     parser.add_argument("--run_in_subprocess", "-s", type=str, help="which model run in subprocess.This will ignore filter and exclude")
     args = parser.parse_args()
     results = []
@@ -678,19 +673,21 @@ if __name__ == "__main__" :
         rc = 0
         try:
             if args.verbose:
-                cp = subprocess.run("nvidia-smi --query-gpu=timestamp,utilization.memory,memory.total,memory.free,memory.used --format=csv,noheader", capture_output=True, text=True, shell=True)
+                cp = subprocess.run("nvidia-smi --query-gpu=timestamp,utilization.memory,memory.total,memory.free,memory.used"
+                                    " --format=csv,noheader",
+                                    capture_output=True, text=True, shell=True)
                 print(f"CIDEBUGOUTPUT,BEFORE subprocess.run,{model_name},{cp.stdout}")
             proc = subprocess.Popen(launch_command,
-                        env=env,
-                        shell=True,
-                        stderr=subprocess.STDOUT)
-            
+                                    env=env,
+                                    shell=True,
+                                    stderr=subprocess.STDOUT)
+
             outs, errs = proc.communicate(timeout=args.timeout)
             rc = proc.poll()
         except subprocess.TimeoutExpired:
             print(f"{model_name} timed out after {args.timeout // 60} minutes! Include it in SKIP or SKIP_TRAIN_ONLY")
             save_error(model_name, args.test, "Timed out.", dirpath)
-            # to visualize highlight timeouts, they will also have 
+            # to visualize highlight timeouts, they will also have
             # "timed out" in the error column
             rc = 17
             process = psutil.Process(proc.pid)
@@ -698,7 +695,9 @@ if __name__ == "__main__" :
                 p.kill()
             process.kill()
         if args.verbose:
-            cp = subprocess.run("nvidia-smi --query-gpu=timestamp,utilization.memory,memory.total,memory.free,memory.used --format=csv,noheader", capture_output=True, text=True, shell=True)
+            cp = subprocess.run("nvidia-smi --query-gpu=timestamp,utilization.memory,memory.total,memory.free,memory.used"
+                                " --format=csv,noheader",
+                                capture_output=True, text=True, shell=True)
             print(f"CIDEBUGOUTPUT,AFTER subprocess.run,{model_name},{args.test},{cp.stdout}")
 
         entry = table[(model_name, args.test)]
