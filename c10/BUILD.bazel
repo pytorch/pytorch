@@ -75,7 +75,6 @@ cc_library(
     local_defines = ["C10_BUILD_MAIN_LIB"],
     deps = [
         ":headers",
-        "@fmt",
         "//c10/core:ScalarType",
         "//c10/util:TypeCast",
         "//c10/util:base",
