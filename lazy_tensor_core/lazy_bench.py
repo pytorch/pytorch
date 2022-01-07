@@ -645,11 +645,11 @@ if __name__ == "__main__" :
                                 lazy_result = call_model_with(lazy_model, lazy_inputs)
                                 if not check_results(correct_result, lazy_result, device):
                                     print(f"INCORRECT: {name}")
-                                    save_error(name, "eval", "Incorrect results.", args.output_dir)
+                                    save_error(name, args.test, "Incorrect results.", args.output_dir)
                                     continue
                         except Exception as e:
                             print(f"ERROR: {name}: {e}")
-                            save_error(name, "eval", e, args.output_dir)
+                            save_error(name, args.test, e, args.output_dir)
                             continue
 
                         lazy_overhead_experiment(args, results, benchmark, lazy_benchmark)
@@ -658,7 +658,7 @@ if __name__ == "__main__" :
 
         except Exception as e:
             print(f"ERROR: {name}: {e}")
-            save_error(name, "eval", e, args.output_dir)
+            save_error(name, args.test, e, args.output_dir)
             exit(1)
         exit(0)
 
