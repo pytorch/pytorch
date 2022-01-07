@@ -1158,10 +1158,11 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         self.assertFalse(_allclose(expected, actual))
 
         # Results should be the same after loading from serialized state_dict
-        with tempfile.NamedTemporaryFile() as f:
+        with tempfile.NamedTemporaryFile(delete=False) as f:
             torch.save(m.state_dict(), f)
-            loaded_state_dict = torch.load(f.name)
-            m2.load_state_dict(loaded_state_dict)
+            with open(f.name, 'rb') as f2:
+                loaded_state_dict = torch.load(f2)
+                m2.load_state_dict(loaded_state_dict)
         expected = m(example_inputs[0])
         actual = m2(example_inputs[0])
         self.assertTrue(_allclose(expected, actual))
