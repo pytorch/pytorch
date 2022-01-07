@@ -72,6 +72,9 @@ fi
 
 TRAVIS_DL_URL_PREFIX="https://s3.amazonaws.com/travis-python-archives/binaries/ubuntu/14.04/x86_64"
 
+ucx_commit=35c58b038654a27905d6e62b939a3ba8ec5e3fbb
+ucc_commit=122c2981e41883f076b17c90ca93b83e015cf2cb
+
 # It's annoying to rename jobs every time you want to rewrite a
 # configuration, so we hardcode everything here rather than do it
 # from scratch
@@ -126,6 +129,8 @@ case "$image" in
     DB=yes
     VISION=yes
     KATEX=yes
+    UCX_COMMIT=${ucx_commit}
+    UCC_COMMIT=${ucc_commit}
     ;;
   pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7)
     CUDA_VERSION=11.3.0 # Deviating from major.minor to conform to nvidia's Docker image names
@@ -138,6 +143,8 @@ case "$image" in
     DB=yes
     VISION=yes
     KATEX=yes
+    UCX_COMMIT=${ucx_commit}
+    UCC_COMMIT=${ucc_commit}
     ;;
   pytorch-linux-bionic-cuda11.5-cudnn8-py3-gcc7)
     CUDA_VERSION=11.5.0
@@ -149,6 +156,8 @@ case "$image" in
     DB=yes
     VISION=yes
     KATEX=yes
+    UCX_COMMIT=${ucx_commit}
+    UCC_COMMIT=${ucc_commit}
     ;;
   pytorch-linux-xenial-py3-clang5-asan)
     ANACONDA_PYTHON_VERSION=3.7
@@ -236,6 +245,8 @@ case "$image" in
     DB=yes
     VISION=yes
     ROCM_VERSION=3.9
+    UCX_COMMIT=${ucx_commit}
+    UCC_COMMIT=${ucc_commit}
     ;;
   pytorch-linux-bionic-rocm4.3.1-py3.7)
     ANACONDA_PYTHON_VERSION=3.7
@@ -347,6 +358,8 @@ docker build \
        --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH:-gfx900;gfx906}" \
        --build-arg "IMAGE_NAME=${IMAGE_NAME}" \
        --build-arg "INSTALL_CUDNN=${INSTALL_CUDNN}" \
+       --build-arg "UCX_COMMIT=${UCX_COMMIT}" \
+       --build-arg "UCC_COMMIT=${UCC_COMMIT}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        -t "$tmp_tag" \
        "$@" \

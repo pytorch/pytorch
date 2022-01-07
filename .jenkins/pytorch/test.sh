@@ -573,6 +573,10 @@ elif [[ "${BUILD_ENVIRONMENT}" == *linux-xenial-cuda11.3-py3.6-gcc7* ]]; then
 else
   install_torchvision
   install_monkeytype
+
+  TORCH_UCC_LIBRARY_PATH=$(install_torch_ucc)
+  export TORCH_UCC_LIBRARY_PATH
+
   test_python
   test_aten
   test_vec256
