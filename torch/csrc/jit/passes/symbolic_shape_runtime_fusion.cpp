@@ -213,7 +213,6 @@ void inlineFallbackGraphAndAddSRCopyOutOp(std::shared_ptr<Graph> graph) {
   for (size_t i = 0; i < false_block_outputs.size(); ++i) {
     false_block->replaceOutput(i, copy_node->outputs().at(i));
   }
-  graph->dump();
 }
 
 // TODO: share more logic with tensorexpr_fuser ?
