@@ -14,6 +14,7 @@
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
+#include <torch/csrc/jit/tensorexpr/loopnest_randomization.h>
 #include <torch/csrc/jit/tensorexpr/operators/operators.h>
 #include "jit/tensorexpr/expr.h"
 
@@ -75,6 +76,15 @@ bool fallbackEnforced() {
     return true;
   }
   return false;
+}
+
+int64_t randomTransformsRequested() {
+  const char* enable_c_str =
+      std::getenv("PYTORCH_TENSOREXPR_RANDOM_TRANSFORM_SEED");
+  if (!enable_c_str) {
+    return 0;
+  }
+  return std::stoi(std::string(enable_c_str));
 }
 
 bool dontUseLLVMFlag() {
@@ -144,6 +154,17 @@ c10::optional<at::Device> pickDeviceType(const std::shared_ptr<Graph>& graph) {
                   "Different devices specified for inputs to the fuser."));
           device = inputDevice;
         }
+      }
+    }
+  }
+  for (auto const& input : graph->inputs()) {
+    if (auto tt = input->type()->cast<TensorType>()) {
+      if (auto inputDevice = tt->device()) {
+        TORCH_INTERNAL_ASSERT(
+            !device || *device == *inputDevice,
+            buildErrorMessage(
+                "Different devices specified for inputs to the fuser."));
+        device = inputDevice;
       }
     }
   }
@@ -662,6 +683,14 @@ StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
   torch::jit::tensorexpr::LoopNest l(st, bufOutputs_);
   LoopNest::sanitizeNames(l.root_stmt());
   GRAPH_DEBUG("Original Stmt:\n", std::to_string(l.root_stmt()), "\n");
+  int64_t random_tr_seed = randomTransformsRequested();
+  if (random_tr_seed) {
+    if (random_tr_seed == -1)
+      random_tr_seed = std::time(nullptr);
+    loopnestRandomization(random_tr_seed, l);
+    GRAPH_DEBUG(
+        "After random transform:\n", std::to_string(l.root_stmt()), "\n");
+  }
 
   bool hasReduction = NodeFinder<ReduceOp>::find(l.root_stmt()).size() != 0;
 
@@ -964,6 +993,9 @@ std::vector<ExprHandle> TensorExprKernel::getInputStrides(
 
 Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
   auto const& t = input->type();
+  auto const& outputs = input->owningGraph()->outputs();
+  std::unordered_set<const Value*> outputs_set(outputs.begin(), outputs.end());
+
   Tensor result(nullptr, nullptr);
   switch (t->kind()) {
     case TypeKind::TensorType: {
@@ -974,7 +1006,11 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
           symbolic_strides_[input].size() == 1 &&
           symbolic_strides_[input][0] == torch::jit::StrideInput::TENSOR_CONT;
 
-      if (contiguous_concrete_tensor || contiguous_strided_tensor) {
+      // We don't need to copy the input if:
+      //  1) it is not an output AND
+      //  2) it is contiguous
+      bool contiguous = contiguous_concrete_tensor || contiguous_strided_tensor;
+      if (!outputs_set.count(input) && contiguous) {
         BufHandle inBuffer(
             "t" + input_name_map_[input],
             sizesFromSymbolicShape(tt->symbolic_sizes()),
@@ -984,8 +1020,9 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
         break;
       }
 
-      // if the input isn't contiguous, write strided input into
-      // contiguous buffer that is then used in all further compute
+      // if the input isn't contiguous or is an output,
+      // write strided input into  contiguous buffer that is
+      // then used in all further compute
       std::vector<DimArg> inputTensorDims;
       auto size_handles = sizesFromSymbolicShape(tt->symbolic_sizes());
       for (size_t i = 0; i < size_handles.size(); i++) {
