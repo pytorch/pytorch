@@ -191,7 +191,7 @@ class RNNBase(Module):
         return ret
 
     def reset_parameters(self) -> None:
-        stdv = 1.0 / math.sqrt(self.hidden_size)
+        stdv = 1.0 / math.sqrt(self.hidden_size) if self.hidden_size > 0 else 0
         for weight in self.parameters():
             init.uniform_(weight, -stdv, stdv)
 
@@ -918,7 +918,7 @@ class RNNCellBase(Module):
         return s.format(**self.__dict__)
 
     def reset_parameters(self) -> None:
-        stdv = 1.0 / math.sqrt(self.hidden_size)
+        stdv = 1.0 / math.sqrt(self.hidden_size) if self.hidden_size > 0 else 0
         for weight in self.parameters():
             init.uniform_(weight, -stdv, stdv)
 
