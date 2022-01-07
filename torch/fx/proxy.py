@@ -168,9 +168,7 @@ class TracerBase:
                 self.create_proxy('call_function', assert_fn, (obj,), {})
                 return True
 
-        from pprint import pprint
-        print(cur)
-        pprint(insts)
+
         raise TraceError('symbolically traced variables cannot be used as inputs to control flow')
 
     @compatibility(is_backward_compatible=True)
