@@ -4,7 +4,6 @@ from itertools import product
 import torch
 import torch.nn as nn
 from torch.nn.utils._per_sample_grad import call_for_per_sample_grads
-from torch.testing._internal import common_dtype
 from torch.testing._internal.common_device_type import OpDTypes, instantiate_device_type_tests, ops
 from torch.testing._internal.common_nn import TestBase, module_tests, new_module_tests
 from torch.testing._internal.common_utils import TestCase, freeze_rng_state, make_tensor, run_tests
@@ -12,68 +11,6 @@ from torch.testing._internal.common_methods_invocations import SampleInput, op_d
 from torch._expanded_weights import ExpandedWeight
 from torch._expanded_weights.expanded_weights_utils import forward_helper, grad_if_exists, \
     grad_if_exists_for_input, unpack_expanded_weight_or_tensor, sum_over_all_but_batch_and_last_n
-
-class TestExpandedWeightAttributes(TestCase):
-    def test_expanded_weight_has_attributes(self, device):
-        attrs_equivalent = ['dtype', 'shape', 'requires_grad', 'is_sparse', 'is_quantized', 'device']
-        attrs_special = {'grad': lambda attr, _: attr is None}
-        supported_dtypes = common_dtype.floating_and_complex_types()
-        for (attr, dtype) in product(attrs_equivalent, supported_dtypes):
-            batch_size = 5
-            orig_tensor = make_tensor((4), device, dtype, requires_grad=True)
-            expanded_weight = ExpandedWeight(orig_tensor, batch_size)
-            assert hasattr(expanded_weight, attr), f"Expanded Weight of type {dtype} didn't have attribute {attr}"
-            actual = getattr(expanded_weight, attr)
-            expected = getattr(orig_tensor, attr)
-            self.assertEqual(expected, actual, f"Expected {attr} to have value {expected}, got {actual}")
-        for (attr_and_func, dtype) in product(attrs_special.items(), supported_dtypes):
-            attr, func = attr_and_func
-            batch_size = 5
-            orig_tensor = make_tensor((4), device, dtype, requires_grad=True)
-            expanded_weight = ExpandedWeight(orig_tensor, batch_size)
-            assert hasattr(expanded_weight, attr), f"Expanded Weight of type {dtype} didn't have attribute {attr}"
-            if not func(getattr(expanded_weight, attr), orig_tensor):
-                raise RuntimeError(f"{attr} got unexpected value. Was {getattr(expanded_weight, attr)}")
-
-class TestExpandedWeightMethods(TestCase):
-    def test_expanded_weight_methods(self, device):
-        # certain functions like __float__, __array__, __index__ will cause errors
-        methods_equivalent = ['size', 'numel', 'stride', 'is_contiguous', 'requires_grad_', 'detach', 'dim', 'ndimension',
-                              '__len__', 'detach_']
-        methods_with_args = {'requires_grad_': (False, True), 'to': (device,), '__eq__': (torch.randn(4, device=device),),
-                             '__getitem__': (0, 2), 'eq': (torch.randn(4, device=device))}
-        methods_special = {'__repr__': lambda attr, orig_weight: orig_weight.__repr__() in attr(),
-                           '__hash__': lambda attr, orig_weight: attr() != orig_weight.__hash__()}
-        supported_dtypes = common_dtype.floating_and_complex_types()
-        for (method, dtype) in product(methods_equivalent, supported_dtypes):
-            batch_size = 5
-            orig_tensor = make_tensor((4), device, dtype, requires_grad=True)
-            expanded_weight = ExpandedWeight(orig_tensor, batch_size)
-            if not hasattr(expanded_weight, method):
-                raise RuntimeError(f"Expanded Weight of type {dtype} didn't have method {method}")
-            actual = getattr(expanded_weight, method)()
-            expected = getattr(orig_tensor, method)()
-            self.assertEqual(expected, actual, f"Expected {method} to produce value {expected}, got {actual}")
-        for (method_and_args, dtype) in product(methods_with_args.items(), supported_dtypes):
-            method, args = method_and_args
-            batch_size = 5
-            orig_tensor = make_tensor((4), device, dtype, requires_grad=True)
-            expanded_weight = ExpandedWeight(orig_tensor, batch_size)
-            for arg in args:
-                if not hasattr(expanded_weight, method):
-                    raise RuntimeError(f"Expanded Weight of type {dtype} didn't have method {method}")
-                actual = getattr(expanded_weight, method)(arg)
-                expected = getattr(orig_tensor, method)(arg)
-                self.assertEqual(expected, actual, f"Expected {method} to produce value {expected}, got {actual}")
-        for (method_and_func, dtype) in product(methods_special.items(), supported_dtypes):
-            method, func = method_and_func
-            batch_size = 5
-            orig_tensor = make_tensor((4), device, dtype, requires_grad=True)
-            expanded_weight = ExpandedWeight(orig_tensor, batch_size)
-            assert hasattr(expanded_weight, method), f"Expanded Weight of type {dtype} didn't have attribute {method}"
-            if not func(getattr(expanded_weight, method), orig_tensor):
-                raise RuntimeError(f"{method} got unexpected value. Was {getattr(expanded_weight, method)}")
-
 
 class TestContext:
     pass
@@ -96,7 +33,9 @@ class TestExpandedWeightHelperFunction(TestCase):
             self.assertTrue(hasattr(ctx, 'all_outputs'))
             self.assertTrue(hasattr(ctx, 'true_outputs'))
 
-            self.assertEqual(ctx.args, args)
+            self.assertEqual(len(ctx.args), len(args))
+            for (helper_arg, orig_arg) in zip(ctx.args, args):
+                assert(helper_arg is orig_arg)  # avoids the many property checks in assertEquals
             self.assertEqual(ctx.all_outputs, res)
             self.assertEqual(ctx.true_outputs, res)
 
@@ -395,7 +334,7 @@ def for_loop_per_sample_grad(batch_size, input, func, *args, **kwargs):
     return per_sample_grad
 
 def is_diff_tensor(t):
-    return isinstance(t, torch.Tensor) and t.requires_grad
+    return isinstance(t, ExpandedWeight) or (isinstance(t, torch.Tensor) and t.requires_grad)
 
 def clone_if_tensor(t):
     if isinstance(t, torch.Tensor):
@@ -405,8 +344,6 @@ def clone_if_tensor(t):
     else:
         return t
 
-instantiate_device_type_tests(TestExpandedWeightAttributes, globals())
-instantiate_device_type_tests(TestExpandedWeightMethods, globals())
 instantiate_device_type_tests(TestExpandedWeightHelperFunction, globals())
 instantiate_device_type_tests(TestExpandedWeightFunctional, globals())
 if __name__ == '__main__':
