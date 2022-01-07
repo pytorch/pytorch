@@ -74,6 +74,7 @@
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/remove_inplace_ops.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
+#include <torch/csrc/jit/passes/replacement_of_old_operators.h>
 #include <torch/csrc/jit/passes/restore_mutation.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
@@ -293,6 +294,11 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_onnx_function_extraction", onnx::ONNXFunctionExtraction)
       .def("_jit_pass_fuse", FuseGraph)
       .def(
+          "_jit_pass_replace_old_ops_with_upgraders",
+          [](std::shared_ptr<Graph>& g) {
+            return ReplaceOldOperatorsWithUpgraders(g);
+          })
+      .def(
           "_jit_pass_dce",
           [](std::shared_ptr<Graph>& g) {
             return EliminateDeadCode(g->block()); // overload resolution
@@ -388,7 +394,13 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_fuse_frozen_conv_add_relu", &FuseFrozenConvAddRelu)
       .def("_jit_pass_transpose_frozen_linear", &FrozenLinearTranspose)
       .def("_jit_pass_optimize_frozen_graph", &OptimizeFrozenGraph)
-      .def("_jit_pass_optimize_for_inference", &optimize_for_inference)
+      .def(
+          "_jit_pass_optimize_for_inference",
+          [](Module& module, std::vector<std::string> other_methods) {
+            optimize_for_inference(module, other_methods);
+          },
+          py::arg("module"),
+          py::arg("other_methods") = std::vector<std::string>())
       .def("_jit_pass_fuse_linear", &FuseLinear)
       .def(
           "_jit_pass_fuse_add_relu",
@@ -691,6 +703,18 @@ void initJITBindings(PyObject* module) {
             checkAliasAnnotation(g, std::move(stack), unqualified_op_name);
           })
       .def("_jit_set_nvfuser_enabled", &RegisterCudaFuseGraph::registerPass)
+      .def(
+          "_jit_set_nvfuser_single_node_mode",
+          [](bool flag) { return fuser::cuda::setSingletonFusion(flag); })
+      .def(
+          "_jit_nvfuser_single_node_mode",
+          []() { return fuser::cuda::getSingletonFusion(); })
+      .def(
+          "_jit_set_nvfuser_horizontal_mode",
+          [](bool flag) { return fuser::cuda::setHorizontalFusion(flag); })
+      .def(
+          "_jit_nvfuser_horizontal_mode",
+          []() { return fuser::cuda::getHorizontalFusion(); })
       .def(
           "_jit_set_nvfuser_guard_mode",
           [](bool profiling_flag) {
@@ -1375,6 +1399,13 @@ void initJITBindings(PyObject* module) {
           "is_backward_compatible_with",
           [](const FunctionSchema& self, const FunctionSchema& old_schema) {
             return self.isBackwardCompatibleWith(old_schema);
+          })
+      .def(
+          "check_forward_compatible_with",
+          [](const FunctionSchema& self, const FunctionSchema& old_schema) {
+            std::ostringstream out;
+            auto result = self.isForwardCompatibleWith(old_schema, out);
+            return std::make_pair(result, out.str());
           })
       .def(
           "__eq__",

@@ -645,9 +645,10 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
       },
       py::call_guard<py::gil_scoped_release>());
 
-  module.def("_reset_current_rpc_agent", []() {
-    RpcAgent::setCurrentRpcAgent(nullptr);
-  });
+  module.def(
+      "_reset_current_rpc_agent",
+      []() { RpcAgent::setCurrentRpcAgent(nullptr); },
+      py::call_guard<py::gil_scoped_release>());
 
   module.def(
       "_delete_all_user_and_unforked_owner_rrefs",

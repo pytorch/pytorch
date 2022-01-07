@@ -149,7 +149,7 @@ that, you can install in `develop` mode again.
 
 * A prerequisite to installing PyTorch is CMake. We recommend installing it with [Homebrew](https://brew.sh/)
 with `brew install cmake` if you are developing on MacOS or Linux system.
-* Our `setup.py` requires Python >= 3.6
+* Our `setup.py` requires Python >= 3.7
 * If a commit is simple and doesn't affect any code (keep in mind that some docstrings contain code
   that is used in tests), you can add `[skip ci]` (case sensitive) somewhere in your commit message to
   [skip all build / test steps](https://github.blog/changelog/2021-02-08-github-actions-skip-pull-request-and-push-workflows-with-skip-ci/).
@@ -242,13 +242,6 @@ into the repo directory.
   directly.)
 * [aten](aten) - C++ tensor library for PyTorch (no autograd support)
   * [src](aten/src) - [README](aten/src/README.md)
-    * [TH](aten/src/TH)
-      [THC](aten/src/THC) - Legacy library code from the original
-      Torch. Try not to add things here; we're slowly porting these to
-      [native](aten/src/ATen/native).
-      * generic - Contains actual implementations of operators,
-        parametrized over `scalar_t`. Files here get compiled N times
-        per supported scalar type in PyTorch.
     * [ATen](aten/src/ATen)
       * [core](aten/src/ATen/core) - Core functionality of ATen. This
         is migrating to top-level c10 folder.
@@ -1323,7 +1316,7 @@ This choice depends on several factors; here is the decision tree as of
     - pytorch_linux_xenial_py3_6_gcc5_4_build
       - pytorch_cpp_doc_build
       - pytorch_doc_test
-      - pytorch_linux_backward_compatibility_check_test
+      - pytorch_linux_forward_backward_compatibility_check_test
       - pytorch_linux_xenial_py3_6_gcc5_4_jit_legacy_test
       - pytorch_linux_xenial_py3_6_gcc5_4_test
       - pytorch_python_doc_build
