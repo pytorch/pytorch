@@ -48,7 +48,7 @@ jobs:
       - name: print labels
         run: echo "${PR_LABELS}"
       - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        uses: actions/checkout@v2
         with:
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
@@ -129,7 +129,7 @@ jobs:
       PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
     steps:
       - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        uses: actions/checkout@v2
         with:
           # deep clone, to allow use of git merge-base
           fetch-depth: 0

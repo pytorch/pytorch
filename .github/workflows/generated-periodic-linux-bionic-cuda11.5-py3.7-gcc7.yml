@@ -94,7 +94,7 @@ jobs:
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        uses: actions/checkout@v2
         with:
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
@@ -340,7 +340,7 @@ jobs:
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        uses: actions/checkout@v2
         with:
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
