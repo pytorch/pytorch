@@ -1,3 +1,5 @@
+#include <torch/csrc/jit/mobile/type_parser.h>
+
 #include <ATen/core/jit_type.h>
 #include <c10/util/string_view.h>
 #include <torch/csrc/jit/frontend/parser_constants.h>
