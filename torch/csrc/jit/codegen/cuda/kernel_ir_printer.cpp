@@ -66,8 +66,7 @@ void IrPrinter::printKernel(const Kernel* kernel) {
 }
 
 std::ostream& IrPrinter::indent() {
-  for (const auto i : c10::irange(indent_level_)) {
-    (void)i; // Suppress unused variable warning
+  for (C10_UNUSED const auto i : c10::irange(indent_level_)) {
     ir_str_ << kTab;
   }
   ir_str_ << margin_;

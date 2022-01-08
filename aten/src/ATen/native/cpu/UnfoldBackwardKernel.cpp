@@ -78,8 +78,7 @@ void _unfold_backward_internal_kernel(
     if (is_step_ge_size) {
       auto* RESTRICT idx_last_dim_ptr = data[3];
 
-      for (const auto elem : c10::irange(nelems)) {
-        (void)elem; //Suppress unused variable warning
+      for (C10_UNUSED const auto elem : c10::irange(nelems)) {
         auto* RESTRICT grad_out_data = reinterpret_cast<scalar_t*>(grad_out_ptr);
         auto* RESTRICT grad_in_data = reinterpret_cast<scalar_t*>(grad_in_ptr);
 
@@ -96,8 +95,7 @@ void _unfold_backward_internal_kernel(
       }
     }
     else {
-      for (const auto elem : c10::irange(nelems)) {
-        (void)elem; //Suppress unused variable warning
+      for (C10_UNUSED const auto elem : c10::irange(nelems)) {
         auto* RESTRICT grad_out_data = reinterpret_cast<scalar_t*>(grad_out_ptr);
         auto* RESTRICT grad_in_data = reinterpret_cast<scalar_t*>(grad_in_ptr);
 

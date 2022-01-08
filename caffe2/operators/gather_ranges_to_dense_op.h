@@ -43,8 +43,7 @@ class GatherRangesToDenseOp final : public Operator<Context> {
     CAFFE_ENFORCE_GT(
         minObservation_, 0, "The number of observations is at least 1");
     // Initialize the empty and mismatch counter.
-    for (const auto i : c10::irange(OutputSize())) {
-      (void)i; // Suppress unused variable warning
+    for (C10_UNUSED const auto i : c10::irange(OutputSize())) {
       emptyRanges_.push_back(0);
       mismatchedRanges_.push_back(0);
       mismatchedLengths_.push_back(set<int>());

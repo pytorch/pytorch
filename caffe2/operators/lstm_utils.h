@@ -158,8 +158,7 @@ chunk(const Tensor& input, int chunks, int axis, CPUContext* context) {
   }
   size_t input_offset = 0;
   std::vector<Tensor> outputs;
-  for (const auto i : c10::irange(chunks)) {
-    (void)i; // Suppress unused variable warning
+  for (C10_UNUSED const auto i : c10::irange(chunks)) {
     auto axis_dim = split_size;
     output_dims[canonical_axis] = split_size;
     Tensor output(output_dims, CPU);

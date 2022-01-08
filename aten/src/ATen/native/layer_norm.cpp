@@ -41,8 +41,7 @@ void layer_norm_cpu_out(
   for (const auto idx : c10::irange(axis)) {
     stat_shape.emplace_back(input_shape[idx]);
   }
-  for (const auto idx : c10::irange(axis, input.dim())) {
-    (void)idx; // Suppress unused variable warning
+  for (C10_UNUSED const auto idx : c10::irange(axis, input.dim())) {
     stat_shape.emplace_back(1);
   }
 
@@ -219,8 +218,7 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
   for (const auto idx : c10::irange(axis)) {
     stat_shape.push_back(input_shape[idx]);
   }
-  for (const auto idx : c10::irange(axis, input.dim())) {
-    (void)idx; // Suppress unused variable
+  for (C10_UNUSED const auto idx : c10::irange(axis, input.dim())) {
     stat_shape.push_back(1);
   }
   mean = mean.view(stat_shape);

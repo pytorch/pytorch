@@ -136,8 +136,7 @@ void unpack_pivots_cpu_kernel(
     auto* unpacked_pivots_ptr = data[0];
     const auto* pivots_ptr = data[1];
 
-    for (const auto elem : c10::irange(nelems)) {
-      (void)elem; //Suppress unused variable warning
+    for (C10_UNUSED const auto elem : c10::irange(nelems)) {
       // WARNING: torch.lu returns int32 pivots,
       // this behavior could change in the future.
       auto* unpacked_pivots_data = reinterpret_cast<int32_t*>(unpacked_pivots_ptr);

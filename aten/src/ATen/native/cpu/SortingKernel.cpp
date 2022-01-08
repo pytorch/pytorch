@@ -56,8 +56,7 @@ void _dim_apply(
         auto* values_data_bytes = data[0];
         auto* indices_data_bytes = data[1];
 
-        for (const auto i : c10::irange(n)) {
-          (void)i; //Suppress unused variable warning
+        for (C10_UNUSED const auto i : c10::irange(n)) {
           f(
             reinterpret_cast<scalar_t*>(values_data_bytes),
             values_dim_stride,

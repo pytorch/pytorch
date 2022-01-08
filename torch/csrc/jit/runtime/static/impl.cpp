@@ -1322,8 +1322,7 @@ float StaticRuntime::benchmark_model(
 
   const bool is_kwargs_empty = kwargs_list.size() == 0;
   const KeywordArgs empty_kwargs;
-  for (const auto i : c10::irange(warmup_runs)) {
-    (void)i; // Suppress unused variable warning
+  for (C10_UNUSED const auto i : c10::irange(warmup_runs)) {
     for (const auto j : c10::irange(args_list.size())) {
       operator()(args_list[j], is_kwargs_empty ? empty_kwargs : kwargs_list[j]);
       if (manage_output_tensors_enabled_) {
@@ -1332,8 +1331,7 @@ float StaticRuntime::benchmark_model(
     }
   }
   caffe2::Timer timer;
-  for (const auto i : c10::irange(main_runs)) {
-    (void)i; // Suppress unused variable warning
+  for (C10_UNUSED const auto i : c10::irange(main_runs)) {
     for (const auto j : c10::irange(args_list.size())) {
       operator()(args_list[j], is_kwargs_empty ? empty_kwargs : kwargs_list[j]);
       if (manage_output_tensors_enabled_) {
@@ -1454,8 +1452,7 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
   results.first_iter_time = timer.MilliSeconds();
 
   // warmup runs
-  for (const auto i : c10::irange(warmup_runs - 1)) {
-    (void)i; // Suppress unused variable warning
+  for (C10_UNUSED const auto i : c10::irange(warmup_runs - 1)) {
     for (const auto j : c10::irange(args_list.size())) {
       operator()(args_list[j], is_kwargs_empty ? empty_kwargs : kwargs_list[j]);
       if (manage_output_tensors) {
@@ -1465,9 +1462,7 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
   }
 
   // main runs
-  for (const auto i : c10::irange(main_runs)) {
-    (void)i; // Suppress unused variable warning
-
+  for (C10_UNUSED const auto i : c10::irange(main_runs)) {
     for (const auto j : c10::irange(args_list.size())) {
       set_inputs(args_list[j], is_kwargs_empty ? empty_kwargs : kwargs_list[j]);
 

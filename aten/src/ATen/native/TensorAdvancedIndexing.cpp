@@ -391,8 +391,7 @@ const Tensor& value){
       }
     }
   }
-  for (const auto i : c10::irange(num_ind, self.ndimension())) {
-    (void)i; //Suppress unused variable warning
+  for (C10_UNUSED const auto i : c10::irange(num_ind, self.ndimension())) {
     mask = mask.unsqueeze(-1);
   }
   return std::make_tuple(true, mask);
@@ -1787,8 +1786,7 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
 
         for (const auto i : c10::irange(n2)) {
           const char* ptr = data[0] + i * strides[1];
-          for (const auto j : c10::irange(n1)) {
-            (void)j; //Suppress unused variable warning
+          for (C10_UNUSED const auto j : c10::irange(n1)) {
             const auto& val = *reinterpret_cast<const scalar_t*>(ptr);
             // If nonzero, write index
             if (val != scalar_t(0)) {

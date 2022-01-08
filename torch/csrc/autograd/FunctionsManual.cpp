@@ -932,8 +932,7 @@ Tensor repeat_backward(Tensor grad, IntArrayRef repeats, IntArrayRef input_shape
   }
   const auto input_dims = input_shape.size();
   int64_t num_unsqueezed = grad.dim() - input_dims;
-  for (const auto i : c10::irange(num_unsqueezed)) {
-    (void)i; // Suppress unused variable warning
+  for (C10_UNUSED const auto i : c10::irange(num_unsqueezed)) {
     grad = grad.sum(0, false);
   }
 
@@ -2295,8 +2294,7 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
       // so the expand succeeds.
       auto dims_to_unsqueeze = std::max<int64_t>(input.dim() - 2, 0);
       auto ggW_expanded = ggW;
-      for(const auto i : c10::irange(dims_to_unsqueeze)) {
-          (void)i; // Suppress unused variable warning
+      for(C10_UNUSED const auto i : c10::irange(dims_to_unsqueeze)) {
           ggW_expanded = ggW_expanded.unsqueeze(1);
       }
       ggW_expanded = ggW_expanded.expand_as(ggI);
@@ -2315,8 +2313,7 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
       if (gO.requires_grad()) {
           // expand weight as input as in ggW/ggI above
           auto weight_expanded = weight;
-          for(const auto i : c10::irange(dims_to_unsqueeze)) {
-              (void)i; // Suppress unused variable warning
+          for(C10_UNUSED const auto i : c10::irange(dims_to_unsqueeze)) {
               weight_expanded = weight_expanded.unsqueeze(1);
           }
           weight_expanded = weight_expanded.expand_as(input);

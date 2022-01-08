@@ -3885,8 +3885,7 @@ TEST(Simplify, SimplifyEliminateEmptyFor) {
   {
     // Flatten many layers around an empty block to an empty block.
     StmtPtr last = alloc<Block>(std::vector<StmtPtr>({}));
-    for (const auto i : c10::irange(11)) {
-      (void)i; // Suppress unused variable warning
+    for (C10_UNUSED const auto i : c10::irange(11)) {
       VarHandle loopVar("loopVar", kInt);
       last = For::make(loopVar, 0, 10, last);
     }
@@ -3970,8 +3969,7 @@ TEST(Simplify, SimplifyFlattenBlock) {
   {
     // Flatten many layers around an empty block to an empty block.
     StmtPtr last = alloc<Block>(std::vector<StmtPtr>({}));
-    for (const auto i : c10::irange(11)) {
-      (void)i; // Suppress unused variable warning
+    for (C10_UNUSED const auto i : c10::irange(11)) {
       last = alloc<Block>(std::vector<StmtPtr>({last}));
     }
 

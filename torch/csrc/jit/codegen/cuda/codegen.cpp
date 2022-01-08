@@ -197,8 +197,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
   }
 
   std::ostream& indent() {
-    for (const auto i : c10::irange(block_nest_level_)) {
-      (void)i; // Suppress unused variable warning
+    for (C10_UNUSED const auto i : c10::irange(block_nest_level_)) {
       code_ << kTab;
     }
     return code_;

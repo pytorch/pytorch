@@ -169,8 +169,7 @@ class BufferReuseDebugPrinter {
   void printAllocInfo(const kir::Allocate* alloc);
 
   std::stringstream& indent() {
-    for (const auto i : c10::irange(indent_level_)) {
-      (void)i; // Suppress unused variable warning
+    for (C10_UNUSED const auto i : c10::irange(indent_level_)) {
       os_ << "  ";
     }
     return os_;

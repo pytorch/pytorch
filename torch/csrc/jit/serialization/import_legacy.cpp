@@ -381,8 +381,7 @@ Module ScriptModuleDeserializer::LEGACY_convertModule(
     }
   }
 
-  for (const auto i : c10::irange(numPushed)) {
-    (void)i; // Suppress unused variable warning
+  for (C10_UNUSED const auto i : c10::irange(numPushed)) {
     LEGACY_moduleStack_.pop_back();
   }
   return module;

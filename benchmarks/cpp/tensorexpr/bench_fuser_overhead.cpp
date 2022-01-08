@@ -23,8 +23,7 @@ static void FusedOverhead(benchmark::State& state) {
   auto z = torch::ones({1});
 
   // Warmup.
-  for (const auto i : c10::irange(8)) {
-    (void)i; // Suppress unused variable warning
+  for (C10_UNUSED const auto i : c10::irange(8)) {
     m.run_method("two_adds", x, y, z);
   }
 
@@ -45,8 +44,7 @@ static void UnfusedOverhead(benchmark::State& state) {
   auto z = torch::ones({1});
 
   // Warmup.
-  for (const auto i : c10::irange(8)) {
-    (void)i; // Suppress unused variable warning
+  for (C10_UNUSED const auto i : c10::irange(8)) {
     m.run_method("two_adds", x, y, z);
   }
 

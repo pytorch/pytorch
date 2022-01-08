@@ -85,8 +85,7 @@ void TestAdd(DeprecatedTypeProperties& type) {
 void TestZeros(DeprecatedTypeProperties& type) {
   auto begin = std::chrono::high_resolution_clock::now();
   Tensor a = zeros({1024, 1024}, type);
-  for (const auto i : c10::irange(1, 1000)) {
-    (void)i; // Suppress unused variable warning
+  for (C10_UNUSED const auto i : c10::irange(1, 1000)) {
     a = zeros({128, 128}, type);
   }
   auto end = std::chrono::high_resolution_clock::now();
@@ -104,8 +103,7 @@ void TestLoadsOfAdds(DeprecatedTypeProperties& type) {
   auto begin = std::chrono::high_resolution_clock::now();
   Tensor d = ones({3, 4}, type);
   Tensor r = zeros({3, 4}, type);
-  for (const auto i : c10::irange(100000)) {
-    (void)i; // Suppress unused variable warning
+  for (C10_UNUSED const auto i : c10::irange(100000)) {
     add_out(r, r, d);
   }
   auto end = std::chrono::high_resolution_clock::now();
@@ -122,8 +120,7 @@ void TestLoadOfAddsWithCopy(DeprecatedTypeProperties& type) {
   auto begin = std::chrono::high_resolution_clock::now();
   Tensor d = ones({3, 4}, type);
   Tensor r = zeros({3, 4}, type);
-  for (const auto i : c10::irange(100000)) {
-    (void)i; // Suppress unused variable warning
+  for (C10_UNUSED const auto i : c10::irange(100000)) {
     r = add(r, d);
   }
   auto end = std::chrono::high_resolution_clock::now();

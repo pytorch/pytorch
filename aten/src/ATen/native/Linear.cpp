@@ -392,8 +392,7 @@ Tensor einsum(c10::string_view equation, TensorList operands) {
         // Add missing dimensions covered by the ellipsis
         const auto num_missing_dim =
             ell_num_dim - (original_sizes.size() - labels.size() + 1);
-        for (const auto k : c10::irange(num_missing_dim)) {
-          (void)k; //Suppress unused warning
+        for (C10_UNUSED const auto k : c10::irange(num_missing_dim)) {
           operand = operand.unsqueeze(j);
         }
         for (const auto k : c10::irange(ell_num_dim)) {

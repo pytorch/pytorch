@@ -101,10 +101,8 @@ class NumpyTileOp : public Operator<Context> {
       int64_t num_tiles,
       const char* input_data,
       char* output_data) {
-    for (const auto i : c10::irange(outer_dim)) {
-      (void)i; // Suppress unused variable warning
-      for (const auto t : c10::irange(num_tiles)) {
-        (void)t; // Suppress unused variable warning
+    for (C10_UNUSED const auto i : c10::irange(outer_dim)) {
+      for (C10_UNUSED const auto t : c10::irange(num_tiles)) {
         context_.CopyItemsSameDevice(meta, inner_dim, input_data, output_data);
         output_data += inner_dim * item_size;
       }

@@ -46,8 +46,7 @@ static void recursive_apply(IntArrayRef sizes, ScalarType scalarType, int64_t di
   }
 
   auto n = sizes[dim];
-  for(const auto i : c10::irange(n)) {
-    (void)i; // Suppress unused variable warning
+  for(C10_UNUSED const auto i : c10::irange(n)) {
     recursive_apply(sizes, scalarType, dim + 1, fn, strided_data);
     for (auto& td : strided_data) {
       td.step(dim);

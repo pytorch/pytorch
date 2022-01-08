@@ -290,8 +290,7 @@ class SparseLengthsSumSparseLookupOp final : public Operator<CPUContext> {
         return false;
       }
       int32_t skipped = 0;
-      for (const auto i : c10::irange(current_length)) {
-        (void)i; // Suppress unused variable warning
+      for (C10_UNUSED const auto i : c10::irange(current_length)) {
         IndexType compressed_idx = indices_data[current];
         if (compressed_idx < 0 || compressed_idx >= compressed_data_size) {
           return false;

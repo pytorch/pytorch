@@ -132,8 +132,7 @@ ConvParamsSerializationTypeV3 parse_conv_serialized_state(c10::IValue v) {
       config_vals.push_back(dilation[0].item<int16_t>());
     }
     // output_padding does not exist in v1, so we fill in a default value
-    for (const auto i : c10::irange(kSpatialDim)) {
-      (void)i; // Suppress unused variable
+    for (C10_UNUSED const auto i : c10::irange(kSpatialDim)) {
       config_vals.push_back(0);
     }
     config_vals.push_back(groups[0].item<int16_t>());
@@ -289,23 +288,19 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
   torch::List<int64_t> stride, padding, output_padding, dilation;
   // skip kSpatialDim
   int idx = 1;
-  for (const auto i : c10::irange(kSpatialDim)) {
-    (void)i; // Suppress unused variable
+  for (C10_UNUSED const auto i : c10::irange(kSpatialDim)) {
     stride.emplace_back(config_vals.at(idx));
     idx++;
   }
-  for (const auto i : c10::irange(kSpatialDim)) {
-    (void)i; // Suppress unused variable
+  for (C10_UNUSED const auto i : c10::irange(kSpatialDim)) {
     padding.emplace_back(config_vals.at(idx));
     idx++;
   }
-  for (const auto i : c10::irange(kSpatialDim)) {
-    (void)i; // Suppress unused variable
+  for (C10_UNUSED const auto i : c10::irange(kSpatialDim)) {
     dilation.emplace_back(config_vals.at(idx));
     idx++;
   }
-  for (const auto i : c10::irange(kSpatialDim)) {
-    (void)i; // Suppress unused variable
+  for (C10_UNUSED const auto i : c10::irange(kSpatialDim)) {
     output_padding.emplace_back(config_vals.at(idx));
     idx++;
   }

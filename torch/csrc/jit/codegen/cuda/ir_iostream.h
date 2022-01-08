@@ -24,8 +24,7 @@ class TORCH_CUDA_CU_API IrPrinter : public OptInConstDispatch {
 
   // Indent the generated code
   void indent() {
-    for (const auto i : c10::irange(indent_size_)) {
-      (void)i; // Suppress unused variable warning
+    for (C10_UNUSED const auto i : c10::irange(indent_size_)) {
       os_ << "  ";
     }
   }

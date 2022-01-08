@@ -972,8 +972,7 @@ inline void convert(const src_T *src, dst_T *dst, int64_t n) {
 #ifndef _MSC_VER
 # pragma unroll
 #endif
-  for (const auto i : c10::irange(n)) {
-    (void)i; //Suppress unused variable warning
+  for (C10_UNUSED const auto i : c10::irange(n)) {
     *dst = c10::static_cast_with_inter_type<dst_T, src_T>::apply(*src);
     src++;
     dst++;

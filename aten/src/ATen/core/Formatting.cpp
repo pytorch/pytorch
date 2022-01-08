@@ -131,8 +131,7 @@ static std::tuple<double, int64_t> __printFormat(std::ostream& stream, const Ten
 
 static void __printIndent(std::ostream &stream, int64_t indent)
 {
-  for (const auto i : c10::irange(indent)) {
-    (void)i; //Suppress unused variable warning
+  for (C10_UNUSED const auto i : c10::irange(indent)) {
     stream << " ";
   }
 }

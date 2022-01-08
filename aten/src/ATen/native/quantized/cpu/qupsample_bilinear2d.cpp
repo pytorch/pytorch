@@ -80,8 +80,7 @@ static void upsample_bilinear2d_out_frame(
       const typename scalar_t::underlying* pos1 = i_p + h1 * input_width + w1;
       typename scalar_t::underlying* pos2 = o_p + h2 * output_width + w2;
 
-      for (const auto c : c10::irange(channels)) {
-        (void)c; //Suppress unused variable warning
+      for (C10_UNUSED const auto c : c10::irange(channels)) {
         float result = h0lambda * (w0lambda * pos1[0] + w1lambda * pos1[w1p]) +
             h1lambda *
                 (w0lambda * pos1[h1p * input_width] +

@@ -156,8 +156,7 @@ void cpu_take_put_kernel(
   auto loop = [&](char** data, const int64_t* strides, int64_t n) {
     auto* iterated_data_bytes = data[0];
     auto* index_data_bytes = data[1];
-    for (const auto elem : c10::irange(n)) {
-      (void)elem; //Suppress unused variable warning
+    for (C10_UNUSED const auto elem : c10::irange(n)) {
       auto idx = *reinterpret_cast<int64_t*>(index_data_bytes);
       auto& iterated = *reinterpret_cast<scalar_t*>(iterated_data_bytes);
 
@@ -274,8 +273,7 @@ void index_fill_kernel(
     auto handle_nonzero_idx_stride = [&](char** data, const int64_t* strides, int64_t n) {
       auto* self_data_bytes = data[0];
       auto* index_data_bytes = data[1];
-      for (const auto elem : c10::irange(n)) {
-        (void)elem; //Suppress unused variable warning
+      for (C10_UNUSED const auto elem : c10::irange(n)) {
         auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
         auto idx = *reinterpret_cast<int64_t*>(index_data_bytes);
         TORCH_CHECK_INDEX(idx >= -self_dim_size && idx < self_dim_size,
@@ -301,8 +299,7 @@ void index_fill_kernel(
       if (idx < 0) {
         idx += self_dim_size;
       }
-      for (const auto elem : c10::irange(n)) {
-        (void)elem; //Suppress unused variable warning
+      for (C10_UNUSED const auto elem : c10::irange(n)) {
         auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
 
         self_data[idx * self_dim_stride] = fill_val;
@@ -335,8 +332,7 @@ void index_copy_kernel(
       auto* self_data_bytes = data[0];
       auto* index_data_bytes = data[1];
       auto* source_data_bytes = data[2];
-      for (const auto elem : c10::irange(n)) {
-        (void)elem; //Suppress unused variable warning
+      for (C10_UNUSED const auto elem : c10::irange(n)) {
         auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
         auto idx = *reinterpret_cast<int64_t*>(index_data_bytes);
         auto* source_data = reinterpret_cast<scalar_t*>(source_data_bytes);
@@ -359,8 +355,7 @@ void index_copy_kernel(
       TORCH_CHECK_INDEX(idx >= 0 && idx < self_dim_size,
             "index_copy_(): index ", idx, " is out of bounds for dimension ",
             dim, " with size ", self_dim_size);
-      for (const auto elem : c10::irange(n)) {
-        (void)elem; //Suppress unused variable warning
+      for (C10_UNUSED const auto elem : c10::irange(n)) {
         auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
         auto* source_data = reinterpret_cast<scalar_t*>(source_data_bytes);
 

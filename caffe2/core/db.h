@@ -249,8 +249,7 @@ class TORCH_API DBReader {
     *value = cursor_->value();
 
     // In sharded mode, each read skips num_shards_ records
-    for (const auto s : c10::irange(num_shards_)) {
-      (void)s; // Suppress unused variable
+    for (C10_UNUSED const auto s : c10::irange(num_shards_)) {
       cursor_->Next();
       if (!cursor_->Valid()) {
         MoveToBeginning();
@@ -294,8 +293,7 @@ class TORCH_API DBReader {
 
   void MoveToBeginning() const {
     cursor_->SeekToFirst();
-    for (const auto s : c10::irange(shard_id_)) {
-      (void)s; // Suppress unused variable
+    for (C10_UNUSED const auto s : c10::irange(shard_id_)) {
       cursor_->Next();
       CAFFE_ENFORCE(
           cursor_->Valid(), "Db has fewer rows than shard id: ", s, shard_id_);

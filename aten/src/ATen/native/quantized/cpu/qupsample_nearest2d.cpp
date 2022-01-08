@@ -55,8 +55,7 @@ static void upsample_nearest2d_out_frame(
       const auto* pos1 = &i_p[h1 * input_width + w1];
       auto* pos2 = &o_p[h2 * output_width + w2];
 
-      for (const auto c : c10::irange(channels)) {
-        (void)c; //Suppress unused variable warning
+      for (C10_UNUSED const auto c : c10::irange(channels)) {
         pos2[0] = pos1[0];
         pos1 += input_height * input_width;
         pos2 += output_height * output_width;

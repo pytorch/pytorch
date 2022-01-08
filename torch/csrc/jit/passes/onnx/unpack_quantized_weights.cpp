@@ -217,23 +217,19 @@ void unpackQuantizedWeightsHelper(
         const int64_t kSpatialDim = config_vals.at(0);
         // skip kSpatialDim
         int idx = 1;
-        for (const auto i : c10::irange(kSpatialDim)) {
-          (void)i; // Suppress unused variable warning
+        for (C10_UNUSED const auto i : c10::irange(kSpatialDim)) {
           stride_int.emplace_back(config_vals.at(idx));
           idx++;
         }
-        for (const auto i : c10::irange(kSpatialDim)) {
-          (void)i; // Suppress unused variable warning
+        for (C10_UNUSED const auto i : c10::irange(kSpatialDim)) {
           padding_int.emplace_back(config_vals.at(idx));
           idx++;
         }
-        for (const auto i : c10::irange(kSpatialDim)) {
-          (void)i; // Suppress unused variable warning
+        for (C10_UNUSED const auto i : c10::irange(kSpatialDim)) {
           dilation_int.emplace_back(config_vals.at(idx));
           idx++;
         }
-        for (const auto i : c10::irange(kSpatialDim)) {
-          (void)i; // Suppress unused variable warning
+        for (C10_UNUSED const auto i : c10::irange(kSpatialDim)) {
           output_padding_int.emplace_back(config_vals.at(idx));
           idx++;
         }
@@ -272,23 +268,19 @@ void unpackQuantizedWeightsHelper(
         const int64_t kSpatialDim = conv_params_packed[0].item<int64_t>();
         // skip kSpatialDim
         int64_t idx = 1;
-        for (const auto i : c10::irange(kSpatialDim)) {
-          (void)i; // Suppress unused variable warning
+        for (C10_UNUSED const auto i : c10::irange(kSpatialDim)) {
           stride_int.emplace_back(conv_params_packed[idx].item<int64_t>());
           idx++;
         }
-        for (const auto i : c10::irange(kSpatialDim)) {
-          (void)i; // Suppress unused variable warning
+        for (C10_UNUSED const auto i : c10::irange(kSpatialDim)) {
           padding_int.emplace_back(conv_params_packed[idx].item<int64_t>());
           idx++;
         }
-        for (const auto i : c10::irange(kSpatialDim)) {
-          (void)i; // Suppress unused variable warning
+        for (C10_UNUSED const auto i : c10::irange(kSpatialDim)) {
           dilation_int.emplace_back(conv_params_packed[idx].item<int64_t>());
           idx++;
         }
-        for (const auto i : c10::irange(kSpatialDim)) {
-          (void)i; // Suppress unused variable warning
+        for (C10_UNUSED const auto i : c10::irange(kSpatialDim)) {
           output_padding_int.emplace_back(
               conv_params_packed[idx].item<int64_t>());
           idx++;

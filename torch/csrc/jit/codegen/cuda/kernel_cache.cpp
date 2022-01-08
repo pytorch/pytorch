@@ -42,8 +42,7 @@ std::vector<size_t> toVector(const at::DimVector& small_vec) {
 
 void encodeBuffer(size_t value, std::string& buffer) {
   const char* v = reinterpret_cast<char*>(&value);
-  for (const auto i : c10::irange(sizeof(size_t))) {
-    (void)i; // Suppress unused variable warning
+  for (C10_UNUSED const auto i : c10::irange(sizeof(size_t))) {
     buffer.push_back(*(v++));
   }
 }

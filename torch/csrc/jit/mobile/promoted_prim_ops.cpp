@@ -132,8 +132,7 @@ void toList(Stack& stack) {
       "Output annotation list dimension and runtime tensor dimension must match for tolist()");
 
   // Wrap out_ty in a ListType dim times.
-  for (const auto i : c10::irange(dim_val)) {
-    (void)i; // Suppress unused variable warning
+  for (C10_UNUSED const auto i : c10::irange(dim_val)) {
     out_ty = ListType::create(out_ty);
   }
 
