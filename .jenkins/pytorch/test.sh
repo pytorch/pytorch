@@ -564,6 +564,9 @@ elif [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
 elif [[ "${BUILD_ENVIRONMENT}" == *distributed* || "${JOB_BASE_NAME}" == *distributed* ]]; then
+  TORCH_UCC_LIBRARY_PATH=$(install_torch_ucc)
+  export TORCH_UCC_LIBRARY_PATH
+
   test_distributed
   test_rpc
 elif [[ "${TEST_CONFIG}" = docs_test ]]; then
@@ -573,10 +576,6 @@ elif [[ "${BUILD_ENVIRONMENT}" == *linux-xenial-cuda11.3-py3.6-gcc7* ]]; then
 else
   install_torchvision
   install_monkeytype
-
-  TORCH_UCC_LIBRARY_PATH=$(install_torch_ucc)
-  export TORCH_UCC_LIBRARY_PATH
-
   test_python
   test_aten
   test_vec256
