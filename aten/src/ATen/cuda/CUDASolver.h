@@ -31,9 +31,9 @@ void lsvlu<float, float>(CUSOLVER_LSVLU_ARGTYPES(float, float));
 template <>
 void lsvlu<double, double>(CUSOLVER_LSVLU_ARGTYPES(double, double));
 template <>
-void lsvlu<cuComplex, float>(CUSOLVER_LSVLU_ARGTYPES(cuComplex, float));
+void lsvlu<c10::complex<float>, float>(CUSOLVER_LSVLU_ARGTYPES(c10::complex<float>, float));
 template <>
-void lsvlu<cuDoubleComplex, double>(CUSOLVER_LSVLU_ARGTYPES(cuDoubleComplex, double));
+void lsvlu<c10::complex<double>, double>(CUSOLVER_LSVLU_ARGTYPES(c10::complex<double>, double));
 
 #define CUDASOLVER_GETRF_ARGTYPES(Dtype)  \
     cusolverDnHandle_t handle, int m, int n, Dtype* dA, int ldda, int* ipiv, int* info

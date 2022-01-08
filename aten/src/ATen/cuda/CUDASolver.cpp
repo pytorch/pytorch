@@ -199,8 +199,8 @@ void lsvlu<double, double>(
   }
 
 template <>
-void lsvlu<cuComplex, float>(
-  CUSOLVER_LSVLU_ARGTYPES(cuComplex, float)) {
+void lsvlu<c10::complex<float>, float>(
+  CUSOLVER_LSVLU_ARGTYPES(c10::complex<float>, float)) {
     TORCH_CUSOLVER_CHECK(cusolverSpCcsrlsvluHost(
         handle,
         n,
@@ -217,8 +217,8 @@ void lsvlu<cuComplex, float>(
   }
 
 template <>
-void lsvlu<cuDoubleComplex, double>(
-  CUSOLVER_LSVLU_ARGTYPES(cuDoubleComplex, double)) {
+void lsvlu<c10::complex<double>, double>(
+  CUSOLVER_LSVLU_ARGTYPES(c10::complex<double>, double)) {
     TORCH_CUSOLVER_CHECK(cusolverSpZcsrlsvluHost(
         handle,
         n,
