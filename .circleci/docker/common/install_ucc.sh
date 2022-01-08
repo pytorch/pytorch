@@ -1,6 +1,10 @@
 #!/bin/bash
 
+set -ex
+
 function install_ucx() {
+  set -ex
+  sudo apt-get install -y libtool
   git clone --recursive https://github.com/openucx/ucx.git
   pushd ucx
   git checkout ${UCX_COMMIT}
@@ -16,6 +20,7 @@ function install_ucx() {
 }
 
 function install_ucc() {
+  set -ex
   git clone --recursive https://github.com/openucx/ucc.git
   pushd ucc
   git checkout ${UCC_COMMIT}
