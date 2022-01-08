@@ -105,7 +105,7 @@ function clone_pytorch_xla() {
 }
 
 function install_torch_ucc() {
-  if [[ -f "/usr/bin/libucc.so" ]]; then
+  if [[ -f "/usr/lib/libucc.so" ]]; then
     git clone https://github.com/facebookresearch/torch_ucc.git
     pushd torch_ucc
     time python setup.py install --oss
