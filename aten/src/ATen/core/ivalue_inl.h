@@ -8,9 +8,10 @@
 #include <ATen/core/Dict.h>
 #include <ATen/core/List.h>
 #include <ATen/core/functional.h>
-#include <ATen/core/symbol.h>
+#include <ATen/core/jit_type.h>
 #include <ATen/core/qualified_name.h>
 #include <ATen/core/rref_interface.h>
+#include <ATen/core/symbol.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/Event.h>
@@ -217,7 +218,7 @@ inline at::Generator IValue::toGenerator() const& {
 namespace ivalue {
 
 void TORCH_API
-checkCustomClassType(const Type* expected_type, const Type* actual_type);
+checkCustomClassType(const ClassType* expected_type, const Type* actual_type);
 
 template <typename T>
 using Shared = c10::intrusive_ptr<T>;
@@ -1331,6 +1332,8 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
     return c10::make_intrusive<Object>(std::move(type), numSlots);
   }
 
+  static c10::intrusive_ptr<Object> create(ClassTypePtr classType, size_t numSlots);
+
   /**
    * Slot API.
    *
@@ -1594,7 +1597,7 @@ c10::intrusive_ptr<T> IValue::toCustomClass() && {
       obj->slots().size() == 1,
       "Tried to cast IValue to custom class but it did "
       "not contain a custom class!");
-  const Type* expected_type = c10::getCustomClassType<c10::intrusive_ptr<T>>().get();
+  const auto* expected_type = c10::getCustomClassType<c10::intrusive_ptr<T>>().get();
   ivalue::checkCustomClassType(expected_type, type().get());
   auto userObj =
       c10::static_intrusive_pointer_cast<T>(obj->getSlot(0).toCapsule());
@@ -1612,7 +1615,7 @@ c10::intrusive_ptr<T> IValue::toCustomClass() const& {
       obj->slots().size() == 1,
       "Tried to cast IValue to custom class but it did "
       "not contain a custom class!");
-  const Type* expected_type = c10::getCustomClassType<c10::intrusive_ptr<T>>().get();
+  const auto* expected_type = c10::getCustomClassType<c10::intrusive_ptr<T>>().get();
   ivalue::checkCustomClassType(expected_type, type().get());
   auto userObj =
       c10::static_intrusive_pointer_cast<T>(obj->getSlot(0).toCapsule());
@@ -1877,6 +1880,28 @@ inline ivalue::Tuple& IValue::toTupleRef() const {
       payload.u.as_intrusive_ptr);
 }
 
+inline bool IValue::isDoubleList() const {
+  // note: avoids calling type() to avoid extra referencing counting for the returned type.
+  return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == FloatType::Kind;
+}
+
+inline bool IValue::isComplexDoubleList() const {
+  // note: avoids calling type() to avoid extra referencing counting for the returned type.
+  return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == ComplexType::Kind;
+}
+
+inline bool IValue::isTensorList() const {
+  return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == TensorType::Kind;
+}
+
+inline bool IValue::isIntList() const {
+  return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == IntType::Kind;
+}
+
+inline bool IValue::isBoolList() const {
+  return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == BoolType::Kind;
+}
+
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Tuple> v)
     : tag(Tag::Tuple), is_intrusive_ptr(true) {
   payload.u.as_intrusive_ptr = null_to_undefined_tensor(v.release());
@@ -2001,7 +2026,7 @@ template <
     typename T,
     std::enable_if_t<std::is_base_of<torch::CustomClassHolder, T>::value, int>>
 IValue::IValue(c10::intrusive_ptr<T> custom_class) {
-  TypePtr classType = []() {
+  auto classType = []() {
     try {
       return c10::getCustomClassType<c10::intrusive_ptr<T>>();
     } catch (const c10::Error&) {
@@ -2011,8 +2036,7 @@ IValue::IValue(c10::intrusive_ptr<T> custom_class) {
           "");
     }
   }();
-  auto ivalue_obj = c10::ivalue::Object::create(
-      c10::StrongTypePtr(nullptr, classType), /*num_slots=*/1);
+  auto ivalue_obj = c10::ivalue::Object::create(std::move(classType), /* numSlots */1);
   ivalue_obj->setSlot(0, IValue::make_capsule(std::move(custom_class)));
   payload.u.as_intrusive_ptr = null_to_undefined_tensor(ivalue_obj.release());
   tag = Tag::Object;
