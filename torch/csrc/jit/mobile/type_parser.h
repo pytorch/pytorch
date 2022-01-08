@@ -1,3 +1,6 @@
+#pragma once
+
+#include <ATen/core/dynamic_type.h>
 #include <ATen/core/jit_type.h>
 
 namespace c10 {
@@ -22,6 +25,7 @@ class TypeParser {
   void expectChar(char c);
   template <class T>
   TypePtr CreateSingleElementType();
+  TypePtr parseSingleElementType(DynamicType::Tag);
 
   void lex();
 
