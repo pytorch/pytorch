@@ -38,6 +38,7 @@ DEFAULT_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     DeQuantStub: nnq.DeQuantize,
     nn.BatchNorm2d: nnq.BatchNorm2d,
     nn.BatchNorm3d: nnq.BatchNorm3d,
+    nn.Dropout: nnq.Dropout,
     nn.Conv1d: nnq.Conv1d,
     nn.Conv2d: nnq.Conv2d,
     nn.Conv3d: nnq.Conv3d,
@@ -80,7 +81,6 @@ DEFAULT_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nnqat.Linear: nnq.Linear,
     nnqat.Conv2d: nnq.Conv2d,
     nnqat.Conv3d: nnq.Conv3d,
-    nnqat.Dropout: nnq.Dropout,
 }
 
 # Default map for swapping float module to qat modules
@@ -88,7 +88,7 @@ DEFAULT_QAT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nn.Conv2d: nnqat.Conv2d,
     nn.Conv3d: nnqat.Conv3d,
     nn.Linear: nnqat.Linear,
-    nn.Dropout: nnqat.Dropout,
+    nn.Dropout: nnq.Dropout,
     nn.modules.linear.NonDynamicallyQuantizableLinear: nnqat.Linear,
     # Intrinsic modules:
     nni.ConvBn1d: nniqat.ConvBn1d,
