@@ -4,6 +4,7 @@ set -ex
 
 function install_ucx() {
   set -ex
+  sudo apt-get update
   sudo apt-get install -y libtool
   git clone --recursive https://github.com/openucx/ucx.git
   pushd ucx
