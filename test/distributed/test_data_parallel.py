@@ -747,7 +747,7 @@ class TestDataParallel(TestCase):
                 self.check_fn = check_fn
 
             def forward(self, inp):
-                self.check_fn()
+                self.check_fn(self)
                 return inp
 
         p1 = torch.nn.Parameter(torch.rand(10))

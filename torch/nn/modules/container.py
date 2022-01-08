@@ -8,7 +8,7 @@ from .module import Module
 from ..parameter import Parameter
 from torch._jit_internal import _copy_to_script_wrapper
 
-from typing import Any, Dict, Iterable, Iterator, Mapping, Optional, TYPE_CHECKING, overload, Tuple, TypeVar, Union
+from typing import Any, Dict, Iterable, Iterator, Mapping, Optional, overload, Tuple, TypeVar, Union
 
 T = TypeVar('T', bound=Module)
 
