@@ -710,6 +710,19 @@ class LSTM(RNNBase):
             max_batch_size = int(max_batch_size)
         else:
             batch_sizes = None
+            is_batched = input.dim() == 3
+            batch_dim = 0 if self.batch_first else 1
+            if not is_batched:
+                input = input.unsqueeze(batch_dim)
+                if hx is not None:
+                    if hx[0].dim() != 2 or hx[1].dim() != 2:
+                        raise RuntimeError(
+                            f"For unbatched 2-D input, hx, cx should also be 2-D but got ({hx[0].dim()}-D, {hx[1].dim()}-D) tensor")
+                    hx = (hx[0].unsqueeze(1), hx[1].unsqueeze(1))
+            else:
+                if hx is not None and (hx[0].dim() != 3 or hx[1].dim() != 3):
+                    raise RuntimeError(
+                        f"For batched 3-D input, hx should also be 3-D but got {hx.dim()}-D tensor")
             max_batch_size = input.size(0) if self.batch_first else input.size(1)
             sorted_indices = None
             unsorted_indices = None
@@ -743,6 +756,9 @@ class LSTM(RNNBase):
             output_packed = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
             return output_packed, self.permute_hidden(hidden, unsorted_indices)
         else:
+            if not is_batched:
+                output = output.squeeze(batch_dim)
+                hidden = (hidden[0].squeeze(1), hidden[1].squeeze(1))
             return output, self.permute_hidden(hidden, unsorted_indices)
 
 
