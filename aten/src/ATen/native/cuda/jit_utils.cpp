@@ -5,6 +5,7 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
+#include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <ATen/code_template.h>
 #include <ATen/native/cuda/jit_utils.h>
 
