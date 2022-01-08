@@ -15,8 +15,8 @@ if [[ "${CIRCLE_JOB}" == *"nightly"* ]]; then
     unset SCCACHE_BUCKET
 fi
 
-if [[ "${DESIRED_CUDA}" == "cu111" || "${DESIRED_CUDA}" == "cu113" ]]; then
-    export BUILD_SPLIT_CUDA="ON"
+if [[ "${DESIRED_CUDA}" == *"cu11"* ]]; then
+    export BUILD_SPLIT_CUDA=ON
 fi
 
 echo "Free Space for CUDA DEBUG BUILD"
