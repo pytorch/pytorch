@@ -51,6 +51,10 @@ def main(args: argparse.Namespace) -> None:
         version = f.read().strip()
     (major, minor, patch) = parse_version(version)
 
+
+    # NOTE: intentionally doesn't define the TORCH_VERSION_HASH
+    #   macro because it's populated by the git commit hash and these
+    #   replacements only occur on BAZEL builds
     replacements = {
         "@TORCH_VERSION_MAJOR@": str(major),
         "@TORCH_VERSION_MINOR@": str(minor),
