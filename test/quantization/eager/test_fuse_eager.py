@@ -361,7 +361,7 @@ class TestFuseEager(QuantizationTestCase):
         model.eval()
         golden = model(inp2)
 
-        model = fuse_modules(model, [["conv1", "bn1"], ["conv2", "bn2"], ["conv3", "bn3"]])
+        model = fuse_modules(model, [["conv1", "bn1"], ["conv2", "bn2"], ["conv3", "bn3"]], is_qat=False)
         self.assertEqual(type(model.bn1), nn.Identity)
         self.assertEqual(type(model.bn2), nn.Identity)
         self.assertEqual(type(model.bn3), nn.Identity)

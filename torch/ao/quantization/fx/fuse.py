@@ -28,9 +28,9 @@ class Fuser:
     def fuse(
         self,
         model: GraphModule,
+        is_qat: bool,
         fuse_custom_config_dict: Optional[Dict[str, Any]] = None,
         backend_config_dict: Optional[Dict[str, Any]] = None,
-        is_qat: bool = False,
     ) -> GraphModule:
         if fuse_custom_config_dict is None:
             fuse_custom_config_dict = {}

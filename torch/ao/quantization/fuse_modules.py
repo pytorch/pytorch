@@ -28,7 +28,7 @@ def _set_module(model, submodule_key, module):
 
     setattr(cur_mod, tokens[-1], module)
 
-def fuse_known_modules(mod_list, additional_fuser_method_mapping=None, is_qat=False):
+def fuse_known_modules(mod_list, is_qat, additional_fuser_method_mapping=None):
     r"""Returns a list of modules that fuses the operations specified
      in the input module list.
 
@@ -65,7 +65,7 @@ def fuse_known_modules(mod_list, additional_fuser_method_mapping=None, is_qat=Fa
 
     return new_mod
 
-def _fuse_modules(model, modules_to_fuse, fuser_func=fuse_known_modules, fuse_custom_config_dict=None, is_qat=False):
+def _fuse_modules(model, modules_to_fuse, is_qat, fuser_func=fuse_known_modules, fuse_custom_config_dict=None):
     if fuse_custom_config_dict is None:
         fuse_custom_config_dict = {}
     additional_fuser_method_mapping = fuse_custom_config_dict.get("additional_fuser_method_mapping", {})
@@ -74,13 +74,13 @@ def _fuse_modules(model, modules_to_fuse, fuser_func=fuse_known_modules, fuse_cu
         mod_list.append(_get_module(model, item))
 
     # Fuse list of modules
-    new_mod_list = fuser_func(mod_list, additional_fuser_method_mapping, is_qat=is_qat)
+    new_mod_list = fuser_func(mod_list, is_qat, additional_fuser_method_mapping)
 
     # Replace original module list with fused module list
     for i, item in enumerate(modules_to_fuse):
         _set_module(model, item, new_mod_list[i])
 
-def fuse_modules(model, modules_to_fuse, inplace=False, fuser_func=fuse_known_modules, fuse_custom_config_dict=None, is_qat=False):
+def fuse_modules(model, modules_to_fuse, is_qat, inplace=False, fuser_func=fuse_known_modules, fuse_custom_config_dict=None):
     r"""Fuses a list of modules into a single module
 
     Fuses only the following sequence of modules:
@@ -139,9 +139,9 @@ def fuse_modules(model, modules_to_fuse, inplace=False, fuser_func=fuse_known_mo
 
     if all(isinstance(module_element, str) for module_element in modules_to_fuse):
         # Handle case of modules_to_fuse being a list
-        _fuse_modules(model, modules_to_fuse, fuser_func, fuse_custom_config_dict, is_qat=is_qat)
+        _fuse_modules(model, modules_to_fuse, is_qat, fuser_func, fuse_custom_config_dict)
     else:
         # Handle case of modules_to_fuse being a list of lists
         for module_list in modules_to_fuse:
-            _fuse_modules(model, module_list, fuser_func, fuse_custom_config_dict, is_qat=is_qat)
+            _fuse_modules(model, module_list, is_qat, fuser_func, fuse_custom_config_dict)
     return model
