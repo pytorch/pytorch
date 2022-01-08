@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/mobile/debug_info.h>
-#include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/serialization/callstack_debug_info_serialization.h>
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
 
@@ -123,13 +122,10 @@ MobileDebugTable::MobileDebugTable(
       size_t debug_size{0};
       std::tie(debug_data, debug_size) = reader->getRecord(record_name);
       auto ivalues =
-          std::move(*jit::unpickle(
-                         reinterpret_cast<const char*>(debug_data.get()),
-                         debug_size,
-                         nullptr,
-                         {},
-                         c10::parseType)
-                         .toTuple())
+          std::move(
+              *jit::unpickle(
+                   reinterpret_cast<const char*>(debug_data.get()), debug_size)
+                   .toTuple())
               .elements();
       SourceRangeDeserializer deserializer;
       for (auto& val : ivalues) {
