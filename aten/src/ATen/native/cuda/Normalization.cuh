@@ -459,7 +459,7 @@ __global__ void batch_norm_reduce_statistics_kernel(
     GenericPackedTensorAccessor<scalar_t, 1, RestrictPtrTraits, index_t> running_var,
     const accscalar_t epsilon,
     const accscalar_t momentum,
-    const GenericPackedTensorAccessor<scalar_t, 1, RestrictPtrTraits, index_t> counts) {
+    const GenericPackedTensorAccessor<accscalar_t, 1, RestrictPtrTraits, index_t> counts) {
 
   int feature_size = vec_mean.size(1);
   int world_size = vec_mean.size(0);
@@ -473,7 +473,7 @@ __global__ void batch_norm_reduce_statistics_kernel(
     accscalar_t var_n = 0;
     index_t n = 0;
     for (int j = 0; j < world_size; j++) {
-      scalar_t count = counts[j];
+      accscalar_t count = counts[j];
       accscalar_t m = vec_mean[j][i];
       accscalar_t v = accscalar_t(1.0) / (vec_invstd[j][i]);
       v = (v * v - epsilon) * count;
@@ -778,12 +778,12 @@ std::tuple<Tensor, Tensor> batch_norm_gather_stats_cuda_template(const Tensor& m
       accscalar_t, 2, RestrictPtrTraits, index_t>(mean_, "mean");
   auto invstd = packed_accessor_or_dummy<
       accscalar_t, 2, RestrictPtrTraits, index_t>(invstd_, "invstd");
+  auto counts = packed_accessor_or_dummy<
+      accscalar_t, 1, RestrictPtrTraits, index_t>(counts_, "counts");
   auto running_mean = packed_accessor_or_dummy<
       scalar_t, 1, RestrictPtrTraits, index_t>(running_mean_, "running_mean");
   auto running_var = packed_accessor_or_dummy<
       scalar_t, 1, RestrictPtrTraits, index_t>(running_var_, "running_mean");
-  auto counts = packed_accessor_or_dummy<
-      scalar_t, 1, RestrictPtrTraits, index_t>(counts_, "counts");
 
   auto save_mean = get_packed_accessor<
       accscalar_t, 1, RestrictPtrTraits, index_t>(save_mean_, "save_mean");
