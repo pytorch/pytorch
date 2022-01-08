@@ -3119,7 +3119,9 @@ TEST_F(NVFuserTest, FusionConv2DNoPadding_CUDA) {
   auto cg_outputs = fe.runFusion(inputs);
 
   at_inp = at_inp.unsqueeze(0); // at::conv2d needs the N axis
-  auto at_out = at::conv2d(at_inp, at_w, {}, {1, 1}, {0, 0});
+  at::IntArrayRef stride = {1, 1};
+  at::IntArrayRef padding = {0, 0};
+  auto at_out = at::conv2d(at_inp, at_w, {}, stride, padding);
   at_out = at_out.squeeze(0); // drop the N axis
 
   testValidate(&fusion, cg_outputs, inputs, {at_out}, __LINE__, __FILE__);
@@ -3212,7 +3214,9 @@ TEST_F(NVFuserTest, FusionConv2DNoPaddingStrided_CUDA) {
   auto cg_outputs = fe.runFusion(inputs);
 
   at_inp = at_inp.unsqueeze(0); // at::conv2d needs the N axis
-  auto at_out = at::conv2d(at_inp, at_w, {}, {2, 2}, {0, 0});
+  at::IntArrayRef stride = {2, 2};
+  at::IntArrayRef padding = {0, 0};
+  auto at_out = at::conv2d(at_inp, at_w, {}, stride, padding);
   at_out = at_out.squeeze(0); // drop the N axis
 
   testValidate(&fusion, cg_outputs, inputs, {at_out}, __LINE__, __FILE__);
@@ -3455,7 +3459,8 @@ TEST_F(NVFuserTest, FusionConv4x4Pad1x1_CUDA) {
   // Gather a neighbor tile of [4, 4] with padding size of 1 for both
   // sides of the spatial dimensions. The resulting extent is
   // decreased by one.
-  auto inp_tile = gather(inp, {1, 4, 4}, {{0, 0}, {1, 1}, {1, 1}}, {1, 1, 1}, true);
+  auto inp_tile =
+      gather(inp, {1, 4, 4}, {{0, 0}, {1, 1}, {1, 1}}, {1, 1, 1}, true);
   // inp_tile: [C, H-1, W-1, 1, 4, 4]
 
   auto inp_bc =
@@ -3528,7 +3533,8 @@ TEST_F(NVFuserTest, FusionConv4x4Pad1x1_CUDA) {
   auto cg_outputs = fe.runFusion(inputs);
 
   at_inp = at_inp.unsqueeze(0); // at::conv2d needs the N axis
-  auto at_out = at::conv2d(at_inp.to(at::kDouble), at_w.to(at::kDouble), {}, 1, 1);
+  auto at_out =
+      at::conv2d(at_inp.to(at::kDouble), at_w.to(at::kDouble), {}, 1, 1);
   at_out = at_out.squeeze(0); // drop the N axis
 
   testValidate(&fusion, cg_outputs, inputs, {at_out}, __LINE__, __FILE__);
@@ -3548,7 +3554,8 @@ TEST_F(NVFuserTest, FusionConv4x5Pad1x2_CUDA) {
 
   // Gather a neighbor tile of [4, 5] with padding size of 1 and 2 for
   // each side of the spatial dimensions.
-  auto inp_tile = gather(inp, {1, 4, 5}, {{0, 0}, {1, 1}, {2, 2}}, {1, 1, 1}, true);
+  auto inp_tile =
+      gather(inp, {1, 4, 5}, {{0, 0}, {1, 1}, {2, 2}}, {1, 1, 1}, true);
   // inp_tile: [C, H-1, W, 1, 4, 5]
 
   auto inp_bc =
@@ -3621,7 +3628,8 @@ TEST_F(NVFuserTest, FusionConv4x5Pad1x2_CUDA) {
   auto cg_outputs = fe.runFusion(inputs);
 
   at_inp = at_inp.unsqueeze(0); // at::conv2d needs the N axis
-  auto at_out = at::conv2d(at_inp.to(at::kDouble), at_w.to(at::kDouble), {}, 1, {1, 2});
+  auto at_out =
+      at::conv2d(at_inp.to(at::kDouble), at_w.to(at::kDouble), {}, 1, {1, 2});
   at_out = at_out.squeeze(0); // drop the N axis
 
   testValidate(&fusion, cg_outputs, inputs, {at_out}, __LINE__, __FILE__);
@@ -3723,7 +3731,8 @@ TEST_F(NVFuserTest, FusionConv4x4Pad1x1Stride4_CUDA) {
   auto cg_outputs = fe.runFusion(inputs);
 
   at_inp = at_inp.unsqueeze(0); // at::conv2d needs the N axis
-  auto at_out = at::conv2d(at_inp.to(at::kDouble), at_w.to(at::kDouble), {}, 4, {1, 1});
+  auto at_out =
+      at::conv2d(at_inp.to(at::kDouble), at_w.to(at::kDouble), {}, 4, {1, 1});
   at_out = at_out.squeeze(0); // drop the N axis
 
   testValidate(&fusion, cg_outputs, inputs, {at_out}, __LINE__, __FILE__);
