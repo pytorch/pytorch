@@ -77,6 +77,11 @@ def hardshrink_backward(grad_out: Tensor, self: Tensor, lambd: float):
     return aten.where((self >= -lambd) & (self <= lambd), aten.new_zeros(grad_out, ()), grad_out)
 
 
+@register_decomposition(aten.hardswish_backward)
+def hardswish_backward(grad_output: Tensor, self: Tensor) -> Tensor:
+    return aten.where(self < -3, aten.new_zeros(grad_output, ()), aten.where(self <= 3, grad_output * ((self / 3) + 0.5), grad_output))    
+
+
 @register_decomposition(aten.threshold_backward)
 def threshold_backward_decomposition(grad_output: Tensor, self: Tensor, threshold: float):
     return aten.where(self <= threshold, aten.new_zeros(grad_output, (1,)), grad_output)
@@ -104,6 +109,12 @@ def mish_backward_decomposition(grad_output: Tensor, input: Tensor):
     input_sigmoid = aten.sigmoid(input)
     out = (input * input_sigmoid * (1 - input_tanh_softplus * input_tanh_softplus))
     return grad_output * (input_tanh_softplus + out)
+
+
+@register_decomposition(aten.silu_backward)
+def silu_backward(grad_output: Tensor, self: Tensor) -> Tensor:
+    sigmoid = 1 / (1 + aten.exp(aten.neg(self)))
+    return grad_output * sigmoid * (1 + self * (1 - sigmoid))
 
 # whyyyy does log_sigmoid do 2 different things for CPU and CUDA >:(
 
@@ -155,13 +166,14 @@ def diagonal_backward(grad_output: Tensor, input_sizes: List[int], offset: int, 
     return aten.diagonal_scatter(grad_input, grad_output, offset, dim1, dim2)
 
 
-# @register_decomposition(aten.cudnn_batch_norm)
-# def cudnn_batch_norm(input: Tensor, weight: Tensor, bias: Optional[Tensor], running_mean: Optional[Tensor], running_var: Optional[Tensor], training: bool, exponential_average_factor: float, epsilon: float):
-#     return aten._batch_norm_impl_index(input, weight, bias, running_mean, running_var, training, exponential_average_factor, epsilon, False)[:4]
+@register_decomposition(aten.cudnn_batch_norm)
+def cudnn_batch_norm(input: Tensor, weight: Tensor, bias: Optional[Tensor], running_mean: Optional[Tensor], running_var: Optional[Tensor], training: bool, exponential_average_factor: float, epsilon: float):
+    a, b, c = aten.native_batch_norm(input, weight, bias, running_mean, running_var, training, exponential_average_factor, epsilon)
+    return (a,b, c, aten.new_empty(input, (1,)))
 
-# @register_decomposition(aten.cudnn_batch_norm_backward)
-# def cudnn_batch_norm_backward(input: Tensor, grad_output: Tensor, weight: Tensor, running_mean: Optional[Tensor], running_var: Optional[Tensor], save_mean: Optional[Tensor], save_var: Optional[Tensor], epsilon: float, reserveSpace: Tensor):
-#     return aten.
+@register_decomposition(aten.cudnn_batch_norm_backward)
+def cudnn_batch_norm_backward(input: Tensor, grad_output: Tensor, weight: Tensor, running_mean: Optional[Tensor], running_var: Optional[Tensor], save_mean: Optional[Tensor], save_var: Optional[Tensor], epsilon: float, reserveSpace: Tensor):
+    return aten.native_batch_norm_backward(grad_output, input, weight, running_mean, running_var, save_mean, save_var, True, epsilon, [True, True, True])
 
 
 @register_decomposition(aten._softmax_backward_data)
