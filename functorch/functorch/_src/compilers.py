@@ -11,6 +11,16 @@ def ts_compile(fx_g, _):
                 args = list(node.args)
                 args[1] = [1]
                 node.args = tuple(args)
+
+    for node in fx_g.graph.nodes:
+        new_kwargs = {}
+        for k, v in node.kwargs.items():
+            if isinstance(v, torch.device):
+                v = v.type
+            new_kwargs[k] = v
+        node.kwargs = new_kwargs
+
+
     fx_g.graph.lint()
 
     # print(set([i.target for i in fx_g.graph.nodes if i.op == 'call_function']))
@@ -42,7 +52,7 @@ def ts_compile(fx_g, _):
     # graph.appendNode(node)
     # node.output().setType(torch._C.ListType.ofTensors())
     # graph.registerOutput(node.output())
-    # torch._C._jit_pass_remove_mutation(f.graph)
+    torch._C._jit_pass_remove_mutation(f.graph)
 
     f = torch.jit.freeze(f.eval())
     f = torch.jit.optimize_for_inference(f)
@@ -55,7 +65,7 @@ def _draw_graph_compile(fx_g, _, name):
 
 
 def draw_graph_compile(name):
-    return partial(draw_graph_compile, name=name)
+    return partial(_draw_graph_compile, name=name)
 
 
 def _tvm_compile(fx_module, example_inputs, name=None):
