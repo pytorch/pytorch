@@ -1,6 +1,7 @@
 #include <ATen/core/Dict.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/core/dynamic_type.h>
+#include <ATen/core/function_schema.h>
 #include <ATen/core/enum_type.h>
 #include <ATen/core/function_schema.h>
 #include <ATen/core/jit_type.h>

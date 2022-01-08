@@ -62,14 +62,6 @@ bool operator==(const ivalue::Tuple& lhs, const ivalue::Tuple& rhs) {
              _fastEqualsForContainer);
 }
 
-TupleTypePtr Tuple::type() const {
-  if (!type_) {
-    type_ = TupleType::create(
-        fmap(elements(), [&](const IValue& v) { return v.type(); }));
-  }
-  return type_;
-}
-
 bool operator==(const ivalue::EnumHolder& lhs, const ivalue::EnumHolder& rhs) {
   return lhs.name() == rhs.name() && *rhs.type() == *lhs.type();
 }
@@ -84,56 +76,56 @@ const std::string ivalue::EnumHolder::unqualifiedClassName() const {
 
 } // namespace ivalue
 
-TypePtr IValue::type() const {
-  switch (tag) {
-    case Tag::None:
-      return NoneType::get();
-    case Tag::Tensor:
-      return TensorType::create(toTensor());
-    case Tag::Storage:
-      return StorageType::get();
-    case Tag::Double:
-      return FloatType::get();
-    case Tag::ComplexDouble:
-      return ComplexType::get();
-    case Tag::Int:
-      return IntType::get();
-    case Tag::Bool:
-      return BoolType::get();
-    case Tag::String:
-      return StringType::get();
-    case Tag::Blob:
-      return AnyType::get();
-    case Tag::GenericDict: {
-      auto d = toGenericDict();
-      return DictType::create(d.keyType(), d.valueType());
-    }
-    case Tag::GenericList:
-      return ListType::create(toList().elementType());
-    case Tag::Future:
-      return FutureType::create(toFuture()->elementType());
-    case Tag::RRef:
-      return RRefType::create(toRRef()->type());
-    case Tag::Device:
-      return DeviceObjType::get();
-    case Tag::Stream:
-      return StreamObjType::get();
-    case Tag::Object:
-      return toObjectRef().type();
-    case Tag::PyObject:
-      return PyObjectType::get();
-    case Tag::Uninitialized:
-      return AnyType::get();
-    case Tag::Capsule:
-      return CapsuleType::get();
-    case Tag::Tuple:
-      return toTupleRef().type();
-    case Tag::Generator:
-      return GeneratorType::get();
-    case Tag::Quantizer:
-      return QuantizerType::get();
-    case Tag::Enum:
-      return toEnumHolder()->type();
+c10::TypePtr IValue::TagType<c10::Type>::get(const IValue& v) {
+  switch (v.tag) {
+      case Tag::None:
+        return NoneType::get();
+      case Tag::Tensor:
+        return TensorType::create(v.toTensor());
+      case Tag::Storage:
+        return StorageType::get();
+      case Tag::Double:
+        return FloatType::get();
+      case Tag::ComplexDouble:
+        return ComplexType::get();
+      case Tag::Int:
+        return IntType::get();
+      case Tag::Bool:
+        return BoolType::get();
+      case Tag::String:
+        return StringType::get();
+      case Tag::Blob:
+        return AnyType::get();
+      case Tag::GenericDict: {
+        auto d = v.toGenericDict();
+        return DictType::create(d.keyType(), d.valueType());
+      }
+      case Tag::GenericList:
+        return ListType::create(v.toList().elementType());
+      case Tag::Future:
+        return FutureType::create(v.toFuture()->elementType());
+      case Tag::RRef:
+        return RRefType::create(v.toRRef()->type());
+      case Tag::Device:
+        return DeviceObjType::get();
+      case Tag::Stream:
+        return StreamObjType::get();
+      case Tag::Object:
+        return v.toObjectRef().type();
+      case Tag::PyObject:
+        return PyObjectType::get();
+      case Tag::Uninitialized:
+        return AnyType::get();
+      case Tag::Capsule:
+        return CapsuleType::get();
+      case Tag::Tuple:
+        return v.toTupleRef().type();
+      case Tag::Generator:
+        return GeneratorType::get();
+      case Tag::Quantizer:
+        return QuantizerType::get();
+      case Tag::Enum:
+        return v.toEnumHolder()->type();
   }
   // switch above is complete but this silences compiler warnings
   TORCH_INTERNAL_ASSERT(false, "unhandled case in IValue::type()");

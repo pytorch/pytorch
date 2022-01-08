@@ -12,7 +12,6 @@
 #include <ATen/core/qualified_name.h>
 #include <ATen/core/rref_interface.h>
 #include <ATen/core/symbol.h>
-#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/Event.h>
 #include <c10/core/Scalar.h>
@@ -20,9 +19,11 @@
 #include <c10/core/StreamGuard.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <c10/util/FunctionRef.h>
+#include <c10/util/hash.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
-#include <c10/util/hash.h>
 
 namespace torch {
 namespace jit {
@@ -684,7 +685,15 @@ struct TORCH_API Tuple : c10::intrusive_ptr_target {
     return elements_.size();
   }
 
-  std::shared_ptr<TupleType> type() const;
+  template <typename T = c10::Type>
+  std::shared_ptr<TupleType> type() const {
+    if (!type_) {
+      type_ = TupleType::create(fmap(elements(), [&](const IValue& v) {
+        return v.type<T>();
+      }));
+    }
+    return type_;
+  }
 
   static size_t hash(const Tuple& t) {
     return c10::get_hash(t.elements());
@@ -2233,5 +2242,15 @@ struct MaybeOwnedTraits<IValue> {
     return true;
   }
 };
+
+template <>
+struct IValue::TagType<c10::Type> {
+  static TORCH_API c10::TypePtr get(const IValue&);
+};
+
+template <typename T>
+typename T::Ptr IValue::type() const {
+  return IValue::TagType<T>::get(*this);
+}
 
 } // namespace c10
