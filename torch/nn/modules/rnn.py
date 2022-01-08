@@ -716,13 +716,15 @@ class LSTM(RNNBase):
                 input = input.unsqueeze(batch_dim)
                 if hx is not None:
                     if hx[0].dim() != 2 or hx[1].dim() != 2:
-                        raise RuntimeError(
-                            f"For unbatched 2-D input, hx and cx should also be 2-D but got ({hx[0].dim()}-D, {hx[1].dim()}-D) tensors")
+                        msg = ("For unbatched 2-D input, hx and cx should "
+                               f"also be 2-D but got ({hx[0].dim()}-D, {hx[1].dim()}-D) tensors")
+                        raise RuntimeError(msg)
                     hx = (hx[0].unsqueeze(1), hx[1].unsqueeze(1))
             else:
                 if hx is not None and (hx[0].dim() != 3 or hx[1].dim() != 3):
-                    raise RuntimeError(
-                        f"For batched 3-D input, hx and cx should also be 3-D but got ({hx[0].dim()}-D, {hx[1].dim()}-D) tensors")
+                    msg = ("For batched 3-D input, hx and cx should "
+                           f"also be 3-D but got ({hx[0].dim()}-D, {hx[1].dim()}-D) tensors")
+                    raise RuntimeError(msg)
             max_batch_size = input.size(0) if self.batch_first else input.size(1)
             sorted_indices = None
             unsorted_indices = None
