@@ -680,7 +680,7 @@ def div_mapper(node: torch.fx.Node, mod: torch.fx.GraphModule) -> torch.fx.Node:
 
 
 @register_acc_op
-def div(input, other, *, rounding_mode=None):
+def div(*, input, other, rounding_mode=None):
     return torch.div(input, other, rounding_mode=rounding_mode)
 
 
