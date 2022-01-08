@@ -2895,11 +2895,11 @@ def cross_entropy(
     See :class:`~torch.nn.CrossEntropyLoss` for details.
 
     Args:
-        input (Tensor) : :math:`(N, C)` where `C = number of classes` or :math:`(N, C, H, W)`
+        input (Tensor) : :math:`(N, C)` or :math:`(C)` where `C = number of classes` or :math:`(N, C, H, W)`
             in case of 2D Loss, or :math:`(N, C, d_1, d_2, ..., d_K)` where :math:`K \geq 1`
             in the case of K-dimensional loss. `input` is expected to contain unnormalized scores
             (often referred to as logits).
-        target (Tensor) : If containing class indices, shape :math:`(N)` where each value is
+        target (Tensor) : If containing class indices, shape :math:`(N)` or :math:`()` where each value is
             :math:`0 \leq \text{targets}[i] \leq C-1`, or :math:`(N, d_1, d_2, ..., d_K)` with
             :math:`K \geq 1` in the case of K-dimensional loss. If containing class probabilities,
             same shape as the input.

@@ -1119,14 +1119,14 @@ class CrossEntropyLoss(_WeightedLoss):
             `Rethinking the Inception Architecture for Computer Vision <https://arxiv.org/abs/1512.00567>`__. Default: :math:`0.0`.
 
     Shape:
-        - Input: :math:`(N, C)` where `C = number of classes`, or
+        - Input: :math:`(N, C)` or :math:`(C)` where `C = number of classes`, or
           :math:`(N, C, d_1, d_2, ..., d_K)` with :math:`K \geq 1`
           in the case of `K`-dimensional loss.
-        - Target: If containing class indices, shape :math:`(N)` where each value is
+        - Target: If containing class indices, shape :math:`(N)` or :math:`()` where each value is
           :math:`0 \leq \text{targets}[i] \leq C-1`, or :math:`(N, d_1, d_2, ..., d_K)` with
           :math:`K \geq 1` in the case of K-dimensional loss. If containing class probabilities,
           same shape as the input.
-        - Output: If :attr:`reduction` is ``'none'``, shape :math:`(N)` or
+        - Output: If :attr:`reduction` is ``'none'``, shape :math:`(N)` or :math:`()` or
           :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 1` in the case of K-dimensional loss.
           Otherwise, scalar.
 
