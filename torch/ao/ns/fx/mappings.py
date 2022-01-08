@@ -378,7 +378,6 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
             nn.Dropout,
             F.dropout,
             nnq.Dropout,
-            nnqat.Dropout,
         ]),
     ]
 
