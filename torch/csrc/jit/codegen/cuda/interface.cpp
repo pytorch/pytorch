@@ -564,13 +564,16 @@ RegisterOperators reg_add_optional({
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg_view_copy({
     Operator(
-        "prim::view_copy(Tensor(a) self, int[] size) -> Tensor(a)",
+        "prim::view_copy(Tensor self, int[] size) -> Tensor",
         [](const Node* node) -> Operation {
-          return [](Stack& stack) {
+          return [node](Stack& stack) {
             TORCH_CHECK(
-                false,
-                "view_copy is only used by nvfuser to identify non-mutating \
-                alias ops, should be restored after fusion pass!");
+                node->s(attr::name) == "CudaFusionGroup",
+                "view_copy is only used by nvfuser to identify non-mutating ",
+                "alias ops, should be restored after fusion pass!");
+            IValue self, size;
+            pop(stack, self, size);
+            push(stack, at::native::view(self.toTensor(), size.toIntVector()));
           };
         },
         aliasAnalysisFromSchema()),
@@ -579,13 +582,18 @@ RegisterOperators reg_view_copy({
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg_reshape_copy({
     Operator(
-        "prim::reshape_copy(Tensor(a) self, int[] shape) -> Tensor(a)",
+        "prim::reshape_copy(Tensor self, int[] shape) -> Tensor",
         [](const Node* node) -> Operation {
-          return [](Stack& stack) {
+          return [node](Stack& stack) {
             TORCH_CHECK(
-                false,
-                "reshape_copy is only used by nvfuser to identify non-mutating \
-                alias ops, should be restored after fusion pass!");
+                node->s(attr::name) == "CudaFusionGroup",
+                "reshape_copy is only used by nvfuser to identify non-mutating ",
+                "alias ops, should be restored after fusion pass!");
+            IValue self, shape;
+            pop(stack, self, shape);
+            push(
+                stack,
+                at::native::reshape(self.toTensor(), shape.toIntVector()));
           };
         },
         aliasAnalysisFromSchema()),
@@ -594,13 +602,16 @@ RegisterOperators reg_reshape_copy({
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg_squeeze_copy({
     Operator(
-        "prim::squeeze_copy(Tensor(a) self) -> Tensor(a)",
+        "prim::squeeze_copy(Tensor self) -> Tensor",
         [](const Node* node) -> Operation {
-          return [](Stack& stack) {
+          return [node](Stack& stack) {
             TORCH_CHECK(
-                false,
-                "squeeze_copy is only used by nvfuser to identify non-mutating \
-                alias ops, should be restored after fusion pass!");
+                node->s(attr::name) == "CudaFusionGroup",
+                "squeeze_copy is only used by nvfuser to identify non-mutating ",
+                "alias ops, should be restored after fusion pass!");
+            IValue self;
+            pop(stack, self);
+            push(stack, at::squeeze(self.toTensor()));
           };
         },
         aliasAnalysisFromSchema()),
@@ -609,13 +620,16 @@ RegisterOperators reg_squeeze_copy({
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg_squeeze_dim_copy({
     Operator(
-        "prim::squeeze_copy.dim(Tensor(a) self, int dim) -> Tensor(a)",
+        "prim::squeeze_copy.dim(Tensor self, int dim) -> Tensor",
         [](const Node* node) -> Operation {
-          return [](Stack& stack) {
+          return [node](Stack& stack) {
             TORCH_CHECK(
-                false,
-                "squeeze_dim_copy is only used by nvfuser to identify non-mutating \
-                alias ops, should be restored after fusion pass!");
+                node->s(attr::name) == "CudaFusionGroup",
+                "squeeze_dim_copy is only used by nvfuser to identify non-mutating ",
+                "alias ops, should be restored after fusion pass!");
+            IValue self, dim;
+            pop(stack, self, dim);
+            push(stack, at::squeeze(self.toTensor(), dim.toInt()));
           };
         },
         aliasAnalysisFromSchema()),
@@ -624,13 +638,16 @@ RegisterOperators reg_squeeze_dim_copy({
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg_unsqueeze_copy({
     Operator(
-        "prim::unsqueeze_copy(Tensor(a) self, int dim) -> Tensor(a)",
+        "prim::unsqueeze_copy(Tensor self, int dim) -> Tensor",
         [](const Node* node) -> Operation {
-          return [](Stack& stack) {
+          return [node](Stack& stack) {
             TORCH_CHECK(
-                false,
-                "unsqueeze_copy is only used by nvfuser to identify non-mutating \
-                alias ops, should be restored after fusion pass!");
+                node->s(attr::name) == "CudaFusionGroup",
+                "unsqueeze_copy is only used by nvfuser to identify non-mutating ",
+                "alias ops, should be restored after fusion pass!");
+            IValue self, dim;
+            pop(stack, self, dim);
+            push(stack, at::unsqueeze(self.toTensor(), dim.toInt()));
           };
         },
         aliasAnalysisFromSchema()),

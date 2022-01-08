@@ -2379,8 +2379,8 @@ class IrParser {
 
     {
       std::array<const char*, kNumViewOps> ViewOps = {
-          "prim::reshape_copy(Tensor(a) self, int[] shape) -> Tensor(a)",
-          "prim::view_copy(Tensor(a) self, int[] size) -> Tensor(a)"};
+          "prim::reshape_copy(Tensor self, int[] shape) -> Tensor",
+          "prim::view_copy(Tensor self, int[] size) -> Tensor"};
       for (auto signature : ViewOps) {
         auto ptr_op = getOperatorForLiteral(signature);
         REGISTER_PARSE_RULE(
@@ -2422,8 +2422,8 @@ class IrParser {
     }
 
     {
-      auto ptr_op = getOperatorForLiteral(
-          "prim::squeeze_copy(Tensor(a) self) -> Tensor(a)");
+      auto ptr_op =
+          getOperatorForLiteral("prim::squeeze_copy(Tensor self) -> Tensor");
       REGISTER_PARSE_RULE(
           ptr_op,
           {
@@ -2448,8 +2448,8 @@ class IrParser {
 
     {
       std::array<const char*, kNumAliasDimOps> AliasOpWithDim = {
-          "prim::squeeze_copy.dim(Tensor(a) self, int dim) -> Tensor(a)",
-          "prim::unsqueeze_copy(Tensor(a) self, int dim) -> Tensor(a)"};
+          "prim::squeeze_copy.dim(Tensor self, int dim) -> Tensor",
+          "prim::unsqueeze_copy(Tensor self, int dim) -> Tensor"};
       for (auto signature : AliasOpWithDim) {
         auto ptr_op = getOperatorForLiteral(signature);
         REGISTER_PARSE_RULE(
@@ -3018,20 +3018,18 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
   }
 
   static auto reshape_schema =
-      getOperatorForLiteral(
-          "aten::reshape(Tensor(a) self, int[] shape) -> Tensor(a)")
+      getOperatorForLiteral("aten::reshape(Tensor self, int[] shape) -> Tensor")
           ->schema();
   static auto reshape_copy_schema =
       getOperatorForLiteral(
-          "prim::reshape_copy(Tensor(a) self, int[] shape) -> Tensor(a)")
+          "prim::reshape_copy(Tensor self, int[] shape) -> Tensor")
           ->schema();
   static auto view_schema =
-      getOperatorForLiteral(
-          "aten::view(Tensor(a) self, int[] size) -> Tensor(a)")
+      getOperatorForLiteral("aten::view(Tensor self, int[] size) -> Tensor")
           ->schema();
   static auto view_copy_schema =
       getOperatorForLiteral(
-          "prim::view_copy(Tensor(a) self, int[] size) -> Tensor(a)")
+          "prim::view_copy(Tensor self, int[] size) -> Tensor")
           ->schema();
   if (node->matches(reshape_schema) || node->matches(reshape_copy_schema) ||
       node->matches(view_schema) || node->matches(view_copy_schema)) {
@@ -3048,11 +3046,11 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
 
   static auto squeeze_dim_schema =
       getOperatorForLiteral(
-          "prim::squeeze_copy.dim(Tensor(a) self, int dim) -> Tensor(a)")
+          "prim::squeeze_copy.dim(Tensor self, int dim) -> Tensor")
           ->schema();
   static auto unsqueeze_schema =
       getOperatorForLiteral(
-          "prim::unsqueeze_copy(Tensor(a) self, int dim) -> Tensor(a)")
+          "prim::unsqueeze_copy(Tensor self, int dim) -> Tensor")
           ->schema();
   if (node->matches(squeeze_dim_schema) || node->matches(unsqueeze_schema)) {
     switch (offset) {
