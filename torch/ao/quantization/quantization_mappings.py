@@ -57,6 +57,7 @@ DEFAULT_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nn.modules.linear.NonDynamicallyQuantizableLinear: nnq.Linear,
     nn.Linear: nnq.Linear,
     nn.ReLU6: nnq.ReLU6,
+    nn.Dropout: nnq.Dropout,
     # Wrapper Modules:
     nnq.FloatFunctional: nnq.QFunctional,
     # Intrinsic modules:
@@ -79,6 +80,7 @@ DEFAULT_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nnqat.Linear: nnq.Linear,
     nnqat.Conv2d: nnq.Conv2d,
     nnqat.Conv3d: nnq.Conv3d,
+    nnqat.Dropout: nnq.Dropout,
 }
 
 # Default map for swapping float module to qat modules
@@ -86,6 +88,7 @@ DEFAULT_QAT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nn.Conv2d: nnqat.Conv2d,
     nn.Conv3d: nnqat.Conv3d,
     nn.Linear: nnqat.Linear,
+    nn.Dropout: nnqat.Dropout,
     nn.modules.linear.NonDynamicallyQuantizableLinear: nnqat.Linear,
     # Intrinsic modules:
     nni.ConvBn1d: nniqat.ConvBn1d,
