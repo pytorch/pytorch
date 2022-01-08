@@ -53,6 +53,10 @@ jobs:
     steps:
       - name: print labels
         run: echo "${PR_LABELS}"
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
       - name: Display EC2 information
         shell: bash
         run: |
@@ -82,10 +86,6 @@ jobs:
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: seemethere/add-github-ssh-key@v1
         with:
@@ -99,10 +99,6 @@ jobs:
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
           submodules: recursive
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
       - name: Calculate docker image tag
         id: calculate-tag
         run: |
@@ -258,6 +254,10 @@ jobs:
       DOCS_TYPE: ${{ matrix.docs_type }}
       WITH_PUSH: ${{ github.event_name == 'schedule' }}
     steps:
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
       - name: Display EC2 information
         shell: bash
         run: |
@@ -287,10 +287,6 @@ jobs:
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: seemethere/add-github-ssh-key@v1
         with:
@@ -304,10 +300,6 @@ jobs:
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
           submodules: recursive
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
       - name: Pull Docker image
         run: |
           retry () {
