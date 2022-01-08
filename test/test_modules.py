@@ -365,12 +365,10 @@ class TestModule(TestCase):
                 else:
                     grad_output = tuple(self._traverse_obj(o, lambda o: o.clone().detach_().normal_())
                                         for o in default_output)
-                    for o, g_o in zip(default_output, grad_output):
-                        if isinstance(o, torch.Tensor):
-                            o.backward(g_o, retain_graph=True)
-                        else:
-                            for o_i, g_o_i in zip(o, g_o):
-                                o_i.backward(g_o_i, retain_graph=True)
+                    flattened_default_output, _ = torch.utils._pytree.tree_flatten(default_output)
+                    flattened_grad_output, _ = torch.utils._pytree.tree_flatten(grad_output)
+                    for o, g_o in zip(flattened_default_output, flattened_grad_output):
+                        o.backward(g_o, retain_graph=True)
 
             default_input_args_grad, default_input_kwargs_grad = deepcopy(self._get_grads((input_args, input_kwargs)))
             default_param_grad = deepcopy([p.grad for p in m.parameters()])
@@ -393,12 +391,10 @@ class TestModule(TestCase):
                     if isinstance(out, torch.Tensor):
                         out.backward(g_out_copy, retain_graph=True)
                     else:
-                        for o, g_o in zip(out, g_out_copy):
-                            if isinstance(o, torch.Tensor):
-                                o.backward(g_o, retain_graph=True)
-                            else:
-                                for o_i, g_o_i in zip(o, g_o):
-                                    o_i.backward(g_o_i, retain_graph=True)
+                        flattened_out, _ = torch.utils._pytree.tree_flatten(out)
+                        flattened_g_out_copy, _ = torch.utils._pytree.tree_flatten(g_out_copy)
+                        for o, g_o in zip(flattened_out, flattened_g_out_copy):
+                            o.backward(g_o, retain_graph=True)
 
                 input_args_grad, input_kwargs_grad = self._get_grads((in_args, in_kwargs))
                 self.assertEqual(out, default_output)
@@ -456,7 +452,9 @@ class TestModule(TestCase):
                 new_kwargs = {name: obj for (name, _), obj in zip(kwarg_tensors, kwarg_args)}
 
                 with freeze_rng_state():
-                    return m(*new_input_args, **new_kwargs, **other_kwargs)
+                    output = m(*new_input_args, **new_kwargs, **other_kwargs)
+                    output_flattened, _ = torch.utils._pytree.tree_flatten(output)
+                    return output_flattened
 
             self.assertTrue(check(fn_to_gradcheck, flat_input, nondet_tol=gradcheck_nondet_tol))
 
@@ -540,7 +538,9 @@ class TestModule(TestCase):
                 if isinstance(cpu_outputs, torch.Tensor):
                     check_backward(cpu_outputs, gpu_outputs)
                 else:
-                    for cpu_output, gpu_output in zip(cpu_outputs, gpu_outputs):
+                    flatten_cpu_outputs, _ = torch.utils._pytree.tree_flatten(cpu_outputs)
+                    flatten_gpu_outputs, _ = torch.utils._pytree.tree_flatten(gpu_outputs)
+                    for cpu_output, gpu_output in zip(flatten_cpu_outputs, flatten_gpu_outputs):
                         check_backward(cpu_output, gpu_output)
 
 

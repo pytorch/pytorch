@@ -1272,16 +1272,5 @@ module_db: List[ModuleInfo] = [
                    ),
                )),
     ModuleInfo(torch.nn.LSTM,
-               module_inputs_func=module_inputs_torch_nn_LSTM,
-               decorators=(
-                   DecorateInfo(
-                       unittest.expectedFailure, "TestModule", "test_grad",
-                   ),
-                   DecorateInfo(
-                       unittest.expectedFailure, "TestModule", "test_gradgrad",
-                   ),
-                   DecorateInfo(
-                       unittest.expectedFailure, "TestModule", "test_cpu_gpu_parity",
-                   ),
-               ))
+               module_inputs_func=module_inputs_torch_nn_LSTM)
 ]
