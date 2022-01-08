@@ -271,6 +271,49 @@ class TestLiteScriptModule(TestCase):
                                     r"use a combination of list\, dictionary\, and single types\.$"):
             script_module._save_to_buffer_for_lite_interpreter()
 
+
+    def test_namedtuple_in_argument(self):
+        # Define input features schema
+        class InputFeatures(NamedTuple):
+            float_features: Tuple[Tensor, Tensor]
+            id_list_features: Dict[int, Tuple[Tensor, Tensor]]
+            id_score_list_features: Dict[int, Tuple[Tensor, Tensor]]
+
+        # Define output features schema
+        class OutputFeatures(NamedTuple):
+            float_features: Tensor
+            id_list_features: Tensor
+
+        class TestModule(torch.nn.Module):
+            def forward(
+                self,
+                input_features: InputFeatures,
+            ) -> OutputFeatures:
+                output_features = OutputFeatures(
+                    input_features.float_features[0],
+                    input_features.id_score_list_features[1][0])
+                return output_features
+
+        # Set input features
+        input_features = InputFeatures(
+            float_features=(Tensor(1), Tensor(2)),
+            id_list_features={0: (Tensor(1), Tensor(2))},
+            id_score_list_features={1: (Tensor(4), Tensor(5))})
+
+        test_module_after = TestModule()
+        # Run inference and get output features
+        output_features = test_module_after.forward(input_features)
+
+        script_module = torch.jit.script(TestModule())
+        script_module_result = script_module(input_features)
+
+        buffer = io.BytesIO(script_module._save_to_buffer_for_lite_interpreter(_save_mobile_debug_info=True))
+        buffer.seek(0)
+        mobile_module = _load_for_lite_interpreter(buffer)
+
+        mobile_module_result = mobile_module(input_features)
+        torch.testing.assert_close(script_module_result, mobile_module_result)
+
     def test_module_export_operator_list(self):
         class Foo(torch.nn.Module):
             def __init__(self):

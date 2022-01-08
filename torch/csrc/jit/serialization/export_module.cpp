@@ -74,6 +74,60 @@ ExportModuleExtraFilesHook& GetExtraFilesHook() {
   return func;
 }
 
+std::string formatNamedTuple(
+    const CompilationUnit& compilation_unit,
+    const std::string& named_tuple_type_str) {
+  auto named_tuple_type =
+      compilation_unit.get_named_tuple(named_tuple_type_str);
+  std::string named_tuple_str = named_tuple_type_str;
+  if (named_tuple_type != nullptr) {
+    named_tuple_str.append("[NamedTuple, [");
+    std::vector<IValue> name_type_pairs;
+
+    // Get the field name and field type for the NamedTuple
+    for (auto it = named_tuple_type->schema()->arguments().begin();
+         it != named_tuple_type->schema()->arguments().end();
+         it++) {
+      name_type_pairs.emplace_back(
+          c10::ivalue::Tuple::create({it->name(), it->type()->repr_str()}));
+
+      // When it->type() is Tensor type, in Python, if it's inferred
+      // type,
+      // str() return "Tensor" and repr_str() return "Tensor (inferred)".
+      // If it's not inferred type, str() return "Tensor[]" and
+      // repr_str() return "Tensor". In cpp, repr_str() will always return
+      // "Tensor" regardless inferred type. When exporing custom type in
+      // bytecode, "Tensor" is the preferred way to deserialize Tensor type
+      std::string type_str =
+          it->is_inferred_type() ? it->type()->str() : it->type()->repr_str();
+      named_tuple_str.append("[" + it->name() + ", " + type_str + "]");
+      if (it != named_tuple_type->schema()->arguments().end() - 1) {
+        named_tuple_str.append(",");
+      }
+    }
+    named_tuple_str.append("]]");
+    // Create a named_tuple type with following structure
+    // "qualified_named[
+    //   NamedTuple, [
+    //       [filed_name_1, field_type_1],
+    //       [filed_name_2, field_type_2]
+    //   ]
+    // ]"
+    //  Example NamedTuple type:
+    //
+    //
+    // "__torch__.base_models.sparse_nn.pytorch_preproc_types.PreprocOutputType[
+    //     NamedTuple, [
+    //         [float_features, Tensor],
+    //         [id_list_features, List[Tensor]],
+    //         [label,  Tensor],
+    //         [weight, Tensor],
+    //         ]
+    //     ]"
+  }
+  return named_tuple_str;
+}
+
 std::pair<IValue, IValue> getFunctionTuple(
     const CompilationUnit& compilation_unit,
     const mobile::Function& func,
@@ -119,47 +173,8 @@ std::pair<IValue, IValue> getFunctionTuple(
           "Please report a bug to PyTorch.");
       auto named_tuple_type = compilation_unit.get_named_tuple(t->str());
       if (named_tuple_type != nullptr) {
-        std::string named_tuple_str = t->str();
-        named_tuple_str.append("[NamedTuple, [");
-        std::vector<IValue> name_type_pairs;
-
-        // Get the field name and field type for the NamedTuple
-        for (auto it = named_tuple_type->schema()->arguments().begin();
-             it != named_tuple_type->schema()->arguments().end();
-             it++) {
-          name_type_pairs.emplace_back(
-              c10::ivalue::Tuple::create({it->name(), it->type()->repr_str()}));
-
-          // When it->type() is Tensor type, in Python, if it's inferred type,
-          // str() return "Tensor" and repr_str() return "Tensor (inferred)". If
-          // it's not inferred type, str() return "Tensor[]" and repr_str()
-          // return "Tensor". In cpp, repr_str() will always return "Tensor"
-          // regardless inferred type. When exporing custom type in bytecode,
-          // "Tensor" is the preferred way to deserialize Tensor type
-          type_str = it->is_inferred_type() ? it->type()->str()
-                                            : it->type()->repr_str();
-          named_tuple_str.append("[" + it->name() + ", " + type_str + "]");
-          if (it != named_tuple_type->schema()->arguments().end() - 1) {
-            named_tuple_str.append(",");
-          }
-        }
-        named_tuple_str.append("]]");
-        // Create a named_tuple type with following structure
-        // "qualified_named[
-        //   NamedTuple, [
-        //       [filed_name_1, field_type_1],
-        //       [filed_name_2, field_type_2]
-        //   ]
-        // ]"
-        //  Example NamedTuple type:
-        //  "__torch__.base_models.sparse_nn.pytorch_preproc_types.PreprocOutputType[
-        //     NamedTuple, [
-        //         [float_features, Tensor],
-        //         [id_list_features, List[Tensor]],
-        //         [label,  Tensor],
-        //         [weight, Tensor],
-        //         ]
-        //     ]"
+        std::string named_tuple_str =
+            formatNamedTuple(compilation_unit, t->str());
         types.emplace_back(named_tuple_str);
         continue;
       }
@@ -191,7 +206,13 @@ std::pair<IValue, IValue> getFunctionTuple(
   auto type_printer = [&](const c10::Type& t) -> c10::optional<std::string> {
     auto namedType = t.cast<c10::NamedType>();
     if (namedType && namedType->name()) {
-      return type_name_uniquer_.getUniqueName(namedType).qualifiedName();
+      std::string type_str =
+          type_name_uniquer_.getUniqueName(namedType).qualifiedName();
+      auto is_class = compilation_unit.get_class(type_str);
+      if (is_class == nullptr) {
+        type_str = formatNamedTuple(compilation_unit, type_str);
+      }
+      return type_str;
     }
     return c10::nullopt;
   };
@@ -210,8 +231,8 @@ std::pair<IValue, IValue> getFunctionTuple(
         `bytecode.pkl` This has to be consistent with the `code/` directory
         which has annotated py code of the entire module. `type_printer` uses
         `TypeNameUniquer` to get the managled name of the argument. This helps
-        in having the right object reference when a class method is called using
-        the `self` argument.
+        in having the right object reference when a class method is called
+        using the `self` argument.
 
         arg.type()->annotation_str(type_printer) => mangled unique name of the
         module/submodule

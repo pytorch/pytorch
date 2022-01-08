@@ -79,8 +79,7 @@
 //  - FunctionSchema::{overload_name_, is_vararg_, is_varret_}
 
 namespace c10 {
-// std::string serializeType(const Type &t);
-TypePtr parseType(const std::string& pythonStr);
+std::vector<TypePtr> parseType(std::vector<std::string>& pythonStr);
 } // namespace c10
 
 namespace torch {
@@ -103,14 +102,17 @@ TypePtr resolveTypeNameMobile(
   // resolution logic.
   static const c10::QualifiedName torchPrefix = "__torch__";
   static const c10::QualifiedName jitPrefix = "torch.jit";
-  if (torchPrefix.isPrefixOf(qn) || jitPrefix.isPrefixOf(qn)) {
+  if ((torchPrefix.isPrefixOf(qn) || jitPrefix.isPrefixOf(qn)) &&
+      qn.qualifiedName().back() != ']') {
     if (compilation_unit->get_class(qn) == nullptr) {
       auto typeptr = ClassType::create(qn, compilation_unit, true);
       compilation_unit->register_type(typeptr);
     }
     return compilation_unit->get_class(qn);
   } else {
-    return c10::parseType(qn.qualifiedName());
+    std::vector<std::string> types_string_list({qn.qualifiedName()});
+    std::vector<TypePtr> ret = c10::parseType(types_string_list);
+    return ret[0];
   }
 }
 
@@ -127,6 +129,7 @@ c10::intrusive_ptr<c10::ivalue::Object> objLoaderMobile(
     mobile::CompilationUnit& mobile_compilation_unit) {
   auto cls = type.type_->expect<at::ClassType>();
   auto qn = cls->name();
+  std::cout << "objLoaderMobile qn: " << qn->qualifiedName() << std::endl;
   c10::QualifiedName method_name(qn.value(), "__setstate__");
   auto setstate = mobile_compilation_unit.find_function(method_name);
   auto find_custom_class_with_setstate = [&qn]() -> c10::ClassTypePtr {
