@@ -113,5 +113,6 @@ function install_torch_ucc() {
     pushd /
     python -c "import inspect; import torch; import torch_ucc; print(inspect.getfile(torch_ucc))"
     popd
+    rm -rf torch_ucc
   fi
 }
