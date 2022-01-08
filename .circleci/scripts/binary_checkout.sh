@@ -61,7 +61,7 @@ git --no-pager log --max-count 1
 popd
 
 # Clone the Builder master repo
-retry git clone -q https://github.com/jambayk/builder.git -b mutex-cpuonly "$BUILDER_ROOT"
+retry git clone -q https://github.com/jambayk/builder.git -b jambayk/mutex-cpuonly "$BUILDER_ROOT"
 pushd "$BUILDER_ROOT"
 echo "Using builder from "
 git --no-pager log --max-count 1
