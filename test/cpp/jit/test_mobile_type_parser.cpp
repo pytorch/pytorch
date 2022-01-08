@@ -2,7 +2,11 @@
 #include <test/cpp/jit/test_utils.h>
 
 #include <ATen/core/jit_type.h>
-#include <torch/csrc/jit/mobile/type_parser.h>
+
+namespace c10 {
+TypePtr parseType(const std::string& pythonStr);
+std::vector<TypePtr> parseType(std::vector<std::string>& pythonStr);
+} // namespace c10
 
 namespace torch {
 namespace jit {

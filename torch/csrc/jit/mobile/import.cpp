@@ -12,7 +12,6 @@
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/observer.h>
-#include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/mobile/upgrader_mobile.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
@@ -78,6 +77,11 @@
 // Note that the following function-schema fields are not supported:
 //  - Argument::{known_length_,kwarg_only_}
 //  - FunctionSchema::{overload_name_, is_vararg_, is_varret_}
+
+namespace c10 {
+// std::string serializeType(const Type &t);
+TypePtr parseType(const std::string& pythonStr);
+} // namespace c10
 
 namespace torch {
 namespace jit {
@@ -498,8 +502,7 @@ c10::IValue BytecodeDeserializer::readArchive(
       type_resolver,
       obj_loader,
       device_,
-      *reader_.get(),
-      nullptr);
+      *reader_.get());
   return ivalues;
 }
 
