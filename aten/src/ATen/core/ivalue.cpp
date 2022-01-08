@@ -1,6 +1,8 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/Dict.h>
 #include <ATen/core/Formatting.h>
+#include <ATen/core/class_type.h>
+#include <ATen/core/enum_type.h>
 #include <ATen/core/function.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
@@ -24,11 +26,11 @@ namespace ivalue {
 
 // This is in ivalue.cpp because we need to access Type::annotation_str, which
 // is declared in jit_type.h
-void checkCustomClassType(const Type* expected_type, const Type* actual_type) {
+void checkCustomClassType(const ClassType* expected_type, const Type* actual_type) {
   // NB: doing pointer comparison here
   // If in the future there ever arises a need to call operator== on custom class
   // Type's, this needs to be changed!
-  TORCH_CHECK(actual_type == expected_type,
+  TORCH_CHECK(actual_type == static_cast<const Type*>(expected_type),
               "Tried to convert an IValue of type ",
               actual_type ? actual_type->repr_str() : std::string("*NULL*"),
               " to custom class type ",
@@ -786,6 +788,13 @@ std::shared_ptr<ClassType> ivalue::Object::type() const {
   return type_.type_->expect<ClassType>();
 }
 
+c10::intrusive_ptr<ivalue::Object> ivalue::Object::create(
+    ClassTypePtr classType, size_t numSlots) {
+  return ivalue::Object::create(
+      StrongTypePtr(nullptr, std::move(classType)), numSlots);
+}
+
+
 IValue IValue::deepcopy() const {
   IValue::HashAliasedIValueMap memo;
   return deepcopy(memo);
@@ -966,19 +975,6 @@ WeakTypePtr WeakOrStrongTypePtr::asWeakTypePtr() const {
         cu_.getStrongRefOrThrow();
     return WeakTypePtr(weak_cu, type_);
   }
-}
-
-
-ska::flat_hash_map<std::type_index, c10::ClassTypePtr>& getCustomClassTypeMap() {
-    static ska::flat_hash_map<std::type_index, c10::ClassTypePtr> tmap;
-    return tmap;
-}
-
-std::unordered_map<std::string, std::function<PyObject*(void*)>>&
-getClassConverter() {
-  static std::unordered_map<std::string, std::function<PyObject*(void*)>>
-      classConverter;
-  return classConverter;
 }
 
 // Needs to be in this .cpp file to access the full definition of PyObjectHolder

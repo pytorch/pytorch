@@ -1,13 +1,11 @@
 #pragma once
 
+#include <ATen/core/custom_class.h>
 #include <ATen/core/jit_type_base.h>
-#include <ATen/core/dynamic_type.h>
 #include <ATen/core/TensorBody.h>
 #include <ATen/core/functional.h>
 #include <ATen/core/symbol.h>
 #include <ATen/core/qualified_name.h>
-#include <ATen/core/ivalue.h>
-#include <ATen/core/class_type.h>
 #include <c10/util/TypeList.h>
 #include <c10/util/Optional.h>
 
@@ -17,8 +15,16 @@
 #include <sstream>
 #include <type_traits>
 
+namespace torch {
+namespace jit {
+struct Function;
+} // namespace jit
+} // namespace torch
+
 namespace c10 {
 
+template<class Key, class Value>
+class Dict;
 struct IValue;
 struct FunctionSchema;
 struct NamedType;
@@ -1083,90 +1089,6 @@ struct TORCH_API TupleType : public NamedType {
   std::shared_ptr<FunctionSchema> schema_;
 };
 
-struct EnumType;
-using EnumTypePtr = std::shared_ptr<EnumType>;
-using EnumNameValue = std::pair<std::string, IValue>;
-struct TORCH_API EnumType : public NamedType {
-  friend struct Type;
-  static const TypeKind Kind = TypeKind::EnumType;
-
-  static EnumTypePtr create(
-      const c10::QualifiedName& qualified_class_name,
-      TypePtr value, std::vector<EnumNameValue> enum_names_values, std::weak_ptr<::torch::jit::CompilationUnit> cu) {
-    switch (value->kind()) {
-      case TypeKind::IntType:
-      case TypeKind::FloatType:
-      case TypeKind::StringType:
-        return EnumTypePtr(new EnumType(qualified_class_name, std::move(value), std::move(enum_names_values), std::move(cu)));
-      default:
-        AT_ERROR(
-            "Cannot create Enum with value type '",
-            value->str(),
-            "', only int, float and string are supported");
-    }
-  }
-
-  std::string str() const override {
-    return "Enum<" + annotation_str() + ">";
-  }
-
-  std::string repr_str() const override {
-    return str();
-  }
-
-  const TypePtr& getValueType() const {
-    return value_type_;
-  }
-
-  bool equals(const Type& rhs) const override {
-    if (auto* enum_rhs = rhs.castRaw<EnumType>()) {
-      return name().value() == enum_rhs->name().value() &&
-          *getValueType() == *(enum_rhs->getValueType()) &&
-          this->compilation_unit() == enum_rhs->compilation_unit();
-    }
-    return false;
-  }
-
-  bool isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const override;
-
-  std::shared_ptr<const ::torch::jit::CompilationUnit> compilation_unit() const {
-    auto cu = cu_.lock();
-    return cu;
-  }
-
-  const QualifiedName qualifiedClassName() const {
-    return name().value();
-  }
-
-  at::ArrayRef<TypePtr> containedTypes() const override {
-    return value_type_;
-  }
-
-  const at::ArrayRef<EnumNameValue> enumNamesValues() const {
-    return enum_names_values_;
-  }
-
- private:
-  EnumType(
-      c10::QualifiedName qualified_class_name,
-      TypePtr value_type,
-      std::vector<EnumNameValue> enum_names_values,
-      std::weak_ptr<torch::jit::CompilationUnit> cu)
-      : NamedType(TypeKind::EnumType, std::move(qualified_class_name)),
-        value_type_(std::move(value_type)),
-        enum_names_values_(std::move(enum_names_values)),
-        cu_(cu) {}
-
-  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
-    const auto& n = name().value();
-    return n.qualifiedName();
-  }
-
-  TypePtr value_type_;
-  std::vector<EnumNameValue> enum_names_values_;
-  std::weak_ptr<::torch::jit::CompilationUnit> cu_;
-};
-
 // the common supertype of all Enums, only used in operator registraion.
 // EnumType <: AnyEnumType for all Enums
 struct AnyEnumType;
@@ -1914,7 +1836,6 @@ TORCH_API bool elementTypeCanBeInferredFromMembers(const TypePtr& elem_type);
 
 struct InterfaceType;
 using InterfaceTypePtr = std::shared_ptr<InterfaceType>;
-using ::torch::jit::CompilationUnit;
 
 // Interfaces are a list of abstract methods that a class might meet.
 // If a class provides those methods, it implicitly meets the interface.
@@ -2072,28 +1993,6 @@ private:
   AnyClassType()
   : Type(TypeKind::AnyClassType) {}
 };
-
-inline bool IValue::isDoubleList() const {
-  // note: avoids calling type() to avoid extra referencing counting for the returned type.
-  return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == FloatType::Kind;
-}
-
-inline bool IValue::isComplexDoubleList() const {
-  // note: avoids calling type() to avoid extra referencing counting for the returned type.
-  return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == ComplexType::Kind;
-}
-
-inline bool IValue::isTensorList() const {
-  return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == TensorType::Kind;
-}
-
-inline bool IValue::isIntList() const {
-  return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == IntType::Kind;
-}
-
-inline bool IValue::isBoolList() const {
-  return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == BoolType::Kind;
-}
 
 template<>
 inline typename detail::CastReturnType<NamedType>::type Type::cast<NamedType>() {
