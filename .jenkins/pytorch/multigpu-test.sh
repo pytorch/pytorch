@@ -16,7 +16,7 @@ if [ -n "${IN_CI}" ]; then
   pip_install unittest-xml-reporting
 fi
 
-TORCH_UCC_LIBRARY_PATH=$(install_torch_ucc)
+TORCH_UCC_LIBRARY_PATH=$(install_torch_ucc | tail -n 1)
 export TORCH_UCC_LIBRARY_PATH
 
 # Disabling tests to see if they solve timeout issues; see https://github.com/pytorch/pytorch/issues/70015
