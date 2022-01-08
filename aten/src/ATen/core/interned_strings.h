@@ -161,7 +161,6 @@ namespace c10 {
   _(prim, HasAttr)                   \
   _(prim, profile)                   \
   _(prim, profile_ivalue)            \
-  _(prim, profile_opt)               \
   _(prim, AddStatValue)              \
   _(prim, TimePoint)                 \
   _(prim, CallFunction)              \

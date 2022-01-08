@@ -10998,6 +10998,7 @@ dedent """
                 jit_o = jit_t(x, w, b)
                 jit_o.backward(grad)
 
+                print("round 1")
                 x.grad.zero_()
                 w.grad.zero_()
                 b.grad.zero_()
@@ -11011,6 +11012,7 @@ dedent """
                 self.assertEqual(w.grad, w_ref.grad)
                 self.assertEqual(b.grad, b_ref.grad)
 
+                print("round 2")
                 x.grad.zero_()
                 w.grad.zero_()
                 x_ref.grad.zero_()

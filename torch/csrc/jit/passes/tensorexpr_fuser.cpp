@@ -203,6 +203,17 @@ void removeProfileNodesAndSpecializeTypes(Block* b) {
       // a use with a different profiled type, we will still be correct.
       // In the future we could consider unifying the types of uses, or adding a
       // type refinement node so uses can have the correct corresponding type.
+      /*
+      if (profiled_type == TensorType::get()) {
+        continue;
+      }
+      auto input_type = it->input()->type()->expect<TensorType>();
+      if (input_type == TensorType::get()) {
+        it->input()->setType(profiled_type);
+      } else {
+        it->input()->setType(input_type->merge(*profiled_type));
+      }
+      */
       if (profiled_type == TensorType::get() && !seen_none) {
         continue;
       }
@@ -222,6 +233,15 @@ void removeProfileNodesAndSpecializeTypes(Block* b) {
         merged_tensor_type = input_tensor_type->merge(*profiled_type);
       }
 
+      // TODO: currently, we ignore whether or not input_tensor is a Tensor or
+      // an Optional[Tensor]. The reason we do this is because the type will
+      // always start as Optional[Tensor] (if the input was an optional tensor)
+      // but we want to be able to specialize on non-optional Tensor if profiling
+      // shows that the input is never None. However, this might be problematic
+      // if on one profiling run we see that it is optional, and on the second
+      // run we don't see any `None` tensors.
+      // We could try adding a `seen_none` attribute somewhere... not really sure
+      // how to do do this though
       if (seen_none) {
         it->input()->setType(OptionalType::create(merged_tensor_type));
       } else {
@@ -229,7 +249,6 @@ void removeProfileNodesAndSpecializeTypes(Block* b) {
       }
 
       it.destroyCurrent();
-
     } else {
       for (Block* ib : it->blocks()) {
         removeProfileNodesAndSpecializeTypes(ib);

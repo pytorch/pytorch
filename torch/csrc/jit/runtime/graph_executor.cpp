@@ -200,6 +200,9 @@ struct UnpackInstructions {
   void pushTensor() {
     insts_.emplace_back(PUSH_TENSOR);
   }
+  void pushNone() {
+    insts_.emplace_back(PUSH_NONE);
+  }
   void pushTensorList(size_t size) {
     insts_.emplace_back(PUSH_LIST);
     sizes_.push_back(size);
@@ -217,6 +220,9 @@ struct UnpackInstructions {
           std::vector<at::Tensor> lst(input_it, input_it + *sizes_it++);
           stack.emplace_back(lst);
         } break;
+        case PUSH_NONE: {
+          stack.emplace_back(IValue());
+        }
       }
     }
   }
@@ -225,6 +231,7 @@ struct UnpackInstructions {
   enum Inst : uint8_t {
     PUSH_TENSOR,
     PUSH_LIST, // consumes one size
+    PUSH_NONE,
   };
   std::vector<Inst> insts_;
   std::vector<size_t> sizes_;
@@ -247,6 +254,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
 
   variable_list apply(variable_list&& inputs) override {
     Stack stack;
+    GRAPH_DEBUG("captures: ", captures_.size(), ". inputs: ", inputs.size());
     stack.reserve(captures_.size() + inputs.size());
 
     input_instructions_.unpack(std::move(inputs), stack);
@@ -332,6 +340,9 @@ struct DifferentiableGraphBackward : public autograd::Node {
     } else if (v.isTensor()) {
       input_instructions_.pushTensor();
       addInputVariable(v.toTensor());
+    } else if (v.isNone()) {
+      input_instructions_.pushNone();
+      addInputVariable(Variable{});
     }
   }
 
@@ -527,6 +538,7 @@ GraphExecutor* getDifferentiableGraphOpExecutor(Operation& op) {
 } // namespace detail
 
 void GraphExecutorImplBase::run(Stack& stack) {
+  GRAPH_DUMP("about to run GraphExecutorImplBase", graph);
   TORCH_CHECK(
       stack.size() >= num_inputs,
       "expected ",
