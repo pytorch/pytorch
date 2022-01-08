@@ -525,6 +525,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nnqd.LSTM,
         nn.BatchNorm2d,
         nn.BatchNorm3d,
+        nn.Dropout,
         nn.ConvTranspose1d,
         nn.ConvTranspose2d,
         nn.ConvTranspose3d,
@@ -561,8 +562,6 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nniqat.ConvReLU3d,
         nniqat.LinearReLU,
         nniqd.LinearReLU,
-        nn.Dropout,
-        nnq.Dropout,
     ])
 
     MODS_IO_TYPE_INT8: Set[NSNodeTargetType] = set([
@@ -573,6 +572,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nnq.Conv3d,
         nnq.BatchNorm2d,
         nnq.BatchNorm3d,
+        nnq.Dropout,
         nnq.ConvTranspose1d,
         nnq.ConvTranspose2d,
         nnq.ConvTranspose3d,
