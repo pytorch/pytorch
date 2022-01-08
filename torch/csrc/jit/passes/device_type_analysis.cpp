@@ -68,42 +68,49 @@ bool returnSecondArgDeviceRule(Node* n) {
   return setReturnsToDevice(n, tensor_type->device());
 }
 
+bool isZerodimCPUTensor(std::shared_ptr<TensorType> tensor_type) {
+  // CPU devices on zerodim tensors are the only device that can be
+  // overwritten by another device. Therefore, to be conservative
+  // assume that it is not a zerodim cpu tensor if something is not known.
+  bool is_zerodim = tensor_type->symbolic_sizes().rank().value_or(-1) == 0;
+  bool is_cpu = tensor_type->device() && tensor_type->device()->is_cpu();
+  return is_zerodim && is_cpu;
+}
+
 bool propWithNoDevice(Node* n) {
-  // Figure out what the common device to propagate is
-  // Types of tensors must match, except CPU zerodim, which any
-  // other type can overwrite
+  // Propagate if we can verify that all input devices match,
+  // except CPU zerodim, which any other type can overwrite
+  int input_num = 0;
 
-  c10::optional<Device> device;
-  bool seen_any_device = false;
-  bool only_seen_cpu_zerodim = false;
+  for (; input_num < n->inputs().size(); input_num++) {
+    if (n->inputs()[input_num]->type()->cast<TensorType>()) {
+      break;
+    }
+  }
+  if (input_num == n->inputs().size()) {
+    // No tensor found
+    return setReturnsToDevice(n, c10::nullopt);
+  }
 
-  for (Value* inp : n->inputs()) {
-    auto tensor_type = inp->type()->cast<TensorType>();
-    if (!tensor_type) {
+  auto tensor_type = n->inputs()[input_num]->type()->expect<TensorType>();
+  bool only_seen_cpu_zerodim = isZerodimCPUTensor(tensor_type);
+  c10::optional<Device> device = tensor_type->device();
+
+  // Now see if all inputs have a consistent device type
+  for (input_num++; input_num < n->inputs().size(); input_num++) {
+    auto tensor_type = n->inputs()[input_num]->type()->cast<TensorType>();
+    if (!tensor_type || isZerodimCPUTensor(tensor_type)) {
       continue;
     }
 
-    // CPU devices on zerodim tensors are the only device that can be
-    // overwritten by another device. Therefore, to be conservative
-    // assume that it is not a zerodim cpu tensor unless we know it is.
-    bool is_zerodim = tensor_type->symbolic_sizes().rank().value_or(-1) == 0;
-    bool is_cpu = tensor_type->device() && tensor_type->device()->is_cpu();
-    bool is_cpu_zerodim = is_zerodim && is_cpu;
-
-    if (seen_any_device) {
-      if (device != tensor_type->device() && !is_cpu_zerodim) {
-        if (only_seen_cpu_zerodim) {
-          device = tensor_type->device();
-          only_seen_cpu_zerodim = false;
-        } else {
-          // Bail on the type not match case
-          return setReturnsToDevice(n, c10::nullopt);
-        }
+    if (device != tensor_type->device()) {
+      if (only_seen_cpu_zerodim) {
+        device = tensor_type->device();
+        only_seen_cpu_zerodim = false;
+      } else {
+        // Bail on the type not match case
+        return setReturnsToDevice(n, c10::nullopt);
       }
-    } else {
-      seen_any_device = true;
-      only_seen_cpu_zerodim = is_cpu_zerodim;
-      device = tensor_type->device();
     }
   }
   return setReturnsToDevice(n, device);
