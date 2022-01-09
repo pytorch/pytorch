@@ -12,7 +12,7 @@ from torch.fx.passes import graph_drawer
 import copy
 import operator
 from functorch._C import CompileCache
-from .decompositions import register_decomposition, decomposition_table
+from .decompositions import register_decomposition
 from typing import List, Dict, Any, Tuple
 
 pytree._register_pytree_node(immutable_collections.immutable_list, lambda x: (
@@ -197,12 +197,13 @@ def partition_with_recompute_fwd_in_bwd(joint_module: fx.GraphModule, _joint_inp
     reduction_ops = [aten.softmax, aten._softmax, aten._softmax_backward_data, aten.sum, aten.mean, aten._grad_sum_to_size, aten.sum_to_size, aten.amax]  # noqa: E501
     misc_ops = [aten.to, aten.type_as, operator.getitem]
 
-    norm_ops = [aten.instance_norm, aten._batch_norm_impl_index, aten.native_batch_norm, aten.batch_norm, aten._batch_norm_impl_index_backward, aten.native_layer_norm, aten.layer_norm, aten.native_layer_norm_backward]  # noqa: E501
+    # not recomputed by default since these are kinda expensive/hard to fuse into
+    # norm_ops = [aten.instance_norm, aten._batch_norm_impl_index, aten.native_batch_norm, aten.batch_norm, aten._batch_norm_impl_index_backward, aten.native_layer_norm, aten.layer_norm, aten.native_layer_norm_backward]  # noqa: E501
 
     # Not used by default since NVFuser can't fuse view ops
-    view_ops = [aten.expand, aten.clone, aten.transpose, aten.t, aten.view, aten._unsafe_view, aten.permute, aten.transpose, aten.t, aten._reshape_alias, aten.squeeze, aten.unsqueeze, aten.reshape, aten.cat, aten.slice, aten.split, aten.select, aten.repeat]  # noqa: E501
+    # view_ops = [aten.expand, aten.clone, aten.transpose, aten.t, aten.view, aten._unsafe_view, aten.permute, aten.transpose, aten.t, aten._reshape_alias, aten.squeeze, aten.unsqueeze, aten.reshape, aten.cat, aten.slice, aten.split, aten.select, aten.repeat]  # noqa: E501
 
-    unrecomputable_ops = [aten.mm, aten.convolution, aten.convolution_backward, aten.bmm, aten.addmm, aten.native_dropout, aten.rand_like, aten.randn_like, aten.upsample_bilinear2d]
+    unrecomputable_ops = [aten.mm, aten.convolution, aten.convolution_backward, aten.bmm, aten.addmm, aten.native_dropout, aten.rand_like, aten.randn_like, aten.upsample_bilinear2d]  # noqa: E501
 
     recomputable_ops = set(
         pointwise_ops
@@ -211,7 +212,9 @@ def partition_with_recompute_fwd_in_bwd(joint_module: fx.GraphModule, _joint_inp
         # + norm_ops
         # + view_ops
     )
-
+    ops = set([i.target for i in joint_module.graph.nodes if i.op == 'call_function'])
+    print(ops - recomputable_ops)
+    AGGRESSIVE_RECOMPUTATION = False
     for node in full_bw_graph.nodes:
         if node in tangent_closure:
             nx_graph.add_edge(node.name+"_in", "sink", capacity=math.inf)
@@ -221,9 +224,12 @@ def partition_with_recompute_fwd_in_bwd(joint_module: fx.GraphModule, _joint_inp
             nx_graph.add_edge("source", node.name+"_in", capacity=math.inf)
             is_input = True
 
-        if node.op == 'call_function' and node.target not in recomputable_ops:
-        # if node.op == 'call_function' and node.target in unrecomputable_ops:
-            nx_graph.add_edge("source", node.name+"_in", capacity=math.inf)
+        if AGGRESSIVE_RECOMPUTATION:
+            if node.op == 'call_function' and node.target in unrecomputable_ops:
+                nx_graph.add_edge("source", node.name+"_in", capacity=math.inf)
+        else:
+            if node.op == 'call_function' and node.target not in recomputable_ops:
+                nx_graph.add_edge("source", node.name+"_in", capacity=math.inf)
 
         if 'tensor_meta' not in node.meta:
             weight = math.inf

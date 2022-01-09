@@ -79,7 +79,7 @@ def hardshrink_backward(grad_out: Tensor, self: Tensor, lambd: float):
 
 @register_decomposition(aten.hardswish_backward)
 def hardswish_backward(grad_output: Tensor, self: Tensor) -> Tensor:
-    return aten.where(self < -3, aten.new_zeros(grad_output, ()), aten.where(self <= 3, grad_output * ((self / 3) + 0.5), grad_output))    
+    return aten.where(self < -3, aten.new_zeros(grad_output, ()), aten.where(self <= 3, grad_output * ((self / 3) + 0.5), grad_output))
 
 
 @register_decomposition(aten.threshold_backward)
@@ -166,14 +166,14 @@ def diagonal_backward(grad_output: Tensor, input_sizes: List[int], offset: int, 
     return aten.diagonal_scatter(grad_input, grad_output, offset, dim1, dim2)
 
 
-@register_decomposition(aten.cudnn_batch_norm)
-def cudnn_batch_norm(input: Tensor, weight: Tensor, bias: Optional[Tensor], running_mean: Optional[Tensor], running_var: Optional[Tensor], training: bool, exponential_average_factor: float, epsilon: float):
-    a, b, c = aten.native_batch_norm(input, weight, bias, running_mean, running_var, training, exponential_average_factor, epsilon)
-    return (a,b, c, aten.new_empty(input, (1,)))
+# @register_decomposition(aten.cudnn_batch_norm)
+# def cudnn_batch_norm(input: Tensor, weight: Tensor, bias: Optional[Tensor], running_mean: Optional[Tensor], running_var: Optional[Tensor], training: bool, exponential_average_factor: float, epsilon: float):
+#     a, b, c = aten.native_batch_norm(input, weight, bias, running_mean, running_var, training, exponential_average_factor, epsilon)
+#     return (a,b, c, aten.new_empty(input, (1,)))
 
-@register_decomposition(aten.cudnn_batch_norm_backward)
-def cudnn_batch_norm_backward(input: Tensor, grad_output: Tensor, weight: Tensor, running_mean: Optional[Tensor], running_var: Optional[Tensor], save_mean: Optional[Tensor], save_var: Optional[Tensor], epsilon: float, reserveSpace: Tensor):
-    return aten.native_batch_norm_backward(grad_output, input, weight, running_mean, running_var, save_mean, save_var, True, epsilon, [True, True, True])
+# @register_decomposition(aten.cudnn_batch_norm_backward)
+# def cudnn_batch_norm_backward(input: Tensor, grad_output: Tensor, weight: Tensor, running_mean: Optional[Tensor], running_var: Optional[Tensor], save_mean: Optional[Tensor], save_var: Optional[Tensor], epsilon: float, reserveSpace: Tensor):
+#     return aten.native_batch_norm_backward(grad_output, input, weight, running_mean, running_var, save_mean, save_var, True, epsilon, [True, True, True])
 
 
 @register_decomposition(aten._softmax_backward_data)
@@ -226,7 +226,17 @@ def native_dropout_decomposition(input, p, generator=None):
 
 @register_decomposition(aten._softmax)
 def _softmax(x: Tensor, dim: int, half_to_float: bool):
-    return aten.exp(x) / aten.sum(aten.exp(x), dim=dim, keepdim=True)
+    x_max = aten.max(x, dim, keepdim=True)[0]
+    unnormalized = aten.exp(x - x_max)
+    return unnormalized / aten.sum(unnormalized, dim, keepdim=True)
+
+
+@register_decomposition(aten._log_softmax)
+def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
+    x_max = aten.max(x, dim, keepdim=True)[0]
+    shifted = x - x_max
+    shifted_logsumexp = aten.log(aten.sum(aten.exp(shifted), dim, keepdim=True))
+    return shifted - shifted_logsumexp
 
 
 @register_decomposition(aten.addmm)
