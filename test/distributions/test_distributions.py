@@ -267,11 +267,11 @@ EXAMPLES = [
         },
         {
             'covariance_matrix': torch.tensor([[5.0, -0.5], [-0.5, 1.5]]),
-            'df': torch.tensor([3.0]),
+            'df': torch.tensor([3.5]),
         },
         {
             'covariance_matrix': torch.tensor([[5.0, -0.5], [-0.5, 1.5]]),
-            'df': 3.0,
+            'df': 3.5,
         },
     ]),
     Example(Kumaraswamy, [
