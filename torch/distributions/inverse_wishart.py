@@ -181,7 +181,7 @@ class InverseWishart(ExponentialFamily):
         p = self._event_shape[-1]  # has singleton shape
         V = self.covariance_matrix  # has shape (batch_shape x event_shape)
         diag_V = V.diagonal(dim1=-2, dim2=-1)
-        eff_df = (nu - p).expand(self._batch_shape + (1, 1))
+        eff_df = (nu - p).view(self._batch_shape + (1, 1))
 
         return (
             (eff_df + 1) * V.pow(2)
