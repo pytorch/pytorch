@@ -1,8 +1,8 @@
 #include <torch/csrc/jit/frontend/schema_type_parser.h>
 
 #include <ATen/core/alias_info.h>
-#include <ATen/core/interned_strings.h>
 #include <ATen/core/jit_type.h>
+#include <ATen/core/symbol.h>
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parse_string_literal.h>
@@ -402,7 +402,7 @@ void SchemaTypeParser::parseList(
     int begin,
     int sep,
     int end,
-    const std::function<void()>& callback) {
+    c10::function_ref<void()> callback) {
   auto r = L.cur().range;
   if (begin != TK_NOTHING)
     L.expect(begin);

@@ -53,7 +53,7 @@ concurrency:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
-          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
+          WORKFLOW_ID: '${{ github.run_id }}'
         shell: bash
         run: |
           python3 -m pip install -r requirements.txt
@@ -78,8 +78,8 @@ concurrency:
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - name: Clean workspace
         run: |
-          rm -rf "${GITHUB_WORKSPACE:?}/*"
-          rm -f ~/.ssh/authorized_keys
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: seemethere/add-github-ssh-key@v1
         with:
@@ -116,6 +116,11 @@ concurrency:
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
           submodules: !{{ submodules }}
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+
 {%- endmacro -%}
 
 {%- macro upload_downloaded_files(name, artifact_name="", use_s3=True, when="always()") -%}
@@ -208,22 +213,6 @@ concurrency:
           PYTHONIOENCODING: "utf-8"
         run: |
           python3 tools/render_junit.py test/
-{%- endmacro -%}
-
-{%- macro ciflow_should_run_job(ciflow_config) %}
-  !{{ ciflow_config.root_job_name }}:
-    runs-on: linux.large
-    timeout-minutes: !{{ timeout_minutes }}
-    env:
-      IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == '!{{ ciflow_config.trigger_action }}') && (github.event.assigneed.login == '!{{ ciflow_config.trigger_actor }}') }}
-      LABEL_CONDITIONS: ${{ !{{ ciflow_config.label_conditions }} }}
-      LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
-    if: !{{ ciflow_config.root_job_condition }}
-    steps:
-      - name: noop
-        run: echo running !{{ ciflow_config.root_job_name }}
-      - name: print labels
-        run: echo "${LABELS}"
 {%- endmacro -%}
 
 {%- macro calculate_docker_image(always_rebuild) -%}
