@@ -15,8 +15,10 @@ _log_2 = math.log(2)
 
 def _mvdigamma(x: torch.Tensor, p: int) -> torch.Tensor:
     assert x.gt((p - 1) / 2).all(), "Wrong domain for multivariate digamma function."
-    return torch.digamma(x.unsqueeze(-1) - torch.arange(p).div(2).expand(x.shape + (-1,))).sum(-1)
-
+    return torch.digamma(
+        x.unsqueeze(-1)
+        - torch.arange(p, dtype=x.dtype, device=x.device).div(2).expand(x.shape + (-1,))
+    ).sum(-1)
 
 class InverseWishart(ExponentialFamily):
     r"""
@@ -181,7 +183,7 @@ class InverseWishart(ExponentialFamily):
         p = self._event_shape[-1]  # has singleton shape
         V = self.covariance_matrix  # has shape (batch_shape x event_shape)
         diag_V = V.diagonal(dim1=-2, dim2=-1)
-        eff_df = (nu - p).view(self._batch_shape + (1, 1))
+        eff_df = (nu - p).expand(self._batch_shape + (1, 1))
 
         return (
             (eff_df + 1) * V.pow(2)
