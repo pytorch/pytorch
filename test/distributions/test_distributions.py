@@ -2447,7 +2447,7 @@ class TestDistributions(TestCase):
                 if scale_tril is not None:
                     scale_tril = scale_tril.tril()
                 return InverseWishart(nu, sigma, prec, scale_tril).log_prob(samples)
-            gradcheck(gradcheck_func, (Inversewishart_samples, df, covariance, precision, scale_tril), raise_exception=True)
+            gradcheck(gradcheck_func, (inverse_wishart_samples, df, covariance, precision, scale_tril), raise_exception=True)
 
         inverse_wishart_log_prob_gradcheck(df, cov)
         inverse_wishart_log_prob_gradcheck(df_multi_batch, cov)
