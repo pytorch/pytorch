@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/frontend/code_template.h>
 
 #include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
 #include <ATen/core/op_registration/op_registration.h>
