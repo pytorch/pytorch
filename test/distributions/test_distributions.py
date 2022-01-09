@@ -2475,7 +2475,7 @@ class TestDistributions(TestCase):
         dist1 = InverseWishart(df, cov)
         dist2 = InverseWishart(df, precision_matrix=prec)
         dist3 = InverseWishart(df, scale_tril=scale_tril)
-        ref_dist = scipy.stats.Inversewishart(df.item(), cov.detach().numpy())
+        ref_dist = scipy.stats.invwishart(df.item(), cov.detach().numpy())
 
         x = dist1.sample((10,))
         expected = ref_dist.logpdf(x.transpose(0, 2).numpy())
