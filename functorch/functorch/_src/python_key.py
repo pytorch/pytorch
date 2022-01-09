@@ -40,6 +40,12 @@ def pythonkey_meta():
 
 
 def get_output_device(devices, op):
+    # The device propagation is a bit sketchy.
+    # aten::index(CPU, CUDA) => CPU tensor
+    # aten::index(CUDA, CPU) => CUDA tensor
+    if op == aten.index:
+        return devices[0]
+    devices = list(set(devices))
     if len(devices) == 1:
         return devices[0]
     else:
@@ -85,8 +91,11 @@ class PythonTensor(torch.Tensor):
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
         if func in CURRENT_DECOMPOSITION_TABLE:
             return CURRENT_DECOMPOSITION_TABLE[func](*args, **kwargs)
-        if func == aten._local_scalar_dense:
-            raise RuntimeError("It appears that you're trying to get value out of a tracing tensor - erroring out! It's likely that this is caused by data-dependent control flow or similar.")
+
+        # Commenting this out for now since it causes some spurious failures (such as error checking)
+        # if func == aten._local_scalar_dense:
+        #     raise RuntimeError("It appears that you're trying to get value out of a tracing tensor - erroring out! "
+        #                        "It's likely that this is caused by data-dependent control flow or similar.")
 
         def unwrap_proxy(e):
             return e.proxy if isinstance(e, PythonTensor) else e
@@ -95,14 +104,9 @@ class PythonTensor(torch.Tensor):
             return e.elem if isinstance(e, PythonTensor) else e
 
         input_devices = [i.device for i in pytree.tree_flatten(args)[0] +
-                                  pytree.tree_flatten(kwargs)[0] if isinstance(i, torch.Tensor)]
-        
-        # The device propagation is a bit sketchy.
-        if func == aten.index:
-            output_device = input_devices[0]
-        else:
-            input_devices = list(set(input_devices))
-            output_device = get_output_device(input_devices, func)
+                         pytree.tree_flatten(kwargs)[0] if isinstance(i, torch.Tensor)]
+
+        output_device = get_output_device(input_devices, func)
 
         proxy_args = pytree.tree_map(unwrap_proxy, args)
         proxy_kwargs = pytree.tree_map(unwrap_proxy, kwargs)
@@ -117,7 +121,6 @@ class PythonTensor(torch.Tensor):
         try:
             real_out = func(*args, **kwargs)
         except NotImplementedError:
-            # Hardcoding in running in cuda if meta-tracing fails for now.
             args = pytree.tree_map(lambda x: torch.ones_like(x, device=output_device)
                                    if isinstance(x, torch.Tensor) else x, args)
             kwargs = pytree.tree_map(lambda x: torch.ones_like(x, device=output_device)

@@ -20,7 +20,6 @@ def ts_compile(fx_g, _):
             new_kwargs[k] = v
         node.kwargs = new_kwargs
 
-
     fx_g.graph.lint()
 
     # print(set([i.target for i in fx_g.graph.nodes if i.op == 'call_function']))
