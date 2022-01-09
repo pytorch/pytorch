@@ -1015,9 +1015,9 @@ class TestDecompositionOpInfo(TestCase):
                 # aggghhhhhhhhhh I hate reductions and floating point
                 (torch.float16, aten.huber_loss_backward): (0.002, 1e-5),
                 (torch.bfloat16, aten.tanh_backward): (0.03, 1e-4),
-                (torch.bfloat16, aten._softmax_backward_data): (0.016, 1e-2),
-                (torch.bfloat16, aten._log_softmax_backward_data): (0.016, 1e-2),
-                # (torch.float16, aten.im2col_backward): (0.016, 1e-2),
+                (torch.bfloat16, aten._log_softmax): (0.05, 1e-2),
+                (torch.bfloat16, aten._softmax_backward_data): (0.016, 5e-3),
+                (torch.bfloat16, aten._log_softmax_backward_data): (0.016, 5e-3),
             }
             if (b.dtype, op) in tol_table:
                 rtol, atol = tol_table[(b.dtype, op)]
@@ -1026,7 +1026,7 @@ class TestDecompositionOpInfo(TestCase):
             if not torch.allclose(a, b, rtol=rtol, atol=atol):
                 atol_diff = (a - b).abs().max()
                 rtol_diff = ((a - b).abs()/b.abs()).nan_to_num(0).max()
-                msg = f"{op.__name__} decomposition failed, max abs: {atol_diff}, max rel: {rtol_diff}"
+                msg = f"{op.__name__} decomposition failed, max rel: {rtol_diff}, max abs: {atol_diff}"
                 raise RuntimeError(msg)
 
         # We check the correctness of each decomposition right after running it.
@@ -1071,6 +1071,7 @@ class TestDecompositionOpInfo(TestCase):
                 if func in decomposition_table and func != torch.ops.aten.detach:
                     upcast_table = set([
                         aten.tanh_backward,
+                        aten._log_softmax,
                     ])
                     decomposition = decomposition_table[func]
                     global run_decompositions
