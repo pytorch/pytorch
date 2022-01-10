@@ -450,7 +450,7 @@ void LazyTensor::ApplyPendingGraph() {
         &tensors,
         {},
         /*wait=*/true,
-        /*sync_ltc_data=*/false);
+        /*sync_ltc_data=false*/true);
   }
 }
 

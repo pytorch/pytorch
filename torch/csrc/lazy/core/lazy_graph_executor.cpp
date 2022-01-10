@@ -706,7 +706,7 @@ std::vector<BackendDataPtr> LazyGraphExecutor::FetchTensorData(
       const BackendDevice& tensor_device = tensor.GetDevice();
       handle = getBackend()->CreateDataPlaceholder(
           tensor_device, std::move(tensor.shape()));
-      tensor.SetDataHandle(handle, config.sync_ltc_data);
+      tensor.SetDataHandle(handle, /*config.sync_ltc_data*/ true);
     }
     tensors_data.emplace_back(std::move(handle));
   }
