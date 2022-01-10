@@ -163,14 +163,11 @@ class TracerBase:
         if inst.opname == 'POP_JUMP_IF_TRUE':
             first = insts[cur + 1]
             last = insts[inst.arg // 2 - 1]
-            starts_with_assert = first.opname == 'LOAD_GLOBAL' and first.argval == 'AssertionError' or first.opname == 'LOAD_ASSERTION_ERROR'
+            starts_with_assert = (first.opname == 'LOAD_GLOBAL' and first.argval == 'AssertionError'
+                                  or first.opname == 'LOAD_ASSERTION_ERROR')
             if starts_with_assert and last.opname == 'RAISE_VARARGS':
                 self.create_proxy('call_function', assert_fn, (obj,), {})
                 return True
-
-        from pprint import pprint
-        print(cur)
-        pprint(insts)
 
         raise TraceError('symbolically traced variables cannot be used as inputs to control flow')
 

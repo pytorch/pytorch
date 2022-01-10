@@ -181,4 +181,41 @@ bool DynamicType::LabeledDynamicType::equals(
   return (label == other.label) && (*ty == *other.ty);
 }
 
+DynamicType::Ptr IValue::TagType<c10::DynamicType>::get(const c10::IValue& v) {
+  switch (v.tag) {
+    case Tag::None:
+      return NoneType::get();
+    case Tag::Tensor:
+      return TensorType::get();
+    case Tag::Double:
+      return FloatType::get();
+    case Tag::ComplexDouble:
+      return ComplexType::get();
+    case Tag::Int:
+      return IntType::get();
+    case Tag::Bool:
+      return BoolType::get();
+    case Tag::String:
+      return StringType::get();
+    case Tag::GenericDict: {
+      auto d = v.toGenericDict();
+      return DictType::create(d.keyType(), d.valueType());
+    }
+    case Tag::GenericList:
+      return ListType::create(v.toList().elementType());
+    case Tag::Device:
+      return DeviceObjType::get();
+    case Tag::Stream:
+      return StreamObjType::get();
+    case Tag::Object:
+      return v.toObjectRef().type();
+    case Tag::Capsule:
+      return CapsuleType::get();
+    case Tag::Tuple:
+      return v.toTupleRef().type<c10::DynamicType>();
+    default:
+      return AnyType::get();
+  }
+}
+
 } // namespace c10
