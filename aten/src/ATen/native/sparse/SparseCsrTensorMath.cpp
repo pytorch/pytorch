@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/NativeFunctions.h>
@@ -11,6 +12,7 @@
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/Resize.h>
+#include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/mkl/SparseBlasImpl.h>
 #include <ATen/native/sparse/SparseBlasImpl.h>
 #include <c10/util/irange.h>
@@ -586,7 +588,7 @@ TORCH_IMPL_FUNC(_convert_indices_from_csr_to_coo_structured_cpu) (
 }
 
 Tensor& linalg_solve_sparse_csr_out(const Tensor& input, const Tensor& other, Tensor& result) {
-  #ifdef CUDART_VERSION
+  if (at::globalContext().hasCUDA()) { 
     TORCH_INTERNAL_ASSERT(input.is_sparse_csr());
 
     other.expect_contiguous();
@@ -605,14 +607,17 @@ Tensor& linalg_solve_sparse_csr_out(const Tensor& input, const Tensor& other, Te
       "other (got: ", result.scalar_type(), ") and out (got: ", result.scalar_type(), ") tensors must have same dtype.");
 
     int singularity = -1;
-    linalg_solve_sparse_csr_kernel(input, other, result, singularity);
+
+    linalg_solve_sparse_csr_stub(kCUDA, input, other, result, singularity);
 
     TORCH_CHECK(singularity == -1, "Probably got a singular matrix as an input. Please check the input again.");
     return result;
-  #else
+  } else {
     TORCH_CHECK(false, "PyTorch was not built with CUDA support. Please rebuild again with USE_CUDA=1.");
-  #endif // CUDART_VERSION
+  }
 }
+
+DEFINE_DISPATCH(linalg_solve_sparse_csr_stub);
 
 } // namespace native
 } // namespace at

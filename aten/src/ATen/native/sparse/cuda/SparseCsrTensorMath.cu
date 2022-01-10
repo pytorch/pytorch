@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/NativeFunctions.h>
@@ -8,6 +9,7 @@
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/Resize.h>
+#include <ATen/native/LinearAlgebra.h>
 #include <ATen/cuda/CUDASparseDescriptors.h>
 #include <ATen/cuda/CUDASolver.h>
 #include <algorithm>
@@ -100,6 +102,35 @@ void convert_indices_from_csr_to_coo_cuda(const Tensor& indices, const Tensor& c
   indices.select(0, 1).copy_(*col_indices.expect_contiguous());
   convert_indices_from_csr_to_coo_cuda_kernel<<<BLOCKS, THREADS, 0, stream>>>(data_out, crow_indices_data_in, nrows);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+template <typename scalar_t, typename value_t>
+void _apply_sparse_csr_lu_solve(
+  const at::sparse_csr::SparseCsrTensor& input,
+  const Tensor& other,
+  Tensor& result,
+  int &_singularity) {
+  auto values = input.values();
+  const scalar_t *values_data_ptr = values.data_ptr<scalar_t>();
+  auto crow_indices = input.crow_indices().to(kInt);
+  const int *crow_indices_data_ptr = crow_indices.data_ptr<int>();
+  auto col_indices = input.col_indices().to(kInt);
+  const int *col_indices_data_ptr = col_indices.data_ptr<int>();
+  auto handle = at::cuda::getCurrentCUDASolverSpHandle(); 
+  auto descrA = at::cuda::sparse::CuSparseMatDescriptor();
+
+  const scalar_t *b = other.data_ptr<scalar_t>();
+  int n = crow_indices.numel() - 1; 
+  int nnzA = input._nnz();
+  value_t tol = 0.0;
+  // default reordering of symrcm
+  // Should reorder be an argument provided for users to choose between the following?
+  // symrcm, symamd, csrmetisnd (1, 2, 3)
+  int reorder = 1;
+  scalar_t *x = result.data_ptr<scalar_t>();
+
+  at::cuda::solver::lsvlu<scalar_t, value_t>(handle, n, nnzA, descrA.descriptor(), values_data_ptr,
+    crow_indices_data_ptr, col_indices_data_ptr, b, tol, reorder, x, &_singularity);
 }
 
 } // namespace
@@ -265,35 +296,6 @@ TORCH_IMPL_FUNC(_convert_indices_from_csr_to_coo_structured_cuda) (
   }
 }
 
-template <typename scalar_t, typename value_t>
-void _apply_sparse_csr_lu_solve(
-  const at::sparse_csr::SparseCsrTensor& input,
-  const Tensor& other,
-  Tensor& result,
-  int &_singularity) {
-  auto values = input.values();
-  const scalar_t *values_data_ptr = values.data_ptr<scalar_t>();
-  auto crow_indices = input.crow_indices().to(kInt);
-  const int *crow_indices_data_ptr = crow_indices.data_ptr<int>();
-  auto col_indices = input.col_indices().to(kInt);
-  const int *col_indices_data_ptr = col_indices.data_ptr<int>();
-  auto handle = at::cuda::getCurrentCUDASolverSpHandle(); 
-  auto descrA = at::cuda::sparse::CuSparseMatDescriptor();
-
-  const scalar_t *b = other.data_ptr<scalar_t>();
-  int n = crow_indices.numel() - 1; 
-  int nnzA = input._nnz();
-  value_t tol = 0.0;
-  // default reordering of symrcm
-  // Should reorder be an argument provided for users to choose between the following?
-  // symrcm, symamd, csrmetisnd (1, 2, 3)
-  int reorder = 1;
-  scalar_t *x = result.data_ptr<scalar_t>();
-
-  at::cuda::solver::lsvlu<scalar_t, value_t>(handle, n, nnzA, descrA.descriptor(), values_data_ptr,
-    crow_indices_data_ptr, col_indices_data_ptr, b, tol, reorder, x, &_singularity);
-}
-
 void linalg_solve_sparse_csr_kernel(
   const Tensor& input,
   const Tensor& other,
@@ -307,6 +309,8 @@ void linalg_solve_sparse_csr_kernel(
     }
   });
 }
+
+REGISTER_CUDA_DISPATCH(linalg_solve_sparse_csr_stub, &linalg_solve_sparse_csr_kernel);
 
 } // namespace native
 } // namespace at

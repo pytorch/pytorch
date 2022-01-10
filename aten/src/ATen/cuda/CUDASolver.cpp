@@ -206,13 +206,13 @@ void lsvlu<c10::complex<float>, float>(
         n,
         nnzA,
         descrA,
-        csrValA,
+        reinterpret_cast<const cuComplex*>(csrValA),
         csrRowPtrA,
         csrColIndA,
-        b,
+        reinterpret_cast<const cuComplex*>(b),
         tol,
         reorder,
-        x,
+        reinterpret_cast<cuComplex*>(x),
         singularity));
   }
 
@@ -224,13 +224,13 @@ void lsvlu<c10::complex<double>, double>(
         n,
         nnzA,
         descrA,
-        csrValA,
+        reinterpret_cast<const cuDoubleComplex*>(csrValA),
         csrRowPtrA,
         csrColIndA,
-        b,
+        reinterpret_cast<const cuDoubleComplex*>(b),
         tol,
         reorder,
-        x,
+        reinterpret_cast<cuDoubleComplex*>(x),
         singularity));
   }
 
