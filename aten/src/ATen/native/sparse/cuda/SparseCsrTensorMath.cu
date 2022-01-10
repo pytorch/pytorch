@@ -126,7 +126,7 @@ void _apply_sparse_csr_lu_solve(
   // default reordering of symrcm
   // Should reorder be an argument provided for users to choose between the following?
   // symrcm, symamd, csrmetisnd (1, 2, 3)
-  int reorder = 1;
+  int reorder = 0;
   scalar_t *x = result.data_ptr<scalar_t>();
 
   at::cuda::solver::lsvlu<scalar_t, value_t>(handle, n, nnzA, descrA.descriptor(), values_data_ptr,
