@@ -508,4 +508,4 @@ C10_API std::ostream& operator<<(std::ostream& out, const Half& value);
 
 } // namespace c10
 
-#include <c10/util/Half-inl.h>
+#include <c10/util/Half-inl.h>  // IWYU pragma: keep

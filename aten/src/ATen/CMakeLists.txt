@@ -206,8 +206,6 @@ if(USE_ROCM)
 endif()
 
 list(APPEND ATen_CPU_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/..)
-# so the build can find the generated header files
-list(APPEND ATen_CPU_INCLUDE ${CMAKE_CURRENT_BINARY_DIR})
 
 if(USE_TBB)
   if(USE_SYSTEM_TBB)

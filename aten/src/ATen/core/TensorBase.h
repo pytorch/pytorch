@@ -7,6 +7,7 @@
 #include <c10/core/ScalarTypeToTypeMeta.h>
 #include <c10/core/Storage.h>
 #include <c10/core/TensorImpl.h>
+#include <c10/core/TensorOptions.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/core/WrapDimMinimal.h>
 #include <c10/util/Exception.h>
@@ -19,7 +20,6 @@
 #include <ATen/core/TensorAccessor.h>
 
 namespace c10 {
-struct TensorOptions;
 class Scalar;
 }
 

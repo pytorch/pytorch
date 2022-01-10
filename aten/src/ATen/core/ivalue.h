@@ -1296,4 +1296,4 @@ TORCH_API std::unordered_map<std::string, std::function<PyObject*(void*)>>&
 getClassConverter();
 } // namespace c10
 
-#include <ATen/core/ivalue_inl.h>
+#include <ATen/core/ivalue_inl.h>  // IWYU pragma: keep
