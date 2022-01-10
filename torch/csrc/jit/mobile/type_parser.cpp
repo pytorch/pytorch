@@ -1,17 +1,19 @@
 #include <torch/csrc/jit/mobile/type_parser.h>
 
+#include <queue>
+
 #include <ATen/core/jit_type.h>
+#include <ATen/core/type_factory.h>
 #include <c10/util/string_view.h>
 #include <torch/csrc/jit/frontend/parser_constants.h>
 #include <torch/csrc/jit/mobile/runtime_compatibility.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/custom_class.h>
-#include <queue>
 
 namespace torch {
 namespace jit {
 const std::unordered_map<std::string, c10::TypePtr>& string_to_type_lut();
-}
+} // namespace jit
 } // namespace torch
 
 using torch::jit::string_to_type_lut;
@@ -112,7 +114,7 @@ TypePtr TypeParser::parseNonSimple(const std::string& token) {
     expectChar(',');
     auto val = parse();
     expectChar(']');
-    return DictType::create(std::move(key), std::move(val));
+    return DynamicTypeFactory::create<DictType>(std::move(key), std::move(val));
   } else if (token == "Tuple") {
     std::vector<TypePtr> types;
     expectChar('[');
