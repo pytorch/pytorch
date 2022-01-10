@@ -68,7 +68,7 @@ class PeriodicModelAverager(ModelAverager):
         >>>  # After 100 steps, run model averaging every 4 steps.
         >>>  # Note that ``warmup_steps`` must be the same as ``start_localSGD_iter`` used in ``PostLocalSGDState``.
         >>>  averager = averagers.PeriodicModelAverager(period=4, warmup_steps=100)
-        >>>  for step in range(0, 20):
+        >>>  for step in range(0, 200):
         >>>     optimizer.zero_grad()
         >>>     loss = loss_fn(output, labels)
         >>>     loss.backward()
