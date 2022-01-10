@@ -614,17 +614,17 @@ Tensor& linalg_solve_sparse_csr_out(const Tensor& input, const Tensor& other, Te
     TORCH_CHECK(singularity == -1, "Probably got a singular matrix as an input. Please check the input again.");
     return result;
   } else {
-    TORCH_CHECK(false, "PyTorch was not built with CUDA support. Please rebuild again with USE_CUDA=1.");
+    AT_ERROR("PyTorch was not built with CUDA support. Please use PyTorch built CUDA support");
   }
 }
 
 void linalg_sparse_csr_kernel_error(
-        const Tensor& input,
-        const Tensor& other,
-        Tensor& result,
-        int& singularity
-        ) {
-    TORCH_CHECK(false, "Not implemented.");
+  const Tensor& input,
+  const Tensor& other,
+  Tensor& result,
+  int& singularity
+) {
+  AT_ERROR("Not implemented for the given backend.");
 }
 
 DEFINE_DISPATCH(linalg_solve_sparse_csr_stub);
