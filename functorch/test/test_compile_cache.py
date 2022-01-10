@@ -4,7 +4,6 @@ import functorch
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 from functorch.compile import aot_function, nop
-from functorch.compile import memory_efficient_pointwise_fusion
 
 
 class TestCompileCache(TestCase):
@@ -27,19 +26,15 @@ class TestCompileCache(TestCase):
         for hasher_type in ["DynamicShapeHasher", "StaticShapeHasher"]:
             functorch.compile.clear_compile_cache()
             start_num_recomps = functorch.compile.num_of_recompilations()
-            mem_optimized_fn = memory_efficient_pointwise_fusion(
-                fn,
-                compiler_name="torchscript_nnc",
-                hasher_type=hasher_type,
-            )
+            aot_autograd_fn = aot_function(fn, nop, nop, hasher_type=hasher_type)
 
             a = torch.randn(10, 20, requires_grad=True)
             b = torch.randn(20, requires_grad=True)
-            self.check(a, b, mem_optimized_fn, fn)
+            self.check(a, b, aot_autograd_fn, fn)
 
             a = torch.randn(10, 20, requires_grad=True)
             b = torch.randn(10, 20, requires_grad=True)
-            self.check(a, b, mem_optimized_fn, fn)
+            self.check(a, b, aot_autograd_fn, fn)
 
             end_num_recomps = functorch.compile.num_of_recompilations()
 
@@ -53,19 +48,17 @@ class TestCompileCache(TestCase):
         for hasher_type in ["DynamicShapeHasher", "StaticShapeHasher"]:
             functorch.compile.clear_compile_cache()
             start_num_recomps = functorch.compile.num_of_recompilations()
-            mem_optimized_fn = memory_efficient_pointwise_fusion(
-                fn, compiler_name="torchscript_nnc", hasher_type=hasher_type
-            )
+            aot_autograd_fn = aot_function(fn, nop, nop, hasher_type=hasher_type)
 
             for s in range(10, 20):
                 a = torch.randn(s, requires_grad=True)
                 b = torch.randn(s, requires_grad=True)
-                self.check(a, b, mem_optimized_fn, fn)
+                self.check(a, b, aot_autograd_fn, fn)
 
             for s in range(10, 20):
                 a = torch.randn(s, requires_grad=True)
                 b = torch.randn(s, requires_grad=True)
-                self.check(a, b, mem_optimized_fn, fn)
+                self.check(a, b, aot_autograd_fn, fn)
 
             end_num_recomps = functorch.compile.num_of_recompilations()
 
@@ -78,7 +71,7 @@ class TestCompileCache(TestCase):
             for s in range(10, 20):
                 a = torch.randn(s, s, requires_grad=True)
                 b = torch.randn(s, s, requires_grad=True)
-                self.check(a, b, mem_optimized_fn, fn)
+                self.check(a, b, aot_autograd_fn, fn)
 
             end_num_recomps = functorch.compile.num_of_recompilations()
 
@@ -114,21 +107,17 @@ class TestCompileCache(TestCase):
 
         for hasher_type in ["DynamicShapeHasher", "StaticShapeHasher"]:
             functorch.compile.clear_compile_cache()
-            mem_optimized_f = memory_efficient_pointwise_fusion(
-                f, compiler_name="torchscript_nnc", hasher_type=hasher_type
-            )
-            mem_optimized_g = memory_efficient_pointwise_fusion(
-                g, compiler_name="torchscript_nnc", hasher_type=hasher_type
-            )
+            aot_autograd_f = aot_function(f, nop, nop, hasher_type=hasher_type)
+            aot_autograd_g = aot_function(g, nop, nop, hasher_type=hasher_type)
 
             start_num_recomps = functorch.compile.num_of_recompilations()
             a = torch.randn(10, requires_grad=True)
             b = torch.randn(10, requires_grad=True)
-            self.check(a, b, mem_optimized_f, f)
+            self.check(a, b, aot_autograd_f, f)
 
             a = torch.randn(10, requires_grad=True)
             b = torch.randn(10, requires_grad=True)
-            self.check(a, b, mem_optimized_g, g)
+            self.check(a, b, aot_autograd_g, g)
 
             end_num_recomps = functorch.compile.num_of_recompilations()
             total_recomps = end_num_recomps - start_num_recomps
@@ -137,7 +126,7 @@ class TestCompileCache(TestCase):
             # Force recompilation for function f and check num of recompilations again
             a = torch.randn(10, 20, requires_grad=True)
             b = torch.randn(10, 20, requires_grad=True)
-            self.check(a, b, mem_optimized_f, f)
+            self.check(a, b, aot_autograd_f, f)
 
             end_num_recomps = functorch.compile.num_of_recompilations()
             total_recomps = end_num_recomps - start_num_recomps
@@ -150,12 +139,12 @@ class TestCompileCache(TestCase):
                 res = res * arg
             return res
 
-        def check(args, mem_optimized_fn, fn):
+        def check(args, aot_autograd_fn, fn):
             args_clone = [arg.clone().detach().requires_grad_(True) for arg in args]
             ref = fn(*args)
             ref.sum().backward()
 
-            res = mem_optimized_fn(*args_clone)
+            res = aot_autograd_fn(*args_clone)
             res.sum().backward()
             assert torch.allclose(res, ref)
             for (arg, arg_clone) in zip(args, args_clone):
