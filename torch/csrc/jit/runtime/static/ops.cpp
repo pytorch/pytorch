@@ -35,6 +35,7 @@
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
+#include <iterator>
 #include <mutex>
 #include <unordered_map>
 
@@ -681,6 +682,68 @@ namespace {
 
 class VarStackNodeWrapper {
  public:
+  class VarStackNodeWrapperIter {
+   public:
+    using iterator_category = std::forward_iterator_tag;
+    using value_type = at::Tensor;
+    using difference_type = size_t;
+    using pointer = const at::Tensor*;
+    using reference = const at::Tensor&;
+
+    VarStackNodeWrapperIter() = default;
+
+    VarStackNodeWrapperIter(
+        const VarStackNodeWrapper* container,
+        size_t start_idx)
+        : container_(container), idx_(start_idx) {}
+
+    VarStackNodeWrapperIter& operator++() {
+      DCHECK_NE(idx_, container_->size());
+      ++idx_;
+      return *this;
+    }
+
+    VarStackNodeWrapperIter operator++(int) {
+      VarStackNodeWrapperIter old = *this;
+      ++(*this);
+      return old;
+    }
+
+    reference operator*() const {
+      TORCH_CHECK(container_ != nullptr);
+      return (*container_)[idx_];
+    }
+
+    pointer operator->() const {
+      TORCH_CHECK(container_ != nullptr);
+      return &(*container_)[idx_];
+    }
+
+    friend bool operator==(
+        VarStackNodeWrapperIter lhs,
+        VarStackNodeWrapperIter rhs) {
+      DCHECK_EQ(lhs.container_, rhs.container_);
+      return lhs.idx_ == rhs.idx_;
+    }
+
+    friend bool operator!=(
+        VarStackNodeWrapperIter lhs,
+        VarStackNodeWrapperIter rhs) {
+      return !(lhs == rhs);
+    }
+
+   private:
+    const VarStackNodeWrapper* container_ = nullptr;
+    size_t idx_ = 0;
+  };
+
+  // NB: to mimic the behavior of at::ArrayRef, both iterators are
+  // the const version.
+  using iterator = VarStackNodeWrapperIter;
+  using const_iterator = VarStackNodeWrapperIter;
+  using size_type = size_t;
+  using value_type = at::Tensor;
+
   explicit VarStackNodeWrapper(const ProcessedNode& pnode) : pnode_(pnode) {}
 
   const at::Tensor& operator[](size_t idx) const {
@@ -690,6 +753,43 @@ class VarStackNodeWrapper {
 
   size_t size() const {
     return pnode_.num_inputs() - 1;
+  }
+
+  iterator begin() {
+    return VarStackNodeWrapperIter(this, 0);
+  }
+  iterator end() {
+    return VarStackNodeWrapperIter(this, size());
+  }
+
+  const_iterator begin() const {
+    return VarStackNodeWrapperIter(this, 0);
+  }
+  const_iterator end() const {
+    return VarStackNodeWrapperIter(this, size());
+  }
+
+  const_iterator cbegin() const {
+    return VarStackNodeWrapperIter(this, 0);
+  }
+  const_iterator cend() const {
+    return VarStackNodeWrapperIter(this, size());
+  }
+
+  bool empty() const {
+    return size() == 0;
+  }
+
+  const at::Tensor& front() const {
+    TORCH_CHECK(
+        !empty(), "Attempted to access front() of empty VarStackNodeWrapper");
+    return pnode_.Input(0).toTensor();
+  }
+
+  const at::Tensor& back() const {
+    TORCH_CHECK(
+        !empty(), "Attempted to access back() of empty VarStackNodeWrapper");
+    return pnode_.Input(size() - 1).toTensor();
   }
 
  private:
