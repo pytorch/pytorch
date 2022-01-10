@@ -73,7 +73,7 @@ def _calculate_dynamic_qparams(X, dtype, reduce_range=False, qscheme=torch.per_t
     else:
         if is_symmetric:
             max_val = max(max_val, -min_val)
-            min_val = -max_val;
+            min_val = -max_val
             scale = (max_val - min_val) / (qmax - qmin)
             scale = max(scale, np.finfo(np.float32).eps)
             zero_point = 0
