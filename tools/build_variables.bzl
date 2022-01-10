@@ -210,6 +210,7 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/mobile/nnc/registry.cpp",
     "torch/csrc/jit/operator_upgraders/utils.cpp",
     "torch/csrc/jit/operator_upgraders/upgraders.cpp",
+    "torch/csrc/jit/operator_upgraders/upgraders_entry.cpp",
     "torch/csrc/jit/passes/annotate_warns.cpp",
     "torch/csrc/jit/passes/bailout_graph.cpp",
     "torch/csrc/jit/passes/batch_mm.cpp",
@@ -500,7 +501,6 @@ libtorch_distributed_sources = libtorch_distributed_base_sources + libtorch_dist
 jit_sources_full = [
     "torch/csrc/jit/codegen/cuda/interface.cpp",
     "torch/csrc/jit/passes/lower_graph.cpp",
-    "torch/csrc/jit/operator_upgraders/upgraders_entry.cpp",
     "torch/csrc/jit/runtime/register_c10_ops.cpp",
     "torch/csrc/jit/runtime/register_prim_ops.cpp",
     "torch/csrc/jit/runtime/register_prim_ops_fulljit.cpp",
@@ -563,7 +563,7 @@ libtorch_lite_cmake_sources = sorted(
     torch_mobile_core,
 )
 
-libtorch_cmake_sources = libtorch_core_sources + libtorch_core_jit_sources + libtorch_lite_cmake_sources
+libtorch_cmake_sources = libtorch_core_sources + libtorch_core_jit_sources
 
 libtorch_extra_sources = libtorch_core_jit_sources + [
     "torch/csrc/autograd/TraceTypeManual.cpp",
@@ -590,8 +590,11 @@ libtorch_extra_sources = libtorch_core_jit_sources + [
     "torch/csrc/jit/mobile/train/random.cpp",
     "torch/csrc/jit/mobile/train/sequential.cpp",
     "torch/csrc/jit/mobile/upgrader_mobile.cpp",
+    "torch/csrc/jit/operator_upgraders/upgraders_entry.cpp",
     "torch/csrc/jit/serialization/onnx.cpp",
     "torch/csrc/jit/serialization/export.cpp",
+    "torch/csrc/jit/serialization/export_bytecode.cpp"
+    "torch/csrc/jit/serialization/export_module.cpp"
     "torch/csrc/jit/serialization/import_legacy.cpp",
     "torch/csrc/utils/byte_order.cpp",
     "torch/csrc/utils/out_types.cpp",
