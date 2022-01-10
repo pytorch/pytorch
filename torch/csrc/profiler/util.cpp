@@ -2,6 +2,7 @@
 
 #include <c10/util/ArrayRef.h>
 #include <fmt/format.h>
+#include <c10/util/irange.h>
 
 #ifdef USE_KINETO
 #include <libkineto.h>
@@ -50,7 +51,7 @@ std::string getNvtxStr(
       for (const auto idx : c10::irange(shapes.size())) {
         if (shapes[idx].size() > 0) {
           s << "[";
-          for (size_t dim = 0; dim < shapes[idx].size(); ++dim) {
+          for (const auto dim : c10::irange(shapes[idx].size())) {
             s << shapes[idx][dim];
             if (dim < shapes[idx].size() - 1) {
               s << ", ";
@@ -152,7 +153,7 @@ std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes) {
       oss << ", ";
     }
     oss << "[";
-    for (size_t s_idx = 0; s_idx < shapes[t_idx].size(); ++s_idx) {
+    for (const auto s_idx : c10::irange(shapes[t_idx].size())) {
       if (s_idx > 0) {
         oss << ", ";
       }
