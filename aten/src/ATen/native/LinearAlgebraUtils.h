@@ -102,6 +102,21 @@ static inline int64_t matrixStride(const Tensor& batched_matrices) {
   return batched_matrices.size(-1) * batched_matrices.size(-2);
 }
 
+// This function is similar to at::native::toListOfOptionalTensors,
+// but converts inputs to at::indexing::TensorIndex and outputs a std::vector.
+// The output could then be supplied with at::indexing::Ellipsis or
+// at::indexing::Slice, for example, to perform advanced indexing
+// with the `index` method.
+static inline std::vector<at::indexing::TensorIndex>
+toVectorOfTensorIndices(ArrayRef<Tensor> v, c10::optional<int64_t> len = c10::nullopt) {
+  std::vector<at::indexing::TensorIndex> result;
+  result.reserve(len.has_value() ? len.value() : v.size());
+  for (const Tensor& t : v) {
+    result.push_back(t);
+  }
+  return result;
+}
+
 // This function is designed to be used with linear algebra methods that minimize
 // L(ax - b) = 0, where L is generally the identity map (`solve`, for example)
 // or the L2 norm (`lstsq`).

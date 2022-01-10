@@ -2408,21 +2408,6 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
   return u_term + sigma_term + v_term;
 }
 
-// This function is similar to at::native::toListOfOptionalTensors,
-// but converts inputs to a std::vector of at::indexing::TensorIndex.
-// The output could then be supplied with at::indexing::Ellipsis or
-// at::indexing::Slice, for example, to perform advanced indexing
-// with the `index` method.
-std::vector<at::indexing::TensorIndex>
-toVectorOfTensorIndices(ArrayRef<Tensor> v, c10::optional<int64_t> len = c10::nullopt) {
-  std::vector<at::indexing::TensorIndex> result;
-  result.reserve(len.has_value() ? len.value() : v.size());
-  for (const Tensor& t : v) {
-    result.push_back(t);
-  }
-  return result;
-}
-
 Tensor linalg_svd_rank_revealing_backward(
     const std::vector<torch::autograd::Variable>& grads,
     const Tensor& input,
@@ -2468,7 +2453,7 @@ Tensor linalg_svd_rank_revealing_backward(
     // Populate indices of rank r matrices only if
     // batch dimension is non-empty.
     if (n_batch_dims) {
-      rank_r_indices = toVectorOfTensorIndices(rank_r_mask, n_batch_dims + 2);
+      rank_r_indices = at::native::toVectorOfTensorIndices(rank_r_mask, n_batch_dims + 2);
     }
     // It is equivalent to indexing at [rank == r, :]
     rank_r_indices.push_back(Slice());
