@@ -9,7 +9,6 @@ class Scalar;
 
 namespace at {
 struct TensorIterator;
-struct Tensor;
 }
 
 namespace at { namespace native {
@@ -25,8 +24,5 @@ using unpack_pivots_fn = void(*)(
   int64_t dim_size
 );
 DECLARE_DISPATCH(unpack_pivots_fn, unpack_pivots_stub);
-
-using linalg_solve_fn = void (*)(const at::Tensor&, const at::Tensor&, at::Tensor&, int&);
-DECLARE_DISPATCH(linalg_solve_fn, linalg_solve_sparse_csr_stub);
 
 }} // namespace at::native

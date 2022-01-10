@@ -10,6 +10,7 @@
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/LinearAlgebra.h>
+#include <ATen/native/sparse/SparseCsrTensorMath.h>
 #include <ATen/cuda/CUDASparseDescriptors.h>
 #include <ATen/cuda/CUDASolver.h>
 #include <algorithm>
@@ -308,6 +309,14 @@ void linalg_solve_sparse_csr_kernel(
       _apply_sparse_csr_lu_solve<scalar_t, double>(input, other, result, singularity);
     }
   });
+}
+
+void linalg_solve_sparse_csr_kernel_error(
+  const Tensor& input,
+  const Tensor& other,
+  Tensor& result,
+  int& singularity) {
+  TORCH_CHECK(false, "Not implemented for the given device.");
 }
 
 REGISTER_CUDA_DISPATCH(linalg_solve_sparse_csr_stub, &linalg_solve_sparse_csr_kernel);

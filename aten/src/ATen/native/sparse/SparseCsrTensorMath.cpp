@@ -13,6 +13,7 @@
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/LinearAlgebra.h>
+#include <ATen/native/sparse/SparseCsrTensorMath.h>
 #include <ATen/native/mkl/SparseBlasImpl.h>
 #include <ATen/native/sparse/SparseBlasImpl.h>
 #include <c10/util/irange.h>
@@ -617,7 +618,20 @@ Tensor& linalg_solve_sparse_csr_out(const Tensor& input, const Tensor& other, Te
   }
 }
 
+void linalg_sparse_csr_kernel_error(
+        const Tensor& input,
+        const Tensor& other,
+        Tensor& result,
+        int& singularity
+        ) {
+    TORCH_CHECK(false, "Not implemented.");
+}
+
 DEFINE_DISPATCH(linalg_solve_sparse_csr_stub);
+
+REGISTER_ARCH_DISPATCH(linalg_solve_sparse_csr_stub, DEFAULT, &linalg_sparse_csr_kernel_error);
+REGISTER_AVX512_DISPATCH(linalg_solve_sparse_csr_stub, &linalg_sparse_csr_kernel_error);
+REGISTER_AVX2_DISPATCH(linalg_solve_sparse_csr_stub, &linalg_sparse_csr_kernel_error);
 
 } // namespace native
 } // namespace at
