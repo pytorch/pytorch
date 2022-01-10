@@ -19,7 +19,7 @@ class TestFunctionalAutogradBenchmark(TestCase):
         # is not allowed to open it again. As this is a simple smoke test, we choose for now
         # not to run this on windows and keep the code here simple.
         with tempfile.NamedTemporaryFile() as out_file:
-            cmd = ['python' if not does_python_refer_to_2 else 'python3', \
+            cmd = ['python' if not does_python_refer_to_2 else 'python3',
                    '../benchmarks/functional_autograd_benchmark/functional_autograd_benchmark.py']
             # Only run the warmup
             cmd += ['--num-iters', '0']
