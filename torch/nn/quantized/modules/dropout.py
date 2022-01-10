@@ -3,10 +3,10 @@ import torch.nn.quantized.functional
 
 class Dropout(torch.nn.Dropout):
     r"""This is the quantized equivalent of :class:`~torch.nn.Dropout`.
+        And this is a placeholder to enable models where fp32 tensors
+        had dropout to work with quantized tensors.
 
     Args:
-        scale: quantization scale of the output tensor
-        zero_point: quantization zero point of the output tensor
         p: probability of an element to be zeroed
         inplace: can optionally do the operation in-place. Default: ``False``
     """

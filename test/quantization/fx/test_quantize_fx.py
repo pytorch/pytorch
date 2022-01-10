@@ -5617,7 +5617,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
                 out = model_quantized(input.to(device_after))
                 self.assertEqual(out.device.type, device_after)
 
-    def _test_model_dropout(self):
+    def test_model_dropout(self):
         from torchvision import models
         m = models.mobilenet_v3_small()
         qconfig_dict = {'': torch.quantization.get_default_qat_qconfig('fbgemm')}
