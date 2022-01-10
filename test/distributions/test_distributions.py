@@ -4763,8 +4763,8 @@ class TestAgainstScipy(TestCase):
                 scipy.stats.halfnorm(scale=positive_var2)
             ),
             (
-                InverseWishart(20 + positive_var[0], cov_tensor),  # scipy var for Wishart only supports scalars
-                scipy.stats.invwishart(20 + positive_var[0].item(), cov_tensor),
+                InverseWishart(21 + positive_var[0], cov_tensor),  # scipy var for Wishart only supports scalars
+                scipy.stats.invwishart(21 + positive_var[0].item(), cov_tensor),
             ),
             (
                 Laplace(random_var, positive_var2),
