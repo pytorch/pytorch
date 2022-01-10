@@ -119,6 +119,22 @@ inline Tensor& digamma_out(Tensor& result, const Tensor& self) {
   return torch::special_digamma_out(result, self);
 }
 
+/// Computes complete elliptic integral of the second kind of input, elementwise
+/// See https://pytorch.org/docs/master/special.html#torch.special.ellipe.
+///
+/// Example:
+/// ```
+/// auto t = torch::randn(128, dtype=kDouble);
+/// torch::special::ellipe(t);
+/// ```
+inline Tensor ellipe(const Tensor& self) {
+  return torch::special_ellipe(self);
+}
+
+inline Tensor& ellipe_out(Tensor& result, const Tensor& self) {
+  return torch::special_ellipe_out(result, self);
+}
+
 /// Computes entropy of input, elementwise
 /// See https://pytorch.org/docs/master/special.html#torch.special.entr.
 ///

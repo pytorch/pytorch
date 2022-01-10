@@ -537,6 +537,14 @@ static void erfcx_kernel(TensorIteratorBase& iter){
   });
 }
 
+static void ellpe_kernel(TensorIteratorBase& iter){
+  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "ellpe_cpu", [&]() {
+    cpu_kernel(
+      iter,
+      [](scalar_t a) -> scalar_t { return ellpe(a); });
+  });
+}
+
 // TODO: Disable cont. branch to test more risky code
 
 #define IMPLEMENT_ITERATOR_LAMBDA(op)                                         \
@@ -627,6 +635,7 @@ REGISTER_DISPATCH(special_ndtri_stub, &CPU_CAPABILITY::ndtri_kernel);
 REGISTER_DISPATCH(special_i1_stub, &CPU_CAPABILITY::i1_kernel);
 REGISTER_DISPATCH(special_i1e_stub, &CPU_CAPABILITY::i1e_kernel);
 REGISTER_DISPATCH(special_erfcx_stub, &CPU_CAPABILITY::erfcx_kernel);
+REGISTER_DISPATCH(special_ellpe_stub, &CPU_CAPABILITY::ellpe_kernel);
 
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)

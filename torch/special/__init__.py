@@ -2,12 +2,31 @@ import torch
 from torch._C import _add_docstr, _special  # type: ignore[attr-defined]
 from torch._torch_docs import common_args, multi_dim_common
 
-__all__ = ['entr', 'psi', 'digamma', 'gammaln', 'polygamma', 'erf', 'erfc', 'erfinv',
+__all__ = ['entr', 'psi', 'digamma', 'gammaln', 'polygamma', 'ellipe', 'erf', 'erfc', 'erfinv',
            'erfcx', 'logit', 'logsumexp', 'expit', 'exp2', 'expm1', 'xlog1py', 'xlogy',
            'i0', 'i0e', 'i1', 'i1e', 'ndtr', 'ndtri', 'log1p', 'sinc', 'round', 'log_softmax',
            'zeta', 'multigammaln', 'gammainc', 'gammaincc', 'softmax']
 
 Tensor = torch.Tensor
+
+ellipe = _add_docstr(_special.special_ellipe,
+                   r"""
+ellipe(input, *, out=None) -> Tensor
+Computes complete elliptic integral of the second kind, elementwise.
+""" + """
+
+Args:
+   input (Tensor): the input tensor.
+
+Keyword args:
+    out (Tensor, optional): the output tensor.
+
+Example::
+    >>> a = torch.arange(-0.5, 1, 0.5)
+    >>> a
+    tensor([-0.5000,  0.0000,  0.5000])
+    >>> torch.special.ellipe(a)
+""")
 
 entr = _add_docstr(_special.special_entr,
                    r"""

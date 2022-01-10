@@ -274,6 +274,56 @@ T polevl(const T x, const T A[], const int len) {
   }
 ); // ndtri_string
 
+const auto ellpe_string = jiterator_stringify(
+    template <typename T>
+    T polevl(const T x, const T A[], const int len) {
+      T result = 0;
+      for (int i = 0; i < len; ++i) {
+        result = result * x + A[i];
+      }
+      return result;
+    }
+
+    template <typename T>
+    T ellpe(T x) {
+      static const T P[] = {
+          1.53552577301013293365E-4,
+          2.50888492163602060990E-3,
+          8.68786816565889628429E-3,
+          1.07350949056076193403E-2,
+          7.77395492516787092951E-3,
+          7.58395289413514708519E-3,
+          1.15688436810574127319E-2,
+          2.18317996015557253103E-2,
+          5.68051945617860553470E-2,
+          4.43147180560990850618E-1,
+          1.00000000000000000299E0};
+
+      static const T Q[] = {
+          3.27954898576485872656E-5,
+          1.00962792679356715133E-3,
+          6.50609489976927491433E-3,
+          1.68862163993311317300E-2,
+          2.61769742454493659583E-2,
+          3.34833904888224918614E-2,
+          4.27180926518931511717E-2,
+          5.85936634471101055642E-2,
+          9.37499997197644278445E-2,
+          2.49999999999888314361E-1};
+
+      x = T{1.0} - x;
+      if (x == T{0.0}) {
+        return T{1.0};
+      }
+      if (x < T{0.0}) {
+        return NAN;
+      }
+      if (x > T{1.0}) {
+        return ellpe(T{1.0} - T{1} / x) * sqrt(x);
+      }
+      return (polevl(x, P, 10) - log(x) * (x * polevl(x, Q, 9)));
+    }); // ellpe_string
+
 const auto gcd_string = jiterator_stringify(
   template <typename T>
   T gcd(const T a_in, const T b_in) {
@@ -1605,6 +1655,46 @@ static inline C10_HOST_DEVICE scalar_t calc_i1e(scalar_t _x) {
   auto len = std::get<1>(coeff_pair);
   const scalar_t out = chbevl(scalar_t{32.0} / x - scalar_t{2.0}, B, len) / ::sqrt(x);
   return (_x < scalar_t{0.0}) ? -out : out;
+}
+
+template <typename scalar_t>
+static inline C10_HOST_DEVICE scalar_t ellpe(scalar_t x) {
+  static const scalar_t P[] = {
+      1.53552577301013293365E-4,
+      2.50888492163602060990E-3,
+      8.68786816565889628429E-3,
+      1.07350949056076193403E-2,
+      7.77395492516787092951E-3,
+      7.58395289413514708519E-3,
+      1.15688436810574127319E-2,
+      2.18317996015557253103E-2,
+      5.68051945617860553470E-2,
+      4.43147180560990850618E-1,
+      1.00000000000000000299E0};
+
+  static const scalar_t Q[] = {
+      3.27954898576485872656E-5,
+      1.00962792679356715133E-3,
+      6.50609489976927491433E-3,
+      1.68862163993311317300E-2,
+      2.61769742454493659583E-2,
+      3.34833904888224918614E-2,
+      4.27180926518931511717E-2,
+      5.85936634471101055642E-2,
+      9.37499997197644278445E-2,
+      2.49999999999888314361E-1};
+
+  x = T{1.0} - x;
+  if (x == T{0.0}) {
+    return T{1.0};
+  }
+  if (x < T{0.0}) {
+    return NAN;
+  }
+  if (x > T{1.0}) {
+    return ellpe(T{1.0} - T{1} / x) * sqrt(x);
+  }
+  return (polevl(x, P, 10) - log(x) * (x * polevl(x, Q, 9)));
 }
 
 #endif // USE_ROCM (false/true)
