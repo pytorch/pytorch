@@ -17,7 +17,7 @@ from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_versi
 from numbers import Number
 from typing import Dict, Any
 from distutils.version import LooseVersion
-from torch.testing import get_all_complex_dtypes, get_all_fp_dtypes
+from torch.testing import get_all_fp_dtypes
 from torch.testing._internal.common_cuda import \
     (SM53OrLater, SM80OrLater, CUDA11OrLater)
 from torch.testing._internal.common_device_type import \
