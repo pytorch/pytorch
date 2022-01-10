@@ -2668,5 +2668,41 @@ REGISTER_OPERATOR_FUNCTOR(
       return nullptr;
     });
 
+REGISTER_OPERATOR_FUNCTOR(aten::gt, aten_gt, [](Node* n) -> SROperator {
+  if (!n->matches(torch::schema("aten::gt(Tensor a, Tensor b) -> Tensor"))) {
+    LogAndDumpSchema(n);
+    return nullptr;
+  }
+  return [](ProcessedNode* pnode) {
+    const auto& a = pnode->Input(0).toTensor();
+    const auto& b = pnode->Input(1).toTensor();
+    if (pnode->Output(0).isNone()) {
+      pnode->Output(0) = at::cpu::gt(a, b);
+      return;
+    }
+    auto& out = pnode->Output(0).toTensor();
+    fastResizeToZero(out);
+    at::cpu::gt_out(out, a, b);
+  };
+});
+
+REGISTER_OPERATOR_FUNCTOR(aten::eq, aten_eq, [](Node* n) -> SROperator {
+  if (!n->matches(torch::schema("aten::eq(Tensor a, Tensor b) -> Tensor"))) {
+    LogAndDumpSchema(n);
+    return nullptr;
+  }
+  return [](ProcessedNode* pnode) {
+    const auto& a = pnode->Input(0).toTensor();
+    const auto& b = pnode->Input(1).toTensor();
+    if (pnode->Output(0).isNone()) {
+      pnode->Output(0) = at::cpu::eq(a, b);
+      return;
+    }
+    auto& out = pnode->Output(0).toTensor();
+    fastResizeToZero(out);
+    at::cpu::eq_out(out, a, b);
+  };
+});
+
 } // namespace jit
 } // namespace torch

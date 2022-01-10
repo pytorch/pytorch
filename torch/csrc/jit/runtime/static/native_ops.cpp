@@ -616,5 +616,92 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       };
     });
 
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::mul,
+    aten_mul,
+    [](Node* n) -> SROperator {
+      if (!n->matches(
+              torch::schema("aten::mul.left_t(t[] l, int n) -> (t[])"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+      return [](ProcessedNode* pnode) {
+        const auto& list = pnode->Input(0).toList();
+        const auto n = pnode->Input(1).toInt();
+
+        auto list_type = list.elementType();
+        auto ret = c10::impl::GenericList(list_type);
+        ret.reserve(list.size() * n);
+        for (const auto i : c10::irange(n)) {
+          (void)i;
+          for (const auto& ival : list) {
+            ret.push_back(ival);
+          }
+        }
+        pnode->Output(0) = ret;
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::sub,
+    aten_sub,
+    [](Node* n) -> SROperator {
+      if (!n->matches(torch::schema("aten::sub.int(int a, int b) -> (int)"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+      return [](ProcessedNode* pnode) {
+        const auto a = pnode->Input(0).toInt();
+        const auto b = pnode->Input(1).toInt();
+        pnode->Output(0) = a - b;
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::add,
+    aten_add,
+    [](Node* n) -> SROperator {
+      if (!n->matches(torch::schema("aten::add.t(t[] a, t[] b) -> (t[])"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+      return [](ProcessedNode* pnode) {
+        const auto& a = pnode->Input(0).toList();
+        const auto& b = pnode->Input(1).toList();
+        auto ret = a.copy();
+        ret.append(b);
+        pnode->Output(0) = ret;
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::Int,
+    aten_Int,
+    [](Node* n) -> SROperator {
+      if (!n->matches(torch::schema("aten::Int(Tensor a) -> int"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+      return [](ProcessedNode* pnode) {
+        const auto& input = pnode->Input(0).toTensor();
+        TORCH_CHECK(
+            input.numel() == 1,
+            "Only 1 element tensors can be converted to ints");
+        AT_DISPATCH_ALL_TYPES_AND2(
+            at::ScalarType::Bool,
+            at::ScalarType::Half,
+            input.scalar_type(),
+            "aten_int",
+            [&]() {
+              auto data = *input.data_ptr<scalar_t>();
+              TORCH_CHECK(
+                  data <= std::numeric_limits<int64_t>::max() &&
+                      data >= std::numeric_limits<int64_t>::min(),
+                  "Value would overflow 64 bit signed integer");
+              pnode->Output(0) = static_cast<int64_t>(data);
+            });
+      };
+    });
+
 } // namespace jit
 } // namespace torch
