@@ -712,7 +712,8 @@ linalg_svd_rank_revealing(
   auto S = at::empty({0}, input.options().dtype(real_dtype));
   auto Vh = at::empty({0}, input.options());
   auto rank = at::empty({0}, input.options().dtype(ScalarType::Long));
-  return linalg_svd_rank_revealing_out(input, atol, rtol, full_matrices, U, S, Vh, rank);
+  linalg_svd_rank_revealing_out(input, atol, rtol, full_matrices, U, S, Vh, rank);
+  return std::make_tuple(std::move(U), std::move(S), std::move(Vh), std::move(rank));
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor>
