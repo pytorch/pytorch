@@ -607,7 +607,8 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
   const Tensor& k_proj_weight = {},
   const Tensor& v_proj_weight = {},
   const Tensor& static_k = {},
-  const Tensor& static_v = {}) {
+  const Tensor& static_v = {},
+  bool average_attn_weights = true) {
   namespace F = torch::nn::functional;
 
   const auto query_sizes = query.sizes();
@@ -845,9 +846,12 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
   attn_output = attn_output.transpose(0, 1).contiguous().view({tgt_len, bsz, embed_dim});
   attn_output = F::linear(attn_output, out_proj_weight, out_proj_bias);
   if (need_weights) {
-    // average attention weights over heads
     attn_output_weights = attn_output_weights.view({bsz, num_heads, tgt_len, src_len});
-    return std::make_tuple(attn_output, attn_output_weights.sum(/*dim=*/1) / num_heads);
+    if (average_attn_weights) {
+      // average attention weights over heads
+      attn_output_weights = attn_output_weights.sum(/*dim=*/1) / num_heads;
+    }
+    return std::make_tuple(attn_output, attn_output_weights);
   } else {
     return std::make_tuple(attn_output, Tensor());
   }
@@ -881,7 +885,8 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
     options.k_proj_weight(),
     options.v_proj_weight(),
     options.static_k(),
-    options.static_v()
+    options.static_v(),
+    options.average_attn_weights()
   );
 }
 
