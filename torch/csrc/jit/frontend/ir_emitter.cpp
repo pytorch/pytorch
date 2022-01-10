@@ -1299,7 +1299,7 @@ CondValue to_ir::emitIsInstance(const Expr& obj, const Expr& classinfo) {
     if (lhs_type == AnyType::get()) {
       isinstance_types.insert(
           isinstance_types.end(), rhs_types.begin(), rhs_types.end());
-      not_isinstance_types.push_back(AnyType::get());
+      not_isinstance_types.emplace_back(AnyType::get());
       // Edge case: we can still say that all lhs types subtype some
       // rhs type if `lhs` is `Any` and `rhs` is `Any`
       if (isinstance_types.size() != 1 ||
