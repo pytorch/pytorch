@@ -5976,8 +5976,6 @@ else:
         dst = dst.masked_scatter(mask, src)
         self.assertEqual(dst, torch.tensor([True, True, True], device=device))
 
-    # refer https://github.com/pytorch/pytorch/issues/60190
-    @skipIfRocm
     @onlyCUDA
     @largeTensorTest('30GB')
     def test_masked_scatter_large_tensor(self, device):
