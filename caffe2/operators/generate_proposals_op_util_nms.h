@@ -370,7 +370,7 @@ int convex_hull_graham(
   // Step 3:
   // Sort point 1 ~ num_in according to their relative cross-product values
   // (essentially sorting according to angles)
-  std::sort(
+  std::stable_sort(
       q + 1,
       q + num_in,
       [](const Eigen::Vector2f& A, const Eigen::Vector2f& B) -> bool {
@@ -711,7 +711,7 @@ std::vector<int> nms_cpu(
     bool legacy_plus_one = false) {
   std::vector<int> indices(proposals.rows());
   std::iota(indices.begin(), indices.end(), 0);
-  std::sort(
+  std::stable_sort(
       indices.data(),
       indices.data() + indices.size(),
       [&scores](int lhs, int rhs) { return scores(lhs) > scores(rhs); });

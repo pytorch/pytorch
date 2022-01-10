@@ -555,6 +555,27 @@ LINUX_WORKFLOWS = [
             labels=set([LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA]),
         ),
     ),
+    # no-ops builds test USE_PER_OPERATOR_HEADERS=0 where ATen/ops is not generated
+    CIWorkflow(
+        arch="linux",
+        build_environment="linux-xenial-cuda11.3-py3.7-gcc7-no-ops",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7",
+        test_runner_type=LINUX_CUDA_TEST_RUNNER,
+        exclude_test=True,
+        ciflow_config=CIFlowConfig(
+            labels=set([LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA]),
+        ),
+    ),
+    CIWorkflow(
+        arch="linux",
+        build_environment="linux-xenial-py3.7-gcc7-no-ops",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.7-gcc7",
+        test_runner_type=LINUX_CPU_TEST_RUNNER,
+        exclude_test=True,
+        ciflow_config=CIFlowConfig(
+            labels=set([LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU]),
+        ),
+    ),
     CIWorkflow(
         arch="linux",
         build_environment="libtorch-linux-xenial-cuda11.3-py3.7-gcc7",
@@ -789,9 +810,8 @@ MACOS_WORKFLOWS = [
 
 DOCKER_IMAGES = {
     f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-cuda10.2-cudnn7-py3.7-clang9",  # for pytorch/xla
-    f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm4.1-py3.7",                 # for rocm
-    f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm4.2-py3.7",                 # for rocm
     f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm4.3.1-py3.7",               # for rocm
+    f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm4.5-py3.7",                 # for rocm
 }
 
 DOCKER_IMAGES.update({
