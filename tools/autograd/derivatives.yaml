@@ -800,12 +800,13 @@
   result: pinv_jvp(self_p, result, self_t)
 
 - name: linalg_svd_rank_revealing.tartol(Tensor input, *, Tensor? atol=None, Tensor? rtol=None, bool full_matrices=True) -> (Tensor U, Tensor S, Tensor Vh, Tensor rank)
-  input: linalg_svd_rank_revealing_backward(grads, input, U, S, Vh, rank)
+  input: "svd_backward({grads[0], grads[1], grads[2].defined() ? grads[2].mH() : Tensor()}, input, !full_matrices, true, U, S, Vh.mH())"
   atol: non_differentiable
   rtol: non_differentiable
   output_differentiability: [True, True, True, False]
 
 - name: linalg_svd_rank_restricted(Tensor input, *, Tensor? atol=None, Tensor? rtol=None, bool full_matrices=True) -> (Tensor U, Tensor S, Tensor Vh, Tensor rank)
+  #input: linalg_svd_rank_revealing_backward(grads, input, U, S, Vh, rank)
   atol: non_differentiable
   rtol: non_differentiable
   output_differentiability: [True, True, True, False]

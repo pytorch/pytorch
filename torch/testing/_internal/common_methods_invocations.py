@@ -12776,7 +12776,6 @@ op_db: List[OpInfo] = [
     OpInfo('linalg.svd_rank_revealing',
            op=torch.linalg.svd_rank_revealing,
            aten_name='linalg_svd_rank_revealing',
-           variant_test_name='full_rank',
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_linalg_svd_rank_revealing,
            # Disable as grads are filled in parts which
