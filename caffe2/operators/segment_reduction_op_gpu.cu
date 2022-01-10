@@ -93,7 +93,7 @@ __global__ void length_sum_gradient_kernel(
     const int* __restrict__ prefix_sum_length_data,
     int N,
     int post,
-    int len_length) {
+    int len_length) { //DESTROY
   // len_length blocks
   int group = blockIdx.x;
 
@@ -134,7 +134,6 @@ __global__ void length_max_kernel(
     const int* __restrict__ prefix_sum_length_data,
     int N,
     int post,
-    int len_length,
     const T numeric_min) {
   // len_length blocks
   int group = blockIdx.x;
@@ -319,7 +318,6 @@ __global__ void sparse_length_weighted_sum_kernel(
     const IndexType* __restrict__ indices,
     int N,
     int post,
-    int len_length,
     int len_indices) {
   // len_length blocks
   int group = blockIdx.x;
@@ -749,7 +747,6 @@ class CUDASparseLengthsMaxOp : public Operator<CUDAContext> {
                 prefix_sum_length_data,
                 N,
                 post,
-                len_length,
                 numeric_min);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else {
@@ -760,7 +757,6 @@ class CUDASparseLengthsMaxOp : public Operator<CUDAContext> {
                 prefix_sum_length_data,
                 N,
                 post,
-                len_length,
                 numeric_min);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
@@ -849,7 +845,6 @@ class CUDASparseLengthsWeightedSumOp : public Operator<CUDAContext> {
               indices,
               N,
               post,
-              len_length,
               dataToReduceSize);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
@@ -862,7 +857,6 @@ class CUDASparseLengthsWeightedSumOp : public Operator<CUDAContext> {
               indices,
               N,
               post,
-              len_length,
               dataToReduceSize);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
