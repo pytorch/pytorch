@@ -8,8 +8,6 @@
 #include <c10/util/hash.h>
 #include <c10/util/irange.h>
 
-#include <THC/THC.h>
-
 #include <nccl.h>
 
 #include <limits>

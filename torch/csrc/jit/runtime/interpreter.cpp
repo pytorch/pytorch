@@ -284,13 +284,25 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           }
           case INST(OP): {
             INST_GUARD;
+#ifndef NDEBUG
+            size_t init_size = stack.size();
+#endif
             frame.function->operator_table_[inst.X](stack);
+#ifndef NDEBUG
+            frame.function->assert_stack_size(inst.X, init_size, stack.size());
+#endif
           }
             INST_NEXT;
           case INST(OPN): {
             INST_GUARD;
             stack.push_back(inst.N);
+#ifndef NDEBUG
+            size_t init_size = stack.size();
+#endif
             frame.function->operator_table_[inst.X](stack);
+#ifndef NDEBUG
+            frame.function->assert_stack_size(inst.X, init_size, stack.size());
+#endif
           }
             INST_NEXT;
           case INST(LOAD): {
@@ -317,7 +329,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             INST_NEXT;
           case INST(DROP): {
             INST_GUARD;
-            pop(stack);
+            stack.pop_back();
           }
             INST_NEXT;
           case INST(DROPR): {
@@ -332,16 +344,16 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             INST_NEXT;
           case INST(GET_ATTR): {
             INST_GUARD;
-            auto userObj = pop(stack).toObject();
-            auto value = userObj->getSlot(inst.X);
-            push(stack, std::move(value));
+            const auto& userObj = stack.back().toObjectRef();
+            stack.back() = userObj.getSlot(inst.X);
           }
             INST_NEXT;
           case INST(SET_ATTR): {
             INST_GUARD;
             auto v = pop(stack);
-            auto userObj = pop(stack).toObject();
-            userObj->setSlot(inst.X, std::move(v));
+            auto& userObj = stack.back().toObjectRef();
+            userObj.setSlot(inst.X, std::move(v));
+            stack.pop_back();
           }
             INST_NEXT;
           case INST(JF): {

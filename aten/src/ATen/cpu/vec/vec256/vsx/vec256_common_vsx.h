@@ -22,7 +22,7 @@
 namespace at {
 namespace vec {
 
-namespace {
+inline namespace CPU_CAPABILITY {
 
 DEFINE_CLAMP_FUNCS(c10::quint8)
 DEFINE_CLAMP_FUNCS(c10::qint8)

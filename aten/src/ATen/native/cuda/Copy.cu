@@ -1,4 +1,4 @@
-#include <ATen/ATen.h>
+#include <ATen/Functions.h>
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/CachingHostAllocator.h>
@@ -12,6 +12,31 @@
 
 namespace at {
 namespace native {
+
+void neg_kernel_cuda(TensorIteratorBase &iter);
+void conj_kernel_cuda(TensorIteratorBase &iter);
+
+namespace {
+void direct_copy_kernel_cuda(TensorIteratorBase &iter) {
+  ScalarType dtype = iter.dtype(0);
+  if (isQIntType(dtype)) {
+    AT_DISPATCH_QINT_TYPES(dtype, "copy_", [&] {
+      gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
+    });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+        kHalf, kBool, kBFloat16, dtype, "copy_", [&] {
+          gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
+    });
+  }
+}
+
+void neg_conj_kernel_cuda(TensorIteratorBase &iter) {
+  AT_DISPATCH_COMPLEX_TYPES(iter.common_dtype(), "neg_conj_cuda", [&] {
+    gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return -std::conj(x); });
+  });
+}
+}  // namespace (anonymous)
 
 using namespace at::cuda;
 
@@ -64,36 +89,17 @@ void copy_device_to_device(TensorIterator& iter, bool non_blocking) {
           copy_stream));
     }
   } else {
-    auto dtype = iter.dtype(0);
-    if (isQIntType(dtype)) {
-      AT_DISPATCH_QINT_TYPES(dtype, "copy_", [&] {
-        gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
-      });
-    } else {
-      if (same_neg) {
-        if (!same_conj && same_type) {
-          AT_DISPATCH_COMPLEX_TYPES(
-              dtype, "copy_conj_", [&] {
-                gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return std::conj(x); });
-              });
-        } else {
-          AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-              kHalf, kBool, kBFloat16, dtype, "copy_", [&] {
-                gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
-              });
-        }
+    if (same_neg) {
+      if (!same_conj) {
+        conj_kernel_cuda(iter);
       } else {
-        if (!same_conj && same_type) {
-          AT_DISPATCH_COMPLEX_TYPES(
-              dtype, "copy_conj_", [&] {
-                gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return std::conj(-x); });
-              });
-        } else {
-          AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-              kHalf, kBool, kBFloat16, dtype, "copy_", [&] {
-                gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return -x; });
-              });
-        }
+        direct_copy_kernel_cuda(iter);
+      }
+    } else {
+      if (!same_conj) {
+        neg_conj_kernel_cuda(iter);
+      } else {
+        neg_kernel_cuda(iter);
       }
     }
   }
@@ -217,13 +223,8 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
 
   if (non_blocking) {
     AT_CUDA_CHECK(cudaMemcpyAsync(dst, src, nbytes, kind, stream));
-    // we use the storage context as the key for the caching host allocator,
-    // and not the data pointer.
-    // This allows us to attribute the events to the original tensor allocation correctly.
-    const auto& dst_tensor = iter.tensor(0);
-    const auto& src_tensor = iter.tensor(1);
-    auto* ctx = (dst_device == kCPU ? dst_tensor : src_tensor).storage().data_ptr().get_context();
-    AT_CUDA_CHECK(CachingHostAllocator_recordEvent(ctx, stream));
+    void* ptr = (dst_device == kCPU ? dst : src);
+    AT_CUDA_CHECK(CachingHostAllocator_recordEvent(ptr, stream));
   } else {
     at::cuda::memcpy_and_sync(dst, src, nbytes, kind, stream);
   }

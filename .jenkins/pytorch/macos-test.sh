@@ -38,7 +38,8 @@ if [[ ! $(python -c "import torch; print(int(torch.backends.openmp.is_available(
 fi
 popd
 
-test_python_all() {
+
+setup_test_python() {
   # The CircleCI worker hostname doesn't resolve to an address.
   # This environment variable makes ProcessGroupGloo default to
   # using the address associated with the loopback interface.
@@ -47,8 +48,25 @@ test_python_all() {
 
   # Increase default limit on open file handles from 256 to 1024
   ulimit -n 1024
+}
 
-  python test/run_test.py --verbose --exclude-jit-executor
+test_python_all() {
+  setup_test_python
+
+  time python test/run_test.py --verbose --exclude-jit-executor
+
+  assert_git_not_dirty
+}
+
+test_python_shard() {
+  if [[ -z "$NUM_TEST_SHARDS" ]]; then
+    echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
+    exit 1
+  fi
+
+  setup_test_python
+
+  time python test/run_test.py --verbose --exclude-jit-executor --shard "$1" "$NUM_TEST_SHARDS"
 
   assert_git_not_dirty
 }
@@ -143,8 +161,19 @@ test_jit_hooks() {
   assert_git_not_dirty
 }
 
-test_python_all
-test_libtorch
-test_custom_script_ops
-test_jit_hooks
-test_custom_backend
+if [[ $NUM_TEST_SHARDS -gt 1 ]]; then
+  test_python_shard "${SHARD_NUMBER}"
+  if [[ "${SHARD_NUMBER}" == 1 ]]; then
+    test_libtorch
+    test_custom_script_ops
+  elif [[ "${SHARD_NUMBER}" == 2 ]]; then
+    test_jit_hooks
+    test_custom_backend
+  fi
+else
+  test_python_all
+  test_libtorch
+  test_custom_script_ops
+  test_jit_hooks
+  test_custom_backend
+fi
