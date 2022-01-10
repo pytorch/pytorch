@@ -4830,10 +4830,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 x = self.maxpool2d(x)
                 x = self.maxpool3d(x)
                 x = torch.flatten(x)
-                x = torch.max(x)
-                x = torch.min(x)
                 x = x.reshape([-1])
-                x = x.resize_(1, 1, x.numel())
+                x = x.resize_(1, 1, x)
                 x = x.view(-1)
                 # prim::ListConstruct
                 xs = [x, x]
@@ -4850,7 +4848,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 x, y = torch.chunk(x, 2)
                 x = F.dropout(x)
                 x = self.dropout(x)
-                x, _ = torch.sort(x)
                 x = x.permute(0, 2, 3, 1)
                 x = x.repeat_interleave(3, 1)
                 x = torch.repeat_interleave(x, 3, 1)
@@ -4893,9 +4890,9 @@ class TestQuantizeFxOps(QuantizationTestCase):
         # check exact counts of quantize and dequantize
         count_check = {
             # input of conv and two outputs of getitem
-            ns.call_function(torch.quantize_per_tensor) : 3,
+            ns.call_function(torch.quantize_per_tensor) : 2,
             # output of the model and two outputs of getitem
-            ns.call_method('dequantize') : 3
+            ns.call_method('dequantize') : 2
         }
         order_check = [
             ns.call_function(torch.quantize_per_tensor),
