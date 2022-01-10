@@ -67,6 +67,8 @@ full_codegen:
   - ne.Tensor
   - nll_loss_backward
   - nll_loss_forward
+  - nll_loss2d_backward
+  - nll_loss2d_forward
   - pow.Tensor_Scalar
   - pow.Tensor_Tensor
   - relu
