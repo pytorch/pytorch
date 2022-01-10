@@ -5088,6 +5088,7 @@ def multi_head_attention_forward(
     v_proj_weight: Optional[Tensor] = None,
     static_k: Optional[Tensor] = None,
     static_v: Optional[Tensor] = None,
+    average_attn_weights: bool = True,
 ) -> Tuple[Tensor, Optional[Tensor]]:
     r"""
     Args:
@@ -5113,6 +5114,9 @@ def multi_head_attention_forward(
             a combination of q_proj_weight, k_proj_weight, v_proj_weight.
         q_proj_weight, k_proj_weight, v_proj_weight, in_proj_bias: input projection weight and bias.
         static_k, static_v: static key and value used for attention operators.
+        average_attn_weights: If true, indicates that the returned ``attn_weights`` should be averaged across heads.
+            Otherwise, ``attn_weights`` are provided separately per head. Note that this flag only has an effect
+            when ``need_weights=True.``. Default: True
 
 
     Shape:
@@ -5142,8 +5146,11 @@ def multi_head_attention_forward(
         Outputs:
         - attn_output: :math:`(L, E)` or :math:`(L, N, E)` where L is the target sequence length, N is the batch size,
           E is the embedding dimension.
-        - attn_output_weights: :math:`(L, S)` or :math:`(N, L, S)` where N is the batch size,
-          L is the target sequence length, S is the source sequence length.
+        - attn_output_weights: Only returned when ``need_weights=True``. If ``average_attn_weights=True``, returns
+          attention weights averaged across heads of shape :math:`(L, S)` when input is unbatched or
+          :math:`(N, L, S)`, where :math:`N` is the batch size, :math:`L` is the target sequence length, and
+          :math:`S` is the source sequence length. If ``average_weights=False``, returns attention weights per
+          head of shape :math:`(num_heads, L, S)` when input is unbatched or :math:`(N, num_heads, L, S)`.
     """
     tens_ops = (query, key, value, in_proj_weight, in_proj_bias, bias_k, bias_v, out_proj_weight, out_proj_bias)
     if has_torch_function(tens_ops):
@@ -5328,9 +5335,10 @@ def multi_head_attention_forward(
     attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
 
     if need_weights:
-        # average attention weights over heads
+        # optionally average attention weights over heads
         attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
-        attn_output_weights = attn_output_weights.sum(dim=1) / num_heads
+        if average_attn_weights:
+            attn_output_weights = attn_output_weights.sum(dim=1) / num_heads
 
         if not is_batched:
             # squeeze the output if input was unbatched
