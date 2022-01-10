@@ -2,6 +2,7 @@
 
 #include <memory>
 
+#include <ATen/core/ivalue.h>
 #include <ATen/core/class_type.h>
 #include <ATen/core/jit_type_base.h>
 #include <c10/util/Optional.h>
@@ -104,6 +105,8 @@ class DynamicType : public SharedType {
   };
 
  public:
+  // TODO Change Ptr to DynamicTypePtr when all migrations are done.
+  using Ptr = TypePtr;
   ~DynamicType() override;
 
   struct Arguments {
@@ -154,6 +157,11 @@ class DynamicType : public SharedType {
     Arguments arguments_;
     ClassTypePtr class_;
   };
+};
+
+template <>
+struct IValue::TagType<c10::DynamicType> {
+  static DynamicType::Ptr get(const c10::IValue& v);
 };
 
 } // namespace c10
