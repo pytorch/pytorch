@@ -25,6 +25,7 @@ def define_targets(rules):
         name = "Macros",
         hdrs = ["util/Macros.h"],
         testonly = True,
+        visibility = ["//:__subpackages__"],
     )
 
     rules.cc_library(
