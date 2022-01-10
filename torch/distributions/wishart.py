@@ -120,9 +120,8 @@ class Wishart(ExponentialFamily):
         new = self._get_checked_instance(Wishart, _instance)
         batch_shape = torch.Size(batch_shape)
         cov_shape = batch_shape + self.event_shape
-        df_shape = batch_shape
         new._unbroadcasted_scale_tril = self._unbroadcasted_scale_tril.expand(cov_shape)
-        new.df = self.df.expand(df_shape)
+        new.df = self.df.expand(batch_shape)
 
         new._batch_dims = [-(x + 1) for x in range(len(batch_shape))]
 
