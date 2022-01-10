@@ -1,18 +1,69 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/sparse/SparseTensorMath.h>
 
 #include <c10/util/irange.h>
 #include <c10/util/MaybeOwned.h>
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/ScalarOps.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/Copy.h>
 #include <ATen/native/CPUBlas.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_sparse_addmm.h>
+#include <ATen/ops/_sparse_addmm_native.h>
+#include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
+#include <ATen/ops/_sparse_mm_native.h>
+#include <ATen/ops/_sparse_sum.h>
+#include <ATen/ops/_sparse_sum_backward_native.h>
+#include <ATen/ops/_sparse_sum_native.h>
+#include <ATen/ops/add.h>
+#include <ATen/ops/add_native.h>
+#include <ATen/ops/addmm.h>
+#include <ATen/ops/addmm_native.h>
+#include <ATen/ops/any.h>
+#include <ATen/ops/any_native.h>
+#include <ATen/ops/bmm_native.h>
+#include <ATen/ops/cat.h>
+#include <ATen/ops/conj_physical.h>
+#include <ATen/ops/conj_physical_native.h>
+#include <ATen/ops/copy_sparse_to_sparse.h>
+#include <ATen/ops/div.h>
+#include <ATen/ops/div_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/floor_divide.h>
+#include <ATen/ops/floor_divide_native.h>
+#include <ATen/ops/hspmm_native.h>
+#include <ATen/ops/mm_native.h>
+#include <ATen/ops/mul.h>
+#include <ATen/ops/mul_native.h>
+#include <ATen/ops/mv_native.h>
+#include <ATen/ops/native_norm_native.h>
+#include <ATen/ops/neg_native.h>
+#include <ATen/ops/pow.h>
+#include <ATen/ops/pow_native.h>
+#include <ATen/ops/result_type.h>
+#include <ATen/ops/scalar_tensor.h>
+#include <ATen/ops/smm_native.h>
+#include <ATen/ops/sspaddmm.h>
+#include <ATen/ops/sspaddmm_native.h>
+#include <ATen/ops/sub_native.h>
+#include <ATen/ops/zero_native.h>
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like.h>
+#include <ATen/ops/zeros_native.h>
+#endif
 
 #include <algorithm>
 
