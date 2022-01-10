@@ -10,6 +10,7 @@
 #include <ATen/native/cuda/UpSample.cuh>
 #include <ATen/native/cuda/KernelUtils.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
+#include <ATen/native/cuda/LaunchUtils.h>
 
 namespace at {
 namespace native {
@@ -492,9 +493,12 @@ __global__ void upsample_gen2d_aa_out_frame(
   extern __shared__ int smem[];
   scalar_t *wx = reinterpret_cast<scalar_t*>(smem);
   scalar_t *wy = reinterpret_cast<scalar_t*>(smem);
-  // split wx, wy
+  scalar_t *buffer2 = reinterpret_cast<scalar_t*>(smem);
+  // split wx, wy, buffer2
   wx = &wx[interp_width * threadIdx.x];
   wy = &wy[interp_width * blockDim.x + interp_height * threadIdx.y];
+  const int offset = interp_width * blockDim.x + interp_height * blockDim.y;
+  buffer2 = &buffer2[offset + interp_height * (threadIdx.x + threadIdx.y * blockDim.x)];
 
   // Compute weights and kernel spans
   int xmin, xsize, ymin, ysize;
@@ -538,7 +542,6 @@ __global__ void upsample_gen2d_aa_out_frame(
 
   __syncthreads();
 
-  scalar_t buffer2[256];
   const scalar_t * buffer1;
 
   for (int n = 0; n < batchsize; n++) {
@@ -691,19 +694,13 @@ static void upsample_gen2d_aa_out_cuda_template(
   int input_height = input.size(2);
   int input_width = input.size(3);
 
-  const int num_threads = std::min(
-      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-
+  size_t sharedMemPerBlock = at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock;
   int* maxThreadsDim = at::cuda::getCurrentDeviceProperties()->maxThreadsDim;
-  int block_x = std::min<int>(maxThreadsDim[0], at::cuda::warp_size());
-  int block_y = std::min<int>(maxThreadsDim[1], num_threads / block_x);
-  const dim3 block(block_x, block_y);
-
+  int maxThreadsPerBlock = at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
   int* maxGridSize = at::cuda::getCurrentDeviceProperties()->maxGridSize;
+  int block_x = std::min<int>(maxThreadsDim[0], at::cuda::warp_size());
   int grid_x = std::min<int>(maxGridSize[0], ceil_div(output_width, block_x));
-  int grid_y = std::min<int>(maxGridSize[1], ceil_div(output_height, block_y));
-  const dim3 grid(grid_x, grid_y);
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       input.scalar_type(), "upsample_bilinear2d_out_frame", [&] {
@@ -717,19 +714,31 @@ static void upsample_gen2d_aa_out_cuda_template(
         const accscalar_t width_scale = area_pixel_compute_scale<accscalar_t>(
             input_width, output_width, align_corners, scales_w);
 
-        // We are using local buffer memory of 256 * sizeof(float) per thread
-        // to store weights
-        TORCH_CHECK(
-            height_scale < (255 / interp_size),
-            "Max supported scale factor is 127 (bilinear), 63 (bicubic)");
-        TORCH_CHECK(
-            width_scale < (255 / interp_size),
-            "Max supported scale factor is 127 (bilinear), 63 (bicubic)");
+        // We are using shared memory to store weights wx, wy and a buffer of size wy unique per thread
+        // Let's compute block_y size depending on given height_scale and width_scale
+        // We have the following relationship:
+        // shmem_size / sizeofdtype =
+        //  (width_scale * interp_size + 3) * block_x +   <-- wx allocation
+        //  (height_scale * interp_size + 3) * block_y * (block_x + 1)   <-- wy and buffer allocations
+        // Note: scale * interp_size + 3 is an approximation for ceil( interp_size * 0.5 * scale ) * 2 + 1
+        // See definition of interp_height or interp_width inside the kernel
 
+        int numer = (sharedMemPerBlock * 1.0 / sizeof(scalar_t) - (width_scale * interp_size + 3) * block_x);
+        int denom = (height_scale * interp_size + 3) * (block_x + 1);
+        int block_y = lastPow2((unsigned int) (numer / denom));
+        block_y = std::min<int>(maxThreadsPerBlock / block_x, block_y);
+        const dim3 block(block_x, block_y);
+
+        int grid_y = std::min<int>(maxGridSize[1], ceil_div(output_height, block_y));
+        const dim3 grid(grid_x, grid_y);
+
+        // Compute actual size of required shared memory and verify if we can allocate it
+        // - wx and wy size:
         size_t weights_per_block =
             (size_t) (width_scale * interp_size + 3) * block_x + (size_t)(height_scale * interp_size + 3) * block_y;
+        // - buffer size:
+        weights_per_block += (size_t)(height_scale * interp_size + 3) * block_y * block_x;
         size_t shmem_size = weights_per_block * sizeof(scalar_t);
-        size_t sharedMemPerBlock = at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock;
         TORCH_CHECK(
             shmem_size <= sharedMemPerBlock,
             "Too much shared memory required: ", shmem_size, " vs ", sharedMemPerBlock);
