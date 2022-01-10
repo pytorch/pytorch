@@ -1047,12 +1047,10 @@ class MultiheadAttention(Module):
             return attn_output, attn_output_weights
 
 class PReLU(Module):
-    r"""Applies the element-wise function:
+    r"""Applies the Parametric Rectified Linear Unit function :math:`\text{PReLU}(x) =
+    \max(0,x) + a * \min(0,x)` element-wise.
 
-    .. math::
-        \text{PReLU}(x) = \max(0,x) + a * \min(0,x)
-
-    or
+    PReLU is also defined as:
 
     .. math::
         \text{PReLU}(x) =
