@@ -910,8 +910,7 @@ StaticModule::StaticModule(
 
   // Create ProcessedFunction instances first to freeze their addresses to pass
   // to ProcessedNode.
-  AliasDb alias_db(
-      graph_, /*isFrozen=*/false, /*enablePreciseTupleContainerAnalysis=*/true);
+  AliasDb alias_db(graph_, /*isFrozen=*/false);
   GRAPH_DEBUG("AliasDb: ", alias_db.toString());
 
   // Construct constant and function nodes
