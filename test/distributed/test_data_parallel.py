@@ -13,7 +13,7 @@ from torch.cuda.amp import autocast
 import torch.nn.parallel as dp
 from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, onlyCUDA, skipMeta
-from torch.testing._internal.common_utils import run_tests, TestCase, ALL_TENSORTYPES
+from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.common_utils import _assertGradAndGradgradChecks, gradcheck
 from torch.testing._internal.common_utils import dtype2prec_DONTUSE
 from torch.testing._internal.common_utils import sandcastle_skip_if
@@ -773,7 +773,7 @@ class TestDataParallelDeviceType(TestCase):
 
     @onlyCUDA
     @skipMeta
-    @dtypes(*ALL_TENSORTYPES)
+    @dtypes(torch.float, torch.double, torch.half)
     def test_data_parallel_module(self, device, dtype):
         l = nn.Linear(10, 5).to(device, dtype)
         i = torch.randn(20, 10, device=device, dtype=dtype)
@@ -785,7 +785,7 @@ class TestDataParallelDeviceType(TestCase):
 
     @onlyCUDA
     @skipMeta
-    @dtypes(*ALL_TENSORTYPES)
+    @dtypes(torch.float, torch.double, torch.half)
     def test_data_parallel_module_kwargs_only(self, device, dtype):
         class Net(nn.Module):
             def __init__(self):
@@ -805,7 +805,7 @@ class TestDataParallelDeviceType(TestCase):
 
     @onlyCUDA
     @skipMeta
-    @dtypes(*ALL_TENSORTYPES)
+    @dtypes(torch.float, torch.double, torch.half)
     def test_data_parallel_module_kwargs_only_empty_list(self, device, dtype):
         class Net(nn.Module):
             def __init__(self):
@@ -825,7 +825,7 @@ class TestDataParallelDeviceType(TestCase):
 
     @onlyCUDA
     @skipMeta
-    @dtypes(*ALL_TENSORTYPES)
+    @dtypes(torch.float, torch.double, torch.half)
     def test_data_parallel_module_kwargs_only_empty_dict(self, device, dtype):
         class Net(nn.Module):
             def __init__(self):
@@ -845,7 +845,7 @@ class TestDataParallelDeviceType(TestCase):
 
     @onlyCUDA
     @skipMeta
-    @dtypes(*ALL_TENSORTYPES)
+    @dtypes(torch.float, torch.double, torch.half)
     def test_data_parallel_module_kwargs_only_empty_tuple(self, device, dtype):
         class Net(nn.Module):
             def __init__(self):
