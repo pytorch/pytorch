@@ -25,6 +25,7 @@ from torch.testing._internal.common_quantized import (
     override_quantized_engine,
     override_qengines,
     qengine_is_qnnpack,
+    qengine_is_onednn,
 )
 from hypothesis import assume, given
 from hypothesis import strategies as st
@@ -97,10 +98,9 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                                              zero_points=zero_point_tensor,
                                              axis=0, dtype=torch.qint8)
         else:
-            W_q = torch.quantize_per_tensor(W, 0.1, 4, torch.qint8)
             # ONEDNN only supports symmetric quantization of weight
-            if torch.backends.quantized.engine == 'onednn':
-                W_q = torch.quantize_per_tensor(W, 0.1, 0, torch.qint8)
+            W_zp = 0 if qengine_is_onednn() else 4
+            W_q = torch.quantize_per_tensor(W, 0.1, W_zp, torch.qint8)
 
         X = torch.rand(batch_size, in_features).float()
         X_q = torch.quantize_per_tensor(X, 0.2, 10, torch.quint8)
@@ -239,9 +239,6 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             groups, kernel_size, stride, padding, padding_mode, dilation,
             X_scale, X_zero_point, W_scale, W_zero_point, Y_scale, Y_zero_point,
             use_bias, use_fused, use_channelwise):
-        # ONEDNN only supports symmetric quantization of weight
-        if torch.backends.quantized.engine == 'onednn' and not all(zp == 0 for zp in W_zero_point):
-            return
         for i in range(len(kernel_size)):
             assume(input_feature_map_size[i] + 2 * padding[i]
                    >= dilation[i] * (kernel_size[i] - 1) + 1)
@@ -420,7 +417,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             X_scale = 1.3
             X_zero_point = 2
             W_scale = [0.5]
-            W_zero_point = [3]
+            W_zero_point = [0] if qengine_is_onednn() else [3]
             Y_scale = 5.0
             Y_zero_point = 4
             if torch.backends.quantized.engine == 'qnnpack':
@@ -487,7 +484,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             X_scale = 1.3
             X_zero_point = 2
             W_scale = [0.5]
-            W_zero_point = [3]
+            W_zero_point = [0] if qengine_is_onednn() else [3]
             Y_scale = 5.0
             Y_zero_point = 4
             # use_fused -> quantized class
@@ -556,7 +553,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             X_scale = 1.3
             X_zero_point = 2
             W_scale = [0.5]
-            W_zero_point = [3]
+            W_zero_point = [0] if qengine_is_onednn() else [3]
             Y_scale = 5.0
             Y_zero_point = 4
             # use_fused -> quantized class
@@ -1087,10 +1084,8 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
     def test_linear_api(self, batch_size, in_features, out_features, use_bias, use_default_observer):
         """test API functionality for nn.quantized.dynamic.Linear"""
         W = torch.rand(out_features, in_features).float()
-        W_scale, W_zp = _calculate_dynamic_qparams(W, torch.qint8)
-        # ONEDNN only supports symmetric quantization of weight
-        if torch.backends.quantized.engine == 'onednn' and W_zp != 0:
-            return
+        qscheme = torch.per_tensor_symmetric if qengine_is_onednn() else torch.per_tensor_affine
+        W_scale, W_zp = _calculate_dynamic_qparams(W, torch.qint8, qscheme=qscheme)
         W_q = torch.quantize_per_tensor(W, W_scale, W_zp, torch.qint8)
         X = torch.rand(batch_size, in_features).float()
         B = torch.rand(out_features).float() if use_bias else None

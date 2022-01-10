@@ -3208,10 +3208,11 @@ class TestQuantizedLinear(TestCase):
             + X_value_min
         ).astype(np.uint8)
         W_scales = np.random.rand(output_channels)
-        W_zps = np.round(np.random.rand(output_channels) * 100 - 50).astype(np.int)
         # ONEDNN only supports symmetric quantization of weight
-        if torch.backends.quantized.engine == 'onednn':
+        if qengine_is_onednn():
             W_zps = np.zeros(output_channels).astype(np.int)
+        else:
+            W_zps = np.round(np.random.rand(output_channels) * 100 - 50).astype(np.int)
         W_value_min = -128
         W_value_max = 127
         W_q0 = np.round(
@@ -3312,7 +3313,7 @@ class TestQuantizedLinear(TestCase):
         qlinear_unpack = torch.ops.quantized.linear_unpack
 
         # ONEDNN only supports symmetric quantization of weight
-        if torch.backends.quantized.engine == 'onednn':
+        if qengine_is_onednn():
             if use_channelwise:
                 W_zps = torch.zeros(output_channels).to(torch.int64)
             else:
@@ -3777,7 +3778,7 @@ class TestQuantizedConv(TestCase):
             # currently transposed conv and per-channel per quantization does not work
             return
         # ONEDNN only supports symmetric quantization of weight and zero output padding
-        if torch.backends.quantized.engine == 'onednn':
+        if qengine_is_onednn():
             W_zero_point = 0
             o_pads = len(o_pads) * [0] if o_pads is not None else None
         if channelwise:
@@ -3910,8 +3911,8 @@ class TestQuantizedConv(TestCase):
         Y_zero_point, use_bias, use_relu, use_channelwise, use_transpose
     ):
         # ONEDNN only supports symmetric quantization of weight
-        if torch.backends.quantized.engine == 'onednn':
-            W_zero_point = len(W_zero_point) * [0] if W_zero_point is not None else None
+        if qengine_is_onednn() and W_zero_point is not None:
+            W_zero_point = len(W_zero_point) * [0]
         (X, W), (X_q, W_q), bias_float = self._make_qconv_tensors(
             batch_size, input_channels_per_group, input_feature_map_shape,
             output_channels_per_group, groups, kernels,
