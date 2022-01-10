@@ -763,10 +763,8 @@ class LeakyReLU(Module):
 
 
 class LogSigmoid(Module):
-    r"""Applies the element-wise function:
-
-    .. math::
-        \text{LogSigmoid}(x) = \log\left(\frac{ 1 }{ 1 + \exp(-x)}\right)
+    r"""Applies the LogSigmoid function :math:`\text{LogSigmoid}(x) =
+    \log\left(\frac{ 1 }{ 1 + \exp(-x)}\right)` element-wise:
 
     Shape:
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
