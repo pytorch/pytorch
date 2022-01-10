@@ -5609,12 +5609,12 @@ def sample_inputs_linalg_svd_rank_revealing(op_info, device, dtype, requires_gra
         yield clone_sample(sample)
         yield clone_sample(sample, **merge_dicts(dict(tol=tol), sample.kwargs))
         yield clone_sample(sample, **merge_dicts(dict(tol=tol_tensor), sample.kwargs))
-        yield clone_sample(sample, **merge_dicts(dict(atol=tol), sample.kwargs))
-        yield clone_sample(sample, **merge_dicts(dict(atol=tol_tensor), sample.kwargs))
-        yield clone_sample(sample, **merge_dicts(dict(atol=tol, rtol=tol), sample.kwargs))
-        yield clone_sample(sample, **merge_dicts(dict(atol=tol_tensor, rtol=tol_tensor), sample.kwargs))
-        yield clone_sample(sample, **merge_dicts(dict(atol=tol, rtol=tol_tensor), sample.kwargs))
-        yield clone_sample(sample, **merge_dicts(dict(atol=tol_tensor, rtol=tol), sample.kwargs))
+        #yield clone_sample(sample, **merge_dicts(dict(atol=tol), sample.kwargs))
+        #yield clone_sample(sample, **merge_dicts(dict(atol=tol_tensor), sample.kwargs))
+        #yield clone_sample(sample, **merge_dicts(dict(atol=tol, rtol=tol), sample.kwargs))
+        #yield clone_sample(sample, **merge_dicts(dict(atol=tol_tensor, rtol=tol_tensor), sample.kwargs))
+        #yield clone_sample(sample, **merge_dicts(dict(atol=tol, rtol=tol_tensor), sample.kwargs))
+        #yield clone_sample(sample, **merge_dicts(dict(atol=tol_tensor, rtol=tol), sample.kwargs))
 
 def sample_inputs_linalg_svdvals(op_info, device, dtype, requires_grad=False, **kwargs):
     batches = [(), (0, ), (2, ), (1, 1)]
