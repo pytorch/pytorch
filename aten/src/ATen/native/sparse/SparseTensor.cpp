@@ -819,5 +819,27 @@ Tensor sparse_mask_helper_cpu(
   return r_values;
 }
 
+Tensor empty_like_sparse_coo(
+    const Tensor& self,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
+  TORCH_CHECK(
+      !(options.layout() != kStrided &&
+          optional_memory_format.has_value()),
+      "memory format option is only supported by strided tensors");
+
+  TORCH_INTERNAL_ASSERT(options.layout() == kSparse && self.is_sparse());
+
+  auto result = at::empty({0}, options);
+  result.sparse_resize_and_clear_(
+      self.sizes(), self.sparse_dim(), self.dense_dim());
+  return result;
+}
+
 } // namespace native
 } // namespace at
