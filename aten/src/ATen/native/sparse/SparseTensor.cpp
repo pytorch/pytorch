@@ -48,6 +48,11 @@ Tensor _indices_sparse(const SparseTensor& self) {
 }
 
 Tensor _values_sparse(const SparseTensor& self) {
+  TORCH_WARN_ONCE(
+    "Calling sparse_tensor._values() returns a detached version "
+    "of the values. If you want to track gradients through the "
+    "values tensor, call sparse_tensor.coalesce().values() instead."
+  )
   return get_sparse_impl(self)->values();
 }
 
