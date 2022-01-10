@@ -1,6 +1,4 @@
-#include <ATen/core/op_registration/op_allowlist.h>
-#include <ATen/ATen.h>
-
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/native/Copy.h>
 #include <ATen/native/TensorIterator.h>
@@ -10,9 +8,21 @@
 
 namespace at {
 namespace native {
+inline namespace CPU_CAPABILITY {
+void neg_kernel(TensorIteratorBase &iter);
+void conj_kernel(TensorIteratorBase &iter);
+} // namespace CPU_CAPABILITY
+
 namespace {
 
-static void copy_kernel(TensorIterator& iter, bool non_blocking) {
+void direct_copy_kernel(TensorIteratorBase &iter) {
+  // TODO: we don't actually need separate instantiations per dtype;
+  // we only need a separate instantiation per dtype size. This would
+  // probably save us a little bit of code size here
+  // TODO: not sure if optimizer is able to compile two levels of
+  // conditionals into a single jump table.  We should have a
+  // single jump table here; might be worth just writing out the
+  // dispatch statement by hand instead of using AT_DISPATCH
   ScalarType dtype = iter.dtype(0);
   if (dtype == iter.dtype(1)) {
     // TODO: as the majority of these operations can be done treating
@@ -62,34 +72,25 @@ static void copy_kernel(TensorIterator& iter, bool non_blocking) {
             });
       }
     } else {
-      if (dtype == ScalarType::Half) {
-        cpu_kernel(iter, [=](at::Half a) -> at::Half { return -a; });
-      } else if (isComplexType(dtype)) {
-        if (iter.tensor(0).is_conj() == iter.tensor(1).is_conj()) {
-          AT_DISPATCH_COMPLEX_TYPES(dtype, "copy_kernel", [&] {
-              cpu_kernel_vec(
-                iter,
-                [=](scalar_t a) -> scalar_t { return -a; },
-                [=](Vectorized<scalar_t> a) -> Vectorized<scalar_t> { return a.neg(); });
-            });
-        } else {
-          AT_DISPATCH_COMPLEX_TYPES(dtype, "conj_kernel", [&] {
-              cpu_kernel_vec(
-                iter,
-                [=](scalar_t a) -> scalar_t { return -1 * conj_impl(a); },
-                [=](Vectorized<scalar_t> a) -> Vectorized<scalar_t> { return a.neg().conj(); });
-            });
-        }
-      } else {
-          AT_DISPATCH_ALL_TYPES_AND2(
-            ScalarType::Bool, ScalarType::BFloat16,dtype, "copy_kernel", [&] {
-              cpu_kernel_vec(
-                  iter,
-                  [=](scalar_t a) -> scalar_t { return -a; },
-                  [=](Vectorized<scalar_t> a) -> Vectorized<scalar_t> { return a.neg(); });
-            });
-      }
+      neg_kernel(iter);
     }
+  } else {
+    if (requires_conj) {
+      conj_kernel(iter);
+    } else {
+      direct_copy_kernel(iter);
+    }
+  }
+}
+
+void copy_kernel(TensorIterator& iter, bool non_blocking) {
+  ScalarType dtype = iter.dtype(0);
+  const bool requires_conj = (
+      isComplexType(dtype) && (iter.tensor_base(0).is_conj() != iter.tensor_base(1).is_conj()));
+  const bool requires_neg = (iter.tensor_base(0).is_neg() != iter.tensor_base(1).is_neg());
+
+  if (dtype == iter.dtype(1)) {
+    copy_same_dtype(iter, requires_conj, requires_neg);
   } else {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, dtype, "copy_", [&] {
       using dest_t = scalar_t;
@@ -112,11 +113,12 @@ static void copy_kernel(TensorIterator& iter, bool non_blocking) {
           return c10::static_cast_with_inter_type<dest_t, scalar_t>::apply(src); });
       });
     });
-    if (iter.tensor(0).is_conj() != iter.tensor(1).is_conj()) {
-      iter.tensor(0).conj_physical_();
-    }
-    if (iter.tensor(0).is_neg() != iter.tensor(1).is_neg()) {
-      iter.tensor(0).neg_();
+
+    if (requires_conj || requires_neg) {
+      // This inplace "copy" will perform any missing neg or conj operations
+      auto self = iter.tensor_base(0);
+      auto iter = TensorIterator::unary_op(self, self);
+      copy_same_dtype(iter, requires_conj, requires_neg);
     }
   }
 }

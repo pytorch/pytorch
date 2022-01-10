@@ -435,6 +435,30 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(qY, qY_hat,
                          msg="F.celu failed ({} vs {})".format(qY, qY_hat))
 
+    """Tests the correctness of the quantized::gelu op."""
+    def test_qgelu(self):
+        shapes = ((4,), (4, 4), (4, 4, 4), (4, 4, 4, 4))
+        dtypes = (torch.quint8, torch.qint8)
+        memory_formats = (torch.channels_last, torch.contiguous_format)
+        test_cases = itertools.product(shapes, dtypes, memory_formats)
+        for shape, dtype, memory_format in test_cases:
+            if memory_format == torch.channels_last and len(shape) != 4:
+                continue
+            X, scale, zero_point, torch_type = \
+                torch.randn(*shape), 0.1, 0, dtype
+            X = X.to(memory_format=memory_format)
+
+            qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                           dtype=torch_type)
+            dqX = qX.dequantize()
+
+            op = torch.nn.functional.gelu
+            dqY = op(dqX)
+            qY = torch.quantize_per_tensor(dqY, scale=scale, zero_point=zero_point,
+                                           dtype=torch_type)
+            qY_hat = op(qX)
+            self.assertEqual(qY.dequantize(), qY_hat.dequantize(),
+                             msg="F.gelu failed ({} vs {})".format(qY, qY_hat))
 
     """Tests the correctness of the quantized::qlayer_norm op."""
     @skipIfNoFBGEMM
