@@ -46,7 +46,7 @@ def get_file_pathnames_from_root(
         masks: Union[str, List[str]],
         recursive: bool = False,
         abspath: bool = False,
-        deterministic_order: bool = True) -> Iterable[str]:
+        non_deterministic: bool = False) -> Iterable[str]:
 
     # print out an error message and raise the error out
     def onerror(err : OSError):
@@ -56,14 +56,14 @@ def get_file_pathnames_from_root(
     for path, dirs, files in os.walk(root, onerror=onerror):
         if abspath:
             path = os.path.abspath(path)
-        if deterministic_order:
+        if not non_deterministic:
             files.sort()
         for f in files:
             if match_masks(f, masks):
                 yield os.path.join(path, f)
         if not recursive:
             break
-        if deterministic_order:
+        if not non_deterministic:
             dirs.sort()
 
 
