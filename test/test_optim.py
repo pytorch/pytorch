@@ -1423,6 +1423,21 @@ class TestLRScheduler(TestCase):
         scheduler = SequentialLR(self.opt, schedulers=schedulers, milestones=milestones)
         self._test(scheduler, targets, epochs)
 
+    def test_get_last_lr_sequentiallr(self):
+        epochs = 12
+        milestones = [3, 6]
+        schedulers = [None] * 3
+        schedulers[0] = ConstantLR(self.opt, factor=0.1, total_iters=3)
+        schedulers[1] = ExponentialLR(self.opt, gamma=0.8)
+        schedulers[2] = StepLR(self.opt, gamma=0.1, step_size=2)
+        scheduler = SequentialLR(self.opt, schedulers=schedulers, milestones=milestones)
+        constant_lr_target = [0.005] * 3
+        exponential_lr_target = [0.05, 0.04, 0.032]
+        step_lr_target = [0.05, 0.05, 0.005, 0.005, 0.0005, 0.0005]
+        single_targets = constant_lr_target + exponential_lr_target + step_lr_target
+        targets = [single_targets, [x * 10 for x in single_targets]]
+        self._test_get_last_lr(scheduler, targets, epochs)
+
     def test_chained_lr2_get_last_lr_before_step(self):
         schedulers = [
             LinearLR(self.opt, start_factor=0.4, total_iters=3),
