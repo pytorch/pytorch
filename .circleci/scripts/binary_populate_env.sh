@@ -139,13 +139,6 @@ if [[ "$PACKAGE_TYPE" == libtorch ]]; then
   fi
 fi
 
-# Because most Circle executors only have 20 CPUs, using more causes OOMs w/ Ninja and nvcc parallelization
-MEMORY_LIMIT_MAX_JOBS=18
-NUM_CPUS=$(( $(nproc) - 2 ))
-
-# Defaults here for **binary** linux builds so they can be changed in one place
-export MAX_JOBS=${MAX_JOBS:-$(( ${NUM_CPUS} > ${MEMORY_LIMIT_MAX_JOBS} ? ${MEMORY_LIMIT_MAX_JOBS} : ${NUM_CPUS} ))}
-
 cat >"$envfile" <<EOL
 # =================== The following code will be executed inside Docker container ===================
 export TZ=UTC
@@ -183,9 +176,22 @@ export DOCKER_IMAGE="$DOCKER_IMAGE"
 export USE_GOLD_LINKER="${USE_GOLD_LINKER}"
 export USE_GLOO_WITH_OPENSSL="ON"
 export USE_WHOLE_CUDNN="${USE_WHOLE_CUDNN}"
-export MAX_JOBS="${MAX_JOBS}"
 # =================== The above code will be executed inside Docker container ===================
 EOL
+
+# nproc doesn't exist on darwin
+if [[ "$(uname)" != Darwin ]]; then
+  # Because most Circle executors only have 20 CPUs, using more causes OOMs w/ Ninja and nvcc parallelization
+  MEMORY_LIMIT_MAX_JOBS=18
+  NUM_CPUS=$(( $(nproc) - 2 ))
+
+  # Defaults here for **binary** linux builds so they can be changed in one place
+  export MAX_JOBS=${MAX_JOBS:-$(( ${NUM_CPUS} > ${MEMORY_LIMIT_MAX_JOBS} ? ${MEMORY_LIMIT_MAX_JOBS} : ${NUM_CPUS} ))}
+
+  cat >>"$envfile" <<EOL
+  export MAX_JOBS="${MAX_JOBS}"
+EOL
+fi
 
 if [[ -z "${IS_GHA:-}" ]]; then
   cat >>"$envfile" <<EOL
