@@ -79,9 +79,6 @@ class AutocastTestLists(object):
 
         # The remaining lists organize ops that autocast treats explicitly.
         self.torch_fp16 = [
-            # deprecated _convolution
-            ("_convolution", conv_args_fp32[1] + bias_fp32 + ((1, 1), (0, 0), (1, 1), False,
-                                                              (0, 0), 1, False, True, True)),
             # the current  _convolution
             ("_convolution", conv_args_fp32[1] + bias_fp32 + ((1, 1), (0, 0), (1, 1), False,
                                                               (0, 0), 1, False, True, True, True)),
