@@ -3210,7 +3210,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.gaussian_nll_loss'),
         xfail('nn.functional.poisson_nll_loss'),
         xfail('nn.functional.huber_loss'),
-        xfail('nn.functional.instance_norm'),
         # We can get this to work on CUDA through decomposition,
         # but fails on CPU due to max_pool1d_cpu not having a derivative
         xfail('nn.functional.max_pool1d'),
