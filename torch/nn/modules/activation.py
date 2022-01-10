@@ -713,13 +713,10 @@ class Hardshrink(Module):
 
 
 class LeakyReLU(Module):
-    r"""Applies the element-wise function:
+    r"""Applies the Leaky Rectified Linear Unit function :math:`\text{LeakyReLU}(x)
+    = \max(0, x) + \text{negative\_slope} * \min(0, x)` element-wise.
 
-    .. math::
-        \text{LeakyReLU}(x) = \max(0, x) + \text{negative\_slope} * \min(0, x)
-
-
-    or
+    LeakyReLU is also defined as:
 
     .. math::
         \text{LeakyRELU}(x) =
