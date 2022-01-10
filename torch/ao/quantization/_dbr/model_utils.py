@@ -64,7 +64,8 @@ def pack_weights_for_functionals(
             elif seen_op_info.type == F.linear:
                 # fetch all the info needed for packed params
                 weight = getattr(module, seen_op_info.packable_tensor_idx_to_name[1])
-                bias = getattr(module, seen_op_info.packable_tensor_kwarg_name_to_name['bias'])
+                bias_name = seen_op_info.packable_tensor_kwarg_name_to_name['bias']
+                bias = getattr(module, bias_name) if bias_name else None
 
                 # quantize the weight
                 # TODO: create weight observers from qconfig.weight
@@ -102,10 +103,13 @@ def attach_scale_zp_values_to_model(
     if hasattr(module, '_auto_quant_state'):
         qstate: AutoQuantizationState = module._auto_quant_state  # type: ignore[assignment]
         for tensor_id, observer in qstate.tensor_id_to_observer.items():
-            scale, zp = observer.calculate_qparams()
-            # tensor_id_to_observer is a ModuleDict which has to have string keys
-            # tensor_id_to_scale_zp is a normal dict which can have int keys
-            qstate.tensor_id_to_scale_zp[int(tensor_id)] = (scale, zp)
+            activation_int8_quantized = \
+                observer.dtype in [torch.quint8, torch.qint8]
+            if activation_int8_quantized:
+                scale, zp = observer.calculate_qparams()
+                # tensor_id_to_observer is a ModuleDict which has to have string keys
+                # tensor_id_to_scale_zp is a normal dict which can have int keys
+                qstate.tensor_id_to_scale_zp[int(tensor_id)] = (scale, zp)
         qstate.tensor_id_to_observer.clear()
 
     for _, child in module.named_children():
@@ -127,3 +131,18 @@ def attach_op_convert_info_to_model(
 
     for _, child in module.named_children():
         attach_op_convert_info_to_model(child)
+
+def attach_output_convert_info_to_model(
+    module: torch.nn.Module,
+) -> None:
+    """
+    Calculates the info needed to perform the module outputs hook
+    and attaches it to the parent module. This is done to avoid recalculating
+    these values at inference.
+    """
+    if hasattr(module, '_auto_quant_state'):
+        qstate: AutoQuantizationState = module._auto_quant_state  # type: ignore[assignment]
+        qstate.set_needs_dtype_transform_on_outputs()
+
+    for _, child in module.named_children():
+        attach_output_convert_info_to_model(child)

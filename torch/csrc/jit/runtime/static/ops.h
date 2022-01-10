@@ -121,6 +121,14 @@ inline at::Tensor create_empty_from(
       memory_format);
 }
 
+inline at::Tensor create_empty_from(
+    const at::Tensor& t,
+    c10::ScalarType dtype,
+    c10::MemoryFormat memory_format) {
+  return at::detail::empty_cpu(
+      {0}, dtype, t.layout(), t.device(), c10::nullopt, memory_format);
+}
+
 inline bool checkResizedDataPtr(at::Tensor& t) {
   auto const prev_data_ptr = t.data_ptr();
   t.resize_({0});
