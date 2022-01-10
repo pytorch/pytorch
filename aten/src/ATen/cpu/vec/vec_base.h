@@ -58,8 +58,8 @@
 
 namespace at {
 namespace vec {
-// See Note [Acceptable use of anonymous namespace in header]
-namespace {
+// See Note [CPU_CAPABILITY namespace]
+inline namespace CPU_CAPABILITY {
 // at::Half and at::BFloat16 should be treated as floating point
 template <typename T>
 struct is_floating_point:
@@ -87,7 +87,11 @@ using int_same_size_t = typename int_of_size<sizeof(T)>::type;
 // NOTE: If you specialize on a type, you must define all operations!
 
 // emulates Vectorized types
+#if defined(__s390x__)
+template <class T, class TEMP=void>
+#else
 template <class T>
+#endif
 struct Vectorized {
 private:
   __at_align__ T values[VECTOR_WIDTH / sizeof(T)];

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/passes/pass_manager.h>
 #include <memory>
 
@@ -22,6 +22,8 @@ TORCH_API void FuseTensorExprs(
 
 TORCH_API void setTensorExprFuserEnabled(bool val);
 TORCH_API bool tensorExprFuserEnabled();
+TORCH_API void setTensorExprDynamicShapeFusionEnabled(bool val);
+TORCH_API bool tensorExprDynamicShapeFusionEnabled();
 TORCH_API bool setTexprReductionsEnabled(bool value);
 TORCH_API bool texprReductionsEnabled();
 
@@ -58,7 +60,6 @@ TORCH_API bool usedOnlyInSize(Value* v);
 TORCH_API Value* broadcastSizes(at::ArrayRef<Value*> sizes, AliasDb* db);
 
 namespace tensorexpr {
-TORCH_API const OperatorSet& supported_eltwise_set();
 TORCH_API bool isSupported(Node* node);
 } // namespace tensorexpr
 } // namespace jit

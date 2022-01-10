@@ -4469,6 +4469,14 @@ else:
 
             self.assertEqual(res, expected, atol=0, rtol=0)
 
+    @onlyNativeDeviceTypes
+    def test_scatter_zero_size_index(self, device) -> None:
+        null_index = torch.zeros((0, 4), dtype=torch.int64)
+        null_arr = torch.zeros((0, 4))
+        original = torch.arange(4, dtype=torch.float32)
+        result = original.scatter(0, null_index, null_arr)
+        self.assertEqual(result, original, atol=0, rtol=0)
+
     @onlyCUDA
     def test_sync_warning(self, device):
 
@@ -5609,6 +5617,42 @@ else:
             # not the data
             self.assertEqual(x, y)
 
+    @onlyNativeDeviceTypes
+    def test_copy_math_view(self, device):
+        for dst_dtype, src_dtype in [
+                (torch.float32, torch.float32),
+                (torch.float64, torch.float32),
+                (torch.int64, torch.int32),
+                (torch.complex128, torch.complex64),
+        ]:
+            src = make_tensor((100,), dtype=src_dtype, device=device)
+            dst = torch.empty(100, dtype=dst_dtype, device=device)
+
+            dst.copy_(src)
+            self.assertEqual(dst, src, exact_dtype=False)
+
+            dst.copy_(src._neg_view())
+            self.assertEqual(dst, src.neg(), exact_dtype=False)
+
+            dst._neg_view().copy_(torch._neg_view(src))
+            self.assertEqual(dst, src, exact_dtype=False)
+
+            dst._neg_view().copy_(src)
+            self.assertEqual(dst, src.neg(), exact_dtype=False)
+
+        for dst_dtype, src_dtype in [
+                (torch.complex64, torch.complex64),
+                (torch.complex128, torch.complex64),
+        ]:
+            src = make_tensor((100,), dtype=src_dtype, device=device)
+            dst = torch.empty(100, dtype=dst_dtype, device=device)
+
+            dst.conj().copy_(src)
+            self.assertEqual(dst, src.conj_physical(), exact_dtype=False)
+
+            dst.conj().copy_(src._neg_view())
+            self.assertEqual(dst, src.neg().conj_physical(), exact_dtype=False)
+
     def test_clone_all_dtypes_and_devices(self, device):
         for dt in get_all_dtypes():
             x = torch.tensor((1, 1), dtype=dt, device=device)
@@ -6730,7 +6774,6 @@ else:
         self.unary_check_input_output_mem_overlap(
             doubles, sz, lambda input, out: out.copy_(input))
 
-    @expectedFailureMeta  # RuntimeError not raised
     @onlyNativeDeviceTypes
     def test_index_add_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
@@ -8189,16 +8232,34 @@ else:
         _test_helper(remove_hook=True)
         _test_helper(remove_hook=False)
 
+    # This test should ideally be in test_testing.py,
+    # but since pytorch/xla runs tests from test_torch.py, we have it here.
     @skipXLA
     def test_skip_xla(self, device):
         if self.device_type == 'xla':
             # Should not reach here!
             self.assertTrue(False)
 
+    # This test should ideally be in test_testing.py,
+    # but since pytorch/xla runs tests from test_torch.py, we have it here.
     @expectedFailureXLA
     def test_expected_failure_xla(self, device):
         if self.device_type == 'xla':
             self.assertTrue(False)
+
+    # This test should ideally be in test_testing.py,
+    # but since pytorch/xla runs tests from test_torch.py, we have it here.
+    def test_assertRaisesRegex_ignore_msg_non_native_device(self, device):
+        # Verify that self.assertRaisesRegex only checks the Error and ignores
+        # message for non-native devices.
+        x = torch.randn((10, 3), device=device)
+        t = torch.empty(10, dtype=torch.int64, device=device).random_(0, 3)
+        invalid_weight = torch.randn(4, device=device)
+        msg = "weight tensor should be defined either for all 3 classes or no classes"
+
+        # XLA raises RuntimeError with a different message.
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.nn.functional.nll_loss(x, t, weight=invalid_weight)
 
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.

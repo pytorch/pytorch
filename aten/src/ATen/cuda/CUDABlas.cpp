@@ -136,7 +136,7 @@ C10_EXPORT const char* _cublasGetErrorEnum(cublasStatus_t error) {
 /* LEVEL 3 BLAS FUNCTIONS */
 
 #ifndef USE_ROCM
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11200
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11020
 #define cublasGemmStridedBatchedExFix cublasGemmStridedBatchedEx
 #else
 // Workaround for https://github.com/pytorch/pytorch/issues/45724

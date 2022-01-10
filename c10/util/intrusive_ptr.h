@@ -66,7 +66,7 @@ class C10_API intrusive_ptr_target {
   //      plus one more if refcount > 0
   //    An invariant: refcount > 0  =>  weakcount > 0
   //
-  //  - THStorage stays live as long as there are any strong
+  //  - c10::StorageImpl stays live as long as there are any strong
   //    or weak pointers to it (weakcount > 0, since strong
   //    references count as a +1 to weakcount)
   //
@@ -75,7 +75,7 @@ class C10_API intrusive_ptr_target {
   //  - Once refcount == 0, it can never again be > 0 (the transition
   //    from > 0 to == 0 is monotonic)
   //
-  //  - When you access THStorage via a weak pointer, you must
+  //  - When you access c10::StorageImpl via a weak pointer, you must
   //    atomically increment the use count, if it is greater than 0.
   //    If it is not, you must report that the storage is dead.
   //
@@ -466,6 +466,17 @@ class intrusive_ptr final {
    */
   static intrusive_ptr reclaim(TTarget* owning_ptr) {
     return intrusive_ptr(owning_ptr, raw::DontIncreaseRefcount{});
+  }
+
+  /**
+   * Takes an owning pointer to TTarget* and creates an intrusive_ptr
+   * representing a new reference, i.e. the raw pointer retains
+   * ownership.
+   */
+  static intrusive_ptr reclaim_copy(TTarget* owning_ptr) {
+    auto ret = reclaim(owning_ptr);
+    ret.retain_();
+    return ret;
   }
 
   /**
@@ -920,6 +931,17 @@ class weak_intrusive_ptr final {
              owning_weak_ptr->weakcount_.load() > 0),
         "weak_intrusive_ptr: Can only weak_intrusive_ptr::reclaim() owning pointers that were created using weak_intrusive_ptr::release().");
     return weak_intrusive_ptr(owning_weak_ptr);
+  }
+
+  /**
+   * Takes a pointer to TTarget* (may be weak or strong) and creates a
+   * new weak_intrusive_ptr representing a new weak reference, i.e.
+   * the raw pointer retains ownership.
+   */
+  static weak_intrusive_ptr reclaim_copy(TTarget* owning_ptr) {
+    auto ret = reclaim(owning_ptr);
+    ret.retain_();
+    return ret;
   }
 
   template <class TTarget1, class NullType1, class TTarget2, class NullType2>

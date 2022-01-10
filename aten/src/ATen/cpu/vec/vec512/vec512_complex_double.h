@@ -13,8 +13,8 @@
 
 namespace at {
 namespace vec {
-// See Note [Acceptable use of anonymous namespace in header]
-namespace {
+// See Note [CPU_CAPABILITY namespace]
+inline namespace CPU_CAPABILITY {
 
 #if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
 
@@ -446,7 +446,7 @@ template <> Vectorized<c10::complex<double>> inline operator/(const Vectorized<c
 }
 
 // reciprocal. Implement this here so we can use multiplication.
-Vectorized<c10::complex<double>> Vectorized<c10::complex<double>>::reciprocal() const{
+inline Vectorized<c10::complex<double>> Vectorized<c10::complex<double>>::reciprocal() const{
   //re + im*i = (a + bi)  / (c + di)
   //re = (ac + bd)/abs_2() = c/abs_2()
   //im = (bc - ad)/abs_2() = d/abs_2()
@@ -455,7 +455,7 @@ Vectorized<c10::complex<double>> Vectorized<c10::complex<double>>::reciprocal() 
   return _mm512_div_pd(c_d, abs_2_());
 }
 
-Vectorized<c10::complex<double>> Vectorized<c10::complex<double>>::atan() const {
+inline Vectorized<c10::complex<double>> Vectorized<c10::complex<double>>::atan() const {
   // atan(x) = i/2 * ln((i + z)/(i - z))
   const __m512d i = _mm512_setr_pd(0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0);
   const Vectorized i_half = _mm512_setr_pd(0.0, 0.5, 0.0, 0.5, 0.0, 0.5, 0.0, 0.5);
@@ -514,11 +514,11 @@ Vectorized<c10::complex<double>> inline operator^(const Vectorized<c10::complex<
   return _mm512_xor_pd(a, b);
 }
 
-Vectorized<c10::complex<double>> Vectorized<c10::complex<double>>::eq(const Vectorized<c10::complex<double>>& other) const {
+inline Vectorized<c10::complex<double>> Vectorized<c10::complex<double>>::eq(const Vectorized<c10::complex<double>>& other) const {
   return (*this == other) & Vectorized<c10::complex<double>>(_mm512_set1_pd(1.0));
 }
 
-Vectorized<c10::complex<double>> Vectorized<c10::complex<double>>::ne(const Vectorized<c10::complex<double>>& other) const {
+inline Vectorized<c10::complex<double>> Vectorized<c10::complex<double>>::ne(const Vectorized<c10::complex<double>>& other) const {
   return (*this != other) & Vectorized<c10::complex<double>>(_mm512_set1_pd(1.0));
 }
 

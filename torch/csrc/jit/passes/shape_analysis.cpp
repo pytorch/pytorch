@@ -14,6 +14,13 @@
 
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/core/symbol.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty_strided.h>
+#endif
 
 #include <exception>
 #include <iostream>
@@ -2152,8 +2159,12 @@ TypePtr unshapedTypeImpl(TypePtr type, TypeCache& unshaped_type_cache) {
   if (type->isSubtypeOf(*TensorType::get())) {
     return TensorType::get();
   }
+  at::ArrayRef<TypePtr> contained = type->containedTypes();
+  if (contained.empty()) {
+    return type;
+  }
   std::vector<TypePtr> unshaped_contained_types;
-  for (const auto& contained_type : type->containedTypes()) {
+  for (const auto& contained_type : contained) {
     unshaped_contained_types.push_back(
         getOrCreateUnshapedType(contained_type, unshaped_type_cache));
   }

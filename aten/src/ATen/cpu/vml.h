@@ -39,7 +39,7 @@
 
 namespace at {
 namespace vml {
-namespace {
+inline namespace CPU_CAPABILITY {
 
 using namespace vec;
 

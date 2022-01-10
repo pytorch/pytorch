@@ -10,7 +10,7 @@ TensorView* softmax(TensorView* x, int dim) {
   TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid.");
 
   const int kNumberOfDims =
-      TensorDomain::noReductions(x->getRootDomain()).size();
+      TensorDomain::noReductions(x->getMaybeRFactorDomain()).size();
   const int kReductionAxis = (dim < 0) ? dim + kNumberOfDims : dim;
   TORCH_INTERNAL_ASSERT(kReductionAxis >= 0 && kReductionAxis < kNumberOfDims);
 
@@ -33,7 +33,7 @@ TensorView* softmax_backward(TensorView* dy, TensorView* y, int dim) {
   TORCH_INTERNAL_ASSERT(y != nullptr, "Output is invalid.");
 
   const int kNumberOfDims =
-      TensorDomain::noReductions(y->getRootDomain()).size();
+      TensorDomain::noReductions(y->getMaybeRFactorDomain()).size();
   const int kReductionAxis = (dim < 0) ? dim + kNumberOfDims : dim;
   TORCH_INTERNAL_ASSERT(kReductionAxis >= 0 && kReductionAxis < kNumberOfDims);
 
@@ -76,7 +76,7 @@ ForwardNormResult layer_norm(
   // N = reduction = product of norm_shape = H * W * D
   // weight = bias = norm_shape tensor
   const size_t kNumberOfDims =
-      TensorDomain::noReductions(x->getRootDomain()).size();
+      TensorDomain::noReductions(x->getMaybeRFactorDomain()).size();
   const size_t kOuterNumDims = kNumberOfDims - kNormShapeNumDims;
 
   std::vector<int> outer_reduction_axes(kOuterNumDims);
@@ -143,7 +143,7 @@ BackwardNormResult layer_norm_backward(
   // N = reduction = product of norm_shape = H * W * D
   // weight = bias = norm_shape tensor
   const size_t kNumberOfDims =
-      TensorDomain::noReductions(x->getRootDomain()).size();
+      TensorDomain::noReductions(x->getMaybeRFactorDomain()).size();
   const size_t kNormShapeNumDims = norm_shape.size();
   const size_t kOuterNumDims = kNumberOfDims - kNormShapeNumDims;
 
@@ -237,7 +237,7 @@ ForwardNormResult batch_norm(
   // N = reduction = B * H * W * D
   // weight = bias = (C) tensor
   const size_t kNumberOfDims =
-      TensorDomain::noReductions(x->getRootDomain()).size();
+      TensorDomain::noReductions(x->getMaybeRFactorDomain()).size();
   // channels last format means C dimension is at axis kNumberOfDims-1 at x
   size_t c_axis = channels_last ? kNumberOfDims - 1 : 1;
 
@@ -492,7 +492,7 @@ ForwardNormResult instance_norm(
   const size_t kBatchDim = 0;
   const size_t kChannelsDim = 1;
   const size_t kNumberOfDims =
-      TensorDomain::noReductions(x->getRootDomain()).size();
+      TensorDomain::noReductions(x->getMaybeRFactorDomain()).size();
 
   std::vector<int> x_reduction_axes;
   std::vector<bool> x_broadcast_mask(kNumberOfDims, false);

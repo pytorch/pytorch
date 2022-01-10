@@ -13,6 +13,11 @@ elementwise_ops = [
     ((lambda x, y: x - y), acc_ops.sub),
     # Avoid dividing by 0.
     ((lambda x, y: x / (y + 1.0)), acc_ops.div),
+    ((lambda x, y: x // (y + 1.0)), acc_ops.div),
+    ((lambda x, y: torch.div(x, y + 1.0, rounding_mode="trunc")), acc_ops.div),
+    ((lambda x, y: torch.div(x, y + 1.0, rounding_mode="floor")), acc_ops.div),
+    ((lambda x, y: torch.div(x, y + 1.0)), acc_ops.div),
+    ((lambda x, y: torch.floor_divide(x, y + 1.0)), acc_ops.div),
     ((lambda x, y: x * y), acc_ops.mul),
     (torch.pow, acc_ops.pow),
 ]
@@ -43,7 +48,7 @@ class TestBinaryOpConverters(AccTestCase):
 
             def forward(self, x):
                 x = self.orig_op(x, self.constant)
-                return self.orig_op(x, 1)
+                return self.orig_op(x, -2)
 
         m = TestModule(orig_op)
         inputs = [torch.randn(2, 2)]
