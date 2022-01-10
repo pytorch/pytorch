@@ -743,6 +743,79 @@ linalg_svd_rank_revealing(
   return at::linalg_svd_rank_revealing(input, tol, /*rtol=*/0.0, full_matrices);
 }
 
+std::tuple<Tensor, Tensor, Tensor, Tensor>
+linalg_svd_rank_restricted(
+    const Tensor& input,
+    const c10::optional<Tensor>& atol,
+    const c10::optional<Tensor>& rtol,
+    bool full_matrices) {
+  Tensor U, S, Vh, rank;
+  std::tie(U, S, Vh, rank) = at::linalg_svd_rank_revealing(input, atol, rtol, full_matrices);
+
+  auto U_restricted = at::zeros_like(U);
+  auto S_restricted = at::zeros_like(S);
+  auto Vh_restricted = at::zeros_like(Vh);
+
+  const auto n_batch_dims = input.dim() - 2;
+  const auto m = input.size(-2);
+  const auto n = input.size(-1);
+  const auto k = std::max(m, n);
+  const auto U_dim = U.size(-1);
+  const auto S_len = S.size(-1);
+  const auto V_dim = Vh.size(-2);
+
+  // Find only unique ranks and store them on the CPU
+  // as they are used for the in-CPU indexing.
+  const auto unique_ranks = std::get<0>(at::_unique(
+    rank.device().type() == at::kCUDA ? rank.to(at::kCPU) : rank,
+    /*sorted=*/false
+  ));
+
+  // This tensor is used to store rank-restricting masks
+  auto mask = at::ones({unique_ranks.numel(), k}, input.options().dtype(at::kBool));
+
+  using at::indexing::Slice;
+  using at::indexing::TensorIndex;
+
+  for (const auto i : c10::irange(unique_ranks.numel())) {
+    const auto r = unique_ranks.select(0, i).item<int64_t>();
+    // init a mask by setting elements r:k to zero
+    auto r_mask = mask.select(0, i);
+    r_mask.narrow(-1, r, k - r).zero_();
+
+    // Form an index for matrices of rank r.
+    const auto rank_r_mask = at::where(rank == r);
+    std::vector<TensorIndex> rank_r_indices;
+    // Populate indices of rank r matrices only if
+    // batch dimension is non-empty.
+    if (n_batch_dims) {
+      rank_r_indices = at::native::toVectorOfTensorIndices(rank_r_mask, n_batch_dims + 2);
+    }
+    // It is equivalent to indexing at [rank == r, :]
+    rank_r_indices.push_back(Slice());
+
+    const auto S_rank_r = S.index(rank_r_indices) * r_mask.narrow(-1, 0, S_len);
+    S_restricted.index_put_(rank_r_indices, S_rank_r);
+
+    // Modify rank_r_indices to be able to index matrices.
+    // It is equivalent to indexing at [rank == r, :, :]
+    rank_r_indices.push_back(Slice());
+
+    const auto U_rank_r = U.index(rank_r_indices) * r_mask.narrow(-1, 0, U_dim);
+    U_restricted.index_put_(rank_r_indices, U_rank_r);
+
+    const auto Vh_rank_r = Vh.index(rank_r_indices) * r_mask.narrow(-1, 0, V_dim).unsqueeze(-1);
+    Vh_restricted.index_put_(rank_r_indices, Vh_rank_r);
+  }
+
+  return std::make_tuple(
+      std::move(U_restricted),
+      std::move(S_restricted),
+      std::move(Vh_restricted),
+      std::move(rank)
+  );
+}
+
 // multi_dot helper functions
 namespace {
 

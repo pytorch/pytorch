@@ -1690,6 +1690,9 @@ Examples::
     rank=tensor([0, 0, 0]))
 """)
 
+svd_rank_restricted = _add_docstr(_linalg.linalg_svd_rank_restricted, r"""
+""")
+
 cond = _add_docstr(_linalg.linalg_cond, r"""
 linalg.cond(A, p=None, *, out=None) -> Tensor
 

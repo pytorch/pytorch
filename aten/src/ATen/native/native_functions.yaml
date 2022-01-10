@@ -11031,6 +11031,10 @@
   python_module: linalg
   variants: function
 
+- func: linalg_svd_rank_restricted(Tensor input, *, Tensor? atol=None, Tensor? rtol=None, bool full_matrices=True) -> (Tensor U, Tensor S, Tensor Vh, Tensor rank)
+  python_module: linalg
+  variants: function
+
 - func: linalg_cond(Tensor self, Scalar? p=None) -> Tensor
   python_module: linalg
   variants: function

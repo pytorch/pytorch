@@ -12750,6 +12750,29 @@ op_db: List[OpInfo] = [
                skipCUDAIfRocm,
                skipCPUIfNoLapack,
            ]),
+    OpInfo('linalg.svd_rank_restricted',
+           op=torch.linalg.svd_rank_restricted,
+           aten_name='linalg_svd_rank_restricted',
+           variant_test_name='full_rank',
+           dtypes=floating_and_complex_types(),
+           sample_inputs_func=sample_inputs_linalg_svd,
+           supports_out=False,
+           # Disable as grads are filled in parts which
+           # makes Vmap unhappy because of unavoidable
+           # in-place operations
+           check_batched_grad=False,
+           check_batched_gradgrad=False,
+           decorators=[
+               slowTest,
+               skipCUDAIfNoMagmaAndNoCusolver,
+               skipCUDAIfRocm,
+               skipCPUIfNoLapack,
+           ],
+           skips=(
+               # errors with "leaked XXXX bytes CUDA memory on device 0"
+               # TODO: investigate. Suspect: svd_out, as linalg_pinv is also skipping the very same test and is SVD-based
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', device_type='cuda', dtypes=(torch.float32,)),
+           )),
     OpInfo('linalg.svd_rank_revealing',
            op=torch.linalg.svd_rank_revealing,
            aten_name='linalg_svd_rank_revealing',
