@@ -34,8 +34,7 @@ STD_C_HEADER_MAP = {
     "<wctype.h>": "<cwctype>",
 }
 
-def main():
-
+def main() -> None:
     for line in sys.stdin:
         # Convert all quoted includes to angle brackets
         match = QUOTE_INCLUDE_RE.match(line)
