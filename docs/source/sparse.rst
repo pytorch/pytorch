@@ -314,7 +314,7 @@ acquired using methods :meth:`torch.Tensor.indices()` and
             [2, 0, 2]])
 
   .. See https://github.com/pytorch/pytorch/pull/45695 for a new API.
-  
+
   .. warning::
     Calling :meth:`torch.Tensor._values()` will return a *detached* tensor.
     To track gradients, :meth:`torch.Tensor.coalesce().values()` must be
