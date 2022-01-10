@@ -618,13 +618,15 @@ Tensor& linalg_solve_sparse_csr_out(const Tensor& input, const Tensor& other, Te
   }
 }
 
+// This function is needed for completeness, though we always call the CUDA dispatch
+//  defined in aten/src/ATen/native/sparse/cuda/SparseCsrTensorMath.cu file when given CPU inputs
 void linalg_sparse_csr_kernel_error(
   const Tensor& input,
   const Tensor& other,
   Tensor& result,
   int& singularity
 ) {
-  AT_ERROR("Not implemented for the given backend.");
+  AT_ERROR("Not implemented for the given backend: ", input.device().type());
 }
 
 DEFINE_DISPATCH(linalg_solve_sparse_csr_stub);
