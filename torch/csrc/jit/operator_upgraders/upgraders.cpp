@@ -28,6 +28,11 @@ int UpgradersMap::count() {
   return content_.size();
 }
 
+bool UpgradersMap::is_populated() {
+  std::lock_guard<std::mutex> _(lock);
+  return isPopulated;
+}
+
 const std::unordered_map<std::string, std::shared_ptr<Graph>>& UpgradersMap::
     get_content() {
   std::lock_guard<std::mutex> _(lock);
@@ -58,6 +63,10 @@ void populate_upgraders_map(
 
 int get_upgraders_map_size() {
   return upgradersMap.count();
+}
+
+bool is_upgraders_map_populated() {
+  return upgradersMap.is_populated();
 }
 
 const std::unordered_map<std::string, std::shared_ptr<Graph>>&
