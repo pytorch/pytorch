@@ -19,8 +19,7 @@ using c10::cuda::compat::pow;
 template <typename T>
 __global__ void LpPoolForwardNCHW(
     const int nthreads,
-    const T* bottom_data,
-    const int num,
+    const T *const bottom_data,
     const int channels,
     const int height,
     const int width,
@@ -32,7 +31,7 @@ __global__ void LpPoolForwardNCHW(
     const int stride_w,
     const int pad_t,
     const int pad_l,
-    T* top_data,
+    T *const top_data,
     const T p) {
   CUDA_1D_KERNEL_LOOP(index, nthreads) {
     int n = index;
@@ -64,7 +63,6 @@ template <typename T>
 __global__ void LpPoolForwardNHWC(
     const int nthreads,
     const T* bottom_data,
-    const int num,
     const int height,
     const int width,
     const int channels,
@@ -107,7 +105,6 @@ __global__ void LpPoolBackwardNCHW(
     const T* const top_diff,
     const T* const top_data,
     const T* const bottom_data,
-    const int num,
     const int channels,
     const int height,
     const int width,
@@ -143,8 +140,6 @@ __global__ void LpPoolBackwardNCHW(
         // figure out the pooling size
         int hstart = ph * stride_h - pad_t;
         int wstart = pw * stride_w - pad_l;
-        int hend = min(hstart + kernel_h, height);
-        int wend = min(wstart + kernel_w, width);
         hstart = max(hstart, 0);
         wstart = max(wstart, 0);
         gradient += top_diff_slice[ph * pooled_width + pw] *
@@ -162,7 +157,6 @@ __global__ void LpPoolBackwardNHWC(
     const T* const top_diff,
     const T* const top_data,
     const T* const bottom_data,
-    const int num,
     const int height,
     const int width,
     const int channels,
@@ -195,10 +189,8 @@ __global__ void LpPoolBackwardNHWC(
     for (int ph = phstart; ph < phend; ++ph) {
       for (int pw = pwstart; pw < pwend; ++pw) {
         // figure out the pooling size
-        int hstart = ph * stride_h - pad_t;
-        int wstart = pw * stride_w - pad_l;
-        int hend = min(hstart + kernel_h, height);
-        int wend = min(wstart + kernel_w, width);
+        const int hstart = ph * stride_h - pad_t;
+        const int wstart = pw * stride_w - pad_l;
         hstart = max(hstart, 0);
         wstart = max(wstart, 0);
         gradient += top_diff_slice[(ph * pooled_width + pw) * channels] *
@@ -225,7 +217,6 @@ bool PoolOp<float, CUDAContext, LpPoolFunctor>::RunOnDeviceWithOrderNCHW() {
          context_.cuda_stream()>>>(
           output_size,
           X.data<float>(),
-          X.dim32(0),
           X.dim32(1),
           X.dim32(2),
           X.dim32(3),
@@ -257,7 +248,6 @@ bool PoolOp<float, CUDAContext, LpPoolFunctor>::RunOnDeviceWithOrderNHWC() {
          context_.cuda_stream()>>>(
           output_size,
           X.data<float>(),
-          X.dim32(0),
           X.dim32(1),
           X.dim32(2),
           X.dim32(3),
@@ -295,7 +285,6 @@ bool PoolGradientOp<float, CUDAContext, LpPoolFunctor>::
           dY.data<float>(),
           Y.data<float>(),
           X.data<float>(),
-          X.dim32(0),
           X.dim32(1),
           X.dim32(2),
           X.dim32(3),
@@ -333,7 +322,6 @@ bool PoolGradientOp<float, CUDAContext, LpPoolFunctor>::
           dY.data<float>(),
           Y.data<float>(),
           X.data<float>(),
-          X.dim32(0),
           X.dim32(1),
           X.dim32(2),
           X.dim32(3),
