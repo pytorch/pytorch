@@ -1107,7 +1107,7 @@ class TestTensorCreation(TestCase):
     # errors with UBSAN. These casts are deliberate in PyTorch, however, and
     # NumPy has the same behavior.
     @onlyNativeDeviceTypes
-    @unittest.skipIf(IS_MACOS or IS_JETSON, 
+    @unittest.skipIf(IS_MACOS or IS_JETSON,
                      "Test is broken on MacOS & Jetsons, see https://github.com/pytorch/pytorch/issues/38752")
     @unittest.skipIf(IS_PPC, "Test is broken on PowerPC, see https://github.com/pytorch/pytorch/issues/39671")
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
