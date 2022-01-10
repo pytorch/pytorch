@@ -2539,6 +2539,11 @@
     CUDA: layer_norm_cuda
     CompositeImplicitAutograd: math_native_layer_norm
 
+- func: native_multi_head_self_attention(Tensor query, Tensor qkv_weight, Tensor qkv_bias, Tensor proj_weight, Tensor proj_bias, Tensor? mask=None) -> Tensor
+  dispatch:
+    CPU: multi_head_self_attention_cpu
+    CUDA: multi_head_self_attention_cuda
+
 - func: native_layer_norm_backward(Tensor grad_out, Tensor input, int[] normalized_shape, Tensor mean, Tensor rstd, Tensor? weight, Tensor? bias, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   dispatch:
     CPU: layer_norm_backward_cpu

@@ -1,15 +1,15 @@
 import logging
-import unittest as ut
 
 import torch.fx as fx
 import torch.fx.experimental.fx2trt.passes.remove_duplicate_output_args as dedup
 import torch.nn as nn
+from torch.testing._internal.common_utils import TestCase, run_tests
 
 
 _LOGGER = logging.getLogger(__name__)
 
 
-class TestFx2TrtPasses(ut.TestCase):
+class TestFx2TrtPasses(TestCase):
     def test_remove_duplicate_output_args(self):
         class Sub(nn.Module):
             def forward(self, x):
@@ -65,3 +65,6 @@ graph():
         assert (
             ttop_a_graph_expected == ttop_a_graph_actual
         ), f"Unexpected ttop.a graph: {ttop_a_graph_actual}"
+
+if __name__ == '__main__':
+    run_tests()
