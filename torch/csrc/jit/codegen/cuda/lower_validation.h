@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 
@@ -29,11 +29,6 @@ void validateParallelize(Fusion* fusion);
 //! extent. This function makes sure all tensors have all values
 //! calculated that are necessary for output values.
 void validatePartialSplit(Fusion* fusion);
-
-//! If a tensor depends on multiple grid reduction outputs, it may not
-//! be computed at all unless a single thread block happens hold the
-//! valid outputs of all producer tensors.
-void validateThreadPredicates(Fusion* fusion);
 
 } // namespace cuda
 } // namespace fuser

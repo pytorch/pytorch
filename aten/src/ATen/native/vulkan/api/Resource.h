@@ -337,7 +337,7 @@ struct Resource final {
   } pool;
 
   explicit Resource(const GPU& gpu)
-    : pool(gpu, Pool::Policy::linear()) {
+    : pool(gpu, nullptr) {
   }
 };
 

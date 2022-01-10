@@ -1144,7 +1144,7 @@ class TestFusedObsFakeQuantModule(TestCase):
         qconfigs = [torch.ao.quantization.default_embedding_qat_qconfig,
                     torch.ao.quantization.default_embedding_qat_qconfig_4bit]
         for qconfig in qconfigs:
-            model = Model()
+            model = Model().train()
             indices = torch.randint(0, 10, (5, 12))
 
             model.qconfig = qconfig
@@ -1160,6 +1160,11 @@ class TestFusedObsFakeQuantModule(TestCase):
             self.assertEqual(count_fake_quant, 2)
 
             quant_model(indices)
+
+            # Ensure that EmbeddingBags have float zero_point values
+            self.assertEqual(quant_model.emb1.weight_fake_quant.zero_point.dtype, torch.float32)
+            self.assertEqual(quant_model.emb2.weight_fake_quant.zero_point.dtype, torch.float32)
+
             inference_gm = convert(quant_model.eval().cpu(),
                                    mapping=get_embedding_static_quant_module_mappings())
 
@@ -1190,6 +1195,7 @@ class TestFusedObsFakeQuantModule(TestCase):
                 self.assertEqual(count_activation_postproc, 3)
 
                 self.assertEqual(type(quant_model.emb.weight_fake_quant), FakeQuantize)
+                self.assertEqual(quant_model.emb.weight_fake_quant.zero_point.dtype, torch.float32)
                 self.assertEqual(type(quant_model.emb.activation_post_process), NoopObserver)
                 self.assertEqual(type(quant_model.linear.weight_fake_quant), FusedMovingAvgObsFakeQuantize)
                 self.assertEqual(type(quant_model.linear.activation_post_process), FusedMovingAvgObsFakeQuantize)
