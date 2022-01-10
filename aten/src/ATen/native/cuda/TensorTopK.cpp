@@ -39,10 +39,10 @@ TORCH_IMPL_FUNC(topk_out_cuda)
 
   dim = at::maybe_wrap_dim(dim, self);
 
-  if (should_use_sort(self, dim)) {
-    topk_out_with_sort(self, k, dim, largest, values, indices);
-    return;
-  }
+  // if (should_use_sort(self, dim)) {
+  //   topk_out_with_sort(self, k, dim, largest, values, indices);
+  //   return;
+  // }
 
   // If k is 0 the result is an empty tensor, so we don't need to launch a kernel.
   if (k == 0) {
