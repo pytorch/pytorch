@@ -209,11 +209,9 @@ struct AliasDb::WriteRegistry {
 
 AliasDb::AliasDb(
     std::shared_ptr<Graph> graph,
-    bool isFrozen,
-    bool enablePreciseTupleContainerAnalysis)
+    bool isFrozen)
     : graph_(std::move(graph)),
       isFrozen_(isFrozen),
-      enablePreciseTupleContainerAnalysis_(enablePreciseTupleContainerAnalysis),
       memoryDAGBuilder_(std::make_unique<MemoryDAGBuilder>()),
       writeRegistry_(std::make_unique<AliasDb::WriteRegistry>()) {
   analyze(graph_);
@@ -1145,13 +1143,15 @@ bool AliasDb::functionalNonEscapingListUse(const Use& use) const {
 }
 
 bool AliasDb::functionalNonEscapingTupleUse(const Use& use) const {
-  if (!enablePreciseTupleContainerAnalysis_) {
-    return false;
-  }
   Node* n = use.user;
   size_t offset = use.offset;
   Value* container = n->inputs().at(offset);
   if (!container->type()->cast<TupleType>()) {
+    return false;
+  }
+  // if this in a subgraph, then the list may have more
+  // uses in enclosing graph and the elements may escape
+  if (use.user->owningGraph() != graph_.get()) {
     return false;
   }
   // TODO(T97387453): Cover more ops that do not let escape tuples' elements.

@@ -45,8 +45,7 @@ class AliasDb {
  public:
   TORCH_API explicit AliasDb(
       std::shared_ptr<Graph> graphi,
-      bool isFrozen = false,
-      bool enablePreciseTupleContainerAnalysis = false);
+      bool isFrozen = false);
   TORCH_API ~AliasDb();
 
   // There are limitations to what effects the alias analysis can track. Two
