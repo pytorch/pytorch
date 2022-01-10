@@ -68,12 +68,20 @@ def get_exhaustive_batched_inputs(arg_values, kwarg_values, batch_size=3, bdims=
             # Batch norm is unique because the running_mean and running_var are updated in place.
             # Therefore, they cannot be unbatched if the input is batched. The case where both are
             # unbatched is added at the end
-            assert len(flat_args) >= 3  # batch_norm requires all 3 positional arguments
-            add_batch_choices(flat_args[0])  # input can be batched or unbatched
-            batch_choices.append((add_batch_dim(flat_args[1], bdim, batch_size),))  # running_mean must be batched
-            batch_choices.append((add_batch_dim(flat_args[2], bdim, batch_size),))  # running_var must be batched
-            orig_flat_args = flat_args
-            flat_args = flat_args[3:]
+            if len(flat_args) >= 3:
+                add_batch_choices(flat_args[0])  # input can be batched or unbatched
+                batch_choices.append((add_batch_dim(flat_args[1], bdim, batch_size),))  # running_mean must be batched
+                batch_choices.append((add_batch_dim(flat_args[2], bdim, batch_size),))  # running_var must be batched
+                orig_flat_args = flat_args
+                flat_args = orig_flat_args[3:]
+            else:
+                # TODO: None defaults in instance norm create empty tensors that are written to and mean that we must
+                # have unbatched inputs. None in the running mean/running var shouldn't make a tensor
+                batch_choices.append(((flat_args[0], None),))  # input must be unbatched
+                if len(flat_args) == 2:
+                    batch_choices.append((add_batch_dim(flat_args[1], bdim, batch_size),))
+                orig_flat_args = flat_args
+                flat_args = []
 
         for arg in flat_args:
             add_batch_choices(arg)
@@ -86,11 +94,12 @@ def get_exhaustive_batched_inputs(arg_values, kwarg_values, batch_size=3, bdims=
 
             yield pytree.tree_unflatten(batched_args, arg_spec), pytree.tree_unflatten(in_dims, arg_spec), kwarg_values
 
-        if for_batch_norm:
+        if for_batch_norm and len(orig_flat_args) >= 2:
             # Adds the case where input, running_mean, and running_var are all unbatched
             batch_choices[0] = ((orig_flat_args[0], None),)
             batch_choices[1] = ((orig_flat_args[1], None),)
-            batch_choices[2] = ((orig_flat_args[2], None),)
+            if len(orig_flat_args) >= 3:
+                batch_choices[2] = ((orig_flat_args[2], None),)
             for batched_values in itertools.product(*batch_choices):
                 batched_args, in_dims = zip(*batched_values)
 
@@ -111,7 +120,8 @@ def get_fallback_and_vmap_exhaustive(op, arg_values, kwarg_values, opinfo=None, 
     out_dim = 0
     batch_size = 4
     generator = get_exhaustive_batched_inputs(arg_values, kwarg_values, batch_size, bdims=bdims)
-    if opinfo is not None and opinfo.name == "nn.functional.batch_norm":
+    batch_norm_fns = ("nn.functional.batch_norm", "nn.functional.instance_norm")  # instance norm calls batch norm
+    if opinfo is not None and opinfo.name in batch_norm_fns:
         generator = get_exhaustive_batched_inputs_for_batch_norm(arg_values, kwarg_values, batch_size, bdims=bdims)
     for batched_args, in_dims, kwarg_values in generator:
         if compute_loop_out:
