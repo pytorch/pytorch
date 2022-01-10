@@ -771,16 +771,17 @@ linalg_svd_rank_restricted(
     /*sorted=*/false
   ));
 
-  // This tensor is used to store rank-restricting masks
-  auto mask = at::ones({unique_ranks.numel(), k}, input.options().dtype(at::kBool));
-
   using at::indexing::Slice;
   using at::indexing::TensorIndex;
 
   for (const auto i : c10::irange(unique_ranks.numel())) {
     const auto r = unique_ranks.select(0, i).item<int64_t>();
     // init a mask by setting elements r:k to zero
-    auto r_mask = mask.select(0, i);
+    // NOTE: for performance reasons it would make sense to store these masks
+    // in a single tensor. However, a view + zero_ on a buffer breaks CompositeCompliance tests.
+    // TODO: fix that once and if things with the autograd composite compliance become
+    // more flexible.
+    auto r_mask = at::ones({unique_ranks.numel(), k}, input.options().dtype(at::kBool));
     r_mask.narrow(-1, r, k - r).zero_();
 
     // Form an index for matrices of rank r.
