@@ -592,6 +592,17 @@ class PackageExporter:
                     module, field = arg.split(" ")
                     if module not in all_dependencies:
                         all_dependencies.append(module)
+                    for pattern, pattern_info in self.patterns.items():
+                        if pattern.matches(module):
+                            if pattern_info.action == _ModuleProviderAction.MOCK:
+                                raise NotImplementedError(
+                                    f"Object '{field}' from module {module} was mocked out during packaging "
+                                    f"but is being used in resource - {resource} in package {package}. "
+                                    "If this error is happening during 'save_pickle', please ensure that your "
+                                    "pickled object doesn't contain any mocked objects."
+                                )
+                            else:
+                                break
 
             for module_name in all_dependencies:
                 self.dependency_graph.add_edge(name_in_dependency_graph, module_name)
