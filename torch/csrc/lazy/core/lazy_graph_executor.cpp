@@ -1,6 +1,8 @@
 #include <torch/csrc/lazy/core/lazy_graph_executor.h>
 
+#include <ATen/ScalarOps.h>
 #include <c10/util/Logging.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/lazy/core/config.h>
 #include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
 #include <torch/csrc/lazy/core/ir_dump_util.h>
@@ -16,8 +18,6 @@
 #include <torch/csrc/lazy/ts_backend/ops/device_data.h>
 #include <torch/csrc/lazy/ts_backend/ops/expand.h>
 #include <torch/csrc/lazy/ts_backend/ops/scalar.h>
-
-#include <ATen/ScalarOps.h>
 
 namespace torch {
 namespace lazy {
@@ -527,6 +527,16 @@ Value LazyGraphExecutor::GetDeviceDataIrValue(
   return MakeNode<DeviceData>(std::move(data));
 }
 
+Value LazyGraphExecutor::GetIrValueForScalarFromCodegen(const at::Scalar& value) {
+  if (IsSpecialScalar(value)) {
+    return MakeNode<Scalar>(value, value.type());
+  }
+  auto cpu_device = getBackend()->GetBackendDevice(c10::Device(c10::kCPU, 0));
+  BackendDataPtr data = getBackend()->MakeComputationDataFromScalar(value, cpu_device);
+  data->SetInfo(std::make_shared<DeviceDataInfo>(/*tensor_id=*/-1, /*read_only=*/true));
+  return MakeNode<DeviceData>(std::move(data));
+}
+
 Value LazyGraphExecutor::GetIrValueForScalar(
     const at::Scalar& value,
     c10::ScalarType type,
@@ -534,7 +544,7 @@ Value LazyGraphExecutor::GetIrValueForScalar(
   if (IsSpecialScalar(value)) {
     return MakeNode<Scalar>(value, type);
   }
-  return GetDeviceDataIrValue(value, type, device);
+  return GetDeviceDataIrValue(value, type, getBackend()->GetBackendDevice(c10::Device(c10::kCPU, 0)));
 }
 
 Value LazyGraphExecutor::GetIrValueForScalar(
@@ -543,26 +553,18 @@ Value LazyGraphExecutor::GetIrValueForScalar(
   return GetIrValueForScalar(value, value.type(), device);
 }
 
-Value LazyGraphExecutor::GetIrValueForScalar(
-    const at::Scalar& value,
-    c10::ScalarType type,
-    c10::ArrayRef<int64_t> dimensions,
+Value LazyGraphExecutor::GetIrValueForExpandedScalar(
+    const at::Scalar& value, const Shape& shape,
     const BackendDevice& device) {
+  c10::ArrayRef<int64_t> dimensions = shape.sizes();
+  auto type = shape.scalar_type();
   Value ir_value = GetIrValueForScalar(value, type, device);
   if (!dimensions.empty()) {
-    ir_value = MakeNode<Expand>(
-        ir_value,
-        dimensions.vec(),
-        /*is_scalar_expand=*/true);
+      ir_value = MakeNode<Expand>(
+          ir_value, dimensions.vec(),
+          /*is_scalar_expand=*/true);
   }
   return ir_value;
-}
-
-Value LazyGraphExecutor::GetIrValueForScalar(
-    const at::Scalar& value,
-    const Shape& shape,
-    const BackendDevice& device) {
-  return GetIrValueForScalar(value, shape.scalar_type(), shape.sizes(), device);
 }
 
 LazyGraphExecutor::Async::Async(
@@ -631,7 +633,7 @@ LazyGraphExecutor::SyncTensorCollection LazyGraphExecutor::CollectSyncTensors(
         DeviceLockerArena::Get()->LockDevices(unique_device.AsSet());
   }
   VLOG(4) << "Waiting on device barrier for device " << coll.device << " done!";
-  for (size_t i = 0; i < tensors.size(); ++i) {
+  for (const auto i : c10::irange(tensors.size())) {
     if (tensor_ids.insert(tensors[i].GetUniqueId()).second &&
         tensors[i].CurrentDataHandle() == nullptr) {
       Value ir_value = tensors[i].CurrentIrValue();
@@ -656,7 +658,7 @@ LazyGraphExecutor::SyncTensorCollection LazyGraphExecutor::CollectSyncTensors(
     TORCH_LAZY_COUNTER("SyncTensorsToData", at_tensors.size());
     std::vector<BackendDataPtr> handles =
         CreateTensorsData(at_tensors, devices);
-    for (size_t i = 0; i < handles.size(); ++i) {
+    for (const auto i : c10::irange(handles.size())) {
       // If we are here, it means that the IR Value for the tensor is not
       // present. Also, we uploaded the at::Tensor data to the device, but such
       // data is still valid so we leave it live on the lazy tensor (so that a
@@ -849,7 +851,7 @@ void LazyGraphExecutor::BuildInputOutputAliases(
     c10::ArrayRef<size_t> indices,
     LoweringContext* lowering_ctx) {
   std::unordered_map<int64_t, size_t> output_tensor_id_map;
-  for (size_t i = 0; i < indices.size(); ++i) {
+  for (const auto i : c10::irange(indices.size())) {
     size_t tensor_index = indices[i];
     int64_t tensor_id = tensors[tensor_index].GetUniqueId();
     output_tensor_id_map[tensor_id] = i;
@@ -857,7 +859,7 @@ void LazyGraphExecutor::BuildInputOutputAliases(
   const std::vector<BackendDataPtr>& parameters_data =
       lowering_ctx->GetParametersData();
   std::vector<ssize_t> alias_map(indices.size(), -1);
-  for (size_t i = 0; i < parameters_data.size(); ++i) {
+  for (const auto i : c10::irange(parameters_data.size())) {
     DeviceDataInfo* data_info =
         dynamic_cast<DeviceDataInfo*>(parameters_data[i]->info());
     if (data_info != nullptr && !data_info->read_only) {
@@ -945,7 +947,7 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::
       VLOG(3) << "Executing IR graph hash " << HashToString(hash)
               << " on device " << async->device << " done!";
 
-      for (size_t i = 0; i < results.size(); ++i) {
+      for (const auto i : c10::irange(results.size())) {
         if (async->tensors_data[i] != nullptr) {
           async->tensors_data[i]->Assign(*results[i]);
         } else {
@@ -1023,7 +1025,7 @@ std::vector<at::Tensor> LazyGraphExecutor::FetchTensors(
   size_t literals_index = 0;
   size_t sync_index = 0;
   results.reserve(tensors->size());
-  for (size_t i = 0; i < tensors->size(); ++i) {
+  for (const auto i : c10::irange(tensors->size())) {
     if (indices != nullptr && sync_index < indices->size() &&
         i == (*indices)[sync_index]) {
       results.push_back(getBackend()->MakeTensorFromComputationData(
@@ -1052,7 +1054,7 @@ std::vector<BackendDataPtr> LazyGraphExecutor::GatherTensorsData(
   std::vector<BackendDataPtr> result_tensors_data;
   std::unordered_map<int64_t, size_t> uid_index_map;
   size_t indices_index = 0;
-  for (size_t i = 0; i < tensors.size(); ++i) {
+  for (const auto i : c10::irange(tensors.size())) {
     int64_t tensor_id = tensors[i].GetUniqueId();
     auto it = uid_index_map.find(tensor_id);
     if (it != uid_index_map.end()) {
