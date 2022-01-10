@@ -368,13 +368,13 @@ Tensor lu_backward_base(
   const Tensor& L,
   const Tensor& U
 );
-Tensor _lu_with_info_backward(
+Tensor lu_factor_ex_backward(
   const Tensor& grad,
   const Tensor& self,
   const Tensor& LU,
   const Tensor& pivs
 );
-Tensor _lu_with_info_jvp(
+Tensor lu_factor_ex_jvp(
   const Tensor& dX,
   const Tensor& LU,
   const Tensor& pivs
