@@ -195,6 +195,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE(hstack);
   OP_DECOMPOSE(index_select_backward);
   OP_DECOMPOSE(inner);
+  OP_DECOMPOSE(instance_norm);
   OP_DECOMPOSE(kron);
   OP_DECOMPOSE(layer_norm);
   OP_DECOMPOSE2(ldexp, Tensor);
