@@ -261,6 +261,11 @@ Tensor empty_like(
           .merge_in(options_)
           .merge_memory_format(optional_memory_format);
 
+  TORCH_CHECK(
+      !(options.layout() != kStrided &&
+          optional_memory_format.has_value()),
+      "memory format option is only supported by strided tensors");
+
   auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Preserve);
 
   if (self.is_quantized()) {
