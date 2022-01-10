@@ -407,8 +407,7 @@ def build_deps():
 
 # the list of runtime dependencies required by this built package
 install_requires = [
-    'typing_extensions',
-    'dataclasses; python_version < "3.7"'
+    'typing_extensions'
 ]
 
 missing_pydep = '''
