@@ -7,6 +7,7 @@ from torch.testing._internal.common_fx2trt import AccTestCase
 from parameterized import param, parameterized
 import unittest
 import tensorrt as trt
+from torch.testing._internal.common_utils import run_tests
 
 
 class TestPadConverter(AccTestCase):
@@ -67,3 +68,6 @@ class TestPadConverter(AccTestCase):
             inputs,
             expected_ops={acc_ops.pad},
         )
+
+if __name__ == '__main__':
+    run_tests()

@@ -299,14 +299,10 @@ DynamicType::Ptr IValue::TagType<c10::DynamicType>::get(const c10::IValue& v) {
       return DynamicTypeTrait<StringType>::getBaseType();
     case Tag::GenericDict: {
       auto d = v.toGenericDict();
-      return std::make_shared<DynamicType>(
-          DynamicType::Tag::Dict,
-          DynamicType::Arguments({d.keyType(), d.valueType()}));
+      return DynamicTypeFactory::create<DictType>(d.keyType(), d.valueType());
     }
     case Tag::GenericList:
-      return std::make_shared<DynamicType>(
-          DynamicType::Tag::List,
-          DynamicType::Arguments{v.toList().elementType()});
+      return DynamicTypeFactory::create<ListType>(v.toList().elementType());
     case Tag::Device:
       return DynamicTypeTrait<DeviceObjType>::getBaseType();
     case Tag::Stream:
