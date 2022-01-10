@@ -12390,7 +12390,8 @@ op_db: List[OpInfo] = [
                    skips=(
                        # Reference: https://github.com/pytorch/pytorch/issues/66402
                        DecorateInfo(unittest.expectedFailure, "TestUnaryUfuncs", "test_reference_numerics_hard",
-                                    device_type='cpu', dtypes=(torch.complex64,), active_if=not (IS_JETSON or IS_MACOS or IS_WINDOWS)),
+                                    device_type='cpu', dtypes=(torch.complex64,),
+                                    active_if=not (IS_JETSON or IS_MACOS or IS_WINDOWS)),
                    )),
     UnaryUfuncInfo('isinf',
                    ref=np.isinf,
