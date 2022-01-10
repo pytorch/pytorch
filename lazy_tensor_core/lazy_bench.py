@@ -648,7 +648,7 @@ if __name__ == "__main__" :
                             continue
 
                         lazy_overhead_experiment(args, results, benchmark, lazy_benchmark)
-                        lazy_compute_experiment(args, f"amortized {args.inner_loop_repeat}x", results, benchmark, lazy_benchmark)
+                        # lazy_compute_experiment(args, f"amortized {args.inner_loop_repeat}x", results, benchmark, lazy_benchmark)
                         lazy_compute_experiment(args, "unamortized", results, benchmark, lazy_benchmark, sync_every_iter=True)
 
         except Exception as e:
