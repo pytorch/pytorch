@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/autograd/cpp_hook.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/autograd/custom_function.h>
@@ -22,7 +23,7 @@ CppFunctionPreHook::CppFunctionPreHook(const std::shared_ptr<hooks_list> &hooks,
 
 variable_list CppFunctionPreHook::operator()(const variable_list& values) {
   auto value = values[value_idx_];
-  for (unsigned i = 0; i < hooks_->size(); ++i) {
+  for (const auto i : c10::irange(hooks_->size())) {
     auto &hook = (*hooks_)[i];
     if (!hook) {
       // hook was removed
