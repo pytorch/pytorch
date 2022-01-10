@@ -3,6 +3,9 @@ def define_targets(rules):
         name = "CPUAllocator",
         srcs = ["CPUAllocator.cpp"],
         hdrs = ["CPUAllocator.h"],
+        # This library defines a flag, The use of alwayslink keeps it
+        # from being stripped.
+        alwayslink = True,
         linkstatic = True,
         local_defines = ["C10_BUILD_MAIN_LIB"],
         visibility = ["//visibility:public"],
