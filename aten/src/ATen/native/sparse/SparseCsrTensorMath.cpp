@@ -588,7 +588,7 @@ TORCH_IMPL_FUNC(_convert_indices_from_csr_to_coo_structured_cpu) (
 }
 
 Tensor& linalg_solve_sparse_csr_out(const Tensor& input, const Tensor& other, Tensor& result) {
-  if (at::globalContext().hasCUDA()) { 
+  if (at::globalContext().hasCUDA()) {
     TORCH_INTERNAL_ASSERT(input.is_sparse_csr());
 
     other.expect_contiguous();

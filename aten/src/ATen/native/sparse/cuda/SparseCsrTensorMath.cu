@@ -116,11 +116,11 @@ void _apply_sparse_csr_lu_solve(
   const int *crow_indices_data_ptr = crow_indices.data_ptr<int>();
   auto col_indices = input.col_indices().to(kInt);
   const int *col_indices_data_ptr = col_indices.data_ptr<int>();
-  auto handle = at::cuda::getCurrentCUDASolverSpHandle(); 
+  auto handle = at::cuda::getCurrentCUDASolverSpHandle();
   auto descrA = at::cuda::sparse::CuSparseMatDescriptor();
 
   const scalar_t *b = other.data_ptr<scalar_t>();
-  int n = crow_indices.numel() - 1; 
+  int n = crow_indices.numel() - 1;
   int nnzA = input._nnz();
   value_t tol = 0.0;
   // default reordering of symrcm
