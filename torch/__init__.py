@@ -750,10 +750,6 @@ for name in dir(_C._VariableFunctions):
 # needs to be after the above ATen bindings so we can overwrite from Python side
 from .functional import *  # noqa: F403
 
-# torch.poisson_nll_loss only preserved for backwards compatibility,
-# should be invoked with torch.nn.functional.poisson_nll_loss
-from ._C._nn import poisson_nll_loss 
-
 
 ################################################################################
 # Remove unnecessary members
