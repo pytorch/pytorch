@@ -1391,6 +1391,13 @@ void initJITBindings(PyObject* module) {
             return self.isBackwardCompatibleWith(old_schema);
           })
       .def(
+          "check_forward_compatible_with",
+          [](const FunctionSchema& self, const FunctionSchema& old_schema) {
+            std::ostringstream out;
+            auto result = self.isForwardCompatibleWith(old_schema, out);
+            return std::make_pair(result, out.str());
+          })
+      .def(
           "__eq__",
           [](const FunctionSchema& self, const FunctionSchema& other) {
             return self == other;
