@@ -119,9 +119,8 @@ class InverseWishart(ExponentialFamily):
         new = self._get_checked_instance(InverseWishart, _instance)
         batch_shape = torch.Size(batch_shape)
         cov_shape = batch_shape + self.event_shape
-        df_shape = batch_shape
         new._unbroadcasted_scale_tril = self._unbroadcasted_scale_tril.expand(cov_shape)
-        new.df = self.df.expand(df_shape)
+        new.df = self.df.expand(batch_shape)
 
         new._batch_dims = [-(x + 1) for x in range(len(batch_shape))]
 
@@ -183,7 +182,7 @@ class InverseWishart(ExponentialFamily):
         p = self._event_shape[-1]  # has singleton shape
         V = self.covariance_matrix  # has shape (batch_shape x event_shape)
         diag_V = V.diagonal(dim1=-2, dim2=-1)
-        eff_df = (nu - p).expand(self._batch_shape + (1, 1))
+        eff_df = (nu - p).view(self._batch_shape + (1, 1))
 
         return (
             (eff_df + 1) * V.pow(2)
