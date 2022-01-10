@@ -114,6 +114,20 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     TORCH_CHECK(self__sizes[1] == mat2_sizes[1], "self_ dim 1 must match mat2 dim 1");
   }
 
+  TORCH_CHECK(!result._is_zerotensor(), "ZeroTensors are immutable. Please use the materialized zero tensor ",
+                    "obtained using .clone() if you want a mutable tensor.");
+  if (mat1._is_zerotensor() || mat2._is_zerotensor()) {
+    return at::mul_out(
+        result,
+        self,
+        at::native::scalar_tensor(
+            beta,
+            self.scalar_type(),
+            c10::nullopt /* layout */,
+            at::kCPU,
+            c10::nullopt /* pin_memory */));
+  }
+
   if (&result != &self) {
     at::native::resize_output(result, self__sizes);
     if (beta.toComplexDouble() != 0.0) {
@@ -357,6 +371,10 @@ Tensor dot_cuda(const Tensor& self, const Tensor& other) {
     incy = 1;
   }
 
+if (self._is_zerotensor() || other._is_zerotensor()) {
+  return at::zeros({}, self.options());
+}
+
 return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
       self.scalar_type(), "dot",
@@ -402,6 +420,10 @@ Tensor vdot_cuda(const Tensor& self, const Tensor& other) {
   if (n == 1) {
     incx = 1;
     incy = 1;
+  }
+
+  if (self._is_zerotensor() || other._is_zerotensor()) {
+    return at::zeros({}, self.options());
   }
 
   return AT_DISPATCH_COMPLEX_TYPES(self.scalar_type(), "vdot", [&] {
