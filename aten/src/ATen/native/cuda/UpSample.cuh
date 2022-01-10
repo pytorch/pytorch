@@ -331,44 +331,10 @@ __device__ __forceinline__ static void _compute_weights(
   }
 }
 
-template <typename scalar_t, typename accscalar_t, typename filter_fn_t>
-__device__ __forceinline__ static void _compute_weights_old(
-    const int i,
-    const int input_size,
-    const accscalar_t scale,
-    const accscalar_t support,
-    scalar_t* wt_ptr,
-    int interp_size,
-    filter_fn_t filter_fn,
-    int& xmin,
-    int& xsize) {
-  accscalar_t invscale = (scale >= 1.0) ? 1.0 / scale : 1.0;
-  accscalar_t center = scale * (i + 0.5);
-  xmin = max(
-      static_cast<int>(center - support + 0.5), static_cast<int>(0));
-  xsize = min(static_cast<int>(center + support + 0.5), input_size) - xmin;
-
-  accscalar_t total_w = 0.0;
-  int j = 0;
-  for (j = 0; j < xsize; j++) {
-    accscalar_t w = filter_fn((j + xmin - center + 0.5) * invscale);
-    wt_ptr[j] = static_cast<scalar_t>(w);
-    total_w += w;
-  }
-  for (j = 0; j < xsize; j++) {
-    if (total_w != 0.0) {
-      wt_ptr[j] /= total_w;
-    }
-  }
-  for (; j < interp_size; j++) {
-    wt_ptr[j] = static_cast<scalar_t>(0.0);
-  }
-}
-
 template <typename scalar_t, typename accscalar_t>
 __device__ __forceinline__ static accscalar_t interpolate_aa_single_dim(
-    scalar_t* src,
-    scalar_t* weights,
+    const scalar_t* src,
+    const scalar_t* weights,
     int size) {
   scalar_t t = static_cast<accscalar_t>(*src);
   scalar_t wts = static_cast<accscalar_t>(weights[0]);

@@ -538,19 +538,14 @@ __global__ void upsample_gen2d_aa_out_frame(
 
   __syncthreads();
 
-  scalar_t buffer1[256];
   scalar_t buffer2[256];
+  const scalar_t * buffer1;
 
   for (int n = 0; n < batchsize; n++) {
     for (int c = 0; c < channels; c++) {
       // interpolate on y-axis for ymin to ymin + ysize
       for (int y = 0; y < ysize; y++) {
-        // copy data into the local buffer and use
-        // interpolate_aa_single_dim method
-        for (int x = 0; x < xsize; x++) {
-          buffer1[x] = idata[n][c][ymin + y][xmin + x];
-        }
-
+        buffer1 = &(idata[n][c][ymin + y][xmin]);
         buffer2[y] = static_cast<scalar_t>(
             upsample_antialias::interpolate_aa_single_dim<scalar_t, accscalar_t>(
                 buffer1, wx, xsize));
@@ -724,12 +719,12 @@ static void upsample_gen2d_aa_out_cuda_template(
 
         // We are using local buffer memory of 256 * sizeof(float) per thread
         // to store weights
-        // TORCH_CHECK(
-        //     height_scale < (255 / interp_size),
-        //     "Max supported scale factor is 127 (bilinear), 63 (bicubic)");
-        // TORCH_CHECK(
-        //     width_scale < (255 / interp_size),
-        //     "Max supported scale factor is 127 (bilinear), 63 (bicubic)");
+        TORCH_CHECK(
+            height_scale < (255 / interp_size),
+            "Max supported scale factor is 127 (bilinear), 63 (bicubic)");
+        TORCH_CHECK(
+            width_scale < (255 / interp_size),
+            "Max supported scale factor is 127 (bilinear), 63 (bicubic)");
 
         size_t weights_per_block =
             (size_t) (width_scale * interp_size + 3) * block_x + (size_t)(height_scale * interp_size + 3) * block_y;
