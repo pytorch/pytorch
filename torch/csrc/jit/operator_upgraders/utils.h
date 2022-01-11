@@ -30,5 +30,9 @@ TORCH_API bool isOpSymbolCurrent(
     const std::string& name,
     size_t current_version);
 
+TORCH_API std::vector<std::string> loadPossibleHistoricOps(
+    const std::string& name,
+    c10::optional<size_t> version);
+
 } // namespace jit
 } // namespace torch

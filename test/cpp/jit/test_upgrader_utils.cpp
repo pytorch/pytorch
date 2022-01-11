@@ -4,6 +4,8 @@
 
 #include <test/cpp/jit/test_utils.h>
 
+#include <vector>
+
 namespace torch {
 namespace jit {
 
@@ -56,6 +58,32 @@ TEST(UpgraderUtils, FindIfOpIsCurrent) {
   EXPECT_FALSE(isOpSymbolCurrent("foo", 6));
   EXPECT_TRUE(isOpSymbolCurrent("foo", 8));
   test_only_remove_entry("foo");
+}
+
+TEST(UpgraderUtils, CanLoadHistoricOp) {
+  std::vector<UpgraderEntry> dummy_entry = {
+      {4, "foo__0_3", "foo.bar()"},
+      {8, "foo__4_7", "foo.foo()"},
+  };
+
+  std::vector<std::string> schemas = {"foo.bar()", "foo.foo()"};
+
+  // symbol based look up
+  test_only_add_entry("foo.first", dummy_entry[0]);
+  test_only_add_entry("foo.second", dummy_entry[1]);
+
+  auto oldSchemas = loadPossibleHistoricOps("foo", 2);
+  EXPECT_EQ(oldSchemas.size(), 2);
+  for (const auto& entry : oldSchemas) {
+    EXPECT_TRUE(
+        std::find(schemas.begin(), schemas.end(), entry) != schemas.end());
+  }
+
+  auto oldSchemasWithCurrentVersion = loadPossibleHistoricOps("foo", 9);
+  EXPECT_EQ(oldSchemasWithCurrentVersion.size(), 0);
+
+  test_only_remove_entry("foo.first");
+  test_only_remove_entry("foo.second");
 }
 
 } // namespace jit

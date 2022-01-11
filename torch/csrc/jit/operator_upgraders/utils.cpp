@@ -49,5 +49,27 @@ bool isOpSymbolCurrent(const std::string& name, size_t current_version) {
   return true;
 }
 
+std::vector<std::string> loadPossibleHistoricOps(
+    const std::string& name,
+    c10::optional<size_t> version) {
+  std::vector<std::string> possibleSchemas;
+
+  if (!version.has_value()) {
+    return possibleSchemas;
+  }
+
+  for (const auto& entry : get_operator_version_map()) {
+    auto old_symbol_name = entry.first;
+    if (old_symbol_name.find(name) == 0) {
+      auto possibleUpgrader = findUpgrader(entry.second, version.value());
+      if (possibleUpgrader.has_value()) {
+        possibleSchemas.push_back(possibleUpgrader.value().old_schema);
+      }
+    }
+  }
+
+  return possibleSchemas;
+}
+
 } // namespace jit
 } // namespace torch
