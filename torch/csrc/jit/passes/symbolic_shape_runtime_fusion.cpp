@@ -112,7 +112,6 @@ StrideInput strideInputFromString(const std::string& si) {
   }
 }
 
-
 // in the runtime guard, strides are serialized as one flat
 // vector. stride_inputs_offset indexes into that vector
 // where the strides of this tensor beegin
