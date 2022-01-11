@@ -14,6 +14,7 @@ The torch.special module, modeled after SciPy's `special <https://docs.scipy.org
 Functions
 -----------------------
 
+.. autofunction:: ellipe
 .. autofunction:: entr
 .. autofunction:: erf
 .. autofunction:: erfc
