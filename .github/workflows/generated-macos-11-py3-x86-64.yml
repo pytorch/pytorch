@@ -10,7 +10,6 @@ on:
     branches:
       - master
       - release/*
-      - fbsync
   workflow_dispatch:
 
 # For setup-miniconda, see https://github.com/conda-incubator/setup-miniconda/issues/179
