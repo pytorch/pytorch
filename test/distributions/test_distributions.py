@@ -251,7 +251,7 @@ EXAMPLES = [
     Example(InverseWishart, [
         {
             'covariance_matrix': torch.tensor([[2.0, 0.3], [0.3, 0.25]], requires_grad=True),
-            'df': torch.tensor([5.], requires_grad=True),
+            'df': torch.tensor([5.5], requires_grad=True),
         },
         {
             'precision_matrix': torch.tensor([[2.0, 0.1, 0.0],
