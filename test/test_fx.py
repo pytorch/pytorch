@@ -476,11 +476,18 @@ class TestFX(JitTestCase):
         tracer.record_stack_traces = True
 
         graph = tracer.trace(M())
-        for node in graph.nodes:
+        # saving the original list because we will insert new nodes as a part of a test
+        orig_graph_nodes = list(graph.nodes)
+        for node in orig_graph_nodes:
             if node.op == 'output':
                 continue
             self.assertTrue(node.stack_trace is not None)
             assert 'test_fx.py' in node.stack_trace
+
+            # verify that copying the node does not lose the stack trace
+            new_node = graph.node_copy(node)
+            self.assertTrue(new_node.stack_trace is not None)
+            assert 'test_fx.py' in new_node.stack_trace
 
     def test_graph_unique_names_manual(self):
         graph : torch.fx.Graph = torch.fx.Graph()
@@ -3152,7 +3159,6 @@ class TestOperatorSignatures(JitTestCase):
                     pass
             else:
                 raise RuntimeError(f'Did not match any schemas for op {op.name}!')
-
 
 
 class TestFXAPIBackwardCompatibility(JitTestCase):

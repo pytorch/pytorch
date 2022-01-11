@@ -237,23 +237,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
         py::arg("scopes") = std::unordered_set<at::RecordScope>());
   m.def("_disable_profiler", disableProfiler);
   m.def("_prepare_profiler", prepareProfiler);
-
-  m.def("_add_metadata_json", [](const std::string& key, const std::string& value) {
-#ifdef USE_KINETO
-      addMetadataJson(key, value);
-#else
-      LOG(WARNING) << "Adding profiling metadata requires using "
-                   << "torch.profiler with Kineto support (USE_KINETO=1)";
-#endif // USE_KINETO
-  });
-
-  m.def("kineto_available", []() {
-#ifdef USE_KINETO
-    return true;
-#else
-    return false;
-#endif
-  });
+  m.def("_add_metadata_json", torch::profiler::impl::addMetadataJson);  // Only if `USE_KINETO` is set
+  m.def("kineto_available", []() { return torch::profiler::kKinetoAvailable; });
 
   // NOTICE: These record functions are not torch operators and may not show up
   // in TorchScript tracing, FX transforms, or operator serialization. For these
