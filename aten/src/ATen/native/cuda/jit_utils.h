@@ -4,6 +4,7 @@
 #include <sstream>
 #include <unordered_map>
 #include <vector>
+#include <tuple>
 
 #include <c10/util/irange.h>
 #include <ATen/cuda/detail/LazyNVRTC.h>
@@ -17,6 +18,8 @@
 #endif
 
 namespace at { namespace cuda { namespace jit {
+
+using arg_type_name_t = std::pair<std::string, std::string>;
 
 // TODO: TemplateEnv and CodeTemplate are copied from code_template.h
 // They should be refactored into their own header
@@ -280,7 +283,8 @@ std::string generate_code(
     bool dynamic_casting,
     BinaryFuncVariant scalar_pos,
     bool vectorized=false,
-    int vec_size=0);
+    int vec_size=0,
+    std::vector<arg_type_name_t> extra_arg_name = {});
 
 NvrtcFunction jit_pwise_function(
     const std::string& code,
@@ -288,7 +292,7 @@ NvrtcFunction jit_pwise_function(
 
 void launch_jitted_pwise_function(
     NvrtcFunction function,
-    std::array<void*, 7>& args,
+    std::array<void*, 15>& args,
     const int nBlocks,
     const int kBlockSize);
 

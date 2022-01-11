@@ -49,18 +49,36 @@ void trigamma_kernel_cuda(TensorIteratorBase& iter) {
   #endif // USE_JITERATOR
 }
 
-// TODO: jiterate the polygamma kernel (requires supporting heterogenous functor args)
+const char polygamma_name[] = "polygamma";
 void polygamma_kernel_cuda(TensorIteratorBase& iter, int64_t n) {
   if (n == 0) {
     digamma_kernel_cuda(iter);
   } else if (n == 1) {
     trigamma_kernel_cuda(iter);
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "polygamma_cuda", [&]() {
-      gpu_kernel(iter, [=] GPU_LAMBDA(scalar_t a) -> scalar_t {
-        return calc_polygamma<scalar_t, /*is_cuda=*/true>(int(n), a);
-      });
-    });
+#ifdef USE_JITERATOR
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+        iter.common_dtype(), "polygamma_cuda", [&]() {
+          jitted_gpu_kernel<
+              /*name=*/polygamma_name,
+              /*return_dtype=*/scalar_t,
+              /*common_dtype=*/scalar_t,
+              /*arity=*/1>(
+              iter,
+              polygamma_string,
+              at::cuda::jit::BinaryFuncVariant::NoScalar,
+              0,
+              {{"int", "n"}}, // extra args to the kernel
+              &n); // pointer to the args
+        });
+#else
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+        iter.common_dtype(), "polygamma_cuda", [&]() {
+          gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t {
+            return calc_polygamma(a);
+          });
+        });
+#endif // USE_JITERATOR
   }
 }
 

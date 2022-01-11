@@ -6,6 +6,7 @@
 #include <ATen/native/TensorIteratorDynamicCasting.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/OpMathType.h>
+#include <tuple>
 
 #include <thrust/tuple.h>
 
@@ -108,10 +109,20 @@ operations instead of the typical CUDA functors.
 // Only handles elementwise unary and binary kernels with a
 //   common dtype and a single output.
 // NOTE: this assumes the op's iterator has a common_dtype.
-template <char const *name, typename return_type, typename f_inputs_type, int arity>
-void jitted_gpu_kernel(TensorIteratorBase& iter, const std::string& f,
-                       at::cuda::jit::BinaryFuncVariant scalar_pos=at::cuda::jit::BinaryFuncVariant::NoScalar,
-at::opmath_type<f_inputs_type> scalar_val=0) {
+template <
+    char const* name,
+    typename return_type,
+    typename f_inputs_type,
+    int arity,
+    typename... Args>
+void jitted_gpu_kernel(
+    TensorIteratorBase& iter,
+    const std::string& f,
+    at::cuda::jit::BinaryFuncVariant scalar_pos =
+        at::cuda::jit::BinaryFuncVariant::NoScalar,
+    at::opmath_type<f_inputs_type> scalar_val = 0,
+    std::vector<at::cuda::jit::arg_type_name_t> extra_arg_name = {},
+    Args... extra_args) {
   // TODO: much of preamble is common to both jitted_gpu_kernel and gpu_kernel
   //   Maybe it could be refactored?
   static_assert((!std::is_same<return_type, c10::complex<double>>::value &&
@@ -120,6 +131,8 @@ at::opmath_type<f_inputs_type> scalar_val=0) {
   static_assert((!std::is_same<f_inputs_type, c10::complex<double>>::value &&
   !std::is_same<return_type, c10::complex<float>>::value), "complex types are not supported \
   in jiterator functors");
+  static_assert(
+      sizeof...(extra_args) < 7, "more than 7 captures is not allowed!");
   for (int arg = 0; arg < iter.ntensors(); arg++) {
     TORCH_INTERNAL_ASSERT(
       iter.device(arg).is_cuda(),
@@ -132,7 +145,8 @@ at::opmath_type<f_inputs_type> scalar_val=0) {
 
   if (!iter.can_use_32bit_indexing()) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
-      jitted_gpu_kernel<name, return_type, f_inputs_type, arity>(sub_iter, f, scalar_pos, scalar_val);
+      jitted_gpu_kernel<name, return_type, f_inputs_type, arity, Args...>(
+          sub_iter, f, scalar_pos, scalar_val, extra_arg_name, extra_args...);
     }
 
     return;
@@ -165,22 +179,40 @@ at::opmath_type<f_inputs_type> scalar_val=0) {
                 "Encountered an unsupported dtype ", dtypei, "!");
   }
   if (scalar_pos == at::cuda::jit::BinaryFuncVariant::NoScalar) {
-    jitted_gpu_kernel_impl</*name*/ name,
-                    /*return_type=*/ return_type,
-                    /*f_inputs_type=*/ f_inputs_type,
-                    arity, at::cuda::jit::BinaryFuncVariant::NoScalar>(iter, f, needs_dynamic_casting);
+    jitted_gpu_kernel_impl<
+        /*name*/ name,
+        /*return_type=*/return_type,
+        /*f_inputs_type=*/f_inputs_type,
+        arity,
+        at::cuda::jit::BinaryFuncVariant::NoScalar>(
+        iter, f, needs_dynamic_casting, 0, extra_arg_name, extra_args...);
   } else if (scalar_pos == at::cuda::jit::BinaryFuncVariant::RhsScalar) {
-    jitted_gpu_kernel_impl</*name*/ name,
-                    /*return_type=*/ return_type,
-                    /*f_inputs_type=*/ f_inputs_type,
-                    arity, at::cuda::jit::BinaryFuncVariant::RhsScalar>(iter, f, needs_dynamic_casting, scalar_val);
+    jitted_gpu_kernel_impl<
+        /*name*/ name,
+        /*return_type=*/return_type,
+        /*f_inputs_type=*/f_inputs_type,
+        arity,
+        at::cuda::jit::BinaryFuncVariant::RhsScalar>(
+        iter,
+        f,
+        needs_dynamic_casting,
+        scalar_val,
+        extra_arg_name,
+        extra_args...);
 
   } else {
-    jitted_gpu_kernel_impl</*name*/ name,
-                    /*return_type=*/ return_type,
-                    /*f_inputs_type=*/ f_inputs_type,
-                    arity, at::cuda::jit::BinaryFuncVariant::LhsScalar>(iter, f, needs_dynamic_casting, scalar_val);
-
+    jitted_gpu_kernel_impl<
+        /*name*/ name,
+        /*return_type=*/return_type,
+        /*f_inputs_type=*/f_inputs_type,
+        arity,
+        at::cuda::jit::BinaryFuncVariant::LhsScalar>(
+        iter,
+        f,
+        needs_dynamic_casting,
+        scalar_val,
+        extra_arg_name,
+        extra_args...);
   }
 }
 
