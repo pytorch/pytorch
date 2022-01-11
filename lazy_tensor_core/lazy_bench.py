@@ -667,7 +667,7 @@ if __name__ == "__main__" :
         except Exception as e:
             print(f"ERROR: {name}: {e}")
             save_error(name, args.test, e, args.output_dir)
-            exit(1)
+            exit(13)
         exit(0)
 
     import psutil
