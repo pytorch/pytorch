@@ -145,7 +145,7 @@ TORCH_CUDA_CPP_API void reduce_scatter(
     const comm_list& user_comms = {});
 
 TORCH_CUDA_CPP_API void scatter(
-    const at::Tensor& inputs,
+    const std::vector<at::Tensor>& inputs,
     at::Tensor& outputs,
     ncclComm_t comm,
     at::cuda::CUDAStream& stream,
@@ -159,7 +159,7 @@ TORCH_CUDA_CPP_API void all_gather(
 
 TORCH_CUDA_CPP_API void gather(
     const at::Tensor& inputs,
-    at::Tensor& outputs,
+    std::vector<at::Tensor>& outputs,
     ncclComm_t comm,
     at::cuda::CUDAStream& stream,
     int32_t root = 0);

@@ -420,6 +420,23 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
       OpType opType,
       const char* profilingTitle = nullptr);
 
+  template <typename Fn>
+  c10::intrusive_ptr<ProcessGroup::Work> oneAndAll(
+      std::vector<at::Tensor>& tensor,
+      std::vector<std::vector<at::Tensor>>& tensor_list,
+      Fn fn,
+      OpType opType,
+      const char* profilingTitle = nullptr);
+  template <typename Fn, typename PreProcess, typename PostProcess>
+  c10::intrusive_ptr<ProcessGroup::Work> oneAndAll(
+      std::vector<at::Tensor>& tensor,
+      std::vector<std::vector<at::Tensor>>& tensor_list,
+      Fn fn,
+      PreProcess pre,
+      PostProcess post,
+      OpType opType,
+      const char* profilingTitle = nullptr);
+
   // Helper that encapsulates work shared across point-to-point communication
   // primitives. It is the same structure as the helper used for collective
   // communicaiton primitives.

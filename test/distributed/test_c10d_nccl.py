@@ -661,7 +661,6 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             for rank in range(self.world_size):
                 scatter_list[idx].append(torch.tensor([rank]).cuda(gpu_idx))
 
-        print(f"scatter list: {scatter_list}")
         # test each rank to scatter
         expected = [torch.tensor([self.rank])]
         for rank in range(self.world_size):

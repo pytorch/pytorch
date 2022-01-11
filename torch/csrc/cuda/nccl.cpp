@@ -812,7 +812,7 @@ void recv(
 
 void gather(
     const at::Tensor& inputs,
-    at::Tensor& outputs,
+    std::vector<at::Tensor>& outputs,
     ncclComm_t _comm,
     at::cuda::CUDAStream& stream,
     int32_t root) {
@@ -857,7 +857,7 @@ void gather(
 }
 
 void scatter(
-    const at::Tensor& inputs,
+    const std::vector<at::Tensor>& inputs,
     at::Tensor& outputs,
     ncclComm_t _comm,
     at::cuda::CUDAStream& stream,
@@ -871,25 +871,26 @@ void scatter(
   NCCL_CHECK(ncclCommCount(comm, &numranks));
   NCCL_CHECK(ncclCommUserRank(comm, &cur_rank));
 
-  size_t count = inputs.numel();
-  auto type = to_nccl_data_type(inputs);
-  auto* recvbuff = reinterpret_cast<char*>(outputs.data_ptr());
-
   NCCL_CHECK(ncclGroupStart());
   if (cur_rank == root)
   {
     for (int r = 0; r < numranks; r++)
     {
       if (r != root) {
+        size_t send_count = inputs[r].numel();
+        auto send_type = to_nccl_data_type(inputs[r]);
         const auto* sendbuff =  reinterpret_cast<char*>(inputs[r].data_ptr());
-        NCCL_CHECK(ncclSend(sendbuff, count, type, r, comm, stream));
+        NCCL_CHECK(ncclSend(sendbuff, send_count, send_type, r, comm, stream));
       } else {
         // on its own rank, simply copy it to the output
         outputs.copy_(inputs[r]);
       }
     }
   } else {
-    NCCL_CHECK(ncclRecv(recvbuff, count, type, root, comm, stream));
+    size_t recv_count = outputs.numel();
+    auto recv_type = to_nccl_data_type(outputs);
+    auto* recvbuff = reinterpret_cast<char*>(outputs.data_ptr());
+    NCCL_CHECK(ncclRecv(recvbuff, recv_count, recv_type, root, comm, stream));
   }
   NCCL_CHECK(ncclGroupEnd());
 

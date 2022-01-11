@@ -1248,8 +1248,7 @@ void check_gpu_tensors(const std::vector<at::Tensor>& tensors) {
 std::vector<at::Tensor> flatten_for_scatter_gather(
     std::vector<std::vector<at::Tensor>>& tensor_lists,
     std::vector<at::Tensor>& other,
-    size_t world_size,
-    bool copy_content=false) {
+    size_t world_size) {
   if (tensor_lists.size() != other.size()) {
     TORCH_CHECK(false,
         "Tensor list operands to scatter/gather must have the same length");
@@ -1259,7 +1258,7 @@ std::vector<at::Tensor> flatten_for_scatter_gather(
   std::vector<at::Tensor> flattened;
   flattened.resize(num_devices);
 
-  for (auto i = size_t{}; i < num_devices; ++i) {
+  for (const auto i : c10::irange(size_t{}, num_devices)) {
     if (tensor_lists[i].size() != world_size * num_devices) {
       TORCH_CHECK(false,
           "Tensor list input to scatter/gather must match number of collective"
@@ -1282,15 +1281,6 @@ std::vector<at::Tensor> flatten_for_scatter_gather(
     }
     // Flatten the tensors (from all ranks) into a single big tensor.
     flattened[i] = newLikeFlat(tensor_lists, i);
-
-    // copy the input tensors to the flatten large send buffer
-    // this is used by scatter as we are flattening the input list
-    if (copy_content) {
-      for (const auto j : c10::irange(tensor_lists[i].size())) {
-        flattened[i][j].copy_(tensor_lists[i].at(j));
-      }
-    }
-
   }
   return flattened;
 }
@@ -1449,6 +1439,118 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
 }
 
 template <typename Fn, typename PreProcess, typename PostProcess>
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::oneAndAll(
+    std::vector<at::Tensor>& tensor,
+    std::vector<std::vector<at::Tensor>>& tensor_list,
+    Fn fn,
+    PreProcess pre,
+    PostProcess post,
+    OpType opType,
+    const char* profilingTitle) {
+
+  errorIfCapturingNonCapturableNCCL();
+
+  // Bump collective counter
+  seq_++;
+
+  const auto devices = getDeviceList(tensor);
+  const auto key = getKeyFromDevices(devices);
+  auto& ncclComms = getNCCLComm(key, devices, opType);
+
+  syncStreams(devices, ncclEvents_[key], ncclStreams_[key]);
+
+  // Work itself will create the CUDA events on all GPUs of tensors
+  bool can_profile = tensor.size() == 1;
+  auto work = initWork(
+      devices,
+      rank_,
+      opType,
+      can_profile ? profilingTitle : nullptr,
+      can_profile ? c10::optional<std::vector<at::Tensor>>(tensor)
+                  : c10::nullopt);
+
+  // Store references to outputs to be used by WorkNCCL::result and operator<<.
+  if (opType == OpType::GATHER) {
+    work->outputs_ = std::make_shared<std::vector<at::Tensor>>(tensor_list[0]);
+  } else if (opType == OpType::SCATTER) {
+    work->outputs_ = std::make_shared<std::vector<at::Tensor>>(tensor);
+  }
+
+  at::cuda::OptionalCUDAGuard gpuGuard;
+
+  // Start event should only be recorded before the ncclGroupStart()
+  if (desyncDebug_) {
+    for (const auto i : c10::irange(tensor.size())) {
+      at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
+      (*work->ncclStartEvents_)[i].record(ncclStream);
+    }
+  }
+
+  pre(ncclStreams_[key]);
+
+  for (const auto i : c10::irange(tensor.size())) {
+    gpuGuard.set_index(devices[i].index());
+    at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
+
+    // Both `tensor' and `tensor_list' are created on a worker stream and used in
+    // different ncclStreams.  Hence, both must record the ncclStream to
+    // prevent being freed before the collective finishes.
+    //
+    // We only record `tensor' here, and leave recording `tensor_list' to `fn' for
+    // operations where `tensor' and `tensor_list' are not the same.
+    // See [Sync Streams].
+    c10::cuda::CUDACachingAllocator::recordStream(
+        tensor[i].storage().data_ptr(), ncclStream);
+  }
+
+  {
+    AutoNcclGroup nccl_group_guard;
+    for (const auto i : c10::irange(tensor.size())) {
+      gpuGuard.set_index(devices[i].index());
+      at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
+      C10D_NCCL_CHECK(
+          fn(tensor[i], tensor_list[i], ncclComms[i]->getNcclComm(), ncclStream), ncclComms[i]->getNcclCommFailureReason());
+    }
+  }
+
+  post(ncclStreams_[key]);
+
+  // End event should only be recorded after the ncclGroupEnd()
+  for (const auto i : c10::irange(tensor.size())) {
+    at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
+    (*work->ncclEndEvents_)[i].record(ncclStream);
+    work->ncclComms_[i] = ncclComms[i];
+  }
+
+  {
+    c10::cuda::CUDAMultiStreamGuard streamGuard(ncclStreams_[key]);
+    work->future_ = c10::make_intrusive<at::ivalue::Future>(
+        c10::ListType::create(c10::TensorType::get()),
+        devices);
+
+    // Add a callback that runs profiling end callbacks. wrapCallback() in CUDA
+    // future blocks the stream this callback runs on the corresponding
+    // ncclEndEvents_ ensuring appropriate synchronization.
+    if (work->recordFunctionEndCallback_) {
+      work->future_->addCallback(
+          [work](at::ivalue::Future& /* unused */) { work->recordFunctionEndCallback_(); });
+    }
+    work->future_->markCompleted(at::IValue(*work->outputs_));
+  }
+
+  // Set appropriate work parameters.
+  work->blockingWait_ = blockingWait_;
+  work->opTimeout_ = options_->timeout;
+  work->store_ = store_;
+
+  if (asyncErrorHandling_) {
+    workEnqueue(work);
+  }
+
+  return work;
+}
+
+template <typename Fn, typename PreProcess, typename PostProcess>
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
     std::vector<at::Tensor>& tensors,
     Fn fn,
@@ -1564,6 +1666,23 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   return collective(
       inputs,
       outputs,
+      fn,
+      [](std::vector<at::cuda::CUDAStream>&) {},
+      [](std::vector<at::cuda::CUDAStream>&) {},
+      opType,
+      profilingTitle);
+}
+
+template <typename Fn>
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::oneAndAll(
+    std::vector<at::Tensor>& tensor,
+    std::vector<std::vector<at::Tensor>>& tensor_list,
+    Fn fn,
+    OpType opType,
+    const char* profilingTitle) {
+  return oneAndAll(
+      tensor,
+      tensor_list,
       fn,
       [](std::vector<at::cuda::CUDAStream>&) {},
       [](std::vector<at::cuda::CUDAStream>&) {},
@@ -1748,7 +1867,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
         // Copy the flattened output tensors to the outputs.
         for (const auto i : c10::irange(outputTensors.size())) {
           at::cuda::CUDAStreamGuard guard(ncclStreams[i]);
-          for (size_t j = 0; j < outputTensors[0].size(); ++j) {
+          for (const auto j : c10::irange(outputTensors[0].size())) {
             // See [Sync Streams].
             c10::cuda::CUDACachingAllocator::recordStream(
                 outputTensors[i][j].storage().data_ptr(), ncclStreams[i]);
@@ -1813,7 +1932,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce_scatter(
         // Copy the input tensors to the flattened inputs.
         for (const auto i : c10::irange(inputTensors.size())) {
           at::cuda::CUDAStreamGuard guard(ncclStreams[i]);
-          for (size_t j = 0; j < inputTensors[0].size(); ++j) {
+          for (const auto j : c10::irange(inputTensors[0].size())) {
             // See [Sync Streams].
             c10::cuda::CUDACachingAllocator::recordStream(
                 inputTensors[i][j].storage().data_ptr(), ncclStreams[i]);
@@ -2161,7 +2280,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::gather(
   check_gpu_tensors(inputTensors);
   assertSingleElementInput(invalidArgument, inputTensors);
 
-  std::vector<at::Tensor> outputFlattened;
+  // std::vector<at::Tensor> outputFlattened;
 
   // @lint-ignore CLANGTIDY
   auto tensor = inputTensors.back();
@@ -2189,9 +2308,6 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::gather(
       invalidArgument(ss.str());
     }
 
-    outputFlattened = flatten_for_scatter_gather(outputTensors, inputTensors, size_);
-    check_gpu_tensors(outputFlattened);
-
     const auto& options = inputTensors[0].options();
     const auto& sizes = inputTensors[0].sizes();
     assertTypeAndSizesMatch(invalidArgument, outputTensors[0], options, sizes);
@@ -2200,42 +2316,26 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::gather(
     if (outputTensors.size() != 0) {
       invalidArgument("requires empty output on non-root");
     }
+    outputTensors.emplace_back();
 
-    for(int i = 0; i < inputTensors.size(); ++ i) {
-      outputFlattened.emplace_back(at::empty_like(inputTensors[i], inputTensors[i].options()));
-    }
   }
 
-  return collective(
+  return oneAndAll(
       inputTensors,
-      outputFlattened,
+      outputTensors,
       [&](at::Tensor& input,
-          at::Tensor& output,
+          std::vector<at::Tensor>& output_list,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
         const auto root = opts.rootRank;
         if (getRank() == root) {
-          c10::cuda::CUDACachingAllocator::recordStream(
-              output.storage().data_ptr(), stream);
-        }
-        torch::cuda::nccl::gather(input, output, comm, stream, root);
-        return ncclSuccess;
-      },
-      [&](std::vector<at::cuda::CUDAStream>& ncclStreams) {},
-      [&](std::vector<at::cuda::CUDAStream>& ncclStreams) {
-        const auto root = opts.rootRank;
-        if (getRank() == root) {
-          // Copy the flattened output tensors to the outputs.
-          for (const auto i : c10::irange(outputTensors.size())) {
-            at::cuda::CUDAStreamGuard guard(ncclStreams[i]);
-            for (size_t j = 0; j < outputTensors[0].size(); ++j) {
-              // See [Sync Streams].
-              c10::cuda::CUDACachingAllocator::recordStream(
-                  outputTensors[i][j].storage().data_ptr(), ncclStreams[i]);
-              outputTensors[i][j].copy_(outputFlattened[i][j], true);
-            }
+          for(auto output: output_list) {
+            c10::cuda::CUDACachingAllocator::recordStream(
+                output.storage().data_ptr(), stream);
           }
         }
+        torch::cuda::nccl::gather(input, output_list, comm, stream, root);
+        return ncclSuccess;
       },
       OpType::GATHER,
       "nccl:gather");
@@ -2253,8 +2353,6 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::scatter(
   assertRootRank(invalidArgument, opts.rootRank, size_);
   check_gpu_tensors(outputTensors);
   assertSingleElementInput(invalidArgument, outputTensors);
-
-  std::vector<at::Tensor> inputFlattened;
 
   // @lint-ignore CLANGTIDY
   auto tensor = outputTensors.back();
@@ -2282,38 +2380,36 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::scatter(
       invalidArgument(ss.str());
     }
 
-    inputFlattened = flatten_for_scatter_gather(inputTensors, outputTensors, size_, true);
-    check_gpu_tensors(inputFlattened);
-
     const auto& options = outputTensors[0].options();
     const auto& sizes = outputTensors[0].sizes();
     assertTypeAndSizesMatch(invalidArgument, inputTensors[0], options, sizes);
   } else {
-    // if not in the root rank, initialize inputFlattened as empty place holder
+    // if not in the root rank, initialize inputTensors as empty place holder
+    // with an empty list
     if (inputTensors.size() != 0) {
       invalidArgument("requires empty input on non-root");
     }
+    inputTensors.emplace_back();
 
-    for(int i = 0; i < outputTensors.size(); ++ i) {
-      inputFlattened.emplace_back(at::empty_like(outputTensors[i], outputTensors[i].options()));
-    }
   }
 
-  return collective(
-      inputFlattened,
+  return oneAndAll(
       outputTensors,
-      [&](at::Tensor& input,
-          at::Tensor& output,
+      inputTensors,
+      [&](at::Tensor& output,
+          std::vector<at::Tensor>& input_list,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
         const auto root = opts.rootRank;
-        c10::cuda::CUDACachingAllocator::recordStream(
-            output.storage().data_ptr(), stream);
-        torch::cuda::nccl::scatter(input, output, comm, stream, root);
+        if (getRank() == root) {
+          for(auto input: input_list) {
+            c10::cuda::CUDACachingAllocator::recordStream(
+                input.storage().data_ptr(), stream);
+          }
+        }
+        torch::cuda::nccl::scatter(input_list, output, comm, stream, root);
         return ncclSuccess;
       },
-      [&](std::vector<at::cuda::CUDAStream>& ncclStreams) {},
-      [&](std::vector<at::cuda::CUDAStream>& ncclStreams) {},
       OpType::SCATTER,
       "nccl:scatter");
 

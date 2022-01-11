@@ -106,6 +106,30 @@ def fuse_linear_bn(linear, bn):
     else:
         return nn.utils.fusion.fuse_linear_bn_eval(linear, bn)
 
+
+def fuse_convtranspose_bn(convt, bn):
+    r"""Given ConvTranspose and bn modules, fuses them and returns the fused module
+
+    Args:
+        convt: Module instance of type ConvTransposeNd
+        bn: BatchNormNd instance that needs to be fused with the linear layer.
+            batch norm N should match the ConvTranspose N
+
+    Examples::
+
+        >>> m1 = nn.ConvTranspose2d(10, 20, 3)
+        >>> b1 = nn.BatchNorm2d(20)
+        >>> m2 = fuse_convtranspose_bn(m1, b1)
+    """
+    assert(convt.training == bn.training),\
+        "ConvTranspose and BN both must be in the same mode (train or eval)."
+
+    if convt.training:
+        raise Exception("Fusing ConvTranspose+BatchNorm not yet supported in training.")
+    else:
+        return nn.utils.fusion.fuse_conv_bn_eval(convt, bn, transpose=True)
+
+
 DEFAULT_OP_LIST_TO_FUSER_METHOD: Dict[Tuple, Union[nn.Sequential, Callable]] = {
     (nn.Conv1d, nn.BatchNorm1d): fuse_conv_bn,
     (nn.Conv1d, nn.BatchNorm1d, nn.ReLU): fuse_conv_bn_relu,
@@ -120,6 +144,9 @@ DEFAULT_OP_LIST_TO_FUSER_METHOD: Dict[Tuple, Union[nn.Sequential, Callable]] = {
     (nn.Linear, nn.ReLU): nni.LinearReLU,
     (nn.BatchNorm2d, nn.ReLU): nni.BNReLU2d,
     (nn.BatchNorm3d, nn.ReLU): nni.BNReLU3d,
+    (nn.ConvTranspose1d, nn.BatchNorm1d): fuse_convtranspose_bn,
+    (nn.ConvTranspose2d, nn.BatchNorm2d): fuse_convtranspose_bn,
+    (nn.ConvTranspose3d, nn.BatchNorm3d): fuse_convtranspose_bn,
 }
 
 def get_fuser_method(op_list, additional_fuser_method_mapping=None):
@@ -148,7 +175,7 @@ DEFAULT_PATTERN_TO_FUSER_METHOD: Dict[Pattern, Union[nn.Sequential, Callable]] =
     (nn.ReLU, (nn.BatchNorm1d, nn.Conv1d)): reverse3(fuse_conv_bn_relu),
     (nn.BatchNorm2d, nn.Conv2d): reverse2(fuse_conv_bn),
     (nn.ReLU, (nn.BatchNorm2d, nn.Conv2d)): reverse3(fuse_conv_bn_relu),
-    (nn.BatchNorm3d, nn.Conv2d): reverse2(fuse_conv_bn),
+    (nn.BatchNorm3d, nn.Conv3d): reverse2(fuse_conv_bn),
     (nn.ReLU, (nn.BatchNorm3d, nn.Conv3d)): reverse3(fuse_conv_bn_relu),
     (nn.ReLU, nn.Conv1d): reverse2(nni.ConvReLU1d),
     (nn.ReLU, nn.Conv2d): reverse2(nni.ConvReLU2d),
@@ -157,6 +184,9 @@ DEFAULT_PATTERN_TO_FUSER_METHOD: Dict[Pattern, Union[nn.Sequential, Callable]] =
     (nn.ReLU, nn.Linear): reverse2(nni.LinearReLU),
     (nn.ReLU, nn.BatchNorm2d): reverse2(nni.BNReLU2d),
     (nn.ReLU, nn.BatchNorm3d): reverse2(nni.BNReLU3d),
+    (nn.BatchNorm1d, nn.ConvTranspose1d): reverse2(fuse_convtranspose_bn),
+    (nn.BatchNorm2d, nn.ConvTranspose2d): reverse2(fuse_convtranspose_bn),
+    (nn.BatchNorm3d, nn.ConvTranspose3d): reverse2(fuse_convtranspose_bn),
 }
 
 def get_fuser_method_new(
