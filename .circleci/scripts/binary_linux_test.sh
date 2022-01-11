@@ -57,7 +57,6 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
       future \
       mkl>=2018 \
       ninja \
-      dataclasses \
       typing-extensions \
       defaults::protobuf \
       six

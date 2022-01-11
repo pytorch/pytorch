@@ -12,6 +12,5 @@ dependencies:
   - future
   - six
   - requests
-  - dataclasses
   - pip:
     - -r ../../requirements.txt

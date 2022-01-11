@@ -18,7 +18,6 @@ retry conda install -y \
   cffi \
   ninja \
   typing_extensions \
-  dataclasses \
   pip
 
 # The torch.hub tests make requests to GitHub.

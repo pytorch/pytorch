@@ -37,7 +37,7 @@ jobs:
           . "${HOME}"/anaconda3/etc/profile.d/conda.sh
           conda activate pr-ci
           conda install -y numpy requests ninja pyyaml mkl mkl-include setuptools cmake cffi typing_extensions \
-                           future six dataclasses pillow pytest tabulate gitpython git-lfs
+                           future six pillow pytest tabulate gitpython git-lfs
           # install magma
           conda install -y -c pytorch "${MAGMA_VERSION}"
           conda install -y pytorch torchvision torchtext cudatoolkit="${CUDA_VERSION}" -c pytorch-nightly
