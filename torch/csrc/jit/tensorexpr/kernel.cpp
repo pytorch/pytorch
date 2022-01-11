@@ -937,6 +937,7 @@ std::vector<ExprHandle> TensorExprKernel::getInputStrides(
   }
 
   size_t rank = inputTensorDims.size();
+  TORCH_INTERNAL_ASSERT(symbolic_strides_.count(input));
   std::vector<StrideInput>& stride_input = symbolic_strides_[input];
   if (stride_input.size() == 1 &&
       (stride_input[0] == StrideInput::TENSOR_CONT_CHANNELS_LAST ||
@@ -1316,6 +1317,7 @@ BlockPtr TensorExprKernel::bindAllInputs() {
       if (!tt) {
         continue;
       }
+      TORCH_INTERNAL_ASSERT(symbolic_strides_.count(input));
       auto symbolic_stride = symbolic_strides_[input];
       for (size_t j = 0; j < symbolic_stride.size(); ++j) {
         if (symbolic_stride[j] == torch::jit::StrideInput::S_AS_ARG) {
