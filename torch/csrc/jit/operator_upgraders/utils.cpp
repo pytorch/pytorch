@@ -60,7 +60,9 @@ std::vector<std::string> loadPossibleHistoricOps(
 
   for (const auto& entry : get_operator_version_map()) {
     auto old_symbol_name = entry.first;
-    if (old_symbol_name.find(name) == 0) {
+    // strip off the overload name, if exist
+    auto base_name = old_symbol_name.substr(0, old_symbol_name.find("."));
+    if (base_name == name) {
       auto possibleUpgrader = findUpgrader(entry.second, version.value());
       if (possibleUpgrader.has_value()) {
         possibleSchemas.push_back(possibleUpgrader.value().old_schema);

@@ -682,12 +682,13 @@ Value* emitBuiltinCall(
 
   // we might have seen old historic
   // ops that are deprecated
-  if (variants.size() == 0) {
+  if (variants.empty()) {
     auto oldSchemas =
         loadPossibleHistoricOps(name.toQualString(), graph_version);
+    upgrader_schemas.reserve(oldSchemas.size());
     for (const auto& old_schema_entry : oldSchemas) {
       FunctionSchema old_schema = parseSchema(old_schema_entry);
-      upgrader_schemas.push_back(old_schema);
+      upgrader_schemas.emplace_back(old_schema);
     }
   }
 
