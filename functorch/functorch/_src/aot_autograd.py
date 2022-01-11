@@ -42,7 +42,8 @@ aten = torch.ops.aten
 
 def draw_graph(traced: torch.fx.GraphModule, fname: str, figname: str = "fx_graph", clear_meta=True):
     if clear_meta:
-        traced = copy.deepcopy(traced)
+        new_graph = copy.deepcopy(traced.graph)
+        traced = fx.GraphModule(traced, new_graph)
     for node in traced.graph.nodes:
         node.meta = {}
     base, ext = os.path.splitext(fname)
@@ -98,7 +99,15 @@ def _extract_graph_with_inputs_outputs(joint_graph, inputs, outputs):
             env[node] = new_graph.node_copy(node, lambda x: env[x])
         elif node.op == 'output':
             pass
-    new_graph.output([env[x] for x in outputs])
+    output_values = []
+    for x in outputs:
+        if isinstance(x, fx.Node):
+            if x not in env:
+                raise RuntimeError(f"Node {x} couldn't be found in env")
+            output_values.append(env[x])
+        else:
+            output_values.append(x)
+    new_graph.output(output_values)
 
     new_graph.eliminate_dead_code()
     new_graph.lint()
@@ -212,8 +221,8 @@ def partition_with_recompute_fwd_in_bwd(joint_module: fx.GraphModule, _joint_inp
         # + norm_ops
         # + view_ops
     )
-    ops = set([i.target for i in joint_module.graph.nodes if i.op == 'call_function'])
-    print(ops - recomputable_ops)
+    # ops = set([i.target for i in joint_module.graph.nodes if i.op == 'call_function'])
+    # print(ops - recomputable_ops)
     AGGRESSIVE_RECOMPUTATION = False
     for node in full_bw_graph.nodes:
         if node in tangent_closure:
