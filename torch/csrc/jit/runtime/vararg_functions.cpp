@@ -308,7 +308,7 @@ void tupleConstruct(Stack& stack, size_t num_inputs) {
 
 void namedTupleConstruct(
     Stack& stack,
-    at::TupleTypePtr type,
+    c10::TypePtr tuple_type,
     size_t num_inputs) {
   std::vector<IValue> elems{
       std::make_move_iterator(stack.end() - num_inputs),
@@ -316,7 +316,7 @@ void namedTupleConstruct(
   drop(stack, num_inputs);
   push(
       stack,
-      c10::ivalue::Tuple::createNamed(std::move(elems), std::move(type)));
+      c10::ivalue::Tuple::createNamed(std::move(elems), std::move(tuple_type)));
 }
 
 void listConstruct(Stack& stack, const at::ListType& type, size_t num_inputs) {
