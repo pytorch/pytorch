@@ -6,6 +6,7 @@
 
 #include <c10/util/Exception.h>
 #include <c10/util/SmallVector.h>
+#include <c10/util/irange.h>
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
@@ -138,7 +139,7 @@ class OnnxifiOp final : public Operator<Context> {
 
     if (use_passed_output_shapes_) {
       // Populate output_shapes_per_bs_
-      for (int bs = 1; bs < max_batch_size_; ++bs) {
+      for (const auto bs : c10::irange(1, max_batch_size_)) {
         auto output_shapes_tp = helper.GetRepeatedArgument<TensorProto>("output_shapes_bs_" + caffe2::to_string(bs));
         auto output_qshapes_tp = helper.GetRepeatedArgument<TensorProto>("output_qshapes_bs_" + caffe2::to_string(bs));
         CAFFE_ENFORCE_EQ(output_names_.size(), output_shapes_tp.size() + output_qshapes_tp.size());
@@ -267,7 +268,7 @@ class OnnxifiOp final : public Operator<Context> {
           ONNXIFI_STATUS_SUCCESS);
 
       // Release unused backend ids.
-      for (size_t i = 0; i < num_backends; ++i) {
+      for (const auto i : c10::irange(num_backends)) {
         if (i == static_cast<size_t>(backend_index)) {
           continue;
         }
@@ -287,7 +288,7 @@ class OnnxifiOp final : public Operator<Context> {
 
       // Extra weight shapes
       std::unordered_map<std::string, ShapeInfo> weight_shape_info;
-      for (size_t i = 0; i < weight_names.size(); ++i) {
+      for (const auto i : c10::irange(weight_names.size())) {
         TensorShape shape;
         const auto& shape0 = weight_shapes[i];
         for (const auto d : shape0) {
