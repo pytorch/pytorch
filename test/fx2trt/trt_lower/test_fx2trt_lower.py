@@ -1,17 +1,17 @@
 import logging
-import unittest as ut
 # @manual=//caffe2:torch_fx2trt
 from torch.fx.experimental.fx2trt.lower import Lowerer
 from torch.fx.experimental.fx2trt import LowerSetting
 import torch
 import torch.fx as fx
 import torch.nn as nn
+from torch.testing._internal.common_utils import TestCase, run_tests
 
 
 logger = logging.getLogger(__name__)
 
 
-class Fx2trtLowerTests(ut.TestCase):
+class Fx2trtLowerTests(TestCase):
     def test_fx2trt_lower(self):
         mod = _Mod()
         mod_traced = fx.symbolic_trace(mod)
@@ -24,3 +24,6 @@ class Fx2trtLowerTests(ut.TestCase):
 class _Mod(nn.Module):
     def forward(self, x):
         return (x, 2 * x)
+
+if __name__ == '__main__':
+    run_tests()
