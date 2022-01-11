@@ -10,7 +10,7 @@ __all__ = ['entr', 'psi', 'digamma', 'gammaln', 'polygamma', 'ellipe', 'erf', 'e
 Tensor = torch.Tensor
 
 ellipe = _add_docstr(_special.special_ellipe,
-                   r"""
+                     r"""
 ellipe(input, *, out=None) -> Tensor
 Computes complete elliptic integral of the second kind, elementwise.
 
