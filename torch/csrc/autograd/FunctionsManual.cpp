@@ -2587,10 +2587,6 @@ Tensor linalg_eig_backward(const Tensor& gL,
     }
   }
   auto VhgV = at::matmul(V.mH(), gV);
-  if (is_hermitian) {
-    // Project onto the tangent space at the identity of U(n), that is, the skew-Hermitian matrices
-    VhgV = 0.5 * (VhgV - VhgV.mH());
-  }
   const auto diag_VhgV = VhgV.diagonal(0, -2, -1);
 
   if (V.is_complex()) {
@@ -2602,29 +2598,26 @@ Tensor linalg_eig_backward(const Tensor& gL,
                 "by e^{i phi}. The specified loss function depends on this quantity, so it is ill-defined.");
   }
 
-  auto gA = [&]{
-    auto ret = VhgV;
-    if (!is_hermitian) {
-      ret = ret - at::matmul(V.mH(), V * at::real(diag_VhgV).unsqueeze(-2));
-    }
+  if (is_hermitian) {
+    // Project onto the tangent space at the identity of U(n), that is, the skew-Hermitian matrices
+    VhgV = 0.5 * (VhgV - VhgV.mH());
+  } else {
+    // Project onto the tangent space at V^H V of complex matrices with columns of norm 1
+    VhgV = VhgV - at::matmul(V.mH(), V * at::real(diag_VhgV).unsqueeze(-2));
+  }
 
+  auto gA = [&, VhgV = std::move(VhgV)]{
     auto Econj = [&L]{
       auto Lconj = L.conj();
       auto ret = Lconj.unsqueeze(-2) - Lconj.unsqueeze(-1);
-      if (at::GradMode::is_enabled()) {
-        // Avoids differentiating through at infinity when doing gradgrad
-        // 1 could be any number, as we are going to overwrite the diagonal
-        ret.diagonal(0, -2, -1).fill_(1.);
-      }
+      ret.diagonal(0, -2, -1).fill_(1.);
       return ret;
     }();
 
-    ret /= std::move(Econj);
+    auto ret = std::move(VhgV).div_(std::move(Econj));
 
     if (gL.defined()) {
       ret.diagonal(0, -2, -1).copy_(gL);
-    } else {
-      ret.diagonal(0, -2, -1).zero_();
     }
     return ret;
   }();
@@ -2657,7 +2650,7 @@ std::tuple<Tensor, Tensor> linalg_eig_jvp(const Tensor& dA,
   // Note: The Hermitian case is a simplification of this formula using that V^{-1} = V^H and that L is real
   if (is_hermitian) {
     TORCH_CHECK(at::allclose(dA, dA.mH(), /*rtol=*/1e-2, /*atol=*/1e-2),
-                "linalg_eig_jvp: The tangent part of the matrix A should be Hermitian");
+                "linalg_eig_jvp: The tangent part of the matrix A should also be ", (dA.is_complex() ? "Hermitian" : "symmetric."));
   }
 
   const auto to_complex = [](const Tensor& A){ return A.to(c10::toComplexType(A.scalar_type())); };
@@ -2673,6 +2666,7 @@ std::tuple<Tensor, Tensor> linalg_eig_jvp(const Tensor& dA,
       ret = at::matmul(V, ret);
       return ret;
     }();
+
     if (is_hermitian) {
       return dX;
     } else {
