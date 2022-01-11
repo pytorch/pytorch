@@ -26,6 +26,31 @@ from torch.ao.quantization.qconfig import (
     float_qparams_weight_only_qconfig_4bit,
     activation_is_memoryless)
 
+
+def _get_default_custom_config_dict(other_dict=None):
+    r"""Defines the default custom config dict.
+    If `other_dict` is provided, updates the defaults.
+
+    We want to keep it inside a function as dicts are mutable.
+    """
+    custom_config_dict = {
+        'float_to_observed_custom_module_class': {
+            nn.LSTM: nn.quantizable.LSTM,
+            nn.MultiheadAttention: nn.quantizable.MultiheadAttention,
+        },
+        'observed_to_quantized_custom_module_class': {
+            nn.quantizable.LSTM: nn.quantized.LSTM,
+            nn.quantizable.MultiheadAttention: nn.quantized.MultiheadAttention,
+        }
+    }
+    if other_dict is not None:
+        custom_config_dict['float_to_observed_custom_module_class'].update(
+            other_dict.get('float_to_observed_custom_module_class', {}))
+        custom_config_dict['observed_to_quantized_custom_module_class'].update(
+            other_dict.get('observed_to_quantized_custom_module_class', {}))
+    return custom_config_dict
+
+
 def is_activation_post_process(module):
     return (isinstance(module, torch.ao.quantization.ObserverBase) or
             isinstance(module, torch.ao.quantization.FakeQuantizeBase))
@@ -244,8 +269,7 @@ def prepare(model, inplace=False, allow_list=None,
 
     """
     torch._C._log_api_usage_once("quantization_api.quantize.prepare")
-    if prepare_custom_config_dict is None:
-        prepare_custom_config_dict = {}
+    prepare_custom_config_dict = _get_default_custom_config_dict(prepare_custom_config_dict)
     custom_module_class_mapping = prepare_custom_config_dict.get("float_to_observed_custom_module_class", {})
 
     if not inplace:
@@ -525,8 +549,7 @@ def _convert(
     """
     if mapping is None:
         mapping = get_default_static_quant_module_mappings()
-    if convert_custom_config_dict is None:
-        convert_custom_config_dict = {}
+    convert_custom_config_dict = _get_default_custom_config_dict(convert_custom_config_dict)
     custom_module_class_mapping = convert_custom_config_dict.get("observed_to_quantized_custom_module_class", {})
 
     if not inplace:
