@@ -220,21 +220,13 @@ def build_constructor_arg_db():
         torch.nn.quantized.QFunctional: ((), {}),
     }
     if IS_JETSON:
-        x[torch.nn.qat.Conv2d] = ((3, 3, 3), {
-                'qconfig': torch.ao.quantization.default_qconfig,
-            })
-        x[torch.nn.qat.Conv3d] = ((3, 3, 3), {
-                'qconfig': torch.ao.quantization.default_qconfig,
-            })
-        x[torch.nn.qat.Linear] = ((5, 2), {
-                'qconfig': torch.ao.quantization.default_qconfig,
-            })
-        x[torch.nn.qat.Embedding] = ((10, 12), {
-                'qconfig': torch.ao.quantization.float_qparams_weight_only_qconfig,
-            })
-        x[torch.nn.qat.EmbeddingBag] = ((10, 12), {
-                'qconfig': torch.ao.quantization.float_qparams_weight_only_qconfig,
-            })
+        x[torch.nn.qat.Conv2d] = ((3, 3, 3), {'qconfig': torch.ao.quantization.default_qconfig})
+        x[torch.nn.qat.Conv3d] = ((3, 3, 3), {'qconfig': torch.ao.quantization.default_qconfig})
+        x[torch.nn.qat.Linear] = ((5, 2), {'qconfig': torch.ao.quantization.default_qconfig,})
+        x[torch.nn.qat.Embedding] =
+            ((10, 12), {'qconfig': torch.ao.quantization.float_qparams_weight_only_qconfig})
+        x[torch.nn.qat.EmbeddingBag] =
+            ((10, 12), {'qconfig': torch.ao.quantization.float_qparams_weight_only_qconfig})
     return x
 
 
