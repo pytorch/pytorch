@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/device_type_analysis.h>
+#include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/library.h>
 #include <cstddef>
 #include <memory>
@@ -149,27 +150,20 @@ bool defaultDeviceProp(Node* n) {
   return propWithNoDevice(n);
 }
 
-struct DeviceTypePropagationPass {
+struct DeviceTypePropagationPass : public PropertyPropBase {
   explicit DeviceTypePropagationPass(std::shared_ptr<Graph> graph)
-      : graph_(std::move(graph)) {
+      : PropertyPropBase(graph) {
     buildRuleRegistry();
   }
 
   // returns true if at least one node has its scalar type set on a tensor node
   bool run() {
-    processBlock(graph_->block());
+    propagateBlock(graph_->block(), false);
     return changed_;
   }
 
  private:
-  void processBlock(Block* block) {
-    GRAPH_DEBUG("processBlock");
-    for (auto it = block->nodes().begin(); it != block->nodes().end(); it++) {
-      processNode(*it);
-    }
-  }
-
-  void processNode(Node* n) {
+  void propagateNode(Node* n, bool _ = false) override {
     GRAPH_DEBUG("processNode");
     switch (n->kind()) {
       case prim::If:
@@ -206,80 +200,6 @@ struct DeviceTypePropagationPass {
           return; // Not handled for now
         }
     }
-  }
-
-  bool mergeAndApplyTensorProps(
-      const at::ArrayRef<Value*>& src1,
-      const at::ArrayRef<Value*>& src2,
-      const at::ArrayRef<Value*>& dst) {
-    bool changed = false;
-    TORCH_INTERNAL_ASSERT(src1.size() == src2.size());
-    TORCH_INTERNAL_ASSERT(src1.size() == dst.size());
-
-    for (int i = 0; i < dst.size(); i++) {
-      auto src1_type = src1[i]->type()->cast<TensorType>();
-      auto src2_type = src2[i]->type()->cast<TensorType>();
-      if (!src1_type || !src2_type) {
-        continue;
-      }
-
-      if (!src1_type->device() || !src2_type->device() ||
-          !(src1_type->device().value() == src2_type->device().value())) {
-        changed |= setDeviceType(dst[i], c10::nullopt);
-      } else {
-        changed |= setDeviceType(dst[i], src1_type->device());
-      }
-    }
-    return changed;
-  }
-
-  bool applyTensorProps(
-      const at::ArrayRef<Value*>& src,
-      const at::ArrayRef<Value*>& dst) {
-    TORCH_INTERNAL_ASSERT(src.size() == dst.size());
-    bool changed = false;
-    for (int i = 0; i < dst.size(); i++) {
-      auto src_type = src[i]->type()->cast<TensorType>();
-      changed |= setDeviceType(dst[i], src_type->device());
-    }
-    return changed;
-  }
-
-  void processLoop(Node* node) {
-    GRAPH_DEBUG("processLoop");
-    LoopView l(node);
-
-    applyTensorProps(l.carriedInputs(), l.bodyCarriedInputs());
-
-    int iter = 0;
-    for (; iter < 4; iter++) {
-      processBlock(l.bodyBlock());
-      bool inputs_changed = mergeAndApplyTensorProps(
-          l.carriedInputs(), l.bodyCarriedOutputs(), l.bodyCarriedInputs());
-      if (!inputs_changed) {
-        break;
-      }
-    }
-    TORCH_INTERNAL_ASSERT(
-        iter < 4, "Failed to apply tensor props to loop due to changing types");
-
-    // Note that the types of bodyCarriedOutputs and carriedInputs
-    // can be different, so we need the merged version of them, which
-    // is bodyCarriedInputs.
-    applyTensorProps(l.bodyCarriedInputs(), l.carriedOutputs());
-  }
-
-  void processIf(Node* node) {
-    GRAPH_DEBUG("processIf");
-    auto blocks = node->blocks();
-    auto true_block = blocks.at(0);
-    auto false_block = blocks.at(1);
-
-    processBlock(true_block);
-    processBlock(false_block);
-
-    mergeAndApplyTensorProps(
-        true_block->outputs(), false_block->outputs(), node->outputs());
   }
 
   void processAtenOps(Node* n) {
