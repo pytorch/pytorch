@@ -174,7 +174,7 @@ class InverseWishart(ExponentialFamily):
         p = self._event_shape[-1]  # has singleton shape
         if self.df.le(p + 1).any():
             raise ValueError("Mean of the Inverse Wishart distribution can be caculated only for df > ndim + 1.")
-        return self.covariance_matrix.div(self.df - 1)
+        return self.covariance_matrix / (self.df - 1).expand(self._batch_shape + self._event_shape)
 
     @property
     def variance(self):
