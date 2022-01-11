@@ -247,9 +247,6 @@ class AliasDb {
   // internally.
   bool isFrozen_;
 
-  // Enable precise treatment of prim::TupleConstruct.
-  bool enablePreciseTupleContainerAnalysis_ = false;
-
   // The points-to graph that stores aliasing relationships
   std::unique_ptr<MemoryDAGBuilder> memoryDAGBuilder_;
   std::unique_ptr<MemoryDAG> memoryDAG_;
