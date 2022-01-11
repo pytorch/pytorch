@@ -15,7 +15,6 @@
 #include <torch/csrc/jit/ir/ir.h>
 
 #include <torch/csrc/jit/passes/normalize_ops.h>
-#include <torch/csrc/jit/passes/replacement_of_old_operators.h>
 
 namespace torch {
 namespace jit {
