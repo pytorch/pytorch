@@ -98,7 +98,6 @@ TESTS = discover_tests(
         'test_bundled_images',
         'test_cpp_extensions_aot',
         'test_determination',
-        'test_gen_backend_stubs',
         'test_jit_fuser',
         'test_jit_simple',
         'test_jit_string',
@@ -206,6 +205,7 @@ WINDOWS_BLOCKLIST = [
     "distributed/_sharded_tensor/test_sharded_tensor",
     "distributed/_sharded_tensor/ops/test_embedding",
     "distributed/_sharded_tensor/ops/test_embedding_bag",
+    "distributed/_sharded_tensor/ops/test_binary_cmp",
     "distributed/_sharded_tensor/ops/test_init",
     "distributed/_sharded_tensor/ops/test_linear",
     "distributed/_sharded_optim/test_sharded_optim",
@@ -219,6 +219,7 @@ ROCM_BLOCKLIST = [
     "distributed/_sharded_tensor/test_sharded_tensor",
     "distributed/_sharded_tensor/ops/test_embedding",
     "distributed/_sharded_tensor/ops/test_embedding_bag",
+    "distributed/_sharded_tensor/ops/test_binary_cmp",
     "distributed/_sharded_tensor/ops/test_init",
     "distributed/_sharded_tensor/ops/test_linear",
     "distributed/_sharded_optim/test_sharded_optim",
@@ -357,6 +358,7 @@ DISTRIBUTED_TESTS = [
     "distributed/_sharded_tensor/test_sharded_tensor",
     "distributed/_sharded_tensor/ops/test_embedding",
     "distributed/_sharded_tensor/ops/test_embedding_bag",
+    "distributed/_sharded_tensor/ops/test_binary_cmp",
     "distributed/_sharded_tensor/ops/test_init",
     "distributed/_sharded_tensor/ops/test_linear",
     "distributed/_sharded_optim/test_sharded_optim",
@@ -888,10 +890,13 @@ def get_selected_tests(options):
             filter(lambda test_name: test_name in DISTRIBUTED_TESTS, selected_tests)
         )
 
+    # Only run fx2trt test with specified option argument
     if options.fx2trt_tests:
         selected_tests = list(
-            filter(lambda test_name: "fx2trt" in test_name, selected_tests)
+            filter(lambda test_name: test_name in FX2TRT_TESTS, selected_tests)
         )
+    else:
+        options.exclude.extend(FX2TRT_TESTS)
 
     # Filter to only run core tests when --core option is specified
     if options.core:
@@ -935,7 +940,7 @@ def get_selected_tests(options):
             WINDOWS_BLOCKLIST.append("jit")
             WINDOWS_BLOCKLIST.append("jit_fuser")
 
-        # This is exception thats caused by this issue https://github.com/pytorch/pytorch/issues/69460
+        # This is exception that's caused by this issue https://github.com/pytorch/pytorch/issues/69460
         # This below code should be removed once this issue is solved
         if torch.version.cuda is not None and LooseVersion(torch.version.cuda) >= "11.5":
             WINDOWS_BLOCKLIST.append("test_cpp_extensions_aot")
@@ -963,6 +968,11 @@ def get_selected_tests(options):
         selected_tests = get_shard_based_on_S3(
             which_shard, num_shards, selected_tests, TEST_TIMES_FILE
         )
+
+    # skip all distributed tests if distributed package is not available.
+    if not dist.is_available():
+        selected_tests = exclude_tests(DISTRIBUTED_TESTS, selected_tests,
+                                       "PyTorch is built without distributed support.")
 
     return selected_tests
 
