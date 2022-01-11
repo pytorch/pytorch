@@ -39,7 +39,7 @@ from torch.testing._internal.common_utils import freeze_rng_state, run_tests, Te
     skipIfRocmVersionLessThan, skipIfNotMiopenSuggestNHWC, TEST_NUMPY, TEST_SCIPY, TEST_WITH_ROCM, download_file, \
     get_function_arglist, load_tests, ALL_TENSORTYPES, \
     ALL_TENSORTYPES2, suppress_warnings, TemporaryFileName, TEST_WITH_UBSAN, IS_PPC, \
-    parametrize as parametrize_test, subtest
+    parametrize as parametrize_test, subtest, instantiate_parametrized_tests
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
     module_tests, criterion_tests, loss_reference_fns, \
@@ -895,8 +895,8 @@ class TestNN(NNTestCase):
         w = torch.randn(6, 1, 5, 5)
 
         with self.assertRaisesRegex(RuntimeError,
-                                    r'Expected 4-dimensional input for 4-dimensional weight \[6, 1, 5, 5\],' +
-                                    r' but got 5-dimensional input of size \[1, 10, 1, 28, 28\] instead'):
+                                    r'Expected 3D \(unbatched\) or 4D \(batched\) input to conv2d, but got ' +
+                                    r'input of size: \[1, 10, 1, 28, 28\]'):
 
             F.conv2d(x, w)
 
@@ -2292,7 +2292,10 @@ class TestNN(NNTestCase):
         sample = next(model.parameters())[0, 0, 0]
         self.assertTrue(torch.equal(sample.data, vec.data[:5]))
 
+    # FIXME: Rewrite this test using functions not depending on LAPACK
+    #        and remove the `@skipIfNoLapack` (see #70995)
     # torch/nn/utils/parametrize
+    @skipIfNoLapack
     def test_register_and_remove_parametrization(self):
         r"""Test that it is possible to add a few parametrizations
         on a parameter or a buffer and that removing them restores the initial state
@@ -2592,6 +2595,9 @@ class TestNN(NNTestCase):
         self.assertTrue((model.bias[1:-1] == torch.ones(6)).all())
         self.assertEqual(len(list(model.parameters())), 1)
 
+    # FIXME: Rewrite this test using functions not depending on LAPACK
+    #        and remove the `@skipIfNoLapack` (see #70995)
+    @skipIfNoLapack
     def test_serialization_parametrization(self):
         r"""Test that it is possible to serialize a parametrized model via state_dict"""
         # A stateful parametrization
@@ -2637,6 +2643,9 @@ class TestNN(NNTestCase):
             with TemporaryFileName() as fname:
                 torch.save(model, fname)
 
+    # FIXME: Rewrite this test using functions not depending on LAPACK
+    #        and remove the `@skipIfNoLapack` (see #70995)
+    @skipIfNoLapack
     def test_initialization_parametrization(self):
         r"""Test that it is possible to initialize a parametrization when it
             implements a `right_inverse` method
@@ -2926,6 +2935,9 @@ class TestNN(NNTestCase):
         self.assertEqual(len(module.parametrizations.weight), 1)
         self.assertTrue(isinstance(module.parametrizations.weight[0], Identity))
 
+    # FIXME: Rewrite this test using functions not depending on LAPACK
+    #        and remove the `@skipIfNoLapack` (see #70995)
+    @skipIfNoLapack
     def test_multiple_inputs_parametrization(self):
         # A parametrization with several outputs
         class RankOne(nn.Module):
@@ -3020,6 +3032,9 @@ class TestNN(NNTestCase):
             loss.backward()
             sgd.step()
 
+    # FIXME: Rewrite this test using functions not depending on LAPACK
+    #        and remove the `@skipIfNoLapack` (see #70995)
+    @skipIfNoLapack
     def test_caching_parametrization(self):
         r"""Test the caching system of a parametrization"""
         # Define a couple matrix parametrizations
@@ -4686,6 +4701,7 @@ class TestNN(NNTestCase):
         m = pickle.loads(pickle.dumps(m))
         self.assertIsInstance(m, nn.Linear)
 
+    @skipIfNoLapack
     def test_orthogonal_parametrization(self):
         # Orthogonal implements 6 algorithms (3x parametrizations times 2 options of use_trivialization)
 
@@ -4805,6 +4821,7 @@ class TestNN(NNTestCase):
                     opt.step()
                     assert_is_orthogonal(m.weight)
 
+    @skipIfNoLapack
     def test_orthogonal_errors(self):
         m = nn.Linear(3, 4)
         with self.assertRaisesRegex(ValueError, "has to be one of"):
@@ -5073,8 +5090,10 @@ class TestNN(NNTestCase):
         self.assertRaises(AssertionError, lambda: F.pad(inputs, (1,)))
 
     @unittest.skipIf(not TEST_NUMPY, "numpy not found")
-    def test_multihead_attention(self):
-        def _scaled_dot_attn_ref(Q, K, V, dims, unseen_mask=None, key_padding_mask=None):
+    @parametrize_test("average_attn_weights", [True, False])
+    def test_multihead_attention(self, average_attn_weights):
+        def _scaled_dot_attn_ref(Q, K, V, dims, unseen_mask=None, key_padding_mask=None,
+                                 average_attn_weights=average_attn_weights):
             """ Numpy-based reference implementation of scaled dot attention
             for testing"""
 
@@ -5097,7 +5116,8 @@ class TestNN(NNTestCase):
 
             reference = _softmax(QKT)
             ref_attn_weight = reference
-            ref_attn_weight = np.sum(ref_attn_weight, axis=1) / b2
+            if average_attn_weights:
+                ref_attn_weight = np.sum(ref_attn_weight, axis=1) / b2
             reference = _batchmatmul(reference, V)
             return reference, ref_attn_weight
 
@@ -5158,7 +5178,8 @@ class TestNN(NNTestCase):
             return (src_indices < src_lengths).int().detach()
 
         def _multihead_attn_test_helper(add_key_padding_mask=False, add_bias_kv=False, add_zero_attn=False,
-                                        saved_kv=False, same_embed_dim=False, byte_mask=False):
+                                        saved_kv=False, same_embed_dim=False, byte_mask=False,
+                                        average_attn_weights=average_attn_weights):
             for _ in range(100):
                 batch_sz, seq_len = [random.randint(2, 10) for r in range(2)]
                 d_head = random.randint(3, 10)
@@ -5229,7 +5250,8 @@ class TestNN(NNTestCase):
                         multihead_attn_module.add_zero_attn, multihead_attn_module.dropout,
                         multihead_attn_module.out_proj.weight, multihead_attn_module.out_proj.bias,
                         multihead_attn_module.training, key_padding_mask_tensor, True, attn_mask_tensor,
-                        static_k=saved_k_tensor, static_v=saved_v_tensor)
+                        static_k=saved_k_tensor, static_v=saved_v_tensor,
+                        average_attn_weights=average_attn_weights)
                 else:
                     result, result_weight = torch.nn.functional.multi_head_attention_forward(
                         _Q, _K, _V,
@@ -5241,7 +5263,8 @@ class TestNN(NNTestCase):
                         multihead_attn_module.training, key_padding_mask_tensor, True, attn_mask_tensor,
                         True, multihead_attn_module.q_proj_weight,
                         multihead_attn_module.k_proj_weight, multihead_attn_module.v_proj_weight,
-                        static_k=saved_k_tensor, static_v=saved_v_tensor)
+                        static_k=saved_k_tensor, static_v=saved_v_tensor,
+                        average_attn_weights=average_attn_weights)
 
                 result = result.squeeze(0).detach().numpy()
 
@@ -6172,9 +6195,9 @@ class TestNN(NNTestCase):
                        nn.Conv2d(3, 8, 3).to(dtype), nn.ConvTranspose2d(3, 8, 3).to(dtype),
                        nn.Conv3d(3, 8, 3).to(dtype), nn.ConvTranspose3d(3, 8, 3).to(dtype)]
 
-            invalid_input_dims = [(2, 4), (2, 4),
-                                  (3, 5), (3, 5),
-                                  (4, 6), (4, 6)]
+            invalid_input_dims = [(1, 4), (1, 4),
+                                  (2, 5), (2, 5),
+                                  (3, 6), (3, 6)]
 
             for invalid_dims, module in zip(invalid_input_dims, modules):
                 for dims in invalid_dims:
@@ -13402,7 +13425,7 @@ class TestNNDeviceType(NNTestCase):
         gx_expect, gy_expect = x.grad, y.grad
         x.grad, y.grad = None, None
 
-        z = F.conv1d(x, y, padding='same')
+        z = F.conv2d(x, y, padding='same')
         z.sum().backward()
         self.assertEqual(gx_expect, x.grad)
         self.assertEqual(gy_expect, y.grad)
@@ -16481,6 +16504,91 @@ class TestNNDeviceType(NNTestCase):
         _helper(zero_infinity=True)
         _helper(zero_infinity=False)
 
+    def _CTCLoss_gen_losses(self, device, input_length, vocab_size, target_length, reduction, use_module_form):
+        batch_size = 1
+        log_probs = torch.randn(input_length, batch_size, vocab_size, dtype=torch.float, device=device) \
+                         .log_softmax(2).requires_grad_()
+        targets = torch.randint(low=1, high=vocab_size - 1, size=(batch_size, target_length),
+                                dtype=torch.int, device=device)
+        input_lengths = batch_size * [input_length]
+        target_lengths = batch_size * [target_length]
+
+        log_probs_no_bd = log_probs.squeeze(1).detach().clone().requires_grad_()
+        targets_no_bd = targets.squeeze(0).detach().clone()
+        input_lengths_no_bd = torch.tensor(input_length)
+        target_lengths_no_bd = torch.tensor(target_length)
+
+        # currently only length 2 and 1 right now, but left flexible for additional potential cases
+        log_probs_refs = [log_probs.detach().clone().requires_grad_() for _ in range(2)]
+        log_probs_no_bd_refs = [log_probs_no_bd.detach().clone().requires_grad_() for _ in range(1)]
+
+        losses = []
+        losses_no_bd = []
+
+        has_cuda = torch.cuda.is_available()
+        has_cudnn = has_cuda and 'cuda' in device and self.has_cudnn()
+        # cudnn requires a cpu target
+        if has_cuda and has_cudnn:
+            targets = targets.cpu()
+            targets_no_bd = targets_no_bd.cpu()
+
+        ctc_loss = (
+            nn.CTCLoss(reduction=reduction, zero_infinity=True)
+            if use_module_form
+            else partial(torch.nn.functional.ctc_loss, reduction=reduction, zero_infinity=True)
+        )
+
+        with torch.backends.cudnn.flags(enabled=has_cudnn):
+            # batched case. log_probs.shape = (T, N, C), targets = (N, S), input_lengths/target_lengths = (N,)
+            losses.append(ctc_loss(log_probs_refs[0], targets, input_lengths, target_lengths))
+            # batched case. input.shape = (T, N, C), targets = (S,), input_lengths/target_lengths = (N,)
+            losses.append(ctc_loss(log_probs_refs[1], targets_no_bd, input_lengths, target_lengths))
+            # unbatched case. input.shape = (T, C), targets = (S,), input_lengths/target_lengths = (N,)
+            losses_no_bd.append(ctc_loss(log_probs_no_bd_refs[0], targets_no_bd,
+                                         input_lengths_no_bd, target_lengths_no_bd))
+
+            for loss in losses + losses_no_bd:
+                loss.backward()
+
+        return losses, losses_no_bd, log_probs_refs, log_probs_no_bd_refs
+
+    def _assertEqual_list(self, expected, list_to_compare, atol=None, rtol=None):
+        for ele in list_to_compare:
+            self.assertEqual(expected, ele, atol=atol, rtol=rtol)
+
+    @parametrize_test("reduction", ['none', 'mean', 'sum'])
+    @parametrize_test("use_module_form", [True, False])
+    def test_CTCLoss_no_batch_dim(self, device, reduction, use_module_form):
+        input_length = 40
+        vocab_size = 3
+        target_length = 12
+
+        args = self._CTCLoss_gen_losses(device, input_length, vocab_size, target_length, reduction, use_module_form)
+        losses, losses_no_bd, log_probs_refs, log_probs_no_bd_refs = args
+
+        # test output values
+        self._assertEqual_list(losses[0], losses[1:], atol=1e-4, rtol=0)
+        self._assertEqual_list(losses[0].squeeze(0), losses_no_bd, atol=1e-4, rtol=0)
+
+        # test gradient values
+        self._assertEqual_list(log_probs_refs[0].grad, [t.grad for t in log_probs_refs[1:]], atol=1e-4, rtol=0)
+        self._assertEqual_list(
+            log_probs_refs[0].grad.squeeze(1),
+            [t.grad for t in log_probs_no_bd_refs],
+            atol=1e-4,
+            rtol=0,
+        )
+
+        # checking the output's shape
+        # batch dim case should be (N,). no batch dim case should be ()
+        self._assertEqual_list((1,) if reduction == 'none' else (), [loss.shape for loss in losses])
+        self._assertEqual_list((), [loss.shape for loss in losses_no_bd])
+
+        # checking the gradient's shape
+        # batch dim case should have shape (T, N, C). no batch dim case should have shape (T, C)
+        self._assertEqual_list((input_length, 1, vocab_size), [t.grad.shape for t in log_probs_refs])
+        self._assertEqual_list((input_length, vocab_size), [t.grad.shape for t in log_probs_no_bd_refs])
+
     @onlyCUDA
     @skipCUDAIfNoCudnn
     def test_contig_wrong_stride_cudnn(self, device):
@@ -18388,7 +18496,7 @@ class TestNNDeviceType(NNTestCase):
         output_mask = [True, True, True]
         grad_grad_output, grad_input, grad_weight = torch.ops.aten._convolution_double_backward(
             ggI, ggW, ggB, gO, weight, input, stride, padding, dilation, transposed,
-            output_padding, groups, False, False, False, False, output_mask)
+            output_padding, groups, output_mask)
 
         # Make sure the correct shapes are computed.
         self.assertEqual(grad_grad_output.shape, gO.shape)
@@ -20123,6 +20231,7 @@ class TestStateDictHooks(TestCase):
 
 
 instantiate_device_type_tests(TestNNDeviceType, globals())
+instantiate_parametrized_tests(TestNN)
 
 if __name__ == '__main__':
     run_tests()

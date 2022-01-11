@@ -635,6 +635,7 @@ class SequentialLR(_LRScheduler):
         self._milestones = milestones
         self.last_epoch = last_epoch + 1
         self.optimizer = optimizer
+        self._last_lr = schedulers[0].get_last_lr()
 
     def step(self):
         self.last_epoch += 1
@@ -643,6 +644,7 @@ class SequentialLR(_LRScheduler):
             self._schedulers[idx].step(0)
         else:
             self._schedulers[idx].step()
+        self._last_lr = self._schedulers[idx].get_last_lr()
 
     def state_dict(self):
         """Returns the state of the scheduler as a :class:`dict`.
