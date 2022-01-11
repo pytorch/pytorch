@@ -1321,8 +1321,10 @@ def sample_inputs_linalg_det_singular(op_info, device, dtype, requires_grad, **k
             lu, pivs, _ = torch.linalg.lu_factor_ex(x)
             p, l, u = torch.lu_unpack(lu, pivs)
             u_diag_abs = u.diagonal(0, -2, -1).abs()
+            u_diag_abs_largest = u_diag_abs.max(dim=-1, keepdim=True).values
             u_diag_abs_smallest_idxs = torch.topk(u_diag_abs, k=(n - rank), largest=False).indices
-            u.diagonal(0, -2, -1)[..., u_diag_abs_smallest_idxs] = torch.finfo(dtype).eps
+            u[..., u_diag_abs_smallest_idxs] = torch.finfo(dtype).eps
+
 
             matrix = p @ l @ u
 
