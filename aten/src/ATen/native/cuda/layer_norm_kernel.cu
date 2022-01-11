@@ -21,6 +21,14 @@ namespace {
 
 constexpr int kCUDANumThreads = 256;
 constexpr int kColwiseReduceTileSize = 32;
+constexpr int vec_size = 4; //we could make it dependent on dtype, but that would lead to different results between float and low-p types
+
+// aligned vector generates vectorized load/store on CUDA (copy-pasted from MemoryAccess.cuh)
+template<typename scalar_t, int vec_size>
+struct alignas(sizeof(scalar_t) * vec_size) aligned_vector {
+  scalar_t val[vec_size];
+};
+
 
 template <typename T, typename T_ACC>
 __global__ void RowwiseMomentsCUDAKernel(
@@ -82,6 +90,188 @@ __global__ void LayerNormForwardCUDAKernel(
         beta_v;
   }
 }
+
+struct WelfordDataLN{
+  float mean;
+  float sigma2;
+  float count;
+  C10_HOST_DEVICE WelfordDataLN(): mean(0.f), sigma2(0.f), count(0.f){}
+  C10_HOST_DEVICE WelfordDataLN(float mean, float sigma2, float count): mean(mean), sigma2(sigma2), count(count) {}
+};
+
+template<typename U> __device__
+WelfordDataLN cuWelfordOnlineSum(
+  const U val,
+  const WelfordDataLN& curr_sum)
+{
+  U delta = val - curr_sum.mean;
+  U new_count = curr_sum.count + 1.f;
+  U new_mean = curr_sum.mean + delta * (1.f/new_count); //proper division is slow, this is less accurate but noticeably faster
+  return {new_mean, curr_sum.sigma2 + delta * (val - new_mean), new_count};
+}
+
+__device__
+WelfordDataLN cuWelfordCombine(
+  const WelfordDataLN dataB,
+  const WelfordDataLN dataA
+) {
+  using U = decltype(dataB.count);
+  U delta = dataB.mean - dataA.mean;
+  U count = dataA.count + dataB.count;
+  U mean, sigma2;
+  if (count > decltype(dataB.count){0}) {
+    auto coef = 1.f/count; //NB we don't use --use_fast_math, but this is emulation, 1./count goes to intrinsic, `* coef` is multiplication, instead of slow fp division
+    auto nA = dataA.count * coef;
+    auto nB = dataB.count * coef;
+    mean = nA*dataA.mean + nB*dataB.mean;
+    sigma2 = dataA.sigma2 + dataB.sigma2 + delta * delta * dataA.count * nB;
+  } else {
+    mean = U(0);
+    sigma2 = U(0);
+  }
+  return {mean, sigma2, count};
+}
+
+template<typename T, int alignment=16>
+__device__ WelfordDataLN compute_stats(
+  const T*  __restrict__ X,
+  const int N,
+  float * buf
+  ) {
+    //X points to the row to read
+    using vec_t = aligned_vector<T, vec_size>;
+    using acc_t = acc_type<T, true>;
+    const vec_t * X_vec = reinterpret_cast<const vec_t*>(X);
+    const int numx = blockDim.x * blockDim.y;
+    const int thrx = threadIdx.x + threadIdx.y * blockDim.x;
+    const int n_vec_to_read = N/vec_size;
+    WelfordDataLN wd(0.f, 0.f, 0.f);
+    //no tail, we check that N is multiple of vec_size
+    for (int i = thrx; i < n_vec_to_read; i += numx) {
+      vec_t data = X_vec[i];
+      #pragma unroll
+      for (int ii=0; ii < vec_size; ii++){
+        wd = cuWelfordOnlineSum(static_cast<acc_t>(data.val[ii]), wd);
+      }
+    }
+    // intra-warp reduction
+    for (int offset = (C10_WARP_SIZE >> 1); offset > 0; offset >>= 1) {
+        WelfordDataLN wdB{WARP_SHFL_DOWN(wd.mean, offset),
+        WARP_SHFL_DOWN(wd.sigma2, offset), WARP_SHFL_DOWN(wd.count, offset)};
+        wd = cuWelfordCombine(wd, wdB);
+    }
+    // threadIdx.x == 0 has correct values for each warp
+    // inter-warp reductions
+    if (blockDim.y > 1) {
+      float * meansigmabuf = buf;
+      float * countbuf = buf + blockDim.y;
+      for (int offset = blockDim.y/2;  offset > 0;  offset /= 2) {
+        // upper half of warps write to shared
+        if (threadIdx.x == 0 && threadIdx.y >= offset && threadIdx.y < 2*offset) {
+          const int wrt_y = threadIdx.y - offset;
+          meansigmabuf[2*wrt_y] = wd.mean;
+          meansigmabuf[2*wrt_y+1] = wd.sigma2;
+          countbuf[wrt_y] = wd.count;
+        }
+        __syncthreads();
+        // lower half merges
+        if (threadIdx.x == 0 && threadIdx.y < offset) {
+          WelfordDataLN wdB{meansigmabuf[2*threadIdx.y],
+                          meansigmabuf[2*threadIdx.y+1],
+                          countbuf[threadIdx.y]};
+          wd = cuWelfordCombine(wd, wdB);
+        }
+        __syncthreads();
+      }
+      if (threadIdx.x == 0 && threadIdx.y ==0) {
+        meansigmabuf[0] = wd.mean;
+        meansigmabuf[1] = wd.sigma2/float(N);
+      }
+      __syncthreads();
+      return WelfordDataLN{meansigmabuf[0], meansigmabuf[1],0.f};
+
+    } else {
+      return WelfordDataLN{WARP_SHFL(wd.mean,0), WARP_SHFL(wd.sigma2,0)/float(N), 0.f};
+    }
+}
+
+
+template <typename T, typename T_ACC,
+typename std::enable_if<!std::is_same<T, double>::value, int>::type = 0>
+__device__ __inline__ void vectorized_layer_norm_kernel_impl(
+  const int N,
+  T_ACC eps,
+  const  T* __restrict__ X,
+  const  T* gamma,
+  const  T* beta,
+  T_ACC* mean,
+  T_ACC* rstd,
+  T* Y){
+    extern __shared__ float s_data[]; //if we made smem WelfordDataLN type, there would be bank conflicts,
+    //as one thread would have to write 3 consecutive floats
+    auto i1 = blockIdx.x;
+    const T * block_row = X + i1 * N;
+    WelfordDataLN wd = compute_stats(block_row, N, s_data);
+    using vec_t = aligned_vector<T, vec_size>;
+    const vec_t * X_vec = reinterpret_cast<const vec_t*>(block_row);
+    vec_t * Y_vec = reinterpret_cast<vec_t*>(Y + i1 * N);
+    const int numx = blockDim.x * blockDim.y;
+    const int thrx = threadIdx.x + threadIdx.y * blockDim.x;
+    const int n_vec_to_read = N/vec_size;
+    T_ACC rstd_val = c10::cuda::compat::rsqrt(wd.sigma2 + eps);
+    //no tail, N is guaranteed to be multiple of vec size
+    for (int i = thrx; i < n_vec_to_read; i += numx) {
+      vec_t data = X_vec[i];
+      vec_t out;
+      //computation is performed in T_ACC, X is cast to T_ACC and result is implicitly cast to T
+      if (gamma != nullptr && beta != nullptr) {
+        #pragma unroll
+        for (int ii=0; ii < vec_size; ii++){
+          out.val[ii] = static_cast<T_ACC>(gamma[i*vec_size + ii]) * (rstd_val * (static_cast<T_ACC>(data.val[ii]) - wd.mean))
+          + static_cast<T_ACC>(beta[i*vec_size + ii]);
+        }
+      } else {
+        #pragma unroll
+        for (int ii=0; ii < vec_size; ii++){
+          out.val[ii] = rstd_val * (static_cast<T_ACC>(data.val[ii]) - wd.mean);
+        }
+
+      }
+      Y_vec[i] = out;
+    }
+    if (thrx == 0) {
+      mean[i1] = wd.mean;
+      rstd[i1] = rstd_val;
+    }
+}
+
+template <typename T, typename T_ACC,
+typename std::enable_if<std::is_same<T, double>::value, int>::type = 0>
+__device__ __inline__ void vectorized_layer_norm_kernel_impl(
+  const int N,
+  T_ACC eps,
+  const  T* __restrict__ X,
+  const  T* gamma,
+  const  T* beta,
+  T_ACC* mean,
+  T_ACC* rstd,
+  T* Y){
+    CUDA_KERNEL_ASSERT("doesn't work with double");
+  }
+
+//to avoid windows SFINAE errors
+template <typename T, typename T_ACC>
+__global__ __inline__ void vectorized_layer_norm_kernel(
+  const int N,
+  T_ACC eps,
+  const  T* __restrict__ X,
+  const  T* gamma,
+  const  T* beta,
+  T_ACC* mean,
+  T_ACC* rstd,
+  T* Y){
+    vectorized_layer_norm_kernel_impl(N, eps, X, gamma, beta, mean, rstd, Y);
+  }
 
 template <typename T>
 __global__ void ComputeInternalGradientsCUDAKernel(
@@ -263,6 +453,31 @@ __global__ void GammaBetaBackwardCUDAKernel(
 }
 
 template <typename T, typename T_ACC>
+//typename std::enable_if<!std::is_same<>::type* = nullptr>
+void launch_vectorized_layer_norm_kernel(
+  int N,
+  int64_t M,
+  T_ACC eps,
+  const T* X_data,
+  const T* gamma_data,
+  const T* beta_data,
+  T* Y_data,
+  T_ACC* mean_data,
+  T_ACC* rstd_data
+) {
+    //constexpr int alignment = 16; //currently unused to make sure float and half results are bw accurate
+    auto stream = at::cuda::getCurrentCUDAStream().stream();
+    const int num_threads = 128;
+    const dim3 threads(C10_WARP_SIZE,num_threads/C10_WARP_SIZE,1);
+    const dim3 blocks(M);
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(threads.y % 2 == 0 || threads.y == 1);
+    int nshared = threads.y > 1 ? threads.y * 3/2 *sizeof(T_ACC) : 0;
+    vectorized_layer_norm_kernel<<<blocks, threads, nshared, stream>>>(N, eps, X_data,
+    gamma_data, beta_data, mean_data, rstd_data, Y_data);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+template <typename T, typename T_ACC>
 void LayerNormKernelImplInternal(
     const Tensor& X,
     const Tensor& gamma,
@@ -273,15 +488,24 @@ void LayerNormKernelImplInternal(
     Tensor* Y,
     Tensor* mean,
     Tensor* rstd) {
-  DCHECK_EQ(X.numel(), M * N);
-  DCHECK(!gamma.defined() || gamma.numel() == N);
-  DCHECK(!beta.defined() || beta.numel() == N);
+  // assumes input, gamma and beta are of proper shape, this was checked in _check_layer_norm_inputs
+  // assumes all tensors are contiguous
   const T* X_data = X.data_ptr<T>();
   const T* gamma_data = gamma.defined() ? gamma.data_ptr<T>() : nullptr;
   const T* beta_data = beta.defined() ? beta.data_ptr<T>() : nullptr;
   T* Y_data = Y->data_ptr<T>();
   T_ACC* mean_data = mean->data_ptr<T_ACC>();
   T_ACC* rstd_data = rstd->data_ptr<T_ACC>();
+  // check if can take fast path - all tensors are properly aligned, N is less than 2^24 (to use float count),
+  // N is multiple of vec_size (so that all rows are aligned if tensor is aligned)
+  auto can_vectorize = [&](const T * ptr, int alignment){uint64_t addr = reinterpret_cast<uint64_t>(ptr); return addr % alignment == 0;};
+  constexpr int num_vec_elems = vec_size;
+  constexpr int alignment = num_vec_elems * sizeof(T);
+  if ((std::is_same<T, float>::value || std::is_same<T, at::Half>::value) &&
+  N <= 1ULL << std::numeric_limits<float>::digits && N % num_vec_elems == 0 &&
+  can_vectorize(X_data, alignment) && can_vectorize(Y_data, alignment)) {
+    launch_vectorized_layer_norm_kernel(static_cast<int>(N), M, eps, X_data, gamma_data, beta_data, Y_data, mean_data, rstd_data);
+  } else {
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
   RowwiseMomentsCUDAKernel<T, T_ACC>
       <<<M, cuda_utils::kCUDABlockReduceNumThreads, 0, cuda_stream>>>(
@@ -290,6 +514,7 @@ void LayerNormKernelImplInternal(
   LayerNormForwardCUDAKernel<T, T_ACC><<<M, kCUDANumThreads, 0, cuda_stream>>>(
       N, X_data, mean_data, rstd_data, gamma_data, beta_data, Y_data);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
+  }
 }
 
 void LayerNormKernelImpl(
@@ -568,8 +793,6 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cuda(
   return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
 }
 
-REGISTER_DISPATCH(LayerNormKernel, &LayerNormKernelImpl);
-REGISTER_DISPATCH(LayerNormBackwardKernel, &LayerNormBackwardKernelImpl);
 
 } // namespace native
 } // namespace at
