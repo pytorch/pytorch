@@ -5,8 +5,11 @@
     { include: ["<ATen/cpu/vec/functional_base.h>", private, "<ATen/cpu/vec/functional.h>", public] },
     { include: ["<ATen/cpu/vec/functional_bfloat16.h>", private, "<ATen/cpu/vec/functional.h>", public] },
 
+    { include: ["<ATen/core/Dict_inl.h>", private, "<ATen/core/Dict.h>", public] },
+    { include: ["<ATen/core/ivalue_inl.h>", private, "<ATen/core/ivalue.h>", public] },
     { include: ["<ATen/core/DimVector.h>", public, "<ATen/DimVector.h>", public] },
     { include: ["<ATen/core/Dimname.h>", public, "<ATen/Dimname.h>", public] },
+    { include: ["<ATen/core/symbol.h>", public, "<ATen/core/Dimname.h>", public] },
     { include: ["<ATen/TensorIterator.h>", public, "<ATen/core/TensorIterator.h>", public] },
 
     { include: ["<c10/core/WrapDimMinimal.h>", public, "<ATen/WrapDimUtils.h>", public] },
