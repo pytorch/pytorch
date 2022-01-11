@@ -1478,7 +1478,7 @@ void TensorExprKernel::compile() {
       // strides at the end of the kernel (if already contiguous it's a no-op)
       Tensor properly_strided_output = convertStaticShapeOutputToCorrectStrides(output);
       if (properly_strided_output.stmt()) {
-        block->append_stmt(IRSimplifier::simplify(properly_strided_output.stmt()));
+        block->append_stmt(properly_strided_output.stmt());
       }
       // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
       bufs_[output] = properly_strided_output.buf();
