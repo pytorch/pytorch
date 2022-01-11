@@ -10,7 +10,9 @@
 #include <torch/csrc/utils/disallow_copy.h>
 #include <torch/csrc/utils/python_stub.h>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/core/dynamic_type.h>
+#include <ATen/core/enum_type.h>
 #include <ATen/core/function_schema.h>
 #include <ATen/core/functional.h>
 #include <ATen/core/interned_strings.h>
@@ -18,6 +20,7 @@
 #include <ATen/core/jit_type.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
 
 #include <functional>
 #include <iostream>
@@ -1174,6 +1177,8 @@ struct Graph {
   // by default this is set to append to the top level block
   Node* insert_before_;
 
+  c10::optional<size_t> op_version_;
+
  public:
   Graph(ScopePtr scope_root = c10::make_intrusive<Scope>())
       : next_unique_(0),
@@ -1224,6 +1229,15 @@ struct Graph {
   ScopePtr current_scope() {
     return current_scope_;
   }
+
+  void set_op_version(c10::optional<size_t> version) {
+    op_version_ = version;
+  }
+
+  c10::optional<size_t> get_op_version() {
+    return op_version_;
+  }
+
   void set_current_scope(ScopePtr scope) {
     current_scope_ = std::move(scope);
   }
@@ -1575,6 +1589,11 @@ TORCH_API std::vector<Value*> inlineCallTo(
     Node* to_replace,
     GraphFunction* callee,
     bool use_graph = true);
+
+TORCH_API std::vector<Value*> inlineCallTo(
+    Node* to_replace,
+    GraphFunction* callee,
+    Graph* callee_graph);
 
 /** If there is only one value in \p OUTPUTS and its kind is Tuple, insert a
  * tuple unpack node and return the resulting values.
