@@ -14,11 +14,18 @@ class PackagePickler(_Pickler):
     to find objects and modules to save.
     """
 
-    dispatch = _Pickler.dispatch.copy()
-
     def __init__(self, importer: Importer, *args, **kwargs):
         self.importer = importer
         super().__init__(*args, **kwargs)
+
+        # Make sure the dispatch table copied from _Pickler is up-to-date.
+        # Previous issues have been encountered where a library (e.g. dill)
+        # mutate _Pickler.dispatch, PackagePickler makes a copy when this lib
+        # is imported, then the offending library removes its dispatch entries,
+        # leaving PackagePickler with a stale dispatch table that may cause
+        # unwanted behavior.
+        self.dispatch = _Pickler.dispatch.copy()
+        self.dispatch[FunctionType] = PackagePickler.save_global
 
     def save_global(self, obj, name=None):
         # unfortunately the pickler code is factored in a way that
@@ -89,8 +96,6 @@ class PackagePickler(_Pickler):
                 ) from None
 
         self.memoize(obj)
-
-    dispatch[FunctionType] = save_global
 
 
 def create_pickler(data_buf, importer):
