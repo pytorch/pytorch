@@ -2575,7 +2575,7 @@ class TestQuantizedOps(TestCase):
                 torch.nn.MultiheadAttention: torch.nn.quantizable.MultiheadAttention
             },
             'observed_to_quantized_custom_module_class': {
-                torch.nn.quantizable.MultiheadAttention: torch.nn.quantizable.MultiheadAttention
+                torch.nn.quantizable.MultiheadAttention: torch.nn.quantized.MultiheadAttention
             }
         }
 
