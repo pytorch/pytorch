@@ -30,10 +30,9 @@ import torch.autograd.functional as autogradF
 from torch.utils.checkpoint import checkpoint
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import (TestCase, run_tests, skipIfNoLapack,
-                                                  slowTest, IS_WINDOWS, IS_MACOS, CudaMemoryLeakCheck,
-                                                  disable_gc, gradcheck, gradgradcheck,
-                                                  parametrize, instantiate_parametrized_tests)
+from torch.testing._internal.common_utils import (
+    TestCase, run_tests, skipIfNoLapack, slowTest, IS_WINDOWS, IS_MACOS,
+    disable_gc, gradcheck, gradgradcheck, parametrize, instantiate_parametrized_tests)
 from torch.autograd import Variable, Function, detect_anomaly, kineto_available
 from torch.autograd.function import InplaceFunction
 import torch.autograd.forward_ad as fwAD
@@ -382,7 +381,6 @@ class TestAutograd(TestCase):
     def test_not_implemented_fwad(self):
         x = torch.randn(3)
         v = torch.rand(3)
-        mat = torch.randn(2, 3)
 
         with fwAD.dual_level():
             dual_x = fwAD.make_dual(x, v)
@@ -391,8 +389,8 @@ class TestAutograd(TestCase):
             hint_msg = "Running forward AD for an OP that does not implement it should raise a NotImplementedError"
 
             with self.assertRaisesRegex(NotImplementedError, err_msg, msg=hint_msg):
-                # if forward AD ends up being implemented for torch.mv, choose a different op
-                res = torch.mv(mat, dual_x)
+                # if forward AD ends up being implemented for torch.atan2, choose a different op
+                torch.atan2(dual_x, dual_x)
 
     def test_accumulate_grad(self):
         grad_output = torch.ones(5, 5)
@@ -8271,18 +8269,25 @@ class TestAutogradDeviceType(TestCase):
 
     @onlyCUDA
     def test_reentrant_parent_error_on_cpu(self, device):
-        before = CudaMemoryLeakCheck.get_cuda_memory_usage()
+        def _get_cuda_memory_usage():
+            # we don't need CUDA synchronize because the statistics are not tracked at
+            # actual freeing, but at when marking the block as free.
+            num_devices = torch.cuda.device_count()
+            gc.collect()
+            return tuple(torch.cuda.memory_allocated(i) for i in range(num_devices))
+
+        before = _get_cuda_memory_usage()
 
         # Run as separate function so that gc can clean up everything when we
         # check for memory usage.
         self._test_reentrant_parent_error_on_cpu(device)
 
         # Wait for autograd thread to cleanup failed tasks.
-        after = CudaMemoryLeakCheck.get_cuda_memory_usage()
+        after = _get_cuda_memory_usage()
         start = time.time()
         while before != after and time.time() - start < 30:
             time.sleep(0.1)
-            after = CudaMemoryLeakCheck.get_cuda_memory_usage()
+            after = _get_cuda_memory_usage()
 
         self.assertEqual(before, after)
 

@@ -812,7 +812,7 @@ void recv(
 
 void gather(
     const at::Tensor& inputs,
-    at::Tensor& outputs,
+    std::vector<at::Tensor>& outputs,
     ncclComm_t _comm,
     at::cuda::CUDAStream& stream,
     int32_t root) {

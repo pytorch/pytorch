@@ -1,9 +1,10 @@
 import torch
 import torch.fx.experimental.fx_acc.acc_ops as acc_ops
-from caffe2.torch.fb.fx2trt.tests.test_utils import AccTestCase
+from torch.testing._internal.common_fx2trt import AccTestCase
 from torch.fx.experimental.fx2trt.passes.fuse_pass import (
     fuse_unsqueeze_cat_sum,
 )
+from torch.testing._internal.common_utils import run_tests
 
 
 class TestFuseUnsqueezeCatSum(AccTestCase):
@@ -33,3 +34,6 @@ class TestFuseUnsqueezeCatSum(AccTestCase):
             {acc_ops.unsqueeze, acc_ops.cat, acc_ops.sum},
             apply_passes=[fuse_unsqueeze_cat_sum],
         )
+
+if __name__ == '__main__':
+    run_tests()
