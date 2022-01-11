@@ -1,13 +1,25 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/native/GridSampler.h>
 #include <ATen/native/cpu/GridSamplerKernel.h>
 #include <ATen/cpu/vml.h>
 #include <c10/util/C++17.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/clamp_max_native.h>
+#include <ATen/ops/clamp_min_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/zeros_like.h>
+#endif
 
 #include <algorithm>
 #include <cstring>

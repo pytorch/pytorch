@@ -1,4 +1,5 @@
 #include <ATen/native/cuda/Sorting.h>
+#include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/MemoryOverlap.h>

@@ -1,4 +1,11 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/UnfoldBackward.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/zeros.h>
+#endif
 
 namespace at { namespace native {
 

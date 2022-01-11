@@ -11,6 +11,7 @@
 #include <c10/util/irange.h>
 
 #include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/native/TransposeType.h>
 #include <ATen/native/cuda/MiscUtils.h>
 #include <ATen/native/cuda/BatchLinearAlgebraLib.h>
 

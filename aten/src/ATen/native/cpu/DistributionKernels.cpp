@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/CPUGeneratorImpl.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Generator.h>
@@ -7,6 +8,12 @@
 #include <ATen/native/cpu/DistributionTemplates.h>
 
 #include <ATen/native/UnaryOps.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#endif
 
 #include <cmath>
 #include <limits>

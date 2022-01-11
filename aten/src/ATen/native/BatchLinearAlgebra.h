@@ -4,6 +4,7 @@
 #include <ATen/Config.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/native/TransposeType.h>
 #include <ATen/native/cpu/zmath.h>
 
 

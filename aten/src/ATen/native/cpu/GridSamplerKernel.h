@@ -1,10 +1,7 @@
 #pragma once
 
-#include <ATen/ATen.h>
-#include <ATen/Dispatch.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/DispatchStub.h>
-#include <ATen/cpu/vml.h>
 
 #include <tuple>
 

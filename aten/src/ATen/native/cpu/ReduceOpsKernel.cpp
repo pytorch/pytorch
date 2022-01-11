@@ -1,16 +1,21 @@
-#include <numeric>
-#include <iterator>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <algorithm>
 
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/ReduceOps.h>
-#include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/cpu/Reduce.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/imag.h>
+#endif
 
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>

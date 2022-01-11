@@ -1,6 +1,8 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/native/FunctionOfAMatrixUtils.h>
 
-#include <ATen/native/cpu/Loops.h>
+#include <ATen/Dispatch.h>
+#include <ATen/TensorIterator.h>
 #include <c10/util/irange.h>
 
 #if (defined(_WIN32) || defined(_WIN64))

@@ -1,9 +1,11 @@
 #pragma once
 
-#include <ATen/ATen.h>
 #include <ATen/native/DispatchStub.h>
+#include <cstdint>
 
 namespace at {
+class Tensor;
+
 namespace native {
 
 enum class QUANTILE_INTERPOLATION_MODE : uint8_t {

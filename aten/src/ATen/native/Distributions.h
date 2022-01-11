@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/native/Math.h>
 #include <c10/macros/Macros.h>

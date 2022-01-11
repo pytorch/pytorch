@@ -2,7 +2,7 @@
 
 #include <math.h>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/DispatchStub.h>
 

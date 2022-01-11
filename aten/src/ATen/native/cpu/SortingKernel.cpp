@@ -1,13 +1,21 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/NumericUtils.h>
-#include <ATen/native/TensorIterator.h>
+#include <ATen/TensorIterator.h>
+#include <ATen/WrapDimUtils.h>
 #include <ATen/native/StridedRandomAccessor.h>
 #include <ATen/native/CompositeRandomAccessor.h>
 #include <ATen/native/Sorting.h>
 #include <ATen/native/SortingUtils.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/arange.h>
+#endif
 
 namespace at { namespace native {
 
