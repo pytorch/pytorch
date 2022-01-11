@@ -81,7 +81,8 @@ list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${LIBSHM_SRCDIR})
 
 set(TORCH_PYTHON_LINK_LIBRARIES
     shm
-    fmt::fmt-header-only)
+    fmt::fmt-header-only
+    ATEN_CPU_FILES_GEN_LIB)
 
 set(TORCH_PYTHON_COMPILE_DEFINITIONS)
 
@@ -373,6 +374,12 @@ endif()
 if(USE_CUDA)
   torch_cuda_get_nvcc_gencode_flag(_ARCH_FLAGS)
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/cuda/Module.cpp PROPERTIES COMPILE_FLAGS "-DCUDA_ARCH_FLAGS=\"${_ARCH_FLAGS_readable}\"")
+endif()
+
+# Preserve HIP arch flags
+if(USE_ROCM)
+  string(REPLACE ";" " " PYTORCH_ROCM_ARCH_readable "${PYTORCH_ROCM_ARCH}")
+  set_source_files_properties(${TORCH_SRC_DIR}/csrc/cuda/Module.cpp PROPERTIES COMPILE_FLAGS "-DCUDA_ARCH_FLAGS=\"${PYTORCH_ROCM_ARCH_readable}\"")
 endif()
 
 target_compile_definitions(torch_python PRIVATE "-DTHP_BUILD_MAIN_LIB")

@@ -1,6 +1,7 @@
 #include <c10/core/ScalarType.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/operators/misc.h>
+#include <torch/csrc/jit/tensorexpr/operators/pointwise.h>
 #include <torch/csrc/jit/tensorexpr/operators/quantization.h>
 
 using namespace torch::jit::tensorexpr;
@@ -19,10 +20,14 @@ std::vector<int64_t> _pair_int(ArgValue v) {
 } // namespace
 
 double immQScale(const BufHandle& qx) {
+  TORCH_INTERNAL_ASSERT(
+      qx.node()->qscale(), buildErrorMessage("Expects BufHandle with qscale"));
   return to<DoubleImm>(IRSimplifier::simplify(qx.node()->qscale()))->value();
 }
 
 int64_t immQZero(const BufHandle& qx) {
+  TORCH_INTERNAL_ASSERT(
+      qx.node()->qzero(), buildErrorMessage("Expects BufHandle with qzero"));
   return to<LongImm>(IRSimplifier::simplify(qx.node()->qzero()))->value();
 }
 
@@ -115,6 +120,59 @@ BufHandle makeQBufHandleNCHW(
       LongImm::make(qzero).node());
 }
 
+bool isNHWC(const BufHandle& buf) {
+  const auto& strides = buf.node()->strides();
+  const auto& dims = buf.node()->dims();
+  if (strides.size() != 4) {
+    return false;
+  }
+  auto dims1 = to<LongImm>(IRSimplifier::simplify(dims[1]))->value();
+  auto strides1 = to<LongImm>(IRSimplifier::simplify(strides[1]))->value();
+  auto strides3 = to<LongImm>(IRSimplifier::simplify(strides[3]))->value();
+
+  return ((strides3 == dims1) && (strides1 == 1));
+}
+
+bool isNLC(const BufHandle& buf) {
+  const auto& strides = buf.node()->strides();
+  const auto& dims = buf.node()->dims();
+  if (strides.size() != 3) {
+    return false;
+  }
+  auto dims1 = to<LongImm>(IRSimplifier::simplify(dims[1]))->value();
+  auto strides1 = to<LongImm>(IRSimplifier::simplify(strides[1]))->value();
+  auto strides3 = to<LongImm>(IRSimplifier::simplify(strides[3]))->value();
+
+  return ((strides3 == dims1) && (strides1 == 1));
+}
+
+ExprHandle quant(
+    ExprHandle x,
+    Dtype out_dtype,
+    ExprHandle qscale,
+    ExprHandle qzero) {
+  auto promoted_qscale = promoteToDtype(qscale, x.dtype().scalar_type());
+  auto promoted_qzero = promoteToDtype(qzero, x.dtype().scalar_type());
+  return promoteToDtype(
+      x / promoted_qscale + promoted_qzero + FloatImm::make(0.5f),
+      out_dtype.scalar_type());
+}
+
+ExprHandle dequant(
+    ExprHandle qx,
+    Dtype out_dtype,
+    ExprHandle qscale,
+    ExprHandle qzero) {
+  auto qx_promoted = promoteToDtype(qx, out_dtype.scalar_type());
+  auto qscale_promoted =
+      promoteToDtype(ExprHandle(qscale), out_dtype.scalar_type());
+  auto qzero_promoted =
+      promoteToDtype(ExprHandle(qzero), out_dtype.scalar_type());
+  return promoteToDtype(
+      (qx_promoted - qzero_promoted) * qscale_promoted,
+      out_dtype.scalar_type());
+}
+
 Tensor computeQuantizePerTensor(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
@@ -139,15 +197,9 @@ Tensor computeQuantizePerTensor(
     }
     throw malformed_input("Expected quantized dtype");
   }(c10::get<int64_t>(inputs[3]));
-  const BufHandle& x = c10::get<BufHandle>(inputs[0]);
 
-  auto x_dtype = x.node()->dtype();
-  auto promoted_qscale = promoteToDtype(qscale, x_dtype.scalar_type());
-  auto promoted_qzero = promoteToDtype(qzero, x_dtype.scalar_type());
-  ExprHandle exprHandle = promoteToDtype(
-      tensorOrConstant(inputs[0], indices) / promoted_qscale + promoted_qzero +
-          FloatImm::make(0.5f),
-      dtype.scalar_type());
+  ExprHandle e =
+      quant(tensorOrConstant(inputs[0], indices), dtype, qscale, qzero);
 
   BufPtr buf = alloc<Buf>(
       "quantize_per_tensor",
@@ -157,6 +209,47 @@ Tensor computeQuantizePerTensor(
       c10::nullopt,
       qscale.node(),
       qzero.node());
+  return Tensor(buf, vars, e.node());
+}
+
+Tensor computeQuantizedAdd(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    at::Device) {
+  const BufHandle& QA = c10::get<BufHandle>(inputs[0]);
+  const BufHandle& QB = c10::get<BufHandle>(inputs[1]);
+  auto qa_scale = ExprHandle(QA.node()->qscale());
+  auto qa_zero = ExprHandle(QA.node()->qzero());
+  auto qb_scale = ExprHandle(QB.node()->qscale());
+  auto qb_zero = ExprHandle(QB.node()->qzero());
+  ExprHandle out_qscale = DoubleImm::make(c10::get<double>(inputs[2]));
+  ExprHandle out_qzero = LongImm::make(c10::get<int64_t>(inputs[3]));
+  Dtype dequant_dtype = kFloat;
+  Dtype out_dtype = outputType ? Dtype(*outputType) : QA.dtype();
+  std::vector<VarPtr> vars;
+  std::vector<ExprHandle> indices;
+  for (const auto& os : outputShape) {
+    auto var = alloc<Var>("", os.node()->dtype());
+    vars.push_back(var);
+    indices.push_back(VarHandle(var));
+  }
+  auto lhs = tensorOrConstant(inputs[0], indices);
+  auto rhs = tensorOrConstant(inputs[1], indices);
+  ExprHandle exprHandle = quant(
+      dequant(lhs, dequant_dtype, qa_scale, qa_zero) +
+          dequant(rhs, dequant_dtype, qb_scale, qb_zero),
+      out_dtype,
+      out_qscale,
+      out_qzero);
+  BufPtr buf = alloc<Buf>(
+      "quantized_add",
+      ExprHandleVectorToExprVector(outputShape),
+      out_dtype,
+      nullptr,
+      c10::nullopt,
+      out_qscale.node(),
+      out_qzero.node());
   return Tensor(buf, vars, exprHandle.node());
 }
 
@@ -179,8 +272,18 @@ Tensor computeQuantizePerTensorExternalCall(
     }
     throw malformed_input("Expected quantized dtype");
   }(qdtype);
-  auto ResultBuf = makeQBufHandleNCHW(
-      "quantize_per_tensor", outputShape, dtype, qscale, qzero);
+  auto ResultBuf = [&]() {
+    if (isNHWC(x)) {
+      return makeQBufHandleNHWC(
+          "quantize_per_tensor", outputShape, dtype, qscale, qzero);
+    }
+    if (isNLC(x)) {
+      return makeQBufHandleNLC(
+          "quantize_per_tensor", outputShape, dtype, qscale, qzero);
+    }
+    return makeQBufHandleNCHW(
+        "quantize_per_tensor", outputShape, dtype, qscale, qzero);
+  }();
   StmtPtr s = ExternalCall::make(
       ResultBuf, "nnc_aten_quantize_per_tensor", {x}, {qscale, qzero, qdtype});
   return Tensor(ResultBuf.node(), s);
@@ -415,20 +518,7 @@ Tensor computeQuantizedLinearRelu(
   return Tensor(ResultBuf.node(), s);
 }
 
-bool isChannelsLast(const BufHandle& buf) {
-  const auto& strides = buf.node()->strides();
-  const auto& dims = buf.node()->dims();
-  if (strides.size() != 4) {
-    return false;
-  }
-  auto dims1 = to<LongImm>(IRSimplifier::simplify(dims[1]))->value();
-  auto strides1 = to<LongImm>(IRSimplifier::simplify(strides[1]))->value();
-  auto strides3 = to<LongImm>(IRSimplifier::simplify(strides[3]))->value();
-
-  return ((strides3 == dims1) && (strides1 == 1));
-}
-
-Tensor computeQuantizedAdd(
+Tensor computeQuantizedAddExternalCall(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     // NOLINTNEXTLINE
@@ -441,8 +531,8 @@ Tensor computeQuantizedAdd(
   const auto out_qzero = c10::get<int64_t>(inputs[3]);
   // Change to dtype based on outputType when dtype propagation implemented
   const auto out_qdtype = immQDType(qa);
-  const bool isQAChannelsLast = isChannelsLast(qa);
-  const bool isQBChannelsLast = isChannelsLast(qb);
+  const bool isQAChannelsLast = isNHWC(qa);
+  const bool isQBChannelsLast = isNHWC(qb);
   auto ResultBuf = (isQAChannelsLast || isQBChannelsLast)
       ? makeQBufHandleNHWC(
             "quantized_add",
@@ -536,7 +626,7 @@ Tensor computeQuantizedRelu(
     at::Device device) {
   const BufHandle& qa = c10::get<BufHandle>(inputs[0]);
   const auto out_qdtype = immQDType(qa);
-  const bool isQAChannelsLast = isChannelsLast(qa);
+  const bool isQAChannelsLast = isNHWC(qa);
   auto ResultBuf = isQAChannelsLast ? makeQBufHandleNHWC(
                                           "quantized_relu",
                                           outputShape,
@@ -605,12 +695,14 @@ Tensor computeDequantize(
     dtype = Dtype(*outputType);
   }
   auto qx = c10::get<BufHandle>(inputs[0]);
-  auto qscale = qx.node()->qscale();
-  auto qzero = qx.node()->qzero();
   TORCH_INTERNAL_ASSERT(
-      qscale, buildErrorMessage("Missing quantized scale for dequantize"));
+      qx.node()->qscale(),
+      buildErrorMessage("Missing quantized scale for dequantize"));
   TORCH_INTERNAL_ASSERT(
-      qzero, buildErrorMessage("Missing quantized zero point for dequantize"));
+      qx.node()->qzero(),
+      buildErrorMessage("Missing quantized zero point for dequantize"));
+  auto qscale = ExprHandle(qx.node()->qscale());
+  auto qzero = ExprHandle(qx.node()->qzero());
   std::vector<VarPtr> vars;
   std::vector<ExprHandle> indices;
   for (const auto& os : outputShape) {
@@ -618,14 +710,7 @@ Tensor computeDequantize(
     vars.push_back(var);
     indices.push_back(VarHandle(var));
   }
-  auto qx_e_promoted =
-      promoteToDtype(tensorOrConstant(inputs[0], indices), dtype.scalar_type());
-  auto qscale_promoted =
-      promoteToDtype(ExprHandle(qscale), dtype.scalar_type());
-  auto qzero_promoted = promoteToDtype(ExprHandle(qzero), dtype.scalar_type());
-  auto y = promoteToDtype(
-      (qx_e_promoted - qzero_promoted) * qscale_promoted, dtype.scalar_type());
-
+  auto y = dequant(tensorOrConstant(inputs[0], indices), dtype, qscale, qzero);
   BufPtr buf = alloc<Buf>(
       "dequantize", ExprHandleVectorToExprVector(outputShape), dtype);
   return Tensor(buf, vars, y.node());

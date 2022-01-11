@@ -47,6 +47,7 @@ from torch.testing._internal.common_utils import \
      gradcheck)
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.autograd import grad
+import torch.autograd.forward_ad as fwAD
 from torch.autograd.functional import jacobian
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  Cauchy, Chi2, ContinuousBernoulli, Dirichlet,
@@ -766,6 +767,14 @@ class TestDistributions(TestCase):
 
         gradcheck(apply_fn, (s,) + tuple(ctor_params), raise_exception=True)
 
+    def _check_forward_ad(self, fn):
+        with fwAD.dual_level():
+            x = torch.tensor(1.)
+            t = torch.tensor(1.)
+            dual = fwAD.make_dual(x, t)
+            dual_out = fn(dual)
+            self.assertEqual(torch.count_nonzero(fwAD.unpack_dual(dual_out).tangent).item(), 0)
+
     def _check_log_prob(self, dist, asset_fn):
         # checks that the log_prob matches a reference function
         s = dist.sample()
@@ -992,6 +1001,11 @@ class TestDistributions(TestCase):
         self.assertEqual(Bernoulli(torch.tensor([0.0])).entropy(), torch.tensor([0.0]))
         self.assertEqual(Bernoulli(s).entropy(), torch.tensor(0.6108), atol=1e-4, rtol=0)
 
+        self._check_forward_ad(torch.bernoulli)
+        self._check_forward_ad(lambda x: x.bernoulli_())
+        self._check_forward_ad(lambda x: x.bernoulli_(x.clone().detach()))
+        self._check_forward_ad(lambda x: x.bernoulli_(x))
+
     def test_bernoulli_enumerate_support(self):
         examples = [
             ({"probs": [0.1]}, [[0], [1]]),
@@ -1023,6 +1037,8 @@ class TestDistributions(TestCase):
         self._gradcheck_log_prob(Geometric, (p,))
         self.assertRaises(ValueError, lambda: Geometric(0))
         self.assertRaises(NotImplementedError, Geometric(r).rsample)
+
+        self._check_forward_ad(lambda x: x.geometric_(0.2))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_geometric_log_prob_and_entropy(self):
@@ -1317,6 +1333,9 @@ class TestDistributions(TestCase):
         ]
         self._check_enumerate_support(OneHotCategorical, examples)
 
+    def test_poisson_forward_ad(self):
+        self._check_forward_ad(torch.poisson)
+
     def test_poisson_shape(self):
         rate = torch.randn(2, 3).abs().requires_grad_()
         rate_1d = torch.randn(1).abs().requires_grad_()
@@ -1508,6 +1527,8 @@ class TestDistributions(TestCase):
         low.grad.zero_()
         high.grad.zero_()
 
+        self._check_forward_ad(lambda x: x.uniform_())
+
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_vonmises_sample(self):
         for loc in [0.0, math.pi / 2.0]:
@@ -1552,6 +1573,8 @@ class TestDistributions(TestCase):
         self.assertEqual(scale.grad, eps)
         loc.grad.zero_()
         scale.grad.zero_()
+
+        self._check_forward_ad(lambda x: x.cauchy_())
 
     def test_halfcauchy(self):
         scale = torch.ones(5, 5, requires_grad=True)
@@ -1648,6 +1671,8 @@ class TestDistributions(TestCase):
         dist = LogNormal(torch.zeros(4), torch.ones(2, 1, 1))
         log_prob = dist.log_prob(torch.ones(3, 1))
         self.assertEqual(log_prob.shape, (2, 3, 4))
+
+        self._check_forward_ad(lambda x: x.log_normal_())
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_lognormal_logprob(self):
@@ -1868,6 +1893,11 @@ class TestDistributions(TestCase):
             self.assertEqual(log_prob, math.log(expected), atol=1e-3, rtol=0)
 
         self._check_log_prob(Normal(loc, scale), ref_log_prob)
+        self._check_forward_ad(torch.normal)
+        self._check_forward_ad(lambda x: torch.normal(x, 0.5))
+        self._check_forward_ad(lambda x: torch.normal(0.2, x))
+        self._check_forward_ad(lambda x: torch.normal(x, x))
+        self._check_forward_ad(lambda x: x.normal_())
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_normal_sample(self):
@@ -2164,6 +2194,7 @@ class TestDistributions(TestCase):
             self.assertEqual(log_prob, expected, atol=1e-3, rtol=0)
 
         self._check_log_prob(Exponential(rate), ref_log_prob)
+        self._check_forward_ad(lambda x: x.exponential_())
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_exponential_sample(self):

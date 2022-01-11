@@ -1,5 +1,5 @@
 import warnings
-from typing import Callable, Dict, Iterator, Optional, Tuple, TypeVar
+from typing import Callable, Iterator, TypeVar
 
 from torch.utils.data import IterDataPipe, functional_datapipe
 from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
@@ -28,8 +28,6 @@ class FilterIterDataPipe(IterDataPipe[T_co]):
     Args:
         datapipe: Iterable DataPipe being filtered
         filter_fn: Customized function mapping an element to a boolean.
-        fn_args: Positional arguments for `filter_fn`
-        fn_kwargs: Keyword arguments for `filter_fn`
         drop_empty_batches: By default, drops batch if it is empty after filtering instead of keeping an empty list
     """
     datapipe: IterDataPipe
@@ -39,8 +37,6 @@ class FilterIterDataPipe(IterDataPipe[T_co]):
     def __init__(self,
                  datapipe: IterDataPipe,
                  filter_fn: Callable,
-                 fn_args: Optional[Tuple] = None,
-                 fn_kwargs: Optional[Dict] = None,
                  drop_empty_batches: bool = True,
                  ) -> None:
         super().__init__()
@@ -50,8 +46,6 @@ class FilterIterDataPipe(IterDataPipe[T_co]):
             warnings.warn("Lambda function is not supported for pickle, please use "
                           "regular python function or functools.partial instead.")
         self.filter_fn = filter_fn  # type: ignore[assignment]
-        self.args = () if fn_args is None else fn_args
-        self.kwargs = {} if fn_kwargs is None else fn_kwargs
         self.drop_empty_batches = drop_empty_batches
 
     def __iter__(self) -> Iterator[T_co]:
@@ -62,7 +56,7 @@ class FilterIterDataPipe(IterDataPipe[T_co]):
                 yield filtered
 
     def _returnIfTrue(self, data):
-        condition = self.filter_fn(data, *self.args, **self.kwargs)
+        condition = self.filter_fn(data)
 
         if df_wrapper.is_column(condition):
             # We are operating on DataFrames filter here
@@ -95,11 +89,11 @@ class FilterIterDataPipe(IterDataPipe[T_co]):
             dill_function = dill.dumps(self.filter_fn)
         else:
             dill_function = self.filter_fn
-        state = (self.datapipe, dill_function, self.args, self.kwargs, self.drop_empty_batches)
+        state = (self.datapipe, dill_function, self.drop_empty_batches)
         return state
 
     def __setstate__(self, state):
-        (self.datapipe, dill_function, self.args, self.kwargs, self.drop_empty_batches) = state
+        (self.datapipe, dill_function, self.drop_empty_batches) = state
         if DILL_AVAILABLE:
             self.filter_fn = dill.loads(dill_function)  # type: ignore[assignment]
         else:

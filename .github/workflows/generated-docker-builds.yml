@@ -110,6 +110,10 @@ jobs:
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
           submodules: recursive
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
       - name: Calculate docker image tag
         id: calculate-tag
         run: |

@@ -37,6 +37,23 @@ class TestUpgraders(JitTestCase):
         self.assertTrue(upgraders_size == upgraders_size_second_time)
         self.assertTrue(upgraders_dump == upgraders_dump_second_time)
 
+    def test_add_value_to_version_map(self):
+        map_before_test = torch._C._get_operator_version_map()
+
+        upgrader_bumped_version = 3
+        upgrader_name = "_test_serialization_subcmul_0_2"
+        upgrader_schema = "aten::_test_serialization_subcmul(Tensor self, Tensor other, Scalar alpha=2) -> Tensor"
+        dummy_entry = torch._C._UpgraderEntry(upgrader_bumped_version, upgrader_name, upgrader_schema)
+
+        torch._C._test_only_add_entry_to_op_version_map("aten::_test_serialization_subcmul", dummy_entry)
+        map_after_test = torch._C._get_operator_version_map()
+        self.assertTrue("aten::_test_serialization_subcmul" in map_after_test)
+        self.assertTrue(len(map_after_test) - len(map_before_test) == 1)
+        torch._C._test_only_remove_entry_to_op_version_map("aten::_test_serialization_subcmul")
+        map_after_remove_test = torch._C._get_operator_version_map()
+        self.assertTrue("aten::_test_serialization_subcmul" not in map_after_remove_test)
+        self.assertEqual(len(map_after_remove_test), len(map_before_test))
+
     def test_populated_test_upgrader_graph(self):
         @torch.jit.script
         def f():
