@@ -305,3 +305,64 @@ class TestDeviceAnalysis(JitTestCase):
         self.assert_device_equal(test_fn, [self.cpu, self.cpu, None], self.cpu)
         self.assert_device_equal(test_fn, [self.mkldnn, self.mkldnn, None], self.mkldnn)
         self.assert_device_equal(test_fn, [self.cpu, self.cuda, None], None)
+
+    def test_loop_simple(self):
+        def test_fn(x, y, z: int):
+            for _ in range(z):
+                y = x
+            return y
+
+        self.assert_device_equal(test_fn, [self.cpu, self.cpu, None], self.cpu)
+        self.assert_device_equal(test_fn, [self.cpu, self.cuda, None], None)
+        self.assert_device_equal(test_fn, [self.cpu, None, None], None)
+
+    def test_loop_device_change(self):
+        def test_fn(x, z: int):
+            for _ in range(z):
+                x = x.cuda()
+            return x
+
+        self.assert_device_equal(test_fn, [self.cpu, None], None)
+        self.assert_device_equal(test_fn, [self.cuda, None], self.cuda)
+        self.assert_device_equal(test_fn, [None, None], None)
+
+    def test_while_change(self):
+        def test_fn(x, z: int):
+            while z > 0:
+                x = x.cuda()
+                z = 0
+            return x
+
+        self.assert_device_equal(test_fn, [self.cpu, None], None)
+        self.assert_device_equal(test_fn, [self.cuda, None], self.cuda)
+        self.assert_device_equal(test_fn, [None, None], None)
+
+    def test_nested_loops(self):
+        def test_fn(x, z: int):
+            for i in range(z):
+                x = x.cpu()
+                for _ in range(i):
+                    x = x + 1
+
+            return x
+
+        self.assert_device_equal(test_fn, [self.cpu, None], self.cpu)
+        self.assert_device_equal(test_fn, [self.cuda, None], None)
+        self.assert_device_equal(test_fn, [None, None], None)
+
+    def test_if_loop_mix(self):
+        def test_fn(x, y, z: bool, a: bool):
+            c = x
+            while a:
+                if z:
+                    c = x + 3
+                else:
+                    c = y * 2
+                a = False
+            return c
+
+        self.assert_device_equal(test_fn, [self.cpu, self.cpu, None, None], self.cpu)
+        self.assert_device_equal(
+            test_fn, [self.mkldnn, self.mkldnn, None, None], self.mkldnn
+        )
+        self.assert_device_equal(test_fn, [self.cpu, self.cuda, None, None], None)
