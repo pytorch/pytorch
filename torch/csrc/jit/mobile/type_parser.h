@@ -4,7 +4,8 @@
 #include <ATen/core/jit_type.h>
 
 namespace c10 {
-class TypeParser {
+
+class TORCH_API TypeParser {
  public:
   explicit TypeParser(std::string pythonStr);
   explicit TypeParser(std::vector<std::string>& pythonStrs);
@@ -48,4 +49,5 @@ class TypeParser {
 TORCH_API TypePtr parseType(const std::string& pythonStr);
 
 TORCH_API std::vector<TypePtr> parseType(std::vector<std::string>& pythonStr);
+
 } // namespace c10
