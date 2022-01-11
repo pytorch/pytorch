@@ -229,7 +229,11 @@ class TORCH_API TensorExprKernel {
 
   Tensor convertSymbolicOutputToCorrectStrides(torch::jit::Value* v);
   Tensor convertStaticShapeOutputToCorrectStrides(torch::jit::Value* v);
-  Tensor convertOutputToCorrectStrides(std::vector<ExprHandle>& sizes, std::vector<size_t>& sorted_stride_indices_descending, std::vector<ExprPtr>& strides, BufPtr& buf);
+  Tensor convertOutputToCorrectStrides(
+      const std::vector<ExprHandle>& sizes,
+      const std::vector<size_t>& sorted_stride_indices_descending,
+      const std::vector<ExprPtr>& strides,
+      BufPtr& buf);
 
   NNCLoweringFunction getCustomLoweringFor(c10::Symbol op) const;
   std::unordered_map<c10::Symbol, NNCLoweringFunction> getCustomLowerings()
