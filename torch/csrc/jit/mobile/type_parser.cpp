@@ -82,7 +82,7 @@ std::vector<TypePtr> TypeParser::parseList() {
 // The list of non-simple types supported by current parser.
 const std::unordered_set<std::string>& TypeParser::getNonSimpleType() {
   static std::unordered_set<std::string> nonSimpleTypes{
-      "List", "Optional", "Future", "Dict", "Tuple"};
+      "List", "Optional", "Dict", "Tuple"};
   return nonSimpleTypes;
 }
 
@@ -101,13 +101,19 @@ std::unordered_set<std::string> TypeParser::getContainedTypes() {
   return contained_types_;
 }
 
+template <typename T>
+TypePtr TypeParser::parseSingleElementType() {
+  expectChar('[');
+  auto result = DynamicTypeFactory::create<T>(parse());
+  expectChar(']');
+  return result;
+}
+
 TypePtr TypeParser::parseNonSimple(const std::string& token) {
   if (token == "List") {
-    return CreateSingleElementType<ListType>();
+    return parseSingleElementType<ListType>();
   } else if (token == "Optional") {
-    return parseSingleElementType(DynamicType::Tag::Optional);
-  } else if (token == "Future") {
-    return CreateSingleElementType<FutureType>();
+    return parseSingleElementType<OptionalType>();
   } else if (token == "Dict") {
     expectChar('[');
     auto key = parse();
@@ -294,22 +300,6 @@ void TypeParser::expectChar(char c) {
       ", but get ",
       token);
   advance();
-}
-
-template <class T>
-TypePtr TypeParser::CreateSingleElementType() {
-  expectChar('[');
-  auto result = T::create(parse());
-  expectChar(']');
-  return result;
-}
-
-TypePtr TypeParser::parseSingleElementType(DynamicType::Tag tag) {
-  expectChar('[');
-  auto result =
-      std::make_shared<DynamicType>(tag, DynamicType::Arguments(parse()));
-  expectChar(']');
-  return result;
 }
 
 void TypeParser::lex() {
