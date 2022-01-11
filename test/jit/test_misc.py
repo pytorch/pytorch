@@ -6,7 +6,6 @@ from torch.testing._internal.jit_utils import JitTestCase, make_global
 from torch.testing import FileCheck
 from torch import jit
 from jit.test_module_interface import TestModuleInterface  # noqa: F401
-import unittest
 import os
 import sys
 import torch
