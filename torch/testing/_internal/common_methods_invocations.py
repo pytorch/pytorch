@@ -10588,7 +10588,7 @@ op_db: List[OpInfo] = [
     OpInfo('sort',
            dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
-           dtypesIfROCM=all_types_and(torch.float16),
+           dtypesIfROCM=all_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_sort,
            skips=(
                # sort does not correctly warn when resizing out= inputs
@@ -11027,7 +11027,7 @@ op_db: List[OpInfo] = [
     OpInfo('msort',
            dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
-           dtypesIfROCM=all_types_and(torch.float16),
+           dtypesIfROCM=all_types_and(torch.float16, torch.bfloat16),
            check_batched_gradgrad=False,
            skips=(
                #  msort does not correctly warn when resizing out= inputs.
