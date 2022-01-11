@@ -787,7 +787,8 @@ linalg_svd_rank_revealing(
     const Tensor& input,
     const Tensor& tol,
     bool full_matrices) {
-  return at::linalg_svd_rank_revealing(input, tol, /*rtol=*/c10::nullopt, full_matrices);
+  const auto rtol = at::zeros({}, tol.options());
+  return at::linalg_svd_rank_revealing(input, tol, rtol, full_matrices);
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor>
@@ -810,9 +811,9 @@ linalg_svd_rank_restricted(
       /*compute_unique_rank=*/true
   );
 
-  auto U_restricted = at::zeros_like(U);
-  auto S_restricted = at::zeros_like(S);
-  auto Vh_restricted = at::zeros_like(Vh);
+  auto U_rank_restricted = at::zeros_like(U);
+  auto S_rank_restricted = at::zeros_like(S);
+  auto Vh_rank_restricted = at::zeros_like(Vh);
 
   const auto n_batch_dims = input.dim() - 2;
   const auto m = input.size(-2);
@@ -847,25 +848,53 @@ linalg_svd_rank_restricted(
     rank_r_indices.push_back(Slice());
 
     const auto S_rank_r = S.index(rank_r_indices) * r_mask.narrow(-1, 0, S_len);
-    S_restricted.index_put_(rank_r_indices, S_rank_r);
+    S_rank_restricted.index_put_(rank_r_indices, S_rank_r);
 
     // Modify rank_r_indices to be able to index matrices.
     // It is equivalent to indexing at [rank == r, :, :]
     rank_r_indices.push_back(Slice());
 
     const auto U_rank_r = U.index(rank_r_indices) * r_mask.narrow(-1, 0, U_dim);
-    U_restricted.index_put_(rank_r_indices, U_rank_r);
+    U_rank_restricted.index_put_(rank_r_indices, U_rank_r);
 
     const auto Vh_rank_r = Vh.index(rank_r_indices) * r_mask.narrow(-1, 0, V_dim).unsqueeze(-1);
-    Vh_restricted.index_put_(rank_r_indices, Vh_rank_r);
+    Vh_rank_restricted.index_put_(rank_r_indices, Vh_rank_r);
   }
 
   return std::make_tuple(
-      std::move(U_restricted),
-      std::move(S_restricted),
-      std::move(Vh_restricted),
+      std::move(U_rank_restricted),
+      std::move(S_rank_restricted),
+      std::move(Vh_rank_restricted),
       std::move(rank)
   );
+}
+
+std::tuple<Tensor, Tensor, Tensor, Tensor>
+linalg_svd_rank_restricted(
+    const Tensor& input,
+    c10::optional<double> atol,
+    c10::optional<double> rtol,
+    bool full_matrices) {
+  Tensor atol_tensor, rtol_tensor;
+  std::tie(atol_tensor, rtol_tensor) = get_atol_rtol(input, atol, rtol);
+  return at::linalg_svd_rank_restricted(input, atol_tensor, rtol_tensor, full_matrices);
+}
+
+std::tuple<Tensor, Tensor, Tensor, Tensor>
+linalg_svd_rank_restricted(
+    const Tensor& input,
+    double tol,
+    bool full_matrices) {
+  return at::linalg_svd_rank_restricted(input, tol, 0.0, full_matrices);
+}
+
+std::tuple<Tensor, Tensor, Tensor, Tensor>
+linalg_svd_rank_restricted(
+    const Tensor& input,
+    const Tensor& tol,
+    bool full_matrices) {
+  const auto rtol = at::zeros({}, tol.options());
+  return at::linalg_svd_rank_restricted(input, tol, rtol, full_matrices);
 }
 
 // multi_dot helper functions
