@@ -14068,7 +14068,7 @@ op_db: List[OpInfo] = [
                    sample_inputs_func=sample_inputs_entr),
     UnaryUfuncInfo('special.ellipe',
                    ref=scipy.special.ellipe if TEST_SCIPY else _NOTHING,
-                   domain=(float('-inf'), 2),
+                   domain=(float('-inf'), 1),
                    aten_name='special_ellipe',
                    supports_inplace_autograd=False,
                    supports_forward_ad=True,

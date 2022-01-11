@@ -225,19 +225,20 @@ void erfcx_kernel_cuda(TensorIteratorBase& iter) {
 
 const char ellpe_name[] = "ellpe";
 void ellpe_kernel_cuda(TensorIteratorBase& iter) {
-  #ifdef USE_JITERATOR
-    AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "ellpe_cuda", [&]() {
-      jitted_gpu_kernel</*name=*/ ellpe_name,
-                        /*return_dtype=*/ scalar_t,
-                        /*common_dtype=*/ scalar_t,
-                        /*arity=*/ 1>(iter, ellpe_string);
-    });
-  #else
-    AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "ellpe_cuda", [&]() {
-      gpu_kernel(
-          iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t { return calc_erfcx(a); });
-    });
-  #endif
+#ifdef USE_JITERATOR
+  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "ellpe_cuda", [&]() {
+    jitted_gpu_kernel<
+        /*name=*/ellpe_name,
+        /*return_dtype=*/scalar_t,
+        /*common_dtype=*/scalar_t,
+        /*arity=*/1>(iter, ellpe_string);
+  });
+#else
+  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "ellpe_cuda", [&]() {
+    gpu_kernel(
+        iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t { return ellpe(a); });
+  });
+#endif
 }
 
 void kaiser_window_kernel_cuda(TensorIteratorBase& iter, int64_t window_length, double beta_){

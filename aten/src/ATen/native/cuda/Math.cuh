@@ -278,15 +278,15 @@ const auto ellpe_string = jiterator_stringify(
     template <typename T>
     T polevl(const T x, const T A[], const int len) {
       T result = 0;
-      for (int i = 0; i < len; ++i) {
+      for (int i = 0; i <= len; i++) {
         result = result * x + A[i];
       }
       return result;
     }
 
-    template <typename T>
-    T ellpe(T x) {
-      static const T P[] = {
+    template <typename scalar_t>
+    scalar_t ellpe(scalar_t x) {
+      static const scalar_t P[] = {
           1.53552577301013293365E-4,
           2.50888492163602060990E-3,
           8.68786816565889628429E-3,
@@ -299,7 +299,7 @@ const auto ellpe_string = jiterator_stringify(
           4.43147180560990850618E-1,
           1.00000000000000000299E0};
 
-      static const T Q[] = {
+      static const scalar_t Q[] = {
           3.27954898576485872656E-5,
           1.00962792679356715133E-3,
           6.50609489976927491433E-3,
@@ -311,15 +311,16 @@ const auto ellpe_string = jiterator_stringify(
           9.37499997197644278445E-2,
           2.49999999999888314361E-1};
 
-      x = T{1.0} - x;
-      if (x == T{0.0}) {
-        return T{1.0};
+      x = scalar_t{1.0} - x;
+      if (x == scalar_t{0.0}) {
+        return scalar_t{1.0};
       }
-      if (x < T{0.0}) {
+      if (x < scalar_t{0.0}) {
         return NAN;
       }
-      if (x > T{1.0}) {
-        return ellpe(T{1.0} - T{1} / x) * sqrt(x);
+
+      if (x > scalar_t{1.0}) {
+        return ellpe(scalar_t{1.0} - scalar_t{1} / x) * sqrt(x);
       }
       return (polevl(x, P, 10) - log(x) * (x * polevl(x, Q, 9)));
     }); // ellpe_string
@@ -1684,15 +1685,15 @@ static inline C10_HOST_DEVICE scalar_t ellpe(scalar_t x) {
       9.37499997197644278445E-2,
       2.49999999999888314361E-1};
 
-  x = T{1.0} - x;
-  if (x == T{0.0}) {
-    return T{1.0};
+  x = scalar_t{1.0} - x;
+  if (x == scalar_t{0.0}) {
+    return scalar_t{1.0};
   }
-  if (x < T{0.0}) {
+  if (x < scalar_t{0.0}) {
     return NAN;
   }
-  if (x > T{1.0}) {
-    return ellpe(T{1.0} - T{1} / x) * sqrt(x);
+  if (x > scalar_t{1.0}) {
+    return ellpe(scalar_t{1.0} - scalar_t{1} / x) * sqrt(x);
   }
   return (polevl(x, P, 10) - log(x) * (x * polevl(x, Q, 9)));
 }
