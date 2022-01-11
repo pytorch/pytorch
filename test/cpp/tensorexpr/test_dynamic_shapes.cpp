@@ -52,6 +52,7 @@ TEST(DynamicShapes, SimpleGraph) {
   std::vector<torch::jit::StrideInput> input_desc = {torch::jit::StrideInput::TENSOR_CONT};
   std::unordered_map< const torch::jit::Value*, std::vector<torch::jit::StrideInput>> symbolic_strides;
   symbolic_strides[x_inp] = input_desc;
+  symbolic_strides[graph->outputs().at(0)] = input_desc;
   std::vector<int64_t> symbolic_shape_inputs = c10::fmap(
       x_sym_dims,
       [](const c10::ShapeSymbol& shapeSym) { return shapeSym.value(); });
@@ -133,6 +134,7 @@ TEST(DynamicShapes, GraphWith2InputsSameDims) {
   std::unordered_map< const torch::jit::Value*, std::vector<torch::jit::StrideInput>> symbolic_strides;
   symbolic_strides[x_inp] = input_desc;
   symbolic_strides[y_inp] = input_desc;
+  symbolic_strides[graph->outputs().at(0)] = input_desc;
 
   TensorExprKernel kernel(graph, {}, symbolic_shape_inputs, false, symbolic_strides);
 
@@ -218,6 +220,7 @@ TEST(DynamicShapes, GraphWith2InputsAndBroadcast) {
   std::unordered_map< const torch::jit::Value*, std::vector<torch::jit::StrideInput>> symbolic_strides;
   symbolic_strides[x_inp] = input_desc;
   symbolic_strides[y_inp] = input_desc;
+  symbolic_strides[graph->outputs().at(0)] = input_desc;
 
   TensorExprKernel kernel(graph, {}, symbolic_shape_inputs, false, symbolic_strides);
 
@@ -294,6 +297,8 @@ TEST(DynamicShapes, GraphWithPartiallySymbolicOutput) {
   std::unordered_map< const torch::jit::Value*, std::vector<torch::jit::StrideInput>> symbolic_strides;
   symbolic_strides[x_inp] = input_desc;
   symbolic_strides[y_inp] = input_desc;
+  symbolic_strides[graph->outputs().at(0)] = input_desc;
+
 
   TensorExprKernel kernel(graph, {}, symbolic_shape_inputs, false, symbolic_strides);
 
@@ -412,6 +417,8 @@ TEST(DynamicShapes, GraphWithCatAndBroadcast) {
   symbolic_strides[x_inp] = input_desc;
   symbolic_strides[y_inp] = input_desc;
   symbolic_strides[z_inp] = input_desc;
+  symbolic_strides[graph->outputs().at(0)] = input_desc;
+
 
   TensorExprKernel kernel(graph, {}, symbolic_shape_inputs, false, symbolic_strides);
 
