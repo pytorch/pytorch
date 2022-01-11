@@ -9,8 +9,6 @@
 #include <tuple>
 #include <unordered_set>
 
-#include <THC/THC.h>
-
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/core/DeviceType.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
@@ -1260,7 +1258,7 @@ std::vector<at::Tensor> flatten_for_scatter_gather(
   std::vector<at::Tensor> flattened;
   flattened.resize(num_devices);
 
-  for (auto i = size_t{}; i < num_devices; ++i) {
+  for (const auto i : c10::irange(size_t{}, num_devices)) {
     if (tensor_lists[i].size() != world_size * num_devices) {
       TORCH_CHECK(false,
           "Tensor list input to scatter/gather must match number of collective"
@@ -1740,7 +1738,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
         // Copy the flattened output tensors to the outputs.
         for (const auto i : c10::irange(outputTensors.size())) {
           at::cuda::CUDAStreamGuard guard(ncclStreams[i]);
-          for (size_t j = 0; j < outputTensors[0].size(); ++j) {
+          for (const auto j : c10::irange(outputTensors[0].size())) {
             // See [Sync Streams].
             c10::cuda::CUDACachingAllocator::recordStream(
                 outputTensors[i][j].storage().data_ptr(), ncclStreams[i]);
@@ -1805,7 +1803,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce_scatter(
         // Copy the input tensors to the flattened inputs.
         for (const auto i : c10::irange(inputTensors.size())) {
           at::cuda::CUDAStreamGuard guard(ncclStreams[i]);
-          for (size_t j = 0; j < inputTensors[0].size(); ++j) {
+          for (const auto j : c10::irange(inputTensors[0].size())) {
             // See [Sync Streams].
             c10::cuda::CUDACachingAllocator::recordStream(
                 inputTensors[i][j].storage().data_ptr(), ncclStreams[i]);

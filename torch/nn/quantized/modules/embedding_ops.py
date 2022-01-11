@@ -231,7 +231,6 @@ class EmbeddingBag(Embedding):
         """
         if hasattr(mod, 'weight_fake_quant'):
             weight_observer = mod.weight_fake_quant
-            activation_post_process = mod.activation_post_process
         else:
             assert type(mod) == nn.EmbeddingBag, 'nnq.' + cls.__name__ + '.from_float only works for ' + \
                 nn.EmbeddingBag.__name__

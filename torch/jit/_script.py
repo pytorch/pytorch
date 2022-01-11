@@ -56,6 +56,13 @@ function and does not have any attributes or Parameters.
 """
 set_module(ScriptFunction, "torch.jit")
 
+# Throws an error if a jit function is pickled.
+# Helps to avoid Python crashes for Python versions 3.9.5 + when protocol 0 or 1 is given as an argument.
+def _reduce(cls):
+    raise pickle.PickleError("ScriptFunction cannot be pickled")
+
+ScriptFunction.__reduce__ = _reduce  # type: ignore[assignment]
+
 
 if _enabled:
     Attribute = collections.namedtuple("Attribute", ["value", "type"])
@@ -1263,7 +1270,6 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None,
         return create_script_dict(obj)
     if isinstance(obj, list):
         return create_script_list(obj)
-
     if inspect.isclass(obj):
         qualified_name = _qualified_name(obj)
         # If this type is a `nn.Module` subclass, they probably meant to pass
