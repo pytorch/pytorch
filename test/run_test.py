@@ -205,7 +205,7 @@ WINDOWS_BLOCKLIST = [
     "distributed/_sharded_tensor/test_sharded_tensor",
     "distributed/_sharded_tensor/ops/test_embedding",
     "distributed/_sharded_tensor/ops/test_embedding_bag",
-    "distributed/_sharded_tensor/ops/test_equals",
+    "distributed/_sharded_tensor/ops/test_binary_cmp",
     "distributed/_sharded_tensor/ops/test_init",
     "distributed/_sharded_tensor/ops/test_linear",
     "distributed/_sharded_optim/test_sharded_optim",
@@ -219,7 +219,7 @@ ROCM_BLOCKLIST = [
     "distributed/_sharded_tensor/test_sharded_tensor",
     "distributed/_sharded_tensor/ops/test_embedding",
     "distributed/_sharded_tensor/ops/test_embedding_bag",
-    "distributed/_sharded_tensor/ops/test_equals",
+    "distributed/_sharded_tensor/ops/test_binary_cmp",
     "distributed/_sharded_tensor/ops/test_init",
     "distributed/_sharded_tensor/ops/test_linear",
     "distributed/_sharded_optim/test_sharded_optim",
@@ -358,7 +358,7 @@ DISTRIBUTED_TESTS = [
     "distributed/_sharded_tensor/test_sharded_tensor",
     "distributed/_sharded_tensor/ops/test_embedding",
     "distributed/_sharded_tensor/ops/test_embedding_bag",
-    "distributed/_sharded_tensor/ops/test_equals",
+    "distributed/_sharded_tensor/ops/test_binary_cmp",
     "distributed/_sharded_tensor/ops/test_init",
     "distributed/_sharded_tensor/ops/test_linear",
     "distributed/_sharded_optim/test_sharded_optim",
@@ -893,7 +893,7 @@ def get_selected_tests(options):
     # Only run fx2trt test with specified option argument
     if options.fx2trt_tests:
         selected_tests = list(
-            filter(lambda test_name: "fx2trt" in test_name, selected_tests)
+            filter(lambda test_name: test_name in FX2TRT_TESTS, selected_tests)
         )
     else:
         options.exclude.extend(FX2TRT_TESTS)
