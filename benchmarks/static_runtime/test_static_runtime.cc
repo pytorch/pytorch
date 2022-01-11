@@ -999,6 +999,13 @@ TEST(StaticRuntime, to) {
         return e
   )JIT";
 
+  const auto to_script_select_tensor_output_into_tuple = R"JIT(
+    def forward(self, a, b):
+        d = a.half() * b.half()
+        e = d.float()
+        return (d, e)
+  )JIT";
+
   const auto to_script_memory_planning_fail = R"JIT(
     def forward(self, a, b):
         d = a.half() * b.half()
@@ -1015,18 +1022,37 @@ TEST(StaticRuntime, to) {
     std::vector<IValue> args0{a, b, c, d, e};
     std::vector<IValue> args1{a, b, c, d};
     std::vector<IValue> args2{a, other, c, d, e};
+    std::vector<IValue> args2WithDifferentOtherType{
+        a, at::randn({4, 3, 1, 2}, ScalarType::Double), c, d, e};
     std::vector<IValue> args3{a, c10::nullopt, c, d};
 
-    testStaticRuntime(to_script_dtype, args0);
+    std::vector<IValue> args0WithInt{a, ScalarType::Int, c, d, e};
+    testStaticRuntime(
+        to_script_dtype,
+        args0,
+        args0WithInt,
+        /* default for use_allclose */ false,
+        /* default for use_equalnan */ false,
+        /* check_resize */ false);
     testStaticRuntime(to_script_dtype_strided, args0);
     testStaticRuntime(to_script_prim_dtype, args1);
     if (!d) {
       testStaticRuntime(to_script_prim_dtype, args3);
     }
-    testStaticRuntime(to_script_other, args2);
+    // Second set of args tests case where the `other` tensor's dtype
+    // changes between iterations.
+    testStaticRuntime(
+        to_script_other,
+        args2,
+        args2WithDifferentOtherType,
+        /* default for use_allclose */ false,
+        /* default for use_equalnan */ false,
+        /* check_resize */ false);
     testStaticRuntime(to_script_alias, {a});
+
     testStaticRuntime(to_script_memory_planning_fail, {a, a});
     testStaticRuntime(to_script_fails_managed_output_check, {a, a});
+    testStaticRuntime(to_script_select_tensor_output_into_tuple, {a, a});
 
     // dynamic shapes
     testStaticRuntime(to_script_dtype, args0, {a2, b, c, d, e});
@@ -1742,6 +1768,10 @@ TEST(StaticRuntime, VarStack) {
   std::vector<IValue> args5 = {at::randn({1, 2, 3}), at::randn({1, 2, 3}), 3};
   testStaticRuntime(var_stack_script, args5);
 
+  // Fast path
+  std::vector<IValue> args6 = {at::randn({1}), at::randn({1}), 0};
+  testStaticRuntime(var_stack_script, args6);
+
   testStaticRuntime(var_stack_script, args1, args2);
 }
 
@@ -2298,4 +2328,37 @@ TEST(StaticRuntime, ModelCrashOnSecondRun) {
   // We guarantee that the runtime is still usable after the crash.
   // Run again to verify this.
   compareResultsWithJIT(runtime, graph, args_no_crash);
+}
+
+TEST(StaticRuntime, ReplaceWithMaybeCopy) {
+  const std::string to = R"IR(
+    graph(%0 : Tensor):
+      %1: int = prim::Constant[value=4]()
+      %2: bool = prim::Constant[value=0]()
+      %3: None = prim::Constant()
+      %res : Tensor = aten::to(%0, %1, %2, %2, %3)
+      return (%res)
+  )IR";
+
+  at::Tensor a = at::tensor({1.1, 2.2, 3.3, 4.0}, at::ScalarType::Float);
+  std::vector<IValue> args{a};
+  auto g = std::make_shared<torch::jit::Graph>();
+  torch::jit::parseIR(to, g.get());
+
+  // Jit Interpreter.
+  Stack stack(args);
+  torch::jit::GraphExecutor graph_exec(g, "");
+  graph_exec.run(stack);
+  ASSERT_EQ(stack.size(), 1);
+  auto expected = stack[0].toTensor();
+
+  // Static Runtime.
+  torch::jit::StaticModule smodule(g);
+  auto actual = smodule(args, {}).toTensor();
+  smodule.runtime().check_for_memory_leak();
+
+  EXPECT_TRUE(expected.equal(actual));
+  EXPECT_FALSE(hasProcessedNodeWithName(smodule, "aten::to"));
+  EXPECT_TRUE(
+      hasProcessedNodeWithName(smodule, "static_runtime::to_maybe_copy_out"));
 }
