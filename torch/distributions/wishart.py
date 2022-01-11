@@ -187,7 +187,7 @@ class Wishart(ExponentialFamily):
         noise = self._dist_chi2.rsample(sample_shape).sqrt().diag_embed(dim1=-2, dim2=-1)
         i, j = torch.tril_indices(p, p, offset=-1)
         noise[..., i, j] = torch.randn(
-            torch.Size(sample_shape) + self._batch_shape + (0.5 * int(p * (p - 1)),),
+            torch.Size(sample_shape) + self._batch_shape + (int(0.5 * p * (p - 1)),),
             dtype=noise.dtype,
             device=noise.device,
         )
