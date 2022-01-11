@@ -364,11 +364,9 @@ class TensorExprFuser {
   TensorExprFuser(
       std::shared_ptr<Graph> graph,
       size_t min_group_size,
-      bool disable_shape_checks,
       bool add_composed_op)
       : graph_(std::move(graph)),
         min_group_size_(min_group_size),
-        disable_shape_checks_(disable_shape_checks),
         add_composed_op_(add_composed_op) {
     parseTENotFuseOption();
   }
@@ -999,7 +997,7 @@ class TensorExprFuser {
   }
 
   bool canHandle(Node* node) {
-    REQ(disable_shape_checks_ || allShapesAreKnown(node));
+    REQ(allShapesAreKnown(node));
     REQ(isFusableOnDevice(node));
     REQ(operators_not_to_fuse.find(node->kind()) ==
         operators_not_to_fuse.end());
@@ -1209,8 +1207,6 @@ class TensorExprFuser {
   std::set<NodeKind> operators_not_to_fuse;
   // Minimal size of a fusion group
   size_t min_group_size_;
-  // If true, shapes are ignored
-  bool disable_shape_checks_;
   // compose Runtime Type Guard and Kernel in one op
   bool add_composed_op_;
 };
@@ -1218,7 +1214,6 @@ class TensorExprFuser {
 void FuseTensorExprs(
     std::shared_ptr<Graph>& graph,
     size_t min_group_size,
-    bool disable_shape_checks,
     bool add_composed_op) {
   GRAPH_DUMP("Before TExprFuser: ", graph);
 
@@ -1230,8 +1225,7 @@ void FuseTensorExprs(
   // Get rid of dead code so that we don't waste effort fusing it.
   EliminateDeadCode(graph);
 
-  TensorExprFuser fuser(
-      graph, min_group_size, disable_shape_checks, add_composed_op);
+  TensorExprFuser fuser(graph, min_group_size, add_composed_op);
   fuser.run();
 
   EliminateCommonSubexpression(graph);
