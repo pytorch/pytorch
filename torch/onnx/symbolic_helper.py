@@ -477,18 +477,32 @@ def _interpolate_warning(interpolate_mode):
                   "We recommend using opset 11 and above for models using this operator.")
 
 def _unsqueeze_helper(g, input, axes_i):
-    if _export_onnx_opset_version >= 13:
-        axes = g.op("Constant", value_t=torch.tensor(axes_i, dtype=torch.long))
-        return g.op("Unsqueeze", input, axes)
-    else:
-        return g.op("Unsqueeze", input, axes_i=axes_i)
+    if _is_constant(axes_i[0]):
+        if _export_onnx_opset_version >= 13:
+            axes = g.op("Constant", value_t=torch.tensor(axes_i, dtype=torch.long))
+            return g.op("Unsqueeze", input, axes)
+        else:
+            return g.op("Unsqueeze", input, axes_i=axes_i)
+    else:  # Tensor type
+        if _export_onnx_opset_version >= 13:
+            axes_t = axes_i[0]
+            return g.op("Unsqueeze", input, axes_t)
+        else:
+            raise ValueError("Unsupported Unsqueeze dynamic axes ONNX opset version: " + str(_export_onnx_opset_version))
 
 def _squeeze_helper(g, input, axes_i):
-    if _export_onnx_opset_version >= 13:
-        axes = g.op("Constant", value_t=torch.tensor(axes_i, dtype=torch.long))
-        return g.op("Squeeze", input, axes)
-    else:
-        return g.op("Squeeze", input, axes_i=axes_i)
+    if _is_constant(axes_i[0]):
+        if _export_onnx_opset_version >= 13:
+            axes = g.op("Constant", value_t=torch.tensor(axes_i, dtype=torch.long))
+            return g.op("Squeeze", input, axes)
+        else:
+            return g.op("Squeeze", input, axes_i=axes_i)
+    else:  # Tensor type
+        if _export_onnx_opset_version >= 13:
+            axes_t = axes_i[0]
+            return g.op("Squeeze", input, axes_t)
+        else:
+            raise ValueError("Unsupported Squeeze dynamic axes ONNX opset version: " + str(_export_onnx_opset_version))
 
 def _reducesum_helper(g, input, axes_i=None, keepdims_i=1, noop_with_empty_axes_i=0):
     keepdims_i = _maybe_get_const(keepdims_i, "i")

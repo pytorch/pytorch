@@ -566,6 +566,9 @@ def size(g, self, dim=None):
 
 
 def squeeze(g, self, dim=None):
+    if not sym_help._is_constant(dim):
+        return sym_help._squeeze_helper(g, self, [dim])
+
     if dim is None:
         return g.op("Squeeze", self)
 
@@ -606,8 +609,11 @@ def squeeze(g, self, dim=None):
     return sym_help._squeeze_helper(g, self, [dim])
 
 
-@parse_args("v", "i")
 def unsqueeze(g, self, dim):
+    if not sym_help._is_constant(dim):
+        return sym_help._unsqueeze_helper(g, self, [dim])
+
+    dim = sym_help._get_const(dim, "i", "dim")
     return sym_help._unsqueeze_helper(g, self, [dim])
 
 def mm(g, self, other):
