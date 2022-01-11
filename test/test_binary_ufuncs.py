@@ -1657,6 +1657,7 @@ class TestBinaryUfuncs(TestCase):
 
     # NOTE: torch.floor_divide currently truncates instead of flooring.
     # See https://github.com/pytorch/pytorch/issues/43874.
+    @unittest.skipIf(IS_JETSON, "missing xnnpack")
     @onlyNativeDeviceTypes
     def test_div_and_floordiv_script_vs_python(self, device):
         # Creates jitted functions of two tensors
