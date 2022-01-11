@@ -37,7 +37,7 @@ fi
 
 EXTRA_CONDA_FLAGS=""
 NUMPY_PIN=""
-if [[ "\$python_nodot" = *39* ]]; then
+if [[ "\$python_nodot" = *39* || "\$python_nodot" = *310* ]]; then
   EXTRA_CONDA_FLAGS="-c=conda-forge"
   # There's an issue with conda channel priority where it'll randomly pick 1.19 over 1.20
   # we set a lower boundary here just to be safe
