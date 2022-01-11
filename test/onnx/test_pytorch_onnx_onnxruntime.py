@@ -1197,6 +1197,38 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.tensor(-3).to(dtype=torch.float32)
         self.run_test(model, x)
 
+    def test_tanhshrink(self):
+        model = torch.nn.Tanhshrink()
+
+        x = torch.rand(3, 3).to(dtype=torch.float32)
+        self.run_test(model, x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_hardshrink(self):
+        model = torch.nn.Hardshrink()
+
+        x = torch.rand(3, 3).to(dtype=torch.float32)
+        self.run_test(model, x)
+
+        # Testing edge cases
+        x = torch.tensor(0.5).to(dtype=torch.float32)
+        self.run_test(model, x)
+        x = torch.tensor(-0.5).to(dtype=torch.float32)
+        self.run_test(model, x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_softshrink(self):
+        model = torch.nn.Softshrink()
+
+        x = torch.rand(3, 3).to(dtype=torch.float32)
+        self.run_test(model, x)
+
+        # Testing edge cases
+        x = torch.tensor(0.5).to(dtype=torch.float32)
+        self.run_test(model, x)
+        x = torch.tensor(-0.5).to(dtype=torch.float32)
+        self.run_test(model, x)
+
     def test_clamp(self):
         class ClampModel(torch.nn.Module):
             def forward(self, x):
@@ -3656,12 +3688,17 @@ class TestONNXRuntime(unittest.TestCase):
             def __init__(self):
                 super(GatherModule, self).__init__()
                 self.register_buffer("weight", torch.ones(5))
+                # torch.nn.Embedding is converted to ONNX::Gather.
+                # Constant folding will be triggerred for constant inputs.
+                # This pattern is common for constant mask inputs in transformer models.
+                self.embed = torch.nn.Embedding(8, 3)
 
             def forward(self, x):
                 # shape is of rank 0
                 shape = self.weight.shape[0]
                 m = 5 - shape
-                return x.clamp(min=m)
+                y = torch.ones(1, 4, dtype=torch.long)
+                return x.clamp(min=m), self.embed(y)
 
         x = torch.randn(1)
         self.run_test(GatherModule(), (x,))
