@@ -123,7 +123,7 @@ class NLLLoss(_WeightedLoss):
 
     .. math::
         \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \quad
-        l_n = - w_{y_n} x_{n,y_n}, \quad
+        l_n = - w_{y_n} x_n y_n, \quad
         w_{c} = \text{weight}[c] \cdot \mathbb{1}\{c \not= \text{ignore\_index}\},
 
     where :math:`x` is the input, :math:`y` is the target, :math:`w` is the weight, and
