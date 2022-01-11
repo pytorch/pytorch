@@ -3897,6 +3897,7 @@ class TestQuantizedConv(TestCase):
         dilations, X_scale, X_zero_point, W_scale, W_zero_point, Y_scale,
         Y_zero_point, use_bias, use_relu, use_channelwise, use_transpose,
         device=torch.device("cpu"),
+        dtype=torch.quint8,
     ):
         (X, W), (X_q, W_q), bias_float = self._make_qconv_tensors(
             batch_size, input_channels_per_group, input_feature_map_shape,
@@ -3921,7 +3922,7 @@ class TestQuantizedConv(TestCase):
         # Quantize reference results for comparison
         result_ref_q = torch.quantize_per_tensor(
             result_ref, scale=Y_scale, zero_point=Y_zero_point,
-            dtype=torch.quint8)
+            dtype=dtype)
 
         if qconv_prepack_fn is not None:
             if use_transpose:
@@ -4040,11 +4041,14 @@ class TestQuantizedConv(TestCase):
             Y_scale, Y_zero_point, use_bias, use_relu, use_channelwise, False)
 
     @given(batch_size=st.integers(1, 3),
-           input_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
+           # input_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
+           input_channels_per_group=st.sampled_from([16, 32]),
            height=st.integers(10, 16),
            width=st.integers(7, 14),
-           output_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
-           groups=st.integers(1, 3),
+           # output_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
+           output_channels_per_group=st.sampled_from([6, 32]),
+           # groups=st.integers(1, 3),
+           groups = st.integers(1, 1),
            kernel_h=st.integers(1, 7),
            kernel_w=st.integers(1, 7),
            stride_h=st.integers(1, 2),
@@ -4138,7 +4142,8 @@ class TestQuantizedConv(TestCase):
             output_channels_per_group, groups, kernels, strides, pads, None,
             dilations, X_scale, X_zero_point, W_scale, W_zero_point,
             Y_scale, Y_zero_point, use_bias, use_relu, use_channelwise, False,
-            device=torch.device("cuda"))
+            device=torch.device("cuda"),
+            dtype=torch.qint8)
 
     """Tests the correctness of quantized convolution op."""
     @given(batch_size=st.integers(1, 3),
