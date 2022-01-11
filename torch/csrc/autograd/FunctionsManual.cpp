@@ -2460,18 +2460,19 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
   return u_term + sigma_term + v_term;
 }
 
-Tensor linalg_svd_rank_revealing_backward(
+Tensor _linalg_svd_rank_restricted_helper_backward(
     const std::vector<torch::autograd::Variable>& grads,
     const Tensor& input,
     const Tensor& U,
     const Tensor& S,
     const Tensor& Vh,
-    const Tensor& rank
+    const Tensor& rank,
+    const Tensor& unique_rank
 ) {
   auto grad = at::empty_like(input);
 
   // If empty tensor in batch dimensions
-  if (!rank.numel()) {
+  if (!input.numel()) {
     return grad;
   }
 
@@ -2484,20 +2485,13 @@ Tensor linalg_svd_rank_revealing_backward(
   const auto& Vh_grad = grads[2];
   const auto Vh_grad_defined = Vh_grad.defined();
 
-  // Find only unique ranks and store them on the CPU
-  // as they are used for the in-CPU indexing.
-  const auto unique_ranks = std::get<0>(at::_unique(
-    rank.device().type() == at::kCUDA ? rank.to(at::kCPU) : rank,
-    /*sorted=*/false
-  ));
-
   const auto n_batch_dims = input.dim() - 2;
 
   using at::indexing::Slice;
   using at::indexing::TensorIndex;
 
-  for (const auto i : c10::irange(unique_ranks.numel())) {
-    const auto r = unique_ranks.select(0, i).item<int64_t>();
+  for (const auto i : c10::irange(unique_rank.numel())) {
+    const auto r = unique_rank.select(0, i).item<int64_t>();
 
     // Form an index for matrices of rank r.
     const auto rank_r_mask = at::where(rank == r);

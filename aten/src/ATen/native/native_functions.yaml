@@ -10975,11 +10975,15 @@
   python_module: linalg
   variants: function
 
-- func: _linalg_svd_rank_restricted_helper(Tensor input, Tensor? atol=None, Tensor? rtol=None, bool full_matrices=True) -> (Tensor U, Tensor S, Tensor Vh, Tensor rank, Tensor unique_ranks)
+- func: _linalg_svd_rank_restricted_helper(Tensor input, Tensor? atol=None, Tensor? rtol=None, bool full_matrices=True) -> (Tensor U, Tensor S, Tensor Vh, Tensor rank, Tensor unique_rank)
   variants: function
+  dispatch:
+    CompositeExplicitAutograd: _linalg_svd_rank_restricted_helper
 
-- func: _linalg_svd_rank_restricted_helper.out(Tensor input, Tensor? atol=None, Tensor? rtol=None, bool full_matrices=True, *, Tensor(a!) U, Tensor(b!) S, Tensor(c!) Vh, Tensor(d!) rank, Tensor(e!) unique_ranks) -> (Tensor(a!) U, Tensor(b!) S, Tensor(c!) Vh, Tensor(d!) rank, Tensor(e!) unique_rank)
+- func: _linalg_svd_rank_restricted_helper.out(Tensor input, Tensor? atol=None, Tensor? rtol=None, bool full_matrices=True, *, Tensor(a!) U, Tensor(b!) S, Tensor(c!) Vh, Tensor(d!) rank, Tensor(e!) unique_rank) -> (Tensor(a!) U, Tensor(b!) S, Tensor(c!) Vh, Tensor(d!) rank, Tensor(e!) unique_rank)
   variants: function
+  dispatch:
+    CompositeExplicitAutograd: _linalg_svd_rank_restricted_helper_out
 
 - func: linalg_svd_rank_revealing(Tensor input, float tol, bool full_matrices=True) -> (Tensor U, Tensor S, Tensor Vh, Tensor rank)
   python_module: linalg

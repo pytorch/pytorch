@@ -161,13 +161,14 @@ at::Tensor elu_double_backward(const Tensor& grad, const Tensor& grad_output, co
 
 Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
           bool some, bool compute_uv, const Tensor& raw_u, const Tensor& sigma, const Tensor& raw_v);
-Tensor linalg_svd_rank_revealing_backward(
+Tensor _linalg_svd_rank_restricted_helper_backward(
     const std::vector<torch::autograd::Variable>& grads,
     const Tensor& input,
     const Tensor& U,
     const Tensor& S,
     const Tensor& Vh,
-    const Tensor& rank
+    const Tensor& rank,
+    const Tensor& unique_rank
 );
 Tensor slice_backward_wrapper(
     const at::Tensor& grad,

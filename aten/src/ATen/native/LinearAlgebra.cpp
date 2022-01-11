@@ -789,8 +789,8 @@ linalg_svd_rank_restricted(
     const c10::optional<Tensor>& atol,
     const c10::optional<Tensor>& rtol,
     bool full_matrices) {
-  Tensor U, S, Vh, rank;
-  std::tie(U, S, Vh, rank) = at::linalg_svd_rank_revealing(input, atol, rtol, full_matrices);
+  Tensor U, S, Vh, rank, unique_rank;
+  std::tie(U, S, Vh, rank, unique_rank) = at::_linalg_svd_rank_restricted_helper(input, atol, rtol, full_matrices);
 
   auto U_restricted = at::zeros_like(U);
   auto S_restricted = at::zeros_like(S);
@@ -804,24 +804,17 @@ linalg_svd_rank_restricted(
   const auto S_len = S.size(-1);
   const auto V_dim = Vh.size(-2);
 
-  // Find only unique ranks and store them on the CPU
-  // as they are used for the in-CPU indexing.
-  const auto unique_ranks = std::get<0>(at::_unique(
-    rank.device().type() == at::kCUDA ? rank.to(at::kCPU) : rank,
-    /*sorted=*/false
-  ));
-
   using at::indexing::Slice;
   using at::indexing::TensorIndex;
 
-  for (const auto i : c10::irange(unique_ranks.numel())) {
-    const auto r = unique_ranks.select(0, i).item<int64_t>();
+  for (const auto i : c10::irange(unique_rank.numel())) {
+    const auto r = unique_rank.select(0, i).item<int64_t>();
     // init a mask by setting elements r:k to zero
     // NOTE: for performance reasons it would make sense to store these masks
     // in a single tensor. However, a view + zero_ on a buffer breaks CompositeCompliance tests.
     // TODO: fix that once and if things with the autograd composite compliance become
     // more flexible.
-    auto r_mask = at::ones({unique_ranks.numel(), k}, input.options().dtype(at::kBool));
+    auto r_mask = at::ones({unique_rank.numel(), k}, input.options().dtype(at::kBool));
     r_mask.narrow(-1, r, k - r).zero_();
 
     // Form an index for matrices of rank r.
