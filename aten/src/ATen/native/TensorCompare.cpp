@@ -362,14 +362,16 @@ std::vector<Tensor> where(const Tensor& condition) {
 Tensor _s_where(const Tensor& condition, const Tensor& self, const Tensor& other) {
   TORCH_CHECK(self.dtype() == other.dtype(), "expected scalar type ", self.dtype(), " but found ", other.dtype());
   Tensor ret = at::empty(self.sizes(), self.options());
+  //
+  Tensor cond_bool = condition.scalar_type() == ScalarType::Byte ? condition.to(ScalarType::Bool) : condition;
   auto iter = at::TensorIteratorConfig()
     .check_all_same_dtype(false)
     .add_output(ret)
-    .add_input(condition)
+    .add_input(cond_bool)
     .add_input(self)
     .add_input(other)
     .build();
-  where_kernel(iter.device_type(), iter, condition.scalar_type());
+  where_kernel(iter.device_type(), iter);
   return ret;
 }
 
@@ -485,12 +487,13 @@ TORCH_IMPL_FUNC(clamp_out)
  const OptionalScalarRef min,
  const OptionalScalarRef max,
  const Tensor& result) {
+  using at::native::detail::ClampLimits;
   if (min && max) {
     clamp_scalar_stub(device_type(), *this, min.get(), max.get());
   } else if (max) {
-    at::clamp_max_outf(self, max.get(), const_cast<Tensor&>(result));
+    clamp_max_scalar_stub(device_type(), *this, max.get());
   } else if (min) {
-    at::clamp_min_outf(self, min.get(), const_cast<Tensor&>(result));
+    clamp_min_scalar_stub(device_type(), *this, min.get());
   }
 }
 
