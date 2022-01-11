@@ -142,7 +142,6 @@ def _get_all_patterns_and_replacements():
         (hardtanh_inplace_pattern, hardtanh_inplace_replacement),
         (mean_pattern, mean_replacement),
         (mean_method_pattern, mean_method_replacement),
-        (flatten_pattern, flatten_replacement),
     ]
 
 

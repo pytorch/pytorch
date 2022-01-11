@@ -1558,7 +1558,6 @@ class CopyNodeQuantizeHandler(QuantizeHandler):
         # always produce reference pattern for following functions
         func_list = [
             torch.nn.functional.relu,
-            torch.flatten,
         ]
         is_func = node.op == "call_function" and node.target in func_list
         if is_reference or is_func:
