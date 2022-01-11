@@ -1261,7 +1261,7 @@ class TestSparseCSR(TestCase):
 
     @ops(sparse_csr_linalg_solve)
     def test_linalg_solve_sparse_csr_cusolver(self, device, dtype, op):
-        if dtype not in floating_and_complex_types() or device != 'cpu':
+        if device == 'meta':
             self.skipTest("Skipped!")
 
         samples = op.sample_inputs(device, dtype)
@@ -1269,6 +1269,11 @@ class TestSparseCSR(TestCase):
         for sample in samples:
             if sample.input.ndim != 2 or sample.args[0].ndim != 1 or sample.args[0].size() == torch.Size([0]):
                 continue
+            if device != 'cpu':
+                out = torch.zeros(sample.args[0].size(), dtype=dtype, device=device)
+                with self.assertRaisesRegex(NotImplementedError, "doesn't exist for this backend"):
+                    op(sample.input.to_sparse_csr(), *sample.args, **sample.kwargs, out=out)
+                break
             expect = op(sample.input, *sample.args, **sample.kwargs)
             sample.input = sample.input.to_sparse_csr()
             out = torch.zeros(sample.args[0].size(), dtype=dtype, device=device)
