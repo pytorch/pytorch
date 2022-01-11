@@ -800,7 +800,7 @@
   self: pinv_backward(grad, result, self)
   result: pinv_jvp(self_p, result, self_t)
 
-- name: _linalg_svd_rank_restricted_helper(Tensor input, Tensor? atol=None, Tensor? rtol=None, bool full_matrices=True) -> (Tensor U, Tensor S, Tensor Vh, Tensor rank, Tensor unique_rank)
+- name: _linalg_svd_rank_restricted_helper(Tensor input, Tensor? atol=None, Tensor? rtol=None, bool full_matrices=True, bool compute_unique_rank=True) -> (Tensor U, Tensor S, Tensor Vh, Tensor rank, Tensor unique_rank)
   input: _linalg_svd_rank_restricted_helper_backward(grads, input, U, S, Vh, rank, unique_rank)
   atol: non_differentiable
   rtol: non_differentiable

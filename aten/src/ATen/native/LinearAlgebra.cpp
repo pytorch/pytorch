@@ -622,6 +622,7 @@ _linalg_svd_rank_restricted_helper_out(
     const c10::optional<Tensor>& atol_opt,
     const c10::optional<Tensor>& rtol_opt,
     bool full_matrices,
+    bool compute_unique_rank,
     Tensor& U,
     Tensor& S,
     Tensor& Vh,
@@ -648,14 +649,16 @@ _linalg_svd_rank_restricted_helper_out(
   const auto tol = at::max(atol.unsqueeze(-1), rtol.unsqueeze(-1) * max_S);
   at::sum_out(rank, S > tol, /*dim=*/-1);
 
-  const auto unique_rank_res = std::get<0>(at::_unique(
-      rank.device().type() == at::kCUDA ? rank.to(at::kCPU) : rank,
-      /*sorted=*/false
-  ));
+  if (compute_unique_rank) {
+    const auto unique_rank_res = std::get<0>(at::_unique(
+        rank.device().type() == at::kCUDA ? rank.to(at::kCPU) : rank,
+        /*sorted=*/false
+    ));
 
-  // prepare unique_rank
-  at::native::resize_output(unique_rank, unique_rank_res.sizes());
-  unique_rank.copy_(unique_rank_res);
+    // prepare unique_rank
+    at::native::resize_output(unique_rank, unique_rank_res.sizes());
+    unique_rank.copy_(unique_rank_res);
+  }
 
   return std::tie(U, S, Vh, rank, unique_rank);
 }
@@ -665,14 +668,18 @@ _linalg_svd_rank_restricted_helper(
     const Tensor& input,
     const c10::optional<Tensor>& atol,
     const c10::optional<Tensor>& rtol,
-    bool full_matrices) {
+    bool full_matrices,
+    bool compute_unique_rank) {
   auto U = at::empty({0}, input.options());
   const auto real_dtype = at::toValueType(input.scalar_type());
   auto S = at::empty({0}, input.options().dtype(real_dtype));
   auto Vh = at::empty({0}, input.options());
   auto rank = at::empty({0}, input.options().dtype(ScalarType::Long));
   auto unique_rank = at::empty({0}, input.options().device(at::kCPU).dtype(ScalarType::Long));
-  _linalg_svd_rank_restricted_helper_out(input, atol, rtol, full_matrices, U, S, Vh, rank, unique_rank);
+  _linalg_svd_rank_restricted_helper_out(
+      input, atol, rtol, full_matrices, compute_unique_rank,
+      U, S, Vh, rank, unique_rank
+  );
   return std::make_tuple(
       std::move(U),
       std::move(S),
@@ -692,8 +699,16 @@ linalg_svd_rank_revealing_out(
     Tensor& S,
     Tensor& Vh,
     Tensor& rank) {
-  auto unique_rank = at::empty({0}, input.options().device(at::kCPU).dtype(ScalarType::Long));
-  at::_linalg_svd_rank_restricted_helper_outf(input, atol_opt, rtol_opt, full_matrices, U, S, Vh, rank, unique_rank);
+  at::_linalg_svd_rank_restricted_helper_outf(
+      input, atol_opt, rtol_opt, full_matrices,
+      // No need to compute unique ranks for this function.
+      // This will prevent the unnecessery CPU-GPU sync.
+      /*compute_unique_rank=*/false,
+      U, S, Vh, rank,
+      // Need to pass an lvalue,
+      // will be ignored in the code anyway.
+      /*unique_rank=*/rank
+  );
   return std::tie(U, S, Vh, rank);
 }
 
@@ -790,7 +805,10 @@ linalg_svd_rank_restricted(
     const c10::optional<Tensor>& rtol,
     bool full_matrices) {
   Tensor U, S, Vh, rank, unique_rank;
-  std::tie(U, S, Vh, rank, unique_rank) = at::_linalg_svd_rank_restricted_helper(input, atol, rtol, full_matrices);
+  std::tie(U, S, Vh, rank, unique_rank) = at::_linalg_svd_rank_restricted_helper(
+      input, atol, rtol, full_matrices,
+      /*compute_unique_rank=*/true
+  );
 
   auto U_restricted = at::zeros_like(U);
   auto S_restricted = at::zeros_like(S);
