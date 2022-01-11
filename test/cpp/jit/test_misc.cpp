@@ -5,6 +5,8 @@
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
+#include <torch/csrc/jit/passes/tensorexpr_fuser.h>
+#include <torch/csrc/jit/tensorexpr/kernel.h>
 
 #include <test/cpp/jit/test_utils.h>
 
@@ -2822,6 +2824,80 @@ graph(%x.1 : Tensor):
   FunctionalToInplaceActivation(graph);
   testing::FileCheck().check("aten::relu_")->run(*graph);
   testing::FileCheck().check_not("aten::relu(")->run(*graph);
+}
+
+// TODO: move to test_kernel when global settings are explicit
+// fusion parameters
+class Composed : public ::testing::Test {
+ public:
+  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
+  void SetUp() {
+    torch::jit::tensorexpr::getTEMustUseLLVMOnCPU() = false;
+  }
+};
+
+TEST_F(Composed, ComposedOp) {
+  struct WithCPUFuser {
+    WithCPUFuser(bool val = true) : cpuFuserEnabled(canFuseOnCPU()) {
+      overrideCanFuseOnCPU(val);
+    }
+
+    ~WithCPUFuser() {
+      overrideCanFuseOnCPU(cpuFuserEnabled);
+    }
+
+    bool cpuFuserEnabled;
+  };
+
+#ifdef TORCH_ENABLE_LLVM
+  const auto graph_string = R"IR(
+      graph(%0 : Float(5, 3, strides=[3, 1], device=cpu),
+            %1 : Float(5, 3, strides=[1, 5], device=cpu)):
+        %2 : Float(5, 3, strides=[3, 1], device=cpu) = aten::mul(%0, %1)
+        %3 : Float(5, 3, strides=[3, 1], device=cpu) = aten::mul(%0, %2)
+        %4 : Float(5, 3, strides=[3, 1], device=cpu) = aten::mul(%0, %3)
+        return (%3, %4))IR";
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  // wrong input sizes so we hit the fallback path
+  auto a = at::rand({2, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto b = at::rand({2, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat))
+               .transpose(0, 1);
+  auto ref1 = a * (a * b);
+  auto ref2 = a * ref1;
+  WithCPUFuser g(true);
+  bool dynamic_enabled = tensorExprFuserEnabled();
+  bool fusable_on_device = torch::jit::tensorexpr::getTEMustUseLLVMOnCPU();
+  torch::jit::tensorexpr::getTEMustUseLLVMOnCPU() = false;
+  setTensorExprDynamicShapeFusionEnabled(true);
+  FuseTensorExprs(graph);
+  Code code(graph, "");
+  InterpreterState interpreter{code};
+  std::vector<IValue> stack = {a, b};
+  interpreter.run(stack);
+  at::Tensor out2 = pop(stack).toTensor();
+  at::Tensor out1 = pop(stack).toTensor();
+  ASSERT_TRUE(at::allclose(ref1, out1));
+  ASSERT_TRUE(at::allclose(ref2, out2));
+  graph->dump();
+
+  auto inp_1 = at::ones({4, 4}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto inp_2 = at::ones({4, 4}, TensorOptions(kCPU).dtype(at::kFloat));
+  stack = {inp_1, inp_2, a, b};
+  InterpreterState interpreter2{code};
+  interpreter2.run(stack);
+  out2 = pop(stack).toTensor();
+  out1 = pop(stack).toTensor();
+  ASSERT_TRUE(at::allclose(ref1, out1));
+  ASSERT_TRUE(at::allclose(ref2, out2));
+  // inp_1 is on the bottom of the stack, and corresponds
+  // to the second output. inp_2 is on the top corresponds to first output
+  ASSERT_TRUE(at::allclose(inp_1, ref2));
+  ASSERT_TRUE(at::allclose(inp_2, ref1));
+  setTensorExprDynamicShapeFusionEnabled(dynamic_enabled);
+  torch::jit::tensorexpr::getTEMustUseLLVMOnCPU() = fusable_on_device;
+#endif
 }
 
 } // namespace jit

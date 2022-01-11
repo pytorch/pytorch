@@ -30,7 +30,7 @@ void listConstruct(
     const at::ListType& list_type,
     size_t num_inputs);
 
-void dictConstruct(Stack& stack, const at::DictType& type, size_t num_inputs);
+void dictConstruct(Stack& stack, const c10::Type& type, size_t num_inputs);
 
 // as weak_ref will create a Object with a non-owning CompilationUnit reference,
 // for use as a constant in the Graph to avoid a reference cycle
