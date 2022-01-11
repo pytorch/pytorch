@@ -1550,7 +1550,6 @@ TEST(Reductions, ReductionCacheConsumerAccess) {
   StmtPtr result = IRSimplifier::simplify(l.root_stmt());
   SimpleIREvaluator cg(result, {a, b, e});
 
-  std::cout << *cg.stmt() << std::endl;
   std::ostringstream oss;
   oss << *cg.stmt();
   const std::string& expected_ir =
