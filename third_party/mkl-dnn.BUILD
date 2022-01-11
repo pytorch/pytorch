@@ -60,7 +60,6 @@ cc_library(
         "-DDNNL_DLL",
         "-DDNNL_DLL_EXPORTS",
         "-DDNNL_ENABLE_CONCURRENT_EXEC",
-        "-DTH_BLAS_MKL",
         "-D__STDC_CONSTANT_MACROS",
         "-D__STDC_LIMIT_MACROS",
         "-fno-strict-overflow",

@@ -184,7 +184,7 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
 
         Args:
             callback(``Future``): a ``Callable`` that takes in one argument,
-            which is the reference to this ``Future``.
+                which is the reference to this ``Future``.
 
         .. note:: Note that if the callback function throws, either
             through the original future being completed with an exception and

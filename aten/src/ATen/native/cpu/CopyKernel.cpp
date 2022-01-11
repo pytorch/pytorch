@@ -1,99 +1,85 @@
-#include <ATen/core/op_registration/op_allowlist.h>
-#include <ATen/ATen.h>
-
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/native/Copy.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <c10/util/TypeCast.h>
 #include <ATen/native/cpu/zmath.h>
-#include <ATen/Parallel.h>
-#include <ATen/cpu/vec/vec.h>
 
 namespace at {
 namespace native {
+inline namespace CPU_CAPABILITY {
+void neg_kernel(TensorIteratorBase &iter);
+void conj_kernel(TensorIteratorBase &iter);
+} // namespace CPU_CAPABILITY
+
 namespace {
 
-static void copy_kernel(TensorIterator& iter, bool non_blocking) {
+void direct_copy_kernel(TensorIteratorBase &iter) {
+  // TODO: we don't actually need separate instantiations per dtype;
+  // we only need a separate instantiation per dtype size. This would
+  // probably save us a little bit of code size here
+  // TODO: not sure if optimizer is able to compile two levels of
+  // conditionals into a single jump table.  We should have a
+  // single jump table here; might be worth just writing out the
+  // dispatch statement by hand instead of using AT_DISPATCH
   ScalarType dtype = iter.dtype(0);
-  if (dtype == iter.dtype(1)) {
-    // TODO: as the majority of these operations can be done treating
-    // their datatypes as opaque bit patterns, we don't actually need
-    // separate instantiations per dtype; we only need a separate
-    // instantiation per dtype size.  This would probably save us a
-    // little bit of code size here
-    // TODO: not sure if optimizer is able to compile two levels of
-    // conditionals into a single jump table.  We should have a
-    // single jump table here; might be worth just writing out the
-    // dispatch statement by hand instead of using AT_DISPATCH
-    if (iter.tensor(0).is_neg() == iter.tensor(1).is_neg()) {
-      if (dtype == ScalarType::Half) {
-        cpu_kernel(iter, [=](at::Half a) -> at::Half { return a; });
-      } else if (dtype == ScalarType::ComplexHalf) {
-        cpu_kernel(iter, [=](c10::complex<at::Half> a) -> c10::complex<at::Half> { return a; });
-      } else if (isQIntType(dtype)) {
-        AT_DISPATCH_QINT_TYPES(dtype, "copy_kernel", [&] {
-          cpu_kernel_vec(
-              iter,
-              [=](scalar_t a) -> scalar_t { return a; },
-              [=](Vectorized<scalar_t> a) -> Vectorized<scalar_t> { return a; });
-        });
-      } else if (isComplexType(dtype)) {
-        // This case should never actually happen since currently there's no way to get a complex tensor
-        // with negative bit.
-        if (iter.tensor(0).is_conj() == iter.tensor(1).is_conj()) {
-          AT_DISPATCH_COMPLEX_TYPES(dtype, "copy_kernel", [&] {
-              cpu_kernel_vec(
-                iter,
-                [=](scalar_t a) -> scalar_t { return a; },
-                [=](Vectorized<scalar_t> a) -> Vectorized<scalar_t> { return a; });
-            });
-        } else {
-          AT_DISPATCH_COMPLEX_TYPES(dtype, "conj_kernel", [&] {
-              cpu_kernel_vec(
-                iter,
-                [=](scalar_t a) -> scalar_t { return conj_impl(a); },
-                [=](Vectorized<scalar_t> a) -> Vectorized<scalar_t> { return a.conj(); });
-            });
-        }
-      } else {
-        AT_DISPATCH_ALL_TYPES_AND2(
-            ScalarType::Bool, ScalarType::BFloat16,dtype, "copy_kernel", [&] {
-              cpu_kernel_vec(
-                  iter,
-                  [=](scalar_t a) -> scalar_t { return a; },
-                  [=](Vectorized<scalar_t> a) { return a; });
-            });
-      }
+  if (isQIntType(dtype)) {
+    AT_DISPATCH_QINT_TYPES(dtype, "copy_kernel", [&] {
+      cpu_kernel_vec(
+          iter,
+          [=](scalar_t a) -> scalar_t { return a; },
+          [=](Vectorized<scalar_t> a) -> Vectorized<scalar_t> { return a; });
+    });
+  } else if (dtype == ScalarType::ComplexHalf) {
+    cpu_kernel(iter, [=](c10::complex<at::Half> a) -> c10::complex<at::Half> { return a; });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+        kBool, kHalf, kBFloat16, dtype, "copy_kernel", [&] {
+      cpu_kernel_vec(
+          iter,
+          [=](scalar_t a) -> scalar_t { return a; },
+          [=](Vectorized<scalar_t> a) -> Vectorized<scalar_t> { return a; });
+    });
+  }
+}
+
+void neg_conj_kernel(TensorIteratorBase &iter) {
+  // fused a = b.neg().conj_physical()
+  AT_DISPATCH_COMPLEX_TYPES(iter.common_dtype(), "neg_conj_cpu", [&] {
+    cpu_kernel_vec(
+        iter,
+        [=](scalar_t a) -> scalar_t { return -conj_impl(a); },
+        [=](Vectorized<scalar_t> a) -> Vectorized<scalar_t> { return a.neg().conj(); });
+  });
+}
+
+void copy_same_dtype(TensorIteratorBase &iter, bool requires_conj, bool requires_neg) {
+  if (requires_neg) {
+    // This case should never actually happen since currently there's no way to get a complex tensor
+    // with negative bit.
+    if (requires_conj) {
+      neg_conj_kernel(iter);
     } else {
-      if (dtype == ScalarType::Half) {
-        cpu_kernel(iter, [=](at::Half a) -> at::Half { return -a; });
-      } else if (isComplexType(dtype)) {
-        if (iter.tensor(0).is_conj() == iter.tensor(1).is_conj()) {
-          AT_DISPATCH_COMPLEX_TYPES(dtype, "copy_kernel", [&] {
-              cpu_kernel_vec(
-                iter,
-                [=](scalar_t a) -> scalar_t { return -a; },
-                [=](Vectorized<scalar_t> a) -> Vectorized<scalar_t> { return a.neg(); });
-            });
-        } else {
-          AT_DISPATCH_COMPLEX_TYPES(dtype, "conj_kernel", [&] {
-              cpu_kernel_vec(
-                iter,
-                [=](scalar_t a) -> scalar_t { return -1 * conj_impl(a); },
-                [=](Vectorized<scalar_t> a) -> Vectorized<scalar_t> { return a.neg().conj(); });
-            });
-        }
-      } else {
-          AT_DISPATCH_ALL_TYPES_AND2(
-            ScalarType::Bool, ScalarType::BFloat16,dtype, "copy_kernel", [&] {
-              cpu_kernel_vec(
-                  iter,
-                  [=](scalar_t a) -> scalar_t { return -a; },
-                  [=](Vectorized<scalar_t> a) -> Vectorized<scalar_t> { return a.neg(); });
-            });
-      }
+      neg_kernel(iter);
     }
+  } else {
+    if (requires_conj) {
+      conj_kernel(iter);
+    } else {
+      direct_copy_kernel(iter);
+    }
+  }
+}
+
+void copy_kernel(TensorIterator& iter, bool non_blocking) {
+  ScalarType dtype = iter.dtype(0);
+  const bool requires_conj = (
+      isComplexType(dtype) && (iter.tensor_base(0).is_conj() != iter.tensor_base(1).is_conj()));
+  const bool requires_neg = (iter.tensor_base(0).is_neg() != iter.tensor_base(1).is_neg());
+
+  if (dtype == iter.dtype(1)) {
+    copy_same_dtype(iter, requires_conj, requires_neg);
   } else {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, dtype, "copy_", [&] {
       using dest_t = scalar_t;
@@ -116,75 +102,19 @@ static void copy_kernel(TensorIterator& iter, bool non_blocking) {
           return c10::static_cast_with_inter_type<dest_t, scalar_t>::apply(src); });
       });
     });
-    if (iter.tensor(0).is_conj() != iter.tensor(1).is_conj()) {
-      iter.tensor(0).conj_physical_();
-    }
-    if (iter.tensor(0).is_neg() != iter.tensor(1).is_neg()) {
-      iter.tensor(0).neg_();
+
+    if (requires_conj || requires_neg) {
+      // This inplace "copy" will perform any missing neg or conj operations
+      auto self = iter.tensor_base(0);
+      auto iter = TensorIterator::unary_op(self, self);
+      copy_same_dtype(iter, requires_conj, requires_neg);
     }
   }
-}
-
-template <typename scalar_t>
-void transpose_copy_kernel_impl(Tensor& self, const Tensor& src) {
-  scalar_t* self_data = self.data_ptr<scalar_t>();
-  scalar_t* src_data = src.data_ptr<scalar_t>();
-
-  int64_t M = src.size(0);
-  int64_t N = src.size(1);
-
-  constexpr int64_t BLOCK_SIZE = 8;
-  int64_t K = divup(M, BLOCK_SIZE);
-
-  // parallel on outer most dimension
-  // TODO: vectorize the remainder
-  int64_t grain_size = at::internal::GRAIN_SIZE / N / BLOCK_SIZE;
-  at::parallel_for(0, K, grain_size, [&] (int64_t begin, int64_t end) {
-    int64_t rbegin = begin * BLOCK_SIZE;
-    int64_t rend = std::min(end * BLOCK_SIZE, M);
-
-    int64_t i = rbegin;
-    for (; i < rend - (rend % BLOCK_SIZE); i += BLOCK_SIZE) {
-      int64_t j = 0;
-      for (; j < N - (N % BLOCK_SIZE); j += BLOCK_SIZE) {
-        vec::transpose_kernel_8x8<scalar_t>(
-            &src_data[j * M + i], M, &self_data[i * N + j], N);
-      }
-      for (; j < N; j++) {
-        for (int64_t k = i; k < i + BLOCK_SIZE; k++) {
-          self_data[k * N + j] = src_data[j * M + k];
-        }
-      }
-    }
-    for (; i < rend; i++) {
-      for (int64_t j = 0; j < N; j++) {
-        self_data[i * N + j] = src_data[j * M + i];
-      }
-    }
-  });
-}
-
-static void  transpose_copy_kernel(Tensor& self, const Tensor& src) {
-  TORCH_CHECK(self.is_contiguous(), "self is not contiguous");
-  TORCH_CHECK(src.numel() > 0, "expect src number of elements > 0");
-  TORCH_CHECK(src.dim() == 2 && self.dim() == 2,
-      "expect src and self dims to be 2, self dim: ", src.dim(),
-      "; self dim: ", self.dim());
-  TORCH_CHECK(src.stride(0) == 1, "src first dimension is not contiguous");
-  TORCH_CHECK(src.stride(1) == src.size(0), "expect src.stride(1) == src.size(0)");
-  TORCH_CHECK(src.scalar_type() == self.scalar_type(),
-      "expect same data type for src and self, src data type: ", src.scalar_type(),
-      "; self data type: ", self.scalar_type());
-
-  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, src.scalar_type(), "transpose_copy_kernel", [&] {
-    transpose_copy_kernel_impl<scalar_t>(self, src);
-  });
 }
 
 } // anonymous namespace
 
 REGISTER_DISPATCH(copy_stub, &copy_kernel);
-REGISTER_DISPATCH(transpose_copy_stub, &transpose_copy_kernel);
 
 } // namespace native
 } // namespace at
