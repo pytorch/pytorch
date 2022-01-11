@@ -1111,12 +1111,16 @@ bool denseAndNonOverlapping(
   return (strides == at::infer_dense_strides(sizes, strides));
 }
 
-Tensor TensorExprKernel::convertOutputToCorrectStrides(std::vector<ExprHandle>& sizes, std::vector<size_t>& sorted_stride_indices_descending, std::vector<ExprPtr>& strides, BufPtr& buf) {
+Tensor TensorExprKernel::convertOutputToCorrectStrides(
+    const std::vector<ExprHandle>& sizes,
+    const std::vector<size_t>& sorted_stride_indices_descending,
+    const std::vector<ExprPtr>& strides,
+    BufPtr& buf) {
   // We need to convert the output tensor so that its values are layed
   // so that when viewed from the output strides the values are correct.
   // A contiguous Tensor of size(2, 3) with values 0-5 is layed out as:
   // [0] [1] [2] [3] [4] [5]
-  // The same valued tensor with strides (2, 1) would be layed out like
+  // The same valued tensor with strides (1, 2) would be layed out like
   // [0] [3] [1] [4] [2] [5]
   // When we are doing the re-ordering of values into the output tensor,
   // we are iterating per-element of the input, and we are fixed
@@ -1158,7 +1162,6 @@ Tensor TensorExprKernel::convertOutputToCorrectStrides(std::vector<ExprHandle>& 
         return BufHandle(buf).load(new_axes);
       });
 }
-
 
 Tensor TensorExprKernel::convertSymbolicOutputToCorrectStrides(torch::jit::Value* v) {
   const TensorTypePtr& tt = v->type()->expect<TensorType>();
@@ -1602,7 +1605,9 @@ void TensorExprKernel::updateOutputSizesAndStrides(
     } else if (tensorOutputStrideDesc_[i] == torch::jit::StrideInput::TENSOR_CONT_CHANNELS_LAST) {
       tensorOutputStrides_[i] = at::get_channels_last_strides_2d(tensorOutputSizes_[i]);
     } else {
-      TORCH_INTERNAL_ASSERT(false);
+      std::string output_desc = toString(tensorOutputStrideDesc_[i]);
+      TORCH_INTERNAL_ASSERT(
+          false, "Expected contiguous or channels last, got ", output_desc);
     }
   }
 }
