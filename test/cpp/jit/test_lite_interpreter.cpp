@@ -1517,8 +1517,8 @@ TEST(LiteInterpreterTest, OperatorSize1) {
   mobile::Module bc = _load_for_mobile(ss);
   const auto& func = bc.get_method("forward").function();
   ASSERT_EQ(
-      func.get_code()->operator_input_sizes_.size(),
-      func.get_code()->operators_.size());
+      func.get_code().operator_input_sizes_.size(),
+      func.get_code().operators_.size());
 }
 
 TEST(LiteInterpreterTest, OperatorTest2) { // NOLINT (use =delete in gtest)
@@ -1552,8 +1552,8 @@ TEST(LiteInterpreterTest, OperatorTest2) { // NOLINT (use =delete in gtest)
     mobile::Module bc = _load_for_mobile(ss);
     const auto& func = bc.get_method("test_func").function();
     ASSERT_EQ(
-        func.get_code()->operator_input_sizes_.size(),
-        func.get_code()->operators_.size());
+        func.get_code().operator_input_sizes_.size(),
+        func.get_code().operators_.size());
   }
 }
 
@@ -1590,7 +1590,7 @@ TEST(LiteInterpreterUpgraderTest, DivTensorV2) {
   */
   mobile::Module m_module = _load_for_mobile(test_model_file);
   auto intrsuction_list =
-      m_module.get_method("forward").function().get_code()->instructions_;
+      m_module.get_method("forward").function().get_code().instructions_;
   uint64_t number_of_call_instruction = 0;
   for (auto& instruction : intrsuction_list) {
     number_of_call_instruction += (instruction.op == OpCode::CALL);
@@ -1629,7 +1629,7 @@ TEST(LiteInterpreterUpgraderTest, DivTensorOutV2) {
   mobile::Module m_module = _load_for_mobile(test_model_file);
 
   auto intrsuction_list =
-      m_module.get_method("forward").function().get_code()->instructions_;
+      m_module.get_method("forward").function().get_code().instructions_;
   uint64_t number_of_call_instruction = 0;
   for (auto& instruction : intrsuction_list) {
     number_of_call_instruction += (instruction.op == OpCode::CALL);
@@ -1670,7 +1670,7 @@ TEST(LiteInterpreterUpgraderTest, DivTensorInplaceV2) {
   mobile::Module m_module = _load_for_mobile(test_model_file);
 
   auto intrsuction_list =
-      m_module.get_method("forward").function().get_code()->instructions_;
+      m_module.get_method("forward").function().get_code().instructions_;
   uint64_t number_of_call_instruction = 0;
   for (auto& instruction : intrsuction_list) {
     number_of_call_instruction += (instruction.op == OpCode::CALL);
@@ -1710,7 +1710,7 @@ TEST(LiteInterpreterUpgraderTest, DivScalarFloatV2) {
   mobile::Module m_module = _load_for_mobile(test_model_file);
 
   auto intrsuction_list =
-      m_module.get_method("forward").function().get_code()->instructions_;
+      m_module.get_method("forward").function().get_code().instructions_;
   uint64_t number_of_call_instruction = 0;
   for (auto& instruction : intrsuction_list) {
     number_of_call_instruction += (instruction.op == OpCode::CALL);
@@ -1750,7 +1750,7 @@ TEST(LiteInterpreterUpgraderTest, DivScalarReciprocalFloatV2) {
   mobile::Module m_module = _load_for_mobile(test_model_file);
 
   auto intrsuction_list =
-      m_module.get_method("forward").function().get_code()->instructions_;
+      m_module.get_method("forward").function().get_code().instructions_;
   uint64_t number_of_call_instruction = 0;
   for (auto& instruction : intrsuction_list) {
     number_of_call_instruction += (instruction.op == OpCode::CALL);
@@ -1791,7 +1791,7 @@ TEST(LiteInterpreterUpgraderTest, DivScalarReciprocalIntV2) {
   mobile::Module m_module = _load_for_mobile(test_model_file);
 
   auto intrsuction_list =
-      m_module.get_method("forward").function().get_code()->instructions_;
+      m_module.get_method("forward").function().get_code().instructions_;
   uint64_t number_of_call_instruction = 0;
   for (auto& instruction : intrsuction_list) {
     number_of_call_instruction += (instruction.op == OpCode::CALL);
@@ -1843,7 +1843,7 @@ TEST(LiteInterpreterUpgraderTest, DivScalarScalarV2) {
   */
   mobile::Module m_module = _load_for_mobile(test_model_file);
   auto intrsuction_list =
-      m_module.get_method("forward").function().get_code()->instructions_;
+      m_module.get_method("forward").function().get_code().instructions_;
   uint64_t number_of_call_instruction = 0;
   for (auto& instruction : intrsuction_list) {
     number_of_call_instruction += (instruction.op == OpCode::CALL);
@@ -1884,7 +1884,7 @@ TEST(LiteInterpreterUpgraderTest, DivScalarIntV2) {
   mobile::Module m_module = _load_for_mobile(test_model_file);
 
   auto intrsuction_list =
-      m_module.get_method("forward").function().get_code()->instructions_;
+      m_module.get_method("forward").function().get_code().instructions_;
   uint64_t number_of_call_instruction = 0;
   for (auto& instruction : intrsuction_list) {
     number_of_call_instruction += (instruction.op == OpCode::CALL);
@@ -1924,7 +1924,7 @@ TEST(LiteInterpreterUpgraderTest, DivScalarInplaceFloatV2) {
   mobile::Module m_module = _load_for_mobile(test_model_file);
 
   auto intrsuction_list =
-      m_module.get_method("forward").function().get_code()->instructions_;
+      m_module.get_method("forward").function().get_code().instructions_;
   uint64_t number_of_call_instruction = 0;
   for (auto& instruction : intrsuction_list) {
     number_of_call_instruction += (instruction.op == OpCode::CALL);
@@ -1964,7 +1964,7 @@ TEST(LiteInterpreterUpgraderTest, DivScalarInplaceIntV2) {
   mobile::Module m_module = _load_for_mobile(test_model_file);
 
   auto intrsuction_list =
-      m_module.get_method("forward").function().get_code()->instructions_;
+      m_module.get_method("forward").function().get_code().instructions_;
   uint64_t number_of_call_instruction = 0;
   for (auto& instruction : intrsuction_list) {
     number_of_call_instruction += (instruction.op == OpCode::CALL);
@@ -1988,9 +1988,9 @@ TEST(LiteInterpreterUpgraderTest, Upgrader) {
 
   for (auto& byteCodeFunctionWithOperator : getUpgraderBytecodeList()) {
     ASSERT_EQ(
-        byteCodeFunctionWithOperator.function.get_code()->operators_.size(),
-        byteCodeFunctionWithOperator.function.get_code()->op_names_.size());
-    if (byteCodeFunctionWithOperator.function.get_code()->operators_.empty()) {
+        byteCodeFunctionWithOperator.function.get_code().operators_.size(),
+        byteCodeFunctionWithOperator.function.get_code().op_names_.size());
+    if (byteCodeFunctionWithOperator.function.get_code().operators_.empty()) {
       for (const auto& op : byteCodeFunctionWithOperator.operators) {
         byteCodeFunctionWithOperator.function.append_operator(
             op.name,
@@ -2003,6 +2003,98 @@ TEST(LiteInterpreterUpgraderTest, Upgrader) {
   }
 
   ASSERT_EQ(getUpgraderBytecodeList().size(), upgrader_functions.size());
+}
+
+void enumerateTupleType(
+    size_t depth,
+    std::vector<TypePtr>& current,
+    const std::vector<TypePtr>& candidates,
+    std::vector<TypePtr>& out) {
+  static std::vector<std::string> fieldNames;
+  if (depth > fieldNames.size()) {
+    fieldNames.reserve(depth);
+    for (size_t i = fieldNames.size(); i < depth; i++) {
+      fieldNames.push_back("field" + std::to_string(i));
+    }
+  }
+  if (depth == 0) {
+    out.push_back(TupleType::create(current));
+    while (fieldNames.size() > current.size()) {
+      fieldNames.pop_back();
+    }
+    out.push_back(TupleType::createNamed("NamedTuple", fieldNames, current));
+    return;
+  }
+  for (const auto& type : candidates) {
+    if (containsAnyType(type)) {
+      continue;
+    }
+    current.push_back(type);
+    enumerateTupleType(depth - 1, current, candidates, out);
+    current.pop_back();
+  }
+}
+
+/**
+ * Enumerate all possible JIT types appearing in mobile runtime, and test
+ * whether subtyping relation is preserved after one of the JIT types is
+ * converted to DynamicType.
+ *
+ * We firstly enumerate all "base" types in a vector, and implement
+ * expandTypes() to enumerate container types one "level" up for a given set
+ * of types. We call expandTypes() twice to test types nested less or equal
+ * to two levels. e.g. List[Optional[Tensor]], Optional[Dict[Int, Bool]], etc.
+ */
+TEST(LiteInterpreterTest, DynamicType) {
+  auto cu = std::make_shared<CompilationUnit>();
+  std::vector<TypePtr> keyTypes = {
+      AnyType::get(),
+      IntType::get(),
+      BoolType::get(),
+      FloatType::get(),
+      ComplexType::get(),
+      StringType::get(),
+      TensorType::get(),
+      DeviceObjType::get(),
+  };
+  std::vector<TypePtr> types = {
+      NoneType::get(),
+      NumberType::get(),
+      ClassType::create("__torch__.TestClass1", cu),
+      ClassType::create("__torch__.TestClass2", cu),
+      AnyListType::get(),
+      AnyTupleType::get(),
+      StreamObjType::get(),
+      CapsuleType::get()};
+  std::copy(keyTypes.begin(), keyTypes.end(), back_inserter(types));
+  auto expandTypes = [&](size_t tupleSize) {
+    std::vector<TypePtr> nested;
+    for (const auto& type : types) {
+      if (!(type == AnyType::get())) {
+        nested.push_back(ListType::create(type));
+        if (!(type == NoneType::get() || type->kind() == OptionalType::Kind)) {
+          nested.push_back(OptionalType::create(type));
+        }
+      }
+      for (const auto& keyType : keyTypes) {
+        nested.push_back(DictType::create(keyType, type));
+      }
+    }
+    std::vector<TypePtr> tmp;
+    enumerateTupleType(tupleSize, tmp, types, nested);
+    std::move(std::begin(nested), std::end(nested), std::back_inserter(types));
+  };
+  expandTypes(1);
+  expandTypes(1);
+  for (const auto& a : types) {
+    auto da = DynamicType::create(*a);
+    for (const auto& b : types) {
+      bool result = a->isSubtypeOf(*b);
+      EXPECT_EQ(result, da->isSubtypeOf(*b));
+      result = b->isSubtypeOf(*a);
+      EXPECT_EQ(result, b->isSubtypeOf(*da));
+    }
+  }
 }
 
 } // namespace jit

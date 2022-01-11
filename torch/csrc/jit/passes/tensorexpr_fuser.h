@@ -22,6 +22,8 @@ TORCH_API void FuseTensorExprs(
 
 TORCH_API void setTensorExprFuserEnabled(bool val);
 TORCH_API bool tensorExprFuserEnabled();
+TORCH_API void setTensorExprDynamicShapeFusionEnabled(bool val);
+TORCH_API bool tensorExprDynamicShapeFusionEnabled();
 TORCH_API bool setTexprReductionsEnabled(bool value);
 TORCH_API bool texprReductionsEnabled();
 
