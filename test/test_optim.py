@@ -20,7 +20,7 @@ from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, SequentialLR, S
 from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
     skipIfRocm
-
+from torch.testing._internal.common_device_type import toleranceOverride, tol
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -183,6 +183,15 @@ class TestOptim(TestCase):
         optimizer_c.param_groups.extend(optimizer_c.param_groups)
         self.assertEqual(optimizer.state_dict()['param_groups'][-1],
                          optimizer_c.state_dict()['param_groups'][-1])
+
+        # Make sure that optimizers that support maximize can load older models
+        state_dict = optimizer.state_dict()
+        if 'maximize' in state_dict['param_groups'][0]:
+            for group in state_dict['param_groups']:
+                del group['maximize']
+            optimizer.load_state_dict(state_dict)
+            # Make sure we can still step
+            optimizer.step()
 
         # Check that state dict can be loaded even when we cast parameters
         # to a different type and move to a different device.
@@ -600,7 +609,9 @@ class TestOptim(TestCase):
             optim.SparseAdam([{"params": [torch.zeros(3, layout=torch.sparse_coo)]}])
 
     # ROCm precision is too low to pass this test
+    # Tolerance Override Handles https://github.com/pytorch/pytorch/issues/69698
     @skipIfRocm
+    @toleranceOverride({torch.float32: tol(4e-3, 0)})
     def test_adadelta(self):
         for optimizer in [optim.Adadelta, optim_mt.Adadelta]:
             self._test_basic_cases(
@@ -622,6 +633,8 @@ class TestOptim(TestCase):
             with self.assertRaisesRegex(ValueError, "Invalid rho value: 1.1"):
                 optimizer(None, lr=1e-2, rho=1.1)
 
+    # Tolerance Override Handles https://github.com/pytorch/pytorch/issues/69698
+    @toleranceOverride({torch.float32: tol(2e-2, 0)})
     def test_adadelta_complex(self):
         for optimizer in [optim.Adadelta]:
             self._test_complex_optimizer(
@@ -1418,6 +1431,21 @@ class TestLRScheduler(TestCase):
         schedulers[2] = StepLR(self.opt, gamma=0.1, step_size=2)
         scheduler = SequentialLR(self.opt, schedulers=schedulers, milestones=milestones)
         self._test(scheduler, targets, epochs)
+
+    def test_get_last_lr_sequentiallr(self):
+        epochs = 12
+        milestones = [3, 6]
+        schedulers = [None] * 3
+        schedulers[0] = ConstantLR(self.opt, factor=0.1, total_iters=3)
+        schedulers[1] = ExponentialLR(self.opt, gamma=0.8)
+        schedulers[2] = StepLR(self.opt, gamma=0.1, step_size=2)
+        scheduler = SequentialLR(self.opt, schedulers=schedulers, milestones=milestones)
+        constant_lr_target = [0.005] * 3
+        exponential_lr_target = [0.05, 0.04, 0.032]
+        step_lr_target = [0.05, 0.05, 0.005, 0.005, 0.0005, 0.0005]
+        single_targets = constant_lr_target + exponential_lr_target + step_lr_target
+        targets = [single_targets, [x * 10 for x in single_targets]]
+        self._test_get_last_lr(scheduler, targets, epochs)
 
     def test_chained_lr2_get_last_lr_before_step(self):
         schedulers = [
