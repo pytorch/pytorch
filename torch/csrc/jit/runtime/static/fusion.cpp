@@ -333,7 +333,6 @@ void performTensorExprFusion(
   FuseTensorExprs(
       traced_graph,
       /*min_group_size*/ 2,
-      /*disable_shape_checks*/ false,
       /*add_composed_op*/ true);
   graph->block()->clear();
   graph->block()->cloneFrom(traced_graph->block(), nullptr);
