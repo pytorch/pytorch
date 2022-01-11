@@ -5,7 +5,7 @@ import torch.fx
 import torch.nn as nn
 import torch.fx.experimental.fx_acc.acc_tracer as acc_tracer
 from torch.fx.experimental.fx2trt.tools.trt_splitter import TRTSplitter
-from torch.fx.experimental.fx2trt.fx2trt import TRTInterpreter, InputTensorSpec, TRTModule
+from torch.fx.experimental.fx2trt import TRTInterpreter, InputTensorSpec, TRTModule
 
 
 # The purpose of this example is to demonstrate the overall flow of lowering a PyTorch

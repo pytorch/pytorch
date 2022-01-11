@@ -1151,14 +1151,17 @@ Arguments:
               "reduce_scatter",
               [](::c10d::ProcessGroup& pg,
                  at::Tensor& output,
-                 std::vector<at::Tensor>& input) {
+                 std::vector<at::Tensor>& input,
+                 ::c10d::ReduceOp op) {
                 std::vector<at::Tensor> outputs = {output};
                 std::vector<std::vector<at::Tensor>> inputs = {input};
-                return pg.reduce_scatter(
-                    outputs, inputs, ::c10d::ReduceScatterOptions());
+                ::c10d::ReduceScatterOptions opts;
+                opts.reduceOp = op;
+                return pg.reduce_scatter(outputs, inputs, opts);
               },
               py::arg("output_tensors"),
               py::arg("input_tensor"),
+              py::arg("op") = ::c10d::ReduceOp::SUM,
               py::call_guard<py::gil_scoped_release>())
 
           .def(

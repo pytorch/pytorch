@@ -109,7 +109,7 @@ class IDEEPConvTransposeUnpoolBase : public IDEEPOperator {
       CAFFE_ENFORCE_EQ(pads_.size(), 2 * kernel_.size());
     }
 
-    for (int dim = 0; dim < kernel_.size(); ++dim) {
+    for (const auto dim : c10::irange(kernel_.size())) {
       CAFFE_ENFORCE_GT(kernel_[dim], 0);
       CAFFE_ENFORCE_GT(stride_[dim], 0);
       CAFFE_ENFORCE_GE(adj_[dim], 0);
@@ -143,7 +143,7 @@ class IDEEPConvTransposeUnpoolBase : public IDEEPOperator {
     auto input_dims = input.get_dims();
     itensor::dims dims;
     dims.assign(input_dims.begin() + 2, input_dims.end());
-    for (int dim = 0; dim < dims.size(); ++dim) {
+    for (const auto dim : c10::irange(dims.size())) {
       int dim_size = 0;
       ComputeSizeAndPad(
           dims[dim],
@@ -175,7 +175,6 @@ class IDEEPConvTransposeUnpoolBase : public IDEEPOperator {
 
  private:
   LegacyPadding legacy_pad_;
-  int pad_;
 
  protected:
   vector<int> kernel_;
