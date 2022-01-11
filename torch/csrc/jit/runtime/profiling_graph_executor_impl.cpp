@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/passes/canonicalize_graph_fuser_ops.h>
 #include <torch/csrc/jit/passes/clear_profiling.h>
 #include <torch/csrc/jit/passes/clear_undefinedness.h>
+#include <torch/csrc/jit/passes/common_expression_hoisting.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
@@ -332,110 +333,14 @@ void runPreAutodiffPassPipeline(std::shared_ptr<Graph>& graph) {
 
     EliminateCommonSubexpression(graph);
     GRAPH_DEBUG(
-        "After EliminateCommonSubexpression, before CheckInplace\n", *graph);
-
+        "After EliminateCommonSubexpression, before HoistCommonExpression\n",
+        *graph);
+    HoistCommonExpression(graph);
+    GRAPH_DEBUG("After HoistCommonExpression, before CheckInplace\n", *graph);
     CheckInplace(graph);
   }
   GRAPH_DEBUG(
       "After CheckInplace (end of runPreAutodiffPassPipeline)\n", *graph);
-}
-
-void runDiffGraphPasses(std::shared_ptr<Graph>& graph) {
-  GRAPH_DEBUG(
-      "Before EliminateDeadCode (beginning of runDiffGraphPasses)\n", *graph);
-  // runOptimization:
-  {
-    // Basic graph preprocessing to eliminate noise.
-    EliminateDeadCode(graph);
-    GRAPH_DEBUG(
-        "After EliminateDeadCode, before EliminateCommonSubexpression\n",
-        *graph);
-    EliminateCommonSubexpression(graph);
-    GRAPH_DEBUG(
-        "After EliminateCommonSubexpression, before PeepholeOptimize\n",
-        *graph);
-
-    PeepholeOptimize(graph);
-    GRAPH_DEBUG("After PeepholeOptimize, before ConstantPropagation\n", *graph);
-    ConstantPropagation(graph);
-    GRAPH_DEBUG("After ConstantPropagation, before ConstantPooling\n", *graph);
-    ConstantPooling(graph);
-    GRAPH_DEBUG("After ConstantPooling, before UnrollLoops\n", *graph);
-
-    UnrollLoops(graph);
-    GRAPH_DEBUG("After UnrollLoops, before RemoveListMutation\n", *graph);
-    // run again with unrolled loops
-    RemoveListMutation(graph);
-    GRAPH_DEBUG("After RemoveListMutation, before PeepholeOptimize\n", *graph);
-    PeepholeOptimize(graph);
-    GRAPH_DEBUG("After PeepholeOptimize, before ConstantPropagation\n", *graph);
-    ConstantPropagation(graph);
-    GRAPH_DEBUG(
-        "After ConstantPropagation, before EliminateCommonSubexpression\n",
-        *graph);
-
-    EliminateCommonSubexpression(graph);
-    GRAPH_DEBUG(
-        "After EliminateCommonSubexpression, before CheckInplace\n", *graph);
-
-    CheckInplace(graph);
-  }
-  GRAPH_DEBUG("After CheckInplace, before customPrePasses\n", *graph);
-
-  // runNondiffOptimization
-  {
-    // Run custom passes that different backends can register.
-    for (const auto& passPair : getCustomPrePasses()) {
-      passPair.first(graph);
-    }
-    GRAPH_DEBUG("After customPrePasses, before LowerSimpleTuples\n", *graph);
-
-    // TupleConstruct / TupleUnpack pairs can still be present at this point
-    // and must be removed for fusion.
-    LowerSimpleTuples(graph);
-    GRAPH_DEBUG("After LowerSimpleTuples\n", *graph);
-
-    if (tensorExprFuserEnabled()) {
-      // Remove prim::profile nodes and embed the profile info directly in the
-      // IR in value types. We're doing such transformation as optimizations
-      // that try to merge/fuse nodes in the graph (e.g. BatchMM and GraphFuser)
-      // work worse in the presence of intermittent prim::profile nodes.
-      // Optimizations relying on the type info are also responsible for
-      // inserting proper type checks. Once we're done with these optimizations
-      // we will wipe the tensor type information from the IR, so that it's not
-      // accidentally used by any other pass.
-      RemoveProfileNodesAndSpecializeTypes(graph);
-      GRAPH_DEBUG(
-          "After RemoveProfileNodesAndSpecializeTypes, before BatchMM\n",
-          *graph);
-      // Rewrite subgraphs with many MMs into expressions that batch them.
-      BatchMM(graph);
-      GRAPH_DEBUG("After BatchMM, before Fusion\n", *graph);
-
-      FuseTensorExprs(graph, getFusionGroupInlining() ? 2 : 1);
-      GRAPH_DEBUG(
-          "After Fusion, before RemoveTensorTypeSpecializations\n", *graph);
-
-      // Wipe tensor type info from the IR
-      RemoveTensorTypeSpecializations(graph);
-      GRAPH_DEBUG(
-          "After RemoveTensorTypeSpecializations, before customPostPasses\n",
-          *graph);
-    } else {
-      // Rewrite subgraphs with many MMs into expressions that batch them.
-      BatchMM(graph);
-      GRAPH_DEBUG("After BatchMM, before Fusion\n", *graph);
-
-      FuseGraph(graph, true);
-      GRAPH_DEBUG("After Fusion, before customPostPasses\n", *graph);
-    }
-
-    // Run custom post-fusion passes
-    for (const auto& passPair : getCustomPostPasses()) {
-      passPair.first(graph);
-    }
-  }
-  GRAPH_DEBUG("After customPostPasses (end of runDiffGraphPasses)\n", *graph);
 }
 
 void runNoGradOptimizations(std::shared_ptr<Graph>& graph) {
@@ -527,7 +432,7 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
       auto diff_graph = std::move(dnode->g(attr::Subgraph));
       Gradient gradient = differentiate(diff_graph);
       RemoveTensorTypeSpecializations(gradient.f);
-      RemoveProfilingNodes(gradient.f);
+      ProfilingRecord::removeProfilingNodes(gradient.f->block());
       GRAPH_DEBUG("Forward graph:\n", *(gradient.f));
       GRAPH_DEBUG("Backward graph:\n", *(gradient.df));
       // just like inside autograd.Functions, the forward of a differentiable
@@ -543,7 +448,7 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
         copy,
         getAutodiffSubgraphInlining() ? autodiffSubgraphNodeThreshold : 1);
     replaceFallbackGraphWithFallbackFunction(copy->block());
-    RemoveProfilingNodes(copy);
+    ProfilingRecord::removeProfilingNodes(copy->block());
     GRAPH_DEBUG(
         "After InlineAutodiffSubgraphs and Removing Profiling Nodes\n", *copy);
   } else {
@@ -593,7 +498,11 @@ void ProfilingGraphExecutorImpl::runProfilingInsensitiveOptimizations(
   DecomposeOps(graph);
   GRAPH_DEBUG("After DecomposeOps, before ConstantPropagation\n", *graph);
   ConstantPropagation(graph);
-  GRAPH_DEBUG("After ConstantPropagation, before EliminateDeadCode\n", *graph);
+  GRAPH_DEBUG(
+      "After ConstantPropagation, before HoistCommonExpression\n", *graph);
+  HoistCommonExpression(graph);
+  GRAPH_DEBUG(
+      "After EliminateCommonSubexpression, before ElimiateDeadCode\n", *graph);
   EliminateDeadCode(graph);
   GRAPH_DEBUG(
       "After EliminateDeadCode, before EliminateCommonSubexpression\n", *graph);
