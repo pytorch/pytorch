@@ -124,10 +124,10 @@ static inline void launch_vectorized_kernel(int64_t N, const func_t& f, array_t 
   }
 }
 
-template <typename... Args>
-auto param_to_std_array(Args*... args) {
+template <typename ArrT, typename... Args>
+auto parameter_pack_to_array(Args*... args) {
   constexpr auto p_pack_size = sizeof...(args);
-  std::array<void*, p_pack_size> arr = {std::forward<void*>(args)...};
+  std::array<ArrT, p_pack_size> arr = {std::forward<ArrT>(args)...};
   return arr;
 }
 
@@ -190,9 +190,9 @@ static inline void launch_jitted_unrolled_kernel(
     nullptr
   };
 
-  auto param_pack_arr = param_to_std_array(extra_args...);
+  auto extra_args_array = parameter_pack_to_array<void*>(extra_args...);
   for (int i = 0; i < extra_arg_name.size(); i++) {
-    args[i+7] = param_pack_arr[i];
+    args[i + 7] = extra_args_array[i];
   }
 
   at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args, grid, num_threads());
@@ -253,7 +253,7 @@ at::opmath_type<f_inputs_type> scalar_val, std::vector<at::cuda::jit::arg_type_n
     }
   }
 
-  auto param_pack_arr = param_to_std_array(extra_args...);
+  auto extra_args_arr = parameter_pack_to_array<void*>(extra_args...);
 
   if (vectorized) {
     std::array<void*, 15> args = {
@@ -275,7 +275,7 @@ at::opmath_type<f_inputs_type> scalar_val, std::vector<at::cuda::jit::arg_type_n
     };
 
     for (int i = 0; i < extra_arg_name.size(); i++) {
-      args[i + 3] = param_pack_arr[i];
+      args[i + 3] = extra_args_arr[i];
     }
 
     at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args, grid, num_threads());
@@ -305,7 +305,7 @@ at::opmath_type<f_inputs_type> scalar_val, std::vector<at::cuda::jit::arg_type_n
     };
 
     for (int i = 0; i < extra_arg_name.size(); i++) {
-      args[i + 7] = param_pack_arr[i];
+      args[i + 7] = extra_args_arr[i];
     }
     at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args, grid, num_threads());
     C10_CUDA_KERNEL_LAUNCH_CHECK();
