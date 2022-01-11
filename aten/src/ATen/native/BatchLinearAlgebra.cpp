@@ -13,6 +13,7 @@
 
 #include <c10/util/irange.h>
 
+#include <cctype>
 #include <vector>
 
 // First the required LAPACK implementations are registered here.
