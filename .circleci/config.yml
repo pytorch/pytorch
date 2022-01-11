@@ -1673,64 +1673,6 @@ jobs:
               export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_DOCKER_BUILDER_V1}
               set -x
               cd .circleci/docker && ./build_docker.sh
-  docker_for_ecr_gc_build_job:
-      machine:
-        image: ubuntu-2004:202104-01
-      steps:
-        - checkout
-        - run:
-            name: build_docker_image_for_ecr_gc
-            no_output_timeout: "1h"
-            command: |
-              cd .circleci/ecr_gc_docker
-              docker build . -t 308535385114.dkr.ecr.us-east-1.amazonaws.com/gc/ecr
-              set +x
-              export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_DOCKER_BUILDER_V1}
-              export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_DOCKER_BUILDER_V1}
-              export AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-              export AWS_REGION=us-east-1
-              aws ecr get-login-password --region $AWS_REGION|docker login --username AWS \
-                       --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
-              set -x
-              docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/gc/ecr
-  ecr_gc_job:
-      parameters:
-        project:
-          type: string
-          default: "pytorch"
-        tags_to_keep:  # comma separate values
-          type: string
-      environment:
-        PROJECT: << parameters.project >>
-        # TODO: Remove legacy image tags once we feel comfortable with new docker image tags
-        IMAGE_TAG: << parameters.tags_to_keep >>
-      docker:
-        - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/gc/ecr
-          aws_auth:
-            aws_access_key_id: ${CIRCLECI_AWS_ACCESS_KEY_FOR_DOCKER_BUILDER_V1}
-            aws_secret_access_key: ${CIRCLECI_AWS_SECRET_KEY_FOR_DOCKER_BUILDER_V1}
-
-      steps:
-        - checkout
-        - run:
-            # NOTE: see 'docker_build_job' for how these tags actually get built
-            name: dynamically generate tags to keep
-            no_output_timeout: "1h"
-            command: |
-              GENERATED_IMAGE_TAG=$(\
-                git log --oneline --pretty='%H' .circleci/docker \
-                  | xargs -I '{}' git rev-parse '{}:.circleci/docker' \
-                  | paste -sd "," -)
-              echo "export GENERATED_IMAGE_TAG='${GENERATED_IMAGE_TAG}'" >> ${BASH_ENV}
-        - run:
-            name: garbage collecting for ecr images
-            no_output_timeout: "1h"
-            command: |
-              set +x
-              export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_DOCKER_BUILDER_V1}
-              export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_DOCKER_BUILDER_V1}
-              set -x
-              /usr/bin/gc.py --filter-prefix ${PROJECT}  --ignore-tags "${IMAGE_TAG},${GENERATED_IMAGE_TAG}"
 ##############################################################################
 # Workflows
 ##############################################################################
@@ -8716,40 +8658,6 @@ workflows:
           requires:
             - binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_build
     when: << pipeline.parameters.run_master_build >>
-  ecr_gc:
-    triggers:
-      - schedule:
-          cron: "45 * * * *"
-          filters:
-            branches:
-              only:
-                - master
-    jobs:
-      - docker_for_ecr_gc_build_job
-      - ecr_gc_job:
-            name: ecr_gc_job_for_pytorch
-            project: pytorch
-            tags_to_keep: "271,262,256,278,282,291,300,323,327,347,389,401,402,403,405,a8006f9a-272d-4478-b137-d121c6f05c83,6e7b11da-a919-49e5-b2ba-da66e3d4bb0a,f990c76a-a798-42bb-852f-5be5006f8026,e43973a9-9d5a-4138-9181-a08a0fc55e2f,8fcf46ef-4a34-480b-a8ee-b0a30a4d3e59,9a3986fa-7ce7-4a36-a001-3c9bef9892e2,1bc00f11-e0f3-4e5c-859f-15937dd938cd,209062ef-ab58-422a-b295-36c4eed6e906,be76e8fd-44e2-484d-b090-07e0cc3a56f0,fff7795428560442086f7b2bb6004b65245dc11a,ab1632df-fa59-40e6-8c23-98e004f61148"
-            requires:
-              - docker_for_ecr_gc_build_job
-      - ecr_gc_job:
-            name: ecr_gc_job_for_caffe2
-            project: caffe2
-            tags_to_keep: "376,373,369,348,345,336,325,324,315,306,301,287,283,276,273,266,253,248,238,230,213"
-            requires:
-              - docker_for_ecr_gc_build_job
-      - ecr_gc_job:
-            name: ecr_gc_job_for_translate
-            project: translate
-            tags_to_keep: "8"
-            requires:
-              - docker_for_ecr_gc_build_job
-      - ecr_gc_job:
-            name: ecr_gc_job_for_tensorcomp
-            project: tensorcomp
-            tags_to_keep: "34"
-            requires:
-              - docker_for_ecr_gc_build_job
   # Promotion workflow
   promote:
     jobs:
