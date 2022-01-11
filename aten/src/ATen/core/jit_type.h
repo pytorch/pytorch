@@ -1021,6 +1021,10 @@ struct TORCH_API TupleType : public NamedType {
       const std::vector<std::string>& field_names,
       const std::vector<TypePtr>& field_types);
 
+  static TupleTypePtr createNamed(const c10::optional<c10::QualifiedName>& name,
+      const std::vector<c10::string_view>& field_names,
+      const std::vector<TypePtr>& field_types);
+
   static TupleTypePtr create(
       std::vector<TypePtr> types) {
     return TupleTypePtr(new TupleType(
@@ -1059,6 +1063,13 @@ struct TORCH_API TupleType : public NamedType {
   static const TypeKind Kind = TypeKind::TupleType;
 
  private:
+  template <typename S>
+  static TupleTypePtr createWithSpec(
+      const c10::optional<c10::QualifiedName>& name,
+      const std::vector<S>& field_names,
+      const std::vector<TypePtr>& field_types,
+      std::vector<IValue>& field_defaults);
+
   TupleType(
       std::vector<TypePtr> elements_,
       c10::optional<c10::QualifiedName> name,
@@ -2008,6 +2019,15 @@ inline typename detail::CastConstReturnType<NamedType>::type Type::cast<NamedTyp
   if (kind() == TypeKind::TupleType || kind() == TypeKind::FunctionType ||
       kind() == TypeKind::ClassType || kind() == TypeKind::InterfaceType) {
     return std::static_pointer_cast<const NamedType>(static_cast<const NamedType *>(this)->shared_from_this());
+  }
+  return nullptr;
+}
+
+template<>
+inline const NamedType* Type::castRaw<NamedType>() const {
+  if (kind() == TypeKind::TupleType || kind() == TypeKind::FunctionType ||
+      kind() == TypeKind::ClassType || kind() == TypeKind::InterfaceType) {
+    return static_cast<const NamedType*>(this);
   }
   return nullptr;
 }

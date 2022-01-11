@@ -31,6 +31,7 @@ class TORCH_API TypeParser {
   void lex();
 
   std::string next();
+  c10::string_view nextView();
   void advance();
   C10_NODISCARD c10::string_view cur() const;
 
