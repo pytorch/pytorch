@@ -4469,6 +4469,14 @@ else:
 
             self.assertEqual(res, expected, atol=0, rtol=0)
 
+    @onlyNativeDeviceTypes
+    def test_scatter_zero_size_index(self, device) -> None:
+        null_index = torch.zeros((0, 4), dtype=torch.int64)
+        null_arr = torch.zeros((0, 4))
+        original = torch.arange(4, dtype=torch.float32)
+        result = original.scatter(0, null_index, null_arr)
+        self.assertEqual(result, original, atol=0, rtol=0)
+
     @onlyCUDA
     def test_sync_warning(self, device):
 
