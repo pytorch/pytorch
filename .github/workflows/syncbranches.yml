@@ -1,0 +1,28 @@
+name: Merge fbsync to master
+
+on:
+  push:
+    branches:
+      - fbsync
+
+jobs:
+  do_merge:
+    runs-on: ubuntu-20.04
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+          architecture: x64
+      - name: Checkout repo
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+
+      - name: Setup commiter id
+        run: |
+          git config --global user.email "pytorchbot@users.noreply.github.com"
+          git config --global user.name "PyTorch Bot"
+      - name: Sync branches
+        run: |
+          python3 .github/scripts/syncbranches.py
