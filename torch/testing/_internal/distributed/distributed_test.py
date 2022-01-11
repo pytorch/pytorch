@@ -2669,7 +2669,6 @@ class DistributedTest:
             self._barrier()
 
         @sandcastle_skip_if(BACKEND == "nccl", "Nccl does not support CPU tensors")
-        @sandcastle_skip_if(BACKEND in DistTestCases.skip_collective["scatter"], f"{BACKEND} does not support scatter")
         def test_scatter_checks(self):
             group, group_id, rank = self._init_global_test()
             one = torch.ones([1])
