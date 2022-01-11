@@ -98,6 +98,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       };
     });
 
+// See [Borrowed IValue Outputs]
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
     static_runtime::dict_unpack,
     static_runtime_dict_unpack,
@@ -476,6 +477,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       };
     });
 
+// See [Borrowed IValue Outputs]
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
     static_runtime::VarTupleUnpack,
     static_runtime_VarTupleUnpack,
@@ -547,19 +549,72 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     });
 
 REGISTER_NATIVE_OPERATOR_FUNCTOR(aten::split, aten_split, [](Node* n) -> SROperator {
-  if (!n->matches(torch::schema(
+  if (n->matches(torch::schema(
           "aten::split(Tensor(a -> *) self, int split_size, int dim=0) -> Tensor(a)[]"))) {
-    LogAndDumpSchema(n);
-    return nullptr;
+    return [](ProcessedNode* p_node) {
+      const auto& self = p_node->Input(0).toTensor();
+      const auto split_size = p_node->Input(1).toInt();
+      const auto dim = p_node->Input(2).toInt();
+      p_node->Output(0) = at::native::split(self, split_size, dim);
+    };
   }
 
-  return [](ProcessedNode* p_node) {
-    const auto& self = p_node->Input(0).toTensor();
-    const auto split_size = p_node->Input(1).toInt();
-    const auto dim = p_node->Input(2).toInt();
-    p_node->Output(0) = at::native::split(self, split_size, dim);
-  };
+  if (n->matches(torch::schema(
+          "aten::split(Tensor(a -> *) self, int[] split_sizes, int dim=0) -> (Tensor[])"))) {
+    return [](ProcessedNode* p_node) {
+      const auto& self = p_node->Input(0).toTensor();
+      const auto& split_sizes = p_node->Input(1).toIntList();
+      const auto dim = p_node->Input(2).toInt();
+      p_node->Output(0) =
+          at::native::split_with_sizes(self, split_sizes.vec(), dim);
+    };
+  }
+
+  LogAndDumpSchema(n);
+  return nullptr;
 });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::split_with_sizes,
+    aten_split_with_sizes,
+    [](Node* n) -> SROperator {
+      if (!n->matches(torch::schema(
+              "aten::split_with_sizes(Tensor(a -> *) self, int[] split_sizes, int dim=0) -> Tensor(a)[]")) &&
+          !n->matches(torch::schema(
+              "aten::split_with_sizes(Tensor(a -> *) self, int[] split_sizes, int dim=0) -> (Tensor[])"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+      return [](ProcessedNode* p_node) {
+        const auto& self = p_node->Input(0).toTensor();
+        const auto& split_sizes = p_node->Input(1).toIntList();
+        const auto dim = p_node->Input(2).toInt();
+        p_node->Output(0) =
+            at::native::split_with_sizes(self, split_sizes.vec(), dim);
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    static_runtime::select_tensor,
+    aten_select_tensor,
+    [](Node* n) -> SROperator {
+      TORCH_CHECK(n->inputs().size() == 3);
+      return [](ProcessedNode* p_node) {
+        const auto did_copy = p_node->Input(2).toBool();
+        DCHECK(p_node->Input(0).isTensor());
+        DCHECK(!did_copy || p_node->Input(1).isTensor());
+        const IValue& assignFrom =
+            did_copy ? p_node->Input(1) : p_node->Input(0);
+        // Create an IValue that borrows the input Tensor in order to
+        // save a refcount increment here and decrement in
+        // MemoryPlanner::deallocate. MemoryPlanner knows about this
+        // and will safely clean it up by using the corresponding
+        // destroyBorrow method.
+        p_node->Output(0) =
+            IValue(c10::MaybeOwnedTraits<at::TensorBase>::createBorrow(
+                assignFrom.toTensor()));
+      };
+    });
 
 } // namespace jit
 } // namespace torch
