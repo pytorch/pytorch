@@ -93,10 +93,8 @@ TEST(MobileTypeParserTest, DictNestedNamedTupleTypeList) {
       "Dict[str, __torch__.base_models.preproc_types.PreprocOutputType]");
   std::vector<std::string> type_strs = {type_str_1, type_str_2};
   std::vector<c10::TypePtr> named_tuple_tps = c10::parseType(type_strs);
-  std::string named_tuple_annotation_str = named_tuple_tps[1]->annotation_str();
-  ASSERT_EQ(
-      named_tuple_annotation_str,
-      "Dict[str, __torch__.base_models.preproc_types.PreprocOutputType]");
+  EXPECT_EQ(*named_tuple_tps[1]->containedType(0), *c10::StringType::get());
+  EXPECT_EQ(*named_tuple_tps[0], *named_tuple_tps[1]->containedType(1));
 }
 
 TEST(MobileTypeParserTest, NamedTupleNestedNamedTupleTypeList) {
