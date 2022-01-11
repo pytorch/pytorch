@@ -57,8 +57,10 @@ __device__ static inline int64_t get_target_prime(
 // computed when we start a new block_s. This is why we have our own for loop here.
 template<typename scalar_t, typename target_t>
 __global__ void
-#if defined (USE_ROCM)
-C10_LAUNCH_BOUNDS_2((std::is_same<scalar_t, float>::value ? 1024 : 896), 1)
+#if __CUDA_ARCH__ == 620
+  C10_LAUNCH_BOUNDS_1(1024)
+#elif defined (USE_ROCM)
+  C10_LAUNCH_BOUNDS_2((std::is_same<scalar_t, float>::value ? 1024 : 896), 1)
 #endif
 ctc_loss_log_alpha_gpu_kernel(scalar_t* __restrict__ log_alpha_data,
                                     const scalar_t*log_probs_data, const int64_t* __restrict__ input_lengths, int64_t max_input_length,
@@ -288,7 +290,11 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
 // alpha kernel above. (As mentioned above, it might make sense do the calculation in the alpha kernel.)
 template<typename scalar_t, typename target_t>
 __global__ void
-C10_LAUNCH_BOUNDS_2((std::is_same<scalar_t, float>::value ? 1024 : 896), 1)
+#if __CUDA_ARCH__ == 620
+  C10_LAUNCH_BOUNDS_1(1024)
+#else
+  C10_LAUNCH_BOUNDS_2((std::is_same<scalar_t, float>::value ? 1024 : 896), 1)
+#endif
 ctc_loss_backward_log_beta_gpu_kernel(scalar_t* __restrict__ log_beta_data,
                                       const scalar_t*log_probs_data, const int64_t* __restrict__ input_lengths, int64_t max_input_length,
                                       const target_t* __restrict__ targets_data, const int64_t* __restrict__ target_lengths, int64_t max_target_length,
@@ -413,8 +419,10 @@ ctc_loss_backward_log_beta_gpu_kernel(scalar_t* __restrict__ log_beta_data,
 // alphabets the inplace nature is a considerable advantage.
 template<typename scalar_t, typename target_t>
 __global__ void
-#if defined (USE_ROCM)
-C10_LAUNCH_BOUNDS_2((std::is_same<scalar_t, float>::value ? 1024 : 896), 1)
+#if __CUDA_ARCH__ == 620
+  C10_LAUNCH_BOUNDS_1(1024)
+#elif defined (USE_ROCM)
+  C10_LAUNCH_BOUNDS_2((std::is_same<scalar_t, float>::value ? 1024 : 896), 1)
 #endif
 ctc_loss_backward_collect_nonblank_gpu_kernel(scalar_t* __restrict__ gradient_data,
                                                      const scalar_t* __restrict__ grad_out_data, int64_t grad_out_batch_stride,
@@ -465,8 +473,10 @@ ctc_loss_backward_collect_nonblank_gpu_kernel(scalar_t* __restrict__ gradient_da
 // It appears to be faster than the above method for small batch sizes.
 template<typename scalar_t, typename target_t>
 __global__ void
-#if defined (USE_ROCM)
-C10_LAUNCH_BOUNDS_2((std::is_same<scalar_t, float>::value ? 1024 : 896), 1)
+#if __CUDA_ARCH__ == 620
+  C10_LAUNCH_BOUNDS_1(1024)
+#elif defined (USE_ROCM)
+  C10_LAUNCH_BOUNDS_2((std::is_same<scalar_t, float>::value ? 1024 : 896), 1)
 #endif
 ctc_loss_backward_collect_gpu_kernel(scalar_t* __restrict__ gradient_data,
                                                      const scalar_t* __restrict__ grad_out_data, int64_t grad_out_batch_stride,
@@ -537,8 +547,10 @@ ctc_loss_backward_collect_gpu_kernel(scalar_t* __restrict__ gradient_data,
 // elements are padded
 template<typename scalar_t>
 __global__ void
-#if defined (USE_ROCM)
-C10_LAUNCH_BOUNDS_2((std::is_same<scalar_t, float>::value ? 1024 : 896), 1)
+#if __CUDA_ARCH__ == 620
+  C10_LAUNCH_BOUNDS_1(1024)
+#elif defined (USE_ROCM)
+  C10_LAUNCH_BOUNDS_2((std::is_same<scalar_t, float>::value ? 1024 : 896), 1)
 #endif
 ctc_loss_zero_padded_gradients(
     scalar_t* __restrict__ gradient_data,   /* (T, B, D) layout */
