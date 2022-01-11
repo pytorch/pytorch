@@ -13051,7 +13051,7 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @tf32_on_and_off(0.01)
-    @dtypes(*get_all_fp_dtypes(include_bfloat16=False))
+    @dtypes(torch.float, torch.double, torch.half)
     # Very similar to test_Conv2d_naive_groups but with special care to handle
     # the number of groups == number of input channels
     def test_Conv2d_depthwise_naive_groups(self, device, dtype):
@@ -13093,7 +13093,7 @@ class TestNNDeviceType(NNTestCase):
                              atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
     @onlyCUDA
-    @dtypes(*get_all_fp_dtypes(include_bfloat16=False))
+    @dtypes(torch.float, torch.double, torch.half)
     @tf32_on_and_off(0.005)
     def test_Conv3d_depthwise_naive_groups(self, device, dtype):
         for depth_multiplier in [1, 2]:
