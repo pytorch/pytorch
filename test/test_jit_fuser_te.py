@@ -1871,10 +1871,11 @@ class TestTEFuser(JitTestCase):
                 foo_s = torch.jit.trace(eager, (inp, inp))
                 for _ in range(3):
                     out = foo_s(inp, inp)
-                out_eager = foo(inp, inp)
+                out_eager = eager(inp, inp)
                 self.assertEqual(out_eager, out)
                 self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
-                self.assertAllFused(torch.jit.last_executed_optimized_graph())
+                g = torch.jit.last_executed_optimized_graph()
+                FileCheck().check("TensorExpr").run(g)
 
     def test_unsqueeze_var_dim(self):
         def eager(x, y, z: int):

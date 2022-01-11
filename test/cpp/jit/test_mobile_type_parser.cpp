@@ -39,8 +39,10 @@ TEST(MobileTypeParserTest, TorchBindClass) {
 TEST(MobileTypeParserTest, ListOfTorchBindClass) {
   std::string tuple_ps("List[__torch__.torch.classes.rnn.CellParamsBase]");
   auto tuple_tp = c10::parseType(tuple_ps);
-  std::string tuple_tps = tuple_tp->annotation_str();
-  ASSERT_EQ(tuple_ps, tuple_tps);
+  EXPECT_TRUE(tuple_tp->isSubtypeOf(AnyListType::get()));
+  EXPECT_EQ(
+      "__torch__.torch.classes.rnn.CellParamsBase",
+      tuple_tp->containedType(0)->annotation_str());
 }
 
 TEST(MobileTypeParserTest, NestedContainersAnnotationStrWithSpaces) {
