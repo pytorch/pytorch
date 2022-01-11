@@ -5,7 +5,7 @@
 namespace caffe2 {
 namespace {
 __global__ void SliceCopyKernel(
-    char* src_offset_bytes,
+    const char* src_offset_bytes,
     int src_block_size_bytes,
     char* dst_offset_bytes,
     int dst_block_size_bytes,
@@ -165,8 +165,8 @@ bool SliceImplGpu(
 
     size_t src_block_size_bytes = itemsize * src_block_size;
     size_t dst_block_size_bytes = itemsize * dst_block_size;
-    char* src_offset_bytes = src_bytes + itemsize * src_offset;
-    char* dst_offset_bytes = dst_bytes;
+    const char *const src_offset_bytes = src_bytes + itemsize * src_offset;
+    char *const dst_offset_bytes = dst_bytes;
 
     SliceCopyKernel<<<
         std::min(num_blocks, CAFFE_MAXIMUM_NUM_BLOCKS),
@@ -182,25 +182,22 @@ bool SliceImplGpu(
         num_blocks);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
-    char* src_bytes = (char*)go->raw_data();
-    char* dst_bytes = (char*)gdata->raw_mutable_data(go->meta());
+    const char *const src_bytes = (char*)go->raw_data();
+    char *const dst_bytes = (char*)gdata->raw_mutable_data(go->meta());
 
-    size_t src_nbytes = go->nbytes();
-    size_t dst_nbytes = gdata->nbytes();
-
-    size_t src_block_size = unit * (ends_idx[dim] - starts_idx[dim]);
-    size_t dst_block_size = unit * data.size(dim);
-    size_t dst_offset = unit * starts_idx[dim];
+    const size_t src_block_size = unit * (ends_idx[dim] - starts_idx[dim]);
+    const size_t dst_block_size = unit * data.size(dim);
+    const size_t dst_offset = unit * starts_idx[dim];
 
     if (num_blocks == 0 || dst_block_size == 0) {
       return true;
     }
 
-    size_t src_block_size_bytes = itemsize * src_block_size;
-    size_t dst_block_size_bytes = itemsize * dst_block_size;
+    const size_t src_block_size_bytes = itemsize * src_block_size;
+    const size_t dst_block_size_bytes = itemsize * dst_block_size;
 
-    char* src_offset_bytes = src_bytes;
-    char* dst_offset_bytes = dst_bytes + itemsize * dst_offset;
+    const char *const src_offset_bytes = src_bytes;
+    char *const dst_offset_bytes = dst_bytes + itemsize * dst_offset;
     // Zero out gradient blob before copy since we copy in fewer items than
     // there is space for
     math::Set<float, CUDAContext>(
