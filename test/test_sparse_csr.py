@@ -1271,6 +1271,26 @@ class TestSparseCSR(TestCase):
 
             self.assertEqual(coo_sparse.to_sparse_csr().to_sparse_coo(), coo_sparse)
 
+    @skipMeta
+    @dtypes(*get_all_dtypes())
+    def test_transpose(self, device, dtype):
+
+        def run_test(shape, nnz, index_type, dim0, dim1):
+            a = self.genSparseCSRTensor(shape, nnz, dtype=dtype, device=device, index_dtype=index_dtype)
+
+            t = a.transpose(dim0, dim1)
+
+            self.assertEqual(t.to_dense(), a.to_dense().transpose(dim0, dim1))
+
+        for shape, index_dtype, (dim0, dim1) in itertools.product(
+                [(10, 5), (10, 10)],
+                [torch.int32, torch.int64],
+                [(0, 0), (0, 1)]):
+            run_test(shape, 0, index_dtype, dim0, dim1)
+            run_test(shape, max(shape), index_dtype, dim0, dim1)
+            run_test(shape, shape[0] * shape[1], index_dtype, dim0, dim1)
+
+
 # e.g., TestSparseCSRCPU and TestSparseCSRCUDA
 instantiate_device_type_tests(TestSparseCSR, globals())
 

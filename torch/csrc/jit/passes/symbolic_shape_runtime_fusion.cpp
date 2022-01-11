@@ -4,11 +4,14 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/symbolic_shape_runtime_fusion.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
+#include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
+#include <torch/csrc/jit/runtime/static/ops.h>
 #include <sstream>
 
 namespace torch {
@@ -106,8 +109,57 @@ bool TryGeneralizeInputDimensionsToSymbolicShapes(
   return true;
 }
 
+void moveConstantTensorsOutOfSubgraph(
+    Node* tensorexpr_graph_node,
+    std::shared_ptr<Graph> tensorexpr_graph) {
+  auto parent = tensorexpr_graph_node->owningGraph();
+
+  auto env = [&](Value* v) {
+    TORCH_INTERNAL_ASSERT(
+        false,
+        "this should never happen since constant nodes do not have any inputs",
+        v->debugName());
+    return v;
+  };
+
+  WithInsertPoint wip(tensorexpr_graph_node);
+  std::vector<Node*> to_destroy;
+  for (auto node : tensorexpr_graph->nodes()) {
+    if (node->kind() == prim::Constant) {
+      if (!node->output()->type()->cast<TensorType>()) {
+        continue;
+      }
+
+      // copy the constant and insert that copy into the parent graph.
+      auto copy = parent->createClone(node, env);
+      parent->insertNode(copy);
+
+      // add a new input to the te subgraph and replace the uses of the
+      // constant with this input.
+      auto new_const = tensorexpr_graph->addInput();
+      new_const->setType(node->output()->type());
+      node->output()->replaceAllUsesWith(new_const);
+
+      // add the copy as input to the te node
+      tensorexpr_graph_node->addInput(copy->output());
+
+      to_destroy.push_back(node);
+    }
+  }
+
+  for (auto n : to_destroy) {
+    n->destroy();
+  }
+}
+
 bool GenerateGuard(Node* tensorexpr_graph_node, bool add_composed_op) {
   auto tensorexpr_graph = SubgraphUtils::getSubgraph(tensorexpr_graph_node);
+
+  // Move constant tensors from the subgraph to the outer scope.
+  // This is necessary because symbolic shape analysis does not handle the
+  // case of broadcast(constant, symbolic_shape) well and that results in poor
+  // performance.
+  moveConstantTensorsOutOfSubgraph(tensorexpr_graph_node, tensorexpr_graph);
 
   // Generalize Inputs
   if (!TryGeneralizeInputDimensionsToSymbolicShapes(tensorexpr_graph)) {
@@ -128,6 +180,39 @@ bool GenerateGuard(Node* tensorexpr_graph_node, bool add_composed_op) {
   insertDynamicShapesGuard(
       *maybe_shape_compute_mapping, tensorexpr_graph_node, add_composed_op);
   return true;
+}
+
+void inlineFallbackGraphAndAddSRCopyOutOp(std::shared_ptr<Graph> graph) {
+  DepthFirstGraphNodeIterator it(graph);
+
+  Node* n = nullptr;
+  while ((n = it.next()) != nullptr) {
+    if (n->kind() == prim::FallbackGraph) {
+      break;
+    }
+  }
+  TORCH_INTERNAL_ASSERT(n != nullptr, "Expected to find fallback graph");
+
+  auto if_node = n->owningBlock()->owningNode();
+  IfView if_v(if_node);
+  SubgraphUtils::unmergeSubgraph(n);
+
+  auto false_block = if_v.elseBlock();
+  std::vector<Value*> false_block_outputs(
+      if_v.elseOutputs().begin(), if_v.elseOutputs().end());
+  TORCH_INTERNAL_ASSERT(false_block_outputs.size() != 0);
+
+  for (auto out : false_block_outputs) {
+    TORCH_INTERNAL_ASSERT(out->type()->cast<TensorType>());
+  }
+  auto copy_node = graph->create(
+      prim::StaticRuntimeCopyOuts,
+      false_block_outputs,
+      false_block_outputs.size());
+  false_block->appendNode(copy_node);
+  for (size_t i = 0; i < false_block_outputs.size(); ++i) {
+    false_block->replaceOutput(i, copy_node->outputs().at(i));
+  }
 }
 
 // TODO: share more logic with tensorexpr_fuser ?
@@ -227,8 +312,61 @@ void insertDynamicShapesGuard(
     auto te_dyn_group = SubgraphUtils::createSingletonSubgraph(
         typecheck_node, prim::TensorExprDynamicGroup);
     SubgraphUtils::mergeNodeIntoSubgraph(versioning_if, te_dyn_group);
+    inlineFallbackGraphAndAddSRCopyOutOp(
+        SubgraphUtils::getSubgraph(te_dyn_group));
   }
 }
+
+// This operator is inserted at the end of the fallback block computing outputs
+// for the fusion group. We convert block1():
+//   %14 : Tensor = aten::mul(%0, %1)
+//   %15 : Tensor = aten::mul(%0, %14)
+//   -> (%15, %14)
+// return (%3, %4)
+// to
+// block1():
+//   %14 : Tensor = aten::mul(%0, %1)
+//   %15 : Tensor = aten::mul(%0, %14)
+//   %16 : Tensor, %17 : Tensor = prim::StaticRuntimeCopyOuts(%15, %14)
+//   -> (%16, %17)
+// Every output of the block is added as an input, and for each input there is
+// a StaticRuntimeCopyOuts output. SR invokes the composed operator first with
+// no tensors on the stack, in which case the Op will just return back the
+// inputs. Second it invokes it with pre-allocated tensors, one for each output
+// of the Fusion group, which is the same number of outputs of the fallback
+// block. In this case we copy over the values of the inputs to pre-allocated
+// tensors
+// Note: this logic is meant to reflect the invocation of the TE Kernel
+// and `runWithAllocatedOutputs` in tensorexpr_fuser.cpp
+Operation StaticRuntimeCopyOuts(const Node* node) {
+  auto num_ten_inputs = node->inputs().size();
+  return [num_ten_inputs](Stack& stack) {
+    std::vector<IValue> inputs = pop(stack, num_ten_inputs);
+    // uncommon case - first run
+    if (stack.size() == 0) {
+      for (IValue elem : inputs) {
+        push(stack, std::move(elem));
+      }
+    } else {
+      at::ArrayRef<IValue> outputs = last(stack, num_ten_inputs);
+      for (size_t i = 0; i < inputs.size(); ++i) {
+        IValue out = outputs[i];
+        at::Tensor& out_t = out.toTensor();
+        fastResizeToZero(out_t);
+        out_t.resize_as_(inputs[i].toTensor());
+        out_t.copy_(inputs[i].toTensor());
+      }
+    }
+    return 0;
+  };
+}
+
+RegisterOperators SRCopyOuts({
+    torch::jit::Operator(
+        prim::StaticRuntimeCopyOuts,
+        StaticRuntimeCopyOuts,
+        AliasAnalysisKind::CONSERVATIVE),
+});
 
 // On each invocation of this guard, we need to check all of the static
 // information (dtype/device/requires grad/contiguity/static dims),
@@ -317,28 +455,18 @@ RegisterOperators reg_guard({
                       tensor.device() != device ||
                       tensor.dtype() != expected_scalar_types[i]) ||
                   tensor.requires_grad()) {
-                std::cout << " DEVICE /DTYPE/ REQUIRES GRAD MISMATCH\n";
-                std::cout << tensor;
-                std::cout << "Expected device : " << device << "\n";
-                std::cout << "Expected dtype : " << expected_scalar_types[i]
-                          << "\n";
                 push(stack, false);
                 return;
               }
               // TODO: striding
               if (C10_UNLIKELY(
                       !tensor.is_contiguous(at::MemoryFormat::Contiguous))) {
-                std::cout << " CONTIGUITY MISMATCH \n\n";
-                std::cout << tensor;
                 push(stack, false);
                 return;
               }
               const auto& sizes = tensor.sizes();
               const auto num_dims = sizes.size();
               if (C10_UNLIKELY(num_dims != expected_dims[i])) {
-                std::cout << " Expected Dims Mismatch \n\n";
-                std::cout << tensor;
-                std::cout << " Expected num dims: " << expected_dims[i] << "\n";
                 push(stack, false);
                 return;
               }
@@ -348,10 +476,6 @@ RegisterOperators reg_guard({
                 const int64_t tensor_dim = sizes[dim_index];
                 if (dim_value >= 0) {
                   if (C10_UNLIKELY(dim_value != tensor_dim)) {
-                    std::cout << " Concrete value dim Mismatch \n\n";
-                    std::cout << tensor;
-                    std::cout << " Expected dim value: " << tensor_dim << "\n";
-                    std::cout << " Dim index: " << dim_index;
                     push(stack, false);
                     return;
                   }
@@ -364,11 +488,6 @@ RegisterOperators reg_guard({
                   // sym symbol already seen, check value
                   if (flattened_symbolic_dims[flattened_sym_index] >= 0) {
                     if (C10_UNLIKELY(flattened_sym_value != tensor_dim)) {
-                      std::cout << " symbolic value dim Mismatch \n\n";
-                      std::cout << tensor;
-                      std::cout << " Expected symbolic value : "
-                                << flattened_sym_value << "\n";
-                      std::cout << " Dim index: " << dim_index;
                       push(stack, false);
                       return;
                     }
@@ -388,21 +507,21 @@ RegisterOperators reg_guard({
         aliasAnalysisFromSchema()),
 });
 
-void runTensorExprDynamicGroup(std::shared_ptr<Graph> graph, Stack& stack) {
-  Code code(graph, "");
+void runTensorExprDynamicGroup(const Code& code, Stack& stack) {
   InterpreterState interpreter{code};
   interpreter.run(stack);
 }
 
 Operation createTensorExprDynamicGroup(const Node* node) {
   auto graph = node->g(attr::Subgraph);
+  Code code(graph, "");
   // This implementation creates a Code object and InterpreterState on every
   // call to TensorExprDynamicGroup, which affects performance. Ideally, we
   // should be reusing Code and InterpreterState across calls to this op.
   // But that is resulting in a "No frames found" error.
   // TODO: Improve the performance of this by figuring out a better approach.
-  return [graph](Stack& stack) {
-    runTensorExprDynamicGroup(graph, stack);
+  return [code](Stack& stack) {
+    runTensorExprDynamicGroup(code, stack);
     return 0;
   };
 }
