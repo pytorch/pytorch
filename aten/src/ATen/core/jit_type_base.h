@@ -374,6 +374,7 @@ struct TORCH_API Type {
 
   using TypePtr = SingletonOrSharedTypePtr<Type>;
   using Ptr = TypePtr;
+  using ElementType = Type;
 
   // subtyping relation. By default, we return true for the case
   // when the type is exactly equal or if this <: T where rhs = Optional[T]
