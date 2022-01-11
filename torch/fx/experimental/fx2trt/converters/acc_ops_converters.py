@@ -626,6 +626,43 @@ def acc_ops_leaky_relu(
     operation_type = trt.ActivationType.LEAKY_RELU
     return add_activation_layer(network, input_val, operation_type, target, name, negative_slope)
 
+@tensorrt_converter(acc_ops.elu)
+def acc_ops_elu(
+    network: TRTNetwork,
+    target: Target,
+    args: Tuple[Argument, ...],
+    kwargs: Dict[str, Argument],
+    name: str,
+) -> Union[TRTTensor, Sequence[TRTTensor]]:
+    input_val = kwargs["input"]
+    alpha = kwargs["alpha"]
+    operation_type = trt.ActivationType.ELU
+    return add_activation_layer(network, input_val, operation_type, target, name, alpha)
+
+@tensorrt_converter(acc_ops.selu)
+def acc_ops_selu(
+    network: TRTNetwork,
+    target: Target,
+    args: Tuple[Argument, ...],
+    kwargs: Dict[str, Argument],
+    name: str,
+) -> Union[TRTTensor, Sequence[TRTTensor]]:
+    input_val = kwargs["input"]
+    operation_type = trt.ActivationType.SELU
+    return add_activation_layer(network, input_val, operation_type, target, name)
+
+@tensorrt_converter(acc_ops.softsign)
+def acc_ops_softsign(
+    network: TRTNetwork,
+    target: Target,
+    args: Tuple[Argument, ...],
+    kwargs: Dict[str, Argument],
+    name: str,
+) -> Union[TRTTensor, Sequence[TRTTensor]]:
+    input_val = kwargs["input"]
+    operation_type = trt.ActivationType.SOFTSIGN
+    return add_activation_layer(network, input_val, operation_type, target, name)
+
 @tensorrt_converter(acc_ops.sin)
 def acc_ops_sin(
     network: TRTNetwork,
