@@ -208,7 +208,7 @@ coverage_missing_automodule = [
     "torch.ao.ns.fx",
     "torch.ao.quantization",
     "torch.ao.quantization.fx",
-    "torch.ao.quantization.fx.backend_config_dict",
+    "torch.ao.quantization.fx.backend_config",
     "torch.ao.sparsity",
     "torch.ao.sparsity.experimental",
     "torch.ao.sparsity.experimental.pruner",
