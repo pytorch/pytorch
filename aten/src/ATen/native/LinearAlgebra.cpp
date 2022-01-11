@@ -885,7 +885,7 @@ linalg_svd_rank_restricted(
     const Tensor& input,
     double tol,
     bool full_matrices) {
-  return at::linalg_svd_rank_restricted(input, tol, 0.0, full_matrices);
+  return at::linalg_svd_rank_restricted(input, tol, /*rtol=*/0.0, full_matrices);
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor>
@@ -895,6 +895,73 @@ linalg_svd_rank_restricted(
     bool full_matrices) {
   const auto rtol = at::zeros({}, tol.options());
   return at::linalg_svd_rank_restricted(input, tol, rtol, full_matrices);
+}
+
+std::tuple<Tensor&, Tensor&, Tensor&, Tensor&>
+linalg_svd_rank_restricted_out(
+    const Tensor& input,
+    const c10::optional<Tensor>& atol_opt,
+    const c10::optional<Tensor>& rtol_opt,
+    bool full_matrices,
+    Tensor& U,
+    Tensor& S,
+    Tensor& Vh,
+    Tensor& rank) {
+  at::_linalg_svd_rank_restricted_helper_outf(
+      input, atol_opt, rtol_opt, full_matrices,
+      /*compute_unique_rank=*/false,
+      U, S, Vh, rank, rank
+  );
+  return std::tie(U, S, Vh, rank);
+}
+
+std::tuple<Tensor&, Tensor&, Tensor&, Tensor&>
+linalg_svd_rank_restricted_out(
+    const Tensor& input,
+    c10::optional<double> atol,
+    c10::optional<double> rtol,
+    bool full_matrices,
+    Tensor& U,
+    Tensor& S,
+    Tensor& Vh,
+    Tensor& rank) {
+  Tensor atol_tensor, rtol_tensor;
+  std::tie(atol_tensor, rtol_tensor) = get_atol_rtol(input, atol, rtol);
+  return at::linalg_svd_rank_restricted_outf(
+      input, atol_tensor, rtol_tensor, full_matrices,
+      U, S, Vh, rank
+  );
+}
+
+std::tuple<Tensor&, Tensor&, Tensor&, Tensor&>
+linalg_svd_rank_restricted_out(
+    const Tensor& input,
+    const Tensor& tol,
+    bool full_matrices,
+    Tensor& U,
+    Tensor& S,
+    Tensor& Vh,
+    Tensor& rank) {
+  const auto rtol = at::zeros({}, tol.options());
+  return at::linalg_svd_rank_restricted_outf(
+      input, tol, rtol, full_matrices,
+      U, S, Vh, rank
+  );
+}
+
+std::tuple<Tensor&, Tensor&, Tensor&, Tensor&>
+linalg_svd_rank_restricted_out(
+    const Tensor& input,
+    double tol,
+    bool full_matrices,
+    Tensor& U,
+    Tensor& S,
+    Tensor& Vh,
+    Tensor& rank) {
+  return at::linalg_svd_rank_restricted_outf(
+      input, tol, /*rtol=*/0.0, full_matrices,
+      U, S, Vh, rank
+  );
 }
 
 // multi_dot helper functions
