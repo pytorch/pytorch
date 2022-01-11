@@ -207,9 +207,7 @@ struct AliasDb::WriteRegistry {
   std::unordered_set<Node*> writesToAllWildcards_;
 };
 
-AliasDb::AliasDb(
-    std::shared_ptr<Graph> graph,
-    bool isFrozen)
+AliasDb::AliasDb(std::shared_ptr<Graph> graph, bool isFrozen)
     : graph_(std::move(graph)),
       isFrozen_(isFrozen),
       memoryDAGBuilder_(std::make_unique<MemoryDAGBuilder>()),
@@ -1126,6 +1124,12 @@ bool AliasDb::functionalNonEscapingListUse(const Use& use) const {
   common ops where the output does not alias the list or the list elements
   */
 
+  // only used in output of graph - no further uses,
+  // so there will be no use of it where the contained element leaks
+  if (use.user->kind() == prim::Return) {
+    return use.user->owningBlock() == graph_->block();
+  }
+
   switch (use.user->kind()) {
     case aten::cat:
     case aten::broadcast_tensors:
@@ -1138,11 +1142,6 @@ bool AliasDb::functionalNonEscapingListUse(const Use& use) const {
   auto op = use.user->maybeOperator();
   if (op && op->aliasAnalysisKind() == AliasAnalysisKind::PURE_FUNCTION) {
     return true;
-  }
-  // only used in output of graph - no further uses,
-  // so there will be no use of it where the contained element leaks
-  if (use.user->kind() == prim::Return) {
-    return use.user->owningBlock() == graph_->block();
   }
   return false;
 }
