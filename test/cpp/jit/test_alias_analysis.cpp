@@ -1553,8 +1553,7 @@ TEST(AliasRegistrationTest, ATenSplitIntListAliasCheck) {
     return (%d))IR";
 
   torch::jit::parseIR(graph_string, graph.get(), vmap);
-  AliasDb aliasDb(
-      graph, /*isFrozen=*/false, /*enablePreciseTupleContainerAnalysis=*/true);
+  AliasDb aliasDb(graph, /*isFrozen=*/false);
 
   EXPECT_TRUE(aliasDb.mayAlias(vmap["y"], vmap["b"]));
   EXPECT_TRUE(aliasDb.mayAlias(vmap["y"], vmap["c"]));
@@ -1580,8 +1579,7 @@ TEST(AliasRegistrationTest, ATenSplitIntAliasCheck) {
     return (%d))IR";
 
   torch::jit::parseIR(graph_string, graph.get(), vmap);
-  AliasDb aliasDb(
-      graph, /*isFrozen=*/false, /*enablePreciseTupleContainerAnalysis=*/true);
+  AliasDb aliasDb(graph, /*isFrozen=*/false);
 
   EXPECT_TRUE(aliasDb.mayAlias(vmap["y"], vmap["b"]));
   EXPECT_TRUE(aliasDb.mayAlias(vmap["y"], vmap["c"]));

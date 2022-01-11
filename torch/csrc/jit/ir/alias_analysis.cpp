@@ -1139,7 +1139,11 @@ bool AliasDb::functionalNonEscapingListUse(const Use& use) const {
   if (op && op->aliasAnalysisKind() == AliasAnalysisKind::PURE_FUNCTION) {
     return true;
   }
-
+  // only used in output of graph - no further uses,
+  // so there will be no use of it where the contained element leaks
+  if (use.user->kind() == prim::Return) {
+    return use.user->owningBlock() == graph_->block();
+  }
   return false;
 }
 
@@ -1150,13 +1154,10 @@ bool AliasDb::functionalNonEscapingTupleUse(const Use& use) const {
   if (!container->type()->cast<TupleType>()) {
     return false;
   }
-  // if this in a subgraph, then the list may have more
-  // uses in enclosing graph and the elements may escape
-  if (use.user->owningGraph() != graph_.get()) {
-    return false;
-  }
   // TODO(T97387453): Cover more ops that do not let escape tuples' elements.
-  return use.user->kind() == prim::Return;
+  bool in_return_outputs = use.user->kind() == prim::Return;
+  bool not_in_nested_subgraph = use.user->owningBlock() == graph_->block();
+  return in_return_outputs && not_in_nested_subgraph;
 }
 
 // List or dict or tuple construct: create an aliasing element for the actual
