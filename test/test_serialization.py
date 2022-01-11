@@ -44,6 +44,8 @@ with warnings.catch_warnings(record=True) as warns:
                 can_retrieve_source = False
                 break
 
+dev_name = torch.cuda.get_device_name(torch.cuda.current_device()).lower()
+IS_JETSON = 'xavier' in dev_name or 'nano' in dev_name or 'jetson' in dev_name or 'tegra' in dev_name
 
 class FilelikeMock(object):
     def __init__(self, data, has_fileno=True, has_readinto=False):
@@ -737,6 +739,7 @@ class TestOldSerialization(TestCase, SerializationMixin):
         self.assertEqual(i, i_loaded)
         self.assertEqual(j, j_loaded)
 
+    @unittest.skipIf(IS_JETSON, 'Killed on Jetsons')
     def test_serialization_offset_filelike(self):
         a = torch.randn(5, 5)
         b = torch.randn(1024, 1024, 512, dtype=torch.float32)
@@ -790,6 +793,7 @@ class TestSerialization(TestCase, SerializationMixin):
             torch.load(f)
 
     # Ensure large zip64 serialization works properly
+    @unittest.skipIf(IS_JETSON, 'Killed on Jetsons')
     def test_serialization_2gb_file(self):
         big_model = torch.nn.Conv2d(20000, 3200, kernel_size=3)
 
