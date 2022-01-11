@@ -478,7 +478,7 @@ std::shared_ptr<Graph> trimGraph(
   int64_t iter = 0;
   while (changed && iter++ < iters) {
     changed = trimGraphOnce(graph);
-    eliminateDeadCode(graph->block());
+    EliminateDeadCode(graph->block());
   }
   // Avoid letting quantized values to graph outputs.
   // Ideally we should allow quantized outputs as well, but currently the main
