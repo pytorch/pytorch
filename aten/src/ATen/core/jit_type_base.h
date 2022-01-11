@@ -554,6 +554,9 @@ struct TORCH_API Type {
   virtual at::ArrayRef<TypePtr> containedTypes() const {
     return {};
   }
+  virtual TypePtr containedType(size_t i) const {
+    return containedTypes().at(i);
+  }
   // create a new version of this type, replacing its contained types with
   // contained_types
   TypePtr withContained(std::vector<TypePtr> contained_types);
