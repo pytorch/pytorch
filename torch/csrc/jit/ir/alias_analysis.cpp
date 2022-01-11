@@ -207,9 +207,7 @@ struct AliasDb::WriteRegistry {
   std::unordered_set<Node*> writesToAllWildcards_;
 };
 
-AliasDb::AliasDb(
-    std::shared_ptr<Graph> graph,
-    bool isFrozen)
+AliasDb::AliasDb(std::shared_ptr<Graph> graph, bool isFrozen)
     : graph_(std::move(graph)),
       isFrozen_(isFrozen),
       memoryDAGBuilder_(std::make_unique<MemoryDAGBuilder>()),

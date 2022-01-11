@@ -24,9 +24,8 @@ class TORCH_API TypeParser {
 
   void expect(const char* s);
   void expectChar(char c);
-  template <class T>
-  TypePtr CreateSingleElementType();
-  TypePtr parseSingleElementType(DynamicType::Tag);
+  template <typename T>
+  TypePtr parseSingleElementType();
 
   void lex();
 
