@@ -7,6 +7,7 @@ import torch.fx.experimental.fx_acc.acc_ops as acc_ops
 import torch.nn as nn
 from torch.testing._internal.common_fx2trt import AccTestCase
 from parameterized import parameterized
+from torch.testing._internal.common_utils import run_tests
 
 unary_ops = [
     (torch.sin, acc_ops.sin),
@@ -43,3 +44,6 @@ class TestUnaryOpConverters(AccTestCase):
         m = TestModule(orig_op)
         inputs = [torch.randn(2, 2, 3)]
         self.run_test(m, inputs, expected_ops={expected_op})
+
+if __name__ == '__main__':
+    run_tests()

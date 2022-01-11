@@ -1,15 +1,16 @@
 #ifndef CAFFE2_OPERATORS_RECURRENT_NETWORK_EXECUTOR_H_
 #define CAFFE2_OPERATORS_RECURRENT_NETWORK_EXECUTOR_H_
 
-#include <map>
-#include <unordered_set>
-#include <vector>
-
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/timer.h"
 #include "caffe2/operators/rnn/recurrent_network_executor_incl.h"
+#include "c10/util/irange.h"
+
+#include <map>
+#include <unordered_set>
+#include <vector>
 
 namespace caffe2 {
 
@@ -38,7 +39,7 @@ class RecurrentNetworkExecutorBase {
         recurrent_input_map_(recurrent_input_map),
         timestep_blob_(timestep_blob) {
     const bool net_def_has_device_option = step_net_def_.has_device_option();
-    for (int i = 0; i < step_net_def_.op_size(); i++) {
+    for (const auto i : c10::irange(step_net_def_.op_size())) {
       if (net_def_has_device_option) {
         // In the case when net def specifies device option, final device option
         // will be equal to merge of operator and net def device options, with
@@ -86,7 +87,7 @@ class RecurrentNetworkExecutorBase {
       for (auto& rnn_op : timestep_ops_template_) {
         rnn_op.has_timestep_blob = false;
         const OperatorDef& op = step_net_def_.op(rnn_op.order);
-        for (int i = 0; i < op.input_size(); i++) {
+        for (const auto i : c10::irange(op.input_size())) {
           if (op.input(i) == timestep_blob_) {
             rnn_op.has_timestep_blob = true;
             break;
@@ -137,7 +138,7 @@ class RecurrentNetworkExecutorBase {
         if (rnn_op.has_timestep_blob) {
           OperatorDef op_copy = step_net_def_.op(rnn_op.order);
 
-          for (int i = 0; i < op_copy.input_size(); i++) {
+          for (const auto i : c10::irange(op_copy.input_size())) {
             if (op_copy.input(i) == timestep_blob_) {
               op_copy.set_input(i, this_timestep_blob);
             }
@@ -283,7 +284,7 @@ class RecurrentNetworkExecutorBase {
       int opidx,
       std::vector<RNNNetOperator>& rnn_ops,
       std::unordered_set<int>* dep_ops) {
-    for (int i = 0; i < rnn_ops.size(); i++) {
+    for (const auto i : c10::irange(rnn_ops.size())) {
       if (i == opidx) {
         continue;
       }
@@ -315,7 +316,7 @@ class RecurrentNetworkExecutorBase {
    * for each timestep.
    */
   void CalculateInternalDependencies() {
-    for (int i = 0; i < step_net_def_.op_size(); i++) {
+    for (const auto i : c10::irange(step_net_def_.op_size())) {
       timestep_ops_template_.push_back(RNNNetOperator(step_net_def_.op(i), i));
     }
     // Then see which outputs appear as inputs, and those are
