@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
@@ -1731,6 +1732,26 @@ TEST_F(Kernel, Strided1dWithinBounds) {
   for (size_t i = 0; i < 3; ++i) {
     CHECK_EQ(((float*)output.data_ptr())[i], ((float*)expect.data_ptr())[i]);
   }
+}
+
+TEST_F(Kernel, InputAsOutput) {
+  const auto graph_string = R"IR(
+      graph(%x : Float(5, 3, strides=[3, 1], device=cpu),
+            %y : Float(5, 3, strides=[1, 5], device=cpu)):
+        return (%x, %y))IR";
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  auto x = at::rand({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto y =
+      at::rand({3, 5}, TensorOptions(kCPU).dtype(at::kFloat)).transpose(0, 1);
+  TensorExprKernel k(graph);
+  std::vector<at::Tensor> inputs = {x, y};
+
+  std::vector<IValue> stack = fmap<IValue>(inputs);
+  k.run(stack);
+  CHECK(at::allclose(x, stack[0].toTensor()));
+  CHECK(at::allclose(y, stack[1].toTensor()));
 }
 
 } // namespace jit
