@@ -13,6 +13,10 @@ ellipe = _add_docstr(_special.special_ellipe,
                    r"""
 ellipe(input, *, out=None) -> Tensor
 Computes complete elliptic integral of the second kind, elementwise.
+
+The function is defined as
+.. math:: E(k) = \int_0^{\pi/2} [1 - (k \sin(\theta))^2]^{1/2} d\theta
+
 """ + """
 
 Args:
@@ -22,10 +26,11 @@ Keyword args:
     out (Tensor, optional): the output tensor.
 
 Example::
-    >>> a = torch.arange(-0.5, 1, 0.5)
+    >>> a = torch.arange(-2, 2, 0.5)
     >>> a
-    tensor([-0.5000,  0.0000,  0.5000])
+    tensor([-2.0000, -1.5000, -1.0000, -0.5000,  0.0000,  0.5000,  1.0000,  1.5000])
     >>> torch.special.ellipe(a)
+    tensor([2.1844, 2.0530, 1.9101, 1.7518, 1.5708, 1.3506, 1.0000,    nan])
 """)
 
 entr = _add_docstr(_special.special_entr,
