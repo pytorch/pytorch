@@ -28,6 +28,7 @@ struct TORCH_API DynamicTypeFactory {
         name,
         c10::DynamicType::Arguments(fields, types));
   }
+  static const std::unordered_map<std::string, c10::TypePtr>& basePythonTypes();
 };
 
 struct TORCH_API DefaultTypeFactory {
@@ -45,6 +46,7 @@ struct TORCH_API DefaultTypeFactory {
       const std::vector<c10::TypePtr>& types) {
     return c10::TupleType::createNamed(name, fields, types);
   }
+  static const std::unordered_map<std::string, c10::TypePtr>& basePythonTypes();
 };
 
 } // namespace c10
