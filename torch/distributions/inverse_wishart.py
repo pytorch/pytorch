@@ -174,7 +174,7 @@ class InverseWishart(ExponentialFamily):
         p = self._event_shape[-1]  # has singleton shape
         if self.df.le(p + 1).any():
             raise ValueError("Mean of the Inverse Wishart distribution can be caculated only for df > ndim + 1.")
-        return self.covariance_matrix / (self.df - 1).expand(self._batch_shape + self._event_shape)
+        return self.covariance_matrix / (self.df - 1).clamp(min=1e-10).expand(self._batch_shape + self._event_shape)
 
     @property
     def variance(self):
@@ -187,7 +187,7 @@ class InverseWishart(ExponentialFamily):
         return (
             (eff_df + 1) * V.pow(2)
             + (eff_df - 1) * torch.einsum("...i,...j->...ij", diag_V, diag_V)
-        ) / (eff_df * (eff_df - 1).pow(2) * (eff_df - 3))
+        ) / (eff_df * (eff_df - 1).pow(2) * (eff_df - 3)).clamp(min=1e-10)
 
     def _bartlett_sampling(self, sample_shape=torch.Size()):
         p = self._event_shape[-1]  # has singleton shape
@@ -196,7 +196,7 @@ class InverseWishart(ExponentialFamily):
         noise = self._dist_chi2.rsample(sample_shape).sqrt().reciprocal().diag_embed(dim1=-2, dim2=-1)
         i, j = torch.tril_indices(p, p, offset=-1)
         noise[..., i, j] = torch.randn(
-            torch.Size(sample_shape) + self._batch_shape + (int(p * (p - 1) / 2),),
+            torch.Size(sample_shape) + self._batch_shape + (0.5 * int(p * (p - 1)),),
             dtype=noise.dtype,
             device=noise.device,
         )
@@ -259,11 +259,11 @@ class InverseWishart(ExponentialFamily):
         nu = self.df  # has shape (batch_shape)
         p = self._event_shape[-1]  # has singleton shape
         return (
-            - nu * p * _log_2 / 2
+            - 0.5 * nu * p * _log_2
             - nu * self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
-            - torch.mvlgamma(nu / 2, p=p)
-            - (nu + p + 1) / 2 * torch.linalg.slogdet(value).logabsdet
-            - torch.cholesky_solve(value, self._unbroadcasted_scale_tril).diagonal(dim1=-2, dim2=-1).reciprocal().sum(dim=-1) / 2
+            - torch.mvlgamma(0.5 * nu, p=p)
+            - 0.5 * (nu + p + 1) * torch.linalg.slogdet(value).logabsdet
+            - 0.5 * torch.cholesky_solve(value, self._unbroadcasted_scale_tril).diagonal(dim1=-2, dim2=-1).reciprocal().sum(dim=-1)
         )
 
     def entropy(self):
@@ -272,10 +272,10 @@ class InverseWishart(ExponentialFamily):
         V = self.covariance_matrix  # has shape (batch_shape x event_shape)
         return (
             (p + 1) * self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
-            - p * (p + 1) * _log_2 / 2
-            + torch.mvlgamma(nu / 2, p=p)
-            - (nu + p + 1) / 2 * _mvdigamma(nu / 2, p=p)
-            + nu * p / 2
+            - 0.5 * p * (p + 1) * _log_2
+            + torch.mvlgamma(0.5 * nu, p=p)
+            - 0.5 * (nu + p + 1) * _mvdigamma(0.5 * nu, p=p)
+            + 0.5 * nu * p
         )
 
     @property
