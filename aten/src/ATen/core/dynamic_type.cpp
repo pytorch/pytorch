@@ -222,7 +222,9 @@ DynamicType::Ptr IValue::TagType<c10::DynamicType>::get(const c10::IValue& v) {
           DynamicType::Arguments({d.keyType(), d.valueType()}));
     }
     case Tag::GenericList:
-      return ListType::create(v.toList().elementType());
+      return std::make_shared<DynamicType>(
+          DynamicType::Tag::List,
+          DynamicType::Arguments{v.toList().elementType()});
     case Tag::Device:
       return DeviceObjType::get();
     case Tag::Stream:
