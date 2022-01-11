@@ -1552,11 +1552,11 @@ inline TypePtr TensorType::fromBoolType() {
 }
 
 inline c10::optional<c10::ScalarType> tryScalarTypeFromJitType(const Type& type) {
-  if (&type == FloatType::get().get()) {
+  if (type == *FloatType::get()) {
     return at::typeMetaToScalarType(c10::get_default_dtype());
-  } else if (&type == IntType::get().get()) {
+  } else if (type == *IntType::get()) {
     return at::ScalarType::Long;
-  } else if (&type == BoolType::get().get()) {
+  } else if (type == *BoolType::get()) {
     return at::ScalarType::Bool;
   }
   return c10::nullopt;
