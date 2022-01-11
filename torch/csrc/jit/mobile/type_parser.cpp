@@ -23,8 +23,8 @@ namespace c10 {
 
 namespace {
 
-// Torchbind custom class always starts with the follow prefix, so use it as an
-// identifier for torchbind custom class type
+// Torchbind custom class always starts with the follow prefix, so use it as
+// an identifier for torchbind custom class type
 static constexpr const char* kTypeTorchbindCustomClass =
     "__torch__.torch.classes";
 static constexpr const char* kTypeNamedTuple = "NamedTuple";
@@ -125,7 +125,7 @@ TypePtr TypeParser::parseNonSimple(const std::string& token) {
       }
     }
     expect("]");
-    return TupleType::create(types);
+    return DynamicTypeFactory::create<TupleType>(std::move(types));
   }
   return nullptr;
 }
@@ -180,14 +180,14 @@ TypePtr TypeParser::parse() {
 //         ]
 //     ]"
 TypePtr TypeParser::parseNamedTuple(const std::string& qualified_name) {
-  std::vector<std::string> field_names;
+  std::vector<c10::string_view> field_names;
   std::vector<TypePtr> field_types;
   std::string ns;
   expect(",");
   expect("[");
   while (cur() != "]") {
     expect("[");
-    std::string field_name = next();
+    auto field_name = nextView();
     expect(",");
     TypePtr field_type = parse();
     field_names.emplace_back(field_name);
@@ -197,7 +197,8 @@ TypePtr TypeParser::parseNamedTuple(const std::string& qualified_name) {
       next();
     }
   }
-  return TupleType::createNamed(qualified_name, field_names, field_types);
+  return DynamicTypeFactory::createNamedTuple(
+      qualified_name, field_names, field_types);
 }
 
 // Custom type will be following structure:
@@ -330,15 +331,19 @@ void TypeParser::lex() {
   }
 }
 
-std::string TypeParser::next() {
+c10::string_view TypeParser::nextView() {
   TORCH_CHECK(
       !next_token_.empty(),
       "Empty token queue in mobile type parser.",
       "Check the format of the type string and make sure it's correct.");
   c10::string_view token = cur();
-  std::string ret(token.begin(), token.end());
   advance();
-  return ret;
+  return token;
+}
+
+std::string TypeParser::next() {
+  auto token = nextView();
+  return std::string(token.begin(), token.end());
 }
 
 void TypeParser::advance() {
