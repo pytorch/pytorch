@@ -191,7 +191,7 @@ class RNNBase(Module):
         return ret
 
     def reset_parameters(self) -> None:
-        stdv = 1.0 / math.sqrt(self.hidden_size)
+        stdv = 1.0 / math.sqrt(self.hidden_size) if self.hidden_size > 0 else 0
         for weight in self.parameters():
             init.uniform_(weight, -stdv, stdv)
 
@@ -340,13 +340,15 @@ class RNN(RNNBase):
         bidirectional: If ``True``, becomes a bidirectional RNN. Default: ``False``
 
     Inputs: input, h_0
-        * **input**: tensor of shape :math:`(L, N, H_{in})` when ``batch_first=False`` or
+        * **input**: tensor of shape :math:`(L, H_{in})` for unbatched input,
+          :math:`(L, N, H_{in})` when ``batch_first=False`` or
           :math:`(N, L, H_{in})` when ``batch_first=True`` containing the features of
           the input sequence.  The input can also be a packed variable length sequence.
           See :func:`torch.nn.utils.rnn.pack_padded_sequence` or
           :func:`torch.nn.utils.rnn.pack_sequence` for details.
-        * **h_0**: tensor of shape :math:`(D * \text{num\_layers}, N, H_{out})` containing the initial hidden
-          state for each element in the batch. Defaults to zeros if not provided.
+        * **h_0**: tensor of shape :math:`(D * \text{num\_layers}, H_{out})` for unbatched input or
+          :math:`(D * \text{num\_layers}, N, H_{out})` containing the initial hidden
+          state for the input sequence batch. Defaults to zeros if not provided.
 
         where:
 
@@ -360,12 +362,14 @@ class RNN(RNNBase):
             \end{aligned}
 
     Outputs: output, h_n
-        * **output**: tensor of shape :math:`(L, N, D * H_{out})` when ``batch_first=False`` or
+        * **output**: tensor of shape :math:`(L, D * H_{out})` for unbatched input,
+          :math:`(L, N, D * H_{out})` when ``batch_first=False`` or
           :math:`(N, L, D * H_{out})` when ``batch_first=True`` containing the output features
           `(h_t)` from the last layer of the RNN, for each `t`. If a
           :class:`torch.nn.utils.rnn.PackedSequence` has been given as the input, the output
           will also be a packed sequence.
-        * **h_n**: tensor of shape :math:`(D * \text{num\_layers}, N, H_{out})` containing the final hidden state
+        * **h_n**: tensor of shape :math:`(D * \text{num\_layers}, H_{out})` for unbatched input or
+          :math:`(D * \text{num\_layers}, N, H_{out})` containing the final hidden state
           for each element in the batch.
 
     Attributes:
@@ -387,6 +391,9 @@ class RNN(RNNBase):
         For bidirectional RNNs, forward and backward are directions 0 and 1 respectively.
         Example of splitting the output layers when ``batch_first=False``:
         ``output.view(seq_len, batch, num_directions, hidden_size)``.
+
+    .. note::
+        `batch_first` argument is ignored for unbatched inputs.
 
     .. include:: ../cudnn_rnn_determinism.rst
 
@@ -429,6 +436,19 @@ class RNN(RNNBase):
             max_batch_size = int(batch_sizes[0])
         else:
             batch_sizes = None
+            is_batched = input.dim() == 3
+            batch_dim = 0 if self.batch_first else 1
+            if not is_batched:
+                input = input.unsqueeze(batch_dim)
+                if hx is not None:
+                    if hx.dim() != 2:
+                        raise RuntimeError(
+                            f"For unbatched 2-D input, hx should also be 2-D but got {hx.dim()}-D tensor")
+                    hx = hx.unsqueeze(1)
+            else:
+                if hx is not None and hx.dim() != 3:
+                    raise RuntimeError(
+                        f"For batched 3-D input, hx should also be 3-D but got {hx.dim()}-D tensor")
             max_batch_size = input.size(0) if self.batch_first else input.size(1)
             sorted_indices = None
             unsorted_indices = None
@@ -471,6 +491,11 @@ class RNN(RNNBase):
         if isinstance(orig_input, PackedSequence):
             output_packed = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
             return output_packed, self.permute_hidden(hidden, unsorted_indices)
+
+        if not is_batched:
+            output = output.squeeze(batch_dim)
+            hidden = hidden.squeeze(1)
+
         return output, self.permute_hidden(hidden, unsorted_indices)
 
 # XXX: LSTM and GRU implementation is different from RNNBase, this is because:
@@ -766,13 +791,15 @@ class GRU(RNNBase):
         bidirectional: If ``True``, becomes a bidirectional GRU. Default: ``False``
 
     Inputs: input, h_0
-        * **input**: tensor of shape :math:`(L, N, H_{in})` when ``batch_first=False`` or
+        * **input**: tensor of shape :math:`(L, H_{in})` for unbatched input,
+          :math:`(L, N, H_{in})` when ``batch_first=False`` or
           :math:`(N, L, H_{in})` when ``batch_first=True`` containing the features of
           the input sequence.  The input can also be a packed variable length sequence.
           See :func:`torch.nn.utils.rnn.pack_padded_sequence` or
           :func:`torch.nn.utils.rnn.pack_sequence` for details.
-        * **h_0**: tensor of shape :math:`(D * \text{num\_layers}, N, H_{out})` containing the initial hidden
-          state for each element in the batch. Defaults to zeros if not provided.
+        * **h_0**: tensor of shape :math:`(D * \text{num\_layers}, H_{out})` or
+          :math:`(D * \text{num\_layers}, N, H_{out})`
+          containing the initial hidden state for the input sequence. Defaults to zeros if not provided.
 
         where:
 
@@ -786,13 +813,15 @@ class GRU(RNNBase):
             \end{aligned}
 
     Outputs: output, h_n
-        * **output**: tensor of shape :math:`(L, N, D * H_{out})` when ``batch_first=False`` or
+        * **output**: tensor of shape :math:`(L, H_{in})` for unbatched input,
+          :math:`(L, N, D * H_{out})` when ``batch_first=False`` or
           :math:`(N, L, D * H_{out})` when ``batch_first=True`` containing the output features
           `(h_t)` from the last layer of the GRU, for each `t`. If a
           :class:`torch.nn.utils.rnn.PackedSequence` has been given as the input, the output
           will also be a packed sequence.
-        * **h_n**: tensor of shape :math:`(D * \text{num\_layers}, N, H_{out})` containing the final hidden state
-          for each element in the batch.
+        * **h_n**: tensor of shape :math:`(D * \text{num\_layers}, H_{out})` or
+          :math:`(D * \text{num\_layers}, N, H_{out})` containing the final hidden state
+          for the input sequence.
 
     Attributes:
         weight_ih_l[k] : the learnable input-hidden weights of the :math:`\text{k}^{th}` layer
@@ -813,6 +842,9 @@ class GRU(RNNBase):
         For bidirectional GRUs, forward and backward are directions 0 and 1 respectively.
         Example of splitting the output layers when ``batch_first=False``:
         ``output.view(seq_len, batch, num_directions, hidden_size)``.
+
+    .. note::
+        `batch_first` argument is ignored for unbatched inputs.
 
     .. include:: ../cudnn_persistent_rnn.rst
 
@@ -848,6 +880,19 @@ class GRU(RNNBase):
             max_batch_size = int(max_batch_size)
         else:
             batch_sizes = None
+            is_batched = input.dim() == 3
+            batch_dim = 0 if self.batch_first else 1
+            if not is_batched:
+                input = input.unsqueeze(batch_dim)
+                if hx is not None:
+                    if hx.dim() != 2:
+                        raise RuntimeError(
+                            f"For unbatched 2-D input, hx should also be 2-D but got {hx.dim()}-D tensor")
+                    hx = hx.unsqueeze(1)
+            else:
+                if hx is not None and hx.dim() != 3:
+                    raise RuntimeError(
+                        f"For batched 3-D input, hx should also be 3-D but got {hx.dim()}-D tensor")
             max_batch_size = input.size(0) if self.batch_first else input.size(1)
             sorted_indices = None
             unsorted_indices = None
@@ -877,6 +922,10 @@ class GRU(RNNBase):
             output_packed = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
             return output_packed, self.permute_hidden(hidden, unsorted_indices)
         else:
+            if not is_batched:
+                output = output.squeeze(batch_dim)
+                hidden = hidden.squeeze(1)
+
             return output, self.permute_hidden(hidden, unsorted_indices)
 
 
@@ -918,7 +967,7 @@ class RNNCellBase(Module):
         return s.format(**self.__dict__)
 
     def reset_parameters(self) -> None:
-        stdv = 1.0 / math.sqrt(self.hidden_size)
+        stdv = 1.0 / math.sqrt(self.hidden_size) if self.hidden_size > 0 else 0
         for weight in self.parameters():
             init.uniform_(weight, -stdv, stdv)
 
@@ -940,9 +989,8 @@ class RNNCell(RNNCellBase):
         nonlinearity: The non-linearity to use. Can be either ``'tanh'`` or ``'relu'``. Default: ``'tanh'``
 
     Inputs: input, hidden
-        - **input** of shape `(batch, input_size)`: tensor containing input features
-        - **hidden** of shape `(batch, hidden_size)`: tensor containing the initial hidden
-          state for each element in the batch.
+        - **input**: tensor containing input features
+        - **hidden**: tensor containing the initial hidden state
           Defaults to zero if not provided.
 
     Outputs: h'
@@ -950,13 +998,11 @@ class RNNCell(RNNCellBase):
           for each element in the batch
 
     Shape:
-        - Input1: :math:`(N, H_{in})` tensor containing input features where
-          :math:`H_{in}` = `input_size`
-        - Input2: :math:`(N, H_{out})` tensor containing the initial hidden
-          state for each element in the batch where :math:`H_{out}` = `hidden_size`
-          Defaults to zero if not provided.
-        - Output: :math:`(N, H_{out})` tensor containing the next hidden state
-          for each element in the batch
+        - input: :math:`(N, H_{in})` or :math:`(H_{in})` tensor containing input features where
+          :math:`H_{in}` = `input_size`.
+        - hidden: :math:`(N, H_{out})` or :math:`(H_{out})` tensor containing the initial hidden
+          state where :math:`H_{out}` = `hidden_size`. Defaults to zero if not provided.
+        - output: :math:`(N, H_{out})` or :math:`(H_{out})` tensor containing the next hidden state.
 
     Attributes:
         weight_ih: the learnable input-hidden weights, of shape
@@ -990,8 +1036,17 @@ class RNNCell(RNNCellBase):
         self.nonlinearity = nonlinearity
 
     def forward(self, input: Tensor, hx: Optional[Tensor] = None) -> Tensor:
+        assert input.dim() in (1, 2), \
+            f"RNNCell: Expected input to be 1-D or 2-D but received {input.dim()}-D tensor"
+        is_batched = input.dim() == 2
+        if not is_batched:
+            input = input.unsqueeze(0)
+
         if hx is None:
             hx = torch.zeros(input.size(0), self.hidden_size, dtype=input.dtype, device=input.device)
+        else:
+            hx = hx.unsqueeze(0) if not is_batched else hx
+
         if self.nonlinearity == "tanh":
             ret = _VF.rnn_tanh_cell(
                 input, hx,
@@ -1008,6 +1063,10 @@ class RNNCell(RNNCellBase):
             ret = input  # TODO: remove when jit supports exception flow
             raise RuntimeError(
                 "Unknown nonlinearity: {}".format(self.nonlinearity))
+
+        if not is_batched:
+            ret = ret.squeeze(0)
+
         return ret
 
 
@@ -1034,19 +1093,15 @@ class LSTMCell(RNNCellBase):
             `b_hh`. Default: ``True``
 
     Inputs: input, (h_0, c_0)
-        - **input** of shape `(batch, input_size)`: tensor containing input features
-        - **h_0** of shape `(batch, hidden_size)`: tensor containing the initial hidden
-          state for each element in the batch.
-        - **c_0** of shape `(batch, hidden_size)`: tensor containing the initial cell state
-          for each element in the batch.
+        - **input** of shape `(batch, input_size)` or `(input_size)`: tensor containing input features
+        - **h_0** of shape `(batch, hidden_size)` or `(hidden_size)`: tensor containing the initial hidden state
+        - **c_0** of shape `(batch, hidden_size)` or `(hidden_size)`: tensor containing the initial cell state
 
           If `(h_0, c_0)` is not provided, both **h_0** and **c_0** default to zero.
 
     Outputs: (h_1, c_1)
-        - **h_1** of shape `(batch, hidden_size)`: tensor containing the next hidden state
-          for each element in the batch
-        - **c_1** of shape `(batch, hidden_size)`: tensor containing the next cell state
-          for each element in the batch
+        - **h_1** of shape `(batch, hidden_size)` or `(hidden_size)`: tensor containing the next hidden state
+        - **c_1** of shape `(batch, hidden_size)` or `(hidden_size)`: tensor containing the next cell state
 
     Attributes:
         weight_ih: the learnable input-hidden weights, of shape
@@ -1079,14 +1134,27 @@ class LSTMCell(RNNCellBase):
         super(LSTMCell, self).__init__(input_size, hidden_size, bias, num_chunks=4, **factory_kwargs)
 
     def forward(self, input: Tensor, hx: Optional[Tuple[Tensor, Tensor]] = None) -> Tuple[Tensor, Tensor]:
+        assert input.dim() in (1, 2), \
+            f"LSTMCell: Expected input to be 1-D or 2-D but received {input.dim()}-D tensor"
+        is_batched = input.dim() == 2
+        if not is_batched:
+            input = input.unsqueeze(0)
+
         if hx is None:
             zeros = torch.zeros(input.size(0), self.hidden_size, dtype=input.dtype, device=input.device)
             hx = (zeros, zeros)
-        return _VF.lstm_cell(
+        else:
+            hx = (hx[0].unsqueeze(0), hx[1].unsqueeze(0)) if not is_batched else hx
+
+        ret = _VF.lstm_cell(
             input, hx,
             self.weight_ih, self.weight_hh,
             self.bias_ih, self.bias_hh,
         )
+
+        if not is_batched:
+            ret = (ret[0].squeeze(0), ret[1].squeeze(0))
+        return ret
 
 
 class GRUCell(RNNCellBase):
@@ -1110,23 +1178,21 @@ class GRUCell(RNNCellBase):
             `b_hh`. Default: ``True``
 
     Inputs: input, hidden
-        - **input** of shape `(batch, input_size)`: tensor containing input features
-        - **hidden** of shape `(batch, hidden_size)`: tensor containing the initial hidden
+        - **input** : tensor containing input features
+        - **hidden** : tensor containing the initial hidden
           state for each element in the batch.
           Defaults to zero if not provided.
 
     Outputs: h'
-        - **h'** of shape `(batch, hidden_size)`: tensor containing the next hidden state
+        - **h'** : tensor containing the next hidden state
           for each element in the batch
 
     Shape:
-        - Input1: :math:`(N, H_{in})` tensor containing input features where
-          :math:`H_{in}` = `input_size`
-        - Input2: :math:`(N, H_{out})` tensor containing the initial hidden
-          state for each element in the batch where :math:`H_{out}` = `hidden_size`
-          Defaults to zero if not provided.
-        - Output: :math:`(N, H_{out})` tensor containing the next hidden state
-          for each element in the batch
+        - input: :math:`(N, H_{in})` or :math:`(H_{in})` tensor containing input features where
+          :math:`H_{in}` = `input_size`.
+        - hidden: :math:`(N, H_{out})` or :math:`(H_{out})` tensor containing the initial hidden
+          state where :math:`H_{out}` = `hidden_size`. Defaults to zero if not provided.
+        - output: :math:`(N, H_{out})` or :math:`(H_{out})` tensor containing the next hidden state.
 
     Attributes:
         weight_ih: the learnable input-hidden weights, of shape
@@ -1157,10 +1223,24 @@ class GRUCell(RNNCellBase):
         super(GRUCell, self).__init__(input_size, hidden_size, bias, num_chunks=3, **factory_kwargs)
 
     def forward(self, input: Tensor, hx: Optional[Tensor] = None) -> Tensor:
+        assert input.dim() in (1, 2), \
+            f"GRUCell: Expected input to be 1-D or 2-D but received {input.dim()}-D tensor"
+        is_batched = input.dim() == 2
+        if not is_batched:
+            input = input.unsqueeze(0)
+
         if hx is None:
             hx = torch.zeros(input.size(0), self.hidden_size, dtype=input.dtype, device=input.device)
-        return _VF.gru_cell(
+        else:
+            hx = hx.unsqueeze(0) if not is_batched else hx
+
+        ret = _VF.gru_cell(
             input, hx,
             self.weight_ih, self.weight_hh,
             self.bias_ih, self.bias_hh,
         )
+
+        if not is_batched:
+            ret = ret.squeeze(0)
+
+        return ret

@@ -1102,7 +1102,7 @@ TEST(Reductions, ReduceOverSplitRfactor) {
   ASSERT_EQ(out[0], 4950);
 
   std::ostringstream oss;
-  oss << *s;
+  oss << *cg.stmt();
 
   // Check the IR to verify the rfactored reduce is eliminated.
   // TODO: The alloc free should be eliminated here since it is size 0.
@@ -1295,7 +1295,7 @@ TEST(Reductions, ReductionCacheAccessesOperatorAxis) {
   SimpleIREvaluator cg_after(result, {a, b, e});
 
   std::ostringstream oss;
-  oss << *result;
+  oss << *cg_after.stmt();
   const std::string& expected_ir =
       R"IR(
 #CHECK: Allocate(d_local); // dtype=float, dims=[4]
@@ -1370,7 +1370,7 @@ TEST(Reductions, ReductionCacheAccessesOuterReduceAxis) {
   SimpleIREvaluator cg_after(result, {a, b, e});
 
   std::ostringstream oss;
-  oss << *result;
+  oss << *cg_after.stmt();
   const std::string& expected_ir =
       R"IR(
 #CHECK: Allocate(d_local); // dtype=float, dims=[1]
@@ -1443,7 +1443,7 @@ TEST(Reductions, ReductionCacheAccessesInnerReduceAxis) {
   SimpleIREvaluator cg_after(result, {a, b, e});
 
   std::ostringstream oss;
-  oss << *result;
+  oss << *cg_after.stmt();
   const std::string& expected_ir =
       R"IR(
 #CHECK: Allocate(d_local); // dtype=float, dims=[1]
@@ -1506,9 +1506,10 @@ TEST(Reductions, ReductionCacheBodyAccess) {
 
   l.prepareForCodegen();
   StmtPtr result = IRSimplifier::simplify(l.root_stmt());
+  SimpleIREvaluator cg(result, {a, b, e});
 
   std::ostringstream oss;
-  oss << *result;
+  oss << *cg.stmt();
   const std::string& expected_ir =
       R"IR(
 #CHECK: Allocate(scale_local); // dtype=float, dims=[1, 32, 12]
@@ -1547,12 +1548,13 @@ TEST(Reductions, ReductionCacheConsumerAccess) {
   l.prepareForCodegen();
 
   StmtPtr result = IRSimplifier::simplify(l.root_stmt());
+  SimpleIREvaluator cg(result, {a, b, e});
 
   std::ostringstream oss;
-  oss << *result;
+  oss << *cg.stmt();
   const std::string& expected_ir =
       R"IR(
-#CHECK: Allocate(sum_local); // dtype=float, dims=[4]
+#CHECK: Alias(sum_local,scale);
 #CHECK: sum[l1] = (sum[l1]) + (scale[
 #CHECK: for (int i = 0; i < 4
 #CHECK:   sum_local[i] = sum[i + 4 * l_outer];
@@ -1592,13 +1594,14 @@ TEST(Reductions, ReductionSplitCacheConsumerAccess) {
   l.prepareForCodegen();
 
   StmtPtr result = IRSimplifier::simplify(l.root_stmt());
+  SimpleIREvaluator cg(result, {a, b, e});
 
   // reduction changes but cache does not.
   std::ostringstream oss;
-  oss << *result;
+  oss << *cg.stmt();
   const std::string& expected_ir =
       R"IR(
-#CHECK: Allocate(sum_local); // dtype=float, dims=[4]
+#CHECK: Alias(sum_local,scale);
 #CHECK: sum[l1_inner + 4 * l1_outer] = (sum[l1_inner + 4 * l1_outer]) + (scale[((m1_1 + 12 * n1_1) + 1536 * l1_outer) + 384 * l1_inner]);
 #CHECK: for (int i = 0; i < 4
 #CHECK:   sum_local[i] = sum[i + 4 * l_outer];
@@ -1639,13 +1642,13 @@ TEST(Reductions, ReductionReorderCacheConsumerAccess) {
   l.prepareForCodegen();
 
   StmtPtr result = IRSimplifier::simplify(l.root_stmt());
+  SimpleIREvaluator cg(result, {a, b, e});
 
   // neither reduction body not cache changes.
   std::ostringstream oss;
-  oss << *result;
+  oss << *cg.stmt();
   const std::string& expected_ir =
       R"IR(
-#CHECK: Allocate(sum_local); // dtype=float, dims=[4]
 #CHECK: sum[l1] = (sum[l1]) + (scale[(m1_1 + 12 * n1_1) + 384 * l1]);
 #CHECK: for (int i = 0; i < 4
 #CHECK:   sum_local[i] = sum[i + 4 * l_outer];
@@ -1691,13 +1694,14 @@ TEST(Reductions, ReductionRfactorCacheTempOuter) {
   loop.simplify();
   loop.prepareForCodegen();
   StmtPtr s = loop.root_stmt();
+  SimpleIREvaluator cg(s, {b, c, m, n, k});
 
   std::ostringstream oss;
-  oss << *s;
+  oss << *cg.stmt();
   const std::string& expected_ir =
       R"IR(
-#CHECK: Allocate(tmp); // dtype=float, dims=[n]
 #CHECK: Allocate(sum_rfac); // dtype=float, dims=[n]
+#CHECK: Allocate(tmp); // dtype=float, dims=[n]
 #CHECK: for (int a = 0; a < m
 #CHECK:   for (int i = 0; i < n
 #CHECK:     tmp[i] = 0
@@ -1714,7 +1718,6 @@ TEST(Reductions, ReductionRfactorCacheTempOuter) {
 #CHECK-NOT: tmp
       )IR";
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
-  SimpleIREvaluator cg(s, {b, c, m, n, k});
 
   cg.call({in, out, M, N, K});
   ASSERT_EQ(out[0], 499500);
@@ -1757,13 +1760,14 @@ TEST(Reductions, ReductionRfactorCacheTempInner) {
   loop.prepareForCodegen();
   loop.simplify();
   StmtPtr s = loop.root_stmt();
+  SimpleIREvaluator cg(s, {b, c, m, n, k});
 
   std::ostringstream oss;
-  oss << *s;
+  oss << *cg.stmt();
   const std::string& expected_ir =
       R"IR(
-#CHECK: Allocate(tmp); // dtype=float, dims=[1]
 #CHECK: Allocate(sum_rfac); // dtype=float, dims=[n]
+#CHECK: Allocate(tmp); // dtype=float, dims=[1]
 #CHECK: for (int a = 0; a < m
 #CHECK:   for (int b = 0; b < n
 #CHECK:     tmp[0] = 0
@@ -1775,8 +1779,6 @@ TEST(Reductions, ReductionRfactorCacheTempInner) {
 #CHECK-NOT: tmp
       )IR";
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
-
-  SimpleIREvaluator cg(s, {b, c, m, n, k});
 
   cg.call({in, out, M, N, K});
   ASSERT_EQ(out[0], 499500);
