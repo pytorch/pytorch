@@ -16,8 +16,9 @@ if [ -n "${IN_CI}" ]; then
   pip_install unittest-xml-reporting
 fi
 
-python tools/download_mnist.py --quiet -d test/cpp/api/mnist
-OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api
+# Disabling tests to see if they solve timeout issues; see https://github.com/pytorch/pytorch/issues/70015
+# python tools/download_mnist.py --quiet -d test/cpp/api/mnist
+# OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api
 time python test/run_test.py --verbose -i distributed/test_c10d_common
 time python test/run_test.py --verbose -i distributed/test_c10d_gloo
 time python test/run_test.py --verbose -i distributed/test_c10d_nccl

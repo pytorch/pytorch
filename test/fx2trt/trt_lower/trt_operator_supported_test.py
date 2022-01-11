@@ -1,15 +1,15 @@
 # Owner(s): ["oncall: fx"]
 
-import unittest
 import torch.fx.experimental.fx_acc.acc_ops  # noqa: F401
 import torch
 import torch.fx
 from torch.fx.experimental.fx2trt.tools.trt_splitter import create_trt_operator_support
 import torch.nn as nn
 from torch.fx.experimental.fx_acc import acc_ops, acc_tracer
+from torch.testing._internal.common_utils import TestCase, run_tests
 
 
-class TestTRTOperatorSupport(unittest.TestCase):
+class TestTRTOperatorSupport(TestCase):
     def test_supported_node_target(self):
         class TestModule(nn.Module):
             def __init__(self):
@@ -76,3 +76,6 @@ class TestTRTOperatorSupport(unittest.TestCase):
         for node in traced_mod.graph.nodes:
             if node.target == acc_ops.quantize_per_tensor:
                 self.assertTrue(op_support.is_node_supported(mod, node))
+
+if __name__ == '__main__':
+    run_tests()
