@@ -11,9 +11,9 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_device_type import \
     (ops, instantiate_device_type_tests, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoCusparseGeneric,
      precisionOverride, skipMeta, skipCUDAIf, skipCUDAIfRocm, skipCPUIfNoMklSparse)
-from torch.testing._internal.common_methods_invocations import (sparse_csr_unary_ufuncs, )
+from torch.testing._internal.common_methods_invocations import (UnaryUfuncInfo, sparse_csr_funcs, )
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
-from torch.testing._internal.common_dtype import floating_types, get_all_dtypes
+from torch.testing._internal.common_dtype import floating_types, get_all_dtypes, floating_and_complex_types
 from test_sparse import CUSPARSE_SPMM_COMPLEX128_SUPPORTED
 
 if TEST_SCIPY:
@@ -22,6 +22,10 @@ if TEST_SCIPY:
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
+
+# Unary Ufuncs supported by Sparse CSR Layout
+sparse_csr_unary_ufuncs = [op for op in sparse_csr_funcs if isinstance(op, UnaryUfuncInfo)]
+sparse_csr_linalg_solve = [op for op in sparse_csr_funcs if op.name == 'linalg.solve']
 
 def _check_cusparse_triangular_solve_available():
     version = _get_torch_cuda_version()
@@ -84,7 +88,6 @@ def _test_addmm_addmv(test_case, f, t, m, v, *, alpha=None, beta=None, transpose
     res3 = torch.from_numpy(res3).to(dtype)
     test_case.assertEqual(res1, res2)
     test_case.assertEqual(res1, res3)
-
 
 class TestSparseCSRSampler(TestCase):
 
@@ -1255,6 +1258,22 @@ class TestSparseCSR(TestCase):
             coo_sparse = dense.to_sparse_coo()
 
             self.assertEqual(coo_sparse.to_sparse_csr().to_sparse_coo(), coo_sparse)
+
+    @ops(sparse_csr_linalg_solve)
+    def test_linalg_solve_sparse_csr_cusolver(self, device, dtype, op):
+        if dtype not in floating_and_complex_types() or device != 'cpu':
+            self.skipTest("Skipped!")
+
+        samples = op.sample_inputs(device, dtype)
+
+        for sample in samples:
+            if sample.input.ndim != 2 or sample.args[0].ndim != 1 or sample.args[0].size() == torch.Size([0]):
+                continue
+            expect = op(sample.input, *sample.args, **sample.kwargs)
+            sample.input = sample.input.to_sparse_csr()
+            out = torch.zeros(sample.args[0].size(), dtype=dtype, device=device)
+            op(sample.input, *sample.args, **sample.kwargs, out=out)
+            self.assertEqual(expect, out)
 
 # e.g., TestSparseCSRCPU and TestSparseCSRCUDA
 instantiate_device_type_tests(TestSparseCSR, globals())
