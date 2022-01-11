@@ -8347,7 +8347,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             self.assertEqual(y, yn)
 
             for offset in offsets:
-                y = torch.linalg.trace(x, offset)
+                y = torch.linalg.trace(x, offset=offset)
                 yn = np.trace(x.cpu(), offset, axis1=-2, axis2=-1)
                 self.assertEqual(y, yn)
 

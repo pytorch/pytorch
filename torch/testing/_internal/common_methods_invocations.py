@@ -2552,23 +2552,16 @@ def sample_inputs_trace(self, device, dtype, requires_grad, **kwargs):
 def sample_inputs_linalg_trace(self, device, dtype, requires_grad, **kwargs):
     inputs = (
         ((S, S), 0),
-        ((S, L, M), 0),
         ((S, M, L), 0),
         ((S, S), 1),
-        ((S, S), -2),
-        ((S, L, M), 1),
-        ((S, L, M), -1),
-        ((S, L, M), 100),
         ((S, L, M), -100),
-        ((S, M, L), 1),
-        ((S, M, L), -1),
     )
     samples = []
 
     for shape, offset in inputs:
         tensor = make_tensor(shape, device, dtype, low=None, high=None,
                              requires_grad=requires_grad)
-        samples.append(SampleInput(tensor, args=(offset,)))
+        samples.append(SampleInput(tensor, kwargs={'offset': offset}))
 
     return samples
 
@@ -10008,10 +10001,11 @@ op_db: List[OpInfo] = [
     OpInfo('linalg.trace',
            aten_name='linalg_trace',
            op=torch.linalg.trace,
+           supports_out=False,
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
-           backward_dtypes=floating_and_complex_types_and(torch.bfloat16, torch.float16),
            sample_inputs_func=sample_inputs_linalg_trace,
-           supports_forward_ad=True),
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True),
     OpInfo('linalg.vector_norm',
            op=torch.linalg.vector_norm,
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
