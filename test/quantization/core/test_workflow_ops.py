@@ -557,7 +557,7 @@ class TestFakeQuantizeOps(TestCase):
     def test_fq_serializable_per_tensor(self):
         observer = default_observer
         quant_min = 0
-        quant_max = 255
+        quant_max = 127
         for FakeQuantizeClass in [FakeQuantize, _LearnableFakeQuantize]:
             fq_module = FakeQuantizeClass(observer, quant_min, quant_max)
             X = torch.tensor([-5, -3.5, -2, 0, 3, 5, 7], dtype=torch.float32)
