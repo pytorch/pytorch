@@ -49,11 +49,42 @@ bool mergeTypes(
   return changed;
 }
 
+void PropertyPropBase::propagateBlock(Block* block, bool insert_expands) {
+  for (Node* node : block->nodes()) {
+    try {
+      propagateNode(node, insert_expands);
+    } catch (propagation_error& e) {
+      setUnshapedType(node);
+    } catch (std::exception& e) {
+      throw ErrorReport(node->sourceRange())
+          << ExceptionMessage(e)
+          << "\nThe above operation failed shape propagation in this context";
+    }
+  }
+}
+
+void PropertyPropBase::processIf(Node* node) {
+  auto then_block = node->blocks().at(0);
+  auto else_block = node->blocks().at(1);
+  propagateBlock(then_block);
+  propagateBlock(else_block);
+  mergeTypes(then_block->outputs(), else_block->outputs(), node->outputs());
+}
+
+void PropertyPropBase::setUnshapedType(Value* o) {
+  o->setType(unshapedType(o->type()));
+}
+
+void PropertyPropBase::setUnshapedType(Node* node) {
+  for (auto o : node->outputs()) {
+    setUnshapedType(o);
+  }
+}
+
 namespace prim {
 using namespace ::c10::prim;
 }
 
-struct propagation_error : std::exception {};
 
 #define SHAPE_ASSERT(cond) \
   if (!(cond))             \
@@ -92,25 +123,11 @@ bool containsTensorType(const TypePtr& t) {
   return false;
 }
 
-class ShapePropagator {
+class ShapePropagator: public PropertyPropBase {
  public:
   explicit ShapePropagator(const std::shared_ptr<Graph>& graph)
-      : aliasDb_(graph) {
+      : PropertyPropBase(graph), aliasDb_(graph) {
     collectResizeSet(graph->block());
-  }
-
-  void PropagateShapeOnBlock(Block* block, bool insert_expands = true) {
-    for (Node* node : block->nodes()) {
-      try {
-        PropagateShapeOnNode(node, insert_expands);
-      } catch (propagation_error& e) {
-        setUnshapedType(node);
-      } catch (std::exception& e) {
-        throw ErrorReport(node->sourceRange())
-            << ExceptionMessage(e)
-            << "\nThe above operation failed shape propagation in this context";
-      }
-    }
   }
 
  private:
@@ -154,16 +171,6 @@ class ShapePropagator {
           }
         }
       }
-    }
-  }
-
-  void setUnshapedType(Value* o) {
-    o->setType(unshapedType(o->type()));
-  }
-
-  void setUnshapedType(Node* node) {
-    for (auto o : node->outputs()) {
-      setUnshapedType(o);
     }
   }
 
@@ -335,7 +342,7 @@ class ShapePropagator {
                               graph->insertConstant(expected_size),
                               graph->insertConstant(false)})
                          ->insertBefore(node);
-      PropagateShapeOnNode(expand);
+      propagateNode(expand);
       node->replaceInput(input_idx, expand->output());
     };
     broadcast(idx1);
@@ -569,7 +576,7 @@ class ShapePropagator {
     return in_resize;
   }
 
-  void PropagateShapeOnNode(Node* node, bool insert_expands = true) {
+   void propagateNode(Node* node, bool insert_expands = true) override {
     // Certain ops like resize_ change the input tensors size. Because our
     // analysis is flow invariant, we set any Tensor that can alias a resized
     // Tensor to the base Tensor Type without size information.
@@ -580,15 +587,8 @@ class ShapePropagator {
     // These don't require the types, and have complicated schema. Return early
     // after we process them.
     switch (node->kind()) {
-      case prim::If: {
-        auto then_block = node->blocks().at(0);
-        auto else_block = node->blocks().at(1);
-        PropagateShapeOnBlock(then_block);
-        PropagateShapeOnBlock(else_block);
-        mergeTypes(
-            then_block->outputs(), else_block->outputs(), node->outputs());
-        return;
-      }
+      case prim::If:
+        return processIf(node);
       case prim::Loop: {
         auto body_block = node->blocks().at(0);
         // propagate counter type
@@ -602,14 +602,14 @@ class ShapePropagator {
         auto loop_carried_outputs = body_block->outputs().slice(1); // skip cond
 
         do {
-          PropagateShapeOnBlock(body_block, /*insert_expands=*/false);
+          propagateBlock(body_block, /*insert_expands=*/false);
           // note: inserting expands is unsafe at this point, we don't know
           // if the types are stable yet, so the arguments to expand may change
         } while (mergeTypes(
             loop_carried_block, loop_carried_outputs, loop_carried_block));
 
         // now that the types are stable, we can insert the expands
-        PropagateShapeOnBlock(body_block, /*insert_expands=*/true);
+        propagateBlock(body_block, /*insert_expands=*/true);
 
         for (const auto i : c10::irange(loop_carried_inputs.size())) {
           node->outputs()[i]->setType(loop_carried_block[i]->type());
@@ -2146,7 +2146,7 @@ class ShapePropagator {
 } // anonymous namespace
 
 void PropagateInputShapes(const std::shared_ptr<Graph>& graph) {
-  ShapePropagator(graph).PropagateShapeOnBlock(graph->block());
+  ShapePropagator(graph).propagateBlock(graph->block());
 }
 
 namespace {
