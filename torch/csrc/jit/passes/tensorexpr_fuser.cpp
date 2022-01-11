@@ -1258,6 +1258,10 @@ Operation createTensorExprOp(const Node* node) {
   if (node->hasAttribute(attr::symbolic_shape_inputs)) {
     sym_shapes = node->is(attr::symbolic_shape_inputs);
   }
+  bool allow_stack_outputs = false;
+  if (node->hasAttribute(attr::allow_stack_outputs)) {
+    allow_stack_outputs = node->i(attr::allow_stack_outputs) == 1;
+  }
 
   std::unordered_map<c10::Symbol, tensorexpr::NNCLoweringFunction>
       custom_lowerings;
