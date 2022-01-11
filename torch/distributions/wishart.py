@@ -187,7 +187,7 @@ class Wishart(ExponentialFamily):
         noise = self._dist_chi2.rsample(sample_shape).sqrt().diag_embed(dim1=-2, dim2=-1)
         i, j = torch.tril_indices(p, p, offset=-1)
         noise[..., i, j] = torch.randn(
-            torch.Size(sample_shape) + self._batch_shape + (int(p * (p - 1) / 2),),
+            torch.Size(sample_shape) + self._batch_shape + (0.5 * int(p * (p - 1)),),
             dtype=noise.dtype,
             device=noise.device,
         )
@@ -250,11 +250,11 @@ class Wishart(ExponentialFamily):
         nu = self.df  # has shape (batch_shape)
         p = self._event_shape[-1]  # has singleton shape
         return (
-            - nu * p * _log_2 / 2
+            - 0.5 * nu * p * _log_2
             - nu * self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
-            - torch.mvlgamma(nu / 2, p=p)
-            + (nu - p - 1) / 2 * torch.linalg.slogdet(value).logabsdet
-            - torch.cholesky_solve(value, self._unbroadcasted_scale_tril).diagonal(dim1=-2, dim2=-1).sum(dim=-1) / 2
+            - torch.mvlgamma(0.5 * nu, p=p)
+            + 0.5 * (nu - p - 1) * torch.linalg.slogdet(value).logabsdet
+            - 0.5 * torch.cholesky_solve(value, self._unbroadcasted_scale_tril).diagonal(dim1=-2, dim2=-1).sum(dim=-1)
         )
 
     def entropy(self):
@@ -263,10 +263,10 @@ class Wishart(ExponentialFamily):
         V = self.covariance_matrix  # has shape (batch_shape x event_shape)
         return (
             (p + 1) * self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
-            + p * (p + 1) * _log_2 / 2
-            + torch.mvlgamma(nu / 2, p=p)
-            - (nu - p - 1) / 2 * _mvdigamma(nu / 2, p=p)
-            + nu * p / 2
+            + 0.5 * p * (p + 1) * _log_2
+            + torch.mvlgamma(0.5 * nu, p=p)
+            - 0.5 * (nu - p - 1) * _mvdigamma(0.5 * nu, p=p)
+            + 0.5 * nu * p
         )
 
     @property
