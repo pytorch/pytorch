@@ -361,6 +361,7 @@ def lazy_overhead_experiment(args, results, benchmark, lazy_benchmark):
         timed(args, lazy_benchmark, sync=LazySync(sync_every_iter=True))
     warmup_time = time.perf_counter() - warmup0
     bench0 = time.perf_counter()
+    dump_lazy_metrics(reset=True)
     for rep in range(args.repeat):
         # interleave the runs to handle frequency scaling and load changes
         _, timings[rep, 0] = timed(args, benchmark, sync=ref_sync(sync_every_iter=True))
@@ -368,17 +369,23 @@ def lazy_overhead_experiment(args, results, benchmark, lazy_benchmark):
         ltm.wait_device_ops()
         if current_device == 'cuda':
             torch.cuda.synchronize()
+    lazy_metrics = dump_lazy_metrics(reset=True)
     bench_time = time.perf_counter() - bench0
     pvalue = ttest_ind(timings[:, 0], timings[:, 1]).pvalue
     median = np.median(timings, axis=0)
+    fallbacks = ";".join([f"{m}:{lazy_metrics[m]}" for m in lazy_metrics if "aten::" in m])
+    ops = int(sum([lazy_metrics[m] for m in lazy_metrics if 'lazy::'  in m or 'aten::' in m]) / args.repeat)
+    trace_us = median[1] / 1e-6
+    us_per_op = trace_us / ops
     overhead = median[1] / median[0]
     results.append(overhead)
     output_csv(
         os.path.join(args.output_dir, f"lazy-overheads_{args.test}_{get_unique_suffix()}.csv"),
-        ("dev", "name", "test", "overhead", "pvalue"),
-    ).writerow([current_device, current_name, args.test, f"{overhead:.4f}", f"{pvalue:.4e}"])
+        ("dev", "name", "test", "overhead", "pvalue", "ops", "trace_us", "us_per_op", "fallbacks"),
+    ).writerow([current_device, current_name, args.test, f"{overhead:.4f}", f"{pvalue:.4e}",
+                f"{ops}", f"{trace_us:.4f}", f"{us_per_op:.4f}", f"{fallbacks}"])
     print(f"{short_name(name, limit=30):<30} {current_device:<4} {args.test:<5} "
-          f"{'trace overheads':<20} overhead: {overhead:.3f} pvalue: {pvalue:.2e}")
+          f"{'trace overheads':<20} overhead: {overhead:.3f} pvalue: {pvalue:.2e} us_per_op {us_per_op:.3f}")
     if args.verbose:
         print(f"CIDEBUGOUTPUT,lazy_overhead_experiment,"
               f"{current_name},{args.test},{current_device},{overhead:.4f},"
@@ -511,7 +518,7 @@ def merge_reformat(tmp_dir, out_dir, table):
         headers = {
             "error": ("name", "test", "error"),
             "lazy-compute" : ("name", "dev", "experiment", "test", "speedup", "pvalue"),
-            "lazy-overheads" : ("dev", "name", "test", "overhead", "pvalue")
+            "lazy-overheads" : ("dev", "name", "test", "overhead", "pvalue", "ops", "trace_us", "us_per_op", "fallbacks")
         }
 
         header = headers[file_type]
@@ -535,11 +542,16 @@ def merge_reformat(tmp_dir, out_dir, table):
                 entry["error"] = get_field(r, "error", prefix)
             elif prefix == "lazy-overheads":
                 entry["overhead"] = get_field(r, "overhead", prefix)
+                entry["ops"] = get_field(r, "ops", prefix)
+                entry["trace_us"] = get_field(r, "trace_us", prefix)
+                entry["us_per_op"] = get_field(r, "us_per_op", prefix)
+                entry["fallbacks"] = get_field(r, "fallbacks", prefix)
             else:
                 entry[get_field(r, "experiment", prefix)] = get_field(r, "speedup", prefix)
 
     amortized_header = f"amortized {args.inner_loop_repeat}x"
-    headers = ("name", "test", amortized_header, "unamortized", "overhead", "error", "rc")
+    headers = ("name", "test", amortized_header, "unamortized", "overhead", "error", "rc",
+               "ops", "trace_us", "us_per_op", "fallbacks")
 
     cw = output_csv(
         os.path.join(out_dir, f"{args.test}_reformat.csv"),
@@ -548,7 +560,8 @@ def merge_reformat(tmp_dir, out_dir, table):
 
     for k, v in table.items():
         cw.writerow((k[0], k[1], v.get(amortized_header, 'N/A'),
-                     v.get('unamortized', 'N/A'), v.get('overhead', 'N/A'), v.get('error', 'N/A'), v.get('rc')))
+                     v.get('unamortized', 'N/A'), v.get('overhead', 'N/A'), v.get('error', 'N/A'), v.get('rc'),
+                     v.get('ops', 'N/A'), v.get('trace_us', 'N/A'), v.get('us_per_op', 'N/A'), v.get('fallbacks', 'N/A')))
 
 def save_error(name, test, error, dir):
     output_csv(
