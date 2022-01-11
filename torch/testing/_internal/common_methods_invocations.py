@@ -5518,7 +5518,6 @@ def sample_inputs_linalg_svd_rank_revealing(op_info, device, dtype, requires_gra
         tol_tensor = torch.tensor(tol, dtype=tol_dtype, device=device)
 
         yield sample
-        yield clone_sample(sample)
         yield clone_sample(sample, **merge_dicts(dict(tol=tol), sample.kwargs))
         yield clone_sample(sample, **merge_dicts(dict(tol=tol_tensor), sample.kwargs))
         yield clone_sample(sample, **merge_dicts(dict(atol=tol), sample.kwargs))
