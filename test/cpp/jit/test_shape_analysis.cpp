@@ -70,6 +70,7 @@ TEST(ShapeAnalysisTest, DynamicShapesFusion) {
   subgraph->inputs().at(2)->setType(z_type);
   subgraph->outputs().at(0)->setType(TensorType::create(at::rand({14, 5})));
   auto output = g->insertNode(g->create(prim::TensorExprGroup))->output();
+  subgraph->outputs().at(0)->setType(TensorType::create(at::rand({14, 5})));
   output->node()->addInput(x_inp);
   output->node()->addInput(y_inp);
   output->node()->addInput(z_inp);
