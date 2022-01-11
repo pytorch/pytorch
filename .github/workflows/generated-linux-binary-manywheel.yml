@@ -368,13 +368,13 @@ jobs:
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
-          echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
+          echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
-            echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
+            echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
           fi
       - name: Upload binaries
         env:
@@ -746,13 +746,13 @@ jobs:
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
-          echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
+          echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
-            echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
+            echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
           fi
       - name: Upload binaries
         env:
@@ -1127,13 +1127,13 @@ jobs:
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
-          echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
+          echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
-            echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
+            echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
           fi
       - name: Upload binaries
         env:
@@ -1508,13 +1508,13 @@ jobs:
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
-          echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
+          echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
-            echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
+            echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
           fi
       - name: Upload binaries
         env:
@@ -1889,13 +1889,13 @@ jobs:
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
-          echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
+          echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
-            echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
+            echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
           fi
       - name: Upload binaries
         env:
@@ -2262,13 +2262,13 @@ jobs:
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
-          echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
+          echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
-            echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
+            echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
           fi
       - name: Upload binaries
         env:
@@ -2635,13 +2635,13 @@ jobs:
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
-          echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
+          echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
-            echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
+            echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
           fi
       - name: Upload binaries
         env:
@@ -3005,13 +3005,13 @@ jobs:
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
-          echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
+          echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
-            echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
+            echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
           fi
       - name: Upload binaries
         env:
@@ -3383,13 +3383,13 @@ jobs:
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
-          echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
+          echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
-            echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
+            echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
           fi
       - name: Upload binaries
         env:
@@ -3764,13 +3764,13 @@ jobs:
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
-          echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
+          echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
-            echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
+            echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
           fi
       - name: Upload binaries
         env:
@@ -4145,13 +4145,13 @@ jobs:
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
-          echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
+          echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
-            echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
+            echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
           fi
       - name: Upload binaries
         env:
@@ -4526,13 +4526,13 @@ jobs:
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
-          echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
+          echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
-            echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
+            echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
           fi
       - name: Upload binaries
         env:
@@ -4899,13 +4899,13 @@ jobs:
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
-          echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
+          echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
-            echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
+            echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
           fi
       - name: Upload binaries
         env:
@@ -5272,13 +5272,13 @@ jobs:
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
-          echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
+          echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
-            echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
+            echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
           fi
       - name: Upload binaries
         env:
@@ -5642,13 +5642,13 @@ jobs:
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
-          echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
+          echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
-            echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
+            echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
           fi
       - name: Upload binaries
         env:
@@ -6020,13 +6020,13 @@ jobs:
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
-          echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
+          echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
-            echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
+            echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
           fi
       - name: Upload binaries
         env:
@@ -6401,13 +6401,13 @@ jobs:
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
-          echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
+          echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
-            echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
+            echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
           fi
       - name: Upload binaries
         env:
@@ -6782,13 +6782,13 @@ jobs:
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
-          echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
+          echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
-            echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
+            echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
           fi
       - name: Upload binaries
         env:
@@ -7163,13 +7163,13 @@ jobs:
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
-          echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
+          echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
-            echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
+            echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
           fi
       - name: Upload binaries
         env:
@@ -7536,13 +7536,13 @@ jobs:
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
-          echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
+          echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
-            echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
+            echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
           fi
       - name: Upload binaries
         env:
@@ -7909,13 +7909,13 @@ jobs:
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
-          echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
+          echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
-            echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
+            echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
           fi
       - name: Upload binaries
         env:
