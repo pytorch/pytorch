@@ -616,6 +616,72 @@ Tensor matrix_rank(const Tensor& self, bool symmetric) {
   return at::linalg_matrix_rank(self, 0.0, c10::nullopt, symmetric);
 }
 
+std::tuple<Tensor&, Tensor&, Tensor&, Tensor&, Tensor&>
+_linalg_svd_rank_restricted_helper_out(
+    const Tensor& input,
+    const c10::optional<Tensor>& atol_opt,
+    const c10::optional<Tensor>& rtol_opt,
+    bool full_matrices,
+    Tensor& U,
+    Tensor& S,
+    Tensor& Vh,
+    Tensor& rank,
+    Tensor& unique_rank) {
+  at::linalg_svd_out(U, S, Vh, input, full_matrices);
+
+  // make sure rank is of proper size
+  const auto batch_shape = IntArrayRef(input.sizes().cbegin(), input.sizes().cend() - 2);
+  at::native::resize_output(rank, batch_shape);
+
+  // return 0 rank if input is empty
+  if (!input.numel()) {
+    rank.zero_();
+    unique_rank.zero_();
+    return std::tie(U, S, Vh, rank, unique_rank);
+  }
+
+  // We compute matrix rank as the number of singular values
+  // that are above max(atol, rtol * max(S)) threshold
+  Tensor atol, rtol;
+  std::tie(atol, rtol) = get_atol_rtol(input, atol_opt, rtol_opt, "_linalg_svd_rank_restricted_helper_out");
+  const auto max_S = S.abs().amax(/*dim=*/-1, /*keepdim=*/true);
+  const auto tol = at::max(atol.unsqueeze(-1), rtol.unsqueeze(-1) * max_S);
+  at::sum_out(rank, S > tol, /*dim=*/-1);
+
+  const auto unique_rank_res = std::get<0>(at::_unique(
+      rank.device().type() == at::kCUDA ? rank.to(at::kCPU) : rank,
+      /*sorted=*/false
+  ));
+
+  // prepare unique_rank
+  at::native::resize_output(unique_rank, unique_rank_res.sizes());
+  unique_rank.copy_(unique_rank_res);
+
+  return std::tie(U, S, Vh, rank, unique_rank);
+}
+
+std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor>
+_linalg_svd_rank_restricted_helper(
+    const Tensor& input,
+    const c10::optional<Tensor>& atol,
+    const c10::optional<Tensor>& rtol,
+    bool full_matrices) {
+  auto U = at::empty({0}, input.options());
+  const auto real_dtype = at::toValueType(input.scalar_type());
+  auto S = at::empty({0}, input.options().dtype(real_dtype));
+  auto Vh = at::empty({0}, input.options());
+  auto rank = at::empty({0}, input.options().dtype(ScalarType::Long));
+  auto unique_rank = at::empty({0}, input.options().device(at::kCPU).dtype(ScalarType::Long));
+  _linalg_svd_rank_restricted_helper_out(input, atol, rtol, full_matrices, U, S, Vh, rank, unique_rank);
+  return std::make_tuple(
+      std::move(U),
+      std::move(S),
+      std::move(Vh),
+      std::move(rank),
+      std::move(unique_rank)
+  );
+}
+
 std::tuple<Tensor&, Tensor&, Tensor&, Tensor&>
 linalg_svd_rank_revealing_out(
     const Tensor& input,
@@ -626,26 +692,8 @@ linalg_svd_rank_revealing_out(
     Tensor& S,
     Tensor& Vh,
     Tensor& rank) {
-  at::linalg_svd_out(U, S, Vh, input, full_matrices);
-
-  // make sure rank is of proper size
-  const auto batch_shape = IntArrayRef(input.sizes().cbegin(), input.sizes().cend() - 2);
-  at::native::resize_output(rank, batch_shape);
-
-  // return 0 rank if input is empty
-  if (!input.numel()) {
-    rank.zero_();
-    return std::tie(U, S, Vh, rank);
-  }
-
-  // We compute matrix rank as the number of singular values
-  // that are above max(atol, rtol * max(S)) threshold
-  Tensor atol, rtol;
-  std::tie(atol, rtol) = get_atol_rtol(input, atol_opt, rtol_opt, "torch.linalg.svd_rank_revealing");
-  const auto max_S = S.abs().amax(/*dim=*/-1, /*keepdim=*/true);
-  const auto tol = at::max(atol.unsqueeze(-1), rtol.unsqueeze(-1) * max_S);
-  at::sum_out(rank, S > tol, /*dim=*/-1);
-
+  auto unique_rank = at::empty({0}, input.options().device(at::kCPU).dtype(ScalarType::Long));
+  at::_linalg_svd_rank_restricted_helper_outf(input, atol_opt, rtol_opt, full_matrices, U, S, Vh, rank, unique_rank);
   return std::tie(U, S, Vh, rank);
 }
 
