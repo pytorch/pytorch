@@ -1,7 +1,7 @@
 import torch
+import torch.jit
 from torch import nn
 import torch.nn.functional as nnF
-import torch.nn.quantized as nnq
 
 from torch import Tensor
 from typing import Optional, Tuple
@@ -73,7 +73,7 @@ class MultiheadAttention(nn.MultiheadAttention):
         self.out_proj = nn.Linear(self.embed_dim, self.embed_dim, bias=bias, **factory_kwargs)  # type: ignore[assignment]
 
         # Functionals
-        self.q_scaling_product = nnq.FloatFunctional()
+        self.q_scaling_product = torch.nn.quantized.FloatFunctional()
 
         # Quant/Dequant
         self.quant_attn_output = torch.ao.quantization.QuantStub()
