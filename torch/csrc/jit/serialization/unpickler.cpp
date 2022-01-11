@@ -164,11 +164,24 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
   }
 }
 
+namespace {
+template <typename T>
+bool is(const Type& type) {
+  if (type.kind() == T::Kind) {
+    return true;
+  }
+  if (auto dyn = type.castRaw<c10::DynamicType>()) {
+    return dyn->tag() == c10::DynamicTypeTrait<T>::tagValue();
+  }
+  return false;
+}
+} // namespace
+
 void restoreContainerTypeTags(const IValue& ivalue, const TypePtr& type) {
-  if (auto dict_type = type->cast<DictType>()) {
+  if (is<DictType>(*type)) {
     auto dict = ivalue.toGenericDict();
-    dict.unsafeSetKeyType(dict_type->getKeyType());
-    dict.unsafeSetValueType(dict_type->getValueType());
+    dict.unsafeSetKeyType(type->containedType(0));
+    dict.unsafeSetValueType(type->containedType(1));
   } else if (auto list_type = type->cast<ListType>()) {
     ivalue.toList().unsafeSetElementType(list_type->getElementType());
   } else {
