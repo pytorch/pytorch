@@ -1,4 +1,5 @@
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/core/type_factory.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/mobile/runtime_compatibility.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
@@ -12,7 +13,6 @@ TypePtr parseType(const std::string& pythonStr);
 
 namespace torch {
 namespace jit {
-const std::unordered_map<std::string, c10::TypePtr>& string_to_type_lut();
 
 uint64_t _get_runtime_bytecode_version() {
   return caffe2::serialize::kMaxSupportedBytecodeVersion;
@@ -77,7 +77,7 @@ RuntimeCompatibilityInfo RuntimeCompatibilityInfo::get() {
 
 std::unordered_set<std::string> _get_mobile_supported_types() {
   std::unordered_set<std::string> supported_types;
-  for (const auto& it : string_to_type_lut()) {
+  for (const auto& it : c10::DynamicTypeFactory::basePythonTypes()) {
     supported_types.insert(it.first);
   }
   supported_types.insert(

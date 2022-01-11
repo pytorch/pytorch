@@ -338,7 +338,6 @@ def add_auto_observation(
     return model
 
 
-# TODO(future PR): add serialization support
 def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
     def convert_to_dispatch_proxy(x):
         if isinstance(x, torch.Tensor):
