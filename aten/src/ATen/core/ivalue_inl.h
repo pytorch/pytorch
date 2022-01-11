@@ -8,10 +8,10 @@
 #include <ATen/core/Dict.h>
 #include <ATen/core/List.h>
 #include <ATen/core/functional.h>
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/jit_type.h>
 #include <ATen/core/qualified_name.h>
 #include <ATen/core/rref_interface.h>
-#include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <ATen/core/symbol.h>
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/Event.h>
 #include <c10/core/Scalar.h>
@@ -19,9 +19,11 @@
 #include <c10/core/StreamGuard.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <c10/util/FunctionRef.h>
+#include <c10/util/hash.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
-#include <c10/util/hash.h>
 
 namespace torch {
 namespace jit {
@@ -217,7 +219,7 @@ inline at::Generator IValue::toGenerator() const& {
 namespace ivalue {
 
 void TORCH_API
-checkCustomClassType(const Type* expected_type, const Type* actual_type);
+checkCustomClassType(const ClassType* expected_type, const Type* actual_type);
 
 template <typename T>
 using Shared = c10::intrusive_ptr<T>;
@@ -573,18 +575,28 @@ struct TORCH_API TupleElements {
   }
 };
 
+template <typename T>
+struct TupleTypeFactory {};
+
+template <>
+struct TORCH_API TupleTypeFactory<TupleType> {
+  static TupleTypePtr create(std::vector<TypePtr> types) {
+    return TupleType::create(std::move(types));
+  }
+  static TupleTypePtr fallback(const Type& type);
+};
+
 struct TORCH_API Tuple : c10::intrusive_ptr_target {
  private:
   TupleElements elements_;
-  mutable std::shared_ptr<TupleType>
-      type_; // lazily computed for unnamed tuples
+  mutable c10::TypePtr type_; // lazily computed for unnamed tuples
 
  public:
   // named tuples have additional type information, so we
   // directly create them tagged
   static c10::intrusive_ptr<Tuple> createNamed(
       std::vector<IValue> elements_,
-      std::shared_ptr<TupleType> type_) {
+      c10::TypePtr type_) {
     return c10::make_intrusive<Tuple>(std::move(elements_), std::move(type_));
   }
 
@@ -683,7 +695,18 @@ struct TORCH_API Tuple : c10::intrusive_ptr_target {
     return elements_.size();
   }
 
-  std::shared_ptr<TupleType> type() const;
+  template <typename T = c10::TupleType>
+  std::shared_ptr<T> type() const {
+    if (!type_) {
+      type_ = TupleTypeFactory<T>::create(fmap(elements(), [&](const IValue& v) {
+        return v.type<typename T::ElementType>();
+      }));
+    }
+    if (auto t = type_->cast<T>()) {
+      return t;
+    }
+    return TupleTypeFactory<T>::fallback(*type_);
+  }
 
   static size_t hash(const Tuple& t) {
     return c10::get_hash(t.elements());
@@ -694,19 +717,39 @@ struct TORCH_API Tuple : c10::intrusive_ptr_target {
       const ivalue::Tuple& rhs);
 
  private:
-  explicit Tuple(std::vector<IValue> elements, std::shared_ptr<TupleType> type = nullptr)
+  // NOTE: If we try to avoid the overloads without
+  // `std::shared_ptr<TupleType> type` by defaulting it to nullptr, we
+  // end up having to call (part of) the shared_ptr destructor for
+  // `type` even though we should know statically it won't do
+  // anything.
+  explicit Tuple(std::vector<IValue> elements)
+    : elements_(std::move(elements)){}
+
+  explicit Tuple(std::vector<IValue> elements, c10::TypePtr type)
     : elements_(std::move(elements)), type_(std::move(type)) {}
 
-  explicit Tuple(TupleElements&& elements, std::shared_ptr<TupleType> type = nullptr)
+  explicit Tuple(TupleElements&& elements)
+    : elements_(std::move(elements)) {}
+
+  explicit Tuple(TupleElements&& elements, std::shared_ptr<TupleType> type)
     : elements_(std::move(elements)), type_(std::move(type)) {}
 
-  explicit Tuple(IValue&& e1, std::shared_ptr<TupleType> type = nullptr)
+  explicit Tuple(IValue&& e1)
+    : elements_(std::move(e1)) {}
+
+  explicit Tuple(IValue&& e1, std::shared_ptr<TupleType> type)
     : elements_(std::move(e1)), type_(std::move(type)) {}
 
-  explicit Tuple(IValue&& e1, IValue&& e2, std::shared_ptr<TupleType> type = nullptr)
+  explicit Tuple(IValue&& e1, IValue&& e2)
+    : elements_(std::move(e1), std::move(e2)) {}
+
+  explicit Tuple(IValue&& e1, IValue&& e2, std::shared_ptr<TupleType> type)
     : elements_(std::move(e1), std::move(e2)), type_(std::move(type)) {}
 
-  explicit Tuple(IValue&& e1, IValue&& e2, IValue&& e3, std::shared_ptr<TupleType> type = nullptr)
+  explicit Tuple(IValue&& e1, IValue&& e2, IValue&& e3)
+    : elements_(std::move(e1), std::move(e2), std::move(e3)) {}
+
+  explicit Tuple(IValue&& e1, IValue&& e2, IValue&& e3, std::shared_ptr<TupleType> type)
     : elements_(std::move(e1), std::move(e2), std::move(e3)), type_(std::move(type)) {}
 
   friend class c10::intrusive_ptr<Tuple>;
@@ -1311,6 +1354,8 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
     return c10::make_intrusive<Object>(std::move(type), numSlots);
   }
 
+  static c10::intrusive_ptr<Object> create(ClassTypePtr classType, size_t numSlots);
+
   /**
    * Slot API.
    *
@@ -1574,7 +1619,7 @@ c10::intrusive_ptr<T> IValue::toCustomClass() && {
       obj->slots().size() == 1,
       "Tried to cast IValue to custom class but it did "
       "not contain a custom class!");
-  const Type* expected_type = c10::getCustomClassType<c10::intrusive_ptr<T>>().get();
+  const auto* expected_type = c10::getCustomClassType<c10::intrusive_ptr<T>>().get();
   ivalue::checkCustomClassType(expected_type, type().get());
   auto userObj =
       c10::static_intrusive_pointer_cast<T>(obj->getSlot(0).toCapsule());
@@ -1592,7 +1637,7 @@ c10::intrusive_ptr<T> IValue::toCustomClass() const& {
       obj->slots().size() == 1,
       "Tried to cast IValue to custom class but it did "
       "not contain a custom class!");
-  const Type* expected_type = c10::getCustomClassType<c10::intrusive_ptr<T>>().get();
+  const auto* expected_type = c10::getCustomClassType<c10::intrusive_ptr<T>>().get();
   ivalue::checkCustomClassType(expected_type, type().get());
   auto userObj =
       c10::static_intrusive_pointer_cast<T>(obj->getSlot(0).toCapsule());
@@ -1857,6 +1902,28 @@ inline ivalue::Tuple& IValue::toTupleRef() const {
       payload.u.as_intrusive_ptr);
 }
 
+inline bool IValue::isDoubleList() const {
+  // note: avoids calling type() to avoid extra referencing counting for the returned type.
+  return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == FloatType::Kind;
+}
+
+inline bool IValue::isComplexDoubleList() const {
+  // note: avoids calling type() to avoid extra referencing counting for the returned type.
+  return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == ComplexType::Kind;
+}
+
+inline bool IValue::isTensorList() const {
+  return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == TensorType::Kind;
+}
+
+inline bool IValue::isIntList() const {
+  return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == IntType::Kind;
+}
+
+inline bool IValue::isBoolList() const {
+  return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == BoolType::Kind;
+}
+
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Tuple> v)
     : tag(Tag::Tuple), is_intrusive_ptr(true) {
   payload.u.as_intrusive_ptr = null_to_undefined_tensor(v.release());
@@ -1981,7 +2048,7 @@ template <
     typename T,
     std::enable_if_t<std::is_base_of<torch::CustomClassHolder, T>::value, int>>
 IValue::IValue(c10::intrusive_ptr<T> custom_class) {
-  TypePtr classType = []() {
+  auto classType = []() {
     try {
       return c10::getCustomClassType<c10::intrusive_ptr<T>>();
     } catch (const c10::Error&) {
@@ -1991,8 +2058,7 @@ IValue::IValue(c10::intrusive_ptr<T> custom_class) {
           "");
     }
   }();
-  auto ivalue_obj = c10::ivalue::Object::create(
-      c10::StrongTypePtr(nullptr, classType), /*num_slots=*/1);
+  auto ivalue_obj = c10::ivalue::Object::create(std::move(classType), /* numSlots */1);
   ivalue_obj->setSlot(0, IValue::make_capsule(std::move(custom_class)));
   payload.u.as_intrusive_ptr = null_to_undefined_tensor(ivalue_obj.release());
   tag = Tag::Object;
@@ -2189,5 +2255,15 @@ struct MaybeOwnedTraits<IValue> {
     return true;
   }
 };
+
+template <>
+struct IValue::TagType<c10::Type> {
+  static TORCH_API c10::TypePtr get(const IValue&);
+};
+
+template <typename T>
+typename T::Ptr IValue::type() const {
+  return IValue::TagType<T>::get(*this);
+}
 
 } // namespace c10

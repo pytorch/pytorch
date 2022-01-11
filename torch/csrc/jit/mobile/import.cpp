@@ -8,15 +8,17 @@
 #include <c10/util/ScopeExit.h>
 #include <c10/util/irange.h>
 #include <caffe2/serialize/inline_container.h>
+#include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/observer.h>
+#include <torch/csrc/jit/mobile/type_parser.h>
+#include <torch/csrc/jit/mobile/upgrader_mobile.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 #include <torch/custom_class.h>
-
 #include <exception>
 #include <fstream>
 #include <string>
@@ -76,11 +78,6 @@
 // Note that the following function-schema fields are not supported:
 //  - Argument::{known_length_,kwarg_only_}
 //  - FunctionSchema::{overload_name_, is_vararg_, is_varret_}
-
-namespace c10 {
-// std::string serializeType(const Type &t);
-TypePtr parseType(const std::string& pythonStr);
-} // namespace c10
 
 namespace torch {
 namespace jit {
@@ -202,6 +199,7 @@ class BytecodeDeserializer final {
 
  private:
   TypePtr resolveTypeName(const c10::QualifiedName& qn);
+  void init_upgrader(mobile::Function* function);
   void parseMethods(
       c10::ivalue::TupleElements&& vals,
       c10::optional<c10::ivalue::TupleElements>&& debug_handles,
@@ -219,6 +217,11 @@ class BytecodeDeserializer final {
   std::unique_ptr<PyTorchStreamReader> reader_{};
   c10::optional<at::Device> device_;
   uint64_t module_load_options_;
+  // From `version` or `.data/version` in model.ptl and it's compute
+  // dynamically. It's used for finding the minimum required runtime to run all
+  // operators from the given model. If it's less than the current runtime,
+  // upgrader will be applied at loading stage.
+  uint64_t operator_version_;
 };
 
 BytecodeDeserializer::BytecodeDeserializer(
@@ -290,6 +293,12 @@ void BytecodeDeserializer::parseFunctionSchema(
         false /*is_varargs*/,
         false /*is_varret*/);
     function->setSchema(std::move(schema));
+  }
+}
+
+void BytecodeDeserializer::init_upgrader(mobile::Function* function) {
+  for (auto& byteCodeFunctionWithOperator : getUpgraderBytecodeList()) {
+    function->append_function(byteCodeFunctionWithOperator.function);
   }
 }
 
@@ -370,6 +379,17 @@ void BytecodeDeserializer::parseMethods(
       debug_handles_m_tuple =
           std::move(*std::move((*debug_handles)[i]).toTuple()).elements();
     }
+    init_upgrader(function.get());
+    // 1. First pass all operators from models
+    parseOperators(
+        std::move(ops_list),
+        model_version,
+        module_load_options_,
+        function.get());
+
+    // 2. Decides if upgrader is needed
+    bool use_upgrader =
+        (operator_version_ < caffe2::serialize::kProducedFileFormatVersion);
 
     parseInstructions(
         function_name,
@@ -377,11 +397,12 @@ void BytecodeDeserializer::parseMethods(
         debug_handles_m_tuple,
         function.get());
 
-    parseOperators(
-        std::move(ops_list),
-        model_version,
-        module_load_options_,
-        function.get());
+    // 3. If upgrader is needed, change change the OP instrunction to CALL
+    // instruction (In next PR, use_upgrader will be parsed to parseInstruction
+    // function and do the actual change)
+    if (use_upgrader) {
+      applyUpgrader(function.get(), operator_version_);
+    }
 
     parseConstants(consts_list, function.get());
 
@@ -443,6 +464,7 @@ mobile::Module BytecodeDeserializer::deserialize(
             .elements();
     has_debug_handles = true;
   }
+  operator_version_ = reader_->version();
   parseMethods(std::move(bvals), std::move(debug_handles), *mcu);
   auto m = mobile::Module(readArchive("data", mcu).toObject(), mcu);
   m.setHasDebugHandles(has_debug_handles);
@@ -476,7 +498,8 @@ c10::IValue BytecodeDeserializer::readArchive(
       type_resolver,
       obj_loader,
       device_,
-      *reader_.get());
+      *reader_.get(),
+      nullptr);
   return ivalues;
 }
 
@@ -629,12 +652,12 @@ std::set<std::string> _export_operator_list(
   std::set<std::string> operator_list;
   for (Method func : module.get_methods()) {
     const Function& function = func.function();
-    const std::shared_ptr<Code> cptr = function.get_code();
+    const auto& code = function.get_code();
     // op_names below isn't a list of unique operator names. In fact
     // it can contain the same operator name many many times, so we need
     // to de-dup the list by adding all the operator names into
     // an std::set<std::string>.
-    std::vector<c10::OperatorName> const& op_names = cptr->op_names_;
+    std::vector<c10::OperatorName> const& op_names = code.op_names_;
     for (auto& op_name : op_names) {
       operator_list.insert(toString(op_name));
     }

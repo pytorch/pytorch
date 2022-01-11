@@ -391,6 +391,11 @@ void IrPrinter::handle(const GatherOp* op) {
   os_ << "} )\n";
 }
 
+void IrPrinter::handle(const ViewOp* top) {
+  indent();
+  os_ << top->out() << " = view( " << top->in() << " )\n";
+}
+
 void IrPrinter::handle(const Split* s) {
   os_ << (s->innerSplit() ? "Split: " : "Outer split: ");
   handle(s->in());
