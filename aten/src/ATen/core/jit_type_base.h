@@ -373,6 +373,8 @@ struct TORCH_API Type {
   };
 
   using TypePtr = SingletonOrSharedTypePtr<Type>;
+  using Ptr = TypePtr;
+  using ElementType = Type;
 
   // subtyping relation. By default, we return true for the case
   // when the type is exactly equal or if this <: T where rhs = Optional[T]
@@ -552,6 +554,9 @@ struct TORCH_API Type {
   // list for a tuple, the types of the tuple elements
   virtual at::ArrayRef<TypePtr> containedTypes() const {
     return {};
+  }
+  virtual TypePtr containedType(size_t i) const {
+    return containedTypes().at(i);
   }
   // create a new version of this type, replacing its contained types with
   // contained_types
