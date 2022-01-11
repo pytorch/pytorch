@@ -671,7 +671,9 @@ class GELU(Module):
 
 
 class Hardshrink(Module):
-    r"""Applies the hard shrinkage function element-wise:
+    r"""Applies the Hard Shrinkage (Hardshrink) function element-wise.
+
+    Hardshrink is defined as:
 
     .. math::
         \text{HardShrink}(x) =
