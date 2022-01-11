@@ -61,6 +61,7 @@
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/python/init.h>
 #include <torch/csrc/jit/python/python_ir.h>
+#include <torch/csrc/monitor/python_init.h>
 #include <torch/csrc/onnx/init.h>
 #include <torch/csrc/utils/init.h>
 #include <torch/csrc/utils/crash_handler.h>
@@ -832,6 +833,7 @@ PyObject* initModule() {
   // init.
   torch::onnx::initONNXBindings(module);
   torch::jit::initJITBindings(module);
+  torch::monitor::initMonitorBindings(module);
   torch::impl::dispatch::initDispatchBindings(module);
   torch::throughput_benchmark::initThroughputBenchmarkBindings(module);
   torch::crash_handler::initCrashHandlerBindings(module);
