@@ -22,6 +22,8 @@
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lift_closures.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/passes/normalize_ops.h>
+#include <torch/csrc/jit/passes/replacement_of_old_operators.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/slice_indices_adjust.h>
@@ -1299,7 +1301,7 @@ CondValue to_ir::emitIsInstance(const Expr& obj, const Expr& classinfo) {
     if (lhs_type == AnyType::get()) {
       isinstance_types.insert(
           isinstance_types.end(), rhs_types.begin(), rhs_types.end());
-      not_isinstance_types.emplace_back(AnyType::get());
+      not_isinstance_types.push_back(AnyType::get());
       // Edge case: we can still say that all lhs types subtype some
       // rhs type if `lhs` is `Any` and `rhs` is `Any`
       if (isinstance_types.size() != 1 ||

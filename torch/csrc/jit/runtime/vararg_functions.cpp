@@ -336,8 +336,12 @@ void listConstruct(Stack& stack, const at::ListType& type, size_t num_inputs) {
   stack.push_back(makeList(stack, type, num_inputs));
 }
 
-void dictConstruct(Stack& stack, const at::DictType& type, size_t num_inputs) {
-  auto vals = c10::impl::GenericDict(type.getKeyType(), type.getValueType());
+void dictConstruct(
+    Stack& stack,
+    const c10::Type& dict_type,
+    size_t num_inputs) {
+  auto vals = c10::impl::GenericDict(
+      dict_type.containedType(0), dict_type.containedType(1));
   vals.reserve(num_inputs / 2);
   // loop from the bottom of the stack to ensure the dictConstruct preserve
   // the inputs order.
