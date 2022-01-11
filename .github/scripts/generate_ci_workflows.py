@@ -10,6 +10,8 @@ import os
 import sys
 from typing_extensions import Literal
 
+import generate_binary_build_matrix  # type: ignore[import]
+
 YamlShellBool = Literal["''", 1]
 Arch = Literal["windows", "linux", "macos"]
 
@@ -73,6 +75,10 @@ LABEL_CIFLOW_DOCKER = "ciflow/docker"
 LABEL_CIFLOW_IOS = "ciflow/ios"
 LABEL_CIFLOW_MACOS = "ciflow/macos"
 LABEL_CIFLOW_TRUNK = "ciflow/trunk"
+LABEL_CIFLOW_BINARIES = "ciflow/binaries"
+LABEL_CIFLOW_BINARIES_WHEEL = "ciflow/binaries/wheel"
+LABEL_CIFLOW_BINARIES_CONDA = "ciflow/binaries/conda"
+LABEL_CIFLOW_BINARIES_LIBTORCH = "ciflow/binaries/libtorch"
 
 
 @dataclass
@@ -84,6 +90,8 @@ class CIFlowConfig:
     trigger_actor: str = 'pytorchbot'
     root_job_condition: str = ''
     label_conditions: str = ''
+    # Certain jobs might not want to be part of the ciflow/[all,trunk] workflow
+    isolated_workflow: bool = False
 
     def gen_root_job_condition(self) -> None:
         # CIFlow conditions:
@@ -112,9 +120,10 @@ class CIFlowConfig:
         self.root_job_condition = ''
 
     def __post_init__(self) -> None:
-        self.labels.add(LABEL_CIFLOW_ALL)
-        if LABEL_CIFLOW_SCHEDULED not in self.labels:
-            self.labels.add(LABEL_CIFLOW_TRUNK)
+        if not self.isolated_workflow:
+            self.labels.add(LABEL_CIFLOW_ALL)
+            if LABEL_CIFLOW_SCHEDULED not in self.labels:
+                self.labels.add(LABEL_CIFLOW_TRUNK)
         assert all(label.startswith(LABEL_CIFLOW_PREFIX) for label in self.labels)
         self.gen_root_job_condition()
 
@@ -262,6 +271,40 @@ class DockerWorkflow:
 
     def generate_workflow_file(self, workflow_template: jinja2.Template) -> None:
         output_file_path = GITHUB_DIR / "workflows/generated-docker-builds.yml"
+        with open(output_file_path, "w") as output_file:
+            GENERATED = "generated"  # Note that please keep the variable GENERATED otherwise phabricator will hide the whole file
+            output_file.writelines([f"# @{GENERATED} DO NOT EDIT MANUALLY\n"])
+            try:
+                content = workflow_template.render(asdict(self))
+            except Exception as e:
+                print(f"Failed on template: {workflow_template}", file=sys.stderr)
+                raise e
+            output_file.write(content)
+            if content[-1] != "\n":
+                output_file.write("\n")
+        print(output_file_path)
+
+@dataclass
+class BinaryBuildWorkflow:
+    os: str
+    build_configs: List[Dict[str, str]]
+    package_type: str
+
+    # Optional fields
+    build_environment: str = ''
+    abi_version: str = ''
+    ciflow_config: CIFlowConfig = field(default_factory=CIFlowConfig)
+    is_scheduled: str = ''
+
+    def __post_init__(self) -> None:
+        if self.abi_version:
+            self.build_environment = f"{self.os}-binary-{self.package_type}-{self.abi_version}"
+        else:
+            self.build_environment = f"{self.os}-binary-{self.package_type}"
+
+
+    def generate_workflow_file(self, workflow_template: jinja2.Template) -> None:
+        output_file_path = GITHUB_DIR / f"workflows/generated-{self.build_environment}.yml"
         with open(output_file_path, "w") as output_file:
             GENERATED = "generated"  # Note that please keep the variable GENERATED otherwise phabricator will hide the whole file
             output_file.writelines([f"# @{GENERATED} DO NOT EDIT MANUALLY\n"])
@@ -786,6 +829,51 @@ DOCKER_WORKFLOWS = [
     ),
 ]
 
+LINUX_BINARY_BUILD_WORFKLOWS = [
+    BinaryBuildWorkflow(
+        os="linux",
+        package_type="manywheel",
+        build_configs=generate_binary_build_matrix.generate_wheels_matrix(),
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},
+            isolated_workflow=True,
+        ),
+    ),
+    BinaryBuildWorkflow(
+        os="linux",
+        package_type="conda",
+        build_configs=generate_binary_build_matrix.generate_conda_matrix(),
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_CONDA},
+            isolated_workflow=True,
+        ),
+    ),
+    BinaryBuildWorkflow(
+        os="linux",
+        package_type="libtorch",
+        abi_version=generate_binary_build_matrix.CXX11_ABI,
+        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
+            generate_binary_build_matrix.CXX11_ABI
+        ),
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
+            isolated_workflow=True,
+        ),
+    ),
+    BinaryBuildWorkflow(
+        os="linux",
+        package_type="libtorch",
+        abi_version=generate_binary_build_matrix.PRE_CXX11_ABI,
+        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
+            generate_binary_build_matrix.PRE_CXX11_ABI
+        ),
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
+            isolated_workflow=True,
+        ),
+    ),
+]
+
 def main() -> None:
     jinja_env = jinja2.Environment(
         variable_start_string="!{{",
@@ -801,6 +889,7 @@ def main() -> None:
         (jinja_env.get_template("docker_builds_ci_workflow.yml.j2"), DOCKER_WORKFLOWS),
         (jinja_env.get_template("android_ci_full_workflow.yml.j2"), ANDROID_WORKFLOWS),
         (jinja_env.get_template("android_ci_workflow.yml.j2"), ANDROID_SHORT_WORKFLOWS),
+        (jinja_env.get_template("linux_binary_build_workflow.yml.j2"), LINUX_BINARY_BUILD_WORFKLOWS),
     ]
     # Delete the existing generated files first, this should align with .gitattributes file description.
     existing_workflows = GITHUB_DIR.glob("workflows/generated-*")
