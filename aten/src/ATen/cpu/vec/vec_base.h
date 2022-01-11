@@ -87,7 +87,11 @@ using int_same_size_t = typename int_of_size<sizeof(T)>::type;
 // NOTE: If you specialize on a type, you must define all operations!
 
 // emulates Vectorized types
+#if defined(__s390x__)
+template <class T, class TEMP=void>
+#else
 template <class T>
+#endif
 struct Vectorized {
 private:
   __at_align__ T values[VECTOR_WIDTH / sizeof(T)];
@@ -961,16 +965,6 @@ interleave2(const Vectorized<T>& a, const Vectorized<T>& b) {
   }
   return std::make_pair(Vectorized<T>::loadu(static_cast<void*>(buffer1)),
                         Vectorized<T>::loadu(static_cast<void*>(buffer2)));
-}
-
-// transpose operation of a 8*8 block
-template <typename T>
-inline void transpose_kernel_8x8(const T* src, int64_t ld_src, T* dst, int64_t ld_dst) {
-  for (int64_t i = 0; i < 8; i++) {
-    for (int64_t j = 0; j < 8; j++) {
-      dst[j * ld_dst + i] = src[i * ld_src + j];
-    }
-  }
 }
 
 template <typename src_T, typename dst_T>

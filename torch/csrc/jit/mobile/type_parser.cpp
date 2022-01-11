@@ -1,15 +1,19 @@
+#include <torch/csrc/jit/mobile/type_parser.h>
+
+#include <queue>
+
 #include <ATen/core/jit_type.h>
+#include <ATen/core/type_factory.h>
 #include <c10/util/string_view.h>
 #include <torch/csrc/jit/frontend/parser_constants.h>
 #include <torch/csrc/jit/mobile/runtime_compatibility.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/custom_class.h>
-#include <queue>
 
 namespace torch {
 namespace jit {
 const std::unordered_map<std::string, c10::TypePtr>& string_to_type_lut();
-}
+} // namespace jit
 } // namespace torch
 
 using torch::jit::string_to_type_lut;
@@ -75,15 +79,15 @@ std::vector<TypePtr> TypeParser::parseList() {
   return typePtrs;
 }
 
-// The list of non-simple types supported by currrent parser.
-std::unordered_set<std::string> TypeParser::getNonSimpleType() {
+// The list of non-simple types supported by current parser.
+const std::unordered_set<std::string>& TypeParser::getNonSimpleType() {
   static std::unordered_set<std::string> nonSimpleTypes{
-      "List", "Union", "Optional", "Future", "Dict", "Tuple"};
+      "List", "Optional", "Future", "Dict", "Tuple"};
   return nonSimpleTypes;
 }
 
-// The list of custom types supported by currrent parser.
-std::unordered_set<std::string> TypeParser::getCustomType() {
+// The list of custom types supported by current parser.
+const std::unordered_set<std::string>& TypeParser::getCustomType() {
   static std::unordered_set<std::string> customeTypes{
       kTypeTorchbindCustomClass, kTypeNamedTuple};
   return customeTypes;
@@ -101,7 +105,7 @@ TypePtr TypeParser::parseNonSimple(const std::string& token) {
   if (token == "List") {
     return CreateSingleElementType<ListType>();
   } else if (token == "Optional") {
-    return CreateSingleElementType<OptionalType>();
+    return parseSingleElementType(DynamicType::Tag::Optional);
   } else if (token == "Future") {
     return CreateSingleElementType<FutureType>();
   } else if (token == "Dict") {
@@ -110,7 +114,7 @@ TypePtr TypeParser::parseNonSimple(const std::string& token) {
     expectChar(',');
     auto val = parse();
     expectChar(']');
-    return DictType::create(std::move(key), std::move(val));
+    return DynamicTypeFactory::create<DictType>(std::move(key), std::move(val));
   } else if (token == "Tuple") {
     std::vector<TypePtr> types;
     expectChar('[');
@@ -295,6 +299,14 @@ template <class T>
 TypePtr TypeParser::CreateSingleElementType() {
   expectChar('[');
   auto result = T::create(parse());
+  expectChar(']');
+  return result;
+}
+
+TypePtr TypeParser::parseSingleElementType(DynamicType::Tag tag) {
+  expectChar('[');
+  auto result =
+      std::make_shared<DynamicType>(tag, DynamicType::Arguments(parse()));
   expectChar(']');
   return result;
 }

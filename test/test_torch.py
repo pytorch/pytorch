@@ -4469,6 +4469,14 @@ else:
 
             self.assertEqual(res, expected, atol=0, rtol=0)
 
+    @onlyNativeDeviceTypes
+    def test_scatter_zero_size_index(self, device) -> None:
+        null_index = torch.zeros((0, 4), dtype=torch.int64)
+        null_arr = torch.zeros((0, 4))
+        original = torch.arange(4, dtype=torch.float32)
+        result = original.scatter(0, null_index, null_arr)
+        self.assertEqual(result, original, atol=0, rtol=0)
+
     @onlyCUDA
     def test_sync_warning(self, device):
 
@@ -4628,19 +4636,6 @@ else:
         b = torch.ones(10000, 10000, dtype=dtype, device=device)  # probability of drawing "1" is 1
         num_zeros = (torch.bernoulli(b) == 0).sum()
         self.assertEqual(num_zeros, 0)
-
-    @onlyCPU
-    @dtypesIfCPU(torch.bfloat16, torch.float32)
-    def test_copy_transpose_same_type(self, device, dtype):
-        # CPU has a fast path in copy tranpose when src and dst have the same dtype
-        x = torch.randn(1000, 100, dtype=dtype, device=device).t()
-        x2 = x.float() if dtype == torch.bfloat16 else x.double()
-        y = torch.empty(100, 1000, dtype=dtype, device=device)
-        y2 = torch.empty(100, 1000, dtype=dtype, device=device)
-
-        y.copy_(x)
-        y2.copy_(x2)
-        self.assertEqual(y, y2)
 
     @dtypes(*get_all_fp_dtypes())
     def test_exponential(self, device, dtype):
@@ -5621,6 +5616,42 @@ else:
             # copy is a shallow copy, only copies the tensor view,
             # not the data
             self.assertEqual(x, y)
+
+    @onlyNativeDeviceTypes
+    def test_copy_math_view(self, device):
+        for dst_dtype, src_dtype in [
+                (torch.float32, torch.float32),
+                (torch.float64, torch.float32),
+                (torch.int64, torch.int32),
+                (torch.complex128, torch.complex64),
+        ]:
+            src = make_tensor((100,), dtype=src_dtype, device=device)
+            dst = torch.empty(100, dtype=dst_dtype, device=device)
+
+            dst.copy_(src)
+            self.assertEqual(dst, src, exact_dtype=False)
+
+            dst.copy_(src._neg_view())
+            self.assertEqual(dst, src.neg(), exact_dtype=False)
+
+            dst._neg_view().copy_(torch._neg_view(src))
+            self.assertEqual(dst, src, exact_dtype=False)
+
+            dst._neg_view().copy_(src)
+            self.assertEqual(dst, src.neg(), exact_dtype=False)
+
+        for dst_dtype, src_dtype in [
+                (torch.complex64, torch.complex64),
+                (torch.complex128, torch.complex64),
+        ]:
+            src = make_tensor((100,), dtype=src_dtype, device=device)
+            dst = torch.empty(100, dtype=dst_dtype, device=device)
+
+            dst.conj().copy_(src)
+            self.assertEqual(dst, src.conj_physical(), exact_dtype=False)
+
+            dst.conj().copy_(src._neg_view())
+            self.assertEqual(dst, src.neg().conj_physical(), exact_dtype=False)
 
     def test_clone_all_dtypes_and_devices(self, device):
         for dt in get_all_dtypes():
