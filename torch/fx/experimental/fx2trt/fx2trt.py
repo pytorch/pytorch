@@ -1,12 +1,16 @@
 import warnings
-from typing import List, NamedTuple, Iterable, Any, Optional, Tuple, Sequence, Dict
+from typing import List, NamedTuple, Any, Optional, Sequence, Dict
 
+import numpy
 import tensorrt as trt
 import torch
 import torch.fx
 from torch.fx.node import _get_qualified_name
 from torch.fx.passes.shape_prop import TensorMetadata
-import numpy
+
+from .converter_registry import CONVERTERS
+from .input_tensor_spec import InputTensorSpec
+from .utils import torch_dtype_to_trt, get_dynamic_dims
 
 
 class TRTInterpreterResult(NamedTuple):
@@ -14,334 +18,6 @@ class TRTInterpreterResult(NamedTuple):
     input_names: Sequence[str]
     output_names: Sequence[str]
     serialized_cache: bytearray
-
-
-# Borrowed from torch2trt
-def torch_dtype_to_trt(dtype):
-    if trt.__version__ >= "7.0" and dtype == torch.bool:
-        return trt.bool
-    elif dtype == torch.int8:
-        return trt.int8
-    elif dtype == torch.int32:
-        return trt.int32
-    elif dtype == torch.float16:
-        return trt.float16
-    elif dtype == torch.float32:
-        return trt.float32
-    else:
-        raise TypeError("%s is not supported by tensorrt" % dtype)
-
-
-def torch_dtype_from_trt(dtype):
-    if dtype == trt.int8:
-        return torch.int8
-    elif trt.__version__ >= "7.0" and dtype == trt.bool:
-        return torch.bool
-    elif dtype == trt.int32:
-        return torch.int32
-    elif dtype == trt.float16:
-        return torch.float16
-    elif dtype == trt.float32:
-        return torch.float32
-    else:
-        raise TypeError("%s is not supported by torch" % dtype)
-
-
-class TRTModule(torch.nn.Module):
-    def __init__(self, engine=None, input_names=None, output_names=None, cuda_graph_batch_size=-1):
-        super(TRTModule, self).__init__()
-        self._register_state_dict_hook(TRTModule._on_state_dict)
-        self.engine = engine
-        self.input_names = input_names
-        self.output_names = output_names
-        self.cuda_graph_batch_size = cuda_graph_batch_size
-        self.initialized = False
-
-        if engine:
-            self._initialize()
-
-    def _initialize(self):
-        self.initialized = True
-        self.context = self.engine.create_execution_context()
-
-        # Indices of inputs/outputs in the trt engine bindings, in the order
-        # as they are in the original PyTorch model.
-        self.input_binding_indices_in_order: Sequence[int] = [
-            self.engine.get_binding_index(name) for name in self.input_names
-        ]
-        self.output_binding_indices_in_order: Sequence[int] = [
-            self.engine.get_binding_index(name) for name in self.output_names
-        ]
-        primary_input_outputs = set()
-        primary_input_outputs.update(self.input_binding_indices_in_order)
-        primary_input_outputs.update(self.output_binding_indices_in_order)
-        self.hidden_output_binding_indices_in_order: Sequence[int] = []
-        self.hidden_output_names: Sequence[str] = []
-        for i in range(self.engine.num_bindings):
-            if i not in primary_input_outputs:
-                self.hidden_output_binding_indices_in_order.append(i)
-                self.hidden_output_names.append(self.engine.get_binding_name(i))
-
-        assert self.engine.num_bindings == (len(self.input_names) + len(self.output_names) + len(self.hidden_output_names))
-
-        self.input_dtypes: Sequence[torch.dtype] = [
-            torch_dtype_from_trt(self.engine.get_binding_dtype(idx))
-            for idx in self.input_binding_indices_in_order
-        ]
-        self.input_shapes: Sequence[Sequence[int]] = [
-            tuple(self.engine.get_binding_shape(idx))
-            for idx in self.input_binding_indices_in_order
-        ]
-        self.output_dtypes: Sequence[torch.dtype] = [
-            torch_dtype_from_trt(self.engine.get_binding_dtype(idx))
-            for idx in self.output_binding_indices_in_order
-        ]
-        self.output_shapes = [
-            tuple(self.engine.get_binding_shape(idx)) if self.engine.has_implicit_batch_dimension else tuple()
-            for idx in self.output_binding_indices_in_order
-        ]
-        self.hidden_output_dtypes: Sequence[torch.dtype] = [
-            torch_dtype_from_trt(self.engine.get_binding_dtype(idx))
-            for idx in self.hidden_output_binding_indices_in_order
-        ]
-        self.hidden_output_shapes = [
-            tuple(self.engine.get_binding_shape(idx)) if self.engine.has_implicit_batch_dimension else tuple()
-            for idx in self.hidden_output_binding_indices_in_order
-        ]
-
-
-    def _check_initialized(self):
-        if not self.initialized:
-            raise RuntimeError("TRTModule is not initialized.")
-
-    def _on_state_dict(self, state_dict, prefix, local_metadata):
-        self._check_initialized()
-        state_dict[prefix + "engine"] = bytearray(self.engine.serialize())
-        state_dict[prefix + "input_names"] = self.input_names
-        state_dict[prefix + "output_names"] = self.output_names
-        state_dict[prefix + "cuda_graph_batch_size"] = self.cuda_graph_batch_size
-
-    def _load_from_state_dict(
-        self,
-        state_dict,
-        prefix,
-        local_metadata,
-        strict,
-        missing_keys,
-        unexpected_keys,
-        error_msgs,
-    ):
-        engine_bytes = state_dict[prefix + "engine"]
-
-        logger = trt.Logger()
-        runtime = trt.Runtime(logger)
-        self.engine = runtime.deserialize_cuda_engine(engine_bytes)
-
-        self.input_names = state_dict[prefix + "input_names"]
-        self.output_names = state_dict[prefix + "output_names"]
-        self._initialize()
-
-    def __getstate__(self):
-        state = self.__dict__.copy()
-        state["engine"] = bytearray(self.engine.serialize())
-        state.pop('context', None)
-        return state
-
-    def __setstate__(self, state):
-        logger = trt.Logger()
-        runtime = trt.Runtime(logger)
-        state["engine"] = runtime.deserialize_cuda_engine(state["engine"])
-        self.__dict__.update(state)
-        if self.engine:
-            self.context = self.engine.create_execution_context()
-
-    def forward(self, *inputs):
-        with torch.autograd.profiler.record_function("TRTModule:Forward"):
-            self._check_initialized()
-
-            with torch.autograd.profiler.record_function("TRTModule:ProcessInputs"):
-                assert len(inputs) == len(
-                    self.input_names
-                ), f"Wrong number of inputs, expect {len(self.input_names)} get {len(inputs)}."
-
-                # This is only used when the trt engine is using implicit batch dim.
-                batch_size = inputs[0].shape[0]
-                contiguous_inputs: List[torch.Tensor] = [i.contiguous() for i in inputs]
-                bindings: List[Any] = [None] * (
-                    len(self.input_names) + len(self.output_names) + len(self.hidden_output_names)
-                )
-
-                for i, input_name in enumerate(self.input_names):
-                    assert inputs[
-                        i
-                    ].is_cuda, f"{i}th input({input_name}) is not on cuda device."
-                    assert (
-                        inputs[i].dtype == self.input_dtypes[i]
-                    ), f"Dtype mismatch for {i}th input({input_name}). Expect {self.input_dtypes[i]}, got {inputs[i].dtype}."
-
-                    idx = self.input_binding_indices_in_order[i]
-                    bindings[idx] = contiguous_inputs[i].data_ptr()
-
-                    if not self.engine.has_implicit_batch_dimension:
-                        self.context.set_binding_shape(
-                            idx, tuple(contiguous_inputs[i].shape)
-                        )
-                    else:
-                        assert (
-                            inputs[i].size()[1:] == self.input_shapes[i]
-                        ), f"Shape mismatch for {i}th input({input_name}). " \
-                           f"Expect {self.input_shapes[i]}, got {inputs[i].size()[1:]}."
-
-            with torch.autograd.profiler.record_function("TRTModule:ProcessOutputs"):
-                # create output tensors
-                outputs: List[torch.Tensor] = []
-
-                for i, idx in enumerate(self.output_binding_indices_in_order):
-                    if self.engine.has_implicit_batch_dimension:
-                        shape = (batch_size,) + self.output_shapes[i]
-                    else:
-                        shape = tuple(self.context.get_binding_shape(idx))
-
-                    output = torch.empty(  # type: ignore[call-overload]
-                        size=shape,
-                        dtype=self.output_dtypes[i],
-                        device=torch.cuda.current_device(),
-                    )
-                    outputs.append(output)
-                    bindings[idx] = output.data_ptr()
-
-                for i, idx in enumerate(self.hidden_output_binding_indices_in_order):
-                    if self.engine.has_implicit_batch_dimension:
-                        shape = (batch_size,) + self.hidden_output_shapes[i]
-                    else:
-                        shape = tuple(self.context.get_binding_shape(idx))
-
-                    output = torch.empty(  # type: ignore[call-overload]
-                        size=shape,
-                        dtype=self.hidden_output_dtypes[i],
-                        device=torch.cuda.current_device(),
-                    )
-                    bindings[idx] = output.data_ptr()
-
-            with torch.autograd.profiler.record_function("TRTModule:TensorRTRuntime"):
-                if self.engine.has_implicit_batch_dimension:
-                    self.context.execute_async(
-                        batch_size, bindings, torch.cuda.current_stream().cuda_stream
-                    )
-                else:
-                    self.context.execute_async_v2(
-                        bindings, torch.cuda.current_stream().cuda_stream
-                    )
-
-            if len(outputs) == 1:
-                return outputs[0]
-
-            return tuple(outputs)
-
-    def enable_profiling(self):
-        """
-        Enable TensorRT profiling. After calling this function, TensorRT will report
-        time spent on each layer in stdout for each forward run.
-        """
-        self._check_initialized()
-
-        if not self.context.profiler:
-            self.context.profiler = trt.Profiler()
-
-    def disable_profiling(self):
-        """
-        Disable TensorRT profiling.
-        """
-        self._check_initialized()
-
-        torch.cuda.synchronize()
-        del self.context
-        self.context = self.engine.create_execution_context()
-
-
-CONVERTERS = {}
-NO_IMPLICIT_BATCH_DIM_SUPPORT = {}
-NO_EXPLICIT_BATCH_DIM_SUPPORT = {}
-
-
-def tensorrt_converter(key, no_implicit_batch_dim=False, no_explicit_batch_dim=False, enabled=True):
-    def register_converter(converter):
-        CONVERTERS[key] = converter
-        if no_implicit_batch_dim:
-            NO_IMPLICIT_BATCH_DIM_SUPPORT[key] = converter
-        if no_explicit_batch_dim:
-            NO_EXPLICIT_BATCH_DIM_SUPPORT[key] = converter
-        return converter
-
-    def pass_converter(converter):
-        return converter
-
-    if enabled:
-        return register_converter
-    else:
-        return pass_converter
-
-
-class InputTensorSpec(NamedTuple):
-    """
-    This class contains the information of a input tensor.
-
-    shape: shape of the tensor.
-
-    dtype: dtyep of the tensor.
-
-    device: device of the tensor. This is only used to generate inputs to the given model
-        in order to run shape prop. For TensorRT engine, inputs have to be on cuda device.
-
-    shape_ranges: If dynamic shape is needed (shape has dimensions of -1), then this field
-        has to be provided (default is empty list). Every shape_range is a tuple of three
-        tuples ((min_input_shape), (optimized_input_shape), (max_input_shape)). Each shape_range
-        is used to populate a TensorRT optimization profile.
-        e.g. If the input shape varies from (1, 224) to (100, 224) and we want to optimize
-        for (25, 224) because it's the most common input shape, then we set shape_ranges to
-        ((1, 224), (25, 225), (100, 224)).
-
-    has_batch_dim: Whether the shape includes batch dimension. Batch dimension has to be provided
-        if the engine want to run with dynamic shape.
-    """
-
-    shape: torch.Size
-    dtype: torch.dtype
-    device: torch.device = torch.device("cpu")
-    shape_ranges: List[Tuple[Tuple[int, ...], Tuple[int, ...], Tuple[int, ...]]] = []
-    has_batch_dim: bool = True
-
-    @classmethod
-    def from_tensor(cls, tensor: torch.Tensor):
-        return cls(tensor.shape, tensor.dtype, tensor.device)
-
-    @classmethod
-    def from_tensors(cls, tensors: Iterable[torch.Tensor]):
-        return [cls.from_tensor(t) for t in tensors]
-
-
-def get_dynamic_dims(shape):
-    dynamic_dims = []
-
-    for i, s in enumerate(shape):
-        if s == -1:
-            dynamic_dims.append(i)
-
-    return dynamic_dims
-
-
-def create_inputs_from_specs(input_specs):
-    inputs = []
-
-    for shape, dtype, device, shape_ranges, has_batch_dim in input_specs:
-        if len(get_dynamic_dims(shape)):
-            shape = shape_ranges[0][1]
-        elif not has_batch_dim:
-            shape = (1,) + tuple(shape)
-
-        inputs.append(torch.randn(shape).to(dtype=dtype, device=device))
-
-    return inputs
 
 
 class TRTInterpreter(torch.fx.Interpreter):
@@ -467,10 +143,12 @@ class TRTInterpreter(torch.fx.Interpreter):
         max_workspace_size=1 << 25,
         fp16_mode=True,
         int8_mode=False,
+        sparse_weights=False,
         force_fp32_output=False,
         strict_type_constraints=False,
         algorithm_selector=None,
         timing_cache=None,
+        profiling_verbosity=None,
     ) -> TRTInterpreterResult:
         # For float outputs, we set their dtype to fp16 only if fp16_mode=True and
         # force_fp32_output=False.
@@ -497,11 +175,19 @@ class TRTInterpreter(torch.fx.Interpreter):
             cache = builder_config.create_timing_cache(b"")
         builder_config.set_timing_cache(cache, False)
 
+        if trt.__version__ >= "8.2":
+            builder_config.profiling_verbosity = profiling_verbosity \
+                if profiling_verbosity else \
+                trt.ProfilingVerbosity.LAYER_NAMES_ONLY
         if fp16_mode:
             builder_config.set_flag(trt.BuilderFlag.FP16)
 
         if int8_mode:
             builder_config.set_flag(trt.BuilderFlag.INT8)
+
+        if sparse_weights:
+            assert fp16_mode or int8_mode, "We can only enable sparsity in fp16 or int8 mode."
+            builder_config.set_flag(trt.BuilderFlag.SPARSE_WEIGHTS)
 
         if strict_type_constraints:
             builder_config.set_flag(trt.BuilderFlag.STRICT_TYPES)
@@ -572,6 +258,7 @@ class TRTInterpreter(torch.fx.Interpreter):
                 f"Conversion of module of type {submod_type} not currently supported!"
             )
 
+        assert self._cur_node_name is not None
         return converter(self.network, submod, args, kwargs, self._cur_node_name)
 
     def call_function(self, target, args, kwargs):
@@ -582,6 +269,7 @@ class TRTInterpreter(torch.fx.Interpreter):
                 f"Conversion of function {torch.typename(target)} not currently supported!"
             )
 
+        assert self._cur_node_name is not None
         return converter(self.network, target, args, kwargs, self._cur_node_name)
 
     def call_method(self, target, args, kwargs):
@@ -593,6 +281,7 @@ class TRTInterpreter(torch.fx.Interpreter):
                 f"Conversion of method {target} not currently supported!"
             )
 
+        assert self._cur_node_name is not None
         return converter(self.network, target, args, kwargs, self._cur_node_name)
 
     def output(self, target, args, kwargs):
