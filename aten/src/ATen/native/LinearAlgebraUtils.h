@@ -193,7 +193,7 @@ void checkLinalgCompatibleDtype(const std::string& fn_name, ScalarType out_type,
 
 void checkNotComplexTolerance(const Tensor& tol, const c10::string_view f_name, const c10::string_view tol_name);
 
-bool linalg_solve_is_vector_rhs(const Tensor& input, const Tensor& other);
+TORCH_API bool linalg_solve_is_vector_rhs(const Tensor& input, const Tensor& other);
 
 TORCH_API bool is_blas_compatible_column_major_order(const Tensor& input);
 

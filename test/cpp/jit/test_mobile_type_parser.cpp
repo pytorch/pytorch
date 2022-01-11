@@ -2,11 +2,7 @@
 #include <test/cpp/jit/test_utils.h>
 
 #include <ATen/core/jit_type.h>
-
-namespace c10 {
-TypePtr parseType(const std::string& pythonStr);
-std::vector<TypePtr> parseType(std::vector<std::string>& pythonStr);
-} // namespace c10
+#include <torch/csrc/jit/mobile/type_parser.h>
 
 namespace torch {
 namespace jit {
@@ -23,8 +19,14 @@ TEST(MobileTypeParserTest, NestedContainersAnnotationStr) {
   std::string tuple_ps(
       "Tuple[str, Optional[float], Dict[str, List[Tensor]], int]");
   auto tuple_tp = c10::parseType(tuple_ps);
-  std::string tuple_tps = tuple_tp->annotation_str();
-  ASSERT_EQ(tuple_ps, tuple_tps);
+  std::vector<TypePtr> args = {
+      c10::StringType::get(),
+      c10::OptionalType::create(c10::FloatType::get()),
+      c10::DictType::create(
+          StringType::get(), ListType::create(TensorType::get())),
+      IntType::get()};
+  auto tp = TupleType::create(std::move(args));
+  ASSERT_EQ(*tuple_tp, *tp);
 }
 
 TEST(MobileTypeParserTest, TorchBindClass) {
@@ -42,14 +44,14 @@ TEST(MobileTypeParserTest, ListOfTorchBindClass) {
 }
 
 TEST(MobileTypeParserTest, NestedContainersAnnotationStrWithSpaces) {
-  std::string tuple_ps(
-      "Tuple[str, Optional[float], Dict[str, List[Tensor]], int]");
   std::string tuple_space_ps(
       "Tuple[  str, Optional[float], Dict[str, List[Tensor ]]  , int]");
   auto tuple_space_tp = c10::parseType(tuple_space_ps);
   // tuple_space_tps should not have weird white spaces
   std::string tuple_space_tps = tuple_space_tp->annotation_str();
-  ASSERT_EQ(tuple_ps, tuple_space_tps);
+  ASSERT_TRUE(tuple_space_tps.find("[ ") == std::string::npos);
+  ASSERT_TRUE(tuple_space_tps.find(" ]") == std::string::npos);
+  ASSERT_TRUE(tuple_space_tps.find(" ,") == std::string::npos);
 }
 
 TEST(MobileTypeParserTest, NamedTuple) {
@@ -91,10 +93,8 @@ TEST(MobileTypeParserTest, DictNestedNamedTupleTypeList) {
       "Dict[str, __torch__.base_models.preproc_types.PreprocOutputType]");
   std::vector<std::string> type_strs = {type_str_1, type_str_2};
   std::vector<c10::TypePtr> named_tuple_tps = c10::parseType(type_strs);
-  std::string named_tuple_annotation_str = named_tuple_tps[1]->annotation_str();
-  ASSERT_EQ(
-      named_tuple_annotation_str,
-      "Dict[str, __torch__.base_models.preproc_types.PreprocOutputType]");
+  EXPECT_EQ(*named_tuple_tps[1]->containedType(0), *c10::StringType::get());
+  EXPECT_EQ(*named_tuple_tps[0], *named_tuple_tps[1]->containedType(1));
 }
 
 TEST(MobileTypeParserTest, NamedTupleNestedNamedTupleTypeList) {
