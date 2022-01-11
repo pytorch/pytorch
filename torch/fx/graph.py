@@ -2,6 +2,7 @@ from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_na
 import torch.utils._pytree as pytree
 from . import _pytree as fx_pytree
 from ._compatibility import compatibility
+import contextlib
 
 from typing import TYPE_CHECKING, Callable, Any, List, Dict, NamedTuple, Optional, Tuple, Set, FrozenSet, Type
 from dataclasses import dataclass
@@ -28,6 +29,12 @@ _origin_type_map = {
     frozenset: FrozenSet,
     tuple: Tuple,
 }
+
+
+# Signature for functions thattransforms the body (`list[str]`) of the
+# generated code
+TransformCodeFunc = Callable[[List[str]], List[str]]
+
 
 class _CustomBuiltin(NamedTuple):
     """Additional objs that we add to every graph's globals.
@@ -303,6 +310,9 @@ class Graph:
         self._owning_module = owning_module
         self._tracer_cls = tracer_cls
         self._pytree_info: Optional[_PyTreeInfo] = None
+
+        # A function `list[str] -> list[str]` to transform the body of the generated code
+        self._on_generate_code: Optional[TransformCodeFunc] = None
 
     @property
     def owning_module(self):
@@ -1009,6 +1019,9 @@ class Graph:
         else:
             wrap_stmts = ''
 
+        if self._on_generate_code:
+            body = self._on_generate_code(body)
+
         # If the original function didn't have self as its first argument, we
         # would have added it.
         if len(orig_args) == 0 or orig_args[0] != 'self':
@@ -1172,6 +1185,93 @@ def forward({', '.join(orig_args)}){maybe_return_annotation[0]}:
                 changed = True
 
         return changed
+
+
+    @compatibility(is_backward_compatible=False)
+    def on_generate_code(
+        self,
+        make_transformer: Callable[[Optional[TransformCodeFunc]], TransformCodeFunc]
+    ):
+        """Register a transformer function when python code is generated
+
+        Args:
+            make_transformer (Callable[[Optional[TransformCodeFunc]], TransformCodeFunc]):
+                a function that returns a code transformer to be registered.
+                This function is called by `on_generate_code` to obtain the
+                code transformer.
+
+                This function is also given as its input the currently
+                registered code transformer (or None if nothing is registered),
+                in case it is not desirable to overwrite it. This is useful to
+                chain code transformers together.
+
+        Returns:
+            a context manager that when used in a `with` statement, to automatically
+            restore the previously registered code transformer.
+
+        Example:
+
+        .. code-block:: python
+
+
+            gm: fx.GraphModule = ...
+
+            # This is a code transformer we want to register. This code
+            # transformer prepends a pdb import and trace statement at the very
+            # beginning of the generated torch.fx code to allow for manual
+            # debugging with the PDB library.
+            def insert_pdb(body):
+                return ["import pdb; pdb.set_trace()\\n", *body]
+
+            # Registers `insert_pdb`, and overwrites the current registered
+            # code transformer (given by `_` to the lambda):
+            gm.graph.on_generate_code(
+                lambda _: insert_pdb
+            )
+
+            # Or alternatively, registers a code transformer which first
+            # runs `body` through existing registered transformer, then
+            # through `insert_pdb`:
+            gm.graph.on_generate_code(
+                lambda current_trans: (
+                    lambda body: insert_pdb(
+                        current_trans(body) if current_trans
+                        else body
+                    )
+                )
+            )
+
+            gm.recompile()
+            gm(*inputs)  # drops into pdb
+
+
+        This function can also be used as a context manager, with the benefit to
+        automatically restores the previously registered code transformer:
+
+        .. code-block:: python
+
+            # ... continue from previous example
+
+            with gm.graph.on_generate_code(lambda _: insert_pdb):
+                # do more stuff with `gm`...
+                gm.recompile()
+                gm(*inputs)  # drops into pdb
+
+            # now previous code transformer is restored (but `gm`'s code with pdb
+            # remains - that means you can run `gm` with pdb here too, until you
+            # run next `recompile()`).
+        """
+        on_gen_code_old = self._on_generate_code
+        self._on_generate_code = make_transformer(on_gen_code_old)
+
+        @contextlib.contextmanager
+        def on_generate_code_context_manager():
+            try:
+                yield
+            finally:
+                self._on_generate_code = on_gen_code_old
+
+        return on_generate_code_context_manager()
 
 
 reflectable_magic_methods = {

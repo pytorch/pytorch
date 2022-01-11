@@ -10,7 +10,16 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/fold_conv_bn.h>
 #include <torch/csrc/jit/passes/frozen_conv_folding.h>
+#include <torch/csrc/jit/passes/utils/optimization_utils.h>
 #include <torch/csrc/jit/tensorexpr/types.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/ones_like.h>
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like.h>
+#endif
 
 namespace torch {
 namespace jit {
@@ -18,15 +27,6 @@ namespace jit {
 namespace {
 
 using Tensor = at::Tensor;
-
-bool nonConstantParameters(Node* n) {
-  for (size_t i = 1; i < n->inputs().size(); i++) {
-    if (n->inputs().at(i)->node()->kind() != prim::Constant) {
-      return true;
-    }
-  }
-  return false;
-}
 
 bool supportedConvNode(Node* n) {
   switch (n->kind()) {

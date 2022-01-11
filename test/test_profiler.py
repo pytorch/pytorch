@@ -1,8 +1,9 @@
+# Owner(s): ["oncall: profiler"]
+
 import collections
 import gc
 import io
 import json
-import time
 import os
 import unittest
 
@@ -10,15 +11,18 @@ import torch
 import torch.nn as nn
 import torch.optim
 import torch.utils.data
+import torch.utils.data.datapipes as dp
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, TEST_WITH_ASAN, TEST_WITH_ROCM, IS_WINDOWS,
     TemporaryFileName, TemporaryDirectoryName)
+from torch.autograd import (_record_function_with_args_enter, _record_function_with_args_exit)
 from torch.autograd.profiler import profile as _profile
 from torch.profiler import (
     kineto_available, profile, record_function, supported_activities,
     DeviceType, ProfilerAction, ProfilerActivity
 )
+from torch.testing._internal.common_device_type import skipCUDAVersionIn
 
 try:
     import psutil
@@ -33,6 +37,8 @@ import pickle
 @unittest.skipIf(IS_WINDOWS, "Test is flaky on Windows")
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
 class TestProfilerCUDA(TestCase):
+
+    @skipCUDAVersionIn([(11, 5)])  # https://github.com/pytorch/pytorch/issues/69023
     def test_mem_leak(self):
         """Checks that there's no memory leak when using profiler with CUDA
         """
@@ -57,6 +63,68 @@ class TestProfilerCUDA(TestCase):
             max_diff = max(max_diff, last_rss[idx] - last_rss[idx - 1])
         self.assertTrue(not (is_increasing and max_diff > 100 * 1024),
                         msg='memory usage is increasing, {}'.format(str(last_rss)))
+
+class TestRecordFunction(TestCase):
+    def _record_function_with_param(self):
+        u = torch.randn(3, 4, 5, requires_grad=True)
+        with _profile(with_stack=True, use_kineto=kineto_available(), record_shapes=True) as prof:
+            with record_function("## TEST 1 ##", "1, 2, 3"):
+                rf_handle = _record_function_with_args_enter("## TEST 2 ##", 1, False, 2.5, [u, u], "hello", u)
+                _record_function_with_args_exit(rf_handle)
+        return prof
+
+    def test_record_function(self):
+        prof_result = self._record_function_with_param()
+        found_test_1 = False
+        found_test_2 = False
+        for e in prof_result.function_events:
+            if "## TEST 1 ##" == e.name:
+                found_test_1 = True
+                self.assertTrue(e.input_shapes == [[]])
+            elif "## TEST 2 ##" == e.name:
+                found_test_2 = True
+                self.assertTrue(e.input_shapes == [[], [], [], [], [], [3, 4, 5]])
+        self.assertTrue(found_test_1)
+        self.assertTrue(found_test_2)
+
+    def test_datapipe_with_record_function(self):
+        with _profile(with_stack=True, use_kineto=kineto_available(), record_shapes=True) as prof:
+            input_dp1 = dp.iter.IterableWrapper(range(4))
+            input_dp2 = dp.iter.IterableWrapper(range(4, 8))
+            input_dp3 = dp.iter.IterableWrapper(range(8, 12))
+            output_dp = input_dp1.mux(input_dp2, input_dp3)
+            output = list(output_dp)
+
+        has_iter = False
+        has_mux = False
+        for e in prof.function_events:
+            if has_iter and has_mux:
+                break
+
+            if not has_iter and e.name == "enumerate(DataPipe)#IterableWrapperIterDataPipe":
+                has_iter = True
+            if not has_mux and e.name == "enumerate(DataPipe)#MultiplexerIterDataPipe":
+                has_mux = True
+        self.assertTrue(has_iter)
+        self.assertTrue(has_mux)
+
+    def test_datapipe_with_record_function_fork(self):
+        with _profile(with_stack=True, use_kineto=kineto_available(), record_shapes=True) as prof:
+            input_dp = dp.iter.IterableWrapper(range(10))
+            dp1, dp2, dp3 = input_dp.fork(num_instances=3)
+            output1 = list(dp1)
+        has_iter = False
+        has_child = False
+        for e in prof.function_events:
+            if has_iter and has_child:
+                break
+
+            if not has_iter and e.name == "enumerate(DataPipe)#IterableWrapperIterDataPipe":
+                has_iter = True
+            if not has_child and e.name == "enumerate(DataPipe)#_ChildDataPipe":
+                has_child = True
+        self.assertTrue(has_iter)
+        self.assertTrue(has_child)
 
 class TestProfiler(TestCase):
     def test_source(self):
@@ -588,16 +656,8 @@ class TestProfiler(TestCase):
                 assert is_int, "Invalid stacks record"
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @unittest.skipIf(IS_WINDOWS, "Test is flaky on Windows")
     def test_tensorboard_trace_handler(self):
-        def delayed(func, time_to_sleep=0.005):
-            """"The payload in this test might be too small. tensorboard_trace_handler use time.time()
-            to generate a filename. Delaying it to avoid generate the same filename on Windows.
-            """
-            def wrapper(*args, **kwargs):
-                time.sleep(time_to_sleep)
-                func(*args, **kwargs)
-            return wrapper
-
         use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
         with _profile(use_cuda=use_cuda, use_kineto=True):
             self.payload(use_cuda=use_cuda)
@@ -614,7 +674,7 @@ class TestProfiler(TestCase):
                     warmup=1,
                     active=2,
                     repeat=3),
-                on_trace_ready=delayed(torch.profiler.tensorboard_trace_handler(dname))
+                on_trace_ready=torch.profiler.tensorboard_trace_handler(dname)
             ) as p:
                 for _ in range(18):
                     self.payload(use_cuda=use_cuda)
@@ -643,7 +703,7 @@ class TestProfiler(TestCase):
                     warmup=1,
                     active=2,
                     repeat=3),
-                on_trace_ready=delayed(torch.profiler.tensorboard_trace_handler(dname, use_gzip=True))
+                on_trace_ready=torch.profiler.tensorboard_trace_handler(dname, use_gzip=True)
             )
             p.start()
             for _ in range(18):

@@ -85,7 +85,6 @@ class AutocastTestLists(object):
             # the current  _convolution
             ("_convolution", conv_args_fp32[1] + bias_fp32 + ((1, 1), (0, 0), (1, 1), False,
                                                               (0, 0), 1, False, True, True, True)),
-            ("_convolution_nogroup", conv_args_fp32[1] + bias_fp32 + ((1, 1), (0, 0), (1, 1), False, (0, 0))),
             ("conv1d", conv_args_fp32[0]),
             ("conv2d", conv_args_fp32[1]),
             ("conv3d", conv_args_fp32[2]),

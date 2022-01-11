@@ -548,6 +548,11 @@ class SparseBitVector {
     if (this == &RHS)
       return false;
 
+    if (empty()) {
+      *this = RHS;
+      return true;
+    }
+
     bool changed = false;
     ElementListIter Iter1 = Elements.begin();
     ElementListConstIter Iter2 = RHS.Elements.begin();

@@ -177,6 +177,9 @@ Tensor class reference
      use ``tensor.new_*`` creation ops.
 
 .. autoattribute:: Tensor.T
+.. autoattribute:: Tensor.H
+.. autoattribute:: Tensor.mT
+.. autoattribute:: Tensor.mH
 
 .. autosummary::
     :toctree: generated
@@ -220,6 +223,7 @@ Tensor class reference
     Tensor.addmv_
     Tensor.addr
     Tensor.addr_
+    Tensor.adjoint
     Tensor.allclose
     Tensor.amax
     Tensor.amin
@@ -229,6 +233,7 @@ Tensor class reference
     Tensor.argmax
     Tensor.argmin
     Tensor.argsort
+    Tensor.argwhere
     Tensor.asin
     Tensor.asin_
     Tensor.arcsin
@@ -240,6 +245,8 @@ Tensor class reference
     Tensor.arctan_
     Tensor.atan2
     Tensor.atan2_
+    Tensor.arctan2
+    Tensor.arctan2_
     Tensor.all
     Tensor.any
     Tensor.backward
@@ -319,6 +326,7 @@ Tensor class reference
     Tensor.diag_embed
     Tensor.diagflat
     Tensor.diagonal
+    Tensor.diagonal_scatter
     Tensor.fill_diagonal_
     Tensor.fmax
     Tensor.fmin
@@ -586,6 +594,7 @@ Tensor class reference
     Tensor.scatter_add_
     Tensor.scatter_add
     Tensor.select
+    Tensor.select_scatter
     Tensor.set_
     Tensor.share_memory_
     Tensor.short
@@ -608,6 +617,7 @@ Tensor class reference
     Tensor.arcsinh_
     Tensor.size
     Tensor.slogdet
+    Tensor.slice_scatter
     Tensor.solve
     Tensor.sort
     Tensor.split

@@ -5,11 +5,10 @@
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/named_value.h>
-#include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/runtime/argument_spec.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/api/include/torch/ordered_dict.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/utils/memory.h>
@@ -298,7 +297,9 @@ TORCH_API Module freeze(
 
 // C++ equivalent api of `torch.jit.optimize_for_inference`. See documentation
 // there for details.
-TORCH_API Module optimize_for_inference(Module& module);
+TORCH_API Module optimize_for_inference(
+    Module& module,
+    const std::vector<std::string>& other_methods = {});
 
 namespace detail {
 
@@ -535,7 +536,7 @@ struct TORCH_API BufferPolicy {
     return std::move(v).toTensor();
   }
   static bool valid(const ClassTypePtr& typ, size_t i, const IValue& v) {
-    return typ->getAttribute(i)->isSubtypeOf(TensorType::get()) &&
+    return typ->getAttribute(i)->isSubtypeOf(*TensorType::get()) &&
         typ->is_buffer(i);
   }
   static CONSTEXPR_EXCEPT_WIN_CUDA bool all_slots = false;

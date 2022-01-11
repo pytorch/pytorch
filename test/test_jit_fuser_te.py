@@ -1,4 +1,7 @@
+# Owner(s): ["NNC"]
+
 import operator
+import os
 import unittest
 import contextlib
 import math
@@ -6,6 +9,7 @@ import torch
 import torch.nn.functional as F
 from torch.testing import FileCheck
 from typing import List
+import warnings
 
 # these needs to be set before `common_utils`
 # infers `GRAPH_EXECUTOR`.
@@ -841,7 +845,7 @@ class TestTEFuser(JitTestCase):
                 inputs = get_lstm_inputs(device)
                 ge = self.checkTrace(LSTMCellC, inputs)
                 graph = ge.graph_for(*inputs)
-                self.assertLastGraphAllFused()
+                self.assertAllFused(ge.graph_for(*inputs))
                 # XXX: TE fuser can handle concats inside a fusion group.
                 # FileCheck().check("FusedConcat").check_next("return").run(str(graph))
 
@@ -996,6 +1000,29 @@ class TestTEFuser(JitTestCase):
         y = torch.tensor(1, dtype=torch.float, device='cpu')
         ge = self.checkScript(fn, (x, y))
         self.assertAllFused(ge.graph_for(x, y))
+
+    def test_inlined_optimized_graph(self):
+        @torch.jit.script
+        def foo(x):
+            return torch.relu(x + x)
+
+        for _ in range(3):
+            foo(torch.rand([4, 4]))
+
+        for _ in range(3):
+            foo(torch.rand([10]))
+
+        for _ in range(3):
+            foo(torch.rand([2, 2, 2]))
+
+        g = torch.jit.last_executed_optimized_graph()
+
+        FileCheck().check_count("prim::If", 1, exactly=True).check("prim::TensorExpr").run(g)
+        torch._C._jit_pass_inline(g)
+        f = FileCheck()
+        for _ in range(3):
+            f.check("prim::If").check("prim::TensorExpr")
+        f.run(g)
 
     def test_small_constant(self):
         for device in self.devices:
@@ -1962,6 +1989,18 @@ class TestTEFuser(JitTestCase):
             for fn in [bn, bn_no_weight, bn_no_bias, bn_neither]:
                 test(fn, (i, x))
 
+    def test_profiler(self):
+        @torch.jit.script
+        def test(x, y, z):
+            return x * y + z
+
+        args = [torch.randn(4) for _ in range(3)]
+        with torch.autograd.profiler.profile() as prof:
+            for _ in range(3):
+                test(*args)
+        self.assertIn("fused_mul_add", prof.table())
+
+
 works_list = [
     '__radd__',
     '__rdiv__',
@@ -1978,6 +2017,7 @@ works_list = [
     'ceil',
     'clamp',
     'clamp.scalar',
+    'contiguous',
     'cos',
     'cosh',
     'div.no_rounding_mode',
@@ -1996,6 +2036,7 @@ works_list = [
     'fmod.autodiffed',
     'ge',
     'gt',
+    'isnan',
     'le',
     'lerp',
     'lgamma',
@@ -2021,12 +2062,16 @@ works_list = [
     'nn.functional.leaky_relu',
     'nn.functional.relu',
     'nn.functional.relu6',
+    'nn.functional.softsign',
+    'nn.functional.tanhshrink',
+    'nn.functional.threshold',
     'permute',
     'pow',
     'reciprocal',
     'remainder',
     'remainder.autodiffed',
     'reshape',
+    'reshape_as',
     'round',
     'rsub',
     'rsub.rsub_tensor',
@@ -2038,6 +2083,7 @@ works_list = [
     'sqrt',
     'sub',
     'sum',
+    't',
     'tan',
     'tanh',
     'transpose',
@@ -2045,7 +2091,26 @@ works_list = [
     'trunc',
     'unsqueeze',
     'view',
+    'view_as',
     'where',
+    'bool',
+    'byte',
+    'char',
+    'double',
+    'float',
+    'half',
+    'int',
+    'long',
+    'short',
+    'bool.channels_last',
+    'byte.channels_last',
+    'char.channels_last',
+    'double.channels_last',
+    'float.channels_last',
+    'half.channels_last',
+    'int.channels_last',
+    'long.channels_last',
+    'short.channels_last',
 ]
 
 known_failures = [
@@ -2056,12 +2121,7 @@ known_failures = [
 
 # If your OpInfo test causes this test to fail, add it here
 skip_ops = [
-    # Causing SIGSEGV
-    # Reference: https://github.com/pytorch/pytorch/pull/59442/checks?check_run_id=2746156896
-    't',
     'conj'
-    'view',
-    'reshape',
 ]
 
 def get_name(op):
@@ -2072,8 +2132,6 @@ def get_name(op):
 
 class TestNNCOpInfo(TestCase):
     def te_compile(self, device, dtype, op):
-        # If adding new OpInfo tests cause this test to fail, add it into here
-        skip_ops = ['view', 'reshape']
         if op.name in skip_ops:
             return
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
@@ -2138,7 +2196,9 @@ def f({', '.join(param_names)}):
         if get_name(op) in skip_ops:
             return
         try:
-            self.te_compile(device, dtype, op)
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore', TracerWarning)
+                self.te_compile(device, dtype, op)
         except Exception as e:
             pass
         else:
@@ -2147,6 +2207,69 @@ def f({', '.join(param_names)}):
 
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(TestNNCOpInfo, globals(), only_for=only_for)
+
+
+class TestLoopnestRandomization(JitTestCase):
+    def setUp(self):
+        self.old_cpu_fuser_state = torch._C._jit_can_fuse_on_cpu()
+        self.old_must_use_cpu_state = torch._C._jit_get_te_must_use_llvm_cpu()
+        self.old_gpu_fuser_state = torch._C._jit_can_fuse_on_gpu()
+
+        torch._C._jit_override_can_fuse_on_cpu(True)
+        # TODO: force LLVM. need to add it to asan, mac, windows builds + sandcastle
+        # torch._C._jit_set_te_must_use_llvm_cpu(True)
+        torch._C._jit_override_can_fuse_on_gpu(True)
+
+        self.old_profiling_executor = torch._C._jit_set_profiling_executor(True)
+        self.old_profiling_mode = torch._C._jit_set_profiling_mode(True)
+
+        self.old_fusion_inlining = torch._C._debug_get_fusion_group_inlining()
+        torch._C._debug_set_fusion_group_inlining(False)
+
+        self.texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()
+        torch._C._jit_set_texpr_fuser_enabled(True)
+
+        self.old_te_must_use_llvm_cpu = torch._C._jit_get_te_must_use_llvm_cpu()
+        torch._C._jit_set_te_must_use_llvm_cpu(False)
+
+        # Set the seed to 1. This tests the codepath through random
+        # transformation.
+        os.environ["PYTORCH_TENSOREXPR_RANDOM_TRANSFORM_SEED"] = "1"
+
+    def tearDown(self):
+        torch._C._jit_set_profiling_executor(self.old_profiling_executor)
+        torch._C._jit_set_profiling_mode(self.old_profiling_mode)
+
+        torch._C._jit_override_can_fuse_on_gpu(self.old_gpu_fuser_state)
+        torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuser_state)
+        torch._C._jit_set_te_must_use_llvm_cpu(self.old_must_use_cpu_state)
+        torch._C._debug_set_fusion_group_inlining(self.old_fusion_inlining)
+
+        torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
+        torch._C._jit_set_te_must_use_llvm_cpu(self.old_te_must_use_llvm_cpu)
+
+        # Set it back to 0.
+        os.environ["PYTORCH_TENSOREXPR_RANDOM_TRANSFORM_SEED"] = "0"
+
+    @onlyCPU
+    @unittest.skipIf(not LLVM_ENABLED, "Compiles with TensorExprKernel")
+    def test_relu(self, device):
+        def fn_test_relu(x, y):
+            return F.relu(x + 0.5 * y)
+
+        x = torch.randn(4, 4, dtype=torch.float, device=device)
+        y = torch.randn(4, 4, dtype=torch.float, device=device)
+
+        fn = fn_test_relu
+        traced_fn = torch.jit.trace(fn, (x, y))
+
+        ref = fn(x, y)
+        res = traced_fn(x, y)
+        assert torch.allclose(ref, res)
+
+
+instantiate_device_type_tests(TestLoopnestRandomization, globals(), only_for=("cpu"))
+
 
 if __name__ == '__main__':
     run_tests()
