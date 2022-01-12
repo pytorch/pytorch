@@ -1,12 +1,20 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Parallel.h>
 #include <torch/library.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <c10/util/irange.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_empty_affine_quantized.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/quantized_batch_norm_native.h>
+#endif
+
 #include <algorithm>
-#include <vector>
 
 namespace at {
 namespace native {

@@ -1,4 +1,6 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/core/List.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/SortingUtils.h>
@@ -9,6 +11,12 @@
 #include <ATen/native/quantized/fake_quant_affine.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_empty_affine_quantized.h>
+#endif
 
 #include <cmath>
 #ifdef USE_FBGEMM

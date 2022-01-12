@@ -1,9 +1,21 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Context.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_empty_affine_quantized.h>         // for _empty_affine_q...
+#include <ATen/ops/mean.h>                            // for mean
+#include <ATen/ops/mean_native.h>                     // for mean_out_quanti...
+#include <ATen/ops/quantize_per_tensor.h>             // for quantize_per_te...
+#include <ATen/ops/zeros_like_ops.h>
+#endif
 
 namespace at {
 namespace native {

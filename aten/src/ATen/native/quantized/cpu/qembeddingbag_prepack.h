@@ -1,7 +1,7 @@
-#include <ATen/ATen.h>
+#pragma once
+#include <ATen/core/Tensor.h>
 
-namespace at {
-namespace native {
+namespace at { namespace native {
 
 Tensor& qembeddingbag_byte_prepack_out(Tensor& output, const Tensor& weight);
 

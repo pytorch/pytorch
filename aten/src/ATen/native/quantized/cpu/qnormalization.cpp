@@ -1,10 +1,15 @@
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/layer_norm.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <c10/util/accumulate.h>
 #include <torch/library.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/_empty_affine_quantized.h>
+#endif
 
 #include <algorithm>
 #include <vector>

@@ -1,13 +1,23 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Context.h>
+#include <ATen/Dispatch.h>
 #include <torch/library.h>
-#include <ATen/cpu/vec/vec.h>
-#include <ATen/native/TensorIterator.h>
-#include <ATen/native/cpu/Loops.h>
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_empty_affine_quantized.h>
+#include <ATen/ops/_empty_affine_quantized_native.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/relu_native.h>
+#endif
 
 #include <algorithm>
 

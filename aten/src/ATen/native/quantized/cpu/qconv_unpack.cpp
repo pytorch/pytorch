@@ -1,12 +1,24 @@
+// #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <tuple>
 #include <vector>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/core/List.h>
+#include <ATen/core/ivalue.h>
 #include <torch/library.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <ATen/native/quantized/cpu/quant_utils.h>
 #include <ATen/native/quantized/cpu/conv_packed_params.h>
+
+// TODO
+#if 1 //ndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/_empty_affine_quantized.h>
+#include <ATen/ops/_empty_per_channel_affine_quantized.h>
+#include <ATen/ops/from_blob.h>
+#endif
 
 #ifdef USE_FBGEMM
 template <int kSpatialDim>

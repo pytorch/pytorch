@@ -48,8 +48,14 @@
 // STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
 // STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/TracerMode.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#endif
 
 namespace at {
 namespace cpp_custom_type_hack {

@@ -1,16 +1,19 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
-#include <torch/library.h>
-#include <ATen/native/TensorIterator.h>
-#include <ATen/native/cpu/Loops.h>
-#include <ATen/quantized/Quantizer.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Context.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <c10/util/irange.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
-#include <algorithm>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_empty_affine_quantized.h>
+#include <ATen/ops/tanh_native.h>
+#endif
 
 namespace at {
 namespace native {

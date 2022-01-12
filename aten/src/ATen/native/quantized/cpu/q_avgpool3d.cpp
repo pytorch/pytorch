@@ -1,17 +1,21 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/Parallel.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 
-#include <c10/util/irange.h>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_empty_affine_quantized.h>
+#include <ATen/ops/avg_pool3d_native.h>
+#endif
+
 #include <c10/util/math_compat.h>
 
-#include <algorithm>
-#include <cmath>
-#include <limits>
 #include <vector>
 
 namespace at {

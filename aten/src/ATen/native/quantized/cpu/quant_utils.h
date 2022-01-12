@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/List.h>
 #include <c10/util/irange.h>
 #include <algorithm>
 #include <cmath>
