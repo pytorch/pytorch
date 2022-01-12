@@ -2,8 +2,8 @@
 
 #include <memory>
 
-#include <ATen/core/ivalue.h>
 #include <ATen/core/class_type.h>
+#include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type_base.h>
 #include <c10/util/Optional.h>
 
@@ -21,6 +21,7 @@ constexpr DynamicTypeBits kDynamicFloatTypeBit = DYNAMIC_TYPE_BIT(4);
 constexpr DynamicTypeBits kDynamicComplexTypeBit = DYNAMIC_TYPE_BIT(5);
 constexpr DynamicTypeBits kDynamicListTypeBit = DYNAMIC_TYPE_BIT(7);
 constexpr DynamicTypeBits kDynamicTupleTypeBit = DYNAMIC_TYPE_BIT(8);
+constexpr DynamicTypeBits kDynamicClassTypeBit = DYNAMIC_TYPE_BIT(10);
 
 #define FORALL_DYNAMIC_TYPES(_)                                              \
   _(Tensor, DYNAMIC_TYPE_BIT(0))                                             \
@@ -35,7 +36,7 @@ constexpr DynamicTypeBits kDynamicTupleTypeBit = DYNAMIC_TYPE_BIT(8);
   _(List, kDynamicListTypeBit)                                               \
   _(Tuple, (kDynamicTupleTypeBit | kDynamicCovariantTypeBit))                \
   _(Dict, DYNAMIC_TYPE_BIT(9))                                               \
-  _(Class, DYNAMIC_TYPE_BIT(10))                                             \
+  _(Class, kDynamicClassTypeBit)                                             \
   _(Optional,                                                                \
     (DYNAMIC_TYPE_BIT(11) | kDynamicNoneTypeBit | kDynamicCovariantTypeBit)) \
   _(AnyList, (kDynamicListTypeBit | kDynamicAnyTypeBit))                     \
@@ -44,6 +45,10 @@ constexpr DynamicTypeBits kDynamicTupleTypeBit = DYNAMIC_TYPE_BIT(8);
   _(DeviceObj, DYNAMIC_TYPE_BIT(12))                                         \
   _(StreamObj, DYNAMIC_TYPE_BIT(13))                                         \
   _(Capsule, DYNAMIC_TYPE_BIT(14))                                           \
+  _(Generator, DYNAMIC_TYPE_BIT(15))                                         \
+  _(Storage, DYNAMIC_TYPE_BIT(16))                                           \
+  _(Var, DYNAMIC_TYPE_BIT(17))                                               \
+  _(AnyClass, kDynamicClassTypeBit | kDynamicAnyTypeBit)                     \
   _(Any, 0xffffffff)
 
 class DynamicType;
@@ -107,6 +112,7 @@ class DynamicType : public SharedType {
  public:
   // TODO Change Ptr to DynamicTypePtr when all migrations are done.
   using Ptr = TypePtr;
+  using ElementType = DynamicType;
   ~DynamicType() override;
 
   struct Arguments {
@@ -129,6 +135,22 @@ class DynamicType : public SharedType {
   static TORCH_API DynamicTypePtr create(Type& ty);
 
   explicit DynamicType(Tag, Arguments);
+  explicit DynamicType(Tag, c10::string_view, Arguments);
+
+  TypePtr containedType(size_t) const override;
+  Tag tag() const {
+    return tag_;
+  }
+  const c10::optional<std::string>& name() const {
+    return name_;
+  }
+  const Arguments& arguments() const {
+    return arguments_;
+  }
+  TypeKind dynamicKind() const;
+
+  // Should be used only on the server side to restore static type information.
+  TypePtr fallback() const;
 
  private:
   bool symmetric() const override {
@@ -153,15 +175,44 @@ class DynamicType : public SharedType {
   }
 
   Tag tag_;
+  c10::optional<std::string> name_;
   union {
     Arguments arguments_;
     ClassTypePtr class_;
   };
 };
 
+template <typename T>
+struct DynamicTypeTrait {
+  static auto tagValue() {
+    TORCH_CHECK(false);
+    return DynamicType::Tag::Any;
+  }
+};
+#define DYNAMIC_TYPE_TAG_VALUE(NAME, _)           \
+  template <>                                     \
+  struct TORCH_API DynamicTypeTrait<NAME##Type> { \
+    static auto tagValue() {                      \
+      return DynamicType::Tag::NAME;              \
+    }                                             \
+    static const DynamicTypePtr& getBaseType();   \
+  };
+FORALL_DYNAMIC_TYPES(DYNAMIC_TYPE_TAG_VALUE)
+#undef DYNAMIC_TYPE_TAG_VALUE
+
 template <>
 struct IValue::TagType<c10::DynamicType> {
   static DynamicType::Ptr get(const c10::IValue& v);
 };
+
+namespace ivalue {
+
+template <>
+struct TORCH_API TupleTypeFactory<c10::DynamicType> {
+  static DynamicTypePtr create(std::vector<TypePtr> elemTypes);
+  static DynamicTypePtr fallback(const Type&);
+};
+
+} // namespace ivalue
 
 } // namespace c10

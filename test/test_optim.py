@@ -184,6 +184,15 @@ class TestOptim(TestCase):
         self.assertEqual(optimizer.state_dict()['param_groups'][-1],
                          optimizer_c.state_dict()['param_groups'][-1])
 
+        # Make sure that optimizers that support maximize can load older models
+        state_dict = optimizer.state_dict()
+        if 'maximize' in state_dict['param_groups'][0]:
+            for group in state_dict['param_groups']:
+                del group['maximize']
+            optimizer.load_state_dict(state_dict)
+            # Make sure we can still step
+            optimizer.step()
+
         # Check that state dict can be loaded even when we cast parameters
         # to a different type and move to a different device.
         if not torch.cuda.is_available():
