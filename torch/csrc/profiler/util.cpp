@@ -1,4 +1,5 @@
 #include <torch/csrc/profiler/util.h>
+#include <torch/csrc/profiler/kineto_shim.h>
 
 #include <c10/util/ArrayRef.h>
 #include <fmt/format.h>
@@ -11,19 +12,6 @@
 namespace torch {
 namespace profiler {
 namespace impl {
-
-void addMetadataJson(const std::string& key, const std::string& value) {
-#ifdef USE_KINETO
-  if (libkineto::api().isProfilerInitialized()) {
-    libkineto::api().activityProfiler().addMetadata(key, value);
-  } else {
-    LOG(WARNING) << "Profiler is not initialized: skipping profiling metadata";
-  }
-#else
-  LOG(WARNING) << "Adding profiling metadata requires using "
-               << "torch.profiler with Kineto support (USE_KINETO=1)";
-#endif // USE_KINETO
-}
 
 // ----------------------------------------------------------------------------
 // -- NVTX --------------------------------------------------------------------
