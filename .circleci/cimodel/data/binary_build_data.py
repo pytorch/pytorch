@@ -32,7 +32,6 @@ def get_processor_arch_name(gpu_version):
 
 LINUX_PACKAGE_VARIANTS = OrderedDict(
     manywheel=[
-        "3.6m",
         "3.7m",
         "3.8m",
         "3.9m"
