@@ -808,8 +808,13 @@ linalg_svd_rank_restricted(
   Tensor U, S, Vh, rank, unique_rank;
   std::tie(U, S, Vh, rank, unique_rank) = at::_linalg_svd_rank_restricted_helper(
       input, atol, rtol, full_matrices,
-      /*compute_unique_rank=*/true
+      /*compute_unique_rank=*/input.numel() ? true : false
   );
+
+  // fast path for emtpy inputs
+  if (!input.numel()) {
+    return std::make_tuple(std::move(U), std::move(S), std::move(Vh), std::move(rank));
+  }
 
   auto U_rank_restricted = at::zeros_like(U);
   auto S_rank_restricted = at::zeros_like(S);
