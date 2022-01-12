@@ -1,10 +1,7 @@
 #pragma once
 
 #include <torch/csrc/python_headers.h>
-
-namespace at {
-class Tensor;
-}
+#include <ATen/ATen.h>
 
 namespace torch { namespace utils {
 
