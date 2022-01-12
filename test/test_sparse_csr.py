@@ -13,7 +13,7 @@ from torch.testing._internal.common_device_type import \
      precisionOverride, skipMeta, skipCUDAIf, skipCUDAIfRocm, skipCPUIfNoMklSparse)
 from torch.testing._internal.common_methods_invocations import (UnaryUfuncInfo, sparse_csr_funcs, )
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
-from torch.testing._internal.common_dtype import floating_types, get_all_dtypes, floating_and_complex_types
+from torch.testing._internal.common_dtype import floating_types, get_all_dtypes
 from test_sparse import CUSPARSE_SPMM_COMPLEX128_SUPPORTED
 
 if TEST_SCIPY:
