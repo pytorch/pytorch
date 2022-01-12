@@ -1,15 +1,20 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/ceil_div.h>
 #include <ATen/Context.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/Dispatch.h>
 #include <ATen/MemoryOverlap.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/native/Resize.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/diag.h>
+#include <ATen/ops/trace_native.h>
+#include <ATen/ops/diag_native.h>
+#include <ATen/ops/triu_native.h>
+#include <ATen/ops/tril_native.h>
 #endif
 
 #include <ATen/cuda/CUDAApplyUtils.cuh>

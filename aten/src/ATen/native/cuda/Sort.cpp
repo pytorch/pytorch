@@ -1,10 +1,22 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/cuda/Sort.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/Functions.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/MemoryOverlap.h>
+#include <ATen/TensorUtils.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/Resize.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/arange.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/empty_strided.h>
+#include <ATen/ops/sort_native.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 #include <limits>
 

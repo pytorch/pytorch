@@ -1,7 +1,9 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/Dispatch.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/WrapDimUtils.h>
 #include <c10/macros/Macros.h>
 
@@ -12,6 +14,18 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/MemoryAccess.cuh>
 #include <ATen/native/cuda/PersistentSoftmax.cuh>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_masked_softmax_native.h>
+#include <ATen/ops/_log_softmax_native.h>
+#include <ATen/ops/_log_softmax_backward_data_native.h>
+#include <ATen/ops/_softmax_native.h>
+#include <ATen/ops/_softmax_backward_data_native.h>
+#include <ATen/ops/softmax.h>
+#endif
 
 namespace at {
 namespace native {

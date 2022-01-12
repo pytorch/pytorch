@@ -1,9 +1,9 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <type_traits>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/TensorAccessor.h>
 
 #include <ATen/cuda/CUDAContext.h>
@@ -15,6 +15,18 @@
 #include <ATen/native/cuda/PersistentSoftmax.cuh>
 
 #include <c10/cuda/CUDAMathCompat.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/linear_native.h>
+#include <ATen/ops/matmul.h>
+#include <ATen/ops/matmul_native.h>
+#include <ATen/ops/native_multi_head_self_attention_native.h>
+#include <ATen/ops/split_native.h>
+#endif
 
 namespace at {
 

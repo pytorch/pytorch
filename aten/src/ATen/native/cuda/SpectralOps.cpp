@@ -1,18 +1,27 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/Config.h>
 #include <ATen/Dispatch.h>
-#include <ATen/Utils.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/cuda/detail/KernelUtils.h>
-#include <ATen/cuda/detail/OffsetCalculator.cuh>
+#include <ATen/ScalarOps.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/Resize.h>
-#include <ATen/native/TensorIterator.h>
 #include <ATen/native/SpectralOpsUtils.h>
 #include <ATen/native/cuda/CuFFTUtils.h>
 #include <ATen/native/cuda/CuFFTPlanCache.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_fft_c2c_native.h>
+#include <ATen/ops/_fft_c2r_native.h>
+#include <ATen/ops/_fft_r2c_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/mul.h>
+#endif
 
 #include <cufft.h>
 #include <cufftXt.h>
