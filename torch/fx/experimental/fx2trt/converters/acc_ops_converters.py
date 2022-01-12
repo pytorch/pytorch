@@ -1161,21 +1161,33 @@ def acc_ops_div(
     kwargs: Dict[str, Argument],
     name: str,
 ) -> Union[TRTTensor, Sequence[TRTTensor]]:
-    if kwargs["rounding_mode"] == "trunc":
-        inputs = kwargs["input"]
-        other = kwargs["other"]
-        return trunc_div(inputs, other, network, target, name)
-    elif kwargs["rounding_mode"] == "floor":
-        return add_binary_elementwise_layer(
-            network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.FLOOR_DIV, target, name
-        )
-    elif kwargs["rounding_mode"] is None:
-        return add_binary_elementwise_layer(
-            network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.DIV, target, name
-        )
-    else :
-        mode = kwargs["rounding_mode"]
-        raise RuntimeError(f"Div received mode {mode} that is not supported!")
+    return add_binary_elementwise_layer(
+        network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.DIV, target, name
+    )
+
+
+@tensorrt_converter(acc_ops.floor_div)
+def acc_ops_floor_div(
+    network: TRTNetwork,
+    target: Target,
+    args: Tuple[Argument, ...],
+    kwargs: Dict[str, Argument],
+    name: str,
+) -> Union[TRTTensor, Sequence[TRTTensor]]:
+    return add_binary_elementwise_layer(
+        network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.FLOOR_DIV, target, name
+    )
+
+
+@tensorrt_converter(acc_ops.trunc_div)
+def acc_ops_trunc_div(
+    network: TRTNetwork,
+    target: Target,
+    args: Tuple[Argument, ...],
+    kwargs: Dict[str, Argument],
+    name: str,
+) -> Union[TRTTensor, Sequence[TRTTensor]]:
+    return trunc_div(kwargs["input"], kwargs["other"], network, target, name)
 
 
 @tensorrt_converter(acc_ops.mul)
@@ -2106,14 +2118,18 @@ def acc_ops_cumsum(
     set_layer_name(running_sum, target, f"{name}_running_sum_1")
     running_sum_tensor = running_sum.get_output(0)
 
-    current_sum = add_binary_elementwise_layer(network, data, running_sum_tensor, trt.ElementWiseOperation.SUM, target, "sum_1")
+    current_sum = add_binary_elementwise_layer(
+        network, data, running_sum_tensor, trt.ElementWiseOperation.SUM, target, f"{name}_sum_1"
+    )
     running_sum.set_input(1, current_sum)
 
     running_sum = loop.add_recurrence(zero_tensor)
     set_layer_name(running_sum, target, f"{name}_running_sum_2")
     running_sum_tensor = running_sum.get_output(0)
 
-    current_sum = add_binary_elementwise_layer(network, data, running_sum_tensor, trt.ElementWiseOperation.SUM, target, "sum_2")
+    current_sum = add_binary_elementwise_layer(
+        network, data, running_sum_tensor, trt.ElementWiseOperation.SUM, target, f"{name}_sum_2"
+    )
     running_sum.set_input(1, current_sum)
 
     loop_output = loop.add_loop_output(current_sum, trt.LoopOutput.CONCATENATE, dim)
