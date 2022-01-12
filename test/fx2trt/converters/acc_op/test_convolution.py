@@ -4,6 +4,7 @@ import torch
 import torch.fx.experimental.fx_acc.acc_ops as acc_ops
 from torch.testing._internal.common_fx2trt import AccTestCase, InputTensorSpec
 from parameterized import parameterized, param
+from torch.testing._internal.common_utils import run_tests
 
 
 class TestConvolutionConverter(AccTestCase):
@@ -59,3 +60,6 @@ class TestConvolutionConverter(AccTestCase):
         self.run_test_with_dynamic_shape(
             TestModule(), input_specs, expected_ops={acc_ops.conv2d}
         )
+
+if __name__ == '__main__':
+    run_tests()
