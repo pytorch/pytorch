@@ -2022,7 +2022,7 @@ bool LoopNest::fuseLoops(const std::vector<ForPtr>& loops, ForPtr* fused) {
   return unsafeFuseLoops(loops, fused);
 }
 
-ForPtr findOuterFor(ForPtr a, ForPtr b) {
+ForPtr LoopNest::findOuterFor(ForPtr a, ForPtr b) {
   StmtPtr s = b; // guess b is the latter.
   while (s != nullptr) {
     if (s == a) {
