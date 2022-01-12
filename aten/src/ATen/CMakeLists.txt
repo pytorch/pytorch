@@ -65,7 +65,7 @@ file(GLOB cuda_nvrtc_stub_cpp "cuda/nvrtc_stub/*.cpp")
 file(GLOB cuda_cu "cuda/*.cu" "cuda/detail/*.cu")
 file(GLOB cudnn_h "cudnn/*.h" "cudnn/*.cuh")
 file(GLOB cudnn_cpp "cudnn/*.cpp")
-file(GLOB ops_hp "ops/*.h")
+file(GLOB ops_h "ops/*.h")
 
 file(GLOB hip_h "hip/*.h" "hip/detail/*.h" "hip/*.cuh" "hip/detail/*.cuh" "hip/impl/*.h")
 file(GLOB hip_cpp "hip/*.cpp" "hip/detail/*.cpp" "hip/impl/*.cpp")
