@@ -13,7 +13,6 @@
 #else
 #include <ATen/ops/empty.h>
 #include <ATen/ops/conv_depthwise3d_native.h>
-#include <ATen/ops/conv_depthwise3d_backward_native.h>
 #endif
 
 #include <algorithm>
