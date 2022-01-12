@@ -62,7 +62,7 @@ __global__ void LpPoolForwardNCHW(
 template <typename T>
 __global__ void LpPoolForwardNHWC(
     const int nthreads,
-    const T* bottom_data,
+    const T *const bottom_data,
     const int height,
     const int width,
     const int channels,
@@ -74,7 +74,7 @@ __global__ void LpPoolForwardNHWC(
     const int stride_w,
     const int pad_t,
     const int pad_l,
-    T* top_data,
+    T *const top_data,
     const T p) {
   CUDA_1D_KERNEL_LOOP(index, nthreads) {
     int c = index % channels;
