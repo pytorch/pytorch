@@ -69,6 +69,7 @@ TEST(ShapeAnalysisTest, DynamicShapesFusion) {
   subgraph->inputs().at(1)->setType(y_type);
   subgraph->inputs().at(2)->setType(z_type);
   auto output = g->insertNode(g->create(prim::TensorExprGroup))->output();
+  subgraph->outputs().at(0)->setType(TensorType::create(at::rand({14, 5})));
   output->node()->addInput(x_inp);
   output->node()->addInput(y_inp);
   output->node()->addInput(z_inp);
@@ -268,6 +269,7 @@ TEST(ShapeAnalysisTest, MovingConstantOutOfFusionGroups) {
   auto x_type = TensorType::create(at::rand({10, 5}));
   x_inp->setType(x_type);
   subgraph->inputs().at(0)->setType(x_type);
+  subgraph->outputs().at(0)->setType(x_type);
   auto output = g->insertNode(g->create(prim::TensorExprGroup))->output();
   output->node()->addInput(x_inp);
   output->node()->g_(attr::Subgraph, subgraph);
