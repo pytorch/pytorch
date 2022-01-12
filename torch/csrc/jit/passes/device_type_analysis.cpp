@@ -8,7 +8,6 @@
 #include <torch/csrc/jit/passes/device_type_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/library.h>
-#include <cstddef>
 #include <memory>
 #include <utility>
 
