@@ -207,7 +207,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
   std::vector<int64_t> strides;
   parseList(TK_NOTHING, ',', ')', [&] {
     // Extra handling for options like 'device' and 'requires_grad'
-    if (L.cur().kind == TK_IDENT) {
+    if (L.cur().kind == TK_IDENT && L.cur().text() != "SS") {
       const std::string& field = L.expect(TK_IDENT).text();
       if (field == "device") {
         auto parsed_device = tryToParseDeviceType();
@@ -258,10 +258,21 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
       }
       return;
     }
+    bool shape_symbol = false;
+    if (L.cur().kind == TK_IDENT && L.cur().text() == "SS") {
+      L.next();
+      L.expect('(');
+      L.expect('-');
+      shape_symbol = true;
+    }
     const std::string& num = L.expect(TK_NUMBER).text();
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::string::size_type num_len;
-    auto dim = c10::stoll(num, &num_len);
+    int64_t dim = c10::stoll(num, &num_len);
+    if (shape_symbol) {
+      L.expect(')');
+      dim = -dim;
+    }
     dims.emplace_back(dim);
   });
   if (seen_strides) {
