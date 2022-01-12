@@ -77,13 +77,6 @@ def deprecation_warning(name, new_name: str = ""):
                   new_name_statement, DeprecationWarning)
 
 
-# Warns user that the DataPipe has been moved to TorchData and will be removed from `torch`
-def deprecation_warning_torchdata(name):
-    warnings.warn(f"{name} and its functional API are deprecated and will be removed from the package `torch`. "
-                  f"Please import those features from the new package TorchData: https://github.com/pytorch/data",
-                  DeprecationWarning)
-
-
 class StreamWrapper:
     def __init__(self, file_obj):
         self.file_obj = file_obj
