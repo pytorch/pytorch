@@ -2,8 +2,8 @@
 
 #include <memory>
 
-#include <ATen/core/ivalue.h>
 #include <ATen/core/class_type.h>
+#include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type_base.h>
 #include <c10/util/Optional.h>
 
@@ -175,14 +175,15 @@ class DynamicType : public SharedType {
 
 template <typename T>
 struct DynamicTypeTrait {};
-#define DYNAMIC_TYPE_TAG_VALUE(NAME, _) \
-template <> \
-struct TORCH_API DynamicTypeTrait<NAME ## Type> { \
-static auto tagValue() { \
-  return DynamicType::Tag::NAME; \
-} \
-};
-    FORALL_DYNAMIC_TYPES(DYNAMIC_TYPE_TAG_VALUE)
+#define DYNAMIC_TYPE_TAG_VALUE(NAME, _)           \
+  template <>                                     \
+  struct TORCH_API DynamicTypeTrait<NAME##Type> { \
+    static auto tagValue() {                      \
+      return DynamicType::Tag::NAME;              \
+    }                                             \
+    static const DynamicTypePtr& getBaseType();   \
+  };
+FORALL_DYNAMIC_TYPES(DYNAMIC_TYPE_TAG_VALUE)
 #undef DYNAMIC_TYPE_TAG_VALUE
 
 template <>
