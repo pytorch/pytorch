@@ -1,7 +1,7 @@
 #pragma once
 
-#include <ATen/CUDAGeneratorImpl.h>
 #include <ATen/core/ivalue.h>
+#include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/ir/ir.h>
 
