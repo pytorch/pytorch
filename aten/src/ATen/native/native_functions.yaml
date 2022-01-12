@@ -1943,6 +1943,7 @@
   device_guard: False
   dispatch:
     CompositeExplicitAutograd: empty_like
+    SparseCPU, SparseCUDA: empty_like_sparse_coo
 
 - func: empty_strided(int[] size, int[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
