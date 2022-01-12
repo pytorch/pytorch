@@ -204,6 +204,26 @@ TEST(LiteInterpreterTest, Dict) {
   AT_ASSERT(output.toGenericDict().at("result").toTensor().item().toInt() == 2);
 }
 
+TEST(LiteInterpreterTest, List) {
+  Module m("m");
+  m.define(R"JIT(
+  def foo(self, x):
+      return [x + 2]
+
+  def forward(self, x):
+      d = self.foo(x)
+      return d
+  )JIT");
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  std::vector<torch::jit::IValue> inputs({torch::ones({})});
+  auto output = bc.get_method("forward")(inputs);
+  auto server_output = m.forward(inputs);
+  EXPECT_EQ(output.toList().get(0).toTensor().item().toInt(), 3);
+  EXPECT_EQ(output, server_output);
+}
+
 TEST(LiteInterpreterTest, PrimOverload) {
   /*
   // temporarily disabled
@@ -2065,7 +2085,12 @@ TEST(LiteInterpreterTest, DynamicType) {
       AnyListType::get(),
       AnyTupleType::get(),
       StreamObjType::get(),
-      CapsuleType::get()};
+      CapsuleType::get(),
+      GeneratorType::get(),
+      StorageType::get(),
+      VarType::create("t"),
+      VarType::create("v"),
+      AnyClassType::get()};
   std::copy(keyTypes.begin(), keyTypes.end(), back_inserter(types));
   auto expandTypes = [&](size_t tupleSize) {
     std::vector<TypePtr> nested;
