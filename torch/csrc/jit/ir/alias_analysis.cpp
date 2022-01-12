@@ -208,13 +208,9 @@ struct AliasDb::WriteRegistry {
   std::unordered_set<Node*> writesToAllWildcards_;
 };
 
-AliasDb::AliasDb(
-    std::shared_ptr<Graph> graph,
-    bool isFrozen,
-    bool enablePreciseTupleContainerAnalysis)
+AliasDb::AliasDb(std::shared_ptr<Graph> graph, bool isFrozen)
     : graph_(std::move(graph)),
       isFrozen_(isFrozen),
-      enablePreciseTupleContainerAnalysis_(enablePreciseTupleContainerAnalysis),
       memoryDAGBuilder_(std::make_unique<MemoryDAGBuilder>()),
       writeRegistry_(std::make_unique<AliasDb::WriteRegistry>()) {
   analyze(graph_);
@@ -1129,6 +1125,12 @@ bool AliasDb::functionalNonEscapingListUse(const Use& use) const {
   common ops where the output does not alias the list or the list elements
   */
 
+  // only used in output of graph - no further uses,
+  // so there will be no use of it where the contained element leaks
+  if (use.user->kind() == prim::Return) {
+    return use.user->owningBlock() == graph_->block();
+  }
+
   switch (use.user->kind()) {
     case aten::cat:
     case aten::broadcast_tensors:
@@ -1142,14 +1144,10 @@ bool AliasDb::functionalNonEscapingListUse(const Use& use) const {
   if (op && op->aliasAnalysisKind() == AliasAnalysisKind::PURE_FUNCTION) {
     return true;
   }
-
   return false;
 }
 
 bool AliasDb::functionalNonEscapingTupleUse(const Use& use) const {
-  if (!enablePreciseTupleContainerAnalysis_) {
-    return false;
-  }
   Node* n = use.user;
   size_t offset = use.offset;
   Value* container = n->inputs().at(offset);
@@ -1157,7 +1155,9 @@ bool AliasDb::functionalNonEscapingTupleUse(const Use& use) const {
     return false;
   }
   // TODO(T97387453): Cover more ops that do not let escape tuples' elements.
-  return use.user->kind() == prim::Return;
+  bool in_return_outputs = use.user->kind() == prim::Return;
+  bool not_in_nested_subgraph = use.user->owningBlock() == graph_->block();
+  return in_return_outputs && not_in_nested_subgraph;
 }
 
 // List or dict or tuple construct: create an aliasing element for the actual

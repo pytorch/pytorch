@@ -7,17 +7,19 @@ import torch.fx.experimental.fx_acc.acc_ops as acc_ops
 import torch.nn as nn
 from torch.testing._internal.common_fx2trt import AccTestCase, InputTensorSpec
 from parameterized import parameterized
+from torch.testing._internal.common_utils import run_tests
 
 elementwise_ops = [
     ((lambda x, y: x + y), acc_ops.add),
     ((lambda x, y: x - y), acc_ops.sub),
-    # Avoid dividing by 0.
-    ((lambda x, y: x / (y + 1.0)), acc_ops.div),
-    ((lambda x, y: x // (y + 1.0)), acc_ops.div),
-    ((lambda x, y: torch.div(x, y + 1.0, rounding_mode="trunc")), acc_ops.div),
-    ((lambda x, y: torch.div(x, y + 1.0, rounding_mode="floor")), acc_ops.div),
-    ((lambda x, y: torch.div(x, y + 1.0)), acc_ops.div),
-    ((lambda x, y: torch.floor_divide(x, y + 1.0)), acc_ops.div),
+    ((lambda x, y: x / y), acc_ops.div),
+    ((lambda x, y: x // y), acc_ops.floor_div),
+    ((lambda x, y: torch.div(x, y, rounding_mode="trunc")), acc_ops.trunc_div),
+    ((lambda x, y: torch.div(x, y, rounding_mode="floor")), acc_ops.floor_div),
+    ((lambda x, y: torch.div(x, y)), acc_ops.div),
+    # torch.floor_divide rounds result toward zero, rather than -Inf.
+    # https://github.com/pytorch/pytorch/issues/43874
+    ((lambda x, y: torch.floor_divide(x, y)), acc_ops.trunc_div),
     ((lambda x, y: x * y), acc_ops.mul),
     (torch.pow, acc_ops.pow),
 ]
@@ -35,7 +37,8 @@ class TestBinaryOpConverters(AccTestCase):
                 return self.orig_op(x, x)
 
         m = TestModule(orig_op)
-        inputs = [torch.randn(1, 1)]
+        # Avoid dividing by 0.
+        inputs = [torch.rand(1, 1) + 1]
         self.run_test(m, inputs, expected_ops={expected_op})
 
     @parameterized.expand([(op[1].__name__, op[0], op[1]) for op in elementwise_ops])
@@ -101,3 +104,6 @@ class TestBinaryOpConverters(AccTestCase):
         ]
 
         self.run_test_with_dynamic_shape(Op(), input_specs, expected_ops={expected_op})
+
+if __name__ == '__main__':
+    run_tests()

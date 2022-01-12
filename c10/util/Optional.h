@@ -41,6 +41,11 @@
 
 #include <c10/util/Metaprogramming.h>
 
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wstring-conversion")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wstring-conversion")
+#endif
+
 #define TR2_OPTIONAL_REQUIRES(...) \
   typename std::enable_if<__VA_ARGS__::value, bool>::type = false
 
@@ -1233,5 +1238,7 @@ struct hash<c10::optional<T&>> {
 #undef TR2_OPTIONAL_REQUIRES
 #undef TR2_OPTIONAL_ASSERTED_EXPRESSION
 #undef TR2_OPTIONAL_HOST_CONSTEXPR
+
+C10_CLANG_DIAGNOSTIC_POP()
 
 #endif // C10_UTIL_OPTIONAL_H_
