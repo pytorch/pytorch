@@ -58,6 +58,8 @@ MACOS_RUNNERS = {
 CUDA_RUNNERS = {
     WINDOWS_CUDA_TEST_RUNNER,
     LINUX_CUDA_TEST_RUNNER,
+}
+ROCM_RUNNERS = {
     LINUX_ROCM_TEST_RUNNER,
 }
 CPU_RUNNERS = {
@@ -69,6 +71,7 @@ LABEL_CIFLOW_ALL = "ciflow/all"
 LABEL_CIFLOW_BAZEL = "ciflow/bazel"
 LABEL_CIFLOW_CPU = "ciflow/cpu"
 LABEL_CIFLOW_CUDA = "ciflow/cuda"
+LABEL_CIFLOW_ROCM = "ciflow/rocm"
 LABEL_CIFLOW_DOCS = "ciflow/docs"
 LABEL_CIFLOW_DEFAULT = "ciflow/default"
 LABEL_CIFLOW_LIBTORCH = "ciflow/libtorch"
@@ -254,6 +257,8 @@ class CIWorkflow:
             assert self.test_runner_type != ''
         if self.test_runner_type in CUDA_RUNNERS:
             assert LABEL_CIFLOW_CUDA in self.ciflow_config.labels
+        if self.test_runner_type in ROCM_RUNNERS:
+            assert LABEL_CIFLOW_ROCM in self.ciflow_config.labels
         if self.test_runner_type in CPU_RUNNERS and not self.exclude_test:
             assert LABEL_CIFLOW_CPU in self.ciflow_config.labels
         if self.is_scheduled:
@@ -602,7 +607,7 @@ LINUX_WORKFLOWS = [
         test_runner_type=LINUX_ROCM_TEST_RUNNER,
         num_test_shards=2,
         ciflow_config=CIFlowConfig(
-            labels=set([LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA]),
+            labels=set([LABEL_CIFLOW_LINUX, LABEL_CIFLOW_ROCM]),
         ),
     ),
     CIWorkflow(
