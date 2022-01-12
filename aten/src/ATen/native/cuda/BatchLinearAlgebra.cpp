@@ -1401,7 +1401,16 @@ void ldl_factor_kernel(
     case at::LinalgBackend::Magma:
       return ldl_factor_looped_magma(factors, pivots, info, upper, hermitian);
     default:
+    // By default use cusolver if available and magma otherwise.
+    // If cusolver and magma 2.5.4+ are both available and hermitian=true,
+    // call magma for complex inputs
 #ifdef USE_CUSOLVER
+#if AT_MAGMA_ENABLED() && (MAGMA_VERSION_MAJOR >= 2 && MAGMA_VERSION_MINOR >= 5 && MAGMA_VERSION_MICRO >= 4)
+      if (factors.is_complex() && hermitian) {
+        return ldl_factor_looped_magma(
+            factors, pivots, info, upper, hermitian);
+      }
+#endif
       return ldl_factor_looped_cusolver(
           factors, pivots, info, upper, hermitian);
 #else
