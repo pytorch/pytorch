@@ -382,6 +382,9 @@ MatchTypeReturn matchTypeVariables(
     const TypePtr& actual,
     TypeEnv& type_env) {
   if (!formal->hasFreeVariables()) {
+    if (auto dyn = formal->castRaw<c10::DynamicType>()) {
+      return matchTypeVariables(dyn->fallback(), actual, type_env);
+    }
     return MatchTypeReturn::Success();
   }
 
@@ -512,6 +515,9 @@ MatchTypeReturn matchTypeVariables(
 // change return types like List[List[t]] into List[List[int]]
 TORCH_API TypePtr tryEvalTypeVariables(const TypePtr& type, std::unordered_map<std::string, TypePtr>& type_env) {
   if (!type->hasFreeVariables()) {
+    if (auto dyn = type->castRaw<c10::DynamicType>()) {
+      return tryEvalTypeVariables(dyn->fallback(), type_env);
+    }
     return type;
   }
 

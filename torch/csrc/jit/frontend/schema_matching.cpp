@@ -615,6 +615,8 @@ static Value* emitBuiltinNode(
   if (!version.has_value() ||
       isOpSymbolCurrent(matched_schema.schema_name, version.value())) {
     n->getOperation();
+  } else {
+    n->setHistoricSchemaName(matched_schema.schema_name);
   }
 
   return packOutputs(graph, n->outputs(), matched_schema.return_field_names);
@@ -678,6 +680,18 @@ Value* emitBuiltinCall(
       schemas.push_back(&op->schema());
   }
 
+  // we might have seen old historic
+  // ops that are deprecated
+  if (variants.empty()) {
+    auto oldSchemas =
+        loadPossibleHistoricOps(name.toQualString(), graph_version);
+    upgrader_schemas.reserve(oldSchemas.size());
+    for (const auto& old_schema_entry : oldSchemas) {
+      FunctionSchema old_schema = parseSchema(old_schema_entry);
+      upgrader_schemas.emplace_back(old_schema);
+    }
+  }
+
   // TODO (tugsuu): make sure this is optimized later
   for (const auto& schema : upgrader_schemas) {
     schemas.push_back(&schema);
@@ -710,7 +724,7 @@ Value* emitBuiltinCall(
 
   auto matched = matchSchemas(schemas, loc, graph, args, kwargs, self);
 
-  if (matched.first < variants.size()) {
+  if (matched.first < variants.size() + upgrader_schemas.size()) {
     return emitBuiltinNode(matched.second, loc, graph, name, graph_version);
   } else {
     auto& fn = *builtin_functions[matched.first - variants.size()];

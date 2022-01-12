@@ -492,6 +492,10 @@ class AccTracerTest(unittest.TestCase):
                 bn_mean = node
             elif node.op == "get_attr" and node.target == "bn.running_var":
                 bn_var = node
+            elif node.op == "get_attr" and node.target == "bn.scale":
+                bn_scale = node
+            elif node.op == "get_attr" and node.target == "bn.zero_point":
+                bn_zero_point = node
             elif node.op == "call_function":
                 self.assertEqual(node.target, acc_ops.quantized_batch_norm2d)
                 self.assertEqual(node.kwargs["input"], ph)
@@ -499,6 +503,8 @@ class AccTracerTest(unittest.TestCase):
                 self.assertEqual(node.kwargs["bias"], bias_attr)
                 self.assertEqual(node.kwargs["running_mean"], bn_mean)
                 self.assertEqual(node.kwargs["running_var"], bn_var)
+                self.assertEqual(node.kwargs["acc_out_ty"][6]["scale"], bn_scale)
+                self.assertEqual(node.kwargs["acc_out_ty"][6]["zero_point"], bn_zero_point)
                 bn = node
             elif node.op == "output":
                 self.assertEqual(bn, node.args[0])
@@ -1451,6 +1457,17 @@ class AccTracerTest(unittest.TestCase):
     def test_torch_mul(self):
         self._make_acc_op_function_test(acc_ops.mul, lambda x: torch.mul(x, 7))
 
+    def test_div(self):
+        self._make_acc_op_function_test(acc_ops.div, lambda x: torch.div(x, 2))
+        self._make_acc_op_function_test(acc_ops.div, lambda x: x / 2)
+
+    def test_floor_div(self):
+        self._make_acc_op_function_test(acc_ops.floor_div, lambda x: torch.div(x, 2, rounding_mode="floor"))
+
+    def test_trunc_div(self):
+        self._make_acc_op_function_test(acc_ops.trunc_div, lambda x: torch.div(x, 2, rounding_mode="trunc"))
+        self._make_acc_op_function_test(acc_ops.trunc_div, lambda x: torch.floor_divide(x, 2))
+
     def test_view(self):
         """
         Test that Tensor.view is traced correctly.
@@ -1906,6 +1923,8 @@ class AccTracerTest(unittest.TestCase):
                 acc_ops.sub,
                 acc_ops.mul,
                 acc_ops.div,
+                acc_ops.floor_div,
+                acc_ops.trunc_div,
                 acc_ops.pow,
                 acc_ops.relu,
                 acc_ops.leaky_relu,
