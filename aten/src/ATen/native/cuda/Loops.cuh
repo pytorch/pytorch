@@ -121,7 +121,7 @@ void jitted_gpu_kernel(
     at::cuda::jit::BinaryFuncVariant scalar_pos =
         at::cuda::jit::BinaryFuncVariant::NoScalar,
     at::opmath_type<f_inputs_type> scalar_val = 0,
-    std::vector<at::cuda::jit::arg_type_name_t> extra_arg_name = {},
+    std::vector<at::cuda::jit::arg_type_name_t> extra_args_name = {},
     Args... extra_args) {
   // TODO: much of preamble is common to both jitted_gpu_kernel and gpu_kernel
   //   Maybe it could be refactored?
@@ -146,7 +146,7 @@ void jitted_gpu_kernel(
   if (!iter.can_use_32bit_indexing()) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
       jitted_gpu_kernel<name, return_type, f_inputs_type, arity, Args...>(
-          sub_iter, f, scalar_pos, scalar_val, extra_arg_name, extra_args...);
+          sub_iter, f, scalar_pos, scalar_val, extra_args_name, extra_args...);
     }
 
     return;
@@ -185,7 +185,7 @@ void jitted_gpu_kernel(
         /*f_inputs_type=*/f_inputs_type,
         arity,
         at::cuda::jit::BinaryFuncVariant::NoScalar>(
-        iter, f, needs_dynamic_casting, 0, extra_arg_name, extra_args...);
+        iter, f, needs_dynamic_casting, 0, extra_args_name, extra_args...);
   } else if (scalar_pos == at::cuda::jit::BinaryFuncVariant::RhsScalar) {
     jitted_gpu_kernel_impl<
         /*name*/ name,
@@ -197,7 +197,7 @@ void jitted_gpu_kernel(
         f,
         needs_dynamic_casting,
         scalar_val,
-        extra_arg_name,
+        extra_args_name,
         extra_args...);
 
   } else {
@@ -211,7 +211,7 @@ void jitted_gpu_kernel(
         f,
         needs_dynamic_casting,
         scalar_val,
-        extra_arg_name,
+        extra_args_name,
         extra_args...);
   }
 }

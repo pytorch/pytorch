@@ -124,12 +124,16 @@ static inline void launch_vectorized_kernel(int64_t N, const func_t& f, array_t 
   }
 }
 
+namespace {
+
 template <typename ArrT, typename... Args>
 auto parameter_pack_to_array(Args*... args) {
   constexpr auto p_pack_size = sizeof...(args);
-  std::array<ArrT, p_pack_size> arr = {std::forward<ArrT>(args)...};
+  std::array<ArrT, p_pack_size> arr = {static_cast<ArrT>(args)...};
   return arr;
 }
+
+} // namespace
 
 template<char const *name,
          typename result_type,
@@ -144,7 +148,7 @@ template<char const *name,
 static inline void launch_jitted_unrolled_kernel(
   DeviceIndex dev_idx, int64_t N, const std::string& f, array_t data,
   inp_calc_t ic, out_calc_t oc, loader_t l, storer_t s, bool contiguous, at::opmath_type<f_inputs_type> scalar_val,
-  std::vector<at::cuda::jit::arg_type_name_t> extra_arg_name, Args... extra_args) {
+  std::vector<at::cuda::jit::arg_type_name_t> extra_args_name, Args... extra_args) {
 
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
   const int64_t grid = (N + block_work_size() - 1) / block_work_size();
@@ -166,7 +170,7 @@ static inline void launch_jitted_unrolled_kernel(
       std::string result_type_str = at::cuda::jit::typeName<result_type>();
       auto code = at::cuda::jit::generate_code(nTensors, f, string_name,
                                                f_inputs_type_str, compute_type_str, result_type_str,
-                                               contiguous, dynamic_casting, scalar_pos, false, 0, extra_arg_name);
+                                               contiguous, dynamic_casting, scalar_pos, false, 0, extra_args_name);
       *fn_ptr = at::cuda::jit::jit_pwise_function(code, name);
     }
   }
@@ -192,6 +196,7 @@ static inline void launch_jitted_unrolled_kernel(
 
   auto extra_args_array = parameter_pack_to_array<void*>(extra_args...);
   for (int i = 0; i < extra_arg_name.size(); i++) {
+    // since 7 slots are already filled in `args`
     args[i + 7] = extra_args_array[i];
   }
 
@@ -207,7 +212,7 @@ template<
   at::cuda::jit::BinaryFuncVariant scalar_pos,
   typename array_t, typename ... Args>
 static inline void launch_jitted_vectorized_kernel(DeviceIndex dev_idx, int64_t N, const std::string& f, array_t data,
-at::opmath_type<f_inputs_type> scalar_val, std::vector<at::cuda::jit::arg_type_name_t> extra_arg_name, Args... extra_args) {
+at::opmath_type<f_inputs_type> scalar_val, std::vector<at::cuda::jit::arg_type_name_t> extra_args_name, Args... extra_args) {
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
   const int64_t grid = (N + block_work_size() - 1) / block_work_size();
   const int vec_size = memory::jitted_can_vectorize_up_to<result_type, f_inputs_type, arity>(data);
@@ -247,13 +252,13 @@ at::opmath_type<f_inputs_type> scalar_val, std::vector<at::cuda::jit::arg_type_n
                                                f_inputs_type_str, compute_type_str, result_type_str,
                                                /*contiguous=*/true, /*dynamic_casting=*/false,
                                                scalar_pos,
-                                               vectorized, vec_size, extra_arg_name);
+                                               vectorized, vec_size, extra_args_name);
       std::string kernel_name = vectorized ? string_name + "_vectorized" + std::to_string(vec_size) : string_name;
       *fn_ptr = at::cuda::jit::jit_pwise_function(code, kernel_name);
     }
   }
 
-  auto extra_args_arr = parameter_pack_to_array<void*>(extra_args...);
+  auto extra_args_array = parameter_pack_to_array<void*>(extra_args...);
 
   if (vectorized) {
     std::array<void*, 15> args = {
@@ -274,8 +279,9 @@ at::opmath_type<f_inputs_type> scalar_val, std::vector<at::cuda::jit::arg_type_n
       nullptr
     };
 
-    for (int i = 0; i < extra_arg_name.size(); i++) {
-      args[i + 3] = extra_args_arr[i];
+    for (int i = 0; i < extra_args_array.size(); i++) {
+      // since 3 slots are already filled in `args`
+      args[i + 3] = extra_args_array[i];
     }
 
     at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args, grid, num_threads());
@@ -304,8 +310,9 @@ at::opmath_type<f_inputs_type> scalar_val, std::vector<at::cuda::jit::arg_type_n
       nullptr
     };
 
-    for (int i = 0; i < extra_arg_name.size(); i++) {
-      args[i + 7] = extra_args_arr[i];
+    for (int i = 0; i < extra_args_array.size(); i++) {
+      // since 7 slots are already filled in `args`
+      args[i + 7] = extra_args_array[i];
     }
     at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args, grid, num_threads());
     C10_CUDA_KERNEL_LAUNCH_CHECK();

@@ -284,7 +284,7 @@ std::string generate_code(
     BinaryFuncVariant scalar_pos,
     bool vectorized=false,
     int vec_size=0,
-    std::vector<arg_type_name_t> extra_arg_name = {});
+    std::vector<arg_type_name_t> extra_args_name = {});
 
 NvrtcFunction jit_pwise_function(
     const std::string& code,

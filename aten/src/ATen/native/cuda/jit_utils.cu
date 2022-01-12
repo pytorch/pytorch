@@ -583,7 +583,7 @@ std::string generate_code(
     BinaryFuncVariant scalar_pos,
     bool vectorized,
     int vec_size,
-    std::vector<arg_type_name_t> extra_arg_name) {
+    std::vector<arg_type_name_t> extra_args_name) {
   TemplateEnv env;
   env.s("index_type", "unsigned int");
   const int nInputs = nTensors - 1;
