@@ -195,7 +195,7 @@ static inline void launch_jitted_unrolled_kernel(
   };
 
   auto extra_args_array = parameter_pack_to_array<void*>(extra_args...);
-  for (int i = 0; i < extra_arg_name.size(); i++) {
+  for (int i = 0; i < extra_args_name.size(); i++) {
     // since 7 slots are already filled in `args`
     args[i + 7] = extra_args_array[i];
   }
