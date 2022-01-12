@@ -338,6 +338,12 @@ struct TORCH_API Node {
   topo_position_t topo_position_ = 0;
   // a managing wrapper for Python to allow invalidation
   std::shared_ptr<Wrap<Node>> wrap_;
+  // Stores the full schema name, if the operator is historic
+  // When the operator is deprecated or the name of the operator
+  // is changed, we need to rely on this name
+  // to retrieve old schemas to successfully apply upgraders
+  // for this operator.
+  c10::optional<std::string> historic_schema_name_ = c10::nullopt;
 
  protected:
   Node(Graph* graph_, NodeKind kind_); // defined after graph
@@ -360,6 +366,14 @@ struct TORCH_API Node {
       wrap_ = std::make_shared<Wrap<Node>>(this);
     }
     return wrap_;
+  }
+
+  const c10::optional<std::string> getHistoricSchemaName() {
+    return historic_schema_name_;
+  }
+
+  void setHistoricSchemaName(const std::string& name) {
+    historic_schema_name_ = name;
   }
 
   Node*& next() {
