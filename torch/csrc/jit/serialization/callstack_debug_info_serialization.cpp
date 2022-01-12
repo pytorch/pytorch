@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/api/compilation_unit.h>
+#include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/serialization/callstack_debug_info_serialization.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 
@@ -214,7 +215,12 @@ ska::flat_hash_map<int64_t, DebugInfoTuple> CallStackDebugInfoUnpickler::
         size_t size,
         const ska::flat_hash_map<int64_t, SourceRange>& source_range_map,
         const std::shared_ptr<CompilationUnit>& cu) {
-  auto ival = jit::unpickle(reinterpret_cast<const char*>(data.get()), size);
+  auto ival = jit::unpickle(
+      reinterpret_cast<const char*>(data.get()),
+      size,
+      nullptr,
+      {},
+      c10::parseType);
   ska::flat_hash_map<int64_t, DebugInfoTuple> callstack_ptrs;
   auto ivalues = std::move(*std::move(ival).toTuple()).elements();
   for (auto& val : ivalues) {
