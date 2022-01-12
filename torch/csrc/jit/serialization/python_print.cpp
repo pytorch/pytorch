@@ -755,6 +755,11 @@ struct PythonPrintImpl {
             min_version_, uint64_t(entry[entry.size() - 1].bumped_at_version));
       }
     }
+    // We want to manually bump the minimum versions for
+    // other variants of aten::div and aten::full which
+    // are not covered by the new upgraders
+    min_version_ =
+        std::max(min_version_, get_min_version_for_kind(node->kind()));
 #else
     min_version_ =
         std::max(min_version_, get_min_version_for_kind(node->kind()));
