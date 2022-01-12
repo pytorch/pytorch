@@ -1,6 +1,6 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#pragma once
 #include <ATen/native/cuda/KernelUtils.cuh>
+#include <ATen/cuda/detail/TensorInfo.cuh>
 
 namespace at { namespace native {
 

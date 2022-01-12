@@ -1,8 +1,7 @@
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/NativeFunctions.h>
 
 #pragma once
 

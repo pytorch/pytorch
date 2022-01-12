@@ -1,7 +1,6 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/Functions.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/AccumulateType.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
@@ -22,6 +21,12 @@
 #include <limits>
 #include <utility>
 #include <type_traits>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#endif
 
 /**
  * Note [Register spilling in curand call for CUDA < 10]
