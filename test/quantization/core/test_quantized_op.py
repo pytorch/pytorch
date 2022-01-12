@@ -4045,6 +4045,7 @@ class TestQuantizedConv(TestCase):
 
         # check that this doesn't error
         test_conv = torch.nn.quantized.Conv2d(input_channels, output_channels, 1)
+        test_conv.scale = Y_scale
         test_conv(X_q)
 
         # Test the module implementation
@@ -4144,6 +4145,7 @@ class TestQuantizedConv(TestCase):
 
         # check that this doesn't error
         test_conv = torch.nn.quantized.ConvTranspose1d(input_channels, output_channels, 1)
+        test_conv.scale = Y_scale
         test_conv(X_q)
 
         # Test the module implementation
@@ -4254,6 +4256,7 @@ class TestQuantizedConv(TestCase):
 
         # check that this doesn't error
         test_conv = torch.nn.quantized.ConvTranspose2d(input_channels, output_channels, 1)
+        test_conv.scale = Y_scale
         test_conv(X_q)
 
         # Test the module implementation
@@ -4374,6 +4377,7 @@ class TestQuantizedConv(TestCase):
 
         # check that this doesn't error
         test_conv = torch.nn.quantized.ConvTranspose3d(input_channels, output_channels, 1)
+        test_conv.scale = Y_scale
         test_conv(X_q)
 
         # Test the module implementation
@@ -4545,6 +4549,7 @@ class TestQuantizedConv(TestCase):
 
         # check that this doesn't error
         test_conv = torch.nn.quantized.Conv1d(input_channels, output_channels, 1)
+        test_conv.scale = Y_scale
         test_conv(X_q)
 
         # Test the module implementation
@@ -4660,6 +4665,7 @@ class TestQuantizedConv(TestCase):
 
             # check that this doesn't error
             test_conv = torch.nn.quantized.Conv3d(input_channels, output_channels, 1)
+            test_conv.scale = Y_scale
             test_conv(X_q)
 
             # Test the module implementation
