@@ -19,7 +19,7 @@
 
 namespace at { namespace cuda { namespace jit {
 
-using arg_type_name_t = std::pair<std::string, std::string>;
+using arg_type_name_t = std::pair<const char*, const char*>;
 
 // TODO: TemplateEnv and CodeTemplate are copied from code_template.h
 // They should be refactored into their own header
@@ -284,7 +284,7 @@ std::string generate_code(
     BinaryFuncVariant scalar_pos,
     bool vectorized=false,
     int vec_size=0,
-    std::vector<arg_type_name_t> extra_args_name = {});
+    c10::SmallVector<arg_type_name_t> extra_args_name = {});
 
 NvrtcFunction jit_pwise_function(
     const std::string& code,

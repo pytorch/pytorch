@@ -148,7 +148,7 @@ template<char const *name,
 static inline void launch_jitted_unrolled_kernel(
   DeviceIndex dev_idx, int64_t N, const std::string& f, array_t data,
   inp_calc_t ic, out_calc_t oc, loader_t l, storer_t s, bool contiguous, at::opmath_type<f_inputs_type> scalar_val,
-  std::vector<at::cuda::jit::arg_type_name_t> extra_args_name, Args... extra_args) {
+  c10::SmallVector<at::cuda::jit::arg_type_name_t> extra_args_name, Args... extra_args) {
 
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
   const int64_t grid = (N + block_work_size() - 1) / block_work_size();
@@ -212,7 +212,7 @@ template<
   at::cuda::jit::BinaryFuncVariant scalar_pos,
   typename array_t, typename ... Args>
 static inline void launch_jitted_vectorized_kernel(DeviceIndex dev_idx, int64_t N, const std::string& f, array_t data,
-at::opmath_type<f_inputs_type> scalar_val, std::vector<at::cuda::jit::arg_type_name_t> extra_args_name, Args... extra_args) {
+at::opmath_type<f_inputs_type> scalar_val, c10::SmallVector<at::cuda::jit::arg_type_name_t> extra_args_name, Args... extra_args) {
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
   const int64_t grid = (N + block_work_size() - 1) / block_work_size();
   const int vec_size = memory::jitted_can_vectorize_up_to<result_type, f_inputs_type, arity>(data);
@@ -334,7 +334,7 @@ static inline void launch_unrolled_kernel(int64_t N, const func_t& f, array_t da
 template <char const *name, typename result_type, typename compute_type, int arity,
           at::cuda::jit::BinaryFuncVariant scalar_pos=at::cuda::jit::BinaryFuncVariant::NoScalar, typename ... Args>
 void jitted_gpu_kernel_impl(TensorIteratorBase& iter, const std::string& f, const bool dynamic_casting, compute_type scalar_val = 0,
-std::vector<at::cuda::jit::arg_type_name_t> extra_arg_name={}, Args... extra_args) {
+c10::SmallVector<at::cuda::jit::arg_type_name_t> extra_arg_name={}, Args... extra_args) {
   TORCH_INTERNAL_ASSERT(iter.can_use_32bit_indexing());
   TORCH_INTERNAL_ASSERT(iter.ninputs() == arity);
   TORCH_INTERNAL_ASSERT(iter.noutputs() == 1);

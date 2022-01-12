@@ -583,7 +583,7 @@ std::string generate_code(
     BinaryFuncVariant scalar_pos,
     bool vectorized,
     int vec_size,
-    std::vector<arg_type_name_t> extra_args_name) {
+    c10::SmallVector<arg_type_name_t> extra_args_name) {
   TemplateEnv env;
   env.s("index_type", "unsigned int");
   const int nInputs = nTensors - 1;
@@ -594,11 +594,11 @@ std::string generate_code(
   env.s("name", name);
   std::string function_param = "";
   for (auto arg: extra_args_name) {
-    function_param +=  "," + arg.first + " " + arg.second;
+    function_param +=  "," + std::string(arg.first) + " " + std::string(arg.second);
   }
   std::string function_call = "";
   for (auto arg: extra_args_name) {
-    function_call +=  ", " + arg.second;
+    function_call +=  ", " + std::string(arg.second);
   }
 
   env.s("extra_params", function_param);

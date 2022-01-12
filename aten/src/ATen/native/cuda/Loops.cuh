@@ -121,7 +121,7 @@ void jitted_gpu_kernel(
     at::cuda::jit::BinaryFuncVariant scalar_pos =
         at::cuda::jit::BinaryFuncVariant::NoScalar,
     at::opmath_type<f_inputs_type> scalar_val = 0,
-    std::vector<at::cuda::jit::arg_type_name_t> extra_args_name = {},
+    c10::SmallVector<at::cuda::jit::arg_type_name_t> extra_args_name = {},
     Args... extra_args) {
   // TODO: much of preamble is common to both jitted_gpu_kernel and gpu_kernel
   //   Maybe it could be refactored?
