@@ -1395,7 +1395,8 @@ ExprPtr PolynomialTransformer::mutate(CompareSelectPtr v) {
   ExprPtr false_branch = v->ret_val2()->accept_mutator(this);
 
   // Constant Folding.
-  if (lhs_new->isConstant() && rhs_new->isConstant()) {
+  if (lhs_new->isConstant() && rhs_new->isConstant() &&
+      true_branch->isConstant() && false_branch->isConstant()) {
     ExprPtr v_new = alloc<CompareSelect>(
         lhs_new,
         rhs_new,

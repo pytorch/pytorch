@@ -1,6 +1,7 @@
 import collections
 import copy
 import math
+import tempfile
 import unittest
 
 import torch
@@ -15,6 +16,7 @@ from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     NodeSpec,
 )
+from torch.testing import FileCheck
 from torch.quantization import (
     ObserverBase,
     FakeQuantizeBase,
@@ -23,6 +25,7 @@ from torch.quantization.quantize_fx import (
     prepare_fx,
     convert_fx,
 )
+from torch.ao.quantization._dbr.quantization_state import AutoQuantizationState
 
 import torch.ao.quantization._quantize_dbr as _quantize_dbr
 import torch.ao.ns._numeric_suite_dbr as ns
@@ -148,6 +151,21 @@ class TestQuantizeDBRIndividualOps(QuantizeDBRTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
 
+    def test_linear_dynamic(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(1, 1)
+
+            def forward(self, x):
+                x1 = self.linear(x)
+                return x1
+
+        m = M().eval()
+        qconfig = torch.quantization.default_dynamic_qconfig
+        # qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 1, 1),))
+
     def test_linear_functional(self):
         class LinearFunctional(nn.Module):
             def __init__(self):
@@ -158,6 +176,22 @@ class TestQuantizeDBRIndividualOps(QuantizeDBRTestCase):
 
             def forward(self, x):
                 x = F.linear(x, self.w1, self.b1)
+                return x
+
+        model_fp32 = LinearFunctional().eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(
+            model_fp32, qconfig, (torch.randn(1, 1, 4, 4),))
+
+    def test_linear_functional_nobias(self):
+        class LinearFunctional(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w1 = nn.Parameter(torch.empty(4, 4))
+                torch.nn.init.kaiming_uniform_(self.w1, a=math.sqrt(5))
+
+            def forward(self, x):
+                x = F.linear(x, self.w1)
                 return x
 
         model_fp32 = LinearFunctional().eval()
@@ -569,6 +603,140 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
             # TODO(future PR): add FX rewrite support
             do_fx_comparison=False, do_torchscript_checks=False)
 
+    def test_child_module_does_not_return_tensor(self):
+        class M1(torch.nn.Module):
+            def forward(self, x):
+                pass
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m1 = M1()
+
+            def forward(self, x):
+                self.m1(x)
+                return x
+
+        model_fp32 = M().eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(
+            model_fp32, qconfig, (torch.randn(1, 1, 1, 1),),
+            # TODO(future PR): add FX rewrite support
+            do_fx_comparison=False, do_torchscript_checks=False)
+
+    def _get_non_traceable_module_class_test_model(self):
+        class M1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = x + x
+                return x
+
+        class M2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m1 = M1()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.m1(x)
+                x = self.conv(x)
+                x = x + x
+                return x
+
+        class M3(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m2 = M2()
+
+            def forward(self, x):
+                x = self.m2(x)
+                return x
+
+        return M3().eval(), M1, M2, M3
+
+    def test_prepare_custom_config_dict_non_traceable_module_class_child_leaf(self):
+
+        # if M1 is set as leaf, M2 and M3 should have auto_quant_state
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        m, M1, M2, M3 = self._get_non_traceable_module_class_test_model()
+        prepare_custom_config_dict = {
+            'non_traceable_module_class': [M1],
+        }
+        mp = _quantize_dbr.prepare(
+            m, qconfig_dict, (torch.randn(1, 1, 1, 1),),
+            prepare_custom_config_dict=prepare_custom_config_dict)
+        self.assertTrue(not hasattr(mp.m2.m1, '_auto_quant_state'))
+        self.assertTrue(hasattr(mp.m2, '_auto_quant_state'))
+        self.assertTrue(hasattr(mp, '_auto_quant_state'))
+        mq = _quantize_dbr.convert(mp)
+        self.assertTrue(isinstance(mq.m2.m1.conv, nn.Conv2d))
+        self.assertTrue(isinstance(mq.m2.conv, nnq.Conv2d))
+        mqt = torch.jit.trace(mq, (torch.randn(1, 1, 1, 1),))
+
+        # mqt.m2.m1 should not have quantized ops
+        FileCheck().check_count("aten::add", 1, exactly=True).run(mqt.m2.m1.graph)
+        FileCheck().check_count("quantized::add", 0, exactly=True).run(mqt.m2.m1.graph)
+        # mqt.m2.m1 should have quantized ops
+        FileCheck().check_count("aten::add", 0, exactly=True).run(mqt.m2.graph)
+        FileCheck().check_count("quantized::add", 1, exactly=True).run(mqt.m2.graph)
+
+        # TODO(future PR): ensure modules in leaves do not get quantized
+
+    def test_prepare_custom_config_dict_non_traceable_module_class_mid_leaf(self):
+        # if M2 is set as leaf, only M1 should have auto_quant_state
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        m, M1, M2, M3 = self._get_non_traceable_module_class_test_model()
+        prepare_custom_config_dict = {
+            'non_traceable_module_class': [M2],
+        }
+        mp = _quantize_dbr.prepare(
+            m, qconfig_dict, (torch.randn(1, 1, 1, 1),),
+            prepare_custom_config_dict=prepare_custom_config_dict)
+        self.assertTrue(not hasattr(mp.m2.m1, '_auto_quant_state'))
+        self.assertTrue(not hasattr(mp.m2, '_auto_quant_state'))
+        self.assertTrue(hasattr(mp, '_auto_quant_state'))
+        mq = _quantize_dbr.convert(mp)
+        self.assertTrue(isinstance(mq.m2.m1.conv, nn.Conv2d))
+        self.assertTrue(isinstance(mq.m2.conv, nn.Conv2d))
+        mqt = torch.jit.trace(mq, (torch.randn(1, 1, 1, 1),))
+
+        # mqt.m2 and all children should not have quantized ops
+        FileCheck().check_count("aten::add", 1, exactly=True).run(mqt.m2.m1.graph)
+        FileCheck().check_count("quantized::add", 0, exactly=True).run(mqt.m2.m1.graph)
+        FileCheck().check_count("aten::add", 1, exactly=True).run(mqt.m2.graph)
+        FileCheck().check_count("quantized::add", 0, exactly=True).run(mqt.m2.graph)
+
+    def test_module_list(self):
+        class Child(torch.nn.Module):
+            def forward(self, x):
+                return x + x
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.module_list = torch.nn.ModuleList([
+                    Child(),
+                ])
+
+            def forward(self, x):
+                for module in self.module_list:
+                    # TODO(future PR): we should see if there is a better
+                    # solution other than asking users to do this
+                    if not isinstance(module, AutoQuantizationState):
+                        x = module(x)
+                return x
+
+        m = M().eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(
+            m, qconfig, (torch.randn(8, 1, 1, 1),),
+            # TODO(future PR): enable scripting for ModuleList + DBR
+            do_fx_comparison=True, do_torchscript_checks=False)
+
     @unittest.skip('TODO build this')
     def test_module_input_types(self):
         class M(torch.nn.Module):
@@ -968,6 +1136,79 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         self.assertTrue(isinstance(mq[2][0], nn.Conv2d))
         self.assertTrue(isinstance(mq[2][1], nnq.Conv2d))
 
+    def _test_serialization(self, model, input_shape):
+        example_inputs = (torch.randn(*input_shape),)
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        m = model().eval()
+        m = _quantize_dbr.prepare(m, qconfig_dict, example_inputs)
+        # calibrate, to populate statistics
+        m(example_inputs[0])
+        m = _quantize_dbr.convert(m)
+
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        m2 = model().eval()
+        m2 = _quantize_dbr.prepare(m2, qconfig_dict, example_inputs)
+        # do not calibrate, to ensure important statistics are populated without calibration and
+        # the results are different at every node, including the quantize_per_tensor node
+        m2 = _quantize_dbr.convert(m2)
+
+        # Results should be different without loading from serialized state_dict
+        expected = m(example_inputs[0])
+        actual = m2(example_inputs[0])
+        self.assertFalse(_allclose(expected, actual))
+
+        # Results should be the same after loading from serialized state_dict
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            torch.save(m.state_dict(), f)
+            with open(f.name, 'rb') as f2:
+                loaded_state_dict = torch.load(f2)
+                m2.load_state_dict(loaded_state_dict)
+        expected = m(example_inputs[0])
+        actual = m2(example_inputs[0])
+        self.assertTrue(_allclose(expected, actual))
+
+    def test_serialization(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+                self.linear = torch.nn.Linear(1, 1)
+
+            def forward(self, x):
+                x1 = self.conv(x)
+                x2 = self.linear(x1)
+                return x2
+
+        input_shape = (1, 1, 1, 1)
+        self._test_serialization(M, input_shape)
+
+    def test_serialization_functional(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                # conv
+                self.weight2d = torch.nn.Parameter(torch.randn(1, 1, 1, 1))
+                self.bias2d = torch.nn.Parameter(torch.randn(1))
+                self.stride2d = (1, 1)
+                self.padding2d = (0, 0)
+                self.dilation2d = (1, 1)
+                self.groups = 1
+                # linear
+                self.w1 = nn.Parameter(torch.empty(1, 1))
+                self.b1 = nn.Parameter(torch.ones(1))
+                torch.nn.init.kaiming_uniform_(self.w1, a=math.sqrt(5))
+
+            def forward(self, x):
+                updated_weight = self.weight2d * x
+                x = F.conv2d(
+                    x, updated_weight, self.bias2d, self.stride2d, self.padding2d,
+                    self.dilation2d, self.groups)
+                # TODO: Investigate why serialization does not work with functional linear
+                # x = F.linear(x, self.w1, self.b1)
+                return x
+
+        input_shape = (1, 1, 1, 1)
+        self._test_serialization(M, input_shape)
 
 @skipIfNoFBGEMM
 class TestQuantizeDBRMultipleOps(QuantizeDBRTestCase):
