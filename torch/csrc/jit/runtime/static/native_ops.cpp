@@ -684,22 +684,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       }
       return [](ProcessedNode* pnode) {
         const auto& input = pnode->Input(0).toTensor();
-        TORCH_CHECK(
-            input.numel() == 1,
-            "Only 1 element tensors can be converted to ints");
-        AT_DISPATCH_ALL_TYPES_AND2(
-            at::ScalarType::Bool,
-            at::ScalarType::Half,
-            input.scalar_type(),
-            "aten_int",
-            [&]() {
-              auto data = *input.data_ptr<scalar_t>();
-              TORCH_CHECK(
-                  data <= std::numeric_limits<int64_t>::max() &&
-                      data >= std::numeric_limits<int64_t>::min(),
-                  "Value would overflow 64 bit signed integer");
-              pnode->Output(0) = static_cast<int64_t>(data);
-            });
+        pnode->Output(0) = at::native::item(input).toInt();
       };
     });
 
