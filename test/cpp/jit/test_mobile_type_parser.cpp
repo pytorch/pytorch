@@ -8,11 +8,10 @@ namespace torch {
 namespace jit {
 
 // Parse Success cases
-TEST(MobileTypeParserTest, RoundTripAnnotationStr) {
+TEST(MobileTypeParserTest, Int) {
   std::string int_ps("int");
   auto int_tp = c10::parseType(int_ps);
-  std::string int_tps = int_tp->annotation_str();
-  ASSERT_EQ(int_ps, int_tps);
+  EXPECT_EQ(*int_tp, *IntType::get());
 }
 
 TEST(MobileTypeParserTest, NestedContainersAnnotationStr) {

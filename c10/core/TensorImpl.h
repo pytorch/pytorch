@@ -37,6 +37,11 @@ C10_DECLARE_bool(caffe2_keep_on_shrink);
 // respect caffe2_keep_on_shrink.
 C10_DECLARE_int64(caffe2_max_keep_on_shrink_memory);
 
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wimplicit-int-float-conversion")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-float-conversion")
+#endif
+
 namespace at {
 class Tensor;
 class TensorBase;
@@ -2644,3 +2649,5 @@ static_assert(
     "See Note [TensorImpl size constraints] on how to proceed.");
 #endif
 } // namespace c10
+
+C10_CLANG_DIAGNOSTIC_POP()
