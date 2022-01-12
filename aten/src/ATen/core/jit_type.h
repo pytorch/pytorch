@@ -205,7 +205,7 @@ struct TORCH_API OptionalType : public UnionType {
   }
 
   // common cast Optional[Tensor] for undefined tensor type
-  static OptionalTypePtr ofTensor();
+  static TypePtr ofTensor();
 
  private:
   explicit OptionalType(TypePtr contained);
