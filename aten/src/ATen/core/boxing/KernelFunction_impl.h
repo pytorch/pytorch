@@ -18,7 +18,7 @@ inline KernelFunction::KernelFunction(std::unique_ptr<OperatorKernel> functor, I
 {}
 
 template<KernelFunction::BoxedKernelFunction* func>
-inline void KernelFunction::make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, DispatchKeySet, Stack* stack) {
+inline void KernelFunction::make_boxed_function(const OperatorHandle& opHandle, DispatchKeySet, Stack* stack) {
     // Note that we're dropping the DispatchKeySet argument.
     // See Note [Plumbing Keys Through The Dispatcher 2] for details.
     func(opHandle, stack);
@@ -29,7 +29,7 @@ inline bool KernelFunction::isValidUnboxed() const {
 }
 
 template<KernelFunction::BoxedKernelFunction_withDispatchKeys* func>
-inline void KernelFunction::make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, DispatchKeySet ks, Stack* stack) {
+inline void KernelFunction::make_boxed_function(const OperatorHandle& opHandle, DispatchKeySet ks, Stack* stack) {
     // See Note [Plumbing Keys Through The Dispatcher 2] for details.
     func(opHandle, ks, stack);
 }
@@ -47,7 +47,7 @@ inline void KernelFunction::callBoxed(const OperatorHandle& opHandle, DispatchKe
         boxed_kernel_func_ != nullptr,
         "Tried to call KernelFunction::callBoxed() on an uninitialized KernelFunction."
     );
-    (*boxed_kernel_func_)(functor_.get(), opHandle, dispatchKeySet, stack);
+    (*boxed_kernel_func_)(opHandle, dispatchKeySet, stack);
 }
 
 template<class Return, class... Args>
