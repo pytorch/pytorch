@@ -1,9 +1,15 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/cuda/Resize.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/PeerToPeerAccess.h>
-#include <torch/library.h>
-#include <ATen/native/cuda/Resize.h>
 #include <ATen/native/ResizeCommon.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/resize_native.h>
+#endif
 
 namespace at {
 namespace native {

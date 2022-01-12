@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <c10/core/TensorImpl.h>
 #include <ATen/native/ResizeCommon.h>
 
 #include <c10/cuda/CUDAGuard.h>

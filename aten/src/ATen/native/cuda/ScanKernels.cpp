@@ -1,9 +1,20 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/NativeFunctions.h>
 
 #include <ATen/native/cuda/ScanKernels.h>
 #include <ATen/native/ReduceOps.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_cummax_helper_native.h>
+#include <ATen/ops/_cummin_helper_native.h>
+#include <ATen/ops/_logcumsumexp_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#endif
 
 namespace at { namespace native {
 
