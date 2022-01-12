@@ -2,7 +2,7 @@ from io import BufferedIOBase
 from typing import Any, Callable, Iterable, Iterator, Sized, Tuple
 
 from torch.utils.data import IterDataPipe, functional_datapipe
-from torch.utils.data.datapipes.utils.common import deprecation_warning_torchdata
+from torch.utils.data.datapipes.utils.common import deprecation_warning
 from torch.utils.data.datapipes.utils.decoder import (
     Decoder,
     basichandlers as decoder_basichandlers,
@@ -41,7 +41,7 @@ class RoutedDecoderIterDataPipe(IterDataPipe[Tuple[str, Any]]):
         if not handlers:
             handlers = (decoder_basichandlers, decoder_imagehandler('torch'))
         self.decoder = Decoder(*handlers, key_fn=key_fn)
-        deprecation_warning_torchdata(type(self).__name__)
+        deprecation_warning(type(self).__name__)
 
     def add_handler(self, *handler: Callable) -> None:
         self.decoder.add_handler(*handler)
