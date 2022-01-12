@@ -34,7 +34,8 @@ LINUX_PACKAGE_VARIANTS = OrderedDict(
     manywheel=[
         "3.7m",
         "3.8m",
-        "3.9m"
+        "3.9m",
+        "3.10m"
     ],
     conda=dimensions.STANDARD_PYTHON_VERSIONS,
     libtorch=[
