@@ -2468,7 +2468,7 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_inverse_wishart_log_prob(self):
-        df = (torch.rand([], requires_grad=True) + 1) * 10
+        df = (torch.rand([], requires_grad=True) + 6) * 10
         tmp = torch.randn(3, 10)
         cov = (torch.matmul(tmp, tmp.t()) / tmp.size(-1)).requires_grad_()
         prec = cov.inverse().requires_grad_()
