@@ -408,8 +408,8 @@ void GeluCUDAKernelImpl(TensorIteratorBase& it, int64_t approximate) {
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, it.dtype(), "GeluCUDAKernelImpl", [&]() {
       using T_ACC = acc_type<scalar_t, true>;
       gpu_kernel(it, [] GPU_LAMBDA(scalar_t x) -> scalar_t {
-        return static_cast<T_ACC>(x) *
-            c10::cuda::compat::normcdf(static_cast<T_ACC>(x));
+        constexpr T_ACC kAlpha = M_SQRT1_2;
+        return static_cast<T_ACC>(x) * T_ACC(0.5) * (T_ACC(1) + ::erf(static_cast<T_ACC>(x) * kAlpha));
       });
     });
   }
@@ -446,7 +446,9 @@ void GeluBackwardCUDAKernelImpl(TensorIteratorBase& it, int64_t approximate) {
           using T_ACC = acc_type<scalar_t, true>;
           gpu_kernel(it, [] GPU_LAMBDA(scalar_t dy, scalar_t x) -> scalar_t {
             constexpr T_ACC kBeta = M_2_SQRTPI * M_SQRT1_2 * T_ACC(0.5);
-            const T_ACC cdf = c10::cuda::compat::normcdf(static_cast<T_ACC>(x));
+            constexpr T_ACC kAlpha = M_SQRT1_2;
+            const T_ACC cdf =
+                T_ACC(0.5) * (T_ACC(1) + ::erf(static_cast<T_ACC>(x) * kAlpha));
             const T_ACC pdf =
                 c10::cuda::compat::exp(
                     T_ACC(-0.5) * static_cast<T_ACC>(x) * static_cast<T_ACC>(x)) *
