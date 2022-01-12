@@ -1204,36 +1204,14 @@ class TestAssertCloseSparseCOO(TestCase):
         for fn in assert_close_with_inputs(actual, expected):
             fn()
 
-    def test_mismatching_is_coalesced(self):
-        indices = (
-            (0, 1),
-            (1, 0),
-        )
-        values = (1, 2)
-        actual = torch.sparse_coo_tensor(indices, values, size=(2, 2))
-        expected = actual.clone().coalesce()
+    def test_mismatching_sparse_dims(self):
+        t = torch.randn(2, 3, 4)
+        actual = t.to_sparse()
+        expected = t.to_sparse(2)
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, "is_coalesced"):
+            with self.assertRaisesRegex(AssertionError, re.escape("number of sparse dimensions in sparse COO tensors")):
                 fn()
-
-    def test_mismatching_is_coalesced_no_check(self):
-        actual_indices = (
-            (0, 1),
-            (1, 0),
-        )
-        actual_values = (1, 2)
-        actual = torch.sparse_coo_tensor(actual_indices, actual_values, size=(2, 2)).coalesce()
-
-        expected_indices = (
-            (0, 1, 1,),
-            (1, 0, 0,),
-        )
-        expected_values = (1, 1, 1)
-        expected = torch.sparse_coo_tensor(expected_indices, expected_values, size=(2, 2))
-
-        for fn in assert_close_with_inputs(actual, expected):
-            fn(check_is_coalesced=False)
 
     def test_mismatching_nnz(self):
         actual_indices = (
