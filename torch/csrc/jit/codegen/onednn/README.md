@@ -1,6 +1,35 @@
 # Pytorch - oneDNN Graph API Bridge
 This integration will add the infrastructure of a new PyTorch JIT graph fuser based on oneDNN Graph API. The oneDNN Graph API provides flexible API for aggressive fusion. The current preview2 version supports fusion for FP32 inference.
 
+## Graph Optimization
+We have registered optimization passes in the custom pre-passes set of PyTorch:
+
+1. Alias and mutation reduction
+
+    The operators of oneDNN graph are pure functional while PyTorch has operators in in-place forms or create views for buffer sharing.
+    Due to the semantic gaps between the backend operators and the PyTorch operators, we have a pass to reduce mutation with best effort at the beginning.
+
+2. Graph passing
+
+    With a PyTorch TorchScript graph, the integration maps PyTorch operators on the graph to the corresponding oneDNN Graph operators to form a backend graph.
+
+3. Partitioning
+
+    The backend selects regions to be fused in the graph and returns a list of partitions. Each partition corresponds to a set of fused operators.
+
+4. Graph rewriting
+
+    The original PyTorch JIT graph will be re-written based on the partitions returned from the backend. The operators in one partition will be grouped together to form a JIT operator, referred to as a oneDNN Graph fusion group.
+
+5. Layout propagation
+
+    This pass is to eliminate unnecessary layout conversions at partition boundaries. We set different formats to the output of a partition so that the backend could perform layout conversion internally. When `ANY` is set, the layout at boundaries will be fully decided by the backend. Otherwise, the backend should follow the layout set by PyTorch. Currently, we set `ANY` layout for a tensor that's an output of a oneDNN Graph partition, and an input to another.
+
+## Graph Executor
+During runtime execution of a (re-written) PyTorch JIT graph, oneDNN graph partitions will be dispatched to the oneDNN graph JIT variadic Operator. 
+Inside the oneDNN graph JIT Op, input PyTorch tensors of each partition will be mapped to oneDNN graph tensors. The partition will then be [compiled](https://spec.oneapi.io/onednn-graph/latest/programming_model.html#partition) and [executed](https://spec.oneapi.io/onednn-graph/latest/programming_model.html#compiled-partition). The output oneDNN graph tensor will be mapped back to PyTorch tensors to be fed to the next operator on the PyTorch JIT graph.
+
+
 ## Tests
 
 ```bash
@@ -41,7 +70,7 @@ caffe2/CMakeLists.txt
 CMake where oneDNN Graph submodule are included:
 
 ```bash
-third_party/mkl-dnn
+third_party/ideep/mkl-dnn
 cmake/public/mkldnn.cmake
 cmake/Modules/FindMKLDNN.cmake
 cmake/Dependencies.cmake
