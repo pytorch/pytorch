@@ -1,13 +1,13 @@
 from typing import List, Optional
-import unittest
 
 import torch
 from torch.fx.experimental.fx2trt import (
     InputTensorSpec,
 )
+from torch.testing._internal.common_utils import TestCase, run_tests
 
 
-class TestTRTModule(unittest.TestCase):
+class TestTRTModule(TestCase):
     def _validate_spec(
         self,
         spec: InputTensorSpec,
@@ -44,3 +44,6 @@ class TestTRTModule(unittest.TestCase):
             for batch_size, shape in zip(batch_size_range, spec.shape_ranges[0]):
                 self.assertEqual(batch_size, shape[0])
                 self.assertSequenceEqual(tensor.shape[1:], shape[1:])
+
+if __name__ == '__main__':
+    run_tests()
