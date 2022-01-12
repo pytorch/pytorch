@@ -1692,6 +1692,7 @@ cc_library(
         ":aten_headers",
         ":caffe2_headers",
         "//c10:headers",
+        "@com_github_google_flatbuffers//:flatbuffers",
         "@local_config_python//:python_headers",
         "@onnx",
     ],
@@ -1725,6 +1726,8 @@ cc_library(
         ],
     )) + libtorch_core_sources + libtorch_distributed_sources + torch_cpp_srcs + libtorch_extra_sources + jit_core_sources + [
         ":cpp_generated_code",
+        "torch/csrc/jit/serialization/flatbuffer_serializer.cpp",
+        "torch/csrc/jit/mobile/flatbuffer_loader.cpp"
     ],
     copts = TORCH_COPTS,
     defines = [
