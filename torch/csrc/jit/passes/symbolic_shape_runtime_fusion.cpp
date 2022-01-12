@@ -454,7 +454,7 @@ void insertDynamicShapesGuard(
 
   std::vector<std::string> output_striding =
       fmap(output_strides, [&](StrideInput inp) { return toString(inp); });
-  auto output_ival = IValue(input_striding);
+  auto output_ival = IValue(output_striding);
   guarded_node->ival_(attr::striding_outputs_desc, output_ival);
 
   if (add_composed_op) {
