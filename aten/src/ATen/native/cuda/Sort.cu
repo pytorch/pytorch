@@ -251,8 +251,8 @@ __global__ void fill_reverse_indices_kernel(
 
 template<typename scalar_t>
 inline void segmented_sort_pairs_by_full_sort(
-  int64_t nsegments, int64_t nsort, int64_t n, bool descending, const TensorBase &indices,
-  const scalar_t *self_ptr, scalar_t *values_ptr, int64_t *indices_ptr
+  const int64_t nsegments, const int64_t nsort, const int64_t n, const bool descending,
+  const scalar_t *const self_ptr, scalar_t *const values_ptr, int64_t *const indices_ptr
 ) {
   int64_t segment_bits = std::max<int64_t>(1L, static_cast<int64_t>(std::ceil(std::log2(nsegments))));
 
@@ -342,7 +342,7 @@ void launch_stable_sort_kernel(
 
         if (nsegments < 128) {
           segmented_sort_pairs_by_full_sort(nsegments, nsort, n, descending,
-            indices, self_ptr, values_ptr, indices_ptr);
+            self_ptr, values_ptr, indices_ptr);
         } else {
           segmented_sort_pairs(nsegments, nsort, n, descending,
                                self_ptr, values_ptr, indices_ptr);
