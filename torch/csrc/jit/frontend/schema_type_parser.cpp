@@ -3,6 +3,7 @@
 #include <ATen/core/alias_info.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/symbol.h>
+#include <ATen/core/type_factory.h>
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parse_string_literal.h>
@@ -342,7 +343,7 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
     }
     L.expect(')');
     alias_info = parseAliasAnnotation();
-    value = UnionType::create(types);
+    value = c10::TypeFactory::create<c10::UnionType>(std::move(types));
   } else if (
       complete_tensor_types && L.cur().kind == TK_IDENT &&
       parseTensorDType(L.cur().text())) {
@@ -390,7 +391,7 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
       }
       alias_info = std::move(container);
     } else if (L.nextIf('?')) {
-      value = OptionalType::create(value);
+      value = c10::TypeFactory::create<c10::OptionalType>(value);
     } else {
       break;
     }
