@@ -716,7 +716,14 @@ class TensorLikePair(Pair):
     def _compare_quantized_values(
         self, actual: torch.Tensor, expected: torch.Tensor, *, rtol: float, atol: float, equal_nan: bool
     ) -> None:
-        """Compares quantized tensors by comparing the :meth:`~torch.Tensor.dequantize`'d variants for closeness."""
+        """Compares quantized tensors by comparing the :meth:`~torch.Tensor.dequantize`'d variants for closeness.
+
+        .. note::
+
+            A detailed discussion about why only the dequantized variant is checked for closeness rather than checking
+            the individual quantization parameters for closeness and the integer representation for equality can be
+            found in https://github.com/pytorch/pytorch/issues/68548.
+        """
         return self._compare_regular_values(
             actual.dequantize(),
             expected.dequantize(),
@@ -1107,6 +1114,7 @@ def assert_close(
         AssertionError: If corresponding tensors do not have the same :attr:`~torch.Tensor.shape`.
         AssertionError: If ``check_layout`` is ``True``, but corresponding tensors do not have the same
             :attr:`~torch.Tensor.layout`.
+        AssertionError: If only one of corresponding tensors is quantized.
         AssertionError: If corresponding tensors are quantized, but have different :meth:`~torch.Tensor.qscheme`'s.
         AssertionError: If ``check_device`` is ``True``, but corresponding tensors are not on the same
             :attr:`~torch.Tensor.device`.
