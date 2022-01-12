@@ -106,8 +106,8 @@ SeenOpInfo.__repr__ = seen_op_info_repr  # type: ignore[assignment]
 @dataclasses.dataclass
 class QTensorInfo:
     id: int  # tensor ID
-    inf_dtype: torch.dtype  # dtype at inference
     orig_dtype: torch.dtype  # dtype seen while tracing with example input
+    inf_dtype: torch.dtype  # dtype at inference
 
 
 def op_needs_quantization(op: Callable) -> bool:
