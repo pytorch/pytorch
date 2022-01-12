@@ -13,7 +13,7 @@
 #include <ATen/native/cuda/block_reduce.cuh>
 
 #ifndef AT_PER_OPERATOR_HEADERS
-#include <ATen/Funcitons.h>
+#include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/empty.h>
