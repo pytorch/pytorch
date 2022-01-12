@@ -10,6 +10,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_torch_cuda_cu_linker_symbol_op_native.h>
 #include <ATen/ops/bucketize_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/searchsorted_native.h>
