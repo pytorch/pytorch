@@ -84,6 +84,8 @@ static void apply_lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, con
 #ifndef CUDART_VERSION
   TORCH_CHECK(false, "lu_solve: cuBLAS backend for lu_solve is not available.")
 #else
+  TORCH_INTERNAL_ASSERT(batchCount(b) == batchCount(lu), "batch_size of b and lu must be the same");
+  TORCH_INTERNAL_ASSERT(batchCount(lu) == batchCount(pivots.unsqueeze(-1)), "batch_size of lu and pivots must be the same");
   const auto trans = to_cublas(transpose);
 
   auto pivots_data = pivots.data_ptr<int>();
@@ -346,34 +348,6 @@ Tensor& _linalg_inv_out_helper_cuda_lib(Tensor& result, Tensor& infos_getrf, Ten
   }
 
   return result;
-}
-
-// entrance of calculations of `inverse` using cusolver getrf + getrs, cublas getrfBatched + getriBatched
-Tensor _inverse_helper_cuda_lib(const Tensor& self) {
-  Tensor self_working_copy = cloneBatchedColumnMajor(self);
-  Tensor self_inv_working_copy = column_major_identity_matrix_like(self_working_copy);
-  const int batch_size = cuda_int_cast(batchCount(self), "batchCount");
-
-  if (self.dim() > 2 && batch_size > 1) {
-    Tensor infos_getrf = at::zeros({std::max<int64_t>(1, batchCount(self))}, self.options().dtype(kInt));
-    Tensor infos_getrs = at::zeros({std::max<int64_t>(1, batchCount(self))}, self.options().dtype(kInt));
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "inverse_cuda", [&]{
-      apply_batched_inverse_lib<scalar_t>(
-        self_working_copy, self_inv_working_copy, infos_getrf, infos_getrs);
-    });
-    batchCheckErrors(infos_getrf, "inverse_cuda");
-    batchCheckErrors(infos_getrs, "inverse_cuda");
-  } else {
-    Tensor infos_getrf = at::zeros({1}, self.options().dtype(kInt));
-    Tensor infos_getrs = at::zeros({1}, self.options().dtype(kInt));
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "inverse_cuda", [&]{
-      apply_single_inverse_lib<scalar_t>(self_working_copy, self_inv_working_copy, infos_getrf, infos_getrs);
-    });
-    batchCheckErrors(infos_getrf, "inverse_cuda");
-    batchCheckErrors(infos_getrs, "inverse_cuda");
-  }
-
-  return self_inv_working_copy;
 }
 
 // call cusolver gesvd function to calculate svd
@@ -1451,56 +1425,40 @@ void linalg_eigh_cusolver(const Tensor& eigenvalues, const Tensor& eigenvectors,
 // The 'apply_' word is used for templated by dtype functions that call an API routine
 // underneath. Since the cusolver API has a slightly different structure we do not prepend
 // apply_ to this function.
-void lu_looped_cusolver(const Tensor& self, const Tensor& pivots, const Tensor& infos, bool get_pivots) {
-  // Fill the pivots tensor with indices using 1-based (Fortran) indexing. This
-  // is needed for maintaining the same results with MAGMA.
-  auto k = std::min(self.size(-2), self.size(-1));
-  Tensor pivots_tmp = at::arange(1, k + 1, self.options().dtype(at::kInt)).expand_as(pivots);
-  pivots.copy_(pivots_tmp);
-
-  AT_DISPATCH_FLOATING_TYPES(
+void lu_factor_looped_cusolver(const Tensor& self, const Tensor& pivots, const Tensor& infos, bool get_pivots, const bool use_magma_) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
     self.scalar_type(),
-    "lu_cusolver",
+    "lu_factor_cusolver",
     [&self,
      &pivots,
      &infos,
      &get_pivots]() {
-    int m = cuda_int_cast(self.size(-2), "m");
-    int n = cuda_int_cast(self.size(-1), "n");
-    int lda = std::max<int>(1, m);
-    int64_t self_stride = matrixStride(self);
-    int64_t batch_size = batchCount(self);
-    scalar_t* self_data = self.data_ptr<scalar_t>();
-    int* infos_data = infos.data_ptr<int>();
+    const auto m = cuda_int_cast(self.size(-2), "m");
+    const auto n = cuda_int_cast(self.size(-1), "n");
+    const auto lda = std::max<int>(1, m);
+    const auto self_stride = matrixStride(self);
+    const auto batch_size = batchCount(self);
+    const auto self_data = self.data_ptr<scalar_t>();
+    const auto infos_data = infos.data_ptr<int>();
 
-    auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+    const auto pivots_data = get_pivots ? pivots.data_ptr<int>() : nullptr;
+    const auto pivots_stride = get_pivots ? pivots.size(-1) : 0;
+
+    const auto handle = at::cuda::getCurrentCUDASolverDnHandle();
     for (auto batch = decltype(batch_size){0}; batch < batch_size; ++batch) {
-      if (get_pivots) {
-        auto pivots_data = pivots.data_ptr<int>();
-        auto pivots_stride = pivots.size(-1);
-        at::cuda::solver::getrf<scalar_t>(
-          handle, m, n,
-          self_data + batch * self_stride,
-          lda,
-          pivots_data + batch * pivots_stride,
-          infos_data + batch
-        );
-      }
-      else {
-        at::cuda::solver::getrf<scalar_t>(
-          handle, m, n,
-          self_data + batch * self_stride,
-          lda,
-          nullptr,
-          infos_data + batch
-        );
-      }
+      at::cuda::solver::getrf<scalar_t>(
+        handle, m, n,
+        self_data + batch * self_stride,
+        lda,
+        get_pivots ? pivots_data + batch * pivots_stride : nullptr,
+        infos_data + batch
+      );
     }
   });
 
   // Necessary because cuSOLVER uses nan for outputs that correspond to 0 in MAGMA for non-pivoted LU.
   // See https://github.com/pytorch/pytorch/issues/53879 for more details.
-  if (!get_pivots) {
+  if (!get_pivots && use_magma_) {
     at::nan_to_num_(const_cast<Tensor&>(self), 0, std::numeric_limits<double>::infinity(),
       -std::numeric_limits<double>::infinity());
   }
@@ -1511,14 +1469,14 @@ void lu_solve_looped_cusolver(const Tensor& b, const Tensor& lu, const Tensor& p
     const auto trans = to_cublas(transpose);
     int n = cuda_int_cast(lu.size(-2), "n");
     int nrhs = cuda_int_cast(b.size(-1), "nrhs");
-    auto batch_size = batchCount(lu);
+    auto batch_size = batchCount(b);
     auto info = at::zeros({1}, lu.options().dtype(kInt));
     auto info_data = info.data_ptr<int>();
     auto b_data = b.data_ptr<scalar_t>();
     auto lu_data = lu.data_ptr<scalar_t>();
     auto pivots_data = pivots.data_ptr<int>();
-    auto pivots_stride = pivots.size(-1);
-    auto lu_stride = matrixStride(lu);
+    auto pivots_stride = pivots.dim() > 1 ? pivots.stride(-2) : 0;
+    auto lu_stride = lu.dim() > 2 ? lu.stride(-3) : 0;
     auto b_stride = matrixStride(b);
     int leading_dimension = cuda_int_cast(std::max<int>(1, n), "leading_dimension");
 

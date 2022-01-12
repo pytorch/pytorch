@@ -2,7 +2,9 @@
 
 #include <ATen/core/TensorBody.h>
 #include <ATen/core/blob.h>
+#include <ATen/core/custom_class.h>
 #include <ATen/core/ivalue_to.h>
+#include <ATen/core/jit_type_base.h>
 #include <c10/util/C++17.h>
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/intrusive_ptr.h>
@@ -27,7 +29,6 @@ struct IValue;
 struct ClassType;
 struct Type;
 class RRefInterface;
-using TypePtr = std::shared_ptr<Type>;
 
 struct ClassType;
 using ClassTypePtr = std::shared_ptr<ClassType>;
@@ -282,6 +283,38 @@ struct TORCH_API IValue final {
       const IValue& lhs,
       const IValue& rhs);
 
+private:
+  static bool isAliasOf(const at::Tensor& a, const at::Tensor& b) {
+    // mkldnn tensors dont have views or storage, so we compare
+    // based on tensor impl. //TODO: find a way to use mkldnn storage
+    if (a.is_mkldnn() || b.is_mkldnn()) {
+      return a.unsafeGetTensorImpl() == b.unsafeGetTensorImpl();
+    }
+
+    if (a.is_sparse()) {
+      return isAliasOf(a._values(), b) || isAliasOf(a._indices(), b);
+    }
+    if (b.is_sparse()) {
+      return isAliasOf(a, b._values()) || isAliasOf(a, b._indices());
+    }
+    if (a.is_sparse_csr()) {
+      return isAliasOf(a.values(), b) ||
+             isAliasOf(a.crow_indices(), b) ||
+             isAliasOf(a.col_indices(), b);
+    }
+    if (b.is_sparse_csr()) {
+      return isAliasOf(a, b.values()) ||
+             isAliasOf(a, b.crow_indices()) ||
+             isAliasOf(a, b.col_indices());
+    }
+
+    return a.is_alias_of(b);
+  }
+
+  template <typename T>
+  bool isListOf() const;
+
+public:
   /// @private [doxygen private]
   bool isAliasOf(const IValue& rhs) const {
     if (this->tag != rhs.tag) {
@@ -291,16 +324,7 @@ struct TORCH_API IValue final {
 
     // Tensors should be compared based on internal storage
     if (this->isTensor()) {
-      const auto& thisTensor = this->toTensor();
-      const auto& rhsTensor = rhs.toTensor();
-      // mkldnn tensors dont have views or storage, so we compare
-      // based on tensor impl. //TODO: find a way to use mkldnn storage
-      if (thisTensor.is_mkldnn() || rhsTensor.is_mkldnn()) {
-        return thisTensor.unsafeGetTensorImpl() ==
-            rhsTensor.unsafeGetTensorImpl();
-      }
-
-      return thisTensor.is_alias_of(rhsTensor);
+      return isAliasOf(this->toTensor(), rhs.toTensor());
     }
 
     if (!this->is_intrusive_ptr) {
@@ -868,21 +892,35 @@ struct TORCH_API IValue final {
     }
   }
 
-  TypePtr type() const;
+  template <typename T = c10::Type>
+  typename T::Ptr type() const;
 
   // Detect aliased tensors.
   struct HashAliasedIValue {
+    size_t hashTensor(const at::Tensor& ten) const {
+      if (ten.is_mkldnn()) {
+        // MKLDNN tensors dont have storage and dont create views
+        // or aliasing so we can just use Tensor pointer, TODO: find way
+        // to use mkldnn storage
+        return reinterpret_cast<size_t>(ten.unsafeGetTensorImpl());
+      } else if (ten.is_sparse()) {
+        // COO sparse tensors have a "values" tensor and an "indices" tensor
+        // so this will detect overlap of sparse tensors that share a values
+        // tensor, but not sparse tensors that share an indices tensor.
+        return hashTensor(ten._values());
+      } else if (ten.is_sparse_csr()) {
+        // COO sparse tensors have a "values" tensor and an "indices" tensor
+        // so this will detect overlap of sparse tensors that share a values
+        // tensor, but not sparse tensors that share an indices tensor.
+        return hashTensor(ten.values());
+      } else {
+        return reinterpret_cast<size_t>(
+            ten.storage().unsafeGetStorageImpl());
+      }
+    }
     size_t operator()(const IValue& val) const {
       if (val.isTensor()) {
-        if (val.toTensor().is_mkldnn()) {
-          // MKLDNN tensors dont have storage and dont create views
-          // or aliasing so we can just use Tensor pointer, TODO: find way
-          // to use mkldnn storage
-          return reinterpret_cast<size_t>(val.toTensor().unsafeGetTensorImpl());
-        } else {
-          return reinterpret_cast<size_t>(
-              val.toTensor().storage().unsafeGetStorageImpl());
-        }
+        return hashTensor(val.toTensor());
       }
       // If it is not a Tensor, then two mutable IValues alias each other only
       // if they are the same pointer.
@@ -1013,6 +1051,9 @@ struct TORCH_API IValue final {
       payload.u = p.u;
     }
   }
+
+  template <typename T>
+  struct TagType {};
 
   friend MaybeOwnedTraits<IValue>;
 
@@ -1145,10 +1186,10 @@ struct TORCH_API WeakIValue final {
 struct TORCH_API StrongTypePtr {
   StrongTypePtr(
       std::shared_ptr<torch::jit::CompilationUnit> cu,
-      std::shared_ptr<Type> type);
+      TypePtr type);
 
   std::shared_ptr<torch::jit::CompilationUnit> cu_;
-  std::shared_ptr<Type> type_;
+  TypePtr type_;
 };
 
 // [Constant Object Weak CompilationUnit Reference]
@@ -1159,10 +1200,10 @@ struct TORCH_API StrongTypePtr {
 struct TORCH_API WeakTypePtr {
   WeakTypePtr(
       std::weak_ptr<torch::jit::CompilationUnit> cu,
-      std::shared_ptr<Type> type);
+      TypePtr type);
 
   std::weak_ptr<torch::jit::CompilationUnit> cu_;
-  std::shared_ptr<Type> type_;
+  TypePtr type_;
 };
 
 // internal build errors with std::variant :/
@@ -1222,45 +1263,6 @@ struct TORCH_API WeakOrStrongTypePtr {
 };
 
 
-TORCH_API ska::flat_hash_map<std::type_index, c10::ClassTypePtr>&
-getCustomClassTypeMap();
-
-template <typename T>
-c10::ClassTypePtr getCustomClassTypeImpl() {
-  auto& tmap = c10::getCustomClassTypeMap();
-  auto tindex = std::type_index(typeid(T));
-  auto res = tmap.find(tindex);
-  if (C10_UNLIKELY(res == tmap.end())) {
-    // type_index is not guaranteed to be unique across shared libraries on some platforms
-    // For example see https://github.com/llvm-mirror/libcxx/blob/78d6a7767ed57b50122a161b91f59f19c9bd0d19/include/typeinfo#L133
-    // Also, this is not the case if RTLD_LOCAL option is used, see
-    // https://github.com/pybind/pybind11/blob/f791dc8648e1f6ec33f402d679b6b116a76d4e1b/include/pybind11/detail/internals.h#L101-L106
-    // Take a slow path of iterating over all registered types and compare their names
-    auto class_name = std::string(tindex.name());
-    for(const auto &it: tmap) {
-      if (class_name == it.first.name()) {
-          // Do not modify existing type map here as this template is supposed to be called only once per type
-          // from getCustomClassTypeImpl()
-          return it.second;
-      }
-    }
-    TORCH_CHECK(false, "Can't find class id in custom class type map for ", tindex.name());
-  }
-  return res->second;
-}
-
-template <typename T>
-const c10::ClassTypePtr& getCustomClassType() {
-  // Classes are never unregistered from getCustomClassTypeMap and the
-  // hash lookup can be a hot path, so just cache.
-  // For the same reason, it's fine If this ends up getting duplicated across
-  // DSO boundaries for whatever reason.
-  static c10::ClassTypePtr cache = getCustomClassTypeImpl<T>();
-  return cache;
-}
-
-TORCH_API std::unordered_map<std::string, std::function<PyObject*(void*)>>&
-getClassConverter();
 } // namespace c10
 
 #include <ATen/core/ivalue_inl.h>

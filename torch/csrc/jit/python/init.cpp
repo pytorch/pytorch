@@ -14,6 +14,7 @@
 #include <torch/csrc/jit/passes/batch_mm.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/canonicalize_graph_fuser_ops.h>
+#include <torch/csrc/jit/passes/common_expression_hoisting.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
@@ -74,6 +75,7 @@
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/remove_inplace_ops.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
+#include <torch/csrc/jit/passes/replacement_of_old_operators.h>
 #include <torch/csrc/jit/passes/restore_mutation.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
@@ -284,6 +286,11 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_onnx_function_extraction", onnx::ONNXFunctionExtraction)
       .def("_jit_pass_fuse", FuseGraph)
       .def(
+          "_jit_pass_replace_old_ops_with_upgraders",
+          [](std::shared_ptr<Graph>& g) {
+            return ReplaceOldOperatorsWithUpgraders(g);
+          })
+      .def(
           "_jit_pass_dce",
           [](std::shared_ptr<Graph>& g) {
             return EliminateDeadCode(g->block()); // overload resolution
@@ -302,6 +309,11 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_cse",
           [](std::shared_ptr<Graph>& g) {
             return EliminateCommonSubexpression(g); // overload resolution
+          })
+      .def(
+          "_jit_pass_common_expression_hoisting",
+          [](std::shared_ptr<Graph>& g) {
+            return HoistCommonExpression(g); // overload resolution
           })
       .def(
           "_jit_pass_fuse_quantized_add_relu",
@@ -689,6 +701,18 @@ void initJITBindings(PyObject* module) {
           })
       .def("_jit_set_nvfuser_enabled", &RegisterCudaFuseGraph::registerPass)
       .def(
+          "_jit_set_nvfuser_single_node_mode",
+          [](bool flag) { return fuser::cuda::setSingletonFusion(flag); })
+      .def(
+          "_jit_nvfuser_single_node_mode",
+          []() { return fuser::cuda::getSingletonFusion(); })
+      .def(
+          "_jit_set_nvfuser_horizontal_mode",
+          [](bool flag) { return fuser::cuda::setHorizontalFusion(flag); })
+      .def(
+          "_jit_nvfuser_horizontal_mode",
+          []() { return fuser::cuda::getHorizontalFusion(); })
+      .def(
           "_jit_set_nvfuser_guard_mode",
           [](bool profiling_flag) {
             bool oldState = fuser::cuda::getCudaFusionGuardMode();
@@ -805,6 +829,12 @@ void initJITBindings(PyObject* module) {
       .def("_jit_texpr_fallback_allowed", &tensorexpr::fallbackAllowed)
       .def("_jit_texpr_set_fallback_allowed", &tensorexpr::setFallbackAllowed)
       .def("_jit_set_texpr_reductions_enabled", &setTexprReductionsEnabled)
+      .def(
+          "_jit_set_texpr_dynamic_shape_enabled",
+          &setTensorExprDynamicShapeFusionEnabled)
+      .def(
+          "_jit_texpr_dynamic_shape_enabled",
+          &tensorExprDynamicShapeFusionEnabled)
       .def("_jit_texpr_reductions_enabled", &texprReductionsEnabled)
       .def(
           "_jit_set_te_generate_block_code",
@@ -1265,6 +1295,50 @@ void initJITBindings(PyObject* module) {
       .def("has_storage", &DeserializationStorageContext::hasStorage);
 
   m.def(
+      "_get_schema",
+      [](const std::string& op_name, const std::string& overload_name) {
+        try {
+          auto symbol = Symbol::fromQualString(op_name);
+          auto operations = getAllOperatorsFor(symbol);
+          for (const auto& op : operations) {
+            if (op->schema().overload_name() == overload_name) {
+              return op->schema();
+            }
+          }
+          throw std::runtime_error("Found no matching schema");
+        } catch (const c10::Error& e) {
+          auto msg = torch::get_cpp_stacktraces_enabled()
+              ? e.what()
+              : e.what_without_backtrace();
+          throw std::runtime_error(msg);
+        }
+      });
+
+  m.def(
+      "_get_operation_overload",
+      [](const std::string& op_name, const std::string& overload_name) {
+        try {
+          auto symbol = Symbol::fromQualString(op_name);
+          auto operations = getAllOperatorsFor(symbol);
+          for (const auto& op : operations) {
+            if (op->schema().overload_name() == overload_name) {
+              auto func =
+                  py::cpp_function([op](py::args args, py::kwargs kwargs) {
+                    return invokeOperatorFromPython({op}, args, kwargs);
+                  });
+              return func;
+            }
+          }
+          throw std::runtime_error("Found no matching operator overload");
+        } catch (const c10::Error& e) {
+          auto msg = torch::get_cpp_stacktraces_enabled()
+              ? e.what()
+              : e.what_without_backtrace();
+          throw std::runtime_error(msg);
+        }
+      });
+
+  m.def(
       "_jit_get_operation",
       [](const std::string& op_name) {
         try {
@@ -1339,8 +1413,11 @@ void initJITBindings(PyObject* module) {
               py::name(symbol.toUnqualString()),
               py::doc(docstring.str().c_str()));
           return func;
-        } catch (const c10::Error& error) {
-          throw std::runtime_error(error.what_without_backtrace());
+        } catch (const c10::Error& e) {
+          auto msg = torch::get_cpp_stacktraces_enabled()
+              ? e.what()
+              : e.what_without_backtrace();
+          throw std::runtime_error(msg);
         }
       },
       py::arg("qualified_name"));
@@ -1374,6 +1451,13 @@ void initJITBindings(PyObject* module) {
           "is_backward_compatible_with",
           [](const FunctionSchema& self, const FunctionSchema& old_schema) {
             return self.isBackwardCompatibleWith(old_schema);
+          })
+      .def(
+          "check_forward_compatible_with",
+          [](const FunctionSchema& self, const FunctionSchema& old_schema) {
+            std::ostringstream out;
+            auto result = self.isForwardCompatibleWith(old_schema, out);
+            return std::make_pair(result, out.str());
           })
       .def(
           "__eq__",

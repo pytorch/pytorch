@@ -644,6 +644,50 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self.assertEqual(quant_ref.int_repr().numpy(), qy.int_repr().numpy(),
                          msg="BatchNorm3d module API failed")
 
+    def _test_batch_norm_serialization(self, get_model, data1, data2):
+        m1 = get_model()
+        m1.qconfig = torch.ao.quantization.default_qconfig
+        mp1 = torch.ao.quantization.prepare(m1)
+        mp1(data1)
+        mq1 = torch.ao.quantization.convert(mp1)
+        ref1 = mq1(data2)
+
+        m2 = get_model()
+        m2.qconfig = torch.quantization.default_qconfig
+        mp2 = torch.ao.quantization.prepare(m2)
+        mq2 = torch.ao.quantization.convert(mp2)
+
+        mq2.load_state_dict(mq1.state_dict())
+        ref2 = mq2(data2)
+
+        self.assertTrue(torch.allclose(ref1, ref2))
+
+    def test_batch_norm2d_serialization(self):
+        data1 = torch.randn(2, 4, 6, 8)
+        data2 = torch.randn(2, 4, 6, 8)
+
+        def _get_model():
+            return nn.Sequential(
+                torch.ao.quantization.QuantStub(),
+                nn.BatchNorm2d(4),
+                torch.ao.quantization.DeQuantStub()
+            ).eval()
+
+        self._test_batch_norm_serialization(_get_model, data1, data2)
+
+    def test_batch_norm3d_serialization(self):
+        data1 = torch.randn(2, 4, 6, 8, 1)
+        data2 = torch.randn(2, 4, 6, 8, 1)
+
+        def _get_model():
+            return nn.Sequential(
+                torch.ao.quantization.QuantStub(),
+                nn.BatchNorm3d(4),
+                torch.ao.quantization.DeQuantStub()
+            ).eval()
+
+        self._test_batch_norm_serialization(_get_model, data1, data2)
+
     def test_layer_norm(self):
         """Tests the correctness of the layernorm module.
         The correctness is defined against the functional implementation.

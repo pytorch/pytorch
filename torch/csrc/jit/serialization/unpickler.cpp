@@ -82,9 +82,10 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case AnyEnumType::Kind:
         // no op, there is nothing to tag
         break;
+      case DynamicType::Kind:
       case EnumType::Kind:
         // TODO(gmagogsfm): Implement serialization/deserialization of Enum.
-        AT_ASSERT(false);
+        TORCH_INTERNAL_ASSERT(false);
       case TupleType::Kind: {
         auto t = w.value.toTuple();
         auto ttype = w.static_type->expect<TupleType>();
@@ -163,13 +164,26 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
   }
 }
 
+namespace {
+template <typename T>
+bool is(const Type& type) {
+  if (type.kind() == T::Kind) {
+    return true;
+  }
+  if (auto dyn = type.castRaw<c10::DynamicType>()) {
+    return dyn->tag() == c10::DynamicTypeTrait<T>::tagValue();
+  }
+  return false;
+}
+} // namespace
+
 void restoreContainerTypeTags(const IValue& ivalue, const TypePtr& type) {
-  if (auto dict_type = type->cast<DictType>()) {
+  if (is<DictType>(*type)) {
     auto dict = ivalue.toGenericDict();
-    dict.unsafeSetKeyType(dict_type->getKeyType());
-    dict.unsafeSetValueType(dict_type->getValueType());
-  } else if (auto list_type = type->cast<ListType>()) {
-    ivalue.toList().unsafeSetElementType(list_type->getElementType());
+    dict.unsafeSetKeyType(type->containedType(0));
+    dict.unsafeSetValueType(type->containedType(1));
+  } else if (is<ListType>(*type)) {
+    ivalue.toList().unsafeSetElementType(type->containedType(0));
   } else {
     AT_ERROR("Unknown type for tag restoration: " + type->annotation_str());
   }
@@ -564,7 +578,7 @@ void Unpickler::readGlobal(
           if (type_resolver_ == nullptr) {
             // If we haven't injected a custom way of retrieving types from
             // names, use a barebones type parser.
-            type = c10::parseType(type_str);
+            type = type_parser_(type_str);
           } else {
             type = type_resolver_(type_str).type_;
           }
@@ -724,6 +738,21 @@ void Unpickler::rebuildSparseTensor() {
         result = at::_sparse_coo_tensor_unsafe(
             indices_tensor, values_tensor, size, options);
         result = autograd::make_variable(result, options.requires_grad());
+        break;
+      }
+      case static_cast<int>(c10::Layout::SparseCsr): {
+        std::vector<int64_t> size = tupleToIntList(elements.at(idx++));
+        bool requires_grad = elements.at(idx++).toBool();
+        auto& crow_indices = elements.at(idx++).toTensor();
+        auto& col_indices = elements.at(idx++).toTensor();
+        auto& values_tensor = elements.at(idx++).toTensor();
+        auto options = values_tensor.options()
+                           .layout(c10::Layout::SparseCsr)
+                           .requires_grad(requires_grad);
+        result = at::_sparse_csr_tensor_unsafe(
+            crow_indices, col_indices, values_tensor, size, options);
+        result =
+            autograd::make_variable(std::move(result), options.requires_grad());
         break;
       }
       default:

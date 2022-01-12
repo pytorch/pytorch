@@ -11,11 +11,9 @@ import sys
 from collections import namedtuple
 
 import cimodel.data.binary_build_definitions as binary_build_definitions
-import cimodel.data.simple.android_definitions
 import cimodel.data.simple.binary_smoketest
 import cimodel.data.simple.docker_definitions
 import cimodel.data.simple.mobile_definitions
-import cimodel.data.simple.nightly_android
 import cimodel.data.simple.nightly_ios
 import cimodel.data.simple.anaconda_prune_defintions
 import cimodel.lib.miniutils as miniutils
@@ -137,11 +135,9 @@ def generate_required_docker_images(items):
 
 def gen_build_workflows_tree():
     build_workflows_functions = [
-        cimodel.data.simple.android_definitions.get_workflow_jobs,
         cimodel.data.simple.mobile_definitions.get_workflow_jobs,
         cimodel.data.simple.binary_smoketest.get_workflow_jobs,
         cimodel.data.simple.nightly_ios.get_workflow_jobs,
-        cimodel.data.simple.nightly_android.get_workflow_jobs,
         cimodel.data.simple.anaconda_prune_defintions.get_workflow_jobs,
         binary_build_definitions.get_post_upload_jobs,
         binary_build_definitions.get_binary_smoke_test_jobs,
@@ -189,7 +185,6 @@ YAML_SOURCES = [
     File("build-parameters/binary-build-params.yml"),
     File("build-parameters/promote-build-params.yml"),
     Header("Job specs"),
-    File("job-specs/pytorch-job-specs.yml"),
     File("job-specs/binary-job-specs.yml"),
     File("job-specs/job-specs-custom.yml"),
     File("job-specs/job-specs-promote.yml"),
@@ -198,7 +193,6 @@ YAML_SOURCES = [
     File("job-specs/docker_jobs.yml"),
     Header("Workflows"),
     Treegen(gen_build_workflows_tree, 0),
-    File("workflows/workflows-ecr-gc.yml"),
     File("workflows/workflows-promote.yml"),
 ]
 

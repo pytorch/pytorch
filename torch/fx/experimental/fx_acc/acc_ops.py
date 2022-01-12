@@ -30,7 +30,8 @@ def linear(*, input, weight, bias):
 
 @register_acc_op_properties(AccOpProperty.quantized)
 @register_acc_op
-def quantized_linear(*, input, weight, bias, acc_out_ty):
+def quantized_linear(*, input, weight, bias, acc_out_ty=None):
+    assert acc_out_ty is not None
     qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams")
     return nn.quantized.functional.linear(
         input,
@@ -243,7 +244,6 @@ def clamp(*, input, min=None, max=None):
     return torch.clamp(**locals())
 
 
-@register_acc_op_properties(AccOpProperty.unary)
 @register_acc_op_mapping(op_and_target=("call_function", torch.cat))
 @register_acc_op
 def cat(*, tensors, dim):
@@ -391,6 +391,13 @@ def t_mapper(node: torch.fx.Node, _: nn.Module):
         ("*", "permutation"),
     ],
 )
+@register_acc_op_mapping(
+    op_and_target=("call_function", torch.permute),
+    arg_replacement_tuples=[
+        ("input", "input"),
+        ("dims", "permutation"),
+    ],
+)
 @register_acc_op
 def permute(*, input, permutation):
     return input.permute(*permutation)
@@ -490,7 +497,8 @@ def hardswish_mapper(node: torch.fx.Node, _: nn.Module) -> torch.fx.Node:
     ],
 )
 @register_acc_op
-def quantized_add(*, input, other, acc_out_ty):
+def quantized_add(*, input, other, acc_out_ty=None):
+    assert acc_out_ty is not None
     qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams")
     return torch.ops.quantized.add(
         input,
@@ -515,7 +523,8 @@ def quantized_add(*, input, other, acc_out_ty):
     ],
 )
 @register_acc_op
-def quantized_mul(*, input, other, acc_out_ty):
+def quantized_mul(*, input, other, acc_out_ty=None):
+    assert acc_out_ty is not None
     qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams")
     return torch.ops.quantized.mul(
         input,
@@ -542,7 +551,8 @@ def quantized_mul(*, input, other, acc_out_ty):
     ],
 )
 @register_acc_op
-def quantize_per_tensor(*, input, acc_out_ty):
+def quantize_per_tensor(*, input, acc_out_ty=None):
+    assert acc_out_ty is not None
     qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams")
     dtype = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "dtype")
     return torch.quantize_per_tensor(
@@ -568,7 +578,8 @@ def quantize_per_tensor(*, input, acc_out_ty):
     ],
 )
 @register_acc_op
-def quantize_per_channel(*, input, acc_out_ty):
+def quantize_per_channel(*, input, acc_out_ty=None):
+    assert acc_out_ty is not None
     qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams")
     dtype = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "dtype")
     return torch.quantize_per_channel(
@@ -590,13 +601,15 @@ def dequantize(*, input):
 
 @register_acc_op_properties(AccOpProperty.pointwise, AccOpProperty.unary, AccOpProperty.quantized)
 @register_acc_op
-def rescale_quantize_per_tensor(*, input, acc_out_ty):
+def rescale_quantize_per_tensor(*, input, acc_out_ty=None):
+    assert acc_out_ty is not None
     d = dequantize(input=input)
     return quantize_per_tensor(input=d, acc_out_ty=acc_out_ty)
 
 @register_acc_op_properties(AccOpProperty.unary, AccOpProperty.quantized)
 @register_acc_op
-def rescale_quantize_per_channel(*, input, acc_out_ty):
+def rescale_quantize_per_channel(*, input, acc_out_ty=None):
+    assert acc_out_ty is not None
     d = dequantize(input=input)
     return quantize_per_channel(input=d, acc_out_ty=acc_out_ty)
 
@@ -617,24 +630,6 @@ def mul(*, input, other):
     return input * other
 
 
-# Torch.floor_divide is announced to be deprecated, consider using torch.div() with 'trunc' or 'floor'
-# mode instead.
-# This implementation matches torch.floor_div's behavior, which for negative number the divide result
-# is round toward zero, rather than -Inf.
-@register_custom_acc_mapper_fn(
-    op_and_target=("call_function", torch.floor_divide),
-    arg_replacement_tuples=[
-        ("input", "input"),
-        ("other", "other"),
-    ],
-)
-@register_custom_acc_mapper_fn(
-    op_and_target=("call_function", operator.floordiv),
-    arg_replacement_tuples=[
-        ("input", "input"),
-        ("other", "other"),
-    ],
-)
 @register_custom_acc_mapper_fn(
     op_and_target=("call_function", torch.div),
     arg_replacement_tuples=[
@@ -643,32 +638,47 @@ def mul(*, input, other):
         ("rounding_mode", "rounding_mode", this_arg_is_optional),
     ],
 )
-@register_custom_acc_mapper_fn(
-    op_and_target=("call_function", operator.truediv),
-    arg_replacement_tuples=[
-        ("input", "input"),
-        ("other", "other"),
-    ],
-)
 def div_mapper(node: torch.fx.Node, mod: torch.fx.GraphModule) -> torch.fx.Node:
     with node.graph.inserting_before(node):
         div_kwargs = dict(node.kwargs)
-        if "rounding_mode" not in div_kwargs and node.op == "call_function":
-            div_kwargs["rounding_mode"] = None
-            if node.target is torch.floor_divide:
-                div_kwargs["rounding_mode"] = "trunc"
-            elif node.target is operator.floordiv:
-                div_kwargs["rounding_mode"] = "floor"
-            elif node.target is operator.truediv:
-                div_kwargs["rounding_mode"] = None
-        div_node = node.graph.call_function(div, kwargs=div_kwargs)
+        if "rounding_mode" not in div_kwargs or div_kwargs["rounding_mode"] is None:
+            div_node = node.graph.call_function(div, kwargs={"input": div_kwargs["input"], "other": div_kwargs["other"]})
+        elif div_kwargs["rounding_mode"] == "trunc":
+            div_node = node.graph.call_function(trunc_div, kwargs={"input": div_kwargs["input"], "other": div_kwargs["other"]})
+        elif div_kwargs["rounding_mode"] == "floor":
+            div_node = node.graph.call_function(floor_div, kwargs={"input": div_kwargs["input"], "other": div_kwargs["other"]})
+        else:
+            raise RuntimeError(f"Unhandled div rounding mode {div_kwargs['rounding_mode']}")
         div_node.meta = node.meta.copy()
         return div_node
 
 
+@register_acc_op_properties(AccOpProperty.pointwise)
+@register_acc_op_mapping(op_and_target=("call_function", operator.truediv))
 @register_acc_op
-def div(input, other, *, rounding_mode=None):
-    return torch.div(input, other, rounding_mode=rounding_mode)
+def div(*, input, other):
+    return input / other
+
+
+@register_acc_op_properties(AccOpProperty.pointwise)
+@register_acc_op_mapping(op_and_target=("call_function", operator.floordiv))
+@register_acc_op
+def floor_div(*, input, other):
+    # This is temp fix because currently operator.floor_div for tensors would
+    # traslate into torch.floor_divide which would throw an error. After it's
+    # fixed we can stick to `input // other`.
+    if isinstance(input, torch.Tensor) or isinstance(other, torch.Tensor):
+        return torch.div(input, other, rounding_mode="floor")
+    return input // other
+
+
+# torch.floor_divide rounds result toward zero, rather than -Inf.
+# https://github.com/pytorch/pytorch/issues/43874
+@register_acc_op_mapping(op_and_target=("call_function", torch.floor_divide))
+@register_acc_op_properties(AccOpProperty.pointwise)
+@register_acc_op
+def trunc_div(*, input, other):
+    return torch.div(input, other, rounding_mode="trunc")
 
 
 @register_acc_op_properties(AccOpProperty.pointwise)
@@ -692,6 +702,29 @@ def pow(*, input, exponent):
 def relu(*, input, inplace=False):
     return nn.functional.relu(**locals())
 
+@register_acc_op_properties(AccOpProperty.pointwise, AccOpProperty.unary)
+@register_acc_op_mapping(op_and_target=("call_function", torch.nn.functional.leaky_relu))
+@register_acc_op
+def leaky_relu(*, input, negative_slope=0.01, inplace=False):
+    return nn.functional.leaky_relu(**locals())
+
+@register_acc_op_properties(AccOpProperty.pointwise, AccOpProperty.unary)
+@register_acc_op_mapping(op_and_target=("call_function", torch.nn.functional.elu))
+@register_acc_op
+def elu(*, input, alpha=1.0, inplace=False):
+    return nn.functional.elu(**locals())
+
+@register_acc_op_properties(AccOpProperty.pointwise, AccOpProperty.unary)
+@register_acc_op_mapping(op_and_target=("call_function", torch.nn.functional.selu))
+@register_acc_op
+def selu(*, input, inplace=False):
+    return nn.functional.selu(**locals())
+
+@register_acc_op_properties(AccOpProperty.pointwise, AccOpProperty.unary)
+@register_acc_op_mapping(op_and_target=("call_function", torch.nn.functional.softsign))
+@register_acc_op
+def softsign(*, input):
+    return nn.functional.softsign(**locals())
 
 @register_custom_acc_mapper_fn(
     op_and_target=("call_function", torch.log1p),
@@ -710,7 +743,25 @@ def torch_log1p_mapper(node: torch.fx.Node, _: torch.nn.Module) -> torch.fx.Node
         return log_node
 
 
+def reduce_op_mapper(node: torch.fx.Node, mod: torch.fx.GraphModule, func) -> torch.fx.Node:
+    with node.graph.inserting_before(node):
+        kwargs = dict(node.kwargs)
+        if "dim" in kwargs and isinstance(kwargs["dim"], int):
+            kwargs["dim"] = (kwargs["dim"],)
+        new_node = node.graph.call_function(func, kwargs=kwargs)
+        new_node.meta = node.meta.copy()
+        return new_node
+
+
 @register_acc_op_properties(AccOpProperty.unary)
+@register_acc_op
+def sum(*, input, dim=None, keepdim=False, dtype=None):
+    if dim is not None:
+        return torch.sum(**locals())
+    else:
+        return input.sum(dtype=dtype)
+
+
 @register_custom_acc_mapper_fn(
     op_and_target=("call_method", "sum"),
     arg_replacement_tuples=[
@@ -729,23 +780,39 @@ def torch_log1p_mapper(node: torch.fx.Node, _: torch.nn.Module) -> torch.fx.Node
         ("dtype", "dtype", this_arg_is_optional),
     ],
 )
-def add_sum_mapper(node: torch.fx.Node, mod: torch.fx.GraphModule) -> torch.fx.Node:
-    with node.graph.inserting_before(node):
-        sum_kwargs = dict(node.kwargs)
-        if "dim" in sum_kwargs and isinstance(sum_kwargs["dim"], int):
-            sum_kwargs["dim"] = (sum_kwargs["dim"],)
-        sum_node = node.graph.call_function(sum, kwargs=sum_kwargs)
-        sum_node.meta = node.meta.copy()
-        return sum_node
+def sum_mapper(node: torch.fx.Node, mod: torch.fx.GraphModule) -> torch.fx.Node:
+    return reduce_op_mapper(node, mod, sum)
 
 
 @register_acc_op_properties(AccOpProperty.unary)
 @register_acc_op
-def sum(*, input, dim=None, keepdim=False, dtype=None):
+def mean(*, input, dim=None, keepdim=False, dtype=None):
     if dim is not None:
-        return torch.sum(**locals())
+        return torch.mean(**locals())
     else:
-        return input.sum(dtype=dtype)
+        return input.mean(dtype=dtype)
+
+
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_method", "mean"),
+    arg_replacement_tuples=[
+        ("input", "input"),
+        ("dim", "dim", this_arg_is_optional),
+        ("keepdim", "keepdim", this_arg_is_optional),
+        ("dtype", "dtype", this_arg_is_optional),
+    ],
+)
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_function", torch.mean),
+    arg_replacement_tuples=[
+        ("input", "input"),
+        ("dim", "dim", this_arg_is_optional),
+        ("keepdim", "keepdim", this_arg_is_optional),
+        ("dtype", "dtype", this_arg_is_optional),
+    ],
+)
+def mean_mapper(node, mod):
+    return reduce_op_mapper(node, mod, mean)
 
 
 @register_custom_acc_mapper_fn(
@@ -1374,7 +1441,8 @@ def custom_narrow_mapper(node: torch.fx.Node, mod: nn.Module) -> torch.fx.Node:
     kwargs_to_move_to_acc_out_ty=[("shape", "shape")],
 )
 @register_acc_op
-def reshape(*, input, acc_out_ty):
+def reshape(*, input, acc_out_ty=None):
+    assert acc_out_ty is not None
     return torch.reshape(
         input, tuple(acc_utils.get_field_from_acc_out_ty(acc_out_ty, "shape"))
     )
@@ -1415,8 +1483,8 @@ def custom_tensor_reshape_mapper(node: torch.fx.Node, _: nn.Module) -> torch.fx.
 
 @register_acc_op_properties(AccOpProperty.pointwise, AccOpProperty.unary)
 @register_acc_op
-def to_dtype(input, acc_out_ty):
-    assert acc_out_ty is not None, "valid acc_out_ty needed"
+def to_dtype(input, acc_out_ty=None):
+    assert acc_out_ty is not None
     return input.to(dtype=acc_utils.get_field_from_acc_out_ty(acc_out_ty, "dtype"))
 
 

@@ -1,8 +1,9 @@
 #include <torch/csrc/jit/frontend/schema_type_parser.h>
 
 #include <ATen/core/alias_info.h>
-#include <ATen/core/interned_strings.h>
 #include <ATen/core/jit_type.h>
+#include <ATen/core/symbol.h>
+#include <ATen/core/type_factory.h>
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parse_string_literal.h>
@@ -206,7 +207,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
   std::vector<int64_t> strides;
   parseList(TK_NOTHING, ',', ')', [&] {
     // Extra handling for options like 'device' and 'requires_grad'
-    if (L.cur().kind == TK_IDENT) {
+    if (L.cur().kind == TK_IDENT && L.cur().text() != "SS") {
       const std::string& field = L.expect(TK_IDENT).text();
       if (field == "device") {
         auto parsed_device = tryToParseDeviceType();
@@ -257,10 +258,21 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
       }
       return;
     }
+    bool shape_symbol = false;
+    if (L.cur().kind == TK_IDENT && L.cur().text() == "SS") {
+      L.next();
+      L.expect('(');
+      L.expect('-');
+      shape_symbol = true;
+    }
     const std::string& num = L.expect(TK_NUMBER).text();
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::string::size_type num_len;
-    auto dim = c10::stoll(num, &num_len);
+    int64_t dim = c10::stoll(num, &num_len);
+    if (shape_symbol) {
+      L.expect(')');
+      dim = -dim;
+    }
     dims.emplace_back(dim);
   });
   if (seen_strides) {
@@ -342,7 +354,7 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
     }
     L.expect(')');
     alias_info = parseAliasAnnotation();
-    value = UnionType::create(types);
+    value = c10::TypeFactory::create<c10::UnionType>(std::move(types));
   } else if (
       complete_tensor_types && L.cur().kind == TK_IDENT &&
       parseTensorDType(L.cur().text())) {
@@ -390,7 +402,7 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
       }
       alias_info = std::move(container);
     } else if (L.nextIf('?')) {
-      value = OptionalType::create(value);
+      value = c10::TypeFactory::create<c10::OptionalType>(value);
     } else {
       break;
     }
@@ -402,7 +414,7 @@ void SchemaTypeParser::parseList(
     int begin,
     int sep,
     int end,
-    const std::function<void()>& callback) {
+    c10::function_ref<void()> callback) {
   auto r = L.cur().range;
   if (begin != TK_NOTHING)
     L.expect(begin);

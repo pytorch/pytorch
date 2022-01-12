@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/tensorexpr/cuda_codegen.h>
 #include <torch/csrc/jit/tensorexpr/half_support.h>
 
-#include <ATen/CUDAGeneratorImpl.h>
+#include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/executor_utils.h>
@@ -103,6 +103,10 @@ void CudaAnalysis::visit(AllocatePtr v) {
     p = p->get_parent();
   }
   throw std::runtime_error("Global alloc not supported yet");
+}
+
+void CudaAnalysis::visit(PlacementAllocatePtr v) {
+  throw std::runtime_error("Memory reuse not supported yet");
 }
 
 void CudaAnalysis::visit(ForPtr v) {

@@ -1,5 +1,5 @@
-#include <ATen/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 
 #include <c10/cuda/CUDACachingAllocator.h>
@@ -20,8 +20,11 @@
 #include <nvfuser_resources/block_sync_default.h>
 #include <nvfuser_resources/broadcast.h>
 #include <nvfuser_resources/fp16_support.h>
+#include <nvfuser_resources/grid_broadcast.h>
 #include <nvfuser_resources/grid_reduction.h>
+#include <nvfuser_resources/grid_sync.h>
 #include <nvfuser_resources/helpers.h>
+#include <nvfuser_resources/index_utils.h>
 #include <nvfuser_resources/random_numbers.h>
 #include <nvfuser_resources/tensor.h>
 #include <nvfuser_resources/warp.h>
@@ -64,20 +67,30 @@ std::string kernelPreamble() {
   )";
 #endif
 
+  // Base classes and helpers
   ss << nvfuser_resources::tensor_cu;
   ss << nvfuser_resources::random_numbers_cu;
   ss << nvfuser_resources::helpers_cu;
+  ss << nvfuser_resources::index_utils_cu;
+
+  // Synchronization classes
   if (std::getenv("PYTORCH_NVFUSER_USE_BLOCK_SYNC_ATOMIC")) {
     ss << nvfuser_resources::block_sync_atomic_cu;
   } else {
     ss << nvfuser_resources::block_sync_default_cu;
   }
+  ss << nvfuser_resources::grid_sync_cu;
+
+  // Communication classes
   ss << nvfuser_resources::block_reduction_cu;
   ss << nvfuser_resources::grid_reduction_cu;
+  ss << nvfuser_resources::grid_broadcast_cu;
   ss << nvfuser_resources::broadcast_cu;
   ss << nvfuser_resources::welford_cu;
-  ss << nvfuser_resources::PhiloxCudaStateRaw_cu;
   ss << nvfuser_resources::warp_cu;
+
+  // Random utilities
+  ss << nvfuser_resources::PhiloxCudaStateRaw_cu;
 
   return ss.str();
 }
@@ -392,6 +405,38 @@ bool canVectorize(
   return true;
 }
 
+namespace {
+
+// Check if there's any split that is non-divisible and vectorized. If
+// found, Vectorize is illegal.
+void validateVectorizedSplits(
+    kir::Kernel* kernel,
+    kir::ExpressionEvaluator& expr_eval) {
+  for (const auto& extent_factor : kernel->summary().splits_to_validate) {
+    auto input_extent = expr_eval.evaluate(extent_factor.first);
+    auto split_factor = expr_eval.evaluate(extent_factor.second);
+    TORCH_INTERNAL_ASSERT(
+        input_extent.has_value(),
+        "Could not check if a split with vectorization is divisible because the extent, ",
+        kir::toString(extent_factor.first),
+        ", is not possible to evaluate.");
+    TORCH_INTERNAL_ASSERT(
+        input_extent.has_value(),
+        "Could not check if a split with vectorization is divisible because the split factor, ",
+        kir::toString(extent_factor.second),
+        ", is not possible to evaluate.");
+    TORCH_INTERNAL_ASSERT(
+        input_extent.value() % split_factor.value() == 0,
+        "Non-divisible split with vectorization is detected. ",
+        "Extent: ",
+        input_extent.value(),
+        ". Factor: ",
+        split_factor.value());
+  }
+}
+
+} // namespace
+
 // Misaligned vectorization check. Currently misaligned vectorization is limited
 // to global-register and register-global load/store patterns. However, this
 // could be improved to include shared memory.
@@ -400,7 +445,8 @@ void validateVectorizedTensors(
     const at::ArrayRef<IValue>& inputs,
     const std::vector<at::Tensor>& outputs,
     GpuLower& lower,
-    caching::ExecutorCompileTimeInfoCache* data_cache) {
+    caching::ExecutorCompileTimeInfoCache* data_cache,
+    kir::ExpressionEvaluator& expr_eval) {
   FUSER_PERF_SCOPE("FusionExecutor::validateVectorizedTensors");
 
   auto tensor_vectorization_validation_entry =
@@ -464,6 +510,8 @@ void validateVectorizedTensors(
           inp_misaligned_tensors,
           out_misaligned_tensors),
       "All global tensors must have the same stride for misaligned vectorization.");
+
+  validateVectorizedSplits(lower.kernel(), expr_eval);
 }
 
 kir::ExpressionEvaluator bindKernelInputs(

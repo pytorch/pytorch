@@ -613,6 +613,55 @@ def acc_ops_relu(
     operation_type = trt.ActivationType.RELU
     return add_activation_layer(network, input_val, operation_type, target, name)
 
+@tensorrt_converter(acc_ops.leaky_relu)
+def acc_ops_leaky_relu(
+    network: TRTNetwork,
+    target: Target,
+    args: Tuple[Argument, ...],
+    kwargs: Dict[str, Argument],
+    name: str,
+) -> Union[TRTTensor, Sequence[TRTTensor]]:
+    input_val = kwargs["input"]
+    negative_slope = kwargs["negative_slope"]
+    operation_type = trt.ActivationType.LEAKY_RELU
+    return add_activation_layer(network, input_val, operation_type, target, name, negative_slope)
+
+@tensorrt_converter(acc_ops.elu)
+def acc_ops_elu(
+    network: TRTNetwork,
+    target: Target,
+    args: Tuple[Argument, ...],
+    kwargs: Dict[str, Argument],
+    name: str,
+) -> Union[TRTTensor, Sequence[TRTTensor]]:
+    input_val = kwargs["input"]
+    alpha = kwargs["alpha"]
+    operation_type = trt.ActivationType.ELU
+    return add_activation_layer(network, input_val, operation_type, target, name, alpha)
+
+@tensorrt_converter(acc_ops.selu)
+def acc_ops_selu(
+    network: TRTNetwork,
+    target: Target,
+    args: Tuple[Argument, ...],
+    kwargs: Dict[str, Argument],
+    name: str,
+) -> Union[TRTTensor, Sequence[TRTTensor]]:
+    input_val = kwargs["input"]
+    operation_type = trt.ActivationType.SELU
+    return add_activation_layer(network, input_val, operation_type, target, name)
+
+@tensorrt_converter(acc_ops.softsign)
+def acc_ops_softsign(
+    network: TRTNetwork,
+    target: Target,
+    args: Tuple[Argument, ...],
+    kwargs: Dict[str, Argument],
+    name: str,
+) -> Union[TRTTensor, Sequence[TRTTensor]]:
+    input_val = kwargs["input"]
+    operation_type = trt.ActivationType.SOFTSIGN
+    return add_activation_layer(network, input_val, operation_type, target, name)
 
 @tensorrt_converter(acc_ops.sin)
 def acc_ops_sin(
@@ -842,34 +891,19 @@ def acc_ops_sum(
     args: Tuple[Argument, ...],
     kwargs: Dict[str, Argument],
     name: str,
-) -> Union[TRTTensor, Sequence[TRTTensor]]:
-    input_val = kwargs["input"]
-    if not isinstance(input_val, TRTTensor):
-        raise RuntimeError(
-            f"sum received input {input_val} that is not part "
-            "of the TensorRT region!"
-        )
+) -> TRTTensor:
+    return add_reduce_layer(network, target, args, kwargs, trt.ReduceOperation.SUM, name)
 
-    # If dim is specified, then we are computing reduced sum over certain dimensions.
-    # Otherwise, we are dong summation over all elements, which is only supported in
-    # explicit batch dimension.
-    if "dim" not in kwargs:
-        assert (
-            not network.has_implicit_batch_dimension
-        ), "Do not support sum all the elements for implicit batch."
-        dim = range(0, len(input_val.shape))
-    else:
-        dim = kwargs["dim"]  # type: ignore[assignment]
 
-    keepdim = False if "keepdim" not in kwargs else kwargs["keepdim"]
-    layer = network.add_reduce(
-        input_val,
-        trt.ReduceOperation.SUM,
-        get_axes_for_reduce_op(dim, network.has_implicit_batch_dimension),
-        keepdim,
-    )
-    set_layer_name(layer, target, name)
-    return layer.get_output(0)
+@tensorrt_converter(acc_ops.mean)
+def acc_ops_mean(
+    network: TRTNetwork,
+    target: Target,
+    args: Tuple[Argument, ...],
+    kwargs: Dict[str, Argument],
+    name: str,
+) -> TRTTensor:
+    return add_reduce_layer(network, target, args, kwargs, trt.ReduceOperation.AVG, name)
 
 
 def add_acc_ops_full_reduce(network, target, args, kwargs, name, reduce_op):
@@ -1127,21 +1161,33 @@ def acc_ops_div(
     kwargs: Dict[str, Argument],
     name: str,
 ) -> Union[TRTTensor, Sequence[TRTTensor]]:
-    if kwargs["rounding_mode"] == "trunc":
-        inputs = kwargs["input"]
-        other = kwargs["other"]
-        return trunc_div(inputs, other, network, target, name)
-    elif kwargs["rounding_mode"] == "floor":
-        return add_binary_elementwise_layer(
-            network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.FLOOR_DIV, target, name
-        )
-    elif kwargs["rounding_mode"] is None:
-        return add_binary_elementwise_layer(
-            network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.DIV, target, name
-        )
-    else :
-        mode = kwargs["rounding_mode"]
-        raise RuntimeError(f"Div received mode {mode} that is not supported!")
+    return add_binary_elementwise_layer(
+        network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.DIV, target, name
+    )
+
+
+@tensorrt_converter(acc_ops.floor_div)
+def acc_ops_floor_div(
+    network: TRTNetwork,
+    target: Target,
+    args: Tuple[Argument, ...],
+    kwargs: Dict[str, Argument],
+    name: str,
+) -> Union[TRTTensor, Sequence[TRTTensor]]:
+    return add_binary_elementwise_layer(
+        network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.FLOOR_DIV, target, name
+    )
+
+
+@tensorrt_converter(acc_ops.trunc_div)
+def acc_ops_trunc_div(
+    network: TRTNetwork,
+    target: Target,
+    args: Tuple[Argument, ...],
+    kwargs: Dict[str, Argument],
+    name: str,
+) -> Union[TRTTensor, Sequence[TRTTensor]]:
+    return trunc_div(kwargs["input"], kwargs["other"], network, target, name)
 
 
 @tensorrt_converter(acc_ops.mul)
@@ -1248,8 +1294,8 @@ def acc_ops_adaptive_avg_pool2d(
     assert (
         input_val.shape[-1] != -1 and input_val.shape[-1] != -1
     ), "AdaptiveAvgPool2d currently doesn't support dynamic shapes for last two dims."
-    output_size = cast(Sequence[int], kwargs["output_size"])
 
+    output_size = cast(Sequence[int], extend_attr_to_tuple(kwargs["output_size"], 2))
     for input_dim, output_dim in zip(input_val.shape[-2:], output_size):
         if input_dim % output_dim != 0:
             raise RuntimeError(
@@ -2072,14 +2118,18 @@ def acc_ops_cumsum(
     set_layer_name(running_sum, target, f"{name}_running_sum_1")
     running_sum_tensor = running_sum.get_output(0)
 
-    current_sum = add_binary_elementwise_layer(network, data, running_sum_tensor, trt.ElementWiseOperation.SUM, target, "sum_1")
+    current_sum = add_binary_elementwise_layer(
+        network, data, running_sum_tensor, trt.ElementWiseOperation.SUM, target, f"{name}_sum_1"
+    )
     running_sum.set_input(1, current_sum)
 
     running_sum = loop.add_recurrence(zero_tensor)
     set_layer_name(running_sum, target, f"{name}_running_sum_2")
     running_sum_tensor = running_sum.get_output(0)
 
-    current_sum = add_binary_elementwise_layer(network, data, running_sum_tensor, trt.ElementWiseOperation.SUM, target, "sum_2")
+    current_sum = add_binary_elementwise_layer(
+        network, data, running_sum_tensor, trt.ElementWiseOperation.SUM, target, f"{name}_sum_2"
+    )
     running_sum.set_input(1, current_sum)
 
     loop_output = loop.add_loop_output(current_sum, trt.LoopOutput.CONCATENATE, dim)
