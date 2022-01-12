@@ -593,11 +593,11 @@ std::string generate_code(
   env.s("functor", func);
   env.s("name", name);
   std::string function_param = "";
-  for (auto arg: extra_arg_name) {
+  for (auto arg: extra_args_name) {
     function_param +=  "," + arg.first + " " + arg.second;
   }
   std::string function_call = "";
-  for (auto arg: extra_arg_name) {
+  for (auto arg: extra_args_name) {
     function_call +=  ", " + arg.second;
   }
 
