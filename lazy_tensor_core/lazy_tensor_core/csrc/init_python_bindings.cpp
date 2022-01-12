@@ -18,6 +18,7 @@
 #include <vector>
 
 #include <torch/csrc/lazy/core/lazy_graph_executor.h>
+#include "c10/core/DeviceType.h"
 #include "lazy_tensor_core/csrc/python_util.h"
 #include "lazy_tensor_core/csrc/tensor_aten_ops.h"
 #include "lazy_tensor_core/csrc/tensor_distributed.h"
@@ -27,10 +28,13 @@
 #include "lazy_tensors/computation_client/metrics_analysis.h"
 #include "lazy_tensors/computation_client/metrics_reader.h"
 #include "lazy_tensors/computation_client/sys_util.h"
+#include "lazy_tensor_core/csrc/ts_backend/LazyLazyIr.h"
+#include "lazy_tensor_core/csrc/ts_backend/LazyShapeInference.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/python/pybind.h"
 #include "torch/csrc/utils/cuda_lazy_init.h"
+#include <torch/torch.h>
 
 namespace torch_lazy_tensors {
 namespace {
@@ -698,4 +702,27 @@ PYBIND11_MODULE(_LAZYC, m) {
     // Do nothing, CUDA not available.
   }
   torch_lazy_tensors::InitLtcBindings(m);
+}
+
+torch::Tensor lazy_custom_relu(torch::Tensor a) {
+  std::cout << "In nop_tensor\n";
+  if (a.device().type() == c10::kLazy) {
+    // CONSTRUCT IR for the custom op
+    std::cout << "Tensor is on the lazy device\n";
+    auto self_lazy_tensor = torch::lazy::GetLtcTensor(a);
+    auto shapes = torch_lazy_tensors::ir::ops::compute_shape_relu(a);
+      return torch::lazy::CreateAtenFromLtcTensor(
+          self_lazy_tensor.Create(torch::lazy::MakeNode<torch_lazy_tensors::ir::ops::Relu>(
+              self_lazy_tensor.GetIrValue(), std::move(shapes)), 
+              self_lazy_tensor.GetDevice()
+          )
+      );
+  } else {
+    //TODO: CUDA IMPLEMENTATION
+    return a.relu();
+  }
+}
+
+TORCH_LIBRARY(lazy_cuda, m) {
+  m.def("lazy_custom_relu", lazy_custom_relu);
 }
