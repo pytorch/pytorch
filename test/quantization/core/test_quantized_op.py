@@ -4036,12 +4036,38 @@ class TestQuantizedConv(TestCase):
             dilations,
             groups,
         )
-        self._test_qconv_impl(
+        X_q, W_q, bias_float = self._test_qconv_impl(
             qconv, qconv_prepack, conv_op, batch_size,
             input_channels_per_group, (height, width),
             output_channels_per_group, groups, kernels, strides, pads, None,
             dilations, X_scale, X_zero_point, W_scale, W_zero_point,
             Y_scale, Y_zero_point, use_bias, use_relu, use_channelwise, False)
+
+        # check that this doesn't error
+        test_conv = torch.nn.quantized.Conv2d(input_channels, output_channels, 1)
+        test_conv(X_q)
+
+        # Test the module implementation
+        qconv_op = torch.nn.quantized.Conv2d(
+            in_channels=input_channels,
+            out_channels=output_channels,
+            kernel_size=kernels,
+            stride=strides,
+            padding=pads,
+            groups=groups,
+            dilation=dilations,
+            bias=use_bias
+        )
+        qconv_op.scale = Y_scale
+        qconv_op.zero_point = Y_zero_point
+        qconv_op.set_weight_bias(W_q, bias_float)
+
+        Y_dq_ref = conv_op(X_q.dequantize())
+        Y_q_ref = torch.quantize_per_tensor(Y_dq_ref, scale=Y_scale,
+                                            zero_point=Y_zero_point,
+                                            dtype=torch.quint8)
+        Y_q = qconv_op(X_q)
+        self.assertEqual(Y_q_ref, Y_q)
 
     """Tests the correctness of quantized convolution op."""
     @given(batch_size=st.integers(1, 3),
@@ -4497,7 +4523,7 @@ class TestQuantizedConv(TestCase):
         output_channels = output_channels_per_group * groups
         if torch.backends.quantized.engine == 'qnnpack':
             use_channelwise = False
-        true_conv1d = torch.nn.Conv1d(
+        conv1d = torch.nn.Conv1d(
             input_channels,
             output_channels,
             kernel,
@@ -4510,12 +4536,39 @@ class TestQuantizedConv(TestCase):
         qconv = torch.ops.quantized.conv1d
         if use_relu:
             qconv = torch.ops.quantized.conv1d_relu
-        self._test_qconv_impl(
-            qconv, qconv_prepack, true_conv1d, batch_size,
+        X_q, W_q, bias_float = self._test_qconv_impl(
+            qconv, qconv_prepack, conv1d, batch_size,
             input_channels_per_group, (length, ),
             output_channels_per_group, groups, kernel, [stride], [pad], None,
             [dilation], X_scale, X_zero_point, W_scale, W_zero_point,
             Y_scale, Y_zero_point, use_bias, use_relu, use_channelwise, False)
+
+        # check that this doesn't error
+        test_conv = torch.nn.quantized.Conv1d(input_channels, output_channels, 1)
+        test_conv(X_q)
+
+        # Test the module implementation
+        qconv_op = torch.nn.quantized.Conv1d(
+            in_channels=input_channels,
+            out_channels=output_channels,
+            kernel_size=kernel,
+            stride=stride,
+            padding=pad,
+            groups=groups,
+            dilation=dilation,
+            bias=use_bias
+        )
+        qconv_op.scale = Y_scale
+        qconv_op.zero_point = Y_zero_point
+        qconv_op.set_weight_bias(W_q, bias_float)
+
+        Y_dq_ref = conv1d(X_q.dequantize())
+        Y_q_ref = torch.quantize_per_tensor(Y_dq_ref, scale=Y_scale,
+                                            zero_point=Y_zero_point,
+                                            dtype=torch.quint8)
+        Y_q = qconv_op(X_q)
+        self.assertEqual(Y_q_ref, Y_q)
+
 
     @given(batch_size=st.integers(1, 4),
            input_channels_per_group=st.sampled_from([2, 4, 5, 8, 16]),
@@ -4598,12 +4651,39 @@ class TestQuantizedConv(TestCase):
                 dilations,
                 groups,
             )
-            self._test_qconv_impl(
+            X_q, W_q, bias_float = self._test_qconv_impl(
                 qconv, qconv_prepack, conv_op, batch_size,
                 input_channels_per_group, (D, H, W), output_channels_per_group,
                 groups, kernels, strides, pads, None, dilations, X_scale,
                 X_zero_point, W_scale, W_zero_point, Y_scale, Y_zero_point,
                 use_bias, use_relu, use_channelwise, use_transpose=False)
+
+            # check that this doesn't error
+            test_conv = torch.nn.quantized.Conv3d(input_channels, output_channels, 1)
+            test_conv(X_q)
+
+            # Test the module implementation
+            qconv_op = torch.nn.quantized.Conv3d(
+                in_channels=input_channels,
+                out_channels=output_channels,
+                kernel_size=kernels,
+                stride=strides,
+                padding=pads,
+                groups=groups,
+                dilation=dilations,
+                bias=use_bias
+            )
+            qconv_op.scale = Y_scale
+            qconv_op.zero_point = Y_zero_point
+            qconv_op.set_weight_bias(W_q, bias_float)
+
+            Y_dq_ref = conv_op(X_q.dequantize())
+            Y_q_ref = torch.quantize_per_tensor(Y_dq_ref, scale=Y_scale,
+                                                zero_point=Y_zero_point,
+                                                dtype=torch.quint8)
+            Y_q = qconv_op(X_q)
+            self.assertEqual(Y_q_ref, Y_q)
+
 
     """Tests the correctness of the quantized::qconv3d_unpack op."""
     @given(
