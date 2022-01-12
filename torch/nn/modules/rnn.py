@@ -578,7 +578,7 @@ class LSTM(RNNBase):
           :math:`(D * \text{num\_layers}, N, H_{out})` containing the
           initial hidden state for each element in the input sequence.
           Defaults to zeros if (h_0, c_0) is not provided.
-        * **c_0**: tensor of shape :math:`(D * \text{num\_layers}, H_{cell})` for unbatched input or 
+        * **c_0**: tensor of shape :math:`(D * \text{num\_layers}, H_{cell})` for unbatched input or
           :math:`(D * \text{num\_layers}, N, H_{cell})` containing the
           initial cell state for each element in the input sequence.
           Defaults to zeros if (h_0, c_0) is not provided.
