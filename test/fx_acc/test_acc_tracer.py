@@ -1457,6 +1457,17 @@ class AccTracerTest(unittest.TestCase):
     def test_torch_mul(self):
         self._make_acc_op_function_test(acc_ops.mul, lambda x: torch.mul(x, 7))
 
+    def test_div(self):
+        self._make_acc_op_function_test(acc_ops.div, lambda x: torch.div(x, 2))
+        self._make_acc_op_function_test(acc_ops.div, lambda x: x / 2)
+
+    def test_floor_div(self):
+        self._make_acc_op_function_test(acc_ops.floor_div, lambda x: torch.div(x, 2, rounding_mode="floor"))
+
+    def test_trunc_div(self):
+        self._make_acc_op_function_test(acc_ops.trunc_div, lambda x: torch.div(x, 2, rounding_mode="trunc"))
+        self._make_acc_op_function_test(acc_ops.trunc_div, lambda x: torch.floor_divide(x, 2))
+
     def test_view(self):
         """
         Test that Tensor.view is traced correctly.
@@ -1912,6 +1923,8 @@ class AccTracerTest(unittest.TestCase):
                 acc_ops.sub,
                 acc_ops.mul,
                 acc_ops.div,
+                acc_ops.floor_div,
+                acc_ops.trunc_div,
                 acc_ops.pow,
                 acc_ops.relu,
                 acc_ops.leaky_relu,
