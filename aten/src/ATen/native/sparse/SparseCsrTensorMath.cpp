@@ -64,6 +64,7 @@
 #include <ATen/ops/mm_native.h>
 #include <ATen/ops/neg.h>
 #include <ATen/ops/neg_native.h>
+#include <ATen/ops/normal_native.h>
 #include <ATen/ops/rad2deg.h>
 #include <ATen/ops/rad2deg_native.h>
 #include <ATen/ops/resize_as_sparse_native.h>
