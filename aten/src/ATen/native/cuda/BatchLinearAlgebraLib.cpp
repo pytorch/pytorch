@@ -171,13 +171,17 @@ void apply_ldl_solve(
     const Tensor& B,
     bool upper) {
 #if defined(CUDART_VERSION) && defined(CUSOLVER_VERSION) && \
-    CUSOLVER_VERSION >= 11102
+    CUSOLVER_VERSION < 11102
   TORCH_CHECK(
       false,
       "Calling torch.linalg.ldl_solve on a CUDA tensor requires compiling ",
       "PyTorch with cuSOLVER. Please use PyTorch built with cuSOLVER 11.1.2+ (CUDA 11.3.1+) support.");
 #else
   auto batch_size = batchCount(B);
+  if (batchCount(B) == 0 || batchCount(A) == 0 ||
+      batchCount(pivots.unsqueeze(-1)) == 0) {
+    return;
+  }
   auto n = A.size(-2);
   auto nrhs = B.size(-1);
   auto lda = A.stride(-1);
@@ -207,9 +211,9 @@ void apply_ldl_solve(
       datatype,
       a_data,
       lda,
-      b_data,
-      datatype,
       pivots_data,
+      datatype,
+      b_data,
       ldb,
       &worksize_device,
       &worksize_host));
