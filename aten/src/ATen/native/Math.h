@@ -405,7 +405,7 @@ static inline float calc_digamma(float x) {
 }
 
 template <typename scalar_t, bool is_cuda=false>
-static inline C10_HOST_DEVICE scalar_t calc_polygamma(int n, scalar_t x) {
+static inline C10_HOST_DEVICE scalar_t calc_polygamma(scalar_t x, int n) {
   // already blocked if n <= 1
   return ((n % 2) ? 1.0 : -1.0) *
       ::exp(::lgamma(static_cast<scalar_t>(n) + 1.0)) *
