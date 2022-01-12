@@ -2404,9 +2404,9 @@ class TestDistributions(TestCase):
         self.assertEqual(d.variance, empirical_var, atol=5, rtol=0)
 
     def test_inverse_wishart_shape(self):
-        df = (torch.rand(5, requires_grad=True) + 6) * 10
-        df_no_batch = (torch.rand([], requires_grad=True) + 6) * 10
-        df_multi_batch = (torch.rand(6, 5, requires_grad=True) + 6) * 10
+        df = (torch.rand(5, requires_grad=True) + 7) * 10
+        df_no_batch = (torch.rand([], requires_grad=True) + 7) * 10
+        df_multi_batch = (torch.rand(6, 5, requires_grad=True) + 7) * 10
 
         # construct PSD covariance
         tmp = torch.randn(3, 10)
@@ -2468,7 +2468,7 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_inverse_wishart_log_prob(self):
-        df = (torch.rand([], requires_grad=True) + 6) * 10
+        df = (torch.rand([], requires_grad=True) + 7) * 10
         tmp = torch.randn(3, 10)
         cov = (torch.matmul(tmp, tmp.t()) / tmp.size(-1)).requires_grad_()
         prec = cov.inverse().requires_grad_()
@@ -2489,7 +2489,7 @@ class TestDistributions(TestCase):
         self.assertEqual(0.0, np.mean((dist3.log_prob(x).detach().numpy() - expected)**2), atol=1e-3, rtol=0)
 
         # Double-check that batched versions behave the same as unbatched
-        df = (torch.rand(5, requires_grad=True) + 6) * 3
+        df = (torch.rand(5, requires_grad=True) + 7) * 3
         tmp = torch.randn(5, 3, 10)
         cov = (tmp.unsqueeze(-2) * tmp.unsqueeze(-3)).mean(-1).requires_grad_()
 
@@ -2506,7 +2506,7 @@ class TestDistributions(TestCase):
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_inverse_wishart_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
-        df = (torch.rand([], requires_grad=True) + 6) * 3
+        df = (torch.rand([], requires_grad=True) + 7) * 3
         tmp = torch.randn(3, 10)
         cov = (torch.matmul(tmp, tmp.t()) / tmp.size(-1)).requires_grad_()
         prec = cov.inverse().requires_grad_()
@@ -2526,7 +2526,7 @@ class TestDistributions(TestCase):
                                     multivariate=True)
 
     def test_inverse_wishart_properties(self):
-        df = (torch.rand([]) + 6) * 5
+        df = (torch.rand([]) + 7) * 5
         scale_tril = transform_to(constraints.lower_cholesky)(torch.randn(5, 5))
         m = InverseWishart(df=df, scale_tril=scale_tril)
         self.assertEqual(m.covariance_matrix, m.scale_tril.mm(m.scale_tril.t()))
@@ -2535,7 +2535,7 @@ class TestDistributions(TestCase):
 
     def test_inverse_wishart_moments(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
-        df = (torch.rand([]) + 6) * 3
+        df = (torch.rand([]) + 7) * 3
         scale_tril = transform_to(constraints.lower_cholesky)(torch.randn(3, 3))
         d = InverseWishart(df=df, scale_tril=scale_tril)
         samples = d.rsample((100000,))
