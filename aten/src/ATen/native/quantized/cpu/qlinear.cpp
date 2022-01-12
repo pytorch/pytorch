@@ -29,6 +29,11 @@ at::Tensor& PackedLinearWeight::apply_impl(
   // a fallback path and rather fail loudly if we cannot run FBGEMM.
   TORCH_CHECK(
       fbgemm::fbgemmSupportedCPU(), "Your CPU does not support FBGEMM.");
+  TORCH_CHECK(input.scalar_type() == c10::kQUInt8,
+                "Expected input data type ",
+                toString(c10::kQUInt8),
+                " but got ",
+                toString(input.scalar_type()));
 
   // TODO: contiguous is called for further jit optimizations.
   auto input_contig = input.expect_contiguous();
@@ -273,6 +278,12 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
   TORCH_CHECK(
       input.dim() >= 2,
       "quantized::linear(): Input tensor rank should be >= 2");
+  TORCH_CHECK(input.scalar_type() == c10::kQUInt8,
+                "quantized::linear (qnnpack): Expected input data type ",
+                toString(c10::kQUInt8),
+                " but got ",
+                toString(input.scalar_type()));
+
   auto input_contig = input.contiguous();
 
   // Weight packing is not thread safe
