@@ -41,6 +41,7 @@
 #include <ATen/ops/copy_sparse_to_sparse_native.h>
 #include <ATen/ops/dense_dim_native.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like_native.h>
 #include <ATen/ops/empty_native.h>
 #include <ATen/ops/index_select.h>
 #include <ATen/ops/indices_native.h>
