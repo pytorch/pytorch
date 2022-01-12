@@ -142,7 +142,7 @@ void batch_iterator_with_broadcasting(const Tensor& a, const Tensor& b, const fu
 }
 
 // Returns the epsilon value for floating types except half
-double _get_epsilon(const ScalarType& sc_type);
+TORCH_API double _get_epsilon(const ScalarType& sc_type);
 
 void linearSolveCheckInputs(const Tensor& self, const Tensor& A, const char* name);
 
