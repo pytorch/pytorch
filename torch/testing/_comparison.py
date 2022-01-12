@@ -29,14 +29,10 @@ class ErrorMeta(Exception):
         self.msg = msg
         self.id = id
 
-    @staticmethod
-    def id_to_itemstr(id: Tuple[Any, ...]) -> str:
-        return "".join(str([item]) for item in id)
-
     def to_error(self) -> Exception:
         msg = self.msg
         if self.id:
-            msg += f"\n\nThe failure occurred for item {self.id_to_itemstr(self.id)}"
+            msg += f"\n\nThe failure occurred for item {''.join(str([item]) for item in self.id)}"
         return self.type(msg)
 
 
@@ -302,6 +298,12 @@ class Pair(abc.ABC):
         """Compares the inputs and returns an :class`ErrorMeta` in case they mismatch."""
 
     def extra_repr(self) -> Sequence[Union[str, Tuple[str, Any]]]:
+        """Returns extra information that will be included in the representation.
+
+        Should be overwritten by all subclasses that use additional options. The representation of the object will only
+        be surfaced in case we encounter an unexpected error and thus should help debug the issue. Can be a sequence of
+        key-value-pairs or attribute names.
+        """
         return []
 
     def __repr__(self) -> str:
@@ -929,7 +931,7 @@ def originate_pairs(
             # what happened. If applicable, the exception should be expected in the future.
             except Exception as error:
                 raise RuntimeError(
-                    f"Originating a {pair_type.__name__}() at item {ErrorMeta.id_to_itemstr(id)} with\n\n"
+                    f"Originating a {pair_type.__name__}() at item {''.join(str([item]) for item in id)} with\n\n"
                     f"{type(actual).__name__}(): {actual}\n\n"
                     f"and\n\n"
                     f"{type(expected).__name__}(): {expected}\n\n"
