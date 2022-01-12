@@ -1,6 +1,7 @@
 import abc
 import cmath
 import collections.abc
+import contextlib
 from typing import NoReturn, Callable, Sequence, List, Union, Optional, Type, Tuple, Any
 
 import torch
@@ -310,7 +311,7 @@ class Pair(abc.ABC):
         head = f"{type(self).__name__}("
         tail = ")"
         body = [
-            f"    {name}={value},"
+            f"    {name}={value!s},"
             for name, value in [
                 ("id", self.id),
                 ("actual", self.actual),
@@ -586,10 +587,29 @@ class TensorLikePair(Pair):
     def compare(self) -> None:
         actual, expected = self.actual, self.expected
 
-        self._compare_attributes(actual, expected)
-        actual, expected = self._equalize_attributes(actual, expected)
+        with self._handle_meta_tensor_data_access():
+            self._compare_attributes(actual, expected)
+            actual, expected = self._equalize_attributes(actual, expected)
 
-        self._compare_values(actual, expected)
+            self._compare_values(actual, expected)
+
+    @contextlib.contextmanager
+    def _handle_meta_tensor_data_access(self):
+        """Turns a vanilla :class:`NotImplementedError` stemming from data access on a meta tensor into an expressive
+        :class:`ErrorMeta`.
+
+        Although it looks like meta tensors could be handled upfront, we need to do it lazily: there are use cases
+        where a meta tensor wraps a data tensors and dispatches all operator calls to it. Thus, although the tensor is
+        a meta tensor, it behaves like a regular one.
+        """
+        try:
+            yield
+        except NotImplementedError as error:
+            if "meta" not in str(error).lower():
+                raise error
+
+            # TODO: See https://github.com/pytorch/pytorch/issues/68592
+            raise self._make_error_meta(NotImplementedError, "Comparing meta tensors is currently not supported.")
 
     def _compare_attributes(
         self,
@@ -1077,6 +1097,8 @@ def assert_close(
     Raises:
         ValueError: If no :class:`torch.Tensor` can be constructed from an input.
         ValueError: If only ``rtol`` or ``atol`` is specified.
+        NotImplementedError: If a tensor is a meta tensor. This is a temporary restriction and will be relaxed in the
+            future.
         AssertionError: If corresponding inputs are not Python scalars and are not directly related.
         AssertionError: If ``allow_subclasses`` is ``False``, but corresponding inputs are not Python scalars and have
             different types.
