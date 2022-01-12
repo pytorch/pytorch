@@ -138,9 +138,7 @@ void OptimizeGraph(
     // TODO: we can avoid this guard by moving operations
     // to exposed folders.
 #ifdef FBCODE_CAFFE2
-    if (opts.use_copy_variants) {
-      ReplaceWithCopy(graph);
-    }
+    ReplaceWithCopy(graph);
     if (opts.use_maybe_copy_variants) {
       ReplaceWithMaybeCopy(graph);
     }
@@ -212,8 +210,7 @@ std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
             << opts.cleanup_activations << ", enable_out_variant "
             << opts.enable_out_variant << ", optimize_memory "
             << opts.optimize_memory << ", manage_output_tensors "
-            << opts.manage_output_tensors << ", use_copy_variants "
-            << opts.use_copy_variants << ", use_maybe_copy_variants "
+            << opts.manage_output_tensors << ", use_maybe_copy_variants "
             << opts.use_maybe_copy_variants << ", enable_tensorexpr_fusion "
             << opts.enable_tensorexpr_fusion;
 
@@ -537,8 +534,7 @@ StaticModule::StaticModule(
 
   // Create ProcessedFunction instances first to freeze their addresses to pass
   // to ProcessedNode.
-  AliasDb alias_db(
-      graph_, /*isFrozen=*/false, /*enablePreciseTupleContainerAnalysis=*/true);
+  AliasDb alias_db(graph_, /*isFrozen=*/false);
   GRAPH_DEBUG("AliasDb: ", alias_db.toString());
 
   // Construct constant and function nodes
