@@ -53,7 +53,8 @@ c10::IValue readArchive(
       type_resolver,
       obj_loader,
       device,
-      stream_reader);
+      stream_reader,
+      nullptr);
   return ivalues;
 }
 
