@@ -65,7 +65,7 @@ def fuse_known_modules(mod_list, is_qat, additional_fuser_method_mapping=None):
 
     return new_mod
 
-def _fuse_modules(model, modules_to_fuse, is_qat, fuser_func=fuse_known_modules, fuse_custom_config_dict=None):
+def _fuse_modules_helper(model, modules_to_fuse, is_qat, fuser_func=fuse_known_modules, fuse_custom_config_dict=None):
     if fuse_custom_config_dict is None:
         fuse_custom_config_dict = {}
     additional_fuser_method_mapping = fuse_custom_config_dict.get("additional_fuser_method_mapping", {})
@@ -80,7 +80,20 @@ def _fuse_modules(model, modules_to_fuse, is_qat, fuser_func=fuse_known_modules,
     for i, item in enumerate(modules_to_fuse):
         _set_module(model, item, new_mod_list[i])
 
-def fuse_modules(model, modules_to_fuse, is_qat, inplace=False, fuser_func=fuse_known_modules, fuse_custom_config_dict=None):
+def _fuse_modules(model, modules_to_fuse, is_qat, inplace=False, fuser_func=fuse_known_modules, fuse_custom_config_dict=None):
+    if not inplace:
+        model = copy.deepcopy(model)
+
+    if all(isinstance(module_element, str) for module_element in modules_to_fuse):
+        # Handle case of modules_to_fuse being a list
+        _fuse_modules_helper(model, modules_to_fuse, is_qat, fuser_func, fuse_custom_config_dict)
+    else:
+        # Handle case of modules_to_fuse being a list of lists
+        for module_list in modules_to_fuse:
+            _fuse_modules_helper(model, module_list, is_qat, fuser_func, fuse_custom_config_dict)
+    return model
+
+def fuse_modules(model, modules_to_fuse, inplace=False, fuser_func=fuse_known_modules, fuse_custom_config_dict=None):
     r"""Fuses a list of modules into a single module
 
     Fuses only the following sequence of modules:
@@ -134,14 +147,9 @@ def fuse_modules(model, modules_to_fuse, is_qat, inplace=False, fuser_func=fuse_
             >>> output = fused_m(input)
 
     """
-    if not inplace:
-        model = copy.deepcopy(model)
+    return _fuse_modules(model, modules_to_fuse, is_qat=False, inplace=False, fuser_func=fuse_known_modules, fuse_custom_config_dict=None):
 
-    if all(isinstance(module_element, str) for module_element in modules_to_fuse):
-        # Handle case of modules_to_fuse being a list
-        _fuse_modules(model, modules_to_fuse, is_qat, fuser_func, fuse_custom_config_dict)
-    else:
-        # Handle case of modules_to_fuse being a list of lists
-        for module_list in modules_to_fuse:
-            _fuse_modules(model, module_list, is_qat, fuser_func, fuse_custom_config_dict)
-    return model
+def fuse_modules_qat(model, modules_to_fuse, inplace=False, fuser_func=fuse_known_modules, fuse_custom_config_dict=None):
+    """ QAT version for `fuse_modules`
+    """
+    return _fuse_modules(model, modules_to_fuse, is_qat=True, inplace=False, fuser_func=fuse_known_modules, fuse_custom_config_dict=None):
