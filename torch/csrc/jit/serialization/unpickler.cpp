@@ -182,8 +182,8 @@ void restoreContainerTypeTags(const IValue& ivalue, const TypePtr& type) {
     auto dict = ivalue.toGenericDict();
     dict.unsafeSetKeyType(type->containedType(0));
     dict.unsafeSetValueType(type->containedType(1));
-  } else if (auto list_type = type->cast<ListType>()) {
-    ivalue.toList().unsafeSetElementType(list_type->getElementType());
+  } else if (is<ListType>(*type)) {
+    ivalue.toList().unsafeSetElementType(type->containedType(0));
   } else {
     AT_ERROR("Unknown type for tag restoration: " + type->annotation_str());
   }
