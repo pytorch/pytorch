@@ -68,7 +68,9 @@ TEST(ShapeAnalysisTest, DynamicShapesFusion) {
   subgraph->inputs().at(0)->setType(x_type);
   subgraph->inputs().at(1)->setType(y_type);
   subgraph->inputs().at(2)->setType(z_type);
+  subgraph->outputs().at(0)->setType(TensorType::create(at::rand({14, 5})));
   auto output = g->insertNode(g->create(prim::TensorExprGroup))->output();
+  subgraph->outputs().at(0)->setType(TensorType::create(at::rand({14, 5})));
   output->node()->addInput(x_inp);
   output->node()->addInput(y_inp);
   output->node()->addInput(z_inp);
@@ -83,7 +85,7 @@ TEST(ShapeAnalysisTest, DynamicShapesFusion) {
       ->check("TensorExprGroup")
       ->check_same("symbolic_shape_inputs")
       ->check("block1")
-      ->check("FallbackGraph")
+      ->check("aten::cat")
       ->run(*g);
 
   // clang-format off
@@ -105,6 +107,7 @@ TEST(ShapeAnalysisTest, DynamicShapesFusion) {
       %3 : Tensor = prim::TensorExprGroup_0[symbolic_shape_inputs=[-5, -4, -3, -2]](%x_inp, %y_inp, %z_inp, %cat_dim_size.48, %elem.11, %elem.5, %elem.3)
       -> (%3)
     block1():
+      // FallbackGraph is inlined
       %14 : Tensor = prim::FallbackGraph_1(%x_inp, %y_inp, %z_inp)
       -> (%14)
   return ()
@@ -268,6 +271,7 @@ TEST(ShapeAnalysisTest, MovingConstantOutOfFusionGroups) {
   auto x_type = TensorType::create(at::rand({10, 5}));
   x_inp->setType(x_type);
   subgraph->inputs().at(0)->setType(x_type);
+  subgraph->outputs().at(0)->setType(x_type);
   auto output = g->insertNode(g->create(prim::TensorExprGroup))->output();
   output->node()->addInput(x_inp);
   output->node()->g_(attr::Subgraph, subgraph);
