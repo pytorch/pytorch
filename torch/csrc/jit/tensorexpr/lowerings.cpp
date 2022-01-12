@@ -546,20 +546,21 @@ int nnc_lowerings_lazy_registration() {
             [](const ExprHandle& a, const ExprHandle& approximate) {
               auto one = Cast::make(a.dtype(), 1.);
               auto point_five = Cast::make(a.dtype(), .5);
+              auto tanh_gelu_flag = Cast::make(approximate.dtype(), at::Gelu::Tanh);
 
               // approximate == 'none'
               auto m_sqrt1_2 = Cast::make(a.dtype(), M_SQRT1_2);
-              auto gelu = a * point_five * (one + erf(a * m_sqrt1_2));
+              auto gelu_result = a * point_five * (one + erf(a * m_sqrt1_2));
 
               // approximate == 'tanh'
               auto beta = Cast::make(a.dtype(), M_SQRT2 * M_2_SQRTPI * 0.5);
               auto kappa = Cast::make(a.dtype(), 0.044715);
               auto a_cube = a * a * a;
               auto inner = beta * (a + kappa * a_cube);
-              auto tanh_gelu = point_five * a * (one + tanh(inner));
+              auto tanh_gelu_result = point_five * a * (one + tanh(inner));
 
-              auto cs = CompareSelect::make(approximate, at::Gelu::Tanh, kEQ);
-              return ifThenElse(cs, tanh_gelu, gelu);
+              auto cs = CompareSelect::make(approximate, tanh_gelu_flag, kEQ);
+              return ifThenElse(cs, tanh_gelu_result, gelu_result);
             });
       });
 
