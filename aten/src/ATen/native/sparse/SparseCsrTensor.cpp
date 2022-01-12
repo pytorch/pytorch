@@ -9,9 +9,9 @@
 #include <ATen/SparseCsrTensorImpl.h>
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/SparseTensorImpl.h>
-#include <ATen/InitialTensorOptions.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_nnz_native.h>
@@ -22,6 +22,7 @@
 #include <ATen/ops/copy_native.h>
 #include <ATen/ops/crow_indices_native.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like_native.h>
 #include <ATen/ops/empty_native.h>
 #include <ATen/ops/resize_as_sparse_native.h>
 #include <ATen/ops/resize_native.h>
