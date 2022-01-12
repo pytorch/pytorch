@@ -209,8 +209,6 @@ struct DeviceTypePropagationPass : public PropertyPropBase {
     changed_ |= defaultDeviceProp(n);
   }
 
-
-  std::shared_ptr<Graph> graph_;
   bool changed_ = false;
 };
 
