@@ -2602,7 +2602,9 @@ Tensor eig_backward(const std::vector<torch::autograd::Variable> &grads, const T
 Tensor linalg_eig_backward(const Tensor& gL,
                            const Tensor& gV,
                            const Tensor& L,
-                           const Tensor& V) {
+                           const Tensor& V,
+                           const bool is_hermitian,
+                           const bool symeig_eigenvectors) {
   // https://arxiv.org/pdf/1701.00392.pdf Eq 4.77
   // For A = VLV^{-1}, denoting the gradients gA, gV and gL, we have
   // gA = V^{-H}(diag_embed(gL) + (V^H gV -V^HV diag(real(V^H gV))) / E*)V^H
@@ -2615,78 +2617,113 @@ Tensor linalg_eig_backward(const Tensor& gL,
   // Note: the term '-V^HV diag(real(V^H gV))' comes from the fact that the eigenvalue
   // decomposition is returned with eigenvectors normalized to have norm one.
 
+  // Note: The Hermitian case is a simplification of this formula using that V^{-1} = V^H and that L is real
+
+  // This check just can be triggered in the backwards of torch.symeig
+  TORCH_CHECK(symeig_eigenvectors,
+           "linalg_eig_backward: torch.symeig(A, eigenvectors=False) is not differentiable. ",
+           "Use torch.linalg.eigvalsh(A) instead.");
+
   // Trivial case
   if (!gL.defined() && !gV.defined()) {
     return {};
   }
 
-  // Shortcut for linalg.eigvals
+  // Shortcut for linalg.eigvals/eigvalsh
+  // Compute V^-H gL V^H
   if (!gV.defined()) {
-    // Compute V^-H gL V^H
-    return at::linalg_solve(V.mH(), gL.unsqueeze(-1) * V.mH());
-  }
-
-  auto Econj = [&L]{
-    auto Lconj = L.conj();
-    auto ret = Lconj.unsqueeze(-2) - Lconj.unsqueeze(-1);
-    if (at::GradMode::is_enabled()) {
-      // Avoids differentiating through at infinity when doing gradgrad
-      // 1 could be any number, as we are going to overwrite the diagonal
-      ret.diagonal(0, -2, -1).fill_(1.);
+    if (is_hermitian) {
+      return at::matmul(V * gL.unsqueeze(-2), V.mH());
+    } else {
+      return at::linalg_solve(V.mH(), gL.unsqueeze(-1) * V.mH());
     }
-    return ret;
-  }();
-  const auto VhgV = at::matmul(V.mH(), gV);
+  }
+  auto VhgV = at::matmul(V.mH(), gV);
   const auto diag_VhgV = VhgV.diagonal(0, -2, -1);
 
-  {
+  if (V.is_complex()) {
     // Check invariance of the loss function wrt the transformation V -> V e^{i\phi}
     const auto imdiag_VhgV = at::imag(diag_VhgV);
     TORCH_CHECK(at::allclose(imdiag_VhgV, at::zeros_like(imdiag_VhgV), /*rtol=*/1e-2, /*atol=*/1e-2),
-                "linalg_eig_backward: The eigenvectors in the complex case are specified up to multiplication "
-                "by e^{i phi}. The specified loss function depends on this quantity, making it ill-defined.");
+                is_hermitian ? "linalg_eigh_backward" : "linalg_eig_backward",
+                ": The eigenvectors in the complex case are specified up to multiplication ",
+                "by e^{i phi}. The specified loss function depends on this quantity, so it is ill-defined.");
   }
 
-  auto gA = VhgV - at::matmul(V.mH(), V * at::real(diag_VhgV).unsqueeze(-2));
-
-  gA = gA / std::move(Econj);
-
-  // Copy gL into the diagonal
-  if (gL.defined()) {
-    gA.diagonal(0, -2, -1).copy_(gL);
+  if (is_hermitian) {
+    // Project onto the tangent space at the identity of U(n), that is, the skew-Hermitian matrices
+    VhgV = 0.5 * (VhgV - VhgV.mH());
+  } else {
+    // Project onto the tangent space at V^H V of complex matrices with columns of norm 1
+    VhgV = VhgV - at::matmul(V.mH(), V * at::real(diag_VhgV).unsqueeze(-2));
   }
-  else {
-    gA.diagonal(0, -2, -1).zero_();
-  }
+
+  auto gA = [&, VhgV = std::move(VhgV)]{
+    auto Econj = [&L]{
+      auto Lconj = L.conj();
+      auto ret = Lconj.unsqueeze(-2) - Lconj.unsqueeze(-1);
+      ret.diagonal(0, -2, -1).fill_(1.);
+      return ret;
+    }();
+
+    auto ret = std::move(VhgV).div_(std::move(Econj));
+
+    if (gL.defined()) {
+      ret.diagonal(0, -2, -1).copy_(gL);
+    }
+    return ret;
+  }();
+
 
   // Conjugate by V^{-H}
-  return at::linalg_solve(V.mH(), at::matmul(gA, V.mH()));
+  if (is_hermitian) {
+    return at::matmul(V, at::matmul(gA, V.mH()));
+  } else {
+    return at::linalg_solve(V.mH(), at::matmul(gA, V.mH()));
+  }
 }
 
 std::tuple<Tensor, Tensor> linalg_eig_jvp(const Tensor& dA,
                                           const Tensor& L,
-                                          const Tensor& V) {
+                                          const Tensor& V,
+                                          const bool is_hermitian) {
   // https://people.maths.ox.ac.uk/gilesm/files/NA-08-01.pdf
   // see also https://arxiv.org/pdf/1701.00392.pdf Eqs. (4.60) and (4.63)
   // Note that neither of the formulas in these pdfs are correct, as they do not assume that
-  // the eigenvectors are of unit norm. This makes them miss the diagonal term in dV
+  // the eigenvectors are of unit norm. As such, they are missing the diagonal term in dV
   // dL = diag(dP)
-  // dV = V (dX / E - Re(diag V^H V dX))
+  // dV = dX - V Re(diag V^H dX))
   // where
   // dP = V^{-1} dA V
-  // dX = dP - dL
+  // dX = V ((dP - diag(dP)) / E)
   // E_{ij} = L_i - L_j if i != j
   //          1         otherwise
-  const auto dAComplex = dA.to(c10::toComplexType(dA.scalar_type()));
-  const auto dP = at::linalg_solve(V, at::matmul(dAComplex, V));
-  auto dL = dP.diagonal(0, -2, -1);
-  auto dV = [&dP, &V, &L]{
-    auto ret = dP / (L.unsqueeze(-2) - L.unsqueeze(-1));
-    ret.diagonal(0, -2, -1).zero_();
-    ret = at::matmul(V, ret);
 
-    auto aux = V * at::real(at::matmul(V.mH(), ret).diagonal(0, -2, -1)).unsqueeze(-2);
-    return ret - aux;
+  // Note: The Hermitian case is a simplification of this formula using that V^{-1} = V^H and that L is real
+  if (is_hermitian) {
+    TORCH_CHECK(at::allclose(dA, dA.mH(), /*rtol=*/1e-2, /*atol=*/1e-2),
+                "linalg_eig_jvp: The tangent part of the matrix A should also be ", (dA.is_complex() ? "Hermitian" : "symmetric."));
+  }
+
+  const auto to_complex = [](const Tensor& A){ return A.to(c10::toComplexType(A.scalar_type())); };
+
+  const auto dP = is_hermitian ? at::matmul(at::matmul(V.mH(), dA), V)
+                               : at::linalg_solve(V, at::matmul(to_complex(dA), V));
+  auto dL = is_hermitian && dA.is_complex() ? at::real(dP.diagonal(0, -2, -1))
+                                            : dP.diagonal(0, -2, -1);
+  auto dV = [&dP, &V, &L, is_hermitian]{
+    const auto dX = [&] {
+      auto ret = dP / (L.unsqueeze(-2) - L.unsqueeze(-1));
+      ret.diagonal(0, -2, -1).zero_();
+      ret = at::matmul(V, ret);
+      return ret;
+    }();
+
+    if (is_hermitian) {
+      return dX;
+    } else {
+      return dX - V * at::real(at::matmul(V.mH(), dX).diagonal(0, -2, -1)).unsqueeze(-2);
+    }
   }();
   return std::make_pair(std::move(dL), std::move(dV));
 }
@@ -2737,141 +2774,6 @@ std::tuple<Tensor, Tensor> linalg_lstsq_backward(
   }
 
   return std::make_tuple(A_grad, B_grad);
-}
-
-
-// jvp functions for eigenvalues and eigenvectors are separate
-// because currently forward AD only works with one rule per output
-Tensor eigh_jvp_eigenvalues(
-    const Tensor& input_tangent,
-    const Tensor& eigenvalues,
-    const Tensor& eigenvectors) {
-  // An extended collection of matrix derivative results for forward and reverse mode automatic differentiation
-  // https://ora.ox.ac.uk/objects/uuid:8d0c0a29-c92b-4153-a1d2-38b276e93124
-  // Section 3.1 Eigenvalues and eigenvectors
-
-  // TODO: gradcheck from test_ops.py hangs with complex inputs
-  TORCH_CHECK_NOT_IMPLEMENTED(
-      !input_tangent.is_complex(),
-      "the derivative for 'eigh' with complex inputs is not implemented.");
-
-  // see the note in the implementation of eigh_backward that tangent should be Hermitian
-  auto hermitian_tangent = 0.5*(input_tangent + input_tangent.mH());
-
-  auto tmp = at::matmul(at::matmul(eigenvectors.mH(), hermitian_tangent), eigenvectors);
-  auto eigenvalues_tangent = tmp.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1);
-  if (eigenvalues_tangent.is_complex()) {
-    return at::real(eigenvalues_tangent);
-  }
-  return eigenvalues_tangent;
-}
-
-Tensor eigh_jvp_eigenvectors(
-    const Tensor& input_tangent,
-    const Tensor& eigenvalues,
-    const Tensor& eigenvectors) {
-  // An extended collection of matrix derivative results for forward and reverse mode automatic differentiation
-  // https://ora.ox.ac.uk/objects/uuid:8d0c0a29-c92b-4153-a1d2-38b276e93124
-  // Section 3.1 Eigenvalues and eigenvectors
-
-  TORCH_CHECK_NOT_IMPLEMENTED(
-      !input_tangent.is_complex(),
-      "the derivative for 'eigh' with complex inputs is not implemented.");
-
-  auto E = eigenvalues.unsqueeze(-2) - eigenvalues.unsqueeze(-1);
-  E.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(INFINITY);
-
-  // see the note in the implementation of eigh_backward that tangent should be Hermitian
-  auto hermitian_tangent = 0.5*(input_tangent + input_tangent.mH());
-
-  auto tmp = at::matmul(at::matmul(eigenvectors.mH(), hermitian_tangent), eigenvectors);
-  return at::matmul(eigenvectors, tmp.div(E));
-}
-
-Tensor eigh_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
-                     bool eigenvectors, const Tensor& L, const Tensor& V) {
-  // This function is used for both torch.symeig and torch.linalg.eigh.
-  // eigh (and torch.symeig) operates only on symmetric (resp. Hermitian) inputs.
-
-  // [Note: eigh backward]
-  // General considerations of the differential and adjoint
-  // Let U(n) = {U \in C^{n x n} | U^H U = I} by the unitary group and
-  // Her(n) = {A \in C^{n x n} | A^H = A} be the Hermitian matrices
-  // eigh : Her(n) -> U(n) x R^n
-  // Denoting the tangent spaces as T, the differential of eigh at A = VLV^H
-  // (i.e. forward differentiation) is a linear map
-  // (d eigh)_A : T_A Her(n) -> T_V U(n) x T_L R^n
-  // R^n is a linear space, so it is canonically isomorphic to its tangent space
-  // Since X, Y \in Her(n) => X + Y \in Her(n), Her(n) is also linear. For this reason, we can write
-  // (d eigh)_A : Her(n) -> T_V U(n) x R^n
-  // Differentiating the equation U^H U = I, the tangent space of U(n) is given by
-  // T_V U(n) = {X \in C^{n x n} | X^H V = -V^H X}. That is, matrices such that V^HX is skew-Hermitian.
-  // We then have that the adjoint of the differential (i.e. reverse differentiation) is a map
-  // (d eigh)*_A : T_V U(n) x Her(n) -> Her(n)
-  // Since the adjoint is defined on T_V U(n), we need to project the input gradient onto T_V U(n)
-
-  // Orthogonal projection \pi_V : C^{n x n} -> T_V U(n)
-  // We have that an element gV \in T_V U(n) can be represented as gV = VX for a skew-Hermitian
-  // matrix X := V^H gV.
-  // Using that V \in U(n) is an isometry of C^{n x n}, we have that
-  // \pi_V(gV) := \pi_V(VX) = V\pi_I(X) = V\pi_I(V^H gV)
-  // pi_I (X) = (X - X^H) / 2 is the orthogonal projection from C^{n x n} into the skew-Hermitian matrices
-
-  // The formula
-  // Following the derivation in
-  // https://people.maths.ox.ac.uk/gilesm/files/NA-08-01.pdf (Sec 3.1)
-  // For A = VLV^H, with V with unitary and L real,
-  // denoting the gradients gA \in Her(n), gV \in C^{n x n} and gL \in R^n, we have
-  // gA = (d eigh)*_A(\pi_V(gV), gL)
-  //    = V(diag_embed(gL) + \pi_I(V^H gV) / E)V^H
-  // where:
-  //   - E_ij = L_i - L_j if i != j
-  //   - diag_embed takes a vector into a diagonal matrix
-  //   - The division by E is done just outside of the diagonal. In the diagonal it is set to zero
-
-  // This check just can be triggered in the backwards of torch.symeig
-  TORCH_CHECK(eigenvectors,
-           "eigh_backward: torch.symeig(A, eigenvectors=False) is not differentiable. ",
-           "Use torch.linalg.eigvalsh(A) instead.");
-
-  const auto gL = grads[0];
-  const auto gV = grads[1];
-
-  if (gV.defined()) {
-    auto E = L.unsqueeze(-2) - L.unsqueeze(-1);
-    if (at::GradMode::is_enabled()) {
-      // Avoids differentiating through at infinity when doing gradgrad
-      // 1 could be any number, as we are going to overwrite the diagonal
-      E.diagonal(0, -2, -1).fill_(1);
-    }
-
-    Tensor result =  at::matmul(V.mH(), gV);
-    // Project
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-    result = result.sub(result.mH()).mul_(0.5);
-    // E is skew-symmetric. Multiplying entrywise a skew-Hermitian matrix by a
-    // skew-symmetric matrix gives a Hermitian matrix, as we expected.
-    result.div_(E);
-
-    if (gL.defined()) {
-      result.diagonal(0, -2, -1).copy_(gL);
-    }
-    else {
-      result.diagonal(0, -2, -1).zero_();
-    }
-
-    // Conjugating a Hermitian matrix by a unitary matrix gives a Hermitian matrix
-    return at::matmul(V, at::matmul(result, V.mH()));
-  }
-  else {
-    if (gL.defined()) {
-      // If we just gL is defined, one matmul suffices
-      return at::matmul(V * gL.unsqueeze(-2), V.mH());
-    } else {
-      // If neither is defined, there's nothing to do
-      return at::zeros_like(self, at::MemoryFormat::Contiguous);
-    }
-  }
 }
 
 std::tuple<Tensor, Tensor> linalg_qr_jvp(
