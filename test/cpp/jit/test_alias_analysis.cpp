@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/irparser.h>
+#include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <torch/csrc/utils/memory.h>
@@ -1474,7 +1475,7 @@ TEST(
 
   torch::jit::parseIR(graph_string, graph.get(), vmap);
   AliasDb aliasDb(
-      graph, /*isFrozen=*/false, /*enablePreciseTupleContainerAnalysis=*/true);
+      graph, /*isFrozen=*/false);
 
   EXPECT_TRUE(!aliasDb.mayAlias(vmap["x"], vmap["y"]));
   EXPECT_TRUE(aliasDb.mayContainAlias(vmap["z"], vmap["x"]));
@@ -1483,22 +1484,23 @@ TEST(
 
 TEST(
     AliasRegistrationTest,
-    WildcareAliasForTupleConstructWithSingleUseAsGraphOutputWithDisablePreciseTupleContainerAnalysis) {
+    RecursiveSubgraphTupleContainment) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> vmap;
   auto graph_string = R"IR(
   graph():
     %x : Tensor = prim::MakeTestTensor()
     %y : Tensor = prim::MakeTestTensor()
-    %z : (Tensor) = prim::TupleConstruct(%x, %y)
+    %z : (Tensor, Tensor) = prim::TupleConstruct(%x, %y)
     return (%z))IR";
 
   torch::jit::parseIR(graph_string, graph.get(), vmap);
-  // enablePreciseTupleContainerAnalysis = false.
+  auto node = vmap["z"]->node();
+  auto subgraph = SubgraphUtils::createSingletonSubgraph(node, prim::FunctionalGraph);
   AliasDb aliasDb(graph);
 
-  EXPECT_TRUE(aliasDb.mayContainAlias(vmap["z"], vmap["x"]));
-  EXPECT_TRUE(aliasDb.mayContainAlias(vmap["z"], vmap["y"]));
+  EXPECT_TRUE(aliasDb.mayContainAlias(subgraph->output(), vmap["x"]));
+  EXPECT_TRUE(aliasDb.mayContainAlias(subgraph->output(), vmap["y"]));
   EXPECT_TRUE(aliasDb.mayAlias(vmap["x"], vmap["y"]));
 }
 
@@ -1519,7 +1521,7 @@ TEST(AliasRegistrationTest, WildcardAliasForTupleConstructWithUses) {
 
   torch::jit::parseIR(graph_string, graph.get(), vmap);
   AliasDb aliasDb(
-      graph, /*isFrozen=*/false, /*enablePreciseTupleContainerAnalysis=*/true);
+      graph, /*isFrozen=*/false);
 
   EXPECT_TRUE(aliasDb.mayAlias(vmap["x"], vmap["y"]));
   EXPECT_TRUE(aliasDb.mayAlias(vmap["x"], vmap["z"]));
@@ -1551,8 +1553,7 @@ TEST(AliasRegistrationTest, ATenSplitIntListAliasCheck) {
     return (%d))IR";
 
   torch::jit::parseIR(graph_string, graph.get(), vmap);
-  AliasDb aliasDb(
-      graph, /*isFrozen=*/false, /*enablePreciseTupleContainerAnalysis=*/true);
+  AliasDb aliasDb(graph, /*isFrozen=*/false);
 
   EXPECT_TRUE(aliasDb.mayAlias(vmap["y"], vmap["b"]));
   EXPECT_TRUE(aliasDb.mayAlias(vmap["y"], vmap["c"]));
@@ -1578,8 +1579,7 @@ TEST(AliasRegistrationTest, ATenSplitIntAliasCheck) {
     return (%d))IR";
 
   torch::jit::parseIR(graph_string, graph.get(), vmap);
-  AliasDb aliasDb(
-      graph, /*isFrozen=*/false, /*enablePreciseTupleContainerAnalysis=*/true);
+  AliasDb aliasDb(graph, /*isFrozen=*/false);
 
   EXPECT_TRUE(aliasDb.mayAlias(vmap["y"], vmap["b"]));
   EXPECT_TRUE(aliasDb.mayAlias(vmap["y"], vmap["c"]));
