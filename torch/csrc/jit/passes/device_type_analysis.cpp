@@ -243,7 +243,6 @@ struct DeviceTypePropagationPass : public PropertyPropBase {
   }
 
   static std::unique_ptr<OperatorMap<PropRule>> device_prop_registry_;
-  std::shared_ptr<Graph> graph_;
   bool changed_ = false;
 };
 
