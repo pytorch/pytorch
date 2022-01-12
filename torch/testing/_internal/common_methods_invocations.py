@@ -12712,7 +12712,11 @@ op_db: List[OpInfo] = [
            skips=(
                # errors with "leaked XXXX bytes CUDA memory on device 0"
                # TODO: investigate. Suspect: svd_out, as linalg_pinv is also skipping the very same test and is SVD-based
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', device_type='cuda', dtypes=(torch.float32,)),
+               DecorateInfo(
+                   unittest.skip("Skipped!"),
+                   'TestJit', 'test_variant_consistency_jit',
+                   device_type='cuda', dtypes=(torch.float32,)
+               ),
            )),
     OpInfo('linalg.svd_rank_revealing',
            op=torch.linalg.svd_rank_revealing,
@@ -12729,7 +12733,11 @@ op_db: List[OpInfo] = [
            skips=(
                # errors with "leaked XXXX bytes CUDA memory on device 0"
                # TODO: investigate. Suspect: svd_out, as linalg_pinv is also skipping the very same test and is SVD-based
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', device_type='cuda', dtypes=(torch.float32,)),
+               DecorateInfo(
+                   unittest.skip("Skipped!"),
+                   'TestJit', 'test_variant_consistency_jit',
+                   device_type='cuda', dtypes=(torch.float32,)
+               ),
            )),
     OpInfo('linalg.svdvals',
            op=torch.linalg.svdvals,
