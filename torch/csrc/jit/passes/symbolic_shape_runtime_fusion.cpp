@@ -458,6 +458,11 @@ void insertDynamicShapesGuard(
   guarded_node->ival_(attr::striding_outputs_desc, output_ival);
 
   if (add_composed_op) {
+    // only in SR flow do we check for values on the stack and
+    // forward them along as tensor outputs
+    // TODO: - refactor and make explicit part of TE Kernel api
+    guarded_node->i_(attr::allow_stack_outputs, 1);
+
     // Create a TensorExprDynamicGroup node
     auto te_dyn_group = SubgraphUtils::createSingletonSubgraph(
         typecheck_node, prim::TensorExprDynamicGroup);
