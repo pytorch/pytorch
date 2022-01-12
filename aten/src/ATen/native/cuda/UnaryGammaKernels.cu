@@ -75,7 +75,7 @@ void polygamma_kernel_cuda(TensorIteratorBase& iter, int64_t n) {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(
         iter.common_dtype(), "polygamma_cuda", [&]() {
           gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t {
-            return calc_polygamma<scalar_t, /*is_cuda=*/true>(a, n);
+            return calc_polygamma<scalar_t, /*is_cuda=*/true>(a, static_cast<int>(n));
           });
         });
 #endif // USE_JITERATOR
