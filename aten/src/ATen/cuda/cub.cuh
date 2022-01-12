@@ -51,13 +51,13 @@
 #define ROCM_HIPCUB(x) x
 #endif
 
-#if (!defined(USE_ROCM) && !CUB_SUPPORTS_NV_BFLOAT16()) || \
+#if !CUB_SUPPORTS_NV_BFLOAT16() || \
      (defined(USE_ROCM) && ROCM_VERSION >= 40500)
 
 #if !defined(USE_ROCM)
 namespace at_cuda_detail {
 #endif
-// backport https://github.com/NVIDIA/cub/pull/306 for c10::BFloat16
+
 template <>
 struct ROCM_HIPCUB(cub)::FpLimits<c10::BFloat16>
 {
@@ -75,6 +75,7 @@ struct ROCM_HIPCUB(cub)::FpLimits<c10::BFloat16>
 template <>
 struct ROCM_HIPCUB(cub)::NumericTraits<c10::BFloat16>:
        ROCM_HIPCUB(cub)::BaseTraits<ROCM_HIPCUB(cub)::FLOATING_POINT, true, false, unsigned short, c10::BFloat16> {};
+
 #if !defined(USE_ROCM)
 } // namespace at_cuda_detail
 #endif
