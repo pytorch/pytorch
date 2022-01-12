@@ -250,13 +250,11 @@ bool InterpreterState::run(Stack& stack) {
           frame.step();
         } break;
         case DICT_CONSTRUCT: {
-          const auto& type = code.types_[inst.X]->expectRef<at::DictType>();
-          dictConstruct(stack, type, inst.N);
+          dictConstruct(stack, *code.types_[inst.X], inst.N);
           frame.step();
         } break;
         case NAMED_TUPLE_CONSTRUCT: {
-          namedTupleConstruct(
-              stack, code.types_[inst.X]->expect<at::TupleType>(), inst.N);
+          namedTupleConstruct(stack, code.types_[inst.X], inst.N);
           frame.step();
         } break;
         case CREATE_OBJECT: {
