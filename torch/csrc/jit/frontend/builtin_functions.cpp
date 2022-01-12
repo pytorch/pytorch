@@ -73,6 +73,10 @@ def list_with_default(out_size: List[int], defaults: List[int]):
   return out_size
 def _assert(condition : bool, message : str):
   assert condition, message
+# existing device operator is registered with input name `a`, which prevents
+# torch.device(type="cuda") from working. add shim-layer here
+def device(type: str):
+  return torch.device(type)
 def type(self: Tensor, dtype: int, non_blocking: bool=False, copy: bool=False) -> Tensor:
   return self.to(dtype, non_blocking, copy)
 )SCRIPT";
