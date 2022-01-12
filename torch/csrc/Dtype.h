@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/core/ScalarType.h>
+#include <ATen/ATen.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/Export.h>
 

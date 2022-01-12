@@ -2,8 +2,7 @@
 
 // ${generated_comment}
 
-#include <ATen/core/Tensor.h>
-#include <ATen/Context.h>
+#include <ATen/ATen.h>
 
 #include <c10/util/intrusive_ptr.h>
 

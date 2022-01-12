@@ -2,8 +2,6 @@
 
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/Types.h>
-#include <c10/core/StorageImpl.h>
-#include <c10/core/TensorImpl.h>
 
 namespace torch {
 

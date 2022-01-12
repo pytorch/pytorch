@@ -219,7 +219,6 @@ def create_python_bindings(
 ) -> None:
     """Generates Python bindings to ATen functions"""
     py_methods: List[str] = []
-    ops_headers: List[str] = []
     py_method_defs: List[str] = []
     py_forwards: List[str] = []
 
@@ -230,11 +229,9 @@ def create_python_bindings(
         py_methods.append(method_impl(name, module, overloads, method=method))
         py_method_defs.append(method_def(name, module, overloads, method=method))
         py_forwards.extend(forward_decls(name, overloads, method=method))
-        ops_headers.append(f'#include <ATen/ops/{name.base}.h>')
 
     fm.write_with_template(filename, filename, lambda: {
         'generated_comment': '@' + f'generated from {fm.template_dir}/{filename}',
-        'ops_headers': ops_headers,
         'py_forwards': py_forwards,
         'py_methods': py_methods,
         'py_method_defs': py_method_defs,
@@ -281,17 +278,15 @@ def create_python_bindings_sharded(
     grouped = group_filter_overloads(pairs, pred)
 
     def key_func(kv: Tuple[BaseOperatorName, List[PythonSignatureNativeFunctionPair]]) -> str:
-        return kv[0].base
+        return str(kv[0])
 
     def env_func(
         kv: Tuple[BaseOperatorName, List[PythonSignatureNativeFunctionPair]]
     ) -> Dict[str, List[str]]:
-        name, fn_pairs = kv
         return {
-            'ops_headers': [f'#include <ATen/ops/{name.base}.h>'],
-            'py_forwards': list(forward_decls(name, fn_pairs, method=method)),
-            'py_methods': [method_impl(name, module, fn_pairs, method=method)],
-            'py_method_defs': [method_def(name, module, fn_pairs, method=method)],
+            'py_forwards': list(forward_decls(kv[0], kv[1], method=method)),
+            'py_methods': [method_impl(kv[0], module, kv[1], method=method)],
+            'py_method_defs': [method_def(kv[0], module, kv[1], method=method)],
         }
 
     fm.write_sharded(
@@ -304,7 +299,7 @@ def create_python_bindings_sharded(
         key_fn=key_func,
         env_callable=env_func,
         num_shards=num_shards,
-        sharded_keys={'ops_headers', 'py_forwards', 'py_methods', 'py_method_defs'}
+        sharded_keys={'py_forwards', 'py_methods', 'py_method_defs'}
     )
 
 def load_signatures(

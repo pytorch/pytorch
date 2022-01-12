@@ -1,5 +1,4 @@
 #include <torch/csrc/distributed/rpc/message.h>
-#include <torch/custom_class.h>
 
 namespace torch {
 namespace distributed {

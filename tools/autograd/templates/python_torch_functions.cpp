@@ -1,4 +1,3 @@
-#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 // ${generated_comment}
 
 // Python bindings for torch.* functions implemented through ATen.
@@ -34,13 +33,7 @@
 #include "torch/csrc/utils/cuda_lazy_init.h"
 #include "torch/csrc/autograd/python_return_types.h"
 
-#include <ATen/core/Tensor.h>
-
-#ifndef AT_PER_OPERATOR_HEADERS
-#include <ATen/Functions.h>
-#else
-$ops_headers
-#endif
+#include <ATen/ATen.h>
 
 #include <functional>
 #include <initializer_list>
