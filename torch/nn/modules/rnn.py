@@ -568,16 +568,19 @@ class LSTM(RNNBase):
         proj_size: If ``> 0``, will use LSTM with projections of corresponding size. Default: 0
 
     Inputs: input, (h_0, c_0)
-        * **input**: tensor of shape :math:`(L, N, H_{in})` when ``batch_first=False`` or
+        * **input**: tensor of shape :math:`(L, H_{in})` for unbatched input,
+          :math:`(L, N, H_{in})` when ``batch_first=False`` or
           :math:`(N, L, H_{in})` when ``batch_first=True`` containing the features of
           the input sequence.  The input can also be a packed variable length sequence.
           See :func:`torch.nn.utils.rnn.pack_padded_sequence` or
           :func:`torch.nn.utils.rnn.pack_sequence` for details.
-        * **h_0**: tensor of shape :math:`(D * \text{num\_layers}, N, H_{out})` containing the
-          initial hidden state for each element in the batch.
+        * **h_0**: tensor of shape :math:`(D * \text{num\_layers}, H_{out})` for unbatched input or
+          :math:`(D * \text{num\_layers}, N, H_{out})` containing the
+          initial hidden state for each element in the input sequence.
           Defaults to zeros if (h_0, c_0) is not provided.
-        * **c_0**: tensor of shape :math:`(D * \text{num\_layers}, N, H_{cell})` containing the
-          initial cell state for each element in the batch.
+        * **c_0**: tensor of shape :math:`(D * \text{num\_layers}, H_{cell})` for unbatched input or 
+          :math:`(D * \text{num\_layers}, N, H_{cell})` containing the
+          initial cell state for each element in the input sequence.
           Defaults to zeros if (h_0, c_0) is not provided.
 
         where:
@@ -593,15 +596,18 @@ class LSTM(RNNBase):
             \end{aligned}
 
     Outputs: output, (h_n, c_n)
-        * **output**: tensor of shape :math:`(L, N, D * H_{out})` when ``batch_first=False`` or
+        * **output**: tensor of shape :math:`(L, D * H_{out})` for unbatched input,
+          :math:`(L, N, D * H_{out})` when ``batch_first=False`` or
           :math:`(N, L, D * H_{out})` when ``batch_first=True`` containing the output features
           `(h_t)` from the last layer of the LSTM, for each `t`. If a
           :class:`torch.nn.utils.rnn.PackedSequence` has been given as the input, the output
           will also be a packed sequence.
-        * **h_n**: tensor of shape :math:`(D * \text{num\_layers}, N, H_{out})` containing the
-          final hidden state for each element in the batch.
-        * **c_n**: tensor of shape :math:`(D * \text{num\_layers}, N, H_{cell})` containing the
-          final cell state for each element in the batch.
+        * **h_n**: tensor of shape :math:`(D * \text{num\_layers}, H_{out})` for unbatched input or
+          :math:`(D * \text{num\_layers}, N, H_{out})` containing the
+          final hidden state for each element in the sequence.
+        * **c_n**: tensor of shape :math:`(D * \text{num\_layers}, H_{cell})` for unbatched input or
+          :math:`(D * \text{num\_layers}, N, H_{cell})` containing the
+          final cell state for each element in the sequence.
 
     Attributes:
         weight_ih_l[k] : the learnable input-hidden weights of the :math:`\text{k}^{th}` layer
@@ -638,6 +644,9 @@ class LSTM(RNNBase):
         For bidirectional LSTMs, forward and backward are directions 0 and 1 respectively.
         Example of splitting the output layers when ``batch_first=False``:
         ``output.view(seq_len, batch, num_directions, hidden_size)``.
+
+    .. note::
+        `batch_first` argument is ignored for unbatched inputs.
 
     .. include:: ../cudnn_rnn_determinism.rst
 
