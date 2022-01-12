@@ -495,7 +495,7 @@ def sum(input: Tensor,
             # Workaround https://github.com/pytorch/pytorch/issues/65400
             dim_ = ()
 
-        result = torch.sparse.sum(mask_input, dim=dim_, dtype=dtype)
+        result = torch.sparse.sum(mask_input, dim=list(dim_), dtype=dtype)
         if result.dtype != dtype:
             # https://github.com/pytorch/pytorch/issues/65392
             # https://github.com/pytorch/pytorch/pull/66153
