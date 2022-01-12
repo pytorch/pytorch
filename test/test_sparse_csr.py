@@ -11,7 +11,8 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_device_type import \
     (ops, instantiate_device_type_tests, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoCusparseGeneric,
      precisionOverride, skipMeta, skipCUDAIf, skipCUDAIfRocm, skipCPUIfNoMklSparse)
-from torch.testing._internal.common_methods_invocations import (sparse_csr_unary_ufuncs, )
+from torch.testing._internal.common_methods_invocations import \
+    (op_db, sparse_csr_unary_ufuncs, )
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing._internal.common_dtype import floating_types, get_all_dtypes
 from test_sparse import CUSPARSE_SPMM_COMPLEX128_SUPPORTED
@@ -40,6 +41,8 @@ def _check_cusparse_sddmm_available():
     # cusparseSDDMM was added in 11.2.1 but we don't have access to patch version
     min_supported_version = (11, 3)
     return version >= min_supported_version
+
+_sparse_csr_ops = list(filter(lambda op: op.supports_sparse_csr, op_db))
 
 # This should be just an import from test_linalg instead of code duplication
 # but https://github.com/pytorch/pytorch/pull/63511#discussion_r733989701
@@ -1182,16 +1185,20 @@ class TestSparseCSR(TestCase):
 
             self.assertEqual(csr_sparse.to_dense(), dense)
 
-    @ops(sparse_csr_unary_ufuncs)
-    def test_sparse_csr_unary_consistency(self, device, dtype, op):
+    @ops(_sparse_csr_ops)
+    def test_sparse_csr_consistency(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype)
+
+        # Fail early to prevent silent success with this test
+        ndims_equals_2d = (s.input.ndim == 2 for s in samples)
+        if not any(ndims_equals_2d):
+            raise ValueError("Expected at least one 2D tensor in samples.")
 
         for sample in samples:
             assert torch.is_tensor(sample.input)
             # Sparse CSR only supports 2D tensors as inputs
-            # Fail early to prevent silent success with this test
             if sample.input.ndim != 2:
-                raise ValueError("Expected 2D tensor but got tensor with dimension: {sample.input.ndim}.")
+                continue
 
             expected = op(sample.input)
             assert torch.is_tensor(expected)

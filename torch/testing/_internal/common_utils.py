@@ -523,20 +523,6 @@ def shell(command, cwd=None, env=None):
     return wait_for_process(p)
 
 
-# Used to run the same test with different tensor types
-def repeat_test_for_types(dtypes):
-    def repeat_helper(f):
-        @wraps(f)
-        def call_helper(self, *args):
-            for dtype in dtypes:
-                with TestCase.subTest(self, dtype=dtype):
-                    f(self, *args, dtype=dtype)
-
-        return call_helper
-    return repeat_helper
-
-
-
 def discover_test_cases_recursively(suite_or_case):
     if isinstance(suite_or_case, unittest.TestCase):
         return [suite_or_case]

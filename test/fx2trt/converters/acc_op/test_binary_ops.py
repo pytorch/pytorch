@@ -7,6 +7,7 @@ import torch.fx.experimental.fx_acc.acc_ops as acc_ops
 import torch.nn as nn
 from torch.testing._internal.common_fx2trt import AccTestCase, InputTensorSpec
 from parameterized import parameterized
+from torch.testing._internal.common_utils import run_tests
 
 elementwise_ops = [
     ((lambda x, y: x + y), acc_ops.add),
@@ -101,3 +102,6 @@ class TestBinaryOpConverters(AccTestCase):
         ]
 
         self.run_test_with_dynamic_shape(Op(), input_specs, expected_ops={expected_op})
+
+if __name__ == '__main__':
+    run_tests()
