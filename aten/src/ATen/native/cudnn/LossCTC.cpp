@@ -1,9 +1,19 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
 #include <ATen/cuda/CUDAConfig.h>
 #if AT_CUDNN_ENABLED()
   #include <ATen/cudnn/Descriptors.h>
+#endif
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_ctc_loss_native.h>
+#include <ATen/ops/_ctc_loss_backward_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
 #endif
 
 #if (!AT_CUDNN_ENABLED()) || (CUDNN_VERSION < 7600)
