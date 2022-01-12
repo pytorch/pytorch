@@ -203,12 +203,12 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     prim_GetAttr,
     [](Node* n) -> SROperator {
       return [](ProcessedNode* p_node) {
-        auto module = p_node->Input(0).toObject();
+        auto& module = p_node->Input(0).toObjectRef();
         Node* node = p_node->node();
         const auto& type = node->input()->type()->expectRef<ClassType>();
         const auto& field = node->s(attr::name);
         const auto slot = type.getAttributeSlot(field);
-        p_node->Output(0) = module->getSlot(slot);
+        p_node->Output(0) = module.getSlot(slot);
       };
     });
 
@@ -217,12 +217,12 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     prim_SetAttr,
     [](Node* n) -> SROperator {
       return [](ProcessedNode* p_node) {
-        auto module = p_node->Input(0).toObject();
+        auto& module = p_node->Input(0).toObjectRef();
         Node* node = p_node->node();
         const auto& type = node->inputs()[0]->type()->expectRef<ClassType>();
         const auto& field = node->s(attr::name);
         const auto slot = type.getAttributeSlot(field);
-        module->setSlot(slot, p_node->Input(1));
+        module.setSlot(slot, p_node->Input(1));
       };
     });
 
