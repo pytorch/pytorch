@@ -2,6 +2,7 @@ from itertools import product
 import unittest
 
 import torch
+from torch.testing._internal.common_utils import TEST_CUDA
 from torch.testing._internal.jit_utils import JitTestCase
 
 try:
