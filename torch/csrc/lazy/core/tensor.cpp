@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/lazy/core/tensor.h>
 
 #include <torch/csrc/lazy/core/config.h>
@@ -428,7 +429,7 @@ Value LazyTensor::CreateTensorNode(BackendDataPtr data, bool read_only) const {
 std::vector<LazyTensor> LazyTensor::MakeOutputTensors(NodePtr node) const {
   std::vector<LazyTensor> tensors;
   tensors.reserve(node->num_outputs());
-  for (size_t i = 0; i < node->num_outputs(); ++i) {
+  for (const auto i : c10::irange(node->num_outputs())) {
     tensors.push_back(Create(Value(node, i), GetDevice()));
   }
   return tensors;
@@ -487,8 +488,12 @@ LazyTensor GetOrCreateLtcTensor(const c10::optional<at::Tensor>& tensor,
 }
 
 LazyTensor GetLtcTensorOrCreateForWrappedNumber(const at::Tensor& tensor, const BackendDevice& device) {
-  return tensor.unsafeGetTensorImpl()->is_wrapped_number() ?
-      GetOrCreateLtcTensor(tensor, device) : GetLtcTensor(tensor);
+  // TODO: There are places in core where a scalar is wrapped but not marked as
+  // wrapped.
+  return (tensor.unsafeGetTensorImpl()->is_wrapped_number() ||
+          (tensor.dim() == 0 && tensor.numel() == 1))
+             ? GetOrCreateLtcTensor(tensor, device)
+             : GetLtcTensor(tensor);
 }
 
 at::Tensor CreateAtenFromLtcTensor(const LazyTensor& ltc_tensor) {
