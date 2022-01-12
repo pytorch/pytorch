@@ -1944,6 +1944,7 @@
   dispatch:
     CompositeExplicitAutograd: empty_like
     SparseCPU, SparseCUDA: empty_like_sparse_coo
+    SparseCsrCPU, SparseCsrCUDA: empty_like_sparse_csr
 
 - func: empty_strided(int[] size, int[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
@@ -7782,6 +7783,7 @@
   dispatch:
     CPU, CUDA: normal_
     Meta: normal_meta_
+    SparseCsrCPU, SparseCsrCUDA: normal_sparse_csr_
 
 - func: normal.Tensor_float_out(Tensor mean, float std=1, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
