@@ -2895,14 +2895,12 @@ def cross_entropy(
     See :class:`~torch.nn.CrossEntropyLoss` for details.
 
     Args:
-        input (Tensor) : :math:`(N, C)` or :math:`(C)` where `C = number of classes` or :math:`(N, C, H, W)`
-            in case of 2D Loss, or :math:`(N, C, d_1, d_2, ..., d_K)` where :math:`K \geq 1`
-            in the case of K-dimensional loss. `input` is expected to contain unnormalized scores
-            (often referred to as logits).
-        target (Tensor) : If containing class indices, shape :math:`(N)` or :math:`()` where each value is
-            :math:`0 \leq \text{targets}[i] \leq C-1`, or :math:`(N, d_1, d_2, ..., d_K)` with
-            :math:`K \geq 1` in the case of K-dimensional loss. If containing class probabilities,
-            same shape as the input.
+        input (Tensor) : Shape :math:`(C)`, :math:`(N, C)` or :math:`(N, C, d_1, d_2, ..., d_K)` with :math:`K \geq 1`
+          in the case of `K`-dimensional loss.
+        target (Tensor) : If containing class indices, shape :math:`()` or :math:`(N)` where each value is
+          between [0, C), otherwise :math:`(N, d_1, d_2, ..., d_K)` with
+          :math:`K \geq 1` in the case of K-dimensional loss with same shape as the input and
+          each value should be between [0, 1].
         weight (Tensor, optional): a manual rescaling weight given to each
             class. If given, has to be a Tensor of size `C`
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
@@ -2929,6 +2927,14 @@ def cross_entropy(
             of smoothing when computing the loss, where 0.0 means no smoothing. The targets
             become a mixture of the original ground truth and a uniform distribution as described in
             `Rethinking the Inception Architecture for Computer Vision <https://arxiv.org/abs/1512.00567>`__. Default: :math:`0.0`.
+
+        where:
+
+        .. math::
+            \begin{aligned}
+                C ={} & \text{number of classes} \\
+                N ={} & \text{batch size} \\
+            \end{aligned}
 
     Examples::
 

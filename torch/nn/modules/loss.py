@@ -1119,16 +1119,21 @@ class CrossEntropyLoss(_WeightedLoss):
             `Rethinking the Inception Architecture for Computer Vision <https://arxiv.org/abs/1512.00567>`__. Default: :math:`0.0`.
 
     Shape:
-        - Input: :math:`(N, C)` or :math:`(C)` where `C = number of classes`, or
-          :math:`(N, C, d_1, d_2, ..., d_K)` with :math:`K \geq 1`
+        - Input: Shape :math:`(C)`, :math:`(N, C)` or :math:`(N, C, d_1, d_2, ..., d_K)` with :math:`K \geq 1`
           in the case of `K`-dimensional loss.
-        - Target: If containing class indices, shape :math:`(N)` or :math:`()` where each value is
-          :math:`0 \leq \text{targets}[i] \leq C-1`, or :math:`(N, d_1, d_2, ..., d_K)` with
-          :math:`K \geq 1` in the case of K-dimensional loss. If containing class probabilities,
-          same shape as the input.
-        - Output: If :attr:`reduction` is ``'none'``, shape :math:`(N)` or :math:`()` or
-          :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 1` in the case of K-dimensional loss.
-          Otherwise, scalar.
+        - Target: If containing class indices, shape :math:`()` or :math:`(N)` where each value is
+          between [0, C), otherwise :math:`(N, d_1, d_2, ..., d_K)` with
+          :math:`K \geq 1` in the case of K-dimensional loss with same shape as the input and
+          each value should be between [0, 1].
+        - Output: If reduction is 'none', same shape as the target. Otherwise, scalar.
+
+        where:
+
+        .. math::
+            \begin{aligned}
+                C ={} & \text{number of classes} \\
+                N ={} & \text{batch size} \\
+            \end{aligned}
 
     Examples::
 
