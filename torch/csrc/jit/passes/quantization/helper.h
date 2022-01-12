@@ -124,6 +124,9 @@ bool matchAtenFuncToUse(
     const std::string& func_name,
     c10::optional<int> nth_arg);
 
+// Return `true` if `n` is a AtenFunction with name in `aten_funcs`
+TORCH_API bool isAtenFunc(Node* n, const std::vector<std::string>& aten_funcs);
+
 // =========== helper functions for Block =========
 // checks if a block will always raise an Exception
 TORCH_API bool alwaysRaisesException(Block* block);
