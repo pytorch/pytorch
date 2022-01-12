@@ -16,7 +16,6 @@ import copy
 import numbers
 import warnings
 import inspect
-import onnx
 from torch._six import string_classes
 from torch.jit import _unique_state_dict
 from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes, OperatorExportTypes, SymbolicContext, TrainingMode, CheckerError
@@ -795,7 +794,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             # string in memory.
             if (operator_export_type is OperatorExportTypes.ONNX) and (not val_use_external_data_format):
                 try:
-                    _check_onnx_proto(proto)
+                    _check_onnx_proto(proto, full_check=True)
                 except RuntimeError as e:
                     raise CheckerError(e)
     finally:
@@ -803,7 +802,6 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
         __IN_ONNX_EXPORT = False
         _reset_trace_module_map()
 
-    onnx.checker.check_model(torch_out, full_check=True)
     return torch_out
 
 

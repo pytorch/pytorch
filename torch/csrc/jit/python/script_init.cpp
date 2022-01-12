@@ -2194,8 +2194,9 @@ void initJitScriptBindings(PyObject* module) {
       .def(py::init<>());
   m.def(
       "_check_onnx_proto",
-      [](const std::string& proto_string) { check_onnx_proto(proto_string); },
-      py::arg("proto_string"));
+      [](const std::string& proto_string, bool full_check) { check_onnx_proto(proto_string, full_check); },
+      py::arg("proto_string"),
+      py::arg("full_check") = false);
   m.def("_jit_is_script_object", [](const py::object& obj) {
     return py::isinstance<Object>(obj);
   });
