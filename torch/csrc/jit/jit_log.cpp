@@ -1,4 +1,3 @@
-
 #include <cstdlib>
 #include <iomanip>
 #include <sstream>
@@ -50,7 +49,7 @@ class JitLoggingConfig {
     parse();
   }
 
-  std::unordered_map<std::string, size_t> getFilesToLevels() {
+  const std::unordered_map<std::string, size_t>& getFilesToLevels() {
     return this->files_to_levels;
   }
 
@@ -112,16 +111,16 @@ void JitLoggingConfig::parse() {
 }
 
 bool is_enabled(const char* cfname, JitLoggingLevels level) {
-  const std::unordered_map<std::string, size_t> files_to_levels =
+  const auto& files_to_levels =
       JitLoggingConfig::getInstance().getFilesToLevels();
   std::string fname{cfname};
   fname = c10::detail::StripBasename(fname);
-  auto end_index = fname.find_last_of('.') == std::string::npos
+  const auto end_index = fname.find_last_of('.') == std::string::npos
       ? fname.size()
       : fname.find_last_of('.');
-  auto fname_no_ext = fname.substr(0, end_index);
+  const auto fname_no_ext = fname.substr(0, end_index);
 
-  auto it = files_to_levels.find(fname_no_ext);
+  const auto it = files_to_levels.find(fname_no_ext);
   if (it == files_to_levels.end()) {
     return false;
   }
