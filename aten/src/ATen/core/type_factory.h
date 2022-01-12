@@ -49,4 +49,12 @@ struct TORCH_API DefaultTypeFactory {
   static const std::unordered_map<std::string, c10::TypePtr>& basePythonTypes();
 };
 
+using TypeFactory =
+#ifdef C10_MOBILE
+    DynamicTypeFactory
+#else
+    DefaultTypeFactory
+#endif
+    ;
+
 } // namespace c10
