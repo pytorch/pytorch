@@ -10,13 +10,20 @@
 namespace c10 {
 
 namespace {
+
 bool contains(DynamicType::Tag lhs, DynamicTypeBits rhs) {
   return (static_cast<DynamicTypeBits>(lhs) | rhs) ==
       static_cast<DynamicTypeBits>(lhs);
 }
+
 bool contains(DynamicType::Tag lhs, DynamicType::Tag rhs) {
   return contains(lhs, static_cast<DynamicTypeBits>(rhs));
 }
+
+C10_NOINLINE DynamicTypePtr makeBaseType(DynamicType::Tag tag) {
+  return std::make_shared<DynamicType>(tag, DynamicType::Arguments{});
+}
+
 } // namespace
 
 std::string DynamicType::str() const {
@@ -202,41 +209,37 @@ bool DynamicType::LabeledDynamicType::equals(
 DynamicType::Ptr IValue::TagType<c10::DynamicType>::get(const c10::IValue& v) {
   switch (v.tag) {
     case Tag::None:
-      return NoneType::get();
+      return DynamicTypeTrait<NoneType>::getBaseType();
     case Tag::Tensor:
-      return TensorType::get();
+      return DynamicTypeTrait<TensorType>::getBaseType();
     case Tag::Double:
-      return FloatType::get();
+      return DynamicTypeTrait<FloatType>::getBaseType();
     case Tag::ComplexDouble:
-      return ComplexType::get();
+      return DynamicTypeTrait<ComplexType>::getBaseType();
     case Tag::Int:
-      return IntType::get();
+      return DynamicTypeTrait<IntType>::getBaseType();
     case Tag::Bool:
-      return BoolType::get();
+      return DynamicTypeTrait<BoolType>::getBaseType();
     case Tag::String:
-      return StringType::get();
+      return DynamicTypeTrait<StringType>::getBaseType();
     case Tag::GenericDict: {
       auto d = v.toGenericDict();
-      return std::make_shared<DynamicType>(
-          DynamicType::Tag::Dict,
-          DynamicType::Arguments({d.keyType(), d.valueType()}));
+      return DynamicTypeFactory::create<DictType>(d.keyType(), d.valueType());
     }
     case Tag::GenericList:
-      return std::make_shared<DynamicType>(
-          DynamicType::Tag::List,
-          DynamicType::Arguments{v.toList().elementType()});
+      return DynamicTypeFactory::create<ListType>(v.toList().elementType());
     case Tag::Device:
-      return DeviceObjType::get();
+      return DynamicTypeTrait<DeviceObjType>::getBaseType();
     case Tag::Stream:
-      return StreamObjType::get();
+      return DynamicTypeTrait<StreamObjType>::getBaseType();
     case Tag::Object:
       return v.toObjectRef().type();
     case Tag::Capsule:
-      return CapsuleType::get();
+      return DynamicTypeTrait<CapsuleType>::getBaseType();
     case Tag::Tuple:
       return v.toTupleRef().type<c10::DynamicType>();
     default:
-      return AnyType::get();
+      return DynamicTypeTrait<AnyType>::getBaseType();
   }
 }
 
@@ -272,5 +275,13 @@ ivalue::TupleTypeFactory<TupleType>::fallback(const Type& type) {
   return TupleType::create(std::move(types));
 #endif
 }
+
+#define DYNAMIC_TYPE_TAG_VALUE(NAME, _)                               \
+  const DynamicTypePtr& DynamicTypeTrait<NAME##Type>::getBaseType() { \
+    static auto type = makeBaseType(tagValue());                      \
+    return type;                                                      \
+  }
+FORALL_DYNAMIC_TYPES(DYNAMIC_TYPE_TAG_VALUE)
+#undef DYNAMIC_TYPE_TAG_VALUE
 
 } // namespace c10

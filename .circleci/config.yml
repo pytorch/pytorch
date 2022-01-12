@@ -2035,6 +2035,17 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/conda-builder:cpu"
       - binary_linux_build:
+          name: binary_linux_conda_3_10_cpu_devtoolset7_nightly_build
+          build_environment: "conda 3.10 cpu devtoolset7"
+          filters:
+            branches:
+              only:
+                - /.*/
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          docker_image: "pytorch/conda-builder:cpu"
+      - binary_linux_build:
           name: binary_linux_conda_3_7_cu102_devtoolset7_nightly_build
           build_environment: "conda 3.7 cu102 devtoolset7"
           filters:
@@ -2059,6 +2070,17 @@ workflows:
       - binary_linux_build:
           name: binary_linux_conda_3_9_cu102_devtoolset7_nightly_build
           build_environment: "conda 3.9 cu102 devtoolset7"
+          filters:
+            branches:
+              only:
+                - /.*/
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          docker_image: "pytorch/conda-builder:cuda102"
+      - binary_linux_build:
+          name: binary_linux_conda_3_10_cu102_devtoolset7_nightly_build
+          build_environment: "conda 3.10 cu102 devtoolset7"
           filters:
             branches:
               only:
@@ -2101,6 +2123,17 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/conda-builder:cuda111"
       - binary_linux_build:
+          name: binary_linux_conda_3_10_cu111_devtoolset7_nightly_build
+          build_environment: "conda 3.10 cu111 devtoolset7"
+          filters:
+            branches:
+              only:
+                - /.*/
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          docker_image: "pytorch/conda-builder:cuda111"
+      - binary_linux_build:
           name: binary_linux_conda_3_7_cu113_devtoolset7_nightly_build
           build_environment: "conda 3.7 cu113 devtoolset7"
           filters:
@@ -2134,6 +2167,17 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/conda-builder:cuda113"
       - binary_linux_build:
+          name: binary_linux_conda_3_10_cu113_devtoolset7_nightly_build
+          build_environment: "conda 3.10 cu113 devtoolset7"
+          filters:
+            branches:
+              only:
+                - /.*/
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          docker_image: "pytorch/conda-builder:cuda113"
+      - binary_linux_build:
           name: binary_linux_conda_3_7_cu115_devtoolset7_nightly_build
           build_environment: "conda 3.7 cu115 devtoolset7"
           filters:
@@ -2158,6 +2202,17 @@ workflows:
       - binary_linux_build:
           name: binary_linux_conda_3_9_cu115_devtoolset7_nightly_build
           build_environment: "conda 3.9 cu115 devtoolset7"
+          filters:
+            branches:
+              only:
+                - /.*/
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          docker_image: "pytorch/conda-builder:cuda115"
+      - binary_linux_build:
+          name: binary_linux_conda_3_10_cu115_devtoolset7_nightly_build
+          build_environment: "conda 3.10 cu115 devtoolset7"
           filters:
             branches:
               only:
@@ -2677,6 +2732,16 @@ workflows:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_mac_build:
+          name: binary_macos_wheel_3_10_cpu_nightly_build
+          build_environment: "wheel 3.10 cpu"
+          filters:
+            branches:
+              only:
+                - /.*/
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_mac_build:
           name: binary_macos_conda_3_7_cpu_nightly_build
           build_environment: "conda 3.7 cpu"
           filters:
@@ -2699,6 +2764,16 @@ workflows:
       - binary_mac_build:
           name: binary_macos_conda_3_9_cpu_nightly_build
           build_environment: "conda 3.9 cpu"
+          filters:
+            branches:
+              only:
+                - /.*/
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_mac_build:
+          name: binary_macos_conda_3_10_cpu_nightly_build
+          build_environment: "conda 3.10 cpu"
           filters:
             branches:
               only:
@@ -2787,6 +2862,16 @@ workflows:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_windows_build:
+          name: binary_windows_wheel_3_10_cpu_nightly_build
+          build_environment: "wheel 3.10 cpu"
+          filters:
+            branches:
+              only:
+                - /.*/
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_build:
           name: binary_windows_wheel_3_7_cu111_nightly_build
           build_environment: "wheel 3.7 cu111"
           filters:
@@ -2809,6 +2894,16 @@ workflows:
       - binary_windows_build:
           name: binary_windows_wheel_3_9_cu111_nightly_build
           build_environment: "wheel 3.9 cu111"
+          filters:
+            branches:
+              only:
+                - /.*/
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_build:
+          name: binary_windows_wheel_3_10_cu111_nightly_build
+          build_environment: "wheel 3.10 cu111"
           filters:
             branches:
               only:
@@ -2847,6 +2942,16 @@ workflows:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_windows_build:
+          name: binary_windows_wheel_3_10_cu113_nightly_build
+          build_environment: "wheel 3.10 cu113"
+          filters:
+            branches:
+              only:
+                - /.*/
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_build:
           name: binary_windows_wheel_3_7_cu115_nightly_build
           build_environment: "wheel 3.7 cu115"
           filters:
@@ -2869,6 +2974,16 @@ workflows:
       - binary_windows_build:
           name: binary_windows_wheel_3_9_cu115_nightly_build
           build_environment: "wheel 3.9 cu115"
+          filters:
+            branches:
+              only:
+                - /.*/
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_build:
+          name: binary_windows_wheel_3_10_cu115_nightly_build
+          build_environment: "wheel 3.10 cu115"
           filters:
             branches:
               only:
@@ -2907,6 +3022,16 @@ workflows:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_windows_build:
+          name: binary_windows_conda_3_10_cpu_nightly_build
+          build_environment: "conda 3.10 cpu"
+          filters:
+            branches:
+              only:
+                - /.*/
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_build:
           name: binary_windows_conda_3_7_cu111_nightly_build
           build_environment: "conda 3.7 cu111"
           filters:
@@ -2929,6 +3054,16 @@ workflows:
       - binary_windows_build:
           name: binary_windows_conda_3_9_cu111_nightly_build
           build_environment: "conda 3.9 cu111"
+          filters:
+            branches:
+              only:
+                - /.*/
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_build:
+          name: binary_windows_conda_3_10_cu111_nightly_build
+          build_environment: "conda 3.10 cu111"
           filters:
             branches:
               only:
@@ -2967,6 +3102,16 @@ workflows:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_windows_build:
+          name: binary_windows_conda_3_10_cu113_nightly_build
+          build_environment: "conda 3.10 cu113"
+          filters:
+            branches:
+              only:
+                - /.*/
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_build:
           name: binary_windows_conda_3_7_cu115_nightly_build
           build_environment: "conda 3.7 cu115"
           filters:
@@ -2989,6 +3134,16 @@ workflows:
       - binary_windows_build:
           name: binary_windows_conda_3_9_cu115_nightly_build
           build_environment: "conda 3.9 cu115"
+          filters:
+            branches:
+              only:
+                - /.*/
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_build:
+          name: binary_windows_conda_3_10_cu115_nightly_build
+          build_environment: "conda 3.10 cu115"
           filters:
             branches:
               only:
@@ -3470,6 +3625,19 @@ workflows:
             - binary_linux_conda_3_9_cpu_devtoolset7_nightly_build
           docker_image: "pytorch/conda-builder:cpu"
       - binary_linux_test:
+          name: binary_linux_conda_3_10_cpu_devtoolset7_nightly_test
+          build_environment: "conda 3.10 cpu devtoolset7"
+          filters:
+            branches:
+              only:
+                - /.*/
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          requires:
+            - binary_linux_conda_3_10_cpu_devtoolset7_nightly_build
+          docker_image: "pytorch/conda-builder:cpu"
+      - binary_linux_test:
           name: binary_linux_conda_3_7_cu102_devtoolset7_nightly_test
           build_environment: "conda 3.7 cu102 devtoolset7"
           filters:
@@ -3511,6 +3679,21 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
             - binary_linux_conda_3_9_cu102_devtoolset7_nightly_build
+          docker_image: "pytorch/conda-builder:cuda102"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - binary_linux_test:
+          name: binary_linux_conda_3_10_cu102_devtoolset7_nightly_test
+          build_environment: "conda 3.10 cu102 devtoolset7"
+          filters:
+            branches:
+              only:
+                - /.*/
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          requires:
+            - binary_linux_conda_3_10_cu102_devtoolset7_nightly_build
           docker_image: "pytorch/conda-builder:cuda102"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
@@ -3560,6 +3743,21 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
+          name: binary_linux_conda_3_10_cu111_devtoolset7_nightly_test
+          build_environment: "conda 3.10 cu111 devtoolset7"
+          filters:
+            branches:
+              only:
+                - /.*/
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          requires:
+            - binary_linux_conda_3_10_cu111_devtoolset7_nightly_build
+          docker_image: "pytorch/conda-builder:cuda111"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - binary_linux_test:
           name: binary_linux_conda_3_7_cu113_devtoolset7_nightly_test
           build_environment: "conda 3.7 cu113 devtoolset7"
           filters:
@@ -3605,6 +3803,21 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
+          name: binary_linux_conda_3_10_cu113_devtoolset7_nightly_test
+          build_environment: "conda 3.10 cu113 devtoolset7"
+          filters:
+            branches:
+              only:
+                - /.*/
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          requires:
+            - binary_linux_conda_3_10_cu113_devtoolset7_nightly_build
+          docker_image: "pytorch/conda-builder:cuda113"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - binary_linux_test:
           name: binary_linux_conda_3_7_cu115_devtoolset7_nightly_test
           build_environment: "conda 3.7 cu115 devtoolset7"
           filters:
@@ -3646,6 +3859,21 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
             - binary_linux_conda_3_9_cu115_devtoolset7_nightly_build
+          docker_image: "pytorch/conda-builder:cuda115"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - binary_linux_test:
+          name: binary_linux_conda_3_10_cu115_devtoolset7_nightly_test
+          build_environment: "conda 3.10 cu115 devtoolset7"
+          filters:
+            branches:
+              only:
+                - /.*/
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          requires:
+            - binary_linux_conda_3_10_cu115_devtoolset7_nightly_build
           docker_image: "pytorch/conda-builder:cuda115"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
@@ -4310,6 +4538,18 @@ workflows:
           requires:
             - binary_windows_wheel_3_9_cpu_nightly_build
       - binary_windows_test:
+          name: binary_windows_wheel_3_10_cpu_nightly_test
+          build_environment: "wheel 3.10 cpu"
+          filters:
+            branches:
+              only:
+                - /.*/
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          requires:
+            - binary_windows_wheel_3_10_cpu_nightly_build
+      - binary_windows_test:
           name: binary_windows_wheel_3_7_cu111_nightly_test
           build_environment: "wheel 3.7 cu111"
           filters:
@@ -4347,6 +4587,19 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
             - binary_windows_wheel_3_9_cu111_nightly_build
+          executor: windows-with-nvidia-gpu
+      - binary_windows_test:
+          name: binary_windows_wheel_3_10_cu111_nightly_test
+          build_environment: "wheel 3.10 cu111"
+          filters:
+            branches:
+              only:
+                - /.*/
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          requires:
+            - binary_windows_wheel_3_10_cu111_nightly_build
           executor: windows-with-nvidia-gpu
       - binary_windows_test:
           name: binary_windows_wheel_3_7_cu113_nightly_test
@@ -4388,6 +4641,19 @@ workflows:
             - binary_windows_wheel_3_9_cu113_nightly_build
           executor: windows-with-nvidia-gpu
       - binary_windows_test:
+          name: binary_windows_wheel_3_10_cu113_nightly_test
+          build_environment: "wheel 3.10 cu113"
+          filters:
+            branches:
+              only:
+                - /.*/
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          requires:
+            - binary_windows_wheel_3_10_cu113_nightly_build
+          executor: windows-with-nvidia-gpu
+      - binary_windows_test:
           name: binary_windows_wheel_3_7_cu115_nightly_test
           build_environment: "wheel 3.7 cu115"
           filters:
@@ -4427,6 +4693,19 @@ workflows:
             - binary_windows_wheel_3_9_cu115_nightly_build
           executor: windows-with-nvidia-gpu
       - binary_windows_test:
+          name: binary_windows_wheel_3_10_cu115_nightly_test
+          build_environment: "wheel 3.10 cu115"
+          filters:
+            branches:
+              only:
+                - /.*/
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          requires:
+            - binary_windows_wheel_3_10_cu115_nightly_build
+          executor: windows-with-nvidia-gpu
+      - binary_windows_test:
           name: binary_windows_conda_3_7_cpu_nightly_test
           build_environment: "conda 3.7 cpu"
           filters:
@@ -4462,6 +4741,18 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
             - binary_windows_conda_3_9_cpu_nightly_build
+      - binary_windows_test:
+          name: binary_windows_conda_3_10_cpu_nightly_test
+          build_environment: "conda 3.10 cpu"
+          filters:
+            branches:
+              only:
+                - /.*/
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          requires:
+            - binary_windows_conda_3_10_cpu_nightly_build
       - binary_windows_test:
           name: binary_windows_conda_3_7_cu111_nightly_test
           build_environment: "conda 3.7 cu111"
@@ -4500,6 +4791,19 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
             - binary_windows_conda_3_9_cu111_nightly_build
+          executor: windows-with-nvidia-gpu
+      - binary_windows_test:
+          name: binary_windows_conda_3_10_cu111_nightly_test
+          build_environment: "conda 3.10 cu111"
+          filters:
+            branches:
+              only:
+                - /.*/
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          requires:
+            - binary_windows_conda_3_10_cu111_nightly_build
           executor: windows-with-nvidia-gpu
       - binary_windows_test:
           name: binary_windows_conda_3_7_cu113_nightly_test
@@ -4541,6 +4845,19 @@ workflows:
             - binary_windows_conda_3_9_cu113_nightly_build
           executor: windows-with-nvidia-gpu
       - binary_windows_test:
+          name: binary_windows_conda_3_10_cu113_nightly_test
+          build_environment: "conda 3.10 cu113"
+          filters:
+            branches:
+              only:
+                - /.*/
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          requires:
+            - binary_windows_conda_3_10_cu113_nightly_build
+          executor: windows-with-nvidia-gpu
+      - binary_windows_test:
           name: binary_windows_conda_3_7_cu115_nightly_test
           build_environment: "conda 3.7 cu115"
           filters:
@@ -4578,6 +4895,19 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
             - binary_windows_conda_3_9_cu115_nightly_build
+          executor: windows-with-nvidia-gpu
+      - binary_windows_test:
+          name: binary_windows_conda_3_10_cu115_nightly_test
+          build_environment: "conda 3.10 cu115"
+          filters:
+            branches:
+              only:
+                - /.*/
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          requires:
+            - binary_windows_conda_3_10_cu115_nightly_build
           executor: windows-with-nvidia-gpu
       - binary_windows_test:
           name: binary_windows_libtorch_3_7_cpu_debug_nightly_test
@@ -5060,6 +5390,20 @@ workflows:
           package_type: conda
           upload_subfolder: cpu
       - binary_upload:
+          name: binary_linux_conda_3_10_cpu_devtoolset7_nightly_upload
+          context: org-member
+          requires:
+            - binary_linux_conda_3_10_cpu_devtoolset7_nightly_test
+          filters:
+            branches:
+              only:
+                - nightly
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          package_type: conda
+          upload_subfolder: cpu
+      - binary_upload:
           name: binary_linux_conda_3_7_cu102_devtoolset7_nightly_upload
           context: org-member
           requires:
@@ -5092,6 +5436,20 @@ workflows:
           context: org-member
           requires:
             - binary_linux_conda_3_9_cu102_devtoolset7_nightly_test
+          filters:
+            branches:
+              only:
+                - nightly
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          package_type: conda
+          upload_subfolder: cu102
+      - binary_upload:
+          name: binary_linux_conda_3_10_cu102_devtoolset7_nightly_upload
+          context: org-member
+          requires:
+            - binary_linux_conda_3_10_cu102_devtoolset7_nightly_test
           filters:
             branches:
               only:
@@ -5144,6 +5502,20 @@ workflows:
           package_type: conda
           upload_subfolder: cu111
       - binary_upload:
+          name: binary_linux_conda_3_10_cu111_devtoolset7_nightly_upload
+          context: org-member
+          requires:
+            - binary_linux_conda_3_10_cu111_devtoolset7_nightly_test
+          filters:
+            branches:
+              only:
+                - nightly
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          package_type: conda
+          upload_subfolder: cu111
+      - binary_upload:
           name: binary_linux_conda_3_7_cu113_devtoolset7_nightly_upload
           context: org-member
           requires:
@@ -5186,6 +5558,20 @@ workflows:
           package_type: conda
           upload_subfolder: cu113
       - binary_upload:
+          name: binary_linux_conda_3_10_cu113_devtoolset7_nightly_upload
+          context: org-member
+          requires:
+            - binary_linux_conda_3_10_cu113_devtoolset7_nightly_test
+          filters:
+            branches:
+              only:
+                - nightly
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          package_type: conda
+          upload_subfolder: cu113
+      - binary_upload:
           name: binary_linux_conda_3_7_cu115_devtoolset7_nightly_upload
           context: org-member
           requires:
@@ -5218,6 +5604,20 @@ workflows:
           context: org-member
           requires:
             - binary_linux_conda_3_9_cu115_devtoolset7_nightly_test
+          filters:
+            branches:
+              only:
+                - nightly
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          package_type: conda
+          upload_subfolder: cu115
+      - binary_upload:
+          name: binary_linux_conda_3_10_cu115_devtoolset7_nightly_upload
+          context: org-member
+          requires:
+            - binary_linux_conda_3_10_cu115_devtoolset7_nightly_test
           filters:
             branches:
               only:
@@ -5830,6 +6230,20 @@ workflows:
           package_type: wheel
           upload_subfolder: cpu
       - binary_upload:
+          name: binary_macos_wheel_3_10_cpu_nightly_upload
+          context: org-member
+          requires:
+            - binary_macos_wheel_3_10_cpu_nightly_build
+          filters:
+            branches:
+              only:
+                - nightly
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          package_type: wheel
+          upload_subfolder: cpu
+      - binary_upload:
           name: binary_macos_conda_3_7_cpu_nightly_upload
           context: org-member
           requires:
@@ -5862,6 +6276,20 @@ workflows:
           context: org-member
           requires:
             - binary_macos_conda_3_9_cpu_nightly_build
+          filters:
+            branches:
+              only:
+                - nightly
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          package_type: conda
+          upload_subfolder: cpu
+      - binary_upload:
+          name: binary_macos_conda_3_10_cpu_nightly_upload
+          context: org-member
+          requires:
+            - binary_macos_conda_3_10_cpu_nightly_build
           filters:
             branches:
               only:
@@ -5984,6 +6412,20 @@ workflows:
           package_type: wheel
           upload_subfolder: cpu
       - binary_upload:
+          name: binary_windows_wheel_3_10_cpu_nightly_upload
+          context: org-member
+          requires:
+            - binary_windows_wheel_3_10_cpu_nightly_test
+          filters:
+            branches:
+              only:
+                - nightly
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          package_type: wheel
+          upload_subfolder: cpu
+      - binary_upload:
           name: binary_windows_wheel_3_7_cu111_nightly_upload
           context: org-member
           requires:
@@ -6016,6 +6458,20 @@ workflows:
           context: org-member
           requires:
             - binary_windows_wheel_3_9_cu111_nightly_test
+          filters:
+            branches:
+              only:
+                - nightly
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          package_type: wheel
+          upload_subfolder: cu111
+      - binary_upload:
+          name: binary_windows_wheel_3_10_cu111_nightly_upload
+          context: org-member
+          requires:
+            - binary_windows_wheel_3_10_cu111_nightly_test
           filters:
             branches:
               only:
@@ -6068,6 +6524,20 @@ workflows:
           package_type: wheel
           upload_subfolder: cu113
       - binary_upload:
+          name: binary_windows_wheel_3_10_cu113_nightly_upload
+          context: org-member
+          requires:
+            - binary_windows_wheel_3_10_cu113_nightly_test
+          filters:
+            branches:
+              only:
+                - nightly
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          package_type: wheel
+          upload_subfolder: cu113
+      - binary_upload:
           name: binary_windows_wheel_3_7_cu115_nightly_upload
           context: org-member
           requires:
@@ -6100,6 +6570,20 @@ workflows:
           context: org-member
           requires:
             - binary_windows_wheel_3_9_cu115_nightly_test
+          filters:
+            branches:
+              only:
+                - nightly
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          package_type: wheel
+          upload_subfolder: cu115
+      - binary_upload:
+          name: binary_windows_wheel_3_10_cu115_nightly_upload
+          context: org-member
+          requires:
+            - binary_windows_wheel_3_10_cu115_nightly_test
           filters:
             branches:
               only:
@@ -6152,6 +6636,20 @@ workflows:
           package_type: conda
           upload_subfolder: cpu
       - binary_upload:
+          name: binary_windows_conda_3_10_cpu_nightly_upload
+          context: org-member
+          requires:
+            - binary_windows_conda_3_10_cpu_nightly_test
+          filters:
+            branches:
+              only:
+                - nightly
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          package_type: conda
+          upload_subfolder: cpu
+      - binary_upload:
           name: binary_windows_conda_3_7_cu111_nightly_upload
           context: org-member
           requires:
@@ -6184,6 +6682,20 @@ workflows:
           context: org-member
           requires:
             - binary_windows_conda_3_9_cu111_nightly_test
+          filters:
+            branches:
+              only:
+                - nightly
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          package_type: conda
+          upload_subfolder: cu111
+      - binary_upload:
+          name: binary_windows_conda_3_10_cu111_nightly_upload
+          context: org-member
+          requires:
+            - binary_windows_conda_3_10_cu111_nightly_test
           filters:
             branches:
               only:
@@ -6236,6 +6748,20 @@ workflows:
           package_type: conda
           upload_subfolder: cu113
       - binary_upload:
+          name: binary_windows_conda_3_10_cu113_nightly_upload
+          context: org-member
+          requires:
+            - binary_windows_conda_3_10_cu113_nightly_test
+          filters:
+            branches:
+              only:
+                - nightly
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          package_type: conda
+          upload_subfolder: cu113
+      - binary_upload:
           name: binary_windows_conda_3_7_cu115_nightly_upload
           context: org-member
           requires:
@@ -6268,6 +6794,20 @@ workflows:
           context: org-member
           requires:
             - binary_windows_conda_3_9_cu115_nightly_test
+          filters:
+            branches:
+              only:
+                - nightly
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          package_type: conda
+          upload_subfolder: cu115
+      - binary_upload:
+          name: binary_windows_conda_3_10_cu115_nightly_upload
+          context: org-member
+          requires:
+            - binary_windows_conda_3_10_cu115_nightly_test
           filters:
             branches:
               only:
@@ -6934,6 +7474,16 @@ workflows:
                 - postnightly
           docker_image: "pytorch/conda-builder:cpu"
       - smoke_linux_test:
+          name: smoke_linux_conda_3_10_cpu_devtoolset7_nightly
+          build_environment: "conda 3.10 cpu devtoolset7"
+          requires:
+            - update_s3_htmls
+          filters:
+            branches:
+              only:
+                - postnightly
+          docker_image: "pytorch/conda-builder:cpu"
+      - smoke_linux_test:
           name: smoke_linux_conda_3_7_cu102_devtoolset7_nightly
           build_environment: "conda 3.7 cu102 devtoolset7"
           requires:
@@ -6960,6 +7510,18 @@ workflows:
       - smoke_linux_test:
           name: smoke_linux_conda_3_9_cu102_devtoolset7_nightly
           build_environment: "conda 3.9 cu102 devtoolset7"
+          requires:
+            - update_s3_htmls
+          filters:
+            branches:
+              only:
+                - postnightly
+          docker_image: "pytorch/conda-builder:cuda102"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_conda_3_10_cu102_devtoolset7_nightly
+          build_environment: "conda 3.10 cu102 devtoolset7"
           requires:
             - update_s3_htmls
           filters:
@@ -7006,6 +7568,18 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
+          name: smoke_linux_conda_3_10_cu111_devtoolset7_nightly
+          build_environment: "conda 3.10 cu111 devtoolset7"
+          requires:
+            - update_s3_htmls
+          filters:
+            branches:
+              only:
+                - postnightly
+          docker_image: "pytorch/conda-builder:cuda111"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
           name: smoke_linux_conda_3_7_cu113_devtoolset7_nightly
           build_environment: "conda 3.7 cu113 devtoolset7"
           requires:
@@ -7042,6 +7616,18 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
+          name: smoke_linux_conda_3_10_cu113_devtoolset7_nightly
+          build_environment: "conda 3.10 cu113 devtoolset7"
+          requires:
+            - update_s3_htmls
+          filters:
+            branches:
+              only:
+                - postnightly
+          docker_image: "pytorch/conda-builder:cuda113"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
           name: smoke_linux_conda_3_7_cu115_devtoolset7_nightly
           build_environment: "conda 3.7 cu115 devtoolset7"
           requires:
@@ -7068,6 +7654,18 @@ workflows:
       - smoke_linux_test:
           name: smoke_linux_conda_3_9_cu115_devtoolset7_nightly
           build_environment: "conda 3.9 cu115 devtoolset7"
+          requires:
+            - update_s3_htmls
+          filters:
+            branches:
+              only:
+                - postnightly
+          docker_image: "pytorch/conda-builder:cuda115"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_conda_3_10_cu115_devtoolset7_nightly
+          build_environment: "conda 3.10 cu115 devtoolset7"
           requires:
             - update_s3_htmls
           filters:
@@ -7609,6 +8207,15 @@ workflows:
               only:
                 - postnightly
       - smoke_mac_test:
+          name: smoke_macos_wheel_3_10_cpu_nightly
+          build_environment: "wheel 3.10 cpu"
+          requires:
+            - update_s3_htmls
+          filters:
+            branches:
+              only:
+                - postnightly
+      - smoke_mac_test:
           name: smoke_macos_conda_3_7_cpu_nightly
           build_environment: "conda 3.7 cpu"
           requires:
@@ -7629,6 +8236,15 @@ workflows:
       - smoke_mac_test:
           name: smoke_macos_conda_3_9_cpu_nightly
           build_environment: "conda 3.9 cpu"
+          requires:
+            - update_s3_htmls
+          filters:
+            branches:
+              only:
+                - postnightly
+      - smoke_mac_test:
+          name: smoke_macos_conda_3_10_cpu_nightly
+          build_environment: "conda 3.10 cpu"
           requires:
             - update_s3_htmls
           filters:
@@ -7672,6 +8288,15 @@ workflows:
               only:
                 - postnightly
       - smoke_windows_test:
+          name: smoke_windows_wheel_3_10_cpu_nightly
+          build_environment: "wheel 3.10 cpu"
+          requires:
+            - update_s3_htmls
+          filters:
+            branches:
+              only:
+                - postnightly
+      - smoke_windows_test:
           name: smoke_windows_wheel_3_7_cu111_nightly
           build_environment: "wheel 3.7 cu111"
           requires:
@@ -7694,6 +8319,16 @@ workflows:
       - smoke_windows_test:
           name: smoke_windows_wheel_3_9_cu111_nightly
           build_environment: "wheel 3.9 cu111"
+          requires:
+            - update_s3_htmls
+          filters:
+            branches:
+              only:
+                - postnightly
+          executor: windows-with-nvidia-gpu
+      - smoke_windows_test:
+          name: smoke_windows_wheel_3_10_cu111_nightly
+          build_environment: "wheel 3.10 cu111"
           requires:
             - update_s3_htmls
           filters:
@@ -7732,6 +8367,16 @@ workflows:
                 - postnightly
           executor: windows-with-nvidia-gpu
       - smoke_windows_test:
+          name: smoke_windows_wheel_3_10_cu113_nightly
+          build_environment: "wheel 3.10 cu113"
+          requires:
+            - update_s3_htmls
+          filters:
+            branches:
+              only:
+                - postnightly
+          executor: windows-with-nvidia-gpu
+      - smoke_windows_test:
           name: smoke_windows_wheel_3_7_cu115_nightly
           build_environment: "wheel 3.7 cu115"
           requires:
@@ -7754,6 +8399,16 @@ workflows:
       - smoke_windows_test:
           name: smoke_windows_wheel_3_9_cu115_nightly
           build_environment: "wheel 3.9 cu115"
+          requires:
+            - update_s3_htmls
+          filters:
+            branches:
+              only:
+                - postnightly
+          executor: windows-with-nvidia-gpu
+      - smoke_windows_test:
+          name: smoke_windows_wheel_3_10_cu115_nightly
+          build_environment: "wheel 3.10 cu115"
           requires:
             - update_s3_htmls
           filters:
@@ -7789,6 +8444,15 @@ workflows:
               only:
                 - postnightly
       - smoke_windows_test:
+          name: smoke_windows_conda_3_10_cpu_nightly
+          build_environment: "conda 3.10 cpu"
+          requires:
+            - update_s3_htmls
+          filters:
+            branches:
+              only:
+                - postnightly
+      - smoke_windows_test:
           name: smoke_windows_conda_3_7_cu111_nightly
           build_environment: "conda 3.7 cu111"
           requires:
@@ -7811,6 +8475,16 @@ workflows:
       - smoke_windows_test:
           name: smoke_windows_conda_3_9_cu111_nightly
           build_environment: "conda 3.9 cu111"
+          requires:
+            - update_s3_htmls
+          filters:
+            branches:
+              only:
+                - postnightly
+          executor: windows-with-nvidia-gpu
+      - smoke_windows_test:
+          name: smoke_windows_conda_3_10_cu111_nightly
+          build_environment: "conda 3.10 cu111"
           requires:
             - update_s3_htmls
           filters:
@@ -7849,6 +8523,16 @@ workflows:
                 - postnightly
           executor: windows-with-nvidia-gpu
       - smoke_windows_test:
+          name: smoke_windows_conda_3_10_cu113_nightly
+          build_environment: "conda 3.10 cu113"
+          requires:
+            - update_s3_htmls
+          filters:
+            branches:
+              only:
+                - postnightly
+          executor: windows-with-nvidia-gpu
+      - smoke_windows_test:
           name: smoke_windows_conda_3_7_cu115_nightly
           build_environment: "conda 3.7 cu115"
           requires:
@@ -7871,6 +8555,16 @@ workflows:
       - smoke_windows_test:
           name: smoke_windows_conda_3_9_cu115_nightly
           build_environment: "conda 3.9 cu115"
+          requires:
+            - update_s3_htmls
+          filters:
+            branches:
+              only:
+                - postnightly
+          executor: windows-with-nvidia-gpu
+      - smoke_windows_test:
+          name: smoke_windows_conda_3_10_cu115_nightly
+          build_environment: "conda 3.10 cu115"
           requires:
             - update_s3_htmls
           filters:

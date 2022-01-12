@@ -17,7 +17,8 @@ namespace tensorexpr {
 struct SmallSizeTPairHash {
  public:
   std::size_t operator()(const std::pair<size_t, size_t>& x) const {
-    return x.first << 32 | x.second;
+    // hashing input index and then dim index
+    return x.first * 128 + x.second;
   }
 };
 
