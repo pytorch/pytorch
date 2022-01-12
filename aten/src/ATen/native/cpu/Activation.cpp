@@ -194,7 +194,6 @@ void GeluKernelImpl(TensorIteratorBase& it, int64_t approximate) {
       const Vec kBetaVec(scalar_t(M_SQRT2 * M_2_SQRTPI * 0.5));
       const Vec kKappaVec(scalar_t(0.044715));
       const Vec kOneVec(scalar_t(1));
-      const Vec kThreeVec(scalar_t(3));
       const Vec kPointFiveVec(scalar_t(0.5));
       cpu_kernel_vec(
           it,
