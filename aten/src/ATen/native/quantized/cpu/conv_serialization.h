@@ -6,15 +6,8 @@
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <c10/util/irange.h>
 
-
-// TODO: Not in this branch
-#if 1 //ndef AT_PER_OPERATOR_HEADERS
-#pragma push_macro("TORCH_ASSERT_ONLY_METHOD_OPERATORS")
-#ifdef TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#undef TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#endif
+#ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
-#pragma pop_macro("TORCH_ASSERT_ONLY_METHOD_OPERATORS")
 #else
 #include <ATen/ops/from_blob.h>
 #endif

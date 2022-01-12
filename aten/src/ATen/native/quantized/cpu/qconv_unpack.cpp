@@ -1,4 +1,4 @@
-// #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <tuple>
 #include <vector>
 
@@ -11,8 +11,7 @@
 #include <ATen/native/quantized/cpu/quant_utils.h>
 #include <ATen/native/quantized/cpu/conv_packed_params.h>
 
-// TODO
-#if 1 //ndef AT_PER_OPERATOR_HEADERS
+#ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #else
 #include <ATen/ops/_empty_affine_quantized.h>

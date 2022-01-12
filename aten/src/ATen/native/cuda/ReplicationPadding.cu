@@ -9,7 +9,7 @@
 #include <c10/util/Exception.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
-#include <ATen/Funcitons.h>
+#include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/empty_like.h>

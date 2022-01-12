@@ -9,7 +9,6 @@
 #include <ATen/native/cuda/block_reduce.cuh>
 #include <ATen/native/Resize.h>
 #include <ATen/native/IndexingUtils.h>
-#include <ATen/native/ConvUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -17,7 +16,6 @@
 #else
 #include <ATen/ops/empty.h>
 #include <ATen/ops/_conv_depthwise2d_native.h>
-#include <ATen/ops/_conv_depthwise2d_backward_native.h>
 #endif
 
 namespace at {
