@@ -363,6 +363,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def("addInput", [](Graph& g) { return g.addInput(); })
       .def("copy", [](Graph& g) { return g.copy(); })
       .GS(eraseInput)
+      .GS(eraseOutput)
       .GS(registerOutput)
       .def(
           "create",
