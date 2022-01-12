@@ -634,12 +634,12 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
 
   auto output_min = kReluFused
       // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-      ? activationLimits(output_scale, output_zero_point, Activation::RELU)
+      ? activationLimits<uint8_t>(output_scale, output_zero_point, Activation::RELU)
             .first
       : std::numeric_limits<uint8_t>::min();
   auto output_max = kReluFused
       // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-      ? activationLimits(output_scale, output_zero_point, Activation::RELU)
+      ? activationLimits<uint8_t>(output_scale, output_zero_point, Activation::RELU)
             .second
       : std::numeric_limits<uint8_t>::max();
 
