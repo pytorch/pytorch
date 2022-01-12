@@ -1,9 +1,9 @@
-#include <ATen/ATen.h>
+// #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/cuda/BatchLinearAlgebraLib.h>
 #include <ATen/Context.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/Dispatch.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/cuda/PinnedMemoryAllocator.h>
+#include <ATen/ExpandUtils.h>
 #include <ATen/cuda/CUDASolver.h>
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/CUDAEvent.h>
@@ -13,7 +13,6 @@
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/TransposeType.h>
 #include <ATen/native/cuda/MiscUtils.h>
-#include <ATen/native/cuda/BatchLinearAlgebraLib.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>

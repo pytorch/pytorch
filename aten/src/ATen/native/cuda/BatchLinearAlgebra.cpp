@@ -1,7 +1,9 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/BatchLinearAlgebra.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Context.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/Dispatch.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 
@@ -11,9 +13,28 @@
 #include <ATen/native/cuda/MiscUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/LinearAlgebra.h>
-#include <ATen/native/BatchLinearAlgebra.h>
 #include <ATen/native/cuda/BatchLinearAlgebraLib.h>
 #include <ATen/native/cpu/zmath.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_cholesky_solve_helper_native.h>
+#include <ATen/ops/_linalg_inv_out_helper_native.h>
+#include <ATen/ops/_linalg_qr_helper_native.h>
+#include <ATen/ops/_solve_helper_native.h>
+#include <ATen/ops/_svd_helper_native.h>
+#include <ATen/ops/_symeig_helper_native.h>
+#include <ATen/ops/arange.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/empty_strided.h>
+#include <ATen/ops/linalg_eigh.h>
+#include <ATen/ops/linalg_eigvalsh.h>
+#include <ATen/ops/lstsq_native.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 #if AT_MAGMA_ENABLED()
 #include <magma_types.h>

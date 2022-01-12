@@ -1,7 +1,25 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/cuda/Activation.h>
 
-#include <ATen/ATen.h>
+#include <ATen/core/DimVector.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/TensorIterator.h>
+#include <ATen/WrapDimUtils.h>
 #include <ATen/native/Resize.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/gelu_backward_native.h>
+#include <ATen/ops/gelu_native.h>
+#include <ATen/ops/glu_backward_native.h>
+#include <ATen/ops/log_sigmoid_forward_native.h>
+#include <ATen/ops/prelu_backward_native.h>
+#include <ATen/ops/prelu_native.h>
+#endif
 
 namespace at { namespace native {
 
