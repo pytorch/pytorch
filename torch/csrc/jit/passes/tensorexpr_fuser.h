@@ -10,9 +10,13 @@ namespace jit {
 struct Graph;
 
 // Run TensorExpressions-based fuser.
+// If add_composed_op is true, creates a single operation that
+// performs both the runtime check that types align
+// and then the dispatch to the kernel/unoptimized graph
 TORCH_API void FuseTensorExprs(
     std::shared_ptr<Graph>& graph,
-    size_t min_group_size = 2);
+    size_t min_group_size = 2,
+    bool add_composed_op = false);
 
 TORCH_API void setTensorExprFuserEnabled(bool val);
 TORCH_API bool tensorExprFuserEnabled();
