@@ -4353,6 +4353,7 @@ TORCH_IMPL_FUNC(linalg_ldl_factor_ex_out)
   at::native::resize_output(info, info_shape);
 
   auto info_ = info.expect_contiguous();
+  info_->zero_();
   auto pivots_ = pivots.expect_contiguous();
 
   bool factors_equal_expected_shape = factors.sizes().equals(self.sizes());
