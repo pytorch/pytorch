@@ -381,7 +381,6 @@ class TestAutograd(TestCase):
     def test_not_implemented_fwad(self):
         x = torch.randn(3)
         v = torch.rand(3)
-        mat = torch.randn(2, 3)
 
         with fwAD.dual_level():
             dual_x = fwAD.make_dual(x, v)
@@ -390,8 +389,8 @@ class TestAutograd(TestCase):
             hint_msg = "Running forward AD for an OP that does not implement it should raise a NotImplementedError"
 
             with self.assertRaisesRegex(NotImplementedError, err_msg, msg=hint_msg):
-                # if forward AD ends up being implemented for torch.mv, choose a different op
-                res = torch.mv(mat, dual_x)
+                # if forward AD ends up being implemented for torch.atan2, choose a different op
+                torch.atan2(dual_x, dual_x)
 
     def test_accumulate_grad(self):
         grad_output = torch.ones(5, 5)
@@ -5907,11 +5906,51 @@ for shape in [(1,), ()]:
             y.sum().backward()
             self.assertEqual(a.grad, y)
 
-    def test_setting_default_saved_variable_hooks_twice_should_fail(self):
-        with self.assertRaisesRegex(RuntimeError, "Setting default hooks but they have already been set. "):
+    def test_setting_default_saved_variable_hooks_twice_should_not_fail(self):
+        with torch.autograd.graph.saved_tensors_hooks(lambda x: x, lambda x: x):
             with torch.autograd.graph.saved_tensors_hooks(lambda x: x, lambda x: x):
-                with torch.autograd.graph.saved_tensors_hooks(lambda x: x, lambda x: x):
-                    pass
+                pass
+
+    def test_setting_default_saved_variable_hooks_twice_should_use_inner(self):
+        with torch.autograd.graph.saved_tensors_hooks(lambda x: 3 * x, lambda x: 3 * x):
+            b = torch.randn(5, requires_grad=True)
+            with torch.autograd.graph.saved_tensors_hooks(lambda x: 5 * x, lambda x: 5 * x):
+                a = torch.randn(5, requires_grad=True)
+                y = a * a
+            z = b * b
+        y.sum().backward()
+        z.sum().backward()
+        self.assertEqual(2 * 5 * 5 * a, a.grad)
+        self.assertEqual(2 * 3 * 3 * b, b.grad)
+
+    def test_save_on_cpu_and_checkpoint(self):
+        a = torch.randn(2, 2, requires_grad=True)
+
+        b = a.pow(2).pow(2).pow(2).pow(2)
+        b.sum().backward()
+        b_grad = a.grad.clone()
+        a.grad.zero_()
+
+        with torch.autograd.graph.save_on_cpu():
+            h = a.pow(2)
+            h = checkpoint(lambda x: x.pow(2).pow(2), h, use_reentrant=False)
+            c = h.pow(2)
+        c.sum().backward()
+        c_grad = a.grad.clone()
+        a.grad.zero_()
+
+        def f(a):
+            h = a.pow(2)
+            with torch.autograd.graph.save_on_cpu():
+                h = h.pow(2).pow(2)
+            return h.pow(2)
+
+        d = checkpoint(f, a, use_reentrant=False)
+        d.sum().backward()
+        d_grad = a.grad.clone()
+
+        self.assertEqual(b_grad, c_grad)
+        self.assertEqual(b_grad, d_grad)
 
     def test_pack_hook_with_inplace_modification_should_fail(self):
         a = torch.randn(5, requires_grad=True)
