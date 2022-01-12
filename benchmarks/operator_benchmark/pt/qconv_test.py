@@ -27,7 +27,7 @@ class QConv1dBenchmark(op_bench.TorchBenchmarkBase):
         self.inputs = {
             "input": qX
         }
-
+        torch.backends.quantized.engine = 'qnnpack'
         self.qconv1d = nnq.Conv1d(IC, OC, kernel, stride=stride, padding=pad, groups=G)
         self.qconv1d.set_weight_bias(self.qW, None)
         self.qconv1d.scale = torch.tensor(self.scale, dtype=torch.double)
@@ -57,6 +57,7 @@ class QConv2dBenchmark(op_bench.TorchBenchmarkBase):
             "input": qX
         }
 
+        torch.backends.quantized.engine = 'qnnpack'
         self.qconv2d = nnq.Conv2d(IC, OC, kernel, stride=stride, padding=pad, groups=G)
         self.qconv2d.set_weight_bias(self.qW, None)
         self.qconv2d.scale = torch.tensor(self.scale, dtype=torch.double)
@@ -67,7 +68,7 @@ class QConv2dBenchmark(op_bench.TorchBenchmarkBase):
         return self.qconv2d(input)
 
 
-op_bench.generate_pt_test(configs.remove_cuda(configs.conv_1d_configs_short + configs.conv_1d_configs_long), QConv1dBenchmark)
+# op_bench.generate_pt_test(configs.remove_cuda(configs.conv_1d_configs_short + configs.conv_1d_configs_long), QConv1dBenchmark)
 op_bench.generate_pt_test(configs.remove_cuda(configs.conv_2d_configs_short + configs.conv_2d_configs_long), QConv2dBenchmark)
 
 
