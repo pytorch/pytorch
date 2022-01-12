@@ -35,14 +35,20 @@ concurrency:
           echo "instance-type: $(get_ec2_metadata instance-type)"
 {%- endmacro -%}
 
-{%- macro parse_ref() -%}
+{%- macro parse_ref(pytorch_directory="") -%}
       - name: Parse ref
+{%- if pytorch_directory %}
+        working-directory: !{{ pytorch_directory }}
+{%- endif %}
         id: parse-ref
         run: .github/scripts/parse_ref.py
 {%- endmacro -%}
 
-{%- macro upload_test_statistics(build_environment, when="always()") -%}
+{%- macro upload_test_statistics(build_environment, when="always()", pytorch_directory="") -%}
       - name: Display and upload test statistics (Click Me)
+{%- if pytorch_directory %}
+        working-directory: !{{ pytorch_directory }}
+{%- endif %}
         if: !{{ when }}
         # temporary hack: set CIRCLE_* vars, until we update
         # tools/stats/print_test_stats.py to natively support GitHub Actions
@@ -59,6 +65,14 @@ concurrency:
           python3 -m pip install -r requirements.txt
           python3 -m pip install boto3==1.19.12
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
+{%- endmacro -%}
+
+{%- macro chown_dir(dir) -%}
+      - name: Chown artifacts
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "!{{ dir }}:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
 {%- endmacro -%}
 
 {%- macro setup_ec2_linux() -%}
@@ -89,8 +103,11 @@ concurrency:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
 {%- endmacro -%}
 
-{%- macro teardown_ec2_linux() -%}
+{%- macro teardown_ec2_linux(pytorch_directory="") -%}
       - name: Hold runner for 2 hours or until ssh sessions have drained
+{%- if pytorch_directory %}
+        working-directory: !{{ pytorch_directory }}
+{%- endif %}
         # Always hold for active ssh sessions
         if: always()
         run: .github/scripts/wait_for_ssh_to_drain.sh
