@@ -1425,6 +1425,8 @@ void ldl_solve_kernel(
     const Tensor& B,
     bool upper,
     bool hermitian) {
+  // TODO: It should be possible to add the MAGMA backend for this function when using MAGMA 2.6.0
+  // https://bitbucket.org/icl/magma/src/c703d112dcf19eb8c73676cef10888aa2ef73457/ReleaseNotes#lines-48
   if (factors.is_complex()) {
     TORCH_CHECK(
         !hermitian,
