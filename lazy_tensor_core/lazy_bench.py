@@ -539,7 +539,7 @@ def merge_reformat(tmp_dir, out_dir, table):
                 entry = table[key]
 
             if prefix == "error":
-                entry["error"] = get_field(r, "error", prefix)
+                entry["error"] = f'{entry.get("error", "")}  {get_field(r, "error", prefix)}'
             elif prefix == "lazy-overheads":
                 entry["overhead"] = get_field(r, "overhead", prefix)
                 entry["ops"] = get_field(r, "ops", prefix)
