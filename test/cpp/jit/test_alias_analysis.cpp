@@ -1474,17 +1474,14 @@ TEST(
     return (%z))IR";
 
   torch::jit::parseIR(graph_string, graph.get(), vmap);
-  AliasDb aliasDb(
-      graph, /*isFrozen=*/false);
+  AliasDb aliasDb(graph, /*isFrozen=*/false);
 
   EXPECT_TRUE(!aliasDb.mayAlias(vmap["x"], vmap["y"]));
   EXPECT_TRUE(aliasDb.mayContainAlias(vmap["z"], vmap["x"]));
   EXPECT_TRUE(aliasDb.mayContainAlias(vmap["z"], vmap["y"]));
 }
 
-TEST(
-    AliasRegistrationTest,
-    RecursiveSubgraphTupleContainment) {
+TEST(AliasRegistrationTest, RecursiveSubgraphTupleContainment) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> vmap;
   auto graph_string = R"IR(
@@ -1496,7 +1493,8 @@ TEST(
 
   torch::jit::parseIR(graph_string, graph.get(), vmap);
   auto node = vmap["z"]->node();
-  auto subgraph = SubgraphUtils::createSingletonSubgraph(node, prim::FunctionalGraph);
+  auto subgraph =
+      SubgraphUtils::createSingletonSubgraph(node, prim::FunctionalGraph);
   AliasDb aliasDb(graph);
 
   EXPECT_TRUE(aliasDb.mayContainAlias(subgraph->output(), vmap["x"]));
@@ -1520,8 +1518,7 @@ TEST(AliasRegistrationTest, WildcardAliasForTupleConstructWithUses) {
     return (%c, %d))IR";
 
   torch::jit::parseIR(graph_string, graph.get(), vmap);
-  AliasDb aliasDb(
-      graph, /*isFrozen=*/false);
+  AliasDb aliasDb(graph, /*isFrozen=*/false);
 
   EXPECT_TRUE(aliasDb.mayAlias(vmap["x"], vmap["y"]));
   EXPECT_TRUE(aliasDb.mayAlias(vmap["x"], vmap["z"]));
