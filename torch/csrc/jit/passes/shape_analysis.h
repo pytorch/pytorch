@@ -17,12 +17,12 @@ class PropertyPropBase{
   explicit PropertyPropBase(std::shared_ptr<Graph> graph)
       : graph_(std::move(graph)) {
   }
+  virtual ~PropertyPropBase() = default;
 
   void propagateBlock(Block* block, bool insert_expands = true);
   // insert_expands is used for shape inference
 
   void processIf(Node* node);
-  void processLoop(Node* node);
 
   protected:
   virtual void propagateNode(Node* node, bool insert_expands = true) = 0;

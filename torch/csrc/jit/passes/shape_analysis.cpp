@@ -15,7 +15,6 @@
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/core/symbol.h>
-#include "jit/ir/ir_views.h"
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -50,13 +49,6 @@ bool mergeTypes(
   return changed;
 }
 
-void applyTypes(ArrayRef<Value*> src, ArrayRef<Value*> dst){
-  AT_ASSERT(src.size() == dst.size());
-  for (const auto i : c10::irange(src.size())) {
-    dst[i]->setType(src[i]->type());
-  }
-}
-
 void PropertyPropBase::propagateBlock(Block* block, bool insert_expands) {
   for (Node* node : block->nodes()) {
     try {
@@ -77,24 +69,6 @@ void PropertyPropBase::processIf(Node* node) {
   propagateBlock(then_block);
   propagateBlock(else_block);
   mergeTypes(then_block->outputs(), else_block->outputs(), node->outputs());
-}
-
-void PropertyPropBase::processLoop(Node* node) {
-  LoopView loop(node);
-  // propagate counter type
-  loop.currentTripCount()->setType(loop.maxTripCount()->type());
-  applyTypes(loop.carriedInputs(), loop.bodyCarriedInputs());
-
-  do {
-    propagateBlock(loop.bodyBlock(), /*insert_expands=*/false);
-    // note: inserting expands is unsafe at this point, we don't know
-    // if the types are stable yet, so the arguments to expand may change
-  } while (mergeTypes(
-      loop.bodyCarriedInputs(), loop.bodyCarriedOutputs(), loop.bodyCarriedInputs()));
-
-  // now that the types are stable, we can insert the expands
-  propagateBlock(loop.bodyBlock(), /*insert_expands=*/true);
-  applyTypes(loop.bodyCarriedInputs(), loop.carriedOutputs());
 }
 
 void PropertyPropBase::setUnshapedType(Value* o) {
@@ -327,6 +301,24 @@ class ShapePropagator: public PropertyPropBase {
 
     // no dimmed tensors. e.g. zero_dim_tensor + zero_dim_tensor.
     return zerodim;
+  }
+
+  bool mergeTypes(
+      ArrayRef<Value*> lhs,
+      ArrayRef<Value*> rhs,
+      ArrayRef<Value*> outputs) {
+    AT_ASSERT(lhs.size() == rhs.size() && rhs.size() == outputs.size());
+    bool changed = false;
+    for (size_t i = 0; i < lhs.size(); ++i) {
+      auto old_output_type = outputs[i]->type();
+      auto new_type =
+          unifyTypes(lhs[i]->type(), rhs[i]->type(), /*default_to_union=*/true);
+      AT_ASSERT(new_type);
+      outputs[i]->setType(*new_type);
+      if (*old_output_type != *outputs[i]->type())
+        changed = true;
+    }
+    return changed;
   }
 
   void broadcastBinary(
@@ -598,7 +590,31 @@ class ShapePropagator: public PropertyPropBase {
       case prim::If:
         return processIf(node);
       case prim::Loop: {
-        return processLoop(node);
+        auto body_block = node->blocks().at(0);
+        // propagate counter type
+        body_block->inputs().at(0)->setType(node->inputs().at(0)->type());
+        // propagate loop-carried input types to block inputs
+        auto loop_carried_inputs = node->inputs().slice(2); // skip max, cond
+        auto loop_carried_block = body_block->inputs().slice(1); // skip trip
+        for (const auto i : c10::irange(loop_carried_inputs.size())) {
+          loop_carried_block[i]->setType(loop_carried_inputs[i]->type());
+        }
+        auto loop_carried_outputs = body_block->outputs().slice(1); // skip cond
+
+        do {
+          propagateBlock(body_block, /*insert_expands=*/false);
+          // note: inserting expands is unsafe at this point, we don't know
+          // if the types are stable yet, so the arguments to expand may change
+        } while (mergeTypes(
+            loop_carried_block, loop_carried_outputs, loop_carried_block));
+
+        // now that the types are stable, we can insert the expands
+        propagateBlock(body_block, /*insert_expands=*/true);
+
+        for (const auto i : c10::irange(loop_carried_inputs.size())) {
+          node->outputs()[i]->setType(loop_carried_block[i]->type());
+        }
+        return;
       }
       case aten::Bool:
       case aten::Int:
