@@ -1136,6 +1136,19 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         self.assertTrue(isinstance(mq[2][0], nn.Conv2d))
         self.assertTrue(isinstance(mq[2][1], nnq.Conv2d))
 
+    def test_qconfig_dict_unsupported_does_not_crash_when_empty(self):
+        """
+        Verifies that the yet unimplemented keys of qconfig_dict only
+        crash when they have non-zero values
+        """
+        m = nn.Sequential(nn.Conv2d(1, 1, 1)).eval()
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        # this modifies qconfig_dict inplace to include more keys
+        mp = prepare_fx(m, qconfig_dict)
+        example_args = (torch.randn(1, 1, 1, 1),)
+        # need this line to not crash
+        mp = _quantize_dbr.prepare(m, qconfig_dict, example_args)
+
     def _test_serialization(self, model, input_shape):
         example_inputs = (torch.randn(*input_shape),)
         qconfig_dict = {'': torch.quantization.default_qconfig}
