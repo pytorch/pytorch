@@ -704,6 +704,7 @@ class LSTM(RNNBase):
     def forward(self, input, hx=None):  # noqa: F811
         orig_input = input
         # xxx: isinstance check needs to be in conditional for TorchScript to compile
+        batch_sizes = None
         if isinstance(orig_input, PackedSequence):
             input, batch_sizes, sorted_indices, unsorted_indices = input
             max_batch_size = batch_sizes[0]
@@ -714,17 +715,6 @@ class LSTM(RNNBase):
             batch_dim = 0 if self.batch_first else 1
             if not is_batched:
                 input = input.unsqueeze(batch_dim)
-                if hx is not None:
-                    if hx[0].dim() != 2 or hx[1].dim() != 2:
-                        msg = ("For unbatched 2-D input, hx and cx should "
-                               f"also be 2-D but got ({hx[0].dim()}-D, {hx[1].dim()}-D) tensors")
-                        raise RuntimeError(msg)
-                    hx = (hx[0].unsqueeze(1), hx[1].unsqueeze(1))
-            else:
-                if hx is not None and (hx[0].dim() != 3 or hx[1].dim() != 3):
-                    msg = ("For batched 3-D input, hx and cx should "
-                           f"also be 3-D but got ({hx[0].dim()}-D, {hx[1].dim()}-D) tensors")
-                    raise RuntimeError(msg)
             max_batch_size = input.size(0) if self.batch_first else input.size(1)
             sorted_indices = None
             unsorted_indices = None
@@ -740,6 +730,19 @@ class LSTM(RNNBase):
                                   dtype=input.dtype, device=input.device)
             hx = (h_zeros, c_zeros)
         else:
+            if batch_sizes is None:  # If not PackSequence input.
+                if not is_batched:
+                    if hx[0].dim() != 2 or hx[1].dim() != 2:
+                        msg = ("For unbatched 2-D input, hx and cx should "
+                               f"also be 2-D but got ({hx[0].dim()}-D, {hx[1].dim()}-D) tensors")
+                        raise RuntimeError(msg)
+                    hx = (hx[0].unsqueeze(1), hx[1].unsqueeze(1))
+                else:
+                    if (hx[0].dim() != 3 or hx[1].dim() != 3):
+                        msg = ("For batched 3-D input, hx and cx should "
+                               f"also be 3-D but got ({hx[0].dim()}-D, {hx[1].dim()}-D) tensors")
+                        raise RuntimeError(msg)
+
             # Each batch of the hidden state should match the input sequence that
             # the user believes he/she is passing in.
             hx = self.permute_hidden(hx, sorted_indices)
