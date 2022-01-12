@@ -25,6 +25,7 @@ from jit.test_class_type import TestClassType  # noqa: F401
 from jit.test_builtins import TestBuiltins, TestTensorBuiltins  # noqa: F401
 from jit.test_ignore_context_manager import TestIgnoreContextManager  # noqa: F401
 from jit.test_symbolic_shape_analysis import TestSymbolicShapeAnalysis  # noqa: F401
+from jit.test_if_hoisting import TestIfHoisting  # noqa: F401
 from jit.test_unsupported_ops import TestUnsupportedOps  # noqa: F401
 from jit.test_freezing import TestFreezing, TestFrozenOptimizations, TestMKLDNNReinplacing  # noqa: F401
 from jit.test_peephole import TestPeephole  # noqa: F401
@@ -10439,6 +10440,13 @@ dedent """
         double_mod = torch.jit.script(Mod(Double()))
         self.assertEqual(none_mod(torch.tensor(1)), torch.tensor(1))
         self.assertEqual(double_mod(torch.tensor(1)), torch.tensor(1) * 2)
+
+    def test_device_kwarg(self):
+        from torch import device
+
+        def f():
+            return device(type='cuda'), torch.device(type='cpu')
+        self.checkScript(f, ())
 
     def test_script_module_export_tensor_type(self):
         class M(torch.jit.ScriptModule):
