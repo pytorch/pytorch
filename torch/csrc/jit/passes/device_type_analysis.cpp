@@ -3,7 +3,6 @@
 #include <c10/core/Device.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
-#include <jit/ir/ir_views.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/device_type_analysis.h>
