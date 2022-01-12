@@ -893,7 +893,7 @@ def get_selected_tests(options):
     # Only run fx2trt test with specified option argument
     if options.fx2trt_tests:
         selected_tests = list(
-            filter(lambda test_name: "fx2trt" in test_name, selected_tests)
+            filter(lambda test_name: test_name in FX2TRT_TESTS, selected_tests)
         )
     else:
         options.exclude.extend(FX2TRT_TESTS)
