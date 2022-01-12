@@ -670,7 +670,7 @@ BAD_EXAMPLES = [
         },
         {
             'covariance_matrix': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True),
-            'df': 3.,
+            'df': 1.,
         },
         {
             'covariance_matrix': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True),
