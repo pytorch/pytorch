@@ -11,6 +11,8 @@
 #include <torch/csrc/utils/python_stub.h>
 
 #include <ATen/core/Tensor.h>
+#include <ATen/core/dynamic_type.h>
+#include <ATen/core/enum_type.h>
 #include <ATen/core/function_schema.h>
 #include <ATen/core/functional.h>
 #include <ATen/core/interned_strings.h>
@@ -1501,17 +1503,17 @@ struct ProfileOp : public Node {
     callback_ = std::move(callback);
   }
 
-  bool hasRun() const {
-    return has_run_;
+  bool hasSeenTensor() const {
+    return has_seen_tensor_;
   }
 
-  void setHasRun(bool has_run) {
-    has_run_ = has_run;
+  void setHasSeenTensor(bool has_seen_tensor) {
+    has_seen_tensor_ = has_seen_tensor;
   }
 
  private:
   std::function<void(std::vector<IValue>&)> callback_;
-  bool has_run_ = false;
+  bool has_seen_tensor_ = false;
 };
 
 struct TORCH_API ProfileIValueOp : public Node {
@@ -1587,6 +1589,11 @@ TORCH_API std::vector<Value*> inlineCallTo(
     Node* to_replace,
     GraphFunction* callee,
     bool use_graph = true);
+
+TORCH_API std::vector<Value*> inlineCallTo(
+    Node* to_replace,
+    GraphFunction* callee,
+    Graph* callee_graph);
 
 /** If there is only one value in \p OUTPUTS and its kind is Tuple, insert a
  * tuple unpack node and return the resulting values.

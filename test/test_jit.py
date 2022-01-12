@@ -25,6 +25,7 @@ from jit.test_class_type import TestClassType  # noqa: F401
 from jit.test_builtins import TestBuiltins, TestTensorBuiltins  # noqa: F401
 from jit.test_ignore_context_manager import TestIgnoreContextManager  # noqa: F401
 from jit.test_symbolic_shape_analysis import TestSymbolicShapeAnalysis  # noqa: F401
+from jit.test_if_hoisting import TestIfHoisting  # noqa: F401
 from jit.test_unsupported_ops import TestUnsupportedOps  # noqa: F401
 from jit.test_freezing import TestFreezing, TestFrozenOptimizations, TestMKLDNNReinplacing  # noqa: F401
 from jit.test_peephole import TestPeephole  # noqa: F401
@@ -68,6 +69,7 @@ from jit.test_attr import TestGetDefaultAttr  # noqa: F401
 from jit.test_aten_pow import TestAtenPow  # noqa: F401
 from jit.test_optimize_for_mobile_preserve_debug_info import TestOptimizeForMobilePreserveDebugInfo  # noqa: F401
 from jit.test_union import TestUnion  # noqa: F401
+from jit.test_legacy_upgraders import TestLegacyUpgraders  # noqa: F401
 from jit.test_models import MnistNet
 from jit.test_batch_mm import TestBatchMM  # noqa: F401
 from jit.test_dtype_analysis import TestDtypeAnalysis, TestDtypeCustomRulesCPU  # noqa: F401
@@ -9732,6 +9734,18 @@ dedent """
         scripted = torch.jit.script(foo)
         self.assertTrue(scripted())
 
+    def test_comment_ignore_indent(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+    # useless comment that is not indented correctly  # noqa: E115
+                super().__init__()
+
+            def forward(self):
+                return 5
+
+        # should compile without an error
+        self.checkModule(Model(), ())
+
     def test_script_outputs(self):
         with self.assertRaisesRegex(RuntimeError, "cannot be used as a tuple"):
             @torch.jit.script
@@ -10998,7 +11012,6 @@ dedent """
                 jit_o = jit_t(x, w, b)
                 jit_o.backward(grad)
 
-                print("round 1")
                 x.grad.zero_()
                 w.grad.zero_()
                 b.grad.zero_()
@@ -11012,7 +11025,6 @@ dedent """
                 self.assertEqual(w.grad, w_ref.grad)
                 self.assertEqual(b.grad, b_ref.grad)
 
-                print("round 2")
                 x.grad.zero_()
                 w.grad.zero_()
                 x_ref.grad.zero_()
@@ -13006,7 +13018,7 @@ dedent """
                 return self.conv(x)
         foo = Foo()
         # testing that the correct error message propagates
-        with self.assertRaisesRegex(RuntimeError, "Expected 4-dimensional input for 4-dimensional weight"):
+        with self.assertRaisesRegex(RuntimeError, r"Expected 3D \(unbatched\) or 4D \(batched\) input to conv2d"):
             foo(torch.ones([123]))  # wrong size
 
     def test_builtin_error_messsage(self):

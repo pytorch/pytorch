@@ -203,46 +203,33 @@ void removeProfileNodesAndSpecializeTypes(Block* b) {
       // a use with a different profiled type, we will still be correct.
       // In the future we could consider unifying the types of uses, or adding a
       // type refinement node so uses can have the correct corresponding type.
-      /*
-      if (profiled_type == TensorType::get()) {
-        continue;
-      }
-      auto input_type = it->input()->type()->expect<TensorType>();
-      if (input_type == TensorType::get()) {
-        it->input()->setType(profiled_type);
-      } else {
-        it->input()->setType(input_type->merge(*profiled_type));
-      }
-      */
       if (profiled_type == TensorType::get() && !seen_none) {
         continue;
       }
+
+      TensorTypePtr input_tensor_type = nullptr;
+      bool input_is_optional = false;
+      if (it->input()->type()->kind() == c10::TypeKind::TensorType) {
+        input_tensor_type = it->input()->type()->expect<TensorType>();
+      } else {
+        input_tensor_type = it->input()
+                                ->type()
+                                ->expectRef<OptionalType>()
+                                .getElementType()
+                                ->expect<TensorType>();
+        input_is_optional = true;
+      }
+
       // If we encounter non-identical profiled types for the same value, merge
       // them.  This situation can happen if, e.g., loop unrolling duplicates
       // profiled types in a loop body in a manner that isn't logically
       // consistent (see TestTEFuser.test_unrolled_cat).
-      TensorTypePtr input_tensor_type = nullptr;
-      if (it->input()->type()->kind() == c10::TypeKind::TensorType) {
-        input_tensor_type = it->input()->type()->expect<TensorType>();
-      } else if (it->input()->type()->kind() == c10::TypeKind::OptionalType) {
-        input_tensor_type = it->input()->type()->expect<OptionalType>()->getElementType()->expect<TensorType>();
-      }
-
       TensorTypePtr merged_tensor_type = profiled_type;
       if (input_tensor_type != TensorType::get()) {
         merged_tensor_type = input_tensor_type->merge(*profiled_type);
       }
 
-      // TODO: currently, we ignore whether or not input_tensor is a Tensor or
-      // an Optional[Tensor]. The reason we do this is because the type will
-      // always start as Optional[Tensor] (if the input was an optional tensor)
-      // but we want to be able to specialize on non-optional Tensor if profiling
-      // shows that the input is never None. However, this might be problematic
-      // if on one profiling run we see that it is optional, and on the second
-      // run we don't see any `None` tensors.
-      // We could try adding a `seen_none` attribute somewhere... not really sure
-      // how to do do this though
-      if (seen_none) {
+      if (seen_none || input_is_optional) {
         it->input()->setType(OptionalType::create(merged_tensor_type));
       } else {
         it->input()->setType(merged_tensor_type);
@@ -1280,42 +1267,19 @@ Operation createTensorExprOp(const Node* node) {
   }
 
   // Handle the case when dynamic shape fusion is enabled.
-  //
-  // This case is different because the TensorExprGroup node is not part of
-  // the main graph, but it is part of the composed op TensorExprDynamicGroup.
-  // So, every run of the TensorExprDynamicGroup op will end up calling this
-  // function, but that still does not require creating a new TensorExprKernel
-  // for every such call. So, we maintain a cache from the node to the kernels
-  // created.
-  //
-  // TODO: Can we get rid of the cache here and still ensure that we compile
-  // the kernel only once for every op?
-  return [=](Stack& stack) {
-    // A cache from the node to the corresponding kernel.
-    static std::unordered_map<
-        std::string,
-        std::shared_ptr<tensorexpr::TensorExprKernel>>
-        cached_kernels;
-    std::ostringstream node_ss;
-    node->print(node_ss, 0, nullptr);
-    auto node_str = node_ss.str();
-    auto subgraph = node->g(attr::Subgraph);
-    auto it = cached_kernels.find(node_str);
-    std::shared_ptr<tensorexpr::TensorExprKernel> kernel;
-    if (it != cached_kernels.end()) {
-      kernel = it->second;
-    } else {
-      VLOG(1) << "Compiling a new kernel for " << *node;
-      std::vector<int64_t> sym_shapes;
-      if (node->hasAttribute(attr::symbolic_shape_inputs)) {
-        sym_shapes = node->is(attr::symbolic_shape_inputs);
-      }
-      std::unordered_map<c10::Symbol, tensorexpr::NNCLoweringFunction>
-          custom_lowerings;
-      kernel = std::make_shared<tensorexpr::TensorExprKernel>(
-          subgraph, custom_lowerings, sym_shapes);
-      cached_kernels[node_str] = kernel;
-    }
+  VLOG(1) << "Compiling a new kernel for " << *node;
+  std::vector<int64_t> sym_shapes;
+  if (node->hasAttribute(attr::symbolic_shape_inputs)) {
+    sym_shapes = node->is(attr::symbolic_shape_inputs);
+  }
+  std::unordered_map<c10::Symbol, tensorexpr::NNCLoweringFunction>
+      custom_lowerings;
+  auto subgraph = node->g(attr::Subgraph);
+  auto kernel = std::make_shared<tensorexpr::TensorExprKernel>(
+      subgraph, custom_lowerings, sym_shapes);
+
+  auto num_subgraph_inputs = subgraph->inputs().size();
+  return [kernel, num_subgraph_inputs](Stack& stack) {
     RECORD_FUNCTION(kernel->getKernelName(), std::vector<c10::IValue>());
 
     // Stack contents:
@@ -1325,7 +1289,6 @@ Operation createTensorExprOp(const Node* node) {
     // outputs are being passed in. Otherwise, output tensors are passed in
     // at the bottom of the stack. So, we call the appropriate run function
     // in TensorExprKernel.
-    auto num_subgraph_inputs = subgraph->inputs().size();
     if (num_subgraph_inputs == stack.size()) {
       kernel->run(stack);
     } else {

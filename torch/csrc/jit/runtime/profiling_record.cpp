@@ -118,7 +118,7 @@ bool isOptionalTensorType(const TypePtr& type) {
   if (type->kind() != c10::TypeKind::OptionalType) {
     return false;
   }
-  const auto& kind = type->expect<OptionalType>()->getElementType()->kind();
+  const auto& kind = type->expectRef<OptionalType>().getElementType()->kind();
   return kind == c10::TypeKind::TensorType;
 }
 } // namespace
@@ -170,7 +170,7 @@ void ProfilingRecord::insertShapeProfile(
             *new_tensor_type);
 
         if (new_tensor_type != nullptr) {
-          if (pn->hasRun()) {
+          if (pn->hasSeenTensor()) {
             const auto& existing_tensor_type =
                 pn->ty(attr::profiled_type)->expectRef<TensorType>();
             GRAPH_DEBUG(
@@ -183,12 +183,11 @@ void ProfilingRecord::insertShapeProfile(
                 "Merged type for %", pno->debugName(), ": ", *merged_type);
             pn->ty_(attr::profiled_type, std::move(merged_type));
           } else {
-            pn->setHasRun(true);
+            pn->setHasSeenTensor(true);
             pn->ty_(attr::profiled_type, std::move(new_tensor_type));
           }
         }
         if (v.isNone()) {
-          pn->setHasRun(true);
           pn->i_(attr::seen_none, 1);
         }
       }
