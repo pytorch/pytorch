@@ -124,6 +124,8 @@ Tensor _add_scalar_out(Tensor& out, const Tensor& self, const Scalar& other) {
 template <bool ReLUFused = false>
 Tensor qnnpack_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
   TORCH_CHECK(qa.ndimension() > 0, "qnnpack_add(): Got empty input tensor.");
+  TORCH_CHECK(qa.sizes() == qb.sizes(),
+                "qnnpack_add(): qnnpack kernel does not support broadcasting");
   TORCH_CHECK(qa.scalar_type() == c10::kQUInt8 && qb.scalar_type() == c10::kQUInt8,
                 "qnnpack_add(): Expected both input data types to be ",
                 toString(c10::kQUInt8),
@@ -224,6 +226,7 @@ Tensor qadd(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
   check_inputs(qa, qb);
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
+      qa.sizes() == qb.sizes() && /* qnnpack does not support boradcasting */
       qa.scalar_type() == kQUInt8 && qb.scalar_type() == kQUInt8) {
     return qnnpack_add<ReLUFused>(qa, qb, scale, zero_point);
   }
