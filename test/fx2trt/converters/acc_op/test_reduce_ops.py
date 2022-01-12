@@ -4,6 +4,7 @@ import torch
 import torch.fx.experimental.fx_acc.acc_ops as acc_ops
 from torch.testing._internal.common_fx2trt import AccTestCase
 from parameterized import parameterized
+from torch.testing._internal.common_utils import run_tests
 
 reduce_ops = [(torch.sum, acc_ops.sum), (torch.mean, acc_ops.mean)]
 
@@ -63,3 +64,6 @@ class TestReduceConverter(AccTestCase):
             expected_ops={expected_acc_op},
             test_implicit_batch_dim=False,
         )
+
+if __name__ == '__main__':
+    run_tests()
