@@ -113,5 +113,5 @@ def test_transform_to(constraint_fn, args, is_cuda):
     assert torch.allclose(y, y2), "Error in transform_to({}) pseudoinverse".format(constraint)
 
 
-if __name__ == '__main__' and torch._C.has_lapack:
+if __name__ == '__main__':
     pytest.main([__file__])
