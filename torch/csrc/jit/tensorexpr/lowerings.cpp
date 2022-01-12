@@ -1538,8 +1538,8 @@ int nnc_lowerings_lazy_registration() {
       {"aten::embedding(Tensor weight, Tensor indices, int padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor"},
       computeEmbedding);
 
-#define NNC_QUANTIZATION_EXPR_QUANT 0
-#define NNC_QUANTIZATION_EXPR_DEQUANT 0
+#define NNC_QUANTIZATION_EXPR_QUANT 1
+#define NNC_QUANTIZATION_EXPR_DEQUANT 1
 
   RegisterNNCLoweringsFunction aten_quantize_per_tensor(
       {"aten::quantize_per_tensor(Tensor self, float scale, int zero_point, int dtype) -> (Tensor)",
