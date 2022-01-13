@@ -194,6 +194,7 @@ TORCH_META_FUNC2(scatter_reduce, two)
     sizes[dim] = index.numel() > 0 ? index.max().item<int64_t>() + 1: 0;
 
   set_output(sizes, self.options());
+
 }
 
 TORCH_PRECOMPUTE_META_FUNC(index_add)
@@ -1314,21 +1315,47 @@ TORCH_IMPL_FUNC(scatter_reduce_structured_cpu)
         "Shape mismatch between `self` (got ", self.sizes(), ") and `index` (got ", index.sizes(), ")");
   }
 
-  TORCH_CHECK(reduce == "sum", "`reduce` argument must be 'sum'");
+  TORCH_CHECK(reduce == "sum" || reduce == "prod" || reduce == "mean" || reduce == "amax" || reduce =="amin",
+              "`reduce` argument must be one of ('sum', 'prod', 'mean', 'amax', 'amin'");
 
   // TODO: We currently expect contiguous memory layout.
-  TORCH_CHECK(self.is_contiguous(), "`self` needs to be contiguous");
-  TORCH_CHECK(index.is_contiguous(), "`index` needs to be contiguous");
-  TORCH_CHECK(out.is_contiguous(), "`out` needs to be contiguous");
+  // TORCH_CHECK(self.is_contiguous(), "`self` needs to be contiguous");
+  // TORCH_CHECK(index.is_contiguous(), "`index` needs to be contiguous");
+  // TORCH_CHECK(out.is_contiguous(), "`out` needs to be contiguous");
 
   dim = dim < 0 ? dim + self.dim() : dim;
 
-  out.zero_();
-
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, self.scalar_type(), "scatter_reduce", [&] {
-    auto self_data = self.data_ptr<scalar_t>();
-    auto index_data = index.data_ptr<int64_t>();
-    auto out_data = out.data_ptr<scalar_t>();
+    // FIXME: this doesn't seem to be the behavior specified in the documentation
+    // documentation specifies that the elements in out should be considered in the computation(?)
+    // fill with different things depending on mode
+    // but how to tell whether out Tensor was initialized in meta or is a genuine out tensor???
+    // doesn't seem to be possible to initialize values of out tensor in TORCH_META_FUNC
+    if (reduce == "sum" || reduce == "mean") {
+      out.fill_(0);
+    } else if (reduce == "prod") {
+      out.fill_(1);
+    } else if (reduce == "amax") {
+      out.fill_(INT_MIN);
+    } else if (reduce == "amin") {
+      out.fill_(INT_MAX);
+    } else {
+      AT_ERROR("Expected `reduce` to be one of 'sum', 'prod', 'mean', 'amax', 'amin' but got ", reduce, ".");
+    }
+
+    auto self_cont = self.contiguous();
+    auto index_cont = index.contiguous();
+    auto self_data = self_cont.data_ptr<scalar_t>();
+    auto index_data = index_cont.data_ptr<int64_t>();
+    // FIXME: probably shouldn't be handling non-contiguous like this, ask about this? TensorIterator needed?
+    // or naively iterate over all indices and multiply by stride and sum(?)
+    bool out_is_contiguous = out.is_contiguous();
+    auto out_cont = out_is_contiguous ? out : out.contiguous();
+    auto out_cont_data = out_cont.data_ptr<scalar_t>();
+
+    auto counts = at::zeros_like(out_cont);
+    auto counts_data = counts.data_ptr<scalar_t>();
+
 
     int64_t offset1 = 1, offset2 = 1;
     for (int64_t d = 0; d < dim; d++)
@@ -1341,14 +1368,36 @@ TORCH_IMPL_FUNC(scatter_reduce_structured_cpu)
     for (int64_t i = 0; i < offset1; i++) {
       for (int64_t j = 0; j < self.size(dim); j++) {
         for (int64_t k = 0; k < offset2; k++) {
-          value = self_data[i * self.stride(dim) * self.size(dim) + j * self.stride(dim) + k];
-          dim_index = index_data[i * index.stride(dim) * index.size(dim) + j * index.stride(dim) + k];
+          // because contiguous, self.stride(dim) = self.size(dim + 1) * ... * self.size(last_dim)
+          // i * self.stride(dim) * self.size(dim) = contiguous elements along dim j ?
+          value = self_data[i * self_cont.stride(dim) * self_cont.size(dim) + j * self_cont.stride(dim) + k];
+          dim_index = index_data[i * index_cont.stride(dim) * index_cont.size(dim) + j * index_cont.stride(dim) + k];
           TORCH_CHECK(dim_index >= 0 && dim_index < out.size(dim),
               "Expected `index` values to be in range ", 0, " to ", out.size(dim), " (got ", dim_index, ")");
-          out_data[i * out.stride(dim) * out.size(dim) + dim_index * out.stride(dim) + k] += value;
+          int64_t ind = i * out_cont.stride(dim) * out_cont.size(dim) + dim_index * out_cont.stride(dim) + k;
+          if (reduce == "sum") {
+            out_cont_data[ind] += value;
+          } else if (reduce == "prod") {
+            out_cont_data[ind] *= value;
+          } else if (reduce == "mean") {
+            auto n = counts_data[ind];
+            out_cont_data[ind] = (out_cont_data[ind] * n + value) / (n + 1);
+            counts_data[ind] += 1;
+          } else if (reduce == "amax") {
+            out_cont_data[ind] = std::max(out_cont_data[ind], value);
+          } else if (reduce == "amin") {
+            out_cont_data[ind] = std::min(out_cont_data[ind], value);
+          } else {
+            AT_ERROR("Expected `reduce` to be one of 'sum', 'prod', 'mean', 'amax', 'amin' but got ", reduce, ".");
+          }
         }
       }
     }
+
+    if (!out_is_contiguous) {
+      out.copy_(out_cont);
+    }
+
   });
 }
 

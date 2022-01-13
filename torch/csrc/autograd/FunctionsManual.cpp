@@ -4801,6 +4801,43 @@ std::tuple<Tensor, Tensor> _cudnn_convolution_backward(
   return result;
 }
 
+Tensor scatter_reduce_backward(const Tensor & grad,
+                               const Tensor& input,
+                               int dim,
+                               const Tensor & index,
+                               c10::string_view reduce,
+                               const Tensor & result){
+  Tensor grad_input;
+
+  // TODO: gather doesn't support broadcasting of input and index
+  // currently this works because scatter_reduce doesn't support broadcasting yet but
+  // this needs to be fixed when scatter_reduce is upgraded to support broadcasting
+  // by broadcasting index here too.
+
+  if (reduce == "sum") {
+    grad_input = grad.gather(dim, index);
+  } else if (reduce == "prod") {
+    grad_input = (grad * result).gather(dim, index) / input;
+    grad_input.masked_fill_(input == 0, 0);
+  } else if (reduce == "mean") {
+    // TODO: ones or zeros here
+    Tensor N = zeros_like(grad).scatter_add_(dim, index, ones_like(input)).gather(dim, index);
+    grad_input = grad.gather(dim, index) / N;
+    grad_input.masked_fill_(N == 0, 0);
+  } else if (reduce == "amax" || reduce == "amin") {
+    Tensor N = zeros_like(grad).scatter_add_(dim, index, ones_like(input)).gather(dim, index);
+    Tensor value = result.gather(dim, index);
+    auto mask = at::where(value.isnan(), input.isnan(), input == value);
+    grad_input = mask * grad.gather(dim, index);
+  } else {
+    AT_ERROR("Expected 'reduce' to be one of 'sum', 'prod', 'mean', 'amax', 'amin' but got ", reduce, ".");
+  }
+
+  return grad_input;
+
+}
+
+
 } // namespace details
 } // namespace generated
 } // namespace autograd
