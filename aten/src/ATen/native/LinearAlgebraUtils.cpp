@@ -355,16 +355,6 @@ std::tuple<std::vector<int64_t>,
   return std::make_tuple(q_sizes, q_strides, n_columns_q);
 }
 
-// Function used instead of .to so that the original strides are retained
-// .to doesn't retain strides and make the output tensor contiguous
-Tensor same_stride_to(const Tensor& original_tensor, const at::TensorOptions& options) {
-  auto strided_to = at::empty_strided(original_tensor.sizes(),
-                                      original_tensor.strides(),
-                                      options);
-  strided_to.copy_(original_tensor);
-  return strided_to;
-}
-
 // Creates a dimension permutation array that can be given to `at::permute()`, which will shift
 // the two specified dimensions to the end of a tensor, without changing the order of
 // the other dimensions. `dim1` will be placed at the very end, and `dim0` will be
@@ -435,8 +425,7 @@ bool svd_uses_cusolver(const Tensor& A) {
   // if cusolver is available, it is used unconditionally
   return A.is_cuda()
          && at::globalContext().hasCuSOLVER()
-         && (at::globalContext().linalgPreferredBackend() != at::LinalgBackend::Magma
-             || !at::globalContext().hasMAGMA());
+         && at::globalContext().linalgPreferredBackend() != at::LinalgBackend::Magma;
 }
 
 void checkSameDevice(const std::string& fn_name, Tensor result, Tensor input, const std::string& result_name) {
