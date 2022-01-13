@@ -5,6 +5,7 @@ import torch.fx.experimental.fx_acc.acc_ops as acc_ops
 import torch.nn as nn
 from torch.testing._internal.common_fx2trt import AccTestCase, InputTensorSpec
 from parameterized import parameterized, param
+from torch.testing._internal.common_utils import run_tests
 
 
 class TestLayerNormConverter(AccTestCase):
@@ -59,3 +60,6 @@ class TestLayerNormConverter(AccTestCase):
         self.run_test_with_dynamic_shape(
             LayerNorm(normalized_shape), input_specs, expected_ops={acc_ops.layer_norm}
         )
+
+if __name__ == '__main__':
+    run_tests()
