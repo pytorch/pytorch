@@ -9,7 +9,7 @@
 
 #include <ATen/cudnn/cudnn-wrapper.h>
 #include <cudnn_frontend.h>
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/native/ConvUtils.h>
@@ -17,6 +17,12 @@
 #include <ATen/native/utils/ParamsHash.h>
 #include <ATen/cudnn/Handle.h>
 #include <ATen/TensorUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#endif
 
 #include <unordered_map>
 

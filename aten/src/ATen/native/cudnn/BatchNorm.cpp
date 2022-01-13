@@ -3,15 +3,6 @@
 #include <ATen/Config.h>
 #include <ATen/cuda/CUDAConfig.h>
 
-#ifndef AT_PER_OPERATOR_HEADERS
-#include <ATen/Functions.h>
-#include <ATen/NativeFunctions.h>
-#else
-#include <ATen/ops/cudnn_batch_norm.h>
-#include <ATen/ops/cudnn_batch_norm_backward.h>
-#include <ATen/ops/empty.h>
-#endif
-
 #if !AT_CUDNN_ENABLED()
 
 namespace at { namespace native {
@@ -40,6 +31,16 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
 #include <ATen/cuda/Exceptions.h>
 
 #include <ATen/TensorUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/cudnn_batch_norm_backward_native.h>
+#include <ATen/ops/cudnn_batch_norm_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#endif
 
 namespace at { namespace native {
 
