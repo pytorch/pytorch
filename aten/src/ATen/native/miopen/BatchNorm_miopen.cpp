@@ -7,8 +7,8 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/empty.h>
-#include <ATen/ops/cudnn_batch_norm_native.h>
-#include <ATen/ops/cudnn_batch_norm_backward_native.h>
+#include <ATen/ops/miopen_batch_norm_native.h>
+#include <ATen/ops/miopen_batch_norm_backward_native.h>
 #endif
 
 // TODO: Remove the condition on AT_ROCM_ENABLED entirely,
