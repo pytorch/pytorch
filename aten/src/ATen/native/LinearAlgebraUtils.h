@@ -173,8 +173,6 @@ TORCH_API std::tuple<std::vector<int64_t>,
                      int64_t> _compute_geometry_for_Q(const Tensor& input, bool reduced);
 
 
-TORCH_API Tensor same_stride_to(const Tensor& original_tensor, const at::TensorOptions& options);
-
 std::vector<int64_t> create_dim_backshift_permutation(int64_t dim0, int64_t dim1, int64_t ndim);
 
 std::vector<int64_t> create_reverse_permutation(std::vector<int64_t> permutation);

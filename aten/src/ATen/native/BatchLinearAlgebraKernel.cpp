@@ -952,7 +952,7 @@ static void apply_svd(const Tensor& A,
                       const Tensor& Vh,
                       const Tensor& info) {
 #if !AT_BUILD_WITH_LAPACK()
-  AT_ERROR("svd: LAPACK library not found in compilation");
+  TORCH_CHECK(false, "svd: LAPACK library not found in compilation");
 #else
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
   const auto A_data = A.data_ptr<scalar_t>();
@@ -969,9 +969,9 @@ static void apply_svd(const Tensor& A,
 
   const auto m = A.size(-2);
   const auto n = A.size(-1);
-  const auto lda = A.strides().end()[-1];
-  const auto ldu= compute_uv ? U.strides().end()[-1] : 1;
-  const auto ldvh = compute_uv ? Vh.strides().end()[-1] : 1;
+  const auto lda = A.stride(-1);
+  const auto ldu= compute_uv ? U.stride(-1) : 1;
+  const auto ldvh = compute_uv ? Vh.stride(-1) : 1;
 
   auto iwork = std::vector<int>(8 * std::min(m, n));
   auto* const iwork_data = iwork.data();
@@ -1103,4 +1103,5 @@ REGISTER_ARCH_DISPATCH(svd_stub, DEFAULT, &svd_kernel);
 REGISTER_AVX512_DISPATCH(svd_stub, &svd_kernel);
 REGISTER_AVX2_DISPATCH(svd_stub, &svd_kernel);
 REGISTER_VSX_DISPATCH(svd_stub, &svd_kernel);
+REGISTER_ZVECTOR_DISPATCH(svd_stub, &svd_kernel);
 }} // namespace at::native
