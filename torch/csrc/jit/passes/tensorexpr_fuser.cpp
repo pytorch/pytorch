@@ -22,6 +22,7 @@
 #include <torch/csrc/jit/runtime/symbolic_shape_registry_util.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/utils/memory.h>
+#include <ATen/core/interned_strings.h>
 
 // NOLINTNEXTLINE
 C10_DEFINE_bool(
@@ -364,10 +365,10 @@ class TensorExprFuser {
   TensorExprFuser(
       std::shared_ptr<Graph> graph,
       size_t min_group_size,
-      bool disable_shape_checks)
+      bool add_composed_op)
       : graph_(std::move(graph)),
         min_group_size_(min_group_size),
-        disable_shape_checks_(disable_shape_checks) {
+        add_composed_op_(add_composed_op) {
     parseTENotFuseOption();
   }
 
@@ -997,7 +998,7 @@ class TensorExprFuser {
   }
 
   bool canHandle(Node* node) {
-    REQ(disable_shape_checks_ || allShapesAreKnown(node));
+    REQ(allShapesAreKnown(node));
     REQ(isFusableOnDevice(node));
     REQ(operators_not_to_fuse.find(node->kind()) ==
         operators_not_to_fuse.end());
@@ -1171,7 +1172,7 @@ class TensorExprFuser {
     }
     for (Node* fusion_group : fusion_groups) {
       VLOG(1) << "GenerateGuard for fusion group: " << *fusion_group;
-      if (!GenerateGuard(fusion_group, /*add_composed_op=*/true)) {
+      if (!GenerateGuard(fusion_group, add_composed_op_)) {
         VLOG(1) << "  Unfusing the fusion group because GenerateGuard failed"
                 << std::endl;
         SubgraphUtils::unmergeSubgraph(fusion_group);
@@ -1207,14 +1208,14 @@ class TensorExprFuser {
   std::set<NodeKind> operators_not_to_fuse;
   // Minimal size of a fusion group
   size_t min_group_size_;
-  // If true, shapes are ignored
-  bool disable_shape_checks_;
+  // compose Runtime Type Guard and Kernel in one op
+  bool add_composed_op_;
 };
 
 void FuseTensorExprs(
     std::shared_ptr<Graph>& graph,
     size_t min_group_size,
-    bool disable_shape_checks) {
+    bool add_composed_op) {
   GRAPH_DUMP("Before TExprFuser: ", graph);
 
   // Temporary change for Block code generation.
@@ -1225,7 +1226,7 @@ void FuseTensorExprs(
   // Get rid of dead code so that we don't waste effort fusing it.
   EliminateDeadCode(graph);
 
-  TensorExprFuser fuser(graph, min_group_size, disable_shape_checks);
+  TensorExprFuser fuser(graph, min_group_size, add_composed_op);
   fuser.run();
 
   EliminateCommonSubexpression(graph);
@@ -1246,42 +1247,58 @@ Operation createTensorExprOp(const Node* node) {
   }
 
   // Handle the case when dynamic shape fusion is enabled.
-  //
-  // This case is different because the TensorExprGroup node is not part of
-  // the main graph, but it is part of the composed op TensorExprDynamicGroup.
-  // So, every run of the TensorExprDynamicGroup op will end up calling this
-  // function, but that still does not require creating a new TensorExprKernel
-  // for every such call. So, we maintain a cache from the node to the kernels
-  // created.
-  //
-  // TODO: Can we get rid of the cache here and still ensure that we compile
-  // the kernel only once for every op?
-  return [=](Stack& stack) {
-    // A cache from the node to the corresponding kernel.
-    static std::unordered_map<
-        std::string,
-        std::shared_ptr<tensorexpr::TensorExprKernel>>
-        cached_kernels;
-    std::ostringstream node_ss;
-    node->print(node_ss, 0, nullptr);
-    auto node_str = node_ss.str();
-    auto subgraph = node->g(attr::Subgraph);
-    auto it = cached_kernels.find(node_str);
-    std::shared_ptr<tensorexpr::TensorExprKernel> kernel;
-    if (it != cached_kernels.end()) {
-      kernel = it->second;
-    } else {
-      VLOG(1) << "Compiling a new kernel for " << *node;
-      std::vector<int64_t> sym_shapes;
-      if (node->hasAttribute(attr::symbolic_shape_inputs)) {
-        sym_shapes = node->is(attr::symbolic_shape_inputs);
-      }
-      std::unordered_map<c10::Symbol, tensorexpr::NNCLoweringFunction>
-          custom_lowerings;
-      kernel = std::make_shared<tensorexpr::TensorExprKernel>(
-          subgraph, custom_lowerings, sym_shapes);
-      cached_kernels[node_str] = kernel;
+  VLOG(1) << "Compiling a new kernel for " << *node;
+  std::vector<int64_t> sym_shapes;
+  if (node->hasAttribute(attr::symbolic_shape_inputs)) {
+    sym_shapes = node->is(attr::symbolic_shape_inputs);
+  }
+  bool allow_stack_outputs = false;
+  if (node->hasAttribute(attr::allow_stack_outputs)) {
+    allow_stack_outputs = node->i(attr::allow_stack_outputs) == 1;
+  }
+
+  std::unordered_map<c10::Symbol, tensorexpr::NNCLoweringFunction>
+      custom_lowerings;
+  auto subgraph = node->g(attr::Subgraph);
+  IValue sym_strides = node->ival(attr::striding_inputs_desc);
+
+  // Striding Descriptor is serialized on the node as a vector of vector of
+  // strings, translate back to StrideInput enum
+  std::vector<std::vector<std::string>> sym_strides_strs =
+      sym_strides.to<std::vector<std::vector<std::string>>>();
+  std::vector<std::vector<StrideInput>> striding_inputs;
+  for (const auto& vec : sym_strides_strs) {
+    std::vector<StrideInput> input_desc;
+    input_desc.reserve(vec.size());
+    for (const std::string& str : vec) {
+      input_desc.push_back(strideInputFromString(str));
     }
+    striding_inputs.push_back(input_desc);
+  }
+  std::unordered_map<const Value*, std::vector<StrideInput>> stride_map;
+  size_t index = 0;
+  for (Value* v : subgraph->inputs()) {
+    if (!v->type()->cast<TensorType>()) {
+      continue;
+    }
+    stride_map[v] = striding_inputs[index];
+    index++;
+  }
+  std::vector<std::string> output_desc = node->ival(attr::striding_outputs_desc).to<std::vector<std::string>>();
+  for (size_t i = 0; i < subgraph->outputs().size(); ++i) {
+    stride_map[subgraph->outputs().at(i)] = {strideInputFromString(output_desc.at(i))};
+  }
+
+  std::shared_ptr<tensorexpr::TensorExprKernel> kernel =
+      std::make_shared<tensorexpr::TensorExprKernel>(
+          subgraph,
+          custom_lowerings,
+          sym_shapes,
+          /*pre_alloc*/ false,
+          stride_map);
+
+  auto num_subgraph_inputs = subgraph->inputs().size();
+  return [kernel, num_subgraph_inputs, allow_stack_outputs](Stack& stack) {
     RECORD_FUNCTION(kernel->getKernelName(), std::vector<c10::IValue>());
 
     // Stack contents:
@@ -1291,8 +1308,7 @@ Operation createTensorExprOp(const Node* node) {
     // outputs are being passed in. Otherwise, output tensors are passed in
     // at the bottom of the stack. So, we call the appropriate run function
     // in TensorExprKernel.
-    auto num_subgraph_inputs = subgraph->inputs().size();
-    if (num_subgraph_inputs == stack.size()) {
+    if (num_subgraph_inputs == stack.size() || !allow_stack_outputs) {
       kernel->run(stack);
     } else {
       kernel->runWithAllocatedOutputs(stack);

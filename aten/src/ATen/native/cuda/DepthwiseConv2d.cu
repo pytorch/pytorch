@@ -3,6 +3,7 @@
 #include <ATen/div_rtn.h>
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/detail/KernelUtils.h>
+#include <ATen/native/ConvUtils.h>
 #include <ATen/native/cuda/block_reduce.cuh>
 #include <ATen/native/Resize.h>
 #include <ATen/native/IndexingUtils.h>
@@ -621,6 +622,8 @@ std::tuple<Tensor, Tensor> conv_depthwise2d_backward_cuda(
       grad_input,
       grad_weight);
 }
+
+REGISTER_CUDA_DISPATCH(conv_depthwise2d_backward_stub, &conv_depthwise2d_backward_cuda);
 
 } // namespace native
 } // namespace at
