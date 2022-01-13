@@ -11236,6 +11236,8 @@ op_db: List[OpInfo] = [
            skips=(
                # Pre-existing condition; Needs to be fixed
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
+               # RuntimeError: attribute lookup is not defined on function
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
            ),
            sample_inputs_func=sample_inputs_max_pool),
     OpInfo('nn.functional.max_pool2d',
@@ -11251,6 +11253,10 @@ op_db: List[OpInfo] = [
            assert_jit_shape_analysis=True,
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           skips=(
+               # RuntimeError: attribute lookup is not defined on function
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+           ),
            sample_inputs_func=sample_inputs_max_pool),
     OpInfo('nn.functional.max_pool3d',
            aten_name='max_pool3d',
@@ -11266,6 +11272,10 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            # TODO: investigate nondeterminism
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           skips=(
+               # RuntimeError: attribute lookup is not defined on function
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+           ),
            sample_inputs_func=sample_inputs_max_pool),
     OpInfo('nn.functional.linear',
            aten_name='linear',
