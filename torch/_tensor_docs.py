@@ -2976,7 +2976,7 @@ In-place version of :meth:`~Tensor.deg2rad`
 
 add_docstr_all('ravel',
                r"""
-ravel(input) -> Tensor
+ravel() -> Tensor
 
 see :func:`torch.ravel`
 """)
@@ -4177,28 +4177,28 @@ See :func:`torch.triangular_solve`
 
 add_docstr_all('tril',
                r"""
-tril(k=0) -> Tensor
+tril(diagonal=0) -> Tensor
 
 See :func:`torch.tril`
 """)
 
 add_docstr_all('tril_',
                r"""
-tril_(k=0) -> Tensor
+tril_(diagonal=0) -> Tensor
 
 In-place version of :meth:`~Tensor.tril`
 """)
 
 add_docstr_all('triu',
                r"""
-triu(k=0) -> Tensor
+triu(diagonal=0) -> Tensor
 
 See :func:`torch.triu`
 """)
 
 add_docstr_all('triu_',
                r"""
-triu_(k=0) -> Tensor
+triu_(diagonal=0) -> Tensor
 
 In-place version of :meth:`~Tensor.triu`
 """)
