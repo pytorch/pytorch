@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/device_type_analysis.h>
+#include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/library.h>
 #include <memory>
 #include <utility>
@@ -147,30 +148,23 @@ bool defaultDeviceProp(Node* n) {
   return propWithNoDevice(n);
 }
 
-struct DeviceTypePropagationPass {
+struct DeviceTypePropagationPass : public PropertyPropBase {
   explicit DeviceTypePropagationPass(std::shared_ptr<Graph> graph)
-      : graph_(std::move(graph)) {
+      : PropertyPropBase(graph) {
   }
 
   // returns true if at least one node has its scalar type set on a tensor node
   bool run() {
-    processBlock(graph_->block());
+    propagateBlock(graph_->block(), false);
     return changed_;
   }
 
  private:
-  void processBlock(Block* block) {
-    GRAPH_DEBUG("processBlock");
-    for (auto it = block->nodes().begin(); it != block->nodes().end(); it++) {
-      processNode(*it);
-    }
-  }
-
-  void processNode(Node* n) {
+  void propagateNode(Node* n, bool _ = false) override {
     GRAPH_DEBUG("processNode");
     switch (n->kind()) {
       case prim::If:
-        // return processIf(n);
+        return processIf(n);
       case prim::Loop:
       case prim::CallMethod:
       case prim::CallFunction:
@@ -215,8 +209,6 @@ struct DeviceTypePropagationPass {
     changed_ |= defaultDeviceProp(n);
   }
 
-
-  std::shared_ptr<Graph> graph_;
   bool changed_ = false;
 };
 
