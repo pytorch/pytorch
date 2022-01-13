@@ -1,6 +1,7 @@
 import collections
 import copy
 import math
+import tempfile
 import unittest
 
 import torch
@@ -1135,6 +1136,79 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         self.assertTrue(isinstance(mq[2][0], nn.Conv2d))
         self.assertTrue(isinstance(mq[2][1], nnq.Conv2d))
 
+    def _test_serialization(self, model, input_shape):
+        example_inputs = (torch.randn(*input_shape),)
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        m = model().eval()
+        m = _quantize_dbr.prepare(m, qconfig_dict, example_inputs)
+        # calibrate, to populate statistics
+        m(example_inputs[0])
+        m = _quantize_dbr.convert(m)
+
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        m2 = model().eval()
+        m2 = _quantize_dbr.prepare(m2, qconfig_dict, example_inputs)
+        # do not calibrate, to ensure important statistics are populated without calibration and
+        # the results are different at every node, including the quantize_per_tensor node
+        m2 = _quantize_dbr.convert(m2)
+
+        # Results should be different without loading from serialized state_dict
+        expected = m(example_inputs[0])
+        actual = m2(example_inputs[0])
+        self.assertFalse(_allclose(expected, actual))
+
+        # Results should be the same after loading from serialized state_dict
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            torch.save(m.state_dict(), f)
+            with open(f.name, 'rb') as f2:
+                loaded_state_dict = torch.load(f2)
+                m2.load_state_dict(loaded_state_dict)
+        expected = m(example_inputs[0])
+        actual = m2(example_inputs[0])
+        self.assertTrue(_allclose(expected, actual))
+
+    def test_serialization(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+                self.linear = torch.nn.Linear(1, 1)
+
+            def forward(self, x):
+                x1 = self.conv(x)
+                x2 = self.linear(x1)
+                return x2
+
+        input_shape = (1, 1, 1, 1)
+        self._test_serialization(M, input_shape)
+
+    def test_serialization_functional(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                # conv
+                self.weight2d = torch.nn.Parameter(torch.randn(1, 1, 1, 1))
+                self.bias2d = torch.nn.Parameter(torch.randn(1))
+                self.stride2d = (1, 1)
+                self.padding2d = (0, 0)
+                self.dilation2d = (1, 1)
+                self.groups = 1
+                # linear
+                self.w1 = nn.Parameter(torch.empty(1, 1))
+                self.b1 = nn.Parameter(torch.ones(1))
+                torch.nn.init.kaiming_uniform_(self.w1, a=math.sqrt(5))
+
+            def forward(self, x):
+                updated_weight = self.weight2d * x
+                x = F.conv2d(
+                    x, updated_weight, self.bias2d, self.stride2d, self.padding2d,
+                    self.dilation2d, self.groups)
+                # TODO: Investigate why serialization does not work with functional linear
+                # x = F.linear(x, self.w1, self.b1)
+                return x
+
+        input_shape = (1, 1, 1, 1)
+        self._test_serialization(M, input_shape)
 
 @skipIfNoFBGEMM
 class TestQuantizeDBRMultipleOps(QuantizeDBRTestCase):
