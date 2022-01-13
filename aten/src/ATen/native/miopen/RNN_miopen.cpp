@@ -14,7 +14,9 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/cat.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/miopen_rnn.h>
 #include <ATen/ops/miopen_rnn_native.h>
 #include <ATen/ops/miopen_rnn_backward_native.h>
 #include <ATen/ops/zeros.h>
