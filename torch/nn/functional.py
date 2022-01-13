@@ -648,10 +648,11 @@ def max_pool1d_with_indices(
     # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
     # and https://github.com/pytorch/pytorch/issues/62545 for context
     if ceil_mode != return_indices:
-        if (max_pool1d_with_indices.count == 0):
+        # Only raise the warning if it isn't raised already in a single run
+        if (max_pool1d_with_indices.warning_count == 0):
             warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
                           " to match the args list in nn.MaxPool1d in a future release.", DeprecationWarning)
-        max_pool1d_with_indices.count += 1
+        max_pool1d_with_indices.warning_count += 1
 
     if has_torch_function_unary(input):
         return handle_torch_function(
@@ -681,10 +682,11 @@ def _max_pool1d(
     # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
     # and https://github.com/pytorch/pytorch/issues/62545 for context
     if ceil_mode != return_indices:
-        if _max_pool1d.count == 0:
+        # Only raise the warning if it isn't raised already in a single run
+        if _max_pool1d.warning_count == 0:
             warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
                           " to match the args list in nn.MaxPool1d in a future release.", DeprecationWarning)
-        _max_pool1d.count += 1
+        _max_pool1d.warning_count += 1
 
     if has_torch_function_unary(input):
         return handle_torch_function(
@@ -703,8 +705,9 @@ def _max_pool1d(
     return torch.max_pool1d(input, kernel_size, stride, padding, dilation, ceil_mode)
 
 
-max_pool1d_with_indices.count = 0
-_max_pool1d.count = 0
+# Used to limit number of warnings in CI to only one
+max_pool1d_with_indices.warning_count = 0
+_max_pool1d.warning_count = 0
 max_pool1d = boolean_dispatch(
     arg_name="return_indices",
     arg_index=6,
@@ -752,10 +755,11 @@ def max_pool2d_with_indices(
     # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
     # and https://github.com/pytorch/pytorch/issues/62545 for context
     if ceil_mode != return_indices:
-        if max_pool2d_with_indices.count == 0:
+        # Only raise the warning if it isn't raised already in a single run
+        if max_pool2d_with_indices.warning_count == 0:
             warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
                           " to match the args list in nn.MaxPool2d in a future release.", DeprecationWarning)
-        max_pool2d_with_indices.count += 1
+        max_pool2d_with_indices.warning_count += 1
 
     if has_torch_function_unary(input):
         return handle_torch_function(
@@ -785,10 +789,11 @@ def _max_pool2d(
     # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
     # and https://github.com/pytorch/pytorch/issues/62545 for context
     if ceil_mode != return_indices:
-        if (_max_pool2d.count == 0):
+        # Only raise the warning if it isn't raised already in a single run
+        if (_max_pool2d.warning_count == 0):
             warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
                           " to match the args list in nn.MaxPool2d in a future release.", DeprecationWarning)
-        _max_pool2d.count += 1
+        _max_pool2d.warning_count += 1
 
     if has_torch_function_unary(input):
         return handle_torch_function(
@@ -807,8 +812,9 @@ def _max_pool2d(
     return torch.max_pool2d(input, kernel_size, stride, padding, dilation, ceil_mode)
 
 
-max_pool2d_with_indices.count = 0
-_max_pool2d.count = 0
+# Used to limit number of warnings in CI to only one
+max_pool2d_with_indices.warning_count = 0
+_max_pool2d.warning_count = 0
 max_pool2d = boolean_dispatch(
     arg_name="return_indices",
     arg_index=6,
@@ -856,10 +862,11 @@ def max_pool3d_with_indices(
     # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
     # and https://github.com/pytorch/pytorch/issues/62545 for context
     if ceil_mode != return_indices:
-        if max_pool3d_with_indices.count == 0:
+        # Only raise the warning if it isn't raised already in a single run
+        if max_pool3d_with_indices.warning_count == 0:
             warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
                           " to match the args list in nn.MaxPool3d in a future release.", DeprecationWarning)
-        max_pool3d_with_indices.count += 1
+        max_pool3d_with_indices.warning_count += 1
 
     if has_torch_function_unary(input):
         return handle_torch_function(
@@ -889,10 +896,11 @@ def _max_pool3d(
     # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
     # and https://github.com/pytorch/pytorch/issues/62545 for context
     if ceil_mode != return_indices:
-        if _max_pool3d.count == 0:
+        # Only raise the warning if it isn't raised already in a single run
+        if _max_pool3d.warning_count == 0:
             warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
                           " to match the args list in nn.MaxPool3d in a future release.", DeprecationWarning)
-        _max_pool3d.count += 1
+        _max_pool3d.warning_count += 1
 
     if has_torch_function_unary(input):
         return handle_torch_function(
@@ -911,8 +919,9 @@ def _max_pool3d(
     return torch.max_pool3d(input, kernel_size, stride, padding, dilation, ceil_mode)
 
 
-max_pool3d_with_indices.count = 0
-_max_pool3d.count = 0
+# Used to limit number of warnings in CI to only one
+max_pool3d_with_indices.warning_count = 0
+_max_pool3d.warning_count = 0
 max_pool3d = boolean_dispatch(
     arg_name="return_indices",
     arg_index=6,
