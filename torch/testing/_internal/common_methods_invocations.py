@@ -1179,11 +1179,11 @@ def sample_inputs_unary(op_info, device, dtype, requires_grad, **kwargs):
     low, high = op_info.domain
     low = low if low is None else low + op_info._domain_eps
     high = high if high is None else high - op_info._domain_eps
-    shapes = ((50, 50),) if op_info.supports_sparse_csr else ((500,), ())
+    shapes = ((L, L),) if op_info.supports_sparse_csr else ((L,), ())
     for shape in shapes:
         t = make_tensor(shape, device=device, dtype=dtype,
-                                      low=low, high=high,
-                                      requires_grad=requires_grad)
+                        low=low, high=high,
+                        requires_grad=requires_grad)
         yield SampleInput(t)
 
 # Metadata class for unary "universal functions (ufuncs)" that accept a single
