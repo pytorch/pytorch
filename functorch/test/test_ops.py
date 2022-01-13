@@ -7,8 +7,10 @@
 from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors
 import torch
 from torch import Tensor
+import torch.nn.functional as F
 import functools
 import unittest
+import itertools
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_device_type import ops
 from torch.testing._internal.common_dtype import integral_types
@@ -21,6 +23,7 @@ from common_utils import (
     skip,
     skipOps,
     check_vmap_fallback,
+    loop,
     IS_FBCODE,
 )
 from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
@@ -1166,6 +1169,29 @@ class TestDecompositionOpInfo(TestCase):
         with open('op_analysis/run_decompositions.txt', 'w') as f:
             for op in get_names(run_decompositions):
                 f.write(f'{op}\n')
+
+    def test_group_norm_backward(self, device):
+        # group norm will hit the decomposable ``infinitely_differentiable_group_norm_backward`` when
+        # GradMode is on, which happens by default in the grad transform. This avoids that
+        def f(x, weight, bias, grad_out):
+            output = F.group_norm(x, 6, weight, bias)
+            inputs = []
+            for input in (x, weight, bias):
+                if input.requires_grad:
+                    inputs.append(input)
+            return torch.autograd.grad(outputs=output, inputs=inputs, grad_outputs=grad_out)
+
+        B, N, C, H, W = 2, 3, 24, 5, 7
+        for (input_grad, weight_grad, bias_grad) in itertools.product((True, False), (True, False), (True, False)):
+            if not input_grad and not weight_grad and not bias_grad:
+                continue
+            x = torch.randn(N, C, H, W, device=device, requires_grad=input_grad)
+            weight = torch.randn(C, device=device, requires_grad=weight_grad)
+            bias = torch.randn(C, device=device, requires_grad=bias_grad)
+            grad_out = torch.randn(B, N, C, H, W, device=device)
+            loop_out = loop(f, (None, None, None, 0), 0, 2, x, weight, bias, grad_out)
+            batched_out = vmap(f, (None, None, None, 0), 0)(x, weight, bias, grad_out)
+            self.assertEqual(loop_out, batched_out)
 
 
 only_for = ("cpu", "cuda")
