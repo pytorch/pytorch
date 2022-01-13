@@ -9,8 +9,44 @@ import lazy_tensor_core.core.lazy_model as ltm
 
 lazy_tensor_core._LAZYC._ltc_init_ts_backend()
 
+class M(torch.nn.Module):
+    def __init__(self):
+        super(M, self).__init__()
+        self.bias = torch.nn.Parameter(torch.rand(2, 2, requires_grad=True))
+
+    def forward(self, input):
+        return input * self.bias
+
+class Optimizer:
+    def __init__(self, parameters):
+        params = list(parameters)
+        assert len(params) == 1
+        self.param = params[0]
+
+    def step(self):
+        diff = torch.ops.lazy_cuda.optim(self.param, self.param.grad)
+        # TODO: figure out if there's a way to specify schema for custom ops
+        # so we can fold the update into optim
+        # update
+        self.param.data.sub_(diff)
+
+    def zero_grad(self):
+        if self.param.grad:
+            self.param.grad.zero_()
 
 dev = 'lazy'
-x = torch.rand(2, 2, device=dev)
-x_relu = torch.ops.lazy_cuda.lazy_custom_relu(x)
-print (x_relu.cpu())
+x = torch.rand(2, 2, device=dev, requires_grad=True)
+
+model = M().to(device = dev)
+model.train()
+print(model.bias.requires_grad)
+print(x.requires_grad)
+optimizer = Optimizer(model.parameters())
+niter = 1
+for _ in range(niter):
+    optimizer.zero_grad()
+    pred = model(x)
+    y = torch.rand_like(pred).to(device = dev)
+    (y - pred).sum().backward()
+    optimizer.step()
+    ltm.mark_step()
