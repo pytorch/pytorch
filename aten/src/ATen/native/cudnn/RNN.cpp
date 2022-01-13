@@ -5,7 +5,6 @@
 #include <ATen/cuda/CUDAEvent.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <ATen/cuda/Exceptions.h>
-#include <ATen/InitialTensorOptions.h>
 #include <ATen/MatrixRef.h>
 #include <ATen/native/RNN.h>
 #include <ATen/TensorUtils.h>
