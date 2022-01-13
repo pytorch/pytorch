@@ -2292,7 +2292,10 @@ class TestNN(NNTestCase):
         sample = next(model.parameters())[0, 0, 0]
         self.assertTrue(torch.equal(sample.data, vec.data[:5]))
 
+    # FIXME: Rewrite this test using functions not depending on LAPACK
+    #        and remove the `@skipIfNoLapack` (see #70995)
     # torch/nn/utils/parametrize
+    @skipIfNoLapack
     def test_register_and_remove_parametrization(self):
         r"""Test that it is possible to add a few parametrizations
         on a parameter or a buffer and that removing them restores the initial state
@@ -2592,6 +2595,9 @@ class TestNN(NNTestCase):
         self.assertTrue((model.bias[1:-1] == torch.ones(6)).all())
         self.assertEqual(len(list(model.parameters())), 1)
 
+    # FIXME: Rewrite this test using functions not depending on LAPACK
+    #        and remove the `@skipIfNoLapack` (see #70995)
+    @skipIfNoLapack
     def test_serialization_parametrization(self):
         r"""Test that it is possible to serialize a parametrized model via state_dict"""
         # A stateful parametrization
@@ -2637,6 +2643,9 @@ class TestNN(NNTestCase):
             with TemporaryFileName() as fname:
                 torch.save(model, fname)
 
+    # FIXME: Rewrite this test using functions not depending on LAPACK
+    #        and remove the `@skipIfNoLapack` (see #70995)
+    @skipIfNoLapack
     def test_initialization_parametrization(self):
         r"""Test that it is possible to initialize a parametrization when it
             implements a `right_inverse` method
@@ -2926,6 +2935,9 @@ class TestNN(NNTestCase):
         self.assertEqual(len(module.parametrizations.weight), 1)
         self.assertTrue(isinstance(module.parametrizations.weight[0], Identity))
 
+    # FIXME: Rewrite this test using functions not depending on LAPACK
+    #        and remove the `@skipIfNoLapack` (see #70995)
+    @skipIfNoLapack
     def test_multiple_inputs_parametrization(self):
         # A parametrization with several outputs
         class RankOne(nn.Module):
@@ -3020,6 +3032,9 @@ class TestNN(NNTestCase):
             loss.backward()
             sgd.step()
 
+    # FIXME: Rewrite this test using functions not depending on LAPACK
+    #        and remove the `@skipIfNoLapack` (see #70995)
+    @skipIfNoLapack
     def test_caching_parametrization(self):
         r"""Test the caching system of a parametrization"""
         # Define a couple matrix parametrizations
@@ -4686,6 +4701,7 @@ class TestNN(NNTestCase):
         m = pickle.loads(pickle.dumps(m))
         self.assertIsInstance(m, nn.Linear)
 
+    @skipIfNoLapack
     def test_orthogonal_parametrization(self):
         # Orthogonal implements 6 algorithms (3x parametrizations times 2 options of use_trivialization)
 
@@ -4805,6 +4821,7 @@ class TestNN(NNTestCase):
                     opt.step()
                     assert_is_orthogonal(m.weight)
 
+    @skipIfNoLapack
     def test_orthogonal_errors(self):
         m = nn.Linear(3, 4)
         with self.assertRaisesRegex(ValueError, "has to be one of"):
@@ -15012,6 +15029,32 @@ class TestNNDeviceType(NNTestCase):
         helper(4, 8, 7, 7, 3, stride=1)
         helper(10, 512, 31, 31, 3, stride=2)
         helper(1, 129, 8, 8, 3, stride=2)
+
+    @onlyCPU
+    def test_max_pool2d_bfloat16(self, device):
+        def helper(n, c, h, w, kernel_size, stride, memory_format):
+            input = torch.randn(n, c, h, w, dtype=torch.float32, device=device).bfloat16()
+            input = input.to(memory_format=memory_format).requires_grad_()
+            pool = torch.nn.MaxPool2d(kernel_size, stride, return_indices=True).to(device)
+
+            input2 = input.detach().clone().float().requires_grad_(True)
+
+            out, ind = pool(input)
+            out.sum().backward()
+            out2, ind2 = pool(input2)
+            out2.sum().backward()
+
+            self.assertTrue(out.is_contiguous(memory_format=memory_format))
+            self.assertEqual(out.dtype, torch.bfloat16)
+            self.assertEqual(input.grad.dtype, torch.bfloat16)
+            self.assertEqual(out, out2.bfloat16())
+            self.assertEqual(ind, ind2)
+            self.assertEqual(input.grad, input2.grad.bfloat16())
+
+        helper(4, 30, 8, 8, 7, 1, torch.contiguous_format)
+        helper(4, 65, 8, 8, 7, 1, torch.channels_last)
+        helper(1, 19, 20, 10, 8, 2, torch.contiguous_format)
+        helper(1, 19, 20, 10, 8, 2, torch.channels_last)
 
     @onlyCUDA
     def test_max_pool2d_indices(self, device):
