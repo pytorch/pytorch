@@ -8,6 +8,7 @@ from torch.fx.experimental.fx2trt.passes.fuse_pass import (
     fuse_permute_matmul,
     trt_transposed_matmul,
 )
+from torch.testing._internal.common_utils import run_tests
 
 
 def permute021(x):
@@ -57,3 +58,6 @@ class TestMultiFuse(AccTestCase):
             {acc_ops.permute},
             apply_passes=[fuse_permute_matmul, fuse_permute_linear],
         )
+
+if __name__ == '__main__':
+    run_tests()
