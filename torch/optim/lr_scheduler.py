@@ -495,7 +495,7 @@ class LinearLR(_LRScheduler):
     lr :math:`\eta_0` as lr.
 
     .. math::
-        \eta_t = \eta_0 \left(K_\text{start} + \frac{T_\text{curr}(K_\text{end} - 
+        \eta_t = \eta_0 \left(K_\text{start} + \frac{T_\text{curr}(K_\text{end} -
         K_\text{start})}{T_\text{max}} \right)
 
     Args:
