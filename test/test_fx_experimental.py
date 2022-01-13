@@ -852,6 +852,28 @@ terrible spacing
         module_with_submodules = split_module(traced, m, lambda node: 0)
         module_with_submodules(a)
 
+    def test_split_module_default_arg(self):
+        class ModelToTrace(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = torch.nn.Linear(512, 512)
+
+            def forward(self, x, targets=None):
+                x = self.lin(x)
+
+                if targets is not None:
+                    x = x + targets
+
+                return x
+
+        mtt = ModelToTrace()
+        traced = torch.fx.symbolic_trace(mtt, concrete_args={'targets': None})
+
+        split = split_module(traced, mtt, lambda node: 0)
+
+        x = torch.randn(50, 512)
+        torch.testing.assert_allclose(split(x), traced(x))
+
     def test_normalize_binary_operators(self):
         ops_to_test = {
             torch.add,
