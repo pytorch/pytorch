@@ -7,16 +7,8 @@
 #include <c10/util/string_view.h>
 #include <torch/csrc/jit/frontend/parser_constants.h>
 #include <torch/csrc/jit/mobile/runtime_compatibility.h>
-#include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/custom_class.h>
 
-namespace torch {
-namespace jit {
-const std::unordered_map<std::string, c10::TypePtr>& string_to_type_lut();
-} // namespace jit
-} // namespace torch
-
-using torch::jit::string_to_type_lut;
 using torch::jit::valid_single_char_tokens;
 
 namespace c10 {
@@ -82,7 +74,7 @@ std::vector<TypePtr> TypeParser::parseList() {
 // The list of non-simple types supported by current parser.
 const std::unordered_set<std::string>& TypeParser::getNonSimpleType() {
   static std::unordered_set<std::string> nonSimpleTypes{
-      "List", "Optional", "Future", "Dict", "Tuple"};
+      "List", "Optional", "Dict", "Tuple"};
   return nonSimpleTypes;
 }
 
@@ -101,13 +93,19 @@ std::unordered_set<std::string> TypeParser::getContainedTypes() {
   return contained_types_;
 }
 
+template <typename T>
+TypePtr TypeParser::parseSingleElementType() {
+  expectChar('[');
+  auto result = DynamicTypeFactory::create<T>(parse());
+  expectChar(']');
+  return result;
+}
+
 TypePtr TypeParser::parseNonSimple(const std::string& token) {
   if (token == "List") {
-    return CreateSingleElementType<ListType>();
+    return parseSingleElementType<ListType>();
   } else if (token == "Optional") {
-    return parseSingleElementType(DynamicType::Tag::Optional);
-  } else if (token == "Future") {
-    return CreateSingleElementType<FutureType>();
+    return parseSingleElementType<OptionalType>();
   } else if (token == "Dict") {
     expectChar('[');
     auto key = parse();
@@ -132,8 +130,9 @@ TypePtr TypeParser::parseNonSimple(const std::string& token) {
 
 TypePtr TypeParser::parse() {
   std::string token = next();
-  auto simpleTypeIt = string_to_type_lut().find(token);
-  if (simpleTypeIt != string_to_type_lut().end()) {
+  const auto& baseTypes = DynamicTypeFactory::basePythonTypes();
+  auto simpleTypeIt = baseTypes.find(token);
+  if (simpleTypeIt != baseTypes.end()) {
     if (cur() != "]" && cur() != "," && cur() != "") {
       TORCH_CHECK(
           false, "Simple type ", token, " is followed by ", "invalid chars.");
@@ -296,22 +295,6 @@ void TypeParser::expectChar(char c) {
   advance();
 }
 
-template <class T>
-TypePtr TypeParser::CreateSingleElementType() {
-  expectChar('[');
-  auto result = T::create(parse());
-  expectChar(']');
-  return result;
-}
-
-TypePtr TypeParser::parseSingleElementType(DynamicType::Tag tag) {
-  expectChar('[');
-  auto result =
-      std::make_shared<DynamicType>(tag, DynamicType::Arguments(parse()));
-  expectChar(']');
-  return result;
-}
-
 void TypeParser::lex() {
   // skip white spaces
   while (start_ < pythonStr_.size() && pythonStr_[start_] == ' ')
@@ -365,4 +348,5 @@ TORCH_API std::vector<at::TypePtr> parseType(
   at::TypeParser parser(pythonStrs);
   return parser.parseList();
 }
+
 } // namespace c10

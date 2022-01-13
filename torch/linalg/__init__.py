@@ -442,16 +442,19 @@ the output has the same batch dimensions.
              eigenvalues are different). If it is not diagonalizable, the returned
              eigenvalues will be correct but :math:`A \neq V \operatorname{diag}(\Lambda)V^{-1}`.
 
-.. warning:: The eigenvectors of a matrix are not unique, nor are they continuous with respect to
+.. warning:: The returned eigenvectors are normalized to have norm `1`.
+             Even then, the eigenvectors of a matrix are not unique, nor are they continuous with respect to
              :attr:`A`. Due to this lack of uniqueness, different hardware and software may compute
              different eigenvectors.
 
-             This non-uniqueness is caused by the fact that multiplying an eigenvector by a
-             non-zero number produces another set of valid eigenvectors of the matrix.
-             In this implmentation, the returned eigenvectors are normalized to have norm
-             `1` and largest real component.
+             This non-uniqueness is caused by the fact that multiplying an eigenvector by
+             by :math:`e^{i \phi}, \phi \in \mathbb{R}` produces another set of valid eigenvectors
+             of the matrix.  For this reason, the loss function shall not depend on the phase of the
+             eigenvectors, as this quantity is not well-defined.
+             This is checked when computing the gradients of this function.
 
-.. warning:: Gradients computed using `V` will only be finite when :attr:`A` does not have repeated eigenvalues.
+.. warning:: Gradients computed using the `eigenvectors` tensor will only be finite when
+             :attr:`A` has distinct eigenvalues.
              Furthermore, if the distance between any two eigenvalues is close to zero,
              the gradient will be numerically unstable, as it depends on the eigenvalues
              :math:`\lambda_i` through the computation of
@@ -600,13 +603,12 @@ The eigenvalues are returned in ascending order.
              This non-uniqueness is caused by the fact that multiplying an eigenvector by
              `-1` in the real case or by :math:`e^{i \phi}, \phi \in \mathbb{R}` in the complex
              case produces another set of valid eigenvectors of the matrix.
-             This non-uniqueness problem is even worse when the matrix has repeated eigenvalues.
-             In this case, one may multiply the associated eigenvectors spanning
-             the subspace by a rotation matrix and the resulting eigenvectors will be valid
-             eigenvectors.
+             For this reason, the loss function shall not depend on the phase of the eigenvectors, as
+             this quantity is not well-defined.
+             This is checked for complex inputs when computing the gradients of this function.
 
 .. warning:: Gradients computed using the `eigenvectors` tensor will only be finite when
-             :attr:`A` has unique eigenvalues.
+             :attr:`A` has distinct eigenvalues.
              Furthermore, if the distance between any two eigenvalues is close to zero,
              the gradient will be numerically unstable, as it depends on the eigenvalues
              :math:`\lambda_i` through the computation of
