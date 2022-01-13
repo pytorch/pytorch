@@ -1,18 +1,32 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
-#include <ATen/cuda/CUDAConfig.h>  // for the definition of AT_CUDNN_ENABLED
+#include <ATen/Context.h>
+#include <ATen/TensorGeometry.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/cuda/CUDAConfig.h>
 #include <ATen/native/ConvUtils.h>
 
 #if AT_CUDNN_ENABLED()
 
 #include <ATen/native/cudnn/ConvShared.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/empty_native.h>
+#include <ATen/ops/zeros_like.h>
+#include <ATen/ops/zeros_native.h>
+#endif
+
 // NOTE [cuDNN API version]
 //
 // ConvPlaceholders.cpp contains placeholder implementation of cudnn
 // convolution when cudnn is not enabled. These operators only raises
-// errors, and do no real computation. This file also contains deprecated
-// operators. These operators are implemented using currnet operators.
+// errors, and do no real computation. These operators are implemented
+// using currnet operators.
 //
 // cuDNN v7 and v8 have different API. ConvShared.{cpp, h} contains
 // code shared by v7 and v8. Conv_v7.cpp contains implementation of

@@ -17,12 +17,15 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_cudnn_rnn.h>
-#include <ATen/ops/_cudnn_rnn_backward.h>
-#include <ATen/ops/_cudnn_rnn_flatten_weight.h>
 #include <ATen/ops/_cudnn_init_dropout_state.h>
+#include <ATen/ops/_cudnn_init_dropout_state_native.h>
+#include <ATen/ops/_cudnn_rnn.h>
+#include <ATen/ops/_cudnn_rnn_backward_native.h>
+#include <ATen/ops/_cudnn_rnn_flatten_weight_native.h>
+#include <ATen/ops/_cudnn_rnn_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like.h>
 #endif
 
 #if !AT_CUDNN_ENABLED()
