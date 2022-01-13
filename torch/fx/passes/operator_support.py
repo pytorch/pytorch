@@ -171,7 +171,7 @@ class OpSupports:
             submodules: t.Mapping[str, torch.nn.Module],
             node: torch.fx.Node,
         ) -> bool:
-            for arg in node._input_nodes:
+            for arg in node.all_input_nodes:
                 # escape dtype check for get_attr node
                 if arg.op == "get_attr":
                     continue
