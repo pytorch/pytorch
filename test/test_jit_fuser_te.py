@@ -21,10 +21,10 @@ torch._C._jit_set_profiling_executor(True)
 torch._C._jit_set_profiling_mode(True)
 
 from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, \
-    enable_profiling_mode_for_profiling_tests, TestCase
+    enable_profiling_mode_for_profiling_tests
 from torch.testing._internal.jit_utils import JitTestCase, \
     RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, warmup_backward, set_fusion_group_inlining, \
-    clone_inputs, get_traced_sample_variant_pairs, is_lambda
+    clone_inputs, get_traced_sample_variant_pairs, TensorExprTestOptions
 
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_device_type import ops, onlyCPU, instantiate_device_type_tests, \
@@ -70,32 +70,6 @@ def inline_fusion_groups():
         yield
     finally:
         torch._C._debug_set_fusion_group_inlining(old_inlining)
-
-class TensorExprTestOptions():
-    def __init__(self):
-        self.old_profiling_executor = torch._C._jit_set_profiling_executor(True)
-        self.old_profiling_mode = torch._C._jit_set_profiling_mode(True)
-
-        self.old_cpu_fuser_state = torch._C._jit_can_fuse_on_cpu()
-        self.old_gpu_fuser_state = torch._C._jit_can_fuse_on_gpu()
-        torch._C._jit_override_can_fuse_on_cpu(True)
-        torch._C._jit_override_can_fuse_on_gpu(True)
-        self.texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()
-        torch._C._jit_set_texpr_fuser_enabled(True)
-        self.old_fusion_inlining = torch._C._debug_get_fusion_group_inlining()
-        torch._C._debug_set_fusion_group_inlining(False)
-        self.old_te_must_use_llvm_cpu = torch._C._jit_get_te_must_use_llvm_cpu()
-        torch._C._jit_set_te_must_use_llvm_cpu(False)
-
-    def restore(self):
-        torch._C._jit_set_profiling_executor(self.old_profiling_executor)
-        torch._C._jit_set_profiling_mode(self.old_profiling_mode)
-
-        torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
-        torch._C._jit_override_can_fuse_on_gpu(self.old_gpu_fuser_state)
-        torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuser_state)
-        torch._C._debug_set_fusion_group_inlining(self.old_fusion_inlining)
-        torch._C._jit_set_te_must_use_llvm_cpu(self.old_te_must_use_llvm_cpu)
 
 _tracing_ops = partial(ops, dtypes=OpDTypes.supported,
                        allowed_dtypes=(torch.float, torch.cfloat))

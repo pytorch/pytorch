@@ -22,8 +22,7 @@ from torch.testing._internal.common_device_type import \
 from torch.testing._internal.common_jit import JitCommonTestCase, check_against_reference
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, create_traced_fn, \
     check_alias_annotation
-from torch.testing._internal.jit_utils import disable_autodiff_subgraph_inlining, JitTestCase, \
-    is_lambda
+from torch.testing._internal.jit_utils import disable_autodiff_subgraph_inlining, is_lambda
 import torch.testing._internal.opinfo_helper as opinfo_helper
 from torch.testing._internal.composite_compliance import _check_composite_compliance
 
