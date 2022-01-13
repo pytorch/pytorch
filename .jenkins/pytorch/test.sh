@@ -298,21 +298,21 @@ test_xla() {
 # Because this function uninstalls the torch built from branch, and install
 # nightly version.
 test_backward_compatibility() {
-  set -x
-  pushd test/backward_compatibility
-  python -m venv venv
-  . venv/bin/activate
-  # check for torch 1.8.1
-  pip_install --pre torch==1.8.1 -f https://download.pytorch.org/whl/test/cpu/torch_test.html
-  pip show torch
-  python dump_all_function_schemas.py --filename nightly_schemas.txt
-  deactivate
-  rm -r venv
-  pip show torch
-  python check_backward_compatibility.py --existing-schemas nightly_schemas.txt
-  popd
-  set +x
-  assert_git_not_dirty
+  # set -x
+  # pushd test/backward_compatibility
+  # python -m venv venv
+  # . venv/bin/activate
+  # # check for torch 1.8.1
+  # pip_install --pre torch==1.8.1 -f https://download.pytorch.org/whl/test/cpu/torch_test.html
+  # pip show torch
+  # python dump_all_function_schemas.py --filename nightly_schemas.txt
+  # deactivate
+  # rm -r venv
+  # pip show torch
+  # python check_backward_compatibility.py --existing-schemas nightly_schemas.txt
+  # popd
+  # set +x
+  # assert_git_not_dirty
 }
 
 test_bazel() {
