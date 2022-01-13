@@ -48,8 +48,8 @@ jobs:
           # install magma
           conda install -y -c pytorch "${MAGMA_VERSION}"
           # install the most recent successful nightly build
-          python benchmark/torchbenchmark/utils/torch_nightly.py --dump-latest-build nightly.txt \
-                                                                 --packages torch torchvision torchtext
+          python benchmark/torchbenchmark/util/torch_nightly.py --dump-latest-wheels nightly.txt \
+                                                                --packages torch torchvision torchtext
           pip install -r nightly.txt
       - name: Setup TorchBench branch
         run: |
