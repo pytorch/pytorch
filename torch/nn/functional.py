@@ -706,6 +706,7 @@ def _max_pool1d(
 
 
 # Used to limit number of warnings in CI to only one
+# See: https://github.com/pytorch/pytorch/issues/71257 for more context
 max_pool1d_with_indices.warning_count = 0
 _max_pool1d.warning_count = 0
 max_pool1d = boolean_dispatch(
@@ -813,6 +814,7 @@ def _max_pool2d(
 
 
 # Used to limit number of warnings in CI to only one
+# See: https://github.com/pytorch/pytorch/issues/71257 for more context
 max_pool2d_with_indices.warning_count = 0
 _max_pool2d.warning_count = 0
 max_pool2d = boolean_dispatch(
@@ -920,6 +922,7 @@ def _max_pool3d(
 
 
 # Used to limit number of warnings in CI to only one
+# See: https://github.com/pytorch/pytorch/issues/71257 for more context
 max_pool3d_with_indices.warning_count = 0
 _max_pool3d.warning_count = 0
 max_pool3d = boolean_dispatch(
