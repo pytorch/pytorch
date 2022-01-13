@@ -4,13 +4,17 @@
 #if AT_CUDNN_ENABLED()
 
 #include <ATen/native/cudnn/Macros.h>
+#include <ATen/core/Tensor.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#endif
 
 #include <limits>
 #include <vector>
-#include <sstream>
-#include <functional>
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/Config.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <ATen/cuda/Exceptions.h>
