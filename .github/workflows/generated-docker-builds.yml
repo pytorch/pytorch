@@ -11,7 +11,7 @@ on:
       - '.circleci/docker/**'
       - '.github/workflows/generated-docker-builds.yml'
   schedule:
-    - cron: 1 * */7 * *
+    - cron: 1 * * * 3
 concurrency:
   group: docker-builds-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
