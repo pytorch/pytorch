@@ -30,6 +30,13 @@ jobs:
           git remote prune origin
           git fetch
           popd
+      - name: Checkout TorchBench
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          repository: pytorch/benchmark
+          path: benchmark
+          lfs: true
+          ref: ${{ env.TORCHBENCH_BRANCH }}
       - name: Create conda environment
         run: |
           conda create -y -n pr-ci python="${PYTHON_VERSION}"
@@ -37,10 +44,13 @@ jobs:
           . "${HOME}"/anaconda3/etc/profile.d/conda.sh
           conda activate pr-ci
           conda install -y numpy requests ninja pyyaml mkl mkl-include setuptools cmake cffi typing_extensions \
-                           future six dataclasses pillow pytest tabulate gitpython git-lfs
+                           future six dataclasses pillow pytest tabulate gitpython git-lfs beautifulsoup4
           # install magma
           conda install -y -c pytorch "${MAGMA_VERSION}"
-          conda install -y pytorch torchvision torchtext cudatoolkit="${CUDA_VERSION}" -c pytorch-nightly
+          # install the most recent successful nightly build
+          python benchmark/torchbenchmark/utils/torch_nightly.py --dump-latest-build nightly.txt \
+                                                                 --packages torch torchvision torchtext
+          pip install -f nightly.txt
       - name: Setup TorchBench branch
         run: |
           # shellcheck disable=SC1091
@@ -49,13 +59,6 @@ jobs:
           PR_BODY_FILE=/tmp/pr-body.txt
           echo "$PR_BODY" > ${PR_BODY_FILE}
           python pytorch/.github/scripts/run_torchbench.py --pr-body "${PR_BODY_FILE}" set-torchbench-branch
-      - name: Checkout TorchBench
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          repository: pytorch/benchmark
-          path: benchmark
-          lfs: true
-          ref: ${{ env.TORCHBENCH_BRANCH }}
       - name: Install TorchBench dependencies
         run: |
           # shellcheck disable=SC1091
