@@ -721,7 +721,7 @@ torch::Tensor lazy_custom_relu(torch::Tensor input, torch::Tensor grad) {
       );
   } else {
     //TODO: CUDA IMPLEMENTATION
-    return input.relu();
+    return grad * 0.01;
   }
 }
 
