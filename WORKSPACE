@@ -197,3 +197,8 @@ new_local_repository(
     build_file = "@//third_party:cudnn.BUILD",
     path = "/usr/",
 )
+
+local_repository(
+    name = "com_github_google_flatbuffers",
+    path = "third_party/flatbuffers",
+)
