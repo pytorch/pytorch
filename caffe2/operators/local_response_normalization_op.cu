@@ -55,7 +55,6 @@ __global__ void LRNFillScaleNCHW(const int nthreads, const T* in,
 
 template <typename T>
 __global__ void LRNFillScaleNHWC(const int nthreads, const T *const in,
-    const int height, const int width,
     const int channels, const int size, const T alpha_over_size,
     const T bias, T* scale) {
   CUDA_1D_KERNEL_LOOP(index, nthreads) {
@@ -155,8 +154,7 @@ __global__ void LRNComputeDiffNCHW(const int nthreads, const T* bottom_data,
 template <typename T>
 __global__ void LRNComputeDiffNHWC(const int nthreads, const T* bottom_data,
     const T* top_data, const T* scale, const T* top_diff,
-    const int height, const int width, const int channels,
-    const int size, const T negative_beta, const T cache_ratio,
+    const int channels, const int size, const T negative_beta, const T cache_ratio,
     T* bottom_diff) {
   CUDA_1D_KERNEL_LOOP(index, nthreads) {
     // find out the local channel offset
@@ -237,7 +235,7 @@ bool LRNOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   int n_threads = X.numel();
   LRNFillScaleNHWC<float><<<CAFFE_GET_BLOCKS(n_threads), CAFFE_CUDA_NUM_THREADS,
                         0, context_.cuda_stream()>>>(
-      n_threads, Xdata, H, W, C, size_, alpha_ / size_, bias_, scale_data);
+      n_threads, Xdata, C, size_, alpha_ / size_, bias_, scale_data);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   LRNComputeOutput<float><<<CAFFE_GET_BLOCKS(n_threads), CAFFE_CUDA_NUM_THREADS,
@@ -317,7 +315,7 @@ bool LRNGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   int n_threads = X.numel();
   LRNFillScaleNHWC<float><<<CAFFE_GET_BLOCKS(n_threads), CAFFE_CUDA_NUM_THREADS,
                         0, context_.cuda_stream()>>>(
-      n_threads, Xdata, H, W, C, size_, alpha_ / size_, bias_, scale_data);
+      n_threads, Xdata, C, size_, alpha_ / size_, bias_, scale_data);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   LRNComputeDiffNHWC<float>
@@ -330,8 +328,6 @@ bool LRNGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
           Y.data<float>(),
           scale_data,
           dY.data<float>(),
-          X.dim32(1),
-          X.dim32(2),
           X.dim32(3),
           size_,
           -beta_,
