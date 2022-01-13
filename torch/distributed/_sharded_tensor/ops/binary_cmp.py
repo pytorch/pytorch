@@ -2,8 +2,8 @@ import torch
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as distributed_c10d
 from torch.distributed._sharded_tensor import (
-    sharded_op_impl,
     ShardedTensor,
+    sharded_op_impl
 )
 
 def _communicate_result(result, pg):
@@ -19,16 +19,15 @@ def _communicate_result(result, pg):
 
     return torch.equal(result_tensor, expected_result)
 
-@sharded_op_impl(torch.equal)
-def equal(types, args=(), kwargs=None, process_group=None):
+def binary_cmp(cmp_fun, types, args, kwargs=None, process_group=None):
     if len(args) != 2:
-        raise ValueError('Expected two arguments for torch.equal')
+        raise ValueError(f'Expected two arguments for torch.{cmp_fun.__name__}')
 
     result = True
     st1 = args[0]
     st2 = args[1]
     if not(isinstance(st1, ShardedTensor) and isinstance(st2, ShardedTensor)):
-        raise TypeError('Both arguments to torch.equal need to be of type ShardedTensor')
+        raise TypeError(f'Both arguments to torch.{cmp_fun.__name__} need to be of type ShardedTensor')
 
     # Verify same PG
     if st1._process_group != st2._process_group:
@@ -47,12 +46,23 @@ def equal(types, args=(), kwargs=None, process_group=None):
     if len(st1_local_shards) != len(st2_local_shards):
         return _communicate_result(False, st1._process_group)
 
+    # kwargs must be dict-like
+    if kwargs is None:
+        kwargs = {}
     # Verify each local shard
     for idx in range(len(st1_local_shards)):
         if st1_local_shards[idx].metadata != st2_local_shards[idx].metadata:
             return _communicate_result(False, st1._process_group)
-        if not torch.equal(st1_local_shards[idx].tensor, st2_local_shards[idx].tensor):
+        if not cmp_fun(st1_local_shards[idx].tensor, st2_local_shards[idx].tensor, **kwargs):
             return _communicate_result(False, st1._process_group)
 
 
     return _communicate_result(True, st1._process_group)
+
+@sharded_op_impl(torch.equal)
+def equal(types, args, kwargs, process_group):
+    return binary_cmp(torch.equal, types, args, kwargs, process_group)
+
+@sharded_op_impl(torch.allclose)
+def allclose(types, args, kwargs, process_group):
+    return binary_cmp(torch.allclose, types, args, kwargs, process_group)
