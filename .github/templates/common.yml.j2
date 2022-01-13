@@ -103,7 +103,6 @@ concurrency:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
 {%- endmacro -%}
 
-<<<<<<< HEAD
 {%- macro setup_rocm_linux() -%}
       - name: Clean workspace
         run: |
