@@ -554,7 +554,7 @@ void ReplaceWithMaybeCopy(
     }
 
     auto* out = n->output();
-    if (!outputs_are_immutable && db.mayContainAlias({out}, graph->outputs())) {
+    if (!outputs_are_immutable && db.mayContainAlias(out, graph->outputs())) {
       continue;
     }
 
@@ -658,7 +658,7 @@ void ReplaceWithCopy(
     }
 
     auto* out = n->output();
-    if (!outputs_are_immutable && db.mayContainAlias({out}, graph->outputs())) {
+    if (!outputs_are_immutable && db.mayContainAlias(out, graph->outputs())) {
       continue;
     }
     auto* new_node = graph->create(new_symbol, n->outputs().size());
