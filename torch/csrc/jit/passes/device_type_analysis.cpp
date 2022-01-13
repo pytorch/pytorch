@@ -167,6 +167,7 @@ struct DeviceTypePropagationPass : public PropertyPropBase {
       case prim::If:
         return processIf(n);
       case prim::Loop:
+        return processLoop(n);
       case prim::CallMethod:
       case prim::CallFunction:
         return; // Not handled for now

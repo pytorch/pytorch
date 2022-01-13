@@ -23,6 +23,7 @@ class PropertyPropBase{
   // insert_expands is used for shape inference
 
   void processIf(Node* node);
+  void processLoop(Node* node);
 
   protected:
   virtual void propagateNode(Node* node, bool insert_expands = true) = 0;
