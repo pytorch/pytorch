@@ -16,7 +16,8 @@ import functools
 # Testing utils
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import IS_WINDOWS, \
-    freeze_rng_state, enable_profiling_mode_for_profiling_tests, ProfilingMode, TEST_BAILOUTS
+    freeze_rng_state, enable_profiling_mode_for_profiling_tests, ProfilingMode, TEST_BAILOUTS, \
+    is_iterable_of_tensors
 from torch.testing._internal.common_jit import JitCommonTestCase
 from torch.testing._internal.common_utils import enable_profiling_mode  # noqa: F401
 
@@ -763,28 +764,56 @@ def _get_py3_code(code, fn_name):
         fn = getattr(module, fn_name)
         return fn
 
-class TensorExprTestOptions():
-    def __init__(self):
-        self.old_profiling_executor = torch._C._jit_set_profiling_executor(True)
-        self.old_profiling_mode = torch._C._jit_set_profiling_mode(True)
+def clone_inputs(args):
+    inputs: List[Union[torch.Tensor, List[torch.Tensor]]] = []
 
-        self.old_cpu_fuser_state = torch._C._jit_can_fuse_on_cpu()
-        self.old_gpu_fuser_state = torch._C._jit_can_fuse_on_gpu()
-        torch._C._jit_override_can_fuse_on_cpu(True)
-        torch._C._jit_override_can_fuse_on_gpu(True)
-        self.texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()
-        torch._C._jit_set_texpr_fuser_enabled(True)
-        self.old_fusion_inlining = torch._C._debug_get_fusion_group_inlining()
-        torch._C._debug_set_fusion_group_inlining(False)
-        self.old_te_must_use_llvm_cpu = torch._C._jit_get_te_must_use_llvm_cpu()
-        torch._C._jit_set_te_must_use_llvm_cpu(False)
+    for arg in args:
+        if isinstance(arg, torch.Tensor):
+            inputs.append(arg.detach().clone())
+        elif is_iterable_of_tensors(arg):
+            inputs.append([t.detach().clone() for t in arg])
+        else:
+            inputs.append(arg)
 
-    def restore(self):
-        torch._C._jit_set_profiling_executor(self.old_profiling_executor)
-        torch._C._jit_set_profiling_mode(self.old_profiling_mode)
+    return inputs
 
-        torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
-        torch._C._jit_override_can_fuse_on_gpu(self.old_gpu_fuser_state)
-        torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuser_state)
-        torch._C._debug_set_fusion_group_inlining(self.old_fusion_inlining)
-        torch._C._jit_set_te_must_use_llvm_cpu(self.old_te_must_use_llvm_cpu)
+def get_traced_sample_variant_pairs(device, dtype, op):
+    # tuples of (variant, sample)
+    outputs: List[Tuple[Any, Any]] = []
+
+    samples = op.sample_inputs(device, dtype)
+
+    # Acquires variants to test
+    func = op.get_op()
+    method = op.get_method()
+    variants = {
+        # TODO: inplace tests currently fail, fix and add inplace variant
+        'function': func, 'method': method,
+    }
+
+    # TODO: find better way to standardize on op registration itself..
+    has_fake_function = op.name in ["resize_", 'resize_as_']
+
+    if has_fake_function:
+        variants = {'method': getattr(torch.Tensor, op.name)}
+
+    # doesn't support tracing
+    if has_fake_function:
+        return outputs
+
+    for sample in samples:
+        for func_type, variant in variants.items():
+            if variant is None:
+                continue
+
+            if is_lambda(variant):
+                continue
+
+            outputs.append((variant, sample))
+
+    return outputs
+
+# types.LambdaType gave false positives
+def is_lambda(lamb):
+    LAMBDA = lambda: 0  # noqa: E731
+    return isinstance(lamb, type(LAMBDA)) and lamb.__name__ == LAMBDA.__name__

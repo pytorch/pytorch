@@ -244,7 +244,6 @@ def clamp(*, input, min=None, max=None):
     return torch.clamp(**locals())
 
 
-@register_acc_op_properties(AccOpProperty.unary)
 @register_acc_op_mapping(op_and_target=("call_function", torch.cat))
 @register_acc_op
 def cat(*, tensors, dim):
@@ -681,7 +680,7 @@ def div_mapper(node: torch.fx.Node, mod: torch.fx.GraphModule) -> torch.fx.Node:
 
 
 @register_acc_op
-def div(input, other, *, rounding_mode=None):
+def div(*, input, other, rounding_mode=None):
     return torch.div(input, other, rounding_mode=rounding_mode)
 
 
@@ -706,6 +705,29 @@ def pow(*, input, exponent):
 def relu(*, input, inplace=False):
     return nn.functional.relu(**locals())
 
+@register_acc_op_properties(AccOpProperty.pointwise, AccOpProperty.unary)
+@register_acc_op_mapping(op_and_target=("call_function", torch.nn.functional.leaky_relu))
+@register_acc_op
+def leaky_relu(*, input, negative_slope=0.01, inplace=False):
+    return nn.functional.leaky_relu(**locals())
+
+@register_acc_op_properties(AccOpProperty.pointwise, AccOpProperty.unary)
+@register_acc_op_mapping(op_and_target=("call_function", torch.nn.functional.elu))
+@register_acc_op
+def elu(*, input, alpha=1.0, inplace=False):
+    return nn.functional.elu(**locals())
+
+@register_acc_op_properties(AccOpProperty.pointwise, AccOpProperty.unary)
+@register_acc_op_mapping(op_and_target=("call_function", torch.nn.functional.selu))
+@register_acc_op
+def selu(*, input, inplace=False):
+    return nn.functional.selu(**locals())
+
+@register_acc_op_properties(AccOpProperty.pointwise, AccOpProperty.unary)
+@register_acc_op_mapping(op_and_target=("call_function", torch.nn.functional.softsign))
+@register_acc_op
+def softsign(*, input):
+    return nn.functional.softsign(**locals())
 
 @register_custom_acc_mapper_fn(
     op_and_target=("call_function", torch.log1p),

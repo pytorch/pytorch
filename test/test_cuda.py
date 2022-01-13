@@ -1662,7 +1662,8 @@ except RuntimeError as e:
 
         @self.wrap_with_cuda_memory_check
         def leak_gpu0():
-            l.append(torch.randn(1024, device=torch.device("cuda:0")))
+            # increasing to 8MB to force acquiring a new block and overcome blocksize differences across platforms
+            l.append(torch.randn(1024 * 1024 * 8, device=torch.device("cuda:0")))
 
         no_leak()
 
@@ -1672,7 +1673,8 @@ except RuntimeError as e:
         if TEST_MULTIGPU:
             @self.wrap_with_cuda_memory_check
             def leak_gpu1():
-                l.append(torch.randn(1024, device=torch.device("cuda:1")))
+                # increasing to 8MB to force acquiring a new block and overcome blocksize differences across platforms
+                l.append(torch.randn(1024 * 1024 * 8, device=torch.device("cuda:1")))
 
             with self.assertRaisesRegex(RuntimeError, r"CUDA driver API confirmed .+ on device 1.+"):
                 leak_gpu1()
