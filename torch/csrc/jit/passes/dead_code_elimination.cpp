@@ -305,7 +305,7 @@ class DeadCodeEliminator {
         return true;
       }
 
-      // onnx export calls eliminateDeadCode but sometimes passes invalid
+      // onnx export calls EliminateDeadCode but sometimes passes invalid
       // aten operators. So we call maybeSchema so we handle the cases when
       // there is no valid schema for a node
       auto schema = node->maybeSchema();
@@ -435,22 +435,22 @@ class DeadCodeEliminator {
       [](const std::unordered_set<const Value*>&) {};
 };
 
-void eliminateDeadCode(
+void EliminateDeadCode(
     const std::shared_ptr<Graph>& graph,
     DCESideEffectPolicy sideEffectPolicy) {
   DeadCodeEliminator(graph, sideEffectPolicy)
       .run(graph->block(), /*recurse=*/true);
-  GRAPH_DUMP("After eliminateDeadCode: ", graph);
+  GRAPH_DUMP("After EliminateDeadCode: ", graph);
 }
 
-void eliminateDeadCode(
+void EliminateDeadCode(
     Block* block,
     bool recurse,
     DCESideEffectPolicy sideEffectPolicy) {
   DeadCodeEliminator(sideEffectPolicy).run(block, recurse);
 }
 
-void eliminateDeadCode(
+void EliminateDeadCode(
     Block* block,
     std::function<void(const std::unordered_set<const Value*>&)> cb,
     DCESideEffectPolicy sideEffectPolicy) {

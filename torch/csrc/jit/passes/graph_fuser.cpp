@@ -1122,9 +1122,9 @@ struct GraphFuser {
         continue;
       }
       auto subgraph = node->g(attr::Subgraph);
-      eliminateDeadCode(subgraph);
+      EliminateDeadCode(subgraph);
       EliminateCommonSubexpression(subgraph);
-      constantPooling(subgraph);
+      ConstantPooling(subgraph);
     }
   }
 
@@ -1262,7 +1262,7 @@ void FuseGraph(std::shared_ptr<Graph>& graph, bool strict_fuser_check) {
   EliminateCommonSubexpression(graph);
   // We might have emitted a fair amount of useless shape propagating code, so
   // remove it
-  eliminateDeadCode(graph);
+  EliminateDeadCode(graph);
   // Improve the quality of shape propagation code that was left
   PeepholeOptimizeShapeExpressions(graph->block(), &db);
 }

@@ -525,7 +525,7 @@ class ConcatCombiner {
     collectOptimizableConcats();
     bool changed = combineConcats();
     if (changed) {
-      eliminateDeadCode(graph_);
+      EliminateDeadCode(graph_);
     }
     return changed;
   }

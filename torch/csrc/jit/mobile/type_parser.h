@@ -24,13 +24,13 @@ class TORCH_API TypeParser {
 
   void expect(const char* s);
   void expectChar(char c);
-  template <class T>
-  TypePtr CreateSingleElementType();
-  TypePtr parseSingleElementType(DynamicType::Tag);
+  template <typename T>
+  TypePtr parseSingleElementType();
 
   void lex();
 
   std::string next();
+  c10::string_view nextView();
   void advance();
   C10_NODISCARD c10::string_view cur() const;
 
