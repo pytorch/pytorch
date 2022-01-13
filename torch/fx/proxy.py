@@ -254,25 +254,26 @@ class Proxy:
         return self.tracer.iter(self)
 
     def __bool__(self) -> bool:
-        # check if this boolean is used in an assertion, bytecode pattern for assertions
-        # is pretty stable for Python 3.7--3.9
-        frame = inspect.currentframe()
-        assert frame is not None
-        calling_frame = frame.f_back
-        assert calling_frame is not None
-        insts = list(dis.get_instructions(calling_frame.f_code))
-        cur = calling_frame.f_lasti // 2
-        inst = insts[cur]
+        if self.tracer.trace_asserts:
+            # check if this boolean is used in an assertion, bytecode pattern for assertions
+            # is pretty stable for Python 3.7--3.9
+            frame = inspect.currentframe()
+            assert frame is not None
+            calling_frame = frame.f_back
+            assert calling_frame is not None
+            insts = list(dis.get_instructions(calling_frame.f_code))
+            cur = calling_frame.f_lasti // 2
+            inst = insts[cur]
 
-        if inst.opname == 'POP_JUMP_IF_TRUE':
-            first = insts[cur + 1]
-            assert inst.arg is not None
-            last = insts[inst.arg // 2 - 1]
-            starts_with_assert = (first.opname == 'LOAD_GLOBAL' and first.argval == 'AssertionError'
-                                  or first.opname == 'LOAD_ASSERTION_ERROR')
-            if starts_with_assert and last.opname == 'RAISE_VARARGS':
-                self.tracer.create_proxy('call_function', assert_fn, (self,), {})
-                return True
+            if inst.opname == 'POP_JUMP_IF_TRUE':
+                first = insts[cur + 1]
+                assert inst.arg is not None
+                last = insts[inst.arg // 2 - 1]
+                starts_with_assert = (first.opname == 'LOAD_GLOBAL' and first.argval == 'AssertionError'
+                                    or first.opname == 'LOAD_ASSERTION_ERROR')
+                if starts_with_assert and last.opname == 'RAISE_VARARGS':
+                    self.tracer.create_proxy('call_function', assert_fn, (self,), {})
+                    return True
 
         return self.tracer.to_bool(self)
 
