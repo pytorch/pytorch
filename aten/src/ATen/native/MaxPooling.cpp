@@ -10,7 +10,7 @@ namespace native {
 
 DEFINE_DISPATCH(max_pool1d_stub);
 
-Tensor _max_pool1d_forward(
+Tensor _max_pool1d_cpu_forward(
     const Tensor& self,
     IntArrayRef kernel_size,
     IntArrayRef stride,
@@ -101,7 +101,7 @@ Tensor max_pool1d(
 
   Tensor result = [&]() {
     NoNamesGuard guard;
-    return at::_max_pool1d_forward(
+    return at::_max_pool1d_cpu_forward(
         self, kernel_size, stride, padding, dilation, ceil_mode);
   }();
   namedinference::propagate_names(result, self);
