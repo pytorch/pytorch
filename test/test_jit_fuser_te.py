@@ -2111,6 +2111,12 @@ def get_name(op):
     return '.'.join(l)
 
 class TestNNCOpInfo(JitCommonTestCase):
+    def setUp(self):
+        self.tensorexpr_options = TensorExprTestOptions()
+
+    def tearDown(self):
+        self.tensorexpr_options.restore()
+
     def te_compile(self, device, dtype, op):
         if op.name in skip_ops:
             return
