@@ -368,7 +368,7 @@ TORCH_META_FUNC(linalg_ldl_solve)
       B.dim(),
       " dimensions instead");
   TORCH_CHECK(
-      at::isIntegralType(pivots.scalar_type()),
+      at::isIntegralType(pivots.scalar_type(), /*includeBool=*/false),
       "torch.linalg.ldl_solve: Expected pivots to be integers. Got ",
       pivots.scalar_type());
   TORCH_CHECK(
