@@ -483,4 +483,18 @@ __host__ __device__
 #endif
 #endif // HAS_DEMANGLE
 
+#ifdef __clang__
+#define _C10_PRAGMA__(string) _Pragma( #string )
+#define _C10_PRAGMA_(string) _C10_PRAGMA__( string )
+#define C10_CLANG_DIAGNOSTIC_PUSH() _Pragma("clang diagnostic push")
+#define C10_CLANG_DIAGNOSTIC_POP() _Pragma("clang diagnostic pop")
+#define C10_CLANG_DIAGNOSTIC_IGNORE(flag) _C10_PRAGMA_(clang diagnostic ignored flag)
+#define C10_CLANG_HAS_WARNING(flag) __has_warning( flag )
+#else
+#define C10_CLANG_DIAGNOSTIC_PUSH()
+#define C10_CLANG_DIAGNOSTIC_POP()
+#define C10_CLANG_DIAGNOSTIC_IGNORE(flag)
+#define C10_CLANG_HAS_WARNING(flag) 0
+#endif
+
 #endif // C10_MACROS_MACROS_H_
