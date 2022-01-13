@@ -594,5 +594,27 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       };
     });
 
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    static_runtime::select_tensor,
+    aten_select_tensor,
+    [](Node* n) -> SROperator {
+      TORCH_CHECK(n->inputs().size() == 3);
+      return [](ProcessedNode* p_node) {
+        const auto did_copy = p_node->Input(2).toBool();
+        DCHECK(p_node->Input(0).isTensor());
+        DCHECK(!did_copy || p_node->Input(1).isTensor());
+        const IValue& assignFrom =
+            did_copy ? p_node->Input(1) : p_node->Input(0);
+        // Create an IValue that borrows the input Tensor in order to
+        // save a refcount increment here and decrement in
+        // MemoryPlanner::deallocate. MemoryPlanner knows about this
+        // and will safely clean it up by using the corresponding
+        // destroyBorrow method.
+        p_node->Output(0) =
+            IValue(c10::MaybeOwnedTraits<at::TensorBase>::createBorrow(
+                assignFrom.toTensor()));
+      };
+    });
+
 } // namespace jit
 } // namespace torch
