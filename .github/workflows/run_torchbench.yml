@@ -68,6 +68,9 @@ jobs:
           # usually, this doesn't break the binary compatibility
           # use "--no-deps" to install the packages by force
           pip install -r nightly.txt --no-deps
+          python -c 'import torch; print(torch.__version__)'
+          python -c 'import torchvision; print(torchvision.__version__)'
+          python -c 'import torchtext; print(torchtext.__version__)'
           pushd benchmark
           python install.py
       - name: Install TorchBench dependencies
