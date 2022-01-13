@@ -1616,7 +1616,7 @@ class CTCLoss(_Loss):
             to be aligned to the targets.
 
     Shape:
-        - Log_probs: Tensor of size :math:`(T, N, C)`,
+        - Log_probs: Tensor of size :math:`(T, N, C)` or :math:`(T, C)`,
           where :math:`T = \text{input length}`,
           :math:`N = \text{batch size}`, and
           :math:`C = \text{number of classes (including blank)}`.
@@ -1633,12 +1633,12 @@ class CTCLoss(_Loss):
           In the :math:`(\operatorname{sum}(\text{target\_lengths}))` form,
           the targets are assumed to be un-padded and
           concatenated within 1 dimension.
-        - Input_lengths: Tuple or tensor of size :math:`(N)`,
+        - Input_lengths: Tuple or tensor of size :math:`(N)` or :math:`()`,
           where :math:`N = \text{batch size}`. It represent the lengths of the
           inputs (must each be :math:`\leq T`). And the lengths are specified
           for each sequence to achieve masking under the assumption that sequences
           are padded to equal lengths.
-        - Target_lengths: Tuple or tensor of size :math:`(N)`,
+        - Target_lengths: Tuple or tensor of size :math:`(N)` or :math:`()`,
           where :math:`N = \text{batch size}`. It represent lengths of the targets.
           Lengths are specified for each sequence to achieve masking under the
           assumption that sequences are padded to equal lengths. If target shape is
@@ -1648,7 +1648,7 @@ class CTCLoss(_Loss):
           If the targets are given as a 1d tensor that is the concatenation of individual
           targets, the target_lengths must add up to the total length of the tensor.
         - Output: scalar. If :attr:`reduction` is ``'none'``, then
-          :math:`(N)`, where :math:`N = \text{batch size}`.
+          :math:`(N)` if input is batched or :math:`()` if input is unbatched, where :math:`N = \text{batch size}`.
 
     Examples::
 
@@ -1684,6 +1684,22 @@ class CTCLoss(_Loss):
         >>> # Initialize random batch of targets (0 = blank, 1:C = classes)
         >>> target_lengths = torch.randint(low=1, high=T, size=(N,), dtype=torch.long)
         >>> target = torch.randint(low=1, high=C, size=(sum(target_lengths),), dtype=torch.long)
+        >>> ctc_loss = nn.CTCLoss()
+        >>> loss = ctc_loss(input, target, input_lengths, target_lengths)
+        >>> loss.backward()
+        >>>
+        >>>
+        >>> # Target are to be un-padded and unbatched (effectively N=1)
+        >>> T = 50      # Input sequence length
+        >>> C = 20      # Number of classes (including blank)
+        >>>
+        >>> # Initialize random batch of input vectors, for *size = (T,C)
+        >>> input = torch.randn(T, C).log_softmax(2).detach().requires_grad_()
+        >>> input_lengths = torch.tensor(T, dtype=torch.long)
+        >>>
+        >>> # Initialize random batch of targets (0 = blank, 1:C = classes)
+        >>> target_lengths = torch.randint(low=1, high=T, size=(), dtype=torch.long)
+        >>> target = torch.randint(low=1, high=C, size=(target_lengths,), dtype=torch.long)
         >>> ctc_loss = nn.CTCLoss()
         >>> loss = ctc_loss(input, target, input_lengths, target_lengths)
         >>> loss.backward()
