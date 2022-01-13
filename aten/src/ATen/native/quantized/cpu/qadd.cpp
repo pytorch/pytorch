@@ -165,12 +165,12 @@ Tensor qnnpack_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
   size_t num_elems = qa_contig.numel() / qa_contig.size(0);
   auto output_min = ReLUFused
       // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-      ? activationLimits(scale, zero_point, Activation::RELU)
+      ? activationLimits<uint8_t>(scale, zero_point, Activation::RELU)
             .first
       : std::numeric_limits<uint8_t>::min();
   auto output_max = ReLUFused
       // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-      ? activationLimits(scale, zero_point, Activation::RELU)
+      ? activationLimits<uint8_t>(scale, zero_point, Activation::RELU)
             .second
       : std::numeric_limits<uint8_t>::max();
   const pytorch_qnnp_status createStatus = pytorch_qnnp_create_add_nc_q8(
