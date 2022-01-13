@@ -128,7 +128,7 @@ void preoptimizeGraph(std::shared_ptr<Graph>& graph) {
   Autocast(graph);
 #endif
 
-  constantPooling(graph);
+  ConstantPooling(graph);
 }
 
 GraphFunction* tryToGraphFunction(Function& function) noexcept {

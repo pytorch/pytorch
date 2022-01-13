@@ -306,7 +306,7 @@ C10_UNUSED void SplitOutPrecomputeOpsForSparseNN(
 #ifdef FBCODE_CAFFE2
   PrecomputeMultiplierShiftForSigridHash(graph);
   ConstantPropagation(graph);
-  constantPooling(graph);
+  ConstantPooling(graph);
 #endif
 }
 } // namespace
@@ -744,8 +744,7 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
 
   AliasDb alias_db(
       graph,
-      /*isFrozen=*/false,
-      /*enablePreciseTupleContainerAnalysis=*/true);
+      /*isFrozen=*/false);
   const std::vector<Value*> graph_outputs(
       graph->outputs().begin(), graph->outputs().end());
   auto nodes = graph->nodes();

@@ -69,7 +69,7 @@ bool EliminateNoOps(
   }
 
   if (changed) {
-    eliminateDeadCode(graph);
+    EliminateDeadCode(graph);
   }
 
   GRAPH_DUMP("After EliminateNoOps: ", graph);
