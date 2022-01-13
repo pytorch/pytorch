@@ -33,6 +33,26 @@ using OptNameList = c10::optional<std::vector<std::string>>;
 void standardizeVectorForUnion(std::vector<TypePtr>& reference, std::vector<TypePtr>* to_fill);
 void standardizeVectorForUnion(std::vector<TypePtr>* to_flatten);
 
+inline bool is_contiguous_strides(
+    const IntArrayRef sizes,
+    const IntArrayRef strides) {
+  int n_dim = static_cast<int>(sizes.size());
+  if (n_dim == 0) {
+    return true;
+  }
+
+  if (strides[n_dim - 1] != 1) {
+    return false;
+  }
+
+  for (int i = n_dim - 2; i >= 0; i--) {
+    if (strides[i] != strides[i + 1] * sizes[i + 1]) {
+      return false;
+    }
+  }
+  return true;
+}
+
 struct AnyType;
 using AnyTypePtr = SingletonTypePtr<AnyType>;
 // Any is the top of the type hierarchy, all other types are subtypes
@@ -205,7 +225,7 @@ struct TORCH_API OptionalType : public UnionType {
   }
 
   // common cast Optional[Tensor] for undefined tensor type
-  static OptionalTypePtr ofTensor();
+  static TypePtr ofTensor();
 
  private:
   explicit OptionalType(TypePtr contained);
@@ -639,6 +659,12 @@ struct TORCH_API TensorType : public SharedType {
     return copy;
   }
 
+  TensorTypePtr withStrides(VaryingShape<Stride> sstrides) const {
+    auto cloned = clone();
+    cloned->strides_ = sstrides;
+    return cloned;
+  }
+
   TensorTypePtr withSizesStrides(
       at::IntArrayRef sizes,
       at::IntArrayRef strides) const {
@@ -1021,6 +1047,10 @@ struct TORCH_API TupleType : public NamedType {
       const std::vector<std::string>& field_names,
       const std::vector<TypePtr>& field_types);
 
+  static TupleTypePtr createNamed(const c10::optional<c10::QualifiedName>& name,
+      const std::vector<c10::string_view>& field_names,
+      const std::vector<TypePtr>& field_types);
+
   static TupleTypePtr create(
       std::vector<TypePtr> types) {
     return TupleTypePtr(new TupleType(
@@ -1059,6 +1089,13 @@ struct TORCH_API TupleType : public NamedType {
   static const TypeKind Kind = TypeKind::TupleType;
 
  private:
+  template <typename S>
+  static TupleTypePtr createWithSpec(
+      const c10::optional<c10::QualifiedName>& name,
+      const std::vector<S>& field_names,
+      const std::vector<TypePtr>& field_types,
+      std::vector<IValue>& field_defaults);
+
   TupleType(
       std::vector<TypePtr> elements_,
       c10::optional<c10::QualifiedName> name,
@@ -1541,11 +1578,11 @@ inline TypePtr TensorType::fromBoolType() {
 }
 
 inline c10::optional<c10::ScalarType> tryScalarTypeFromJitType(const Type& type) {
-  if (&type == FloatType::get().get()) {
+  if (type == *FloatType::get()) {
     return at::typeMetaToScalarType(c10::get_default_dtype());
-  } else if (&type == IntType::get().get()) {
+  } else if (type == *IntType::get()) {
     return at::ScalarType::Long;
-  } else if (&type == BoolType::get().get()) {
+  } else if (type == *BoolType::get()) {
     return at::ScalarType::Bool;
   }
   return c10::nullopt;
@@ -2008,6 +2045,15 @@ inline typename detail::CastConstReturnType<NamedType>::type Type::cast<NamedTyp
   if (kind() == TypeKind::TupleType || kind() == TypeKind::FunctionType ||
       kind() == TypeKind::ClassType || kind() == TypeKind::InterfaceType) {
     return std::static_pointer_cast<const NamedType>(static_cast<const NamedType *>(this)->shared_from_this());
+  }
+  return nullptr;
+}
+
+template<>
+inline const NamedType* Type::castRaw<NamedType>() const {
+  if (kind() == TypeKind::TupleType || kind() == TypeKind::FunctionType ||
+      kind() == TypeKind::ClassType || kind() == TypeKind::InterfaceType) {
+    return static_cast<const NamedType*>(this);
   }
   return nullptr;
 }

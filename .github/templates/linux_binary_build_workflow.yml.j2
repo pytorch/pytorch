@@ -27,8 +27,10 @@ name: !{{ build_environment }}
 {%- endmacro %}
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
+# NOTE: Uncomment this to test within your PR
+# TODO: Migrate to new ciflow trigger, reference https://github.com/pytorch/pytorch/pull/70321
+#  pull_request:
+#    types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
   push:
     tags:
       - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
@@ -216,13 +218,13 @@ jobs:
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
-          echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
+          echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
-            echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
+            echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
           fi
       - name: Upload binaries
         env:
