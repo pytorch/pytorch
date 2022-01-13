@@ -515,7 +515,6 @@ Tensor median_impl(const Tensor& self, bool ignore_nan) {
 
 } // namespace
 
-
 Tensor& quantile_out(
     const Tensor& self,
     const Tensor& q,
@@ -527,8 +526,7 @@ Tensor& quantile_out(
       out,
       self,
       q,
-      // NOLINTNEXTLINE(performance-move-const-arg)
-      std::move(dim),
+      dim,
       keepdim,
       get_quantile_interpolation_mode(interpolation),
       /*ignore_nan=*/false);
@@ -547,8 +545,7 @@ Tensor& quantile_out(
   return at::native::quantile_out(
       self,
       at::scalar_tensor(q, self.options()),
-      // NOLINTNEXTLINE(performance-move-const-arg)
-      std::move(dim),
+      dim,
       keepdim,
       interpolation,
       out);
@@ -565,8 +562,7 @@ Tensor quantile(
       out,
       self,
       q,
-      // NOLINTNEXTLINE(performance-move-const-arg)
-      std::move(dim),
+      dim,
       keepdim,
       get_quantile_interpolation_mode(interpolation),
       /*ignore_nan=*/false);
@@ -582,8 +578,7 @@ Tensor quantile(
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
   return at::native::quantile(
-      // NOLINTNEXTLINE(performance-move-const-arg)
-      self, at::scalar_tensor(q, self.options()), std::move(dim), keepdim, interpolation);
+      self, at::scalar_tensor(q, self.options()), dim, keepdim, interpolation);
 }
 
 Tensor& nanquantile_out(
@@ -597,8 +592,7 @@ Tensor& nanquantile_out(
       out,
       self,
       q,
-      // NOLINTNEXTLINE(performance-move-const-arg)
-      std::move(dim),
+      dim,
       keepdim,
       get_quantile_interpolation_mode(interpolation),
       /*ignore_nan=*/true);
@@ -617,8 +611,7 @@ Tensor& nanquantile_out(
   return at::native::nanquantile_out(
       self,
       at::scalar_tensor(q, self.options()),
-      // NOLINTNEXTLINE(performance-move-const-arg)
-      std::move(dim),
+      dim,
       keepdim,
       interpolation,
       out);
@@ -635,8 +628,7 @@ Tensor nanquantile(
       out,
       self,
       q,
-      // NOLINTNEXTLINE(performance-move-const-arg)
-      std::move(dim),
+      dim,
       keepdim,
       get_quantile_interpolation_mode(interpolation),
       /*ignore_nan=*/true);
@@ -652,84 +644,7 @@ Tensor nanquantile(
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
   return at::native::nanquantile(
-      // NOLINTNEXTLINE(performance-move-const-arg)
-      self, at::scalar_tensor(q, self.options()), std::move(dim), keepdim, interpolation);
-}
-
-Tensor& quantile_out(
-    const Tensor& self,
-    const Tensor& q,
-    optional<int64_t> dim,
-    bool keepdim,
-    Tensor& out) {
-  // NOLINTNEXTLINE(performance-move-const-arg)
-  return at::native::quantile_out(self, q, std::move(dim), keepdim, "linear", out);
-}
-
-Tensor& quantile_out(
-    const Tensor& self,
-    double q,
-    optional<int64_t> dim,
-    bool keepdim,
-    Tensor& out) {
-  // NOLINTNEXTLINE(performance-move-const-arg)
-  return at::native::quantile_out(self, q, std::move(dim), keepdim, "linear", out);
-}
-
-Tensor quantile(
-    const Tensor& self,
-    const Tensor& q,
-    optional<int64_t> dim,
-    bool keepdim) {
-  // NOLINTNEXTLINE(performance-move-const-arg)
-  return at::native::quantile(self, q, std::move(dim), keepdim, "linear");
-}
-
-Tensor quantile(
-    const Tensor& self,
-    double q,
-    optional<int64_t> dim,
-    bool keepdim) {
-  // NOLINTNEXTLINE(performance-move-const-arg)
-  return at::native::quantile(self, q, std::move(dim), keepdim, "linear");
-}
-
-Tensor& nanquantile_out(
-    const Tensor& self,
-    const Tensor& q,
-    optional<int64_t> dim,
-    bool keepdim,
-    Tensor& out) {
-  // NOLINTNEXTLINE(performance-move-const-arg)
-  return at::native::nanquantile_out(self, q, std::move(dim), keepdim, "linear", out);
-}
-
-Tensor& nanquantile_out(
-    const Tensor& self,
-    double q,
-    optional<int64_t> dim,
-    bool keepdim,
-    Tensor& out) {
-  // NOLINTNEXTLINE(performance-move-const-arg)
-  return at::native::nanquantile_out(self, q, std::move(dim), keepdim, "linear", out);
-}
-
-Tensor nanquantile(
-    const Tensor& self,
-    const Tensor& q,
-    optional<int64_t> dim,
-    bool keepdim) {
-  // NOLINTNEXTLINE(performance-move-const-arg)
-  return at::native::nanquantile(self, q, std::move(dim), keepdim, "linear");
-}
-
-Tensor nanquantile(
-    const Tensor& self,
-    double q,
-    optional<int64_t> dim,
-    bool keepdim) {
-  // NOLINTNEXTLINE(performance-move-const-arg)
-  return at::native::nanquantile(self, q, std::move(dim), keepdim, "linear");
+      self, at::scalar_tensor(q, self.options()), dim, keepdim, interpolation);
 }
 
 std::tuple<Tensor&, Tensor&> kthvalue_out_cpu(
