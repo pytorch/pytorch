@@ -306,7 +306,6 @@ class AutoQuantizationState(torch.nn.Module):
         args: Tuple[Any, ...],
         first_call: bool,
         qtensor_id: List[int],
-        root_module: torch.nn.Module,
         global_op_idx: List[int],
     ) -> Any:
         """
@@ -321,12 +320,12 @@ class AutoQuantizationState(torch.nn.Module):
         * observe the output, if needed
         """
         seen_op_info = self._get_cur_seen_op_info()
-        func_output_obs_type = get_func_output_obs_type(seen_op_info)
         if first_call:
             self._first_call_op_prepare_after_hook_adjust_subgraphs(
-                op, output, args, first_call, qtensor_id, root_module,
-                seen_op_info, func_output_obs_type)
+                op, output, args, first_call, qtensor_id,
+                seen_op_info)
         else:
+            func_output_obs_type = get_func_output_obs_type(seen_op_info)
             # TODO(future PR): other output types
             if func_output_obs_type != FuncOutputObsType.NONE:
                 seen_op_info = self._get_cur_seen_op_info()
@@ -629,12 +628,8 @@ class AutoQuantizationState(torch.nn.Module):
         self,
         op: Callable,
         arg: Any,
-        arg_idx: int,
-        input_observed_arg_idxs: Optional[List[int]],
         arg_tensor_infos: List[Optional[QTensorInfo]],
-        func_output_dtype_type: FuncOutputDTypeType,
         qtensor_id: List[int],
-        fqn: str,
     ) -> None:
         """
         Runs the prepare hook during first_call for individual
@@ -656,28 +651,6 @@ class AutoQuantizationState(torch.nn.Module):
             qtensor_id[0] += 1
         arg_tensor_infos.append(arg._qtensor_info)  # type: ignore[attr-defined]
 
-        if input_observed_arg_idxs is not None and \
-                arg_idx not in input_observed_arg_idxs:
-            return
-
-        if func_output_dtype_type == FuncOutputDTypeType.DTYPE_DEPENDS_ON_QCONFIG:
-            # if the existing inf_dtype is not torch.quint8, add an observer
-            # which will be converted to a quant later
-            # TODO(future PR): share these observers if multiple ops need
-            # this quant.
-            qconfig = get_cur_qconfig(self.qconfig_dict, fqn, op)
-            if qconfig is None:
-                # If qconfig is None, we do not need any input observers
-                return
-            elif arg._qtensor_info.inf_dtype != torch.quint8:  # type: ignore[attr-defined]
-                # TODO(future PR): currently this only handles float32 and
-                # quint8, we need to extend it to other dtypes
-                tensor_id = arg._qtensor_info.id  # type: ignore[attr-defined]
-                weight_arg_idx = get_weight_arg_idx(op)
-                obs = qconfig.weight() if arg_idx == weight_arg_idx else \
-                    qconfig.activation()
-                self.tensor_id_to_observer[str(tensor_id)] = obs
-
     def _first_call_op_prepare_before_hook_create_subgraphs(
         self,
         op: Callable,
@@ -694,26 +667,15 @@ class AutoQuantizationState(torch.nn.Module):
         """
         op_packing_only_uses_module_attributes = \
             get_op_packing_only_uses_module_attributes(op, args, root_module)
-        func_output_dtype_type = get_func_output_dtype_type(
-            op, args, op_packing_only_uses_module_attributes)
-        input_observed_arg_idxs = get_input_observed_arg_idxs(op)
         arg_tensor_infos: List[Optional[QTensorInfo]] = []
-        # Note: this is incremented for both branches of the if below
-        arg_idx = 0
         for arg in args:
             if isinstance(arg, (list, tuple)):
                 for inner_arg in arg:
                     self._first_call_op_prepare_before_hook_create_subgraphs_tensor(
-                        op, inner_arg, arg_idx, input_observed_arg_idxs,
-                        arg_tensor_infos, func_output_dtype_type,
-                        qtensor_id, fqn)
-                    arg_idx += 1
+                        op, inner_arg, arg_tensor_infos, qtensor_id)
             else:
                 self._first_call_op_prepare_before_hook_create_subgraphs_tensor(
-                    op, arg, arg_idx, input_observed_arg_idxs,
-                    arg_tensor_infos, func_output_dtype_type,
-                    qtensor_id, fqn)
-                arg_idx += 1
+                    op, arg, arg_tensor_infos, qtensor_id)
 
         packable_tensor_idx_to_name = {}
         packable_nontensor_idx_to_arg = {}
@@ -742,8 +704,8 @@ class AutoQuantizationState(torch.nn.Module):
 
         if self.idx not in self.idx_to_seen_op_infos:
             op_type_is_module = isinstance(op, torch.nn.Module)
-            op_type = type(op) if op_type_is_module else op
-            qconfig = get_cur_qconfig(self.qconfig_dict, fqn, op)
+            op_type : Callable = type(op) if op_type_is_module else op  # type: ignore[assignment]
+            qconfig = get_cur_qconfig(self.qconfig_dict, fqn, op_type)
             self.idx_to_seen_op_infos[self.idx] = SeenOpInfo(
                 self.idx, op_type, op_type_is_module, fqn, arg_tensor_infos, [],
                 packable_tensor_idx_to_name, packable_nontensor_idx_to_arg,
@@ -759,9 +721,7 @@ class AutoQuantizationState(torch.nn.Module):
         args: Tuple[Any, ...],
         first_call: bool,
         qtensor_id: List[int],
-        root_module: torch.nn.Module,
         seen_op_info: SeenOpInfo,
-        func_output_obs_type: FuncOutputObsType,
     ) -> None:
         """
         After `op` was just executed, modifies the subgraph recorded
@@ -769,58 +729,11 @@ class AutoQuantizationState(torch.nn.Module):
         has to be done in the "after" hook because the output of the op
         does not exist in the "before" hook.
         """
-        if func_output_obs_type == FuncOutputObsType.NEW_OBS:
-            # TODO(future PR): check qconfig is None
-            qconfig = get_cur_qconfig(self.qconfig_dict, seen_op_info.fqn, op)
-            assert qconfig is not None
-            self.tensor_id_to_observer[str(qtensor_id[0])] = \
-                qconfig.activation()
-        elif func_output_obs_type == FuncOutputObsType.REUSES_FIRST_INPUT_OBS:
-            first_input_tensor_id = seen_op_info.input_tensor_infos[0].id
-
-            first_input_obs = None
-            if str(first_input_tensor_id) in self.tensor_id_to_observer:
-                first_input_obs = \
-                    self.tensor_id_to_observer[str(first_input_tensor_id)]
-            else:
-                # This observer may be in a module (handled by eager
-                # convert), in which case it's not in our map. For now,
-                # copy it from the module. In the future, we could look
-                # into having a soft link.
-                # TODO: make this handle more cases
-                # TODO: handle module -> add_scalar -> add_scalar
-                prev_op = get_producer_of_seen_op_info(
-                    self.idx_to_seen_op_infos, seen_op_info)
-                assert prev_op is not None
-                # TODO: the following line needs to only check fqn
-                # for modules, not for functions
-                fqn_last_part = prev_op.fqn.split('.')[-1]
-                if hasattr(root_module, fqn_last_part):
-                    first_input_mod = getattr(root_module, fqn_last_part)
-                else:
-                    first_input_mod = None
-                # Currently, both tracing for module fusion and tracing for
-                # quantization go through this code path. When tracing
-                # for module fusion, quantizeable modules do not have
-                # observers yet. For this path to not crash, we create one.
-                # When tracing for quantization, this will be ignored.
-                # TODO(future PR): refactor to avoid this.
-                if first_input_mod and hasattr(first_input_mod, 'activation_post_process'):
-                    first_input_obs = first_input_mod.activation_post_process
-                else:
-                    # TODO(future PR): check qconfig is None
-                    qconfig = get_cur_qconfig(self.qconfig_dict, seen_op_info.fqn, op)
-                    assert qconfig is not None
-                    first_input_obs = qconfig.activation()
-
-            self.tensor_id_to_observer[str(qtensor_id[0])] = first_input_obs
-
         # TODO(future PR): check if _qtensor_id needs to become an actual
         # attribute of Tensor
         # TODO(future PR): handle non-tensor outputs
 
-        func_output_dtype_type = get_func_output_dtype_type(
-            op, args, seen_op_info.op_packing_only_uses_module_attributes)
+        func_output_dtype_type = get_func_output_dtype_type(seen_op_info)
         if func_output_dtype_type == FuncOutputDTypeType.DTYPE_DEPENDS_ON_QCONFIG:
             if isinstance(op, torch.nn.Module):
                 # For now, assume that eager mode convert has attached qconfig
@@ -863,6 +776,97 @@ class AutoQuantizationState(torch.nn.Module):
             for element in output:
                 if isinstance(element, torch.Tensor):
                     _add_output_qtensor_info(element)
+
+    def _maybe_insert_input_observers(self, seen_op_info: SeenOpInfo):
+        func_output_dtype_type = get_func_output_dtype_type(seen_op_info)
+        input_observed_arg_idxs = get_input_observed_arg_idxs(
+            seen_op_info.type, seen_op_info.type_is_module)
+
+        if func_output_dtype_type == FuncOutputDTypeType.DTYPE_DEPENDS_ON_QCONFIG:
+            for idx, tensor_info in enumerate(seen_op_info.input_tensor_infos):
+                if tensor_info is None:
+                    continue
+                if input_observed_arg_idxs is not None and \
+                        idx not in input_observed_arg_idxs:
+                    continue
+
+                qconfig = get_cur_qconfig(
+                    self.qconfig_dict, seen_op_info.fqn, seen_op_info.type)
+                if qconfig is None:
+                    # If qconfig is None, we do not need any input observers
+                    continue
+
+                elif tensor_info.inf_dtype != torch.quint8:
+                    # TODO(future PR): this assumes current dtype is quint8,
+                    # this is not always true
+                    # TODO(future PR): currently this only handles float32 and
+                    # quint8, we need to extend it to other dtypes
+                    tensor_id = tensor_info.id  # type: ignore[attr-defined]
+                    weight_arg_idx = get_weight_arg_idx(seen_op_info.type)
+                    obs = qconfig.weight() if idx == weight_arg_idx else \
+                        qconfig.activation()
+                    self.tensor_id_to_observer[str(tensor_id)] = obs
+
+    def _maybe_insert_output_observers(
+        self,
+        seen_op_info: SeenOpInfo,
+        root_module: torch.nn.Module,
+    ):
+        func_output_obs_type = get_func_output_obs_type(seen_op_info)
+        output_tensor_id = seen_op_info.output_tensor_infos[0].id
+
+        if func_output_obs_type == FuncOutputObsType.NEW_OBS:
+            # TODO(future PR): check qconfig is None
+            qconfig = get_cur_qconfig(
+                self.qconfig_dict, seen_op_info.fqn, seen_op_info.type)
+            assert qconfig is not None
+            self.tensor_id_to_observer[str(output_tensor_id)] = \
+                qconfig.activation()
+        elif func_output_obs_type == FuncOutputObsType.REUSES_FIRST_INPUT_OBS:
+            first_input_tensor_id = seen_op_info.input_tensor_infos[0].id
+
+            first_input_obs = None
+            if str(first_input_tensor_id) in self.tensor_id_to_observer:
+                first_input_obs = \
+                    self.tensor_id_to_observer[str(first_input_tensor_id)]
+            else:
+                # This observer may be in a module (handled by eager
+                # convert), in which case it's not in our map. For now,
+                # copy it from the module. In the future, we could look
+                # into having a soft link.
+                # TODO: make this handle more cases
+                # TODO: handle module -> add_scalar -> add_scalar
+                prev_op = get_producer_of_seen_op_info(
+                    self.idx_to_seen_op_infos, seen_op_info)
+                assert prev_op is not None
+                # TODO: the following line needs to only check fqn
+                # for modules, not for functions
+                fqn_last_part = prev_op.fqn.split('.')[-1]
+                if hasattr(root_module, fqn_last_part):
+                    first_input_mod = getattr(root_module, fqn_last_part)
+                else:
+                    first_input_mod = None
+                # Currently, both tracing for module fusion and tracing for
+                # quantization go through this code path. When tracing
+                # for module fusion, quantizeable modules do not have
+                # observers yet. For this path to not crash, we create one.
+                # When tracing for quantization, this will be ignored.
+                # TODO(future PR): refactor to avoid this.
+                if first_input_mod and hasattr(first_input_mod, 'activation_post_process'):
+                    first_input_obs = first_input_mod.activation_post_process
+                else:
+                    # TODO(future PR): check qconfig is None
+                    qconfig = get_cur_qconfig(
+                        self.qconfig_dict, seen_op_info.fqn, seen_op_info.type)
+                    assert qconfig is not None
+                    first_input_obs = qconfig.activation()
+
+            self.tensor_id_to_observer[str(output_tensor_id)] = first_input_obs
+
+    def insert_observers(self, root_module: torch.nn.Module):
+        for idx, seen_op_info in self.idx_to_seen_op_infos.items():
+            self._maybe_insert_input_observers(seen_op_info)
+            self._maybe_insert_output_observers(seen_op_info, root_module)
 
     # This is a hack to enable nn.Sequential to properly work with
     # this class.
