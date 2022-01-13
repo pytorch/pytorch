@@ -175,6 +175,30 @@ def prod(x):
     return s
 
 
+def size_of(metadata):
+    sizes = {
+        torch.float: 4,
+        torch.float16: 2,
+        torch.float32: 4,
+        torch.float64: 8,
+        torch.int: 4,
+        torch.int8: 1,
+        torch.int16: 2,
+        torch.int32: 4,
+        torch.int64: 8,
+        torch.uint8: 1,
+        torch.bool: 1,
+    }
+
+    numel = prod(metadata.shape)
+    dtype = metadata.dtype
+
+    if dtype not in sizes:
+        raise NotImplementedError("Don't know the size of dtype ", dtype)
+
+    return numel * sizes[dtype]
+
+
 def partition_with_recompute_fwd_in_bwd(joint_module: fx.GraphModule, _joint_inputs):
     """
     Partitions the joint graph such that the backward recomputes the forward.
@@ -243,7 +267,7 @@ def partition_with_recompute_fwd_in_bwd(joint_module: fx.GraphModule, _joint_inp
         if 'tensor_meta' not in node.meta:
             weight = math.inf
         else:
-            mem_sz = prod(node.meta['tensor_meta'].shape)
+            mem_sz = size_of(node.meta['tensor_meta'])
             if is_input:
                 weight = mem_sz
             else:
