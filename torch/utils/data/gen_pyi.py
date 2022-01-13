@@ -190,7 +190,7 @@ def main() -> None:
     fm = FileManager(install_dir='.', template_dir='.', dry_run=False)
     fm.write_with_template(filename="dataset.pyi",
                            template_fn="dataset.pyi.in",
-                           env_callable=lambda: {'IterableDataPipeMethods': iter_method_definitions,
+                           env_callable=lambda: {'IterDataPipeMethods': iter_method_definitions,
                                                  'MapDataPipeMethods': map_method_definitions})
 
 

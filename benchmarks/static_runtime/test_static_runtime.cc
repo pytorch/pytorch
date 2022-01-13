@@ -388,6 +388,12 @@ TEST(StaticRuntime, Binary) {
         return (c.clone())
   )JIT";
 
+  const auto add_list_script = R"JIT(
+    def forward(self, a: List[int], b: List[int]):
+        c = a + b
+        return c[::]
+  )JIT";
+
   const auto list_construct_script = R"JIT(
     def forward(self, a, b):
       return [a, b]
@@ -448,6 +454,10 @@ TEST(StaticRuntime, Binary) {
   testStaticRuntime(list_unpack_script_2, args);
   testStaticRuntime(tuple_construct_script, args);
   testStaticRuntime(tuple_construct_script_2, args);
+
+  std::vector<IValue> list_args{
+      c10::List<int64_t>{1, 2, 3}, c10::List<int64_t>{4, 5, 6}};
+  testStaticRuntime(add_list_script, list_args);
 }
 
 TEST(StaticRuntime, MatMul) {
@@ -543,6 +553,12 @@ TEST(StaticRuntime, Mul) {
         return torch.mul(a, b).clone()
   )JIT";
 
+  const auto mul_list = R"JIT(
+    def forward(self, a: List[int], n: int):
+        b = a * n
+        return b[::]
+  )JIT";
+
   auto a = at::randn({3, 3});
   auto b = at::randn({3, 3});
   auto c = at::randn({3, 3, 3});
@@ -559,6 +575,9 @@ TEST(StaticRuntime, Mul) {
 
   testStaticRuntime(mul_scalar, scalar_args1);
   testStaticRuntime(mul_scalar, scalar_args1, scalar_args2);
+
+  std::vector<IValue> list_args{c10::List<int64_t>{1, 2}, 3};
+  testStaticRuntime(mul_list, list_args);
 }
 
 TEST(StaticRuntime, Log) {
@@ -598,6 +617,11 @@ TEST(StaticRuntime, Sub) {
         return torch.sub(a, b, alpha=c).clone()
   )JIT";
 
+  const auto sub_two_scalars = R"JIT(
+    def forward(self, a: int, b: int):
+        return (a - b - b)
+  )JIT";
+
   auto a = at::randn({2, 3});
   auto b = at::randn({2, 3});
   auto c = at::randn({4, 3, 2});
@@ -618,6 +642,9 @@ TEST(StaticRuntime, Sub) {
   std::vector<IValue> args3{a, 2.3, 4};
   testStaticRuntime(sub_scalar_alpha, args3);
   testStaticRuntime(sub_scalar_alpha, {c, 1.3, 2});
+
+  std::vector<IValue> args4{1, 2};
+  testStaticRuntime(sub_two_scalars, args4);
 }
 
 TEST(StaticRuntime, NanToNum) {
@@ -2361,4 +2388,13 @@ TEST(StaticRuntime, ReplaceWithMaybeCopy) {
   EXPECT_FALSE(hasProcessedNodeWithName(smodule, "aten::to"));
   EXPECT_TRUE(
       hasProcessedNodeWithName(smodule, "static_runtime::to_maybe_copy_out"));
+}
+
+TEST(StaticRuntime, Int) {
+  const auto src = R"JIT(
+    def forward(self, x):
+        return int(x) + int(x)
+  )JIT";
+  std::vector<IValue> args{at::tensor({3.14})};
+  testStaticRuntime(src, args);
 }
