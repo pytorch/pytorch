@@ -8408,6 +8408,39 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         for shape, batch, hermitian, upper in itertools.product(shapes, batches, hermitians, (True, False)):
             run_test(shape, batch, hermitian, upper)
 
+    @skipCUDAIfNoCusolver
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @skipCUDAIfRocm
+    @dtypes(*floating_and_complex_types())
+    def test_ldl_solve(self, device, dtype):
+        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+
+        def run_test(shape, batch, nrhs, hermitian, upper):
+            A = random_hermitian_pd_matrix(shape, *batch, dtype=dtype, device=device)
+            B = make_tensor((*A.shape[:-1], nrhs), dtype=dtype, device=device)
+            factors, pivots, info = torch.linalg.ldl_factor_ex(A, hermitian=hermitian, upper=upper)
+            X = torch.linalg.ldl_solve(factors, pivots, B, hermitian=hermitian, upper=upper)
+
+            def symmetric(A):
+                if upper:
+                    return A.triu() + A.triu(1).mT
+                else:
+                    return A.tril() + A.tril(-1).mT
+
+            # verify A @ X == B
+            expected_B = symmetric(A) @ X if not hermitian else A @ X
+            self.assertEqual(B, expected_B)
+
+        # hermitian=True is not supported on CUDA yet
+        hermitians = (True, False) if dtype.is_complex and self.device_type == 'cpu' else (False,)
+
+        shapes = (5,)
+        batches = ((), (4,), (2, 2))
+        nrhss = (1, 7)
+        for shape, batch, nrhs, hermitian, upper in itertools.product(shapes, batches, nrhss, hermitians, (True, False)):
+            run_test(shape, batch, nrhs, hermitian, upper)
+
     @onlyCUDA
     @skipCUDAIfNoMagma
     @skipCUDAIfNoCusolver
