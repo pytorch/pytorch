@@ -51,7 +51,7 @@ test/custom_operator/model.pt
 test/jit_hooks/*.pt
 test/data/legacy_modules.t7
 test/data/*.pt
-test/backward_compatibility/nightly_schemas.txt
+test/forward_backward_compatibility/nightly_schemas.txt
 dropout_model.pt
 test/generated_type_hints_smoketest.py
 test/htmlcov
