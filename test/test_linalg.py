@@ -8381,7 +8381,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 scipy_ldl_batched = np.vectorize(
                     lambda x: scipy_ldl(x, hermitian=hermitian, lower=not upper),
                     otypes=[np_dtype, np_dtype, np.dtype('int64')],
-                    signature=f'(m,m)->(m,m),(m,m),(m)')
+                    signature='(m,m)->(m,m),(m,m),(m)')
 
                 expected = scipy_ldl_batched(A_np)
                 expected_L, expected_D, expected_pivots = expected
