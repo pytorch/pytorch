@@ -2895,8 +2895,10 @@ def cross_entropy(
     See :class:`~torch.nn.CrossEntropyLoss` for details.
 
     Args:
-        input (Tensor) : Input Tensor (look below for valid shape).
-        target (Tensor) : Target Tensor (look below for valid shapes).
+        input (Tensor) : Predicted unnormalized scores (often referred to as logits);
+        see Shape section below for supported shapes.
+        target (Tensor) : Ground truth class indices or class probabilities;
+        see Shape section below for supported shapes.
         weight (Tensor, optional): a manual rescaling weight given to each
             class. If given, has to be a Tensor of size `C`
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
@@ -2927,10 +2929,9 @@ def cross_entropy(
     Shape:
         - Input: Shape :math:`(C)`, :math:`(N, C)` or :math:`(N, C, d_1, d_2, ..., d_K)` with :math:`K \geq 1`
           in the case of `K`-dimensional loss.
-        - Target: If containing class indices, shape :math:`()` or :math:`(N)` where each value is
-          between [0, C), otherwise :math:`(N, d_1, d_2, ..., d_K)` with
-          :math:`K \geq 1` in the case of K-dimensional loss with same shape as the input and
-          each value should be between [0, 1].
+        - Target: If containing class indices, shape :math:`()`, :math:`(N)` or :math:`(N, d_1, d_2, ..., d_K)` with
+          :math:`K \geq 1` in the case of K-dimensional loss where each value should be between :math:`[0, C)`.
+          If containing class probabilities, same shape as the input and each value should be between :math:`[0, 1]`.
 
         where:
 
