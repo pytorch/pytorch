@@ -257,9 +257,6 @@
       "periodic-win-vs2019-cuda11.5-py3",
       "win-vs2019-cpu-py3",
       "win-vs2019-cuda11.3-py3"
-    ],
-    "ciflow/xla": [
-      "linux-bionic-py3.6-clang9"
     ]
   },
   "version": "v1"

@@ -619,9 +619,8 @@ LINUX_WORKFLOWS = [
         num_test_shards=2,
         distributed_test=False,
         enable_noarch_test=1,
-        enable_xla_test=1,
         ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_XLA, LABEL_CIFLOW_NOARCH},
+            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_NOARCH},
         ),
     ),
     CIWorkflow(
@@ -825,8 +824,8 @@ DOCKER_WORKFLOWS = [
     DockerWorkflow(
         build_environment="docker-builds",
         docker_images=sorted(DOCKER_IMAGES),
-        # Run weekly to ensure they can build
-        is_scheduled="1 * */7 * *",
+        # Run every Wednesday to ensure they can build
+        is_scheduled="1 * * * 3",
     ),
 ]
 
