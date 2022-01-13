@@ -163,12 +163,12 @@ test_python_shard() {
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
     exit 1
   fi
-  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --exclude-fx2trt-tests --shard "$1" "$NUM_TEST_SHARDS" --verbose
+  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --shard "$1" "$NUM_TEST_SHARDS" --verbose
   assert_git_not_dirty
 }
 
 test_python() {
-  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --exclude-fx2trt-tests --verbose
+  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --verbose
   assert_git_not_dirty
 }
 
@@ -436,9 +436,9 @@ test_xla() {
 # Do NOT run this test before any other tests, like test_python_shard, etc.
 # Because this function uninstalls the torch built from branch, and install
 # nightly version.
-test_backward_compatibility() {
+test_forward_backward_compatibility() {
   set -x
-  pushd test/backward_compatibility
+  pushd test/forward_backward_compatibility
   python -m venv venv
   # shellcheck disable=SC1091
   . venv/bin/activate
@@ -448,7 +448,7 @@ test_backward_compatibility() {
   deactivate
   rm -r venv
   pip show torch
-  python check_backward_compatibility.py --existing-schemas nightly_schemas.txt
+  python check_forward_backward_compatibility.py --existing-schemas nightly_schemas.txt
   popd
   set +x
   assert_git_not_dirty
@@ -529,7 +529,7 @@ if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-baze
 fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *backward* ]]; then
-  test_backward_compatibility
+  test_forward_backward_compatibility
   # Do NOT add tests after bc check tests, see its comment.
 elif [[ "${TEST_CONFIG}" == *xla* ]]; then
   install_torchvision
@@ -568,7 +568,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *distributed* || "${JOB_BASE_NAME}" == *distri
   test_rpc
 elif [[ "${TEST_CONFIG}" = docs_test ]]; then
   test_docs_test
-elif [[ "${BUILD_ENVIRONMENT}" == *linux-xenial-cuda11.3-py3.6-gcc7* ]]; then
+elif [[ "${TEST_CONFIG}" == fx2trt ]]; then
   test_torch_fx2trt
 else
   install_torchvision
