@@ -1067,9 +1067,9 @@ struct CudaGraphFuser {
         continue;
       }
       auto subgraph = node->g(attr::Subgraph);
-      eliminateDeadCode(subgraph);
+      EliminateDeadCode(subgraph);
       EliminateCommonSubexpression(subgraph);
-      constantPooling(subgraph);
+      ConstantPooling(subgraph);
     }
   }
 
@@ -2053,7 +2053,7 @@ void CudaFuseGraph(std::shared_ptr<Graph>& graph) {
   EliminateCommonSubexpression(graph);
   // We might have emitted a fair amount of useless shape propagating code, so
   // remove it
-  eliminateDeadCode(graph);
+  EliminateDeadCode(graph);
 
   GRAPH_DEBUG("After ECS & Dead code removal: ", *graph);
   // Improve the quality of shape propagation code that was left

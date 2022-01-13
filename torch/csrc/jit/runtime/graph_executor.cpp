@@ -661,10 +661,10 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
         "After specializeAutogradZero, before lowerSimpleTuples\n", *opt_graph);
     lowerSimpleTuples(opt_graph);
     GRAPH_DEBUG(
-        "After lowerSimpleTuples, before constantPooling\n", *opt_graph);
-    constantPooling(opt_graph);
+        "After lowerSimpleTuples, before ConstantPooling\n", *opt_graph);
+    ConstantPooling(opt_graph);
     GRAPH_DEBUG(
-        "After constantPooling, before runRequiredPasses\n", *opt_graph);
+        "After ConstantPooling, before runRequiredPasses\n", *opt_graph);
 
     // Phase 1. Specialize to input definedness (this is very important for
     //          gradient graphs), and run required passes to bring the graph
@@ -730,7 +730,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
       runNondiffOptimization(opt_graph);
     }
     // Make sure there are no leftovers from any passes.
-    eliminateDeadCode(opt_graph);
+    EliminateDeadCode(opt_graph);
     GRAPH_DUMP("After compileSpec optimizations:", opt_graph);
     return ExecutionPlan(opt_graph, function_name_);
   }
@@ -814,7 +814,7 @@ void runRequiredPasses(const std::shared_ptr<Graph>& g) {
   // add valid expand nodes when the shapes are stable
   RemoveExpands(g);
   CanonicalizeOps(g);
-  eliminateDeadCode(g);
+  EliminateDeadCode(g);
 }
 
 void packGradient(const Gradient& gradient, Node* dnode) {
@@ -913,10 +913,10 @@ void runOptimization(
     bool const_prop_user_classes) {
   // Basic graph preprocessing to eliminate noise.
   GRAPH_DEBUG(
-      "Before eliminateDeadCode (beginning of runOptimization)\n", *graph);
-  eliminateDeadCode(graph);
+      "Before EliminateDeadCode (beginning of runOptimization)\n", *graph);
+  EliminateDeadCode(graph);
   GRAPH_DEBUG(
-      "After eliminateDeadCode, before EliminateCommonSubexpression\n", *graph);
+      "After EliminateDeadCode, before EliminateCommonSubexpression\n", *graph);
   EliminateCommonSubexpression(graph);
   GRAPH_DEBUG(
       "After EliminateCommonSubexpression , before PeepholeOptimize\n", *graph);
@@ -929,10 +929,10 @@ void runOptimization(
   } else {
     ConstantPropagation(graph, true);
   }
-  GRAPH_DEBUG("After ConstantPropagation, before constantPooling\n", *graph);
+  GRAPH_DEBUG("After ConstantPropagation, before ConstantPooling\n", *graph);
 
-  constantPooling(graph);
-  GRAPH_DEBUG("After constantPooling\n", *graph);
+  ConstantPooling(graph);
+  GRAPH_DEBUG("After ConstantPooling\n", *graph);
 
   // Unroll small loops, and eliminate expressions that are the same at every
   // iteration.

@@ -380,7 +380,7 @@ static void ImplicitCastForONNX(Block* block) {
 
     ImplicitCastNodeForONNX(*it);
   }
-  eliminateDeadCode(
+  EliminateDeadCode(
       block, true, DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS);
 }
 
@@ -396,7 +396,7 @@ static void LowPrecisionCastForStandardOpsONNX(
       LowPrecisionCastNodeForStandardOps(*it, opset_version);
     }
   }
-  eliminateDeadCode(
+  EliminateDeadCode(
       block, true, DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS);
 }
 } // anonymous namespace
