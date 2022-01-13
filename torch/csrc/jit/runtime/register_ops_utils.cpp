@@ -384,8 +384,8 @@ void listAdd(Stack& stack) {
 }
 
 void listInplaceAdd(Stack& stack) {
-  c10::List<IValue> b = pop(stack).to<List<IValue>>();
-  c10::List<IValue> a = pop(stack).to<List<IValue>>();
+  c10::List<IValue> b = pop(stack).to<c10::List<IValue>>();
+  c10::List<IValue> a = pop(stack).to<c10::List<IValue>>();
   a.append(std::move(b));
   push(stack, std::move(a));
 }
