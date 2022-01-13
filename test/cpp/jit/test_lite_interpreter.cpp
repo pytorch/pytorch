@@ -2056,7 +2056,7 @@ void enumerateTupleType(
 }
 
 class LiteInterpreterDynamicTypeTestFixture
-    : public ::testing::TestWithParam<int> {
+    : public ::testing::TestWithParam<size_t> {
  protected:
   void SetUp() {
     cu = std::make_shared<CompilationUnit>();
@@ -2146,10 +2146,8 @@ INSTANTIATE_TEST_SUITE_P(
     PyTorch,
     LiteInterpreterDynamicTypeTestFixture,
     ::testing::Range(
-        0,
-        static_cast<int>(LiteInterpreterDynamicTypeTestFixture::kNumSplits)));
-
-#undef NUM_SPLITS
+        static_cast<size_t>(0),
+        LiteInterpreterDynamicTypeTestFixture::kNumSplits));
 
 } // namespace jit
 } // namespace torch
