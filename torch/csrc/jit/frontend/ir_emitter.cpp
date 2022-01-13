@@ -4,6 +4,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/irange.h>
+#include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/frontend/canonicalize_modified_loop.h>
 #include <torch/csrc/jit/frontend/convert_to_ssa.h>
@@ -22,6 +23,7 @@
 #include <torch/csrc/jit/passes/lift_closures.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/normalize_ops.h>
+#include <torch/csrc/jit/passes/replacement_of_old_operators.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/slice_indices_adjust.h>
@@ -655,6 +657,13 @@ struct to_ir {
           << "methods must have a self argument";
     }
     method.setSchema(emitDef(def, self, graph->block()));
+
+#if ENABLE_UPGRADERS
+    // At this point, we might have received a graph that is compiled with
+    // old operator schemas that might not exist in the system anymore.
+    // Therefore, we replace such ops with its' valid upgrader.
+    ReplaceOldOperatorsWithUpgraders(graph);
+#endif
 
     // NB ORDERING: SSA conversion has to occur before
     // lifting of closures and forks, this way closures are converted
@@ -5170,7 +5179,8 @@ std::unique_ptr<Function> CompilationUnit::define(
     const Self* self,
     const std::unordered_map<std::string, Function*>& function_table,
     bool shouldMangle,
-    CompilationUnit::FunctionType type) const {
+    CompilationUnit::FunctionType type,
+    c10::optional<size_t> operator_set_version) const {
   TORCH_INTERNAL_ASSERT(resolver);
   auto _resolver = resolver;
   if (!self) {
@@ -5202,8 +5212,11 @@ std::unique_ptr<Function> CompilationUnit::define(
       name = mangle(name);
     }
   }
-  auto fn = torch::make_unique<GraphFunction>(
-      std::move(name), std::make_shared<Graph>(), creator);
+
+  auto graph = std::make_shared<Graph>();
+  graph->set_op_version(operator_set_version);
+
+  auto fn = torch::make_unique<GraphFunction>(std::move(name), graph, creator);
   if (self) {
     // Register this as a method on `self`'s type
     if (type == CompilationUnit::FunctionType::Hook) {
@@ -5224,7 +5237,8 @@ std::vector<Function*> CompilationUnit::define(
     const std::vector<Def>& definitions,
     const std::vector<ResolverPtr>& defResolvers,
     const Self* self,
-    bool shouldMangle) {
+    bool shouldMangle,
+    c10::optional<size_t> operator_set_version) {
   TORCH_INTERNAL_ASSERT(definitions.size() == defResolvers.size());
   TORCH_INTERNAL_ASSERT(properties.size() == propResolvers.size());
   std::vector<Function*> functions;
@@ -5266,7 +5280,8 @@ std::vector<Function*> CompilationUnit::define(
         self,
         function_table,
         shouldMangle,
-        CompilationUnit::FunctionType::Method);
+        CompilationUnit::FunctionType::Method,
+        operator_set_version);
 
     record_function(std::move(fn));
   }
