@@ -58,7 +58,9 @@ class TestDeviceAnalysis(JitTestCase):
         cls.cpu = torch.device("cpu")
         cls.cuda = torch.device("cuda")
         cls.vulkan = torch.device("vulkan")
-        cls.mkldnn = torch.device("mkldnn")
+        cls.mkldnn = torch.device(
+            "mkldnn"
+        )  # MKLDNN can't mix with other device types at all
         cls.device_types = [cls.cpu, cls.cuda, cls.vulkan]
 
     @staticmethod
@@ -163,6 +165,28 @@ class TestDeviceAnalysis(JitTestCase):
         for in_device in self.device_types:
             self.assert_device_equal(set_device, [in_device, None], None)
 
+    def test_tensor_as_fns(self):
+        def view_as_fn(x, y):
+            return x.view_as(y)
+
+        def expand_as_fn(x, y):
+            return x.expand_as(y)
+
+        def reshape_as_fn(x, y):
+            return x.reshape_as(y)
+
+        for test_fn in [view_as_fn, expand_as_fn, reshape_as_fn]:
+            self.assert_device_equal(test_fn, [self.cpu, self.cpu], self.cpu)
+            self.assert_device_equal(test_fn, [self.cuda, None], self.cuda)
+            self.assert_device_equal(test_fn, [None, self.mkldnn], None)
+
+        def type_as_fn(x, y):
+            return x.type_as(y)
+
+        self.assert_device_equal(type_as_fn, [self.cpu, self.cpu], self.cpu)
+        self.assert_device_equal(type_as_fn, [self.cuda, None], None)
+        self.assert_device_equal(type_as_fn, [None, self.mkldnn], self.mkldnn)
+
     def zerodim_test_core(self, device_pairs):
         # Test the support of zerodim tensors with non-zerodim tensors
         def mul(x, y):
@@ -248,6 +272,28 @@ class TestDeviceAnalysis(JitTestCase):
             (self.cuda, self.cuda),
         ]
         self.zerodim_test_core(device_pairs)
+
+    def test_custom_device_op(self):
+        # Test both of the custom functions and check that the devicetype is
+        # correctly applied
+        def set_cuda(x):
+            return x.cuda()
+
+        def set_cpu(x):
+            return x.cpu()
+
+        def set_mkldnn(x):
+            return x.to_mkldnn()
+
+        device_pairs = (
+            (set_cuda, self.cuda),
+            (set_cpu, self.cpu),
+            (set_mkldnn, self.mkldnn),
+        )
+
+        for fn, out_device in device_pairs:
+            for in_device in self.device_types:
+                self.assert_device_equal(fn, [in_device], out_device)
 
     def test_device_if_propagation(self):
         def test_fn(x, y, z: bool):
