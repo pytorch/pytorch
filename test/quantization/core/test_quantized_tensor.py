@@ -258,16 +258,16 @@ class TestQuantizedTensor(TestCase):
             self.assertEqual(int_repr, loaded_int_repr)
 
     def test_qtensor_channel_float_assignment(self):
-        t1 = torch.rand(2,3,5,5)
-        t2 = torch.rand(2,3,5,5)
+        t1 = torch.rand(2, 3, 5, 5)
+        t2 = torch.rand(2, 3, 5, 5)
         for axis in range(t1.ndim):
             scales = np.random.rand(t1.size()[axis])
             zero_points = np.random.randint(low=0, high=50, size=t1.size()[axis])
             for dtype in [torch.qint8, torch.quint8, torch.qint32]:
                 qt1 = torch.quantize_per_channel(t1, scales=torch.tensor(scales),
-                zero_points=torch.tensor(zero_points), dtype=dtype, axis=axis)
+                                                 zero_points=torch.tensor(zero_points), dtype=dtype, axis=axis)
                 qt2 = torch.quantize_per_channel(t2, scales=torch.tensor(scales),
-                zero_points=torch.tensor(zero_points), dtype=dtype, axis=axis)
+                                                 zero_points=torch.tensor(zero_points), dtype=dtype, axis=axis)
                 i = 0
                 j = 1
                 k = 2
