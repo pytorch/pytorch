@@ -112,12 +112,14 @@ DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nni.LinearReLU: nniqd.LinearReLU,
     nn.EmbeddingBag: nnq.EmbeddingBag,
     nn.Embedding: nnq.Embedding,
-    nn.Conv1d: nnqd.Conv1d,
-    nn.Conv2d: nnqd.Conv2d,
-    nn.Conv3d: nnqd.Conv3d,
-    nn.ConvTranspose1d: nnqd.ConvTranspose1d,
-    nn.ConvTranspose2d: nnqd.ConvTranspose2d,
-    nn.ConvTranspose3d: nnqd.ConvTranspose3d,
+    # Don't want to enable these by default because the numerical
+    # accuracy is poor compared to other dynamic ops
+    # nn.Conv1d: nnqd.Conv1d,
+    # nn.Conv2d: nnqd.Conv2d,
+    # nn.Conv3d: nnqd.Conv3d,
+    # nn.ConvTranspose1d: nnqd.ConvTranspose1d,
+    # nn.ConvTranspose2d: nnqd.ConvTranspose2d,
+    # nn.ConvTranspose3d: nnqd.ConvTranspose3d,
 }
 
 # Allowlist for propagating the qconfig
@@ -128,11 +130,11 @@ _INCLUDE_QCONFIG_PROPAGATE_LIST : Set[Callable] = {
 # Default mapping from floating point function or torch ops to quantized ops
 # TODO: merge with default static mapping
 DEFAULT_FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS : Dict[Union[Callable, str], Callable] = {
-    F.elu: torch._ops.ops.quantized.elu,
-    F.hardswish: torch._ops.ops.quantized.hardswish,
-    F.instance_norm: torch._ops.ops.quantized.instance_norm,
-    F.layer_norm: torch._ops.ops.quantized.layer_norm,
-    F.leaky_relu: torch._ops.ops.quantized.leaky_relu,
+    F.elu: torch.ops.quantized.elu,
+    F.hardswish: torch.ops.quantized.hardswish,
+    F.instance_norm: torch.ops.quantized.instance_norm,
+    F.layer_norm: torch.ops.quantized.layer_norm,
+    F.leaky_relu: torch.ops.quantized.leaky_relu,
 }
 
 # mapping from module to output activation post process class
