@@ -8616,6 +8616,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_allclose,
            skips=(
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness'),
            ),
            supports_out=False),
     OpInfo('broadcast_to',
@@ -9596,6 +9597,7 @@ op_db: List[OpInfo] = [
                # RuntimeError:
                # Arguments for call are not valid.
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32, torch.complex64)),  # noqa: B950
+               DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness'),
                # 69925: RuntimeError: Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu!
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad', device_type='cuda'),
                # (ROCm) Memory exception on virtual address 0x7f6f3deb7000, node id 4: Page not present
@@ -11554,7 +11556,11 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
-           sample_inputs_func=sample_inputs_batch_norm),
+           sample_inputs_func=sample_inputs_batch_norm,
+           skips=(
+               # see https://github.com/pytorch/pytorch/issues/71286
+               DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness'),
+           )),
     # This variant tests batch_norm with cuDNN disabled only on CUDA devices
     OpInfo('nn.functional.batch_norm',
            variant_test_name='without_cudnn',
@@ -13098,6 +13104,7 @@ op_db: List[OpInfo] = [
            skips=(
                # RuntimeError: attribute lookup is not defined on builtin
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness'),
            )),
     OpInfo('bfloat16',
            op=lambda x, *args, **kwargs: x.bfloat16(*args, **kwargs),
@@ -13110,6 +13117,7 @@ op_db: List[OpInfo] = [
            skips=(
                # RuntimeError: attribute lookup is not defined on builtin
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness'),
            )),
     OpInfo('bool',
            op=lambda x, *args, **kwargs: x.bool(*args, **kwargs),
@@ -13326,6 +13334,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
                # Empty tensor data is garbage so it's hard to make comparisons with it.
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_conj_view'),
+               # Empty tensor data is garbage so it's hard to make comparisons with it.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness'),
                # Can't find schemas for this operator for some reason
                DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
            )),
@@ -13432,6 +13442,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
                # Empty tensor data is garbage so it's hard to make comparisons with it.
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_conj_view'),
+               # Empty tensor data is garbage so it's hard to make comparisons with it.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness'),
                # Can't find schemas for this operator for some reason
                DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
            ),
@@ -13631,7 +13643,9 @@ op_db: List[OpInfo] = [
                # RuntimeError: Arguments for call not valid.
                #               Expected a value of type 'List[Tensor]' for argument
                #               'tensors' but instead found type 'Tensor (inferred)'.
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_jit_alias_remapping'),)),
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_jit_alias_remapping'),
+               # see https://github.com/pytorch/pytorch/issues/71286
+               DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness'),)),
     OpInfo('vstack',
            aliases=('row_stack',),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),

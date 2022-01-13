@@ -2192,7 +2192,7 @@ def f({', '.join(param_names)}):
 
     @onlyCPU
     @_tracing_ops(op_db)
-    def test_correct_output(self, device, dtype, op):
+    def test_nnc_correctness(self, device, dtype, op):
         variant_sample_pairs = get_traced_sample_variant_pairs(device, dtype, op)
 
         for variant, sample in variant_sample_pairs:
