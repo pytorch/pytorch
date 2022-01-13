@@ -752,6 +752,23 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         self.assertIn("NWithOverloads.1", func_names)
         self.assertIn("NWithOverloads.2", func_names)
 
+    def test_local_function_infer_scopes(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                new_tensor_shape = x.size()[:-1] + \
+                    (1, 1, -1)
+                tensor = x.view(*new_tensor_shape)
+                return tensor
+
+        x = torch.randn(4, 5)
+        f = io.BytesIO()
+        torch.onnx.export(M(), (x,), f, export_modules_as_functions=True,
+                          opset_version=self.opset_version, do_constant_folding=False)
+
+        onnx_model = onnx.load(io.BytesIO(f.getvalue()))
+        funcs = onnx_model.functions
+        self.assertIn("M", [f.name for f in funcs])
+
     def test_aten_fallthrough(self):
         # Test aten export of op with no symbolic
         class Module(torch.nn.Module):
