@@ -20,6 +20,7 @@ from ..qconfig import QConfigAny
 from torch.quantization import (
     ObserverBase,
     FakeQuantizeBase,
+    is_activation_post_process,
 )
 
 from ..qconfig_dict_utils import (
@@ -168,14 +169,32 @@ def trace_with_inputs(
 
 # TODO(future PR): verify correctness of this for all
 # quantizeable modules
-def is_leaf(m: torch.nn.Module) -> bool:
+def is_leaf(
+    m: torch.nn.Module,
+    prepare_custom_config_dict: Optional[Dict[str, Any]],
+) -> bool:
+    if prepare_custom_config_dict is None:
+        prepare_custom_config_dict = {}
+
+    if 'non_traceable_module_class' in prepare_custom_config_dict:
+        for target_cls in prepare_custom_config_dict['non_traceable_module_class']:
+            if isinstance(m, target_cls):
+                return True
+
+    # TODO(future PR): extend to the rest of the container classes
+    container_classes = (
+        torch.nn.Sequential,
+        torch.nn.ModuleList,
+    )
     return (
-        # allowlist everything in torch.nn except nn.Sequential
+        # allowlist everything in torch.nn except containers
         (m.__module__.startswith('torch.nn') and (
-            not isinstance(m, torch.nn.Sequential)
+            not isinstance(m, container_classes)
         )) or
         # allowlist nni modules, as they inherit from nn.Sequential
-        m.__module__.startswith('torch.nn.intrinsic')
+        m.__module__.startswith('torch.nn.intrinsic') or
+        # observers and fake quants are leaves
+        is_activation_post_process(m)
     )
 
 class FuncOutputObsType(enum.Enum):
@@ -522,7 +541,12 @@ def get_torch_function_hook_type(
 
     if needs_op_hooks:
         return HookType.OP_HOOKS
-    elif parent_module_has_qstate:
+    elif (
+        parent_module_has_qstate and
+        # do not attempt to dequantize the args to dequantize, as that will
+        # lead to infinite recursion
+        func != torch.Tensor.dequantize
+    ):
         return HookType.ARG_DEQUANTS
     else:
         return HookType.NONE
