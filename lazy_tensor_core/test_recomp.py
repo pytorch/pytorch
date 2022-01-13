@@ -31,7 +31,7 @@ class Optimizer:
         self.param.data.sub_(diff)
 
     def zero_grad(self):
-        if self.param.grad:
+        if self.param.grad is not None:
             self.param.grad.zero_()
 
 dev = 'lazy'
@@ -42,7 +42,7 @@ model.train()
 print(model.bias.requires_grad)
 print(x.requires_grad)
 optimizer = Optimizer(model.parameters())
-niter = 1
+niter = 3
 for _ in range(niter):
     optimizer.zero_grad()
     pred = model(x)
