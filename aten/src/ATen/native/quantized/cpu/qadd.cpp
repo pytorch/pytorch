@@ -224,6 +224,7 @@ Tensor qadd(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
   check_inputs(qa, qb);
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
+      qa.sizes() == qb.sizes() && /* qnnpack does not support boradcasting */
       qa.scalar_type() == kQUInt8 && qb.scalar_type() == kQUInt8) {
     return qnnpack_add<ReLUFused>(qa, qb, scale, zero_point);
   }
