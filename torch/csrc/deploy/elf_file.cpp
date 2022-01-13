@@ -1,5 +1,5 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/deploy/elf_file.h>
-
 namespace torch {
 namespace deploy {
 
@@ -19,7 +19,7 @@ ElfFile::ElfFile(const char* filename) : memFile_(filename) {
   strtabSection_ = toSection(&shdrList_[strtabSecNo]);
 
   sections_.reserve(numSections_);
-  for (int i = 0; i < numSections_; ++i) {
+  for (const auto i : c10::irange(numSections_)) {
     sections_.emplace_back(toSection(&shdrList_[i]));
   }
 }
@@ -33,6 +33,7 @@ at::optional<Section> ElfFile::findSection(const char* name) const {
       break;
     }
   }
+
   return found;
 }
 

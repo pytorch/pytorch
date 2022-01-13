@@ -25,6 +25,7 @@
 #include <limits>
 #include <numeric>
 #include <string>
+#include <tuple>
 
 namespace at {
 namespace meta {
@@ -112,41 +113,28 @@ namespace native {
 DEFINE_DISPATCH(addr_stub);
 DEFINE_DISPATCH(linalg_vector_norm_stub);
 
-// Helper function for det methods.
-// For pivoted LU factorization A = P * L * U. Since we always have det(L) = 1,
-// det(P) = \pm 1, this method returns a 3-tuple:
-//   (det(P), diag(U), info),
-// where info helps us identify singular matrices.
-static inline std::tuple<c10::ExclusivelyOwned<Tensor>, c10::ExclusivelyOwned<Tensor>> _lu_det_P_diag_U(const Tensor& self) {
-  Tensor pivs, lu, infos;
-  std::tie(lu, pivs, infos) = at::_lu_with_info(self, /*pivot=*/true, /*check_errors=*/false);
-  TORCH_CHECK(infos.ge(0).all().item<uint8_t>(), "Invalid argument passed to lu");
-  auto n = self.size(-1);
-  auto num_exchanges = (at::arange(1, n + 1, pivs.options()) != pivs)
-    .sum(-1, /*keepdim=*/false, /*dtype=*/at::kLong).fmod_(2);
-  auto u_diagonal = lu.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1);
-  num_exchanges.mul_(-2).add_(1);
-  return std::make_tuple(c10::ExclusivelyOwned<Tensor>(std::move(num_exchanges)), c10::ExclusivelyOwned<Tensor>(std::move(u_diagonal)));
+// As P is a permutation matrix
+// det(P) = 1 if it's an even permutation and det(P) = -1 if it's an odd permutation
+static inline Tensor _lu_det_P(const Tensor& lu, const Tensor& pivs) {
+  const auto n = lu.size(-1);
+  auto det_P = (at::arange(1, n + 1, pivs.options()) != pivs)
+    .sum(-1, /*keepdim=*/false, /*dtype=*/at::kLong)
+    .fmod_(2)
+    // take 0 to 1 and 1 to -1
+    .mul_(-2)
+    .add_(1);
+  return det_P;
 }
 
 // Given a pivoted LU factorization A = P L U,
 // det(A) = det(P) * det(L) * det(U).
-// Since det(P) = +- 1 (even or odd permutation), and diag(L) = I, we get that
-// det(A) = ([is P odd] * -2 + 1) * prod(diag(U))
 std::tuple<Tensor, Tensor, Tensor> _det_lu_based_helper(const Tensor& self) {
-  Tensor lu, pivs, infos;
-  std::tie(lu, pivs, infos) = at::_lu_with_info(self, /*pivot=*/true, /*check_errors*/false);
-  TORCH_CHECK(infos.ge(0).all().item<uint8_t>(), "at::_det_lu_based_helper(): Invalid argument passed to LU");
+  Tensor pivs, lu;
+  std::tie(lu, pivs, std::ignore) = at::linalg_lu_factor_ex(self);
+  const auto det_P = _lu_det_P(lu, pivs);
+  auto det = det_P * at::prod(lu.diagonal(0, -2 ,-1), /*dim=*/-1);
 
-  // find det(P)
-  auto n = self.size(-1);
-  auto n_transpositions_mod_2 = (at::arange(1, n + 1, pivs.options()) != pivs)
-    .sum(-1, /*keepdim=*/false, /*dtype=*/at::kLong).fmod_(2);
-  auto p_det = n_transpositions_mod_2.mul_(-2).add_(1);
-
-  auto det = p_det * at::prod(lu.diagonal(0, -2, -1), /*dim=*/-1);
-
-  return std::make_tuple(det, lu, pivs);
+  return std::make_tuple(std::move(det), std::move(lu), std::move(pivs));
 }
 
 // torch.det, alias for torch.linalg.det
@@ -177,14 +165,16 @@ Tensor logdet(const Tensor& self) {
   squareCheckInputs(self, "logdet");
   checkFloatingOrComplex(self, "logdet");
 
-  c10::ExclusivelyOwned<Tensor> det_P, diag_U;
-  std::tie(det_P, diag_U) = _lu_det_P_diag_U(self);
-  Tensor det_sign = diag_U->sign().prod(-1).mul_(*det_P);
+  Tensor pivs, lu;
+  std::tie(lu, pivs, std::ignore) = at::linalg_lu_factor_ex(self);
+  const auto det_P = _lu_det_P(lu, pivs);
+  const auto diag_U = lu.diagonal(0, -2 ,-1);
+  const auto det_sign = diag_U.sign().prod(-1).mul_(det_P);
 
   // If det_sign > 0, diag_U.abs_().log_().sum(-1) gives logdet (this means U is not singular).
   // If det_sign <= 0, then we get proper nan (when det < 0, i.e., det_sign) or -inf (when det = 0, i.e., U is singular).
   // U is singular when U(i, i) = 0 for some i in [1, self.size(-1)].
-  Tensor logdet_vals = diag_U->abs_().log_().sum(-1);
+  Tensor logdet_vals = diag_U.abs_().log_().sum(-1);
   if (self.dim() > 2) {
     auto indices = toListOfOptionalTensors((det_sign < 0).nonzero_numpy());
     // NOLINTNEXTLINE(performance-move-const-arg)
@@ -201,14 +191,16 @@ std::tuple<Tensor, Tensor> linalg_slogdet(const Tensor& self) {
   TORCH_CHECK(t == ScalarType::Double || t == ScalarType::Float || t == ScalarType::ComplexFloat || t == ScalarType::ComplexDouble,
               "linalg.slogdet: expected a tensor of float, double, cfloat or cdouble types but got ", t);
 
-  c10::ExclusivelyOwned<Tensor> det_P, diag_U;
-  std::tie(det_P, diag_U) = _lu_det_P_diag_U(self);
-  auto det_sign = diag_U->sgn().prod(-1).mul_(*det_P);
+  Tensor pivs, lu;
+  std::tie(lu, pivs, std::ignore) = at::linalg_lu_factor_ex(self);
+  const auto det_P = _lu_det_P(lu, pivs);
+  const auto diag_U = lu.diagonal(0, -2 ,-1);
+  const auto det_sign = diag_U.sgn().prod(-1).mul_(det_P);
   // abslogdet_val is -inf if U is singular, in which case diag_U.abs_().log_().sum(-1) will return -inf.
   // U is singular when U(i, i) = 0 for some i in [1, self.size(-1)].
   // Since abslogdet_val cannot take nan, no special case handling is required.
   // in-place abs is not supported for complex tensors
-  auto abslogdet_val = isComplexType(t) ? diag_U->abs().log_().sum(-1) : diag_U->abs_().log_().sum(-1);
+  auto abslogdet_val = isComplexType(t) ? diag_U.abs().log_().sum(-1) : diag_U.abs_().log_().sum(-1);
   return std::make_tuple(det_sign, abslogdet_val);
 }
 
@@ -2836,7 +2828,7 @@ Tensor linalg_tensorinv(const Tensor& self, int64_t ind) {
   // If the reshaped self is not invertible catch this error
   Tensor result, info;
   std::tie(result, info) = at::linalg_inv_ex(self.reshape({prod_ind_end, prod_ind_end}), /*check_errors=*/false);
-  TORCH_CHECK(info.item<int64_t>() == 0, "Failed to invert the input tensor, because it is singular.");
+  singleCheckErrors(info.item<int64_t>(), "inv");
 
   return result.reshape(shape_ind_end);
 }
