@@ -1031,14 +1031,14 @@ class CrossEntropyLoss(_WeightedLoss):
     This is particularly useful when you have an unbalanced training set.
 
     The `input` is expected to contain raw, unnormalized scores for each class.
-    `input` has to be a Tensor of size either :math:`(minibatch, C)` or
-    :math:`(minibatch, C, d_1, d_2, ..., d_K)` with :math:`K \geq 1` for the
-    `K`-dimensional case. The latter is useful for higher dimension inputs, such
+    `input` has to be a Tensor of size :math:`(C)` for unbatched input,
+    :math:`(minibatch, C)` or :math:`(minibatch, C, d_1, d_2, ..., d_K)` with :math:`K \geq 1` for the
+    `K`-dimensional case. The last being useful for higher dimension inputs, such
     as computing cross entropy loss per-pixel for 2D images.
 
     The `target` that this criterion expects should contain either:
 
-    - Class indices in the range :math:`[0, C-1]` where :math:`C` is the number of classes; if
+    - Class indices in the range :math:`[0, C)` where :math:`C` is the number of classes; if
       `ignore_index` is specified, this loss also accepts this class index (this index
       may not necessarily be in the class range). The unreduced (i.e. with :attr:`reduction`
       set to ``'none'``) loss for this case can be described as:

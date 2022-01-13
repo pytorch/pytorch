@@ -2896,9 +2896,9 @@ def cross_entropy(
 
     Args:
         input (Tensor) : Predicted unnormalized scores (often referred to as logits);
-        see Shape section below for supported shapes.
+            see Shape section below for supported shapes.
         target (Tensor) : Ground truth class indices or class probabilities;
-        see Shape section below for supported shapes.
+            see Shape section below for supported shapes.
         weight (Tensor, optional): a manual rescaling weight given to each
             class. If given, has to be a Tensor of size `C`
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
