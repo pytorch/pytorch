@@ -25,10 +25,6 @@ class Optimizer:
 
     def step(self):
         diff = torch.ops.lazy_cuda.optim(self.param, self.param.grad)
-        # TODO: figure out if there's a way to specify schema for custom ops
-        # so we can fold the update into optim
-        # update
-        self.param.data.sub_(diff)
 
     def zero_grad(self):
         if self.param.grad is not None:
