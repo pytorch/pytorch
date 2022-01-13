@@ -319,9 +319,9 @@ def _str_intern(inp):
         suffixes.append('device=\'' + str(self.device) + '\'')
 
     # Tensor printing performs tensor operations like slice, indexing, etc to make it in a
-    # representable format. These operations on xla tensor results in recompilations. Hence,
-    # to avoid recompilations, copying the tensor to cpu before printing.
-    if self.device.type == 'xla':
+    # representable format. These operations on xla/lazy tensor results in compilations. Hence,
+    # to avoid compilations, copying the tensor to cpu before printing.
+    if self.device.type == 'xla' or self.device.type == 'lazy':
         self = self.to('cpu')
 
     # TODO: add an API to map real -> complex dtypes
