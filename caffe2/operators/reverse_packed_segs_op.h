@@ -3,6 +3,7 @@
 
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
+#include "c10/util/irange.h"
 
 namespace caffe2 {
 
@@ -62,7 +63,7 @@ class ReversePackedSegsOp final : public Operator<Context> {
     context_.FinishDeviceComputation();
 
     T* rev_data_ptr = output->template mutable_data<T>();
-    for (int64_t i = 0; i < batch_size; i++) {
+    for (const auto i : c10::irange(batch_size)) {
       const auto& seg_length = lengths_host[i];
       CAFFE_ENFORCE_LE(seg_length, max_length);
       int64_t j = 0;
