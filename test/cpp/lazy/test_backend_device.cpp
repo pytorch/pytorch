@@ -95,6 +95,7 @@ TEST(BackendDeviceTest, GetBackendDevice1) {
 TEST(BackendDeviceTest, GetBackendDevice2) {
   auto tensor1 = torch::rand({0, 1, 3, 0});
   auto tensor2 = torch::rand({0, 1, 3, 0});
+  // TODO(alanwaketan): Cover the test case for GetBackendDevice().
   EXPECT_FALSE(GetBackendDevice(tensor1, tensor2));
 }
 
