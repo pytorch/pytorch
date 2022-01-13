@@ -232,6 +232,13 @@ TypePtr DynamicType::fallback() const {
       for (const auto& elem : arguments_.elems) {
         fallbacks.push_back(elem.ty->fallback());
       }
+      if (name_) {
+        std::vector<c10::string_view> fields;
+        for (const auto& elem : arguments_.elems) {
+          fields.emplace_back(*elem.label);
+        }
+        return TupleType::createNamed(*name_, fields, fallbacks);
+      }
       return TupleType::create(std::move(fallbacks));
     }
     case Tag::Dict:
