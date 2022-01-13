@@ -140,6 +140,7 @@ class TestTesting(TestCase):
 
         self._isclose_helper(tests, device, dtype, True)
 
+    @unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
     @dtypes(torch.complex64, torch.complex128)
     def test_isclose_complex(self, device, dtype):
         tests = (

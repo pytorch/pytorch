@@ -33,7 +33,7 @@ class functional_datapipe(object):
                     raise TypeError('`functional_datapipe` can only decorate IterDataPipe')
             IterDataPipe.register_datapipe_as_function(self.name, cls, enable_df_api_tracing=self.enable_df_api_tracing)
         elif issubclass(cls, MapDataPipe):
-            MapDataPipe.register_datapipe_as_function(self.name, cls, enable_df_api_tracing=self.enable_df_api_tracing)
+            MapDataPipe.register_datapipe_as_function(self.name, cls)
 
         return cls
 
