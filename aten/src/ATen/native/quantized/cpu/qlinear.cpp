@@ -379,12 +379,12 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
 
   auto output_min = ReluFused
       // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-      ? activationLimits(output_scale, output_zero_point, Activation::RELU)
+      ? activationLimits<uint8_t>(output_scale, output_zero_point, Activation::RELU)
             .first
       : std::numeric_limits<uint8_t>::min();
   auto output_max = ReluFused
       // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-      ? activationLimits(output_scale, output_zero_point, Activation::RELU)
+      ? activationLimits<uint8_t>(output_scale, output_zero_point, Activation::RELU)
             .second
       : std::numeric_limits<uint8_t>::max();
   TORCH_INTERNAL_ASSERT(packB != nullptr, "Packed Weights are NULL");
