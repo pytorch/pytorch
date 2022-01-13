@@ -856,6 +856,7 @@ libtorch_python_core_sources = [
     "torch/csrc/jit/python/python_tree_views.cpp",
     "torch/csrc/jit/runtime/static/init.cpp",
     "torch/csrc/jit/tensorexpr/tensorexpr_init.cpp",
+    "torch/csrc/monitor/python_init.cpp",
     "torch/csrc/multiprocessing/init.cpp",
     "torch/csrc/onnx/init.cpp",
     "torch/csrc/serialization.cpp",
