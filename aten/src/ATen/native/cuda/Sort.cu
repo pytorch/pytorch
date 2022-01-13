@@ -331,7 +331,7 @@ void launch_stable_sort_kernel(
   constexpr bool is_rocm_bf16_sort_unsupported = false;
 #endif
 
-  AT_DISPATCH_ALL_TYPES_AND3(kBool, kHalf, kBFloat16, self_.scalar_type(), "sort", [&]{
+  AT_DISPATCH_ALL_TYPES_AND3(kBool, kHalf, kBFloat16, self.scalar_type(), "sort", [&]{
     c10::guts::if_constexpr<!(is_rocm_bf16_sort_unsupported && std::is_same<scalar_t, c10::BFloat16>::value)>([&](auto _){
       const scalar_t *self_ptr = self_.data_ptr<scalar_t>();
       auto values_ptr = reinterpret_cast<scalar_t *>(values_ptr_);
