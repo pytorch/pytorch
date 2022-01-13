@@ -27,8 +27,10 @@ name: !{{ build_environment }}
 {%- endmacro %}
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
+# NOTE: Uncomment this to test within your PR
+# TODO: Migrate to new ciflow trigger, reference https://github.com/pytorch/pytorch/pull/70321
+#  pull_request:
+#    types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
   push:
     tags:
       - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
