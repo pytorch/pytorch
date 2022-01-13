@@ -2870,7 +2870,7 @@ TEST_F(Composed, ComposedOp) {
   bool fusable_on_device = torch::jit::tensorexpr::getTEMustUseLLVMOnCPU();
   torch::jit::tensorexpr::getTEMustUseLLVMOnCPU() = false;
   setTensorExprDynamicShapeFusionEnabled(true);
-  FuseTensorExprs(graph, /*min_group_size*/2, /*add_composed_op*/true);
+  FuseTensorExprs(graph, /*min_group_size*/ 2, /*add_composed_op*/ true);
   Code code(graph, "");
   InterpreterState interpreter{code};
   std::vector<IValue> stack = {a, b};
