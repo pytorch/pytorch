@@ -2,12 +2,38 @@ import torch
 from torch._C import _add_docstr, _special  # type: ignore[attr-defined]
 from torch._torch_docs import common_args, multi_dim_common
 
-__all__ = ['entr', 'psi', 'digamma', 'gammaln', 'polygamma', 'ellipe', 'erf', 'erfc', 'erfinv',
+__all__ = ['entr', 'psi', 'digamma', 'gammaln', 'polygamma', 'ellipe', 'ellipk', 'erf', 'erfc', 'erfinv',
            'erfcx', 'logit', 'logsumexp', 'expit', 'exp2', 'expm1', 'xlog1py', 'xlogy',
            'i0', 'i0e', 'i1', 'i1e', 'ndtr', 'ndtri', 'log1p', 'sinc', 'round', 'log_softmax',
            'zeta', 'multigammaln', 'gammainc', 'gammaincc', 'softmax']
 
 Tensor = torch.Tensor
+
+ellipk = _add_docstr(_special.special_ellipk,
+                     r"""
+ellipk(input, *, out=None) -> Tensor
+Computes complete elliptic integral of the first kind, elementwise.
+
+The function is defined as
+.. math:: K(m) = \int_0^{\pi/2} [1 - (m \sin(\theta))^2]^{-1/2} d\theta
+
+.. note:: Domain is :math:`(-inf, 1]`
+
+""" + """
+
+Args:
+   input (Tensor): the input tensor.
+
+Keyword args:
+    out (Tensor, optional): the output tensor.
+
+Example::
+    >>> a = torch.arange(-2, 2, 0.5)
+    >>> a
+    tensor([-2.0000, -1.5000, -1.0000, -0.5000,  0.0000,  0.5000,  1.0000,  1.5000])
+    >>> torch.special.ellipk(a)
+    tensor([1.1714, 1.2330, 1.3110, 1.4157, 1.5708, 1.8541,    inf,    nan])
+""")
 
 ellipe = _add_docstr(_special.special_ellipe,
                      r"""
@@ -15,7 +41,9 @@ ellipe(input, *, out=None) -> Tensor
 Computes complete elliptic integral of the second kind, elementwise.
 
 The function is defined as
-.. math:: E(k) = \int_0^{\pi/2} [1 - (k \sin(\theta))^2]^{1/2} d\theta
+.. math:: E(m) = \int_0^{\pi/2} [1 - (m \sin(\theta))^2]^{1/2} d\theta
+
+.. note:: Domain is :math:`(-inf, 1]`
 
 """ + """
 

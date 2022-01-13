@@ -1271,7 +1271,11 @@
   result: auto_element_wise
 
 - name: special_ellipe(Tensor self) -> Tensor
-  self: zeros_like(grad)
+  self: grad * (special_ellipe(self) - special_ellipk(self)) / (2 * self)
+  result: auto_element_wise
+
+- name: special_ellipk(Tensor self) -> Tensor
+  self: grad * ((special_ellipe(self) / ((2 * self) * (1 - self))) - (special_ellipk(self)/(2 * self)))
   result: auto_element_wise
 
 # DO NOT define a backward for reshape!

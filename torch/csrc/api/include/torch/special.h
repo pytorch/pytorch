@@ -135,6 +135,22 @@ inline Tensor& ellipe_out(Tensor& result, const Tensor& self) {
   return torch::special_ellipe_out(result, self);
 }
 
+/// Computes complete elliptic integral of the first kind of input, elementwise
+/// See https://pytorch.org/docs/master/special.html#torch.special.ellipe.
+///
+/// Example:
+/// ```
+/// auto t = torch::randn(128, dtype=kDouble);
+/// torch::special::ellipk(t);
+/// ```
+inline Tensor ellipk(const Tensor& self) {
+  return torch::special_ellipk(self);
+}
+
+inline Tensor& ellipk_out(Tensor& result, const Tensor& self) {
+  return torch::special_ellipk_out(result, self);
+}
+
 /// Computes entropy of input, elementwise
 /// See https://pytorch.org/docs/master/special.html#torch.special.entr.
 ///

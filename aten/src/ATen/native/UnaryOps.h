@@ -54,6 +54,7 @@ DECLARE_DISPATCH(unary_fn, log2_stub);
 DECLARE_DISPATCH(unary_fn, special_ndtri_stub);
 DECLARE_DISPATCH(unary_fn, neg_stub);
 DECLARE_DISPATCH(unary_fn, special_ellpe_stub);
+DECLARE_DISPATCH(unary_fn, special_ellpk_stub);
 
 DECLARE_DISPATCH(unary_fn, reciprocal_stub);
 DECLARE_DISPATCH(unary_fn, round_stub);

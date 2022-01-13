@@ -940,6 +940,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.swapaxes: lambda input, dim0, dim1: -1,
         torch.swapdims: lambda input, axis0, axis1: -1,
         torch.special.ellipe: lambda input: -1,
+        torch.special.ellipk: lambda input: -1,
         torch.special.entr: lambda input: -1,
         torch.special.erf: lambda input: -1,
         torch.special.erfc: lambda input: -1,

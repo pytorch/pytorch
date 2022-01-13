@@ -325,6 +325,74 @@ const auto ellpe_string = jiterator_stringify(
       return (polevl(x, P, 10) - log(x) * (x * polevl(x, Q, 9)));
     }); // ellpe_string
 
+const auto ellpk_string = jiterator_stringify(
+    template <typename T>
+    T polevl(const T x, const T A[], const int len) {
+      T result = 0;
+      for (int i = 0; i <= len; i++) {
+        result = result * x + A[i];
+      }
+      return result;
+    }
+
+    template <typename scalar_t>
+    static inline scalar_t ellpk_cephes(scalar_t x) {
+      static const scalar_t P[] = {
+          1.37982864606273237150E-4,
+          2.28025724005875567385E-3,
+          7.97404013220415179367E-3,
+          9.85821379021226008714E-3,
+          6.87489687449949877925E-3,
+          6.18901033637687613229E-3,
+          8.79078273952743772254E-3,
+          1.49380448916805252718E-2,
+          3.08851465246711995998E-2,
+          9.65735902811690126535E-2,
+          1.38629436111989062502E0};
+
+      static const scalar_t Q[] = {
+          2.94078955048598507511E-5,
+          9.14184723865917226571E-4,
+          5.94058303753167793257E-3,
+          1.54850516649762399335E-2,
+          2.39089602715924892727E-2,
+          3.01204715227604046988E-2,
+          3.73774314173823228969E-2,
+          4.88280347570998239232E-2,
+          7.03124996963957469739E-2,
+          1.24999999999870820058E-1,
+          4.99999999999999999821E-1};
+
+      static const scalar_t MACHEP = scalar_t{1.11022302462515654042E-16};
+      static const scalar_t C1 = scalar_t{1.3862943611198906188E0};
+
+      if (x < scalar_t{0.0}) {
+        return NAN;
+      }
+
+      if (x > scalar_t{1.0}) {
+        if (x == POS_INFINITY) {
+          return 0.0;
+        }
+        return ellpk_cephes(1 / x) / sqrt(x);
+      }
+
+      if (x > MACHEP) {
+        return (polevl(x, P, 10) - log(x) * polevl(x, Q, 10));
+      } else {
+        if (x == scalar_t{0.0}) {
+          return POS_INFINITY;
+        } else {
+          return (C1 - 0.5 * log(x));
+        }
+      }
+    }
+
+    template <typename scalar_t>
+    static inline scalar_t ellpk(scalar_t x) {
+      return ellpk_cephes(scalar_t{1} - x);
+    }); // ellpk_string
+
 const auto gcd_string = jiterator_stringify(
   template <typename T>
   T gcd(const T a_in, const T b_in) {
@@ -1656,46 +1724,6 @@ static inline C10_HOST_DEVICE scalar_t calc_i1e(scalar_t _x) {
   auto len = std::get<1>(coeff_pair);
   const scalar_t out = chbevl(scalar_t{32.0} / x - scalar_t{2.0}, B, len) / ::sqrt(x);
   return (_x < scalar_t{0.0}) ? -out : out;
-}
-
-template <typename scalar_t>
-static inline C10_HOST_DEVICE scalar_t ellpe(scalar_t x) {
-  static const scalar_t P[] = {
-      1.53552577301013293365E-4,
-      2.50888492163602060990E-3,
-      8.68786816565889628429E-3,
-      1.07350949056076193403E-2,
-      7.77395492516787092951E-3,
-      7.58395289413514708519E-3,
-      1.15688436810574127319E-2,
-      2.18317996015557253103E-2,
-      5.68051945617860553470E-2,
-      4.43147180560990850618E-1,
-      1.00000000000000000299E0};
-
-  static const scalar_t Q[] = {
-      3.27954898576485872656E-5,
-      1.00962792679356715133E-3,
-      6.50609489976927491433E-3,
-      1.68862163993311317300E-2,
-      2.61769742454493659583E-2,
-      3.34833904888224918614E-2,
-      4.27180926518931511717E-2,
-      5.85936634471101055642E-2,
-      9.37499997197644278445E-2,
-      2.49999999999888314361E-1};
-
-  x = scalar_t{1.0} - x;
-  if (x == scalar_t{0.0}) {
-    return scalar_t{1.0};
-  }
-  if (x < scalar_t{0.0}) {
-    return NAN;
-  }
-  if (x > scalar_t{1.0}) {
-    return ellpe(scalar_t{1.0} - scalar_t{1} / x) * sqrt(x);
-  }
-  return (polevl(x, P, 10) - log(x) * (x * polevl(x, Q, 9)));
 }
 
 #endif // USE_ROCM (false/true)

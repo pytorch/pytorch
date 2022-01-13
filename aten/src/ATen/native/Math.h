@@ -2109,7 +2109,7 @@ calc_erfcx(T x)
 }
 
 template <typename scalar_t>
-static inline scalar_t ellpe(scalar_t x) {
+C10_HOST_DEVICE static inline scalar_t ellpe(scalar_t x) {
   static const scalar_t P[] = {
       1.53552577301013293365E-4,
       2.50888492163602060990E-3,
@@ -2146,4 +2146,62 @@ static inline scalar_t ellpe(scalar_t x) {
     return ellpe(scalar_t{1.0} - scalar_t{1} / x) * sqrt(x);
   }
   return (polevl(x, P, 10) - log(x) * (x * polevl(x, Q, 9)));
+}
+
+template <typename scalar_t>
+C10_HOST_DEVICE static inline scalar_t ellpk_cephes(scalar_t x) {
+  static const scalar_t P[] = {
+      1.37982864606273237150E-4,
+      2.28025724005875567385E-3,
+      7.97404013220415179367E-3,
+      9.85821379021226008714E-3,
+      6.87489687449949877925E-3,
+      6.18901033637687613229E-3,
+      8.79078273952743772254E-3,
+      1.49380448916805252718E-2,
+      3.08851465246711995998E-2,
+      9.65735902811690126535E-2,
+      1.38629436111989062502E0};
+
+  static const scalar_t Q[] = {
+      2.94078955048598507511E-5,
+      9.14184723865917226571E-4,
+      5.94058303753167793257E-3,
+      1.54850516649762399335E-2,
+      2.39089602715924892727E-2,
+      3.01204715227604046988E-2,
+      3.73774314173823228969E-2,
+      4.88280347570998239232E-2,
+      7.03124996963957469739E-2,
+      1.24999999999870820058E-1,
+      4.99999999999999999821E-1};
+
+  static const scalar_t MACHEP = scalar_t{1.11022302462515654042E-16};
+  static const scalar_t C1 = scalar_t{1.3862943611198906188E0};
+
+  if (x < scalar_t{0.0}) {
+    return std::numeric_limits<scalar_t>::quiet_NaN();
+  }
+
+  if (x > scalar_t{1.0}) {
+    if (std::isinf(x)) {
+      return 0.0;
+    }
+    return ellpk_cephes(1 / x) / std::sqrt(x);
+  }
+
+  if (x > MACHEP) {
+    return (polevl(x, P, 10) - log(x) * polevl(x, Q, 10));
+  } else {
+    if (x == scalar_t{0.0}) {
+      return std::numeric_limits<scalar_t>::infinity();
+    } else {
+      return (C1 - 0.5 * std::log(x));
+    }
+  }
+}
+
+template <typename scalar_t>
+C10_HOST_DEVICE static inline scalar_t ellpk(scalar_t x) {
+  return ellpk_cephes(scalar_t{1}- x);
 }

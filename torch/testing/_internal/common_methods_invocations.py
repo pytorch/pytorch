@@ -1179,17 +1179,12 @@ def sample_inputs_unary(op_info, device, dtype, requires_grad, **kwargs):
     low, high = op_info.domain
     low = low if low is None else low + op_info._domain_eps
     high = high if high is None else high - op_info._domain_eps
-
-    if op_info.supports_sparse_csr:
-        # Tensors with dim=2 for sparse CSR testing
-        yield SampleInput(make_tensor((L, L), device=device, dtype=dtype,
+    shapes = ((50, 50),) if op_info.supports_sparse_csr else ((500,), ())
+    for shape in shapes:
+        t = make_tensor(shape, device=device, dtype=dtype,
                                       low=low, high=high,
-                                      requires_grad=requires_grad))
-    else:
-        for shape in ((L,), ()):
-            yield SampleInput(make_tensor(shape, device=device, dtype=dtype,
-                                          low=low, high=high,
-                                          requires_grad=requires_grad))
+                                      requires_grad=requires_grad)
+        yield SampleInput(t)
 
 # Metadata class for unary "universal functions (ufuncs)" that accept a single
 # tensor and have common properties like:
@@ -14077,9 +14072,19 @@ op_db: List[OpInfo] = [
                    supports_inplace_autograd=False,
                    safe_casts_outputs=True,
                    sample_inputs_func=sample_inputs_entr),
+    UnaryUfuncInfo('special.ellipk',
+                   ref=scipy.special.ellipk if TEST_SCIPY else _NOTHING,
+                   domain=(None, 1),
+                   aten_name='special_ellipk',
+                   supports_inplace_autograd=False,
+                   supports_forward_ad=True,
+                   supports_fwgrad_bwgrad=True,
+                   dtypes=all_types_and(torch.bool),
+                   dtypesIfCUDA=all_types_and(torch.bool),
+                   safe_casts_outputs=True),
     UnaryUfuncInfo('special.ellipe',
                    ref=scipy.special.ellipe if TEST_SCIPY else _NOTHING,
-                   domain=(float('-inf'), 1),
+                   domain=(None, 1),
                    aten_name='special_ellipe',
                    supports_inplace_autograd=False,
                    supports_forward_ad=True,
