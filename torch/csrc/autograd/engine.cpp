@@ -1262,7 +1262,11 @@ void GraphTask::stash_current_streams() {
   caller_current_streams_.resize(num_gpus);
   if (num_gpus > 0) {
     for (c10::DeviceIndex idx = 0; idx < num_gpus;  idx++) {
+#if defined(USE_ROCM) && (ROCM_VERSION < 50000)
+      if (true) {
+#else	      
       if (at::detail::getCUDAHooks().hasPrimaryContext(idx)) {
+#endif
         caller_current_streams_[idx] = guard.getStream({c10::DeviceType::CUDA, idx});
       } else {
         caller_current_streams_[idx] = c10::nullopt;
