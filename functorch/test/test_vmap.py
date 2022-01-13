@@ -3262,7 +3262,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.cosine_embedding_loss'),
         xfail('nn.functional.ctc_loss'),
         xfail('nn.functional.gaussian_nll_loss'),
-        xfail('nn.functional.group_norm'),
         xfail('nn.functional.hinge_embedding_loss'),
         xfail('nn.functional.huber_loss'),
         xfail('nn.functional.instance_norm'),
