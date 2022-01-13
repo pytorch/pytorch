@@ -921,7 +921,7 @@ def _test_undefined_forward_mode(func, outputs, inputs):
                 val2, res2 = fwAD.unpack_dual(d_o2)
 
                 if not (res1 is None or res2 is None):
-                    if not torch.equal(res1, res2):
+                    if not torch.allclose(res1, res2):
                         raise GradcheckError("Mismatch in tangent values for output with index: ", index_o,
                                              " when input: ", inp, " has an undefined tangent value. ",
                                              " Got: ", res1, " but expected: ", res2)
