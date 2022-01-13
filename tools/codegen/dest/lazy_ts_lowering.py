@@ -18,12 +18,12 @@ def ts_lowering_body(f: Union[NativeFunctionsGroup, NativeFunction]) -> str:
                 continue
             emplace_arguments.append('loctx->GetOutputOp(operand(i++))')
             continue
-        emplace_arguments.append(f'"{value.name}", {value.name}_')
+        emplace_arguments.append(f'"{value.name}", {value.name}')
 
     emplace_arguments_str = "\n    ".join(
         [f"arguments.emplace_back({a});" for a in emplace_arguments])
     emplace_kwarg_values = [f'"{t.name}", loctx->GetOutputOp(operand(i++))' for t in schema.keyword_values]
-    emplace_kwarg_scalars = [f'"{t.name}", {t.name}_' for t in schema.keyword_scalars]
+    emplace_kwarg_scalars = [f'"{t.name}", {t.name}' for t in schema.keyword_scalars]
     emplace_kwarguments = "\n    ".join(
         [f"kwarguments.emplace_back({a});" for a in emplace_kwarg_values + emplace_kwarg_scalars])
     return f"""\
