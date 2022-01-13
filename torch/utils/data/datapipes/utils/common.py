@@ -54,6 +54,7 @@ def get_file_binaries_from_pathnames(pathnames: Iterable, mode: str):
                             .format(type(pathname)))
         yield pathname, StreamWrapper(open(pathname, mode))
 
+
 def validate_pathname_binary_tuple(data: Tuple[str, IOBase]):
     if not isinstance(data, tuple):
         raise TypeError(f"pathname binary data should be tuple type, but it is type {type(data)}")
@@ -67,11 +68,21 @@ def validate_pathname_binary_tuple(data: Tuple[str, IOBase]):
             f"its subclasses as type, but it is type {type(data[1])}"
         )
 
+
+def deprecation_warning(name, new_name: str = ""):
+    new_name_statement = ""
+    if new_name:
+        new_name_statement = f" Please use {new_name} instead."
+    warnings.warn(f"{name} and its functional API are deprecated and will be removed from the package `torch`." +
+                  new_name_statement, DeprecationWarning)
+
+
 # Warns user that the DataPipe has been moved to TorchData and will be removed from `torch`
 def deprecation_warning_torchdata(name):
     warnings.warn(f"{name} and its functional API are deprecated and will be removed from the package `torch`. "
                   f"Please import those features from the new package TorchData: https://github.com/pytorch/data",
                   DeprecationWarning)
+
 
 class StreamWrapper:
     def __init__(self, file_obj):
