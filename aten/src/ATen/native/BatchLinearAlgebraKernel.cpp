@@ -1150,11 +1150,13 @@ REGISTER_ARCH_DISPATCH(ldl_factor_stub, DEFAULT, &ldl_factor_kernel);
 REGISTER_AVX512_DISPATCH(ldl_factor_stub, &ldl_factor_kernel);
 REGISTER_AVX2_DISPATCH(ldl_factor_stub, &ldl_factor_kernel);
 REGISTER_VSX_DISPATCH(ldl_factor_stub, &ldl_factor_kernel);
+REGISTER_ZVECTOR_DISPATCH(ldl_factor_stub, &ldl_factor_kernel);
 
 REGISTER_ARCH_DISPATCH(ldl_solve_stub, DEFAULT, &ldl_solve_kernel);
 REGISTER_AVX512_DISPATCH(ldl_solve_stub, &ldl_solve_kernel);
 REGISTER_AVX2_DISPATCH(ldl_solve_stub, &ldl_solve_kernel);
 REGISTER_VSX_DISPATCH(ldl_solve_stub, &ldl_solve_kernel);
+REGISTER_ZVECTOR_DISPATCH(ldl_solve_stub, &ldl_solve_kernel);
 
 REGISTER_ARCH_DISPATCH(lu_solve_trans_stub, DEFAULT, &lu_solve_trans_kernel);
 REGISTER_AVX512_DISPATCH(lu_solve_trans_stub, &lu_solve_trans_kernel);
