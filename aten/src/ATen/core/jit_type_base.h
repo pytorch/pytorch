@@ -48,7 +48,8 @@ namespace c10 {
   _(AnyListType)            \
   _(AnyTupleType)           \
   _(AnyClassType)           \
-  _(UnionType)
+  _(UnionType)              \
+  _(DynamicType)
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -132,6 +133,7 @@ struct as_shared_type<const T*> {
 } // namespace detail
 
 struct TORCH_API Type {
+  friend TORCH_API bool operator==(const Type& lhs, const Type& rhs);
  private:
   TypeKind kind_;
 
@@ -140,6 +142,12 @@ struct TORCH_API Type {
 
   virtual std::string annotation_str_impl(TypePrinter printer) const {
     return str();
+  }
+  // a == b
+  virtual bool equals(const Type& rhs) const = 0;
+  // a == b <=> b == a
+  virtual bool symmetric() const {
+    return true;
   }
 
  public:
@@ -365,8 +373,8 @@ struct TORCH_API Type {
   };
 
   using TypePtr = SingletonOrSharedTypePtr<Type>;
-
-  virtual bool operator==(const Type& rhs) const = 0;
+  using Ptr = TypePtr;
+  using ElementType = Type;
 
   // subtyping relation. By default, we return true for the case
   // when the type is exactly equal or if this <: T where rhs = Optional[T]
@@ -547,6 +555,9 @@ struct TORCH_API Type {
   virtual at::ArrayRef<TypePtr> containedTypes() const {
     return {};
   }
+  virtual TypePtr containedType(size_t i) const {
+    return containedTypes().at(i);
+  }
   // create a new version of this type, replacing its contained types with
   // contained_types
   TypePtr withContained(std::vector<TypePtr> contained_types);
@@ -644,6 +655,13 @@ inline TypePtr Type::withContained(std::vector<TypePtr> contained_types) {
   return createWithContained(std::move(contained_types));
 }
 
+
+TORCH_API inline bool operator==(const Type& lhs, const Type& rhs) {
+  if (C10_UNLIKELY(!rhs.symmetric())) {
+    return rhs.equals(lhs);
+  }
+  return lhs.equals(rhs);
+}
 
 struct NamedType;
 using NamedTypePtr = std::shared_ptr<NamedType>;
