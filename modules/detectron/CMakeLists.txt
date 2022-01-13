@@ -33,7 +33,7 @@ if(BUILD_CAFFE2_OPS)
     target_link_libraries(caffe2_detectron_ops_hip torch)
     install(TARGETS caffe2_detectron_ops_hip DESTINATION lib)
   elseif(NOT IOS_PLATFORM)
-    add_library(caffe2_detectron_ops SHARED ${Detectron_CPU_SRCS})
+    add_library(caffe2_detectron_ops ${Detectron_CPU_SRCS})
     if(HAVE_SOVERSION)
       set_target_properties(caffe2_detectron_ops PROPERTIES
         VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
