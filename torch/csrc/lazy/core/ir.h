@@ -65,7 +65,8 @@ using OutputMap = std::unordered_map<Output, T, Output::Hasher>;
 // Represents an input/operand for a Node object.
 struct TORCH_API Value {
   Value() = default;
-  /* implicit */ Value(NodePtr node, size_t index = 0) : node(std::move(node)), index(index) {}
+  /* implicit */ Value(NodePtr&& node, size_t index = 0) : node(std::move(node)), index(index) {}
+  /* implicit */ Value(const NodePtr& node, size_t index = 0) : node(node), index(index) {}
 
   hash_t hash() const;
 
