@@ -129,6 +129,14 @@ std::vector<Shape> compute_shape_arange_out(const at::Scalar & start, const at::
   return {Shape(out.scalar_type(), {size})};
 }
 
+std::vector<Shape> compute_shape_abs(const at::Tensor & self) {
+  if (self.is_complex()) {
+    const auto float_type = c10::toValueType(self.scalar_type());
+    return {Shape(float_type, self.sizes().vec())};
+  }
+  return {Shape(self.scalar_type(), self.sizes().vec())};
+}
+
 std::vector<Shape> compute_shape_binary_cross_entropy(const at::Tensor & self, const at::Tensor & target, const c10::optional<at::Tensor> & weight, int64_t reduction) {
   if(reduction == at::Reduction::None) {
     return {Shape(self.scalar_type(), self.sizes().vec())};
@@ -210,6 +218,18 @@ std::vector<Shape> compute_shape_masked_fill_(at::Tensor & self, const at::Tenso
 
 std::vector<Shape> compute_shape_masked_fill_(at::Tensor & self, const at::Tensor & mask, const at::Tensor & value) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
+}
+
+std::vector<Shape> compute_shape_max(const at::Tensor & self) {
+  TORCH_CHECK(self.numel() > 0,
+            "max(): Expected reduction dim to be specified for input.numel() == 0. Specify the reduction dim with the 'dim' argument.");
+  return {Shape(self.scalar_type(), {})};
+}
+
+std::vector<Shape> compute_shape_min(const at::Tensor & self){
+  TORCH_CHECK(self.numel() > 0,
+            "min(): Expected reduction dim to be specified for input.numel() == 0. Specify the reduction dim with the 'dim' argument.");
+    return {Shape(self.scalar_type(), {})};
 }
 
 std::vector<Shape> compute_shape_embedding(const at::Tensor & weight, const at::Tensor & indices, int64_t padding_idx, bool scale_grad_by_freq, bool sparse){
