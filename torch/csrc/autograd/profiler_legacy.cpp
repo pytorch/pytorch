@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/frontend/code_template.h>
 
 #include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
 #include <ATen/core/op_registration/op_registration.h>
@@ -345,14 +346,6 @@ void pushProfilingCallbacksLegacy() {
 }
 
 } // namespace
-
-torch::profiler::impl::ProfilerConfig getProfilerConfig() {
-  auto state_ptr = getProfilerTLSState();
-  TORCH_CHECK(
-      state_ptr,
-      "Tried to access profiler config, but profiler is not enabled!");
-  return state_ptr->config();
-}
 
 void enableProfilerLegacy(const torch::profiler::impl::ProfilerConfig& new_config) {
   TORCH_CHECK(new_config.state != torch::profiler::impl::ProfilerState::NVTX || torch::profiler::impl::cudaStubs()->enabled(),
