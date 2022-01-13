@@ -256,13 +256,10 @@ TORCH_META_FUNC(linalg_lu_factor_ex)(const Tensor& A, bool pivot, bool check_err
   set_output(2, sizes, {}, A.options().dtype(kInt), {});
 }
 
-TORCH_META_FUNC(linalg_svd)(const Tensor& A,
-                            bool full_matrices) {
-  TORCH_CHECK(A.dim() >= 2, "torch.linalg.svd: input should have at least 2 dimensions, but has ", A.dim(), " dimensions instead");
-
-  // We need to distinguish the cuSOLVER case, as cuSOLVER expects F-contig matrices, but
-  // it computes V rather than Vh
-  const bool use_cusolver = at::native::svd_uses_cusolver(A);
+TORCH_META_FUNC(_linalg_svd)(const Tensor& A,
+                             bool full_matrices,
+                             bool compute_uv) {
+  TORCH_CHECK(A.dim() >= 2, "linalg.svd: input should have at least 2 dimensions, but has ", A.dim(), " dimensions instead");
 
   auto sizes = A.sizes().vec();
   const auto m = sizes.cend()[-2];
@@ -270,20 +267,26 @@ TORCH_META_FUNC(linalg_svd)(const Tensor& A,
   const auto k = std::min(m, n);
 
   // Prepare sizes for U
-  sizes.back() = full_matrices ? m : k;
-  // Optimization: If A is C-contig (F-transposed) we compute the SVD of A^T and transpose the outputs
-  auto U_strides = at::native::contiguous_strides(sizes, /*f-contig*=*/true);
-  set_output(0, sizes, U_strides, A.options(), {});
+  if (compute_uv) {
+    sizes.back() = full_matrices ? m : k;
+    auto U_strides = at::native::contiguous_strides(sizes, /*f-contig*=*/true);
+    set_output(0, sizes, U_strides, A.options(), {});
 
-  // Prepare sizes for Vh
-  sizes.end()[-2] = full_matrices ? n : k;
-  sizes.end()[-1] = n;
-  // Optimization: If A is C-contig (F-transposed) we compute the SVD of A^T and transpose the outputs
-  auto Vh_strides = at::native::contiguous_strides(sizes, /*f-contig*=*/!use_cusolver);
-  set_output(2, sizes, Vh_strides, A.options(), {});
+    // Prepare sizes for Vh
+    sizes.end()[-2] = full_matrices ? n : k;
+    sizes.end()[-1] = n;
+
+    // We need to distinguish the cuSOLVER case, as the cuSOLVER algorithms we use
+    // expect F-contig matrices, but they compute V rather than Vh
+    const bool use_cusolver = at::native::svd_uses_cusolver(A);
+    auto Vh_strides = at::native::contiguous_strides(sizes, /*f-contig*=*/!use_cusolver);
+    set_output(2, sizes, Vh_strides, A.options(), {});
+  } else {
+    set_output(0, {0}, {}, A.options(), {});
+    set_output(2, {0}, {}, A.options(), {});
+  }
 
   // Prepare sizes for S. S is always real, even when A is complex.
-  sizes = A.sizes().vec();
   sizes.pop_back();
   sizes.end()[-1] = k;
   set_output(1, sizes, {}, A.options().dtype(c10::toValueType(A.scalar_type())), {});
@@ -3028,12 +3031,12 @@ std::tuple<Tensor,Tensor> eig(const Tensor& self, bool eigenvectors) {
 
 DEFINE_DISPATCH(svd_stub);
 
-void linalg_svd_and_svdvals(const Tensor& A,
-                            const bool full_matrices,
-                            const bool compute_uv,
-                            Tensor & U,
-                            Tensor & S,
-                            Tensor & Vh) {
+TORCH_IMPL_FUNC(_linalg_svd_out)(const Tensor& A,
+                                 const bool full_matrices,
+                                 const bool compute_uv,
+                                 const Tensor & U,
+                                 const Tensor & S,
+                                 const Tensor & Vh) {
   // Half optimisation half precondition for some parts of the LAPACK / cuSOLVER
   // In particular, the call to lapackSvd to compute lwork fails otherwise
   if (A.numel() == 0) {
@@ -3061,8 +3064,7 @@ void linalg_svd_and_svdvals(const Tensor& A,
   const auto info = at::zeros(IntArrayRef(A.sizes().begin(), A.sizes().end() - 2), A.options().dtype(kInt));
 
   // Prepare S
-  const auto S_ready = S.is_contiguous();
-  const auto S_ = borrow_else_clone(S_ready, S, S, /*C-contig*/true);
+  const auto S_ = S.expect_contiguous();
 
   // Prepare U / Vh
   // U_ and Vh_ are just going to be accessed whenever compute_uv == true
@@ -3084,7 +3086,7 @@ void linalg_svd_and_svdvals(const Tensor& A,
   if (!U_ready) {
     U.copy_(*U_);
   }
-  if (!S_ready) {
+  if (!S.is_same(*S_)) {
     S.copy_(*S_);
   }
   if (!Vh_ready) {
@@ -3092,8 +3094,8 @@ void linalg_svd_and_svdvals(const Tensor& A,
   }
 
   // TODO This should be removed, and the code checking for convergence should be lifted
-  // from svd_cusolver to this function. As such, we should make sure that this function
-  // never returns an error.
+  // from svd_cusolver to this function. We should then make sure that this function
+  // never errors out.
   if (A.dim() > 2) {
     batchCheckErrors(info, "linalg.svd");
   } else {
@@ -3101,42 +3103,42 @@ void linalg_svd_and_svdvals(const Tensor& A,
   }
 }
 
-TORCH_IMPL_FUNC(linalg_svd_out)(const Tensor& A,
-                                bool full_matrices,
-                                const Tensor & U,
-                                const Tensor & S,
-                                const Tensor & Vh) {
+std::tuple<Tensor&, Tensor&, Tensor&>
+linalg_svd_out(const Tensor& A,
+               bool full_matrices,
+               Tensor & U,
+               Tensor & S,
+               Tensor & Vh) {
   // This function does not have an _ex variant as we always check errors inside
   // to assure the convergence of the algorithm anyway. See
   // https://github.com/pytorch/pytorch/issues/28293
   // https://github.com/pytorch/pytorch/issues/64237
-  linalg_svd_and_svdvals(A,
-                         full_matrices,
-                         /*compute_uv=*/true,
-                         const_cast<Tensor&>(U),
-                         const_cast<Tensor&>(S),
-                         const_cast<Tensor&>(Vh));
+  //
+  // We must delegate both linalg_svd and linalg_svdvals to
+  // _linalg_svd (rather than delegating linalg_svdvals to linalg_svd) because
+  //   1. We don't want to expose the `compute_uv` parameter in svd
+  //   2. We would like to make use of the `compute_uv=False` optimisation within svdvals
+  // The only way to achieve these two things and still abide by the compositionality rules
+  // is by dispatching to another function.
+  return at::_linalg_svd_out(U, S, Vh, A, full_matrices, /*compute_uv=*/true);
 }
-// Can't make it structured as its a composite kernel
+
+std::tuple<Tensor, Tensor, Tensor> linalg_svd(const Tensor& A, bool full_matrices) {
+  return at::_linalg_svd(A, full_matrices, /*compute_uv=*/true);
+}
+
 // See note in linalg_svd for why this function does not have an _ex variant
 Tensor& linalg_svdvals_out(const Tensor& A, Tensor & S) {
-  checkLinalgCompatibleDtype(
-      "torch.linalg.svdvals", S.scalar_type(), toValueType(A.scalar_type()));
-
-  // Resize S
-  auto sizes = A.sizes().vec();
-  sizes.pop_back();
-  sizes.end()[-1] = std::min(A.size(-2), A.size(-1));
-  at::native::resize_output(S, sizes);
-
-  Tensor U, Vh;  // Dummies
-  linalg_svd_and_svdvals(A, /*full_matrices=*/false, /*compute_uv=*/false, U, S, Vh);
-
+  // Dummies
+  auto U = at::empty({0}, A.options());
+  auto Vh = at::empty({0}, A.options());
+  at::_linalg_svd_out(U, S, Vh, A, /*full_matrices=*/false, /*comptue_uv=*/false);
   return S;
 }
 
 Tensor linalg_svdvals(const Tensor& A) {
-  return std::get<1>(at::linalg_svd(A, /*full_matrices=*/false));
+  const bool A_requires_grad = (at::GradMode::is_enabled() && A.requires_grad());
+  return std::get<1>(at::_linalg_svd(A, /*full_matrices=*/false, /*comptue_uv=*/A_requires_grad));
 }
 
 std::tuple<Tensor&, Tensor&, Tensor&> svd_out(const Tensor& self, bool some, bool compute_uv, Tensor& U, Tensor& S, Tensor& V) {
@@ -3192,7 +3194,7 @@ std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& self, bool some, bool compu
   //     "_, S, _ = torch.svd(A, some=some, compute_uv=False)\n",
   //     "should be replaced with\n",
   //     "S = torch.linalg.svdvals(A)");
-  TORCH_CHECK(self.dim() >= 2, "torch.linalg.svd: input should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
+  TORCH_CHECK(self.dim() >= 2, "linalg.svd: input should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
   Tensor U, S, Vh;
   if (compute_uv) {
     std::tie(U, S, Vh) = at::linalg_svd(self, /*full_matrices=*/!some);
@@ -3209,7 +3211,6 @@ std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& self, bool some, bool compu
     sizes.end()[-1] = n;
     Vh = at::zeros(sizes, self.options());
   }
-  // linalg_svd returns U, S, Vh
   return std::make_tuple(std::move(U), std::move(S), Vh.mH());
 }
 
