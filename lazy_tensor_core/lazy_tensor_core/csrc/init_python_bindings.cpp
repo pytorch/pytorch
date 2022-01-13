@@ -705,7 +705,9 @@ PYBIND11_MODULE(_LAZYC, m) {
   torch_lazy_tensors::InitLtcBindings(m);
 }
 
-torch::Tensor lazy_custom_relu(torch::Tensor input, torch::Tensor grad) {
+torch::Tensor lazy_custom_relu(torch::Tensor input, torch::Tensor grad, c10::Dict<std::string, at::Tensor> dict) {
+  std::cout << "dict size " << dict.size() << std::endl;
+  std::cout << "value at test_key " <<  dict.at("test_key")  << std::endl;
   std::cout << "In nop_tensor\n";
   if (input.device().type() == c10::kLazy) {
     // CONSTRUCT IR for the custom op
