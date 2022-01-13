@@ -292,12 +292,12 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_dce",
           [](std::shared_ptr<Graph>& g) {
-            return eliminateDeadCode(g->block()); // overload resolution
+            return EliminateDeadCode(g->block()); // overload resolution
           })
       .def(
           "_jit_pass_dce_allow_deleting_nodes_with_side_effects",
           [](std::shared_ptr<Graph>& g) {
-            return eliminateDeadCode(
+            return EliminateDeadCode(
                 g->block(),
                 true,
                 DCESideEffectPolicy::
@@ -449,7 +449,7 @@ void initJITBindings(PyObject* module) {
           py::arg("g"),
           py::arg("value_name_pairs") =
               std::vector<std::pair<std::string, std::string>>())
-      .def("_jit_pass_constant_pooling", constantPooling)
+      .def("_jit_pass_constant_pooling", ConstantPooling)
       // RemoveInplaceOps is used by CoreML so it must be removed with care.
       .def("_jit_pass_propagate_dtype", DtypePropagation)
       .def(
@@ -1285,21 +1285,25 @@ void initJITBindings(PyObject* module) {
           })
       .def("has_storage", &DeserializationStorageContext::hasStorage);
 
-  m.def("_get_schema", [](const std::string& op_name, const std::string& overload_name) {
-    try {
-      auto symbol = Symbol::fromQualString(op_name);
-      auto operations = getAllOperatorsFor(symbol);
-      for (const auto& op: operations) {
-        if (op->schema().overload_name() == overload_name) {
-          return op->schema();
+  m.def(
+      "_get_schema",
+      [](const std::string& op_name, const std::string& overload_name) {
+        try {
+          auto symbol = Symbol::fromQualString(op_name);
+          auto operations = getAllOperatorsFor(symbol);
+          for (const auto& op : operations) {
+            if (op->schema().overload_name() == overload_name) {
+              return op->schema();
+            }
+          }
+          throw std::runtime_error("Found no matching schema");
+        } catch (const c10::Error& e) {
+          auto msg = torch::get_cpp_stacktraces_enabled()
+              ? e.what()
+              : e.what_without_backtrace();
+          throw std::runtime_error(msg);
         }
-      }
-      throw std::runtime_error("Found no matching schema");
-    } catch (const c10::Error& e) {
-      auto msg = torch::get_cpp_stacktraces_enabled() ? e.what() : e.what_without_backtrace();
-      throw std::runtime_error(msg);
-    }
-  });
+      });
 
   m.def(
       "_get_operation_overload",
@@ -1307,18 +1311,20 @@ void initJITBindings(PyObject* module) {
         try {
           auto symbol = Symbol::fromQualString(op_name);
           auto operations = getAllOperatorsFor(symbol);
-          for (const auto& op: operations) {
+          for (const auto& op : operations) {
             if (op->schema().overload_name() == overload_name) {
-              auto func = py::cpp_function(
-              [op](py::args args, py::kwargs kwargs) {
-                return invokeOperatorFromPython({op}, args, kwargs);
-              });
+              auto func =
+                  py::cpp_function([op](py::args args, py::kwargs kwargs) {
+                    return invokeOperatorFromPython({op}, args, kwargs);
+                  });
               return func;
             }
           }
           throw std::runtime_error("Found no matching operator overload");
         } catch (const c10::Error& e) {
-          auto msg = torch::get_cpp_stacktraces_enabled() ? e.what() : e.what_without_backtrace();
+          auto msg = torch::get_cpp_stacktraces_enabled()
+              ? e.what()
+              : e.what_without_backtrace();
           throw std::runtime_error(msg);
         }
       });
@@ -1399,7 +1405,9 @@ void initJITBindings(PyObject* module) {
               py::doc(docstring.str().c_str()));
           return func;
         } catch (const c10::Error& e) {
-          auto msg = torch::get_cpp_stacktraces_enabled() ? e.what() : e.what_without_backtrace();
+          auto msg = torch::get_cpp_stacktraces_enabled()
+              ? e.what()
+              : e.what_without_backtrace();
           throw std::runtime_error(msg);
         }
       },

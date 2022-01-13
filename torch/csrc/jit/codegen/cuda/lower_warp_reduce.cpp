@@ -28,7 +28,7 @@ class EliminateDeadBroadcastAndAllocate {
       : ir_builder_(GpuLower::current()->kernel()) {
     findLiveTvs(exprs);
     findDeadTvs();
-    eliminateDeadCode(exprs);
+    EliminateDeadCode(exprs);
   }
 
   void findLiveTvs(const std::vector<kir::Expr*>& exprs) {
@@ -72,8 +72,8 @@ class EliminateDeadBroadcastAndAllocate {
     }
   }
 
-  void eliminateDeadCode(const std::vector<kir::Expr*>& exprs) {
-    result_exprs_ = eliminateDeadCodeInScope(exprs);
+  void EliminateDeadCode(const std::vector<kir::Expr*>& exprs) {
+    result_exprs_ = EliminateDeadCodeInScope(exprs);
   }
 
   bool shouldEliminate(kir::Expr* expr) {
@@ -95,16 +95,16 @@ class EliminateDeadBroadcastAndAllocate {
 
   //! Returns a new vector of exprs with dead exprs
   //!  eliminated.
-  std::vector<kir::Expr*> eliminateDeadCodeInScope(
+  std::vector<kir::Expr*> EliminateDeadCodeInScope(
       const std::vector<kir::Expr*>& exprs) {
     std::vector<kir::Expr*> result_exprs;
 
     for (auto expr : exprs) {
       auto result_expr = expr;
       if (auto for_loop = dynamic_cast<kir::ForLoop*>(expr)) {
-        result_expr = eliminateDeadCode(for_loop);
+        result_expr = EliminateDeadCode(for_loop);
       } else if (auto ite = dynamic_cast<kir::IfThenElse*>(expr)) {
-        result_expr = eliminateDeadCode(ite);
+        result_expr = EliminateDeadCode(ite);
       } else {
         if (shouldEliminate(expr)) {
           result_expr = nullptr;
@@ -120,8 +120,8 @@ class EliminateDeadBroadcastAndAllocate {
     return result_exprs;
   }
 
-  kir::ForLoop* eliminateDeadCode(kir::ForLoop* for_loop) {
-    auto new_loop_body = eliminateDeadCodeInScope(for_loop->body().exprs());
+  kir::ForLoop* EliminateDeadCode(kir::ForLoop* for_loop) {
+    auto new_loop_body = EliminateDeadCodeInScope(for_loop->body().exprs());
     if (new_loop_body.empty()) {
       return nullptr;
     }
@@ -136,9 +136,9 @@ class EliminateDeadBroadcastAndAllocate {
     return new_loop;
   }
 
-  kir::IfThenElse* eliminateDeadCode(kir::IfThenElse* ite) {
-    auto new_then_body = eliminateDeadCodeInScope(ite->thenBody().exprs());
-    auto new_else_body = eliminateDeadCodeInScope(ite->elseBody().exprs());
+  kir::IfThenElse* EliminateDeadCode(kir::IfThenElse* ite) {
+    auto new_then_body = EliminateDeadCodeInScope(ite->thenBody().exprs());
+    auto new_else_body = EliminateDeadCodeInScope(ite->elseBody().exprs());
     if (new_then_body.empty() && new_else_body.empty()) {
       return nullptr;
     }

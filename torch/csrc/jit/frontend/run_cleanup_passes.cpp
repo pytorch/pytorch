@@ -37,7 +37,7 @@ void runCleanupPasses(std::shared_ptr<Graph>& graph) {
 
   // Constant Pooling pass must be after ConstantPropogation, which can create
   // new constants that needs to be pooled.
-  constantPooling(graph);
+  ConstantPooling(graph);
 
   // For jitter
   canonicalizeOutputs(graph);

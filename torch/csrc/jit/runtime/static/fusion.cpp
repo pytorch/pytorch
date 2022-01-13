@@ -30,12 +30,12 @@ void fuseStaticSubgraphs(std::shared_ptr<Graph> graph, size_t min_size) {
   ConstantPropagation(graph);
   RemoveTensorMutation(graph);
   ConstantPropagation(graph);
-  eliminateDeadCode(graph);
+  EliminateDeadCode(graph);
   auto aliasDb = torch::make_unique<AliasDb>(graph);
   createFusionGroups(graph->block(), aliasDb.get(), min_size);
-  constantPooling(graph);
+  ConstantPooling(graph);
   ConstantPropagation(graph);
-  torch::jit::eliminateDeadCode(graph);
+  torch::jit::EliminateDeadCode(graph);
 }
 
 Operation createStaticSubgraphRuntime(const Node* node) {
@@ -252,7 +252,7 @@ bool inlineIfTooSmall(Node* n, size_t min_size) {
     SubgraphUtils::unmergeSubgraph(n);
     return true;
   }
-  constantPooling(subgraph);
+  ConstantPooling(subgraph);
   ConstantPropagation(subgraph);
   return false;
 }

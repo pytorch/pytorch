@@ -706,7 +706,7 @@ class TensorExprFuser {
       return true;
     }
     // Cleanup the subgraph from duplicated constants while we're at it.
-    constantPooling(subgraph);
+    ConstantPooling(subgraph);
     return false;
   }
 
@@ -1223,13 +1223,13 @@ void FuseTensorExprs(
   }
 
   // Get rid of dead code so that we don't waste effort fusing it.
-  eliminateDeadCode(graph);
+  EliminateDeadCode(graph);
 
   TensorExprFuser fuser(graph, min_group_size, disable_shape_checks);
   fuser.run();
 
   EliminateCommonSubexpression(graph);
-  eliminateDeadCode(graph);
+  EliminateDeadCode(graph);
 
   GRAPH_DUMP("After TExprFuser: ", graph);
 }

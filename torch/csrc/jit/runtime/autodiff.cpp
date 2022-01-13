@@ -134,8 +134,8 @@ bool isDifferentiable(Graph& g) {
 // The input of compiled backward graph is [ctx, grad_values]
 // We run lowerSimpleTuples afterwards to elmininate all tuples generated in
 // this process. The original node and TupleConstruct nodes in forward graph
-// will be cleaned up later using eliminateDeadCode(block). TupleUnPack node in
-// backward graph will be removed in eliminateDeadCode(ReverseDetails) defined
+// will be cleaned up later using EliminateDeadCode(block). TupleUnPack node in
+// backward graph will be removed in EliminateDeadCode(ReverseDetails) defined
 // in this file.
 static c10::optional<std::vector<Value*>> build_script_grad(
     Node* node,
@@ -620,7 +620,7 @@ static void deduplicateSizeCaptures(
   }
 }
 
-static void eliminateDeadCode(ReverseDetails& rev_info) {
+static void EliminateDeadCode(ReverseDetails& rev_info) {
   // addReverseInline has to call gradientForNode if *any* of the inputs
   // require grad, but it will emit vjps for *all* inputs. Use DCE to remove
   // unnecessary nodes. Additionally, requires_grad() on intermediates is an
@@ -643,7 +643,7 @@ static void eliminateDeadCode(ReverseDetails& rev_info) {
           rev_info.grad_map.erase(v);
         }
       };
-  eliminateDeadCode(rev_info.reverse_block, std::move(cb));
+  EliminateDeadCode(rev_info.reverse_block, std::move(cb));
 }
 
 static void Optimize(Gradient& grad_desc, ReverseDetails& rev_info) {
@@ -663,7 +663,7 @@ static void Optimize(Gradient& grad_desc, ReverseDetails& rev_info) {
   // multiple times. Make sure we deduplicate them before lifting.
   EliminateCommonSubexpression(grad_desc.f);
   deduplicateSizeCaptures(grad_desc, rev_info);
-  eliminateDeadCode(rev_info);
+  EliminateDeadCode(rev_info);
 }
 
 // Takes a grad_desc.f returned from `addReverseInline` and splits off the
@@ -838,7 +838,7 @@ Gradient differentiate(std::shared_ptr<Graph>& graph) {
   auto rev_info = addReverseInline(grad_desc);
   Optimize(grad_desc, rev_info);
   // Clean up old nodes which has been replaced by forward graphs in torchscript
-  eliminateDeadCode(grad_desc.f->block());
+  EliminateDeadCode(grad_desc.f->block());
 
   // Fills in f, df, f_real_outputs, df_input_captures,
   // modifies df_input_vjps (new vjps are added for temporaries)
