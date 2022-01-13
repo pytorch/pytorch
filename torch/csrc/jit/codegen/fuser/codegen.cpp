@@ -90,14 +90,14 @@ static const char* calcScalarTypeName(const at::ScalarType type) {
   return scalarTypeName(type);
 }
 
-static std::string variableType(const std::shared_ptr<c10::Type>& t) {
-  if (t->kind() == TypeKind::IntType) {
+static std::string variableType(const c10::Type& t) {
+  if (t.kind() == TypeKind::IntType) {
     return "int64_t";
-  } else if (t->kind() == TypeKind::FloatType) {
+  } else if (t.kind() == TypeKind::FloatType) {
     return "double";
-  } else if (t->kind() == TypeKind::BoolType) {
+  } else if (t.kind() == TypeKind::BoolType) {
     return "bool";
-  } else if (auto scalar_type = t->expectRef<TensorType>().scalarType()) {
+  } else if (auto scalar_type = t.expectRef<TensorType>().scalarType()) {
     return calcScalarTypeName(*scalar_type);
   }
   // something went wrong with the type analysis during shape propagation
@@ -106,25 +106,25 @@ static std::string variableType(const std::shared_ptr<c10::Type>& t) {
 }
 
 static std::string typeCastedValueName(
-    const std::shared_ptr<c10::Type>& t,
+    const c10::Type& t,
     const at::ScalarType outtype,
     const std::string& vn) {
-  if (t->kind() == TypeKind::IntType || t->kind() == TypeKind::BoolType) {
+  if (t.kind() == TypeKind::IntType || t.kind() == TypeKind::BoolType) {
     if (!isIntegralType(outtype, /*includeBool=*/false)) {
       return std::string("((") + calcScalarTypeName(outtype) + ") " + vn + ")";
     }
     return vn;
-  } else if (t->kind() == TypeKind::FloatType) {
+  } else if (t.kind() == TypeKind::FloatType) {
     // We don't guard this on anything because in our type system for scalars,
     // there is not a distinction between `float` and `double`, however there
     // *is* a distinction in tensor scalar types. We conservatively insert a
     // cast here, which may end up being a no-op if the tensor's scalar type
     // is `double`.
     return std::string("((") + calcScalarTypeName(outtype) + ") " + vn + ")";
-  } else if (t->kind() == TypeKind::NoneType) {
+  } else if (t.kind() == TypeKind::NoneType) {
     // Support None value for optional arguments like memory format
     return vn;
-  } else if (auto scalar_type = t->expectRef<TensorType>().scalarType()) {
+  } else if (auto scalar_type = t.expectRef<TensorType>().scalarType()) {
     if (*scalar_type != outtype) {
       return std::string("((") + calcScalarTypeName(outtype) + ") " + vn + ")";
     }
@@ -275,7 +275,7 @@ static std::string encodeRHS(const Node* n) {
       // operator e.g. 1.4-torch.tensor(3) = -2
       env.s(
           c10::to_string(i),
-          typeCastedValueName(in->type(), *outtype, valueName(in)));
+          typeCastedValueName(*in->type(), *outtype, valueName(in)));
       // Uncasted operands only used for comparison operators
       env.s(c10::to_string(i) + "_nocast", valueName(in));
       i++;
@@ -420,7 +420,7 @@ std::string generateKernel(
         formals.size() +
             1); // + 1 because the first argument is the linearIndex
     env.s("scalar", scalar);
-    env.s("scalar_type", variableType(n->type()));
+    env.s("scalar_type", variableType(*n->type()));
     formals.push_back(format("${scalar_type} ${scalar}", env));
     argument_loads.push_back(
         format("*static_cast<${scalar_type}*>(args[${formal_index}])", env));
@@ -524,7 +524,7 @@ std::string generateKernel(
     } else {
       env.s("access", format("s${formal}", env));
       env.s("access_vec4", format("s${formal}", env));
-      env.s("lhs_type", variableType(input.first->type()));
+      env.s("lhs_type", variableType(*input.first->type()));
     }
     body << format("${lhs_type} ${node} = ${access};\n", env);
     body_vec4 << format("${lhs_type} ${node} = ${access_vec4};\n", env);
@@ -568,11 +568,11 @@ std::string generateKernel(
       }
       env.s("node", valueName(n->output()));
       env.s("rhs", rhs);
-      env.s("lhs_type", variableType(n->output()->type()));
+      env.s("lhs_type", variableType(*n->output()->type()));
     } else {
       env.s("node", valueName(n->output()));
       env.s("rhs", encodeRHS(n));
-      env.s("lhs_type", variableType(n->output()->type()));
+      env.s("lhs_type", variableType(*n->output()->type()));
     }
 
     body << format("${lhs_type} ${node} = ${rhs};\n", env);
