@@ -235,8 +235,12 @@ void fractional_max_pool3d_backward_out_cuda_template(
 
 TORCH_IMPL_FUNC(fractional_max_pool3d_out_cuda) (
   const Tensor& input,
-  IntArrayRef pool_size,
-  IntArrayRef output_size,
+  int64_t poolSizeT,
+  int64_t poolSizeH,
+  int64_t poolSizeW,
+  int64_t outputT,
+  int64_t outputH,
+  int64_t outputW,
   const Tensor& randomSamples,
   const Tensor& output,
   const Tensor& indices
@@ -246,13 +250,6 @@ TORCH_IMPL_FUNC(fractional_max_pool3d_out_cuda) (
   int64_t dimt = 1;
   int64_t dimh = 2;
   int64_t dimw = 3;
-
-  int64_t outputT = output_size[0];
-  int64_t outputH = output_size[1];
-  int64_t outputW = output_size[2];
-  int64_t poolSizeT = pool_size[0];
-  int64_t poolSizeH = pool_size[1];
-  int64_t poolSizeW = pool_size[2];
 
   int64_t ndims = input.ndimension();
   if (ndims == 5) {

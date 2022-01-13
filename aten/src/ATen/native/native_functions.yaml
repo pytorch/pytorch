@@ -9230,6 +9230,9 @@
 - func: fractional_max_pool3d.output(Tensor self, int[3] kernel_size, int[3] output_size, Tensor random_samples, *, Tensor(a!) output, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
   python_module: nn
   structured: True
+  precomputed:
+  - kernel_size -> int poolSizeT, int poolSizeH, int poolSizeW
+  - output_size -> int outputT, int outputH, int outputW
   dispatch:
     CPU: fractional_max_pool3d_out_cpu
     CUDA: fractional_max_pool3d_out_cuda

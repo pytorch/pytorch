@@ -10,7 +10,7 @@
 namespace at {
 
 namespace meta {
-TORCH_META_FUNC(fractional_max_pool3d)(
+TORCH_PRECOMPUTE_META_FUNC(fractional_max_pool3d)(
   const at::Tensor& input_,
   IntArrayRef pool_size,
   IntArrayRef output_size,
@@ -79,6 +79,9 @@ TORCH_META_FUNC(fractional_max_pool3d)(
     /* indices will contain the locations for each output point */
     set_output(1, {numBatch, numPlanes, outputT, outputH, outputW}, input_.options().dtype(kLong));
   }
+
+  return TORCH_PRECOMPUTE_STRUCT(fractional_max_pool3d)().set_poolSizeT(poolSizeT).set_poolSizeH(poolSizeH).set_poolSizeW(poolSizeW)
+                                                         .set_outputT(outputT).set_outputH(outputH).set_outputW(outputW);
 }
 
 } // namespace meta
@@ -220,18 +223,15 @@ static void fractional_max_pool3d_out_frame(
 
 TORCH_IMPL_FUNC(fractional_max_pool3d_out_cpu)(
   const at::Tensor& input_,
-  IntArrayRef pool_size,
-  IntArrayRef output_size,
+  int64_t poolSizeT,
+  int64_t poolSizeH,
+  int64_t poolSizeW,
+  int64_t outputT,
+  int64_t outputH,
+  int64_t outputW,
   const at::Tensor& randomSamples,
   const at::Tensor& output,
   const at::Tensor& indices) {
-
-  int64_t outputT = output_size[0];
-  int64_t outputH = output_size[1];
-  int64_t outputW = output_size[2];
-  int64_t poolSizeT = pool_size[0];
-  int64_t poolSizeH = pool_size[1];
-  int64_t poolSizeW = pool_size[2];
 
   int64_t numBatch = 1;
   int64_t planeDim = 0;
