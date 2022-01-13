@@ -75,6 +75,8 @@ if TEST_NUMPY:
 
 DOUBLE_TENSORTYPES = [torch.double]
 
+dev_name = torch.cuda.get_device_name(torch.cuda.current_device()).lower()
+IS_JETSON = 'xavier' in dev_name or 'nano' in dev_name or 'jetson' in dev_name or 'tegra' in dev_name
 
 # WARNING: If you add a new top-level test case to this file, you MUST
 # update test/run_test.py to list it, otherwise it will NOT be run in
@@ -2295,6 +2297,7 @@ class TestNN(NNTestCase):
         self.assertTrue(torch.equal(sample.data, vec.data[:5]))
 
     # torch/nn/utils/parametrize
+    @skipIfNoLapack
     def test_register_and_remove_parametrization(self):
         r"""Test that it is possible to add a few parametrizations
         on a parameter or a buffer and that removing them restores the initial state
@@ -2594,6 +2597,7 @@ class TestNN(NNTestCase):
         self.assertTrue((model.bias[1:-1] == torch.ones(6)).all())
         self.assertEqual(len(list(model.parameters())), 1)
 
+    @skipIfNoLapack
     def test_serialization_parametrization(self):
         r"""Test that it is possible to serialize a parametrized model via state_dict"""
         # A stateful parametrization
@@ -2639,6 +2643,7 @@ class TestNN(NNTestCase):
             with TemporaryFileName() as fname:
                 torch.save(model, fname)
 
+    @skipIfNoLapack
     def test_initialization_parametrization(self):
         r"""Test that it is possible to initialize a parametrization when it
             implements a `right_inverse` method
@@ -2928,6 +2933,7 @@ class TestNN(NNTestCase):
         self.assertEqual(len(module.parametrizations.weight), 1)
         self.assertTrue(isinstance(module.parametrizations.weight[0], Identity))
 
+    @skipIfNoLapack
     def test_multiple_inputs_parametrization(self):
         # A parametrization with several outputs
         class RankOne(nn.Module):
@@ -3022,6 +3028,7 @@ class TestNN(NNTestCase):
             loss.backward()
             sgd.step()
 
+    @skipIfNoLapack
     def test_caching_parametrization(self):
         r"""Test the caching system of a parametrization"""
         # Define a couple matrix parametrizations
@@ -4688,6 +4695,7 @@ class TestNN(NNTestCase):
         m = pickle.loads(pickle.dumps(m))
         self.assertIsInstance(m, nn.Linear)
 
+    @skipIfNoLapack
     def test_orthogonal_parametrization(self):
         # Orthogonal implements 6 algorithms (3x parametrizations times 2 options of use_trivialization)
 
@@ -4807,6 +4815,7 @@ class TestNN(NNTestCase):
                     opt.step()
                     assert_is_orthogonal(m.weight)
 
+    @skipIfNoLapack
     def test_orthogonal_errors(self):
         m = nn.Linear(3, 4)
         with self.assertRaisesRegex(ValueError, "has to be one of"):
@@ -9226,6 +9235,8 @@ class TestNN(NNTestCase):
         not TEST_NUMPY or not TEST_SCIPY, "Numpy or Scipy not found")
     def test_gelu(self):
         def _test_gelu(n, m, dtype, contiguous, atol=None, rtol=None):
+            if IS_JETSON and dtype == torch.bfloat16:
+                self.skipTest('Not Implemented on Jetson')
             numpy_dtype = {
                 torch.bfloat16: torch.float, torch.float: torch.float, torch.double: torch.double
             }[dtype]
@@ -14094,6 +14105,8 @@ class TestNNDeviceType(NNTestCase):
     @expectedFailureMeta  # RuntimeError: cannot reshape tensor of 0 elements into shape [1, 0, -1]
     @onlyNativeDeviceTypes
     def test_TransformerDecoder_empty(self, device):
+        if device != 'cpu' and IS_JETSON:
+            self.skipTest('Killed on Jetson GPU')
         for batch_first, memory_shape, tgt_shape in [(True, (0, 10, 512), (0, 20, 512)),
                                                      (False, (10, 0, 512), (20, 0, 512))]:
             memory = torch.rand(*memory_shape, device=device)
@@ -14105,6 +14118,8 @@ class TestNNDeviceType(NNTestCase):
     @expectedFailureMeta  # RuntimeError: cannot reshape tensor of 0 elements into shape [1, 0, -1]
     @onlyNativeDeviceTypes
     def test_Transformer_empty(self, device):
+        if device != 'cpu' and IS_JETSON:
+            self.skipTest('Killed on Jetson GPU')
         for batch_first, src_shape, tgt_shape in [(True, (10, 0, 512), (20, 0, 512))]:
             transformer_model = nn.Transformer(nhead=16, num_encoder_layers=12).to(device)
             src = torch.rand(*src_shape, requires_grad=True, device=device)
@@ -14819,6 +14834,8 @@ class TestNNDeviceType(NNTestCase):
     @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     def test_avg_pool2d_nhwc(self, device, dtype):
+        if device != 'cpu' and IS_JETSON:
+            self.skipTest('Killed on Jetson GPU')
         def helper(n, c, h, w, kernel_size, stride=None,
                    count_include_pad=True, divisor_override=None, padding=0):
             if stride is None:
@@ -14950,6 +14967,10 @@ class TestNNDeviceType(NNTestCase):
     @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     def test_max_pool2d_nhwc(self, device, dtype):
+        if device != 'cpu' and IS_JETSON:
+            self.skipTest('Killed on Jetson GPU')
+        if device == 'cpu' and IS_JETSON and dtype == torch.double:
+            self.skipTest('OOM on Jetson CPU')
         def helper(n, c, h, w, kernel_size, stride=None):
             if stride is None:
                 stride = kernel_size
@@ -16368,6 +16389,8 @@ class TestNNDeviceType(NNTestCase):
     @skipMeta  # LSTM cell reuses output which was resized
     @dtypes(torch.double)
     def test_LSTM_grad_and_gradgrad(self, device, dtype):
+        if device != 'cpu' and IS_JETSON:
+            self.skipTest("No error raised on Jetson")
         hsize = 4
         inp = torch.rand(1, 3, hsize, device=device, dtype=dtype, requires_grad=True)
         for bias in [True, False]:
@@ -16377,6 +16400,8 @@ class TestNNDeviceType(NNTestCase):
     @skipMeta  # GRU cell reuses output which was resized
     @dtypes(torch.double)
     def test_GRU_grad_and_gradgrad(self, device, dtype):
+        if device != 'cpu' and IS_JETSON:
+            self.skipTest("No error raised on Jetson")
         hsize = 4
         inp = torch.rand(1, 3, hsize, device=device, dtype=dtype, requires_grad=True)
         for bias in [True, False]:
@@ -16393,6 +16418,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(out_ref, out)
 
     @onlyCUDA
+    @unittest.skipIf(IS_JETSON, "OOM on Jetson")
     def test_upsamplingNearest2d_launch_config(self, device):
         m = nn.Upsample(scale_factor=2)
         inp = torch.rand(2**25, 1, 1, 1, device=device)
@@ -16402,6 +16428,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(out_ref, out)
 
     @onlyCUDA
+    @unittest.skipIf(IS_JETSON, "Killed on Jetson GPU")
     def test_upsamplingNearest3d_launch_config(self, device):
         m = nn.Upsample(scale_factor=2)
         inp = torch.rand(2**25, 1, 1, 1, 1, device=device)
@@ -16644,6 +16671,7 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @largeTensorTest('6GB')
+    @unittest.skipIf(IS_JETSON, "OOM on Jetson")
     def test_pool3d_large_size_int64(self, device):
         # See https://github.com/pytorch/pytorch/issues/52822
         x = torch.randn(70, 32, 100, 100, 100, dtype=torch.half, device=device)
@@ -17772,7 +17800,7 @@ class TestNNDeviceType(NNTestCase):
                 self.assertRaisesRegex(RuntimeError, r"stride should not be zero|stride must be greater than zero",
                                        lambda: fn_module(x))
 
-    @dtypesIfCUDA(*get_all_fp_dtypes())
+    @dtypesIfCUDA(*(get_all_fp_dtypes() if not IS_JETSON else (torch.half,)))
     @dtypes(torch.float)
     def test_pool_large_size(self, device, dtype):
         for op in ('max', 'avg'):
@@ -18969,6 +18997,7 @@ class TestNNDeviceType(NNTestCase):
         F.threshold_(x, 0.5, 0.5)
 
     @onlyNativeDeviceTypes
+    @unittest.skipIf(IS_JETSON, "missing xnnpack")
     def test_triplet_margin_with_distance_loss_default_parity(self, device):
         # Test for `nn.TripletMarginWithDistanceLoss` and
         # `F.triplet_margin_with_distance_loss`.  Checks
@@ -19003,6 +19032,7 @@ class TestNNDeviceType(NNTestCase):
                             (anchor, positive, negative)))
 
     @onlyNativeDeviceTypes
+    @unittest.skipIf(IS_JETSON, "missing xnnpack")
     def test_triplet_margin_with_distance_loss(self, device):
         # Test for parity between `nn.TripletMarginWithDistanceLoss` and
         # `F.triplet_margin_with_distance_loss`.
