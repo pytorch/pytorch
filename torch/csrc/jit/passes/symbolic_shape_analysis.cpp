@@ -178,9 +178,9 @@ bool shapeGraphCleanupPasses(std::shared_ptr<Graph> graph) {
   made_change |= RefineIntegerValues(graph);
   made_change |= ConstantPropagation(graph);
   // todo add return change for constant pooling
-  constantPooling(graph);
+  ConstantPooling(graph);
   made_change |= EliminateCommonSubexpression(graph);
-  eliminateDeadCode(graph);
+  EliminateDeadCode(graph);
   return made_change;
 }
 

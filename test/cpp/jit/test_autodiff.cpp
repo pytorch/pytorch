@@ -159,7 +159,7 @@ TEST(AutodiffTest, ADFormulas) {
                      },
                      [](const Variable& var) { return ""; })
                      .first->graph;
-    eliminateDeadCode(graph); // Tracing of some ops depends on the DCE trick
+    EliminateDeadCode(graph); // Tracing of some ops depends on the DCE trick
     ConstantPropagation(graph);
     auto grad_spec = differentiate(graph);
     LowerGradOf(*grad_spec.df);
