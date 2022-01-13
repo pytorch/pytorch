@@ -68,6 +68,8 @@ jobs:
           # usually, this doesn't break the binary compatibility
           # use "--no-deps" to install the packages by force
           pip install -r nightly.txt --no-deps
+          pushd benchmark
+          python install.py
       - name: Install TorchBench dependencies
         run: |
           # shellcheck disable=SC1091
