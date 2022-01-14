@@ -432,6 +432,8 @@ _(aten, leaky_relu_backward) \
 _(aten, leaky_relu_forward) \
 _(aten, lerp) \
 _(aten, linalg_qr) \
+_(aten, linalg_cholesky) \
+_(aten, linalg_eigh) \
 _(aten, linear) \
 _(aten, linspace) \
 _(aten, log) \
