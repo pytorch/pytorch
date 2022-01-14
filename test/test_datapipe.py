@@ -448,7 +448,7 @@ class TestFunctionalIterDataPipe(TestCase):
             (dp.iter.Mapper, (lambda x: x, ), {}),
             (dp.iter.Collator, (lambda x: x, ), {}),
             (dp.iter.Filter, (lambda x: x >= 5, ), {}),
-            (dp.iter.Demultiplexer, (2, lambda x: 0 if x % 2 == 0 else 1, ), {})
+            (dp.iter.Demultiplexer, (2, lambda x: x % 2, ), {})
         ]
         if HAS_DILL:
             for dpipe, dp_args, dp_kwargs in unpicklable_datapipes:
@@ -717,8 +717,9 @@ class TestFunctionalIterDataPipe(TestCase):
                 classifier_fn=lambda x: 0 if x >= 5 else 1,
                 buffer_size=-1
             )
-            self.assertEqual(len(wa), 1)
-            self.assertRegex(str(wa[0].message), r"Unlimited buffer size is set")
+            exp_l = 1 if HAS_DILL else 2
+            self.assertEqual(len(wa), exp_l)
+            self.assertRegex(str(wa[-1].message), r"Unlimited buffer size is set")
         output1, output2 = list(dp1), list(dp2)
         self.assertEqual(list(range(5, 10)), output1)
         self.assertEqual(list(range(0, 5)), output2)
@@ -1158,33 +1159,38 @@ class TestFunctionalIterDataPipe(TestCase):
 
 
 class TestFunctionalMapDataPipe(TestCase):
-    # TODO(VitalyFedyunin): If dill installed this test fails
-    def _test_picklable(self):
-        arr = range(10)
+    def test_serializable(self):
+        input_dp = dp.map.SequenceWrapper(range(10))
         picklable_datapipes: List[
-            Tuple[Type[MapDataPipe], MapDataPipe, Tuple, Dict[str, Any]]
+            Tuple[Type[MapDataPipe], Tuple, Dict[str, Any]]
         ] = [
-            (dp.map.Mapper, dp.map.SequenceWrapper(arr), (), {}),
-            (dp.map.Mapper, dp.map.SequenceWrapper(arr), (_fake_fn, (0,)), {}),
-            (dp.map.Mapper, dp.map.SequenceWrapper(arr), (partial(_fake_add, 1), (0,)), {}),
+            (dp.map.Mapper, (), {}),
+            (dp.map.Mapper, (_fake_fn, ), {}),
+            (dp.map.Mapper, (partial(_fake_add, 1), ), {}),
         ]
-        for dpipe, input_dp, dp_args, dp_kwargs in picklable_datapipes:
-            p = pickle.dumps(dpipe(input_dp, *dp_args, **dp_kwargs))  # type: ignore[call-arg]
+        for dpipe, dp_args, dp_kwargs in picklable_datapipes:
+            _ = pickle.dumps(dpipe(input_dp, *dp_args, **dp_kwargs))  # type: ignore[call-arg]
 
+    def test_serializable_with_dill(self):
+        input_dp = dp.map.SequenceWrapper(range(10))
         unpicklable_datapipes: List[
-            Tuple[Type[MapDataPipe], MapDataPipe, Tuple, Dict[str, Any]]
+            Tuple[Type[MapDataPipe], Tuple, Dict[str, Any]]
         ] = [
-            (dp.map.Mapper, dp.map.SequenceWrapper(arr), (lambda x: x,), {}),
+            (dp.map.Mapper, (lambda x: x,), {}),
         ]
-        for dpipe, input_dp, dp_args, dp_kwargs in unpicklable_datapipes:
-            with warnings.catch_warnings(record=True) as wa:
-                datapipe = dpipe(input_dp, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
-                self.assertEqual(len(wa), 1)
-                self.assertRegex(
-                    str(wa[0].message), r"^Lambda function is not supported for pickle"
-                )
-                with self.assertRaises(AttributeError):
-                    p = pickle.dumps(datapipe)
+        if HAS_DILL:
+            for dpipe, dp_args, dp_kwargs in unpicklable_datapipes:
+                _ = pickle.dumps(dpipe(input_dp, *dp_args, **dp_kwargs))  # type: ignore[call-arg]
+        else:
+            for dpipe, dp_args, dp_kwargs in unpicklable_datapipes:
+                with warnings.catch_warnings(record=True) as wa:
+                    datapipe = dpipe(input_dp, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
+                    self.assertEqual(len(wa), 1)
+                    self.assertRegex(
+                        str(wa[0].message), r"^Lambda function is not supported for pickle"
+                    )
+                    with self.assertRaises(AttributeError):
+                        p = pickle.dumps(datapipe)
 
     def test_sequence_wrapper_datapipe(self):
         seq = list(range(10))
