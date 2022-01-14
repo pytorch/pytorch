@@ -12718,6 +12718,44 @@ op_db: List[OpInfo] = [
                    device_type='cuda', dtypes=(torch.float32,)
                ),
            )),
+    OpInfo('linalg.svd_rank_restricted',
+           variant_test_name='singular',
+           op=lambda t, *args, **kwargs: torch.linalg.svd_rank_restricted(
+               # Divide by 100 to increase stability in non-autograd-related tests.
+               # Cannot do just '/ 100' because it causes test_fn_fwgrad_bwgrad to fail with
+               #     (t @ t.mT if t.shape[-2] > t.shape[-1] else t.mT @ t) / 100,
+               # RuntimeError: Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu!
+               (t @ t.mT if t.shape[-2] > t.shape[-1] else t.mT @ t) / (torch.tensor(100, dtype=t.dtype, device=t.device)),
+               full_matrices=not kwargs['some'] if 'some' in kwargs else True
+           ),
+           aten_name='linalg_svd_rank_restricted',
+           dtypes=floating_and_complex_types(),
+           sample_inputs_func=sample_inputs_svd,
+           supports_out=False,
+           # Disable as grads are filled in parts which
+           # makes Vmap unhappy because of unavoidable
+           # in-place operations
+           check_batched_grad=False,
+           check_batched_gradgrad=False,
+           decorators=[
+               slowTest,
+               skipCUDAIfNoMagmaAndNoCusolver,
+               skipCUDAIfRocm,
+               skipCPUIfNoLapack,
+               DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)}),
+                            'TestCommon', 'test_noncontiguous_samples'),
+           ],
+           skips=(
+               # errors with "leaked XXXX bytes CUDA memory on device 0"
+               # TODO: investigate. Suspect: svd_out, as linalg_pinv is also skipping the very same test and is SVD-based
+               DecorateInfo(
+                   unittest.skip("Skipped!"),
+                   'TestJit', 'test_variant_consistency_jit',
+                   device_type='cuda', dtypes=(torch.float32,)
+               ),
+               # test does not work with passing lambda for op
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+           )),
     OpInfo('linalg.svd_rank_revealing',
            op=torch.linalg.svd_rank_revealing,
            aten_name='linalg_svd_rank_revealing',
