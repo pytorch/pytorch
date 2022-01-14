@@ -38,7 +38,7 @@ class ASGD(Optimizer):
         super(ASGD, self).__init__(params, defaults)
 
     def __setstate__(self, state):
-        super(ASGD, self).__setstate__(state)
+        super().__setstate__(state)
         for group in self.param_groups:
             group.setdefault('foreach', None)
 
@@ -73,16 +73,14 @@ class ASGD(Optimizer):
                     state = self.state[p]
                     # State initialization
                     if len(state) == 0:
-                        state['step'] = 0
-                        state['eta'] = group['lr']
-                        state['mu'] = 1
+                        state['step'] = torch.tensor(0.)
+                        state['eta'] = torch.tensor(group['lr'])
+                        state['mu'] = torch.tensor(1.)
                         state['ax'] = torch.zeros_like(p, memory_format=torch.preserve_format)
 
                     mus.append(state['mu'])
                     axs.append(state['ax'])
                     etas.append(state['eta'])
-
-                    state['step'] += 1
                     state_steps.append(state['step'])
 
             asgd(params_with_grad,
@@ -90,16 +88,13 @@ class ASGD(Optimizer):
                  axs,
                  mus,
                  etas,
-                 weight_decay=group['weight_decay'],
+                 state_steps,
                  lambd=group['lambd'],
+                 lr=group['lr'],
+                 t0=group['t0'],
+                 alpha=group['alpha'],
+                 weight_decay=group['weight_decay'],
                  foreach=group['foreach'])
-
-            # update eta and mu
-            for p in params_with_grad:
-                state = self.state[p]
-                state['eta'] = (group['lr'] /
-                                math.pow((1 + group['lambd'] * group['lr'] * state['step']), group['alpha']))
-                state['mu'] = 1 / max(1, state['step'] - group['t0'])
 
         return loss
 
@@ -107,12 +102,18 @@ class ASGD(Optimizer):
 def asgd(params: List[Tensor],
          grads: List[Tensor],
          axs: List[Tensor],
-         mus: List[float],
-         etas: List[float],
+         mus: List[Tensor],
+         etas: List[Tensor],
+         state_steps: List[Tensor],
+         # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
+         # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
          foreach: bool = None,
          *,
-         weight_decay: float,
-         lambd: float):
+         lambd: float,
+         lr: float,
+         t0: float,
+         alpha: float,
+         weight_decay: float):
     r"""Functional API that performs asgd algorithm computation.
 
     See :class:`~torch.optim.ASGD` for details.
@@ -135,67 +136,98 @@ def asgd(params: List[Tensor],
          axs,
          mus,
          etas,
-         weight_decay=weight_decay,
-         lambd=lambd)
+         state_steps,
+         lambd=lambd,
+         lr=lr,
+         t0=t0,
+         alpha=alpha,
+         weight_decay=weight_decay)
 
 
 def _single_tensor_asgd(params: List[Tensor],
                         grads: List[Tensor],
                         axs: List[Tensor],
-                        mus: List[float],
-                        etas: List[float],
+                        mus: List[Tensor],
+                        etas: List[Tensor],
+                        state_steps: List[Tensor],
                         *,
-                        weight_decay: float,
-                        lambd: float):
+                        lambd: float,
+                        lr: float,
+                        t0: float,
+                        alpha: float,
+                        weight_decay: float):
 
     for i, param in enumerate(params):
         grad = grads[i]
         mu = mus[i]
         ax = axs[i]
         eta = etas[i]
+        step_t = state_steps[i]
+
+        # update step
+        step_t += 1
+        step = step_t.item()
 
         if weight_decay != 0:
             grad = grad.add(param, alpha=weight_decay)
 
         # decay term
-        param.mul_(1 - lambd * eta)
+        param.mul_(1 - lambd * eta.item())
 
         # update parameter
-        param.add_(grad, alpha=-eta)
+        param.add_(grad, alpha=-eta.item())
 
         # averaging
-        if mu != 1:
+        if mu.item() != 1:
             ax.add_(param.sub(ax).mul(mu))
         else:
             ax.copy_(param)
+
+        new_eta = torch.tensor(lr / math.pow((1 + lambd * lr * step), alpha))
+        eta.copy_(new_eta)
+        new_mu = torch.tensor(1 / max(1, step - t0))
+        mu.copy_(new_mu)
 
 
 def _multi_tensor_asgd(params: List[Tensor],
                        grads: List[Tensor],
                        axs: List[Tensor],
-                       mus: List[float],
-                       etas: List[float],
+                       mus: List[Tensor],
+                       etas: List[Tensor],
+                       state_steps: List[Tensor],
                        *,
-                       weight_decay: float,
-                       lambd: float):
+                       lambd: float,
+                       lr: float,
+                       t0: float,
+                       alpha: float,
+                       weight_decay: float):
 
     if len(params) == 0:
         return
+
+    # update step
+    torch._foreach_add_(state_steps, 1)
 
     if weight_decay != 0:
         torch._foreach_add_(grads, params, alpha=weight_decay)
 
     # decay term
-    decay = [1 - lambd * eta for eta in etas]
-    torch._foreach_mul_(params, decay)
+    eta = etas[0].item()
+    torch._foreach_mul_(params, 1 - lambd * eta)
 
     # update parameter
-    updates = torch._foreach_mul(grads, etas)
-    torch._foreach_add_(params, updates, alpha=-1)
+    torch._foreach_add_(params, grads, alpha=-eta)
 
     # averaging
-    for i, mu in enumerate(mus):
-        if mu != 1:
-            axs[i].add_(params[i].sub(axs[i]).mul(mu))
+    for i in range(len(axs)):
+        if mus[i].item() != 1:
+            axs[i].add_(params[i].sub(axs[i]).mul(mus[i]))
         else:
             axs[i].copy_(params[i])
+
+    # update eta and mu
+    for i in range(len(mus)):
+        new_eta = torch.tensor(lr / math.pow((1 + lambd * lr * state_steps[i].item()), alpha))
+        etas[i].copy_(new_eta)
+        new_mu = torch.tensor(1 / max(1, state_steps[i].item() - t0))
+        mus[i].copy_(new_mu)
