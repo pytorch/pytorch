@@ -16,7 +16,7 @@ jobs:
         with:
           ref: viable/strict
           token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
-      - name: Tag nightly from viable/strict
+      - name: Tag nightly-binary from viable/strict
         run: |
-          git tag -f nightly
-          git push origin -f nightly
+          git tag -f nightly-binary
+          git push origin -f nightly-binary
