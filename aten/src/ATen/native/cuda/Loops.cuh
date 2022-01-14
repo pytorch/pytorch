@@ -95,14 +95,16 @@ Loops.cuh (and CUDALoops.cuh) usually build. This reduces build time,
 build size, and CUDA context size.
 
 The jiterator currently has some limitations, however. It cannot:
-  - handle float16, bfloat16, or complex datatypes
-  - handle scalar inputs
+  - handle complex datatypes
 
 These improvements will likely come soon.
 
 For examples of how to use the jiterator see the i1 and gcd kernel
 implementations, which pass jittable strings implementing their
 operations instead of the typical CUDA functors.
+For example of passing a runtime state
+(i.e. lambda captures using functors in case of non-JITed kernels)
+look at Note [jiterator runtime state].
 */
 
 // Entrypoint for jitted GPU kernels.
