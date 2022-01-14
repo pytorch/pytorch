@@ -47,10 +47,9 @@ jobs:
           conda activate pr-ci
           # setup build env
           export USE_CUDA=1
-          export BUILD_TEST=0
-          export USE_MKLDNN=1
-          export USE_MKL=1
           export USE_CUDNN=1
+          export USE_MKLDNN=1
+          export BUILD_TEST=0
           export CMAKE_PREFIX_PATH="${CONDA_PREFIX}"
           # build the packages
           pushd "${HOME}"/pytorch
