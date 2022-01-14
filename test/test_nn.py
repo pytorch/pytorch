@@ -15660,7 +15660,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(embedding.weight.grad._indices(), tensorTwice)
         self.assertEqual(embedding.weight.grad._values(), onesTwice)
 
-    @dtypesIfCUDA((torch.float, torch.double), (torch.half, torch.bfloat16 if TEST_WITH_ROCM else torch.half))
+    @dtypesIfCUDA(floating_types_and((torch.half, torch.bfloat16) if TEST_WITH_ROCM else (torch.half)))
     @dtypes(torch.float32)
     def test_embedding_padding_idx(self, device, dtype):
         embedding = nn.Embedding(10, 20, padding_idx=0).to(device, dtype)
@@ -16786,7 +16786,7 @@ class TestNNDeviceType(NNTestCase):
             torch.__future__.set_overwrite_module_params_on_conversion(False)
 
     @onlyCUDA
-    @dtypes((torch.float, torch.double), (torch.half, torch.bfloat16 if TEST_WITH_ROCM else torch.half))
+    @dtypes(floating_types_and((torch.half, torch.bfloat16) if TEST_WITH_ROCM else (torch.half)))
     def test_embedding_max_norm_device(self, device, dtype):
         embedding = nn.Embedding(22, 5, max_norm=1.0).to(device, dtype=dtype)
         # nn.Embedding only takes LongTensor as input
