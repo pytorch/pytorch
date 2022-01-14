@@ -844,6 +844,8 @@ class HistogramObserver(_ObserverBase):
         dtype: torch.dtype = torch.quint8,
         qscheme=torch.per_tensor_affine,
         reduce_range=False,
+        quant_min=None,
+        quant_max=None,
         factory_kwargs=None,
     ) -> None:
         # bins: The number of bins used for histogram calculation.
@@ -851,6 +853,8 @@ class HistogramObserver(_ObserverBase):
             dtype=dtype,
             qscheme=qscheme,
             reduce_range=reduce_range,
+            quant_min=quant_min,
+            quant_max=quant_max,
             factory_kwargs=factory_kwargs,
         )
         factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
@@ -1408,7 +1412,7 @@ def load_observer_state_dict(mod, obs_dict):
 
 
 # Restrict activations to be in the range (0,127)
-default_observer = MinMaxObserver.with_args(reduce_range=True)
+default_observer = MinMaxObserver.with_args(quant_min=0, quant_max=127)
 """
 Default observer for static quantization, usually used for debugging.
 """
@@ -1430,7 +1434,7 @@ default_weight_observer = MinMaxObserver.with_args(
 Default weight observer.
 """
 
-default_histogram_observer = HistogramObserver.with_args(reduce_range=True)
+default_histogram_observer = HistogramObserver.with_args(quant_min=0, quant_max=127)
 """
 Default histogram observer, usually used for PTQ.
 """

@@ -6,6 +6,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include <c10/macros/Macros.h>
+
 #include <torch/csrc/monitor/events.h>
 
 namespace torch {
@@ -15,7 +17,7 @@ constexpr int NUM_AGGREGATIONS = 7;
 
 // Aggregation is the list of possible aggregations for Stats.
 // These use bitwise flags so they can be efficiently stored.
-enum Aggregation {
+enum class C10_API_ENUM Aggregation {
   // NONE means no aggregations are set.
   NONE = 0,
   // VALUE exports the most recently set value.
@@ -35,29 +37,36 @@ enum Aggregation {
   MIN = 6,
 };
 
+struct TORCH_API AggregationHash {
+  template <typename T>
+  std::size_t operator()(T t) const {
+    return static_cast<std::size_t>(t);
+  }
+};
+
 // aggregationName returns the human readable name corresponding to the
 // aggregation.
-const char* aggregationName(Aggregation agg);
+TORCH_API const char* aggregationName(Aggregation agg);
 
 template <typename T>
 class Stat;
 
 namespace {
-inline std::bitset<NUM_AGGREGATIONS> merge(
-    std::initializer_list<Aggregation>& list) {
+template <typename T>
+inline std::bitset<NUM_AGGREGATIONS> merge(T& list) {
   std::bitset<NUM_AGGREGATIONS> a;
   for (Aggregation b : list) {
-    a.set(b);
+    a.set(static_cast<int>(b));
   }
   return a;
 }
 } // namespace
 
 namespace detail {
-void registerStat(Stat<double>* stat);
-void registerStat(Stat<int64_t>* stat);
-void unregisterStat(Stat<double>* stat);
-void unregisterStat(Stat<int64_t>* stat);
+void TORCH_API registerStat(Stat<double>* stat);
+void TORCH_API registerStat(Stat<int64_t>* stat);
+void TORCH_API unregisterStat(Stat<double>* stat);
+void TORCH_API unregisterStat(Stat<int64_t>* stat);
 } // namespace detail
 
 // Stat is a base class for stats. These stats are used to compute summary
@@ -82,7 +91,7 @@ class Stat {
   };
 
  public:
-  Stat(std::string name, std::initializer_list<Aggregation> aggregations)
+  Stat(std::string name, std::vector<Aggregation> aggregations)
       : name_(std::move(name)), aggregations_(merge(aggregations)) {
     detail::registerStat(this);
   }
@@ -101,19 +110,20 @@ class Stat {
     std::lock_guard<std::mutex> guard(mu_);
     maybeLogLocked();
 
-    if (aggregations_.test(VALUE)) {
+    if (aggregations_.test(static_cast<int>(Aggregation::VALUE))) {
       current_.value = v;
     }
-    if (aggregations_.test(MEAN) || aggregations_.test(SUM)) {
+    if (aggregations_.test(static_cast<int>(Aggregation::MEAN)) ||
+        aggregations_.test(static_cast<int>(Aggregation::SUM))) {
       current_.sum += v;
     }
 
-    if (aggregations_.test(MAX)) {
+    if (aggregations_.test(static_cast<int>(Aggregation::MAX))) {
       if (current_.max < v || current_.count == 0) {
         current_.max = v;
       }
     }
-    if (aggregations_.test(MIN)) {
+    if (aggregations_.test(static_cast<int>(Aggregation::MIN))) {
       if (current_.min > v || current_.count == 0) {
         current_.min = v;
       }
@@ -134,7 +144,7 @@ class Stat {
     return current_.count;
   }
 
-  std::unordered_map<Aggregation, T> get() noexcept {
+  std::unordered_map<Aggregation, T, AggregationHash> get() noexcept {
     std::lock_guard<std::mutex> guard(mu_);
     return getLocked();
   }
@@ -152,48 +162,48 @@ class Stat {
     }
 
     Event e;
-    e.type = "torch.monitor.Stat";
-    e.message = name_;
+    e.name = "torch.monitor.Stat";
     e.timestamp = std::chrono::system_clock::now();
 
     auto stats = getLocked();
-    e.metadata.reserve(stats.size());
+    e.data.reserve(stats.size());
     for (auto& kv : stats) {
       std::stringstream key;
       key << name_;
       key << ".";
       key << aggregationName(kv.first);
-      e.metadata[key.str()] = kv.second;
+      e.data[key.str()] = kv.second;
     }
 
     logEvent(e);
   }
 
-  std::unordered_map<Aggregation, T> getLocked() const noexcept {
-    std::unordered_map<Aggregation, T> out;
+  std::unordered_map<Aggregation, T, AggregationHash> getLocked()
+      const noexcept {
+    std::unordered_map<Aggregation, T, AggregationHash> out;
     out.reserve(aggregations_.count());
 
-    if (aggregations_.test(VALUE)) {
-      out.emplace(VALUE, prev_.value);
+    if (aggregations_.test(static_cast<int>(Aggregation::VALUE))) {
+      out.emplace(Aggregation::VALUE, prev_.value);
     }
-    if (aggregations_.test(MEAN)) {
+    if (aggregations_.test(static_cast<int>(Aggregation::MEAN))) {
       if (prev_.count == 0) {
-        out.emplace(MEAN, 0);
+        out.emplace(Aggregation::MEAN, 0);
       } else {
-        out.emplace(MEAN, prev_.sum / prev_.count);
+        out.emplace(Aggregation::MEAN, prev_.sum / prev_.count);
       }
     }
-    if (aggregations_.test(COUNT)) {
-      out.emplace(COUNT, prev_.count);
+    if (aggregations_.test(static_cast<int>(Aggregation::COUNT))) {
+      out.emplace(Aggregation::COUNT, prev_.count);
     }
-    if (aggregations_.test(SUM)) {
-      out.emplace(SUM, prev_.sum);
+    if (aggregations_.test(static_cast<int>(Aggregation::SUM))) {
+      out.emplace(Aggregation::SUM, prev_.sum);
     }
-    if (aggregations_.test(MAX)) {
-      out.emplace(MAX, prev_.max);
+    if (aggregations_.test(static_cast<int>(Aggregation::MAX))) {
+      out.emplace(Aggregation::MAX, prev_.max);
     }
-    if (aggregations_.test(MIN)) {
-      out.emplace(MIN, prev_.min);
+    if (aggregations_.test(static_cast<int>(Aggregation::MIN))) {
+      out.emplace(Aggregation::MIN, prev_.min);
     }
 
     return out;
@@ -216,6 +226,12 @@ class IntervalStat : public Stat<T> {
   IntervalStat(
       std::string name,
       std::initializer_list<Aggregation> aggregations,
+      std::chrono::milliseconds windowSize)
+      : Stat<T>(std::move(name), aggregations), windowSize_(windowSize) {}
+
+  IntervalStat(
+      std::string name,
+      std::vector<Aggregation> aggregations,
       std::chrono::milliseconds windowSize)
       : Stat<T>(std::move(name), aggregations), windowSize_(windowSize) {}
 
@@ -248,6 +264,12 @@ class FixedCountStat : public Stat<T> {
   FixedCountStat(
       std::string name,
       std::initializer_list<Aggregation> aggregations,
+      int64_t windowSize)
+      : Stat<T>(std::move(name), aggregations), windowSize_(windowSize) {}
+
+  FixedCountStat(
+      std::string name,
+      std::vector<Aggregation> aggregations,
       int64_t windowSize)
       : Stat<T>(std::move(name), aggregations), windowSize_(windowSize) {}
 

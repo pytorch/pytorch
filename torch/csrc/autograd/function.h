@@ -13,6 +13,7 @@
 #include <ATen/record_function.h>
 #include <ATen/SequenceNumber.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -361,7 +362,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   /// Returns true if any of the output edges in any of the ranges are active.
   bool should_compute_output(std::initializer_list<IndexRange> idxs) const {
     return std::any_of(idxs.begin(), idxs.end(), [this](IndexRange range) {
-      for (auto i = range.first; i < range.second; i++) {
+      for (const auto i : c10::irange(range.first, range.second)) {
         if (should_compute_output(i))
           return true;
       }
