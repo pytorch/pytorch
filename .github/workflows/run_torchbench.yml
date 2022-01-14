@@ -24,17 +24,19 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           path: pytorch
-      - name: Update self-hosted PyTorch domain packages
+      - name: Checkout Torchvision
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          repository: pytorch/vision
+          path: vision
+      - name: Checkout Torchtext
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          repository: pytorch/text
+          path: text
+      - name: Update self-hosted PyTorch
         run: |
           pushd "${HOME}"/pytorch
-          git remote prune origin
-          git fetch
-          popd
-          pushd "${HOME}"/vision
-          git remote prune origin
-          git fetch
-          popd
-          pushd "${HOME}"/text
           git remote prune origin
           git fetch
           popd
@@ -60,18 +62,15 @@ jobs:
           export USE_MKL=1
           export USE_CUDNN=1
           export CMAKE_PREFIX_PATH="${CONDA_PREFIX}"
-          # build PyTorch with base sha version
-          pushd "${HOME}"/pytorch
-          git checkout "${PR_BASE_SHA}" && git submodule update --init --recursive
+          # build the packages
+          pushd pytorch
           python setup.py install
           popd
-          pushd "${HOME}"/vision
-          git checkout main && git submodule update --init --recursive
+          pushd vision
           python setup.py install
           popd
-          pushd "${HOME}"/text
-          git checkout main && git submodule update --init --recursive
-          python setup.py clean install
+          pushd text
+          python setup.py install
           popd
       - name: Setup TorchBench branch
         run: |
