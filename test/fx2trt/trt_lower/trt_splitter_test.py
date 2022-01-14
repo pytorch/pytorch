@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: fx"]
 
 import operator
-import unittest
 
 import torch  # isort:skip
 import torch.fx  # isort:skip
@@ -12,6 +11,7 @@ import torch.fx.passes.shape_prop as shape_prop
 from torch.fx.experimental.fx2trt.tools.trt_splitter import TRTSplitter
 from torch.fx.passes import splitter_base
 from torch.fx.experimental.fx_acc import acc_tracer
+from torch.testing._internal.common_utils import TestCase, run_tests
 
 
 ERROR_MSG_NO_ACC_MODULE = "FX split failed: Did not find any ACC submodule!"
@@ -61,7 +61,7 @@ def find_call_targets(module: torch.fx.GraphModule):
 # We test both FxNetSplitOnly and FxNetSplitter here, since they share most
 # functionalities. The only difference is that FxNetSplitOnly does not implement
 # split_preview() related functions, while FxNetSplitter does.
-class TestSplit(unittest.TestCase):
+class TestSplit(TestCase):
     def test_demo(self):
         """
           ==> b ==>
@@ -643,7 +643,7 @@ class TestSplit(unittest.TestCase):
         test_splitter(splitter)
 
 
-class TestSplitComplexGraph(unittest.TestCase):
+class TestSplitComplexGraph(TestCase):
     """
            a ======
         //   \\     \\
@@ -753,7 +753,7 @@ class TestSplitComplexGraph(unittest.TestCase):
         test_splitter(splitter)
 
 
-class TestSplitNonTensorEdges(unittest.TestCase):
+class TestSplitNonTensorEdges(TestCase):
     """
            a (relu)
         //   \\
@@ -963,7 +963,7 @@ class TestSplitNonTensorEdges(unittest.TestCase):
         test_splitter(splitter)
 
 
-class TestAccNodesFinder(unittest.TestCase):
+class TestAccNodesFinder(TestCase):
     def test_acc_nodes_finder_1(self):
         """
         y ------------->
@@ -1007,7 +1007,7 @@ class TestAccNodesFinder(unittest.TestCase):
         self.assertEqual(set(), acc_nodes, "Shouldn't have ACC nodes")
 
 
-class TestAccFusionsFinder(unittest.TestCase):
+class TestAccFusionsFinder(TestCase):
     """
               x
              / \\
@@ -1147,3 +1147,6 @@ class TestAccFusionsFinder(unittest.TestCase):
 
 def op_support_with_support_dict(support_dict: dict) -> op_support.OperatorSupportBase:
     return op_support.OperatorSupport(support_dict)
+
+if __name__ == '__main__':
+    run_tests()
