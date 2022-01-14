@@ -56,6 +56,7 @@ log = logging.getLogger(__name__)
 SKIP = {
     "densenet121":  "OOMs on eager CUDA CI machine (T4 GPU)",
     "timm_nfnet":  "OOMs on eager CUDA CI machine (T4 GPU)",
+    "moco": "Distributed/ProcessGroupNCCL: Tensors must be CUDA and dense",
 }
 SKIP_TRAIN_ONLY = {
     "squeezenet1_1":  "OOMs on eager CUDA CI machine (T4 GPU)",
