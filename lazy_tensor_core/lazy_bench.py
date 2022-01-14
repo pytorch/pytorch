@@ -324,7 +324,11 @@ def to_device(tensors, device):
 
     try:
         import torchbenchmark.models.soft_actor_critic.nets
-        if isinstance(tensors, torchbenchmark.models.soft_actor_critic.nets.SquashedNormal):
+        import torchbenchmark.models.drq.utils
+        if (
+            isinstance(tensors, torchbenchmark.models.soft_actor_critic.nets.SquashedNormal) or
+            isinstance(tensors, torchbenchmark.models.drq.utils.SquashedNormal)
+        ):
             # a SquashedNormal is a py class that holds a loc and scale torch tensor,
             # so convert it to a tuple for compatibility with downstream check_results
             tensors = (tensors.loc, tensors.scale)
@@ -410,7 +414,7 @@ def lazy_compute_experiment(args, experiment, results, benchmark, lazy_benchmark
         print("WARNING: lazy cached compile count indicates fallbacks, or something else")
     fallbacks = {k: v for (k, v) in lazy_metrics.items() if 'aten::' in k}
     if len(fallbacks):
-        print("WARNING: lazy-eager fallbacks detected for [" + ",".join(fallbacks.keys()) + ']')
+        print(f"WARNING: lazy-eager fallbacks detected for [{fallbacks}]")
     if args.dump_lazy_counters:
         print(lazy_metrics)
     pvalue = ttest_ind(timings[:, 0], timings[:, 1]).pvalue
@@ -469,9 +473,7 @@ def check_results(correct_result, lazy_result, device):
     # extracting relevant tensors from huggingface data structures
     correct_result = to_device(correct_result, device)
     lazy_result = to_device(lazy_result, device)
-
     return check_results_impl(correct_result, lazy_result)
-
 
 def check_fuser(args):
     if args.fuser == 'noopt':
