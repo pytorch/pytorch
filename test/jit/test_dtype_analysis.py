@@ -4,12 +4,13 @@ from unittest.case import expectedFailure
 
 import torch
 from torch import complex32, float32, float64, int32, int64
+from torch.jit._passes import _property_propagation
 from torch.testing._internal.common_methods_invocations import (
     SampleInput,
     sample_inputs_adaptive_avg_pool2d,
     sample_inputs_conv2d,
 )
-from torch.testing._internal.common_utils import set_default_dtype
+from torch.testing._internal.common_utils import set_default_dtype, first_sample
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.jit_metaprogramming_utils import create_traced_fn
 from torch.testing._internal.common_device_type import (
@@ -114,20 +115,10 @@ class TestDtypeBase(JitTestCase):
         return dtypes[0]
 
     def prop_dtype_on_graph(self, graph, example_inputs):
-        # Intentionally ignoring the kwargs, and not treating them as tensors for now
-        graph_inputs = list(graph.inputs())
-
         # We need to clear shape information because torch.jit.script
         # will return a cached graph if the function is scripted twice.
         torch._C._jit_pass_erase_shape_information(graph)
-
-        self.assertEqual(len(graph_inputs), len(example_inputs))
-        for graph_i, example_i in zip(graph_inputs, example_inputs):
-            if isinstance(example_i, torch.Tensor):
-                dtype = example_i.dtype
-                shape = example_i.shape
-                graph_i.setType(graph_i.type().with_dtype(dtype).with_sizes(shape))
-
+        _property_propagation.apply_input_props_using_example(graph, example_inputs)
         torch._C._jit_pass_propagate_shapes_on_graph(graph)
         torch._C._jit_pass_propagate_dtype(graph)
 
@@ -282,7 +273,7 @@ class TestDtypeAnalysis(TestDtypeBase):
         ):
             for dtype in (torch.int8, torch.float64):
                 # Gets default version for conv2d
-                sample_input: SampleInput = inputs_fn(None, "cpu", dtype, False)[-1]
+                sample_input: SampleInput = list(inputs_fn(None, "cpu", dtype, False))[-1]
                 input_args = [sample_input.input, *sample_input.args]
                 self.assert_dtype_equal_custom_args(fn, input_args)
 
@@ -292,7 +283,7 @@ class TestDtypeAnalysis(TestDtypeBase):
 
         # Now make sure that conv2d doesn't support mixed args
         conv_ins = sample_inputs_conv2d(None, "cpu", torch.float, False)
-        conv_in = conv_ins[-1]
+        conv_in = list(conv_ins)[-1]
         weight, bias = conv_in.args
         weight = weight.type(torch.long)
 
@@ -316,7 +307,7 @@ class TestDtypeAnalysis(TestDtypeBase):
             return add_res
 
         conv_ins = sample_inputs_conv2d(None, "cpu", torch.int8, False)
-        conv_in = conv_ins[-1]
+        conv_in = list(conv_ins)[-1]
         y_val = torch.rand((1,), dtype=torch.float32)
         input_args = [conv_in.input, *conv_in.args, y_val]
         self.assert_dtype_equal_custom_args(func, input_args)
@@ -340,7 +331,8 @@ class TestDtypeCustomRules(TestDtypeBase):
 
     def custom_rules_test_base(self, device, dtype, op, allow_eager_fail=False):
         try:
-            sample_input = op.sample_inputs(device, dtype, requires_grad=False)[0]
+            samples = op.sample_inputs(device, dtype, requires_grad=False)
+            sample_input = first_sample(self, samples)
             input_args = [sample_input.input, *sample_input.args]
             expected_res = op(*input_args, **sample_input.kwargs)
 

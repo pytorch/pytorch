@@ -192,7 +192,11 @@ if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
   export CXX=clang++
 fi
 
-if [[ "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.6-gcc7-build* || "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.6-gcc5.4-build* ]]; then
+if [[ "${BUILD_ENVIRONMENT}" == *no-ops* ]]; then
+  export USE_PER_OPERATOR_HEADERS=0
+fi
+
+if [[ "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.7-gcc7-build* || "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.7-gcc5.4-build* ]]; then
   export USE_GLOO_WITH_OPENSSL=ON
 fi
 
@@ -207,11 +211,10 @@ if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
 
   get_bazel
 
-  # first build the whole torch for CPU-only
+  # first build torch for CPU-only
   tools/bazel build --config=no-tty :torch
-  # then build selected set of targets with GPU-support.
-  # TODO: eventually this should converge to building the whole :torch with GPU-support
-  tools/bazel build --config=no-tty --config=gpu :c10
+  # then build everything with CUDA
+  tools/bazel build --config=no-tty --config=gpu :all
 else
   # check that setup.py would fail with bad arguments
   echo "The next three invocations are expected to fail with invalid command error messages."
@@ -224,13 +227,12 @@ else
     # ppc64le build fails when WERROR=1
     # set only when building other architectures
     # only use for "python setup.py install" line
-    if [[ "$BUILD_ENVIRONMENT" != *ppc64le* && "$BUILD_ENVIRONMENT" != *clang* ]]; then
+    if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
       WERROR=1 python setup.py bdist_wheel
-      python -mpip install dist/*.whl
     else
       python setup.py bdist_wheel
-      python -mpip install dist/*.whl
     fi
+    python -mpip install dist/*.whl
 
     # TODO: I'm not sure why, but somehow we lose verbose commands
     set -x

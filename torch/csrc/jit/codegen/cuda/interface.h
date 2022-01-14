@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
 
@@ -18,6 +18,11 @@ namespace fuser {
 namespace cuda {
 
 TORCH_API std::atomic<bool>& getCudaFusionGuardMode();
+
+C10_EXPORT bool getSingletonFusion();
+C10_EXPORT bool setSingletonFusion(bool value);
+C10_EXPORT bool getHorizontalFusion();
+C10_EXPORT bool setHorizontalFusion(bool value);
 
 // dummy struct to allow API registration
 struct CudaFuserInterface {

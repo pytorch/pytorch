@@ -4,6 +4,7 @@
 #include <ATen/TensorUtils.h>
 
 #include <ATen/core/Tensor.h>
+#include <ATen/native/ConvUtils.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/im2col.h>
 
@@ -875,6 +876,8 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv_transpose2d_backward_cpu(
 
   return std::tuple<Tensor, Tensor, Tensor>(grad_input, grad_weight, grad_bias);
 }
+
+REGISTER_ALL_CPU_DISPATCH(slow_conv_transpose2d_backward_stub, &slow_conv_transpose2d_backward_cpu);
 
 } // namespace native
 } // namespace at

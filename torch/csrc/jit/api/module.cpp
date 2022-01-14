@@ -1,4 +1,4 @@
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
 #include <ATen/record_function.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>

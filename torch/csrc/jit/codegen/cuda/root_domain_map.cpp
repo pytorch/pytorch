@@ -351,11 +351,11 @@ bool ComputeAtRootDomainMap::canMap(
     const IterDomain* id_b) const {
   TORCH_INTERNAL_ASSERT(
       id_a->definition() == nullptr || id_a->isRFactorProduct(),
-      "Non-root domain is not supproted: ",
+      "Non-root domain is not supported: ",
       id_a);
   TORCH_INTERNAL_ASSERT(
       id_b->definition() == nullptr || id_b->isRFactorProduct(),
-      "Non-root domain is not supproted: ",
+      "Non-root domain is not supported: ",
       id_b);
 
   // Forward to overloaded functions
@@ -530,7 +530,8 @@ std::unordered_map<IterDomain*, IterDomain*> ComputeAtRootDomainMap::map(
     const TensorDomain* consumer,
     const std::unordered_set<IterDomain*>& root_dims_to_map,
     bool producer_to_consumer) const {
-  const auto& producer_root = producer->getMaybeRFactorDomain();
+  const auto& producer_root =
+      TensorDomain::noReductions(producer->getMaybeRFactorDomain());
   const auto& consumer_root = consumer->getRootDomain();
   const TensorDomain* from_td = producer_to_consumer ? producer : consumer;
   const TensorDomain* to_td = producer_to_consumer ? consumer : producer;
@@ -547,15 +548,14 @@ std::unordered_map<IterDomain*, IterDomain*> ComputeAtRootDomainMap::map(
     if (id_map.find(from_id) != id_map.end()) {
       continue;
     }
-    // Matching ID not found. It's an error unless: from_id is
-    // reduction of a producer domain; from_id is a new broadcast of a
-    // consumer domain; or from_id is a window axis of a consumer
-    // domain.
-    if ((producer_to_consumer && from_id->isReduction()) ||
-        (!producer_to_consumer &&
-         (new_broadcast_domains_.find(DomainKey(from_td, from_id)) !=
-              new_broadcast_domains_.end() ||
-          (window_axes_.count(from_id) > 0)))) {
+    // Matching ID not found. It's an error unless from_id is a new
+    // broadcast of a consumer domain; or from_id is a window axis of
+    // a consumer domain. Note that reduction domains are removed from
+    // the producer root domain.
+    if (!producer_to_consumer &&
+        (new_broadcast_domains_.find(DomainKey(from_td, from_id)) !=
+             new_broadcast_domains_.end() ||
+         (window_axes_.count(from_id) > 0))) {
       continue;
     }
     TORCH_INTERNAL_ASSERT(
@@ -762,7 +762,8 @@ void ComputeAtRootDomainMapBuilder::mapPointwiseOrReductionOp(Expr* e) {
 void ComputeAtRootDomainMapBuilder::handle(BroadcastOp* op) {
   const TensorDomain* in_td = op->in()->as<TensorView>()->domain();
   const TensorDomain* out_td = op->out()->as<TensorView>()->domain();
-  const auto in_root = TensorDomain::noReductions(in_td->getRootDomain());
+  const auto in_root =
+      TensorDomain::noReductions(in_td->getMaybeRFactorDomain());
   const auto& out_root = out_td->getRootDomain();
   const auto& bcast_dim_flags = op->getBroadcastDimFlags();
   TORCH_INTERNAL_ASSERT(
@@ -809,7 +810,7 @@ void ComputeAtRootDomainMapBuilder::handle(BroadcastOp* op) {
 void ComputeAtRootDomainMapBuilder::handle(TransposeOp* op) {
   const TensorDomain* in_td = op->in()->as<TensorView>()->domain();
   std::vector<IterDomain*> in_root =
-      TensorDomain::noReductions(in_td->getRootDomain());
+      TensorDomain::noReductions(in_td->getMaybeRFactorDomain());
 
   const TensorDomain* out_td = op->out()->as<TensorView>()->domain();
   const auto& out_root = out_td->getRootDomain();
@@ -826,7 +827,8 @@ void ComputeAtRootDomainMapBuilder::handle(TransposeOp* op) {
 void ComputeAtRootDomainMapBuilder::handle(GatherOp* op) {
   const TensorDomain* in_td = op->in()->as<TensorView>()->domain();
   const TensorDomain* out_td = op->out()->as<TensorView>()->domain();
-  const auto in_root = TensorDomain::noReductions(in_td->getRootDomain());
+  const auto in_root =
+      TensorDomain::noReductions(in_td->getMaybeRFactorDomain());
   const auto& out_root = out_td->getRootDomain();
 
   // Only maps the input root axes. Do not map the new window axes.

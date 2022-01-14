@@ -1,4 +1,5 @@
 #include <torch/csrc/monitor/counters.h>
+#include <torch/csrc/monitor/events.h>
 
 #include <sstream>
 #include <unordered_set>
@@ -8,20 +9,23 @@ namespace monitor {
 
 const char* aggregationName(Aggregation agg) {
   switch (agg) {
-    case NONE:
+    case Aggregation::NONE:
       return "none";
-    case VALUE:
+    case Aggregation::VALUE:
       return "value";
-    case COUNT:
+    case Aggregation::MEAN:
+      return "mean";
+    case Aggregation::COUNT:
       return "count";
-    case SUM:
+    case Aggregation::SUM:
       return "sum";
-    case MAX:
+    case Aggregation::MAX:
       return "max";
-    case MIN:
+    case Aggregation::MIN:
       return "min";
     default:
-      throw std::runtime_error("unknown aggregation: " + std::to_string(agg));
+      throw std::runtime_error(
+          "unknown aggregation: " + std::to_string(static_cast<int>(agg)));
   }
 }
 
@@ -61,40 +65,6 @@ void unregisterStat(Stat<int64_t>* stat) {
   stats().int64s.erase(stat);
 }
 } // namespace detail
-
-template <typename T>
-void closeAndGetStat(Stat<T>* s, std::unordered_map<std::string, T>& m) {
-  s->closeWindow();
-  auto out = s->get();
-  for (auto& kv : out) {
-    std::stringstream key;
-    key << s->name();
-    key << ".";
-    key << aggregationName(kv.first);
-    m[key.str()] = kv.second;
-  }
-}
-
-std::pair<
-    std::unordered_map<std::string, double>,
-    std::unordered_map<std::string, int64_t>>
-closeAndGetStats() noexcept {
-  std::pair<
-      std::unordered_map<std::string, double>,
-      std::unordered_map<std::string, int64_t>>
-      out;
-
-  std::lock_guard<std::mutex> guard(stats().mu);
-
-  for (auto* s : stats().doubles) {
-    closeAndGetStat(s, out.first);
-  }
-  for (auto* s : stats().int64s) {
-    closeAndGetStat(s, out.second);
-  }
-
-  return out;
-}
 
 } // namespace monitor
 } // namespace torch
