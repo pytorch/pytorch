@@ -233,8 +233,7 @@ bool InterpreterState::run(Stack& stack) {
           }
           return false;
         case LIST_CONSTRUCT: {
-          const auto& type = code.types_[inst.X]->expectRef<at::ListType>();
-          listConstruct(stack, type, inst.N);
+          listConstruct(stack, *code.types_[inst.X], inst.N);
           frame.step();
         } break;
         case LIST_UNPACK: {
