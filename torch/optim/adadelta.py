@@ -64,7 +64,7 @@ class Adadelta(Optimizer):
         super(Adadelta, self).__init__(params, defaults)
 
     def __setstate__(self, state):
-        super(Adadelta, self).__setstate__(state)
+        super().__setstate__(state)
         for group in self.param_groups:
             group.setdefault('foreach', None)
 
