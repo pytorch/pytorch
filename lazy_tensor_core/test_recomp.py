@@ -24,7 +24,7 @@ class Optimizer:
         self.param = params[0]
 
     def step(self):
-        diff = torch.ops.lazy_cuda.optim(self.param, self.param.grad)
+        diff = torch.ops.lazy_cuda.optim(self.param, self.param.grad, {"test_key" : torch.rand(1)})
 
     def zero_grad(self):
         if self.param.grad is not None:

@@ -25,12 +25,7 @@ for _ in range(10):
     for t in input_tensors:
         bins[t.size()[1]].append(t)
 
-
-    for k, v in bins.items():
-        print(f"looking at {k}")
-        for t in v:
-            print(f"\t{t.size()[1]}")
-
     r = torch.stack(bins[64], 1).sum([1,2]) + torch.stack(bins[128], 1).sum([1,2]) + torch.stack(bins[256], 1).sum([1,2])
-    ltm.mark_step()
+    
+    print(lazy_tensor_core._LAZYC._get_ltc_tensors_text([r]))
     print(r.sum().item())
