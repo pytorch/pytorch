@@ -7,9 +7,13 @@ import random
 import torch
 from torch.nn import functional
 
-from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR  # TEST_WITH_ROCM
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.codegen.random_topo_test import runDefaultTestWithSeed
+from torch.testing._internal.common_cuda import TEST_MULTIGPU
+from torch.testing._internal.common_device_type import OpDTypes
+from torch.testing._internal.common_methods_invocations import op_db
+from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR  # TEST_WITH_ROCM
+from torch.testing._internal.jit_utils import clone_inputs
+from torch.testing._internal.jit_metaprogramming_utils import create_traced_fn
 from torch.testing import FileCheck
 
 from test_jit import JitTestCase, RUN_CUDA
@@ -3197,6 +3201,33 @@ class TestPassManagerCudaFuser(JitTestCase):
         self.assertTrue(torch._C._jit_nvfuser_enabled())
         self.assertTrue(torch._C._jit_set_nvfuser_enabled(False))
         self.assertFalse(torch._C._jit_nvfuser_enabled())
+
+_tracing_ops = partial(ops, dtypes=OpDTypes.supported,
+                       allowed_dtypes=(torch.float, torch.cfloat))
+
+class TestCudaFuserOpInfo(JitCommonTestCase):
+    def setUp(self):
+        self.nvfuser_single_node_mode = torch._C._jit_set_nvfuser_single_node_mode(True)
+
+    def tearDown(self):
+        torch._C._jit_set_nvfuser_single_node_mode(self.nvfuser_single_node_mode)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @_tracing_ops
+    def test_fuser_correctness(self, device, dtype, op):
+        variant_sample_pairs = get_traced_sample_variant_pairs(device, dtype, op)
+
+        for variant, sample in variant_sample_pairs:
+            trace = create_traced_fn(self, variant)
+            ref = variant(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
+
+            trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
+
+            val = trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
+
+            self.assertEqual(ref, val)
+
+instantiate_device_type_tests(TestCudaFuserOpInfo, globals(), only_for=("cuda"))
 
 
 if __name__ == '__main__':
