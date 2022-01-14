@@ -21,7 +21,7 @@ def clip_grad_norm_(
         norm_type (float or int): type of the used p-norm. Can be ``'inf'`` for
             infinity norm.
         error_if_nonfinite (bool): if True, an error is thrown if the total
-            norm of the gradients from :attr:``parameters`` is ``nan``,
+            norm of the gradients from :attr:`parameters` is ``nan``,
             ``inf``, or ``-inf``. Default: False (will switch to True in the future)
 
     Returns:

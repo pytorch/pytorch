@@ -31,6 +31,7 @@
 // fuser and IR parser
 #include "test_gpu_validator.h"
 
+#include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/Exceptions.h>
 #include <c10/cuda/CUDAStream.h>
 
@@ -89,10 +90,20 @@ void checkIntValue(
 }
 
 // ATen version of tensor shifting
-auto shift(at::Tensor tensor, const std::vector<int>& offsets) {
+auto shift(
+    at::Tensor tensor,
+    const std::vector<int>& offsets,
+    std::vector<int> strides = {}) {
   TORCH_INTERNAL_ASSERT(tensor.ndimension() == offsets.size());
+  if (strides.empty()) {
+    strides = std::vector<int>(tensor.ndimension(), 1);
+  }
   at::Tensor t = tensor;
+  std::vector<at::indexing::TensorIndex> stride_indices;
   for (size_t i = 0; i < offsets.size(); ++i) {
+    auto stride = strides[i];
+    stride_indices.push_back(
+        at::indexing::Slice(0, at::indexing::None, stride));
     const auto offset = offsets[i];
     if (offset == 0) {
       continue;
@@ -107,14 +118,16 @@ auto shift(at::Tensor tensor, const std::vector<int>& offsets) {
     }
     t.index(indices) = 0;
   }
+  t = t.index(stride_indices);
   return t;
 }
 
-// ATen version of tensor shifting
+// ATen version of tensor gather
 auto gather(
     at::Tensor tensor,
     const std::vector<int>& window_shape,
-    const std::vector<std::vector<int>>& pad_width) {
+    const std::vector<std::vector<int>>& pad_width,
+    std::vector<int> strides = {}) {
   TORCH_CHECK(
       tensor.ndimension() == window_shape.size(),
       "Invalid window shape: ",
@@ -125,6 +138,15 @@ auto gather(
       "Invalid pad width: ",
       pad_width,
       ". Size of the pad width is different from the tensor dimension.");
+  if (strides.empty()) {
+    strides = std::vector<int>(tensor.ndimension(), 1);
+  } else {
+    TORCH_CHECK(
+        tensor.ndimension() == strides.size(),
+        "Invalid strides: ",
+        strides,
+        ". Size of strides is different from the tensor dimension.");
+  }
   at::Tensor t = tensor;
   for (size_t i = 0; i < window_shape.size(); ++i) {
     const auto w_size = window_shape[i];
@@ -135,7 +157,9 @@ auto gather(
     for (int w = 0; w < w_size; ++w) {
       std::vector<int> shift_offsets(t.ndimension(), 0);
       shift_offsets[i] = pad[0] - w;
-      auto shifted = shift(t, shift_offsets);
+      std::vector<int> shift_strides(t.ndimension(), 1);
+      shift_strides[i] = strides[i];
+      auto shifted = shift(t, shift_offsets, shift_strides);
       shifted = shifted.unsqueeze(-1);
       if (w == 0) {
         concat_tensor = shifted;
@@ -3924,6 +3948,688 @@ TEST(NVFuserTest, FusionGatherUnswitch1_CUDA) {
 
   auto t4 = gather(t0, {5}, {{2, 2}});
   TORCH_CHECK(t4.equal(outputs[3]));
+}
+
+TEST(NVFuserTest, FusionGatherStrided1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  const std::vector<int> window_shape = {1, 3};
+  const std::vector<std::vector<int>> padding_width = {{0, 0}, {1, 1}};
+
+  const std::vector<int> strides = {1, 3};
+
+  auto tv1 = gather(tv0, window_shape, padding_width, strides);
+
+  fusion.addOutput(tv1);
+
+  const int s1 = 11;
+  const int s2 = 13;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({s1, s2}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion({t0});
+
+  // tv1 has a stride dimension, so its number of dimensions should be
+  // input_ndims + window_ndims + stride.
+  TORCH_CHECK(tv1->nDims() == tv0->nDims() * 2 + 1);
+
+  // However, the number of dimensions of the Aten tensor should still
+  // be just the twice of the number of dimensions of the input
+  // tensor.
+  auto fuser_out = outputs[0];
+  TORCH_CHECK(
+      fuser_out.ndimension() == tv0->nDims() * 2,
+      "Invalid dimensionality of output tensor: ",
+      fuser_out.ndimension());
+
+  // Each output dimension should be: ceilDiv(input_size + padding_width -
+  // window, stride).
+  for (const auto i : c10::irange(window_shape.size())) {
+    auto valid_dim = ceilDiv(
+        t0.size(i) + padding_width[i][0] + padding_width[i][1] -
+            window_shape[i] + 1,
+        strides[i]);
+    auto actual_dim = outputs[0].size(i);
+    TORCH_CHECK(
+        valid_dim == actual_dim,
+        "Invalid output size at dimension ",
+        i,
+        ". Expected: ",
+        valid_dim,
+        ", actual: ",
+        actual_dim);
+  }
+
+  auto ref = gather(t0, window_shape, padding_width, strides);
+
+  TORCH_CHECK(ref.equal(outputs[0]));
+}
+
+// Split strided domain
+TEST(NVFuserTest, FusionGatherStrided2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  const std::vector<int> window_shape = {3};
+  const std::vector<std::vector<int>> padding_width = {{1, 1}};
+  const std::vector<int> strides = {3};
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(1));
+
+  auto tv2 = gather(tv1, window_shape, padding_width, strides);
+
+  auto tv3 = sum(tv2, {-1});
+
+  fusion.addOutput(tv3);
+
+  // Split the strided domain
+  tv3->split(0, 4);
+
+  // Propagate the split by 4 of the tv3 domain to pre-stride domains,
+  // making them split by 4 * 3
+  tv0->computeAt(tv3, 1);
+
+  tv2->computeAt(tv3, -1);
+
+  tv3->axis(0)->parallelize(ParallelType::BIDx);
+  tv3->axis(1)->parallelize(ParallelType::TIDx);
+  scheduler_utils::parallelizeAllLike(tv3, {tv1, tv2});
+
+  tv1->setMemoryType(MemoryType::Shared);
+
+  const int s1 = 100;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({s1}, options);
+  std::vector<IValue> inputs = {t0};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion(inputs);
+
+  auto t1 = t0 + 1;
+  auto t2 = gather(t1, window_shape, padding_width, strides);
+  auto ref = sum(t2, {-1});
+
+  testValidate(&fusion, outputs, inputs, {ref}, __LINE__, __FILE__);
+}
+
+// Outer split
+TEST(NVFuserTest, FusionGatherStrided3_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  const std::vector<int> window_shape = {3};
+  const std::vector<std::vector<int>> padding_width = {{1, 1}};
+  const std::vector<int> strides = {3};
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(1));
+
+  auto tv2 = gather(tv1, window_shape, padding_width, strides);
+
+  auto tv3 = sum(tv2, {-1});
+  fusion.addOutput(tv3);
+
+  // Outer split
+  tv3->split(0, 2, false);
+
+  tv0->computeAt(tv3, 1);
+
+  tv3->axis(0)->parallelize(ParallelType::BIDx);
+  tv3->axis(1)->parallelize(ParallelType::TIDx);
+  scheduler_utils::parallelizeAllLike(tv3, {tv1, tv2});
+
+  tv1->setMemoryType(MemoryType::Shared);
+  tv2->setMemoryType(MemoryType::Shared);
+
+  const int s1 = 100;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({s1}, options);
+  std::vector<IValue> inputs = {t0};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion(inputs);
+
+  auto t1 = t0 + 1;
+  auto t2 = gather(t1, window_shape, padding_width, strides);
+  auto ref = sum(t2, {-1});
+
+  testValidate(&fusion, outputs, inputs, {ref}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionGatherStrided4_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  const std::vector<int> window_shape = {3};
+  const std::vector<std::vector<int>> padding_width = {{1, 1}};
+  const std::vector<int> strides = {3};
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(1));
+
+  // Test propagation of split from one gather output to another
+  auto tv2 = gather(tv1, window_shape, padding_width, strides);
+  auto tv3 = gather(tv1, window_shape, padding_width, strides);
+
+  auto tv4 = sum(tv2, {-1});
+  fusion.addOutput(tv4);
+
+  auto tv5 = sum(tv3, {-1});
+  fusion.addOutput(tv5);
+
+  tv4->split(0, 2);
+
+  // Test forward computeAt propagation from tv1 to tv3
+  tv0->computeAt(tv4, 1);
+
+  const int s1 = 101;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({s1}, options);
+  std::vector<IValue> inputs = {t0};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion(inputs);
+
+  auto t1 = t0 + 1;
+  auto t2 = gather(t1, window_shape, padding_width, strides);
+  auto ref = sum(t2, {-1});
+
+  testValidate(&fusion, outputs, inputs, {ref, ref}, __LINE__, __FILE__);
+}
+
+// Same as GatherStrided1 but with stride != window
+TEST(NVFuserTest, FusionGatherStrided5_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  const std::vector<int> window_shape = {1, 3};
+  const std::vector<std::vector<int>> padding_width = {{0, 0}, {1, 1}};
+
+  const std::vector<int> strides = {1, 2};
+
+  auto tv1 = gather(tv0, window_shape, padding_width, strides);
+
+  fusion.addOutput(tv1);
+
+  const int s1 = 11;
+  const int s2 = 13;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({s1, s2}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion({t0});
+
+  auto ref = gather(t0, window_shape, padding_width, strides);
+
+  TORCH_CHECK(ref.equal(outputs[0]));
+}
+
+// Same as GatherStrided2 but with stride != window
+TEST(NVFuserTest, FusionGatherStrided6_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  const std::vector<int> window_shape = {3};
+  const std::vector<std::vector<int>> padding_width = {{1, 1}};
+  const std::vector<int> strides = {2};
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(1));
+
+  auto tv2 = gather(tv1, window_shape, padding_width, strides);
+
+  auto tv3 = sum(tv2, {-1});
+
+  fusion.addOutput(tv3);
+
+  // Split the strided domain
+  tv3->split(0, 4);
+
+  // Propagate the split by 4 of the tv3 domain to pre-stride domains,
+  // making them split by 4 * 2
+  tv0->computeAt(tv3, 1);
+
+  tv2->computeAt(tv3, -1);
+
+  tv3->axis(0)->parallelize(ParallelType::BIDx);
+  tv3->axis(1)->parallelize(ParallelType::TIDx);
+  scheduler_utils::parallelizeAllLike(tv3, {tv1, tv2});
+
+  tv1->setMemoryType(MemoryType::Shared);
+
+  const int s1 = 100;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({s1}, options);
+  std::vector<IValue> inputs = {t0};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion(inputs);
+
+  auto t1 = t0 + 1;
+  auto t2 = gather(t1, window_shape, padding_width, strides);
+  auto ref = sum(t2, {-1});
+
+  testValidate(&fusion, outputs, inputs, {ref}, __LINE__, __FILE__);
+}
+
+// Same as GatherStrided4 but different strides
+TEST(NVFuserTest, FusionGatherStrided7_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  const std::vector<int> window_shape = {3};
+  const std::vector<std::vector<int>> padding_width = {{1, 1}};
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(1));
+
+  // Use different strides
+  auto tv2 = gather(tv1, window_shape, padding_width, {3});
+  auto tv3 = gather(tv1, window_shape, padding_width, {2});
+
+  auto tv4 = sum(tv2, {-1});
+  fusion.addOutput(tv4);
+
+  auto tv5 = sum(tv3, {-1});
+  fusion.addOutput(tv5);
+
+  tv4->split(0, 2);
+
+  // Since tv3 has a different stride factor, this should fail.
+  ASSERT_ANY_THROW(tv0->computeAt(tv4, 1));
+}
+
+// Same as GatherStrided2 but with unswitch
+TEST(NVFuserTest, FusionGatherStrided8_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  const std::vector<int> window_shape = {3};
+  const std::vector<std::vector<int>> padding_width = {{1, 1}};
+  const std::vector<int> strides = {3};
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(1));
+
+  auto tv2 = gather(tv1, window_shape, padding_width, strides);
+
+  auto tv3 = sum(tv2, {-1});
+
+  fusion.addOutput(tv3);
+
+  const int tidx = 32;
+
+  // Split the strided domain
+  tv3->split(0, tidx);
+
+  // Split for unswitch
+  tv3->split(0, 1);
+
+  tv0->computeAt(tv3, 2);
+
+  tv2->computeAt(tv3, -1);
+
+  tv3->axis(0)->parallelize(ParallelType::BIDx);
+  tv3->axis(1)->parallelize(ParallelType::Unswitch);
+  tv3->axis(2)->parallelize(ParallelType::TIDx);
+  scheduler_utils::parallelizeAllLike(tv3, {tv1, tv2});
+
+  tv1->setMemoryType(MemoryType::Shared);
+
+  const int s1 = 1023;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({s1}, options);
+  std::vector<IValue> inputs = {t0};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion(inputs);
+
+  auto t1 = t0 + 1;
+  auto t2 = gather(t1, window_shape, padding_width, strides);
+  auto ref = sum(t2, {-1});
+
+  testValidate(&fusion, outputs, inputs, {ref}, __LINE__, __FILE__);
+}
+
+// Chained strided gather. Not supported yet.
+TEST(NVFuserTest, FusionGatherStridedChain_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  const std::vector<int> window_shape = {3};
+  const std::vector<std::vector<int>> padding_width = {{1, 1}};
+  const std::vector<int> strides = {3};
+  // const std::vector<int> strides = {1};
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(1));
+
+  auto tv2 = gather(tv1, window_shape, padding_width, strides);
+  // Reduce gathered window
+  auto tv3 = sum(tv2, {-1});
+
+  // Repeat
+  auto tv4 = gather(tv3, window_shape, padding_width, strides);
+  auto tv5 = sum(tv4, {-1});
+  auto out = tv5;
+
+  fusion.addOutput(out);
+
+  // This should throw an error at HaloInfo::build.
+  ASSERT_ANY_THROW(GpuLower gpulw(&fusion));
+}
+
+TEST(NVFuserTest, FusionMaxPoolingStrided_CUDA) {
+  if (at::cuda::getDeviceProperties(0)->major < 6) {
+    return;
+  }
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Input:  CHW
+  // Pooling window: 3x3
+  // Strides: 3
+  // Padding: 1 at each end of the inner 2 dimensions
+
+  // [C, H, W]
+  auto inp = makeSymbolicTensor(3);
+  fusion.addInput(inp);
+
+  // [C, H/3, W/3, 1, 3, 3]
+  auto inp_tile = gather(inp, {1, 3, 3}, {{0, 0}, {1, 1}, {1, 1}}, {1, 3, 3});
+
+  // [C, H/3, W/3]
+  auto max_tensor = reductionOp(
+      BinaryOpType::Max,
+      {-3, -2, -1},
+      new Double(std::numeric_limits<float>::lowest()),
+      inp_tile);
+  fusion.addOutput(max_tensor);
+
+  ////////////////////////////////////
+
+  // Cache the input and weight tensors
+  auto inp_cache = inp->cache_after();
+
+  // Tiling the spatial domain
+  const int tile_x = 32;
+  const int tile_y = 8;
+
+  max_tensor->split(1, tile_y);
+  max_tensor->split(3, tile_x);
+  max_tensor->reorder({{2, 3}});
+  // [C, H/tile_y, W/tile_x, tile_y, tile_x]
+  max_tensor->split(2, 1);
+  // [C, H/tile_y, W/tile_x, 1, tile_y, tile_x]
+
+  inp->computeAt(max_tensor, 4);
+
+  max_tensor->axis(0)->parallelize(ParallelType::BIDx);
+  max_tensor->axis(3)->parallelize(ParallelType::Unswitch);
+  max_tensor->axis(4)->parallelize(ParallelType::TIDy);
+  max_tensor->axis(5)->parallelize(ParallelType::TIDx);
+
+  scheduler_utils::parallelizeAllLike(max_tensor, ir_utils::allTvs(&fusion));
+
+  inp_cache->setMemoryType(MemoryType::Shared);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  const int hw = 50;
+  const int num_channels = 20;
+  const int pooling_window = 3;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor aten_inp = at::randn({num_channels, hw, hw}, options);
+  // We always pad inputs by zero, so if all surrounding values are
+  // negative, max pooling would pick a padded value, which isn't the
+  // correct behavior. We need to be able to choose the value of
+  // padding. In this case, padding by the minimum value would not
+  // have this problem. For now, avoid the problem by making sure all
+  // values are not negative.
+  aten_inp = at::abs(aten_inp);
+  std::vector<IValue> inputs = {aten_inp};
+
+  auto outputs = fe.runFusion(inputs);
+
+  auto ref = at::max_pool2d(
+      aten_inp, {pooling_window, pooling_window}, {3, 3}, {1, 1});
+
+  testValidate(&fusion, outputs, inputs, {ref}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionConv2DStaticStrided_CUDA) {
+  if (at::cuda::getDeviceProperties(0)->major < 6) {
+    return;
+  }
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Input: [C, H, W]
+  auto inp = makeSymbolicTensor(3);
+  fusion.addInput(inp);
+
+  // Weights: [K, C, 3, 3]
+  auto w = makeSymbolicTensor(4);
+  fusion.addInput(w);
+
+  // Gather a neighbor tile of [3, 3] with padding size of 1 for each
+  // side of the spatial dimensions
+  auto inp_tile = gather(inp, {1, 3, 3}, {{0, 0}, {1, 1}, {1, 1}}, {1, 3, 3});
+  // inp_tile: [C, H/3, s3, W/3, s3, 1, 3, 3]
+
+  auto inp_bc =
+      broadcast(inp_tile, {true, false, false, false, false, false, false});
+  auto w_bc = broadcast(w, {false, false, true, true, true, false, false});
+
+  auto inp_times_w = mul(inp_bc, w_bc);
+
+  // Reduce the channel and neighbor tile dimensions
+  auto out = sum(inp_times_w, {1, 4, 5, 6});
+
+  fusion.addOutput(out);
+
+  ////////////////////////////////////
+
+  // Cache the input and weight tensors
+  auto inp_cache = inp->cache_after();
+
+  // Blocking the spatial dimensions
+  const int block_w = 16;
+  const int block_h = 4;
+  const int block_c = 2;
+
+  // [K, C, H/s, W/s, 1, 3, 3]
+  out->split(2, block_h);
+  // [K, C, H/s/block_h, block_h, W/s, 1, 3, 3]
+  out->split(4, block_w);
+  // [K, C, H/s/block_h, block_h, W/s/block_w, block_w, 1, 3, 3]
+  out->reorder({{3, 4}});
+  // [K, C, H/s/block_h, W/s/block_w, block_h, block_w, 1, 3, 3]
+  out->split(1, block_c);
+  // [K, C/block_c, block_c, H/s/block_h, W/s/block_w, block_h, block_w, 1, 3,
+  // 3]
+  out->split(4, 1);
+  // [K, C/block_c, block_c, H/s/block_h, W/s/block_w, 1, block_h, block_w, 1,
+  // 3, 3]
+
+  auto out_rf = out->rFactor({1, -3, -2, -1});
+  // [K, C/block_c, block_c, H/s/block_h, W/s/block_w, 1, block_h, block_w, 1,
+  // 3, 3]
+
+  // out: [K, block_c, H/s/block_h, W/s/block_w, 1, block_h, block_w]
+
+  inp_cache->computeAt(out, 5);
+  inp_cache->setMemoryType(MemoryType::Shared);
+  // [K, block_c, H/s/block_h, W/s/block_w, 1, block_h, block_w, C/block_c, 1,
+  // 3, 3]
+
+  // Move C/block_c before block_h/2 and share the domain from
+  // inp_cache to out_rf
+  out_rf->reorder({{7, 5}, {5, 6}, {6, 7}});
+  inp_cache->computeAt(out_rf, 6);
+
+  inp_tile->computeAt(out_rf, -1);
+  w->computeAt(out_rf, -1);
+
+  out->axis(0)->parallelize(ParallelType::BIDx);
+  out->axis(1)->parallelize(ParallelType::TIDz);
+  out->axis(4)->parallelize(ParallelType::Unswitch);
+  out->axis(5)->parallelize(ParallelType::TIDy);
+  out->axis(6)->parallelize(ParallelType::TIDx);
+
+  scheduler_utils::parallelizeAllLike(out, {inp_cache, out_rf});
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  const int dim_h = 99;
+  const int dim_w = 101;
+  const int dim_c = 10;
+  const int dim_f = 20;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  at::Tensor at_inp = at::randn({dim_c, dim_h, dim_w}, options);
+  at::Tensor at_w = at::randn({dim_f, dim_c, 3, 3}, options);
+  std::vector<IValue> inputs = {at_inp, at_w};
+
+  auto cg_outputs = fe.runFusion(inputs);
+
+  at_inp = at_inp.unsqueeze(0); // at::conv2d needs the N axis
+  auto at_out = at::conv2d(at_inp, at_w, {}, 3, 1);
+  at_out = at_out.squeeze(0); // drop the N axis
+
+  testValidate(&fusion, cg_outputs, inputs, {at_out}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionNonDivisibleHalo1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = shift(tv1, {-1});
+  fusion.addOutput(tv2);
+
+  // [I]
+  tv2->split(0, 8);
+  // [I/8, 8]
+  tv2->split(1, 3);
+  // [I/8, 3, 3]
+
+  tv0->computeAt(tv2, -2);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({24}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion({t0});
+
+  auto ref = shift((t0 + 1), {-1});
+
+  testValidate(&fusion, cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionNonDivisibleHalo2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = gather(tv0, {3, 3}, {{1, 1}, {1, 1}});
+  auto tv2 = sum(tv1, {-2, -1});
+  auto tv3 = add(tv0, tv2);
+  auto tv4 = sum(tv3, {0, 1});
+  fusion.addOutput(tv4);
+
+  const int gy = 50;
+  const int gx = 50;
+  const int by = 8;
+  const int bx = 16;
+
+  auto tv5 = tv0->cache_after();
+
+  // [I, J]
+  tv4->split(0, gy);
+  // [I/gy, gy, J]
+  tv4->split(1, by);
+  // [I/gy, gy/by, by, J]
+  tv4->split(-1, gx);
+  // [I/gy, gy/by, by, J/gx, gx]
+  tv4->split(-1, bx);
+  // [I/gy, gy/by, by, J/gx, gx/bx, bx]
+  tv4->reorder({{3, 1}, {1, 2}, {4, 3}, {2, 4}});
+  // [I/gy, J/gx, gy/by, gx/bx, by, bx]
+
+  auto tv6 = tv4->rFactor({2, 3});
+
+  tv0->computeAt(tv6, 4);
+
+  tv4->axis(0)->parallelize(ParallelType::BIDy);
+  tv4->axis(1)->parallelize(ParallelType::BIDx);
+  tv4->axis(2)->parallelize(ParallelType::TIDy);
+  tv4->axis(3)->parallelize(ParallelType::TIDx);
+
+  scheduler_utils::parallelizeAllLike(tv4, {tv1, tv2, tv3, tv5, tv6});
+
+  tv5->setMemoryType(MemoryType::Shared);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({111, 222}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion({t0});
+
+  auto t1 = gather(t0, {3, 3}, {{1, 1}, {1, 1}});
+  auto t2 = t1.sum({-2, -1});
+  auto t3 = t0 + t2;
+  auto t4 = t3.sum({-2, -1});
+
+  testValidate(&fusion, cg_outputs, {t0}, {t4}, __LINE__, __FILE__);
 }
 
 } // namespace jit

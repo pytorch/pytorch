@@ -9,6 +9,13 @@
 #include <torch/csrc/jit/runtime/static/impl.h>
 #include <torch/csrc/jit/runtime/static/memory_planner.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/allclose.h>
+#endif
+
 #include <memory>
 #include <unordered_map>
 
@@ -69,7 +76,8 @@ class ModuleStaticRuntimeTestContext : public StaticRuntimeTestContext {
   }
 
   StaticModule makeStaticModule(const StaticModuleOptions& opt) const override {
-    return torch::jit::StaticModule(module_, /* is_frozen */ false, opt);
+    return torch::jit::StaticModule(
+        module_, /* is_frozen */ false, opt, /* sample_inputs */ {});
   }
 
  private:
@@ -91,7 +99,7 @@ class GraphStaticRuntimeContext : public StaticRuntimeTestContext {
   }
 
   StaticModule makeStaticModule(const StaticModuleOptions& opt) const override {
-    return StaticModule(graph_, opt);
+    return StaticModule(graph_, opt, /* sample_inputs */ {});
   }
 
  private:
@@ -216,6 +224,14 @@ bool hasNodeWithKind(const StaticModule& smodule, const std::string& kind) {
   return getNodeWithKind(smodule, kind) != nullptr;
 }
 
+std::shared_ptr<Graph> getGraphFromScript(const std::string& jit_script) {
+  script::Module module("module");
+  module.define(jit_script);
+
+  Method method = module.get_method("forward");
+  return module.get_method("forward").graph();
+}
+
 std::shared_ptr<Graph> getGraphFromIR(const std::string& ir) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> vmap;
@@ -316,9 +332,7 @@ void testStaticRuntime(
         size_t new_managed_bytes =
             memory_planner ? memory_planner->total_managed() : 0;
         if (check_resize && new_managed_bytes > 0) {
-          VLOG(1) << "managed_bytes: " << managed_bytes
-                  << ", new_managed_bytes: " << new_managed_bytes;
-          EXPECT_TRUE(new_managed_bytes > managed_bytes);
+          EXPECT_GT(new_managed_bytes, managed_bytes);
         }
 
         // Run static runtime again with an input of the shape observed during

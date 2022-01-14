@@ -1,9 +1,6 @@
-import random
-
 from collections import defaultdict
 
 from torch.utils.data import IterDataPipe, functional_datapipe, DataChunk
-from torch.utils.data.datapipes.utils.common import deprecation_warning_torchdata
 from typing import Any, Callable, DefaultDict, Iterator, List, Optional, Sized, TypeVar
 
 T_co = TypeVar('T_co', covariant=True)
@@ -137,97 +134,6 @@ class UnBatcherIterDataPipe(IterDataPipe):
                 raise IndexError(f"unbatch_level {self.unbatch_level} exceeds the depth of the DataPipe")
 
 
-def _in_batch_shuffle_fn(data: DataChunk):
-    random.shuffle(data)
-    return data
-
-
-class BucketBatcherIterDataPipe(IterDataPipe[DataChunk[T_co]]):
-    r""":class:`BucketBatcherIterDataPipe`.
-
-    Iterable DataPipe to create mini-batches of data from sorted bucket. An outer
-    dimension will be added as `batch_size` if `drop_last` is set to `True`,
-    or `length % batch_size` for the last batch if `drop_last` is set to `False`.
-
-    Args:
-        datapipe: Iterable DataPipe being batched
-        batch_size: The size of each batch
-        drop_last: Option to drop the last batch if it's not full
-        batch_num: Number of batches to consist a bucket
-        bucket_num: Number of buckets to consist a pool for shuffling
-        sort_key: Callable to specify the comparison key for sorting within bucket
-        in_batch_shuffle: Option to do in-batch shuffle or buffer shuffle
-    """
-    datapipe: IterDataPipe[T_co]
-    batch_size: int
-    drop_last: bool
-    batch_num: int
-    bucket_num: int
-    sort_key: Optional[Callable]
-    in_batch_shuffle: bool
-    length: Optional[int]
-
-    def __init__(self,
-                 datapipe: IterDataPipe[T_co],
-                 batch_size: int,
-                 drop_last: bool = False,
-                 batch_num: int = 100,
-                 bucket_num: int = 1,
-                 sort_key: Optional[Callable] = None,
-                 in_batch_shuffle: bool = True
-                 ) -> None:
-        assert batch_size > 0, "Batch size is required to be larger than 0!"
-        assert batch_num > 0, "Number of batches is required to be larger than 0!"
-        assert bucket_num > 0, "Number of buckets is required to be larger than 0!"
-        deprecation_warning_torchdata(type(self).__name__)
-        super().__init__()
-
-        # TODO: Verify _datapippe is not going to be serialized twice
-        # and be able to reconstruct
-        self._datapipe = datapipe
-        self.batch_size = batch_size
-        self.drop_last = drop_last
-        self.batch_num = batch_num
-        self.bucket_num = bucket_num
-        self.sort_key = sort_key
-        self.in_batch_shuffle = in_batch_shuffle
-
-        self.bucket_size = batch_size * batch_num
-        self.pool_size = self.bucket_size * bucket_num
-
-        if bucket_num > 1 or sort_key is None:
-            if in_batch_shuffle:
-                datapipe = datapipe.batch(batch_size=self.pool_size, drop_last=False).map(fn=_in_batch_shuffle_fn).unbatch()
-            else:
-                datapipe = datapipe.shuffle(buffer_size=self.pool_size)
-        if sort_key is not None:
-            datapipe = datapipe.batch(self.bucket_size).map(fn=sort_key).unbatch()
-        datapipe = datapipe.batch(batch_size, drop_last=drop_last)
-        if sort_key is not None:
-            # In-batch shuffle each bucket seems not that useful
-            if in_batch_shuffle:
-                datapipe = datapipe.batch(batch_size=bucket_num, drop_last=False).map(fn=_in_batch_shuffle_fn).unbatch()
-            else:
-                datapipe = datapipe.shuffle(buffer_size=self.bucket_size)
-        self.datapipe = datapipe
-
-        self.length = None
-
-    def __iter__(self) -> Iterator:
-        yield from self.datapipe
-
-    def __len__(self) -> int:
-        if self.length is not None:
-            return self.length
-        if isinstance(self._datapipe, Sized):
-            if self.drop_last:
-                self.length = len(self._datapipe) // self.batch_size
-            else:
-                self.length = (len(self._datapipe) + self.batch_size - 1) // self.batch_size
-            return self.length
-        raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
-
-
 @functional_datapipe('groupby')
 class GrouperIterDataPipe(IterDataPipe[DataChunk]):
     r""":class:`GrouperIterDataPipe`.
@@ -240,7 +146,6 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         group_key_fn: Function used to generate group key from the data of the source datapipe
         buffer_size: The size of buffer for ungrouped data
         group_size: The size of each group
-        unbatch_level: Specifies if it necessary to unbatch source data before grouping
         guaranteed_group_size: The guaranteed minimum group size
         drop_remaining: Specifies if the group smaller than `guaranteed_group_size` will be dropped from buffer
     """
@@ -250,22 +155,18 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
                  *,
                  buffer_size: int = 10000,
                  group_size: Optional[int] = None,
-                 unbatch_level: int = 0,
                  guaranteed_group_size: Optional[int] = None,
                  drop_remaining: bool = False):
-        if unbatch_level == 0:
-            self.datapipe = datapipe
-        else:
-            self.datapipe = datapipe.unbatch(unbatch_level=unbatch_level)
+        self.datapipe = datapipe
         self.group_key_fn = group_key_fn
         self.buffer_size = buffer_size
         self.group_size = group_size
         self.guaranteed_group_size = None
         if group_size is not None and buffer_size is not None:
-            assert group_size > 0 and group_size <= buffer_size
+            assert 0 < group_size <= buffer_size
             self.guaranteed_group_size = group_size
         if guaranteed_group_size is not None:
-            assert guaranteed_group_size > 0 and group_size is not None and guaranteed_group_size <= group_size
+            assert group_size is not None and 0 < guaranteed_group_size <= group_size
             self.guaranteed_group_size = guaranteed_group_size
         self.drop_remaining = drop_remaining
         self.wrapper_class = DataChunk
@@ -288,7 +189,7 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         new_buffer_size = buffer_size - biggest_size
         del buffer_elements[biggest_key]
 
-        return (result_to_yield, new_buffer_size)
+        return result_to_yield, new_buffer_size
 
     def __iter__(self):
         buffer_elements: DefaultDict[Any, List] = defaultdict(list)
