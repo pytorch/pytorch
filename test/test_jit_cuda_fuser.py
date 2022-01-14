@@ -3213,7 +3213,7 @@ class TestCudaFuserOpInfo(JitCommonTestCase):
         torch._C._jit_set_nvfuser_single_node_mode(self.nvfuser_single_node_mode)
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
-    @_tracing_ops
+    @_tracing_ops(op_db)
     def test_fuser_correctness(self, device, dtype, op):
         variant_sample_pairs = get_traced_sample_variant_pairs(device, dtype, op)
 
