@@ -11,6 +11,14 @@
 // However for now opting for STL, since we are not building
 // with Sleef for mobile yet.
 
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
+#if defined(__aarch64__) && defined(TARGET_OS_MAC)
+#include <sleef.h>
+#endif
+
 namespace at {
 namespace vec {
 // See Note [CPU_CAPABILITY namespace]
@@ -353,7 +361,11 @@ public:
     return loadu(tmp);
   }
   Vectorized<float> erf() const {
+#if defined(TARGET_OS_MAC)
+    return Vectorized<float>(Sleef_erff4_u10(values.val[0]), Sleef_erff4_u10(values.val[1]));
+#else
     return map(std::erf);
+#endif
   }
   Vectorized<float> erfc() const {
     return map(std::erfc);
@@ -362,7 +374,11 @@ public:
     return map(calc_erfinv);
   }
   Vectorized<float> exp() const {
+#if defined(TARGET_OS_MAC)
+    return Vectorized<float>(Sleef_expf4_u10(values.val[0]), Sleef_expf4_u10(values.val[1]));
+#else
     return map(std::exp);
+#endif
   }
   Vectorized<float> expm1() const {
     return map(std::expm1);
