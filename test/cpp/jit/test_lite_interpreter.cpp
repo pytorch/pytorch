@@ -2058,7 +2058,7 @@ void enumerateTupleType(
 class LiteInterpreterDynamicTypeTestFixture
     : public ::testing::TestWithParam<size_t> {
  protected:
-  void SetUp() {
+  void SetUp() override {
     cu = std::make_shared<CompilationUnit>();
     std::vector<TypePtr> keyTypes = {
         AnyType::get(),
@@ -2089,14 +2089,14 @@ class LiteInterpreterDynamicTypeTestFixture
       std::vector<TypePtr> nested;
       for (const auto& type : types) {
         if (!(type == AnyType::get())) {
-          nested.push_back(ListType::create(type));
+          nested.emplace_back(ListType::create(type));
           if (!(type == NoneType::get() ||
                 type->kind() == OptionalType::Kind)) {
-            nested.push_back(OptionalType::create(type));
+            nested.emplace_back(OptionalType::create(type));
           }
         }
         for (const auto& keyType : keyTypes) {
-          nested.push_back(DictType::create(keyType, type));
+          nested.emplace_back(DictType::create(keyType, type));
         }
       }
       std::vector<TypePtr> tmp;
