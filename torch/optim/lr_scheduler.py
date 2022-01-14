@@ -489,7 +489,7 @@ class ConstantLR(_LRScheduler):
 class LinearLR(_LRScheduler):
     r"""Decays the learning rate of each parameter group by linearly changing small
     multiplicative factor until the number of epoch reaches a pre-defined milestone: total_iters,
-    or :math:`T_\text{max}`. :math:`K_\text{start}` and :math:`K_\text{end}`denote the start
+    or :math:`T_\text{max}`. :math:`K_\text{start}` and :math:`K_\text{end}` denote the start
     and end factors, respectively. Notice that such decay can happen simultaneously with other
     changes to the learning rate from outside this scheduler. When last_epoch=-1, sets initial
     lr :math:`\eta_0` as lr.
