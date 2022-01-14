@@ -24,13 +24,21 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           path: pytorch
-      - name: Update self-hosted PyTorch
+      - name: Update self-hosted PyTorch domain packages
         run: |
           pushd "${HOME}"/pytorch
           git remote prune origin
           git fetch
           popd
-      - name: Create conda environment
+          pushd "${HOME}"/vision
+          git remote prune origin
+          git fetch
+          popd
+          pushd "${HOME}"/text
+          git remote prune origin
+          git fetch
+          popd
+      - name: Create conda environment and install deps
         run: |
           conda create -y -n pr-ci python="${PYTHON_VERSION}"
           # shellcheck disable=SC1091
@@ -40,7 +48,31 @@ jobs:
                            future six dataclasses pillow pytest tabulate gitpython git-lfs
           # install magma
           conda install -y -c pytorch "${MAGMA_VERSION}"
-          conda install -y pytorch torchvision torchtext cudatoolkit="${CUDA_VERSION}" -c pytorch-nightly
+      - name: Build the self-hosted PyTorch domain packages
+        run: |
+          # shellcheck disable=SC1091
+          . "${HOME}"/anaconda3/etc/profile.d/conda.sh
+          conda activate pr-ci
+          # setup build env
+          export USE_CUDA=1
+          export BUILD_TEST=0
+          export USE_MKLDNN=1
+          export USE_MKL=1
+          export USE_CUDNN=1
+          export CMAKE_PREFIX_PATH="${CONDA_PREFIX}"
+          # build PyTorch with base sha version
+          pushd "${HOME}"/pytorch
+          git checkout "${PR_BASE_SHA}" && git submodule update --init --recursive
+          python setup.py install
+          popd
+          pushd "${HOME}"/vision
+          git checkout main && git submodule update --init --recursive
+          python setup.py install
+          popd
+          pushd "${HOME}"/text
+          git checkout main && git submodule update --init --recursive
+          python setup.py clean install
+          popd
       - name: Setup TorchBench branch
         run: |
           # shellcheck disable=SC1091
