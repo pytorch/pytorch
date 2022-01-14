@@ -78,14 +78,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -212,14 +209,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -341,14 +335,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -458,14 +449,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -593,14 +581,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -728,14 +713,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -845,14 +827,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -983,14 +962,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -1118,14 +1094,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -1235,14 +1208,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -1373,14 +1343,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -1508,14 +1475,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -1625,14 +1589,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -1763,14 +1724,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -1898,14 +1856,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -2014,14 +1969,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -2148,14 +2100,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -2277,14 +2226,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -2394,14 +2340,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -2529,14 +2472,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -2664,14 +2604,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -2781,14 +2718,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -2919,14 +2853,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -3054,14 +2985,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -3171,14 +3099,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -3309,14 +3234,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -3444,14 +3366,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -3561,14 +3480,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -3699,14 +3615,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -3834,14 +3747,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -3950,14 +3860,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -4084,14 +3991,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -4213,14 +4117,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -4330,14 +4231,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -4465,14 +4363,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -4600,14 +4495,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -4717,14 +4609,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -4855,14 +4744,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -4990,14 +4876,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -5107,14 +4990,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -5245,14 +5125,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -5380,14 +5257,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -5497,14 +5371,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -5635,14 +5506,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -5770,14 +5638,11 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: standard
+          AWS_RETRY_MODE: adaptive
           AWS_MAX_ATTEMPTS: 5
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
