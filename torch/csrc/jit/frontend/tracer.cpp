@@ -327,7 +327,7 @@ Node* TracingState::createNode(c10::Symbol op_name, size_t num_outputs) {
   return graph->create(op_name, num_outputs);
 }
 
-void TracingState::insertNode(Node *node) {
+void TracingState::insertNode(Node* node) {
   graph->insertNode(node);
 }
 
