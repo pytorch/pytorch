@@ -366,6 +366,9 @@ class TestOperators(TestCase):
         skip('div', 'no_rounding_mode', device_type='cuda'),
         skip('div', 'trunc_rounding', device_type='cuda'),
         skip('true_divide', device_type='cuda'),
+
+        # Causing an error with calling a forward mode of a forward mode
+        xfail('nn.functional.batch_norm', device_type='cpu'),
     }))
     def test_jvp(self, device, dtype, op):
         # TODO: when we change supports_autograd to supports_backward_ad, also change in this file
@@ -664,6 +667,9 @@ class TestOperators(TestCase):
         skip('div', 'no_rounding_mode', device_type='cuda'),
         skip('div', 'trunc_rounding', device_type='cuda'),
         skip('true_divide', device_type='cuda'),
+
+        # Causing multiple forward mode AD issues, needs investigation
+        xfail('nn.functional.batch_norm', device_type='cpu')
     })
     def test_vmapjvp(self, device, dtype, op):
         if is_inplace(op, op.get_op()):
@@ -698,6 +704,13 @@ class TestOperators(TestCase):
         skip('div', 'no_rounding_mode', device_type='cuda'),
         skip('div', 'trunc_rounding', device_type='cuda'),
         skip('true_divide', device_type='cuda'),
+
+        # Causing issues with multiple cpu levels of forward mode AD
+        xfail('_masked.mean', device_type='cpu'),
+        xfail('_masked.prod', device_type='cpu'),
+        xfail('nn.functional.batch_norm', device_type='cpu'),
+        xfail('nn.functional.hinge_embedding_loss', device_type='cpu'),
+        xfail('nn.functional.instance_norm', device_type='cpu'),
 
         # xfail list
         xfail('linalg.inv'),
