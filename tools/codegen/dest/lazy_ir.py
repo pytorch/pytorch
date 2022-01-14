@@ -78,9 +78,9 @@ class LazyIR:
         scalar_types = schema.filtered_types(values=False, scalars=True)
 
         node_ctor_args = ", ".join([f"const {i.cpp_type()}& {i.name}" for i in all_types])
-        scalar_initializers = ",\n        ".join([f"{t.name}_({t.name})" for t in scalar_types])
+        scalar_initializers = ",\n        ".join([f"{t.name}({t.name})" for t in scalar_types])
         comma_if_scalar_initializers = ",\n" if len(scalar_initializers) else ""
-        scalar_decls = "\n  ".join([f"{t.cpp_type()} {t.name}_;" for t in scalar_types])
+        scalar_decls = "\n  ".join([f"{t.cpp_type()} {t.name};" for t in scalar_types])
         scalar_hashes = ", ".join([f"{f.name}" for f in scalar_types])
         base_ctor_value_args_list = []
         optional_values = []
@@ -98,17 +98,16 @@ class LazyIR:
         members_to_string = []
         for t in scalar_types:
             if isinstance(t.type, OptionalCType):
-                members_to_string.append(f"""if ({t.name}_.has_value()) {{
-    ss << ", {t.name}=" << {t.name}_.value();
+                members_to_string.append(f"""if ({t.name}.has_value()) {{
+    ss << ", {t.name}=" << {t.name}.value();
 }} else {{
     ss << ", {t.name}=null";
 }}""")
             else:
-                members_to_string.append(f'ss << ", {t.name}=" << {t.name}_;')
+                members_to_string.append(f'ss << ", {t.name}=" << {t.name};')
         members_to_string_str = "\n    ".join(members_to_string)
 
         return [f"""\
-// TODO(alanwaketan): Public members don't need to have _ suffix.
 class {schema.node_name} : public {self.node_base} {{
  public:
   {schema.node_name}({node_ctor_args}, std::vector<Shape>&& shapes)
