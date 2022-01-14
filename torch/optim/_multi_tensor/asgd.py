@@ -44,11 +44,14 @@ class ASGD(Optimizer):
             with torch.enable_grad():
                 loss = closure()
 
-        grads = []
-        params_with_grad = []
-        states = []
-
         for group in self.param_groups:
+            grads = []
+            params_with_grad = []
+            mus = []
+            axs = []
+            etas = []
+            state_steps = []
+
             for p in group['params']:
                 if p.grad is not None:
                     if p.grad.is_sparse:
@@ -60,17 +63,22 @@ class ASGD(Optimizer):
 
                     # State initialization
                     if len(state) == 0:
-                        state['step'] = 0
-                        state['eta'] = group['lr']
-                        state['mu'] = 1
+                        state['step'] = torch.tensor(0.)
+                        state['eta'] = torch.tensor(group['lr'])
+                        state['mu'] = torch.tensor(1.)
                         state['ax'] = torch.zeros_like(p, memory_format=torch.preserve_format)
 
-                    state['step'] += 1
-                    states.append(state)
+                    mus.append(state['mu'])
+                    axs.append(state['ax'])
+                    etas.append(state['eta'])
+                    state_steps.append(state['step'])
 
             F.asgd(params_with_grad,
                    grads,
-                   states,
+                   axs,
+                   mus,
+                   etas,
+                   state_steps,
                    lambd=group['lambd'],
                    lr=group['lr'],
                    t0=group['t0'],
