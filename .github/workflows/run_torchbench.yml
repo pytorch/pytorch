@@ -54,15 +54,15 @@ jobs:
           export CMAKE_PREFIX_PATH="${CONDA_PREFIX}"
           # build the packages
           pushd "${HOME}"/pytorch
-          git checkout "${PR_BASE_SHA}" && git submodule sync && git submodule init --recursive
+          git checkout "${PR_BASE_SHA}" && git submodule sync && git submodule update --init --recursive
           python setup.py install
           popd
           pushd vision
-          git checkout main && git submodule sync && git submodule init --recursive
+          git checkout main && git submodule sync && git submodule update --init --recursive
           python setup.py clean install
           popd
           pushd text
-          git checkout main && git submodule sync && git submodule init --recursive
+          git checkout main && git submodule sync && git submodule update --init --recursive
           python setup.py clean install
           popd
       - name: Setup TorchBench branch
