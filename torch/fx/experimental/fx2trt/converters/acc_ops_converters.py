@@ -613,6 +613,55 @@ def acc_ops_relu(
     operation_type = trt.ActivationType.RELU
     return add_activation_layer(network, input_val, operation_type, target, name)
 
+@tensorrt_converter(acc_ops.leaky_relu)
+def acc_ops_leaky_relu(
+    network: TRTNetwork,
+    target: Target,
+    args: Tuple[Argument, ...],
+    kwargs: Dict[str, Argument],
+    name: str,
+) -> Union[TRTTensor, Sequence[TRTTensor]]:
+    input_val = kwargs["input"]
+    negative_slope = kwargs["negative_slope"]
+    operation_type = trt.ActivationType.LEAKY_RELU
+    return add_activation_layer(network, input_val, operation_type, target, name, negative_slope)
+
+@tensorrt_converter(acc_ops.elu)
+def acc_ops_elu(
+    network: TRTNetwork,
+    target: Target,
+    args: Tuple[Argument, ...],
+    kwargs: Dict[str, Argument],
+    name: str,
+) -> Union[TRTTensor, Sequence[TRTTensor]]:
+    input_val = kwargs["input"]
+    alpha = kwargs["alpha"]
+    operation_type = trt.ActivationType.ELU
+    return add_activation_layer(network, input_val, operation_type, target, name, alpha)
+
+@tensorrt_converter(acc_ops.selu)
+def acc_ops_selu(
+    network: TRTNetwork,
+    target: Target,
+    args: Tuple[Argument, ...],
+    kwargs: Dict[str, Argument],
+    name: str,
+) -> Union[TRTTensor, Sequence[TRTTensor]]:
+    input_val = kwargs["input"]
+    operation_type = trt.ActivationType.SELU
+    return add_activation_layer(network, input_val, operation_type, target, name)
+
+@tensorrt_converter(acc_ops.softsign)
+def acc_ops_softsign(
+    network: TRTNetwork,
+    target: Target,
+    args: Tuple[Argument, ...],
+    kwargs: Dict[str, Argument],
+    name: str,
+) -> Union[TRTTensor, Sequence[TRTTensor]]:
+    input_val = kwargs["input"]
+    operation_type = trt.ActivationType.SOFTSIGN
+    return add_activation_layer(network, input_val, operation_type, target, name)
 
 @tensorrt_converter(acc_ops.sin)
 def acc_ops_sin(
@@ -1112,21 +1161,33 @@ def acc_ops_div(
     kwargs: Dict[str, Argument],
     name: str,
 ) -> Union[TRTTensor, Sequence[TRTTensor]]:
-    if kwargs["rounding_mode"] == "trunc":
-        inputs = kwargs["input"]
-        other = kwargs["other"]
-        return trunc_div(inputs, other, network, target, name)
-    elif kwargs["rounding_mode"] == "floor":
-        return add_binary_elementwise_layer(
-            network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.FLOOR_DIV, target, name
-        )
-    elif kwargs["rounding_mode"] is None:
-        return add_binary_elementwise_layer(
-            network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.DIV, target, name
-        )
-    else :
-        mode = kwargs["rounding_mode"]
-        raise RuntimeError(f"Div received mode {mode} that is not supported!")
+    return add_binary_elementwise_layer(
+        network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.DIV, target, name
+    )
+
+
+@tensorrt_converter(acc_ops.floor_div)
+def acc_ops_floor_div(
+    network: TRTNetwork,
+    target: Target,
+    args: Tuple[Argument, ...],
+    kwargs: Dict[str, Argument],
+    name: str,
+) -> Union[TRTTensor, Sequence[TRTTensor]]:
+    return add_binary_elementwise_layer(
+        network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.FLOOR_DIV, target, name
+    )
+
+
+@tensorrt_converter(acc_ops.trunc_div)
+def acc_ops_trunc_div(
+    network: TRTNetwork,
+    target: Target,
+    args: Tuple[Argument, ...],
+    kwargs: Dict[str, Argument],
+    name: str,
+) -> Union[TRTTensor, Sequence[TRTTensor]]:
+    return trunc_div(kwargs["input"], kwargs["other"], network, target, name)
 
 
 @tensorrt_converter(acc_ops.mul)
@@ -2057,14 +2118,18 @@ def acc_ops_cumsum(
     set_layer_name(running_sum, target, f"{name}_running_sum_1")
     running_sum_tensor = running_sum.get_output(0)
 
-    current_sum = add_binary_elementwise_layer(network, data, running_sum_tensor, trt.ElementWiseOperation.SUM, target, "sum_1")
+    current_sum = add_binary_elementwise_layer(
+        network, data, running_sum_tensor, trt.ElementWiseOperation.SUM, target, f"{name}_sum_1"
+    )
     running_sum.set_input(1, current_sum)
 
     running_sum = loop.add_recurrence(zero_tensor)
     set_layer_name(running_sum, target, f"{name}_running_sum_2")
     running_sum_tensor = running_sum.get_output(0)
 
-    current_sum = add_binary_elementwise_layer(network, data, running_sum_tensor, trt.ElementWiseOperation.SUM, target, "sum_2")
+    current_sum = add_binary_elementwise_layer(
+        network, data, running_sum_tensor, trt.ElementWiseOperation.SUM, target, f"{name}_sum_2"
+    )
     running_sum.set_input(1, current_sum)
 
     loop_output = loop.add_loop_output(current_sum, trt.LoopOutput.CONCATENATE, dim)
