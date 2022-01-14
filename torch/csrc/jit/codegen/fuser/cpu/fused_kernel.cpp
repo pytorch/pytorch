@@ -269,7 +269,9 @@ static void runCompiler(
     const std::string& cpp_file,
     const std::string& so_file) {
   auto& config = getConfig();
-  TORCH_CHECK(!config.cxx.empty(), "Failed to compile a fused CPU kernel: Compiler not found");
+  TORCH_CHECK(
+      !config.cxx.empty(),
+      "Failed to compile a fused CPU kernel: Compiler not found");
   TemplateEnv env;
   env.s("cxx", config.cxx);
   env.s("fopenmp", config.openmp ? config.openmp_flags : "");

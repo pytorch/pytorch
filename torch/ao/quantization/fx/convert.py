@@ -206,7 +206,7 @@ def remove_extra_dequantize(quantized: QuantizedGraphModule) -> QuantizedGraphMo
 
 
 def restore_state(
-        observed: GraphModule
+        observed: torch.nn.Module
 ) -> Tuple[Dict[Pattern, QuantizeHandler],
            Dict[str, Tuple[str, type]],
            Dict[str, Any],
@@ -224,7 +224,7 @@ def convert(model: GraphModule, is_reference: bool = False,
             convert_custom_config_dict: Dict[str, Any] = None,
             is_standalone_module: bool = False,
             _remove_qconfig_flag: bool = True,
-            convert_qconfig_dict: Dict[str, Any] = None) -> QuantizedGraphModule:
+            convert_qconfig_dict: Dict[str, Any] = None) -> torch.nn.Module:
     """ standalone_module means it a submodule that is not inlined in
     parent module, and will be quantized separately as one unit.
 
@@ -263,7 +263,7 @@ def convert(model: GraphModule, is_reference: bool = False,
         prepare_qconfig_dict: Dict[str, Dict[Any, Any]] = model._qconfig_dict  # type: ignore[assignment]
         modules_copy = copy.deepcopy(modules)
         convert_dict_to_ordered_dict(convert_qconfig_dict)
-        if model._is_training:
+        if model._is_qat:
             additional_qat_module_mapping = prepare_custom_config_dict.get(
                 "additional_qat_module_mapping", {})
             convert_qconfig_dict = update_qconfig_for_qat(convert_qconfig_dict, additional_qat_module_mapping)
