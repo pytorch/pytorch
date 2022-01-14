@@ -82,7 +82,7 @@ class RMSprop(Optimizer):
         super(RMSprop, self).__init__(params, defaults)
 
     def __setstate__(self, state):
-        super(RMSprop, self).__setstate__(state)
+        super().__setstate__(state)
         for group in self.param_groups:
             group.setdefault('momentum', 0)
             group.setdefault('centered', False)
@@ -159,6 +159,8 @@ def rmsprop(params: List[Tensor],
             square_avgs: List[Tensor],
             grad_avgs: List[Tensor],
             momentum_buffer_list: List[Tensor],
+            # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
+            # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
             foreach: bool = None,
             *,
             lr: float,

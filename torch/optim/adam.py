@@ -86,7 +86,7 @@ class Adam(Optimizer):
         super(Adam, self).__init__(params, defaults)
 
     def __setstate__(self, state):
-        super(Adam, self).__setstate__(state)
+        super().__setstate__(state)
         for group in self.param_groups:
             group.setdefault('amsgrad', False)
             group.setdefault('foreach', None)
@@ -123,7 +123,7 @@ class Adam(Optimizer):
                     state = self.state[p]
                     # Lazy state initialization
                     if len(state) == 0:
-                        state['step'] = 0
+                        state['step'] = torch.tensor(0.)
                         # Exponential moving average of gradient values
                         state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                         # Exponential moving average of squared gradient values
@@ -138,9 +138,6 @@ class Adam(Optimizer):
                     if group['amsgrad']:
                         max_exp_avg_sqs.append(state['max_exp_avg_sq'])
 
-                    # update the steps for each param group update
-                    state['step'] += 1
-                    # record the step after step update
                     state_steps.append(state['step'])
 
             adam(params_with_grad,
@@ -166,7 +163,9 @@ def adam(params: List[Tensor],
          exp_avgs: List[Tensor],
          exp_avg_sqs: List[Tensor],
          max_exp_avg_sqs: List[Tensor],
-         state_steps: List[int],
+         state_steps: List[Tensor],
+         # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
+         # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
          foreach: bool = None,
          *,
          amsgrad: bool,
@@ -179,6 +178,9 @@ def adam(params: List[Tensor],
     r"""Functional API that performs Adam algorithm computation.
     See :class:`~torch.optim.Adam` for details.
     """
+
+    if not all([isinstance(t, torch.Tensor) for t in state_steps]):
+        raise RuntimeError("API has changed, `state_steps` argument must contain a list of singleton tensors")
 
     if foreach is None:
         # Placeholder for more complex foreach logic to be added when value is not set
@@ -212,7 +214,7 @@ def _single_tensor_adam(params: List[Tensor],
                         exp_avgs: List[Tensor],
                         exp_avg_sqs: List[Tensor],
                         max_exp_avg_sqs: List[Tensor],
-                        state_steps: List[int],
+                        state_steps: List[Tensor],
                         *,
                         amsgrad: bool,
                         beta1: float,
@@ -227,7 +229,10 @@ def _single_tensor_adam(params: List[Tensor],
         grad = grads[i] if not maximize else -grads[i]
         exp_avg = exp_avgs[i]
         exp_avg_sq = exp_avg_sqs[i]
-        step = state_steps[i]
+        step_t = state_steps[i]
+        # update step
+        step_t += 1
+        step = step_t.item()
 
         bias_correction1 = 1 - beta1 ** step
         bias_correction2 = 1 - beta2 ** step
@@ -257,7 +262,7 @@ def _multi_tensor_adam(params: List[Tensor],
                        exp_avgs: List[Tensor],
                        exp_avg_sqs: List[Tensor],
                        max_exp_avg_sqs: List[Tensor],
-                       state_steps: List[int],
+                       state_steps: List[Tensor],
                        *,
                        amsgrad: bool,
                        beta1: float,
@@ -270,11 +275,14 @@ def _multi_tensor_adam(params: List[Tensor],
     if len(params) == 0:
         return
 
+    # update steps
+    torch._foreach_add_(state_steps, 1)
+
     if maximize:
         grads = torch._foreach_neg(tuple(grads))  # type: ignore[assignment]
 
-    bias_correction1 = [1 - beta1 ** step for step in state_steps]
-    bias_correction2 = [1 - beta2 ** step for step in state_steps]
+    bias_correction1 = [1 - beta1 ** step.item() for step in state_steps]
+    bias_correction2 = [1 - beta2 ** step.item() for step in state_steps]
     if weight_decay != 0:
         torch._foreach_add_(grads, params, alpha=weight_decay)
 
