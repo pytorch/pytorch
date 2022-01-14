@@ -217,19 +217,27 @@ class AutoQuantizationState(torch.nn.Module):
         # this code is the explicit fast path for `self.idx += 1`
         object.__setattr__(self, 'idx', self.idx + 1)
 
+    def first_call_outputs_prepare_hook(
+        self,
+        outputs: Any,
+        qtensor_id: List[int],
+    ) -> Any:
+        """
+        This function is expected to be called on the outputs of a prepared
+        module right before they are returned to the parent, during tracing.
+        """
+        outputs = self._first_call_assign_qtensor_infos_to_mod_outputs(
+            outputs, qtensor_id)
+        return outputs
+
     def outputs_prepare_hook(
         self,
         outputs: Any,
-        first_call: bool,
-        qtensor_id: List[int],
     ) -> Any:
         """
         This function is expected to be called on the outputs of a prepared
         module right before they are returned to the parent.
         """
-        if first_call:
-            outputs = self._first_call_assign_qtensor_infos_to_mod_outputs(
-                outputs, qtensor_id)
         return outputs
 
     def outputs_convert_hook(
@@ -255,83 +263,100 @@ class AutoQuantizationState(torch.nn.Module):
         """
         return self.output_dtypes
 
-    def op_prepare_before_hook(
+    def first_call_op_prepare_before_hook(
         self,
         op: Callable,
         args: Tuple[Any, ...],
         kwargs: Dict[str, Any],
-        first_call: bool,
         qtensor_id: List[int],
         fqn: str,
         root_module: torch.nn.Module,
     ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
         """
         This function is expected to be called on args and kwargs of
-        `op` directly before `op` is executed.
+        `op` directly before `op` is executed, during tracing.
 
-        If `first_call` is True, we record the type of `op`
+        We record the type of `op`
         and the IDs of its tensor inputs. Note: we add a placeholder for IDs
         of tensor outputs, the placeholder will be filled out during the
         `op_prepare_after_hook`.
 
-        If `first_call` is False, we do the following:
+        The function returns modified `args` and `kwargs`.
+        """
+        return self._first_call_op_prepare_before_hook_create_subgraphs(
+            op, args, kwargs, qtensor_id, fqn, root_module)
+
+    def op_prepare_before_hook(
+        self,
+        op: Callable,
+        args: Tuple[Any, ...],
+        kwargs: Dict[str, Any],
+    ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
+        """
+        This function is expected to be called on args and kwargs of
+        `op` directly before `op` is executed.
+
+        We do the following:
         * pass the inputs through observers, if needed
 
         The function returns modified `args` and `kwargs`.
         """
-        if first_call:
-            return self._first_call_op_prepare_before_hook_create_subgraphs(
-                op, args, kwargs, first_call, qtensor_id, fqn, root_module)
-        else:
-            seen_q_op_info = self._get_cur_seen_q_op_info()
+        seen_q_op_info = self._get_cur_seen_q_op_info()
 
-            def _maybe_observe(arg, tensor_info):
-                tensor_id = tensor_info.id
-                # TODO: do not run this twice on input and output
-                if str(tensor_id) in self.tensor_id_to_observer:
-                    observer = self.tensor_id_to_observer[str(tensor_id)]
-                    return observer(arg)
-                else:
-                    return arg
+        def _maybe_observe(arg, tensor_info):
+            tensor_id = tensor_info.id
+            # TODO: do not run this twice on input and output
+            if str(tensor_id) in self.tensor_id_to_observer:
+                observer = self.tensor_id_to_observer[str(tensor_id)]
+                return observer(arg)
+            else:
+                return arg
 
-            args = iterate_and_apply(
-                args, seen_q_op_info.input_tensor_infos, _maybe_observe)
+        args = iterate_and_apply(
+            args, seen_q_op_info.input_tensor_infos, _maybe_observe)
 
-            return args, kwargs
+        return args, kwargs
+
+    def first_call_op_prepare_after_hook(
+        self,
+        op: Callable,
+        output: Any,
+        args: Tuple[Any, ...],
+        qtensor_id: List[int],
+    ) -> Any:
+        """
+        This function is called after an op call on a prepared model.
+
+        * create an observer for the output, if needed, and record it in
+          `tensor_id_to_observer`
+        * amend the current seen op with the tensor ID of the output
+        """
+        seen_q_op_info = self._get_cur_seen_q_op_info()
+        self._first_call_op_prepare_after_hook_adjust_subgraphs(
+            op, output, args, qtensor_id,
+            seen_q_op_info)
+        return output
 
     def op_prepare_after_hook(
         self,
         op: Callable,
         output: Any,
         args: Tuple[Any, ...],
-        first_call: bool,
-        qtensor_id: List[int],
         global_op_idx: List[int],
     ) -> Any:
         """
         This function is called after an op call on a prepared model.
 
-        If `first_call` is True, we
-        * create an observer for the output, if needed, and record it in
-          `tensor_id_to_observer`
-        * amend the current seen op with the tensor ID of the output
-
-        If `first_call` is False, we
         * observe the output, if needed
         """
         seen_q_op_info = self._get_cur_seen_q_op_info()
-        if first_call:
-            self._first_call_op_prepare_after_hook_adjust_subgraphs(
-                op, output, args, first_call, qtensor_id,
-                seen_q_op_info)
-        else:
-            func_output_obs_type = get_func_output_obs_type(seen_q_op_info)
-            # TODO(future PR): other output types
-            if func_output_obs_type != FuncOutputObsType.NONE:
-                seen_q_op_info = self._get_cur_seen_q_op_info()
-                tensor_id = seen_q_op_info.output_tensor_infos[0].id
-                obs = self.tensor_id_to_observer[str(tensor_id)]
-                output = obs(output)
+        func_output_obs_type = get_func_output_obs_type(seen_q_op_info)
+        # TODO(future PR): other output types
+        if func_output_obs_type != FuncOutputObsType.NONE:
+            seen_q_op_info = self._get_cur_seen_q_op_info()
+            tensor_id = seen_q_op_info.output_tensor_infos[0].id
+            obs = self.tensor_id_to_observer[str(tensor_id)]
+            output = obs(output)
 
         if self.log_op_outputs:
             output_clone = clone_detach_tensor_without_dispatch(output)
@@ -656,7 +681,6 @@ class AutoQuantizationState(torch.nn.Module):
         op: Callable,
         args: Tuple[Any, ...],
         kwargs: Dict[str, Any],
-        first_call: bool,
         qtensor_id: List[int],
         fqn: str,
         root_module: torch.nn.Module,
@@ -719,7 +743,6 @@ class AutoQuantizationState(torch.nn.Module):
         op: Callable,
         output: Any,
         args: Tuple[Any, ...],
-        first_call: bool,
         qtensor_id: List[int],
         seen_q_op_info: SeenQOpInfo,
     ) -> None:

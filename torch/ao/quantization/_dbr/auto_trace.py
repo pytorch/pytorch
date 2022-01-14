@@ -125,13 +125,21 @@ def add_auto_observation(
                 if not first_call:
                     qstate.validate_cur_op(func)
                 # run "before" hook
-                args, kwargs = qstate.op_prepare_before_hook(
-                    func, args, kwargs, first_call, qtensor_id, fqn, parent_module)
+                if first_call:
+                    args, kwargs = qstate.first_call_op_prepare_before_hook(
+                        func, args, kwargs, qtensor_id, fqn, parent_module)
+                else:
+                    args, kwargs = qstate.op_prepare_before_hook(
+                        func, args, kwargs)
                 # forward
                 output = super().__torch_function__(func, types, args, kwargs)
                 # run "after" hook
-                output = qstate.op_prepare_after_hook(
-                    func, output, args, first_call, qtensor_id, global_op_idx)
+                if first_call:
+                    output = qstate.first_call_op_prepare_after_hook(
+                        func, output, args, qtensor_id)
+                else:
+                    output = qstate.op_prepare_after_hook(
+                        func, output, args, global_op_idx)
                 qstate.mark_cur_op_complete(func)
             else:
                 output = super().__torch_function__(func, types, args, kwargs)
@@ -228,11 +236,17 @@ def add_auto_observation(
                             global_disable_torch_function_override
                         global_disable_torch_function_override = True
 
-                        # mypy ignore is used instead of assert because this
-                        # runs on every forward and assert has a performance cost
-                        args, kwargs = parent_qstate.op_prepare_before_hook(
-                            cur_module, args, kwargs, first_call, qtensor_id,
-                            fqn, cur_module)  # type: ignore[arg-type]
+                        if first_call:
+                            # mypy ignore is used instead of assert because this
+                            # runs on every forward and assert has a performance cost
+                            args, kwargs = parent_qstate.first_call_op_prepare_before_hook(
+                                cur_module, args, kwargs, qtensor_id,
+                                fqn, cur_module)  # type: ignore[arg-type]
+                        else:
+                            # mypy ignore is used instead of assert because this
+                            # runs on every forward and assert has a performance cost
+                            args, kwargs = parent_qstate.op_prepare_before_hook(
+                                cur_module, args, kwargs)  # type: ignore[arg-type]
 
                         # original forward
                         output = orig_module_call(self, *args, **kwargs)
@@ -242,9 +256,12 @@ def add_auto_observation(
                             old_global_disable_torch_function_override
 
                         # after hooks
-                        output = parent_qstate.op_prepare_after_hook(
-                            cur_module, output, args, first_call, qtensor_id,
-                            global_op_idx)
+                        if first_call:
+                            output = parent_qstate.first_call_op_prepare_after_hook(
+                                cur_module, output, args, qtensor_id)
+                        else:
+                            output = parent_qstate.op_prepare_after_hook(
+                                cur_module, output, args, global_op_idx)
                         parent_qstate.mark_cur_op_complete(cur_module)
 
                     elif hook_type is HookType.MODULE_IO_HOOKS:
@@ -257,8 +274,12 @@ def add_auto_observation(
                         output = orig_module_call(self, *args, **kwargs)
 
                         # after hooks
-                        output = cur_qstate.outputs_prepare_hook(
-                            output, first_call, qtensor_id)
+                        if first_call:
+                            output = cur_qstate.first_call_outputs_prepare_hook(
+                                output, qtensor_id)
+                        else:
+                            output = cur_qstate.outputs_prepare_hook(output)
+
                         cur_qstate.validate_is_at_last_seen_idx()
 
                     elif hook_type is HookType.ARG_DEQUANTS:
