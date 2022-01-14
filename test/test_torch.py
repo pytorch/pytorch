@@ -4341,7 +4341,7 @@ else:
 
         test_func(torch.gather)
         test_func(torch.Tensor.gather)
-
+    @unittest.skipIf(IS_JETSON, "Flaky on Jetson")
     def test_nondeterministic_alert_grid_sample_2d(self, device):
         input = torch.empty(1, 1, 2, 2, device=device, requires_grad=True)
         grid = torch.empty(1, 1, 1, 2, device=device)
@@ -6672,6 +6672,8 @@ else:
         # use dim0>=46342 for forward, see:
         # https://github.com/pytorch/pytorch/issues/30583
         # Compare output using GPU with the CPU implementation, as brute_pdist uses too much memory
+        if device != 'cpu' and IS_JETSON:
+            self.skipTest("Killed on Jetson GPU")
         if 'cuda' in device:
             x = torch.randn(50000, 1, dtype=torch.float32)
             expected_cpu = torch.pdist(x, p=2)
@@ -6978,6 +6980,7 @@ else:
 
     @deviceCountAtLeast(2)
     @onlyCUDA
+    @unittest.skipIf(IS_JETSON, "Flaky on Jetson")
     def test_multinomial_gpu_device_constrain(self, devices):
         x = torch.empty(0, device=devices[0])
         y = torch.empty(0, device=devices[1])
