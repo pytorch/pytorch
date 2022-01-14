@@ -277,7 +277,7 @@ def timed(args, benchmark, sync, times=1):
 
     if current_device == 'lazy':
         torch.cuda.set_sync_debug_mode(2)
-    else:
+    elif current_device == 'cuda':
         torch.cuda.set_sync_debug_mode(0)
 
     # keep the lazy tensor results alive until the final sync
@@ -293,7 +293,9 @@ def timed(args, benchmark, sync, times=1):
             # may be just an async 'mark_step' for lazy, or no-op for cuda
             sync.iter_sync(results)
 
-    torch.cuda.set_sync_debug_mode(0)
+    if current_device in ['lazy', 'cuda']:
+        # don't assume torch.cuda present unless using cuda
+        torch.cuda.set_sync_debug_mode(0)
 
     # should be a hard sync for lazy and cuda
     # unless strictly measuring lazy trace overhead, then no-op
