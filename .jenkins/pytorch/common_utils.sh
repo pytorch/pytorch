@@ -100,6 +100,6 @@ function checkout_install_torchvision() {
 
 function clone_pytorch_xla() {
   if [[ ! -d ./xla ]]; then
-    git clone --recursive https://github.com/pytorch/xla.git
+    git clone --recursive -b base_cloudbuild https://github.com/pytorch/xla.git
   fi
 }
