@@ -58,12 +58,12 @@ jobs:
           python setup.py clean
           python setup.py install
           popd
-          pushd vision
+          pushd ${HOME}"/vision
           git checkout main && git submodule sync && git submodule update --init --recursive
           python setup.py clean
           python setup.py install
           popd
-          pushd text
+          pushd ${HOME}"/text
           git checkout main && git submodule sync && git submodule update --init --recursive
           python setup.py clean
           python setup.py install
