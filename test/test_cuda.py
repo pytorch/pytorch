@@ -3210,10 +3210,17 @@ torch.cuda.synchronize()
         for op, kwargs in ops_with_kwargs:
             run(op, kwargs)
 
+    def _using_cudaMallocAsync(self):
+        import os
+        alloc_conf = os.getenv("PYTORCH_CUDA_ALLOC_CONF")
+        return (alloc_conf is not None) and ("backend:cudaMallocAsync" in alloc_conf)
+
     @unittest.skipIf((not TEST_CUDA) or
                      TEST_WITH_ROCM or
                      int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
     def test_graph_rng_distributions(self):
+        using_cudaMallocAsync = self._using_cudaMallocAsync()
+
         size = 10000
         input = torch.rand((size,), device="cuda", dtype=torch.float)
         alloc = torch.empty((size,), device="cuda", dtype=torch.float)
@@ -3280,11 +3287,19 @@ torch.cuda.synchronize()
                     g.capture_end()
             torch.cuda.current_stream().wait_stream(stream)
 
-            try:
-                self.assertNotEqual(control1, t1)
-                self.assertNotEqual(control2, t2)
-            except Exception as e:
-                raise RuntimeError("Failed on " + module + "." + op) from e
+            if not using_cudaMallocAsync:
+                # Makes sure values haven't been populated yet
+                # (in other words, makes sure capture didn't actually run ops).
+                # We can only try this with the native allocator, for which captured
+                # addresses are already backed by cudaMalloced memory.
+                # If we try it with cudaMallocAsync, CUDA won't event consider
+                # the captured addresses allocated until replay(), and if we
+                # access them before replay() we get IMAs.
+                try:
+                    self.assertNotEqual(control1, t1)
+                    self.assertNotEqual(control2, t2)
+                except Exception as e:
+                    raise RuntimeError("Failed on " + module + "." + op) from e
 
             # Runs a dummy op prelude, as for controls, to make sure replay()
             # picks up the dummy op's state increment.
@@ -3319,6 +3334,7 @@ torch.cuda.synchronize()
                      int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
     def test_graph_two_successive(self):
         torch.cuda.empty_cache()
+        using_cudaMallocAsync = self._using_cudaMallocAsync()
 
         size = 1000
         kSmallBuffer = 2097152
@@ -3366,24 +3382,28 @@ torch.cuda.synchronize()
             self.assertEqual(b.sum().item(), size * 3070)
             self.assertEqual(c.sum().item(), size * 442)
 
-            if share_mem != "Don't share":
-                self.assertEqual(reserved_no_sharing - torch.cuda.memory_stats()["reserved_bytes.all.current"],
-                                 kSmallBuffer)
-            else:
-                reserved_no_sharing = torch.cuda.memory_stats()["reserved_bytes.all.current"]
+            if not using_cudaMallocAsync:
+                # These stat checks are specific to the native allocator.
+                if share_mem != "Don't share":
+                    self.assertEqual(reserved_no_sharing - torch.cuda.memory_stats()["reserved_bytes.all.current"],
+                                     kSmallBuffer)
+                else:
+                    reserved_no_sharing = torch.cuda.memory_stats()["reserved_bytes.all.current"]
 
             del a, b, c, g0, g1
             # Tensors used across streams (a and b) were held until just now, so no need to call record_stream on them.
             torch.cuda.synchronize()
             torch.cuda.empty_cache()
 
-    @unittest.skip("Temporarily disabled due to a graphs bug in libcuda.so, " +
-                   "see https://github.com/pytorch/pytorch/pull/57556")
     @unittest.skipIf((not TEST_CUDA) or
                      TEST_WITH_ROCM or
                      int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    @unittest.skipIf(int(torch.version.cuda.split(".")[1]) < 4,
+                     "Graph bindings disallow concurrent replay for CUDA < 11.4, see " +
+                     "https://github.com/pytorch/pytorch/pull/57556")
     def test_graph_concurrent_replay(self):
         torch.cuda.empty_cache()
+        using_cudaMallocAsync = self._using_cudaMallocAsync()
 
         size = 1000000  # largeish to help expose race conditions
 
@@ -3432,12 +3452,16 @@ torch.cuda.synchronize()
             torch.cuda.current_stream().wait_stream(s0)
             torch.cuda.current_stream().wait_stream(s1)
 
-            if share_mem != "Don't share":
-                # Confirms concurrent replays using the same mempool corrupted each other.
+            if (not using_cudaMallocAsync) and (share_mem != "Don't share"):
+                # If we used the native allocator and shared mempools,
+                # we expect the concurrent replays corrupted each other.
                 self.assertNotEqual(b.sum().item(), size * 94)
                 self.assertNotEqual(c.sum().item(), size * 156)
             else:
-                # Confirms concurrent replays using different mempools did not corrupt each other.
+                # If we EITHER
+                #   - used the native allocator without sharing mempools, OR
+                #   - used cudaMallocAsync, which ignores graph pool-sharing hints and should always be safe
+                # we don't expect memory corruption.
                 self.assertEqual(b.sum().item(), size * 94)
                 self.assertEqual(c.sum().item(), size * 156)
 
@@ -3451,6 +3475,7 @@ torch.cuda.synchronize()
                      int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
     def test_graph_three_successive(self):
         torch.cuda.empty_cache()
+        using_cudaMallocAsync = self._using_cudaMallocAsync()
 
         size = 1000
 
@@ -3497,9 +3522,10 @@ torch.cuda.synchronize()
             g2.replay()
             g1.replay()
 
-            # If share_mem is True, g2's capture should have reused c's memory for f. We replayed g2 then g1,
-            # so we expect g1's captured "e = c + 3" mistakenly filled e with "f's vals + 3".
-            self.assertEqual(e.sum().item(), size * (7 + 3) if share_mem != "Don't share" else size * 5)
+            expect_corruption = (not using_cudaMallocAsync) and (share_mem != "Don't share")
+            # If we used the native allocator and shared mempools, g2's capture should have reused c's memory for f.
+            # We replayed g2 then g1, so we expect g1's captured "e = c + 3" mistakenly filled e with "f's vals + 3".
+            self.assertEqual(e.sum().item(), size * (7 + 3) if expect_corruption else size * 5)
             self.assertEqual(f.sum().item(), size * 7)
 
             del a, b, d, e, f, g0, g1, g2
@@ -3511,6 +3537,9 @@ torch.cuda.synchronize()
                      TEST_WITH_ROCM or
                      int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
     def test_graph_memory_stats_and_use_result_after_destroy_graph(self):
+        if self._using_cudaMallocAsync():
+            return
+
         kSmallSize = 1048576
         kSmallBuffer = 2097152
         kLargeBuffer = 20971520

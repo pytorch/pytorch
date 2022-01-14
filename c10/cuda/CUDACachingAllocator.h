@@ -141,7 +141,8 @@ C10_CUDA_API void notifyCaptureBegin(int device, CaptureId_t graph_id, MempoolId
 C10_CUDA_API void notifyCaptureAboutToEnd(int device, CaptureId_t graph_id); \
 C10_CUDA_API void notifyCaptureEnded(int device, CaptureId_t graph_id); \
 C10_CUDA_API void notifyCaptureDestroy(int device, MempoolId_t mempool_id); \
-C10_CUDA_API std::mutex* getFreeMutex();
+C10_CUDA_API std::mutex* getFreeMutex(); \
+C10_CUDA_API std::shared_ptr<void> getIpcDevPtr(std::string handle);
 
 // Not meant to be called directly by clients.
 // Maybe make "CUDACachingAllocator" a class or struct, and make these private members?
@@ -303,7 +304,12 @@ inline std::mutex* getFreeMutex() {
 }
 
 // Not part of CUDA_ALLOCATOR_BACKEND_INTERFACE
-C10_CUDA_API std::shared_ptr<void> getIpcDevPtr(std::string handle);
+inline std::shared_ptr<void> getIpcDevPtr(std::string handle) {
+  static auto f = (std::strcmp(allocatorBackend(), "native") == 0) ?
+    THC::getIpcDevPtr : CudaMallocAsync::getIpcDevPtr;
+  return f(handle);
+
+}
 
 } // namespace CUDACachingAllocator
 } // namespace cuda

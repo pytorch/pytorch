@@ -173,6 +173,8 @@ inline void lazy_init_device(int device) {
 
     pytorch_used_bytes[device] = 0;
     pytorch_memory_limits[device] = UINT64_MAX;
+
+    devs_initialized_flags[device] = true;
   }
 }
 
@@ -281,8 +283,9 @@ void free(void* ptr) {
       return;
     }
   } else if (C10_UNLIKELY(it->second.captured)) {
-    TORCH_WARN("Attempting uncaptured free of a captured allocation. "
-               "This is technically allowed, but may indicate you are losing "
+    TORCH_WARN("Attempting uncaptured free of a captured allocation with address ",
+               ptr,
+               "\nThis is technically allowed, but may indicate you are losing "
                "the last user-visible tensor through which the allocation can "
                "be accessed, so you'll have no way to view the data after "
                "future replays of the owning graph.");
@@ -323,7 +326,7 @@ void malloc(void** devPtr, int device, size_t size, cudaStream_t stream) {
   auto inserted = ptr_info.emplace(*devPtr, PtrUsage(size, capture_underway));
   TORCH_INTERNAL_ASSERT(inserted.second,
                         "address returned by cudaMallocAsync already exists "
-                        "in usage_streams_each_ptr");
+                        "in ptr_info");
 
   inserted.first->second.usage_streams.emplace_back(stream, device);
 
@@ -371,7 +374,7 @@ void init(int dev_count) {
   TORCH_INTERNAL_ASSERT(!called, "init called twice");
   std::lock_guard<std::mutex> lk(general_mutex);
   device_count = dev_count;
-  devs_initialized_flags.resize(dev_count, 0);
+  devs_initialized_flags.resize(dev_count, false);
   dummy_unifying_free_streams.resize(dev_count);
   pytorch_used_bytes.resize(dev_count);
   pytorch_memory_limits.resize(dev_count);
@@ -472,6 +475,12 @@ void recordStream(const DataPtr& ptr, cuda::CUDAStream stream) {
 
 std::mutex* getFreeMutex() {
   return &general_mutex;
+}
+
+std::shared_ptr<void> getIpcDevPtr(std::string handle) {
+  TORCH_CHECK(false,
+              "cudaMallocAsync does not yet support getIpcDevPtr. "
+              "If you need it, please file an issue describing your use case.");
 }
 
 // Collects stats for device.
@@ -739,6 +748,9 @@ void notifyCaptureDestroy(int device, MempoolId_t mempool_id) {
 }
 std::mutex* getFreeMutex() {
   NOT_AVAILABLE("getFreeMutex")
+}
+std::shared_ptr<void> getIpcDevPtr(std::string handle) {
+  NOT_AVAILABLE("getIpcDevPtr")
 }
 
 #endif
