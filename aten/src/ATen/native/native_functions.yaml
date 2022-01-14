@@ -3394,6 +3394,11 @@
     CPU: channel_shuffle
     QuantizedCPU: channel_shuffle_quantized_cpu
 
+- func: native_channel_shuffle(Tensor self, int groups) -> Tensor
+  dispatch:
+    CPU: channel_shuffle_cpu
+    CompositeImplicitAutograd: math_channel_shuffle
+
 - func: is_pinned(Tensor self, Device? device=None) -> bool
   variants: method
   dispatch:
