@@ -1753,7 +1753,7 @@ void TensorExprKernel::runKernel(Stack& stack) {
     if (isOutputScalar_[idx++]) {
       // Scalar outputs are returned as 0-dim tensors, we need to extract the
       // scalar value from them
-      push_one(stack, std::move(o.item()));
+      push_one(stack, o.item());
     } else {
       push_one(stack, std::move(o));
     }
