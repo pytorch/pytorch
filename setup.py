@@ -116,6 +116,10 @@
 #     These are not CUDA versions, instead, they specify what
 #     classes of NVIDIA hardware we should generate PTX for.
 #
+#   PYTORCH_ROCM_ARCH
+#     specify which AMD GPU targets to build for.
+#     ie `PYTORCH_ROCM_ARCH="gfx900;gfx906"`
+#
 #   ONNX_NAMESPACE
 #     specify a namespace for ONNX built here rather than the hard-coded
 #     one in this file; needed to build with other frameworks that share ONNX.
@@ -947,6 +951,7 @@ if __name__ == '__main__':
                 'include/ATen/cuda/detail/*.cuh',
                 'include/ATen/cuda/detail/*.h',
                 'include/ATen/cudnn/*.h',
+                'include/ATen/ops/*.h',
                 'include/ATen/hip/*.cuh',
                 'include/ATen/hip/*.h',
                 'include/ATen/hip/detail/*.cuh',
@@ -1024,6 +1029,7 @@ if __name__ == '__main__':
                 'include/torch/csrc/jit/tensorexpr/*.h',
                 'include/torch/csrc/jit/tensorexpr/operators/*.h',
                 'include/torch/csrc/onnx/*.h',
+                'include/torch/csrc/profiler/*.h',
                 'include/torch/csrc/utils/*.h',
                 'include/torch/csrc/tensor/*.h',
                 'include/torch/csrc/lazy/core/*.h',

@@ -852,6 +852,28 @@ terrible spacing
         module_with_submodules = split_module(traced, m, lambda node: 0)
         module_with_submodules(a)
 
+    def test_split_module_default_arg(self):
+        class ModelToTrace(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = torch.nn.Linear(512, 512)
+
+            def forward(self, x, targets=None):
+                x = self.lin(x)
+
+                if targets is not None:
+                    x = x + targets
+
+                return x
+
+        mtt = ModelToTrace()
+        traced = torch.fx.symbolic_trace(mtt, concrete_args={'targets': None})
+
+        split = split_module(traced, mtt, lambda node: 0)
+
+        x = torch.randn(50, 512)
+        torch.testing.assert_allclose(split(x), traced(x))
+
     def test_normalize_binary_operators(self):
         ops_to_test = {
             torch.add,
@@ -1147,9 +1169,10 @@ class {test_classname}(torch.nn.Module):
                 self.linear = torch.nn.Linear(2, 2)
                 self.attr = torch.randn(2)
                 self.register_buffer("attr2", torch.randn(2))
+                self.register_buffer("attr3", torch.ones(2, dtype=torch.int32))
 
             def forward(self, x):
-                return self.linear(self.seq(self.W + self.attr + self.attr2 + x))
+                return self.linear(self.seq(self.W + self.attr + self.attr2 + self.attr3 + x))
 
         mod = symbolic_trace(Test())
         module_name = "Foo"
@@ -1483,6 +1506,7 @@ class TestNormalizeOperators(JitTestCase):
             "index_put",
             "nn.functional.conv2d",
             "nn.functional.dropout",
+            "nn.functional.dropout2d",
             "nn.functional.embedding",  # Implemented with a lambda
             "nn.functional.embedding_bag",  # Implemented with a lambda
             "nn.functional.rrelu",  # Implemented with a lambda
@@ -1525,6 +1549,9 @@ class TestNormalizeOperators(JitTestCase):
             'new_empty',
             'new_zeros',
             'new_full',
+            'normal',
+            'multinomial',
+            'bernoulli',
             "__getitem__",
             "__radd__",
             "__rsub__",
@@ -1539,6 +1566,9 @@ class TestNormalizeOperators(JitTestCase):
             "atleast_1d",
             "atleast_2d",
             "atleast_3d",
+            "svd_lowrank",  # implemented with a lambda
+            "pca_lowrank",  # implemented with a lambda
+            "column_stack",
         }
 
         # Unsupported input types

@@ -35,7 +35,7 @@ def ts_lowering_body(f: Union[NativeFunctionsGroup, NativeFunction]) -> str:
     size_t i = 0;
     {emplace_arguments_str}
     {emplace_kwarguments}
-    TSOpVector {schema.aten_name}_out = compiler::LowerTSBuiltin(function, op().op, arguments, kwarguments);
+    torch::lazy::TSOpVector {schema.aten_name}_out = torch::lazy::LowerTSBuiltin(function, op().op, arguments, kwarguments);
     CHECK_EQ({schema.aten_name}_out.size(), {len(func.returns)});
 
     // TODO: need to call GenerateClone sometimes? Or else return LowerBuiltIn() directly

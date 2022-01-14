@@ -59,12 +59,12 @@ class DataNetFiller : public Filler {
       : init_net_(init_net), data_net_(data_net) {
     // The output of the data_net_ will be served as the input
     int op_size = data_net_.op_size();
-    for (int i = 0; i < op_size; ++i) {
+    for (const auto i : c10::irange(op_size)) {
       OperatorDef op_def = data_net_.op(i);
       // We rely on Fill op to generate inputs
       CAFFE_ENFORCE(op_def.type().find("Fill") != std::string::npos);
       int output_size = op_def.output_size();
-      for (int j = 0; j < output_size; ++j) {
+      for (const auto j : c10::irange(output_size)) {
         input_names_.push_back(op_def.output(j));
       }
     }
@@ -105,7 +105,7 @@ class DataRandomFiller : public Filler {
       int input_index,
       const std::vector<std::vector<int64_t>>& input_dims) {
     Workspace ws;
-    for (int i = 0; i < op_def.input_size(); ++i) {
+    for (const auto i : c10::irange(op_def.input_size())) {
       // CreateOperator requires all input blobs present
       ws.CreateBlob(op_def.input(i));
     }

@@ -37,33 +37,23 @@ concurrency:
 
 jobs:
 
-  ciflow_should_run:
-    runs-on: linux.large
-    timeout-minutes: 240
-    env:
-      IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == 'unassigned') && (github.event.assigneed.login == 'pytorchbot') }}
-      LABEL_CONDITIONS: ${{ contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/android') || contains(github.event.pull_request.labels.*.name, 'ciflow/cpu') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux') }}
-      LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
-    if: ${{ (github.repository == 'pytorch/pytorch') && (
-            (github.event_name == 'push') ||
-            (github.event_name == 'schedule') ||
-            (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/android') || contains(github.event.pull_request.labels.*.name, 'ciflow/cpu') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux')) ||
-            ((github.event_name == 'pull_request' && github.event.action != 'unassigned') && !contains(join(github.event.pull_request.labels.*.name), 'ciflow/')))
-         }}
-    steps:
-      - name: noop
-        run: echo running ciflow_should_run
-      - name: print labels
-        run: echo "${LABELS}"
-
   # building and testing in a single job since bazel runs only small subset of tests
   build-and-test:
     runs-on: linux.2xlarge
-    needs: [ciflow_should_run]
     env:
       JOB_BASE_NAME: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit-build-and-test
       NUM_TEST_SHARDS: 1
+      IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == 'unassigned') && (github.event.assigneed.login == 'pytorchbot') }}
+      LABEL_CONDITIONS: ${{ contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/android') || contains(github.event.pull_request.labels.*.name, 'ciflow/cpu') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux') || contains(github.event.pull_request.labels.*.name, 'ciflow/trunk') }}
+    if: ${{ (github.repository == 'pytorch/pytorch') && (
+            (github.event_name == 'push') ||
+            (github.event_name == 'schedule') ||
+            (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/android') || contains(github.event.pull_request.labels.*.name, 'ciflow/cpu') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux') || contains(github.event.pull_request.labels.*.name, 'ciflow/trunk')) ||
+            ((github.event_name == 'pull_request' && github.event.action != 'unassigned') && !contains(join(github.event.pull_request.labels.*.name), 'ciflow/')))
+         }}
     steps:
+      - name: print labels
+        run: echo "${PR_LABELS}"
       - name: Display EC2 information
         shell: bash
         run: |
@@ -95,8 +85,8 @@ jobs:
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - name: Clean workspace
         run: |
-          rm -rf "${GITHUB_WORKSPACE:?}/*"
-          rm -f ~/.ssh/authorized_keys
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: seemethere/add-github-ssh-key@v1
         with:
@@ -110,6 +100,10 @@ jobs:
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
           submodules: recursive
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
       - name: Calculate docker image tag
         id: calculate-tag
         run: |
@@ -243,11 +237,21 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
-          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
+          WORKFLOW_ID: '${{ github.run_id }}'
         run: |
+          # The artifact file is created inside docker container, which contains the result binaries.
+          # Now unpackage it into the project folder. The subsequent script will scan project folder
+          # to locate result binaries and report their sizes.
+          # If artifact file is not provided it assumes that the project folder has been mounted in
+          # the docker during build and already contains the result binaries, so this step can be skipped.
+          export ARTIFACTS=
+          if [ -n "${ARTIFACTS}" ]; then
+            tar xf "${ARTIFACTS}" -C "${GITHUB_WORKSPACE}"
+            cd "${GITHUB_WORKSPACE}"
+          fi
           COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
           export COMMIT_TIME
-          ANDROID_BUILD_TYPE="custom-build-single"
+          ANDROID_BUILD_TYPE=custom-build-single
           export ANDROID_BUILD_TYPE
           pip3 install requests==2.26 boto3==1.16.34
           python3 -m tools.stats.upload_binary_size_to_scuba "android" || exit 0

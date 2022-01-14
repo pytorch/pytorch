@@ -28,40 +28,35 @@ env:
 
 jobs:
 
-  ciflow_should_run:
-    runs-on: linux.large
-    timeout-minutes: 240
-    env:
-      IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == 'unassigned') && (github.event.assigneed.login == 'pytorchbot') }}
-      LABEL_CONDITIONS: ${{ contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/macos') }}
-      LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
-    if: ${{ (github.repository == 'pytorch/pytorch') && (
-            (github.event_name == 'push') ||
-            (github.event_name == 'schedule') ||
-            (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/macos')) ||
-            (false))
-         }}
-    steps:
-      - name: noop
-        run: echo running ciflow_should_run
-      - name: print labels
-        run: echo "${LABELS}"
-
   build:
     runs-on: macos-11
-    needs: [ciflow_should_run]
     env:
       JOB_BASE_NAME: macos-11-py3-x86-64
       # For sccache access (only on non-forked PRs)
       AWS_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
+      IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == 'unassigned') && (github.event.assigneed.login == 'pytorchbot') }}
+      LABEL_CONDITIONS: ${{ contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/macos') || contains(github.event.pull_request.labels.*.name, 'ciflow/trunk') }}
+      PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+    if: ${{ (github.repository == 'pytorch/pytorch') && (
+            (github.event_name == 'push') ||
+            (github.event_name == 'schedule') ||
+            (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/macos') || contains(github.event.pull_request.labels.*.name, 'ciflow/trunk')) ||
+            (false))
+         }}
     steps:
+      - name: print labels
+        run: echo "${PR_LABELS}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
           submodules: recursive
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
       - name: Setup miniconda
         uses: conda-incubator/setup-miniconda@v2
         with:
@@ -96,8 +91,8 @@ jobs:
 
 
   generate-test-matrix:
+    needs: build
     runs-on: ubuntu-18.04
-    needs: [ciflow_should_run]
     timeout-minutes: 240
     env:
       TEST_RUNNER_TYPE: macos-11
@@ -120,7 +115,7 @@ jobs:
         run: .github/scripts/generate_pytorch_test_matrix.py
 
   test:
-    needs: [build, generate-test-matrix, ciflow_should_run]
+    needs: [build, generate-test-matrix]
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
       fail-fast: false
@@ -132,9 +127,6 @@ jobs:
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
-      # For sccache / S3 access (only on non-forked PRs)
-      AWS_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
     steps:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -142,6 +134,10 @@ jobs:
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
           submodules: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
       - uses: actions/download-artifact@v2
         name: Download PyTorch Build Artifacts from GHA
         with:
@@ -180,6 +176,23 @@ jobs:
           PYTHONIOENCODING: "utf-8"
         run: |
           python3 tools/render_junit.py test/
+      - name: Zip JSONs for upload
+        if: always()
+        env:
+          FILE_SUFFIX: '${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}'
+        run: |
+          # Remove any previous test jsons if they exist
+          rm -f test-jsons-*.zip
+          zip -r "test-jsons-${FILE_SUFFIX}.zip" test -i '*.json'
+      - uses: actions/upload-artifact@v2
+        name: Store Test Downloaded JSONs on Github
+        if: always()
+        with:
+          name: test-jsons
+          retention-days: 14
+          if-no-files-found: warn
+          path:
+            test-jsons-*.zip
       - name: Zip test reports for upload
         if: always()
         env:
@@ -198,7 +211,7 @@ jobs:
           path:
             test-reports-*.zip
       - name: Display and upload test statistics (Click Me)
-        if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
+        if: always()
         # temporary hack: set CIRCLE_* vars, until we update
         # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:
@@ -208,7 +221,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
-          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
+          WORKFLOW_ID: '${{ github.run_id }}'
         shell: bash
         run: |
           python3 -m pip install -r requirements.txt

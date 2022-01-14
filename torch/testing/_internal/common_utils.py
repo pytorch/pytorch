@@ -40,7 +40,7 @@ import json
 import __main__  # type: ignore[import]
 import errno
 import ctypes
-from typing import cast, Any, Dict, Iterable, Iterator, Optional, Union, List
+from typing import cast, Any, Dict, Iterable, Iterator, Optional, Union, List, TypeVar
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -60,6 +60,7 @@ import torch.backends.mkl
 from enum import Enum
 from statistics import mean
 import functools
+from .composite_compliance import no_dispatch
 
 torch.backends.disable_global_flags()
 
@@ -522,20 +523,6 @@ def shell(command, cwd=None, env=None):
     return wait_for_process(p)
 
 
-# Used to run the same test with different tensor types
-def repeat_test_for_types(dtypes):
-    def repeat_helper(f):
-        @wraps(f)
-        def call_helper(self, *args):
-            for dtype in dtypes:
-                with TestCase.subTest(self, dtype=dtype):
-                    f(self, *args, dtype=dtype)
-
-        return call_helper
-    return repeat_helper
-
-
-
 def discover_test_cases_recursively(suite_or_case):
     if isinstance(suite_or_case, unittest.TestCase):
         return [suite_or_case]
@@ -614,8 +601,11 @@ def run_tests(argv=UNITTEST_ARGS):
         test_cases = discover_test_cases_recursively(suite)
         for case in test_cases:
             test_case_full_name = case.id().split('.', 1)[1]
-            other_args = (['--import-disabled-tests'] if IMPORT_DISABLED_TESTS else List[str]([]) +
-                          ['--import-slow-tests'] if IMPORT_SLOW_TESTS else List[str]([]))
+            other_args = []
+            if IMPORT_DISABLED_TESTS:
+                other_args.append('--import-disabled-tests')
+            if IMPORT_SLOW_TESTS:
+                other_args.append('--import-slow-tests')
             cmd = [sys.executable] + [argv[0]] + other_args + argv[1:] + [test_case_full_name]
             string_cmd = " ".join(cmd)
             exitcode = shell(cmd)
@@ -733,6 +723,7 @@ def _check_module_exists(name: str) -> bool:
 TEST_NUMPY = _check_module_exists('numpy')
 TEST_SCIPY = _check_module_exists('scipy')
 TEST_MKL = torch.backends.mkl.is_available()
+TEST_CUDA = torch.cuda.is_available()
 TEST_NUMBA = _check_module_exists('numba')
 
 TEST_DILL = _check_module_exists('dill')
@@ -770,6 +761,8 @@ TEST_SKIP_NOARCH = os.getenv('PYTORCH_TEST_SKIP_NOARCH', '0') == '1'
 # Determine whether to enable cuda memory leak check.
 # CUDA mem leak check is expensive and thus we don't want to execute it on every
 # test case / configuration.
+# If this is True then CUDA memory leak checks are skipped. If this is false
+#   then CUDA memory leak checks are performed.
 # See: https://github.com/pytorch/pytorch/pull/59402#issuecomment-858811135
 TEST_SKIP_CUDA_MEM_LEAK_CHECK = os.getenv('PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK', '0') == '1'
 
@@ -1123,13 +1116,21 @@ def set_rng_seed(seed):
 
 @contextlib.contextmanager
 def freeze_rng_state():
-    rng_state = torch.get_rng_state()
-    if torch.cuda.is_available():
-        cuda_rng_state = torch.cuda.get_rng_state()
-    yield
-    if torch.cuda.is_available():
-        torch.cuda.set_rng_state(cuda_rng_state)
-    torch.set_rng_state(rng_state)
+    # no_dispatch needed for test_composite_compliance
+    # Some OpInfos use freeze_rng_state for rng determinism, but
+    # test_composite_compliance overrides dispatch for all torch functions
+    # which we need to disable to get and set rng state
+    with no_dispatch():
+        rng_state = torch.get_rng_state()
+        if torch.cuda.is_available():
+            cuda_rng_state = torch.cuda.get_rng_state()
+    try:
+        yield
+    finally:
+        with no_dispatch():
+            if torch.cuda.is_available():
+                torch.cuda.set_rng_state(cuda_rng_state)
+            torch.set_rng_state(rng_state)
 
 @contextlib.contextmanager
 def set_default_dtype(dtype):
@@ -1210,35 +1211,117 @@ class CudaMemoryLeakCheck():
         from torch.testing._internal.common_cuda import initialize_cuda_context_rng
         initialize_cuda_context_rng()
 
-    @staticmethod
-    def get_cuda_memory_usage():
-        # we don't need CUDA synchronize because the statistics are not tracked at
-        # actual freeing, but at when marking the block as free.
-        num_devices = torch.cuda.device_count()
-        gc.collect()
-        return tuple(torch.cuda.memory_allocated(i) for i in range(num_devices))
-
+    # Stores CUDA memory data provided by PyTorch's caching allocator and
+    #   the CUDA driver.
+    #
+    # NOTE: The undocumented torch.cuda.mem_get_info() returns
+    #   (#free bytes, #total bytes available) on the GPU
     def __enter__(self):
-        self.befores = self.get_cuda_memory_usage()
+        self.caching_allocator_befores = []
+        self.driver_befores = []
+
+        # Performs a gc if required (required if any CUDA memory is held)
+        num_devices = torch.cuda.device_count()
+        for i in range(num_devices):
+            caching_allocator_mem_allocated = torch.cuda.memory_allocated(i)
+            # NOTE: gc is based exclusively on caching allocator memory
+            #   because the driver will always have some bytes in use (context size?)
+            if caching_allocator_mem_allocated > 0:
+                gc.collect()
+                torch.cuda.empty_cache()
+                break
+
+        # Acquires caching allocator and driver statistics before the test is run
+        for i in range(num_devices):
+            self.caching_allocator_befores.append(torch.cuda.memory_allocated(i))
+            bytes_free, bytes_total = torch.cuda.mem_get_info(i)
+            driver_mem_allocated = bytes_total - bytes_free
+            self.driver_befores.append(driver_mem_allocated)
 
     def __exit__(self, exec_type, exec_value, traceback):
         # Don't check for leaks if an exception was thrown
         if exec_type is not None:
             return
 
-        afters = self.get_cuda_memory_usage()
+        # Compares caching allocator before/after statistics
+        # An increase in allocated memory is a discrepancy indicating a possible
+        #   memory leak
+        discrepancy_detected = False
+        num_devices = torch.cuda.device_count()
+        for i in range(num_devices):
+            caching_allocator_mem_allocated = torch.cuda.memory_allocated(i)
 
-        for i, (before, after) in enumerate(zip(self.befores, afters)):
-            if not TEST_WITH_ROCM:
-                self.testcase.assertEqual(
-                    before, after, msg='{} leaked {} bytes CUDA memory on device {}'.format(
-                        self.name, after - before, i))
-            else:
+            if caching_allocator_mem_allocated > self.caching_allocator_befores[i]:
+                discrepancy_detected = True
+                break
+
+        # Short-circuits if no discrepancy detected
+        if not discrepancy_detected:
+            return
+
+        # Validates the discrepancy persists after garbage collection and
+        #   is confirmed by the driver API
+
+        # NOTE: driver API iscrepancies alone are ignored because with the jiterator
+        #   some tests may permanently increase the CUDA context size and
+        #   that will appear as a driver memory leak but is the expected behavior.
+
+        # GCs and clears the cache
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        for i in range(num_devices):
+            caching_allocator_mem_allocated = torch.cuda.memory_allocated(i)
+            bytes_free, bytes_total = torch.cuda.mem_get_info(i)
+            driver_mem_allocated = bytes_total - bytes_free
+
+            caching_allocator_discrepancy = False
+            driver_discrepancy = False
+
+            if caching_allocator_mem_allocated > self.caching_allocator_befores[i]:
+                caching_allocator_discrepancy = True
+
+            if driver_mem_allocated > self.driver_befores[i]:
+                driver_discrepancy = True
+
+            if caching_allocator_discrepancy and not driver_discrepancy:
+                # Just raises a warning if the leak is not validated by the
+                #   driver API
+                # NOTE: this may be a problem with how the caching allocator collects its
+                #   statistics or a leak too small to trigger the allocation of an
+                #   additional block of memory by the CUDA driver
+                msg = ("CUDA caching allocator reports a memory leak not "
+                       "verified by the driver API in {}! "
+                       "Caching allocator allocated memory was {} and is now reported as {} "
+                       "on device {}. "
+                       "CUDA driver allocated memory was {} and is now {}.").format(
+                    self.name,
+                    self.caching_allocator_befores[i],
+                    caching_allocator_mem_allocated,
+                    i,
+                    self.driver_befores[i],
+                    driver_mem_allocated)
+                warnings.warn(msg)
+            elif caching_allocator_discrepancy and driver_discrepancy:
+                # A caching allocator discrepancy validated by the driver API is a
+                #   failure (except on ROCm, see below)
+                msg = ("CUDA driver API confirmed a leak in {}! "
+                       "Caching allocator allocated memory was {} and is now reported as {} "
+                       "on device {}. "
+                       "CUDA driver allocated memory was {} and is now {}.").format(
+                    self.name,
+                    self.caching_allocator_befores[i],
+                    caching_allocator_mem_allocated,
+                    i,
+                    self.driver_befores[i],
+                    driver_mem_allocated)
+
                 # See #62533
                 # ROCM: Sometimes the transient memory is reported as leaked memory
-                if before != after:
-                    warnings.warn('{} leaked {} bytes ROCm memory on device {}'.format(
-                        self.name, after - before, i), RuntimeWarning)
+                if TEST_WITH_ROCM:
+                    warnings.warn(msg)
+                else:
+                    raise RuntimeError(msg)
 
 @contextmanager
 def skip_exception_type(exc_type):
@@ -1686,7 +1769,9 @@ class TestCase(expecttest.TestCase):
                 count = crow_indices[i + 1] - crow_indices[i]
                 col_indices[crow_indices[i]:crow_indices[i + 1]], _ = torch.sort(
                     torch.randperm(n_cols, dtype=index_dtype, device=device)[:count])
-            values = make_tensor([nnz], device=device, dtype=dtype, low=-1, high=1)
+            low = -1 if dtype != torch.uint8 else 0
+            high = 1 if dtype != torch.uint8 else 2
+            values = make_tensor([nnz], device=device, dtype=dtype, low=low, high=high)
             return values, crow_indices, col_indices
 
         values, crow_indices, col_indices = random_sparse_csr(size[0], size[1], nnz)
@@ -1897,7 +1982,8 @@ class TestCase(expecttest.TestCase):
         debug_msg: Optional[str] = None
 
         if x is None or y is None:
-            self.assertTrue(x is None and y is None)
+            self.assertTrue(x is None, "left arg is not None while right arg is None")
+            self.assertTrue(y is None, "left arg is None while right arg not is None")
         # Tensor x Number and Number x Tensor comparisons
         elif isinstance(x, torch.Tensor) and isinstance(y, Number):
             self.assertEqual(x.item(), y, atol=atol, rtol=rtol, msg=msg,
@@ -2543,35 +2629,29 @@ def random_hermitian_pd_matrix(matrix_size, *batch_dims, dtype, device):
                     dtype=dtype, device=device)
     return A @ A.mH + torch.eye(matrix_size, dtype=dtype, device=device)
 
-
-# TODO: remove this (prefer make_fullrank_matrices_with_distinct_singular_values below)
-def random_fullrank_matrix_distinct_singular_value(matrix_size, *batch_dims,
-                                                   **kwargs):
-    dtype = kwargs.get('dtype', torch.double)
-    device = kwargs.get('device', 'cpu')
-    silent = kwargs.get("silent", False)
-    if silent and not torch._C.has_lapack:
-        return torch.ones(matrix_size, matrix_size, dtype=dtype, device=device)
-
-    A = torch.randn(batch_dims + (matrix_size, matrix_size), dtype=dtype, device=device)
-    u, _, vh = torch.linalg.svd(A, full_matrices=False)
-    real_dtype = A.real.dtype if A.dtype.is_complex else A.dtype
-    s = torch.arange(1., matrix_size + 1, dtype=real_dtype, device=device).mul_(1.0 / (matrix_size + 1))
-    return (u * s.to(A.dtype)) @ vh
-
-
 # Creates a full rank matrix with distinct signular values or
 #   a batch of such matrices
-# Shape must be a square matrix or batch of square matrices
-def make_fullrank_matrices_with_distinct_singular_values(*shape, device, dtype):
-    assert shape[-1] == shape[-2]
-    t = make_tensor(shape, device=device, dtype=dtype)
-    u, _, vh = torch.linalg.svd(t, full_matrices=False)
-    # TODO: improve the handling of complex tensors here
-    real_dtype = t.real.dtype if t.dtype.is_complex else t.dtype
-    s = torch.arange(1., shape[-1] + 1, dtype=real_dtype, device=device).mul_(1.0 / (shape[-1] + 1))
-    return (u * s.to(dtype)) @ vh
-
+def make_fullrank_matrices_with_distinct_singular_values(*shape, device, dtype, requires_grad=False):
+    with torch.no_grad():
+        t = make_tensor(shape, device=device, dtype=dtype)
+        u, _, vh = torch.linalg.svd(t, full_matrices=False)
+        # TODO: improve the handling of complex tensors here
+        real_dtype = t.real.dtype if t.dtype.is_complex else t.dtype
+        k = min(shape[-1], shape[-2])
+        # We choose the singular values to be "around one"
+        # This is to make the matrix well conditioned
+        # s = [2, 3, ..., k+1]
+        s = torch.arange(2, k + 2, dtype=real_dtype, device=device)
+        # s = [2, -3, 4, ..., (-1)^k k+1]
+        s[1::2] *= -1.
+        # 1 + 1/s so that the singular values are in the range [2/3, 3/2]
+        # This gives a condition number of 9/4, which should be good enough
+        s.reciprocal_().add_(1.)
+        # Note that the singular values need not be ordered in an SVD so
+        # we don't need need to sort S
+        x = (u * s.to(u.dtype)) @ vh
+    x.requires_grad_(requires_grad)
+    return x
 
 def random_matrix(rows, columns, *batch_dims, **kwargs):
     """Return rectangular matrix or batches of rectangular matrices.
@@ -2589,6 +2669,8 @@ def random_matrix(rows, columns, *batch_dims, **kwargs):
         return torch.ones(rows, columns, dtype=dtype, device=device)
 
     A = torch.randn(batch_dims + (rows, columns), dtype=dtype, device=device)
+    if A.numel() == 0:
+        return A
     u, _, vh = torch.linalg.svd(A, full_matrices=False)
     k = min(rows, columns)
     s = torch.linspace(1 / (k + 1), 1, k, dtype=dtype, device=device)
@@ -3116,3 +3198,15 @@ def get_cycles_per_ms() -> float:
         vals.append(measure())
     vals = sorted(vals)
     return mean(vals[2 : num - 2])
+
+
+T = TypeVar('T')
+def first_sample(self: unittest.TestCase, samples: Iterable[T]) -> T:
+    """
+    Returns the first sample from an iterable of samples, like those returned by OpInfo.
+    The test will be skipped if no samples are available.
+    """
+    try:
+        return next(iter(samples))
+    except StopIteration:
+        raise unittest.SkipTest('Skipped! Need at least 1 sample input')

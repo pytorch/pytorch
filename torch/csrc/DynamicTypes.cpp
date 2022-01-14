@@ -20,10 +20,6 @@
 #include <unordered_map>
 #include <vector>
 
-#ifdef USE_CUDA
-#include <THC/THC.h>
-#endif
-
 namespace torch {
 namespace {
 std::unordered_map<at::DeprecatedTypeProperties*, PyTypeObject*> attype_to_py_storage_type;

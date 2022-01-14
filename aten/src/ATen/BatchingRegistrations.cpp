@@ -563,6 +563,15 @@ Tensor _new_zeros_with_same_feature_meta_batching_rule(
   return self_physical_view.getPhysicalToLogicalMap().apply(result);
 }
 
+bool _has_same_storage_numel_batching_rule(const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(isBatchedTensor(self) && !isBatchedTensor(other),
+    "Only the 'batched grad' use case is supported in PyTorch core.");
+  // The _has_same_storage_numel check is skipped if the tangent is a batched
+  // tensor because using as_strided to access storage locations not indexable
+  // by the input tensor is not supported in vmap
+  return true;
+}
+
 // What are the semantics of as_strided inside of vmap?
 // y = vmap(lambda x: x.as_strided(sizes, strides, offset))(xs)
 // This returns a view on `x`, `y`, such that each y[i] has:
@@ -1060,6 +1069,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("_add_batch_dim", native::_add_batch_dim);
   m.impl("_remove_batch_dim", native::_remove_batch_dim);
   m.impl("_make_dual", _make_dual_batching_rule);
+  m.impl("_has_same_storage_numel", _has_same_storage_numel_batching_rule);
   m.impl("is_same_size", native::is_same_size);
   m.impl("_new_zeros_with_same_feature_meta", _new_zeros_with_same_feature_meta_batching_rule);
 
