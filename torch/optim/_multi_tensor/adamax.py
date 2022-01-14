@@ -52,7 +52,7 @@ class Adamax(Optimizer):
         for group in self.param_groups:
             grads = []
             params_with_grad = []
-            states = []
+            state_steps = []
             exp_avgs = []
             exp_infs = []
 
@@ -70,21 +70,19 @@ class Adamax(Optimizer):
 
                     # State initialization
                     if len(state) == 0:
-                        state['step'] = 0
+                        state['step'] = torch.tensor(0.)
                         state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                         state['exp_inf'] = torch.zeros_like(p, memory_format=torch.preserve_format)
 
                     exp_avgs.append(state['exp_avg'])
                     exp_infs.append(state['exp_inf'])
-
-                    state['step'] += 1
-                    states.append(state)
+                    state_steps.append(state['step'])
 
             F.adamax(params_with_grad,
                      grads,
                      exp_avgs,
                      exp_infs,
-                     states,
+                     state_steps,
                      beta1=beta1,
                      beta2=beta2,
                      lr=group['lr'],
