@@ -46,14 +46,15 @@ jobs:
           . "${HOME}"/anaconda3/etc/profile.d/conda.sh
           conda activate pr-ci
           # setup build env
-          export USE_CUDA=1
-          export USE_CUDNN=1
-          export USE_MKLDNN=1
-          export BUILD_TEST=0
-          export CMAKE_PREFIX_PATH="${CONDA_PREFIX}"
+          USE_CUDA=1
+          USE_CUDNN=1
+          USE_MKLDNN=1
+          BUILD_TEST=0
+          CMAKE_PREFIX_PATH="${CONDA_PREFIX}"
+          PR_MERGE_BASE=$(git merge-base "${PR_BASE_SHA}" "${PR_HEAD_SHA}")
           # build the packages
           pushd "${HOME}"/pytorch
-          git checkout "${PR_BASE_SHA}" && git submodule sync && git submodule update --init --recursive
+          git checkout "${PR_MERGE_BASE}" && git submodule sync && git submodule update --init --recursive
           python setup.py clean
           python setup.py install
           popd
