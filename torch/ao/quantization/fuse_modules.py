@@ -134,22 +134,22 @@ def fuse_modules(model, modules_to_fuse, inplace=False, fuser_func=fuse_known_mo
 
     Examples::
 
-            >>> m = myModel()
-            >>> # m is a module containing  the sub-modules below
+            >>> m = M().eval()
+            >>> # m is a module containing the sub-modules below
             >>> modules_to_fuse = [ ['conv1', 'bn1', 'relu1'], ['submodule.conv', 'submodule.relu']]
             >>> fused_m = torch.ao.quantization.fuse_modules(m, modules_to_fuse)
             >>> output = fused_m(input)
 
-            >>> m = myModel()
+            >>> m = M().eval()
             >>> # Alternately provide a single list of modules to fuse
             >>> modules_to_fuse = ['conv1', 'bn1', 'relu1']
             >>> fused_m = torch.ao.quantization.fuse_modules(m, modules_to_fuse)
             >>> output = fused_m(input)
 
     """
-    return _fuse_modules(model, modules_to_fuse, is_qat=False, inplace=False, fuser_func=fuse_known_modules, fuse_custom_config_dict=None):
+    return _fuse_modules(model, modules_to_fuse, is_qat=False, inplace=inplace, fuser_func=fuse_known_modules, fuse_custom_config_dict=None)
 
 def fuse_modules_qat(model, modules_to_fuse, inplace=False, fuser_func=fuse_known_modules, fuse_custom_config_dict=None):
     """ QAT version for `fuse_modules`
     """
-    return _fuse_modules(model, modules_to_fuse, is_qat=True, inplace=False, fuser_func=fuse_known_modules, fuse_custom_config_dict=None):
+    return _fuse_modules(model, modules_to_fuse, is_qat=True, inplace=inplace, fuser_func=fuse_known_modules, fuse_custom_config_dict=None)

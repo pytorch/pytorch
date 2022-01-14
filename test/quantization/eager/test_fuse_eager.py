@@ -15,6 +15,7 @@ from torch.ao.quantization import (
     prepare_qat,
     quantize_qat,
     fuse_modules,
+    fuse_modules_qat,
     QConfig,
     default_qconfig,
     default_qat_qconfig,
@@ -43,8 +44,8 @@ class TestFuseEager(QuantizationTestCase):
     def test_fuse_module_train(self):
         model = ModelForFusion(default_qat_qconfig).train()
         # Test step by step fusion
-        model = fuse_modules(model, ['conv1', 'bn1', 'relu1'], is_qat=True)
-        model = fuse_modules(model, ['sub1.conv', 'sub1.bn'], is_qat=True)
+        model = fuse_modules_qat(model, ['conv1', 'bn1', 'relu1'])
+        model = fuse_modules_qat(model, ['sub1.conv', 'sub1.bn'])
         self.assertEqual(type(model.conv1), nni.ConvBnReLU2d,
                          msg="Fused Conv + BN + Relu first layer")
         self.assertEqual(type(model.bn1), torch.nn.Identity,
@@ -91,11 +92,10 @@ class TestFuseEager(QuantizationTestCase):
             checkQuantized(model)
 
         model = ModelForFusion(default_qat_qconfig).train()
-        model = fuse_modules(
+        model = fuse_modules_qat(
             model,
             [['conv1', 'bn1', 'relu1'],
-             ['sub1.conv', 'sub1.bn']],
-            is_qat=True)
+             ['sub1.conv', 'sub1.bn']])
         model = quantize_qat(model, test_only_train_fn, [self.img_data_1d_train])
         with self.assertRaisesRegex(RuntimeError, "Could not run 'aten::native_batch_norm' with arguments from the 'QuantizedCPU'"):
             checkQuantized(model)
@@ -110,8 +110,7 @@ class TestFuseEager(QuantizationTestCase):
              ['conv1', 'bn1', 'relu1'],
              ['conv2', 'relu2'],
              ['bn2', 'relu3'],
-             ['sub1.conv', 'sub1.bn']],
-            is_qat=False)
+             ['sub1.conv', 'sub1.bn']])
         self.assertEqual(type(model.conv1), nni.ConvReLU2d,
                          msg="Fused Conv + BN + Relu first layer (BN is folded)")
         self.assertEqual(type(model.conv1[0]), nn.Conv2d,
@@ -180,8 +179,7 @@ class TestFuseEager(QuantizationTestCase):
              ['conv2', 'relu2'],
              ['bn2', 'relu3'],
              ['sub1.conv', 'sub1.bn'],
-             ['conv3', 'bn3', 'relu4']],
-            is_qat=False)
+             ['conv3', 'bn3', 'relu4']])
         model = quantize(model, test_only_eval_fn, [self.img_data_1d])
         checkQuantized(model)
 
@@ -190,14 +188,13 @@ class TestFuseEager(QuantizationTestCase):
             with override_quantized_engine(qengine):
                 model = ModelWithSequentialFusion().train()
                 model.to(torch.float)
-                fuse_modules(
+                fuse_modules_qat(
                     model, [['conv1', 'relu1'] ,
                             ['features.0.0', 'features.0.1', 'features.0.2'],
                             ['features.1.0', 'features.1.1', 'features.1.2'],
                             ['features.2.0', 'features.2.1', 'features.2.2'],
                             ['classifier.0', 'classifier.1']],
-                    inplace=True,
-                    is_qat=True)
+                    inplace=True)
                 self.assertEqual(type(model.conv1), nni.ConvReLU2d,
                                  msg="Fused Conv + Relu: nni.ConvReLU2d")
                 self.assertEqual(type(model.conv1[0]), nn.Conv2d,
@@ -247,13 +244,12 @@ class TestFuseEager(QuantizationTestCase):
                 model.to(torch.float)
                 fuse_modules(
                     model,
-                    [['conv1', 'relu1'] ,
+                    [['conv1', 'relu1'],
                      ['features.0.0', 'features.0.1', 'features.0.2'],
                      ['features.1.0', 'features.1.1', 'features.1.2'],
                      ['features.2.0', 'features.2.1', 'features.2.2'],
                      ['classifier.0', 'classifier.1']],
-                    inplace=True,
-                    is_qat=False)
+                    inplace=True)
                 self.assertEqual(type(model.conv1), nni.ConvReLU2d,
                                  msg="Fused Conv + Relu: nni.ConvReLU2d")
                 self.assertEqual(type(model.conv1[0]), nn.Conv2d,
@@ -302,11 +298,10 @@ class TestFuseEager(QuantizationTestCase):
                 # fused model
                 model_orig.qconfig = QConfig(activation=torch.nn.Identity,
                                              weight=torch.nn.Identity)
-                model = fuse_modules(
+                model = fuse_modules_qat(
                     model_orig,
                     [["conv1", "bn1", "relu1"],
-                     ["conv2", "bn2"]],
-                    is_qat=True)
+                     ["conv2", "bn2"]])
                 prep_model = prepare_qat(model, inplace=False)
                 # output with fusion but no observers.
                 out_fused = prep_model(self.img_data_2d[0][0])
@@ -347,7 +342,7 @@ class TestFuseEager(QuantizationTestCase):
         model.eval()
         golden = model(inp2)
 
-        model = fuse_modules(model, [["fc", "bn"]], is_qat=False)
+        model = fuse_modules(model, [["fc", "bn"]])
         self.assertEqual(type(model.bn), nn.Identity)
         self.assertEqual(golden, model(inp2))
 
@@ -361,7 +356,7 @@ class TestFuseEager(QuantizationTestCase):
         model.eval()
         golden = model(inp2)
 
-        model = fuse_modules(model, [["conv1", "bn1"], ["conv2", "bn2"], ["conv3", "bn3"]], is_qat=False)
+        model = fuse_modules(model, [["conv1", "bn1"], ["conv2", "bn2"], ["conv3", "bn3"]])
         self.assertEqual(type(model.bn1), nn.Identity)
         self.assertEqual(type(model.bn2), nn.Identity)
         self.assertEqual(type(model.bn3), nn.Identity)
@@ -404,8 +399,8 @@ class TestFuseEager(QuantizationTestCase):
         self.assertEqual(counter['pre_forwards'], 2 * len(self.img_data_1d))
         self.assertEqual(counter['forwards'], 2 * len(self.img_data_1d))
 
-        model = fuse_modules(model, ['conv1', 'bn1', 'relu1'], is_qat=True)
-        model = fuse_modules(model, ['sub1.conv', 'sub1.bn'], is_qat=True)
+        model = fuse_modules_qat(model, ['conv1', 'bn1', 'relu1'])
+        model = fuse_modules_qat(model, ['sub1.conv', 'sub1.bn'])
 
         fused = True
         before_fusion_pre_count = counter['pre_forwards']
