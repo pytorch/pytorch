@@ -23,7 +23,7 @@ struct FunctionalityOffsetAndMask {
 C10_API std::array<FunctionalityOffsetAndMask, num_functionality_keys>
 initializeFunctionalityOffsetsAndMasks();
 
-C10_ALWAYS_INLINE static std::array<FunctionalityOffsetAndMask, num_functionality_keys>&
+C10_ALWAYS_INLINE static const std::array<FunctionalityOffsetAndMask, num_functionality_keys>&
 offsetsAndMasks() {
     static auto offsets_and_masks_ = initializeFunctionalityOffsetsAndMasks();
     return offsets_and_masks_;
@@ -551,9 +551,7 @@ constexpr DispatchKeySet after_func_keyset =
 
 // backend_dispatch_keyset should include all runtime backend keys.
 // Alias key DispatchKey::CompositeExplicitAutograd maps to
-// backend_dispatch_keyset NestedTensor has been explicitly removed due to
-// incompatibility with some kernels, such as structured kernels, that use the
-// DefaultBackend key.
+// backend_dispatch_keyset
 constexpr DispatchKeySet backend_dispatch_keyset = autogradother_backends |
         DispatchKeySet(DispatchKeySet::RAW, full_backend_mask) |
         DispatchKeySet({
