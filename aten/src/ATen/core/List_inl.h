@@ -79,18 +79,6 @@ impl::GenericList toList(const List<T>& list) {
 }
 
 template<class T>
-List<T>::List(List&& rhs) noexcept: impl_(std::move(rhs.impl_)) {
-  rhs.impl_ = make_intrusive<c10::detail::ListImpl>(std::vector<IValue>{}, impl_->elementType);
-}
-
-template<class T>
-List<T>& List<T>::operator=(List&& rhs) noexcept {
-  impl_ = std::move(rhs.impl_);
-  rhs.impl_ = make_intrusive<c10::detail::ListImpl>(std::vector<IValue>{}, impl_->elementType);
-  return *this;
-}
-
-template<class T>
 List<T> List<T>::copy() const {
   return List<T>(impl_->copy());
 }
@@ -358,5 +346,3 @@ void List<T>::unsafeSetElementType(TypePtr t) {
   impl_->elementType = std::move(t);
 }
 }
-
-#include <ATen/core/jit_type.h>

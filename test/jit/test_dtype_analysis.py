@@ -4,6 +4,7 @@ from unittest.case import expectedFailure
 
 import torch
 from torch import complex32, float32, float64, int32, int64
+from torch.jit._passes import _property_propagation
 from torch.testing._internal.common_methods_invocations import (
     SampleInput,
     sample_inputs_adaptive_avg_pool2d,
@@ -114,20 +115,10 @@ class TestDtypeBase(JitTestCase):
         return dtypes[0]
 
     def prop_dtype_on_graph(self, graph, example_inputs):
-        # Intentionally ignoring the kwargs, and not treating them as tensors for now
-        graph_inputs = list(graph.inputs())
-
         # We need to clear shape information because torch.jit.script
         # will return a cached graph if the function is scripted twice.
         torch._C._jit_pass_erase_shape_information(graph)
-
-        self.assertEqual(len(graph_inputs), len(example_inputs))
-        for graph_i, example_i in zip(graph_inputs, example_inputs):
-            if isinstance(example_i, torch.Tensor):
-                dtype = example_i.dtype
-                shape = example_i.shape
-                graph_i.setType(graph_i.type().with_dtype(dtype).with_sizes(shape))
-
+        _property_propagation.apply_input_props_using_example(graph, example_inputs)
         torch._C._jit_pass_propagate_shapes_on_graph(graph)
         torch._C._jit_pass_propagate_dtype(graph)
 
