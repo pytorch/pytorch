@@ -105,7 +105,7 @@ class SGD(Optimizer):
         super(SGD, self).__init__(params, defaults)
 
     def __setstate__(self, state):
-        super(SGD, self).__setstate__(state)
+        super().__setstate__(state)
         for group in self.param_groups:
             group.setdefault('nesterov', False)
             group.setdefault('maximize', False)
@@ -166,7 +166,9 @@ class SGD(Optimizer):
 def sgd(params: List[Tensor],
         d_p_list: List[Tensor],
         momentum_buffer_list: List[Optional[Tensor]],
-        has_sparse_grad: bool = False,
+        # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
+        # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
+        has_sparse_grad: bool = None,
         foreach: bool = None,
         *,
         weight_decay: float,
@@ -186,6 +188,9 @@ def sgd(params: List[Tensor],
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError('torch.jit.script not supported with foreach optimizers')
+
+    if has_sparse_grad is None:
+        has_sparse_grad = any([grad.is_sparse for grad in d_p_list])
 
     if foreach and not torch.jit.is_scripting():
         func = _multi_tensor_sgd
@@ -240,7 +245,7 @@ def _single_tensor_sgd(params: List[Tensor],
 
 
 def _multi_tensor_sgd(params: List[Tensor],
-                      d_p_list: List[Tensor],
+                      grads: List[Tensor],
                       momentum_buffer_list: List[Optional[Tensor]],
                       has_sparse_grad: bool = False,
                       *,
@@ -255,37 +260,42 @@ def _multi_tensor_sgd(params: List[Tensor],
         return
 
     if weight_decay != 0:
-        if has_sparse_grad:
-            d_p_list = [d_p.add(p, alpha=weight_decay) for d_p, p in zip(d_p_list, params)]
-        else:
-            d_p_list = torch._foreach_add(d_p_list, params, alpha=weight_decay)  # type: ignore[assignment]
+        grads = torch._foreach_add(grads, params, alpha=weight_decay)
 
     if momentum != 0:
-        if all(isinstance(t, torch.Tensor) for t in momentum_buffer_list):
-            torch._foreach_mul_(momentum_buffer_list, momentum)  # type: ignore[arg-type]
-            torch._foreach_add_(momentum_buffer_list, d_p_list, alpha=1 - dampening)  # type: ignore[arg-type]
+        bufs = []
+
+        all_states_with_momentum_buffer = True
+        for i in range(len(momentum_buffer_list)):
+            if momentum_buffer_list[i] is None:
+                all_states_with_momentum_buffer = False
+                break
+            else:
+                bufs.append(momentum_buffer_list[i])
+
+        if all_states_with_momentum_buffer:
+            torch._foreach_mul_(bufs, momentum)
+            torch._foreach_add_(bufs, grads, alpha=1 - dampening)
         else:
-            for i, (buf, d_p) in enumerate(zip(momentum_buffer_list, d_p_list)):
-                if buf is None:
-                    buf = torch.clone(d_p.clone().detach())
-                    momentum_buffer_list[i] = buf
+            bufs = []
+            for i in range(len(momentum_buffer_list)):
+                if momentum_buffer_list[i] is None:
+                    buf = momentum_buffer_list[i] = torch.clone(grads[i]).detach()
                 else:
-                    buf.mul_(momentum).add_(d_p, alpha=1 - dampening)
+                    buf = momentum_buffer_list[i]
+                    buf.mul_(momentum).add_(grads[i], alpha=1 - dampening)
+
+                bufs.append(buf)
 
         if nesterov:
-            if not has_sparse_grad:
-                d_p_list = torch._foreach_add(d_p_list, momentum_buffer_list, alpha=momentum)  # type: ignore[arg-type, assignment]
-            else:
-                d_p_list = [
-                    d_p.add(momentum_buffer, alpha=momentum)  # type: ignore[arg-type]
-                    for d_p, momentum_buffer in zip(d_p_list, momentum_buffer_list)
-                ]
+            torch._foreach_add_(grads, bufs, alpha=momentum)
         else:
-            d_p_list = momentum_buffer_list  # type: ignore[assignment]
+            grads = bufs
+
     alpha = lr if maximize else -lr
     if not has_sparse_grad:
-        torch._foreach_add_(params, d_p_list, alpha=alpha)
+        torch._foreach_add_(params, grads, alpha=alpha)
     else:
-        # foreach APIs don't support sparse
-        for p, d_p in zip(params, d_p_list):
-            p.add_(d_p, alpha=alpha)
+        # foreach APIs dont support sparse
+        for i in range(len(params)):
+            params[i].add_(grads[i], alpha=alpha)
