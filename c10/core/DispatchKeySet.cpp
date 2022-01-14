@@ -6,7 +6,13 @@ namespace c10 {
 bool isBackendDispatchKey(DispatchKey t) {
   return t != DispatchKey::Undefined
       // See Note [No Alias Keys in DispatchKeySet]
-      && !isAliasDispatchKey(t) && backend_dispatch_keyset.has(t);
+      && !isAliasDispatchKey(t)
+      // Note [NestedTensor Not Included in Backend Keys]
+      // NestedTensor has been explicitly removed from the "backend keyset" due to
+      // incompatibility with some kernels, so we don't want it to be included
+      // in CompositeImplicitAutograd or CompositeExplicitAutograd kernels.
+      && t != DispatchKey::NestedTensor
+      && backend_dispatch_keyset.has(t);
 }
 
 DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
@@ -29,9 +35,11 @@ bool runtimeDispatchKeySetHas(DispatchKey t, DispatchKey k) {
     case DispatchKey::Autograd:
       return autograd_dispatch_keyset.has(k);
     case DispatchKey::CompositeImplicitAutograd:
-      return math_dispatch_keyset.has(k);
+      // See Note [NestedTensor Not Included in Backend Keys]
+      return k != DispatchKey::NestedTensor && math_dispatch_keyset.has(k);
     case DispatchKey::CompositeExplicitAutograd:
-      return backend_dispatch_keyset.has(k);
+      // See Note [NestedTensor Not Included in Backend Keys]
+      return k != DispatchKey::NestedTensor && backend_dispatch_keyset.has(k);
     default:
       return t == k;
   }

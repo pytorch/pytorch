@@ -159,8 +159,13 @@ const char* toString(DispatchKey t) {
     case DispatchKey::Tracer:
       return "Tracer";
 
+    // Note: AutocastCUDA and Autocast are the same, currently.
+    // See comments in DispatchKey.h
     case DispatchKey::Autocast:
       return "Autocast";
+
+    case DispatchKey::AutocastCPU:
+      return "AutocastCPU";
 
     case DispatchKey::Batched:
       return "Batched";
