@@ -666,7 +666,7 @@ if __name__ == "__main__" :
         # for child processes
         launch_command = f"python {' '.join(copy_argv)} --run_in_subprocess '{model_name}' --output_dir={dirpath}"
         env = os.environ
-        env["LTC_TS_CUDA"] = "1"
+        env["LTC_TS_CUDA"] = "1" if args.device == "cuda" else "0"
         rc = 0
         try:
             if args.verbose:
