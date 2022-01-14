@@ -60,7 +60,7 @@ class _FunctionalAdagrad(object):
         params_with_grad = []
         grads = []
         state_sums = []
-        state_steps: List[int] = []
+        state_steps: List[Tensor] = []
 
         if len(params) != len(gradients):
             raise ValueError(
@@ -75,10 +75,7 @@ class _FunctionalAdagrad(object):
                 grads.append(gradient)
                 state = self.state[param]
                 state_sums.append(state['sum'])
-                # update the steps for each param group update
-                state['step'] += 1
-                # record the step after step update
-                state_steps.append(state['step'].item())
+                state_steps.append(state['step'])
 
         with torch.no_grad():
             F.adagrad(params,

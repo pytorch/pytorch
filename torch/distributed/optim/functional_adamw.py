@@ -61,7 +61,7 @@ class _FunctionalAdamW(object):
         exp_avgs = []
         exp_avg_sqs = []
         max_exp_avg_sqs = []
-        state_steps: List[int] = []
+        state_steps: List[Tensor] = []
         if grad is not None:
             params_with_grad.append(param)
             grads.append(grad)
@@ -86,10 +86,7 @@ class _FunctionalAdamW(object):
         if self.amsgrad:
             max_exp_avg_sqs.append(state['max_exp_avg_sq'])
 
-        # update the steps for each param group update
-        state['step'] += 1
-        # record the step after step update
-        state_steps.append(state['step'].item())
+        state_steps.append(state['step'])
         with torch.no_grad():
             F.adamw(params_with_grad,
                     grads,
@@ -112,7 +109,7 @@ class _FunctionalAdamW(object):
         exp_avgs = []
         exp_avg_sqs = []
         max_exp_avg_sqs = []
-        state_steps: List[int] = []
+        state_steps: List[Tensor] = []
 
         if len(params) != len(gradients):
             raise ValueError(
@@ -146,10 +143,7 @@ class _FunctionalAdamW(object):
                 if self.amsgrad:
                     max_exp_avg_sqs.append(state['max_exp_avg_sq'])
 
-                # update the steps for each param group update
-                state['step'] += 1
-                # record the step after step update
-                state_steps.append(state['step'].item())
+                state_steps.append(state['step'])
 
         with torch.no_grad():
             F.adamw(params_with_grad,
