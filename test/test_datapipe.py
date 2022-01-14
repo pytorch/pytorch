@@ -1,21 +1,14 @@
 # Owner(s): ["module: dataloader"]
 
 import copy
-import http.server
 import itertools
 import os
 import os.path
 import pickle
 import random
-import socketserver
 import sys
-import tarfile
 import tempfile
-import threading
-import time
-import unittest
 import warnings
-import zipfile
 from functools import partial
 from typing import (
     Any,
@@ -229,100 +222,6 @@ class TestIterableDataPipeBasic(TestCase):
                 rec[1].close()
         self.assertEqual(count, len(self.temp_files))
 
-    def test_readfilesfromtar_iterable_datapipe(self):
-        temp_dir = self.temp_dir.name
-        temp_tarfile_pathname = os.path.join(temp_dir, "test_tar.tar")
-        with tarfile.open(temp_tarfile_pathname, "w:gz") as tar:
-            tar.add(self.temp_files[0])
-            tar.add(self.temp_files[1])
-            tar.add(self.temp_files[2])
-        datapipe1 = dp.iter.FileLister(temp_dir, '*.tar')
-        datapipe2 = dp.iter.FileOpener(datapipe1, mode='b')
-        datapipe3 = dp.iter.TarArchiveReader(datapipe2)
-
-        # Test Case: Read extracted files before reaching the end of the tarfile
-        for rec, temp_file in itertools.zip_longest(datapipe3, self.temp_files):
-            self.assertTrue(rec is not None and temp_file is not None)
-            self.assertEqual(os.path.basename(rec[0]), os.path.basename(temp_file))
-            with open(temp_file, 'rb') as f:
-                self.assertEqual(rec[1].read(), f.read())
-            rec[1].close()
-
-
-        # Test Case: Read extracted files after reaching the end of the tarfile
-        data_refs = list(datapipe3)
-        self.assertEqual(len(data_refs), len(self.temp_files))
-        for data_ref, temp_file in zip(data_refs, self.temp_files):
-            self.assertEqual(os.path.basename(data_ref[0]), os.path.basename(temp_file))
-            with open(temp_file, 'rb') as f:
-                self.assertEqual(data_ref[1].read(), f.read())
-            data_ref[1].close()
-
-        # Test Case: reset the DataPipe after reading part of it
-        n_elements_before_reset = 1
-        res_before_reset, res_after_reset = reset_after_n_next_calls(datapipe3, n_elements_before_reset)
-        # Check result accumulated before reset
-        self.assertEqual(len(res_before_reset), n_elements_before_reset)
-        for ele_before_reset, temp_file in zip(res_before_reset, self.temp_files):
-            self.assertEqual(os.path.basename(ele_before_reset[0]), os.path.basename(temp_file))
-            with open(temp_file, 'rb') as f:
-                self.assertEqual(ele_before_reset[1].read(), f.read())
-            ele_before_reset[1].close()
-        # Check result accumulated after reset
-        self.assertEqual(len(res_after_reset), len(self.temp_files))
-        for ele_after_reset, temp_file in zip(res_after_reset, self.temp_files):
-            self.assertEqual(os.path.basename(ele_after_reset[0]), os.path.basename(temp_file))
-            with open(temp_file, 'rb') as f:
-                self.assertEqual(ele_after_reset[1].read(), f.read())
-            ele_after_reset[1].close()
-
-    # This test throws a warning because data_stream in side ZipArchiveReader cannot be closed
-    # due to the way zipfiles.open() is implemented
-    def test_readfilesfromzip_iterable_datapipe(self):
-        temp_dir = self.temp_dir.name
-        temp_zipfile_pathname = os.path.join(temp_dir, "test_zip.zip")
-        with zipfile.ZipFile(temp_zipfile_pathname, 'w') as myzip:
-            myzip.write(self.temp_files[0])
-            myzip.write(self.temp_files[1])
-            myzip.write(self.temp_files[2])
-        datapipe1 = dp.iter.FileLister(temp_dir, '*.zip')
-        datapipe2 = dp.iter.FileOpener(datapipe1, mode='b')
-        datapipe3 = dp.iter.ZipArchiveReader(datapipe2)
-
-        # Test Case: read extracted files before reaching the end of the zipfile
-        for rec, temp_file in itertools.zip_longest(datapipe3, self.temp_files):
-            self.assertTrue(rec is not None and temp_file is not None)
-            self.assertEqual(os.path.basename(rec[0]), os.path.basename(temp_file))
-            with open(temp_file, 'rb') as f:
-                self.assertEqual(rec[1].read(), f.read())
-            rec[1].close()
-        # Test Case: read extracted files after reaching the end of the zipile
-        data_refs = list(datapipe3)
-        self.assertEqual(len(data_refs), len(self.temp_files))
-        for data_ref, temp_file in zip(data_refs, self.temp_files):
-            self.assertEqual(os.path.basename(data_ref[0]), os.path.basename(temp_file))
-            with open(temp_file, 'rb') as f:
-                self.assertEqual(data_ref[1].read(), f.read())
-            data_ref[1].close()
-
-        # Test Case: reset the DataPipe after reading part of it
-        n_elements_before_reset = 1
-        res_before_reset, res_after_reset = reset_after_n_next_calls(datapipe3, n_elements_before_reset)
-        # Check the results accumulated before reset
-        self.assertEqual(len(res_before_reset), n_elements_before_reset)
-        for ele_before_reset, temp_file in zip(res_before_reset, self.temp_files):
-            self.assertEqual(os.path.basename(ele_before_reset[0]), os.path.basename(temp_file))
-            with open(temp_file, 'rb') as f:
-                self.assertEqual(ele_before_reset[1].read(), f.read())
-            ele_before_reset[1].close()
-        # Check the results accumulated after reset
-        self.assertEqual(len(res_after_reset), len(self.temp_files))
-        for ele_after_reset, temp_file in zip(res_after_reset, self.temp_files):
-            self.assertEqual(os.path.basename(ele_after_reset[0]), os.path.basename(temp_file))
-            with open(temp_file, 'rb') as f:
-                self.assertEqual(ele_after_reset[1].read(), f.read())
-            ele_after_reset[1].close()
-
     def test_routeddecoder_iterable_datapipe(self):
         temp_dir = self.temp_dir.name
         temp_pngfile_pathname = os.path.join(temp_dir, "test_png.png")
@@ -363,43 +262,33 @@ class TestIterableDataPipeBasic(TestCase):
         datapipe4.add_handler(_png_decoder)
         _helper(cached, datapipe4, channel_first=True)
 
-
     def test_groupby_iterable_datapipe(self):
-        temp_dir = self.temp_dir.name
-        temp_tarfile_pathname = os.path.join(temp_dir, "test_tar.tar")
-        file_list = [
-            "a.png", "b.png", "c.json", "a.json", "c.png", "b.json", "d.png",
-            "d.json", "e.png", "f.json", "g.png", "f.png", "g.json", "e.json",
-            "h.txt", "h.json"]
-        with tarfile.open(temp_tarfile_pathname, "w:gz") as tar:
-            for file_name in file_list:
-                file_pathname = os.path.join(temp_dir, file_name)
-                with open(file_pathname, 'w') as f:
-                    f.write('12345abcde')
-                tar.add(file_pathname)
+        file_list = ["a.png", "b.png", "c.json", "a.json", "c.png", "b.json", "d.png",
+                     "d.json", "e.png", "f.json", "g.png", "f.png", "g.json", "e.json",
+                     "h.txt", "h.json"]
 
-        datapipe1 = dp.iter.FileLister(temp_dir, '*.tar')
-        datapipe2 = dp.iter.FileOpener(datapipe1, mode='b')
-        datapipe3 = dp.iter.TarArchiveReader(datapipe2)
+        import io
+
+        datapipe1 = dp.iter.IterableWrapper([(filename, io.BytesIO(b'12345abcde')) for filename in file_list])
 
         def group_fn(data):
             filepath, _ = data
             return os.path.basename(filepath).split(".")[0]
 
-        datapipe4 = dp.iter.Grouper(datapipe3, group_key_fn=group_fn, group_size=2)
+        datapipe2 = dp.iter.Grouper(datapipe1, group_key_fn=group_fn, group_size=2)
 
         def order_fn(data):
             data.sort(key=lambda f: f[0], reverse=True)
             return data
 
-        datapipe5 = dp.iter.Mapper(datapipe4, fn=order_fn)  # type: ignore[var-annotated]
+        datapipe3 = dp.iter.Mapper(datapipe2, fn=order_fn)  # type: ignore[var-annotated]
 
         expected_result = [
             ("a.png", "a.json"), ("c.png", "c.json"), ("b.png", "b.json"), ("d.png", "d.json"),
             ("f.png", "f.json"), ("g.png", "g.json"), ("e.png", "e.json"), ("h.txt", "h.json")]
 
         count = 0
-        for rec, expected in zip(datapipe5, expected_result):
+        for rec, expected in zip(datapipe3, expected_result):
             count = count + 1
             self.assertEqual(os.path.basename(rec[0][0]), expected[0])
             self.assertEqual(os.path.basename(rec[1][0]), expected[1])
@@ -503,139 +392,6 @@ class TestDataFramesPipes(TestCase):
     def test_filter(self):
         df_numbers = self._get_dataframes_pipe(range=10).filter(lambda x: x.i > 5)
         self.assertEqual([(6, 0), (7, 1), (8, 2), (9, 0)], list(df_numbers))
-
-class FileLoggerSimpleHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
-    def __init__(self, *args, logfile=None, **kwargs):
-        self.__loggerHandle = None
-        if logfile is not None:
-            self.__loggerHandle = open(logfile, 'a+')
-        super().__init__(*args, **kwargs)
-
-    def log_message(self, format, *args):
-        if self.__loggerHandle is not None:
-            self.__loggerHandle.write("%s - - [%s] %s\n" %
-                                      (self.address_string(),
-                                       self.log_date_time_string(),
-                                       format % args))
-        return
-
-    def finish(self):
-        if self.__loggerHandle is not None:
-            self.__loggerHandle.close()
-        super().finish()
-
-
-def setUpLocalServerInThread():
-    try:
-        Handler = partial(FileLoggerSimpleHTTPRequestHandler, logfile=None)
-        socketserver.TCPServer.allow_reuse_address = True
-
-        server = socketserver.TCPServer(("", 0), Handler)
-        server_addr = "{host}:{port}".format(host=server.server_address[0], port=server.server_address[1])
-        server_thread = threading.Thread(target=server.serve_forever)
-        server_thread.start()
-
-        # Wait a bit for the server to come up
-        time.sleep(3)
-
-        return (server_thread, server_addr, server)
-    except Exception:
-        raise
-
-
-def create_temp_files_for_serving(tmp_dir, file_count, file_size,
-                                  file_url_template):
-    furl_local_file = os.path.join(tmp_dir, "urls_list")
-    with open(furl_local_file, 'w') as fsum:
-        for i in range(0, file_count):
-            f = os.path.join(tmp_dir, "webfile_test_{num}.data".format(num=i))
-
-            write_chunk = 1024 * 1024 * 16
-            rmn_size = file_size
-            while rmn_size > 0:
-                with open(f, 'ab+') as fout:
-                    fout.write(os.urandom(min(rmn_size, write_chunk)))
-                rmn_size = rmn_size - min(rmn_size, write_chunk)
-
-            fsum.write(file_url_template.format(num=i))
-
-
-class TestIterableDataPipeHttp(TestCase):
-    __server_thread: threading.Thread
-    __server_addr: str
-    __server: socketserver.TCPServer
-
-    @classmethod
-    def setUpClass(cls):
-        try:
-            (cls.__server_thread, cls.__server_addr,
-             cls.__server) = setUpLocalServerInThread()
-        except Exception as e:
-            warnings.warn("TestIterableDataPipeHttp could\
-                          not set up due to {0}".format(str(e)))
-
-    @classmethod
-    def tearDownClass(cls):
-        try:
-            cls.__server.shutdown()
-            cls.__server_thread.join(timeout=15)
-        except Exception as e:
-            warnings.warn("TestIterableDataPipeHttp could\
-                           not tear down (clean up temp directory or terminate\
-                           local server) due to {0}".format(str(e)))
-
-    def _http_test_base(self, test_file_size, test_file_count, timeout=None,
-                        chunk=None):
-
-        def _get_data_from_tuple_fn(data, *args, **kwargs):
-            return data[args[0]]
-
-        with tempfile.TemporaryDirectory(dir=os.getcwd()) as tmpdir:
-            # create tmp dir and files for test
-            base_tmp_dir = os.path.basename(os.path.normpath(tmpdir))
-            file_url_template = ("http://{server_addr}/{tmp_dir}/"
-                                 "/webfile_test_{num}.data\n")\
-                .format(server_addr=self.__server_addr, tmp_dir=base_tmp_dir,
-                        num='{num}')
-            create_temp_files_for_serving(tmpdir, test_file_count,
-                                          test_file_size, file_url_template)
-
-            datapipe_dir_f = dp.iter.FileLister(tmpdir, '*_list')
-            datapipe_stream = dp.iter.FileOpener(datapipe_dir_f, mode='b')
-            datapipe_f_lines = dp.iter.LineReader(datapipe_stream)
-            datapipe_line_url: IterDataPipe[str] = \
-                dp.iter.Mapper(datapipe_f_lines, _get_data_from_tuple_fn, (1,))
-            datapipe_http = dp.iter.HttpReader(datapipe_line_url,
-                                               timeout=timeout)
-            datapipe_tob = dp.iter.StreamReader(datapipe_http, chunk=chunk)
-
-            for (url, data) in datapipe_tob:
-                self.assertGreater(len(url), 0)
-                self.assertRegex(url, r'^http://.+\d+.data$')
-                if chunk is not None:
-                    self.assertEqual(len(data), chunk)
-                else:
-                    self.assertEqual(len(data), test_file_size)
-
-    @unittest.skip("Stress test on large amount of files skipped\
-                    due to the CI timing constraint.")
-    def test_stress_http_reader_iterable_datapipes(self):
-        test_file_size = 10
-        #   STATS: It takes about 5 hours to stress test 16 * 1024 * 1024
-        #          files locally
-        test_file_count = 1024
-        self._http_test_base(test_file_size, test_file_count)
-
-    @unittest.skip("Test on the very large file skipped\
-                due to the CI timing constraint.")
-    def test_large_files_http_reader_iterable_datapipes(self):
-        #   STATS: It takes about 11 mins to test a large file of 64GB locally
-        test_file_size = 1024 * 1024 * 128
-        test_file_count = 1
-        timeout = 30
-        chunk = 1024 * 1024 * 8
-        self._http_test_base(test_file_size, test_file_count, timeout=timeout,
-                             chunk=chunk)
 
 
 class IDP_NoLen(IterDataPipe):
@@ -1309,51 +1065,6 @@ class TestFunctionalIterDataPipe(TestCase):
             unbatch_dp = input_dp.unbatch(unbatch_level=5)
             for i in unbatch_dp:
                 print(i)
-
-    def test_bucket_batch_datapipe(self):
-        input_dp = dp.iter.IterableWrapper(range(20))
-        with self.assertRaises(AssertionError):
-            dp.iter.BucketBatcher(input_dp, batch_size=0)
-
-        input_dp_nl = IDP_NoLen(range(20))
-        bucket_dp_nl = dp.iter.BucketBatcher(input_dp_nl, batch_size=7)
-        with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
-            len(bucket_dp_nl)
-
-        def _helper(**kwargs):
-            data_len = 100
-            arrs = list(range(data_len))
-            random.shuffle(arrs)
-            input_dp = dp.iter.IterableWrapper(arrs)
-            bucket_dp = dp.iter.BucketBatcher(input_dp, **kwargs)
-
-            self.assertEqual(len(bucket_dp), data_len // 3 if kwargs['drop_last'] else data_len // 3 + 1)
-
-            def _verify_bucket_sorted(bucket):
-                # Sort batch in a bucket
-                bucket = sorted(bucket, key=lambda x: x[0])
-                flat = [item for batch in bucket for item in batch]
-                # Elements in the bucket should be sorted
-                self.assertEqual(flat, sorted(flat))
-
-            batch_num = kwargs['batch_num'] if 'batch_num' in kwargs else 100
-            bucket = []
-            for idx, d in enumerate(bucket_dp):
-                self.assertEqual(d, sorted(d))
-                bucket.append(d)
-                if idx % batch_num == batch_num - 1:
-                    _verify_bucket_sorted(bucket)
-                    bucket = []
-            _verify_bucket_sorted(bucket)
-
-        def _sort_fn(data):
-            return sorted(data)
-
-        # In-batch shuffle
-        _helper(batch_size=3, drop_last=False, batch_num=5, sort_key=_sort_fn)
-        _helper(batch_size=3, drop_last=False, batch_num=2, bucket_num=2, sort_key=_sort_fn)
-        _helper(batch_size=3, drop_last=True, batch_num=2, sort_key=_sort_fn)
-        _helper(batch_size=3, drop_last=True, batch_num=2, bucket_num=2, sort_key=_sort_fn)
 
     def test_filter_datapipe(self):
         input_ds = dp.iter.IterableWrapper(range(10))
