@@ -368,7 +368,7 @@ Available options:
 * ``max_split_size_mb`` prevents the native allocator
   from splitting blocks larger than this size (in MB). This can reduce
   fragmentation and may allow some borderline workloads to complete without
-  running out of memory. Performance cost can range from 'zero' to 'substatial'
+  running out of memory. Performance cost can range from 'zero' to 'substantial'
   depending on allocation patterns.  Default value is unlimited, i.e. all blocks
   can be split. The
   :meth:`~torch.cuda.memory_stats` and
