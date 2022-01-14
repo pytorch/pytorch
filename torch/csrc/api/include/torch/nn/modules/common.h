@@ -1,5 +1,6 @@
 #pragma once
 
+#include <initializer_list>
 #include <c10/util/irange.h>
 
 /// This macro enables a module with default arguments in its forward method
@@ -76,12 +77,12 @@
     return true; \
   } \
   unsigned int _forward_num_required_args() override { \
-    std::vector<std::pair<unsigned int, torch::nn::AnyValue>> args_info = {__VA_ARGS__}; \
-    return args_info[0].first; \
+    std::initializer_list<std::pair<unsigned int, torch::nn::AnyValue>> args_info{__VA_ARGS__}; \
+    return args_info.begin()->first; \
   } \
   std::vector<torch::nn::AnyValue> _forward_populate_default_args(std::vector<torch::nn::AnyValue>&& arguments) override { \
-    std::vector<std::pair<unsigned int, torch::nn::AnyValue>> args_info = {__VA_ARGS__}; \
-    unsigned int num_all_args = args_info[args_info.size() - 1].first + 1; \
+    std::initializer_list<std::pair<unsigned int, torch::nn::AnyValue>> args_info{__VA_ARGS__}; \
+    unsigned int num_all_args = (args_info.begin()+(args_info.size() - 1))->first + 1; \
     TORCH_INTERNAL_ASSERT(arguments.size() >= _forward_num_required_args() && arguments.size() <= num_all_args); \
     std::vector<torch::nn::AnyValue> ret; \
     ret.reserve(num_all_args); \
