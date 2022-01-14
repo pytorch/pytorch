@@ -12,7 +12,7 @@ void tupleIndex(Stack& stack) {
   }
   stack.emplace_back(tuple->elements()[norm_index]);
 }
-
+// ghtest
 void raiseException(Stack& stack) {
   throw JITException(pop(stack).toStringRef());
 }
