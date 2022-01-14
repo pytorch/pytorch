@@ -76,7 +76,7 @@ class RAdam(Optimizer):
         super(RAdam, self).__init__(params, defaults)
 
     def __setstate__(self, state):
-        super(RAdam, self).__setstate__(state)
+        super().__setstate__(state)
         for group in self.param_groups:
             group.setdefault('foreach', None)
 
@@ -111,7 +111,7 @@ class RAdam(Optimizer):
                     state = self.state[p]
                     # Lazy state initialization
                     if len(state) == 0:
-                        state['step'] = 0
+                        state['step'] = torch.tensor(0.)
                         # Exponential moving average of gradient values
                         state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                         # Exponential moving average of squared gradient values
@@ -119,10 +119,6 @@ class RAdam(Optimizer):
 
                     exp_avgs.append(state['exp_avg'])
                     exp_avg_sqs.append(state['exp_avg_sq'])
-
-                    # update the steps for each param group update
-                    state['step'] += 1
-                    # record the step after step update
                     state_steps.append(state['step'])
 
             radam(params_with_grad,
@@ -144,7 +140,9 @@ def radam(params: List[Tensor],
           grads: List[Tensor],
           exp_avgs: List[Tensor],
           exp_avg_sqs: List[Tensor],
-          state_steps: List[int],
+          state_steps: List[Tensor],
+          # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
+          # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
           foreach: bool = None,
           *,
           beta1: float,
@@ -156,6 +154,9 @@ def radam(params: List[Tensor],
 
     See :class:`~torch.optim.RAdam` for details.
     """
+
+    if not all([isinstance(t, torch.Tensor) for t in state_steps]):
+        raise RuntimeError("API has changed, `state_steps` argument must contain a list of singleton tensors")
 
     if foreach is None:
         # Placeholder for more complex foreach logic to be added when value is not set
@@ -185,7 +186,7 @@ def _single_tensor_radam(params: List[Tensor],
                          grads: List[Tensor],
                          exp_avgs: List[Tensor],
                          exp_avg_sqs: List[Tensor],
-                         state_steps: List[int],
+                         state_steps: List[Tensor],
                          *,
                          beta1: float,
                          beta2: float,
@@ -197,7 +198,10 @@ def _single_tensor_radam(params: List[Tensor],
         grad = grads[i]
         exp_avg = exp_avgs[i]
         exp_avg_sq = exp_avg_sqs[i]
-        step = state_steps[i]
+        step_t = state_steps[i]
+        # update step
+        step_t += 1
+        step = step_t.item()
 
         bias_correction1 = 1 - beta1 ** step
         bias_correction2 = 1 - beta2 ** step
@@ -231,7 +235,7 @@ def _multi_tensor_radam(params: List[Tensor],
                         grads: List[Tensor],
                         exp_avgs: List[Tensor],
                         exp_avg_sqs: List[Tensor],
-                        state_steps: List[int],
+                        state_steps: List[Tensor],
                         *,
                         beta1: float,
                         beta2: float,
@@ -242,13 +246,16 @@ def _multi_tensor_radam(params: List[Tensor],
     if len(params) == 0:
         return
 
+    # Update steps
+    torch._foreach_add_(state_steps, 1)
+
     # maximum length of the approximated SMA
     rho_inf = 2 / (1 - beta2) - 1
     # compute the length of the approximated SMA
-    rho_t_list = [rho_inf - 2 * step * (beta2 ** step) / (1 - beta2 ** step) for step in state_steps]
+    rho_t_list = [rho_inf - 2 * step.item() * (beta2 ** step.item()) / (1 - beta2 ** step.item()) for step in state_steps]
 
-    bias_correction1 = [1 - beta1 ** step for step in state_steps]
-    bias_correction2 = [1 - beta2 ** step for step in state_steps]
+    bias_correction1 = [1 - beta1 ** step.item() for step in state_steps]
+    bias_correction2 = [1 - beta2 ** step.item() for step in state_steps]
     if weight_decay != 0:
         torch._foreach_add_(grads, params, alpha=weight_decay)
 
@@ -263,7 +270,7 @@ def _multi_tensor_radam(params: List[Tensor],
             if rho_t > 5 else 0 for rho_t in rho_t_list]
     unrectified = [0 if rect > 0 else 1. for rect in rect]
 
-    exp_avg_sq_sqrt = torch._foreach_add(torch._foreach_sqrt(exp_avg_sqs), eps)
+    exp_avg_sq_sqrt = torch._foreach_sqrt(exp_avg_sqs)
     bias_correction_sqrt = [math.sqrt(bc) for bc in bias_correction2]
     denom = torch._foreach_div(exp_avg_sq_sqrt, bias_correction_sqrt)
     step_size = [(lr * rect / bc) * -1 for rect, bc in zip(rect, bias_correction1)]
