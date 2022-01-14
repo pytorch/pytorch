@@ -1,4 +1,3 @@
-import math
 import torch
 from . import _functional as F
 from .optimizer import Optimizer
@@ -64,16 +63,14 @@ class ASGD(Optimizer):
                     state = self.state[p]
                     # State initialization
                     if len(state) == 0:
-                        state['step'] = 0
-                        state['eta'] = group['lr']
-                        state['mu'] = 1
+                        state['step'] = torch.tensor(0.)
+                        state['eta'] = torch.tensor(group['lr'])
+                        state['mu'] = torch.tensor(1.)
                         state['ax'] = torch.zeros_like(p, memory_format=torch.preserve_format)
 
                     mus.append(state['mu'])
                     axs.append(state['ax'])
                     etas.append(state['eta'])
-
-                    state['step'] += 1
                     state_steps.append(state['step'])
 
             F.asgd(params_with_grad,
@@ -81,14 +78,11 @@ class ASGD(Optimizer):
                    axs,
                    mus,
                    etas,
-                   weight_decay=group['weight_decay'],
-                   lambd=group['lambd'])
-
-            # update eta and mu
-            for p, mu, eta in zip(params_with_grad, mus, etas):
-                state = self.state[p]
-                state['eta'] = (group['lr'] /
-                                math.pow((1 + group['lambd'] * group['lr'] * state['step']), group['alpha']))
-                state['mu'] = 1 / max(1, state['step'] - group['t0'])
+                   state_steps,
+                   lambd=group['lambd'],
+                   lr=group['lr'],
+                   t0=group['t0'],
+                   alpha=group['alpha'],
+                   weight_decay=group['weight_decay'])
 
         return loss
