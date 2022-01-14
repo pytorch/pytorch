@@ -423,8 +423,9 @@ std::vector<ExprHandle> TensorExprKernel::sizesForValue(
   }
 
   if (v->type()->isSubtypeOf(*FloatType::get()) ||
+      v->type()->isSubtypeOf(*BoolType::get()) ||
       v->type()->isSubtypeOf(*IntType::get())) {
-    return {int64_t{1}};
+    return {};
   }
   if (v->type()->isSubtypeOf(*NoneType::get())) {
     return {};
@@ -1691,6 +1692,8 @@ std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
   for (auto& input : inputs) {
     if (input.isInt()) {
       runArgs.emplace_back(input.toInt());
+    } else if (input.isBool()) {
+      runArgs.emplace_back(input.toBool());
     } else if (input.isDouble()) {
       runArgs.emplace_back(input.toDouble());
     } else if (input.isTensor()) {

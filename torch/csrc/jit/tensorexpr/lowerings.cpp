@@ -80,21 +80,113 @@ int nnc_lowerings_lazy_registration() {
             });
       });
 
-  RegisterNNCLoweringsFunction aten_mul_int(
-      {"aten::mul.int(int a, int b) -> (int)"},
+#define DEFINE_BINARY_SCALAR_OP_LOWERING(op_name, op)                     \
+  RegisterNNCLoweringsFunction aten_##op_name##_scalar(                   \
+      {"aten::" #op_name ".int(int a, int b) -> (int)",                   \
+       "aten::" #op_name ".int_float(int a, float b) -> (float)",         \
+       "aten::" #op_name ".float_int(float a, int b) -> (float)",         \
+       "aten::" #op_name ".float(float a, float b) -> (float)"},          \
+      [](const std::vector<ArgValue>& inputs,                             \
+         const std::vector<ExprHandle>& outputShape,                      \
+         const c10::optional<ScalarType>& outputType,                     \
+         at::Device device) {                                             \
+        return computeScalar(                                             \
+            "aten_#op_name",                                              \
+            inputs,                                                       \
+            outputShape,                                                  \
+            outputType,                                                   \
+            [](const ExprHandle& a, const ExprHandle& b) { return op; }); \
+      });
+  DEFINE_BINARY_SCALAR_OP_LOWERING(mul, a * b)
+  DEFINE_BINARY_SCALAR_OP_LOWERING(add, a + b)
+  DEFINE_BINARY_SCALAR_OP_LOWERING(sub, a - b)
+#undef DEFINE_BINARY_SCALAR_OP_LOWERING
+  RegisterNNCLoweringsFunction aten_div_scalar(
+      {"aten::div(Scalar a, Scalar b) -> (float)",
+       "aten::div.int(int a, int b) -> (float)",
+       "aten::div.int_float(int a, float b) -> (float)",
+       "aten::div.float_int(float a, int b) -> (float)",
+       "aten::div.float(float a, float b) -> (float)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeScalar(
-            "aten_mul",
+            "aten_div",
             inputs,
             outputShape,
             outputType,
-            [](const ExprHandle& lhs, const ExprHandle& rhs) {
-              return lhs * rhs;
+            [](const ExprHandle& a, const ExprHandle& b) {
+              return promoteIntegerToDefaultType(a) /
+                  promoteIntegerToDefaultType(b);
             });
       });
+
+#define DEFINE_COMPARISON_SCALAR_OP_LOWERING(op_name, op)                 \
+  RegisterNNCLoweringsFunction aten_##op_name##_scalar(                   \
+      {"aten::" #op_name ".bool(bool a, bool b) -> (bool)",               \
+       "aten::" #op_name ".int(int a, int b) -> (bool)",                  \
+       "aten::" #op_name ".int_float(int a, float b) -> (bool)",          \
+       "aten::" #op_name ".float_int(float a, int b) -> (bool)",          \
+       "aten::" #op_name ".float(float a, float b) -> (bool)"},           \
+      [](const std::vector<ArgValue>& inputs,                             \
+         const std::vector<ExprHandle>& outputShape,                      \
+         const c10::optional<ScalarType>& outputType,                     \
+         at::Device device) {                                             \
+        return computeScalar(                                             \
+            "aten_#op_name",                                              \
+            inputs,                                                       \
+            outputShape,                                                  \
+            outputType,                                                   \
+            [](const ExprHandle& a, const ExprHandle& b) { return op; }); \
+      });
+  DEFINE_COMPARISON_SCALAR_OP_LOWERING(lt, cast<bool>(a < b))
+  DEFINE_COMPARISON_SCALAR_OP_LOWERING(le, cast<bool>(a <= b))
+  DEFINE_COMPARISON_SCALAR_OP_LOWERING(eq, cast<bool>(a == b))
+  DEFINE_COMPARISON_SCALAR_OP_LOWERING(ne, cast<bool>(a != b))
+  DEFINE_COMPARISON_SCALAR_OP_LOWERING(gt, cast<bool>(a > b))
+  DEFINE_COMPARISON_SCALAR_OP_LOWERING(ge, cast<bool>(a >= b))
+#undef DEFINE_COMPARISON_SCALAR_OP_LOWERING
+
+#define DEFINE_INT_SCALAR_OP_LOWERING(op_name, op)                        \
+  RegisterNNCLoweringsFunction aten_##op_name##_int_scalar(               \
+      {"aten::" #op_name ".int(int a, int b) -> (int)"},                  \
+      [](const std::vector<ArgValue>& inputs,                             \
+         const std::vector<ExprHandle>& outputShape,                      \
+         const c10::optional<ScalarType>& outputType,                     \
+         at::Device device) {                                             \
+        return computeScalar(                                             \
+            "aten_#op_name",                                              \
+            inputs,                                                       \
+            outputShape,                                                  \
+            outputType,                                                   \
+            [](const ExprHandle& a, const ExprHandle& b) { return op; }); \
+      });
+  DEFINE_INT_SCALAR_OP_LOWERING(__and__, boolToInteger(a) & boolToInteger(b))
+  DEFINE_INT_SCALAR_OP_LOWERING(__or__, boolToInteger(a) | boolToInteger(b))
+  DEFINE_INT_SCALAR_OP_LOWERING(__xor__, boolToInteger(a) ^ boolToInteger(b))
+  DEFINE_INT_SCALAR_OP_LOWERING(__lshift__, a << b)
+  DEFINE_INT_SCALAR_OP_LOWERING(__rshift__, a >> b)
+#undef DEFINE_INT_SCALAR_OP_LOWERING
+
+#define DEFINE_BOOL_SCALAR_OP_LOWERING(op_name, op)                       \
+  RegisterNNCLoweringsFunction aten_##op_name##_bool_scalar(              \
+      {"aten::" #op_name ".bool(bool a, bool b) -> (bool)"},              \
+      [](const std::vector<ArgValue>& inputs,                             \
+         const std::vector<ExprHandle>& outputShape,                      \
+         const c10::optional<ScalarType>& outputType,                     \
+         at::Device device) {                                             \
+        return computeScalar(                                             \
+            "aten_#op_name",                                              \
+            inputs,                                                       \
+            outputShape,                                                  \
+            outputType,                                                   \
+            [](const ExprHandle& a, const ExprHandle& b) { return op; }); \
+      });
+  DEFINE_BOOL_SCALAR_OP_LOWERING(__and__, a && b)
+  DEFINE_BOOL_SCALAR_OP_LOWERING(__or__,  a || b)
+  DEFINE_BOOL_SCALAR_OP_LOWERING(__xor__, a != b)
+#undef DEFINE_BOOL_SCALAR_OP_LOWERING
 
   RegisterNNCLoweringsFunction aten_div(
       {"aten::div.Scalar(Tensor self, Scalar other) -> (Tensor)",
