@@ -58,7 +58,7 @@ class NAdam(Optimizer):
             exp_avg = []
             exp_avg_sq = []
             mu_products = []
-            states = []
+            state_steps = []
             beta1, beta2 = group['betas']
 
             for p in group['params']:
@@ -73,8 +73,8 @@ class NAdam(Optimizer):
 
                 # Lazy state initialization
                 if len(state) == 0:
-                    state['step'] = 0
-                    state['mu_product'] = 1.
+                    state['step'] = torch.tensor(0.)
+                    state['mu_product'] = torch.tensor(1.)
                     # Exponential moving average of gradient values
                     state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                     # Exponential moving average of squared gradient values
@@ -82,12 +82,7 @@ class NAdam(Optimizer):
 
                 exp_avg.append(state['exp_avg'])
                 exp_avg_sq.append(state['exp_avg_sq'])
-
-                state['step'] += 1
-                states.append(state)
-
-                mu = beta1 * (1. - 0.5 * (0.96 ** (state['step'] * group['momentum_decay'])))
-                state['mu_product'] *= mu
+                state_steps.append(state['step'])
                 mu_products.append(state['mu_product'])
 
             F.nadam(params_with_grad,
@@ -95,7 +90,7 @@ class NAdam(Optimizer):
                     exp_avg,
                     exp_avg_sq,
                     mu_products,
-                    states,
+                    state_steps,
                     beta1=beta1,
                     beta2=beta2,
                     lr=group['lr'],
