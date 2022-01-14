@@ -18,6 +18,7 @@
 #include <thrust/sequence.h>
 #include <thrust/sort.h>
 #include <thrust/system/cuda/execution_policy.h>
+#include <thrust/iterator/constant_iterator.h>
 
 #include <cuda_runtime_api.h>
 #include <cusparse.h>

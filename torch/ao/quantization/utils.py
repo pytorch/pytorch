@@ -113,6 +113,19 @@ def weight_is_statically_quantized(qconfig):
     """
     return weight_dtype(qconfig) in [torch.quint8, torch.qint8]
 
+def op_is_int8_dynamically_quantized(qconfig) -> bool:
+    """ Given a qconfig, returns True if this op is using int8 dynamic
+    quantization
+    """
+    activation_dtype, weight_dtype, activation_compute_dtype = \
+        get_qconfig_dtypes(qconfig)
+    return (
+        activation_dtype is torch.float and
+        # for now, the lines below assume fbgemm or qnnpack
+        weight_dtype is torch.qint8 and
+        activation_compute_dtype is torch.quint8
+    )
+
 def get_qconfig_dtypes(qconfig):
     r""" returns the qconfig tuple for qconfig:
     (activation_dtype, weight_dtype, activation_compute_dtype)
@@ -220,3 +233,14 @@ def calculate_qmin_qmax(quant_min: int, quant_max: int, has_customized_qrange: b
         else:
             quant_min, quant_max = 0, 15
     return quant_min, quant_max
+
+
+def _parent_name(target):
+    """
+    Turn 'foo.bar' into ['foo', 'bar']
+    """
+    r = target.rsplit('.', 1)
+    if len(r) == 1:
+        return '', r[0]
+    else:
+        return r[0], r[1]

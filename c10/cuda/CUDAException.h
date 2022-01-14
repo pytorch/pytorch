@@ -39,6 +39,7 @@ class C10_CUDA_API CUDAError : public c10::Error {
     cudaError_t __err = EXPR;                                       \
     if (__err != cudaSuccess) {                                     \
       auto error_unused C10_UNUSED = cudaGetLastError();            \
+      (void)error_unused;                                           \
       auto _cuda_check_suffix = c10::cuda::get_cuda_check_suffix(); \
       throw c10::CUDAError(                                         \
           {__func__, __FILE__, static_cast<uint32_t>(__LINE__)},    \
@@ -57,6 +58,7 @@ class C10_CUDA_API CUDAError : public c10::Error {
     cudaError_t __err = EXPR;                                  \
     if (__err != cudaSuccess) {                                \
       auto error_unused C10_UNUSED = cudaGetLastError();       \
+      (void)error_unused;                                      \
       TORCH_WARN("CUDA warning: ", cudaGetErrorString(__err)); \
     }                                                          \
   } while (0)

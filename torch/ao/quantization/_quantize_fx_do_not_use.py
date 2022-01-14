@@ -1,17 +1,17 @@
-from typing import Dict, Any, Optional
+import torch
 from torch.fx import GraphModule
+from typing import Dict, Any, Optional
 from .quantize_fx import (
     _check_is_graph_module,
     check_is_valid_convert_custom_config_dict
 )
-from .fx.graph_module import QuantizedGraphModule
 from .fx._convert_do_not_use import _convert_do_not_use
 
 def _convert_fx_do_not_use(
         graph_module: GraphModule, is_reference: bool = False,
         convert_custom_config_dict: Dict[str, Any] = None,
         _remove_qconfig: bool = True,
-        backend_config_dict: Optional[Dict[str, Any]] = None) -> QuantizedGraphModule:
+        backend_config_dict: Optional[Dict[str, Any]] = None) -> torch.nn.Module:
     """
     Please do not use, this is a temporary function to migrate convert_fx
     to a new implementation

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 #include <torch/csrc/jit/codegen/cuda/compute_at_map.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
@@ -11,6 +11,7 @@
 #include <torch/csrc/jit/codegen/cuda/lower_shift.h>
 #include <torch/csrc/jit/codegen/cuda/lower_trivial_reductions.h>
 #include <torch/csrc/jit/codegen/cuda/lower_warp_reduce.h>
+#include <torch/csrc/jit/codegen/cuda/non_divisible_split.h>
 #include <torch/csrc/jit/codegen/cuda/parallel_dimension_map.h>
 #include <torch/csrc/jit/codegen/cuda/partial_split_map.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
@@ -111,6 +112,14 @@ class TORCH_CUDA_CU_API GpuLower {
     return partial_split_map_;
   }
 
+  auto& nonDivisibleSplitInfo() {
+    return non_divisible_split_info_;
+  }
+
+  const auto& nonDivisibleSplitInfo() const {
+    return non_divisible_split_info_;
+  }
+
  private:
   void lower();
 
@@ -147,6 +156,7 @@ class TORCH_CUDA_CU_API GpuLower {
   WarpPaddedParallelInfo warp_pad_info_;
   ParallelDimensionMap parallel_dimension_map_;
   PartialSplitMap partial_split_map_;
+  NonDivisibleSplitInfo non_divisible_split_info_;
 
   Fusion* fusion_ = nullptr;
 };

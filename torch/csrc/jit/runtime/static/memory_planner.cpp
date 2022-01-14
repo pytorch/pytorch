@@ -56,11 +56,11 @@ FastMap<const Value*, at::Tensor*> tensorValueToTensor(
 
 } // namespace
 
-void assignStorageToManagedTensors(
+std::vector<StorageGroup> assignStorageToManagedTensors(
     graph_node_list nodes,
     const ManagedTensorRanges& ranges,
-    const FastMap<const Value*, at::Tensor*>& tensor_value_to_tensor,
-    std::vector<StorageGroup>& managed_tensor_groups) {
+    const FastMap<const Value*, at::Tensor*>& tensor_value_to_tensor) {
+  std::vector<StorageGroup> managed_tensor_groups;
   // This set maps each Value* to its assigned storage group.
   FastMap<const Value*, size_t> storage_group_mapping;
   // On each iteration, this vector stores the set of storage groups that
@@ -119,6 +119,7 @@ void assignStorageToManagedTensors(
       }
     }
   }
+  return managed_tensor_groups;
 }
 
 namespace {
@@ -127,10 +128,10 @@ bool setIncludes(const FastSet<const Value*>& set, const Value* v) {
   return set.find(v) != set.end();
 }
 
-void assignStorageToOutputTensors(
+std::vector<std::pair<size_t, at::Tensor*>> assignStorageToOutputTensors(
     StaticRuntime* runtime,
-    const FastSet<const Value*>& managed_output_tensor_values,
-    std::vector<std::pair<size_t, at::Tensor*>>& managed_output_tensors) {
+    const FastSet<const Value*>& managed_output_tensor_values) {
+  std::vector<std::pair<size_t, at::Tensor*>> managed_output_tensors;
   for (auto& pnode : runtime->nodes()) {
     for (const auto i : c10::irange(pnode.outputs().size())) {
       auto& ival = pnode.Output(i);
@@ -144,6 +145,7 @@ void assignStorageToOutputTensors(
       managed_output_tensors.emplace_back(0, tensor);
     }
   }
+  return managed_output_tensors;
 }
 
 } // namespace
@@ -213,11 +215,8 @@ MemoryPlanner::MemoryPlanner(
     const auto tensor_value_to_tensor =
         tensorValueToTensor(runtime->nodes(), managed_tensor_values);
     if (optimize_memory) {
-      ::torch::jit::assignStorageToManagedTensors(
-          runtime->node_ptrs(),
-          ranges,
-          tensor_value_to_tensor,
-          managed_tensors_);
+      managed_tensors_ = assignStorageToManagedTensors(
+          runtime->node_ptrs(), ranges, tensor_value_to_tensor);
     } else {
       for (auto& tensor : tensor_value_to_tensor) {
         managed_tensors_.emplace_back(tensor.second);
@@ -226,8 +225,8 @@ MemoryPlanner::MemoryPlanner(
   }
 
   if (enable_out_variant && manage_output_tensors) {
-    ::torch::jit::assignStorageToOutputTensors(
-        runtime, managed_output_tensor_values, managed_output_tensors_);
+    managed_output_tensors_ =
+        assignStorageToOutputTensors(runtime, managed_output_tensor_values);
   }
 
   num_managed_tensors_ = 0;

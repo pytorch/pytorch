@@ -7,6 +7,10 @@ import torch.distributed as dist
 from torch.distributed._sharded_tensor import (
     shard_parameter,
 )
+from torch.distributed._sharded_optim import (
+    ShardedOptimizer,
+    named_params_with_sharded_tensor,
+)
 from torch.testing._internal.common_distributed import (
     requires_nccl,
     skip_if_lt_x_gpu,
@@ -84,13 +88,29 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
             local_linear.weight, sharded_dim, TEST_GPU_NUM, spec, self.rank
         )
         local_grad_narrowed = local_grad.narrow(sharded_dim, start_pos, chunk_size)
-        local_weight_narrowed = local_linear.weight.narrow(
-            sharded_dim, start_pos, chunk_size
-        )
 
         # Test backward gradient calculation.
         self.assertEqual(sharded_linear.bias.grad, local_linear.bias.grad)
         self.assertEqual(sharded_weight.grad, local_grad_narrowed)
+
+        # Test optimizer.
+        previous = local_linear.weight.clone().detach()
+        optim = torch.optim.SGD(local_linear.parameters(), lr=0.1)
+        optim.step()
+        self.assertNotEqual(previous, local_linear.weight)
+        previous_sharded_weight = sharded_weight.clone()
+        previous_sharded_bias = sharded_linear.bias.clone()
+        sharded_optim = ShardedOptimizer(dict(named_params_with_sharded_tensor(sharded_linear)), torch.optim.SGD, lr=0.1)
+        sharded_optim.step()
+        sharded_weight = sharded_linear.weight.local_shards()[0].tensor
+        local_weight_narrowed = local_linear.weight.narrow(
+            sharded_dim, start_pos, chunk_size
+        )
+        self.assertEqual(sharded_weight.size(), local_weight_narrowed.size())
+        self.assertNotEqual(previous_sharded_weight, sharded_weight)
+        self.assertEqual(sharded_weight, local_weight_narrowed)
+        self.assertNotEqual(previous_sharded_bias, sharded_linear.bias)
+        self.assertEqual(sharded_linear.bias, local_linear.bias)
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)

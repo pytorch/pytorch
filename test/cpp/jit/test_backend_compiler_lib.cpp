@@ -98,13 +98,13 @@ class BackendWithCompiler : public PyTorchBackendInterface {
     op_runtimes_us.reserve(handle.toList().size());
 
     c10::List<at::Tensor> output_list;
-    auto start_us = autograd::profiler::getTime() / 1000;
+    auto start_us = torch::profiler::impl::getTime() / 1000;
     for (const auto& token : handle.toList()) {
       IValue val = token;
       auto instruction = val.toTupleRef().elements()[0].toStringRef();
       auto debug_handle = val.toTupleRef().elements()[1].toInt();
       double const_val = 1.0;
-      auto start_time_us = autograd::profiler::getTime() / 1000;
+      auto start_time_us = torch::profiler::impl::getTime() / 1000;
       try {
         if (instruction.rfind("prim::Constant", 0) == 0) {
           TORCH_CHECK(
@@ -147,7 +147,7 @@ class BackendWithCompiler : public PyTorchBackendInterface {
       } catch (c10::Error& e) {
         TORCH_DELEGATED_BACKEND_THROW(false, e.what(), debug_handle);
       }
-      auto end_time_us = autograd::profiler::getTime() / 1000;
+      auto end_time_us = torch::profiler::impl::getTime() / 1000;
       auto duration = end_time_us - start_time_us;
       op_runtimes_us.emplace_back(duration, debug_handle, instruction);
     }
