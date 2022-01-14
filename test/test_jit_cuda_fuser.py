@@ -9,10 +9,11 @@ from torch.nn import functional
 
 from torch.testing._internal.codegen.random_topo_test import runDefaultTestWithSeed
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
-from torch.testing._internal.common_device_type import OpDTypes
+from torch.testing._internal.common_device_type import instantiate_device_type_tests, ops, OpDTypes
+from torch.testing._internal.common_jit import JitCommonTestCase
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR  # TEST_WITH_ROCM
-from torch.testing._internal.jit_utils import clone_inputs
+from torch.testing._internal.jit_utils import clone_inputs, get_traced_sample_variant_pairs
 from torch.testing._internal.jit_metaprogramming_utils import create_traced_fn
 from torch.testing import FileCheck
 
@@ -24,6 +25,7 @@ import itertools
 import numpy as np
 import math
 
+from functools import partial
 from typing import List
 
 CUDA_MAJOR, CUDA_MINOR = (int(x) for x in torch.version.cuda.split('.'))
@@ -3214,7 +3216,7 @@ class TestCudaFuserOpInfo(JitCommonTestCase):
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @_tracing_ops(op_db)
-    def test_fuser_correctness(self, device, dtype, op):
+    def test_nvfuser_correctness(self, device, dtype, op):
         variant_sample_pairs = get_traced_sample_variant_pairs(device, dtype, op)
 
         for variant, sample in variant_sample_pairs:
