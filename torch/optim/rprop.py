@@ -62,7 +62,7 @@ class Rprop(Optimizer):
         super(Rprop, self).__init__(params, defaults)
 
     def __setstate__(self, state):
-        super(Rprop, self).__setstate__(state)
+        super().__setstate__(state)
         for group in self.param_groups:
             group.setdefault('foreach', None)
 
@@ -127,6 +127,8 @@ def rprop(params: List[Tensor],
           grads: List[Tensor],
           prevs: List[Tensor],
           step_sizes: List[Tensor],
+          # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
+          # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
           foreach: bool = None,
           *,
           step_size_min: float,
