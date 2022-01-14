@@ -136,6 +136,7 @@ libtorch_profiler_sources = [
     "torch/csrc/autograd/profiler_legacy.cpp",
     "torch/csrc/autograd/profiler_kineto.cpp",
     "torch/csrc/profiler/api.cpp",
+    "torch/csrc/profiler/kineto_shim.cpp",
     "torch/csrc/monitor/counters.cpp",
     "torch/csrc/monitor/events.cpp",
 ]
@@ -230,6 +231,7 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/passes/remove_exceptions.cpp",
     "torch/csrc/jit/passes/decompose_ops.cpp",
     "torch/csrc/jit/passes/dtype_analysis.cpp",
+    "torch/csrc/jit/passes/device_type_analysis.cpp",
     "torch/csrc/jit/passes/erase_number_types.cpp",
     "torch/csrc/jit/passes/fixup_trace_scope_blocks.cpp",
     "torch/csrc/jit/passes/freeze_module.cpp",
@@ -855,6 +857,7 @@ libtorch_python_core_sources = [
     "torch/csrc/jit/python/python_tree_views.cpp",
     "torch/csrc/jit/runtime/static/init.cpp",
     "torch/csrc/jit/tensorexpr/tensorexpr_init.cpp",
+    "torch/csrc/monitor/python_init.cpp",
     "torch/csrc/multiprocessing/init.cpp",
     "torch/csrc/onnx/init.cpp",
     "torch/csrc/serialization.cpp",
