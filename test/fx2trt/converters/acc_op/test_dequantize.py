@@ -7,6 +7,7 @@ import torch.fx
 import torch.fx.experimental.fx_acc.acc_ops as acc_ops
 import torch.nn as nn
 from torch.testing._internal.common_fx2trt import AccTestCase, InputTensorSpec
+from torch.testing._internal.common_utils import run_tests
 
 
 @unittest.skip(
@@ -44,3 +45,6 @@ class TestDequantizeConverter(AccTestCase):
         self.run_test_with_dynamic_shape(
             TestModule(), input_specs, expected_ops={acc_ops.dequantize}
         )
+
+if __name__ == '__main__':
+    run_tests()
