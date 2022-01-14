@@ -24,16 +24,6 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           path: pytorch
-      - name: Checkout Torchvision
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          repository: pytorch/vision
-          path: vision
-      - name: Checkout Torchtext
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          repository: pytorch/text
-          path: text
       - name: Update self-hosted PyTorch
         run: |
           pushd "${HOME}"/pytorch
@@ -50,7 +40,7 @@ jobs:
                            future six dataclasses pillow pytest tabulate gitpython git-lfs
           # install magma
           conda install -y -c pytorch "${MAGMA_VERSION}"
-      - name: Build the self-hosted PyTorch domain packages
+      - name: Build self-hosted PyTorch domain packages
         run: |
           # shellcheck disable=SC1091
           . "${HOME}"/anaconda3/etc/profile.d/conda.sh
@@ -63,14 +53,17 @@ jobs:
           export USE_CUDNN=1
           export CMAKE_PREFIX_PATH="${CONDA_PREFIX}"
           # build the packages
-          pushd pytorch
+          pushd "${HOME}"/pytorch
+          git checkout "${PR_BASE_SHA}" && git submodule sync && git submodule init --recursive
           python setup.py install
           popd
           pushd vision
-          python setup.py install
+          git checkout main && git submodule sync && git submodule init --recursive
+          python setup.py clean install
           popd
           pushd text
-          python setup.py install
+          git checkout main && git submodule sync && git submodule init --recursive
+          python setup.py clean install
           popd
       - name: Setup TorchBench branch
         run: |
