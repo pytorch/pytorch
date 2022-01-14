@@ -67,7 +67,7 @@ class AdamW(Optimizer):
             amsgrad = group['amsgrad']
 
             grads = []
-            states = []
+            state_steps = []
             exp_avg = []
             exp_avg_sq = []
             max_exp_avg_sq = []
@@ -92,7 +92,7 @@ class AdamW(Optimizer):
 
                 # State initialization
                 if len(state) == 0:
-                    state['step'] = 0
+                    state['step'] = torch.tensor(0.)
                     # Exponential moving average of gradient values
                     state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                     # Exponential moving average of squared gradient values
@@ -107,13 +107,16 @@ class AdamW(Optimizer):
                 if amsgrad:
                     max_exp_avg_sq.append(state['max_exp_avg_sq'])
 
-                state['step'] += 1
-                states.append(state)
+                state_steps.append(state['step'])
+
 
             beta1, beta2 = group['betas']
 
-            bias_correction1 = [1 - beta1 ** state['step'] for state in states]
-            bias_correction2 = [1 - beta2 ** state['step'] for state in states]
+            # update steps
+            torch._foreach_add_(state_steps, 1)
+
+            bias_correction1 = [1 - beta1 ** step.item() for step in state_steps]
+            bias_correction2 = [1 - beta2 ** step.item() for step in state_steps]
 
             #
             # Decay the first and second moment running average coefficient
