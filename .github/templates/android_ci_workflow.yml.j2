@@ -24,12 +24,13 @@ on:
     steps:
       - name: print labels
         run: echo "${PR_LABELS}"
+      !{{ common.add_retry_to_env() }}
       !{{ common.setup_ec2_linux() }}
       !{{ common.checkout_pytorch("recursive") }}
       !{{ common.calculate_docker_image(false) }}
       - name: Pull Docker image
         run: |
-          !{{ common.pull_docker("${DOCKER_IMAGE}") }}
+          retry docker pull "${DOCKER_IMAGE}"
       - name: Determine shm-size
         run: |
           shm_size="1g"
