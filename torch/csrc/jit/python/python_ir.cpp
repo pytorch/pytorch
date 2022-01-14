@@ -1,6 +1,8 @@
 #include <torch/csrc/jit/python/python_ir.h>
 
+#include <aten/src/ATen/core/jit_type.h>
 #include <pybind11/pybind11.h>
+#include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/api/include/torch/python.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
@@ -815,6 +817,27 @@ void initPythonIRBindings(PyObject* module_) {
           [](Type& t) {
             auto scalar_type = t.expectRef<TensorType>().scalarType();
             return (scalar_type) ? toString(*scalar_type) : nullptr;
+          })
+      .def(
+          "device",
+          [](Type& t) -> py::object {
+            auto device =
+                t.expectRef<TensorType>().device();
+            if (!device) {
+              return py::none();
+            }
+            PyObject* thp_device = THPDevice_New(device.value());
+            return py::reinterpret_borrow<py::object>(thp_device);
+            // return toPyObject(device.value());
+          })
+      .def(
+          "with_device",
+          [](Type& t, py::object device) -> py::object {
+            at::Device c_device = python::detail::py_object_to_device(device);
+            if (auto ptt = t.expect<TensorType>()) {
+              return py::cast(ptt->withDevice(c_device));
+            }
+            return py::none();
           })
       .def(
           "dtype",
