@@ -1,5 +1,5 @@
 import sys
-from functools import wraps
+from functools import wraps, partial
 
 import torch
 import torch.distributed as dist
@@ -26,6 +26,10 @@ class ShardedTensorTestBase(MultiProcessTestCase):
             rank=self.rank,
             init_method=f"file://{self.file_name}",
         )
+
+        # set device for nccl pg for collectives
+        if backend == "nccl":
+            torch.cuda.set_device(self.rank)
 
     def init_rpc(self):
         rpc_backend_options = rpc.TensorPipeRpcBackendOptions()
@@ -72,14 +76,19 @@ class ShardedTensorTestBase(MultiProcessTestCase):
         self.assertEqual(len(st1.remote_shards()), len(st2.remote_shards()))
 
 # wrapper to initialize comms (processgroup + rpc)
-def with_comms(init_rpc=True, backend="nccl"):
-    def with_comms_decorator(func):
-        @wraps(func)
-        def wrapper(self):
-            if backend == "nccl" and torch.cuda.device_count() < self.world_size:
-                sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
-            self.init_comms(init_rpc=init_rpc, backend=backend)
-            func(self)
-            self.destroy_comms(destroy_rpc=init_rpc)
-        return wrapper
-    return with_comms_decorator
+def with_comms(func=None, init_rpc=True, backend="nccl"):
+    if func is None:
+        return partial(
+            with_comms,
+            init_rpc=init_rpc,
+            backend=backend,
+        )
+
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        if backend == "nccl" and torch.cuda.device_count() < self.world_size:
+            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+        self.init_comms(init_rpc=init_rpc, backend=backend)
+        func(self)
+        self.destroy_comms(destroy_rpc=init_rpc)
+    return wrapper

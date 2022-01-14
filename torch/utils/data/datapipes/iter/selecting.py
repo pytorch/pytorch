@@ -1,7 +1,7 @@
 import warnings
-from typing import Callable, Dict, Iterator, Optional, Tuple, TypeVar
+from typing import Callable, Iterator, TypeVar
 
-from torch.utils.data import DataChunk, IterDataPipe, functional_datapipe
+from torch.utils.data import IterDataPipe, functional_datapipe
 from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
 
 T_co = TypeVar('T_co', covariant=True)
@@ -28,12 +28,7 @@ class FilterIterDataPipe(IterDataPipe[T_co]):
     Args:
         datapipe: Iterable DataPipe being filtered
         filter_fn: Customized function mapping an element to a boolean.
-        fn_args: Positional arguments for `filter_fn`
-        fn_kwargs: Keyword arguments for `filter_fn`
         drop_empty_batches: By default, drops batch if it is empty after filtering instead of keeping an empty list
-        nesting_level: Determines which level the fn gets applied to, by default it applies to the top level (= 0).
-            This also accepts -1 as input to apply filtering to the lowest nesting level.
-            It currently doesn't support argument < -1.
     """
     datapipe: IterDataPipe
     filter_fn: Callable
@@ -42,10 +37,7 @@ class FilterIterDataPipe(IterDataPipe[T_co]):
     def __init__(self,
                  datapipe: IterDataPipe,
                  filter_fn: Callable,
-                 fn_args: Optional[Tuple] = None,
-                 fn_kwargs: Optional[Dict] = None,
                  drop_empty_batches: bool = True,
-                 nesting_level: int = 0,
                  ) -> None:
         super().__init__()
         self.datapipe = datapipe
@@ -54,48 +46,20 @@ class FilterIterDataPipe(IterDataPipe[T_co]):
             warnings.warn("Lambda function is not supported for pickle, please use "
                           "regular python function or functools.partial instead.")
         self.filter_fn = filter_fn  # type: ignore[assignment]
-        self.args = () if fn_args is None else fn_args
-        self.kwargs = {} if fn_kwargs is None else fn_kwargs
-        if nesting_level < -1:
-            raise ValueError("nesting_level must be -1 or >= 0")
-        self.nesting_level = nesting_level
         self.drop_empty_batches = drop_empty_batches
 
     def __iter__(self) -> Iterator[T_co]:
         res: bool
         for data in self.datapipe:
-            filtered = self._applyFilter(data, self.nesting_level)
+            filtered = self._returnIfTrue(data)
             if self._isNonEmpty(filtered):
                 yield filtered
 
-    def _applyFilter(self, data, nesting_level):
-        if nesting_level == 0:
-            return self._returnIfTrue(data)
-        elif nesting_level > 0:
-            if isinstance(data, DataChunk):
-                result = filter(self._isNonEmpty, [self._applyFilter(i, nesting_level - 1)
-                                                   for i in data.raw_iterator()])
-                return type(data)(list(result))
-            elif isinstance(data, list):
-                result = filter(self._isNonEmpty, [self._applyFilter(i, nesting_level - 1) for i in data])
-                return list(result)
-            else:
-                raise IndexError(f"nesting_level {self.nesting_level} out of range (exceeds data pipe depth)")
-        else:  # Handling nesting_level == -1
-            if isinstance(data, DataChunk):
-                result = filter(self._isNonEmpty, [self._applyFilter(i, nesting_level) for i in data.raw_iterator()])
-                return type(data)(list(result))
-            elif isinstance(data, list):
-                result = filter(self._isNonEmpty, [self._applyFilter(i, nesting_level) for i in data])
-                return list(result)
-            else:
-                return self._returnIfTrue(data)
-
     def _returnIfTrue(self, data):
-        condition = self.filter_fn(data, *self.args, **self.kwargs)
+        condition = self.filter_fn(data)
 
         if df_wrapper.is_column(condition):
-            # We are operatring on DataFrames filter here
+            # We are operating on DataFrames filter here
             result = []
             for idx, mask in enumerate(df_wrapper.iterate(condition)):
                 if mask:
@@ -125,11 +89,11 @@ class FilterIterDataPipe(IterDataPipe[T_co]):
             dill_function = dill.dumps(self.filter_fn)
         else:
             dill_function = self.filter_fn
-        state = (self.datapipe, dill_function, self.args, self.kwargs, self.drop_empty_batches, self.nesting_level)
+        state = (self.datapipe, dill_function, self.drop_empty_batches)
         return state
 
     def __setstate__(self, state):
-        (self.datapipe, dill_function, self.args, self.kwargs, self.drop_empty_batches, self.nesting_level) = state
+        (self.datapipe, dill_function, self.drop_empty_batches) = state
         if DILL_AVAILABLE:
             self.filter_fn = dill.loads(dill_function)  # type: ignore[assignment]
         else:

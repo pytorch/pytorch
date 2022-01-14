@@ -15,11 +15,13 @@
 #include <torch/csrc/jit/mobile/parse_bytecode.h>
 #include <torch/csrc/jit/mobile/parse_operators.h>
 #include <torch/csrc/jit/mobile/runtime_compatibility.h>
+#include <torch/csrc/jit/mobile/upgrader_mobile.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/custom_class.h>
 #include <torch/torch.h>
 
+#include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <unordered_set>
 
 // Tests go in torch::jit
@@ -200,6 +202,26 @@ TEST(LiteInterpreterTest, Dict) {
   std::vector<torch::jit::IValue> inputs({torch::ones({})});
   auto output = bc.get_method("forward")(inputs);
   AT_ASSERT(output.toGenericDict().at("result").toTensor().item().toInt() == 2);
+}
+
+TEST(LiteInterpreterTest, List) {
+  Module m("m");
+  m.define(R"JIT(
+  def foo(self, x):
+      return [x + 2]
+
+  def forward(self, x):
+      d = self.foo(x)
+      return d
+  )JIT");
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  std::vector<torch::jit::IValue> inputs({torch::ones({})});
+  auto output = bc.get_method("forward")(inputs);
+  auto server_output = m.forward(inputs);
+  EXPECT_EQ(output.toList().get(0).toTensor().item().toInt(), 3);
+  EXPECT_EQ(output, server_output);
 }
 
 TEST(LiteInterpreterTest, PrimOverload) {
@@ -1515,8 +1537,8 @@ TEST(LiteInterpreterTest, OperatorSize1) {
   mobile::Module bc = _load_for_mobile(ss);
   const auto& func = bc.get_method("forward").function();
   ASSERT_EQ(
-      func.get_code()->operator_input_sizes_.size(),
-      func.get_code()->operators_.size());
+      func.get_code().operator_input_sizes_.size(),
+      func.get_code().operators_.size());
 }
 
 TEST(LiteInterpreterTest, OperatorTest2) { // NOLINT (use =delete in gtest)
@@ -1550,8 +1572,8 @@ TEST(LiteInterpreterTest, OperatorTest2) { // NOLINT (use =delete in gtest)
     mobile::Module bc = _load_for_mobile(ss);
     const auto& func = bc.get_method("test_func").function();
     ASSERT_EQ(
-        func.get_code()->operator_input_sizes_.size(),
-        func.get_code()->operators_.size());
+        func.get_code().operator_input_sizes_.size(),
+        func.get_code().operators_.size());
   }
 }
 
@@ -1561,7 +1583,41 @@ TEST(LiteInterpreterUpgraderTest, DivTensorV2) {
   std::string filePath(__FILE__);
   auto test_model_file = filePath.substr(0, filePath.find_last_of("/\\") + 1);
   test_model_file.append("upgrader_models/test_versioned_div_tensor_v2.ptl");
+  /*
+  (('__torch__.MyModule.forward',
+    (('instructions',
+      (('STOREN', 1, 3),
+       ('DROPR', 1, 0),
+       ('LOAD', 2, 0),
+       ('LOAD', 3, 0),
+       ('OP', 0, 0),
+       ('LOAD', 2, 0),
+       ('LOAD', 3, 0),
+       ('OP', 1, 0),
+       ('MOVE', 2, 0),
+       ('MOVE', 3, 0),
+       ('OP', 2, 0),
+       ('TUPLE_CONSTRUCT', 3, 0),
+       ('RET', 0, 0))),
+     ('operators',
+      (('aten::div', 'Tensor'),
+       ('aten::div', 'Tensor'),
+       ('aten::div', 'Tensor'))),
+     ('constants', ()),
+     ('types', ()),
+     ('register_size', 3))),)
+
+  */
   mobile::Module m_module = _load_for_mobile(test_model_file);
+  auto intrsuction_list =
+      m_module.get_method("forward").function().get_code().instructions_;
+  uint64_t number_of_call_instruction = 0;
+  for (auto& instruction : intrsuction_list) {
+    number_of_call_instruction += (instruction.op == OpCode::CALL);
+  }
+  // 3 operators will use upgrader
+  ASSERT_EQ(number_of_call_instruction, 3);
+
   std::vector<IValue> inputs = {
       IValue(6 * torch::ones({1})), IValue(3 * torch::ones({1}))};
   auto actual_output = m_module.forward(inputs);
@@ -1569,7 +1625,529 @@ TEST(LiteInterpreterUpgraderTest, DivTensorV2) {
   auto actual_output_list = actual_output.toTuple()->elements();
   ASSERT_TRUE(actual_output_list[0].toTensor().equal(expect_output));
 }
+
+TEST(LiteInterpreterUpgraderTest, DivTensorOutV2) {
+  std::string filePath(__FILE__);
+  auto test_model_file = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file.append(
+      "upgrader_models/test_versioned_div_tensor_out_v2.ptl");
+  /*
+  (('__torch__.MyModule.forward',
+    (('instructions',
+      (('STOREN', 1, 4),
+       ('DROPR', 1, 0),
+       ('MOVE', 2, 0),
+       ('MOVE', 3, 0),
+       ('MOVE', 4, 0),
+       ('OP', 0, 0),
+       ('RET', 0, 0))),
+     ('operators', (('aten::div', 'out'),)),
+     ('constants', ()),
+     ('types', ()),
+     ('register_size', 4))),)
+  */
+  mobile::Module m_module = _load_for_mobile(test_model_file);
+
+  auto intrsuction_list =
+      m_module.get_method("forward").function().get_code().instructions_;
+  uint64_t number_of_call_instruction = 0;
+  for (auto& instruction : intrsuction_list) {
+    number_of_call_instruction += (instruction.op == OpCode::CALL);
+  }
+  // One operator will use upgrader
+  ASSERT_EQ(number_of_call_instruction, 1);
+
+  std::vector<IValue> inputs{
+      IValue(6 * torch::ones({1})),
+      IValue(3 * torch::ones({1})),
+      IValue(torch::empty({1}))};
+  m_module.forward(inputs);
+  auto expect_output = 2.0 * torch::ones({1});
+  auto actual_output = inputs[2].toTensor();
+  // The out argument will be overwritten with the output
+  ASSERT_TRUE(actual_output.equal(expect_output));
+}
+
+TEST(LiteInterpreterUpgraderTest, DivTensorInplaceV2) {
+  std::string filePath(__FILE__);
+  auto test_model_file = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file.append(
+      "upgrader_models/test_versioned_div_tensor_inplace_v2.ptl");
+  /*
+  (('__torch__.MyModule.forward',
+    (('instructions',
+      (('STOREN', 1, 3),
+       ('DROPR', 1, 0),
+       ('MOVE', 2, 0),
+       ('MOVE', 3, 0),
+       ('OP', 0, 0),
+       ('RET', 0, 0))),
+     ('operators', (('aten::div_', 'Tensor'),)),
+     ('constants', ()),
+     ('types', ()),
+     ('register_size', 3))),)
+  */
+  mobile::Module m_module = _load_for_mobile(test_model_file);
+
+  auto intrsuction_list =
+      m_module.get_method("forward").function().get_code().instructions_;
+  uint64_t number_of_call_instruction = 0;
+  for (auto& instruction : intrsuction_list) {
+    number_of_call_instruction += (instruction.op == OpCode::CALL);
+  }
+  // One operator will use upgrader
+  ASSERT_EQ(number_of_call_instruction, 1);
+
+  std::vector<IValue> inputs{
+      IValue(6 * torch::ones({1})), IValue(3 * torch::ones({1}))};
+  m_module.forward(inputs);
+  auto expect_output = 2.0 * torch::ones({1});
+  auto actual_output = inputs[0].toTensor();
+  // The out argument will be overwritten with the output
+  ASSERT_TRUE(actual_output.equal(expect_output));
+}
+
+TEST(LiteInterpreterUpgraderTest, DivScalarFloatV2) {
+  std::string filePath(__FILE__);
+  auto test_model_file = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file.append(
+      "upgrader_models/test_versioned_div_scalar_float_v2.ptl");
+  /*
+  (('__torch__.MyModuleFloat.forward',
+    (('instructions',
+    (('STOREN', 1, 3),
+    ('DROPR', 1, 0),
+    ('MOVE', 2, 0),
+    ('MOVE', 3, 0),
+    ('OP', 0, 0),
+    ('RET', 0, 0))),
+    ('operators', (('aten::div', 'Scalar'),)),
+    ('constants', ()),
+    ('types', ()),
+    ('register_size', 3))),)
+  */
+
+  mobile::Module m_module = _load_for_mobile(test_model_file);
+
+  auto intrsuction_list =
+      m_module.get_method("forward").function().get_code().instructions_;
+  uint64_t number_of_call_instruction = 0;
+  for (auto& instruction : intrsuction_list) {
+    number_of_call_instruction += (instruction.op == OpCode::CALL);
+  }
+  // One operator will use upgrader
+  ASSERT_EQ(number_of_call_instruction, 1);
+
+  std::vector<IValue> inputs{IValue(6 * torch::ones({1})), IValue(3.0)};
+  auto output = m_module.forward(inputs);
+  auto expect_output = 2.0 * torch::ones({1});
+  auto actual_output = output.toTensor();
+
+  // The out argument will be overwritten with the output
+  ASSERT_TRUE(actual_output.equal(expect_output));
+}
+
+TEST(LiteInterpreterUpgraderTest, DivScalarReciprocalFloatV2) {
+  std::string filePath(__FILE__);
+  auto test_model_file = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file.append(
+      "upgrader_models/test_versioned_div_scalar_reciprocal_float_v2.ptl");
+  /*
+  (('__torch__.MyModuleFloat.forward',
+    (('instructions',
+      (('STOREN', 1, 3),
+      ('DROPR', 1, 0),
+      ('MOVE', 2, 0),
+      ('OP', 0, 0),
+      ('MOVE', 3, 0),
+      ('OP', 1, 0),
+      ('RET', 0, 0))),
+    ('operators', (('aten::reciprocal', ''), ('aten::mul', 'Scalar'))),
+    ('constants', ()),
+    ('types', ()),
+    ('register_size', 3))),)
+  */
+  mobile::Module m_module = _load_for_mobile(test_model_file);
+
+  auto intrsuction_list =
+      m_module.get_method("forward").function().get_code().instructions_;
+  uint64_t number_of_call_instruction = 0;
+  for (auto& instruction : intrsuction_list) {
+    number_of_call_instruction += (instruction.op == OpCode::CALL);
+  }
+  // No operator will use upgrader
+  ASSERT_EQ(number_of_call_instruction, 0);
+
+  std::vector<IValue> inputs{IValue(6 * torch::ones({1})), IValue(3.0)};
+  auto output = m_module.forward(inputs);
+  auto expect_output = 0.5 * torch::ones({1});
+  auto actual_output = output.toTensor();
+  std::cout << "expect output: " << expect_output;
+  std::cout << "actual output: " << actual_output;
+  // The out argument will be overwritten with the output
+  ASSERT_TRUE(actual_output.equal(expect_output));
+}
+
+TEST(LiteInterpreterUpgraderTest, DivScalarReciprocalIntV2) {
+  std::string filePath(__FILE__);
+  auto test_model_file = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file.append(
+      "upgrader_models/test_versioned_div_scalar_reciprocal_int_v2.ptl");
+  /*
+  (('__torch__.MyModuleInt.forward',
+  (('instructions',
+    (('STOREN', 1, 3),
+     ('DROPR', 1, 0),
+     ('MOVE', 2, 0),
+     ('OP', 0, 0),
+     ('MOVE', 3, 0),
+     ('OP', 1, 0),
+     ('RET', 0, 0))),
+   ('operators', (('aten::reciprocal', ''), ('aten::mul', 'Scalar'))),
+   ('constants', ()),
+   ('types', ()),
+   ('register_size', 3))),)
+  */
+  mobile::Module m_module = _load_for_mobile(test_model_file);
+
+  auto intrsuction_list =
+      m_module.get_method("forward").function().get_code().instructions_;
+  uint64_t number_of_call_instruction = 0;
+  for (auto& instruction : intrsuction_list) {
+    number_of_call_instruction += (instruction.op == OpCode::CALL);
+  }
+  // No operator will use upgrader
+  ASSERT_EQ(number_of_call_instruction, 0);
+
+  std::vector<IValue> inputs{IValue(6 * torch::ones({1})), IValue(3.0)};
+  auto output = m_module.forward(inputs);
+  auto expect_output = 0.5 * torch::ones({1});
+  auto actual_output = output.toTensor();
+
+  // The out argument will be overwritten with the output
+  ASSERT_TRUE(actual_output.equal(expect_output));
+}
+
+TEST(LiteInterpreterUpgraderTest, DivScalarScalarV2) {
+  std::string filePath(__FILE__);
+  auto test_model_file = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file.append(
+      "upgrader_models/test_versioned_div_scalar_scalar_v2.ptl");
+  /*
+  (('__torch__.MyModule.forward',
+    (('instructions',
+      (('STOREN', 1, 5),
+      ('DROPR', 1, 0),
+      ('LOAD', 2, 0),
+      ('LOAD', 3, 0),
+      ('OP', 0, 0),
+      ('MOVE', 2, 0),
+      ('LOAD', 4, 0),
+      ('OP', 1, 0),
+      ('LOAD', 3, 0),
+      ('MOVE', 4, 0),
+      ('OP', 2, 0),
+      ('MOVE', 3, 0),
+      ('MOVE', 5, 0),
+      ('OP', 3, 0),
+      ('TUPLE_CONSTRUCT', 4, 0),
+      ('RET', 0, 0))),
+    ('operators',
+      (('aten::div', ''),
+      ('aten::div', 'float'),
+      ('aten::div', ''),
+      ('aten::div', 'int'))),
+    ('constants', ()),
+    ('types', ()),
+    ('register_size', 5))),)
+  */
+  mobile::Module m_module = _load_for_mobile(test_model_file);
+  auto intrsuction_list =
+      m_module.get_method("forward").function().get_code().instructions_;
+  uint64_t number_of_call_instruction = 0;
+  for (auto& instruction : intrsuction_list) {
+    number_of_call_instruction += (instruction.op == OpCode::CALL);
+  }
+  // No operator will use upgrader
+  ASSERT_EQ(number_of_call_instruction, 0);
+
+  std::vector<IValue> inputs{IValue(20.0), IValue(10), IValue(2.0), IValue(5)};
+  auto output = m_module.forward(inputs);
+  auto output_list = output.toTupleRef().elements();
+  auto expect_output = std::vector<IValue>(
+      {IValue(2.0), IValue(10.0), IValue(5.0), IValue(2.0)});
+  // auto actual_output = output.toTensor();
+  for (size_t i = 0; i < expect_output.size(); i++) {
+    ASSERT_EQ(output_list[i], expect_output[i]);
+  }
+}
+
+TEST(LiteInterpreterUpgraderTest, DivScalarIntV2) {
+  std::string filePath(__FILE__);
+  auto test_model_file = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file.append(
+      "upgrader_models/test_versioned_div_scalar_int_v2.ptl");
+  /*
+  (('__torch__.MyModuleInt.forward',
+    (('instructions',
+      (('STOREN', 1, 3),
+      ('DROPR', 1, 0),
+      ('MOVE', 2, 0),
+      ('MOVE', 3, 0),
+      ('OP', 0, 0),
+      ('RET', 0, 0))),
+    ('operators', (('aten::div', 'Scalar'),)),
+    ('constants', ()),
+    ('types', ()),
+    ('register_size', 3))),)
+  */
+  mobile::Module m_module = _load_for_mobile(test_model_file);
+
+  auto intrsuction_list =
+      m_module.get_method("forward").function().get_code().instructions_;
+  uint64_t number_of_call_instruction = 0;
+  for (auto& instruction : intrsuction_list) {
+    number_of_call_instruction += (instruction.op == OpCode::CALL);
+  }
+  // One operator will use upgrader
+  ASSERT_EQ(number_of_call_instruction, 1);
+
+  std::vector<IValue> inputs{IValue(6 * torch::ones({1})), IValue(3)};
+  auto output = m_module.forward(inputs);
+  auto expect_output = 2.0 * torch::ones({1});
+  auto actual_output = output.toTensor();
+
+  // The out argument will be overwritten with the output
+  ASSERT_TRUE(actual_output.equal(expect_output));
+}
+
+TEST(LiteInterpreterUpgraderTest, DivScalarInplaceFloatV2) {
+  std::string filePath(__FILE__);
+  auto test_model_file = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file.append(
+      "upgrader_models/test_versioned_div_scalar_inplace_float_v2.ptl");
+  /*
+  (('__torch__.MyModuleFloat.forward',
+    (('instructions',
+      (('STOREN', 1, 3),
+      ('DROPR', 1, 0),
+      ('MOVE', 2, 0),
+      ('MOVE', 3, 0),
+      ('OP', 0, 0),
+      ('RET', 0, 0))),
+    ('operators', (('aten::div_', 'Scalar'),)),
+    ('constants', ()),
+    ('types', ()),
+    ('register_size', 3))),)
+  */
+
+  mobile::Module m_module = _load_for_mobile(test_model_file);
+
+  auto intrsuction_list =
+      m_module.get_method("forward").function().get_code().instructions_;
+  uint64_t number_of_call_instruction = 0;
+  for (auto& instruction : intrsuction_list) {
+    number_of_call_instruction += (instruction.op == OpCode::CALL);
+  }
+  // One operator will use upgrader
+  ASSERT_EQ(number_of_call_instruction, 1);
+
+  std::vector<IValue> inputs{IValue(6 * torch::ones({1})), IValue(3.0)};
+  auto output = m_module.forward(inputs);
+  auto expect_output = 2.0 * torch::ones({1});
+  auto actual_output = output.toTensor();
+
+  // The out argument will be overwritten with the output
+  ASSERT_TRUE(actual_output.equal(expect_output));
+}
+
+TEST(LiteInterpreterUpgraderTest, DivScalarInplaceIntV2) {
+  std::string filePath(__FILE__);
+  auto test_model_file = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file.append(
+      "upgrader_models/test_versioned_div_scalar_inplace_int_v2.ptl");
+  /*
+  (('__torch__.MyModuleInt.forward',
+    (('instructions',
+      (('STOREN', 1, 3),
+       ('DROPR', 1, 0),
+       ('MOVE', 2, 0),
+       ('MOVE', 3, 0),
+       ('OP', 0, 0),
+       ('RET', 0, 0))),
+     ('operators', (('aten::div_', 'Scalar'),)),
+     ('constants', ()),
+     ('types', ()),
+     ('register_size', 3))),)
+  */
+
+  mobile::Module m_module = _load_for_mobile(test_model_file);
+
+  auto intrsuction_list =
+      m_module.get_method("forward").function().get_code().instructions_;
+  uint64_t number_of_call_instruction = 0;
+  for (auto& instruction : intrsuction_list) {
+    number_of_call_instruction += (instruction.op == OpCode::CALL);
+  }
+  // One operator will use upgrader
+  ASSERT_EQ(number_of_call_instruction, 1);
+
+  std::vector<IValue> inputs{IValue(6 * torch::ones({1})), IValue(3)};
+  auto output = m_module.forward(inputs);
+  auto expect_output = 2.0 * torch::ones({1});
+  auto actual_output = output.toTensor();
+
+  // The out argument will be overwritten with the output
+  ASSERT_TRUE(actual_output.equal(expect_output));
+}
+
 #endif // !defined(FB_XPLAT_BUILD)
+
+TEST(LiteInterpreterUpgraderTest, Upgrader) {
+  std::vector<mobile::Function> upgrader_functions;
+
+  for (auto& byteCodeFunctionWithOperator : getUpgraderBytecodeList()) {
+    ASSERT_EQ(
+        byteCodeFunctionWithOperator.function.get_code().operators_.size(),
+        byteCodeFunctionWithOperator.function.get_code().op_names_.size());
+    if (byteCodeFunctionWithOperator.function.get_code().operators_.empty()) {
+      for (const auto& op : byteCodeFunctionWithOperator.operators) {
+        byteCodeFunctionWithOperator.function.append_operator(
+            op.name,
+            op.overload_name,
+            op.num_specified_args,
+            caffe2::serialize::kMaxSupportedFileFormatVersion);
+      }
+    }
+    upgrader_functions.push_back(byteCodeFunctionWithOperator.function);
+  }
+
+  ASSERT_EQ(getUpgraderBytecodeList().size(), upgrader_functions.size());
+}
+
+void enumerateTupleType(
+    size_t depth,
+    std::vector<TypePtr>& current,
+    const std::vector<TypePtr>& candidates,
+    std::vector<TypePtr>& out) {
+  static std::vector<std::string> fieldNames;
+  if (depth > fieldNames.size()) {
+    fieldNames.reserve(depth);
+    for (size_t i = fieldNames.size(); i < depth; i++) {
+      fieldNames.push_back("field" + std::to_string(i));
+    }
+  }
+  if (depth == 0) {
+    out.push_back(TupleType::create(current));
+    while (fieldNames.size() > current.size()) {
+      fieldNames.pop_back();
+    }
+    out.push_back(TupleType::createNamed("NamedTuple", fieldNames, current));
+    return;
+  }
+  for (const auto& type : candidates) {
+    if (containsAnyType(type)) {
+      continue;
+    }
+    current.push_back(type);
+    enumerateTupleType(depth - 1, current, candidates, out);
+    current.pop_back();
+  }
+}
+
+class LiteInterpreterDynamicTypeTestFixture
+    : public ::testing::TestWithParam<size_t> {
+ protected:
+  void SetUp() override {
+    cu = std::make_shared<CompilationUnit>();
+    std::vector<TypePtr> keyTypes = {
+        AnyType::get(),
+        IntType::get(),
+        BoolType::get(),
+        FloatType::get(),
+        ComplexType::get(),
+        StringType::get(),
+        TensorType::get(),
+        DeviceObjType::get(),
+    };
+    types = {
+        NoneType::get(),
+        NumberType::get(),
+        ClassType::create("__torch__.TestClass1", cu),
+        ClassType::create("__torch__.TestClass2", cu),
+        AnyListType::get(),
+        AnyTupleType::get(),
+        StreamObjType::get(),
+        CapsuleType::get(),
+        GeneratorType::get(),
+        StorageType::get(),
+        VarType::create("t"),
+        VarType::create("v"),
+        AnyClassType::get()};
+    std::copy(keyTypes.begin(), keyTypes.end(), back_inserter(types));
+    auto expandTypes = [&](size_t tupleSize) {
+      std::vector<TypePtr> nested;
+      for (const auto& type : types) {
+        if (!(type == AnyType::get())) {
+          nested.emplace_back(ListType::create(type));
+          if (!(type == NoneType::get() ||
+                type->kind() == OptionalType::Kind)) {
+            nested.emplace_back(OptionalType::create(type));
+          }
+        }
+        for (const auto& keyType : keyTypes) {
+          nested.emplace_back(DictType::create(keyType, type));
+        }
+      }
+      std::vector<TypePtr> tmp;
+      enumerateTupleType(tupleSize, tmp, types, nested);
+      std::move(
+          std::begin(nested), std::end(nested), std::back_inserter(types));
+    };
+    expandTypes(1);
+    expandTypes(1);
+  }
+  std::shared_ptr<CompilationUnit> cu;
+  std::vector<TypePtr> types;
+
+ public:
+  static constexpr size_t kNumSplits = 10;
+};
+
+constexpr size_t LiteInterpreterDynamicTypeTestFixture::kNumSplits;
+
+/**
+ * Enumerate all possible JIT types appearing in mobile runtime, and test
+ * whether subtyping relation is preserved after one of the JIT types is
+ * converted to DynamicType.
+ *
+ * We firstly enumerate all "base" types in a vector, and implement
+ * expandTypes() to enumerate container types one "level" up for a given set
+ * of types. We call expandTypes() twice to test types nested less or equal
+ * to two levels. e.g. List[Optional[Tensor]], Optional[Dict[Int, Bool]], etc.
+ */
+TEST_P(LiteInterpreterDynamicTypeTestFixture, Conformance) {
+  size_t num = types.size() / LiteInterpreterDynamicTypeTestFixture::kNumSplits;
+  size_t begin = num * GetParam();
+  size_t end = std::min(types.size(), begin + num);
+  for (const auto& a : types) {
+    auto da = DynamicType::create(*a);
+    for (size_t i = begin; i < end; i++) {
+      const auto& b = types[i];
+      bool result = a->isSubtypeOf(*b);
+      EXPECT_EQ(result, da->isSubtypeOf(*b));
+      result = b->isSubtypeOf(*a);
+      EXPECT_EQ(result, b->isSubtypeOf(*da));
+    }
+  }
+}
+
+INSTANTIATE_TEST_CASE_P(
+    PyTorch,
+    LiteInterpreterDynamicTypeTestFixture,
+    ::testing::Range(
+        static_cast<size_t>(0),
+        LiteInterpreterDynamicTypeTestFixture::kNumSplits));
 
 } // namespace jit
 } // namespace torch

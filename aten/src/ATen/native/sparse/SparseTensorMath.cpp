@@ -55,15 +55,30 @@ SparseTensor& mul_out_sparse_zerodim(SparseTensor& r, const SparseTensor& t, con
   AT_ASSERT(t.is_sparse());
   AT_ASSERT(value.dim() == 0);
 
+  // Resolve a possibly sparse COO value to a strided tensor.
+  Tensor value_;
+  if (value.is_sparse()) {
+    if (value._nnz() == 0) {
+      r.resize_as_(t);
+      return r.zero_();
+    }
+    value_ = value.values();
+  } else {
+    value_ = value;
+  }
+  // With broadcasting in action, value_ may be a 1-D tensor as long
+  // as its shape is (1,).
+  AT_ASSERT(value_.numel() == 1);
+
   if (is_same_tensor(r, t)) {
-    r._values().mul_(value);
+    r._values().mul_(value_);
   } else {
     r.resize_as_(t);
     auto indices = r._indices();
     indices.resize_as_(t._indices());
     indices.copy_(t._indices());
     Tensor r_values = r._values(); // Sigh... needed because mul_out takes Tensor&
-    at::mul_out(r_values, t._values(), value);
+    at::mul_out(r_values, t._values(), value_);
     get_sparse_impl(r)->set_nnz_and_narrow(t._nnz());
     r._coalesced_(t.is_coalesced());
   }
@@ -213,7 +228,7 @@ SparseTensor& div_out_sparse_scalar(const SparseTensor& t, Scalar value, SparseT
 
 Tensor div_sparse(const Tensor& self, const Tensor& value, c10::optional<c10::string_view> rounding_mode) {
   auto commonDtype = at::result_type(self, value);
-  if (c10::isIntegralType(commonDtype, /*include_bool=*/true) && !rounding_mode.has_value()) {
+  if (c10::isIntegralType(commonDtype, /*includeBool=*/true) && !rounding_mode.has_value()) {
     commonDtype = typeMetaToScalarType(at::get_default_dtype());
   }
   Tensor result = at::empty({0}, self.options().dtype(commonDtype));
@@ -601,9 +616,9 @@ Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, const SparseTen
   // accessors rely on nnz test
   if (nDim > nDimI) {
     auto indices_accessor = indices.accessor<int64_t, 2>();
-    for (int64_t k = 0; k < sparse._nnz(); k++) {
+    for (const auto k : c10::irange(sparse._nnz())) {
       Tensor dstBuffer = resultBuffer;
-      for (int64_t d = 0; d < sparse.sparse_dim(); d++) {
+      for (const auto d : c10::irange(sparse.sparse_dim())) {
         dstBuffer = dstBuffer.select(0, indices_accessor[d][k]);
       }
       Tensor srcBuffer = valuesBuffer.select(0, k);
@@ -970,7 +985,7 @@ SparseTensor& hspmm_out_sparse_cpu(const SparseTensor& sparse_, const Tensor& de
   auto indices_accessor = indices.accessor<int64_t, 2>();
 
   int64_t i = -1, prevIdx = -1;
-  for (int64_t j = 0; j < nnz; j++) {
+  for (const auto j : c10::irange(nnz)) {
     int64_t currIdx = valueIndices_accessor[j];
     if (currIdx != prevIdx) {
       indices_accessor[0][++i] = currIdx;
@@ -1086,10 +1101,10 @@ SparseTensor& _sspaddmm_out_cpu(
         scalar_t* newv_ptr = newv.data_ptr<scalar_t>();
         scalar_t cast_alpha = alpha.to<scalar_t>();
 
-        for (int64_t h = 0; h < dim_i; h++) {
+        for (const auto h : c10::irange(dim_i)) {
           int64_t i_start = csr_accessor[h];
           int64_t i_end = csr_accessor[h+1];
-          for (int64_t i = i_start; i < i_end; i++) {
+          for (const auto i : c10::irange(i_start, i_end)) {
             scalar_t val = values_accessor[i];
             int64_t col = indices_accessor[1][i];
             if (col >= 0 && col < dim_j) {
@@ -1103,7 +1118,7 @@ SparseTensor& _sspaddmm_out_cpu(
           }
           // Fill up the indices with the right values
           if (i_start != i_end) {
-            for (int64_t i = 0; i < dim_k; i++) {
+            for (const auto i : c10::irange(dim_k)) {
               newi_accessor[0][p+i] = h;
               newi_accessor[1][p+i] = i;
             }
@@ -1178,7 +1193,7 @@ Tensor _sparse_sum(const SparseTensor& input, IntArrayRef dims_to_sum) {
 
   auto dims_to_keep_v = std::vector<int64_t>();
   auto dense_dims_to_sum_v = std::vector<int64_t>();
-  for (int64_t d = 0; d < input_dim; d++) {
+  for (const auto d : c10::irange(input_dim)) {
     if (dims_to_sum_b[d]) {
       if (d >= sparse_dim) dense_dims_to_sum_v.emplace_back(d + 1 - sparse_dim);
     }
