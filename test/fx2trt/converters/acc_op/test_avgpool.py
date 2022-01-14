@@ -4,6 +4,7 @@ import torch
 import torch.fx.experimental.fx_acc.acc_ops as acc_ops
 from parameterized import parameterized, param
 from torch.testing._internal.common_fx2trt import AccTestCase
+from torch.testing._internal.common_utils import run_tests
 
 
 class TestAvgPoolConverter(AccTestCase):
@@ -45,3 +46,6 @@ class TestAvgPoolConverter(AccTestCase):
 
         inputs = [torch.randn(1, 3, 224, 224)]
         self.run_test(TestModule(), inputs, expected_ops={acc_ops.avg_pool2d})
+
+if __name__ == '__main__':
+    run_tests()

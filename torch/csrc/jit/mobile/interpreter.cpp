@@ -1,5 +1,7 @@
 #include <torch/csrc/jit/mobile/interpreter.h>
 
+#include <ATen/core/class_type.h>
+#include <ATen/core/dynamic_type.h>
 #include <ATen/core/function.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/operator_name.h>
@@ -32,7 +34,7 @@ void createObject(Stack& stack, const at::ClassTypePtr& type) {
 }
 
 void isinstance(Stack& stack, at::ArrayRef<at::TypePtr> types) {
-  at::TypePtr ty = pop(stack).type();
+  at::TypePtr ty = pop(stack).type<c10::DynamicType>();
   for (const at::TypePtr& candidate : types) {
     if (ty->isSubtypeOf(*candidate)) {
       push(stack, true);
@@ -102,7 +104,6 @@ bool InterpreterState::run(Stack& stack) {
       //   }
       // }
       // std::cout << std::endl;
-      // std::cout << "top " << stack.back().tagKind() << std::endl;
 
       // TODO(iliacher): remove the workaround after RecordFunction is in
       // Dispatcher
@@ -232,8 +233,7 @@ bool InterpreterState::run(Stack& stack) {
           }
           return false;
         case LIST_CONSTRUCT: {
-          const auto& type = code.types_[inst.X]->expectRef<at::ListType>();
-          listConstruct(stack, type, inst.N);
+          listConstruct(stack, *code.types_[inst.X], inst.N);
           frame.step();
         } break;
         case LIST_UNPACK: {
@@ -249,13 +249,11 @@ bool InterpreterState::run(Stack& stack) {
           frame.step();
         } break;
         case DICT_CONSTRUCT: {
-          const auto& type = code.types_[inst.X]->expectRef<at::DictType>();
-          dictConstruct(stack, type, inst.N);
+          dictConstruct(stack, *code.types_[inst.X], inst.N);
           frame.step();
         } break;
         case NAMED_TUPLE_CONSTRUCT: {
-          namedTupleConstruct(
-              stack, code.types_[inst.X]->expect<at::TupleType>(), inst.N);
+          namedTupleConstruct(stack, code.types_[inst.X], inst.N);
           frame.step();
         } break;
         case CREATE_OBJECT: {

@@ -286,6 +286,14 @@ def emit_declaration_for_noncomposite_views(f: NativeFunction) -> str:
 # These files provide the kernels that run the functionalization pass, which can be opted into
 # per backend (e.g. XLA or Vulkan), or as a composable transform (functionalize() in functorch).
 
+def needs_functionalization(
+    selector: SelectiveBuilder,
+    f: NativeFunction,
+) -> bool:
+    return (selector.include_all_operators and
+            (f.is_view_op or modifies_arguments(f)))
+
+
 def gen_functionalization_registration(
     selector: SelectiveBuilder,
     f: NativeFunction,
@@ -295,9 +303,7 @@ def gen_functionalization_registration(
     def emit_registration_helper(f: NativeFunction) -> Optional[str]:
         # Note: for now, this logic is meant to avoid registering functionalization kernels for mobile.
         # At some point, Vulkan we'll want to use functionalization and we'll need to change this.
-        if not selector.include_all_operators:
-            return None
-        if not f.is_view_op and not modifies_arguments(f):
+        if not needs_functionalization(selector, f):
             return None
         if f.is_view_op and f.has_composite_implicit_autograd_kernel:
             metadata = composite_implicit_autograd_index.get_kernel(f)
@@ -324,9 +330,7 @@ def gen_functionalization_definition(
 ) -> Optional[str]:
     @with_native_function
     def emit_definition_helper(f: NativeFunction) -> Optional[str]:
-        if not selector.include_all_operators:
-            return None
-        if not f.is_view_op and not modifies_arguments(f):
+        if not needs_functionalization(selector, f):
             return None
         if f.is_view_op and f.has_composite_implicit_autograd_kernel:
             # See Note [Composite view ops in the functionalization pass]

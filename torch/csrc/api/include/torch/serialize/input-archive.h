@@ -2,7 +2,7 @@
 
 #include <c10/util/Optional.h>
 #include <c10/core/Device.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/types.h>
 #include <torch/csrc/jit/api/module.h>
 

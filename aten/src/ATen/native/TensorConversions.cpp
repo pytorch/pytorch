@@ -91,6 +91,26 @@ static inline bool is_null_or_equal_to(const c10::optional<T>& test, const T& va
   return test.value() == value;
 }
 
+// NOTE: static runtime's to_maybe_copy_out relies on details of this
+// check; if you change how it works, please update static runtime as
+// well.
+bool to_will_alias(
+    const Tensor& self,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    bool copy,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  auto memory_format = optional_memory_format.value_or(MemoryFormat::Preserve);
+
+  return is_null_or_equal_to(dtype, self.dtype().toScalarType()) &&
+    is_null_or_equal_to(layout, self.layout()) &&
+    is_null_or_equal_to(device, self.device()) &&
+    !copy &&
+    (memory_format == MemoryFormat::Preserve ||
+     self.suggest_memory_format() == memory_format);
+}
+
 static inline Tensor to_impl(
     const Tensor& self,
     c10::optional<ScalarType> dtype,
@@ -100,18 +120,11 @@ static inline Tensor to_impl(
     bool non_blocking,
     bool copy,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
-  auto memory_format = optional_memory_format.value_or(MemoryFormat::Preserve);
 
   // fast path
-  if (is_null_or_equal_to(dtype, self.dtype().toScalarType()) &&
-      is_null_or_equal_to(layout, self.layout()) &&
-      is_null_or_equal_to(device, self.device()) &&
-      !copy &&
-      (memory_format == MemoryFormat::Preserve ||
-       self.suggest_memory_format() == memory_format)) {
+  if (to_will_alias(self, dtype, layout, device, copy, optional_memory_format)) {
     return self;
   }
-
   return at::_to_copy(
       self, dtype, layout, device, pin_memory, non_blocking, optional_memory_format);
 }
