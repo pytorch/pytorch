@@ -5,7 +5,7 @@
 #include <c10/util/Optional.h>
 #include <torch/csrc/jit/codegen/fuser/compiler.h>
 #include <torch/csrc/jit/codegen/fuser/cpu/temp_file.h>
-#include <torch/csrc/jit/frontend/code_template.h>
+#include <ATen/code_template.h>
 #include <torch/csrc/utils/memory.h>
 
 #include <cstdlib>
@@ -51,7 +51,7 @@ intptr_t run(const std::string& cmd);
 static bool programExists(const std::string& program) {
   std::stringstream ss;
   c10::printQuotedString(ss, program);
-  TemplateEnv env;
+  at::jit::TemplateEnv env;
   env.s("program", ss.str());
   std::string cmd = format(check_exists_string, env);
 #ifdef _MSC_VER
@@ -272,7 +272,7 @@ static void runCompiler(
   TORCH_CHECK(
       !config.cxx.empty(),
       "Failed to compile a fused CPU kernel: Compiler not found");
-  TemplateEnv env;
+  at::jit::TemplateEnv env;
   env.s("cxx", config.cxx);
   env.s("fopenmp", config.openmp ? config.openmp_flags : "");
   env.s("cpp_file", cpp_file);
@@ -299,7 +299,7 @@ static const std::string disas_string =
 static const std::string disas_string = "objdump -M  intel -d \"${so_file}\"";
 #endif
 static void disas(const std::string& so_file) {
-  TemplateEnv env;
+  at::jit::TemplateEnv env;
   env.s("so_file", so_file);
   std::string cmd = format(disas_string, env);
   int r = system(cmd.c_str());

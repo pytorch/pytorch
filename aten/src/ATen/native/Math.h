@@ -13,6 +13,10 @@
 #include <c10/util/math_compat.h>
 #include <ATen/AccumulateType.h>
 
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wimplicit-float-conversion")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-float-conversion")
+#endif
 
 /* The next function is taken from  https://github.com/antelopeusersgroup/antelope_contrib/blob/master/lib/location/libgenloc/erfinv.c.
 Below is the copyright.
@@ -2107,3 +2111,5 @@ calc_erfcx(T x)
     }
   }
 }
+
+C10_CLANG_DIAGNOSTIC_POP()

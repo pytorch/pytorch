@@ -1,12 +1,14 @@
 #include <sstream>
 #include <tuple>
 
-#include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/detail/OffsetCalculator.cuh>
-#include <c10/cuda/CUDACachingAllocator.h>
-#include <ATen/native/cuda/jit_utils.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
+#include <c10/cuda/CUDACachingAllocator.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/detail/OffsetCalculator.cuh>
+#include <ATen/code_template.h>
+#include <ATen/native/cuda/jit_utils.h>
+
 
 namespace at { namespace cuda { namespace jit {
 
@@ -380,7 +382,7 @@ const std::string jit_code_template = R"ESCAPE(
     #pragma unroll
     for (int j = 0; j < thread_work_size; j++) {
       if ((threadIdx.x  + j*num_threads) < remaining) {
-        out[j] = ${name}<${compute_type}>(${args} ${extra_args});
+        out[j] = ${name}<${compute_type}>(${args}${extra_args});
       }
     }
 
@@ -478,7 +480,7 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
 
         #pragma unroll
         for (int j = 0; j < thread_work_size; j++) {
-          out[j] = ${name}<${compute_type}>(${args} ${extra_args});
+          out[j] = ${name}<${compute_type}>(${args}${extra_args});
         }
         using vec_t_output = aligned_vector<${result_type}, vec_size>;
         vec_t_output * to_ = reinterpret_cast<vec_t_output *>(data[0]) + block_work_size / vec_size * idx;
@@ -584,7 +586,8 @@ std::string generate_code(
     bool vectorized,
     int vec_size,
     c10::SmallVector<arg_type_name_t> extra_args_name) {
-  TemplateEnv env;
+  at::jit::TemplateEnv env;
+
   env.s("index_type", "unsigned int");
   const int nInputs = nTensors - 1;
   env.s("nInputs", std::to_string(nInputs));
@@ -593,12 +596,12 @@ std::string generate_code(
   env.s("functor", func);
   env.s("name", name);
   std::string function_param = "";
-  for (auto arg: extra_args_name) {
-    function_param +=  "," + std::string(arg.first) + " " + std::string(arg.second);
-  }
   std::string function_call = "";
   for (auto arg: extra_args_name) {
-    function_call +=  ", " + std::string(arg.second);
+    auto type = std::string(arg.first);
+    auto name = std::string(arg.second);
+    function_param +=  "," + type + " " + name;
+    function_call +=  ", " + name;
   }
 
   env.s("extra_params", function_param);
@@ -674,7 +677,7 @@ std::string generate_code(
     store_outputs << "s.store<" << result_type
                   << ">(out[j], data[0], output_offsets[0]);\n";
     env.s("store_outputs", store_outputs.str());
-    static auto cuda_template = CodeTemplate(jit_common_types + jit_code_template);
+    static auto cuda_template = at::jit::CodeTemplate(jit_common_types + jit_code_template);
     return cuda_template.format(env);
   }
 
@@ -707,7 +710,7 @@ std::string generate_code(
   }
   env.s("load_unrolled_inputs", load_unrolled_inputs.str());
 
-  static auto cuda_template = CodeTemplate(jit_common_types + jit_vectorized_code_template);
+  static auto cuda_template = at::jit::CodeTemplate(jit_common_types + jit_vectorized_code_template);
   return cuda_template.format(env);
 }
 
