@@ -22,6 +22,17 @@ def get_rng_state() -> torch.Tensor:
     r"""Returns the random number generator state as a `torch.ByteTensor`."""
     return default_generator.get_state()
 
+def uniform(low: float, high: float, *size: int) -> torch.Tensor:
+
+    """
+    Returns a tensor filled with numbers generated through a random uniform distribution
+    Args:
+        low (float): Lower limit of the random distribution.
+        high (float): Upper limit of the random distribution.
+        *size (int): Sequence of integers that defines the shape of the Tensor. Can be a variable number or a list.
+    """
+    return (high - low) * torch.rand(size) + low
+
 
 def manual_seed(seed) -> torch._C.Generator:
     r"""Sets the seed for generating random numbers. Returns a
@@ -127,16 +138,3 @@ def fork_rng(devices=None, enabled=True, _caller="fork_rng", _devices_kw="device
         torch.set_rng_state(cpu_rng_state)
         for device, gpu_rng_state in zip(devices, gpu_rng_states):
             torch.cuda.set_rng_state(gpu_rng_state, device)
-
-def uniform(low: float, high: float, *size: int) -> torch.Tensor:
-
-    """
-    Returns a tensor filled with numbers generated through a random uniform distribution
-    Args:
-        low (float): Lower limit of the random distribution.
-        high (float): Upper limit of the random distribution.
-        *size (int): Sequence of integers that defines the shape of the Tensor. Can be a variable number or a list.
-    """
-    return (high - low) * torch.rand(size) + low
-
-
