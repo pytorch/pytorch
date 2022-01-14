@@ -48,18 +48,21 @@ def fetch_and_cache(
         return diff.total_seconds() < FILE_CACHE_LIFESPAN_SECONDS
 
     if os.path.exists(path) and is_cached_file_valid():
-        # Another test process already downloaded the file, so don't re-do it
+        # Another test process already download the file, so don't re-do it
         with open(path, "r") as f:
             return cast(Dict[str, Any], json.load(f))
-    try:
-        contents = urlopen(url, timeout=1).read().decode('utf-8')
-        processed_contents = process_fn(json.loads(contents))
-        with open(path, "w") as f:
-            f.write(json.dumps(processed_contents))
-        return processed_contents
-    except Exception as e:
-        print(f'Could not download {url} because of error {e}.')
-        return {}
+
+    for _ in range(3):
+        try:
+            contents = urlopen(url, timeout=5).read().decode('utf-8')
+            processed_contents = process_fn(json.loads(contents))
+            with open(path, "w") as f:
+                f.write(json.dumps(processed_contents))
+            return processed_contents
+        except Exception as e:
+            print(f'Could not download {url} because: {e}.')
+    print(f'All retries exhausted, downloading {url} failed.')
+    return {}
 
 
 def get_slow_tests(dirpath: str, filename: str = SLOW_TESTS_FILE) -> Optional[Dict[str, float]]:
