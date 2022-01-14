@@ -1,4 +1,4 @@
-#include <ATen/core/Tensor.h>
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/native/Copy.h>
 #include <ATen/native/TensorIterator.h>
@@ -54,26 +54,32 @@ void neg_conj_kernel(TensorIteratorBase &iter) {
   });
 }
 
+void copy_same_dtype(TensorIteratorBase &iter, bool requires_conj, bool requires_neg) {
+  if (requires_neg) {
+    // This case should never actually happen since currently there's no way to get a complex tensor
+    // with negative bit.
+    if (requires_conj) {
+      neg_conj_kernel(iter);
+    } else {
+      neg_kernel(iter);
+    }
+  } else {
+    if (requires_conj) {
+      conj_kernel(iter);
+    } else {
+      direct_copy_kernel(iter);
+    }
+  }
+}
+
 void copy_kernel(TensorIterator& iter, bool non_blocking) {
   ScalarType dtype = iter.dtype(0);
+  const bool requires_conj = (
+      isComplexType(dtype) && (iter.tensor_base(0).is_conj() != iter.tensor_base(1).is_conj()));
+  const bool requires_neg = (iter.tensor_base(0).is_neg() != iter.tensor_base(1).is_neg());
+
   if (dtype == iter.dtype(1)) {
-    if (iter.tensor(0).is_neg() == iter.tensor(1).is_neg()) {
-      // This case should never actually happen since currently there's no way to get a complex tensor
-      // with negative bit.
-      if (isComplexType(dtype) &&
-          (iter.tensor(0).is_conj() != iter.tensor(1).is_conj())) {
-        conj_kernel(iter);
-      } else {
-        direct_copy_kernel(iter);
-      }
-    } else {
-      if (isComplexType(dtype) &&
-          (iter.tensor(0).is_conj() != iter.tensor(1).is_conj())) {
-        neg_conj_kernel(iter);
-      } else {
-        neg_kernel(iter);
-      }
-    }
+    copy_same_dtype(iter, requires_conj, requires_neg);
   } else {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, dtype, "copy_", [&] {
       using dest_t = scalar_t;
@@ -96,11 +102,12 @@ void copy_kernel(TensorIterator& iter, bool non_blocking) {
           return c10::static_cast_with_inter_type<dest_t, scalar_t>::apply(src); });
       });
     });
-    if (iter.tensor(0).is_conj() != iter.tensor(1).is_conj()) {
-      iter.tensor(0).conj_physical_();
-    }
-    if (iter.tensor(0).is_neg() != iter.tensor(1).is_neg()) {
-      iter.tensor(0).neg_();
+
+    if (requires_conj || requires_neg) {
+      // This inplace "copy" will perform any missing neg or conj operations
+      auto self = iter.tensor_base(0);
+      auto iter = TensorIterator::unary_op(self, self);
+      copy_same_dtype(iter, requires_conj, requires_neg);
     }
   }
 }
