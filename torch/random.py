@@ -138,3 +138,5 @@ def uniform(low: float, high: float, *size: int) -> torch.Tensor:
         *size (int): Sequence of integers that defines the shape of the Tensor. Can be a variable number or a list.
     """
     return (high - low) * torch.rand(size) + low
+
+
