@@ -497,16 +497,6 @@ class TestQuantizeFx(QuantizationTestCase):
                 self.assertTrue(is_match(modules, n, pattern))
 
     def test_fused_module_qat_swap(self):
-        class Linear(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.w = torch.ones(5, 5)
-                self.b = torch.zeros(5)
-
-            def forward(self, x):
-                return torch.nn.functional.linear(x, self.w, self.b)
-
-
         class Tmp(torch.nn.Module):
             def __init__(self):
                 super().__init__()
