@@ -460,11 +460,8 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
                             quantized_graph, node_name_to_scope)
                     kwargs = {**self.binary_op_node.kwargs}
                     add_args = (*load_arg(quantized=activation_dtype(qconfig))(self.binary_op_node.args), scale_arg, zero_point_arg)
-                    # TODO(after initial review): expand to all callsites in this file
-                    op = create_node_from_old_node_preserve_meta(
-                        quantized_graph,
-                        ('call_function', self.quantized_binary_op, add_args, kwargs),
-                        self.binary_op_node)
+                    op = quantized_graph.create_node(
+                        'call_function', self.quantized_binary_op, add_args, kwargs)
                     return op
             else:
                 assert dtypes == (torch.float16, torch.float16, None)
@@ -941,10 +938,10 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                 else:
                     parent_name, name = _parent_name(self.linear_node.target)
                     setattr(modules[parent_name], name, ref_linear)
-                op_out = quantized_graph.create_node(
-                    'call_module',
-                    self.linear_node.target,
-                    args, {})
+                op_out = create_node_from_old_node_preserve_meta(
+                    quantized_graph,
+                    ('call_module', self.linear_node.target, args, {}),
+                    self.linear_node)
                 if output_activation_post_process:
                     op_out = quantize_node(
                         op_out,
@@ -1527,9 +1524,7 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
 @register_quant_pattern(torch._C._nn.avg_pool3d)
 @register_quant_pattern(torch.clamp)
 @register_quant_pattern(torch.flatten)
-@register_quant_pattern(torch.max)
 @register_quant_pattern(torch.mean)
-@register_quant_pattern(torch.min)
 @register_quant_pattern(operator.floordiv)
 @register_quant_pattern('clamp')
 @register_quant_pattern('mean')
@@ -1624,14 +1619,12 @@ class CustomModuleQuantizeHandler(QuantizeHandler):
 @register_quant_pattern(torch.nn.Identity)
 @register_quant_pattern(torch.transpose)
 @register_quant_pattern(torch.repeat_interleave)
-@register_quant_pattern(torch.sort)
 @register_quant_pattern(torch.squeeze)
 @register_quant_pattern(torch.stack)
 @register_quant_pattern(torch.unsqueeze)
 @register_quant_pattern('contiguous')
 @register_quant_pattern('detach')
 @register_quant_pattern('detach_')
-@register_quant_pattern('numel')
 @register_quant_pattern('permute')
 @register_quant_pattern('repeat')
 @register_quant_pattern('repeat_interleave')

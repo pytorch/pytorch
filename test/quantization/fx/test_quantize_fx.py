@@ -3476,8 +3476,12 @@ class TestQuantizeFx(QuantizationTestCase):
 
     def test_stack_trace_preserved(self):
         class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(1, 1)
+
             def forward(self, x):
-                x = x + x
+                x = self.linear(x)
                 return x
 
         m = M().eval()
@@ -3485,18 +3489,28 @@ class TestQuantizeFx(QuantizationTestCase):
 
         found_stack_trace = False
         for n in mp.graph.nodes:
-            if n.op == 'call_function' and n.target == operator.add:
+            if n.op == 'call_module' and n.target == 'linear':
                 found_stack_trace = n.stack_trace is not None
                 break
         self.assertTrue(found_stack_trace)
 
-        mq = convert_fx(mp)
+        # test is_reference == True
+        mq = convert_fx(copy.deepcopy(mp), is_reference=True)
         found_stack_trace = False
         for n in mq.graph.nodes:
-            if n.op == 'call_function' and n.target == torch.ops.quantized.add:
+            if n.op == 'call_module' and n.target == 'linear':
                 found_stack_trace = n.stack_trace is not None
                 break
-        self.assertTrue(found_stack_trace)
+        self.assertTrue(found_stack_trace, f"stack trace not found, node: {n.format_node()}, is_reference: True")
+
+        # test is_reference == False
+        mq = convert_fx(mp, is_reference=False)
+        found_stack_trace = False
+        for n in mq.graph.nodes:
+            if n.op == 'call_module' and n.target == 'linear':
+                found_stack_trace = n.stack_trace is not None
+                break
+        self.assertTrue(found_stack_trace, f"stack trace not found, node: {n.format_node()}, is_reference: False")
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
@@ -4854,10 +4868,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 x = self.maxpool2d(x)
                 x = self.maxpool3d(x)
                 x = torch.flatten(x)
-                x = torch.max(x)
-                x = torch.min(x)
                 x = x.reshape([-1])
-                x = x.resize_(1, 1, x.numel())
+                x = x.resize_(1, 1, x)
                 x = x.view(-1)
                 # prim::ListConstruct
                 xs = [x, x]
@@ -4874,7 +4886,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 x, y = torch.chunk(x, 2)
                 x = F.dropout(x)
                 x = self.dropout(x)
-                x, _ = torch.sort(x)
                 x = x.permute(0, 2, 3, 1)
                 x = x.repeat_interleave(3, 1)
                 x = torch.repeat_interleave(x, 3, 1)
@@ -4917,9 +4928,9 @@ class TestQuantizeFxOps(QuantizationTestCase):
         # check exact counts of quantize and dequantize
         count_check = {
             # input of conv and two outputs of getitem
-            ns.call_function(torch.quantize_per_tensor) : 3,
+            ns.call_function(torch.quantize_per_tensor) : 2,
             # output of the model and two outputs of getitem
-            ns.call_method('dequantize') : 3
+            ns.call_method('dequantize') : 2
         }
         order_check = [
             ns.call_function(torch.quantize_per_tensor),
@@ -5643,6 +5654,16 @@ class TestQuantizeFxModels(QuantizationTestCase):
                 model_quantized = convert_fx(model_prepared_second, is_reference=True)
                 out = model_quantized(input.to(device_after))
                 self.assertEqual(out.device.type, device_after)
+
+    @skip_if_no_torchvision
+    def test_model_dropout(self):
+        from torchvision import models
+        m = models.mobilenet_v3_small()
+        qconfig_dict = {'': torch.quantization.get_default_qat_qconfig('fbgemm')}
+        mp = prepare_qat_fx(m, qconfig_dict)
+        mp(torch.randn(1, 3, 224, 224))
+        mq = convert_fx(mp)
+        res = mq(torch.randn(1, 3, 224, 224))
 
     def _test_model_impl(
             self, mode, name, model, eager_quantizable_model,

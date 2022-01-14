@@ -39,7 +39,9 @@ class TORCH_API BackendImplInterface {
   virtual BackendDataPtr MakeComputationDataFromTensor(
       const at::Tensor& tensor, const Shape& shape,
       const BackendDevice& device) const = 0;
-
+  virtual BackendDataPtr MakeComputationDataFromScalar(
+      const at::Scalar& scalar,
+      const torch::lazy::BackendDevice& device) const = 0;
   virtual BackendDataPtr CreateDataPlaceholder(
       const BackendDevice& device, const Shape& shape) const = 0;
 
