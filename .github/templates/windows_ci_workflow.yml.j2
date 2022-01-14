@@ -64,16 +64,19 @@ env:
 !{{ common.concurrency(build_environment) }}
 
 jobs:
-!{{ common.ciflow_should_run_job(ciflow_config) }}
   build:
     runs-on: "windows.4xlarge"
-    needs: [!{{ ciflow_config.root_job_name }}]
     timeout-minutes: !{{ common.timeout_minutes }}
     env:
       JOB_BASE_NAME: !{{ build_environment }}-build
       http_proxy: "!{{ common. squid_proxy }}"
       https_proxy: "!{{ common.squid_proxy }}"
+      IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == '!{{ ciflow_config.trigger_action }}') && (github.event.assigneed.login == '!{{ ciflow_config.trigger_actor }}') }}
+      LABEL_CONDITIONS: ${{ !{{ ciflow_config.label_conditions }} }}
+    if: !{{ ciflow_config.root_job_condition }}
     steps:
+      - name: print labels
+        run: echo "${PR_LABELS}"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: seemethere/add-github-ssh-key@v1
         with:
@@ -122,7 +125,7 @@ jobs:
           rm -rf ./*
 
   generate-test-matrix:
-    needs: [!{{ ciflow_config.root_job_name }}]
+    needs: build
     runs-on: ubuntu-18.04
     timeout-minutes: !{{ common.timeout_minutes }}
     env:
@@ -158,7 +161,7 @@ jobs:
       http_proxy: "!{{ common.squid_proxy }}"
       https_proxy: "!{{ common.squid_proxy }}"
       PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
-    needs: [build, generate-test-matrix, !{{ ciflow_config.root_job_name }}]
+    needs: [build, generate-test-matrix]
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
       fail-fast: false

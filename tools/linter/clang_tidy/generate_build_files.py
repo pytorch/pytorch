@@ -41,6 +41,7 @@ def run_autogen() -> None:
             "aten/src/ATen",
             "-d",
             "build/aten/src/ATen",
+            "--per-operator-headers",
         ]
     )
 

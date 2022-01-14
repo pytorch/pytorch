@@ -138,6 +138,13 @@
 #define C10_UNUSED __attribute__((__unused__))
 #endif //_MSC_VER
 
+// Direct port of LLVM_ATTRIBUTE_USED.
+#if __has_attribute(used)
+#define C10_USED __attribute__((__used__))
+#else
+#define C10_USED
+#endif
+
 #define C10_RESTRICT __restrict
 
 // Simply define the namespace, in case a dependent library want to refer to
@@ -475,5 +482,20 @@ __host__ __device__
 #define HAS_DEMANGLE 1
 #endif
 #endif // HAS_DEMANGLE
+
+#ifdef __clang__
+#define _C10_PRAGMA__(string) _Pragma(#string)
+#define _C10_PRAGMA_(string) _C10_PRAGMA__(string)
+#define C10_CLANG_DIAGNOSTIC_PUSH() _Pragma("clang diagnostic push")
+#define C10_CLANG_DIAGNOSTIC_POP() _Pragma("clang diagnostic pop")
+#define C10_CLANG_DIAGNOSTIC_IGNORE(flag) \
+  _C10_PRAGMA_(clang diagnostic ignored flag)
+#define C10_CLANG_HAS_WARNING(flag) __has_warning(flag)
+#else
+#define C10_CLANG_DIAGNOSTIC_PUSH()
+#define C10_CLANG_DIAGNOSTIC_POP()
+#define C10_CLANG_DIAGNOSTIC_IGNORE(flag)
+#define C10_CLANG_HAS_WARNING(flag) 0
+#endif
 
 #endif // C10_MACROS_MACROS_H_

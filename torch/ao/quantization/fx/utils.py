@@ -37,14 +37,6 @@ BIAS_INDEX_DICT = {
     torch.nn.functional.instance_norm : [4],
 }
 
-# turn foo.bar -> ['foo', 'bar']
-def _parent_name(target):
-    r = target.rsplit('.', 1)
-    if len(r) == 1:
-        return '', r[0]
-    else:
-        return r[0], r[1]
-
 def graph_pretty_str(g, shorten=True) -> str:
     """Returns a printable representation of the ops in the graph of g.
     If shorten is True, tries to abbreviate fields.

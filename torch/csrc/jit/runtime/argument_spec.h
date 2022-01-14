@@ -4,7 +4,7 @@
 #include <ATen/core/stack.h>
 #include <c10/util/hash.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <iostream>

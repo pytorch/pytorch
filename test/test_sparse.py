@@ -12,7 +12,7 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
     do_test_empty_full, load_tests, TEST_NUMPY, IS_WINDOWS, gradcheck, coalescedonoff, \
-    DeterministicGuard
+    DeterministicGuard, first_sample
 from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
 from numbers import Number
 from typing import Dict, Any
@@ -1622,6 +1622,7 @@ class TestSparse(TestCase):
             self._test_basic_ops_shape(9, 0, [10, 10, 10], [], dtype, device, coalesced)
             self._test_basic_ops_shape(0, 0, [10, 10, 10], [], dtype, device, coalesced)
             self._test_basic_ops_shape(0, 0, [10, 10, 0], [], dtype, device, coalesced)
+            self._test_basic_ops_shape(0, 0, [], [], dtype, device, coalesced)
 
         def _test_basic_ops_hybrid():
             self._test_basic_ops_shape(9, 12, [5, 6], [2, 3], dtype, device, coalesced)
@@ -3423,13 +3424,7 @@ class TestSparseUnaryUfuncs(TestCase):
 
     @_sparse_unary_ops
     def test_sparse_consistency(self, device, dtype, op):
-        samples = op.sample_inputs(device, dtype)
-
-        if len(samples) == 0:
-            self.skipTest("Skipped! No sample inputs!")
-
-        sample = samples[0]
-
+        sample = first_sample(self, op.sample_inputs(device, dtype))
         assert isinstance(sample.input, torch.Tensor)
 
         expected = op(sample.input, *sample.args, **sample.kwargs)
@@ -3440,15 +3435,10 @@ class TestSparseUnaryUfuncs(TestCase):
 
     @_sparse_unary_ops
     def test_out(self, device, dtype, op):
-        samples = op.sample_inputs(device, dtype)
-
-        if len(samples) == 0:
-            self.skipTest("Skipped! No sample inputs!")
-
         if not op.supports_out:
             self.skipTest("Skipped! Out not supported")
 
-        sample = samples[0]
+        sample = first_sample(self, op.sample_inputs(device, dtype))
         sample.input = sample.input.to_sparse()
         expect = op(sample.input, *sample.args, **sample.kwargs)
 
@@ -3459,15 +3449,10 @@ class TestSparseUnaryUfuncs(TestCase):
 
     @_sparse_unary_ops
     def test_inplace(self, device, dtype, op):
-        samples = op.sample_inputs(device, dtype)
-
-        if len(samples) == 0:
-            self.skipTest("Skipped! No sample inputs!")
-
         if op.inplace_variant is None:
             self.skipTest("Skipped! Out not supported")
 
-        sample = samples[0]
+        sample = first_sample(self, op.sample_inputs(device, dtype))
         sample.input = sample.input.to_sparse().coalesce()
         expect = op(sample.input, *sample.args, **sample.kwargs)
 

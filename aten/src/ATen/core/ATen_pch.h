@@ -166,7 +166,6 @@
 #include <ATen/core/QuantizerBase.h>
 #include <ATen/core/TensorAccessor.h>
 #include <ATen/core/TensorBase.h>
-#include <ATen/core/aten_interned_strings.h>
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
 
 #pragma pop_macro("TORCH_ASSERT_NO_OPERATORS")
