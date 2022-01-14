@@ -2,13 +2,13 @@
 
 #include <caffe2/serialize/versions.h>
 #include <torch/csrc/api/include/torch/jit.h>
-#include <torch/csrc/jit/frontend/code_template.h>
+#include <ATen/code_template.h>
 #include <torch/csrc/jit/frontend/resolver.h>
 
 namespace torch {
 namespace jit {
 
-auto scalar_operators_source = CodeTemplate(
+auto scalar_operators_source = at::jit::CodeTemplate(
     R"SCRIPT(
 def mul(a : ${Scalar}, b : Tensor) -> Tensor:
   return b * a
@@ -32,13 +32,13 @@ def div(a : ${Scalar}, b : Tensor) -> Tensor:
   return torch.reciprocal(b) * a
 )SCRIPT");
 
-auto _ntuple_ops = CodeTemplate(
+auto _ntuple_ops = at::jit::CodeTemplate(
     R"SCRIPT(
 def _${name}(x: BroadcastingList${Length}[${Scalar}]) -> List[${Scalar}]:
   return x
 )SCRIPT");
 
-auto floordiv = CodeTemplate(
+auto floordiv = at::jit::CodeTemplate(
     R"SCRIPT(
 def floordiv(self : Tensor, other : ${Rhs_Type}) -> Tensor:
   return torch.floor_divide(self, other)
@@ -213,7 +213,7 @@ struct BuiltinFunctionRegistry {
 
   void loadBuiltinFunctions() {
     for (auto scalar : {"float", "int"}) {
-      TemplateEnv env;
+      at::jit::TemplateEnv env;
       env.s("Scalar", scalar);
       loadSource(scalar_operators_source.format(env), "aten");
     }
@@ -227,7 +227,7 @@ struct BuiltinFunctionRegistry {
     };
     for (const auto scalar : {"float", "int"}) {
       for (const auto& pair : name_len) {
-        TemplateEnv env;
+        at::jit::TemplateEnv env;
         env.s("Scalar", scalar);
         env.s("name", pair.first);
         env.s("Length", pair.second);
@@ -235,7 +235,7 @@ struct BuiltinFunctionRegistry {
       }
     }
     for (auto rhs : {"number", "Tensor"}) {
-      TemplateEnv env;
+      at::jit::TemplateEnv env;
       env.s("Rhs_Type", rhs);
       loadSource(floordiv.format(env), "aten");
     }
