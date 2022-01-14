@@ -64,7 +64,7 @@ class Adamax(Optimizer):
         super(Adamax, self).__init__(params, defaults)
 
     def __setstate__(self, state):
-        super(Adamax, self).__setstate__(state)
+        super().__setstate__(state)
         for group in self.param_groups:
             group.setdefault('foreach', None)
 
@@ -106,14 +106,12 @@ class Adamax(Optimizer):
 
                 # State initialization
                 if len(state) == 0:
-                    state['step'] = 0
+                    state['step'] = torch.tensor(0.)
                     state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                     state['exp_inf'] = torch.zeros_like(p, memory_format=torch.preserve_format)
 
                 exp_avgs.append(state['exp_avg'])
                 exp_infs.append(state['exp_inf'])
-
-                state['step'] += 1
                 state_steps.append(state['step'])
 
             adamax(params_with_grad,
@@ -135,7 +133,9 @@ def adamax(params: List[Tensor],
            grads: List[Tensor],
            exp_avgs: List[Tensor],
            exp_infs: List[Tensor],
-           state_steps: List[int],
+           state_steps: List[Tensor],
+           # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
+           # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
            foreach: bool = None,
            *,
            eps: float,
@@ -147,6 +147,9 @@ def adamax(params: List[Tensor],
 
     See :class:`~torch.optim.Adamax` for details.
     """
+
+    if not all([isinstance(t, torch.Tensor) for t in state_steps]):
+        raise RuntimeError("API has changed, `state_steps` argument must contain a list of singleton tensors")
 
     if foreach is None:
         # Placeholder for more complex foreach logic to be added when value is not set
@@ -176,7 +179,7 @@ def _single_tensor_adamax(params: List[Tensor],
                           grads: List[Tensor],
                           exp_avgs: List[Tensor],
                           exp_infs: List[Tensor],
-                          state_steps: List[int],
+                          state_steps: List[Tensor],
                           *,
                           eps: float,
                           beta1: float,
@@ -188,7 +191,10 @@ def _single_tensor_adamax(params: List[Tensor],
         grad = grads[i]
         exp_avg = exp_avgs[i]
         exp_inf = exp_infs[i]
-        step = state_steps[i]
+        step_t = state_steps[i]
+        # update step
+        step_t += 1
+        step = step_t.item()
 
         if weight_decay != 0:
             grad = grad.add(param, alpha=weight_decay)
@@ -212,7 +218,7 @@ def _multi_tensor_adamax(params: List[Tensor],
                          grads: List[Tensor],
                          exp_avgs: List[Tensor],
                          exp_infs: List[Tensor],
-                         state_steps: List[int],
+                         state_steps: List[Tensor],
                          *,
                          beta1: float,
                          beta2: float,
@@ -222,6 +228,9 @@ def _multi_tensor_adamax(params: List[Tensor],
 
     if len(params) == 0:
         return
+
+    # Update steps
+    torch._foreach_add_(state_steps, 1)
 
     if weight_decay != 0:
         torch._foreach_add_(grads, params, alpha=weight_decay)
@@ -238,8 +247,8 @@ def _multi_tensor_adamax(params: List[Tensor],
             exp_inf.unsqueeze(0),
             grad.abs().add_(eps).unsqueeze_(0)
         ], 0)
-        torch.amax(norm_buf, 0, keepdim=False, out=exp_inf)
+        torch.max(norm_buf, 0, keepdim=False, out=(exp_inf, exp_inf.new().long()))
 
-    bias_corrections = [1 - beta1 ** state_step for state_step in state_steps]
+    bias_corrections = [1 - beta1 ** step.item() for step in state_steps]
     clr = [-1 * (lr / bias_correction) for bias_correction in bias_corrections]
     torch._foreach_addcdiv_(params, exp_avgs, exp_infs, clr)
