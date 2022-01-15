@@ -126,15 +126,19 @@ static inline void launch_vectorized_kernel(int64_t N, const func_t& f, array_t 
 
 namespace {
 
-template <typename ArrT, typename... Args>
-auto parameter_pack_to_array(Args&... args) {
-  constexpr auto p_pack_size = sizeof...(args);
-  std::array<ArrT, p_pack_size> arr = {static_cast<ArrT>(&args)...};
-  return arr;
+// Helper function to return an array of void* from
+// template parameter pack.
+// All the arguments should be l-value references
+// so that taking the address works.
+template <typename... Args>
+auto parameter_pack_to_arg_array(Args&... args) {
+  return std::array<void*, sizeof...(args)>{static_cast<void*>(&args)...};;
 }
 
+// Helper function to return a vector<string>
+// corresponding to the type of the arguments in parameter pack.
 template <typename... Args>
-c10::SmallVector<std::string> get_extra_args_typenames(Args... args) {
+c10::SmallVector<std::string> get_extra_args_typenames() {
   return {at::cuda::jit::typeName<Args>()...};
 }
 
@@ -174,7 +178,7 @@ static inline void launch_jitted_unrolled_kernel(
       std::string f_inputs_type_str = at::cuda::jit::typeName<f_inputs_type>();
       std::string compute_type_str = at::cuda::jit::typeName<at::opmath_type<f_inputs_type>>();
       std::string result_type_str = at::cuda::jit::typeName<result_type>();
-      c10::SmallVector<std::string> extra_args_types = get_extra_args_typenames<Args...>(extra_args...);
+      c10::SmallVector<std::string> extra_args_types = get_extra_args_typenames<Args...>();
       auto code = at::cuda::jit::generate_code(nTensors, f, string_name,
                                                f_inputs_type_str, compute_type_str, result_type_str,
                                                contiguous, dynamic_casting, scalar_pos, extra_args_types, false, 0);
@@ -183,7 +187,7 @@ static inline void launch_jitted_unrolled_kernel(
   }
 
   // pack args for kernel launch
-  auto extra_args_array = parameter_pack_to_array<void*>(extra_args...);
+  auto extra_args_array = parameter_pack_to_arg_array(extra_args...);
   constexpr int kernel_args = 7;
   void* args[kernel_args + extra_args_array.size()];
   args[0] = static_cast<void*>(&N);
@@ -247,7 +251,7 @@ at::opmath_type<f_inputs_type> scalar_val, Args... extra_args) {
       std::string f_inputs_type_str = at::cuda::jit::typeName<f_inputs_type>();
       std::string compute_type_str = at::cuda::jit::typeName<at::opmath_type<f_inputs_type>>();
       std::string result_type_str = at::cuda::jit::typeName<result_type>();
-      c10::SmallVector<std::string> extra_args_types = get_extra_args_typenames<Args...>(extra_args...);
+      c10::SmallVector<std::string> extra_args_types = get_extra_args_typenames<Args...>();
       auto code = at::cuda::jit::generate_code(nTensors, f, string_name,
                                                f_inputs_type_str, compute_type_str, result_type_str,
                                                /*contiguous=*/true, /*dynamic_casting=*/false,
@@ -259,7 +263,7 @@ at::opmath_type<f_inputs_type> scalar_val, Args... extra_args) {
     }
   }
 
-  auto extra_args_array = parameter_pack_to_array<void*>(extra_args...);
+  auto extra_args_array = parameter_pack_to_arg_array(extra_args...);
 
   if (vectorized) {
     // pack args for kernel launch

@@ -49,22 +49,6 @@ void trigamma_kernel_cuda(TensorIteratorBase& iter) {
   #endif // USE_JITERATOR
 }
 
-// Note [jiterator runtime state]
-// To pass a runtime argument (similar to lambda captures in non-JIT kernels),
-// we need to pass to additional arguments to `jitted_gpu_kernel`
-// 1. `vector<string>` where first string is the
-//     type of the arguments in the same order as
-//     they appear in kernel's function signature.
-// 2.  We also need to pass the address of these extra arguments to
-//     `jitted_gpu_kernel`
-//     in the same order as they appear in kernel's function signature.
-//
-// NOTE: One big restriction being that these arguments should be after the
-// arguments provided by TensorIterator. Eg. While capturing `n`, where
-// `scalar_t x` and `scalar_t y` are provided by TensorIterator,
-// * foo(scalar_t x, scalar_t y, int n) works!
-// * foo(int n, scalar_t x, scalar_y) doesn't work
-// * foo(scalar_t x, int n, scalar_y) doesn't work
 const char polygamma_name[] = "polygamma";
 void polygamma_kernel_cuda(TensorIteratorBase& iter, int64_t n) {
   if (n == 0) {

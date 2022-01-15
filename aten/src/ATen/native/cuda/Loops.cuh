@@ -102,9 +102,20 @@ These improvements will likely come soon.
 For examples of how to use the jiterator see the i1 and gcd kernel
 implementations, which pass jittable strings implementing their
 operations instead of the typical CUDA functors.
-For example of passing a runtime state
-(i.e. lambda captures using functors in case of non-JITed kernels)
-look at Note [jiterator runtime state].
+
+To pass a runtime argument (similar to lambda captures in non-JIT kernels),
+we need to pass to additional arguments to `jitted_gpu_kernel` by value.
+Currently only primitive C++ types used for computation are valid.
+The order of these extra arguments should be same as the order they appear
+in kernel's function signature. (look at polygamma for example)
+
+NOTE: One big restriction being that these arguments should be after the
+arguments provided by TensorIterator. Eg. While capturing `n`, where
+`scalar_t x` and `scalar_t y` are provided by TensorIterator,
+* foo(scalar_t x, scalar_t y, int n) works!
+* foo(int n, scalar_t x, scalar_y) doesn't work
+* foo(scalar_t x, int n, scalar_y) doesn't work
+
 */
 
 // Entrypoint for jitted GPU kernels.
