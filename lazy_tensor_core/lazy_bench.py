@@ -54,12 +54,12 @@ log = logging.getLogger(__name__)
 # Models that are known to crash or otherwise not work with lazy tensor are
 # disabled, but should be removed from these lists once fixed
 SKIP = {
-    "densenet121":  "OOMs on eager CUDA CI machine (T4 GPU)",
-    "timm_nfnet":  "OOMs on eager CUDA CI machine (T4 GPU)",
+    "densenet121": "OOMs on eager CUDA CI machine (T4 GPU)",
+    "timm_nfnet": "OOMs on eager CUDA CI machine (T4 GPU)",
     "moco": "Distributed/ProcessGroupNCCL: Tensors must be CUDA and dense",
 }
 SKIP_TRAIN_ONLY = {
-    "squeezenet1_1":  "OOMs on eager CUDA CI machine (T4 GPU)",
+    "squeezenet1_1": "OOMs on eager CUDA CI machine (T4 GPU)",
 }
 
 current_name = ""
