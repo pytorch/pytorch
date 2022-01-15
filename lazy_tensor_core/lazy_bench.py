@@ -53,31 +53,14 @@ log = logging.getLogger(__name__)
 
 # Models that are known to crash or otherwise not work with lazy tensor are
 # disabled, but should be removed from these lists once fixed
-SKIP = set({
-})
-SKIP_TRAIN_ONLY = set({
-    # out of memory test
-    # "squeezenet1_1",
-    # "mobilenet_v2_quantized_qat",
-    # "hf_Reformer",
-    # "hf_GPT2",
-    # "hf_BigBird",
-    # "pyhpc_equation_of_state",
-    # "pyhpc_isoneutral_mixing",
-    # "densenet121",
-    # "resnet50_quantized_qat",
-    # "Background_Matting",
-    # "hf_Bart",
-    # "hf_Longformer",
-    # slow tests
-    # "timm_efficientnet",
-    # "Super_SloMo",
-    # "BERT_pytorch",
-    # "demucs",
-    # "opacus_cifar10",
-    # others
-    # "hf_DistilBert",
-})
+SKIP = {
+    "densenet121": "OOMs on eager CUDA CI machine (T4 GPU)",
+    "timm_nfnet": "OOMs on eager CUDA CI machine (T4 GPU)",
+    "moco": "Distributed/ProcessGroupNCCL: Tensors must be CUDA and dense",
+}
+SKIP_TRAIN_ONLY = {
+    "squeezenet1_1": "OOMs on eager CUDA CI machine (T4 GPU)",
+}
 
 current_name = ""
 current_device = ""
@@ -166,9 +149,9 @@ toy_dims = [
 for dims in toy_dims:
     # The toy benchmarks don't support training..
     # and it's too late to add it inside the generator func below...
+    SKIP_TRAIN_ONLY["DivAddMulBenchmark(dims=[" + ','.join([str(d) for d in dims]) + '])'] = "This model has no train()"
+    SKIP_TRAIN_ONLY["HardSwishBenchmark(dims=[" + ','.join([str(d) for d in dims]) + '])'] = "This model has no train()"
 
-    SKIP_TRAIN_ONLY.add("DivAddMulBenchmark(dims=[" + ','.join([str(d) for d in dims]) + '])')
-    SKIP_TRAIN_ONLY.add("HardSwishBenchmark(dims=[" + ','.join([str(d) for d in dims]) + '])')
 def iter_toy_model_names():
     for dims in toy_dims:
         for model in toy_models:
@@ -198,10 +181,14 @@ def iter_models(args, dirpath):
         if (
             (len(args.filter) and (not re.search("|".join(args.filter), name, re.I)))
             or (len(args.exclude) and re.search("|".join(args.exclude), name, re.I))
-            or name in SKIP
-            or (name in SKIP_TRAIN_ONLY and args.test == "train")
         ):
-            save_error(name, args.test, "in SKIP or SKIP_TRAIN_ONLY", dirpath)
+            save_error(name, args.test, "disabled via cmdline filter/exclude", dirpath)
+            continue
+        if name in SKIP:
+            save_error(name, args.test, f"SKIP because {SKIP[name]}", dirpath)
+            continue
+        if name in SKIP_TRAIN_ONLY and args.test == "train":
+            save_error(name, args.test, f"SKIP_TRAIN_ONLY because {SKIP_TRAIN_ONLY[name]}", dirpath)
             continue
         yield name
 
@@ -291,7 +278,7 @@ def timed(args, benchmark, sync, times=1):
 
     if current_device == 'lazy':
         torch.cuda.set_sync_debug_mode(2)
-    else:
+    elif current_device == 'cuda':
         torch.cuda.set_sync_debug_mode(0)
 
     # keep the lazy tensor results alive until the final sync
@@ -307,7 +294,9 @@ def timed(args, benchmark, sync, times=1):
             # may be just an async 'mark_step' for lazy, or no-op for cuda
             sync.iter_sync(results)
 
-    torch.cuda.set_sync_debug_mode(0)
+    if current_device in ['lazy', 'cuda']:
+        # don't assume torch.cuda present unless using cuda
+        torch.cuda.set_sync_debug_mode(0)
 
     # should be a hard sync for lazy and cuda
     # unless strictly measuring lazy trace overhead, then no-op
@@ -336,7 +325,11 @@ def to_device(tensors, device):
 
     try:
         import torchbenchmark.models.soft_actor_critic.nets
-        if isinstance(tensors, torchbenchmark.models.soft_actor_critic.nets.SquashedNormal):
+        import torchbenchmark.models.drq.utils
+        if (
+            isinstance(tensors, torchbenchmark.models.soft_actor_critic.nets.SquashedNormal) or
+            isinstance(tensors, torchbenchmark.models.drq.utils.SquashedNormal)
+        ):
             # a SquashedNormal is a py class that holds a loc and scale torch tensor,
             # so convert it to a tuple for compatibility with downstream check_results
             tensors = (tensors.loc, tensors.scale)
@@ -384,7 +377,7 @@ def lazy_overhead_experiment(args, results, benchmark, lazy_benchmark):
         ("dev", "name", "test", "overhead", "pvalue", "ops", "trace_us", "us_per_op", "fallbacks"),
     ).writerow([current_device, current_name, args.test, f"{overhead:.4f}", f"{pvalue:.4e}",
                 f"{ops}", f"{trace_us:.4f}", f"{us_per_op:.4f}", f"{fallbacks}"])
-    print(f"{short_name(name, limit=30):<30} {current_device:<4} {args.test:<5} "
+    print(f"{short_name(current_name, limit=30):<30} {current_device:<4} {args.test:<5} "
           f"{'trace overheads':<20} overhead: {overhead:.3f} pvalue: {pvalue:.2e} us_per_op {us_per_op:.3f}")
     if args.verbose:
         print(f"CIDEBUGOUTPUT,lazy_overhead_experiment,"
@@ -422,7 +415,7 @@ def lazy_compute_experiment(args, experiment, results, benchmark, lazy_benchmark
         print("WARNING: lazy cached compile count indicates fallbacks, or something else")
     fallbacks = {k: v for (k, v) in lazy_metrics.items() if 'aten::' in k}
     if len(fallbacks):
-        print("WARNING: lazy-eager fallbacks detected for [" + ",".join(fallbacks.keys()) + ']')
+        print(f"WARNING: lazy-eager fallbacks detected for [{fallbacks}]")
     if args.dump_lazy_counters:
         print(lazy_metrics)
     pvalue = ttest_ind(timings[:, 0], timings[:, 1]).pvalue
@@ -441,6 +434,25 @@ def lazy_compute_experiment(args, experiment, results, benchmark, lazy_benchmark
               f"{pvalue:.2e},{args.warmup},{args.repeat},{warmup_time:.2f},{bench_time:.2f}")
     return (speedup, pvalue)
 
+def check_eval_correctness(args, benchmark, lazy_benchmark, name):
+    try:
+        torch.manual_seed(1337)
+        model, example_inputs = benchmark.get_module()
+        model.eval()
+        correct_result = call_model_with(model, example_inputs)
+        torch.manual_seed(1337)
+        lazy_model, lazy_inputs = lazy_benchmark.get_module()
+        lazy_model.eval()
+        lazy_result = call_model_with(lazy_model, lazy_inputs)
+        if not check_results(correct_result, lazy_result, args.device):
+            print(f"INCORRECT: {name}")
+            save_error(name, args.test, "Incorrect results.", args.output_dir)
+            return False
+    except Exception as e:
+        print(f"ERROR: {name}: {e}")
+        save_error(name, args.test, e, args.output_dir)
+        return False
+    return True
 
 def check_results_impl(correct_result, lazy_result):
     # recursive helper for dealing with nested data structures
@@ -462,9 +474,7 @@ def check_results(correct_result, lazy_result, device):
     # extracting relevant tensors from huggingface data structures
     correct_result = to_device(correct_result, device)
     lazy_result = to_device(lazy_result, device)
-
     return check_results_impl(correct_result, lazy_result)
-
 
 def check_fuser(args):
     if args.fuser == 'noopt':
@@ -581,7 +591,7 @@ if __name__ == "__main__" :
     parser.add_argument("--inner_loop_repeat", type=int, default=10, help="repeat the computation this many times per sample")
     parser.add_argument("--fuser", type=str, choices=['noopt', 'fuser0', 'fuser1', 'fuser2'], help="0=legacy, 1=nnc, 2=nvfuser")
     parser.add_argument("--test", type=str, choices=['eval', 'train'], default='eval')
-    parser.add_argument("--verbose", action='store_false')
+    parser.add_argument("--verbose", action='store_true')
     parser.add_argument("--torchbench_dir", type=str, help="path to torchbenchmark repo")
     parser.add_argument("--output_dir", type=str, default=".", help="path to write output files")
     parser.add_argument("--dump_lazy_counters", action='store_true', help="dump lazy counter values after each timing run")
@@ -596,77 +606,56 @@ if __name__ == "__main__" :
     torchbench_dir = abspath(args.torchbench_dir) if args.torchbench_dir else abspath("../../benchmark")
     assert os.path.exists(os.path.join(torchbench_dir, "torchbenchmark")), "set --torchbench_dir to installed torchbench repo"
     sys.path.append(torchbench_dir)
-
     copy_argv = [] + sys.argv
     if args.run_in_subprocess:
         try:
             from fastNLP.core import logger
             logger.setLevel(logging.WARNING)
-            name = args.run_in_subprocess
+            current_name = args.run_in_subprocess
             benchmark_cls = get_benchmark_cls(args.run_in_subprocess)
-            bench_name = benchmark_cls.name if hasattr(benchmark_cls, 'name') else benchmark_cls.name()
-            for device in [args.device]:
+            current_device = args.device
+            if args.device == 'cuda':
+                assert 'LTC_TS_CUDA' in os.environ and bool(os.environ['LTC_TS_CUDA']), "set LTC_TS_CUDA for cuda device"
 
-                # no try since we should've already filtered out models we can't create
-                torch.manual_seed(1337)
-                benchmark = benchmark_cls(device=device, jit=False)
-                torch.manual_seed(1337)
-                lazy_benchmark = benchmark_cls(device='lazy', jit=False)
-                # TODO: might be redundant
-                gc.collect()
+            with pick_grad(args, current_name):
+                with fuser(args.fuser) if args.fuser != 'noopt' else optimized_execution(False):
+                    if args.fuser == 'noopt':
+                        # TODO(whc) cleaner way to configure the fusers; seems i have to set both optimized_execution(False)
+                        # _and_ disable fusers to get no-optimization
+                        torch._C._jit_override_can_fuse_on_cpu(False)
+                        torch._C._jit_override_can_fuse_on_gpu(False)
+                        torch._C._jit_set_texpr_fuser_enabled(False)
+                        torch._C._jit_set_nvfuser_enabled(False)
+                    if args.fuser == 'fuser2':
+                        # special case to disable nvfuser horizontal fusion as it is currently broken
+                        # TODO(whc) remove this once it's fixed
+                        torch._C._jit_set_nvfuser_horizontal_mode(False)
 
-                current_name = name
-                current_device = device
+                    # no try since we should've already filtered out models we can't create
+                    torch.manual_seed(1337)
+                    benchmark = benchmark_cls(device=args.device, jit=False)
+                    torch.manual_seed(1337)
+                    lazy_benchmark = benchmark_cls(device='lazy', jit=False)
+                    # TODO: might be redundant
+                    gc.collect()
 
-                if device == 'cuda':
-                    assert 'LTC_TS_CUDA' in os.environ and bool(os.environ['LTC_TS_CUDA'])
+                    if args.run_tracing_execute_noops:
+                        print(f"Profiling {current_name}")
+                        run_tracing_execute_noops(args.test, lazy_benchmark)
+                        # when profiling, we really don't want to do anything else
+                        exit(0)
 
-                if args.run_tracing_execute_noops:
-                    print(f"Profiling {name}")
-                    run_tracing_execute_noops(args.test, lazy_benchmark)
-                    # when profiling, we really don't want to do anything else
-                    exit(0)
+                    if args.test == 'eval':
+                        if not check_eval_correctness(args, benchmark, lazy_benchmark, current_name):
+                            exit(3)
 
-                with pick_grad(args, name):
-                    with fuser(args.fuser) if args.fuser != 'noopt' else optimized_execution(False):
-                        if args.fuser == 'noopt':
-                            # TODO(whc) cleaner way to configure the fusers; seems i have to set both optimized_execution(False)
-                            # _and_ disable fusers to get no-optimization
-                            torch._C._jit_override_can_fuse_on_cpu(False)
-                            torch._C._jit_override_can_fuse_on_gpu(False)
-                            torch._C._jit_set_texpr_fuser_enabled(False)
-                            torch._C._jit_set_nvfuser_enabled(False)
-                        if args.fuser == 'fuser2':
-                            # special case to disable nvfuser horizontal fusion as it is currently broken
-                            # TODO(whc) remove this once it's fixed
-                            torch._C._jit_set_nvfuser_horizontal_mode(False)
-                        try:
-                            if args.test == 'eval':
-                                # Correctness Check
-                                torch.manual_seed(1337)
-                                model, example_inputs = benchmark.get_module()
-                                model.eval()
-                                correct_result = call_model_with(model, example_inputs)
-                                torch.manual_seed(1337)
-                                lazy_model, lazy_inputs = lazy_benchmark.get_module()
-                                lazy_model.eval()
-                                lazy_result = call_model_with(lazy_model, lazy_inputs)
-                                if not check_results(correct_result, lazy_result, device):
-                                    print(f"INCORRECT: {name}")
-                                    save_error(name, args.test, "Incorrect results.", args.output_dir)
-                                    continue
-                        except Exception as e:
-                            print(f"ERROR: {name}: {e}")
-                            save_error(name, args.test, e, args.output_dir)
-                            continue
-
-                        lazy_overhead_experiment(args, results, benchmark, lazy_benchmark)
-                        lazy_compute_experiment(args, f"amortized {args.inner_loop_repeat}x", results, benchmark, lazy_benchmark)
-                        lazy_compute_experiment(args, "unamortized", results, benchmark, lazy_benchmark, sync_every_iter=True)
+                    lazy_overhead_experiment(args, results, benchmark, lazy_benchmark)
+                    lazy_compute_experiment(args, f"amortized {args.inner_loop_repeat}x", results, benchmark, lazy_benchmark)
+                    lazy_compute_experiment(args, "unamortized", results, benchmark, lazy_benchmark, sync_every_iter=True)
 
         except Exception as e:
-            print(f"ERROR: {name}: {e}")
-            save_error(name, args.test, e, args.output_dir)
+            print(f"ERROR: {current_name}: {e}")
+            save_error(current_name, args.test, e, args.output_dir)
             exit(13)
         exit(0)
 
@@ -682,7 +671,7 @@ if __name__ == "__main__" :
         # for child processes
         launch_command = f"python {' '.join(copy_argv)} --run_in_subprocess '{model_name}' --output_dir={dirpath}"
         env = os.environ
-        env["LTC_TS_CUDA"] = "1"
+        env["LTC_TS_CUDA"] = "1" if args.device == "cuda" else "0"
         rc = 0
         try:
             if args.verbose:
