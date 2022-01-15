@@ -105,7 +105,7 @@ class TestModelNumericsEager(QuantizationTestCase):
                     fq_model = torch.ao.quantization.QuantWrapper(my_model)
                     fq_model.train()
                     fq_model.qconfig = qconfig
-                    torch.ao.quantization.fuse_modules(fq_model.module, [['conv1', 'bn1', 'relu1']], inplace=True, is_qat=True)
+                    torch.ao.quantization.fuse_modules_qat(fq_model.module, [['conv1', 'bn1', 'relu1']], inplace=True)
                     torch.ao.quantization.prepare_qat(fq_model)
                     fq_model.eval()
                     fq_model.apply(torch.ao.quantization.disable_fake_quant)

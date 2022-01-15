@@ -401,7 +401,7 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
             with override_quantized_engine(qengine):
                 qconfig = torch.ao.quantization.get_default_qconfig(qengine)
                 model = ResNetBase().float().eval()
-                model.fuse_model(is_qat=False)
+                model.fuse_model()
                 model = QuantWrapper(model)
                 model.qconfig = qconfig
                 model = prepare(model)

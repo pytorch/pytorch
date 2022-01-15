@@ -48,6 +48,7 @@ from torch.ao.quantization import (
     get_default_qat_qconfig,
     get_default_qconfig_dict,
     fuse_modules,
+    fuse_modules_qat,
     prepare,
     prepare_qat,
     convert,
@@ -865,7 +866,10 @@ class TestQuantizeFx(QuantizationTestCase):
             fuse_list = ["conv", "bn"]
             if has_relu:
                 fuse_list.append("relu")
-            fuse_modules(m_eager, fuse_list, inplace=True, is_qat=is_qat)
+            if is_qat:
+                fuse_modules_qat(m_eager, fuse_list, inplace=True)
+            else:
+                fuse_modules(m_eager, fuse_list, inplace=True)            
             m_eager.qconfig = qconfig
             m_eager = prepare_fn(m_eager)
             m_eager(*self.img_data_dict[dim][0])
@@ -5766,7 +5770,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
             is_qat = True
 
         if hasattr(eager, "fuse_model"):
-            eager.fuse_model(is_qat)
+            eager.fuse_model()
         eager = QuantWrapper(eager)
         eager.qconfig = qconfig
         eager = eager_prepare(eager)
