@@ -1192,8 +1192,9 @@ class AnnotatedConvBnReLUModel(torch.nn.Module):
         x = self.dequant(x)
         return x
 
-    def fuse_model(self, is_qat):
-        if is_qat:
+    def fuse_model(self):
+        # TODO: remove this check and define two fuse_modules function on this module
+        if self.training:
             torch.quantization.fuse_modules_qat(self, [['conv', 'bn', 'relu']], inplace=True)
         else:
             torch.quantization.fuse_modules(self, [['conv', 'bn', 'relu']], inplace=True)
@@ -1942,8 +1943,9 @@ class ResNetBase(torch.nn.Module):
         out = self.fc(out)
         return out
 
-    def fuse_model(self, is_qat):
-        if is_qat:
+    def fuse_model(self):
+        # TODO: remove this check and define two fuse_model function on this module
+        if self.training:
             torch.ao.quantization.fuse_modules_qat(self, [['conv1', 'bn1', 'relu1']], inplace=True)
         else:
             torch.ao.quantization.fuse_modules(self, [['conv1', 'bn1', 'relu1']], inplace=True)
