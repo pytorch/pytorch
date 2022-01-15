@@ -95,7 +95,7 @@ Loops.cuh (and CUDALoops.cuh) usually build. This reduces build time,
 build size, and CUDA context size.
 
 The jiterator currently has some limitations, however. It cannot:
-  - handle complex datatypes
+  - handle math on complex datatypes
 
 These improvements will likely come soon.
 
