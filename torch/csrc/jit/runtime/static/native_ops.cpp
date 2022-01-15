@@ -106,7 +106,8 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       return [](ProcessedNode* p_node) {
         DCHECK(p_node->num_inputs() - 1 == p_node->outputs().size());
         auto dict = p_node->Input(0).toGenericDict();
-        for (size_t i = 1; i < p_node->num_inputs(); ++i) {
+        const auto num_inputs = p_node->num_inputs();
+        for (size_t i = 1; i < num_inputs; ++i) {
           const auto& key = p_node->Input(i);
           auto value = dict.find(key);
           TORCH_CHECK(value != dict.end(), "Key not in dict: ", key);
@@ -268,7 +269,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       }
       return [](ProcessedNode* p_node) {
         const auto& in0_t = p_node->Input(0).toTensor();
-        const auto in1_iv = p_node->Input(1).toIntVector();
+        const auto in1_iv = p_node->Input(1).toDimVector();
         p_node->Output(0) = at::native::permute(in0_t, in1_iv);
       };
     });
@@ -284,7 +285,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       }
       return [](ProcessedNode* p_node) {
         const auto& in0_t = p_node->Input(0).toTensor();
-        const auto in1_iv = p_node->Input(1).toIntVector();
+        const auto in1_iv = p_node->Input(1).toDimVector();
         p_node->Output(0) = at::native::reshape(in0_t, in1_iv);
       };
     });
