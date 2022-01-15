@@ -5,6 +5,7 @@ import torch.fx.experimental.fx_acc.acc_ops as acc_ops
 import torch.nn as nn
 from torch.testing._internal.common_fx2trt import AccTestCase
 from parameterized import parameterized
+from torch.testing._internal.common_utils import run_tests
 
 
 class TestGetitemConverter(AccTestCase):
@@ -52,3 +53,6 @@ class TestGetitemConverter(AccTestCase):
 
         inputs = [torch.randn(2, 10, 10, 10)]
         self.run_test(Getitem(idx), inputs, expected_ops={acc_ops.getitem})
+
+if __name__ == '__main__':
+    run_tests()
