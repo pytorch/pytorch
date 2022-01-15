@@ -106,7 +106,7 @@ struct ShapeArguments {
   ShapeArguments(const c10::SymbolicShape& ss) {
     TORCH_INTERNAL_ASSERT(ss.rank())
     for (size_t i = 0; i < *ss.rank(); ++i) {
-      maybe_shape_symbols_.push_back(ShapeArg(ss.at(i)));
+      maybe_shape_symbols_.emplace_back(ss.at(i));
     }
   }
 
@@ -115,7 +115,7 @@ struct ShapeArguments {
   }
 
   int64_t len() {
-    return maybe_shape_symbols_.size();
+    return (int64_t) maybe_shape_symbols_.size();
   }
 
   ShapeArg at(size_t i) {
@@ -159,7 +159,7 @@ bool isListOfTensors(const TypePtr& type) {
 
 c10::optional<size_t> normIndex(int64_t index, size_t len) {
   if (index < 0) {
-    index = index + len;
+    index = index + (int64_t)len;
   }
   if (index >= 0 && index < static_cast<int64_t>(len)) {
     return index;
@@ -573,7 +573,7 @@ struct SymbolicShapeNodeAnalyzer {
     std::vector<c10::optional<int64_t>> output_shape;
     for (Value* input : list_construct->inputs()) {
       if (symbolic_shape_values.count(input)) {
-        output_shape.push_back(symbolic_shape_values[input]);
+        output_shape.emplace_back(symbolic_shape_values[input]);
       } else {
         output_shape.push_back(constant_as<int64_t>(input));
       }
@@ -708,7 +708,7 @@ struct SymbolicShapeGraphAnalyzer {
             output_index_to_symbolic_shape_[i];
       }
     }
-    for (int64_t i = erase_indices.size() - 1; i >= 0; i--) {
+    for (size_t i = erase_indices.size() - 1; i >= 0; i--) {
       stitched_shape_compute_graph->eraseOutput(erase_indices[i]);
     }
     for (size_t i = 0; i < stitched_shape_compute_graph->inputs().size();) {
