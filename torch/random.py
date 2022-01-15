@@ -4,6 +4,7 @@ import warnings
 
 from torch._C import default_generator
 import torch
+from torch.types import _int, _float
 
 
 def set_rng_state(new_state: torch.Tensor) -> None:
@@ -22,7 +23,7 @@ def get_rng_state() -> torch.Tensor:
     r"""Returns the random number generator state as a `torch.ByteTensor`."""
     return default_generator.get_state()
 
-def uniform(low: float, high: float, *size: int) -> torch.Tensor:
+def uniform(low: _float, high: _float, *size: _int) -> torch.Tensor:
 
     """
     Returns a tensor filled with numbers generated through a random uniform distribution
