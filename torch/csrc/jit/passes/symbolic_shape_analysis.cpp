@@ -110,12 +110,11 @@ struct ShapeArguments {
     }
   }
 
-  ShapeArguments(std::vector<ShapeArg> ss) {
-    maybe_shape_symbols_ = std::move(ss);
-  }
+  ShapeArguments(std::vector<ShapeArg> ss)
+      : maybe_shape_symbols_(std::move(ss)) {}
 
   int64_t len() {
-    return (int64_t) maybe_shape_symbols_.size();
+    return (int64_t)maybe_shape_symbols_.size();
   }
 
   ShapeArg at(size_t i) {
