@@ -50,11 +50,19 @@ void launch_jitted_pwise_function(
     const int nBlocks,
     const int kBlockSize);
 
+template <typename T>
+struct delayed_false : std::false_type {
+};
 
 // Defines type names
-template <typename T> inline std::string typeName() {
-    TORCH_INTERNAL_ASSERT(false, "invalid type");
-    return "void";
+template <typename T>
+inline std::string typeName() {
+  // we can't use static_assert(false) directly as the
+  // program will be ill-formed, so we use delayed `false`
+  // to make sure compiler doesn't eagerly raise
+  // this assert.
+  static_assert(delayed_false<T>::value, "invalid type for jiterator");
+  return "void";
 }
 
 #define TYPE_NAME_FN(ctype, name) \
