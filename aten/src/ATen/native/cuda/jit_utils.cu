@@ -583,9 +583,9 @@ std::string generate_code(
     bool contiguous,
     bool dynamic_casting,
     BinaryFuncVariant scalar_pos,
+    c10::SmallVector<std::string>& extra_args_typenames,
     bool vectorized,
-    int vec_size,
-    c10::SmallVector<arg_type_name_t> extra_args_name) {
+    int vec_size) {
   at::jit::TemplateEnv env;
 
   env.s("index_type", "unsigned int");
@@ -597,11 +597,11 @@ std::string generate_code(
   env.s("name", name);
   std::string function_param = "";
   std::string function_call = "";
-  for (auto arg: extra_args_name) {
-    auto type = std::string(arg.first);
-    auto name = std::string(arg.second);
-    function_param +=  "," + type + " " + name;
-    function_call +=  ", " + name;
+  for (size_t i = 0; i < extra_args_typenames.size(); i++) {
+    auto type = std::string(extra_args_typenames[i]);
+    auto name = "extra_arg_" + std::string(to_string(i));
+    function_param += "," + type + " " + name;
+    function_call += ", " + name;
   }
 
   env.s("extra_params", function_param);
@@ -800,7 +800,7 @@ NvrtcFunction jit_pwise_function(
 // TODO: may need/want to initialize CUDA context here (refactor into nvrtc call)
 void launch_jitted_pwise_function(
     NvrtcFunction function,
-    std::array<void*, 15>& args,
+    void* args[],
     const int nBlocks,
     const int kBlockSize) {
   initializeCudaContext();
@@ -817,7 +817,7 @@ void launch_jitted_pwise_function(
     1,
     0,
     stream,
-    args.data(),
+    args,
     nullptr));
 }
 

@@ -19,8 +19,6 @@
 
 namespace at { namespace cuda { namespace jit {
 
-using arg_type_name_t = std::pair<const char*, const char*>;
-
 enum class BinaryFuncVariant {NoScalar, RhsScalar, LhsScalar};
 
 struct NvrtcFunction {
@@ -38,9 +36,9 @@ std::string generate_code(
     bool contiguous,
     bool dynamic_casting,
     BinaryFuncVariant scalar_pos,
+    c10::SmallVector<std::string>& extra_args_typenames,
     bool vectorized=false,
-    int vec_size=0,
-    c10::SmallVector<arg_type_name_t> extra_args_name = {});
+    int vec_size=0);
 
 NvrtcFunction jit_pwise_function(
     const std::string& code,
@@ -48,7 +46,7 @@ NvrtcFunction jit_pwise_function(
 
 void launch_jitted_pwise_function(
     NvrtcFunction function,
-    std::array<void*, 15>& args,
+    void* args[],
     const int nBlocks,
     const int kBlockSize);
 
