@@ -8,6 +8,14 @@
 #include <ATen/code_template.h>
 #include <ATen/native/cuda/jit_utils.h>
 
+// TODO: remove
+#include <iostream>
+#include <chrono>
+#include <sstream> // might need
+#include <fstream> // might be faster to use sys/stat to state files on Linux
+#include <cstdio> // fopen
+#include <iterator> // istreambuf_iterator
+
 
 namespace at { namespace cuda { namespace jit {
 
@@ -568,6 +576,67 @@ void __inline__ initializeCudaContext() {
   }
 }
 
+// HASH STUFF TODO: refactor
+// Copied from lazy tensor
+size_t LoadHash(const uint8_t** data, const uint8_t* top) {
+  std::ptrdiff_t size = top - (*data);
+  if (size >= (int)sizeof(size_t)) {
+    size_t v;
+    std::memcpy(&v, *data, sizeof(v));
+    *data += sizeof(size_t);
+    return v;
+  }
+
+  union {
+    size_t h;
+    std::array<uint8_t, sizeof(size_t)> b;
+#ifdef _MSC_VER
+  // MSVC (or some versions we use) doesn't support C99 union field init
+  // but it initializes the first member of the union.
+  } uval = {size_t(0)};
+#else
+  } uval = {.h = size_t(0)};
+#endif
+
+  // use memcpy for compatibility with platforms not supporting unaligned access
+  // note: compiled as single `movl` instr on x64.
+  std::memcpy(uval.b.data(), *data, size);
+  *data += size;
+
+  return uval.h;
+}
+
+size_t HashBlock(const void* data, size_t n, const size_t& seed) {
+  const size_t m(static_cast<uint64_t>(0xc6a4a7935bd1e995));
+  const int r = 47;
+
+  const uint8_t* u8_data = reinterpret_cast<const uint8_t*>(data);
+  const uint8_t* top = u8_data + n;
+  size_t h(seed ^ ((uint64_t)n * m));
+
+  while (u8_data < top) {
+    size_t k = LoadHash(&u8_data, top);
+    k *= m;
+    k ^= k >> r;
+    k *= m;
+
+    h ^= k;
+    h *= m;
+  }
+
+  h ^= h >> r;
+  h *= m;
+  h ^= h >> r;
+
+  return h;
+}
+
+size_t hash(const void* data, size_t size) {
+  return HashBlock(data, size, size_t(static_cast<uint64_t>(0xc2b2ae3d27d4eb4f)));
+}
+
+// HASH STUFF
+
 //FIXME - this are defined in Loops.cuh, but including Loops.cuh here would lead to circular includes Loops.cuh -> CUDALoops.cuh -> jit_utils.h -> Loops.cuh
 #define THREAD_WORK_SIZE 4
 constexpr int thread_work_size = THREAD_WORK_SIZE;
@@ -644,11 +713,13 @@ std::string generate_code(
           "loader", std::string("LoadWithCast<" + std::to_string(nInputs) + ">"));
       env.s("storer", "StoreWithCast");
     }
+
     if (contiguous) {
       env.s("offset_calculator", "TrivialOffsetCalculator");
     } else {
       env.s("offset_calculator", "OffsetCalculator");
     }
+
     std::stringstream load_inputs;
     for (int i = 0; i < nInputs; i++) {
       auto i_string = std::to_string(i);
@@ -664,7 +735,54 @@ std::string generate_code(
                   << ">(out[j], data[0], output_offsets[0]);\n";
     env.s("store_outputs", store_outputs.str());
     static auto cuda_template = at::jit::CodeTemplate(jit_common_types + jit_code_template);
-    return cuda_template.format(env);
+    const auto code = cuda_template.format(env);
+
+    std::cout << "Generating vectorized key" << std::endl;
+    // Acquires nvrtc version
+    using CudaVersion = std::pair<int, int>;
+    CudaVersion nvrtc_version;
+    AT_CUDA_NVRTC_CHECK(
+        nvrtc().nvrtcVersion(&nvrtc_version.first, &nvrtc_version.second));
+
+    const cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+    int major = 0, minor = 0;
+    bool compile_to_sass = false;
+    codegenOutputQuery(prop, major, minor, compile_to_sass);
+
+    // Starts key construction
+    auto t_start = std::chrono::high_resolution_clock::now();
+
+    const auto hash_code = hash(code.data(), code.length());
+    std::stringstream ss;
+    ss << name << "_arch" << major << "." << minor;
+    ss << "_nvrtc" << nvrtc_version.first << "." << nvrtc_version.second;
+    ss << (compile_to_sass ? "_sass" : "_ptx");
+    ss << "_" << hash_code;
+    const auto cubin_name = ss.str();
+
+    // queries for file
+    std::stringstream file_path;
+    file_path << "~/.cache/pytorch/kernels/" << cubin_name;
+    FILE* fp = fopen(file_path.str().data(), "r");
+    if (fp == nullptr) {
+
+    } else {
+
+    }
+
+    // end of key construction
+    auto t_end = std::chrono::high_resolution_clock::now();
+    double elapsed_time_us = std::chrono::duration<double, std::micro>(t_end - t_start).count();
+    std::cout << "cubin name is : " << cubin_name << std::endl;
+    std::cout << "it took " << elapsed_time_us << " microseconds to compute and query the cubin name" << std::endl;
+    std::cout << "the file " << ((fp == nullptr) ? "did not" : "did") << " exist" << std::endl;
+
+    // std::cout << "nvrtc version is: " << nvrtc_version.first << "." << nvrtc_version.second << std::endl;
+    // std::cout << "arch is " << major << "." << minor << std::endl;
+    // std::cout << "we are compiling to " << (compile_to_sass ? "sass" : "ptx") << std::endl;
+    // std::cout << "hash_code is: " << hash_code << std::endl;
+
+    return code;
   }
 
   // vectorized case
@@ -697,90 +815,213 @@ std::string generate_code(
   env.s("load_unrolled_inputs", load_unrolled_inputs.str());
 
   static auto cuda_template = at::jit::CodeTemplate(jit_common_types + jit_vectorized_code_template);
-  return cuda_template.format(env);
+  const auto code = cuda_template.format(env);
+
+  std::cout << "Generating vectorized key" << std::endl;
+
+  // Acquires nvrtc version
+  using CudaVersion = std::pair<int, int>;
+  CudaVersion nvrtc_version;
+  AT_CUDA_NVRTC_CHECK(
+      nvrtc().nvrtcVersion(&nvrtc_version.first, &nvrtc_version.second));
+
+  const cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+  int major = 0, minor = 0;
+  bool compile_to_sass = false;
+  codegenOutputQuery(prop, major, minor, compile_to_sass);
+
+  // Starts key construction
+  auto t_start = std::chrono::high_resolution_clock::now();
+
+  const auto hash_code = hash(code.data(), code.length());
+  std::stringstream ss;
+  ss << name << "_arch" << major << "." << minor;
+  ss << "_nvrtc" << nvrtc_version.first << "." << nvrtc_version.second;
+  ss << (compile_to_sass ? "_sass" : "_ptx");
+  ss << "_" << hash_code;
+  const auto cubin_name = ss.str();
+
+  // queries for file
+  std::stringstream file_path;
+  file_path << "~/.cache/pytorch/kernels/" << cubin_name;
+  FILE* fp = fopen(file_path.str().data(), "r");
+  if (fp == nullptr) {
+
+  } else {
+
+  }
+
+
+  // end of key construction
+  auto t_end = std::chrono::high_resolution_clock::now();
+  double elapsed_time_us = std::chrono::duration<double, std::micro>(t_end - t_start).count();
+  std::cout << "cubin name is : " << cubin_name << std::endl;
+  std::cout << "it took " << elapsed_time_us << " microseconds to compute the cubin name" << std::endl;
+  std::cout << "the file " << ((fp == nullptr) ? "did not" : "did") << " exist" << std::endl;
+
+
+  // std::cout << "nvrtc version is: " << nvrtc_version.first << "." << nvrtc_version.second << std::endl;
+  // std::cout << "arch is " << major << "." << minor << std::endl;
+  // std::cout << "we are compiling to " << (compile_to_sass ? "sass" : "ptx") << std::endl;
+  // std::cout << "hash_code is: " << hash_code << std::endl;
+
+  return code;
 }
 
 // Compiles the kernel
 NvrtcFunction jit_pwise_function(
     const std::string& code,
     const std::string& kernel_name) {
-  // Acquires device and NVRTC properties (for compile arch and occupancy calculations)
-  const cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
-  int major = 0, minor = 0;
-  bool compile_to_sass = false;
-  codegenOutputQuery(prop, major, minor, compile_to_sass);
-  // Creates the NVRTC program
-  nvrtcProgram program;
-  const auto& nvrtc = at::globalContext().getNVRTC();
-  AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcCreateProgram(
-      &program, code.c_str(), nullptr, 0, nullptr, nullptr));
-  // constructs nvrtc build arguments
-#if defined(CUDA_VERSION) && CUDA_VERSION < 11010
-  // compile to sass is not allowed prior to CUDA 11.1
-  compile_to_sass = false;
-#endif
-  // CUDA 11.1 allows going directly to SASS (sm_) instead of PTX (compute_)
-  // which gives better backwards compatibility to work on older driver,
-  // (since older driver doesn't necessrily recognize PTX emitted by new
-  // toolkit);
-  // Meanwhile, for forward compatibility (future device with
-  // `unsupported_arch==True`), since SASS are not necessarily compatible,
-  // we fallback to PTX instead.
-  const std::string compute = std::string("--gpu-architecture=") +
-      (compile_to_sass ? "sm_" : "compute_") + std::to_string(major) +
-      std::to_string(minor);
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  std::vector<const char*> args = {
-      "--std=c++14", compute.c_str(), "-default-device"};
 
-#ifndef NDEBUG
-  // Add line info to generated kernels
-  args.push_back("-lineinfo");
-#else
-  // Avoid excessive register usage from assertion
-  args.push_back("-DNDEBUG");
-#endif
-  // compiles and validates result
+//   // Acquires device and NVRTC properties (for compile arch and occupancy calculations)
+//   const cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+//   int major = 0, minor = 0;
+//   bool compile_to_sass = false;
+//   codegenOutputQuery(prop, major, minor, compile_to_sass);
+//   // Creates the NVRTC program
+//   nvrtcProgram program;
+//   const auto& nvrtc = at::globalContext().getNVRTC();
+//   AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcCreateProgram(
+//       &program, code.c_str(), nullptr, 0, nullptr, nullptr));
+//   // constructs nvrtc build arguments
+// #if defined(CUDA_VERSION) && CUDA_VERSION < 11010
+//   // compile to sass is not allowed prior to CUDA 11.1
+//   compile_to_sass = false;
+// #endif
+//   // CUDA 11.1 allows going directly to SASS (sm_) instead of PTX (compute_)
+//   // which gives better backwards compatibility to work on older driver,
+//   // (since older driver doesn't necessrily recognize PTX emitted by new
+//   // toolkit);
+//   // Meanwhile, for forward compatibility (future device with
+//   // `unsupported_arch==True`), since SASS are not necessarily compatible,
+//   // we fallback to PTX instead.
+//   const std::string compute = std::string("--gpu-architecture=") +
+//       (compile_to_sass ? "sm_" : "compute_") + std::to_string(major) +
+//       std::to_string(minor);
+//   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+//   std::vector<const char*> args = {
+//       "--std=c++14", compute.c_str(), "-default-device"};
+
+//   std::cout << "compile_to_sass is " << compile_to_sass << std::endl;
+
+// #ifndef NDEBUG
+//   // Add line info to generated kernels
+//   args.push_back("-lineinfo");
+// #else
+//   // Avoid excessive register usage from assertion
+//   args.push_back("-DNDEBUG");
+// #endif
+//   // compiles and validates result
+//   initializeCudaContext();
+//   const auto compilation_result =
+//       nvrtc.nvrtcCompileProgram(program, args.size(), args.data());
+//   if (compilation_result != NVRTC_SUCCESS) {
+//     size_t logsize;
+//     AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcGetProgramLogSize(program, &logsize));
+//     std::vector<char> log(logsize);
+//     AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcGetProgramLog(program, log.data()));
+//     std::stringstream cu;
+//     cu << log.data();
+//     throw std::runtime_error(cu.str() + code);
+//   }
+//   size_t ptx_size = 0;
+//   std::vector<char> ptx;
+// #if defined(CUDA_VERSION) && CUDA_VERSION >= 11010
+//     // compile_to_sass determines whether we are generating SASS or PTX, hence
+//     // the different API.
+//     const auto getSize = compile_to_sass
+//         ? at::globalContext().getNVRTC().nvrtcGetCUBINSize
+//         : at::globalContext().getNVRTC().nvrtcGetPTXSize;
+//     const auto getFunc = compile_to_sass
+//         ? at::globalContext().getNVRTC().nvrtcGetCUBIN
+//         : at::globalContext().getNVRTC().nvrtcGetPTX;
+// #else
+//     const auto getSize = at::globalContext().getNVRTC().nvrtcGetPTXSize;
+//     const auto getFunc = at::globalContext().getNVRTC().nvrtcGetPTX;
+// #endif
+//     AT_CUDA_NVRTC_CHECK(getSize(program, &ptx_size));
+//     ptx.resize(ptx_size);
+//     AT_CUDA_NVRTC_CHECK(getFunc(program, ptx.data()));
+
+//     NvrtcFunction compiled_kernel_;
+//     AT_CUDA_DRIVER_CHECK(nvrtc.cuModuleLoadData(&(compiled_kernel_.module), ptx.data()));
+//     std::string name = kernel_name + "_kernel";
+//     AT_CUDA_DRIVER_CHECK(
+//         nvrtc.cuModuleGetFunction(&(compiled_kernel_.function), compiled_kernel_.module, name.c_str()));
+//     // TODO: use guards to avoid leaking
+//     AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcDestroyProgram(&program));
+
+// TO WRITE THE FILE CALL ONE JITERATOR KERNEL AND UNCOMMENT ALL THIS CODE (ABOVE AND THE
+// WRITE FILE BLOCK BELOW)
+
+// TO READ THE FILE RUN THE SAME PROGRAM BUT COMMENT ALL THIS OUT AND UNCOMMENT THE READ FILE
+// BLOCK BELOW
+
+//   // TODO: PROTOTYPE ONLY! Writes file
+//   auto t_start = std::chrono::high_resolution_clock::now();
+//   std::ofstream cubin("/private/home/mruberry/cubin", std::ios::out | std::ofstream::binary);
+//   std::copy(ptx.begin(), ptx.end(), std::ostreambuf_iterator<char>(cubin));
+//   // cubin << ptx.data();
+//   cubin.close();
+//   auto t_end = std::chrono::high_resolution_clock::now();
+//   double elapsed_time_us = std::chrono::duration<double, std::micro>(t_end - t_start).count();
+//   std::cout << "it took " << elapsed_time_us << " microseconds to write the cubin" << std::endl;
+
+
+  // TODO: PROTOTYPE ONLY! Reads file!
+  auto t_start = std::chrono::high_resolution_clock::now();
+  std::ifstream readin{"/private/home/mruberry/cubin", std::ios::in | std::ifstream::binary};
+  // std::istreambuf_iterator<char> iter(readin);
+  // std::copy(iter.begin(), iter.end(), std::back_inserter(buffer));
+  std::vector<char> buffer(std::istreambuf_iterator<char>(readin), {});
+  auto t_read = std::chrono::high_resolution_clock::now();
+
+  // std::cout << "buffer.size() is " << buffer.size() << std::endl;
+  // std::cout << "ptx.size() is " << ptx.size() << std::endl;
+
+  // std::cout << "first ptx character " << ptx[0] << std::endl;
+  // std::cout << "first buffer character " << buffer[0] << std::endl;
+
+  // std::cout << "last ptx character " << ptx[ptx.size() - 1] << std::endl;
+  // std::cout << "last buffer character " << buffer[buffer.size() - 1] << std::endl;
+
   initializeCudaContext();
-  const auto compilation_result =
-      nvrtc.nvrtcCompileProgram(program, args.size(), args.data());
-  if (compilation_result != NVRTC_SUCCESS) {
-    size_t logsize;
-    AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcGetProgramLogSize(program, &logsize));
-    std::vector<char> log(logsize);
-    AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcGetProgramLog(program, log.data()));
-    std::stringstream cu;
-    cu << log.data();
-    throw std::runtime_error(cu.str() + code);
-  }
-  size_t ptx_size = 0;
-  std::vector<char> ptx;
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11010
-    // compile_to_sass determines whether we are generating SASS or PTX, hence
-    // the different API.
-    const auto getSize = compile_to_sass
-        ? at::globalContext().getNVRTC().nvrtcGetCUBINSize
-        : at::globalContext().getNVRTC().nvrtcGetPTXSize;
-    const auto getFunc = compile_to_sass
-        ? at::globalContext().getNVRTC().nvrtcGetCUBIN
-        : at::globalContext().getNVRTC().nvrtcGetPTX;
-#else
-    const auto getSize = at::globalContext().getNVRTC().nvrtcGetPTXSize;
-    const auto getFunc = at::globalContext().getNVRTC().nvrtcGetPTX;
-#endif
-    AT_CUDA_NVRTC_CHECK(getSize(program, &ptx_size));
-    ptx.resize(ptx_size);
-    AT_CUDA_NVRTC_CHECK(getFunc(program, ptx.data()));
+  auto t_nvrtc = std::chrono::high_resolution_clock::now();
+  const auto& nvrtc = at::globalContext().getNVRTC();
+  NvrtcFunction compiled_kernel_;
+  AT_CUDA_DRIVER_CHECK(nvrtc.cuModuleLoadData(&(compiled_kernel_.module), buffer.data()));
+  auto t_cuModuleLoadData = std::chrono::high_resolution_clock::now();
+  std::string name = kernel_name + "_kernel";
+  auto t_name = std::chrono::high_resolution_clock::now();
+  AT_CUDA_DRIVER_CHECK(
+      nvrtc.cuModuleGetFunction(&(compiled_kernel_.function), compiled_kernel_.module, name.c_str()));
+  auto t_cuModuleGetFunction = std::chrono::high_resolution_clock::now();
+  // cubin.open("/private/home/mruberry/cubin");
+  // cubin << ptx.data();
+  // cubin.close();
+  auto t_end = std::chrono::high_resolution_clock::now();
+  double elapsed_time_us = std::chrono::duration<double, std::micro>(t_end - t_start).count();
+  std::cout << "it took " << elapsed_time_us << " microseconds to load the cubin" << std::endl;
 
-    NvrtcFunction compiled_kernel_;
-    AT_CUDA_DRIVER_CHECK(nvrtc.cuModuleLoadData(&(compiled_kernel_.module), ptx.data()));
-    std::string name = kernel_name + "_kernel";
-    AT_CUDA_DRIVER_CHECK(
-        nvrtc.cuModuleGetFunction(&(compiled_kernel_.function), compiled_kernel_.module, name.c_str()));
-    // TODO: use guards to avoid leaking
-    AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcDestroyProgram(&program));
+  double read_time = std::chrono::duration<double, std::micro>(t_read - t_start).count();
+  std::cout << "it took " << read_time << " microseconds to read the cubin" << std::endl;
 
-    return compiled_kernel_;
+  double init_time = std::chrono::duration<double, std::micro>(t_nvrtc - t_read).count();
+  std::cout << "it took " << init_time << " microseconds to init CUDA" << std::endl;
+
+  double module_load_time = std::chrono::duration<double, std::micro>(t_cuModuleLoadData - t_nvrtc).count();
+  std::cout << "it took " << module_load_time << " microseconds to load the module" << std::endl;
+
+  double string_time = std::chrono::duration<double, std::micro>(t_name - t_cuModuleLoadData).count();
+  std::cout << "it took " << string_time << " microseconds to create the string" << std::endl;
+
+  double function_time = std::chrono::duration<double, std::micro>(t_cuModuleGetFunction - t_name).count();
+  std::cout << "it took " << function_time << " microseconds to get the function" << std::endl;
+
+// return compiled_kernel_;
+
+
+  return compiled_kernel_;
 }
 
 // TODO: may need/want to initialize CUDA context here (refactor into nvrtc call)
