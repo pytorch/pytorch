@@ -3204,9 +3204,6 @@ class TestPassManagerCudaFuser(JitTestCase):
         self.assertTrue(torch._C._jit_set_nvfuser_enabled(False))
         self.assertFalse(torch._C._jit_nvfuser_enabled())
 
-_tracing_ops = partial(ops, dtypes=OpDTypes.supported,
-                       allowed_dtypes=(torch.float, torch.cfloat))
-
 class TestCudaFuserOpInfo(JitCommonTestCase):
     def setUp(self):
         self.nvfuser_single_node_mode = torch._C._jit_set_nvfuser_single_node_mode(True)
@@ -3215,7 +3212,7 @@ class TestCudaFuserOpInfo(JitCommonTestCase):
         torch._C._jit_set_nvfuser_single_node_mode(self.nvfuser_single_node_mode)
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
-    @_tracing_ops(op_db)
+    @(op_db, dtypes=OpDTypes.supported)
     def test_nvfuser_correctness(self, device, dtype, op):
         variant_sample_pairs = get_traced_sample_variant_pairs(device, dtype, op)
 
