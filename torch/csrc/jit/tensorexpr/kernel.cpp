@@ -322,16 +322,6 @@ ExprHandle TensorExprKernel::constant(const torch::jit::Value* v) {
   return scalars_.at(v);
 }
 
-ExprHandle TensorExprKernel::tensorOrConstant(
-    const torch::jit::Value* v,
-    const std::vector<ExprHandle>& axes) {
-  auto ti = bufs_.find(v);
-  if (ti != bufs_.end()) {
-    return broadcast(BufHandle(ti->second), axes);
-  }
-  return constant(v);
-}
-
 ArgValue TensorExprKernel::toArg(const torch::jit::Value* v) const {
   auto vi = scalars_.find(v);
   if (vi != scalars_.end()) {
