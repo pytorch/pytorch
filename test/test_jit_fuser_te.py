@@ -80,9 +80,6 @@ def inline_fusion_groups():
     finally:
         torch._C._debug_set_fusion_group_inlining(old_inlining)
 
-_tracing_ops = partial(ops, dtypes=OpDTypes.supported,
-                       allowed_dtypes=(torch.float, torch.cfloat))
-
 class TestTEFuser(JitTestCase):
     def setUp(self):
         self.tensorexpr_options = TensorExprTestOptions()
@@ -2289,7 +2286,7 @@ def f({', '.join(param_names)}):
             raise RuntimeError("Expected test to fail. If it now works, move op into works_list")
 
     @onlyCPU
-    @_tracing_ops(op_db)
+    @ops(op_db, dtypes=OpDTypes.supported)
     def test_nnc_correctness(self, device, dtype, op):
         variant_sample_pairs = get_traced_sample_variant_pairs(device, dtype, op)
 
