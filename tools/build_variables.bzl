@@ -1056,6 +1056,7 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/BinaryOpsKernel.cpp",
     "aten/src/ATen/native/cpu/BlasKernel.cpp",
     "aten/src/ATen/native/cpu/CatKernel.cpp",
+    "aten/src/ATen/native/cpu/ChannelShuffleKernel.cpp",
     "aten/src/ATen/native/cpu/ComplexKernel.cpp",
     "aten/src/ATen/native/cpu/CopyKernel.cpp",
     "aten/src/ATen/native/cpu/CrossKernel.cpp",

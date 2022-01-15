@@ -10,17 +10,13 @@ namespace native {
 
 DEFINE_DISPATCH(max_pool1d_stub);
 
-namespace {
-
-Tensor max_pool1d_impl(
+Tensor _max_pool1d_cpu_forward(
     const Tensor& self,
     IntArrayRef kernel_size,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef dilation,
     bool ceil_mode) {
-  NoNamesGuard guard;
-
   TORCH_CHECK(
       self.dim() == 2 || self.dim() == 3,
       "max_pool1d() Expected 2D or 3D input tensor, but got ", self.sizes());
@@ -82,13 +78,8 @@ Tensor max_pool1d_impl(
     output.squeeze_(0);
   }
 
-  guard.reset();
-  namedinference::propagate_names(output, self);
-
   return output;
 }
-
-} // namespace
 
 Tensor max_pool1d(
     const Tensor& self,
@@ -107,8 +98,14 @@ Tensor max_pool1d(
     return std::get<0>(at::max_pool1d_with_indices(
         self, kernel_size, stride, padding, dilation, ceil_mode));
   }
-  return max_pool1d_impl(
-      self, kernel_size, stride, padding, dilation, ceil_mode);
+
+  Tensor result = [&]() {
+    NoNamesGuard guard;
+    return at::_max_pool1d_cpu_forward(
+        self, kernel_size, stride, padding, dilation, ceil_mode);
+  }();
+  namedinference::propagate_names(result, self);
+  return result;
 }
 
 } // namespace native
