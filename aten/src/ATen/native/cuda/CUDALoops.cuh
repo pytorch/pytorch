@@ -181,7 +181,7 @@ static inline void launch_jitted_unrolled_kernel(
       c10::SmallVector<std::string> extra_args_types = get_extra_args_typenames<Args...>();
       auto code = at::cuda::jit::generate_code(nTensors, f, string_name,
                                                f_inputs_type_str, compute_type_str, result_type_str,
-                                               contiguous, dynamic_casting, scalar_pos, extra_args_types, false, 0);
+                                               contiguous, dynamic_casting, scalar_pos, extra_args_types);
       *fn_ptr = at::cuda::jit::jit_pwise_function(code, name);
     }
   }
