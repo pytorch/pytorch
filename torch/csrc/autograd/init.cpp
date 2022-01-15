@@ -11,6 +11,7 @@
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/record_function.h>
 #include <torch/csrc/autograd/profiler.h>
+#include <torch/csrc/autograd/profiler_python.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/saved_variable.h>
@@ -18,6 +19,7 @@
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/autograd/utils/python_arg_parsing.h>
 #include <torch/csrc/autograd/python_mode.h>
+#include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <c10/core/ScalarType.h>
 
@@ -81,7 +83,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .def(py::init<ProfilerState,
           bool, /* record_input_shapes */
           bool, /* profile_memory */
-          bool, /* with_stac k*/
+          bool, /* with_stack */
           bool, /* with_flops */
           bool  /* with_modules */
           >());
@@ -235,23 +237,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
         py::arg("scopes") = std::unordered_set<at::RecordScope>());
   m.def("_disable_profiler", disableProfiler);
   m.def("_prepare_profiler", prepareProfiler);
-
-  m.def("_add_metadata_json", [](const std::string& key, const std::string& value) {
-#ifdef USE_KINETO
-      addMetadataJson(key, value);
-#else
-      LOG(WARNING) << "Adding profiling metadata requires using "
-                   << "torch.profiler with Kineto support (USE_KINETO=1)";
-#endif // USE_KINETO
-  });
-
-  m.def("kineto_available", []() {
-#ifdef USE_KINETO
-    return true;
-#else
-    return false;
-#endif
-  });
+  m.def("_add_metadata_json", addMetadataJson);  // Only if `USE_KINETO` is set
+  m.def("kineto_available", []() { return torch::profiler::kKinetoAvailable; });
 
   // NOTICE: These record functions are not torch operators and may not show up
   // in TorchScript tracing, FX transforms, or operator serialization. For these
@@ -316,11 +303,16 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   m.def("_clear_callbacks", []() {
     at::clearCallbacks();
   });
-  m.def("_register_saved_tensors_default_hooks", [](py::function &pack_hook, py::function &unpack_hook) {
-    torch::autograd::PyDefaultSavedVariableHooks::set_hooks(pack_hook, unpack_hook);
+  m.def("_push_saved_tensors_default_hooks", [](py::function &pack_hook, py::function &unpack_hook) {
+    torch::autograd::PyDefaultSavedVariableHooks::push_hooks(pack_hook, unpack_hook);
   });
-  m.def("_reset_saved_tensors_default_hooks", []() {
-    torch::autograd::PyDefaultSavedVariableHooks::reset_hooks();
+  m.def("_pop_saved_tensors_default_hooks", []() {
+    torch::autograd::PyDefaultSavedVariableHooks::pop_hooks();
+  });
+
+  _C_m.def("_register_py_class_for_device", [](const std::string& device, py::object python_type_class) {
+    auto cls = python_type_class.ptr();
+    registerPythonTensorClass(device, cls);
   });
 
   py::class_<c10::InferenceMode>(_C_m, "_InferenceMode")
@@ -338,6 +330,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
         s.register_hooks(std::make_unique<torch::autograd::PySavedVariableHooks>(pack_hook, unpack_hook));
     });
 
+  torch::autograd::profiler::python_tracer::init();
   Py_RETURN_TRUE;
 }
 

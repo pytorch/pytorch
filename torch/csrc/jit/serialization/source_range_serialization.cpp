@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
 #include <torch/csrc/jit/serialization/source_range_serialization_impl.h>
 
+#include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 
 namespace torch {
@@ -24,7 +25,7 @@ class SourceRangeSerializer {
 };
 
 SourceRange SourceRangeDeserializer::deserialize(const c10::IValue& iv) {
-  const auto& tup_elems = iv.toTuple()->elements();
+  const auto& tup_elems = iv.toTupleRef().elements();
   TORCH_INTERNAL_ASSERT(tup_elems.size() == 3);
   std::shared_ptr<SourceView> source_ = deserialize_source(tup_elems[0]);
   int64_t start_ = tup_elems[1].toInt();
@@ -53,9 +54,8 @@ std::shared_ptr<SourceView> SourceRangeDeserializer::deserialize_source(
 }
 
 c10::IValue SourceRangeSerializer::serialize(const SourceRange& sr) {
-  std::vector<c10::IValue> elements = {
-      serialize_source(sr.source()), (int64_t)sr.start(), (int64_t)sr.end()};
-  return c10::ivalue::Tuple::create(std::move(elements));
+  return c10::ivalue::Tuple::create(
+      serialize_source(sr.source()), (int64_t)sr.start(), (int64_t)sr.end());
 }
 
 c10::IValue SourceRangeSerializer::serialize_source(
@@ -63,13 +63,13 @@ c10::IValue SourceRangeSerializer::serialize_source(
   if (serialized_sources.count(s)) {
     return serialized_sources.at(s);
   }
-  std::vector<c10::IValue> elements;
+  c10::intrusive_ptr<c10::ivalue::Tuple> serialized;
   if (s == nullptr) {
-    elements = {"", "", 0};
+    serialized = c10::ivalue::Tuple::create({"", "", 0});
   } else {
-    elements = {s->text(), s->filename(), (int64_t)s->starting_line_no()};
+    serialized = c10::ivalue::Tuple::create(
+        {s->text(), s->filename(), (int64_t)s->starting_line_no()});
   }
-  auto serialized = c10::ivalue::Tuple::create(std::move(elements));
   serialized_sources[s] = serialized;
   return serialized;
 }
@@ -86,11 +86,10 @@ std::vector<char> SourceRangePickler::pickle(
     if (it != source_range_tags.end()) {
       source_range_tag = it->second;
     }
-    std::vector<c10::IValue> row_elems{
-        (int64_t)range.bytes,
-        srs->serialize(range.range),
-        static_cast<int64_t>(source_range_tag)};
-    ivalues.emplace_back(c10::ivalue::Tuple::create(std::move(row_elems)));
+    ivalues.emplace_back(c10::ivalue::Tuple::create(
+        {(int64_t)range.bytes,
+         srs->serialize(range.range),
+         static_cast<int64_t>(source_range_tag)}));
   }
   std::vector<at::Tensor> table;
   auto ivalue = c10::ivalue::Tuple::create(std::move(ivalues));
@@ -113,13 +112,18 @@ void ConcreteSourceRangeUnpickler::unpickle() {
     return;
   }
 
-  auto ivaluesTuple =
-      jit::unpickle(reinterpret_cast<const char*>(data.get()), size).toTuple();
+  auto ivaluesTuple = jit::unpickle(
+                          reinterpret_cast<const char*>(data.get()),
+                          size,
+                          nullptr,
+                          {},
+                          c10::parseType)
+                          .toTuple();
   const auto& ivalues = ivaluesTuple->elements();
 
   unpickled_records = std::make_shared<SourceRangeRecords>();
   for (auto& val : ivalues) {
-    const auto& tup_elems = val.toTuple()->elements();
+    const auto& tup_elems = val.toTupleRef().elements();
     int64_t offset = tup_elems[kByteOffsetIndex].toInt();
     auto source_range = deserializer->deserialize(tup_elems[kSourceRangeIndex]);
     unpickled_records->emplace_back(offset, std::move(source_range));

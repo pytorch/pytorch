@@ -221,7 +221,7 @@ Tensor align_to(const Tensor& tensor, DimnameList order, int64_t ellipsis_idx) {
   };
 
   // Fill in the non-ellipsis dimensions
-  for (const auto order_idx : c10::irange(0U, order.size())) {
+  for (const auto order_idx : c10::irange(static_cast<int64_t>(order.size()))) {
     auto out_idx = order_idx;
     if (order_idx >= ellipsis_idx) {
       out_idx = order_idx + num_ellipsis_names;
@@ -318,6 +318,9 @@ Tensor index_add(const Tensor& self, Dimname dim, const Tensor& index, const Ten
   reportNYIDimnameOverload("index_add");
 }
 Tensor& index_add_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source, const Scalar &alpha) {
+  reportNYIDimnameOverload("index_add");
+}
+Tensor& index_add_out(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source, const Scalar& alpha, Tensor& result) {
   reportNYIDimnameOverload("index_add");
 }
 Tensor index_fill(const Tensor& self, Dimname dim, const Tensor& index, const Scalar& source) {

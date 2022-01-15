@@ -284,7 +284,7 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, FunctionCtx, _Hook
     @staticmethod
     def backward(ctx: Any, *grad_outputs: Any) -> Any:
         r"""Defines a formula for differentiating the operation with backward mode
-        automatic differentiation.
+        automatic differentiation (alias to the vjp function).
 
         This function is to be overridden by all subclasses.
 

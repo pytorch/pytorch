@@ -153,9 +153,7 @@ void quantize_vec(
 
 template <typename T>
 TORCH_API float dequantize_val(double scale, int64_t zero_point, T value) {
-  // We need to convert the qint8 value to float to ensure the subtraction
-  // subexpression returns a float
-  return (static_cast<float>(value.val_) - zero_point) * scale;
+  return static_cast<float>(scale) * (value.val_ - static_cast<int32_t>(zero_point));
 }
 #endif // USE_FBGEMM
 

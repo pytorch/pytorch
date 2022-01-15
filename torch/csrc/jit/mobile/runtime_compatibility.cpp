@@ -1,8 +1,10 @@
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/core/type_factory.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/mobile/runtime_compatibility.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/runtime/operator.h>
+#include <torch/custom_class.h>
 #include <unordered_map>
 
 namespace c10 {
@@ -11,10 +13,21 @@ TypePtr parseType(const std::string& pythonStr);
 
 namespace torch {
 namespace jit {
-const std::unordered_map<std::string, c10::TypePtr>& string_to_type_lut();
 
 uint64_t _get_runtime_bytecode_version() {
   return caffe2::serialize::kMaxSupportedBytecodeVersion;
+}
+
+std::pair<uint64_t, uint64_t> _get_runtime_bytecode_min_max_versions() {
+  return std::pair<uint64_t, uint64_t>(
+      caffe2::serialize::kMinSupportedBytecodeVersion,
+      caffe2::serialize::kMaxSupportedBytecodeVersion);
+}
+
+std::pair<uint64_t, uint64_t> _get_runtime_operators_min_max_versions() {
+  return std::pair<uint64_t, uint64_t>(
+      caffe2::serialize::kMinSupportedFileFormatVersion,
+      caffe2::serialize::kMaxSupportedFileFormatVersion);
 }
 
 /*
@@ -56,14 +69,15 @@ std::unordered_map<std::string, OperatorInfo> _get_runtime_ops_and_info() {
 
 RuntimeCompatibilityInfo RuntimeCompatibilityInfo::get() {
   return RuntimeCompatibilityInfo{
-      _get_runtime_bytecode_version(),
+      _get_runtime_bytecode_min_max_versions(),
       _get_runtime_ops_and_info(),
-      _get_mobile_supported_types()};
+      _get_mobile_supported_types(),
+      _get_runtime_operators_min_max_versions()};
 }
 
 std::unordered_set<std::string> _get_mobile_supported_types() {
   std::unordered_set<std::string> supported_types;
-  for (const auto& it : string_to_type_lut()) {
+  for (const auto& it : c10::DynamicTypeFactory::basePythonTypes()) {
     supported_types.insert(it.first);
   }
   supported_types.insert(
@@ -74,6 +88,10 @@ std::unordered_set<std::string> _get_mobile_supported_types() {
       at::TypeParser::getCustomType().end());
 
   return supported_types;
+}
+
+TORCH_API std::unordered_set<std::string> _get_loaded_custom_classes() {
+  return torch::getAllCustomClassesNames();
 }
 
 } // namespace jit

@@ -7,14 +7,14 @@ namespace torch {
 
 struct THPVoidTensor {
   PyObject_HEAD
-  THVoidTensor *cdata;
+  c10::TensorImpl *cdata;
   char device_type;
   char data_type;
 };
 
 struct THPVoidStorage {
   PyObject_HEAD
-  THVoidStorage *cdata;
+  c10::StorageImpl *cdata;
 };
 
 } // namespace torch

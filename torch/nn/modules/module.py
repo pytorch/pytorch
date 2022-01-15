@@ -225,6 +225,10 @@ class Module:
     Submodules assigned in this way will be registered, and will have their
     parameters converted too when you call :meth:`to`, etc.
 
+    .. note::
+        As per the example above, an ``__init__()`` call to the parent class
+        must be made before assignment on the child.
+
     :ivar training: Boolean represents whether this module is in training or
                     evaluation mode.
     :vartype training: bool
@@ -1662,7 +1666,7 @@ class Module:
             memo: a memo to store the set of modules already added to the result
             prefix: a prefix that will be added to the name of the module
             remove_duplicate: whether to remove the duplicated module instances in the result
-            or not
+                or not
 
         Yields:
             (string, Module): Tuple of name and module

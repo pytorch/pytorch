@@ -51,6 +51,17 @@ Logger::Logger(std::shared_ptr<c10d::Reducer> reducer) {
   ddp_logging_data_ = std::make_unique<at::DDPLoggingData>();
 }
 
+std::once_flag log_graph_static_flag;
+
+void Logger::log_if_graph_static(bool is_static) {
+  std::call_once(log_graph_static_flag, [this, is_static]() {
+    ddp_logging_data_->ints_map["can_set_static_graph"] = is_static;
+    // It is useful to report the iteration that training finished at.
+    ddp_logging_data_->ints_map["iteration"] = reducer_->num_iterations_;
+    at::LogPyTorchDDPUsage(*ddp_logging_data_);
+  });
+}
+
 // Environment variables
 void Logger::set_env_variables() {
   ddp_logging_data_->strs_map["master_port"] = parse_env("MASTER_PORT");
@@ -264,6 +275,11 @@ void Logger::set_runtime_stats_and_log() {
   // If unused_parameters_ is not empty, calculate its sizes.
   // unused_parameters_ is calculated in forward call of
   // each iteration.
+  if (reducer_->unused_parameters_.size() == 0 &&
+      reducer_->find_unused_parameters_) {
+    // No unused params in this iteration
+    ddp_logging_data_->ints_map["unused_parameter_size"] = 0;
+  }
   for (const auto& unused_index : reducer_->unused_parameters_) {
     const auto& v = reducer_->params_[unused_index];
     ddp_logging_data_->ints_map["unused_parameter_size"] +=

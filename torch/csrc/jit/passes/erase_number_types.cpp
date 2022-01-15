@@ -4,6 +4,8 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 
+#include <ATen/ScalarOps.h>
+
 namespace torch {
 namespace jit {
 
@@ -40,6 +42,7 @@ void EraseNumberTypesOnBlock(Block* block) {
           WithInsertPoint guard(*it);
           Value* r = block->owningGraph()->insertConstant(
               scalar_to_tensor(s), c10::nullopt, it->scope());
+          r->copyMetadata(it->output());
           it->output()->replaceAllUsesWith(r);
           it.destroyCurrent();
         }

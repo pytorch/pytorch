@@ -1,8 +1,7 @@
 #pragma once
-#include <ATen/ATen.h>
+#include <ATen/core/TensorBase.h>
 #include <ATen/ceil_div.h>
 #include <ATen/NumericUtils.h>
-#include <ATen/native/SortingUtils.h>
 #include <assert.h>
 #include <c10/macros/Macros.h>
 #include <stdlib.h>
@@ -113,9 +112,9 @@ static uint64_t nextHighestPowerOf2(uint64_t n) {
 // WARNING: This function assumes input tensors are contiguous
 template <typename scalar_t, typename index_t, typename Launcher>
 void run_launcher(
-    Tensor& values,
-    Tensor& indices,
-    const Tensor& self,
+    const TensorBase &values,
+    const TensorBase &indices,
+    const TensorBase &self,
     int64_t dim,
     Launcher l) {
   auto self_info = cuda::detail::getTensorInfo<scalar_t, index_t>(self);

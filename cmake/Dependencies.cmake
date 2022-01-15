@@ -229,6 +229,10 @@ elseif(BLAS STREQUAL "vecLib")
   set(BLAS_INFO "veclib")
   set(BLAS_FOUND 1)
   set(BLAS_LIBRARIES ${vecLib_LINKER_LIBS})
+elseif(BLAS STREQUAL "FlexiBLAS")
+  find_package(FlexiBLAS REQUIRED)
+  include_directories(SYSTEM ${FlexiBLAS_INCLUDE_DIR})
+  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS ${FlexiBLAS_LIB})
 elseif(BLAS STREQUAL "Generic")
   # On Debian family, the CBLAS ABIs have been merged into libblas.so
   find_library(BLAS_LIBRARIES blas)
@@ -243,9 +247,10 @@ endif()
 
 if(NOT INTERN_BUILD_MOBILE)
   set(AT_MKL_ENABLED 0)
+  set(AT_MKL_SEQUENTIAL 0)
   set(AT_MKL_MT 0)
   set(USE_BLAS 1)
-  if(NOT (ATLAS_FOUND OR BLIS_FOUND OR GENERIC_BLAS_FOUND OR MKL_FOUND OR OpenBLAS_FOUND OR VECLIB_FOUND))
+  if(NOT (ATLAS_FOUND OR BLIS_FOUND OR GENERIC_BLAS_FOUND OR MKL_FOUND OR OpenBLAS_FOUND OR VECLIB_FOUND OR FlexiBLAS_FOUND))
     message(WARNING "Preferred BLAS (" ${BLAS} ") cannot be found, now searching for a general BLAS library")
     find_package(BLAS)
     if(NOT BLAS_FOUND)
@@ -254,9 +259,8 @@ if(NOT INTERN_BUILD_MOBILE)
   endif()
 
   if(MKL_FOUND)
-    add_definitions(-DTH_BLAS_MKL)
     if("${MKL_THREADING}" STREQUAL "SEQ")
-      add_definitions(-DTH_BLAS_MKL_SEQ=1)
+      set(AT_MKL_SEQUENTIAL 1)
     endif()
     if(MSVC AND MKL_LIBRARIES MATCHES ".*libiomp5md\\.lib.*")
       add_definitions(-D_OPENMP_NOFORCE_MANIFEST)
@@ -1043,7 +1047,7 @@ if(BUILD_PYTHON)
 
   # These should fill in the rest of the variables, like versions, but resepct
   # the variables we set above
-  set(Python_ADDITIONAL_VERSIONS ${PYTHON_VERSION} 3.8 3.7 3.6)
+  set(Python_ADDITIONAL_VERSIONS ${PYTHON_VERSION} 3.8 3.7)
   find_package(PythonInterp 3.0)
   find_package(PythonLibs 3.0)
 
@@ -1051,9 +1055,9 @@ if(BUILD_PYTHON)
     message(FATAL_ERROR
       "Found Python libraries version ${PYTHONLIBS_VERSION_STRING}. Python 2 has reached end-of-life and is no longer supported by PyTorch.")
   endif()
-  if(${PYTHONLIBS_VERSION_STRING} VERSION_LESS 3.6)
+  if(${PYTHONLIBS_VERSION_STRING} VERSION_LESS 3.7)
     message(FATAL_ERROR
-      "Found Python libraries version ${PYTHONLIBS_VERSION_STRING}. Python 3.5 is no longer supported by PyTorch.")
+      "Found Python libraries version ${PYTHONLIBS_VERSION_STRING}. Python 3.6 is no longer supported by PyTorch.")
   endif()
 
   # When building pytorch, we pass this in directly from setup.py, and
@@ -1618,6 +1622,12 @@ if(NOT INTERN_BUILD_MOBILE)
     set(CMAKE_CXX_STANDARD 14)
   endif()
 
+  # use cub in a safe manner, see:
+  # https://github.com/pytorch/pytorch/pull/55292
+  if(NOT ${CUDA_VERSION} LESS 11.5)
+    string(APPEND CMAKE_CUDA_FLAGS " -DCUB_WRAPPED_NAMESPACE=at_cuda_detail")
+  endif()
+
   if(CUDA_HAS_FP16 OR NOT ${CUDA_VERSION} LESS 7.5)
     message(STATUS "Found CUDA with FP16 support, compiling with torch.cuda.HalfTensor")
     string(APPEND CMAKE_CUDA_FLAGS " -DCUDA_HAS_FP16=1"
@@ -1735,6 +1745,7 @@ if(NOT INTERN_BUILD_MOBILE)
   endif()
 
   find_package(VSX) # checks VSX
+  find_package(ZVECTOR) # checks ZVECTOR
   # checks AVX and AVX2. Already called once in MiscCheck.cmake. Called again here for clarity --
   # cached results will be used so no extra overhead.
   find_package(AVX)
@@ -1985,3 +1996,6 @@ if(USE_KINETO)
     message(STATUS "Configured Kineto")
   endif()
 endif()
+
+# Include google/FlatBuffers
+include(${CMAKE_CURRENT_LIST_DIR}/FlatBuffers.cmake)

@@ -120,7 +120,7 @@ private:
 
   std::vector<FunctionSignature> signatures_;
   std::string function_name;
-  ssize_t max_args;
+  size_t max_args;
   bool traceable;
 };
 
@@ -135,9 +135,9 @@ struct PYBIND11_EXPORT FunctionSignature {
   std::string name;
   std::vector<FunctionParameter> params;
   std::vector<py::handle> overloaded_args;
-  ssize_t min_args;
-  ssize_t max_args;
-  ssize_t max_pos_args;
+  size_t min_args;
+  size_t max_args;
+  size_t max_pos_args;
   int index;
   bool hidden;
   bool deprecated;
