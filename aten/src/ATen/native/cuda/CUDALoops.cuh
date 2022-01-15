@@ -182,31 +182,24 @@ static inline void launch_jitted_unrolled_kernel(
     }
   }
 
-  // packs args
-  std::array<void*, 14> args = {
-    (void*)&N,
-    (void*)&data,
-    (void*)&ic,
-    (void*)&oc,
-    (void*)&l,
-    (void*)&s,
-    (void*)&scalar_val,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr
-  };
-
+  // pack args for kernel launch
   auto extra_args_array = parameter_pack_to_array<void*>(extra_args...);
+  constexpr int kernel_args = 7;
+  void* args[kernel_args + extra_args_array.size()];
+  args[0] = static_cast<void*>(&N);
+  args[1] = static_cast<void*>(&data);
+  args[2] = static_cast<void*>(&ic);
+  args[3] = static_cast<void*>(&oc);
+  args[4] = static_cast<void*>(&l);
+  args[5] = static_cast<void*>(&s);
+  args[6] = static_cast<void*>(&scalar_val);
+
   for (int i = 0; i < extra_args_array.size(); i++) {
     // since 7 slots are already filled in `args`
     args[i + 7] = extra_args_array[i];
   }
 
-  at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args.data(), grid, num_threads());
+  at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args, grid, num_threads());
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
@@ -269,25 +262,19 @@ at::opmath_type<f_inputs_type> scalar_val, Args... extra_args) {
   auto extra_args_array = parameter_pack_to_array<void*>(extra_args...);
 
   if (vectorized) {
-    std::array<void*, 10> args = {
-      (void*)&N,
-      (void*)&data,
-      (void*)&scalar_val,
-      nullptr,
-      nullptr,
-      nullptr,
-      nullptr,
-      nullptr,
-      nullptr,
-      nullptr
-    };
+    // pack args for kernel launch
+    constexpr int kernel_args = 3;
+    void* args[kernel_args + extra_args_array.size()];
+    args[0] = static_cast<void*>(&N);
+    args[1] = static_cast<void*>(&data);
+    args[2] = static_cast<void*>(&scalar_val);
 
     for (int i = 0; i < extra_args_array.size(); i++) {
       // since 3 slots are already filled in `args`
       args[i + 3] = extra_args_array[i];
     }
 
-    at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args.data(), grid, num_threads());
+    at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args, grid, num_threads());
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     auto ic = TrivialOffsetCalculator<arity>();
@@ -295,28 +282,22 @@ at::opmath_type<f_inputs_type> scalar_val, Args... extra_args) {
     auto l = memory::LoadWithoutCast();
     auto s = memory::StoreWithoutCast();
 
-    std::array<void*, 14> args = {
-      (void*)&N,
-      (void*)&data,
-      (void*)&ic,
-      (void*)&oc,
-      (void*)&l,
-      (void*)&s,
-      (void*)&scalar_val,
-      nullptr,
-      nullptr,
-      nullptr,
-      nullptr,
-      nullptr,
-      nullptr,
-      nullptr
-    };
+    // pack args for kernel launch
+    constexpr int kernel_args = 7;
+    void* args[kernel_args + extra_args_array.size()];
+    args[0] = static_cast<void*>(&N);
+    args[1] = static_cast<void*>(&data);
+    args[2] = static_cast<void*>(&ic);
+    args[3] = static_cast<void*>(&oc);
+    args[4] = static_cast<void*>(&l);
+    args[5] = static_cast<void*>(&s);
+    args[6] = static_cast<void*>(&scalar_val);
 
     for (int i = 0; i < extra_args_array.size(); i++) {
       // since 7 slots are already filled in `args`
       args[i + 7] = extra_args_array[i];
     }
-    at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args.data(), grid, num_threads());
+    at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args, grid, num_threads());
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 
