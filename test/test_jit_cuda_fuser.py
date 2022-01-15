@@ -25,7 +25,6 @@ import itertools
 import numpy as np
 import math
 
-from functools import partial
 from typing import List
 
 CUDA_MAJOR, CUDA_MINOR = (int(x) for x in torch.version.cuda.split('.'))

@@ -32,7 +32,6 @@ from torch.testing._internal.common_device_type import ops, onlyCPU, instantiate
 from torch.testing._internal.common_jit import JitCommonTestCase
 from torch.testing._internal.jit_metaprogramming_utils import create_traced_fn
 
-from functools import partial
 from textwrap import dedent
 from itertools import product, permutations
 
