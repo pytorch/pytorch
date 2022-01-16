@@ -2301,9 +2301,12 @@ Tensor &frobenius_norm_out(const Tensor& self,
     maybe_wrap_dims(dim_, self.dim());
     TORCH_CHECK(dim_[0] != dim_[1], "Expected dims to be different, got ", dim, " instead");
     if (self.is_complex()){
-      result_ = at::sqrt(at::sum(at::real(self.conj() * self), dim_, keepdim));
+      // Dont call sqrt if sum() is zero since it will produce nan with autograd.
+      auto sum = at::sum(at::real(self.conj() * self), dim_, keepdim);
+      result_ = sum.is_nonzero() ? at::sqrt(sum) : sum;
     } else {
-      result_ = at::sqrt(at::sum((self * self), dim_, keepdim));
+      auto sum = at::sum((self * self), dim_, keepdim);
+      result_ = sum.is_nonzero() ? at::sqrt(sum) : sum;
     }
   }
   // NOTE: It would be better to avoid resize and copy by using norm_out and sqrt_out above.
