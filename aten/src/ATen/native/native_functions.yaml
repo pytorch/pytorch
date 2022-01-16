@@ -9240,6 +9240,7 @@
   python_module: nn
   structured: True
   precomputed:
+  - int numBatch, int numPlanes, int inputT, int inputH, int inputW
   - kernel_size -> int poolSizeT, int poolSizeH, int poolSizeW
   - output_size -> int outputT, int outputH, int outputW
   dispatch:
