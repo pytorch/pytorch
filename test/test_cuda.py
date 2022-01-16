@@ -3397,8 +3397,9 @@ torch.cuda.synchronize()
 
     @unittest.skipIf((not TEST_CUDA) or
                      TEST_WITH_ROCM or
-                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
-    @unittest.skipIf(int(torch.version.cuda.split(".")[1]) < 4,
+                     int(torch.version.cuda.split(".")[0]) < 11 or
+                     (int(torch.version.cuda.split(".")[0]) == 11 and
+                      int(torch.version.cuda.split(".")[1]) < 4),
                      "Graph bindings disallow concurrent replay for CUDA < 11.4, see " +
                      "https://github.com/pytorch/pytorch/pull/57556")
     def test_graph_concurrent_replay(self):
