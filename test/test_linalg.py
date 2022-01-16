@@ -1282,26 +1282,13 @@ class TestLinalg(TestCase):
             torch.kron(a, b, out=out)
 
     def test_matrix_norm_backward_zero(self, device):
-        from torchviz import make_dot
-
         a = torch.zeros(3, 3, requires_grad=True, device=device)
-        aa = torch.linalg.matrix_norm(a)
-        # aa.backward()
-
-        make_dot(aa, show_attrs=True, show_saved=True).render("graph", format="png")
-
+        torch.linalg.matrix_norm(a).backward()
         self.assertEqual(a.grad, torch.zeros(3, 3, device=device))
 
     def test_fro_norm_backward_zero(self, device):
-        from torchviz import make_dot
-
         a = torch.zeros(3, 3, requires_grad=True, device=device)
-        aa = torch.linalg.norm(a, 'fro')
-        # aa.backward()
-
-
-        make_dot(aa, show_attrs=True, show_saved=True).render("graph_frob", format="png")
-
+        aa = torch.linalg.norm(a, 'fro').backward()
         self.assertEqual(a.grad, torch.zeros(3, 3, device=device))
 
     # This test confirms that torch.linalg.norm's dtype argument works
