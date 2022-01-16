@@ -2303,10 +2303,10 @@ Tensor &frobenius_norm_out(const Tensor& self,
     if (self.is_complex()){
       // Dont call sqrt if sum() is zero since it will produce nan with autograd.
       auto sum = at::sum(at::real(self.conj() * self), dim_, keepdim);
-      result_ = sum.is_nonzero() ? at::sqrt(sum) : sum;
+      result_ = (sum.count_nonzero() > 0).item<bool>() ? at::sqrt(sum) : sum;
     } else {
       auto sum = at::sum((self * self), dim_, keepdim);
-      result_ = sum.is_nonzero() ? at::sqrt(sum) : sum;
+      result_ = (sum.count_nonzero() > 0).item<bool>() ? at::sqrt(sum) : sum;
     }
   }
   // NOTE: It would be better to avoid resize and copy by using norm_out and sqrt_out above.
