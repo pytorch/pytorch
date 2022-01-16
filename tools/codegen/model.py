@@ -1618,8 +1618,8 @@ class Precompute:
         replace = {}
         for raw_replace_item in src:
             assert isinstance(raw_replace_item, str)
-            assert ' -> ' in raw_replace_item, 'precomputed parameters with no replacement' \
-                                                'are allowed only in the first line'
+            assert ' -> ' in raw_replace_item, 'precomputed parameters without replacement' \
+                                               ' are allowed only in the first line'
 
             arg, with_list_raw = raw_replace_item.split(' -> ')
             with_list = with_list_raw.split(',')
