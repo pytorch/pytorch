@@ -84,6 +84,7 @@ def argument(a: Union[Argument, SelfArgument, TensorOptionsArguments]) -> List[B
 
 def impl_arguments(g: NativeFunctionsGroup) -> List[Binding]:
     args: List[Union[Argument, TensorOptionsArguments, SelfArgument]] = []
+    precomputed_add_args: List[Argument] = []
 
     if g.out.precomputed:
         # A list of parameters for the impl function with
@@ -103,11 +104,12 @@ def impl_arguments(g: NativeFunctionsGroup) -> List[Binding]:
         args.extend(non_out_args_replaced)
         # precomputed.add is the list of parameters that are added
         # without replacement
-        args.extend(g.out.precomputed.add)
+        precomputed_add_args = g.out.precomputed.add
     else:
         args.extend(g.out.func.arguments.non_out)
 
     args.extend(g.out.func.arguments.out)
+    args.extend(precomputed_add_args)
     return [r for arg in args for r in argument(arg)]
 
 def meta_arguments(g: NativeFunctionsGroup) -> List[Binding]:
