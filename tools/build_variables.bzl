@@ -165,6 +165,7 @@ core_trainer_sources = [
     "torch/csrc/autograd/utils/warnings.cpp",
     "torch/csrc/jit/frontend/name_mangler.cpp",
     "torch/csrc/jit/ir/type_hashing.cpp",
+    "torch/csrc/jit/serialization/export_bytecode.cpp",
     "torch/csrc/jit/serialization/pickler.cpp",
     "torch/csrc/jit/serialization/type_name_uniquer.cpp",
 ]
