@@ -253,6 +253,8 @@ TORCH_IMPL_FUNC(fractional_max_pool3d_out_cuda) (
   auto output_ = output;
   auto indices_ = indices;
   auto input_ = input;
+
+  int64_t ndims = input_.ndimension();
   if(ndims == 4) {
     output_ = output_.reshape({1, numPlanes, outputT, outputH, outputW});
     indices_ = indices_.reshape({1, numPlanes, outputT, outputH, outputW});
