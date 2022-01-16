@@ -108,9 +108,9 @@ esac
 # Install Valgrind separately since the apt-get version is too old.
 mkdir valgrind_build && cd valgrind_build
 VALGRIND_VERSION=3.16.1
-if ! wget http://valgrind.org/downloads/valgrind-${VALGRIND_VERSION}.tar.bz2
+if ! wget http://valgrind.org/downloads/valgrind-${VALGRIND_VERSION}.tar.bz2 --no-check-certificate
 then
-  wget https://sourceware.org/ftp/valgrind/valgrind-${VALGRIND_VERSION}.tar.bz2
+  wget https://sourceware.org/ftp/valgrind/valgrind-${VALGRIND_VERSION}.tar.bz2 --no-check-certificate
 fi
 tar -xjf valgrind-${VALGRIND_VERSION}.tar.bz2
 cd valgrind-${VALGRIND_VERSION}
