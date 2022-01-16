@@ -1281,6 +1281,29 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, "can't be cast to the desired output type"):
             torch.kron(a, b, out=out)
 
+    def test_matrix_norm_backward_zero(self, device):
+        from torchviz import make_dot
+
+        a = torch.zeros(3, 3, requires_grad=True, device=device)
+        aa = torch.linalg.matrix_norm(a)
+        # aa.backward()
+
+        make_dot(aa, show_attrs=True, show_saved=True).render("graph", format="png")
+
+        self.assertEqual(a.grad, torch.zeros(3, 3, device=device))
+
+    def test_fro_norm_backward_zero(self, device):
+        from torchviz import make_dot
+
+        a = torch.zeros(3, 3, requires_grad=True, device=device)
+        aa = torch.linalg.norm(a, 'fro')
+        # aa.backward()
+
+
+        make_dot(aa, show_attrs=True, show_saved=True).render("graph_frob", format="png")
+
+        self.assertEqual(a.grad, torch.zeros(3, 3, device=device))
+
     # This test confirms that torch.linalg.norm's dtype argument works
     # as expected, according to the function's documentation
     @skipCUDAIfNoMagma
