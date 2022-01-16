@@ -5,7 +5,7 @@ from .graph_module import QuantizedGraphModule
 from .quantized_fusion_patterns_and_replacements import get_fbgemm_patterns_and_replacements
 from .match_utils import is_match
 from .match_utils import MatchAllNode
-from .utils import _parent_name
+from ..utils import _parent_name
 from typing import Dict, Type
 
 # Mapping from reference module class to the replacement quantized module class for lowering
@@ -28,7 +28,7 @@ def _lower_weighted_ref_module(model: QuantizedGraphModule, ref_class: Type[torc
     pattern = (torch.quantize_per_tensor,
                (ref_class, "dequantize"),
                MatchAllNode, MatchAllNode, MatchAllNode)
-    modules = dict(model.named_modules())
+    modules = dict(model.named_modules(remove_duplicate=False))
     nodes = list(model.graph.nodes)
     # TODO: maybe orgnize this better (e.g. break down to more functions)
     # to make this function more readable

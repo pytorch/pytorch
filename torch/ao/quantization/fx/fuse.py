@@ -15,8 +15,8 @@ from .pattern_utils import (
     get_default_fusion_patterns,
 )
 
-from .backend_config_dict.utils import get_fusion_pattern_to_fuse_handler_cls
-from .backend_config_dict.utils import get_fuser_method_mapping
+from .backend_config.utils import get_fusion_pattern_to_fuse_handler_cls
+from .backend_config.utils import get_fuser_method_mapping
 
 from .fusion_patterns import *  # noqa: F401,F403
 
@@ -56,15 +56,20 @@ class Fuser:
         def load_arg(a):
             return map_arg(a, lambda node: env[node.name])
 
+        def get_root_node(node_pattern):
+            while not isinstance(node_pattern[-1], Node):
+                node_pattern = node_pattern[-1]
+            return node_pattern[-1]
+
         for node in input_graph.nodes:
             maybe_last_node, pattern, matched_node_pattern, obj = \
                 fusion_pairs.get(node.name, (None, None, None, None))
             if maybe_last_node is node:
                 assert obj is not None
                 # TODO: currently we hard code the root node, which only works for
-                # a tuple of two nodes, we want to make this more general to
-                # support more complex patterns
-                root_node = matched_node_pattern[-1]  # type: ignore[index]
+                # a sequence of ops and assume the root node is the last node,
+                # we want to make this more general to support more complex patterns
+                root_node = get_root_node(matched_node_pattern)  # type: ignore[index]
                 env[node.name] = obj.fuse(
                     self, load_arg, root_node, matched_node_pattern,  # type: ignore[arg-type]
                     fuse_custom_config_dict, fuser_method_mapping)

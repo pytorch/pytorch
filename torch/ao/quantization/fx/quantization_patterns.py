@@ -33,9 +33,8 @@ from .pattern_utils import (
     get_default_output_activation_post_process_map,
     Pattern,
 )
-
+from ..utils import _parent_name
 from .utils import (
-    _parent_name,
     all_node_args_have_no_tensors,
     quantize_node,
     get_per_tensor_qparams,
@@ -1524,9 +1523,7 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
 @register_quant_pattern(torch._C._nn.avg_pool3d)
 @register_quant_pattern(torch.clamp)
 @register_quant_pattern(torch.flatten)
-@register_quant_pattern(torch.max)
 @register_quant_pattern(torch.mean)
-@register_quant_pattern(torch.min)
 @register_quant_pattern(operator.floordiv)
 @register_quant_pattern('clamp')
 @register_quant_pattern('mean')
@@ -1621,14 +1618,12 @@ class CustomModuleQuantizeHandler(QuantizeHandler):
 @register_quant_pattern(torch.nn.Identity)
 @register_quant_pattern(torch.transpose)
 @register_quant_pattern(torch.repeat_interleave)
-@register_quant_pattern(torch.sort)
 @register_quant_pattern(torch.squeeze)
 @register_quant_pattern(torch.stack)
 @register_quant_pattern(torch.unsqueeze)
 @register_quant_pattern('contiguous')
 @register_quant_pattern('detach')
 @register_quant_pattern('detach_')
-@register_quant_pattern('numel')
 @register_quant_pattern('permute')
 @register_quant_pattern('repeat')
 @register_quant_pattern('repeat_interleave')

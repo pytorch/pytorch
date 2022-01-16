@@ -121,8 +121,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
 
     // Do we have any reductions?
     const bool has_reductions = kernel_summary.has_block_reductions ||
-        kernel_summary.number_of_grid_reductions > 0;
-
+        kernel_summary.has_grid_reductions;
     const bool has_parallel_welford =
         kernel_summary.has_block_welford || kernel_summary.has_grid_welford;
 
@@ -766,10 +765,17 @@ class CudaKernelGenerator : private kir::IrVisitor {
       return;
     }
 
-    const auto par_domains = node->getParallelReductionDomains();
-    const bool tidx = par_domains.find(ParallelType::TIDx) != par_domains.end();
-    const bool tidy = par_domains.find(ParallelType::TIDy) != par_domains.end();
-    const bool tidz = par_domains.find(ParallelType::TIDz) != par_domains.end();
+    const auto par_domains = ir_utils::getParallelDomains(node->out());
+    // Get parallel reduction domains
+    const bool tidx =
+        par_domains.find(ParallelType::TIDx) != par_domains.end() &&
+        par_domains.at(ParallelType::TIDx)->isReduction();
+    const bool tidy =
+        par_domains.find(ParallelType::TIDy) != par_domains.end() &&
+        par_domains.at(ParallelType::TIDy)->isReduction();
+    const bool tidz =
+        par_domains.find(ParallelType::TIDz) != par_domains.end() &&
+        par_domains.at(ParallelType::TIDz)->isReduction();
 
     const auto data_type = node->out()->dtype();
     const auto op_type = node->operation();
@@ -846,10 +852,17 @@ class CudaKernelGenerator : private kir::IrVisitor {
       return;
     }
 
-    const auto par_domains = node->getParallelReductionDomains();
-    const bool tidx = par_domains.find(ParallelType::TIDx) != par_domains.end();
-    const bool tidy = par_domains.find(ParallelType::TIDy) != par_domains.end();
-    const bool tidz = par_domains.find(ParallelType::TIDz) != par_domains.end();
+    const auto par_domains = ir_utils::getParallelDomains(node->out());
+    // Get parallel reduction domains
+    const bool tidx =
+        par_domains.find(ParallelType::TIDx) != par_domains.end() &&
+        par_domains.at(ParallelType::TIDx)->isReduction();
+    const bool tidy =
+        par_domains.find(ParallelType::TIDy) != par_domains.end() &&
+        par_domains.at(ParallelType::TIDy)->isReduction();
+    const bool tidz =
+        par_domains.find(ParallelType::TIDz) != par_domains.end() &&
+        par_domains.at(ParallelType::TIDz)->isReduction();
 
     const auto data_type = node->out()->dtype();
 
@@ -913,17 +926,12 @@ class CudaKernelGenerator : private kir::IrVisitor {
   std::string generateGridReduceTemplateFlags(
       const REDUCTION_OP* rop,
       const ParallelTypeBitmap& thread_pred) {
-    const auto par_domains = rop->getParallelReductionDomains();
-    const std::array<ParallelType, 6> ptypes{
-        ParallelType::BIDx,
-        ParallelType::BIDy,
-        ParallelType::BIDz,
-        ParallelType::TIDx,
-        ParallelType::TIDy,
-        ParallelType::TIDz};
+    const auto par_domains = ir_utils::getParallelDomains(rop->outputs()[0]);
     std::stringstream flags;
-    for (const ParallelType pt : ptypes) {
-      const bool parallel_reduction = par_domains.find(pt) != par_domains.end();
+    for (const ParallelType pt : kParallelTypeThreads) {
+      const bool parallel_reduction =
+          par_domains.find(pt) != par_domains.end() &&
+          par_domains.at(pt)->isReduction();
       const bool pred = thread_pred.get(pt);
       TORCH_INTERNAL_ASSERT(
           !(parallel_reduction && pred), "Cannot reduce predicated axis: ", pt);
@@ -938,7 +946,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
       } else {
         flag = !pred && !parallel_reduction;
       }
-      if (pt != ptypes[0]) {
+      if (pt != kParallelTypeThreads[0]) {
         flags << ", ";
       }
       flags << (flag ? "true" : "false");
@@ -969,10 +977,13 @@ class CudaKernelGenerator : private kir::IrVisitor {
     const std::string flags_str =
         generateGridReduceTemplateFlags(rop, node->threadPredicate());
 
+    const bool persistent_sync =
+        kernel_->summary().has_cooperative_grid_reduction;
+
     // Since block-level reduction is already done, those dimensions
     // with tidx/y/z being true do not participate in the grid reduction.
-    indent() << kir::GridReduction::getPredicateFlagName(out->view()) << " = "
-             << "reduction::gridReduce<" << flags_str << ">(\n";
+    indent() << "reduction::gridReduce<" << flags_str << ", "
+             << (persistent_sync ? "true" : "false") << ">(\n";
     indent() << kTab << gen(rop->out()) << ",\n";
     if (domain->hasBlockReduction()) {
       indent() << kTab << "block_result_" << block_reduce_name_ << ",\n";
@@ -999,6 +1010,49 @@ class CudaKernelGenerator : private kir::IrVisitor {
              << genInline(node->reduction_op()->init()) << "));\n";
   }
 
+  void visit(const kir::GridBroadcast* node) final {
+    const auto bop = node->broadcast_op();
+    TORCH_INTERNAL_ASSERT(bop->out()->isA<kir::TensorIndex>());
+
+    const auto out = bop->out()->as<kir::TensorIndex>();
+    const auto domain = out->view()->domain();
+    TORCH_INTERNAL_ASSERT(domain->hasGridBroadcast());
+
+    const auto data_type = bop->out()->dtype();
+
+    TORCH_INTERNAL_ASSERT(
+        node->broadcast_buffer()->buffer()->isA<kir::TensorView>());
+    TORCH_INTERNAL_ASSERT(
+        node->sync_buffer()->buffer()->isA<kir::TensorView>());
+    const auto work_buffer =
+        node->broadcast_buffer()->buffer()->as<kir::TensorView>();
+    const auto sync_buffer =
+        node->sync_buffer()->buffer()->as<kir::TensorView>();
+
+    const auto par_domains = ir_utils::getParallelDomains(out);
+    std::stringstream flags_str;
+    for (const ParallelType pt : kParallelTypeThreads) {
+      const bool parallel_bcast = par_domains.find(pt) != par_domains.end() &&
+          par_domains.at(pt)->isBroadcast();
+      if (pt != kParallelTypeThreads[0]) {
+        flags_str << ", ";
+      }
+      flags_str << (parallel_bcast ? "true" : "false");
+    }
+
+    // Since block-level broadcast has not necessarily been performed before
+    // this function call, so grid broadcast may  be broadcasting across both
+    // the grid and the block level.
+    indent() << "grid_broadcast::broadcast<" << flags_str.str() << ">(\n";
+    indent() << kTab << gen(bop->out()) << ",\n";
+    indent() << kTab << gen(bop->in()) << ",\n";
+    indent() << kTab << "&" << varName(work_buffer) << "[0],\n";
+    indent() << kTab << varName(sync_buffer) << ",\n";
+    TORCH_INTERNAL_ASSERT(
+        node->predicate() != nullptr && node->predicate()->hasValue());
+    indent() << kTab << genInline(node->predicate()) << ");\n";
+  }
+
   void visit(const kir::GridWelford* node) final {
     const auto wop = node->welford_op();
     TORCH_INTERNAL_ASSERT(wop->outAvg()->isA<kir::TensorIndex>());
@@ -1019,13 +1073,16 @@ class CudaKernelGenerator : private kir::IrVisitor {
     const auto sync_buffer =
         node->sync_buffer()->buffer()->as<kir::TensorView>();
 
+    const bool persistent_sync =
+        kernel_->summary().has_cooperative_grid_reduction;
+
     const std::string flags_str =
         generateGridReduceTemplateFlags(wop, node->threadPredicate());
 
     // Since block-level reduction is already done, those dimensions
     // with tidx/y/z being true do not participate in the grid reduction.
-    indent() << kir::GridWelford::getPredicateFlagName(out->view()) << " = "
-             << "welford::gridWelford<" << flags_str << ">(\n";
+    indent() << "welford::gridWelford<" << flags_str << ", "
+             << (persistent_sync ? "true" : "false") << ">(\n";
     indent() << kTab << gen(wop->outAvg()) << ",\n"
              << kTab << gen(wop->outVar()) << ",\n"
              << kTab << gen(wop->outN()) << ",\n";
@@ -1084,6 +1141,14 @@ class CudaKernelGenerator : private kir::IrVisitor {
       vectorize_scope_ = node->vectorize();
       handleScope(node->body());
       vectorize_scope_ = false;
+      return;
+    } else if (node->iter_domain()->isStride()) {
+      // A stride domain only executes the loop body with the loop
+      // index being zero.
+      indent() << "constexpr "
+               << "nvfuser_index_t"
+               << " " << gen(node->index()) << " = 0;\n";
+      handleScope(node->body());
       return;
     }
 
