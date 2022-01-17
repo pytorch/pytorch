@@ -847,14 +847,14 @@ void triangular_solve_kernel(const Tensor& A, const Tensor& B, bool left, bool u
   For further details, please see the LAPACK documentation for GETRF.
 */
 template <typename scalar_t>
-void apply_lu(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
+void apply_lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
 #if !AT_BUILD_WITH_LAPACK()
   TORCH_CHECK(
       false,
       "Calling torch.lu on a CPU tensor requires compiling ",
       "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
 #else
-  TORCH_CHECK(compute_pivots, "lu without pivoting is not implemented on the CPU");
+  TORCH_CHECK(compute_pivots, "linalg.lu_factor: LU without pivoting is not implemented on the CPU");
 
   auto input_data = input.data_ptr<scalar_t>();
   auto pivots_data = pivots.data_ptr<int>();
@@ -876,9 +876,9 @@ void apply_lu(const Tensor& input, const Tensor& pivots, const Tensor& infos, bo
 }
 
 // This is a type dispatching helper function for 'apply_lu'
-void lu_kernel(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
+void lu_factor_kernel(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "lu_cpu", [&]{
-    apply_lu<scalar_t>(input, pivots, infos, compute_pivots);
+    apply_lu_factor<scalar_t>(input, pivots, infos, compute_pivots);
   });
 }
 
@@ -890,8 +890,8 @@ void lu_kernel(const Tensor& input, const Tensor& pivots, const Tensor& infos, b
   Args:
   * `b` -  [in] the right hand side matrix B
            [out] the solution matrix X
-  * `lu` - [in] the LU factorization of matrix A (see at::_lu_with_info)
-  * `pivots` - [in] the pivot indices (see at::_lu_with_info)
+  * `lu` - [in] the LU factorization of matrix A (see at::linalg_lu_factor)
+  * `pivots` - [in] the pivot indices (see at::linalg_lu_factor)
 
   For further details, please see the LAPACK documentation for GETRS.
 */
@@ -908,8 +908,8 @@ void apply_lu_solve(const Tensor& b, const Tensor& lu, const Tensor& pivots, Tra
   const auto trans = to_blas(transpose);
   auto pivots_data = pivots.data_ptr<int>();
   auto b_stride = matrixStride(b);
-  auto lu_stride = matrixStride(lu);
-  auto pivots_stride = pivots.size(-1);
+  auto lu_stride = lu.dim() > 2 ? lu.stride(-3) : 0;
+  auto pivots_stride = pivots.dim() > 1 ? pivots.stride(-2) : 0;
   auto batch_size = batchCount(b);
 
   auto n = lu.size(-2);
@@ -949,65 +949,78 @@ REGISTER_ARCH_DISPATCH(cholesky_stub, DEFAULT, &cholesky_kernel);
 REGISTER_AVX512_DISPATCH(cholesky_stub, &cholesky_kernel);
 REGISTER_AVX2_DISPATCH(cholesky_stub, &cholesky_kernel);
 REGISTER_VSX_DISPATCH(cholesky_stub, &cholesky_kernel);
+REGISTER_ZVECTOR_DISPATCH(cholesky_stub, &cholesky_kernel);
 
 REGISTER_ARCH_DISPATCH(cholesky_inverse_stub, DEFAULT, &cholesky_inverse_kernel_impl);
 REGISTER_AVX512_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl);
 REGISTER_AVX2_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl);
 REGISTER_VSX_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl);
+REGISTER_ZVECTOR_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl);
 
 REGISTER_ARCH_DISPATCH(eig_stub, DEFAULT, &eig_kernel_impl);
 REGISTER_AVX512_DISPATCH(eig_stub, &eig_kernel_impl);
 REGISTER_AVX2_DISPATCH(eig_stub, &eig_kernel_impl);
 REGISTER_VSX_DISPATCH(eig_stub, &eig_kernel_impl);
+REGISTER_ZVECTOR_DISPATCH(eig_stub, &eig_kernel_impl);
 
 REGISTER_ARCH_DISPATCH(linalg_eig_stub, DEFAULT, &linalg_eig_kernel);
 REGISTER_AVX512_DISPATCH(linalg_eig_stub, &linalg_eig_kernel);
 REGISTER_AVX2_DISPATCH(linalg_eig_stub, &linalg_eig_kernel);
 REGISTER_VSX_DISPATCH(linalg_eig_stub, &linalg_eig_kernel);
+REGISTER_ZVECTOR_DISPATCH(linalg_eig_stub, &linalg_eig_kernel);
 
 REGISTER_ARCH_DISPATCH(linalg_eigh_stub, DEFAULT, &linalg_eigh_kernel);
 REGISTER_AVX512_DISPATCH(linalg_eigh_stub, &linalg_eigh_kernel);
 REGISTER_AVX2_DISPATCH(linalg_eigh_stub, &linalg_eigh_kernel);
 REGISTER_VSX_DISPATCH(linalg_eigh_stub, &linalg_eigh_kernel);
+REGISTER_ZVECTOR_DISPATCH(linalg_eigh_stub, &linalg_eigh_kernel);
 
 REGISTER_ARCH_DISPATCH(geqrf_stub, DEFAULT, &geqrf_kernel);
 REGISTER_AVX512_DISPATCH(geqrf_stub, &geqrf_kernel);
 REGISTER_AVX2_DISPATCH(geqrf_stub, &geqrf_kernel);
 REGISTER_VSX_DISPATCH(geqrf_stub, &geqrf_kernel);
+REGISTER_ZVECTOR_DISPATCH(geqrf_stub, &geqrf_kernel);
 
 REGISTER_ARCH_DISPATCH(orgqr_stub, DEFAULT, &orgqr_kernel_impl);
 REGISTER_AVX512_DISPATCH(orgqr_stub, &orgqr_kernel_impl);
 REGISTER_AVX2_DISPATCH(orgqr_stub, &orgqr_kernel_impl);
 REGISTER_VSX_DISPATCH(orgqr_stub, &orgqr_kernel_impl);
+REGISTER_ZVECTOR_DISPATCH(orgqr_stub, &orgqr_kernel_impl);
 
 REGISTER_ARCH_DISPATCH(ormqr_stub, DEFAULT, &ormqr_kernel);
 REGISTER_AVX512_DISPATCH(ormqr_stub, &ormqr_kernel);
 REGISTER_AVX2_DISPATCH(ormqr_stub, &ormqr_kernel);
 REGISTER_VSX_DISPATCH(ormqr_stub, &ormqr_kernel);
+REGISTER_ZVECTOR_DISPATCH(ormqr_stub, &ormqr_kernel);
 
 REGISTER_ARCH_DISPATCH(lstsq_stub, DEFAULT, &lstsq_kernel);
 REGISTER_AVX512_DISPATCH(lstsq_stub, &lstsq_kernel);
 REGISTER_AVX2_DISPATCH(lstsq_stub, &lstsq_kernel);
 REGISTER_VSX_DISPATCH(lstsq_stub, &lstsq_kernel);
+REGISTER_ZVECTOR_DISPATCH(lstsq_stub, &lstsq_kernel);
 
 REGISTER_ARCH_DISPATCH(triangular_solve_stub, DEFAULT, &triangular_solve_kernel);
 REGISTER_AVX512_DISPATCH(triangular_solve_stub, &triangular_solve_kernel);
 REGISTER_AVX2_DISPATCH(triangular_solve_stub, &triangular_solve_kernel);
 REGISTER_VSX_DISPATCH(triangular_solve_stub, &triangular_solve_kernel);
+REGISTER_ZVECTOR_DISPATCH(triangular_solve_stub, &triangular_solve_kernel);
 
-REGISTER_ARCH_DISPATCH(lu_stub, DEFAULT, &lu_kernel);
-REGISTER_AVX512_DISPATCH(lu_stub, &lu_kernel);
-REGISTER_AVX2_DISPATCH(lu_stub, &lu_kernel);
-REGISTER_VSX_DISPATCH(lu_stub, &lu_kernel);
+REGISTER_ARCH_DISPATCH(lu_factor_stub, DEFAULT, &lu_factor_kernel);
+REGISTER_AVX512_DISPATCH(lu_factor_stub, &lu_factor_kernel);
+REGISTER_AVX2_DISPATCH(lu_factor_stub, &lu_factor_kernel);
+REGISTER_VSX_DISPATCH(lu_factor_stub, &lu_factor_kernel);
+REGISTER_ZVECTOR_DISPATCH(lu_factor_stub, &lu_factor_kernel);
 
 REGISTER_ARCH_DISPATCH(lu_solve_trans_stub, DEFAULT, &lu_solve_trans_kernel);
 REGISTER_AVX512_DISPATCH(lu_solve_trans_stub, &lu_solve_trans_kernel);
 REGISTER_AVX2_DISPATCH(lu_solve_trans_stub, &lu_solve_trans_kernel);
 REGISTER_VSX_DISPATCH(lu_solve_trans_stub, &lu_solve_trans_kernel);
+REGISTER_ZVECTOR_DISPATCH(lu_solve_trans_stub, &lu_solve_trans_kernel);
 
 REGISTER_ARCH_DISPATCH(lu_solve_stub, DEFAULT, &lu_solve_kernel);
 REGISTER_AVX512_DISPATCH(lu_solve_stub, &lu_solve_kernel);
 REGISTER_AVX2_DISPATCH(lu_solve_stub, &lu_solve_kernel);
 REGISTER_VSX_DISPATCH(lu_solve_stub, &lu_solve_kernel);
+REGISTER_ZVECTOR_DISPATCH(lu_solve_stub, &lu_solve_kernel);
 
 }} // namespace at::native
