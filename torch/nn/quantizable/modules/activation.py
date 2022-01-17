@@ -252,7 +252,8 @@ class MultiheadAttention(nn.MultiheadAttention):
                 value: Tensor,
                 key_padding_mask: Optional[Tensor] = None,
                 need_weights: bool = True,
-                attn_mask: Optional[Tensor] = None) -> Tuple[Tensor, Optional[Tensor]]:
+                attn_mask: Optional[Tensor] = None,
+                average_attn_weights: bool = True) -> Tuple[Tensor, Optional[Tensor]]:
         r"""
     Note::
         Please, refer to :func:`~torch.nn.MultiheadAttention.forward` for more
@@ -289,15 +290,20 @@ class MultiheadAttention(nn.MultiheadAttention):
           while the zero positions will be unchanged. If a BoolTensor is provided, positions with ``True``
           is not allowed to attend while ``False`` values will be unchanged. If a FloatTensor
           is provided, it will be added to the attention weight.
+        - average_attn_weights: If true, indicates that the returned ``attn_weights`` should be averaged across
+          heads. Otherwise, ``attn_weights`` are provided separately per head. Note that this flag only has an
+          effect when ``need_weights=True.``. Default: True (i.e. average weights across heads)
 
         - Outputs:
         - attn_output: :math:`(L, N, E)` where L is the target sequence length, N is the batch size,
           E is the embedding dimension. :math:`(N, L, E)` if ``batch_first`` is ``True``.
-        - attn_output_weights: :math:`(N, L, S)` where N is the batch size,
-          L is the target sequence length, S is the source sequence length.
+        - attn_output_weights: If ``average_attn_weights=True``, returns attention weights averaged
+          across heads of shape :math:`(N, L, S)`, where N is the batch size, L is the target sequence length,
+          S is the source sequence length. If ``average_weights=False``, returns attention weights per
+          head of shape :math:`(N, num_heads, L, S)`.
         """
         return self._forward_impl(query, key, value, key_padding_mask,
-                                  need_weights, attn_mask)
+                                  need_weights, attn_mask, average_attn_weights)
 
     def _forward_impl(self,
                       query: Tensor,
@@ -305,7 +311,8 @@ class MultiheadAttention(nn.MultiheadAttention):
                       value: Tensor,
                       key_padding_mask: Optional[Tensor] = None,
                       need_weights: bool = True,
-                      attn_mask: Optional[Tensor] = None) -> Tuple[Tensor, Optional[Tensor]]:
+                      attn_mask: Optional[Tensor] = None,
+                      average_attn_weights: bool = True) -> Tuple[Tensor, Optional[Tensor]]:
         # This version will not deal with the static key/value pairs.
         # Keeping it here for future changes.
         #
@@ -457,6 +464,8 @@ class MultiheadAttention(nn.MultiheadAttention):
         if need_weights:
             # average attention weights over heads
             attn_output_weights = attn_output_weights.view(bsz, self.num_heads, tgt_len, src_len)
-            return attn_output, attn_output_weights.mean(dim=1)
+            if average_attn_weights:
+                attn_output_weights = attn_output_weights.mean(dim=1)
+            return attn_output, attn_output_weights
         else:
             return attn_output, None
