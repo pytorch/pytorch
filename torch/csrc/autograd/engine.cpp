@@ -1267,7 +1267,7 @@ void GraphTask::stash_current_streams() {
       // https://github.com/pytorch/pytorch/issues/59750.
       // TODO: Remove ROCM-specific behavior when https://github.com/pytorch/pytorch/issues/59750 is fixed.
       if (true) {
-#else	      
+#else
       if (at::detail::getCUDAHooks().hasPrimaryContext(idx)) {
 #endif
         caller_current_streams_[idx] = guard.getStream({c10::DeviceType::CUDA, idx});
