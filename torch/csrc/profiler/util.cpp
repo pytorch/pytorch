@@ -34,40 +34,42 @@ std::string getNvtxStr(
       str = name;
 #endif
     }
+    std::stringstream s;
+    s << str;
     if (shapes.size() > 0) {
-      str << ", sizes = [";
+      s << ", sizes = [";
       for (const auto idx : c10::irange(shapes.size())) {
         if (shapes[idx].size() > 0) {
-          str << "[";
+          s << "[";
           for (const auto dim : c10::irange(shapes[idx].size())) {
-            str << shapes[idx][dim];
+            s << shapes[idx][dim];
             if (dim < shapes[idx].size() - 1) {
-              str << ", ";
+              s << ", ";
             }
           }
-          str << "]";
+          s << "]";
         } else {
-          str << "[]";
+          s << "[]";
         }
         if (idx < shapes.size() - 1) {
-          str << ", ";
+          s << ", ";
         }
       }
-      str << "]";
+      s << "]";
     }
     // Include the sequence ids of the input edges so
     // you can build the network graph
     if (seq_ids.size() > 0) {
-      str << ", seq_ids = [";
+      s << ", seq_ids = [";
         for (size_t idx = 0; idx < seq_ids.size(); ++idx) {
-          str << seq_ids[idx];
+          s << seq_ids[idx];
           if (idx < seq_ids.size() - 1) {
-            str << ", ";
+            s << ", ";
           }
         }
-      str << "]";
+      s << "]";
     }
-    return str;
+    return s.str();
   } else {
     return name;
   }
