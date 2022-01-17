@@ -224,7 +224,7 @@ if HAS_PYDOT:
 
                 def get_module_params_or_buffers():
                     for pname, ptensor in chain(
-                        leaf_module.named_parameters(),leaf_module.named_buffers()
+                        leaf_module.named_parameters(), leaf_module.named_buffers()
                     ):
                         pname1 = node.name + "." + pname
                         label1 = (
