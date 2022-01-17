@@ -109,7 +109,7 @@ template <typename scalar_t, typename value_t>
 void _apply_sparse_csr_lu_solve(
   const at::sparse_csr::SparseCsrTensor& input,
   const Tensor& other,
-  Tensor& result,
+  const Tensor& result,
   int &_singularity) {
   auto values = input.values();
   const scalar_t *values_data_ptr = values.data_ptr<scalar_t>();
@@ -300,14 +300,10 @@ TORCH_IMPL_FUNC(_convert_indices_from_csr_to_coo_structured_cuda) (
 void linalg_solve_sparse_csr_kernel(
   const Tensor& input,
   const Tensor& other,
-  Tensor& result,
+  const Tensor& result,
   int& singularity) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "sparse_csr_solve", [&] {
-    if (input.scalar_type() == at::kComplexFloat || input.scalar_type() == at::kFloat) {
-      _apply_sparse_csr_lu_solve<scalar_t, float>(input, other, result, singularity);
-    } else {
-      _apply_sparse_csr_lu_solve<scalar_t, double>(input, other, result, singularity);
-    }
+    _apply_sparse_csr_lu_solve<scalar_t>(input, other, result, singularity);
   });
 }
 

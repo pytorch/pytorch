@@ -623,7 +623,7 @@ Tensor& linalg_solve_sparse_csr_out(const Tensor& input, const Tensor& other, Te
 void linalg_sparse_csr_kernel_error(
   const Tensor& input,
   const Tensor& other,
-  Tensor& result,
+  const Tensor& result,
   int& singularity
 ) {
   TORCH_CHECK(false, "Not implemented for the given backend: ", input.device().type());
@@ -634,6 +634,7 @@ DEFINE_DISPATCH(linalg_solve_sparse_csr_stub);
 REGISTER_ARCH_DISPATCH(linalg_solve_sparse_csr_stub, DEFAULT, &linalg_sparse_csr_kernel_error);
 REGISTER_AVX512_DISPATCH(linalg_solve_sparse_csr_stub, &linalg_sparse_csr_kernel_error);
 REGISTER_AVX2_DISPATCH(linalg_solve_sparse_csr_stub, &linalg_sparse_csr_kernel_error);
-
+REGISTER_VSX_DISPATCH(linalg_solve_sparse_csr_stub, &linalg_sparse_csr_kernel_error);
+REGISTER_ZVECTOR_DISPATCH(linalg_solve_sparse_csr_stub, &linalg_sparse_csr_kernel_error);
 } // namespace native
 } // namespace at
