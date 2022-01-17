@@ -16,8 +16,8 @@ The following constraints are implemented:
 - ``constraints.multinomial``
 - ``constraints.nonnegative_integer``
 - ``constraints.one_hot``
-- ``constraints.positive_definite``
 - ``constraints.positive_semidefinite``
+- ``constraints.positive_definite``
 - ``constraints.positive_integer``
 - ``constraints.positive``
 - ``constraints.real_vector``
@@ -52,6 +52,7 @@ __all__ = [
     'multinomial',
     'nonnegative_integer',
     'positive',
+    'positive_semidefinite',
     'positive_definite',
     'positive_integer',
     'real',
