@@ -639,7 +639,7 @@ REGISTER_DISPATCH(sum_stub, &sum_kernel_impl);
 #ifndef CPU_CAPABILITY_AVX512
 REGISTER_DISPATCH(nansum_stub, &nansum_kernel_impl);
 #else
-REGISTER_NO_AVX512_DISPATCH(nansum_stub, reduce_fn);
+REGISTER_NO_AVX512_DISPATCH(nansum_stub);
 #endif
 
 }}  // namespace at::native
