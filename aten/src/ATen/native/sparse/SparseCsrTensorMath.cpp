@@ -622,7 +622,7 @@ Tensor& linalg_solve_sparse_csr_out(const Tensor& input, const Tensor& other, Te
 
     linalg_solve_sparse_csr_stub(kCUDA, input, other, result, singularity);
 
-    TORCH_CHECK_LINALG(singularity > -1, "torch.linalg.solve",
+    TORCH_CHECK_LINALG(singularity == -1, "torch.linalg.solve",
         ": The diagonal element ", singularity , " is zero, the solve could not be completed because the input matrix is singular.");
 
     return result;

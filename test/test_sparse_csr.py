@@ -1260,8 +1260,9 @@ class TestSparseCSR(TestCase):
             self.assertEqual(coo_sparse.to_sparse_csr().to_sparse_coo(), coo_sparse)
 
     @ops(sparse_csr_linalg_solve)
+    @onlyCPU
     def test_linalg_solve_sparse_csr_cusolver(self, device, dtype, op):
-        if device == 'meta':
+        if (device == 'meta') or (device == 'cpu' and not torch.cuda.is_available()):
             self.skipTest("Skipped!")
 
         samples = op.sample_inputs(device, dtype)
