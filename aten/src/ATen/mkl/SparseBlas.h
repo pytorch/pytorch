@@ -42,6 +42,31 @@ template <>
 void create_csr<c10::complex<double>>(
     MKL_SPARSE_CREATE_CSR_ARGTYPES(c10::complex<double>));
 
+#define MKL_SPARSE_CREATE_BSR_ARGTYPES(scalar_t)                   \
+  sparse_matrix_t *A, const sparse_index_base_t indexing,          \
+      const sparse_layout_t block_layout, const MKL_INT rows,      \
+      const MKL_INT cols, MKL_INT block_size, MKL_INT *rows_start, \
+      MKL_INT *rows_end, MKL_INT *col_indx, scalar_t *values
+
+template <typename scalar_t>
+inline void create_bsr(MKL_SPARSE_CREATE_BSR_ARGTYPES(scalar_t)) {
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "at::mkl::sparse::create_bsr: not implemented for ",
+      typeid(scalar_t).name());
+}
+
+template <>
+void create_bsr<float>(MKL_SPARSE_CREATE_BSR_ARGTYPES(float));
+template <>
+void create_bsr<double>(MKL_SPARSE_CREATE_BSR_ARGTYPES(double));
+template <>
+void create_bsr<c10::complex<float>>(
+    MKL_SPARSE_CREATE_BSR_ARGTYPES(c10::complex<float>));
+template <>
+void create_bsr<c10::complex<double>>(
+    MKL_SPARSE_CREATE_BSR_ARGTYPES(c10::complex<double>));
+
 #define MKL_SPARSE_MV_ARGTYPES(scalar_t)                        \
   const sparse_operation_t operation, const scalar_t alpha,     \
       const sparse_matrix_t A, const struct matrix_descr descr, \

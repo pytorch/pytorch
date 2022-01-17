@@ -27,7 +27,7 @@
 namespace at {
 namespace native {
 
-namespace CPU_CAPABILITY {
+inline namespace CPU_CAPABILITY {
 
 using namespace vec;
 
@@ -210,7 +210,7 @@ static void imag_kernel(TensorIteratorBase& iter) {
 }
 
 // NB: Ignores the negative bit on tensors
-static void conj_kernel(TensorIteratorBase& iter) {
+void conj_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       kBool, kBFloat16, kHalf, iter.common_dtype(), "conj_cpu", [&]() {
         cpu_kernel_vec(
@@ -580,7 +580,7 @@ void round_decimals_kernel(TensorIteratorBase& iter, int64_t decimals) {
           }
 
 #define IMPLEMENT_FLOAT_KERNEL(op)                                                  \
-  namespace CPU_CAPABILITY {                                                        \
+  inline namespace CPU_CAPABILITY {                                                 \
   void op##_kernel(TensorIteratorBase& iter) {                                      \
     TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                                    \
     AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), #op "_vml_cpu", [&]() { \
@@ -594,7 +594,7 @@ void round_decimals_kernel(TensorIteratorBase& iter, int64_t decimals) {
   REGISTER_DISPATCH(op##_stub, &CPU_CAPABILITY::op##_kernel)
 
 #define IMPLEMENT_COMPLEX_KERNEL(op)                                                             \
-  namespace CPU_CAPABILITY {                                                                     \
+  inline namespace CPU_CAPABILITY {                                                              \
   void op##_kernel(TensorIteratorBase& iter) {                                                   \
     TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                                                 \
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), #op "_vml_cpu", [&]() { \

@@ -18,29 +18,28 @@ class TORCH_API Util {
     kEmitted,
   };
 
-  using EmissionMap = std::unordered_map<const torch::lazy::Node*, EmitStatus>;
+  using EmissionMap = std::unordered_map<const Node*, EmitStatus>;
 
   // Computes the post order from the given node, without using recursion. The
   // emission map can be used as saved state, for multiple separate calls to
   // this API. The returned post-order can be empty if the node has already been
   // emitted inside the emission map. An error is generated if a loop is
   // detected.
-  static std::vector<torch::lazy::Node*> ComputePostOrder(
-      const torch::lazy::Node* node,
+  static std::vector<Node*> ComputePostOrder(
+      const Node* node,
       EmissionMap* emap);
 
-  static std::vector<torch::lazy::Node*> ComputePostOrder(
-      c10::ArrayRef<torch::lazy::Node*> nodes,
+  static std::vector<Node*> ComputePostOrder(
+      c10::ArrayRef<Node*> nodes,
       EmissionMap* emap);
 
   // Same as above, but computes the post order on the set of nodes specified as
   // argument.
-  static std::vector<torch::lazy::Node*> ComputePostOrder(
-      c10::ArrayRef<torch::lazy::Node*> nodes);
+  static std::vector<Node*> ComputePostOrder(c10::ArrayRef<Node*> nodes);
 
   // Retrieves the number of nodes within the graph whose sink are passed in the
   // nodes argument.
-  static size_t GetGraphSize(c10::ArrayRef<torch::lazy::Node*> nodes);
+  static size_t GetGraphSize(c10::ArrayRef<Node*> nodes);
 };
 
 } // namespace lazy

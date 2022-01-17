@@ -389,5 +389,6 @@ struct TORCH_API PackedEmbeddingBagWeight : public EmbeddingPackedParamsBase {
       bool pruned_weights,
       const c10::optional<at::Tensor>& per_sample_weights_,
       const c10::optional<at::Tensor>& compressed_indices_mapping,
-      bool include_last_offset) override;
+      bool include_last_offset,
+      bool is_embedding_op) override;
 };
