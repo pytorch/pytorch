@@ -266,7 +266,7 @@ ExprHandle tensorOrConstant(
 
 ExprHandle scalarOrConstant(const ArgValue& v) {
   if (auto vh = c10::get_if<VarHandle>(&v)) {
-    return vh;
+    return *vh;
   }
   return constant(v);
 }
