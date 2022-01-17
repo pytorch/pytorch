@@ -130,10 +130,10 @@ void convert_indices_from_csr_to_coo_cpu(const Tensor& indices, const Tensor& cr
 
 // This function is needed for completeness, though we always call the CUDA dispatch
 //  defined in aten/src/ATen/native/sparse/cuda/SparseCsrTensorMath.cu file when given CPU inputs
-void linalg_sparse_csr_kernel_error(
+void linalg_solve_sparse_csr_kernel_error(
   const Tensor& input,
   const Tensor& other,
-  Tensor& result,
+  const Tensor& result,
   int& singularity
 ) {
   TORCH_CHECK(false, "Not implemented for the given backend: ", input.device().type());
@@ -622,7 +622,6 @@ Tensor& linalg_solve_sparse_csr_out(const Tensor& input, const Tensor& other, Te
 
     linalg_solve_sparse_csr_stub(kCUDA, input, other, result, singularity);
 
-    TORCH_CHECK(singularity == -1, "Probably got a singular matrix as an input. Please check the input again.");
     return result;
   } else {
     TORCH_CHECK(false, "PyTorch was not built with CUDA support. Please use PyTorch built CUDA support");
@@ -631,10 +630,10 @@ Tensor& linalg_solve_sparse_csr_out(const Tensor& input, const Tensor& other, Te
 
 DEFINE_DISPATCH(linalg_solve_sparse_csr_stub);
 
-REGISTER_ARCH_DISPATCH(linalg_solve_sparse_csr_stub, DEFAULT, &linalg_sparse_csr_kernel_error);
-REGISTER_AVX512_DISPATCH(linalg_solve_sparse_csr_stub, &linalg_sparse_csr_kernel_error);
-REGISTER_AVX2_DISPATCH(linalg_solve_sparse_csr_stub, &linalg_sparse_csr_kernel_error);
-REGISTER_VSX_DISPATCH(linalg_solve_sparse_csr_stub, &linalg_sparse_csr_kernel_error);
+REGISTER_ARCH_DISPATCH(linalg_solve_sparse_csr_stub, DEFAULT, &linalg_solve_sparse_csr_kernel_error);
+REGISTER_AVX512_DISPATCH(linalg_solve_sparse_csr_stub, &linalg_solve_sparse_csr_kernel_error);
+REGISTER_AVX2_DISPATCH(linalg_solve_sparse_csr_stub, &linalg_solve_sparse_csr_kernel_error);
+REGISTER_VSX_DISPATCH(linalg_solve_sparse_csr_stub, &linalg_solve_sparse_csr_kernel_error);
 
 } // namespace native
 } // namespace at
