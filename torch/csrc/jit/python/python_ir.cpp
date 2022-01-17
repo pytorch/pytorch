@@ -821,8 +821,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "device",
           [](Type& t) -> py::object {
-            auto device =
-                t.expectRef<TensorType>().device();
+            auto device = t.expectRef<TensorType>().device();
             if (!device) {
               return py::none();
             }
