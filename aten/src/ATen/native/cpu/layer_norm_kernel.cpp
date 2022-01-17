@@ -27,8 +27,7 @@ void LayerNormKernelImplInternal(
     Tensor* Y,
     Tensor* mean,
     Tensor* rstd) {
-  using T_ACC = vec::vec_scalar_t<T>;
-  using Vec = vec::Vectorized<T_ACC>;
+  using Vec = vec::Vectorized<T>;
   DCHECK_EQ(X.numel(), M * N);
   DCHECK(!gamma.defined() || gamma.numel() == N);
   DCHECK(!beta.defined() || beta.numel() == N);
@@ -48,8 +47,8 @@ void LayerNormKernelImplInternal(
       T rstd_val;
       std::tie(mean_val, rstd_val) = utils::RowwiseMoments(X_ptr, N);
       rstd_val = T(1) / std::sqrt(rstd_val + eps);
-      const T_ACC scale = rstd_val;
-      const T_ACC bias = -rstd_val * mean_val;
+      const T scale = rstd_val;
+      const T bias = -rstd_val * mean_val;
       if (gamma_null || beta_null) {
         for (const auto j : c10::irange(N)) {
           const T gamma_v = gamma_null ? T(1) : gamma_data[j];
@@ -69,6 +68,96 @@ void LayerNormKernelImplInternal(
       }
       mean_data[i] = mean_val;
       rstd_data[i] = rstd_val;
+    }
+  });
+}
+
+template <>
+void LayerNormKernelImplInternal<BFloat16>(
+    const Tensor& X,
+    const Tensor& gamma,
+    const Tensor& beta,
+    int64_t M,
+    int64_t N,
+    BFloat16 eps,
+    Tensor* Y,
+    Tensor* mean,
+    Tensor* rstd) {
+  using bVec = vec::Vectorized<BFloat16>;
+  using fVec = vec::Vectorized<float>;
+  DCHECK_EQ(X.numel(), M * N);
+  DCHECK(!gamma.defined() || gamma.numel() == N);
+  DCHECK(!beta.defined() || beta.numel() == N);
+  const BFloat16* X_data = X.data_ptr<BFloat16>();
+  const BFloat16* gamma_data = gamma.defined() ? gamma.data_ptr<BFloat16>() : nullptr;
+  const BFloat16* beta_data = beta.defined() ? beta.data_ptr<BFloat16>() : nullptr;
+  BFloat16* Y_data = Y->data_ptr<BFloat16>();
+  BFloat16* mean_data = mean->data_ptr<BFloat16>();
+  BFloat16* rstd_data = rstd->data_ptr<BFloat16>();
+  const bool gamma_null = gamma_data == nullptr;
+  const bool beta_null = beta_data == nullptr;
+
+  // pre convert `gamma` and `beta` to float when they are both defined
+  const bool pre_convert_gamma_beta = !gamma_null && !beta_null;
+
+  at::parallel_for(0, M, 1, [&](int64_t start, int64_t end) {
+    // temp buffer holding input, gamma/beta (if defined) in float
+    //
+    // pre convert input slice to float has 2 benefits:
+    //   a. Welford algorithm involves more arithmetic operations,
+    //      this will reduce rounding error and improve performance.
+    //   b. The input slice (float) can be reused when updating
+    //      corresponding output slice.
+    //
+    int64_t buffer_size = pre_convert_gamma_beta ? 3 * N : N;
+    std::unique_ptr<float []> buffer(new float[buffer_size]);
+    float* input_buffer_ptr = buffer.get();
+    float* gamma_buffer_ptr = nullptr;
+    float* beta_buffer_ptr = nullptr;
+    if (pre_convert_gamma_beta) {
+      gamma_buffer_ptr = buffer.get() + N;
+      beta_buffer_ptr = buffer.get() + 2 * N;
+      vec::convert(gamma_data, gamma_buffer_ptr, N);
+      vec::convert(beta_data, beta_buffer_ptr, N);
+    }
+
+    for (const auto i : c10::irange(start, end)) {
+      const BFloat16* X_ptr = X_data + i * N;
+      BFloat16* Y_ptr = Y_data + i * N;
+      vec::convert(X_ptr, input_buffer_ptr, N);
+
+      float mean_val;
+      float rstd_val;
+      std::tie(mean_val, rstd_val) = utils::RowwiseMoments(input_buffer_ptr, N);
+      rstd_val = float(1) / std::sqrt(rstd_val + eps);
+      const float scale = rstd_val;
+      const float bias = -rstd_val * mean_val;
+      if (gamma_null || beta_null) {
+        for (const auto j : c10::irange(N)) {
+          const float gamma_v = gamma_null ? float(1) : float(gamma_data[j]);
+          const float beta_v = beta_null ? float(0) : float(beta_data[j]);
+          Y_ptr[j] = (input_buffer_ptr[j] * scale + bias) * gamma_v + beta_v;
+        }
+      } else {
+        int64_t d = 0;
+        for (; d < N - (N % bVec::size()); d += bVec::size()) {
+          fVec x_fvec0 = fVec::loadu(input_buffer_ptr + d);
+          fVec x_fvec1 = fVec::loadu(input_buffer_ptr + d + fVec::size());
+          fVec gamma_fvec0 = fVec::loadu(gamma_buffer_ptr + d);
+          fVec gamma_fvec1 = fVec::loadu(gamma_buffer_ptr + d + fVec::size());
+          fVec beta_fvec0 = fVec::loadu(beta_buffer_ptr + d);
+          fVec beta_fvec1 = fVec::loadu(beta_buffer_ptr + d + fVec::size());
+          fVec y_fvec0 = (x_fvec0 * fVec(scale) + fVec(bias)) * gamma_fvec0 + beta_fvec0;
+          fVec y_fvec1 = (x_fvec1 * fVec(scale) + fVec(bias)) * gamma_fvec1 + beta_fvec1;
+          bVec y_bvec = convert_float_bfloat16(y_fvec0, y_fvec1);
+          y_bvec.store(Y_ptr + d);
+        }
+        for (; d < N; d++) {
+          Y_ptr[d] = (input_buffer_ptr[d] * scale + bias) * gamma_data[d] + beta_data[d];
+        }
+      }
+      mean_data[i] = BFloat16(mean_val);
+      rstd_data[i] = BFloat16(rstd_val);
     }
   });
 }
