@@ -223,7 +223,7 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, FunctionCtx, _Hook
     r"""Base class to create custom `autograd.Function`
 
     To create a custom `autograd.Function`, subclass this class and implement
-    the :meth:`forward` and :meth`backward` static methods. Then, to use your custom
+    the :meth:`forward` and :meth:`backward` static methods. Then, to use your custom
     op in the forward pass, call the class method ``apply``. Do not call
     :meth:`forward` directly.
 
@@ -284,7 +284,7 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, FunctionCtx, _Hook
     @staticmethod
     def backward(ctx: Any, *grad_outputs: Any) -> Any:
         r"""Defines a formula for differentiating the operation with backward mode
-        automatic differentiation.
+        automatic differentiation (alias to the vjp function).
 
         This function is to be overridden by all subclasses.
 

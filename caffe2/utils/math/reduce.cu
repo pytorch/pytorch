@@ -5,9 +5,8 @@
 #include <limits>
 #include <numeric>
 #include <vector>
-
+#include "caffe2/utils/cub_namespace.cuh"
 #include <cub/block/block_reduce.cuh>
-#include <cub/cub.cuh>
 
 #include <thrust/execution_policy.h>
 #include <thrust/reduce.h>

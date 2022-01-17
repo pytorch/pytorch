@@ -1,4 +1,5 @@
 #include <ATen/test/vec_test_all_types.h>
+#include <c10/util/irange.h>
 namespace {
 #if GTEST_HAS_TYPED_TEST
     template <typename T>
@@ -112,7 +113,7 @@ namespace {
             x = generator.get();
         }
         // test counted load stores
-#if defined(CPU_CAPABILITY_VSX)
+#if defined(CPU_CAPABILITY_VSX) || defined(CPU_CAPABILITY_ZVECTOR)
         for (int i = 1; i < 2 * vec::size(); i++) {
             vec v = vec::loadu(ref_storage, i);
             v.store(storage);
@@ -455,7 +456,7 @@ namespace {
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN VT expected_vals[vec::size()];
         auto vals = 1 << (vec::size());
-        for (int val = 0; val < vals; ++val) {
+        for (const auto val : c10::irange(vals)) {
           for (int i = 0; i < vec::size(); ++i) {
             if (val & (1 << i)) {
               test_vals[i] = std::numeric_limits<VT>::quiet_NaN();
@@ -747,7 +748,7 @@ namespace {
         CACHE_ALIGN VT test_vals[vec::size()];
         //all sets will be within 0  2^(n-1)
         auto power_sets = 1 << (vec::size());
-        for (int expected = 0; expected < power_sets; expected++) {
+        for (const auto expected : c10::irange(power_sets)) {
             // generate test_val based on expected
             for (int i = 0; i < vec::size(); ++i)
             {
@@ -850,10 +851,11 @@ namespace {
     std::enable_if_t<(!is_complex<VT>::value && idx == N), bool>
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     test_blendv(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()], VT mask[vec::size()]) {
+        using bit_rep = BitType<VT>;
         // generate expected_val
         for (int64_t i = 0; i < vec::size(); i++) {
-            int64_t hex_mask = 0;
-            std::memcpy(&hex_mask, &mask[i], sizeof(VT));
+            bit_rep hex_mask = 0;
+            hex_mask=bit_cast<bit_rep>(mask[i]);
             expected_val[i] = (hex_mask & 0x01) ? b[i] : a[i];
         }
         // test with blendv
@@ -894,7 +896,7 @@ namespace {
     void blend_init(T(&a)[N], T(&b)[N]) {
         a[0] = (T)1.0;
         b[0] = a[0] + (T)N;
-        for (int i = 1; i < N; i++) {
+        for (const auto i : c10::irange(1, N)) {
             a[i] = a[i - 1] + (T)(1.0);
             b[i] = b[i - 1] + (T)(1.0);
         }
@@ -905,7 +907,7 @@ namespace {
         auto add = Complex<float>(1., 100.);
         a[0] = Complex<float>(1., 100.);
         b[0] = Complex<float>(5., 1000.);
-        for (int i = 1; i < 4; i++) {
+        for (const auto i : c10::irange(1, 4)) {
             a[i] = a[i - 1] + add;
             b[i] = b[i - 1] + add;
         }
@@ -1051,7 +1053,8 @@ namespace {
         float minv = static_cast<float>(static_cast<double>(min_val) * 2.0);
         float maxv = static_cast<float>(static_cast<double>(max_val) * 2.0);
         ValueGen<float> gen(minv, maxv, seed.add(2));
-        for (int i = 0; i < trials; i++) {
+        for (const auto i : c10::irange(trials)) {
+            (void)i; // Suppress unused variable warning
             float scale = generator_sc.get();
             float inv_scale = 1.0f / static_cast<float>(scale);
             auto zero_point_val = generator_zp.get();
@@ -1088,7 +1091,8 @@ namespace {
         ValueGen<int> generator(min_val, max_val, seed.add(1));
         //scale
         ValueGen<float> generator_sc(1.f, 15.f, seed.add(2));
-        for (int i = 0; i < trials; i++) {
+        for (const auto i : c10::irange(trials)) {
+            (void)i; // Suppress unused variable warning
             float scale = generator_sc.get();
             int32_t zero_point_val = generator.get();
             float scale_zp_premul = -(scale * zero_point_val);
@@ -1135,7 +1139,8 @@ namespace {
         ValueGen<int32_t> generator(min_val, max_val, seed);
         //scale
         ValueGen<float> generator_sc(1.f, 15.f, seed.add(1));
-        for (int i = 0; i < trials; i++) {
+        for (const auto i : c10::irange(trials)) {
+            (void)i; // Suppress unused variable warning
             float multiplier = 1.f / (generator_sc.get());
             auto zero_point_val = generator.get();
             int index = 0;
@@ -1172,7 +1177,8 @@ namespace {
         typename vec::int_vec_return_type  expected_int_ret;
         auto seed = TestSeed();
         ValueGen<underlying> generator(min_val, max_val, seed);
-        for (int i = 0; i < trials; i++) {
+        for (const auto i : c10::irange(trials)) {
+            (void)i; // Suppress unused variable warning
             //generate vals
             for (int j = 0; j < vec::size(); j++) {
                 qint_vals[j] = generator.get();
@@ -1251,7 +1257,7 @@ namespace {
         CACHE_ALIGN VT ref_y[N];
         auto seed = TestSeed();
         ValueGen<VT> generator(VT(-100), VT(100), seed);
-        for (int64_t i = 0; i < N; i++) {
+        for (const auto i : c10::irange(N)) {
           x1[i] = generator.get();
           x2[i] = generator.get();
           x3[i] = generator.get();
@@ -1263,19 +1269,19 @@ namespace {
         };
         // test map: y = x1
         at::vec::map<VT>([](vec x) { return x; }, y, x1, N);
-        for (int64_t i = 0; i < N; i++) { ref_y[i] = x1[i]; }
+        for (const auto i : c10::irange(N)) { ref_y[i] = x1[i]; }
         cmp(y, ref_y);
         // test map2: y = x1 + x2
         at::vec::map2<VT>([](vec x1, vec x2) { return x1 + x2; }, y, x1, x2, N);
-        for (int64_t i = 0; i < N; i++) { ref_y[i] = x1[i] + x2[i]; }
+        for (const auto i : c10::irange(N)) { ref_y[i] = x1[i] + x2[i]; }
         cmp(y, ref_y);
         // test map3: y = x1 + x2 + x3
         at::vec::map3<VT>([](vec x1, vec x2, vec x3) { return x1 + x2 + x3; }, y, x1, x2, x3, N);
-        for (int64_t i = 0; i < N; i++) { ref_y[i] = x1[i] + x2[i] + x3[i]; }
+        for (const auto i : c10::irange(N)) { ref_y[i] = x1[i] + x2[i] + x3[i]; }
         cmp(y, ref_y);
         // test map4: y = x1 + x2 + x3 + x4
         at::vec::map4<VT>([](vec x1, vec x2, vec x3, vec x4) { return x1 + x2 + x3 + x4; }, y, x1, x2, x3, x4, N);
-        for (int64_t i = 0; i < N; i++) { ref_y[i] = x1[i] + x2[i] + x3[i] + x4[i]; }
+        for (const auto i : c10::irange(N)) { ref_y[i] = x1[i] + x2[i] + x3[i] + x4[i]; }
         cmp(y, ref_y);
     }
       TYPED_TEST(FunctionalBF16Tests, Reduce) {
@@ -1294,7 +1300,7 @@ namespace {
       CACHE_ALIGN VT x_b3[N];
       auto seed = TestSeed();
       ValueGen<RT> generator(RT(-1), RT(1), seed);
-      for (int64_t i = 0; i < N; i++) {
+      for (const auto i : c10::irange(N)) {
         x_f1[i] = generator.get();
         x_f2[i] = generator.get();
         x_f3[i] = generator.get();
@@ -1362,7 +1368,7 @@ namespace {
       CACHE_ALIGN VT y_b[N];
       auto seed = TestSeed();
       ValueGen<RT> generator(RT(-1), RT(1), seed);
-      for (int64_t i = 0; i < N; i++) {
+      for (const auto i : c10::irange(N)) {
         x_f1[i] = generator.get();
         x_f2[i] = generator.get();
         x_f3[i] = generator.get();
@@ -1379,7 +1385,7 @@ namespace {
       for (int64_t len = 1; len <= N; len++) {
         at::vec::map<RT>([](auto x) { return x; }, y_f, x_f1, len);
         at::vec::map<VT>([](auto x) { return x; }, y_b, x_b1, len);
-        for (int64_t i = 0; i < len; i++) {
+        for (const auto i : c10::irange(len)) {
           ASSERT_TRUE(cmp(y_f[i], y_b[i])) << "Failure Details:\nTest Seed to reproduce: " << seed
               << "\nmap, Length: " << len << "; index: " << i << "; fp32 reference: " << y_f[i] << "; bf16 value: " << RT(y_b[i]);
         }
@@ -1388,7 +1394,7 @@ namespace {
       for (int64_t len = 1; len <= N; len++) {
         at::vec::map2<RT>([](auto x, auto y) { return x + y; }, y_f, x_f1, x_f2, len);
         at::vec::map2<VT>([](auto x, auto y) { return x + y; }, y_b, x_b1, x_b2, len);
-        for (int64_t i = 0; i < len; i++) {
+        for (const auto i : c10::irange(len)) {
           ASSERT_TRUE(cmp(y_f[i], y_b[i])) << "Failure Details:\nTest Seed to reproduce: " << seed
               << "\nmap2, Length: " << len << "; index: " << i << "; fp32 reference: " << y_f[i] << "; bf16 value: " << RT(y_b[i]);
         }
@@ -1397,7 +1403,7 @@ namespace {
       for (int64_t len = 1; len <= N; len++) {
         at::vec::map3<RT>([](auto x, auto y, auto z) { return x + y * z; }, y_f, x_f1, x_f2, x_f3, len);
         at::vec::map3<VT>([](auto x, auto y, auto z) { return x + y * z; }, y_b, x_b1, x_b2, x_b3, len);
-        for (int64_t i = 0; i < len; i++) {
+        for (const auto i : c10::irange(len)) {
           ASSERT_TRUE(cmp(y_f[i], y_b[i])) << "Failure Details:\nTest Seed to reproduce: " << seed
               << "\nmap3, Length: " << len << "; index: " << i << "; fp32 reference: " << y_f[i] << "; bf16 value: " << RT(y_b[i]);
         }
@@ -1406,7 +1412,7 @@ namespace {
       for (int64_t len = 1; len <= N; len++) {
          at::vec::map4<RT>([](auto x, auto y, auto z, auto w) { return x + y * z - w; }, y_f, x_f1, x_f2, x_f3, x_f4, len);
          at::vec::map4<VT>([](auto x, auto y, auto z, auto w) { return x + y * z - w; }, y_b, x_b1, x_b2, x_b3, x_b4, len);
-         for (int64_t i = 0; i < len; i++) {
+         for (const auto i : c10::irange(len)) {
            ASSERT_TRUE(cmp(y_f[i], y_b[i])) << "Failure Details:\nTest Seed to reproduce: " << seed
                << "\nmap4, Length: " << len << "; index: " << i << "; fp32 reference: " << y_f[i] << "; bf16 value: " << RT(y_b[i]);
          }

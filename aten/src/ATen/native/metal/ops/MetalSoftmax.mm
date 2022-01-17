@@ -65,8 +65,8 @@ Tensor softmax_int(
 }
 
 TORCH_LIBRARY_IMPL(aten, Metal, m) {
-  m.impl("log_softmax.int", TORCH_FN(metal::log_softmax_int));
-  m.impl("softmax.int", TORCH_FN(metal::softmax_int));
+  m.impl(TORCH_SELECTIVE_NAME("aten::log_softmax.int"), TORCH_FN(metal::log_softmax_int));
+  m.impl(TORCH_SELECTIVE_NAME("aten::softmax.int"), TORCH_FN(metal::softmax_int));
 };
 
 }

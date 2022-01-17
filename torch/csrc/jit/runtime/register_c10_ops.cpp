@@ -54,7 +54,7 @@ Registerer& registerer() {
 }
 
 // global instance to run its constructor on startup
-Registerer& dummy = registerer();
+C10_UNUSED Registerer& dummy = registerer();
 
 } // namespace
 

@@ -133,8 +133,8 @@ void adagrad_update_prefetch(
 
 // Version with prefetching for embeddings and
 // momentum using fp16
-decltype(
-    adagrad_fp16_update_prefetch__base) adagrad_fp16_update_prefetch__avx2_fma;
+decltype(adagrad_fp16_update_prefetch__base)
+    adagrad_fp16_update_prefetch__avx2_fma;
 void adagrad_fp16_update_prefetch(
     int N,
     const at::Half* w,
