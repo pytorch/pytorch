@@ -111,7 +111,7 @@ class C10dRendezvousBackend(RendezvousBackend):
     def _call_store(self, store_op: str, *args, **kwargs) -> Any:
         try:
             return getattr(self._store, store_op)(*args, **kwargs)
-        except (ValueError, RuntimeError) as exc:
+        except (ValueError, RuntimeError, TimeoutError) as exc:
             raise RendezvousConnectionError(
                 "The connection to the C10d store has failed. See inner exception for details."
             ) from exc
@@ -164,7 +164,7 @@ def _create_tcp_store(params: RendezvousParameters) -> TCPStore:
                 log.info(msg)
 
             break
-        except (ValueError, RuntimeError) as exc:
+        except (ValueError, RuntimeError, TimeoutError) as exc:
             # If we heuristically inferred the value of is_host as True and our
             # first attempt to instantiate the TCP store has failed, try it one
             # more time with is_host set to False. As an edge case there can be
