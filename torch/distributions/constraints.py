@@ -17,6 +17,7 @@ The following constraints are implemented:
 - ``constraints.nonnegative_integer``
 - ``constraints.one_hot``
 - ``constraints.positive_definite``
+- ``constraints.positive_semidefinite``
 - ``constraints.positive_integer``
 - ``constraints.positive``
 - ``constraints.real_vector``
@@ -488,11 +489,21 @@ class _Symmetric(_Square):
         return torch.isclose(value, value.mT, atol=1e-6).all(-2).all(-1)
 
 
+class _PositiveSemidefinite(_Symmetric):
+    """
+    Constrain to positive-semidefinite matrices.
+    """
+    def check(self, value):
+        sym_check = super().check(value)
+        if not sym_check.all():
+            return sym_check
+        return torch.linalg.eigvalsh(value).ge(0).all(-1)
+
+
 class _PositiveDefinite(_Symmetric):
     """
     Constrain to positive-definite matrices.
     """
-
     def check(self, value):
         sym_check = super().check(value)
         if not sym_check.all():
@@ -592,5 +603,6 @@ corr_cholesky = _CorrCholesky()
 square = _Square()
 symmetric = _Symmetric()
 positive_definite = _PositiveDefinite()
+positive_semidefinite = _PositiveSemidefinite()
 cat = _Cat
 stack = _Stack
