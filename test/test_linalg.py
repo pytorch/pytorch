@@ -1286,6 +1286,13 @@ class TestLinalg(TestCase):
         torch.linalg.matrix_norm(a).backward()
         self.assertEqual(a.grad, torch.zeros(3, 3, device=device))
 
+        a = torch.ones(2, 3, 3, device=device)
+        a[0] = 0
+        b = a.clone()
+        b.requires_grad = True
+        torch.linalg.matrix_norm(b).backward()
+        self.assertEqual(b.grad[0], torch.zeros(3, 3, device=device))
+
     def test_fro_norm_backward_zero(self, device):
         a = torch.zeros(3, 3, requires_grad=True, device=device)
         aa = torch.linalg.norm(a, 'fro').backward()
