@@ -412,13 +412,34 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
   return std::make_tuple(grad_input, grad_weight, grad_bias);
 }
 
+inline bool _batch_norm_use_cudnn(const Tensor& input, const Tensor& weight, const Tensor& bias,
+      const Tensor& running_mean, const Tensor& running_var, bool training, double eps, bool cudnn_enabled) {
+  const bool use_cudnn = (
+      input.is_cuda()
+      && input.scalar_type() != at::kBFloat16 && weight.scalar_type() != at::kBFloat16
+      && (input.scalar_type() != at::kHalf
+        || weight.scalar_type() == at::kFloat)
+      && weight.defined() && bias.defined()
+      && ((running_mean.defined() && running_var.defined())
+        || (!running_mean.defined() && !running_var.defined() && training))
+      && (input.dim() >= 3)
+      && ((input.size(0) <= 880801 && training) // spatial, training
+          ||(input.size(0) <= 65535 && !training)) //spatial, eval
+      && detail::getCUDAHooks().compiledWithCuDNN()
+      && eps >= detail::getCUDAHooks().batchnormMinEpsilonCuDNN()
+      && cudnn_enabled && detail::getCUDAHooks().versionCuDNN() >= 5110L);
+
+  return use_cudnn;
+}
+
 // _batch_norm_impl_index(_backward) are used in the JIT be able to keep the run-time selection
 // of backends, while enabling it to keep the information about the used backend, so that it can
 // use its corresponding backward implementation.
 // XXX: The indices of backends need to be kept synchronized between this function and its _backward.
 std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
     const Tensor& input, const c10::optional<Tensor>& weight_opt /* optional */, const c10::optional<Tensor>& bias_opt /* optional */, const c10::optional<Tensor>& running_mean_opt /* optional */, const c10::optional<Tensor>& running_var_opt /* optional */,
-    bool training, double momentum, double eps, bool cudnn_enabled) {
+    bool training, double momentum, double eps, bool cudnn_enabled,
+    const Tensor& pre_allocated_output) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
@@ -460,20 +481,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
     check_dims_match_num_input_features("bias", num_features, bias.numel());
   }
 
-  const bool use_cudnn = (
-      input.is_cuda()
-      && input.scalar_type() != at::kBFloat16 && weight.scalar_type() != at::kBFloat16
-      && (input.scalar_type() != at::kHalf
-        || weight.scalar_type() == at::kFloat)
-      && weight.defined() && bias.defined()
-      && ((running_mean.defined() && running_var.defined())
-        || (!running_mean.defined() && !running_var.defined() && training))
-      && (input.dim() >= 3)
-      && ((input.size(0) <= 880801 && training) // spatial, training
-          ||(input.size(0) <= 65535 && !training)) //spatial, eval
-      && detail::getCUDAHooks().compiledWithCuDNN()
-      && eps >= detail::getCUDAHooks().batchnormMinEpsilonCuDNN()
-      && cudnn_enabled && detail::getCUDAHooks().versionCuDNN() >= 5110L);
+  const bool use_cudnn = _batch_norm_use_cudnn(input, weight, bias, running_mean, running_var, training, eps, cudnn_enabled);
 
   if (use_cudnn) {
     auto input_c = input.contiguous(input.suggest_memory_format());
@@ -579,7 +587,20 @@ Tensor batch_norm(
   const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
   const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
   return std::get<0>(at::_batch_norm_impl_index(input, weight, bias, running_mean, running_var,
-                                                training, momentum, eps, cudnn_enabled));
+                                                training, momentum, eps, cudnn_enabled, at::Tensor()));
+}
+
+void batch_norm_out(
+    const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
+    const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt,
+    bool training, double momentum, double eps, bool cudnn_enabled, const at::Tensor& pre_allocated_output) {
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
+  const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
+
+  std::get<0>(at::_batch_norm_impl_index(input, weight, bias, running_mean, running_var,
+                                                training, momentum, eps, cudnn_enabled, pre_allocated_output));
 }
 
 Tensor instance_norm(
