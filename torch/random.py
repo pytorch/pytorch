@@ -129,10 +129,8 @@ def fork_rng(devices=None, enabled=True, _caller="fork_rng", _devices_kw="device
             torch.cuda.set_rng_state(gpu_rng_state, device)
 
 def uniform(low, high, size) -> torch.Tensor:
-
-    """
+    r"""
     Generates uniformly distributed tensors
     """
     uniformly_distributed_tensor = (high - low) * torch.rand(*size) + low
-    
     return uniformly_distributed_tensor
