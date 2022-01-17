@@ -3351,8 +3351,8 @@ class TestQuantizedLinear(TestCase):
             np.testing.assert_equal(
                 W_q.q_zero_point(), W_q_origin.q_zero_point())
 
-@unittest.skipIf(IS_MACOS, "Known test failure on Mac.")
-@unittest.skipIf(not BUILD_WITH_CAFFE2, "Test needs Caffe2")
+# @unittest.skipIf(IS_MACOS, "Known test failure on Mac.")
+# @unittest.skipIf(not BUILD_WITH_CAFFE2, "Test needs Caffe2")
 class TestQuantizedEmbeddingOps(TestCase):
     def _test_embedding_bag_unpack_fn(self, pack_fn, unpack_fn, num_embeddings, embedding_dim, bit_rate, optimized_qparams,
                                       num_batches, data_type=np.float32):
@@ -3684,8 +3684,11 @@ class TestQuantizedEmbeddingOps(TestCase):
            embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0))
     def test_embedding(self, num_embeddings, embedding_dim):
         dtypes = [torch.quint8, torch.quint4x2]
-        quant_ops = [torch.ops.quantized.embedding_byte, torch.ops.quantize.embedding_4bit]
-        for quant_op, dtype in zip(dtypes, quant_ops):
+        quant_ops = [torch.ops.quantized.embedding_byte, torch.ops.quantized.embedding_4bit]
+        atols = [0.005, 0.1]
+        rtols = [1e-3, 1e-2]
+        prepack_op = torch.ops.quantized.embedding_bag_prepack
+        for quant_op, dtype, atol, rtol in zip(quant_ops, dtypes, atols, rtols):
             weights = torch.from_numpy((np.random.random_sample((
                 num_embeddings, embedding_dim)) + 1).astype(np.float32))
 
@@ -3695,7 +3698,7 @@ class TestQuantizedEmbeddingOps(TestCase):
             qparams = obs.calculate_qparams()
 
             # Quantize the weights to 8bits
-            qweight = torch.quantize_per_channel(weights, qparams[0], qparams[1], axis=0, dtype=torch.dtype)
+            qweight = torch.quantize_per_channel(weights, qparams[0], qparams[1], axis=0, dtype=dtype)
             max_segments = 5
             max_segment_length = 20
             num_lengths = np.random.randint(1, max_segments + 1)
@@ -3709,7 +3712,7 @@ class TestQuantizedEmbeddingOps(TestCase):
             qresult = quant_op(packed_weight, indices, pruned_weights=False)
 
             ref = torch.embedding(weights, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=False)
-            torch.testing.assert_close(ref, qresult, atol=0.005, rtol=1e-3)
+            torch.testing.assert_close(ref, qresult, atol=atol, rtol=rtol)
 
     def test_embedding_2d_indices(self):
         """
