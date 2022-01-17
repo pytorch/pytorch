@@ -318,7 +318,6 @@ __device__ void radixSelect(
 
   // We start at the most significant digit in our radix, scanning
   // through to the least significant digit
-#pragma unroll
   for (int digitPos = sizeof(scalar_t) * 8 - RADIX_BITS; digitPos >= 0;
        digitPos -= RADIX_BITS) {
     // Count radix distribution for the current position and reduce
