@@ -274,9 +274,9 @@ class DataLoader(Generic[T_co]):
                 sampler = _InfiniteConstantSampler()
             else:  # map-style
                 if shuffle:
-                    sampler = RandomSampler(dataset, generator=generator)
+                    sampler = RandomSampler(dataset, generator=generator)  # type: ignore[arg-type]
                 else:
-                    sampler = SequentialSampler(dataset)
+                    sampler = SequentialSampler(dataset)  # type: ignore[arg-type]
 
         if batch_size is not None and batch_sampler is None:
             # auto_collation without custom batch_sampler
