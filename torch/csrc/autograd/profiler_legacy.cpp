@@ -1,11 +1,11 @@
 #include <torch/csrc/autograd/profiler_legacy.h>
 
 #include <torch/csrc/autograd/function.h>
-#include <torch/csrc/jit/frontend/code_template.h>
-
 #include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
+#include <ATen/code_template.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <torch/library.h>
 
@@ -348,14 +348,6 @@ void pushProfilingCallbacksLegacy() {
 
 } // namespace
 
-torch::profiler::impl::ProfilerConfig getProfilerConfig() {
-  auto state_ptr = getProfilerTLSState();
-  TORCH_CHECK(
-      state_ptr,
-      "Tried to access profiler config, but profiler is not enabled!");
-  return state_ptr->config();
-}
-
 void enableProfilerLegacy(const torch::profiler::impl::ProfilerConfig& new_config) {
   TORCH_CHECK(new_config.state != torch::profiler::impl::ProfilerState::NVTX || torch::profiler::impl::cudaStubs()->enabled(),
     "Can't use NVTX profiler - PyTorch was compiled without CUDA");
@@ -515,7 +507,7 @@ double LegacyEvent::cudaElapsedUs(const LegacyEvent& e) const {
   return torch::profiler::impl::cudaStubs()->elapsed(&cuda_event, &e.cuda_event);
 }
 
-static const jit::CodeTemplate event_template(R"(
+static const at::jit::CodeTemplate event_template(R"(
 {
   "name": "${name}",
   "ph": "X",
@@ -559,7 +551,7 @@ void writeProfilerEventsToStream(std::ostream& out, const std::vector<LegacyEven
       LegacyEvent* evt_start = it->second;
       events_map.erase(it);
 
-      jit::TemplateEnv env;
+      at::jit::TemplateEnv env;
       env.s("name", evt_start->name());
       env.d("ts", profiler_start->cpuElapsedUs(*evt_start));
       env.d("dur", evt_start->cpuElapsedUs(*evt));
