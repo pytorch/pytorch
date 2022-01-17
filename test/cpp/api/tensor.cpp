@@ -1096,3 +1096,14 @@ TEST(TensorTest, ReshapeAlias) {
     z.grad()
   ));
 }
+
+TEST(TensorTest, IsAliasOf) {
+  auto a = torch::empty(4);
+  auto b = a.view({2, 2});
+  ASSERT_TRUE(a.is_alias_of(b));
+  auto c = torch::empty(4);
+  ASSERT_TRUE(!a.is_alias_of(c));
+  auto d = b.view({1, 4});
+  ASSERT_TRUE(d.is_alias_of(b));
+  ASSERT_TRUE(d.is_alias_of(a));
+}

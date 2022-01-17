@@ -822,6 +822,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return is_contiguous_;
   }
 
+  virtual bool is_alias_of(const TensorImpl& other) const {
+    return has_storage() && storage().is_alias_of(other.storage());
+  }
+
  private:
   bool is_contiguous_nondefault_policy_impl(at::MemoryFormat) const;
 

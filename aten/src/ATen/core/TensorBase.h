@@ -301,7 +301,7 @@ class TORCH_API TensorBase {
     return impl_->storage();
   }
   bool is_alias_of(const at::TensorBase& other) const{
-    return impl_->storage().is_alias_of(other.storage());
+    return impl_->is_alias_of(*other.unsafeGetTensorImpl());
   }
 
   inline bool _is_zerotensor() const {
