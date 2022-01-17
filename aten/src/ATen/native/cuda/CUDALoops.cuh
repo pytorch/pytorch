@@ -32,7 +32,6 @@
 #include <tuple>
 #include <iostream>
 #include <mutex>
-#include <tuple>
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/core/Array.h>
