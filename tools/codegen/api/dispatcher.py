@@ -1,10 +1,9 @@
 from tools.codegen.model import (Argument, FunctionSchema, Return,
-                                 SelfArgument, TensorOptionsArguments, Type,
-                                 assert_never)
+                                 SelfArgument, TensorOptionsArguments, Type)
 
 from tools.codegen.api.types import ArgName, Binding, NamedCType, CType
 from tools.codegen.api import cpp
-from tools.codegen.utils import concatMap
+from tools.codegen.utils import concatMap, assert_never
 
 import itertools
 from typing import Sequence, List, Union
@@ -27,15 +26,15 @@ from typing import Sequence, List, Union
 def name(func: FunctionSchema) -> str:
     return cpp.name(func)
 
-def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> NamedCType:
+def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName, remove_non_owning_ref_types: bool = False) -> NamedCType:
     # This is a faux amis.  If it makes sense in the future to add
     # more special cases here, or invert things so cpp.argument_type
     # calls this, or just completely inline the function, please do
     # it.
-    return cpp.argumenttype_type(t, mutable=mutable, binds=binds)
+    return cpp.argumenttype_type(t, mutable=mutable, binds=binds, remove_non_owning_ref_types=remove_non_owning_ref_types)
 
-def argument_type(a: Argument, *, binds: ArgName) -> NamedCType:
-    return argumenttype_type(a.type, mutable=a.is_write, binds=binds)
+def argument_type(a: Argument, *, binds: ArgName, remove_non_owning_ref_types: bool = False) -> NamedCType:
+    return argumenttype_type(a.type, mutable=a.is_write, binds=binds, remove_non_owning_ref_types=remove_non_owning_ref_types)
 
 def returns_type(rs: Sequence[Return]) -> CType:
     # At present, there is no difference. But there could be!
@@ -56,10 +55,12 @@ def jit_arguments(func: FunctionSchema) -> List[Argument]:
         func.arguments.kwarg_only,
         func.arguments.out)))
 
+def argument(a: Argument, *, remove_non_owning_ref_types: bool = False) -> Binding:
+    return Binding(
+        nctype=argument_type(a, binds=a.name, remove_non_owning_ref_types=remove_non_owning_ref_types),
+        name=a.name,
+        argument=a
+    )
+
 def arguments(func: FunctionSchema) -> List[Binding]:
-    return [
-        Binding(
-            nctype=argument_type(a, binds=a.name),
-            name=a.name,
-            argument=a,
-        ) for a in jit_arguments(func)]
+    return [argument(a) for a in jit_arguments(func)]

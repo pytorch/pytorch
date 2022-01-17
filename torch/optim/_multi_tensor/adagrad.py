@@ -34,14 +34,16 @@ class Adagrad(Optimizer):
             raise ValueError("Invalid epsilon value: {}".format(eps))
 
         defaults = dict(lr=lr, lr_decay=lr_decay, eps=eps, weight_decay=weight_decay,
-                        initial_accumulator_value=initial_accumulator_value)
+                        initial_accumulator_value=initial_accumulator_value, foreach=True)
         super(Adagrad, self).__init__(params, defaults)
 
         for group in self.param_groups:
             for p in group['params']:
                 state = self.state[p]
                 state['step'] = 0
-                state['sum'] = torch.full_like(p, initial_accumulator_value, memory_format=torch.preserve_format)
+                init_value = complex(initial_accumulator_value, initial_accumulator_value) if torch.is_complex(p) \
+                    else initial_accumulator_value
+                state['sum'] = torch.full_like(p, init_value, memory_format=torch.preserve_format)
 
     def share_memory(self):
         for group in self.param_groups:

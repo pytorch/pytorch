@@ -28,13 +28,6 @@ ExprHandle demoteOutput(
     const ExprHandle& e,
     const c10::optional<ScalarType> type);
 
-// TODO: Hide the impl functions
-std::pair<std::vector<ExprHandle>, bool> broadcastShapesImpl(
-    std::vector<std::vector<ExprHandle>> shapes);
-std::pair<std::vector<ExprHandle>, bool> broadcastShapesImpl(
-    const std::vector<ExprHandle>& a,
-    const std::vector<ExprHandle>& b);
-
 std::vector<ExprHandle> broadcastShapes(
     std::vector<std::vector<ExprHandle>> shapes);
 std::vector<ExprHandle> broadcastShapes(
@@ -68,12 +61,12 @@ Tensor computeExpand(
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType,
     at::Device device);
-Tensor computeFlatten(
+Tensor computeReshape(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType,
     at::Device device);
-Tensor computeReshape(
+Tensor computeFlatten(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType,
@@ -82,6 +75,11 @@ Tensor computeCatWoConditionals(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape);
 Tensor computeCat(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device);
+Tensor computeEmbedding(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType,

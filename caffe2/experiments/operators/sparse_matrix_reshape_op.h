@@ -111,7 +111,7 @@ class SparseMatrixReshapeOp : public Operator<Context> {
     auto* new_col_data = new_col->template mutable_data<int64_t>();
     auto* new_row_data = new_row->template mutable_data<int>();
 
-    for (int i = 0; i < nnz; ++i) {
+    for (const auto i : c10::irange(nnz)) {
       int64_t offset = old_row_data[i] * old_stride_ + old_col_data[i];
       new_row_data[i] = offset / new_stride_;
       new_col_data[i] = offset % new_stride_;

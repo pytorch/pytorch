@@ -1,3 +1,5 @@
+# Owner(s): ["module: dispatch"]
+
 import torch._C as C
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch._python_dispatcher import PythonDispatcher
