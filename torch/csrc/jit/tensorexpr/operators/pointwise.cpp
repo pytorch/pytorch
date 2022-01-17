@@ -195,7 +195,7 @@ Tensor computeScalar(
   auto dt = Dtype(*outputType);
   VarPtr let_var = alloc<Var>(name + "_var", dt);
   std::vector<ExprHandle> inputs = {
-      scalarOrConstant(inputValues[0]), scalarOrConstant(inputValues[0])};
+      scalarOrConstant(inputValues[0]), scalarOrConstant(inputValues[1])};
   promoteInputs(inputs);
   ExprHandle compute = innerExpr(inputs[0], inputs[1]);
   StmtPtr let_stmt =
