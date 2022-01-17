@@ -185,7 +185,6 @@ YAML_SOURCES = [
     File("build-parameters/binary-build-params.yml"),
     File("build-parameters/promote-build-params.yml"),
     Header("Job specs"),
-    File("job-specs/pytorch-job-specs.yml"),
     File("job-specs/binary-job-specs.yml"),
     File("job-specs/job-specs-custom.yml"),
     File("job-specs/job-specs-promote.yml"),
@@ -194,7 +193,6 @@ YAML_SOURCES = [
     File("job-specs/docker_jobs.yml"),
     Header("Workflows"),
     Treegen(gen_build_workflows_tree, 0),
-    File("workflows/workflows-ecr-gc.yml"),
     File("workflows/workflows-promote.yml"),
 ]
 

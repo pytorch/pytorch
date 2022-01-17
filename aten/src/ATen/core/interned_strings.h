@@ -36,6 +36,7 @@ namespace c10 {
   _(prim, MKLDNNHardSigmoid)         \
   _(prim, MKLDNNHardTanh)            \
   _(prim, MKLDNNClamp)               \
+  _(prim, StaticRuntimeCopyOuts)     \
   _(prim, Drop)                      \
   _(prim, Eval)                      \
   _(prim, Expand) /* onnx */         \
@@ -474,6 +475,9 @@ namespace c10 {
   _(attr, axes)                      \
   _(attr, axis)                      \
   _(attr, symbolic_shape_inputs)     \
+  _(attr, allow_stack_outputs)       \
+  _(attr, striding_inputs_desc)      \
+  _(attr, striding_outputs_desc)     \
   _(attr, broadcast)                 \
   _(attr, direction)                 \
   _(attr, ends)                      \
