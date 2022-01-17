@@ -138,18 +138,23 @@ c10::optional<ParallelType> NamedScalar::getParallelIndex() const {
 }
 
 IterDomain::IterDomain(Passkey passkey, Val* start, Val* extent)
-    : Val(passkey, DataType::Int), start_(start), extent_(extent) {}
+    : Val(passkey, DataType::Int),
+      start_(start),
+      stop_(extent),
+      extent_(extent) {}
 
 IterDomain::IterDomain(
     Passkey passkey,
     const fuser::cuda::IterDomain* iter_domain)
     : Val(passkey, iter_domain->getDataType().value()),
       start_(GpuLower::current()->lowerValue(iter_domain->start())),
+      stop_(GpuLower::current()->lowerValue(iter_domain->stop())),
       extent_(GpuLower::current()->lowerValue(iter_domain->extent())),
       parallel_type_(iter_domain->getParallelType()),
       iter_type_(iter_domain->getIterType()),
       is_rfactor_domain_(iter_domain->isRFactorProduct()),
-      is_simple_(iter_domain->definition() == nullptr) {
+      is_simple_(iter_domain->definition() == nullptr),
+      is_padded_dimension_(iter_domain->hasPaddingToMultipleOfWarp()) {
   // preserve the fusion node's name
   setName(iter_domain->name());
 }
@@ -213,6 +218,12 @@ bool TensorDomain::hasGridReduction() const {
 bool TensorDomain::hasBlockBroadcast() const {
   return std::any_of(domain_.begin(), domain_.end(), [](IterDomain* id) {
     return id->isBroadcast() && id->isThreadDim();
+  });
+}
+
+bool TensorDomain::hasGridBroadcast() const {
+  return std::any_of(domain_.begin(), domain_.end(), [](IterDomain* id) {
+    return id->isBroadcast() && id->isBlockDim();
   });
 }
 
@@ -352,58 +363,6 @@ WelfordOp::WelfordOp(
   addInput(in_N);
 }
 
-std::vector<IterDomain*> WelfordOp::getReductionDomains() const {
-  // out is a TensorIndex after lowering
-  const auto out_val = out()->as<kir::TensorIndex>()->view();
-
-  auto vec_domain = out_val->as<TensorView>()->domain()->domain();
-
-  vec_domain.erase(
-      std::remove_if(
-          vec_domain.begin(),
-          vec_domain.end(),
-          [](IterDomain* id) { return !id->isReduction(); }),
-      vec_domain.end());
-  return vec_domain;
-}
-
-std::unordered_map<ParallelType, IterDomain*, TypeHash> WelfordOp::
-    getParallelReductionDomains() const {
-  std::unordered_map<ParallelType, IterDomain*, TypeHash> parallel_domains;
-  for (auto d : getReductionDomains()) {
-    if (d->isThread()) {
-      parallel_domains.insert(std::make_pair(d->parallelType(), d));
-    }
-  }
-  return parallel_domains;
-}
-
-std::vector<IterDomain*> ReductionOp::getReductionDomains() const {
-  // out is a TensorIndex after lowering
-  const auto out_val = out()->as<kir::TensorIndex>()->view();
-
-  auto vec_domain = out_val->as<TensorView>()->domain()->domain();
-
-  vec_domain.erase(
-      std::remove_if(
-          vec_domain.begin(),
-          vec_domain.end(),
-          [](IterDomain* id) { return !id->isReduction(); }),
-      vec_domain.end());
-  return vec_domain;
-}
-
-std::unordered_map<ParallelType, IterDomain*, TypeHash> ReductionOp::
-    getParallelReductionDomains() const {
-  std::unordered_map<ParallelType, IterDomain*, TypeHash> parallel_domains;
-  for (auto d : getReductionDomains()) {
-    if (d->isThread()) {
-      parallel_domains.insert(std::make_pair(d->parallelType(), d));
-    }
-  }
-  return parallel_domains;
-}
-
 BroadcastOp::BroadcastOp(Passkey passkey, Val* out, Val* in)
     : Expr(passkey), out_(out), in_(in) {
   TORCH_CHECK(in->isA<TensorIndex>() || in->isA<TensorView>());
@@ -518,7 +477,8 @@ ForLoop::ForLoop(
     Val* stop,
     Val* step,
     bool vectorize,
-    Val* vectorize_shift)
+    Val* vectorize_shift,
+    bool unroll_required)
     : Expr(passkey),
       iter_domain_{iter_domain},
       index_(index),
@@ -527,6 +487,7 @@ ForLoop::ForLoop(
       step_(step),
       vectorize_(vectorize),
       vectorize_shift_(vectorize_shift),
+      unroll_required_(unroll_required),
       body_(this) {
   TORCH_INTERNAL_ASSERT(index->dtype() == DataType::Int);
   addInput(index);
@@ -561,7 +522,8 @@ ForLoop::ForLoop(Passkey passkey, IterDomain* iter_domain)
           nullptr,
           nullptr,
           isParallelTypeVectorize(iter_domain->parallelType()),
-          nullptr) {}
+          nullptr,
+          false) {}
 
 ForLoop::ForLoop(Passkey passkey, const ForLoop* other)
     : ForLoop(
@@ -572,7 +534,51 @@ ForLoop::ForLoop(Passkey passkey, const ForLoop* other)
           other->stop(),
           other->step(),
           other->vectorize(),
-          other->vectorize_shift()) {}
+          other->vectorize_shift(),
+          other->isUnrollRequired()) {}
+
+bool ForLoop::isUnrollable() const {
+  // Start and stop must be constant, must not be a broadcast
+  // dimension, cannot be bound to a parallel dimension, must not be
+  // vectorized.
+  return start()->isConstScalar() && stop()->isConstScalar() &&
+      !iter_domain()->isThread() && !iter_domain()->isBroadcast() &&
+      !vectorize();
+}
+
+bool ForLoop::isUnrolled() const {
+  if (isUnrollRequired() && !isUnrollable()) {
+    TORCH_WARN(
+        "Unroll required but not possible. Register allocation disabled. Loop index: ",
+        kir::toString(index_));
+    return false;
+  }
+
+  // Size-one loop will not be materialized as a loop, so return false
+  if (start()->isZeroInt() && stop()->isOneInt()) {
+    return false;
+  }
+
+  // Unroll if required.
+  if (isUnrollRequired()) {
+    return true;
+  }
+
+  // Don't unroll if not possible
+  if (!isUnrollable()) {
+    return false;
+  }
+
+  // Unrolling is technically possible but avoided
+  if (iter_domain()->parallelType() == ParallelType::Unswitch) {
+    // Use ParallelType::Unroll if unrolling is desired. Note that
+    // unswitched size-one loops are not unrolled as they are not
+    // materialized as actual for-loops.
+    return false;
+  }
+
+  return true;
+}
 
 Val* ForLoop::start() const {
   if (start_ != nullptr) {
@@ -668,11 +674,6 @@ Allocate::Allocate(
           size == nullptr ? std::vector<Val*>{} : std::vector<Val*>{size},
           zero_init) {}
 
-GridReduction::GridReduction(Passkey passkey, ReductionOp* reduction_op)
-    : Expr(passkey), reduction_op_(reduction_op) {
-  TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
-}
-
 GridReduction::GridReduction(
     Passkey passkey,
     ReductionOp* reduction_op,
@@ -682,20 +683,6 @@ GridReduction::GridReduction(
       reduction_op_(reduction_op),
       reduction_buffer_(reduction_buffer),
       sync_buffer_(sync_buffer) {}
-
-std::string GridReduction::getPredicateFlagName(const TensorView* val) {
-  std::stringstream ss;
-  ss << "T" << val->name() << "_pred";
-  return ss.str();
-}
-
-// TODO(kir): remove this
-std::string GridReduction::getPredicateFlagName(
-    const fuser::cuda::TensorView* val) {
-  std::stringstream ss;
-  ss << "T" << val->name() << "_pred";
-  return ss.str();
-}
 
 GridWelford::GridWelford(
     Passkey passkey,
@@ -710,20 +697,6 @@ GridWelford::GridWelford(
       avg_buffer_(avg_buffer),
       n_buffer_(n_buffer),
       sync_buffer_(sync_buffer) {}
-
-std::string GridWelford::getPredicateFlagName(const TensorView* val) {
-  std::stringstream ss;
-  ss << "T" << val->name() << "_pred";
-  return ss.str();
-}
-
-// TODO(kir): remove this
-std::string GridWelford::getPredicateFlagName(
-    const fuser::cuda::TensorView* val) {
-  std::stringstream ss;
-  ss << "T" << val->name() << "_pred";
-  return ss.str();
-}
 
 } // namespace kir
 } // namespace cuda

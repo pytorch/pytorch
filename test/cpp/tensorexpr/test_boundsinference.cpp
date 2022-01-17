@@ -5,6 +5,7 @@
 
 #include <gtest/gtest.h>
 
+#include <c10/util/irange.h>
 #include <test/cpp/tensorexpr/padded_buffer.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/bounds_inference.h>
@@ -26,7 +27,7 @@ static void verifyConstBounds(
   size_t ndim = ref.size();
   ASSERT_EQ(access_info.start.size(), ndim);
   ASSERT_EQ(access_info.stop.size(), ndim);
-  for (size_t i = 0; i < ndim; i++) {
+  for (const auto i : c10::irange(ndim)) {
     if (ref[i].first >= 0) { // Negative values are used to skip the check
       ASSERT_TRUE(access_info.start[i]->isConstant());
       int start_i = immediateAs<int>(access_info.start[i]);
@@ -524,14 +525,14 @@ TEST(BoundsInference, CacheReads) {
       // Same number of TensorAccessBoundInfos.
       ASSERT_EQ(pair.second.size(), beforeIt->second.size());
 
-      for (size_t i = 0; i < pair.second.size(); ++i) {
+      for (const auto i : c10::irange(pair.second.size())) {
         TensorAccessBoundsInfo& after = pair.second[i];
         TensorAccessBoundsInfo& before = beforeIt->second[i];
         // Same number of dimensions.
         ASSERT_EQ(before.start.size(), after.start.size());
 
         // Bounds are equal.
-        for (size_t j = 0; j < before.start.size(); ++j) {
+        for (const auto j : c10::irange(before.start.size())) {
           ASSERT_TRUE(exprEquals(before.start[j], after.start[j]));
           ASSERT_TRUE(exprEquals(before.stop[j], after.stop[j]));
         }
@@ -550,7 +551,7 @@ TEST(BoundsInference, CacheReads) {
       ASSERT_EQ(first.start.size(), 2);
 
       // bounds for load and store are equal.
-      for (size_t j = 0; j < first.start.size(); ++j) {
+      for (const auto j : c10::irange(first.start.size())) {
         ASSERT_TRUE(exprEquals(first.start[j], second.start[j]));
         ASSERT_TRUE(exprEquals(first.stop[j], second.stop[j]));
       }
@@ -713,10 +714,10 @@ TEST(BoundsInference, GetPotentialHazardsLoopSplit) {
 
 TEST(BoundsInference, HasConflictingOverlapSameBufferWithPartialOverlap) {
   // Input IR:
-  //   for (int j = 10; j < 100; j++) {
+  //   for (const auto j : c10::irange(10, 100)) {
   //     A[j] = 10 * j;
   //   }
-  //   for (int k = 10; k < 100; k++) {
+  //   for (const auto k : c10::irange(10, 100)) {
   //     A[k-1] = 20 * k;
   //   }
   BufHandle a_buf("A", {200}, kInt);
@@ -735,10 +736,10 @@ TEST(BoundsInference, HasConflictingOverlapSameBufferWithPartialOverlap) {
 
 TEST(BoundsInference, HasConflictingOverlapSameBufferWithFullOverlap) {
   // Input IR:
-  //   for (int j = 10; j < 100; j++) {
+  //   for (const auto j : c10::irange(10, 100)) {
   //     A[j] = 10 * j;
   //   }
-  //   for (int k = 10; k < 100; k++) {
+  //   for (const auto k : c10::irange(10, 100)) {
   //     A[k] = 20 * k;
   //   }
   BufHandle a_buf("A", {200}, kInt);
@@ -756,10 +757,10 @@ TEST(BoundsInference, HasConflictingOverlapSameBufferWithFullOverlap) {
 
 TEST(BoundsInference, HasConflictingOverlapSameBufferWithFullOverlapRAW) {
   // Input IR:
-  //   for (int j = 10; j < 100; j++) {
+  //   for (const auto j : c10::irange(10, 100)) {
   //     A[j] = 10 * j;
   //   }
-  //   for (int k = 10; k < 100; k++) {
+  //   for (const auto k : c10::irange(10, 100)) {
   //     B[k] = A[k];
   //   }
   BufHandle a_buf("A", {200}, kInt);
@@ -779,10 +780,10 @@ TEST(BoundsInference, HasConflictingOverlapSameBufferWithFullOverlapRAW) {
 
 TEST(BoundsInference, HasConflictingOverlapSameBufferNotOverlapping) {
   // Input IR:
-  //   for (int j = 10; j < 100; j++) {
+  //   for (const auto j : c10::irange(10, 100)) {
   //     A[j] = 10 * j;
   //   }
-  //   for (int k = 10; k < 100; k++) {
+  //   for (const auto k : c10::irange(10, 100)) {
   //     A[k+100] = 20 * k;
   //   }
   BufHandle a_buf("A", {200}, kInt);
@@ -801,13 +802,13 @@ TEST(BoundsInference, HasConflictingOverlapSameBufferNotOverlapping) {
 
 TEST(BoundsInference, HasConflictingOverlap2DBufferWithOverlap) {
   // Input IR:
-  //   for (int i = 0; i < 20; i++) {
-  //     for (int j = 0; j < 100; j++) {
+  //   for (const auto i : c10::irange(20)) {
+  //     for (const auto j : c10::irange(100)) {
   //       A[i,j] = i * j * 500;
   //     }
   //   }
-  //   for (int m = 0; m < 20; m++) {
-  //     for (int n = 0; n < 50; n++) {
+  //   for (const auto m : c10::irange(20)) {
+  //     for (const auto n : c10::irange(50)) {
   //       A[m+1,n] = m + n * 100;
   //     }
   //   }
@@ -840,13 +841,13 @@ TEST(BoundsInference, HasConflictingOverlap2DBufferWithOverlap) {
 
 TEST(BoundsInference, HasConflictingOverlap2DBufferWithNoOverlap) {
   // Input IR:
-  //   for (int i = 0; i < 20; i++) {
-  //     for (int j = 0; j < 100; j++) {
+  //   for (const auto i : c10::irange(20)) {
+  //     for (const auto j : c10::irange(100)) {
   //       A[i,j] = i * j * 500;
   //     }
   //   }
-  //   for (int m = 0; m < 20; m++) {
-  //     for (int n = 0; n < 50; n++) {
+  //   for (const auto m : c10::irange(20)) {
+  //     for (const auto n : c10::irange(50)) {
   //       A[m+20,n+100] = m + n * 100;
   //     }
   //   }
@@ -879,13 +880,13 @@ TEST(BoundsInference, HasConflictingOverlap2DBufferWithNoOverlap) {
 
 TEST(BoundsInference, HasConflictingOverlapDifferentBuffers) {
   // Input IR:
-  //   for (int i = 0; i < 20; i++) {
-  //     for (int j = 0; j < 100; j++) {
+  //   for (const auto i : c10::irange(20)) {
+  //     for (const auto j : c10::irange(100)) {
   //       A[i,j] = i * j * 500;
   //     }
   //   }
-  //   for (int m = 0; m < 20; m++) {
-  //     for (int n = 0; n < 50; n++) {
+  //   for (const auto m : c10::irange(20)) {
+  //     for (const auto n : c10::irange(50)) {
   //       B[m,n] = m + n * 100;
   //     }
   //   }
@@ -917,10 +918,10 @@ TEST(BoundsInference, HasConflictingOverlapDifferentBuffers) {
 
 TEST(BoundsInference, HasConflictingOverlapDueToRAWDependence) {
   // Input IR:
-  //   for (int j = 0; j < 100; j++) {
+  //   for (const auto j : c10::irange(100)) {
   //     A[j] = 10 * j;
   //   }
-  //   for (int k = 0; k < 100; k++) {
+  //   for (const auto k : c10::irange(100)) {
   //     B[k] = 20 * A[99-k];
   //   }
   BufHandle a_buf("A", {100}, kInt);
@@ -944,10 +945,10 @@ TEST(BoundsInference, HasConflictingOverlapDueToRAWDependence) {
 
 TEST(BoundsInference, HasConflictingOverlapDueToWARDependence) {
   // Input IR:
-  //   for (int k = 0; k < 100; k++) {
+  //   for (const auto k : c10::irange(100)) {
   //     B[k] = 20 * A[99-k];
   //   }
-  //   for (int j = 0; j < 100; j++) {
+  //   for (const auto j : c10::irange(100)) {
   //     A[j] = 10 * j;
   //   }
   BufHandle a_buf("A", {100}, kInt);
@@ -971,10 +972,10 @@ TEST(BoundsInference, HasConflictingOverlapDueToWARDependence) {
 
 TEST(BoundsInference, HasConflictingOverlapWithLoads) {
   // Input IR:
-  //   for (int k = 10; k < 100; k++) {
+  //   for (const auto k : c10::irange(10, 100)) {
   //     B[k] = 20 * A[99-k];
   //   }
-  //   for (int j = 10; j < 100; j++) {
+  //   for (const auto j : c10::irange(10, 100)) {
   //     C[j] = 10 * A[j];
   //   }
   BufHandle a_buf("A", {100}, kInt);
@@ -1003,7 +1004,7 @@ TEST(BoundsInference, HasConflictingOverlapWithLoads) {
 
 TEST(BoundsInference, IsOverlapping) {
   // Input IR:
-  //   for (int i = 0; i < 100; i++) {
+  //   for (const auto i : c10::irange(100)) {
   //     A[i] = i * 10;               // storeA1
   //     B[i] = A[99-i] * 20;         // loadA1
   //     C[i] = A[i + 100] * 10;      // loadA2

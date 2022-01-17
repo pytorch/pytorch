@@ -26,8 +26,8 @@ class AveragedModel(Module):
             :class:`AveragedModel` parameter, the current value of :attr:`model`
             parameter and the number of models already averaged; if None,
             equally weighted average is used (default: None)
-        mode (str, optional): whether to use parameters or state_dict for update
-            (default: parameters)
+        mode (str, optional): whether to use ``'parameters'`` or ``'state_dict'`` for update
+            (default: ``'parameters'``)
 
     Example:
         >>> loader, optimizer, model, loss_fn = ...
@@ -98,6 +98,9 @@ class AveragedModel(Module):
                 return averaged_model_parameter + \
                     (model_parameter - averaged_model_parameter) / (num_averaged + 1)
         self.avg_fn = avg_fn
+        modes = ['parameters', 'state_dict']
+        if mode not in modes:
+            raise ValueError(f'Invalid mode passed, valid values are {", ".join(modes)}.')
         self.use_state_dict = mode == 'state_dict'
 
     def forward(self, *args, **kwargs):
@@ -220,16 +223,14 @@ class SWALR(_LRScheduler):
             group['swa_lr'] = swa_lr
         if anneal_strategy not in ['cos', 'linear']:
             raise ValueError("anneal_strategy must by one of 'cos' or 'linear', "
-                             "instead got {}".format(anneal_strategy))
+                             f"instead got {anneal_strategy}")
         elif anneal_strategy == 'cos':
             self.anneal_func = self._cosine_anneal
         elif anneal_strategy == 'linear':
             self.anneal_func = self._linear_anneal
         if not isinstance(anneal_epochs, int) or anneal_epochs < 0:
-            raise ValueError("anneal_epochs must be equal or greater than 0, got {}".format(
-                             anneal_epochs))
+            raise ValueError(f"anneal_epochs must be equal or greater than 0, got {anneal_epochs}")
         self.anneal_epochs = anneal_epochs
-
         super(SWALR, self).__init__(optimizer, last_epoch)
 
     @staticmethod
@@ -237,9 +238,8 @@ class SWALR(_LRScheduler):
         if isinstance(swa_lrs, (list, tuple)):
             if len(swa_lrs) != len(optimizer.param_groups):
                 raise ValueError("swa_lr must have the same length as "
-                                 "optimizer.param_groups: swa_lr has {}, "
-                                 "optimizer.param_groups has {}".format(
-                                     len(swa_lrs), len(optimizer.param_groups)))
+                                 f"optimizer.param_groups: swa_lr has {len(swa_lrs)}, "
+                                 f"optimizer.param_groups has {len(optimizer.param_groups)}")
             return swa_lrs
         else:
             return [swa_lrs] * len(optimizer.param_groups)

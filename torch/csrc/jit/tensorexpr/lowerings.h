@@ -15,6 +15,7 @@ namespace tensorexpr {
 
 using ArgNone = c10::monostate;
 using BufList = std::vector<tensorexpr::BufHandle>;
+using DoubleList = std::vector<double>;
 using IntList = std::vector<int64_t>;
 using ArgValue = c10::variant<
     tensorexpr::BufHandle,
@@ -23,6 +24,7 @@ using ArgValue = c10::variant<
     int64_t,
     bool,
     BufList,
+    DoubleList,
     IntList,
     ArgNone>;
 
@@ -32,14 +34,13 @@ using NNCLoweringFunction = std::function<Tensor(
     const c10::optional<ScalarType>&,
     at::Device)>;
 
-TORCH_API std::unordered_map<std::string, NNCLoweringFunction>&
-getNNCLoweringRegistry();
+TORCH_API FunctionSchemaMap<NNCLoweringFunction>& getNNCLoweringRegistry();
 TORCH_API NNCLoweringFunction getStandardLoweringFor(const std::string& op);
 
-struct RegisterNNCLoweringFunction {
-  RegisterNNCLoweringFunction(const std::string& name, NNCLoweringFunction fn) {
-    getNNCLoweringRegistry()[name] = fn;
-  }
+struct RegisterNNCLoweringsFunction {
+  RegisterNNCLoweringsFunction(
+      const std::vector<std::string>& schemas,
+      NNCLoweringFunction fn);
 };
 
 } // namespace tensorexpr

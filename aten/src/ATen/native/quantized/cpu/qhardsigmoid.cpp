@@ -19,6 +19,11 @@ namespace {
 #ifdef USE_PYTORCH_QNNPACK
 Tensor qnnpack_hardsigmoid(Tensor input) {
   TORCH_CHECK(input.ndimension() > 0, "qnnpack_hardsigmoid(): Got empty input tensor");
+  TORCH_CHECK(input.scalar_type() == c10::kQUInt8,
+                "qnnpack_hardsigmoid(): Expected input data type ",
+                toString(c10::kQUInt8),
+                " but got ",
+                toString(input.scalar_type()));
   initQNNPACK();
 
   Tensor input_contig = input.contiguous(input.suggest_memory_format());
@@ -85,6 +90,16 @@ Tensor hardsigmoid_quantized_cpu(const Tensor& qx) {
   Tensor qy;
   qhardsigmoid_stub(qx.device().type(), qx, qy);
   return qy;
+}
+
+Tensor& hardsigmoid_out_quantized_cpu(const Tensor& qx, Tensor& result) {
+  // Note: we create a new temporary tensor because the output of hardsigmoid
+  // usually has different quantization parameters from the input, and
+  // quantization are currently only supported per entire tensor or per entire
+  // channel of a tensor.
+  Tensor qy = hardsigmoid_quantized_cpu(qx);
+  result.copy_(qy);
+  return result;
 }
 
 }}  // namespace at::native

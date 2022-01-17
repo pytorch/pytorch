@@ -3,6 +3,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/LossMulti.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -17,21 +18,21 @@ inline scalar_t multilabel_margin_loss_forward_inner_sum_cpu(
     int64_t dim) {
   using accscalar_t = at::acc_type<scalar_t, false>;
   accscalar_t sum = 0;
-  for (int64_t ddt = 0; ddt < dim; ddt++) {
+  for (const auto ddt : c10::irange(dim)) {
     int64_t target_idx = target_data[ddt];
     if (target_idx < 0) {
       break;
     }
     is_target_data[target_idx] = 1;
   }
-  for (int64_t dt = 0; dt < dim; dt++) {
+  for (const auto dt : c10::irange(dim)) {
     int64_t target_idx = target_data[dt];
     if (target_idx < 0) {
       break;
     }
 
     scalar_t input_target = input_data[target_idx];
-    for (int64_t d = 0; d < dim; d++) {
+    for (const auto d : c10::irange(dim)) {
       if (!is_target_data[d]) {
         scalar_t z = 1 - input_target + input_data[d];
         if (z > 0) {
@@ -63,7 +64,8 @@ static void multilabel_margin_loss_forward_out_frame(
 
     accscalar_t sum = 0;
 
-    for (int64_t t = 0; t < nframe; t++) {
+    for (const auto t : c10::irange(nframe)) {
+      (void)t; //Suppress unused variable warning
       sum += multilabel_margin_loss_forward_inner_sum_cpu(
           input_data, target_data, is_target_data, dim);
 
@@ -81,7 +83,7 @@ static void multilabel_margin_loss_forward_out_frame(
   } else {
     auto output_acc = output.accessor<scalar_t, 1>();
 
-    for (int64_t t = 0; t < nframe; t++) {
+    for (const auto t : c10::irange(nframe)) {
       scalar_t sum = multilabel_margin_loss_forward_inner_sum_cpu(
           input_data, target_data, is_target_data, dim);
 
@@ -171,15 +173,16 @@ static void multilabel_margin_loss_backward_out_frame(
       reduction == Reduction::Mean ? 1. / (nframe * dim) : 1. / dim);
 
   scalar_t* grad_input_row_data = grad_input.data_ptr<scalar_t>();
-  for (int64_t t = 0; t < nframe; t++) {
-    for (int64_t dt = 0; dt < dim; dt++) {
+  for (const auto t : c10::irange(nframe)) {
+    (void)t; //Suppress unused variable warning
+    for (const auto dt : c10::irange(dim)) {
       int64_t target_idx = target_data[dt];
       if (target_idx < 0) {
         break;
       }
 
       scalar_t input_target = input_data[target_idx];
-      for (int64_t d = 0; d < dim; d++) {
+      for (const auto d : c10::irange(dim)) {
         if (!is_target_data[d]) {
           scalar_t z = 1 - input_target + input_data[d];
           if (z > 0) {
@@ -206,8 +209,8 @@ static void multilabel_margin_loss_backward_out_frame(
   } else {
     check_dim_size(grad_output, 1, 0, nframe);
     auto grad_output_acc = grad_output.accessor<scalar_t, 1>();
-    for (int64_t t = 0; t < nframe; t++) {
-      for (int64_t d = 0; d < dim; d++) {
+    for (const auto t : c10::irange(nframe)) {
+      for (const auto d : c10::irange(dim)) {
         grad_input_data[t * dim + d] *= grad_output_acc[t];
       }
     }
