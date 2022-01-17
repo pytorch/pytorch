@@ -606,11 +606,21 @@ Tensor& linalg_solve_sparse_csr_out(const Tensor& input, const Tensor& other, Te
     other.expect_contiguous();
     result.expect_contiguous();
 
+    if (other.ndimension() > 1) {
+      TORCH_CHECK(false, "NotImplementedError: other tensor with dimension > 1 is not implemented yet.");
+    }
+
     // the "other" Tensor needs to be a vector
     TORCH_CHECK(
       other.ndimension() == 1,
       "other tensor must be a vector (1-dimensional), but got tensor with dimension: ",
       other.ndimension());
+
+    // Ensure other tensor is not empty
+    TORCH_CHECK(
+      other.numel(),
+      "Expected non-empty other tensor, but found empty other tensor."
+    );
 
     at::native::resize_output(result, other.sizes());
 

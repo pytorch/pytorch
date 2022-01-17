@@ -1268,7 +1268,7 @@ class TestSparseCSR(TestCase):
         samples = op.sample_inputs(device, dtype)
 
         for sample in samples:
-            if sample.input.ndim != 2 or sample.args[0].ndim != 1 or sample.args[0].size() == torch.Size([0]):
+            if sample.input.ndim != 2:
                 continue
 
             out = torch.zeros(sample.args[0].size(), dtype=dtype, device=device)
@@ -1280,9 +1280,19 @@ class TestSparseCSR(TestCase):
                 with self.assertRaisesRegex(RuntimeError, "PyTorch was not built with CUDA support"):
                     op(sample.input.to_sparse_csr(), *sample.args, **sample.kwargs, out=out)
                 break
+
+            if sample.args[0].ndim != 1:
+                with self.assertRaisesRegex(RuntimeError, "not implemented yet"):
+                    op(sample.input.to_sparse_csr(), *sample.args, **sample.kwargs, out=out)
+                break
+            if not sample.args[0].numel():
+                with self.assertRaisesRegex(RuntimeError,
+                                            "Expected non-empty other tensor, but found empty tensor"):
+                    op(sample.input.to_sparse_csr(), *sample.args, **sample.kwargs, out=out)
+                break
+
             expect = op(sample.input, *sample.args, **sample.kwargs)
             sample.input = sample.input.to_sparse_csr()
-            out = torch.zeros(sample.args[0].size(), dtype=dtype, device=device)
             op(sample.input, *sample.args, **sample.kwargs, out=out)
             self.assertEqual(expect, out)
 
