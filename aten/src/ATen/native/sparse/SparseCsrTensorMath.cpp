@@ -128,6 +128,17 @@ void convert_indices_from_csr_to_coo_cpu(const Tensor& indices, const Tensor& cr
 
 }
 
+// This function is needed for completeness, though we always call the CUDA dispatch
+//  defined in aten/src/ATen/native/sparse/cuda/SparseCsrTensorMath.cu file when given CPU inputs
+void linalg_sparse_csr_kernel_error(
+  const Tensor& input,
+  const Tensor& other,
+  Tensor& result,
+  int& singularity
+) {
+  TORCH_CHECK(false, "Not implemented for the given backend: ", input.device().type());
+}
+
 } // end anonymous namespace
 
 namespace native {
@@ -616,17 +627,6 @@ Tensor& linalg_solve_sparse_csr_out(const Tensor& input, const Tensor& other, Te
   } else {
     TORCH_CHECK(false, "PyTorch was not built with CUDA support. Please use PyTorch built CUDA support");
   }
-}
-
-// This function is needed for completeness, though we always call the CUDA dispatch
-//  defined in aten/src/ATen/native/sparse/cuda/SparseCsrTensorMath.cu file when given CPU inputs
-void linalg_sparse_csr_kernel_error(
-  const Tensor& input,
-  const Tensor& other,
-  Tensor& result,
-  int& singularity
-) {
-  TORCH_CHECK(false, "Not implemented for the given backend: ", input.device().type());
 }
 
 DEFINE_DISPATCH(linalg_solve_sparse_csr_stub);

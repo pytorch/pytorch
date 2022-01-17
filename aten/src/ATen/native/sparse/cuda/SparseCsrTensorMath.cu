@@ -105,12 +105,13 @@ void convert_indices_from_csr_to_coo_cuda(const Tensor& indices, const Tensor& c
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
-template <typename scalar_t, typename value_t>
+template <typename scalar_t>
 void _apply_sparse_csr_lu_solve(
-  const at::sparse_csr::SparseCsrTensor& input,
+  const Tensor& input,
   const Tensor& other,
   Tensor& result,
   int &_singularity) {
+  using value_t = typename c10::scalar_value_type<scalar_t>::type;
   auto values = input.values();
   const scalar_t *values_data_ptr = values.data_ptr<scalar_t>();
   auto crow_indices = input.crow_indices().to(kInt);
@@ -309,14 +310,6 @@ void linalg_solve_sparse_csr_kernel(
       _apply_sparse_csr_lu_solve<scalar_t, double>(input, other, result, singularity);
     }
   });
-}
-
-void linalg_solve_sparse_csr_kernel_error(
-  const Tensor& input,
-  const Tensor& other,
-  Tensor& result,
-  int& singularity) {
-  TORCH_CHECK(false, "Not implemented for the given device.");
 }
 
 REGISTER_CUDA_DISPATCH(linalg_solve_sparse_csr_stub, &linalg_solve_sparse_csr_kernel);
