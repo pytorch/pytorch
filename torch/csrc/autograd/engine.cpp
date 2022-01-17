@@ -1263,6 +1263,9 @@ void GraphTask::stash_current_streams() {
   if (num_gpus > 0) {
     for (c10::DeviceIndex idx = 0; idx < num_gpus;  idx++) {
 #if defined(USE_ROCM) && (ROCM_VERSION < 50000)
+      // If the build targets ROCM, stash streams for all visible devices unconditionally, to work around
+      // https://github.com/pytorch/pytorch/issues/59750.
+      // TODO: Remove ROCM-specific behavior when https://github.com/pytorch/pytorch/issues/59750 is fixed.
       if (true) {
 #else	      
       if (at::detail::getCUDAHooks().hasPrimaryContext(idx)) {
