@@ -1470,14 +1470,13 @@ C10_ALWAYS_INLINE void to_copy_functor_impl(
   // See Note [Explicit nullopt MemoryFormat argument]
   // Can't use size {0} if memory_format is ChannelLast
   if (need_to_allocate_output) {
-    at::Tensor output = at::detail::empty_cpu(
+    p_node->Output(0) = at::detail::empty_cpu(
         self.sizes(),
         args->dtype,
         args->layout,
         self.device(),
         c10::nullopt,
         memory_format);
-    p_node->Output(0) = std::move(output);
   } else {
     if (has_memory_format) {
       memory_format = p_node->Input(4).toOptional<c10::MemoryFormat>().value_or(
