@@ -1147,7 +1147,7 @@ const std::vector<std::string> functions = {
 
             output, save1, save2, reserve, impl_idx = torch._batch_norm_impl_index(
                 input, weight, bias, running_mean, running_var, training,
-                momentum, eps, cudnn_enabled)
+                momentum, eps, cudnn_enabled, None)
             has_weight = weight is not None
             has_bias = bias is not None
 
