@@ -624,7 +624,7 @@ if __name__ == "__main__" :
                         # _and_ disable fusers to get no-optimization
                         torch._C._jit_override_can_fuse_on_cpu(False)
                         torch._C._jit_override_can_fuse_on_gpu(False)
-                        torch._C._jit_set_texpr_fuser_enabled(False)
+                        torch._C._jit_set_texpr_fuser_enabled(True)
                         torch._C._jit_set_nvfuser_enabled(False)
                     if args.fuser == 'fuser2':
                         # special case to disable nvfuser horizontal fusion as it is currently broken
