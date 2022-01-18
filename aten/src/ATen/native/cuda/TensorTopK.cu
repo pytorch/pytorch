@@ -29,11 +29,12 @@ struct AddOp {
   }
 };
 
-template <typename T, typename IndexType, int Dim, bool Order, bool WithKthValues>
+template <typename T, typename IndexType, int Dim, bool WithKthValues>
 C10_LAUNCH_BOUNDS_1(1024)
 __global__ void gatherTopK(at::cuda::detail::TensorInfo<T, IndexType> input,
                            IndexType inputSliceSize,
                            IndexType outputSliceSize, // aka `k`
+                           bool largest,
 
                            IndexType numInputSlices,
                            IndexType inputWithinSliceStride,
@@ -76,8 +77,8 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<T, IndexType> input,
     topKValue = kthValues[slice];
   } else {
     topKValue = static_cast<T>(0);
-    radixSelect<T, typename TopKTypeConfig<T>::RadixType, IndexType, Order>(
-      inputSliceStart, outputSliceSize,
+    radixSelect<T, typename TopKTypeConfig<T>::RadixType, IndexType>(
+      inputSliceStart, outputSliceSize, largest,
       inputSliceSize, inputWithinSliceStride,
       smem, &topKValue);
   }
@@ -106,7 +107,7 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<T, IndexType> input,
       inRange ? doLdg(&inputSliceStart[i * inputWithinSliceStride]) : static_cast<T>(0);
     const auto convertedV = at::native::TopKTypeConfig<T>::convert(v);
     bool hasTopK;
-    if (Order) {
+    if (largest) {
       hasTopK = inRange && (convertedV > topKConverted);
     } else {
       hasTopK = inRange && (convertedV < topKConverted);
@@ -172,11 +173,12 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<T, IndexType> input,
 
 };
 
-template <typename T, typename IndexType, int Dim, bool Order>
+template <typename T, typename IndexType, int Dim>
 void launch(
     at::cuda::detail::TensorInfo<T, IndexType> input,
     IndexType inputSliceSize,
     IndexType outputSliceSize, // aka `k`
+    bool largest,
 
     IndexType numInputSlices,
     IndexType inputWithinSliceStride,
@@ -192,10 +194,11 @@ void launch(
     TORCH_INTERNAL_ASSERT(getGridFromTiles(numInputSlices, grid), "Too many slices to sort");
     dim3 block(std::min(
         at::ceil_div((int64_t)inputSliceSize, (int64_t)C10_WARP_SIZE) * (int64_t)C10_WARP_SIZE, (int64_t)1024));
-    gatherTopK<T, IndexType, Dim, Order, /* WithKthValues= */false><<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
+    gatherTopK<T, IndexType, Dim, /* WithKthValues= */false><<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
         input,
         inputSliceSize,
         outputSliceSize,
+        largest,
         numInputSlices,
         inputWithinSliceStride,
         topK,
@@ -245,12 +248,13 @@ __global__ void fill(T* x, T value, int size) {
   }
 }
 
-template <typename T, typename IndexType, typename Bitwise, int Dim, bool Order, int RADIX_BITS>
+template <typename T, typename IndexType, typename Bitwise, int Dim, int RADIX_BITS>
 C10_LAUNCH_BOUNDS_1(BLOCK_THREADS)
 __global__ void radixFindKthValues(
     at::cuda::detail::TensorInfo<T, IndexType> input,
     IndexType inputSliceSize,
     IndexType* ksToFind, // aka `k`
+    bool largest,
 
     IndexType numInputSlices,
     IndexType withinSliceStride,
@@ -368,7 +372,7 @@ __global__ void radixFindKthValues(
 
       // update desired
       IndexType digit_count_cumsum_left;
-      if (Order) {
+      if (largest) {
         digit_count_cumsum_left =
             (digit == RADIX_DIGITS - 1) ? 0 : temp_storage.scan_storage.digit_count_cumsum[digit + 1];
       } else {
@@ -387,7 +391,7 @@ __global__ void radixFindKthValues(
       __syncthreads();
     };
 
-    if (Order) {
+    if (largest) {
       for (int digit = RADIX_DIGITS - tidx - 1; digit >= 0 && !s_desired_found; digit -= BLOCK_THREADS) {
         post_process(digit);
       }
@@ -403,11 +407,12 @@ __global__ void radixFindKthValues(
   }
 };
 
-template <typename T, typename IndexType, int Dim, bool Order>
+template <typename T, typename IndexType, int Dim>
 void launch(
     at::cuda::detail::TensorInfo<T, IndexType> input,
     IndexType inputSliceSize,
     IndexType outputSliceSize, // aka `k`
+    bool largest,
 
     IndexType numInputSlices,
     IndexType inputWithinSliceStride,
@@ -451,11 +456,12 @@ void launch(
   dim3 block(BLOCK_THREADS);
 
 #define RUN_K(BIT)                                             \
-  radixFindKthValues<T, IndexType, Bitwise, Dim, Order, BIT>   \
+  radixFindKthValues<T, IndexType, Bitwise, Dim, BIT>   \
       <<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>( \
           input,                                               \
           inputSliceSize,                                      \
           ksToFind,                                            \
+          largest,                                             \
           numInputSlices,                                      \
           inputWithinSliceStride,                              \
           current_bit,                                         \
@@ -498,10 +504,11 @@ void launch(
     dim3 grid;
     TORCH_INTERNAL_ASSERT(getGridFromTiles(numInputSlices, grid), "Too many slices to sort");
     dim3 block(std::min(at::ceil_div((int64_t)inputSliceSize, (int64_t)C10_WARP_SIZE) * (int64_t)C10_WARP_SIZE, (int64_t)1024));
-    sbtopk::gatherTopK<T, IndexType, Dim, Order, /* WithKthValues= */true><<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
+    sbtopk::gatherTopK<T, IndexType, Dim, /* WithKthValues= */true><<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
             input,
             inputSliceSize,
             outputSliceSize,
+            largest,
             numInputSlices,
             inputWithinSliceStride,
             topK,
@@ -529,11 +536,12 @@ void launch_gather_topk_kernel(
   // is provided to the kernel for the arguments.
 
   bool should_use_multiblock_per_slice = true;  // TODO logic to disbatch based on heuristics result
-#define RUN_K(INDEX_T, DIM, DIR, LAUNCH_FUNCTION_NAME)                  \
-  LAUNCH_FUNCTION_NAME<scalar_t, INDEX_T, DIM, DIR>(                    \
+#define RUN_K(INDEX_T, DIM, LAUNCH_FUNCTION_NAME)                       \
+  LAUNCH_FUNCTION_NAME<scalar_t, INDEX_T, DIM>(                         \
       inputInfo,                                                        \
       static_cast<INDEX_T>(sliceSize),                                  \
       static_cast<INDEX_T>(k),                                          \
+      largest,                                                          \
       static_cast<INDEX_T>(inputSlices),                                \
       /* The actual dimension that the k-selection is running in */     \
       /* may have changed from collapseDims() */                        \
@@ -544,29 +552,22 @@ void launch_gather_topk_kernel(
       indicesInfo,                                                      \
       static_cast<INDEX_T>(indicesInfo.strides[collapseIndicesDim]));
 
-#define RUN_MB(INDEX_T, DIM, DIR)               \
+#define RUN_MB(INDEX_T, DIM)                    \
   if (should_use_multiblock_per_slice) {        \
-    RUN_K(INDEX_T, DIM, DIR, mbtopk::launch);   \
+    RUN_K(INDEX_T, DIM, mbtopk::launch);        \
   } else {                                      \
-    RUN_K(INDEX_T, DIM, DIR, sbtopk::launch);   \
-  }
-
-#define RUN_DIR(INDEX_T, DIM)                   \
-  if (largest) {                                \
-    RUN_MB(INDEX_T, DIM, true);                 \
-  } else {                                      \
-    RUN_MB(INDEX_T, DIM, false);                \
+    RUN_K(INDEX_T, DIM, sbtopk::launch);        \
   }
 
 #define RUN_DIM(INDEX_T)                        \
   if (allDims == 1) {                           \
-    RUN_DIR(INDEX_T, 1);                        \
+    RUN_MB(INDEX_T, 1);                         \
   } else if (allDims == 2) {                    \
-    RUN_DIR(INDEX_T, 2);                        \
+    RUN_MB(INDEX_T, 2);                         \
   } else if (allDims == 3) {                    \
-    RUN_DIR(INDEX_T, 3);                        \
+    RUN_MB(INDEX_T, 3);                         \
   } else {                                      \
-    RUN_DIR(INDEX_T, -1);                       \
+    RUN_MB(INDEX_T, -1);                        \
   }
 
 #define RUN_T(INDEX_T)                                                  \
@@ -640,7 +641,6 @@ void launch_gather_topk_kernel(
   }
 #undef RUN_T
 #undef RUN_DIM
-#undef RUN_DIR
 #undef RUN_K
 }
 
