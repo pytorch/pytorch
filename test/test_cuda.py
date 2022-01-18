@@ -3711,6 +3711,8 @@ torch.cuda.synchronize()
             g.capture_end()
         torch.cuda.current_stream().wait_stream(s)
 
+        g.replay()
+
         y = model(x)
 
     @unittest.skipIf((not TEST_CUDA) or

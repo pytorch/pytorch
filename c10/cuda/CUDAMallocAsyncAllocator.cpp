@@ -270,7 +270,7 @@ void free(void* ptr) {
                       "This may be benign, for example, a Python tensor in the capture "
                       "might happen to shadow (use the same name as) an unrelated temporary "
                       "tensor from somewhere before capture, pushing the earlier tensor "
-                      "out of scope.\n"
+                      "out of scope. "
                       "However, if the tensor we're freeing here IS used by the capture, "
                       "freeing it is an error, and may cause illegal memory accesses or "
                       "memory corruption during graph replay.");
