@@ -1,5 +1,5 @@
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
-load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+load("@rules_cc//cc:defs.bzl", "cc_library")
 load("//tools/config:defs.bzl", "if_cuda")
 
 # The bool_flag targets allow configuring the build from the
@@ -56,7 +56,6 @@ cc_library(
         "//c10/core:alignment",
         "//c10/core:alloc_cpu",
         "//c10/core:base",
-        "//c10/cuda:Macros",
         "//c10/macros",
         "//c10/mobile:CPUCachingAllocator",
         "//c10/mobile:CPUProfilingAllocator",
@@ -64,7 +63,10 @@ cc_library(
         "//c10/util:base",
         "//c10/util:typeid",
     ] + if_cuda(
-        ["//c10/cuda"],
+        [
+            "//c10/cuda",
+            "//c10/cuda:Macros",
+        ],
         [],
     ),
     alwayslink = True,
