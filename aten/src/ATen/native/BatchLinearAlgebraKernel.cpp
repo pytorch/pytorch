@@ -1011,9 +1011,11 @@ void svd_kernel(const Tensor& A,
                 const bool compute_uv,
                 const Tensor& U,
                 const Tensor& S,
-                Tensor& Vh,
+                const Tensor& Vh,
                 const Tensor& infos) {
   // Need to copy A as column major, as its contents will be destroyed in the LAPACK call.
+  // FIXME It'd be more efficient, rather than cloning A, to copy it into `U` or `Vh` (depending on m > n
+  // or m < n) and call jobz='O'
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(A.scalar_type(), "linalg_svd_cpu", [&]{
     apply_svd<scalar_t>(cloneBatchedColumnMajor(A), full_matrices, compute_uv, U, S, Vh, infos);
   });
