@@ -18,7 +18,8 @@ from torch.testing._internal.common_quantization import (
     prepare_dynamic,
     _make_conv_test_input,
     skipIfNoFBGEMM,
-    lengths_to_offsets
+    lengths_to_offsets,
+    ManualLinearQATModel
 )
 from torch.testing._internal.common_quantized import (
     _calculate_dynamic_qparams,
@@ -625,6 +626,21 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
         self.assertEqual(quant_ref.int_repr().numpy(), qy.int_repr().numpy(),
                          msg="Dropout module API failed")
+
+    def test_dropout_qat_serialization_bc(self):
+        """Check to see whether the post_process_activation is dropped upon
+        convert"""
+        model = ManualLinearQATModel()
+        model.qconfig = torch.ao.quantization.get_default_qat_qconfig("qnnpack")
+        model_prepare_dropout = torch.ao.quantization.prepare_qat(model, inplace=False)
+
+        mapping_without_dropout = torch.ao.get_default_qat_module_mappings().pop(
+            nn.Dropout
+        )
+        model_prepare_ignore_dropout = torch.ao.quantization.prepare_qat(
+            model, mapping_without_dropout, inplace=False
+        )
+        model_prepare_ignore_dropout.load_state_dict(model_prepare_dropout.state_dict())
 
     def _test_dropout_serialization(self, get_model, data1, data2):
         m1 = get_model()
