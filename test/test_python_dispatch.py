@@ -51,7 +51,6 @@ $0 = input('x')
 $1 = input('y')
 $2 = torch._ops.aten.abs($0, out=$1)''')
 
-
     def test_kwarg_only(self) -> None:
         with capture_logs() as logs:
             x = LoggingTensor(torch.ones(1))
@@ -353,6 +352,15 @@ $6 = torch._ops.aten.add_($1, $5)''')
         v = torch.randn(1)
         res = x.index_put_(idxs, v)
         self.assertEqual(called_funcs, [torch.ops.aten.index_put_])
+
+    def test_detach_appears_once_when_called_once(self) -> None:
+        with capture_logs() as logs:
+            x = LoggingTensor(torch.tensor([3.0], requires_grad=True))
+            log_input("x", x)
+            x.detach()
+        self.assertExpectedInline('\n'.join(logs), '''\
+$0 = input('x')
+$1 = torch._ops.aten.detach($0)''')
 
     def test_enable_python_mode_error(self) -> None:
         with self.assertRaisesRegex(ValueError, "__torch_dispatch__"):

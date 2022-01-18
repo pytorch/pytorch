@@ -232,20 +232,6 @@ const Tensor& resize_as_(
   return self;
 }
 
-Tensor detach(c10::DispatchKeySet ks, const Tensor & self) {
-  auto& self_ = unpack(self, "self", 0);
-  RECORD_FUNCTION("detach", std::vector<c10::IValue>({self}));
-  auto result = ([&]() {
-    at::AutoDispatchBelowAutograd guard;
-    return at::redispatch::detach(ks & c10::after_autograd_keyset, self_);
-  })();
-  namedinference::propagate_names(result, self);
-
-  // Detach the forward grads by not setting anything on the result
-
-  return result;
-}
-
 Tensor & detach_(c10::DispatchKeySet ks, Tensor & self) {
   RECORD_FUNCTION("detach_", std::vector<c10::IValue>({self}));
   if (self.is_view()) {
@@ -290,7 +276,6 @@ Tensor & detach_(c10::DispatchKeySet ks, Tensor & self) {
 TORCH_LIBRARY_IMPL(aten, Autograd, m) {
   m.impl("resize_", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::resize_)));
   m.impl("resize_as_", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::resize_as_)));
-  m.impl("detach", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::detach)));
   m.impl("detach_", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::detach_)));
   m.impl("copy_", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::copy_)));
   m.impl("_fw_primal", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::_fw_primal)));
@@ -311,23 +296,6 @@ namespace ADInplaceOrView {
     }
     torch::autograd::increment_version(self);
     return self;
-  }
-
-  Tensor detach(c10::DispatchKeySet ks, const Tensor & self) {
-    auto out = ([&]() {
-      at::AutoDispatchBelowADInplaceOrView guard;
-      // Make an empty shallow copy, the as_view call below will fill in the proper fields
-      return Tensor(self.getIntrusivePtr()->shallow_copy_and_detach(
-        /*version_counter=*/0,
-        /*allow_tensor_metadata_change=*/false));
-    })();
-    std::function<at::Tensor(const at::Tensor&)> func=nullptr;
-    auto result = as_view(/* base */ self, /* output */ out, /* is_bw_differentiable */ false,
-                          /* is_fw_differentiable */ false, /* view_func */ func,
-                          /* creation_meta */ CreationMeta::DEFAULT,
-                          /*allow_tensor_metadata_change=*/false);
-
-    return result;
   }
 
   Tensor _fw_primal(c10::DispatchKeySet ks, const Tensor & self, int64_t level) {
@@ -370,7 +338,6 @@ namespace ADInplaceOrView {
   namespace {
     TORCH_LIBRARY_IMPL(aten, ADInplaceOrView, m) {
       m.impl("copy_", torch::dispatch(DispatchKey::ADInplaceOrView, TORCH_FN(ADInplaceOrView::copy_)));
-      m.impl("detach", torch::dispatch(DispatchKey::ADInplaceOrView, TORCH_FN(ADInplaceOrView::detach)));
       m.impl("_fw_primal", torch::dispatch(DispatchKey::ADInplaceOrView, TORCH_FN(ADInplaceOrView::_fw_primal)));
       m.impl("_make_dual", torch::dispatch(DispatchKey::ADInplaceOrView, TORCH_FN(ADInplaceOrView::_make_dual)));
 

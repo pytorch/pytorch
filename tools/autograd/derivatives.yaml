@@ -2552,6 +2552,20 @@
 - name: _pin_memory(Tensor self, Device? device=None) -> Tensor
   self: grad
 
+# detach prevents gradients (both forward-mode and reverse-mode) from flowing
+# through it. Its implementation (see TensorShape.cpp) is just calling `alias`,
+# which creates a new view; we mark both the input and the output as
+# non-differentiable here.
+#
+# NB: A previous implementation special-cased detach in VariableTypeManual.cpp
+# in such a way that it did not dispatch to a backend (this was an optimization).
+# For Tensor Subclasses and for functorch, we actually do want detach to dispatch
+# to the backend(!), so we removed that optimization
+# See https://github.com/pytorch/functorch/issues/353 for more discussion.
+- name: detach(Tensor(a) self) -> Tensor(a)
+  self: non_differentiable
+  output_differentiability: [False]
+
 # Empty factory functions have explicit non-differentiability so that they propagate the class
 # when used with a Tensor subclass together with __torch_dispatch__.
 # All the other factory functions are composite and call into one of these.
