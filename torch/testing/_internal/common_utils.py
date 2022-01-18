@@ -523,20 +523,6 @@ def shell(command, cwd=None, env=None):
     return wait_for_process(p)
 
 
-# Used to run the same test with different tensor types
-def repeat_test_for_types(dtypes):
-    def repeat_helper(f):
-        @wraps(f)
-        def call_helper(self, *args):
-            for dtype in dtypes:
-                with TestCase.subTest(self, dtype=dtype):
-                    f(self, *args, dtype=dtype)
-
-        return call_helper
-    return repeat_helper
-
-
-
 def discover_test_cases_recursively(suite_or_case):
     if isinstance(suite_or_case, unittest.TestCase):
         return [suite_or_case]
@@ -737,6 +723,7 @@ def _check_module_exists(name: str) -> bool:
 TEST_NUMPY = _check_module_exists('numpy')
 TEST_SCIPY = _check_module_exists('scipy')
 TEST_MKL = torch.backends.mkl.is_available()
+TEST_CUDA = torch.cuda.is_available()
 TEST_NUMBA = _check_module_exists('numba')
 
 TEST_DILL = _check_module_exists('dill')
@@ -1995,7 +1982,8 @@ class TestCase(expecttest.TestCase):
         debug_msg: Optional[str] = None
 
         if x is None or y is None:
-            self.assertTrue(x is None and y is None)
+            self.assertTrue(x is None, "left arg is not None while right arg is None")
+            self.assertTrue(y is None, "left arg is None while right arg not is None")
         # Tensor x Number and Number x Tensor comparisons
         elif isinstance(x, torch.Tensor) and isinstance(y, Number):
             self.assertEqual(x.item(), y, atol=atol, rtol=rtol, msg=msg,

@@ -121,6 +121,15 @@ class AutoQuantizationState(torch.nn.Module):
         # did not require op hooks.
         self.seen_op_types_without_op_hooks: Set[Callable] = set()
 
+    def get_extra_state(self):
+        return {"tensor_id_to_scale_zp": self.tensor_id_to_scale_zp}
+
+    def set_extra_state(self, state):
+        self.tensor_id_to_scale_zp = state["tensor_id_to_scale_zp"]
+        for _, seen_op_info in self.idx_to_seen_op_infos.items():
+            self.idx_to_op_convert_info[seen_op_info.idx] = \
+                self.calculate_op_convert_info(seen_op_info)
+
     def has_at_least_one_seen_op_info(self) -> bool:
         return len(self.idx_to_seen_op_infos) > 0
 
