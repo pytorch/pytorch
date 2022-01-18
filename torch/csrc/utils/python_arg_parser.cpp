@@ -912,7 +912,7 @@ bool FunctionSignature::parse(PyObject* self, PyObject* args, PyObject* kwargs, 
                               bool raise_exception) {
   auto nargs = args ? PyTuple_GET_SIZE(args) : 0;
   auto remaining_kwargs = kwargs ? PyDict_Size(kwargs) : 0;
-  size_t arg_pos = 0;
+  Py_ssize_t arg_pos = 0;
   bool allow_varargs_intlist = false;
 
   // if there is a single positional IntArrayRef argument, i.e. expand(..), view(...),
