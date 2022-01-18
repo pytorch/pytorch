@@ -1283,6 +1283,25 @@ class TestSparse(TestCase):
         test_shape(7, 8, 9, 20, False, (1, 1))
         test_shape(7, 8, 9, 20, True, (1, 1))
 
+    @onlyCPU
+    @coalescedonoff
+    def test_sparse_addmm_bfloat16(self, device, coalesced):
+        # fp32
+        alpha = random.random()
+        beta = random.random()
+        D1 = make_tensor([8, 9], dtype=torch.float, device=device)
+        D2 = make_tensor([7, 9], dtype=torch.float, device=device)
+        S = self._gen_sparse(2, 20, [8, 7], torch.float, device, coalesced)[0]
+        Y = torch.sparse.addmm(D1, S, D2, beta=beta, alpha=alpha)
+
+        # bfloat16
+        D1_bf16 = D1.bfloat16()
+        D2_bf16 = D2.bfloat16()
+        S_bf16 = S.bfloat16()
+        Y_bf16 = torch.sparse.addmm(D1_bf16, S_bf16, D2_bf16, beta=beta, alpha=alpha)
+        self.assertEqual(Y_bf16.dtype, torch.bfloat16)
+        self.assertEqual(Y, Y_bf16.float(), atol=0.5, rtol=0)
+
     @coalescedonoff
     @dtypes(torch.double)
     def test_sparse_mm(self, device, dtype, coalesced):
