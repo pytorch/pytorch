@@ -278,7 +278,7 @@ class BatchNorm1d(_BatchNorm):
             in both training and eval modes. Default: ``True``
 
     Shape:
-        - Input: :math:`(N, C)` or :math:`(N, C, L)`, where :math:`N` is the batch size, :math:`C` is the number of features or channels respectively, :math:`L` is the sequence length
+        - Input: :math:`(N, C)` or :math:`(N, C, L)`, where :math:`N` is the batch size, :math:`C` is the number of features or channels, and :math:`L` is the sequence length
         - Output: :math:`(N, C)` or :math:`(N, C, L)` (same shape as input)
 
     Examples::
