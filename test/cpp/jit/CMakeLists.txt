@@ -89,6 +89,7 @@ set(JIT_TEST_SRCS
   ${JIT_TEST_ROOT}/test_script_profile.cpp
   ${JIT_TEST_ROOT}/test_shape_analysis.cpp
   ${JIT_TEST_ROOT}/test_jit_logging_levels.cpp
+  ${JIT_TEST_ROOT}/test_flatbuffer.cpp
 )
 
 if(USE_CUDA)
@@ -100,6 +101,10 @@ add_executable(test_jit
   ${TORCH_ROOT}/test/cpp/common/main.cpp
   ${JIT_TEST_SRCS}
 )
+
+target_link_libraries(
+  test_jit PRIVATE flatbuffers)
+
 
 # TODO temporary until we can delete the old gtest polyfills.
 target_compile_definitions(test_jit PRIVATE USE_GTEST)
