@@ -442,7 +442,7 @@ class AutoQuantizationState(torch.nn.Module):
 
         # TODO move op-specific logic out of here
         if op is torch.ops.quantized.linear:
-            del kwargs['bias']
+            kwargs.pop('bias', None)
 
         return op, tuple(new_args), kwargs
 
@@ -691,7 +691,7 @@ class AutoQuantizationState(torch.nn.Module):
         of this op in `self`.
         """
         op_packing_only_uses_module_attributes = \
-            get_op_packing_only_uses_module_attributes(op, args, root_module)
+            get_op_packing_only_uses_module_attributes(op, args, kwargs, root_module)
         func_output_dtype_type = get_func_output_dtype_type(
             op, args, op_packing_only_uses_module_attributes)
         input_observed_arg_idxs = get_input_observed_arg_idxs(op)
@@ -720,6 +720,8 @@ class AutoQuantizationState(torch.nn.Module):
             packable_tensor_arg_idxs = get_packable_tensor_arg_idxs(op)
             if packable_tensor_arg_idxs is not None:
                 for arg_idx in packable_tensor_arg_idxs:
+                    if arg_idx >= len(args):
+                        continue
                     arg = args[arg_idx]
                     param_name = get_param_name(root_module, arg)
                     packable_tensor_idx_to_name[arg_idx] = param_name
@@ -733,8 +735,9 @@ class AutoQuantizationState(torch.nn.Module):
                 get_packable_tensor_kwarg_names(op)
             if packable_tensor_kwarg_names is not None:
                 for kwarg_name in packable_tensor_kwarg_names:
-                    if kwarg_name not in kwarg:
+                    if kwarg_name not in kwargs:
                         continue
+                    kwarg = kwargs[kwarg_name]
                     kwarg_name_on_module = get_param_name(root_module, kwarg)
                     packable_tensor_kwarg_name_to_name[kwarg_name] = \
                         kwarg_name_on_module

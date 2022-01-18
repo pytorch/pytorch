@@ -308,6 +308,7 @@ def get_func_output_dtype_type(
 def get_op_packing_only_uses_module_attributes(
     op: Callable,
     args: Tuple[Any, ...],
+    kwargs: Dict[str, Any],
     module: torch.nn.Module,
 ) -> bool:
     """
@@ -323,7 +324,18 @@ def get_op_packing_only_uses_module_attributes(
     packable_tensor_arg_idxs = get_packable_tensor_arg_idxs(op)
     if packable_tensor_arg_idxs is not None:
         for arg_idx in packable_tensor_arg_idxs:
+            if arg_idx >= len(args):
+                continue
             arg_name_in_root = get_param_name(module, args[arg_idx])
+            if arg_name_in_root is None:
+                return False
+
+    packable_tensor_arg_names = get_packable_tensor_kwarg_names(op)
+    if packable_tensor_arg_names is not None:
+        for arg_name in packable_tensor_arg_names:
+            if arg_name not in kwargs:
+                continue
+            arg_name_in_root = get_param_name(module, kwargs[arg_name])
             if arg_name_in_root is None:
                 return False
     return True
