@@ -166,7 +166,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
             "torch/csrc/lazy/core/shape.h",
             f"{output_dir}/{backend_key}NativeFunctions.h",
             f"{output_dir}/{backend_key}LazyIr.h",
-            f"{output_dir}/{backend_key}ShapeInference.h",
+            f"torch/csrc/lazy/core/{backend_key}ShapeInference.h",
         ]],
         'native_functions_include': '',
         'backend_namespace': 'torch_lazy_tensors',  # this is wrong
@@ -180,24 +180,25 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
         )),
     })
     # Generate headers for shape/dtype funcs for non-meta kernels
-    fm.write_with_template(f'{backend_key}ShapeInference.h', 'ShapeInference.h', lambda: {
-        'lazy_ir_sysinc': [f'#include <{path}>' for path in [
-            "ATen/Tensor.h",
-            "c10/core/ScalarType.h",
-            "c10/util/Optional.h",
-            "torch/csrc/lazy/core/ir.h",
-            "torch/csrc/lazy/core/shape.h",
-            "vector",
-        ]],
-        'lazy_ir_inc': [],
-        'DispatchKey': backend_key,
-        'dispatch_namespace': backend_key.lower(),
-        'func_declarations': list(concat_map_codegen(
-            dest.GenLazyShapeInferenceDefinition(backend_indices[backend_key],
-                                                 tensor_class),
-            grouped_native_functions
-        )),
-    })
+    with fm.set_temporary_install_dir("torch/csrc/lazy/core"):
+        fm.write_with_template(f'{backend_key}ShapeInference.h', 'ShapeInference.h', lambda: {
+            'lazy_ir_sysinc': [f'#include <{path}>' for path in [
+                "ATen/Tensor.h",
+                "c10/core/ScalarType.h",
+                "c10/util/Optional.h",
+                "torch/csrc/lazy/core/ir.h",
+                "torch/csrc/lazy/core/shape.h",
+                "vector",
+            ]],
+            'lazy_ir_inc': [],
+            'DispatchKey': backend_key,
+            'dispatch_namespace': backend_key.lower(),
+            'func_declarations': list(concat_map_codegen(
+                dest.GenLazyShapeInferenceDefinition(backend_indices[backend_key],
+                                                    tensor_class),
+                grouped_native_functions
+            )),
+        })
     # Generate IR node classes
     fm.write_with_template(f'{backend_key}LazyIr.h', 'LazyIr.h', lambda: {
         'lazy_ir_sysinc': [f'#include <{path}>' for path in [

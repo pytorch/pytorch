@@ -47,7 +47,7 @@
 #include "torch/csrc/lazy/core/shape.h"
 #include <ATen/native/ConvUtils.h>
 #include "aten/src/ATen/native/ReduceOpsUtils.h"
-#include "lazy_tensor_core/csrc/ts_backend/LazyShapeInference.h"
+#include "torch/csrc/lazy/core/LazyShapeInference.h"
 #include "torch/csrc/api/include/torch/enum.h"
 #include <iostream>
 #include <vector>

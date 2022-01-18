@@ -131,6 +131,15 @@ class FileManager:
         self.filenames = set()
         self.dry_run = dry_run
 
+    @contextlib.contextmanager
+    def set_temporary_install_dir(self, new_install_dir):
+        old_install_dir = self.install_dir
+        try:
+            self.install_dir = new_install_dir
+            yield
+        finally:
+            self.install_dir = old_install_dir
+
     def _write_if_changed(self, filename: str, contents: str) -> None:
         old_contents: Optional[str]
         try:
