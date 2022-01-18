@@ -35,27 +35,26 @@ void call_caffe2_op_from_c10(
           *OptionalType::create(ListType::ofTensors())));
   IValue preallocated_outputs = torch::jit::pop(*stack);
 
-  const size_t num_outputs = schema.returns().size();
-  const size_t num_inputs = schema.arguments().size() -
-      1; // -1 because the last argument is the list of preallocated tensors
-
   c10::List<at::Tensor> outputs;
   if (preallocated_outputs.isNone()) {
     // either the schema doesn't support preallocated outputs or it does but
     // they haven't been passed in. Pass a list of uninitialized tensors to
     // the caffe2 operator as preallocated outputs.
-    outputs.resize(num_outputs);
+    outputs.resize(schema.returns().size());
   } else {
     AT_ASSERT(preallocated_outputs.isTensorList());
     outputs = std::move(preallocated_outputs).toTensorList();
-    TORCH_INTERNAL_ASSERT(num_outputs == outputs.size());
   }
+
+  // -1 because the last argument is the list of preallocated tensors
+  const size_t num_inputs = schema.arguments().size() - 1;
 
   // TODO Avoid vector allocation. One idea would be to keep the std::vector
   // instances in the cache.
   std::vector<IValue> inputs = torch::jit::pop(*stack, num_inputs);
 
   // Convert outputs to caffe2::Tensor
+  const size_t num_outputs = outputs.size();
   std::vector<caffe2::Tensor> outputs_c2(num_outputs);
   for (auto i : c10::irange(num_outputs)) {
     outputs_c2[i] = caffe2::Tensor(outputs.extract(i));
