@@ -7,8 +7,6 @@
 #include <ATen/Context.h>
 #include <limits>
 
-// TODO: this file should be in ATen/cuda, not top level
-
 namespace at {
 /**
  * Note [CUDA Graph-safe RNG states]
@@ -62,7 +60,7 @@ namespace at {
  *
  * Example (see e.g. native/cuda/Dropout.cu):
  *
- * #include <ATen/CUDAGeneratorImpl.h>
+ * #include <ATen/cuda/CUDAGeneratorImpl.h>
  * #include <ATen/cuda/CUDAGraphsUtils.cuh>
  *
  * __global__ void kernel(..., PhiloxCudaState philox_args) {
@@ -93,7 +91,7 @@ namespace at {
 struct TORCH_CUDA_CPP_API CUDAGeneratorImpl : public c10::GeneratorImpl {
   // Constructors
   CUDAGeneratorImpl(DeviceIndex device_index = -1);
-  ~CUDAGeneratorImpl() = default;
+  ~CUDAGeneratorImpl() override = default;
 
   // CUDAGeneratorImpl methods
   std::shared_ptr<CUDAGeneratorImpl> clone() const;
@@ -118,7 +116,7 @@ private:
   CUDAGeneratorImpl* clone_impl() const override;
   uint64_t seed_ = default_rng_seed_val;
   uint64_t philox_offset_per_thread_ = 0;
-  int64_t* offset_extragraph_;
+  int64_t* offset_extragraph_{};
   uint32_t offset_intragraph_ = 0;
   bool graph_expects_this_gen_ = false;
 };

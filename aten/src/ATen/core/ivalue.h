@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/core/DimVector.h>
 #include <ATen/core/TensorBody.h>
 #include <ATen/core/blob.h>
 #include <ATen/core/custom_class.h>
@@ -311,6 +312,9 @@ private:
     return a.is_alias_of(b);
   }
 
+  template <typename T>
+  bool isListOf() const;
+
 public:
   /// @private [doxygen private]
   bool isAliasOf(const IValue& rhs) const {
@@ -573,6 +577,7 @@ public:
   c10::List<int64_t> toIntList() &&;
   c10::List<int64_t> toIntList() const&;
   std::vector<int64_t> toIntVector() const;
+  at::DimVector toDimVector() const;
 
   // ConstantString
   IValue(c10::intrusive_ptr<ivalue::ConstantString> v);

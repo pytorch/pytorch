@@ -877,14 +877,8 @@ void TensorIteratorBase::build_borrowing_binary_float_op(
         .add_input(b));
 }
 
-void TensorIteratorBase::build_comparison_op(
-    const TensorBase& out, const TensorBase& a, const TensorBase& b) {
-  TensorIteratorConfig config;
-
+static void set_up_comparison_op_config(TensorIteratorConfig& config, const TensorBase& out) {
   config.set_check_mem_overlap(true);
-  config.add_owned_output(out);
-  config.add_owned_input(a);
-  config.add_owned_input(b);
   config.allow_cpu_scalars(true);
   config.promote_inputs_to_common_dtype(true);
 
@@ -905,7 +899,38 @@ void TensorIteratorBase::build_comparison_op(
   if (out.defined() && out.scalar_type() != kBool) {
     config.cast_common_dtype_to_outputs(true);
   }
+}
 
+void TensorIteratorBase::build_comparison_op(
+    const TensorBase& out, const TensorBase& a, const TensorBase& b) {
+  TensorIteratorConfig config;
+  set_up_comparison_op_config(config, out);
+
+  config.add_owned_output(out);
+  config.add_owned_input(a);
+  config.add_owned_input(b);
+  build(config);
+}
+
+void TensorIteratorBase::build_borrowing_comparison_op(
+    const TensorBase& out, const TensorBase& a, const TensorBase& b) {
+  TensorIteratorConfig config;
+  set_up_comparison_op_config(config, out);
+
+  config.add_borrowed_output(out);
+  config.add_borrowed_input(a);
+  config.add_borrowed_input(b);
+  build(config);
+}
+
+void TensorIteratorBase::build_borrowing_except_last_argument_comparison_op(
+    const TensorBase& out, const TensorBase& a, const TensorBase& b) {
+  TensorIteratorConfig config;
+  set_up_comparison_op_config(config, out);
+
+  config.add_borrowed_output(out);
+  config.add_borrowed_input(a);
+  config.add_owned_input(b);
   build(config);
 }
 

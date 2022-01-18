@@ -13,6 +13,14 @@
 #include <array>
 #include <bitset>
 
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wshorten-64-to-32")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
+#endif
+#if C10_CLANG_HAS_WARNING("-Wdeprecated-copy-dtor")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wdeprecated-copy-dtor")
+#endif
+
 namespace at {
 class Tensor;
 class OptionalTensorRef;
@@ -438,6 +446,10 @@ public:
   void build_borrowing_unary_force_boolean_op(const TensorBase& out, const TensorBase& a);
   TORCH_DISALLOW_TEMPORARIES(build_borrowing_unary_force_boolean_op)
   void build_comparison_op(const TensorBase& out, const TensorBase& a, const TensorBase& b);
+  void build_borrowing_comparison_op(const TensorBase& out, const TensorBase& a, const TensorBase& b);
+  TORCH_DISALLOW_TEMPORARIES(build_borrowing_comparison_op)
+  // Another special case: we need to own the second argument for comparison ops.
+  void build_borrowing_except_last_argument_comparison_op(const TensorBase& out, const TensorBase& a, const TensorBase& b);
   void build_ternary_op(const TensorBase& out, const TensorBase& a, const TensorBase& b, const TensorBase& c);
 
 #undef TORCH_DISALLOW_TEMPORARIES
@@ -802,3 +814,5 @@ private:
 };
 
 }  // namespace at
+
+C10_CLANG_DIAGNOSTIC_POP()
