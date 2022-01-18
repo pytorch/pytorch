@@ -367,9 +367,30 @@ struct CodeImpl {
     return result;
   }
 
-  void emitRaiseExcpetion(Node* node) {
-    size_t num_inputs = node->inputs().size();
-    insertInstruction(RAISE_EXCEPTION, 0, num_inputs);
+  void emitLoadInputsAndNode(
+      Node* node,
+      OpCode op,
+      int64_t X = 0,
+      uint64_t N = 0) {
+    emitLoadInputs(node->inputs());
+    insertInstruction(op, X, N);
+  }
+
+  void checkNodeAndEmit(Node* node) {
+    // check if the node should be emitted as instruction or operator
+    const Operator& op = node->getOperator();
+    std::string unique_op_name = c10::toString(op.schema().operator_name());
+    if (unique_op_name.find("aten::__getitem__.Dict") == 0) {
+      // __get_item__ overloaded operator for Dict
+      // needs to be emitted an instruction
+      emitLoadInputsAndNode(node, DICT_INDEX);
+    } else {
+      emitOperator(node);
+    }
+  }
+
+  void emitUninitialized() {
+    insertInstruction(UN_INITIALIZED, 0, 0);
   }
 
   void emitConstant(Node* node) {
@@ -615,10 +636,14 @@ struct CodeImpl {
     switch (node->kind()) {
       default:
         // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
-        emitOperator(node);
+        checkNodeAndEmit(node);
+        // emitOperator(node);
         break;
       case prim::RaiseException:
-        emitRaiseExcpetion(node);
+        emitLoadInputsAndNode(node, RAISE_EXCEPTION);
+        break;
+      case prim::TupleIndex:
+        emitLoadInputsAndNode(node, TUPLE_INDEX);
         break;
       case prim::Drop:
         emitDrop(node->inputs());
@@ -697,6 +722,36 @@ struct CodeImpl {
         break;
       case prim::Exit:
         emitExit(node);
+        break;
+      case prim::Uninitialized:
+        emitUninitialized();
+        break;
+      case prim::dtype:
+        emitLoadInputsAndNode(node, DTYPE);
+        break;
+      case prim::device:
+        emitLoadInputsAndNode(node, DEVICE);
+        break;
+      case aten::dim:
+        emitLoadInputsAndNode(node, DIM);
+        break;
+      case prim::is_cuda:
+        emitLoadInputsAndNode(node, IS_CUDA);
+        break;
+      case aten::__not__:
+        emitLoadInputsAndNode(node, __NOT__);
+        break;
+      case aten::format:
+        emitLoadInputsAndNode(node, FORMAT);
+        break;
+      case aten::__is__:
+        emitLoadInputsAndNode(node, __IS__);
+        break;
+      case aten::__isnot__:
+        emitLoadInputsAndNode(node, __ISNOT__);
+        break;
+      case prim::NumToTensor:
+        emitLoadInputsAndNode(node, NUM_TO_TENSOR);
         break;
     }
   }

@@ -53,8 +53,8 @@ namespace jit {
   _(ISINSTANCE, "TI") /* check object is one of  types[X:X+N]  */              \
   _(TUPLE_SLICE, "II") /* slice tup[X:(X+N)] */                                \
   _(TUPLE_INDEX, "") /**/                                                      \
-  _(TUPLE_UNPACK, "") /**/                                                     \
   _(RAISE_EXCEPTION, "") /**/                                                  \
+  _(DICT_INDEX, "") /**/                                                       \
   _(UNCHECKED_CAST, "") /**/                                                   \
   _(__IS__, "") /**/                                                           \
   _(UN_INITIALIZED, "") /**/                                                   \
@@ -63,14 +63,12 @@ namespace jit {
   _(SIZE, "") /**/                                                             \
   _(DEVICE, "") /**/                                                           \
   _(DTYPE, "") /**/                                                            \
-  _(TO_PRIM_DTYPE, "") /**/                                                    \
   _(DIM, "") /**/                                                              \
   _(__NOT__, "") /**/                                                          \
   _(BOOL_TENSOR, "") /**/                                                      \
   _(TO_LIST, "") /* convert the input to a list */                             \
-  _(NUM_TO_TENSOR_SCALAR, "") /**/                                             \
+  _(NUM_TO_TENSOR, "") /**/                                                    \
   _(IS_CUDA, "") /**/                                                          \
-  _(NUM_TO_TENSOR_BOOL, "") /**/                                               \
   _(FORK, "CN") /* launch a thread to run code entry x with N inputs  */       \
   _(WARN, "I") /* emit a warning with line information */                      \
   _(ENTER, "EN") /* enter scope of a contextmanager */                         \
@@ -95,6 +93,7 @@ std::ostream& operator<<(std::ostream& out, Instruction inst);
 
 bool isOpSupportedInMobile(OpCode op);
 char const* toString(OpCode op);
+std::ostream& operator<<(std::ostream& out, Instruction inst);
 
 } // namespace jit
 } // namespace torch

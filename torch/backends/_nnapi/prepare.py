@@ -76,9 +76,9 @@ class NnapiModule(torch.nn.Module):
                 raise Exception("Invalid mem_fmt")
         return outs
 
-def convert_model_to_nnapi(model, inputs, serializer=None, return_shapes=None):
+def convert_model_to_nnapi(model, inputs, serializer=None, return_shapes=None, use_int16_for_qint16=False):
     (shape_compute_module, ser_model_tensor, used_weights, inp_mem_fmts, out_mem_fmts,
-     retval_count) = process_for_nnapi(model, inputs, serializer, return_shapes)
+     retval_count) = process_for_nnapi(model, inputs, serializer, return_shapes, use_int16_for_qint16)
 
     nnapi_model = NnapiModule(
         shape_compute_module,
@@ -114,13 +114,13 @@ def convert_model_to_nnapi(model, inputs, serializer=None, return_shapes=None):
     )
     return wrapper_model
 
-def process_for_nnapi(model, inputs, serializer=None, return_shapes=None):
+def process_for_nnapi(model, inputs, serializer=None, return_shapes=None, use_int16_for_qint16=False):
     model = torch.jit.freeze(model)
 
     if isinstance(inputs, torch.Tensor):
         inputs = [inputs]
 
-    serializer = serializer or _NnapiSerializer(config=None)
+    serializer = serializer or _NnapiSerializer(config=None, use_int16_for_qint16=use_int16_for_qint16)
     (ser_model, used_weights, inp_mem_fmts, out_mem_fmts, shape_compute_lines,
      retval_count) = serializer.serialize_model(model, inputs, return_shapes)
     ser_model_tensor = torch.tensor(ser_model, dtype=torch.int32)

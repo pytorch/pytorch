@@ -1,3 +1,5 @@
+#include <ATen/core/dynamic_type.h>
+#include <ATen/core/type_factory.h>
 #include <torch/csrc/jit/runtime/register_ops_common_utils.h>
 
 namespace torch {
@@ -46,10 +48,10 @@ IValue tensorToListRecursive(
   } else {
     // If the output type is a scalar, read and push one scalar of
     // the right type onto the stack.
-    if (ty == at::IntType::get()) {
+    if (ty == at::DynamicTypeTrait<at::IntType>::getBaseType()) {
       int64_t scalar = *(int64_t*)data;
       return IValue(scalar);
-    } else if (ty == at::FloatType::get()) {
+    } else if (ty == at::DynamicTypeTrait<at::FloatType>::getBaseType()) {
       TORCH_INTERNAL_ASSERT(
           scalar_ty == at::ScalarType::Float ||
               scalar_ty == at::ScalarType::Double,
@@ -57,7 +59,7 @@ IValue tensorToListRecursive(
       double scalar =
           scalar_ty == at::ScalarType::Float ? *(float*)data : *(double*)data;
       return IValue(scalar);
-    } else if (ty == at::ComplexType::get()) {
+    } else if (ty == at::DynamicTypeTrait<at::ComplexType>::getBaseType()) {
       TORCH_INTERNAL_ASSERT(
           scalar_ty == at::ScalarType::ComplexFloat ||
               scalar_ty == at::ScalarType::ComplexDouble,
@@ -66,7 +68,7 @@ IValue tensorToListRecursive(
           ? *(c10::complex<float>*)data
           : *(c10::complex<double>*)data;
       return IValue(scalar);
-    } else if (ty == at::BoolType::get()) {
+    } else if (ty == at::DynamicTypeTrait<at::BoolType>::getBaseType()) {
       bool scalar = *(bool*)data;
       return IValue(scalar);
     } else {

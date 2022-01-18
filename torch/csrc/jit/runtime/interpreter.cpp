@@ -640,14 +640,10 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             tupleIndex(stack);
           }
             INST_NEXT;
-          case INST(TUPLE_UNPACK): {
-            INST_GUARD;
-            tupleUnpack(stack);
-          }
-            INST_NEXT;
           case INST(RAISE_EXCEPTION): {
             INST_GUARD;
             raiseException(stack);
+            // raiseExceptionWithMessage(stack);
           }
             INST_NEXT;
           case INST(UNCHECKED_CAST): {
@@ -690,11 +686,6 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             dtype(stack);
           }
             INST_NEXT;
-          case INST(TO_PRIM_DTYPE): {
-            INST_GUARD;
-            toPrimDType(stack);
-          }
-            INST_NEXT;
           case INST(DIM): {
             INST_GUARD;
             dim(stack);
@@ -710,12 +701,17 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             boolTensor(stack);
           }
             INST_NEXT;
+          case INST(DICT_INDEX): {
+            INST_GUARD;
+            dictIndex(stack);
+          }
+            INST_NEXT;
           case INST(TO_LIST): {
             INST_GUARD;
             toList(stack);
           }
             INST_NEXT;
-          case INST(NUM_TO_TENSOR_SCALAR): {
+          case INST(NUM_TO_TENSOR): {
             INST_GUARD;
             numToTensorScalar(stack);
           }
@@ -723,11 +719,6 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           case INST(IS_CUDA): {
             INST_GUARD;
             isCuda(stack);
-          }
-            INST_NEXT;
-          case INST(NUM_TO_TENSOR_BOOL): {
-            INST_GUARD;
-            numToTensorBool(stack);
           }
             INST_NEXT;
           case INST(FORK): {

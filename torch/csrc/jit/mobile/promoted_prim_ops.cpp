@@ -1,3 +1,5 @@
+#include <ATen/core/dynamic_type.h>
+#include <ATen/core/type_factory.h>
 #include <torch/csrc/jit/mobile/promoted_prim_ops.h>
 
 namespace torch {
@@ -15,7 +17,22 @@ void tupleIndex(Stack& stack) {
 }
 
 void raiseException(Stack& stack) {
+  // this kernel supports RaiseException with only one argument: the error
+  // DEPRECATED from bytecode_version 8;
+  // Please do not make any changes to this to support BC
   throw JITException(pop(stack).toStringRef());
+}
+
+void raiseExceptionWithMessage(Stack& stack) {
+  // this kernel supports RaiseException with only two arguments: the error and
+  // the message Please make changes only to this kernel
+  c10::optional<std::string> qualified_class_name =
+      pop(stack).toOptional<std::string>();
+  std::string message;
+  pop(stack, message);
+
+  // throw JITException(message, qualified_class_name);
+  throw JITException(message);
 }
 
 void is(Stack& stack) {
@@ -102,13 +119,13 @@ void toList(Stack& stack) {
   // with the element type corresponding to elem_ty_val.
   at::TypePtr out_ty;
   if (elem_ty_val == 0) {
-    out_ty = at::IntType::get();
+    out_ty = at::DynamicTypeTrait<at::IntType>::getBaseType();
   } else if (elem_ty_val == 1) {
-    out_ty = at::FloatType::get();
+    out_ty = at::DynamicTypeTrait<at::FloatType>::getBaseType();
   } else if (elem_ty_val == 2) {
-    out_ty = at::BoolType::get();
+    out_ty = at::DynamicTypeTrait<at::BoolType>::getBaseType();
   } else if (elem_ty_val == 3) {
-    out_ty = at::ComplexType::get();
+    out_ty = at::DynamicTypeTrait<at::ComplexType>::getBaseType();
   } else {
     TORCH_CHECK(
         false,
@@ -121,8 +138,10 @@ void toList(Stack& stack) {
   // the elements will be casted to double/c10::complex<double>
   // later.
   TORCH_CHECK(
-      (out_ty == at::FloatType::get() && t.is_floating_point()) ||
-          (out_ty == at::ComplexType::get() && t.is_complex()) ||
+      (out_ty == at::DynamicTypeTrait<at::FloatType>::getBaseType() &&
+       t.is_floating_point()) ||
+          (out_ty == at::DynamicTypeTrait<at::ComplexType>::getBaseType() &&
+           t.is_complex()) ||
           tryScalarTypeFromJitType(*out_ty) == t.scalar_type(),
       "Output annotation element type and runtime tensor element type must match for tolist()");
 
@@ -135,7 +154,7 @@ void toList(Stack& stack) {
   // Wrap out_ty in a ListType dim times.
   for (const auto i : c10::irange(dim_val)) {
     (void)i; // Suppress unused variable warning
-    out_ty = at::ListType::create(out_ty);
+    out_ty = at::DynamicTypeFactory::create<at::ListType>(out_ty);
   }
 
   int64_t dim = t.dim();
@@ -161,10 +180,7 @@ void isCuda(Stack& stack) {
 }
 
 void numToTensorBool(Stack& stack) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  bool b;
-  pop(stack, b);
-  push(stack, at::scalar_tensor(b));
+  numToTensorScalar(stack);
 }
 
 void dictIndex(Stack& stack) {

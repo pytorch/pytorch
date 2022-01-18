@@ -3,14 +3,10 @@
 #include <string>
 #include <vector>
 
+#include <ATen/core/jit_type_base.h>
 #include <ATen/core/symbol.h>
 
 #include <torch/csrc/Export.h>
-
-namespace c10 {
-struct Type;
-using TypePtr = std::shared_ptr<Type>;
-} // namespace c10
 
 namespace torch {
 namespace jit {

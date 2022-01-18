@@ -38,6 +38,7 @@ def fetch_attr(mod, target):
 @unittest.skipIf(not torch.cuda.is_available(), "Skip because CUDA is not available")
 class TRTTestCase(TestCase):
     def setUp(self):
+        super().setUp()
         torch.manual_seed(3)
 
     def run_test(self, mod, inputs, expected_ops, unexpected_ops, interpreter, rtol, atol):
