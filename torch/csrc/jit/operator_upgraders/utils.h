@@ -30,5 +30,13 @@ TORCH_API bool isOpSymbolCurrent(
     const std::string& name,
     size_t current_version);
 
+// Returns the possible old schemas for the operator that
+// doesn't exist anymore. This can be true for deprecated
+// operators. Since name is always a symbol name, there
+// can be multiple schemas for different overloads.
+TORCH_API std::vector<std::string> loadPossibleHistoricOps(
+    const std::string& name,
+    c10::optional<size_t> version);
+
 } // namespace jit
 } // namespace torch
