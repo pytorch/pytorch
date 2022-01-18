@@ -622,6 +622,21 @@ Tensor& linalg_solve_sparse_csr_out(const Tensor& input, const Tensor& other, Te
       "Expected non-empty other tensor, but found empty other tensor."
     );
 
+    // The API expects a square matrix
+    TORCH_CHECK(
+      input.size(0) == input.size(1),
+      "Expected a sparse matrix of dimension N x N (square matrix), but got: ",
+      input.sizes()
+    );
+
+    // Ensure that the vector shape is either (n, 1) or (n,) given input sparse matrix of
+    // shape (n, n)
+    TORCH_CHECK(
+      other.size(0) == input.size(0),
+      "Dimension mismatch for the vector, got shape: ", other.sizes(), " should have been (",
+      input.size(0), ", 1) or (", input.size(0), ",)"
+    );
+
     at::native::resize_output(result, other.sizes());
 
     TORCH_CHECK(
@@ -634,11 +649,18 @@ Tensor& linalg_solve_sparse_csr_out(const Tensor& input, const Tensor& other, Te
 
     TORCH_CHECK_LINALG(singularity == -1, "torch.linalg.solve",
         ": The diagonal element ", singularity , " is zero, the solve could not be completed because the input matrix is singular.");
-
     return result;
   } else {
     TORCH_CHECK(false, "PyTorch was not built with CUDA support. Please use PyTorch built CUDA support");
   }
+}
+
+Tensor linalg_solve_sparse_csr(const Tensor& input, const Tensor& other) {
+  // Result tensor will be a vector, dimension same as that of other tensor
+  // The checks for the input tensors (input, other) are done in the call to out variant
+  auto result = at::zeros_like(other);
+  linalg_solve_sparse_csr_out(input, other, result);
+  return result;
 }
 
 DEFINE_DISPATCH(linalg_solve_sparse_csr_stub);

@@ -11070,6 +11070,7 @@
   variants: function
   dispatch:
     CPU, CUDA: linalg_solve
+    SparseCsrCPU: linalg_solve_sparse_csr
 
 - func: linalg_solve.out(Tensor input, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
