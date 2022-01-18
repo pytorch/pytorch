@@ -60,12 +60,12 @@ jobs:
     steps:
       - name: print labels
         run: echo "${PR_LABELS}"
-      !{{ common.add_retry_to_env() }}
       !{{ common.setup_ec2_linux() }}
       !{{ common.checkout_pytorch("recursive") }}
       !{{ common.calculate_docker_image(false) }}
       - name: Pull Docker image
         run: |
+          !{{ common.add_retry_to_env() }}
           retry docker pull "${DOCKER_IMAGE}"
       !{{ common.parse_ref() }}
       - name: Build
@@ -196,11 +196,11 @@ jobs:
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
     steps:
-      !{{ common.add_retry_to_env() }}
       !{{ common.setup_ec2_linux() }}
       !{{ common.checkout_pytorch("recursive") }}
       - name: Pull Docker image
         run: |
+          !{{ common.add_retry_to_env() }}
           retry docker pull "${DOCKER_IMAGE}"
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         if: ${{ contains(env.BUILD_ENVIRONMENT, 'cuda') && !contains(matrix.config, 'nogpu') }}
@@ -321,11 +321,11 @@ jobs:
       DOCS_TYPE: ${{ matrix.docs_type }}
       WITH_PUSH: ${{ github.event_name == 'schedule' }}
     steps:
-      !{{ common.add_retry_to_env() }}
       !{{ common.setup_ec2_linux() }}
       !{{ common.checkout_pytorch("recursive") }}
       - name: Pull Docker image
         run: |
+          !{{ common.add_retry_to_env() }}
           retry docker pull "${DOCKER_IMAGE}"
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download PyTorch Build Artifacts

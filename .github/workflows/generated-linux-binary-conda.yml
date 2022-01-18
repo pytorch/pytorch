@@ -63,14 +63,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: 3.7
     steps:
-      - name: Add retry to GITHUB_ENV
-        shell: bash
-        run: |
-          cat >> "${GITHUB_ENV}" <<EOF
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          EOF
       - name: Display EC2 information
         shell: bash
         run: |
@@ -86,14 +78,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -120,6 +118,9 @@ jobs:
           path: builder
       - name: Pull Docker image
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Build PyTorch binary
         run: |
@@ -196,14 +197,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: 3.7
     steps:
-      - name: Add retry to GITHUB_ENV
-        shell: bash
-        run: |
-          cat >> "${GITHUB_ENV}" <<EOF
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          EOF
       - name: Display EC2 information
         shell: bash
         run: |
@@ -219,14 +212,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -258,6 +257,9 @@ jobs:
           path: builder
       - name: Pull Docker image
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Test PyTorch binary
         run: |
@@ -339,14 +341,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -435,14 +443,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: 3.7
     steps:
-      - name: Add retry to GITHUB_ENV
-        shell: bash
-        run: |
-          cat >> "${GITHUB_ENV}" <<EOF
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          EOF
       - name: Display EC2 information
         shell: bash
         run: |
@@ -458,14 +458,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -492,6 +498,9 @@ jobs:
           path: builder
       - name: Pull Docker image
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Build PyTorch binary
         run: |
@@ -569,14 +578,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: 3.7
     steps:
-      - name: Add retry to GITHUB_ENV
-        shell: bash
-        run: |
-          cat >> "${GITHUB_ENV}" <<EOF
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          EOF
       - name: Display EC2 information
         shell: bash
         run: |
@@ -592,14 +593,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -636,6 +643,9 @@ jobs:
           echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
       - name: Pull Docker image
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Test PyTorch binary
         run: |
@@ -718,14 +728,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -814,14 +830,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: 3.7
     steps:
-      - name: Add retry to GITHUB_ENV
-        shell: bash
-        run: |
-          cat >> "${GITHUB_ENV}" <<EOF
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          EOF
       - name: Display EC2 information
         shell: bash
         run: |
@@ -837,14 +845,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -874,6 +888,9 @@ jobs:
           echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
       - name: Pull Docker image
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Build PyTorch binary
         run: |
@@ -951,14 +968,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: 3.7
     steps:
-      - name: Add retry to GITHUB_ENV
-        shell: bash
-        run: |
-          cat >> "${GITHUB_ENV}" <<EOF
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          EOF
       - name: Display EC2 information
         shell: bash
         run: |
@@ -974,14 +983,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -1018,6 +1033,9 @@ jobs:
           echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
       - name: Pull Docker image
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Test PyTorch binary
         run: |
@@ -1100,14 +1118,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -1196,14 +1220,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: 3.7
     steps:
-      - name: Add retry to GITHUB_ENV
-        shell: bash
-        run: |
-          cat >> "${GITHUB_ENV}" <<EOF
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          EOF
       - name: Display EC2 information
         shell: bash
         run: |
@@ -1219,14 +1235,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -1256,6 +1278,9 @@ jobs:
           echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
       - name: Pull Docker image
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Build PyTorch binary
         run: |
@@ -1333,14 +1358,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: 3.7
     steps:
-      - name: Add retry to GITHUB_ENV
-        shell: bash
-        run: |
-          cat >> "${GITHUB_ENV}" <<EOF
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          EOF
       - name: Display EC2 information
         shell: bash
         run: |
@@ -1356,14 +1373,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -1400,6 +1423,9 @@ jobs:
           echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
       - name: Pull Docker image
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Test PyTorch binary
         run: |
@@ -1482,14 +1508,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -1578,14 +1610,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: 3.7
     steps:
-      - name: Add retry to GITHUB_ENV
-        shell: bash
-        run: |
-          cat >> "${GITHUB_ENV}" <<EOF
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          EOF
       - name: Display EC2 information
         shell: bash
         run: |
@@ -1601,14 +1625,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -1638,6 +1668,9 @@ jobs:
           echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
       - name: Pull Docker image
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Build PyTorch binary
         run: |
@@ -1715,14 +1748,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: 3.7
     steps:
-      - name: Add retry to GITHUB_ENV
-        shell: bash
-        run: |
-          cat >> "${GITHUB_ENV}" <<EOF
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          EOF
       - name: Display EC2 information
         shell: bash
         run: |
@@ -1738,14 +1763,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -1782,6 +1813,9 @@ jobs:
           echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
       - name: Pull Docker image
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Test PyTorch binary
         run: |
@@ -1864,14 +1898,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -1959,14 +1999,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: 3.8
     steps:
-      - name: Add retry to GITHUB_ENV
-        shell: bash
-        run: |
-          cat >> "${GITHUB_ENV}" <<EOF
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          EOF
       - name: Display EC2 information
         shell: bash
         run: |
@@ -1982,14 +2014,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -2016,6 +2054,9 @@ jobs:
           path: builder
       - name: Pull Docker image
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Build PyTorch binary
         run: |
@@ -2092,14 +2133,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: 3.8
     steps:
-      - name: Add retry to GITHUB_ENV
-        shell: bash
-        run: |
-          cat >> "${GITHUB_ENV}" <<EOF
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          EOF
       - name: Display EC2 information
         shell: bash
         run: |
@@ -2115,14 +2148,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -2154,6 +2193,9 @@ jobs:
           path: builder
       - name: Pull Docker image
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Test PyTorch binary
         run: |
@@ -2235,14 +2277,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -2331,14 +2379,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: 3.8
     steps:
-      - name: Add retry to GITHUB_ENV
-        shell: bash
-        run: |
-          cat >> "${GITHUB_ENV}" <<EOF
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          EOF
       - name: Display EC2 information
         shell: bash
         run: |
@@ -2354,14 +2394,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -2388,6 +2434,9 @@ jobs:
           path: builder
       - name: Pull Docker image
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Build PyTorch binary
         run: |
@@ -2465,14 +2514,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: 3.8
     steps:
-      - name: Add retry to GITHUB_ENV
-        shell: bash
-        run: |
-          cat >> "${GITHUB_ENV}" <<EOF
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          EOF
       - name: Display EC2 information
         shell: bash
         run: |
@@ -2488,14 +2529,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -2532,6 +2579,9 @@ jobs:
           echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
       - name: Pull Docker image
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Test PyTorch binary
         run: |
@@ -2614,14 +2664,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -2710,14 +2766,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: 3.8
     steps:
-      - name: Add retry to GITHUB_ENV
-        shell: bash
-        run: |
-          cat >> "${GITHUB_ENV}" <<EOF
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          EOF
       - name: Display EC2 information
         shell: bash
         run: |
@@ -2733,14 +2781,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -2770,6 +2824,9 @@ jobs:
           echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
       - name: Pull Docker image
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Build PyTorch binary
         run: |
@@ -2847,14 +2904,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: 3.8
     steps:
-      - name: Add retry to GITHUB_ENV
-        shell: bash
-        run: |
-          cat >> "${GITHUB_ENV}" <<EOF
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          EOF
       - name: Display EC2 information
         shell: bash
         run: |
@@ -2870,14 +2919,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -2914,6 +2969,9 @@ jobs:
           echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
       - name: Pull Docker image
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Test PyTorch binary
         run: |
@@ -2996,14 +3054,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -3092,14 +3156,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: 3.8
     steps:
-      - name: Add retry to GITHUB_ENV
-        shell: bash
-        run: |
-          cat >> "${GITHUB_ENV}" <<EOF
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          EOF
       - name: Display EC2 information
         shell: bash
         run: |
@@ -3115,14 +3171,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -3152,6 +3214,9 @@ jobs:
           echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
       - name: Pull Docker image
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Build PyTorch binary
         run: |
@@ -3229,14 +3294,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: 3.8
     steps:
-      - name: Add retry to GITHUB_ENV
-        shell: bash
-        run: |
-          cat >> "${GITHUB_ENV}" <<EOF
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          EOF
       - name: Display EC2 information
         shell: bash
         run: |
@@ -3252,14 +3309,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -3296,6 +3359,9 @@ jobs:
           echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
       - name: Pull Docker image
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Test PyTorch binary
         run: |
@@ -3378,14 +3444,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -3474,14 +3546,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: 3.8
     steps:
-      - name: Add retry to GITHUB_ENV
-        shell: bash
-        run: |
-          cat >> "${GITHUB_ENV}" <<EOF
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          EOF
       - name: Display EC2 information
         shell: bash
         run: |
@@ -3497,14 +3561,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -3534,6 +3604,9 @@ jobs:
           echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
       - name: Pull Docker image
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Build PyTorch binary
         run: |
@@ -3611,14 +3684,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: 3.8
     steps:
-      - name: Add retry to GITHUB_ENV
-        shell: bash
-        run: |
-          cat >> "${GITHUB_ENV}" <<EOF
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          EOF
       - name: Display EC2 information
         shell: bash
         run: |
@@ -3634,14 +3699,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -3678,6 +3749,9 @@ jobs:
           echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
       - name: Pull Docker image
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Test PyTorch binary
         run: |
@@ -3760,14 +3834,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -3855,14 +3935,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: 3.9
     steps:
-      - name: Add retry to GITHUB_ENV
-        shell: bash
-        run: |
-          cat >> "${GITHUB_ENV}" <<EOF
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          EOF
       - name: Display EC2 information
         shell: bash
         run: |
@@ -3878,14 +3950,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -3912,6 +3990,9 @@ jobs:
           path: builder
       - name: Pull Docker image
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Build PyTorch binary
         run: |
@@ -3988,14 +4069,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: 3.9
     steps:
-      - name: Add retry to GITHUB_ENV
-        shell: bash
-        run: |
-          cat >> "${GITHUB_ENV}" <<EOF
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          EOF
       - name: Display EC2 information
         shell: bash
         run: |
@@ -4011,14 +4084,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -4050,6 +4129,9 @@ jobs:
           path: builder
       - name: Pull Docker image
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Test PyTorch binary
         run: |
@@ -4131,14 +4213,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -4227,14 +4315,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: 3.9
     steps:
-      - name: Add retry to GITHUB_ENV
-        shell: bash
-        run: |
-          cat >> "${GITHUB_ENV}" <<EOF
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          EOF
       - name: Display EC2 information
         shell: bash
         run: |
@@ -4250,14 +4330,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -4284,6 +4370,9 @@ jobs:
           path: builder
       - name: Pull Docker image
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Build PyTorch binary
         run: |
@@ -4361,14 +4450,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: 3.9
     steps:
-      - name: Add retry to GITHUB_ENV
-        shell: bash
-        run: |
-          cat >> "${GITHUB_ENV}" <<EOF
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          EOF
       - name: Display EC2 information
         shell: bash
         run: |
@@ -4384,14 +4465,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -4428,6 +4515,9 @@ jobs:
           echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
       - name: Pull Docker image
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Test PyTorch binary
         run: |
@@ -4510,14 +4600,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -4606,14 +4702,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: 3.9
     steps:
-      - name: Add retry to GITHUB_ENV
-        shell: bash
-        run: |
-          cat >> "${GITHUB_ENV}" <<EOF
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          EOF
       - name: Display EC2 information
         shell: bash
         run: |
@@ -4629,14 +4717,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -4666,6 +4760,9 @@ jobs:
           echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
       - name: Pull Docker image
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Build PyTorch binary
         run: |
@@ -4743,14 +4840,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: 3.9
     steps:
-      - name: Add retry to GITHUB_ENV
-        shell: bash
-        run: |
-          cat >> "${GITHUB_ENV}" <<EOF
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          EOF
       - name: Display EC2 information
         shell: bash
         run: |
@@ -4766,14 +4855,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -4810,6 +4905,9 @@ jobs:
           echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
       - name: Pull Docker image
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Test PyTorch binary
         run: |
@@ -4892,14 +4990,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -4988,14 +5092,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: 3.9
     steps:
-      - name: Add retry to GITHUB_ENV
-        shell: bash
-        run: |
-          cat >> "${GITHUB_ENV}" <<EOF
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          EOF
       - name: Display EC2 information
         shell: bash
         run: |
@@ -5011,14 +5107,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -5048,6 +5150,9 @@ jobs:
           echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
       - name: Pull Docker image
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Build PyTorch binary
         run: |
@@ -5125,14 +5230,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: 3.9
     steps:
-      - name: Add retry to GITHUB_ENV
-        shell: bash
-        run: |
-          cat >> "${GITHUB_ENV}" <<EOF
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          EOF
       - name: Display EC2 information
         shell: bash
         run: |
@@ -5148,14 +5245,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -5192,6 +5295,9 @@ jobs:
           echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
       - name: Pull Docker image
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Test PyTorch binary
         run: |
@@ -5274,14 +5380,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -5370,14 +5482,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: 3.9
     steps:
-      - name: Add retry to GITHUB_ENV
-        shell: bash
-        run: |
-          cat >> "${GITHUB_ENV}" <<EOF
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          EOF
       - name: Display EC2 information
         shell: bash
         run: |
@@ -5393,14 +5497,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -5430,6 +5540,9 @@ jobs:
           echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
       - name: Pull Docker image
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Build PyTorch binary
         run: |
@@ -5507,14 +5620,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: 3.9
     steps:
-      - name: Add retry to GITHUB_ENV
-        shell: bash
-        run: |
-          cat >> "${GITHUB_ENV}" <<EOF
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          EOF
       - name: Display EC2 information
         shell: bash
         run: |
@@ -5530,14 +5635,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
@@ -5574,6 +5685,9 @@ jobs:
           echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
       - name: Pull Docker image
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Test PyTorch binary
         run: |
@@ -5656,14 +5770,20 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
       - name: Log in to ECR
         env:
-          AWS_RETRY_MODE: adaptive
+          AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
           retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .

@@ -72,7 +72,6 @@ jobs:
     timeout-minutes: !{{ common.timeout_minutes }}
     !{{ binary_env(config) }}
     steps:
-      !{{ common.add_retry_to_env() }}
       !{{ common.setup_ec2_linux() }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
@@ -91,6 +90,7 @@ jobs:
 {%- endif %}
       - name: Pull Docker image
         run: |
+          !{{ common.add_retry_to_env() }}
           retry docker pull "${DOCKER_IMAGE}"
       - name: Build PyTorch binary
         run: |
@@ -142,7 +142,6 @@ jobs:
     timeout-minutes: !{{ common.timeout_minutes }}
     !{{ binary_env(config) }}
     steps:
-      !{{ common.add_retry_to_env() }}
       !{{ common.setup_ec2_linux() }}
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
@@ -168,6 +167,7 @@ jobs:
 {%- endif %}
       - name: Pull Docker image
         run: |
+          !{{ common.add_retry_to_env() }}
           retry docker pull "${DOCKER_IMAGE}"
       - name: Test PyTorch binary
         run: |
