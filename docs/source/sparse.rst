@@ -315,6 +315,11 @@ acquired using methods :meth:`torch.Tensor.indices()` and
 
   .. See https://github.com/pytorch/pytorch/pull/45695 for a new API.
 
+  .. warning::
+    Calling :meth:`torch.Tensor._values()` will return a *detached* tensor.
+    To track gradients, :meth:`torch.Tensor.coalesce().values()` must be
+    used instead.
+
 Constructing a new sparse COO tensor results a tensor that is not
 coalesced:
 
