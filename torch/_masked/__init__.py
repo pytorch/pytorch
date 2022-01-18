@@ -415,7 +415,7 @@ def _input_mask(input: Tensor, *args, **kwargs) -> Tensor:
         if mask.layout == torch.strided:
             mask = torch.broadcast_to(mask.clone(), input.shape).to(dtype=torch.bool)
         else:
-            mask = torch.broadcast_to(mask, input.shape)
+            mask = torch._sparse_broadcast_to(mask, input.shape)
 
     # mask layout must match with input layout
     if mask.layout != input.layout:

@@ -3360,7 +3360,7 @@ class TestSparse(TestCase):
                 t23 * s
 
     @dtypes(torch.double, torch.cdouble)
-    def test_broadcast_to(self, device, dtype):
+    def test_full_broadcast_to(self, device, dtype):
         def can_broadcast(s0, s1):
             s0 = tuple(reversed(s0))
             s1 = tuple(reversed(s1))
@@ -3377,7 +3377,7 @@ class TestSparse(TestCase):
                 s = t.to_sparse(sparse_dims)
                 if can_broadcast(s0, s1):
                     t_res = torch.broadcast_to(t, s1)
-                    s_res = torch.broadcast_to(s, s1)
+                    s_res = torch._sparse_broadcast_to(s, s1)
                     torch._validate_sparse_coo_tensor_args(s_res._indices(), s_res._values(), s_res.shape)
                     if s_res.is_coalesced():
                         # ensure that is_coalesced is estimated correctly
@@ -3387,7 +3387,7 @@ class TestSparse(TestCase):
                     with self.assertRaisesRegex(RuntimeError,
                                                 r"The expanded size of the tensor \(\d\) "
                                                 r"must match the existing size \(\d\)"):
-                        torch.broadcast_to(s, s1)
+                        torch._sparse_broadcast_to(s, s1)
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
@@ -3395,7 +3395,7 @@ class TestSparse(TestCase):
         def test(sparse_dims, nnz, with_size, new_size):
             x = self._gen_sparse(sparse_dims, nnz, with_size, dtype, device, coalesced)[0]
             y = self.safeToDense(x)
-            x1 = x.broadcast_to(new_size)
+            x1 = torch._sparse_broadcast_to(x, new_size)
             y1 = y.broadcast_to(new_size)
             self.assertEqual(self.safeToDense(x1), y1)
 
