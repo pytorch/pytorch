@@ -393,7 +393,7 @@ class RNN(RNNBase):
         ``output.view(seq_len, batch, num_directions, hidden_size)``.
 
     .. note::
-        `batch_first` argument is ignored for unbatched inputs.
+        ``batch_first`` argument is ignored for unbatched inputs.
 
     .. include:: ../cudnn_rnn_determinism.rst
 
@@ -646,7 +646,7 @@ class LSTM(RNNBase):
         ``output.view(seq_len, batch, num_directions, hidden_size)``.
 
     .. note::
-        `batch_first` argument is ignored for unbatched inputs.
+        ``batch_first`` argument is ignored for unbatched inputs.
 
     .. include:: ../cudnn_rnn_determinism.rst
 
@@ -739,18 +739,18 @@ class LSTM(RNNBase):
                                   dtype=input.dtype, device=input.device)
             hx = (h_zeros, c_zeros)
         else:
-            if batch_sizes is None:  # If not PackSequence input.
-                if not is_batched:
+            if batch_sizes is None:  # If not PackedSequence input.
+                if is_batched:
+                    if (hx[0].dim() != 3 or hx[1].dim() != 3):
+                        msg = ("For batched 3-D input, hx and cx should "
+                               f"also be 3-D but got ({hx[0].dim()}-D, {hx[1].dim()}-D) tensors")
+                        raise RuntimeError(msg)
+                else:
                     if hx[0].dim() != 2 or hx[1].dim() != 2:
                         msg = ("For unbatched 2-D input, hx and cx should "
                                f"also be 2-D but got ({hx[0].dim()}-D, {hx[1].dim()}-D) tensors")
                         raise RuntimeError(msg)
                     hx = (hx[0].unsqueeze(1), hx[1].unsqueeze(1))
-                else:
-                    if (hx[0].dim() != 3 or hx[1].dim() != 3):
-                        msg = ("For batched 3-D input, hx and cx should "
-                               f"also be 3-D but got ({hx[0].dim()}-D, {hx[1].dim()}-D) tensors")
-                        raise RuntimeError(msg)
 
             # Each batch of the hidden state should match the input sequence that
             # the user believes he/she is passing in.
@@ -874,7 +874,7 @@ class GRU(RNNBase):
         ``output.view(seq_len, batch, num_directions, hidden_size)``.
 
     .. note::
-        `batch_first` argument is ignored for unbatched inputs.
+        ``batch_first`` argument is ignored for unbatched inputs.
 
     .. include:: ../cudnn_persistent_rnn.rst
 
