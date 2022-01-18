@@ -888,18 +888,23 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
             # note that relu should already be fused into linear modul in the fusion step
             assert self.relu_node is None, 'linear module and relu fusion is not executed, ' \
                 'please make sure to run fusion before prepare'
-            # we'll always produce reference pattern for torch.nn.Linear,
+            # we'll always produce reference pattern for the following modules
             # will remove the else branch after we migrated all use cases
-            if is_reference or \
-               type(self.linear) in [torch.nn.Linear] and dtypes in [(torch.quint8, torch.qint8, None)]:
+            module_whitelist = [
+                torch.nn.Linear,
+                torch.nn.qat.Linear,
+                torch.nn.intrinsic.modules.fused.LinearReLU,
+                torch.nn.intrinsic.qat.modules.linear_relu.LinearReLU
+            ]
+            if is_reference or type(self.linear) in module_whitelist and dtypes in [(torch.quint8, torch.qint8, None)]:
                 # produce dequant - float_op - quant pattern
                 dtype = torch.float
                 if activation_int8_quantized:
                     dtype = activation_dtype(qconfig)
                 activation = load_arg(quantized=dtype)(self.linear_node.args[0])
                 args = load_arg(quantized=torch.float)(self.linear_node.args)
-                # Get the float linear and attach qscheme and qparams
-                # the the module
+
+                # Get the float linear and attach qscheme and qparams the the module
                 float_linear = self.linear
                 fused_linear = None
                 if isinstance(float_linear, (torch.nn.qat.Linear, torch.nn.intrinsic.qat.LinearReLU)):
