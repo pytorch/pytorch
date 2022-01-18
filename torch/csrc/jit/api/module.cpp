@@ -508,7 +508,7 @@ Module optimize_for_inference(
   for (const auto& method : other_methods) {
     optimize_for_inference(frozen_mod.get_method(method).graph());
   }
-  return module;
+  return frozen_mod;
 }
 
 buffer_list Module::buffers(bool recurse) const {
