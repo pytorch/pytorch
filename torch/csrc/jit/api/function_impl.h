@@ -96,6 +96,7 @@ struct TORCH_API GraphFunction : public Function {
     return *executor;
   }
 
+  using Function::call;
   bool call(
       Stack& stack,
       size_t bailOut,
