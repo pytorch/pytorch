@@ -3269,24 +3269,32 @@ class TestQuantizeFx(QuantizationTestCase):
             def forward(self, x):
                 return self.linear(x)
 
-        m = M().eval()
-        m = prepare_fx(m, {"": default_qconfig})
-        m_ref = copy.deepcopy(m)
-        m_ref = convert_fx(m_ref, is_reference=True)
-        m = convert_fx(m)
-        data = torch.randn(8, 5)
-        out_ref = m_ref(data)
-        out = m(data)
-        # check that reference pattern for quantized linear module is fused
-        expected_node_occurrence = {
-            ns.call_function(torch.quantize_per_tensor): 1,
-            ns.call_module(torch.nn.quantized.Linear): 1,
-            ns.call_method("dequantize"): 1
-        }
-        self.checkGraphModuleNodes(m, expected_node_occurrence=expected_node_occurrence)
+        def _test(qat):
+            if qat:
+              m = M()
+              m = prepare_qat_fx(m, {"": default_qat_qconfig})
+            else:
+              m = M().eval()
+              m = prepare_fx(m, {"": default_qconfig})
+            m_ref = copy.deepcopy(m)
+            m_ref = convert_fx(m_ref, is_reference=True)
+            m = convert_fx(m)
+            data = torch.randn(8, 5)
+            out_ref = m_ref(data)
+            out = m(data)
+            # check that reference pattern for quantized linear module is fused
+            expected_node_occurrence = {
+                ns.call_function(torch.quantize_per_tensor): 1,
+                ns.call_module(torch.nn.quantized.Linear): 1,
+                ns.call_method("dequantize"): 1
+            }
+            self.checkGraphModuleNodes(m, expected_node_occurrence=expected_node_occurrence)
 
-        # checking result match
-        self.assertEqual(out_ref, out)
+            # checking result match
+            self.assertEqual(out_ref, out)
+
+        _test(qat=False)
+        _test(qat=True)
 
     def test_linear_relu_lowering(self):
         class M(torch.nn.Module):
