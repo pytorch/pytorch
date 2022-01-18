@@ -12,7 +12,7 @@ from torch.testing._internal.common_device_type import \
     (ops, instantiate_device_type_tests, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoCusparseGeneric,
      precisionOverride, skipMeta, skipCUDAIf, skipCUDAIfRocm, skipCPUIfNoMklSparse)
 from torch.testing._internal.common_methods_invocations import \
-    (op_db, sparse_csr_unary_ufuncs, sparse_csr_funcs, )
+    (op_db, sparse_csr_funcs, UnaryUfuncInfo, )
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing._internal.common_dtype import floating_types, get_all_dtypes
 from test_sparse import CUSPARSE_SPMM_COMPLEX128_SUPPORTED
@@ -24,6 +24,8 @@ if TEST_SCIPY:
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
 
+# Unary Ufuncs supported by Sparse CSR Layout
+sparse_csr_unary_ufuncs = [op for op in sparse_csr_funcs if isinstance(op, UnaryUfuncInfo)]
 sparse_csr_linalg_solve = [op for op in sparse_csr_funcs if op.name == 'linalg.solve']
 
 def _check_cusparse_triangular_solve_available():
