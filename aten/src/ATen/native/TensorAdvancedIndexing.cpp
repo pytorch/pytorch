@@ -1204,13 +1204,15 @@ void scatter_impl(
     ReduceStub& reduce_stub,
     FillStub& fill_stub,
     const c10::optional<c10::string_view> reduce = nullopt) {
-  if (index.numel() == 0) return;
+
   dim = at::maybe_wrap_dim(dim, self.dim());
   auto mut_out = const_cast<Tensor&>(out);
 
   if (!self.is_same(mut_out)) {
     mut_out.copy_(self);
   }
+
+  if (index.numel() == 0) return;
 
   if (reduce.has_value()) {
     auto op = meta::get_operator_enum(reduce.value());
@@ -1318,39 +1320,30 @@ TORCH_IMPL_FUNC(scatter_reduce_structured_cpu)
   TORCH_CHECK(reduce == "sum" || reduce == "prod" || reduce == "mean" || reduce == "amax" || reduce =="amin",
               "`reduce` argument must be one of ('sum', 'prod', 'mean', 'amax', 'amin'");
 
-  // TODO: We currently expect contiguous memory layout.
-  // TORCH_CHECK(self.is_contiguous(), "`self` needs to be contiguous");
-  // TORCH_CHECK(index.is_contiguous(), "`index` needs to be contiguous");
-  // TORCH_CHECK(out.is_contiguous(), "`out` needs to be contiguous");
-
   dim = dim < 0 ? dim + self.dim() : dim;
 
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, self.scalar_type(), "scatter_reduce", [&] {
-    // FIXME: this doesn't seem to be the behavior specified in the documentation
-    // documentation specifies that the elements in out should be considered in the computation(?)
-    // fill with different things depending on mode
-    // but how to tell whether out Tensor was initialized in meta or is a genuine out tensor???
-    // doesn't seem to be possible to initialize values of out tensor in TORCH_META_FUNC
-    if (reduce == "sum" || reduce == "mean") {
+    if (self.numel() == 0) {
       out.fill_(0);
-    } else if (reduce == "prod") {
-      out.fill_(1);
+      return;
+    }
+
+    if (reduce == "prod") {
+      out.fill_((scalar_t)1);
     } else if (reduce == "amax") {
-      out.fill_(INT_MIN);
+      out.fill_(std::numeric_limits<scalar_t>::lowest());
     } else if (reduce == "amin") {
-      out.fill_(INT_MAX);
+      out.fill_(std::numeric_limits<scalar_t>::max());
     } else {
-      AT_ERROR("Expected `reduce` to be one of 'sum', 'prod', 'mean', 'amax', 'amin' but got ", reduce, ".");
+      out.fill_((scalar_t)0);
     }
 
     auto self_cont = self.contiguous();
     auto index_cont = index.contiguous();
     auto self_data = self_cont.data_ptr<scalar_t>();
     auto index_data = index_cont.data_ptr<int64_t>();
-    // FIXME: probably shouldn't be handling non-contiguous like this, ask about this? TensorIterator needed?
-    // or naively iterate over all indices and multiply by stride and sum(?)
     bool out_is_contiguous = out.is_contiguous();
-    auto out_cont = out_is_contiguous ? out : out.contiguous();
+    auto out_cont = out.contiguous();
     auto out_cont_data = out_cont.data_ptr<scalar_t>();
 
     auto counts = at::zeros_like(out_cont);
@@ -1368,8 +1361,6 @@ TORCH_IMPL_FUNC(scatter_reduce_structured_cpu)
     for (int64_t i = 0; i < offset1; i++) {
       for (int64_t j = 0; j < self.size(dim); j++) {
         for (int64_t k = 0; k < offset2; k++) {
-          // because contiguous, self.stride(dim) = self.size(dim + 1) * ... * self.size(last_dim)
-          // i * self.stride(dim) * self.size(dim) = contiguous elements along dim j ?
           value = self_data[i * self_cont.stride(dim) * self_cont.size(dim) + j * self_cont.stride(dim) + k];
           dim_index = index_data[i * index_cont.stride(dim) * index_cont.size(dim) + j * index_cont.stride(dim) + k];
           TORCH_CHECK(dim_index >= 0 && dim_index < out.size(dim),
@@ -1392,6 +1383,11 @@ TORCH_IMPL_FUNC(scatter_reduce_structured_cpu)
           }
         }
       }
+    }
+
+    if (reduce == "amin" || reduce == "amax") {
+      auto val = (reduce == "amin") ? std::numeric_limits<scalar_t>::max() : std::numeric_limits<scalar_t>::lowest();
+      out_cont.masked_fill_(out_cont == val, (scalar_t)0);
     }
 
     if (!out_is_contiguous) {

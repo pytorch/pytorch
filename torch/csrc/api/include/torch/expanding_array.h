@@ -3,6 +3,7 @@
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
+#include <c10/util/irange.h>
 
 #include <algorithm>
 #include <array>
@@ -132,7 +133,7 @@ class ExpandingArrayWithOptionalElem : public ExpandingArray<D, c10::optional<T>
         values.size() == D,
         "Expected ", D, " values, but instead got ", values.size());
     // clang-format on
-    for (size_t i = 0; i < this->values_.size(); i++) {
+    for (const auto i : c10::irange(this->values_.size())) {
       this->values_[i] = values[i];
     }
   }
@@ -140,14 +141,14 @@ class ExpandingArrayWithOptionalElem : public ExpandingArray<D, c10::optional<T>
   /// Constructs an `ExpandingArrayWithOptionalElem` from a single value of the underlying type `T`,
   /// which is repeated `D` times (where `D` is the extent parameter of the `ExpandingArrayWithOptionalElem`).
   /*implicit*/ ExpandingArrayWithOptionalElem(T single_size) : ExpandingArray<D, c10::optional<T>>(0) {
-    for (size_t i = 0; i < this->values_.size(); i++) {
+    for (const auto i : c10::irange(this->values_.size())) {
       this->values_[i] = single_size;
     }
   }
 
   /// Constructs an `ExpandingArrayWithOptionalElem` from a correctly sized `std::array` of the underlying type `T`.
   /*implicit*/ ExpandingArrayWithOptionalElem(const std::array<T, D>& values) : ExpandingArray<D, c10::optional<T>>(0) {
-    for (size_t i = 0; i < this->values_.size(); i++) {
+    for (const auto i : c10::irange(this->values_.size())) {
       this->values_[i] = values[i];
     }
   }
