@@ -629,13 +629,13 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
     def test_dropout_qat_has_no_post_process_activation(self):
         """Check to make sure QAT doesn't add
-        post_process_activation to dropout module"""
+        activation_post_process to dropout module"""
         model = ManualLinearQATModel("qnnpack")
         model.qconfig = torch.ao.quantization.get_default_qat_qconfig("qnnpack")
         model_prepare = torch.ao.quantization.prepare_qat(model, inplace=False)
         self.assertTrue(hasattr(model_prepare, "dropout"))
-        self.assertFalse(hasattr(model_prepare.dropout, "post_process_activation"))
-        self.assertFalse(hasattr(model_prepare.dropout.state_dict(), "post_process_activation"))
+        self.assertFalse(hasattr(model_prepare.dropout, "activation_post_process"))
+        self.assertFalse(hasattr(model_prepare.dropout.state_dict(), "activation_post_process"))
 
     def _test_dropout_serialization(self, get_model, data1, data2):
         m1 = get_model()
