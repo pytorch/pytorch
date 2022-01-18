@@ -16,7 +16,6 @@ The following constraints are implemented:
 - ``constraints.multinomial``
 - ``constraints.nonnegative_integer``
 - ``constraints.one_hot``
-- ``constraints.positive_semidefinite``
 - ``constraints.positive_definite``
 - ``constraints.positive_integer``
 - ``constraints.positive``
@@ -24,6 +23,8 @@ The following constraints are implemented:
 - ``constraints.real``
 - ``constraints.simplex``
 - ``constraints.symmetric``
+- ``constraints.symmetric_positive_semidefinite``
+- ``constraints.symmetric_positive_definite``
 - ``constraints.stack``
 - ``constraints.square``
 - ``constraints.symmetric``
@@ -490,19 +491,15 @@ class _Symmetric(_Square):
         return torch.isclose(value, value.mT, atol=1e-6).all(-2).all(-1)
 
 
-class _PositiveSemidefinite(Constraint):
-    """
-    Constrain to positive-semidefinite matrices.
-    """
-    def check(self, value):
-        return torch.linalg.eigvalsh(value).ge(0).all(-1)
-
-
-class _PositiveDefinite(Constraint):
+# Below class is temporary class for compatiability during the process of renaming _PositiveDefinite to _SymmetricPositiveDefinite
+class _PositiveDefinite(_Symmetric):
     """
     Constrain to positive-definite matrices.
     """
     def check(self, value):
+        sym_check = super().check(value)
+        if not sym_check.all():
+            return sym_check
         return torch.linalg.cholesky_ex(value).info.eq(0)
 
 
@@ -621,5 +618,7 @@ square = _Square()
 symmetric = _Symmetric()
 positive_definite = _PositiveDefinite()
 positive_semidefinite = _PositiveSemidefinite()
+symmetric_positive_semidefinite = SymmetricPositiveSemidefinite()
+symmetric_positive_definite = SymmetricPositiveDefinite()
 cat = _Cat
 stack = _Stack
