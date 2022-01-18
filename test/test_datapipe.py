@@ -437,12 +437,25 @@ class TestFunctionalIterDataPipe(TestCase):
     def test_serializable(self):
         input_dp = dp.iter.IterableWrapper(range(10))
         picklable_datapipes: List[Tuple[Type[IterDataPipe], Tuple, Dict[str, Any]]] = [
+            # (dp.iter.Batcher, (), {}),  # TODO: Fill out
+            (dp.iter.Collator, (_fake_fn,), {}),
+            # (dp.iter.Concater, (), {}),  # TODO: Fill out
+            (dp.iter.Demultiplexer, (2, _fake_filter_fn), {}),
+            # (dp.iter.FileLister, (), {}),  # TODO: Fill out
+            # (dp.iter.FileOpener, (), {}),  # TODO: Fill out
+            (dp.iter.Filter, (_fake_filter_fn,), {}),
+            (dp.iter.Filter, (partial(_fake_filter_fn_constant, 5),), {}),
+            # (dp.iter.Forker, (), {}),  # TODO: Fill out
+            # (dp.iter.Grouper, (), {}),  # TODO: Fill out
+            # (dp.iter.IterableWrapper, (), {}),  # TODO: Fill out
             (dp.iter.Mapper, (_fake_fn, ), {}),
             (dp.iter.Mapper, (partial(_fake_add, 1), ), {}),
-            (dp.iter.Collator, (_fake_fn, ), {}),
-            (dp.iter.Filter, (_fake_filter_fn, ), {}),
-            (dp.iter.Filter, (partial(_fake_filter_fn_constant, 5), ), {}),
-            (dp.iter.Demultiplexer, (2, _fake_filter_fn), {}),
+            # (dp.iter.Multiplexer, (), {}),  # TODO: Fill out
+            # (dp.iter.Sampler, (), {}),  # TODO: Fill out
+            # (dp.iter.Shuffler, (), {}),  # TODO: Fill out
+            # (dp.iter.StreamReader, (), {}),  # TODO: Fill out
+            # (dp.iter.UnBatcher, (), {}),  # TODO: Fill out
+            # (dp.iter.Zipper, (), {}),  # TODO: Fill out
         ]
         for dpipe, dp_args, dp_kwargs in picklable_datapipes:
             print(dpipe)
@@ -451,10 +464,23 @@ class TestFunctionalIterDataPipe(TestCase):
     def test_serializable_with_dill(self):
         input_dp = dp.iter.IterableWrapper(range(10))
         unpicklable_datapipes: List[Tuple[Type[IterDataPipe], Tuple, Dict[str, Any]]] = [
-            (dp.iter.Mapper, (lambda x: x, ), {}),
+            # (dp.iter.Batcher, (), {}),  # TODO: Fill out
             (dp.iter.Collator, (lambda x: x, ), {}),
+            # (dp.iter.Concater, (), {}),  # TODO: Fill out
+            (dp.iter.Demultiplexer, (2, lambda x: x % 2, ), {}),
+            # (dp.iter.FileLister, (), {}),  # TODO: Fill out
+            # (dp.iter.FileOpener, (), {}),  # TODO: Fill out
             (dp.iter.Filter, (lambda x: x >= 5, ), {}),
-            (dp.iter.Demultiplexer, (2, lambda x: x % 2, ), {})
+            # (dp.iter.Forker, (), {}),  # TODO: Fill out
+            # (dp.iter.Grouper, (), {}),  # TODO: Fill out
+            # (dp.iter.IterableWrapper, (), {}),  # TODO: Fill out
+            (dp.iter.Mapper, (lambda x: x, ), {}),
+            # (dp.iter.Multiplexer, (), {}),  # TODO: Fill out
+            # (dp.iter.Sampler, (), {}),  # TODO: Fill out
+            # (dp.iter.Shuffler, (), {}),  # TODO: Fill out
+            # (dp.iter.StreamReader, (), {}),  # TODO: Fill out
+            # (dp.iter.UnBatcher, (), {}),  # TODO: Fill out
+            # (dp.iter.Zipper, (), {}),  # TODO: Fill out
         ]
         if HAS_DILL:
             for dpipe, dp_args, dp_kwargs in unpicklable_datapipes:
