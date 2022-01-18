@@ -47,8 +47,9 @@ Tensor empty_meta(
 
   auto* allocator = GetMetaAllocator();
   auto dtype = dtype_or_default(dtype_opt);
+  constexpr c10::DispatchKeySet meta_ks(c10::DispatchKey::Meta);
   return at::detail::empty_generic(
-      size, allocator, at::DispatchKey::Meta, dtype, memory_format_opt);
+      size, allocator, meta_ks, dtype, memory_format_opt);
 }
 
 Tensor empty_strided_meta(
