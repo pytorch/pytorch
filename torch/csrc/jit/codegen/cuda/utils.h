@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/jit_type.h>
 #include <c10/util/Exception.h>
 
 namespace torch {

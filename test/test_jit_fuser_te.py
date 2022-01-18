@@ -1,6 +1,7 @@
 # Owner(s): ["NNC"]
 
 import operator
+import os
 import unittest
 import contextlib
 import math
@@ -999,6 +1000,29 @@ class TestTEFuser(JitTestCase):
         y = torch.tensor(1, dtype=torch.float, device='cpu')
         ge = self.checkScript(fn, (x, y))
         self.assertAllFused(ge.graph_for(x, y))
+
+    def test_inlined_optimized_graph(self):
+        @torch.jit.script
+        def foo(x):
+            return torch.relu(x + x)
+
+        for _ in range(3):
+            foo(torch.rand([4, 4]))
+
+        for _ in range(3):
+            foo(torch.rand([10]))
+
+        for _ in range(3):
+            foo(torch.rand([2, 2, 2]))
+
+        g = torch.jit.last_executed_optimized_graph()
+
+        FileCheck().check_count("prim::If", 1, exactly=True).check("prim::TensorExpr").run(g)
+        torch._C._jit_pass_inline(g)
+        f = FileCheck()
+        for _ in range(3):
+            f.check("prim::If").check("prim::TensorExpr")
+        f.run(g)
 
     def test_small_constant(self):
         for device in self.devices:
@@ -2183,6 +2207,69 @@ def f({', '.join(param_names)}):
 
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(TestNNCOpInfo, globals(), only_for=only_for)
+
+
+class TestLoopnestRandomization(JitTestCase):
+    def setUp(self):
+        self.old_cpu_fuser_state = torch._C._jit_can_fuse_on_cpu()
+        self.old_must_use_cpu_state = torch._C._jit_get_te_must_use_llvm_cpu()
+        self.old_gpu_fuser_state = torch._C._jit_can_fuse_on_gpu()
+
+        torch._C._jit_override_can_fuse_on_cpu(True)
+        # TODO: force LLVM. need to add it to asan, mac, windows builds + sandcastle
+        # torch._C._jit_set_te_must_use_llvm_cpu(True)
+        torch._C._jit_override_can_fuse_on_gpu(True)
+
+        self.old_profiling_executor = torch._C._jit_set_profiling_executor(True)
+        self.old_profiling_mode = torch._C._jit_set_profiling_mode(True)
+
+        self.old_fusion_inlining = torch._C._debug_get_fusion_group_inlining()
+        torch._C._debug_set_fusion_group_inlining(False)
+
+        self.texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()
+        torch._C._jit_set_texpr_fuser_enabled(True)
+
+        self.old_te_must_use_llvm_cpu = torch._C._jit_get_te_must_use_llvm_cpu()
+        torch._C._jit_set_te_must_use_llvm_cpu(False)
+
+        # Set the seed to 1. This tests the codepath through random
+        # transformation.
+        os.environ["PYTORCH_TENSOREXPR_RANDOM_TRANSFORM_SEED"] = "1"
+
+    def tearDown(self):
+        torch._C._jit_set_profiling_executor(self.old_profiling_executor)
+        torch._C._jit_set_profiling_mode(self.old_profiling_mode)
+
+        torch._C._jit_override_can_fuse_on_gpu(self.old_gpu_fuser_state)
+        torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuser_state)
+        torch._C._jit_set_te_must_use_llvm_cpu(self.old_must_use_cpu_state)
+        torch._C._debug_set_fusion_group_inlining(self.old_fusion_inlining)
+
+        torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
+        torch._C._jit_set_te_must_use_llvm_cpu(self.old_te_must_use_llvm_cpu)
+
+        # Set it back to 0.
+        os.environ["PYTORCH_TENSOREXPR_RANDOM_TRANSFORM_SEED"] = "0"
+
+    @onlyCPU
+    @unittest.skipIf(not LLVM_ENABLED, "Compiles with TensorExprKernel")
+    def test_relu(self, device):
+        def fn_test_relu(x, y):
+            return F.relu(x + 0.5 * y)
+
+        x = torch.randn(4, 4, dtype=torch.float, device=device)
+        y = torch.randn(4, 4, dtype=torch.float, device=device)
+
+        fn = fn_test_relu
+        traced_fn = torch.jit.trace(fn, (x, y))
+
+        ref = fn(x, y)
+        res = traced_fn(x, y)
+        assert torch.allclose(ref, res)
+
+
+instantiate_device_type_tests(TestLoopnestRandomization, globals(), only_for=("cpu"))
+
 
 if __name__ == '__main__':
     run_tests()

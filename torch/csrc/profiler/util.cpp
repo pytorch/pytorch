@@ -1,6 +1,8 @@
 #include <torch/csrc/profiler/util.h>
 
 #include <c10/util/ArrayRef.h>
+#include <fmt/format.h>
+#include <c10/util/irange.h>
 
 #ifdef USE_KINETO
 #include <libkineto.h>
@@ -31,27 +33,25 @@ std::string getNvtxStr(
     int64_t sequence_nr,
     const std::vector<std::vector<int64_t>>& shapes) {
   if (sequence_nr >= -1 || shapes.size() > 0) {
-    std::stringstream s;
-#if defined(USE_ROCM)
-    s << name;
-#endif
+    std::string str;
     if (sequence_nr >= 0) {
-#if defined(USE_ROCM)
-      s << ", seq = " << sequence_nr;
-#else
-      s << name << ", seq = " << sequence_nr;
-#endif
+      str = fmt::format("{}, seq = {}", name, sequence_nr);
     } else if (sequence_nr == -1) {
-#if !defined(USE_ROCM)
-      s << name;
+      str = name;
+    } else {
+#if defined(USE_ROCM)
+      // Only ROCM supports < -1 sequence_nr
+      str = name;
 #endif
     }
     if (shapes.size() > 0) {
+      std::stringstream s;
+      s << str;
       s << ", sizes = [";
       for (const auto idx : c10::irange(shapes.size())) {
         if (shapes[idx].size() > 0) {
           s << "[";
-          for (size_t dim = 0; dim < shapes[idx].size(); ++dim) {
+          for (const auto dim : c10::irange(shapes[idx].size())) {
             s << shapes[idx][dim];
             if (dim < shapes[idx].size() - 1) {
               s << ", ";
@@ -66,8 +66,10 @@ std::string getNvtxStr(
         }
       }
       s << "]";
+      return s.str();
     }
-    return s.str();
+
+    return str;
   } else {
     return name;
   }
@@ -151,7 +153,7 @@ std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes) {
       oss << ", ";
     }
     oss << "[";
-    for (size_t s_idx = 0; s_idx < shapes[t_idx].size(); ++s_idx) {
+    for (const auto s_idx : c10::irange(shapes[t_idx].size())) {
       if (s_idx > 0) {
         oss << ", ";
       }

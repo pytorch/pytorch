@@ -1047,7 +1047,7 @@ if(BUILD_PYTHON)
 
   # These should fill in the rest of the variables, like versions, but resepct
   # the variables we set above
-  set(Python_ADDITIONAL_VERSIONS ${PYTHON_VERSION} 3.8 3.7 3.6)
+  set(Python_ADDITIONAL_VERSIONS ${PYTHON_VERSION} 3.8 3.7)
   find_package(PythonInterp 3.0)
   find_package(PythonLibs 3.0)
 
@@ -1055,9 +1055,9 @@ if(BUILD_PYTHON)
     message(FATAL_ERROR
       "Found Python libraries version ${PYTHONLIBS_VERSION_STRING}. Python 2 has reached end-of-life and is no longer supported by PyTorch.")
   endif()
-  if(${PYTHONLIBS_VERSION_STRING} VERSION_LESS 3.6)
+  if(${PYTHONLIBS_VERSION_STRING} VERSION_LESS 3.7)
     message(FATAL_ERROR
-      "Found Python libraries version ${PYTHONLIBS_VERSION_STRING}. Python 3.5 is no longer supported by PyTorch.")
+      "Found Python libraries version ${PYTHONLIBS_VERSION_STRING}. Python 3.6 is no longer supported by PyTorch.")
   endif()
 
   # When building pytorch, we pass this in directly from setup.py, and
@@ -1760,6 +1760,7 @@ if(NOT INTERN_BUILD_MOBILE)
   endif()
 
   find_package(VSX) # checks VSX
+  find_package(ZVECTOR) # checks ZVECTOR
   # checks AVX and AVX2. Already called once in MiscCheck.cmake. Called again here for clarity --
   # cached results will be used so no extra overhead.
   find_package(AVX)

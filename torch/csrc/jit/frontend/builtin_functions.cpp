@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/frontend/builtin_functions.h>
 
+#include <caffe2/serialize/versions.h>
 #include <torch/csrc/api/include/torch/jit.h>
 #include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/frontend/resolver.h>
@@ -85,6 +86,7 @@ def __contains__(self: str, key: str):
     return self.find(key, 0, len(self)) != -1
 )SCRIPT";
 
+#if !ENABLE_UPGRADERS
 // Implementations of historic symbol behaviors are defined here
 // See note [Versioned Symbols]
 
@@ -158,7 +160,6 @@ def full_0_4(size:List[int], fill_value:number, *, dtype:Optional[int]=None,
              pin_memory:Optional[bool]=None) -> Tensor:
   if dtype is None:
     fill_value = float(fill_value)
-
   return torch.full(size, fill_value, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory)
 )SCRIPT";
 
@@ -168,6 +169,7 @@ auto full_out = R"SCRIPT(
 def full_0_4(size:List[int], fill_value:number, *, out:Tensor) -> Tensor:
   return torch.full(size, fill_value, out=out)
 )SCRIPT";
+#endif
 
 struct BuiltinFunctionRegistry {
   const std::vector<Function*>& getAllBuiltinFunctionsFor(Symbol name) {
@@ -237,6 +239,7 @@ struct BuiltinFunctionRegistry {
     loadSource(aten_ops, "aten");
     loadSource(aten_ops_additional, "aten");
 
+#if !ENABLE_UPGRADERS
     // Loads functions implementing historic behavior, see note [Versioned
     // Symbols]
     // Note: these functions go into the "upgraders" namespace
@@ -249,6 +252,7 @@ struct BuiltinFunctionRegistry {
     loadSource(div__scalar, "upgraders");
     loadSource(full, "upgraders");
     loadSource(full_out, "upgraders");
+#endif
 
     // These are under `prim` instead of `aten` since they exist to bind certain
     // tensor property getters to correpsonding methods

@@ -10,7 +10,9 @@
 #include <torch/csrc/utils/disallow_copy.h>
 #include <torch/csrc/utils/python_stub.h>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/core/dynamic_type.h>
+#include <ATen/core/enum_type.h>
 #include <ATen/core/function_schema.h>
 #include <ATen/core/functional.h>
 #include <ATen/core/interned_strings.h>
@@ -1587,6 +1589,11 @@ TORCH_API std::vector<Value*> inlineCallTo(
     Node* to_replace,
     GraphFunction* callee,
     bool use_graph = true);
+
+TORCH_API std::vector<Value*> inlineCallTo(
+    Node* to_replace,
+    GraphFunction* callee,
+    Graph* callee_graph);
 
 /** If there is only one value in \p OUTPUTS and its kind is Tuple, insert a
  * tuple unpack node and return the resulting values.
