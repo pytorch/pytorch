@@ -733,7 +733,8 @@ class AutoQuantizationState(torch.nn.Module):
                 get_packable_tensor_kwarg_names(op)
             if packable_tensor_kwarg_names is not None:
                 for kwarg_name in packable_tensor_kwarg_names:
-                    kwarg = kwargs[kwarg_name]
+                    if kwarg_name not in kwarg:
+                        continue
                     kwarg_name_on_module = get_param_name(root_module, kwarg)
                     packable_tensor_kwarg_name_to_name[kwarg_name] = \
                         kwarg_name_on_module
