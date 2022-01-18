@@ -1,10 +1,12 @@
 #include <c10/util/irange.h>
+#include <torch/csrc/jit/codegen/cuda/disjoint_set.h>
 #include <torch/csrc/jit/codegen/cuda/executor_utils.h>
 #include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/pointwise.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/registry.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
 
@@ -355,6 +357,50 @@ class SchedulerTopologyChecker {
     return true;
   }
 };
+
+bool isConnectedFusionGraph(Fusion* fusion) {
+  if (fusion->outputs().empty()) {
+    // Trivial case interpreted as connected
+    return true;
+  }
+
+  // A set of connected components on the fusion graph
+  DisjointSet<Val*> component_sets;
+
+  // Iterate through all used exprs
+  for (auto expr : fusion->exprs()) {
+    TORCH_INTERNAL_ASSERT(
+        !expr->inputs().empty(), "unknown expr with zero input");
+
+    // Each expr joins all its inputs and
+    //  outputs to the same component
+    auto input0 = expr->inputs()[0];
+    for (auto input : expr->inputs()) {
+      component_sets.join(input0, input);
+    }
+    for (auto output : expr->outputs()) {
+      component_sets.join(input0, output);
+    }
+  }
+
+  // Join aliased outputs
+  for (auto alias_it : fusion->ioAlias()) {
+    component_sets.join(alias_it.first, alias_it.second);
+  }
+
+  // Check connected-ness:
+  //  If there is no independent compute flow
+  // on this fusion graph, all outputs will be
+  // equivalent/connected to the first output.
+  auto output0 = fusion->outputs()[0];
+  for (auto output : fusion->outputs()) {
+    if (!component_sets.areEquivalent(output0, output)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 } // namespace
 
 SchedulerRuntimeInfo::SchedulerRuntimeInfo(
@@ -857,6 +903,13 @@ class PointWiseScheduler : public SchedulerEntry {
   }
 
   static bool canScheduleCompileTime(Fusion* fusion) {
+    //   Currently using the same path as the scheduler
+    // to eliminate mismatch between canSchedule and
+    // schedule pointwise.
+    if (!hasReferenceTensorView(fusion)) {
+      return false;
+    }
+
     auto red_ops = findReductionOps(fusion);
     auto welford_ops = findReductionOps<WelfordOp>(fusion);
     return red_ops.empty() && welford_ops.empty();
@@ -1085,8 +1138,13 @@ bool checkCanSchedule(
   // since for all current use cases
   //  it has to pass all the compile time checks to create a data cache for this
   //  fusion.
-  if (!data_cache && !SchedulerType::canScheduleCompileTime(fusion)) {
-    return false;
+  if (!data_cache) {
+    if (!isConnectedFusionGraph(fusion)) {
+      return false;
+    }
+    if (!SchedulerType::canScheduleCompileTime(fusion)) {
+      return false;
+    }
   }
 
   return SchedulerType::canScheduleRunTime(fusion, runtime_info, data_cache);

@@ -2721,8 +2721,10 @@ void SegmentCandidateFinder::findSegments() {
   }
 
   for (auto group : groups()) {
-    // Set heuristics in case single reduction kernels were left out
-    group->setHeuristic(deriveHeuristic(group));
+    if (!group->outputs().empty()) {
+      // Set heuristics in case single reduction kernels were left out
+      group->setHeuristic(deriveHeuristic(group));
+    }
   }
 
   // Remove all scalar edges since they do not represent actual

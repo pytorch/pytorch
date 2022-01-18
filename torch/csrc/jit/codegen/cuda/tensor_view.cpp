@@ -891,6 +891,14 @@ void TensorView::clearReductionIterDomains() {
   setDomain(IrBuilder::create<TensorDomain>(container(), new_root, new_contig));
 }
 
+bool TensorView::isEmptyTensor() const {
+  auto& root_domain = getMaybeRFactorDomain();
+  return std::all_of(
+      root_domain.begin(), root_domain.end(), [](IterDomain* id) {
+        return id->extent()->isZeroInt();
+      });
+}
+
 TensorViewBuilder& TensorViewBuilder::ndims(size_t ndims) {
   TORCH_CHECK(shape_.empty() || shape_.size() == ndims);
   TORCH_CHECK(contiguity_.empty() || contiguity_.size() == ndims);

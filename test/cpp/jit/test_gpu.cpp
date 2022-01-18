@@ -19663,6 +19663,92 @@ TEST_F(NVFuserTest, FusionNonDivisibleSplitVectorize2_CUDA) {
   testValidate(&fusion, cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
 }
 
+TEST_F(NVFuserTest, FusionIssue1284Repro_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  std::vector<int64_t> input_shape_0 = {10, 20};
+  std::vector<int64_t> input_shape_1 = {15};
+
+  TensorView* in_0 = makeSymbolicTensor(input_shape_0.size());
+  TensorView* in_1 = makeSymbolicTensor(input_shape_1.size());
+  fusion.addInput(in_0);
+  fusion.addInput(in_1);
+
+  TensorView* out_0 = add(in_0, IrBuilder::create<Double>(0.f));
+  TensorView* out_1 = add(in_1, IrBuilder::create<Double>(2.f));
+
+  fusion.addOutput(out_0);
+  fusion.addOutput(out_1);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor at_in_0 = at::randn(input_shape_0, options);
+  at::Tensor at_in_1 = at::randn(input_shape_1, options);
+  std::vector<IValue> aten_inputs = {at_in_0, at_in_1};
+
+  FusionExecutorCache fec(std::move(fusion_ptr));
+  auto outputs = fec.runFusionWithInputs(aten_inputs);
+
+  auto t1 = at_in_1 + 2;
+
+  auto runtime = fec.getMostRecentKernelRuntime();
+  TORCH_INTERNAL_ASSERT(runtime->isSegmented());
+  TORCH_INTERNAL_ASSERT(runtime->fusionSegments()->groups().size() == 2);
+
+  testValidate(
+      &fusion, outputs, {at_in_0, at_in_1}, {at_in_0, t1}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionIssue1284Repro2_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  std::vector<int64_t> input_shape_0 = {4, 4};
+  std::vector<int64_t> input_shape_1 = {3, 4, 4};
+  std::vector<int64_t> input_shape_2 = {2, 8, 4, 4};
+
+  TensorView* in_0 = makeSymbolicTensor(input_shape_0.size());
+  TensorView* in_1 = makeSymbolicTensor(input_shape_1.size());
+  TensorView* in_2 = makeSymbolicTensor(input_shape_2.size());
+
+  fusion.addInput(in_0);
+  fusion.addInput(in_1);
+  fusion.addInput(in_2);
+
+  TensorView* out_0 = add(in_0, in_1);
+  TensorView* out_1 = add(in_0, in_2);
+
+  fusion.addOutput(out_0);
+  fusion.addOutput(out_1);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor at_in_0 = at::randn(input_shape_0, options);
+  at::Tensor at_in_1 = at::randn(input_shape_1, options);
+  at::Tensor at_in_2 = at::randn(input_shape_2, options);
+
+  std::vector<IValue> aten_inputs = {at_in_0, at_in_1, at_in_2};
+
+  FusionExecutorCache fec(std::move(fusion_ptr));
+  auto outputs = fec.runFusionWithInputs(aten_inputs);
+
+  auto t0 = at_in_0 + at_in_1;
+  auto t1 = at_in_0 + at_in_2;
+
+  auto runtime = fec.getMostRecentKernelRuntime();
+  TORCH_INTERNAL_ASSERT(runtime->isSegmented());
+  TORCH_INTERNAL_ASSERT(runtime->fusionSegments()->groups().size() == 2);
+
+  testValidate(
+      &fusion,
+      outputs,
+      {at_in_0, at_in_1, at_in_2},
+      {t0, t1},
+      __LINE__,
+      __FILE__);
+}
+
 TEST_F(NVFuserTest, FusionIssue1305Repro_CUDA) {
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   Fusion& fusion = *fusion_ptr.get();

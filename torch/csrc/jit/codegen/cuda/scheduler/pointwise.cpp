@@ -391,6 +391,12 @@ class DomainMap {
     return nullptr;
   }
 
+  static bool hasReferenceTensorView(Fusion* fusion) {
+    FusionGuard fg(fusion);
+    DomainMap domain_map(fusion);
+    return domain_map.findReferenceTensorView() != nullptr;
+  }
+
  private:
   // Determine if output TensorView is a valid reference tensor for this fusion.
   // The reference tensor must map to all the iterDomains in each input.
@@ -417,7 +423,8 @@ class DomainMap {
     // Get concrete IDs for input root or rfactor domain
     std::unordered_set<IterDomain*> in_concrete_ids;
     for (auto in_id : input_tv->getMaybeRFactorDomain()) {
-      if (!in_id->isBroadcast() && !in_id->isReduction()) {
+      if (!ca_index_map_.getConcreteMappedID(in_id)->isBroadcast() &&
+          !in_id->isReduction()) {
         in_concrete_ids.insert(ca_index_map_.getConcreteMappedID(in_id));
       }
     }
@@ -490,6 +497,10 @@ class DomainMap {
 };
 
 } // namespace
+
+bool hasReferenceTensorView(Fusion* fusion) {
+  return DomainMap::hasReferenceTensorView(fusion);
+}
 
 // TODO: Inline intermediate operations (avoid inlining unrolled/vectorized
 // input/output caches)

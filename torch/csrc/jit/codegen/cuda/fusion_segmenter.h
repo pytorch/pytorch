@@ -288,11 +288,11 @@ class TORCH_CUDA_CU_API SegmentedFusion {
   }
 
   Val* findAlias(Val* val) const {
-    Val* alias_val = nullptr;
-    if (complete_fusion_->io_alias_.count(val) != 0) {
-      alias_val = complete_fusion_->io_alias_[val];
+    auto alias_it = complete_fusion_->ioAlias().find(val);
+    if (alias_it != complete_fusion_->ioAlias().end()) {
+      return alias_it->second;
     }
-    return alias_val;
+    return nullptr;
   }
 
   //! Make a clone of the group and convert to fusion

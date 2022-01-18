@@ -445,6 +445,7 @@ std::vector<at::Tensor> FusionKernelRuntime::runWithInput(
         " inputs but expecting ",
         segmented_fusion_->inputs().size());
 
+    c10::Device device(c10::DeviceType::CUDA, 0);
     int extent_index_ = 0;
     // Bind input in the tensor_map
     for (const auto i : c10::irange(inputs.size())) {
@@ -458,6 +459,7 @@ std::vector<at::Tensor> FusionKernelRuntime::runWithInput(
       //      more convenient and safer than replication
       if (inputs[i].isTensor()) {
         auto aten_tensor = inputs[i].toTensor();
+        device = aten_tensor.device();
         for (auto dim_size : aten_tensor.sizes()) {
           runtime_workspace_.tensor_map.emplace(
               runtime_workspace_.group_extent_binding_order[extent_index_++],
@@ -496,14 +498,30 @@ std::vector<at::Tensor> FusionKernelRuntime::runWithInput(
       if (iter != runtime_workspace_.tensor_map.end()) {
         fusion_outputs.push_back(iter->second);
       } else {
+        bool empty_type_check = output->getDataType().has_value() &&
+            output->getDataType().value() == DataType::Float;
+
+        // Only support two cases of empty tensor here, since
+        //   this is hot path.
+        auto out_tv = output->as<TensorView>();
+
+        // TODO: should be only one of the two once the "empty"
+        //  definition has been unified throughout the ops.
+        bool empty_tensor_check =
+            out_tv->isZeroDim() || out_tv->isEmptyTensor();
+
         // This is the check for an empty tensor;
         TORCH_INTERNAL_ASSERT(
-            output->as<TensorView>()->nDims() == 0 &&
-                output->getDataType().has_value() &&
-                output->getDataType().value() == DataType::Float,
+            empty_tensor_check && empty_type_check,
             "Non empty tensor cannot be found at tensor_map in ",
             __FUNCTION__);
-        fusion_outputs.emplace_back(at::Tensor());
+
+        // TODO: would need to clean up this part when
+        //   we have a unified and consistent way to generate
+        //   size-0 tensors.
+        const auto tensor_options =
+            at::TensorOptions().dtype(at::kFloat).device(device);
+        fusion_outputs.emplace_back(at::empty({0}, tensor_options));
       }
     }
 

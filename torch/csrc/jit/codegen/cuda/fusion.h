@@ -252,6 +252,10 @@ class TORCH_CUDA_CU_API Fusion final : public IrContainer {
     return is_during_update_uses_;
   }
 
+  const auto& ioAlias() const {
+    return io_alias_;
+  }
+
  protected:
   friend SegmentCandidateFinder;
   friend SegmentedFusion;

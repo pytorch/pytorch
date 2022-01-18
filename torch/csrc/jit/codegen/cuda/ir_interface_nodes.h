@@ -199,6 +199,16 @@ class TORCH_CUDA_CU_API TensorView : public Val {
   //! trivial reductions
   bool hasAnyReduction() const;
 
+  //! Returns true if this tensor is zero dimensional,
+  //!  i.e. a wrapped scalar or an empty placeholder.
+  bool isZeroDim() const {
+    return nDims() == 0;
+  }
+
+  //! Returns true if this tensor does not contain
+  //!  any value.
+  bool isEmptyTensor() const;
+
   c10::optional<unsigned int> getReductionAxis() const;
 
   const std::vector<IterDomain*>& getRootDomain() const;
