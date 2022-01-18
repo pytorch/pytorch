@@ -1,12 +1,11 @@
 #include <torch/csrc/autograd/profiler_legacy.h>
 
 #include <torch/csrc/autograd/function.h>
-#include <torch/csrc/jit/frontend/code_template.h>
-
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
+#include <ATen/code_template.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <torch/library.h>
 
@@ -506,7 +505,7 @@ double LegacyEvent::cudaElapsedUs(const LegacyEvent& e) const {
   return torch::profiler::impl::cudaStubs()->elapsed(&cuda_event, &e.cuda_event);
 }
 
-static const jit::CodeTemplate event_template(R"(
+static const at::jit::CodeTemplate event_template(R"(
 {
   "name": "${name}",
   "ph": "X",
@@ -550,7 +549,7 @@ void writeProfilerEventsToStream(std::ostream& out, const std::vector<LegacyEven
       LegacyEvent* evt_start = it->second;
       events_map.erase(it);
 
-      jit::TemplateEnv env;
+      at::jit::TemplateEnv env;
       env.s("name", evt_start->name());
       env.d("ts", profiler_start->cpuElapsedUs(*evt_start));
       env.d("dur", evt_start->cpuElapsedUs(*evt));
