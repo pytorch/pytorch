@@ -247,7 +247,7 @@ using svd_fn = void (*)(
     const bool /*compute_uv*/,
     const Tensor& /*U*/,
     const Tensor& /*S*/,
-    Tensor& /*Vh*/,
+    const Tensor& /*Vh*/,
     const Tensor& /*info*/);
 DECLARE_DISPATCH(svd_fn, svd_stub);
 

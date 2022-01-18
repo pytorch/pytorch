@@ -3075,13 +3075,11 @@ TORCH_IMPL_FUNC(_linalg_svd_out)(const Tensor& A,
                             || (use_cusolver && Vh.is_contiguous());
   const auto Vh_ = borrow_else_clone(Vh_ready, Vh, Vh, /*C-contig*/use_cusolver);
 
-  // We need the const_cast because some of the cusolver routines compute V rather than Vh
-  // so we need to compute the output.
   svd_stub(A.device().type(),
            A,
            full_matrices,
            compute_uv,
-           *U_, *S_, const_cast<Tensor&>(*Vh_), info);
+           *U_, *S_, *Vh_, info);
 
   if (!U_ready) {
     U.copy_(*U_);
