@@ -9860,6 +9860,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            sample_inputs_func=sample_inputs_linalg_matrix_norm,
+           gradcheck_fast_mode=not TEST_WITH_ROCM,  # ROCM fails with gradcheck fast and succeeds with slow
            skips=(
                # Pre-existing condition; Needs to be fixed
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
@@ -12635,9 +12636,9 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_svd,
            check_batched_gradgrad=False,
+           gradcheck_fast_mode=not TEST_WITH_ROCM,  # ROCM fails with gradcheck fast and succeeds with slow
            decorators=[
                skipCUDAIfNoMagmaAndNoCusolver,
-               skipCUDAIfRocm,
                skipCPUIfNoLapack,
            ]),
     OpInfo('linalg.svd',
@@ -12646,9 +12647,9 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_svd,
            check_batched_gradgrad=False,
+           gradcheck_fast_mode=not TEST_WITH_ROCM,  # ROCM fails with gradcheck fast and succeeds with slow
            decorators=[
                skipCUDAIfNoMagmaAndNoCusolver,
-               skipCUDAIfRocm,
                skipCPUIfNoLapack,
            ]),
     OpInfo('linalg.svdvals',
@@ -12657,6 +12658,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_linalg_svdvals,
            check_batched_gradgrad=False,
+           gradcheck_fast_mode=not TEST_WITH_ROCM,  # ROCM fails with gradcheck fast and succeeds with slow
            decorators=[
                skipCUDAIfNoMagmaAndNoCusolver,
                skipCPUIfNoLapack]),
