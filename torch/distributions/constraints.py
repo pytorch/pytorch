@@ -617,7 +617,6 @@ corr_cholesky = _CorrCholesky()
 square = _Square()
 symmetric = _Symmetric()
 positive_definite = _PositiveDefinite()
-positive_semidefinite = _PositiveSemidefinite()
 symmetric_positive_semidefinite = SymmetricPositiveSemidefinite()
 symmetric_positive_definite = SymmetricPositiveDefinite()
 cat = _Cat
