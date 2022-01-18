@@ -9,8 +9,9 @@ import functools
 from torch import Tensor
 from typing import Any, Callable, Optional, Tuple, Union, List
 from torch.utils._pytree import tree_flatten, tree_unflatten, _broadcast_to_and_flatten, TreeSpec
-from .pytree_hacks import tree_flatten_hack, tree_map_
+from .pytree_hacks import tree_map_
 from functools import partial
+import inspect
 
 from functorch._C import (
     _add_batch_dim,
@@ -21,6 +22,23 @@ from functorch._C import (
 
 in_dims_t = Union[int, Tuple]
 out_dims_t = Union[int, Tuple[int, ...]]
+
+
+def register_torch_return_types():
+    # Register torch.return_types as pytree node.
+    for name in dir(torch.return_types):
+        if name.startswith('__'):
+            continue
+        attr = getattr(torch.return_types, name)
+        if inspect.isclass(attr):
+            return_type_class = attr
+            # Note: We capture the current `return_type_class` with default argument `constructor`
+            # in the lambda otherwise we will point to the last value of `return_type_class` for all lambdas
+            torch.utils._pytree._register_pytree_node(return_type_class, lambda x: (
+                list(x), None), lambda x, c, constructor=return_type_class: constructor(x))
+
+
+register_torch_return_types()
 
 # Checks that all args-to-be-batched have the same batch dim size
 
@@ -119,7 +137,7 @@ def _unwrap_batched(
         batched_outputs: Union[Tensor, Tuple[Tensor, ...]],
         out_dims: out_dims_t,
         vmap_level: int, batch_size: int, func: Callable) -> Tuple:
-    flat_batched_outputs, output_spec = tree_flatten_hack(batched_outputs)
+    flat_batched_outputs, output_spec = tree_flatten(batched_outputs)
 
     for out in flat_batched_outputs:
         if isinstance(out, torch.Tensor):
