@@ -1,7 +1,7 @@
 #pragma once
 
-#include <torch/csrc/Export.h>
 #include <ATen/code_template.h>
+#include <torch/csrc/Export.h>
 
 namespace torch {
 namespace jit {
