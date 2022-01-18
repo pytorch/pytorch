@@ -27,12 +27,14 @@ name: !{{ build_environment }}
 {%- endmacro %}
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
+# NOTE: Uncomment this to test within your PR
+# TODO: Migrate to new ciflow trigger, reference https://github.com/pytorch/pytorch/pull/70321
+#  pull_request:
+#    types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
   push:
     tags:
       - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
-      - nightly
+      - nightly-binary
   workflow_dispatch:
 
 env:
@@ -88,7 +90,8 @@ jobs:
 {%- endif %}
       - name: Pull Docker image
         run: |
-          !{{ common.pull_docker("${DOCKER_IMAGE}") }}
+          !{{ common.add_retry_to_env() }}
+          retry docker pull "${DOCKER_IMAGE}"
       - name: Build PyTorch binary
         run: |
           set -x
@@ -164,7 +167,8 @@ jobs:
 {%- endif %}
       - name: Pull Docker image
         run: |
-          !{{ common.pull_docker("${DOCKER_IMAGE}") }}
+          !{{ common.add_retry_to_env() }}
+          retry docker pull "${DOCKER_IMAGE}"
       - name: Test PyTorch binary
         run: |
           set -x
