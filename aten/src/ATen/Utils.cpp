@@ -48,7 +48,7 @@ Tensor empty_cpu(
   auto dtype = dtype_or_default(dtype_opt);
 
   constexpr auto cpu_ks = at::DispatchKeySet(at::DispatchKey::CPU);
-  return empty_generic(size, allocator, cpu_ks, dtype, device, memory_format_opt);
+  return empty_generic(size, allocator, cpu_ks, dtype, memory_format_opt);
 }
 
 Tensor empty_generic(
@@ -59,7 +59,6 @@ Tensor empty_generic(
   // pass it in
   c10::DispatchKeySet ks,
   ScalarType scalar_type,
-  Device device,
   c10::optional<c10::MemoryFormat> memory_format_opt) {
 
   check_size_nonnegative(size);

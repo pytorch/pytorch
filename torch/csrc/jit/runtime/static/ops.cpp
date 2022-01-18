@@ -91,10 +91,11 @@ void repeat_out(at::Tensor& result, const Tensor& self, IntArrayRef repeats) {
 at::Tensor& reshape_copy_out(
     at::Tensor& out,
     const at::Tensor& self,
-    const std::vector<int64_t>& proposed_shape,
+    at::IntArrayRef proposed_shape,
     bool infer_size) {
-  auto shape = infer_size ? at::infer_size(proposed_shape, self.numel())
-                          : proposed_shape;
+  auto shape = infer_size
+      ? at::infer_size(proposed_shape, self.numel())
+      : std::vector<int64_t>(proposed_shape.begin(), proposed_shape.end());
   at::native::resize_(out, shape, c10::nullopt);
 
   auto self_contig = self.expect_contiguous();
@@ -1659,7 +1660,7 @@ REGISTER_OPERATOR_FUNCTOR(
       TORCH_CHECK(n->inputs().size() == 2);
       return [](ProcessedNode* p_node) {
         const auto& self = p_node->Input(0).toTensor(); // self
-        const auto proposed_shape = p_node->Input(1).toIntVector(); // shape
+        const auto proposed_shape = p_node->Input(1).toDimVector(); // shape
 
         if (p_node->Output(0).isNone()) {
           p_node->Output(0) = create_empty_from(self);
@@ -1836,7 +1837,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::repeat, aten_repeat, [](Node* n) -> SROperator {
   }
   return [](ProcessedNode* p_node) {
     const auto& self = p_node->Input(0).toTensor();
-    const auto repeats = p_node->Input(1).toIntVector();
+    const auto repeats = p_node->Input(1).toDimVector();
 
     if (p_node->Output(0).isNone()) {
       p_node->Output(0) = at::native::repeat(self, repeats);
@@ -2030,7 +2031,7 @@ REGISTER_OPERATOR_FUNCTOR(
       return [](ProcessedNode* p_node) {
         // ignore Input(5): `bool cudnn_enable=True`
         const auto& input = p_node->Input(0).toTensor();
-        const auto normalized_shape = p_node->Input(1).toIntVector();
+        const auto normalized_shape = p_node->Input(1).toDimVector();
         auto weight_opt = p_node->Input(2).toOptional<at::Tensor>();
         auto bias_opt = p_node->Input(3).toOptional<at::Tensor>();
         float eps = p_node->Input(4).toDouble();
@@ -2124,7 +2125,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::norm, aten_norm, [](Node* n) -> SROperator {
       at::cpu::norm_outf(
           in0_t,
           in1_s,
-          p_node->Input(2).toIntVector(), // dim
+          p_node->Input(2).toDimVector(), // dim
           p_node->Input(3).toBool(), // keepdim
           p_node->Input(4).toScalarType(), // dtype
           out_t);
@@ -2145,7 +2146,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::norm, aten_norm, [](Node* n) -> SROperator {
       at::cpu::norm_outf(
           in0_t,
           in1_s,
-          p_node->Input(2).toIntVector(), // dim
+          p_node->Input(2).toDimVector(), // dim
           p_node->Input(3).toBool(), // keepdim
           out_t);
     };
@@ -2311,7 +2312,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::full, aten_full, [](Node* n) -> SROperator {
     return nullptr;
   }
   return [](ProcessedNode* p_node) {
-    const auto& size = p_node->Input(0).toIntVector();
+    const auto& size = p_node->Input(0).toDimVector();
     const auto fill_value = p_node->Input(1).toScalar();
     if (p_node->Output(0).isNone()) {
       const auto dtype = p_node->Input(2).toOptional<c10::ScalarType>();
@@ -2380,7 +2381,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::linalg_norm, aten_linalg_norm, [](Node* n) -> SR
           "aten::linalg_norm(Tensor self, Scalar? ord=None, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor"))) {
     return [](ProcessedNode* p_node) {
       const auto& input = p_node->Input(0).toTensor();
-      const auto dim = p_node->Input(2).toIntVector();
+      const auto dim = p_node->Input(2).toDimVector();
       const auto keepdim = p_node->Input(3).toBool();
       const auto dtype = p_node->Input(4).toOptional<c10::ScalarType>();
       if (p_node->Output(0).isNone()) {
@@ -2407,7 +2408,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::linalg_norm, aten_linalg_norm, [](Node* n) -> SR
           "aten::linalg_norm.ord_str(Tensor self, str ord, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor"))) {
     return [](ProcessedNode* p_node) {
       const auto& input = p_node->Input(0).toTensor();
-      const auto dim = p_node->Input(2).toIntVector();
+      const auto dim = p_node->Input(2).toDimVector();
       const auto keepdim = p_node->Input(3).toBool();
       const auto dtype = p_node->Input(4).toOptional<c10::ScalarType>();
       if (p_node->Output(0).isNone()) {

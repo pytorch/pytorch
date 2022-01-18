@@ -265,11 +265,12 @@ Interpreter::Interpreter(
     deploySetSelfPtr(handle_);
   }
 
+  auto extra_python_paths = env->getExtraPythonPaths();
   void* newInterpreterImpl = dlsym(handle_, "newInterpreterImpl");
   AT_ASSERT(newInterpreterImpl);
   pImpl_ = std::unique_ptr<InterpreterImpl>(
-      ((InterpreterImpl * (*)()) newInterpreterImpl)());
-
+      ((InterpreterImpl * (*)(const std::vector<std::string>&))
+           newInterpreterImpl)(extra_python_paths));
   env->configureInterpreter(this);
 }
 

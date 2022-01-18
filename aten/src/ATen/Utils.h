@@ -133,7 +133,6 @@ Tensor empty_generic(
   // pass it in
   c10::DispatchKeySet ks,
   ScalarType dtype,
-  Device device,
   c10::optional<c10::MemoryFormat> memory_format
 );
 
