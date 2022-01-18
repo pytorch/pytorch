@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include <test/cpp/tensorexpr/test_base.h>
-#include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/passes/symbolic_shape_runtime_fusion.h>
