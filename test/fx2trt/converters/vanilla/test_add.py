@@ -5,6 +5,7 @@ import operator
 import torch
 import torch.fx
 from torch.testing._internal.common_fx2trt import VanillaTestCase
+from torch.testing._internal.common_utils import run_tests
 
 
 class TestAddConverter(VanillaTestCase):
@@ -21,3 +22,6 @@ class TestAddConverter(VanillaTestCase):
 
         inputs = [torch.randn(1, 1)]
         self.run_test(add, inputs, expected_ops={torch.add})
+
+if __name__ == '__main__':
+    run_tests()
