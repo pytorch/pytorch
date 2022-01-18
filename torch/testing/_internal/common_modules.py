@@ -2,10 +2,11 @@ import torch
 import unittest
 from copy import deepcopy
 from functools import wraps, partial
-from itertools import chain
+from itertools import chain, product
 import itertools
 import torch.nn.functional as F
 from torch.testing import make_tensor
+from torch.testing._internal.common_cuda import TEST_CUDNN
 from torch.testing._internal.common_dtype import floating_types
 from torch.testing._internal.common_device_type import (
     _TestParametrizer, _update_param_kwargs, skipIf, toleranceOverride, tol,
@@ -13,7 +14,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_nn import nllloss_reference, get_reduction
 from torch.testing._internal.common_utils import (
-    freeze_rng_state, set_single_threaded_if_parallel_tbb, GRADCHECK_NONDET_TOL)
+    freeze_rng_state, set_single_threaded_if_parallel_tbb, GRADCHECK_NONDET_TOL, TEST_WITH_ROCM)
 from types import ModuleType
 from typing import List, Tuple, Type, Set, Dict
 
@@ -292,8 +293,10 @@ def module_inputs_torch_nn_GaussianNLLLoss(module_info, device, dtype, requires_
 def no_batch_dim_reference_fn(m, p, *args, **kwargs):
     """Reference function for modules supporting no batch dimensions.
 
-    The module is passed the input and target in batched form with a single item.
-    The output is squeezed to compare with the no-batch input.
+    Unbatched inputs are unsqueezed to form a
+    single batch input before passing them to the module.
+    The output is squeezed to compare with the
+    output of unbatched input to the module.
 
     Currently it only supports modules which return a single Tensor as output.
     You can bind the following kwargs.
@@ -336,8 +339,10 @@ def no_batch_dim_reference_fn(m, p, *args, **kwargs):
 def no_batch_dim_reference_mha(m, p, *args, **kwargs):
     """Reference function for MultiheadAttention supporting no batch dimensions.
 
-    The module is passed the input and target in batched form with a single item.
-    The output is squeezed to compare with the no-batch input.
+    Unbatched inputs are unsqueezed to form a
+    single batch input before passing them to the module.
+    The output is squeezed to compare with the
+    output of unbatched input to the module.
     """
     batch_dim = 0 if kwargs.get('batch_first', True) else 1
     if 'batch_first' in kwargs:
@@ -348,6 +353,30 @@ def no_batch_dim_reference_mha(m, p, *args, **kwargs):
     with freeze_rng_state():
         output = m(*single_batch_input_args, **kwargs)
         return (output[0].squeeze(batch_dim), output[1].squeeze(0))
+
+
+def no_batch_dim_reference_rnn_gru(m, p, *args, **kwargs):
+    """Reference function for RNN and GRU supporting no batch dimensions.
+
+    Unbatched inputs are unsqueezed to form a
+    single batch input before passing them to the module.
+    The output is squeezed to compare with the
+    output of unbatched input to the module.
+    """
+    if len(args) == 1:
+        inp, = args
+        h = None
+    elif len(args) == 2:
+        inp, h = args
+        h = h.unsqueeze(1)
+
+    batch_dim = 0 if kwargs['batch_first'] else 1
+    kwargs.pop('batch_first')
+    inp = inp.unsqueeze(batch_dim)
+    single_batch_input_args = (inp, h)
+    with freeze_rng_state():
+        output = m(*single_batch_input_args, **kwargs)
+        return (output[0].squeeze(batch_dim), output[1].squeeze(1))
 
 
 def no_batch_dim_reference_lstmcell(m, p, *args, **kwargs):
@@ -492,6 +521,40 @@ def module_inputs_torch_nn_L1Loss(module_info, device, dtype, requires_grad, **k
                     forward_input=FunctionInput(make_input(shape=()), make_input(shape=())),
                     reference_fn=lambda m, p, i, t: 1. / i.numel() * (i - t).abs().sum(),
                     desc='scalar')] + generate_regression_criterion_inputs(make_input)
+
+
+def module_inputs_torch_nn_CrossEntropyLoss(module_info, device, dtype, requires_grad, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_target = partial(make_tensor, device=device, dtype=torch.long, requires_grad=False)
+    make_weight = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
+
+    reductions = ['sum', 'mean', 'none']
+    samples = []
+    # Samples below are for validating the no-batch-dim support.
+    for reduction in reductions:
+        samples.append(
+            ModuleInput(constructor_input=FunctionInput(reduction=reduction),
+                        forward_input=FunctionInput(make_input(shape=(9,)), make_target(shape=(), low=0, high=9)),
+                        reference_fn=partial(no_batch_dim_reference_fn, is_criterion=True))
+        )
+        samples.append(
+            ModuleInput(constructor_input=FunctionInput(reduction=reduction, weight=make_weight(shape=(9,))),
+                        forward_input=FunctionInput(make_input(shape=(9,)), make_target(shape=(), low=0, high=9)),
+                        reference_fn=partial(no_batch_dim_reference_fn, is_criterion=True))
+        )
+        samples.append(
+            ModuleInput(constructor_input=FunctionInput(reduction=reduction, label_smoothing=0.5),
+                        forward_input=FunctionInput(make_input(shape=(9,)), make_target(shape=(), low=0, high=9)),
+                        reference_fn=partial(no_batch_dim_reference_fn, is_criterion=True))
+        )
+        samples.append(
+            ModuleInput(constructor_input=FunctionInput(reduction=reduction, label_smoothing=0.5,
+                                                        weight=make_weight(shape=(9,))),
+                        forward_input=FunctionInput(make_input(shape=(9,)), make_target(shape=(), low=0, high=9)),
+                        reference_fn=partial(no_batch_dim_reference_fn, is_criterion=True))
+        )
+
+    return samples
 
 
 def module_inputs_torch_nn_Hardswish(module_info, device, dtype, requires_grad, **kwargs):
@@ -791,6 +854,53 @@ def module_inputs_torch_nn_LSTMCell(module_info, device, dtype, requires_grad, *
     return samples
 
 
+def module_inputs_torch_nn_RNN_GRU(module_info, device, dtype, requires_grad, **kwargs):
+    # Currently all samples below are for validating the no-batch-dim support.
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    is_rnn = kwargs['is_rnn']
+    nonlinearity = ('relu', 'tanh')
+    bias = (False, True)
+    batch_first = (False, True)
+    bidirectional = (False, True)
+
+    samples = []
+    if is_rnn:
+        prod_gen = product(nonlinearity, bias, batch_first, bidirectional)
+    else:
+        prod_gen = product(bias, batch_first, bidirectional)
+
+    for args in prod_gen:
+        if is_rnn:
+            nl, b, b_f, bidir = args
+        else:
+            b, b_f, bidir = args
+
+        cons_args = {'input_size': 2, 'hidden_size': 2, 'num_layers': 2,
+                     'batch_first': b_f, 'bias': b, 'bidirectional': bidir}
+        cons_args_hidden = {'input_size': 2, 'hidden_size': 3, 'num_layers': 2,
+                            'batch_first': b_f, 'bias': b, 'bidirectional': bidir}
+
+        if is_rnn:
+            cons_args['nonlinearity'] = nl
+            cons_args_hidden['nonlinearity'] = nl
+        samples.append(
+            ModuleInput(
+                constructor_input=FunctionInput(**cons_args),
+                forward_input=FunctionInput(make_input((2, 2))),
+                reference_fn=partial(no_batch_dim_reference_rnn_gru, batch_first=b_f),
+            )
+        )
+        samples.append(
+            ModuleInput(
+                constructor_input=FunctionInput(**cons_args_hidden),
+                forward_input=FunctionInput(make_input((3, 2)), make_input((4 if bidir else 2, 3))),
+                reference_fn=partial(no_batch_dim_reference_rnn_gru, batch_first=b_f),
+            )
+        )
+
+    return samples
+
+
 # Database of ModuleInfo entries in alphabetical order.
 module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.AdaptiveAvgPool2d,
@@ -1035,6 +1145,8 @@ module_db: List[ModuleInfo] = [
                skips=(
                    # No channels_last support for loss functions.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)),
+    ModuleInfo(torch.nn.CrossEntropyLoss,
+               module_inputs_func=module_inputs_torch_nn_CrossEntropyLoss),
     ModuleInfo(torch.nn.Hardswish,
                module_inputs_func=module_inputs_torch_nn_Hardswish,
                supports_gradgrad=False),
@@ -1078,4 +1190,57 @@ module_db: List[ModuleInfo] = [
                module_inputs_func=module_inputs_torch_nn_LSTMCell),
     ModuleInfo(torch.nn.Sigmoid,
                module_inputs_func=module_inputs_torch_nn_Sigmoid),
+    ModuleInfo(torch.nn.RNN,
+               module_inputs_func=partial(module_inputs_torch_nn_RNN_GRU, is_rnn=True),
+               decorators=(
+                   # RuntimeError: Batching rule not implemented for aten::_cudnn_rnn_backward.
+                   # We could not generate a fallback
+                   DecorateInfo(
+                       unittest.expectedFailure, "TestModule", "test_grad",
+                       active_if=(TEST_CUDNN and not TEST_WITH_ROCM), device_type='cuda'
+                   ),
+                   # NotImplementedError: the derivative for '_cudnn_rnn_backward' is not implemented.
+                   # Double backwards is not supported for CuDNN RNNs due to limitations in the CuDNN API
+                   DecorateInfo(
+                       unittest.expectedFailure, "TestModule", "test_gradgrad",
+                       active_if=(TEST_CUDNN and not TEST_WITH_ROCM), device_type='cuda'
+                   ),
+                   # CUDNN RNN doesn't accept non-contiguous hx
+                   DecorateInfo(
+                       unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors",
+                       active_if=(TEST_CUDNN and not TEST_WITH_ROCM), device_type='cuda'
+                   ),
+                   # MIOPEN RNN doesn't accept non-contiguous hx (this is dispatched to miopen only for float).
+                   DecorateInfo(
+                       unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors",
+                       active_if=(TEST_CUDNN and TEST_WITH_ROCM), dtypes=(torch.float,), device_type='cuda'
+                   ),
+               )
+               ),
+    ModuleInfo(torch.nn.GRU,
+               module_inputs_func=partial(module_inputs_torch_nn_RNN_GRU, is_rnn=False),
+               decorators=(
+                   # RuntimeError: Batching rule not implemented for aten::_cudnn_rnn_backward.
+                   # We could not generate a fallback
+                   DecorateInfo(
+                       unittest.expectedFailure, "TestModule", "test_grad",
+                       active_if=(TEST_CUDNN and not TEST_WITH_ROCM), device_type='cuda'
+                   ),
+                   # NotImplementedError: the derivative for '_cudnn_rnn_backward' is not implemented.
+                   # Double backwards is not supported for CuDNN RNNs due to limitations in the CuDNN API
+                   DecorateInfo(
+                       unittest.expectedFailure, "TestModule", "test_gradgrad",
+                       active_if=(TEST_CUDNN and not TEST_WITH_ROCM), device_type='cuda'
+                   ),
+                   # CUDNN GRU doesn't accept non-contiguous hx
+                   DecorateInfo(
+                       unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors",
+                       active_if=(TEST_CUDNN and not TEST_WITH_ROCM), device_type='cuda'
+                   ),
+                   # MIOPEN GRU doesn't accept non-contiguous hx (this is dispatched to miopen only for float).
+                   DecorateInfo(
+                       unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors",
+                       active_if=(TEST_CUDNN and TEST_WITH_ROCM), dtypes=(torch.float,), device_type='cuda'
+                   ),
+               ))
 ]

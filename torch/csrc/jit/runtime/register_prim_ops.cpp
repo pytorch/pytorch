@@ -973,7 +973,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         TORCH_SELECTIVE_SCHEMA(
             "aten::index.Tensor_hacked_twin(Tensor self, Tensor[] indices) -> Tensor"),
         [](Stack& stack) {
-          auto indices = pop(stack).to<List<c10::optional<at::Tensor>>>();
+          auto indices = pop(stack).to<c10::List<c10::optional<at::Tensor>>>();
           auto self = pop(stack).toTensor();
           auto result = at::index(self, indices);
           push(stack, std::move(result));
@@ -986,7 +986,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
           auto unsafe = pop(stack).toBool();
           auto accumulate = pop(stack).toBool();
           auto values = pop(stack).toTensor();
-          auto indices = pop(stack).to<List<c10::optional<at::Tensor>>>();
+          auto indices = pop(stack).to<c10::List<c10::optional<at::Tensor>>>();
           auto self = pop(stack).toTensor();
           auto result =
               at::_index_put_impl_(self, indices, values, accumulate, unsafe);
@@ -999,7 +999,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         [](Stack& stack) {
           auto accumulate = pop(stack).toBool();
           auto values = pop(stack).toTensor();
-          auto indices = pop(stack).to<List<c10::optional<at::Tensor>>>();
+          auto indices = pop(stack).to<c10::List<c10::optional<at::Tensor>>>();
           auto self = pop(stack).toTensor();
           auto result = at::index_put_(self, indices, values, accumulate);
           push(stack, std::move(result));
@@ -1011,7 +1011,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         [](Stack& stack) {
           auto accumulate = pop(stack).toBool();
           auto values = pop(stack).toTensor();
-          auto indices = pop(stack).to<List<c10::optional<at::Tensor>>>();
+          auto indices = pop(stack).to<c10::List<c10::optional<at::Tensor>>>();
           auto self = pop(stack).toTensor();
           auto result = at::index_put_(self, indices, values, accumulate);
           push(stack, std::move(result));
@@ -2350,7 +2350,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
           size.reserve(8);
           for (const auto i : c10::irange(num_inputs)) {
             size =
-                at::infer_size(size, peek(stack, i, num_inputs).toIntVector());
+                at::infer_size(size, peek(stack, i, num_inputs).toDimVector());
           }
           drop(stack, num_inputs);
           push(stack, IValue(size));
@@ -2474,12 +2474,12 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
         [](Stack& stack) {
           IValue self_size, other_size;
           pop(stack, self_size, other_size);
-          auto s = self_size.toIntVector();
-          auto o = other_size.toIntVector();
+          auto s = self_size.toDimVector();
+          auto o = other_size.toDimVector();
           if (s == o) {
-            push(stack, IValue());
+            stack.emplace_back();
           } else {
-            push(stack, s);
+            stack.emplace_back(std::move(self_size));
           }
         },
         aliasAnalysisFromSchema()),
