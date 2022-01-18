@@ -2220,10 +2220,6 @@ class TestLRScheduler(TestCase):
     def _test(self, schedulers, targets, epochs=10):
         if isinstance(schedulers, _LRScheduler):
             schedulers = [schedulers]
-
-        optimizers = set()
-        for scheduler in schedulers:
-            optimizers.add(scheduler.optimizer)
         for epoch in range(epochs):
             for param_group, target in zip(self.opt.param_groups, targets):
                 self.assertEqual(target[epoch], param_group['lr'],
