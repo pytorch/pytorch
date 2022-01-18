@@ -1081,8 +1081,8 @@ Tensor _efficientzerotensor(IntArrayRef size,
     auto device_ = device_or_default(device);
     auto allocator = ZeroTensorAllocator(device_);
     auto dtype_ = dtype_or_default(dtype);
-    auto r = at::detail::empty_generic(size, GetZeroTensorAllocator(allocator), at::DispatchKey::ZeroTensor, dtype_, device_, c10::nullopt);
-    return r;
+    return at::detail::empty_generic(
+        size, &allocator, at::DispatchKey::ZeroTensor, dtype_, c10::nullopt);
 }
 
 Tensor& zeros_out(IntArrayRef size, Tensor& result) {
