@@ -3,7 +3,6 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/jit_macros.h>
 #include <c10/macros/Macros.h>
-#include <ATen/jit_macros.h>
 #include <ATen/native/cuda/jit_utils.h>
 
 namespace at {

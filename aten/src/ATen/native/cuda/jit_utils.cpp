@@ -1,18 +1,16 @@
-#include <sstream>
-
 #include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
 #include <c10/util/hash.h>
+#include <c10/util/Optional.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/code_template.h>
 #include <ATen/native/cuda/jit_utils.h>
 
-#include <chrono>
-#include <sstream> // might need
-#include <fstream> // might be faster to use sys/stat to state files on Linux
-#include <cstdio> // fopen
+#include <sstream>
+#include <fstream>
+#include <cstdio>
 #include <iterator> // istreambuf_iterator
 #include <cstdlib>
 #include <string>
@@ -728,6 +726,74 @@ std::string generate_code(
   return code;
 }
 
+
+#ifdef BUILD_JITERATOR_WITH_CACHE
+// Acquires (possibly creating) the kernel cache directory
+c10::optional<std::string> get_cache_dir() {
+  // If the environment variable USE_TORCH_KERNEL_CACHE is set to "0" then no persistent cache is used
+  const char* uptkc = std::getenv("USE_PYTORCH_KERNEL_CACHE");
+  const bool use_kernel_cache = (uptkc == nullptr) ? true : std::strcmp(uptkc, "0");
+
+  if (!use_kernel_cache) {
+    return {};
+  }
+
+  // Cache path comes from PYTORCH_KERNEL_CACHE_PATH, then XDG_CACHE_HOME, then HOME environment variables
+  std::string cache_dir;
+  char* ptkcp = std::getenv("PYTORCH_KERNEL_CACHE_PATH");
+  if (ptkcp != nullptr) {
+    cache_dir = std::string(ptkcp);
+  } else {
+    // USES XDG_CACHE_HOME if it's set
+    ptkcp = std::getenv("XDG_CACHE_HOME");
+    if (ptkcp != nullptr) {
+      cache_dir = std::string(ptkcp) + "/torch/kernels";
+    } else {
+      // Falls back to HOME/.cache
+      ptkcp = std::getenv("HOME");
+      if (ptkcp == nullptr) {
+        TORCH_WARN_ONCE("No PYTORCH_KERNEL_CACHE_PATH or HOME environment variable set!",
+                        " This disables kernel caching.");
+        return {};
+      } else {
+        cache_dir = std::string(ptkcp) + "/.cache/torch/kernels";
+      }
+    }
+  }
+
+  // Creates the cache directory if it does not exist
+  const char* p_cache_dir = cache_dir.c_str();
+  const bool cache_dir_exists = (access(p_cache_dir, F_OK) == 0);
+  if (!cache_dir_exists) {
+    if (mkdir(p_cache_dir, S_IRWXU | S_IRWXG | S_IRWXO) != 0) {
+      TORCH_WARN_ONCE("Specified kernel cache directory could not be created! This disables kernel caching.",
+                      " Specified directory is ", cache_dir, ".",
+                      " This warning will appear only once per process.");
+      return {};
+    }
+  }
+
+  // Checks that the cache directory is readable and writable
+  const bool cache_dir_readable = (access(p_cache_dir, R_OK) == 0);
+  if (!cache_dir_readable) {
+    TORCH_WARN_ONCE("Specified kernel cache directory is not readable! This disables kernel caching.",
+                    " Specified directory is ", cache_dir, ".",
+                    " This warning will appear only once per process.");
+    return {};
+  }
+
+  const bool cache_dir_writable = (access(p_cache_dir, W_OK) == 0);
+  if (!cache_dir_writable) {
+    TORCH_WARN_ONCE("Specified kernel cache directory is not writable! This disables kernel caching.",
+                    " Specified directory is ", cache_dir, ".",
+                    " This warning will appear only once per process.");
+    return {};
+  }
+
+  return cache_dir;
+}
+#endif // BUILD_JITERATOR_WITH_CACHE
+
 // Compiles the kernel, or acquires if from the cache if caching
 NvrtcFunction jit_pwise_function(
     const std::string& code,
@@ -748,92 +814,44 @@ NvrtcFunction jit_pwise_function(
   std::string name = kernel_name + "_kernel";
 
   #ifdef BUILD_JITERATOR_WITH_CACHE
-    // If the environment variable USE_TORCH_KERNEL_CACHE is set to "0" then no persistent cache is used
-    const char* uptkc = std::getenv("USE_PYTORCH_KERNEL_CACHE");
-    bool use_kernel_cache = (uptkc == nullptr) ? true : std::strcmp(uptkc, "0");
-    std::string file_path;
+    static const c10::optional<std::string> cache_dir = get_cache_dir();
 
-    if (use_kernel_cache) {
-      // If caching, generates a key and queries if the program is already available
+    std::string file_path;
+    if (cache_dir.has_value()) {
+      // Attemps to read from the cache.
       // Cubin name is <kernel name>_arch<major>.<minor>_nvrtc<major>.<minor>_<ptx or sass>_<program length>_<string hash>
       // Note that the SHA1 hash used in the file name is NOT the SHA1 hash of the file's contents,
       //   because we hash on the CUDA code, but we save the compiled ptx or sass
 
-      // Acquires cache path from environment variable
-      // Constructs kernel cache path
-      // Uses the environment variable if it's set
-      char* ptkcp = std::getenv("PYTORCH_KERNEL_CACHE_PATH");
-      std::string cache_dir;
+      // Acquires SHA1 hash
+      c10::sha1 sha1_hash{code};
+      const auto hash_code = sha1_hash.str();
 
-      if (ptkcp != nullptr) {
-        cache_dir = std::string(ptkcp);
+      // Constructs file path by appending constructed cubin name to cache path
+      std::stringstream ss;
+      ss << *cache_dir << "/";
+      ss << kernel_name;
+      ss << "_arch" << cuda_major << "." << cuda_minor;
+      ss << "_nvrtc" << nvrtc_major << "." << nvrtc_minor;
+      ss << (compile_to_sass ? "_sass" : "_ptx");
+      ss << "_" << code.length();
+      ss << "_" << hash_code;
+      file_path = ss.str();
+
+      std::ifstream readin{file_path, std::ios::in | std::ifstream::binary};
+      if (readin.fail()) {
+        // NOTE: this does not warn because the file might not exist
+        // TODO: consider if this should explicilty check for the file's existence or not to throw
+        //   an informative warning
+        readin.close();
       } else {
-        // USES XDG_CACHE_HOME if it's set
-        ptkcp = std::getenv("XDG_CACHE_HOME");
-        if (ptkcp != nullptr) {
-          cache_dir = std::string(ptkcp) + "/torch/kernels";
-        } else {
-          // Falls back to HOME/.cache
-          ptkcp = std::getenv("HOME");
-          TORCH_CHECK(ptkcp != nullptr, "No PYTORCH_KERNEL_CACHE_PATH environment variable set",
-                                        " or fallback HOME environment variable set but attempting to cache!");
-          cache_dir = std::string(ptkcp) + "/.cache/torch/kernels";
-        }
-      }
-
-      const bool cache_dir_exists = (access(cache_dir.c_str(), F_OK) == 0);
-      if (!cache_dir_exists) {
-        mkdir(cache_dir.c_str(), S_IRWXU | S_IRWXG | S_IRWXO);
-      }
-
-      const bool cache_dir_readable = (access(cache_dir.c_str(), R_OK) == 0);
-      const bool cache_dir_writable = (access(cache_dir.c_str(), W_OK) == 0);
-
-      if (!cache_dir_readable) {
-        TORCH_WARN_ONCE("Specified kernel cache directory is not readable! This disables caching.",
-                        " Specified directory is ", cache_dir, ".",
-                        " This warning will appear only once per process.");
-        use_kernel_cache = false;
-      }
-
-      if (!cache_dir_writable) {
-        TORCH_WARN_ONCE("Specified kernel cache directory is not writable! This disables caching.",
-                        " Specified directory is ", cache_dir, ".",
-                        " This warning will appear only once per process.");
-        use_kernel_cache = false;
-      }
-
-      if (use_kernel_cache) {
-        // Acquires SHA1 hash
-        c10::sha1 sha1_hash{code};
-        const auto hash_code = sha1_hash.str();
-
-        // Constructs file path by appending constructed cubin name to cache path
-        std::stringstream ss;
-        ss << cache_dir << "/";
-        ss << kernel_name;
-        ss << "_arch" << cuda_major << "." << cuda_minor;
-        ss << "_nvrtc" << nvrtc_major << "." << nvrtc_minor;
-        ss << (compile_to_sass ? "_sass" : "_ptx");
-        ss << "_" << code.length();
-        ss << "_" << hash_code;
-        file_path = ss.str();
-
-        std::ifstream readin{file_path, std::ios::in | std::ifstream::binary};
-        if (readin.fail()) {
-          // NOTE: this does not warn because the file might not exist
-          // TODO: consider if this should explicilty check for the file's existence or not to throw
-          //   an informative warning
-          readin.close();
-        } else {
-          // TODO: try passing the "mapped" file directly to cuModuleLoadCall instead of using an intermediate buffer
-          std::vector<char> buffer(std::istreambuf_iterator<char>(readin), {});
-          AT_CUDA_DRIVER_CHECK(nvrtc.cuModuleLoadData(&(compiled_kernel_.module), buffer.data()));
-          AT_CUDA_DRIVER_CHECK(
-            nvrtc.cuModuleGetFunction(&(compiled_kernel_.function), compiled_kernel_.module, name.c_str()));
-          readin.close();
-          return compiled_kernel_;
-        }
+        // TODO: try passing the "mapped" file directly to cuModuleLoadCall instead of using an intermediate buffer
+        std::vector<char> buffer(std::istreambuf_iterator<char>(readin), {});
+        AT_CUDA_DRIVER_CHECK(nvrtc.cuModuleLoadData(&(compiled_kernel_.module), buffer.data()));
+        AT_CUDA_DRIVER_CHECK(
+          nvrtc.cuModuleGetFunction(&(compiled_kernel_.function), compiled_kernel_.module, name.c_str()));
+        readin.close();
+        return compiled_kernel_;
       }
     }
   #endif // BUILD_JITERATOR_WITH_CACHE
@@ -910,7 +928,7 @@ NvrtcFunction jit_pwise_function(
   AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcDestroyProgram(&program));
 
   #ifdef BUILD_JITERATOR_WITH_CACHE
-    if (use_kernel_cache) {
+    if (cache_dir.has_value()) {
       // Writes the program to the cache if caching
       // NOTE: Actually writes to a per-process temporary file to avoid multi-process contention.
       //   The temporary file is then renamed to the actual file.
