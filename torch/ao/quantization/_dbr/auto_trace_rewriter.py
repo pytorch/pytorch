@@ -151,7 +151,7 @@ class AllModuleTracer(torch.fx.Tracer):
                     new_args.append(additional_kwargs['scale'])
                     new_args.append(additional_kwargs['zero_point'])
                     args = tuple(new_args)
-                    del kwargs['bias']
+                    kwargs.pop('bias', None)
                 elif old_target != F.conv2d or target is F.conv2d:
                     kwargs.update(**additional_kwargs)
                 else:
