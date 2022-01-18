@@ -1641,11 +1641,13 @@ class ManualLinearQATModel(torch.nn.Module):
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
         self.fc1 = torch.nn.Linear(5, 1).to(dtype=torch.float)
+        self.dropout = torch.nn.Dropout(0.5)
         self.fc2 = torch.nn.Linear(1, 10).to(dtype=torch.float)
 
     def forward(self, x):
         x = self.quant(x)
         x = self.fc1(x)
+        x = self.dropout(x)
         x = self.fc2(x)
         return self.dequant(x)
 
@@ -1862,6 +1864,28 @@ class DummyObserver(torch.nn.Module):
         return 1.0, 0
 
     def forward(self, x):
+        return x
+
+
+class ModelForConvTransposeBNFusion(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv1 = nn.ConvTranspose1d(3, 3, 1)
+        self.bn1 = nn.BatchNorm1d(3)
+        self.conv2 = nn.ConvTranspose2d(3, 3, 1)
+        self.bn2 = nn.BatchNorm2d(3)
+        self.conv3 = nn.ConvTranspose3d(3, 3, 1)
+        self.bn3 = nn.BatchNorm3d(3)
+
+    def forward(self, x):
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = x.unsqueeze(2)
+        x = self.conv2(x)
+        x = self.bn2(x)
+        x = x.unsqueeze(2)
+        x = self.conv3(x)
+        x = self.bn3(x)
         return x
 
 

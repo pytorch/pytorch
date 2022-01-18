@@ -1,15 +1,21 @@
 #include <sstream>
 
-#include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/detail/OffsetCalculator.cuh>
-#include <c10/cuda/CUDACachingAllocator.h>
-#include <ATen/native/cuda/jit_utils.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
+#include <c10/cuda/CUDACachingAllocator.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/detail/OffsetCalculator.cuh>
+#include <ATen/code_template.h>
+#include <ATen/native/cuda/jit_utils.h>
+
 
 namespace at { namespace cuda { namespace jit {
 
 const std::string jit_common_types = R"ESCAPE(
+  #define POS_INFINITY __int_as_float(0x7f800000)
+  #define NEG_INFINITY __int_as_float(0xff800000)
+  #define NAN __int_as_float(0x7fffffff)
+
   typedef long long int int64_t;
   typedef unsigned int uint32_t;
   typedef signed char int8_t;
@@ -578,7 +584,7 @@ std::string generate_code(
     BinaryFuncVariant scalar_pos,
     bool vectorized,
     int vec_size) {
-  TemplateEnv env;
+  at::jit::TemplateEnv env;
   env.s("index_type", "unsigned int");
   const int nInputs = nTensors - 1;
   env.s("nInputs", std::to_string(nInputs));
@@ -657,7 +663,7 @@ std::string generate_code(
     store_outputs << "s.store<" << result_type
                   << ">(out[j], data[0], output_offsets[0]);\n";
     env.s("store_outputs", store_outputs.str());
-    static auto cuda_template = CodeTemplate(jit_common_types + jit_code_template);
+    static auto cuda_template = at::jit::CodeTemplate(jit_common_types + jit_code_template);
     return cuda_template.format(env);
   }
 
@@ -690,7 +696,7 @@ std::string generate_code(
   }
   env.s("load_unrolled_inputs", load_unrolled_inputs.str());
 
-  static auto cuda_template = CodeTemplate(jit_common_types + jit_vectorized_code_template);
+  static auto cuda_template = at::jit::CodeTemplate(jit_common_types + jit_vectorized_code_template);
   return cuda_template.format(env);
 }
 
