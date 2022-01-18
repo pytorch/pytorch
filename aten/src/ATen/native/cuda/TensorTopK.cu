@@ -307,9 +307,9 @@ __global__ void radixFindKthValues(
   // collect counts and store in shared memorey for each thread
   for (int i = 0; i < items_per_thread; ++i) {
     // Find the start offset for our slice
-    IndexType idx = (tidx + i * BLOCK_THREADS + blk_idx_in_slice * ITEMS_PER_BLOCK) * withinSliceStride;
+    IndexType idx = tidx + i * BLOCK_THREADS + blk_idx_in_slice * ITEMS_PER_BLOCK;
     if (idx < inputSliceSize) {
-      T val_ori = doLdg(&data[idx]);
+      idx *= withinSliceStride;
       Bitwise val = TopKTypeConfig<T>::convert(doLdg(&data[idx]));
       bool hasVal = ((val & desiredMask) == (desired & desiredMask));
       Bitwise digit = at::cuda::Bitfield<Bitwise>::getBitfield(val, current_bit, RADIX_BITS);
