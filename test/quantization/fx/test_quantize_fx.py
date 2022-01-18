@@ -496,6 +496,43 @@ class TestQuantizeFx(QuantizationTestCase):
             if n.op == 'call_module' and type(modules[n.target]) == nn.ReLU:
                 self.assertTrue(is_match(modules, n, pattern))
 
+    def test_fused_module_qat_swap(self):
+        class Tmp(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.tmp = torch.nn.Linear(5, 5)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                x = self.tmp(x)
+                return self.relu(x)
+
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mods1 = torch.nn.Sequential(Tmp(), torch.nn.Linear(5, 5))
+                self.mods2 = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                a = self.mods1(x)
+                x = torch.add(x, 5)
+                x = self.mods2(x)
+                x = torch.add(x, 5)
+                return a, x
+
+
+        model = M().train()
+        qconfig_dict = {
+            "": None,
+            "object_type": [
+                (torch.nn.Linear, default_qat_qconfig),
+                (torch.nn.ReLU, default_qat_qconfig),
+            ],
+        }
+        prepared = prepare_qat_fx(model, qconfig_dict)
+        self.assertTrue(isinstance(getattr(prepared.mods1, "0").tmp, torch.nn.intrinsic.qat.LinearReLU))
+
     def _get_conv_linear_test_cases(self, is_reference):
         """ Returns a list of test cases, with format:
         is_dynamic, ModuleClass, module_constructor_inputs,

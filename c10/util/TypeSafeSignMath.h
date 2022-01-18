@@ -1,7 +1,16 @@
 #pragma once
 
+#include <c10/macros/Macros.h>
 #include <limits>
 #include <type_traits>
+
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wstring-conversion")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wstring-conversion")
+#endif
+#if C10_CLANG_HAS_WARNING("-Wimplicit-int-float-conversion")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-float-conversion")
+#endif
 
 namespace c10 {
 
@@ -117,3 +126,5 @@ inline constexpr bool less_than_lowest(const T& x) {
 }
 
 } // namespace c10
+
+C10_CLANG_DIAGNOSTIC_POP()
