@@ -628,9 +628,8 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                          msg="Dropout module API failed")
 
     def test_dropout_qat_serialization_bc(self):
-        """Check to see whether the post_process_activation is dropped upon
-        convert"""
-        model = ManualLinearQATModel()
+        """Check to see whether the serialization is BC when QAT is used"""
+        model = ManualLinearQATModel("qnnpack")
         model.qconfig = torch.ao.quantization.get_default_qat_qconfig("qnnpack")
         model_prepare_dropout = torch.ao.quantization.prepare_qat(model, inplace=False)
 
