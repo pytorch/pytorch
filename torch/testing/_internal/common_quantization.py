@@ -396,12 +396,16 @@ class QuantizationTestCase(TestCase):
            not isinstance(module, torch.quantization.DeQuantStub):
             self.assertTrue(hasattr(module, 'activation_post_process'),
                             'module: ' + str(type(module)) + ' do not have observer')
+
+            
         # we don't need to check observers for child modules of the
         # qat modules
         if type(module) not in get_default_qat_module_mappings().values() and \
            type(module) not in float_to_observed_module_class_mapping.values() and \
            not isinstance(module, _FusedModule):
             for child in module.children():
+                if type(child) in [nn.Dropout]:
+                    continue
                 self.checkObservers(child, propagate_qconfig_list, prepare_custom_config_dict)
 
     def checkQuantDequant(self, mod):
