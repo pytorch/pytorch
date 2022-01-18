@@ -8,7 +8,6 @@ TENSOR_TYPE = Union[torch.Tensor, ShardedTensor]
 
 @dataclass
 class StorageMetadata:
-    # Only for ShardedTensor
     shard_metadata: Optional[ShardMetadata]
     # Unique identifier for this particular entity (Tensor or Shard of ShardedTensor)
     storage_key: str
@@ -37,6 +36,7 @@ class Metadata:
 @dataclass
 class ReadWriteRequest:
     # Tensor to read and write
+    # TODO: replace this with a buffer
     target_tensor: torch.Tensor
     # The storage key for read write.
     storage_key: str

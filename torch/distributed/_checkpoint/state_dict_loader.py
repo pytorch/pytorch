@@ -1,4 +1,4 @@
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List
 import torch
 from torch.futures import Future
 from .metadata import ReadWriteRequest, Metadata
@@ -6,23 +6,6 @@ from torch.distributed._sharded_tensor import (
     ShardedTensor,
 )
 from .storage_reader import StorageReader
-
-
-def load_state_dict(state_dict: Dict[str, Any], storage_reader: StorageReader) -> None:
-    """
-    The same as load_async, but blocking until everything is finished
-    """
-    futures = load_state_dict_async(state_dict=state_dict, storage_reader=storage_reader)
-    torch.futures.wait_all(futures)
-
-
-def load_state_dict_async(state_dict: Dict[str, Any], storage_reader: StorageReader) -> List[Future]:
-    """
-    Run the load request in parallel.
-    """
-    metadata = storage_reader.read_metadata()
-    read_requests = _reshard_and_prepare_read_request(state_dict=state_dict, metadata_from_stroage=metadata)
-    return [storage_reader.read(rr) for rr in read_requests]
 
 # -------------- private functions --------------
 def _reshard_and_prepare_read_request(state_dict: Dict[str, Any], metadata_from_stroage: Metadata) -> List[ReadWriteRequest]:
@@ -66,3 +49,47 @@ def _reshard_and_prepare_read_request(state_dict: Dict[str, Any], metadata_from_
                 read_requests.append(rr)
 
     return read_requests
+
+
+# These two public functions defined the default behavior to load a state_dict
+# Note this is a WIP, the state_dict save with different version of the code might not be
+# compatible.
+#
+# The default resharding is defined in `reshard_and_prepare_fn`
+def load_state_dict(
+    state_dict: Dict[str, Any],
+    storage_reader: StorageReader,
+    reshard_and_prepare_fn: Callable = _reshard_and_prepare_read_request,
+) -> None:
+    """
+    The same as load_async, but blocking until everything is finished.
+    Args:
+        state_dict (Dict[str, Any]) : A state_dict to load to. Note that this
+            state dict will updated in places.
+        storage_reader (StorageReader): An instance of storage loader.
+        reshard_and_prepare_fn (Callable): The resharding function.
+    """
+    futures = load_state_dict_async(
+        state_dict=state_dict,
+        storage_reader=storage_reader,
+        reshard_and_prepare_fn=reshard_and_prepare_fn)
+    torch.futures.wait_all(futures)
+
+
+def load_state_dict_async(
+    state_dict: Dict[str, Any],
+    storage_reader: StorageReader,
+    reshard_and_prepare: Callable = _reshard_and_prepare_read_request,
+) -> List[Future]:
+    """
+    Run the load request in parallel, and return a list of futures to wait on.
+
+    Args:
+        state_dict (Dict[str, Any]) : A state_dict to load to. Note that this
+            state dict will updated in places.
+        storage_reader (StorageReader): An instance of storage loader.
+        reshard_and_prepare_fn (Callable): The resharding function.
+    """
+    metadata = storage_reader.read_metadata()
+    read_requests = _reshard_and_prepare_read_request(state_dict=state_dict, metadata_from_stroage=metadata)
+    return [storage_reader.read(rr) for rr in read_requests]

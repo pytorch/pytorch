@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Tuple
 import torch
 from torch import Tensor
 from .metadata import Metadata, ReadWriteRequest, ExtendedTensorMetadata, StorageMetadata
@@ -11,27 +11,6 @@ from torch.distributed._sharded_tensor import (
     ShardMetadata,
 )
 import torch.distributed as dist
-
-
-# The only publish function in the file
-# This the default behavior to save a state_dict
-def save_state_dict(state_dict: Dict[str, Any], storage_writer: StorageWriter) -> None:
-    """
-    The same as save_state_dict_async, but blocking until everything is finished
-    """
-    futures = save_state_dict_async(state_dict=state_dict, storage_writer=storage_writer)
-    torch.futures.wait_all(futures)
-
-
-def save_state_dict_async(state_dict: Dict[str, Any], storage_writer: StorageWriter) -> List[Future]:
-    """
-    Write the state dict, and return futures to wait on
-    """
-    (metadata, storage_handles, write_requests) = _prepare(state_dict=state_dict)
-    storage_writer.prepare_storage(storage_handles=storage_handles)
-    storage_writer.write_metadata(metadata=metadata)
-    futures = [storage_writer.write(wr) for wr in write_requests]
-    return futures
 
 # -------------- private functions --------------
 def _populate_inplace_with_a_tensor(
@@ -103,7 +82,6 @@ def _populate_inplace_with_a_sharded_tensor(
     size_for_storage_handles: Dict[str, int],
     write_requests: List[ReadWriteRequest],
 ):
-
     smd = []
     for shard in tensor.local_shards():
         # each shard is in it own file.
@@ -181,3 +159,55 @@ def _prepare(state_dict: Dict[str, Any]) -> Tuple[Metadata, Dict[str, int], List
             raise RuntimeError("The input need to be either Tensor or ShardedTensor")
 
     return (metadata, storage_handles, write_requests)
+
+
+# These two public functions defined the default behavior to save a state_dict
+# Note this is a WIP, the state_dict save with different version of the code might not be
+# compatible.
+#
+# This code defines/determines these schema
+# 1. The metadata that discribe the state_dict.
+# 2. How we map each tensor/sharded_tensor to storage handles.
+def save_state_dict(
+    state_dict: Dict[str, Any],
+    storage_writer: StorageWriter,
+    metadata_prepare_fn : Callable = _prepare,
+) -> None:
+    """
+    The same as save_state_dict_async, but blocking until everything is finished.
+
+    Args:
+        state_dict (Dict[str, Any]) : A state_dict
+        storage_writer (StorageWriter): An instance of storage writer that
+            performance the writes.
+        metadata_prepare_fn (Callable): The function what creates
+            the metadata, write request and others.
+    """
+    futures = save_state_dict_async(
+        state_dict=state_dict,
+        storage_writer=storage_writer,
+        metadata_prepare_fn=metadata_prepare_fn,
+    )
+    torch.futures.wait_all(futures)
+
+
+def save_state_dict_async(
+    state_dict: Dict[str, Any],
+    storage_writer: StorageWriter,
+    metadata_prepare_fn: Callable = _prepare,
+) -> List[Future]:
+    """
+    Write the state dict with the storage_writer, and return futures to wait on.
+
+    Args:
+        state_dict (Dict[str, Any]) : A state_dict
+        storage_writer (StorageWriter): An instance of storage writer that
+            performance the writes.
+        metadata_prepare_fn (Callable): The function what creates
+            the metadata, write request and others.
+    """
+    (metadata, storage_handles, write_requests) = metadata_prepare_fn(state_dict=state_dict)
+    storage_writer.prepare_storage(storage_handles=storage_handles)
+    storage_writer.write_metadata(metadata=metadata)
+    futures = [storage_writer.write(wr) for wr in write_requests]
+    return futures

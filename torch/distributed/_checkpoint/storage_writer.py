@@ -13,13 +13,20 @@ class StorageWriter(abc.ABC):
     @abc.abstractmethod
     def write(self, req: ReadWriteRequest) -> Future:
         """
-        Writes tensors' storage() to the storage system. Returns a Future
-        to enable async writing.
+        Performs a write request and returns a Future to wait on.
+        Args:
+            req (ReadWriteRequest): see `./metadata.py`
         """
         pass
 
     @abc.abstractmethod
     def write_metadata(self, metadata: Metadata) -> None:
+        """
+        Writes the metatdata.
+
+        Args:
+            metadata (Metadata): see `./metadata.py`
+        """
         pass
 
     def prepare_storage(self, storage_handles: Dict[str, int]) -> None:
@@ -28,6 +35,10 @@ class StorageWriter(abc.ABC):
         It can use `storage_handles` to plan for any write preformace optimization.
         e.g. non sequential and parallel writes.
         By default, it does nothing
+
+        Args:
+            storage_handles (Dict[str, int]): key - handle's name. value - size
+                of the handle.
         """
         pass
 

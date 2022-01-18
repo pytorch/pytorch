@@ -6,15 +6,23 @@ import pickle
 import numpy
 
 class StorageReader(abc.ABC):
+    """
+    Interface to read from the underlying storage system.
+    """
     @abc.abstractmethod
     def read(self, req: ReadWriteRequest) -> Future:
         """
-        Performs a read and returns a Future to enable async reading.
+        Performs a read request and returns a Future to wait on.
+        Args:
+            req (ReadWriteRequest): see `./metadata.py`
         """
         pass
 
     @abc.abstractmethod
     def read_metadata(self) -> Metadata:
+        """
+        Read the meta data and returns.
+        """
         pass
 
 class FileSystemReader(StorageReader):
@@ -24,7 +32,8 @@ class FileSystemReader(StorageReader):
 
     def read(self, req: ReadWriteRequest) -> Future:
         """
-        Performs a read and returns a Future to enable async reading.
+        Very basic implementation that write to file system.
+        Note that the future is resolved before returning.
         """
         with open(f"{self.base_folder_name}/{req.storage_key}", "rb") as storage:
             storage.seek(req.offset)
@@ -35,7 +44,7 @@ class FileSystemReader(StorageReader):
             np_array = numpy.frombuffer(buffer, dtype="float32")
 
             # The tensor conversion triggers this warning, will deal with it later
-            # https://www.internalfb.com/code/fbsource/[81a627eaf12b3da7ba04e0f13c9609bd6a8be7eb]/fbcode/caffe2/torch/csrc/utils/tensor_numpy.cpp?lines=172-178
+            # ../torch/csrc/utils/tensor_numpy.cpp?lines=172-178
             buffer_tensor = torch.from_numpy(np_array)
             req.target_tensor.copy_(buffer_tensor)
 
@@ -43,7 +52,7 @@ class FileSystemReader(StorageReader):
         fut.set_result(None)
         return fut
 
-    # Implementating the abstract function in StateDictLoader
+    # Implementating the abstract function in StorageReader
     def read_metadata(self) -> Metadata:
         with open(f"{self.base_folder_name}/metadata", "rb") as metadata_file:
             return pickle.load(metadata_file)
