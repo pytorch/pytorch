@@ -1070,6 +1070,11 @@
 - func: broadcast_to(Tensor(a) self, int[] size) -> Tensor(a)
   variants: function, method
 
+- func: _sparse_broadcast_to(Tensor(a) self, int[] size) -> Tensor(a)
+  variants: function
+  dispatch:
+    SparseCPU, SparseCUDA: sparse_broadcast_to
+
 - func: cat(Tensor[] tensors, int dim=0) -> Tensor
   dispatch:
     CompositeExplicitAutograd: cat
