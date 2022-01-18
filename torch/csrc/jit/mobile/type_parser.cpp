@@ -151,6 +151,12 @@ TypePtr TypeParser::parse() {
       // other class starts with __torch__ following by custom names
       return parseCustomType();
     }
+  } else if (token == "Union") {
+    // TODO Union types are not supported on embedded runtime, and we need to
+    // generate compiler errors for users scripting UnionTypes. Right now
+    // for preserving backward compatibility we have to return a nullptr since
+    // it does not get involved in type reflection.
+    return nullptr;
   } else {
     TORCH_CHECK(
         false,
