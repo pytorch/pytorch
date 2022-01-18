@@ -90,7 +90,8 @@ jobs:
 {%- endif %}
       - name: Pull Docker image
         run: |
-          !{{ common.pull_docker("${DOCKER_IMAGE}") }}
+          !{{ common.add_retry_to_env() }}
+          retry docker pull "${DOCKER_IMAGE}"
       - name: Build PyTorch binary
         run: |
           set -x
@@ -166,7 +167,8 @@ jobs:
 {%- endif %}
       - name: Pull Docker image
         run: |
-          !{{ common.pull_docker("${DOCKER_IMAGE}") }}
+          !{{ common.add_retry_to_env() }}
+          retry docker pull "${DOCKER_IMAGE}"
       - name: Test PyTorch binary
         run: |
           set -x
