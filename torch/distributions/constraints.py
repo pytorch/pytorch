@@ -490,19 +490,7 @@ class _Symmetric(_Square):
         return torch.isclose(value, value.mT, atol=1e-6).all(-2).all(-1)
 
 
-# Below class is temporary class for compatiability during the process of renaming _PositiveDefinite to _SymmetricPositiveDefinite
-class _PositiveDefinite(_Symmetric):
-    """
-    Constrain to positive-definite matrices.
-    """
-    def check(self, value):
-        sym_check = super().check(value)
-        if not sym_check.all():
-            return sym_check
-        return torch.linalg.cholesky_ex(value).info.eq(0)
-
-
-class _SymmetricPositiveSemidefinite(_Symmetric):
+class _PositiveSemidefinite(_Symmetric):
     """
     Constrain to positive-semidefinite matrices.
     """
@@ -513,7 +501,7 @@ class _SymmetricPositiveSemidefinite(_Symmetric):
         return torch.linalg.eigvalsh(value).ge(0).all(-1)
 
 
-class _SymmetricPositiveDefinite(_Symmetric):
+class _PositiveDefinite(_Symmetric):
     """
     Constrain to positive-definite matrices.
     """
