@@ -159,19 +159,19 @@ void quantile_checks(const Tensor& self, const Tensor& q) {
 }
 
 std::vector<int64_t> quantile_output_shape(
-    const optional<int64_t> _dim,
+    const optional<int64_t> original_dim,
     const Tensor& self,
     const Tensor& q,
     const bool keepdim,
-    int64_t dim) {
+    int64_t wrapped_dim) {
   // Compute output shape: q_size + reduced_size
   std::vector<int64_t> out_shape;
-  if (_dim && self.dim() > 0) {
+  if (original_dim && self.dim() > 0) {
     out_shape = self.sizes().vec();
     if (keepdim) {
-      out_shape[dim] = 1;
+      out_shape[wrapped_dim] = 1;
     } else {
-      out_shape.erase(out_shape.begin() + dim);
+      out_shape.erase(out_shape.begin() + wrapped_dim);
     }
   } else if (keepdim) {
     out_shape = std::vector<int64_t>(self.dim(), 1);
@@ -186,11 +186,11 @@ std::vector<int64_t> quantile_output_shape(
 Tensor quantile_compute(
     const Tensor& self,
     const Tensor& q,
-    const optional<int64_t> _dim,
+    const optional<int64_t> orginal_dim,
     const bool keepdim,
     const QUANTILE_INTERPOLATION_MODE& interpolation,
     const bool ignore_nan,
-    int64_t dim,
+    int64_t wrapped_dim,
     std::vector<int64_t> out_shape) {
   // Checks that all q values are between 0 and 1, inclusive
   // NOTE: this check is only performed when running on the CPU to avoid
@@ -204,12 +204,12 @@ Tensor quantile_compute(
   // Flatten input if no dim provided else move dim to reduce as last dimension.
   // Sort to efficiently query kth values.
   Tensor sorted;
-  if (!_dim) {
+  if (!orginal_dim) {
     sorted = std::get<0>(self.flatten().sort());
-  } else if (dim == self.dim() - 1) {
+  } else if (wrapped_dim == self.dim() - 1) {
     sorted = std::get<0>(self.sort());
   } else {
-    sorted = std::get<0>(self.unsqueeze(-1).transpose(dim, -1).sort());
+    sorted = std::get<0>(self.unsqueeze(-1).transpose(wrapped_dim, -1).sort());
   }
 
   // Treat q as a 1D tensor for the following computations
@@ -287,7 +287,7 @@ void quantile_out_impl(
     Tensor& out,
     const Tensor& self,
     const Tensor& q,
-    const optional<int64_t> _dim,
+    const optional<int64_t> original_dim,
     const bool keepdim,
     const QUANTILE_INTERPOLATION_MODE& interpolation,
     const bool ignore_nan) {
@@ -299,31 +299,31 @@ void quantile_out_impl(
       self.device() == out.device(),
       "quantile() out tensor must be on the same device as the input tensor");
 
-  int64_t dim = at::maybe_wrap_dim(_dim.value_or(0), self.dim());
+  int64_t wrapped_dim = at::maybe_wrap_dim(original_dim.value_or(0), self.dim());
 
-  auto out_shape = quantile_output_shape(_dim, self, q, keepdim, dim);
+  auto out_shape = quantile_output_shape(original_dim, self, q, keepdim, wrapped_dim);
   resize_output(out, out_shape);
 
   auto quantile = quantile_compute(
-      self, q, _dim, keepdim, interpolation, ignore_nan, dim, out_shape);
+      self, q, original_dim, keepdim, interpolation, ignore_nan, wrapped_dim, out_shape);
   out.copy_(quantile);
 }
 
 Tensor quantile_impl(
     const Tensor& self,
     const Tensor& q,
-    const optional<int64_t> _dim,
+    const optional<int64_t> original_dim,
     const bool keepdim,
     const QUANTILE_INTERPOLATION_MODE& interpolation,
     const bool ignore_nan) {
   quantile_checks(self, q);
 
-  int64_t dim = at::maybe_wrap_dim(_dim.value_or(0), self.dim());
+  int64_t wrapped_dim = at::maybe_wrap_dim(original_dim.value_or(0), self.dim());
 
-  auto out_shape = quantile_output_shape(_dim, self, q, keepdim, dim);
+  auto out_shape = quantile_output_shape(original_dim, self, q, keepdim, wrapped_dim);
 
   return quantile_compute(
-      self, q, _dim, keepdim, interpolation, ignore_nan, dim, out_shape);
+      self, q, original_dim, keepdim, interpolation, ignore_nan, wrapped_dim, out_shape);
 }
 
 std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cpu(
