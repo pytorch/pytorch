@@ -825,8 +825,8 @@ DOCKER_WORKFLOWS = [
     DockerWorkflow(
         build_environment="docker-builds",
         docker_images=sorted(DOCKER_IMAGES),
-        # Run weekly to ensure they can build
-        is_scheduled="1 * */7 * *",
+        # Run every Wednesday at 3:01am to ensure they can build
+        is_scheduled="1 3 * * 3",
     ),
 ]
 
