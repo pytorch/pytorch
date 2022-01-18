@@ -27,14 +27,18 @@ name: !{{ build_environment }}
 {%- endmacro %}
 
 on:
-# NOTE: Uncomment this to test within your PR
 # TODO: Migrate to new ciflow trigger, reference https://github.com/pytorch/pytorch/pull/70321
-#  pull_request:
-#    types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
+  pull_request:
+    types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
+    # NOTE: This workflow should only trigger when changes are made to binary builds
+    # Should catch most of the binary build / test scripts
+    paths:
+      - '.github/workflows/generated-linux-binary-*.yml'
+      - '.circleci/scripts/binary_*.sh'
   push:
     tags:
       - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
-      - nightly
+      - nightly-binary
   workflow_dispatch:
 
 env:
@@ -90,7 +94,8 @@ jobs:
 {%- endif %}
       - name: Pull Docker image
         run: |
-          !{{ common.pull_docker("${DOCKER_IMAGE}") }}
+          !{{ common.add_retry_to_env() }}
+          retry docker pull "${DOCKER_IMAGE}"
       - name: Build PyTorch binary
         run: |
           set -x
@@ -166,7 +171,8 @@ jobs:
 {%- endif %}
       - name: Pull Docker image
         run: |
-          !{{ common.pull_docker("${DOCKER_IMAGE}") }}
+          !{{ common.add_retry_to_env() }}
+          retry docker pull "${DOCKER_IMAGE}"
       - name: Test PyTorch binary
         run: |
           set -x

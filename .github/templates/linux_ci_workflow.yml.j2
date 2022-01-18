@@ -65,7 +65,8 @@ jobs:
       !{{ common.calculate_docker_image(false) }}
       - name: Pull Docker image
         run: |
-          !{{ common.pull_docker("${DOCKER_IMAGE}") }}
+          !{{ common.add_retry_to_env() }}
+          retry docker pull "${DOCKER_IMAGE}"
       !{{ common.parse_ref() }}
       - name: Build
         env:
@@ -203,7 +204,8 @@ jobs:
       !{{ common.checkout_pytorch("recursive") }}
       - name: Pull Docker image
         run: |
-          !{{ common.pull_docker("${DOCKER_IMAGE}") }}
+          !{{ common.add_retry_to_env() }}
+          retry docker pull "${DOCKER_IMAGE}"
 {%- if 'rocm' in test_runner_type %}
       - name: ROCm set GPU_FLAG
         if: ${{ contains(env.BUILD_ENVIRONMENT, 'rocm') && !contains(matrix.config, 'nogpu') }}
@@ -362,7 +364,8 @@ jobs:
       !{{ common.checkout_pytorch("recursive") }}
       - name: Pull Docker image
         run: |
-          !{{ common.pull_docker("${DOCKER_IMAGE}") }}
+          !{{ common.add_retry_to_env() }}
+          retry docker pull "${DOCKER_IMAGE}"
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download PyTorch Build Artifacts
         with:

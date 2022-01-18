@@ -653,8 +653,9 @@ LINUX_WORKFLOWS = [
         num_test_shards=2,
         distributed_test=False,
         enable_noarch_test=1,
+        enable_xla_test=1,
         ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_NOARCH},
+            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_XLA, LABEL_CIFLOW_NOARCH},
         ),
     ),
     CIWorkflow(
@@ -858,8 +859,8 @@ DOCKER_WORKFLOWS = [
     DockerWorkflow(
         build_environment="docker-builds",
         docker_images=sorted(DOCKER_IMAGES),
-        # Run every Wednesday to ensure they can build
-        is_scheduled="1 * * * 3",
+        # Run every Wednesday at 3:01am to ensure they can build
+        is_scheduled="1 3 * * 3",
     ),
 ]
 
@@ -869,7 +870,7 @@ LINUX_BINARY_BUILD_WORFKLOWS = [
         package_type="manywheel",
         build_configs=generate_binary_build_matrix.generate_wheels_matrix(),
         ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},
+            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},
             isolated_workflow=True,
         ),
     ),
@@ -878,7 +879,7 @@ LINUX_BINARY_BUILD_WORFKLOWS = [
         package_type="conda",
         build_configs=generate_binary_build_matrix.generate_conda_matrix(),
         ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_CONDA},
+            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_CONDA},
             isolated_workflow=True,
         ),
     ),
@@ -890,7 +891,7 @@ LINUX_BINARY_BUILD_WORFKLOWS = [
             generate_binary_build_matrix.CXX11_ABI
         ),
         ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
+            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
             isolated_workflow=True,
         ),
     ),
@@ -902,7 +903,7 @@ LINUX_BINARY_BUILD_WORFKLOWS = [
             generate_binary_build_matrix.PRE_CXX11_ABI
         ),
         ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
+            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
             isolated_workflow=True,
         ),
     ),
