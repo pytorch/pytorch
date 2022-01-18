@@ -374,7 +374,7 @@ def get_packable_tensor_arg_idxs(op: Callable) -> Optional[List[int]]:
     if op == F.conv2d:
         return [1, 2]
     elif op == F.linear:
-        return [1]
+        return [1, 2]
     return None
 
 def get_packable_tensor_kwarg_names(op: Callable) -> Optional[List[str]]:
@@ -382,8 +382,8 @@ def get_packable_tensor_kwarg_names(op: Callable) -> Optional[List[str]]:
     Returns tensor kwarg names which correspond to parameters which will
     need to be packed.
     """
-    if op == F.linear:
-        return ['bias']
+    if op in (F.conv2d, F.linear):
+        return ['weight', 'bias']
     return None
 
 def get_param_name(module: torch.nn.Module, arg: Any) -> Optional[str]:
@@ -411,8 +411,8 @@ def get_packable_arg_idxs(op: Callable) -> Optional[List[int]]:
         # weight, bias, stride, padding, dilation, groups
         return [1, 2, 3, 4, 5, 6]
     elif op == F.linear:
-        # weight
-        return [1]
+        # weight, bias
+        return [1, 2]
     return None
 
 def get_weight_arg_idx(op: Callable) -> Optional[int]:
