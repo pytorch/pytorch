@@ -128,19 +128,33 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
         ? this->orig_weight.size(1)
         : this->orig_weight.size(0) / groups;
 
+    const size_t kernel_depth = kSpatialDim == 3 ? kernel_[0] : 1;
+    const size_t kernel_height = kernel_[kSpatialDim - 2];
+    const size_t kernel_width = kernel_[kSpatialDim - 1];
+
     pytorch_qnnp_ukernel_type ukernel_type;
     if (transpose_) {
       ukernel_type = pytorch_qnnp_ukernel_type_conv;
     } else {
       ukernel_type = pytorch_qnnp_ukernel_type_none;
-      if (kSpatialDim == 2 && (kernel_size == 9 || kernel_size == 25) &&
-          group_input_channels == 1 && group_output_channels == 1 &&
-          groups > 1) {
+
+      const bool has_depthwise_dimensions =
+          (kSpatialDim == 2 &&
+           ((kernel_height == 3 && kernel_width == 3) ||
+            (kernel_height == 5 && kernel_width == 5))) ||
+          (kSpatialDim == 3 && kernel_height == 3 && kernel_width == 3 &&
+           kernel_depth == 3);
+      const bool has_depthwise_grouping =
+          group_input_channels == 1 && group_output_channels == 1 && groups > 1;
+
+      if (has_depthwise_dimensions && has_depthwise_grouping) {
         ukernel_type = pytorch_qnnp_ukernel_type_dwconv;
       } else if (
           kernel_size == 1 &&
           std::all_of(
-              stride_.begin(), stride_.end(), [](const auto& e) { return e == 1; }) &&
+              stride_.begin(),
+              stride_.end(),
+              [](const auto& e) { return e == 1; }) &&
           !any_padding) {
         ukernel_type = group_input_channels >= SIZE_MAX
             ? pytorch_qnnp_ukernel_type_xzp_gemm
@@ -174,9 +188,9 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
     convolution->groups = groups;
     convolution->group_input_channels = group_input_channels;
     convolution->group_output_channels = group_output_channels;
-    convolution->kernel_depth = kSpatialDim == 3 ? kernel_[0] : 1;
-    convolution->kernel_height = kernel_[kSpatialDim - 2];
-    convolution->kernel_width = kernel_[kSpatialDim - 1];
+    convolution->kernel_depth = kernel_depth;
+    convolution->kernel_height = kernel_height;
+    convolution->kernel_width = kernel_width;
     convolution->stride_depth = kSpatialDim == 3 ? stride_[0] : 1;
     convolution->stride_height = stride_[kSpatialDim - 2];
     convolution->stride_width = stride_[kSpatialDim - 1];
@@ -338,26 +352,28 @@ inline T Round(const T x) {
 }
 #endif
 
-inline uint8_t QuantizeUint8(float scale, int32_t zero_point, float value) {
-  const int32_t qmin = std::numeric_limits<uint8_t>::min();
-  const int32_t qmax = std::numeric_limits<uint8_t>::max();
+template<typename T>
+inline T QuantizeValue(float scale, int32_t zero_point, float value) {
+  const int32_t qmin = std::numeric_limits<T>::min();
+  const int32_t qmax = std::numeric_limits<T>::max();
   auto r = zero_point + static_cast<int32_t>(Round(value / scale));
   r = std::max(r, qmin);
   r = std::min(r, qmax);
-  return static_cast<uint8_t>(r);
+  return static_cast<T>(r);
 }
 
-inline std::pair<uint8_t, uint8_t> activationLimits(
+template<typename T>
+inline std::pair<T, T> activationLimits(
     float scale,
     int32_t zero_point,
     Activation Ac) {
   switch (Ac) {
     case Activation::NONE:
-      return {std::numeric_limits<uint8_t>::min(),
-              std::numeric_limits<uint8_t>::max()};
+      return {std::numeric_limits<T>::min(),
+              std::numeric_limits<T>::max()};
     case Activation::RELU:
-      return {QuantizeUint8(scale, zero_point, 0.0),
-              std::numeric_limits<uint8_t>::max()};
+      return {QuantizeValue<T>(scale, zero_point, 0.0),
+              std::numeric_limits<T>::max()};
     default:
 #ifdef _MSC_VER
       __assume(0);

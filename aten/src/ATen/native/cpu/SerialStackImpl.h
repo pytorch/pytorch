@@ -35,8 +35,7 @@ void stack_serial_kernel_impl(Tensor& result, TensorListType tensors, int64_t di
   int64_t ninputs = tensors.size();
   std::vector<InputMeta> inputs;
   inputs.reserve(ninputs);
-  for (const auto i : c10::irange(tensors.size())) {
-    auto& tensor = tensors[i];
+  for (const auto& tensor : tensors) {
     inputs.emplace_back(tensor, dim, tensor.strides()[dim]);
   }
 
