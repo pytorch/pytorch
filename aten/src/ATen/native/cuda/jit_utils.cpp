@@ -2,19 +2,28 @@
 
 #include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
+#include <c10/util/hash.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/code_template.h>
 #include <ATen/native/cuda/jit_utils.h>
 
-// TODO: remove
-#include <iostream>
 #include <chrono>
 #include <sstream> // might need
 #include <fstream> // might be faster to use sys/stat to state files on Linux
 #include <cstdio> // fopen
 #include <iterator> // istreambuf_iterator
+#include <cstdlib>
+#include <string>
+
+#if BUILD_JITERATOR_WITH_CACHE
+  // Uses POSIX headers, which is why these are guarded behind BUILD_JITERATOR_WITH_CACHE
+  // TODO: C++17 has the fileystem header, which may replace these
+  #include <sys/types.h>
+  #include <sys/stat.h> // mkdir
+  #include <unistd.h>
+#endif // BUILD_JITERATOR_WITH_CACHE
 
 
 namespace at { namespace cuda { namespace jit {
@@ -582,67 +591,6 @@ void __inline__ initializeCudaContext() {
   }
 }
 
-// HASH STUFF TODO: refactor
-// Copied from lazy tensor
-size_t LoadHash(const uint8_t** data, const uint8_t* top) {
-  std::ptrdiff_t size = top - (*data);
-  if (size >= (int)sizeof(size_t)) {
-    size_t v;
-    std::memcpy(&v, *data, sizeof(v));
-    *data += sizeof(size_t);
-    return v;
-  }
-
-  union {
-    size_t h;
-    std::array<uint8_t, sizeof(size_t)> b;
-#ifdef _MSC_VER
-  // MSVC (or some versions we use) doesn't support C99 union field init
-  // but it initializes the first member of the union.
-  } uval = {size_t(0)};
-#else
-  } uval = {.h = size_t(0)};
-#endif
-
-  // use memcpy for compatibility with platforms not supporting unaligned access
-  // note: compiled as single `movl` instr on x64.
-  std::memcpy(uval.b.data(), *data, size);
-  *data += size;
-
-  return uval.h;
-}
-
-size_t HashBlock(const void* data, size_t n, const size_t& seed) {
-  const size_t m(static_cast<uint64_t>(0xc6a4a7935bd1e995));
-  const int r = 47;
-
-  const uint8_t* u8_data = reinterpret_cast<const uint8_t*>(data);
-  const uint8_t* top = u8_data + n;
-  size_t h(seed ^ ((uint64_t)n * m));
-
-  while (u8_data < top) {
-    size_t k = LoadHash(&u8_data, top);
-    k *= m;
-    k ^= k >> r;
-    k *= m;
-
-    h ^= k;
-    h *= m;
-  }
-
-  h ^= h >> r;
-  h *= m;
-  h ^= h >> r;
-
-  return h;
-}
-
-size_t hash(const void* data, size_t size) {
-  return HashBlock(data, size, size_t(static_cast<uint64_t>(0xc2b2ae3d27d4eb4f)));
-}
-
-// HASH STUFF
-
 //FIXME - this are defined in Loops.cuh, but including Loops.cuh here would lead to circular includes Loops.cuh -> CUDALoops.cuh -> jit_utils.h -> Loops.cuh
 #define THREAD_WORK_SIZE 4
 constexpr int thread_work_size = THREAD_WORK_SIZE;
@@ -799,40 +747,96 @@ NvrtcFunction jit_pwise_function(
   NvrtcFunction compiled_kernel_;
   std::string name = kernel_name + "_kernel";
 
-  #ifdef USE_JITERATOR_WITH_CACHE
-    // If caching, generates a key and queries if the program is already available
-    // Cubin name is <kernel name>_arch<major>.<minor>_nvrtc<major>.<minor>_<ptx or sass>_<program length>_<string hash>
-    std::cout << "Generating vectorized key" << std::endl;
+  #ifdef BUILD_JITERATOR_WITH_CACHE
+    // If the environment variable USE_TORCH_KERNEL_CACHE is set to "0" then no persistent cache is used
+    const char* uptkc = std::getenv("USE_PYTORCH_KERNEL_CACHE");
+    bool use_kernel_cache = (uptkc == nullptr) ? true : std::strcmp(uptkc, "0");
+    std::string file_path;
 
-    // Acquires hash
-    const auto hash_code = hash(code.data(), code.length());
+    if (use_kernel_cache) {
+      // If caching, generates a key and queries if the program is already available
+      // Cubin name is <kernel name>_arch<major>.<minor>_nvrtc<major>.<minor>_<ptx or sass>_<program length>_<string hash>
+      // Note that the SHA1 hash used in the file name is NOT the SHA1 hash of the file's contents,
+      //   because we hash on the CUDA code, but we save the compiled ptx or sass
 
-    // Constructs file path by appending constructed cubin name to cache path
-    std::stringstream ss;
-    ss << JITERATOR_CACHE_PATH;
-    ss << kernel_name;
-    ss << "_arch" << cuda_major << "." << cuda_minor;
-    ss << "_nvrtc" << nvrtc_major << "." << nvrtc_minor;
-    ss << (compile_to_sass ? "_sass" : "_ptx");
-    ss << "_" << code.length();
-    ss << "_" << hash_code;
-    const auto file_path = ss.str();
+      // Acquires cache path from environment variable
+      // Constructs kernel cache path
+      // Uses the environment variable if it's set
+      char* ptkcp = std::getenv("PYTORCH_KERNEL_CACHE_PATH");
+      std::string cache_dir;
 
-    // TODO: use file locks
-    std::ifstream readin{file_path, std::ios::in | std::ifstream::binary};
-    if (readin.fail()) {
-      std::cout << "Failed to read file " << file_path << std::endl;
-      readin.close();
-    } else {
-      // TODO: try reading directly into cuModuleLoadCall instead of intermediate buffer
-      std::vector<char> buffer(std::istreambuf_iterator<char>(readin), {});
-      AT_CUDA_DRIVER_CHECK(nvrtc.cuModuleLoadData(&(compiled_kernel_.module), buffer.data()));
-      AT_CUDA_DRIVER_CHECK(
-        nvrtc.cuModuleGetFunction(&(compiled_kernel_.function), compiled_kernel_.module, name.c_str()));
-      readin.close();
-      return compiled_kernel_;
+      if (ptkcp != nullptr) {
+        cache_dir = std::string(ptkcp);
+      } else {
+        // USES XDG_CACHE_HOME if it's set
+        ptkcp = std::getenv("XDG_CACHE_HOME");
+        if (ptkcp != nullptr) {
+          cache_dir = std::string(ptkcp) + "/torch/kernels";
+        } else {
+          // Falls back to HOME/.cache
+          ptkcp = std::getenv("HOME");
+          TORCH_CHECK(ptkcp != nullptr, "No PYTORCH_KERNEL_CACHE_PATH environment variable set",
+                                        " or fallback HOME environment variable set but attempting to cache!");
+          cache_dir = std::string(ptkcp) + "/.cache/torch/kernels";
+        }
+      }
+
+      const bool cache_dir_exists = (access(cache_dir.c_str(), F_OK) == 0);
+      if (!cache_dir_exists) {
+        mkdir(cache_dir.c_str(), S_IRWXU | S_IRWXG | S_IRWXO);
+      }
+
+      const bool cache_dir_readable = (access(cache_dir.c_str(), R_OK) == 0);
+      const bool cache_dir_writable = (access(cache_dir.c_str(), W_OK) == 0);
+
+      if (!cache_dir_readable) {
+        TORCH_WARN_ONCE("Specified kernel cache directory is not readable! This disables caching.",
+                        " Specified directory is ", cache_dir, ".",
+                        " This warning will appear only once per process.");
+        use_kernel_cache = false;
+      }
+
+      if (!cache_dir_writable) {
+        TORCH_WARN_ONCE("Specified kernel cache directory is not writable! This disables caching.",
+                        " Specified directory is ", cache_dir, ".",
+                        " This warning will appear only once per process.");
+        use_kernel_cache = false;
+      }
+
+      if (use_kernel_cache) {
+        // Acquires SHA1 hash
+        c10::sha1 sha1_hash{code};
+        const auto hash_code = sha1_hash.str();
+
+        // Constructs file path by appending constructed cubin name to cache path
+        std::stringstream ss;
+        ss << cache_dir << "/";
+        ss << kernel_name;
+        ss << "_arch" << cuda_major << "." << cuda_minor;
+        ss << "_nvrtc" << nvrtc_major << "." << nvrtc_minor;
+        ss << (compile_to_sass ? "_sass" : "_ptx");
+        ss << "_" << code.length();
+        ss << "_" << hash_code;
+        file_path = ss.str();
+
+        std::ifstream readin{file_path, std::ios::in | std::ifstream::binary};
+        if (readin.fail()) {
+          // NOTE: this does not warn because the file might not exist
+          // TODO: consider if this should explicilty check for the file's existence or not to throw
+          //   an informative warning
+          readin.close();
+        } else {
+          // TODO: try passing the "mapped" file directly to cuModuleLoadCall instead of using an intermediate buffer
+          std::vector<char> buffer(std::istreambuf_iterator<char>(readin), {});
+          AT_CUDA_DRIVER_CHECK(nvrtc.cuModuleLoadData(&(compiled_kernel_.module), buffer.data()));
+          AT_CUDA_DRIVER_CHECK(
+            nvrtc.cuModuleGetFunction(&(compiled_kernel_.function), compiled_kernel_.module, name.c_str()));
+          readin.close();
+          return compiled_kernel_;
+        }
+      }
     }
-  #endif // USE_JITERATOR_WITH_CACHE
+  #endif // BUILD_JITERATOR_WITH_CACHE
 
   // Just-in-time compiles the program
 
@@ -905,18 +909,36 @@ NvrtcFunction jit_pwise_function(
   // TODO: use guards to avoid leaking
   AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcDestroyProgram(&program));
 
-  #ifdef USE_JITERATOR_WITH_CACHE
-    // Writes the program to the cache if caching
-    // TODO: use file locking
-    std::cout << "Trying to write to file path: " << file_path << std::endl;
-    std::ofstream cubin(file_path, std::ios::out | std::ofstream::binary);
-    if (cubin.fail()) {
-      std::cout << "Failed to write to the file" << std::endl;
-    } else {
-      std::copy(ptx.begin(), ptx.end(), std::ostreambuf_iterator<char>(cubin));
+  #ifdef BUILD_JITERATOR_WITH_CACHE
+    if (use_kernel_cache) {
+      // Writes the program to the cache if caching
+      // NOTE: Actually writes to a per-process temporary file to avoid multi-process contention.
+      //   The temporary file is then renamed to the actual file.
+      //   If the actual file already exists then the rename may fail or replace the actual file,
+      //     the behavior is implementation-specific.
+      //   Files replaced through this process should remain extant if they are being read because
+      //     of UNIX filesystem properties, but this behavior is unverified and may require
+      //     additional review in the future.
+      // TODO: In C++17 we should be able to use the filesystem header.
+      const auto pid = getpid();
+      std::stringstream tmp_file_path_ss;
+      tmp_file_path_ss << file_path << "_tmp_" << pid;
+      const std::string tmp_file_path = tmp_file_path_ss.str();
+      std::ofstream cubin(tmp_file_path, std::ios::out | std::ofstream::binary);
+      if (cubin.fail()) {
+        TORCH_WARN_ONCE("Failed to write temporarily kernel cache file!",
+                        " File path was ", tmp_file_path, ".",
+                        " This warning will only appear once per process.");
+      } else {
+        std::copy(ptx.begin(), ptx.end(), std::ostreambuf_iterator<char>(cubin));
+        if (std::rename(tmp_file_path.c_str(), file_path.c_str()) != 0) {
+          // Removes tmp file if the rename failed
+          std::remove(tmp_file_path.c_str());
+        }
+      }
+      cubin.close();
     }
-    cubin.close();
-  #endif // USE_JITERATOR_WITH_CACHE
+  #endif // BUILD_JITERATOR_WITH_CACHE
 
   return compiled_kernel_;
 }

@@ -91,11 +91,16 @@ namespace at { namespace native {
 /* Note [Jiterator]
 The "jiterator" simply just-in-time compiles the same kernels that
 Loops.cuh (and CUDALoops.cuh) usually build. This reduces build time,
-build size, and CUDA context size.
+build size, and initial CUDA context size.
+
+By default on non-Windows systems, it also caches compiled kernels in ~/.cache/torch/kernels.
+This behavior is controlled with two environment variables:
+  - USE_PYTORCH_KERNEL_CACHE, if set to zero then this will disable all cache use
+  - PYTORCH_KERNEL_CACHE_PATH, if set specifies the folder to use for cached kernels
 
 The jiterator currently has some limitations, however. It cannot:
-  - handle float16, bfloat16, or complex datatypes
-  - handle scalar inputs
+  - handle math on complex datatypes
+  - handle kernels with scalar parameters
 
 These improvements will likely come soon.
 
