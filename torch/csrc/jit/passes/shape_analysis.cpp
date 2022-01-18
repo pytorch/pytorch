@@ -50,7 +50,7 @@ bool mergeTypes(
   return changed;
 }
 
-void applyTypes(ArrayRef<Value*> src, ArrayRef<Value*> dst){
+void applyTypes(ArrayRef<Value*> src, ArrayRef<Value*> dst) {
   AT_ASSERT(src.size() == dst.size());
   for (const auto i : c10::irange(src.size())) {
     dst[i]->setType(src[i]->type());
@@ -90,7 +90,9 @@ void PropertyPropBase::processLoop(Node* node) {
     // note: inserting expands is unsafe at this point, we don't know
     // if the types are stable yet, so the arguments to expand may change
   } while (mergeTypes(
-      loop.bodyCarriedInputs(), loop.bodyCarriedOutputs(), loop.bodyCarriedInputs()));
+      loop.bodyCarriedInputs(),
+      loop.bodyCarriedOutputs(),
+      loop.bodyCarriedInputs()));
 
   // now that the types are stable, we can insert the expands
   propagateBlock(loop.bodyBlock(), /*insert_expands=*/true);
@@ -110,7 +112,6 @@ void PropertyPropBase::setUnshapedType(Node* node) {
 namespace prim {
 using namespace ::c10::prim;
 }
-
 
 #define SHAPE_ASSERT(cond) \
   if (!(cond))             \
@@ -189,7 +190,7 @@ c10::optional<std::vector<TensorTypePtr>> gatherTensorTypes(
 
 int64_t wrapDim(int64_t dim, at::IntArrayRef sizes) {
   if (dim < 0) {
-    dim += (int64_t) sizes.size();
+    dim += (int64_t)sizes.size();
   }
   return dim;
 }
@@ -203,7 +204,6 @@ c10::ScalarType unionScalarTypes(
     return c10::promoteTypes(original, next);
   }
 }
-
 
 // Promotes result types for arithmetic operations on Tensor operands using
 // new type promotion logic. See tensor_attributes.rst for details.
@@ -251,7 +251,7 @@ c10::optional<c10::ScalarType> getPromotedTypeForArithmeticOp(Node* node) {
   return zerodim;
 }
 
-class ShapePropagator: public PropertyPropBase {
+class ShapePropagator : public PropertyPropBase {
  public:
   explicit ShapePropagator(const std::shared_ptr<Graph>& graph)
       : PropertyPropBase(graph), aliasDb_(graph) {
@@ -585,7 +585,7 @@ class ShapePropagator: public PropertyPropBase {
     return in_resize;
   }
 
-   void propagateNode(Node* node, bool insert_expands = true) override {
+  void propagateNode(Node* node, bool insert_expands = true) override {
     // Certain ops like resize_ change the input tensors size. Because our
     // analysis is flow invariant, we set any Tensor that can alias a resized
     // Tensor to the base Tensor Type without size information.
@@ -1469,7 +1469,7 @@ class ShapePropagator: public PropertyPropBase {
           if (auto type =
                   node->namedInput(attr::self)->type()->cast<TensorType>()) {
             if (type->dim()) {
-              return factory_like_with_ndim(node, (int) *type->dim());
+              return factory_like_with_ndim(node, (int)*type->dim());
             }
           }
           return {};
