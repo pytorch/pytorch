@@ -87,7 +87,8 @@ Tensor& set_cpu_(Tensor& result) {
   return result;
 }
 
-Tensor broadcast_to_sparse(const Tensor& self, IntArrayRef size) {
+Tensor sparse_broadcast_to(const Tensor& self, IntArrayRef size) {
+  TORCH_CHECK(self.is_sparse(), "input must be sparse tensor");
   int64_t sparse_extra_ndim = size.size() - self.dim();
   int64_t sparse_ndim = size.size() - self.dense_dim();
   TORCH_CHECK(sparse_extra_ndim >= 0, "input not broadcastable to size with smaller dimensionality");
@@ -163,16 +164,6 @@ Tensor broadcast_to_sparse(const Tensor& self, IntArrayRef size) {
 }
 
 Tensor broadcast_to(const Tensor& self, IntArrayRef size) {
-  if (self.is_sparse()) {
-    // While expand for strided tensors is always a view operation,
-    // expanding a sparse tensor involves changing the size of values.
-    // Hence expand cannot be a view operation for sparse tensors in
-    // general. Unless we break the view invariance for expand
-    // (similar to CSR transpose), expand cannot be defined for sparse
-    // tensors. So, we only provide broadcast_to support for sparse
-    // tensors.
-    return broadcast_to_sparse(self, size);
-  }
   return self.expand(size);
 }
 
