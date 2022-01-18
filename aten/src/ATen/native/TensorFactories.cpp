@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/CPUGeneratorImpl.h>
-#include <ATen/Utils.h>
 #include <ATen/Dispatch.h>
+#include <ATen/EmptyTensor.h>
 #include <ATen/Parallel.h>
 #include <ATen/MapAllocator.h>
 #include <ATen/NativeFunctions.h>
@@ -1081,8 +1081,9 @@ Tensor _efficientzerotensor(IntArrayRef size,
     auto device_ = device_or_default(device);
     auto allocator = ZeroTensorAllocator(device_);
     auto dtype_ = dtype_or_default(dtype);
+    constexpr auto zero_ks = at::DispatchKeySet(at::DispatchKey::ZeroTensor);
     return at::detail::empty_generic(
-        size, &allocator, at::DispatchKey::ZeroTensor, dtype_, c10::nullopt);
+        size, &allocator, zero_ks, dtype_, c10::nullopt);
 }
 
 Tensor& zeros_out(IntArrayRef size, Tensor& result) {
