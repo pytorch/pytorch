@@ -627,19 +627,15 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self.assertEqual(quant_ref.int_repr().numpy(), qy.int_repr().numpy(),
                          msg="Dropout module API failed")
 
-    def test_dropout_qat_serialization_bc(self):
-        """Check to see whether the serialization is BC when QAT is used"""
+    def test_dropout_qat_has_no_post_process_activation(self):
+        """Check to make sure QAT doesn't add
+        post_process_activation to dropout module"""
         model = ManualLinearQATModel("qnnpack")
         model.qconfig = torch.ao.quantization.get_default_qat_qconfig("qnnpack")
-        model_prepare_dropout = torch.ao.quantization.prepare_qat(model, inplace=False)
-
-        mapping_without_dropout = torch.ao.get_default_qat_module_mappings().pop(
-            nn.Dropout
-        )
-        model_prepare_ignore_dropout = torch.ao.quantization.prepare_qat(
-            model, mapping_without_dropout, inplace=False
-        )
-        model_prepare_ignore_dropout.load_state_dict(model_prepare_dropout.state_dict())
+        model_prepare = torch.ao.quantization.prepare_qat(model, inplace=False)
+        self.assertTrue(hasattr(model_prepare, "dropout"))
+        self.assertFalse(hasattr(model_prepare.dropout, "post_process_activation"))
+        self.assertFalse(hasattr(model_prepare.dropout.state_dict(), "post_process_activation"))
 
     def _test_dropout_serialization(self, get_model, data1, data2):
         m1 = get_model()
