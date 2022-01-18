@@ -20,20 +20,6 @@ std::ostream& operator<<(std::ostream& out, const Shape& shape) {
   return out << shape.to_string();
 }
 
-std::vector<Shape> convertShapes(
-    const std::vector<at::ScalarType>& dtypes,
-    const std::vector<std::vector<int64_t>>& shapes) {
-  TORCH_INTERNAL_ASSERT(dtypes.size() == shapes.size());
-
-  std::vector<Shape> shape;
-  shape.reserve(dtypes.size());
-  for (const auto i : c10::irange(dtypes.size())) {
-    shape.emplace_back(dtypes[i], shapes[i]);
-  }
-
-  return shape;
-}
-
 size_t Shape::numel() const {
   size_t elts = 1;
   for (auto size : sizes_) {
