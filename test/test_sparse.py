@@ -3593,14 +3593,15 @@ class TestSparseMaskedReductions(TestCase):
         all dimensions" while in future, it will read "no reduce". See
         https://github.com/pytorch/pytorch/issues/29137
 
-        For sparse masked reductions, we'll implement the future
-        behaviour in order to avoid the future BC breaking changes.
+        For sparse masked reductions, we'll implement the current behavior.
 
         For testing, we'll use samples with `dim=0` and map it to
         `dim=()` until
         torch.testing._internal.common_methods_invocations._generate_reduction_kwargs
         is made to generate samples with `dim=()` for non-scalar
-        inputs. With this and after gh-29137 is resolved, this test can be deleted.
+        inputs. With this and after gh-29137 is resolved, this test
+        can be deleted. See also `torch._masked._canonical_dim`
+        implementation about changing the `dim=()` behavior.
         """
         unsupportedTypes = [
             torch.bfloat16,
@@ -3616,18 +3617,15 @@ class TestSparseMaskedReductions(TestCase):
             if sample_input.kwargs.get('dim') != 0:
                 continue
             sample_input_kwargs = dict(sample_input.kwargs)
-            sample_input_kwargs['dim'] = ()    # no reduce for sparse input
+            sample_input_kwargs['dim'] = ()    # reduce over all dimensions
 
             t = sample_input.input
             mask = sample_input_kwargs.get('mask')
             sparse_op_kwargs = dict(sample_input_kwargs)
             actual = op(t.to_sparse(), *sample_input.args, **sample_input_kwargs)
             self.assertEqual(actual.layout, torch.sparse_coo)
-            expected = t.to(dtype)
-            outmask = torch._masked._output_mask(op.op, t, **sample_input_kwargs)
-            expected = torch.where(outmask, expected, torch.zeros_like(expected))
-            actual = actual.to_dense()
-            actual = torch.where(outmask, actual, torch.zeros_like(actual))
+
+            expected = op(t, *sample_input.args, **sample_input_kwargs).to_sparse()
             self.assertEqual(actual, expected, equal_nan=True)
 
 

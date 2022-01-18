@@ -242,7 +242,7 @@ class TestCommon(TestCase):
     @ops(op_db, allowed_dtypes=(torch.float32, torch.long, torch.complex64))
     def test_noncontiguous_samples(self, device, dtype, op):
         test_grad = dtype in op.supported_backward_dtypes(torch.device(device).type)
-        sample_inputs = op.sample_inputs(device, dtype, requires_grad=test_grad)
+        sample_inputs = op.sample_inputs(device, dtype, requires_grad=test_grad, skip_sparse_coo_samples=True)
         for sample_input in sample_inputs:
             t_inp, t_args, t_kwargs = sample_input.input, sample_input.args, sample_input.kwargs
             n_inp, n_args, n_kwargs = sample_input.noncontiguous()
@@ -681,7 +681,7 @@ class TestCommon(TestCase):
     @onlyCPU
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_composite_compliance(self, device, dtype, op):
-        samples = op.sample_inputs(device, dtype, requires_grad=False)
+        samples = op.sample_inputs(device, dtype, requires_grad=False, skip_sparse_coo_samples=True)
 
         for sample in samples:
             args = [sample.input] + list(sample.args)

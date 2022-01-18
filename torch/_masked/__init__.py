@@ -358,6 +358,12 @@ def _canonical_dim(dim: DimOrDims, ndim: int) -> Tuple[int, ...]:
     """Return dim argument as a tuple of sorted dim values.
     """
     dims: List[int] = []
+    if dim == ():
+        # Currently, `dim=()` in reductions operations means "reduce
+        # over all dimensions" while in future, it will read "no
+        # reduce". See https://github.com/pytorch/pytorch/issues/29137
+        # When gh-29137 is resolved, this if-block must be deleted.
+        dim = None
     if dim is None:
         return tuple(range(ndim))
     ndim = max(ndim, 1)
