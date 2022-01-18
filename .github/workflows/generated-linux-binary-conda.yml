@@ -4,10 +4,14 @@
 name: linux-binary-conda
 
 on:
-# NOTE: Uncomment this to test within your PR
 # TODO: Migrate to new ciflow trigger, reference https://github.com/pytorch/pytorch/pull/70321
-#  pull_request:
-#    types: [opened, synchronize, reopened, unassigned]
+  pull_request:
+    types: [opened, synchronize, reopened, unassigned]
+    # NOTE: This workflow should only trigger when changes are made to binary builds
+    # Should catch most of the binary build / test scripts
+    paths:
+      - '.github/workflows/generated-linux-binary-*.yml'
+      - '.circleci/scripts/binary_*.sh'
   push:
     tags:
       - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
@@ -41,8 +45,8 @@ jobs:
     if: ${{ (github.repository == 'pytorch/pytorch') && (
             (github.event_name == 'push') ||
             (github.event_name == 'schedule') ||
-            (contains(github.event.pull_request.labels.*.name, 'ciflow/binaries') || contains(github.event.pull_request.labels.*.name, 'ciflow/binaries/conda')) ||
-            (false))
+            (contains(github.event.pull_request.labels.*.name, 'ciflow/binaries') || contains(github.event.pull_request.labels.*.name, 'ciflow/binaries/conda') || contains(github.event.pull_request.labels.*.name, 'ciflow/default')) ||
+            ((github.event_name == 'pull_request' && github.event.action != 'unassigned') && !contains(join(github.event.pull_request.labels.*.name), 'ciflow/')))
          }}
     runs-on: ubuntu-latest
     steps:
