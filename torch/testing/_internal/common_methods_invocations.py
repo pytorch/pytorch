@@ -9877,6 +9877,7 @@ op_db: List[OpInfo] = [
            check_batched_gradgrad=False,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            sample_inputs_func=sample_inputs_linalg_matrix_norm,
+           gradcheck_fast_mode=not TEST_WITH_ROCM,  # ROCM fails with gradcheck fast and succeeds with slow
            skips=(
                # Pre-existing condition; Needs to be fixed
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
@@ -12653,7 +12654,8 @@ op_db: List[OpInfo] = [
            # We're using at::allclose, which does not have a batching rule
            check_batched_grad=False,
            check_batched_gradgrad=False,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+           gradcheck_fast_mode=not TEST_WITH_ROCM,  # ROCM fails with gradcheck fast and succeeds with slow
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack]),
            skips=(
                # Fixme, forward over backward gives a numerical error
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad', dtypes=(torch.complex128,)),
@@ -12668,6 +12670,7 @@ op_db: List[OpInfo] = [
            # We're using at::allclose, which does not have a batching rule
            check_batched_grad=False,
            check_batched_gradgrad=False,
+           gradcheck_fast_mode=not TEST_WITH_ROCM,  # ROCM fails with gradcheck fast and succeeds with slow
            sample_inputs_func=sample_inputs_svd,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            skips=(
@@ -12683,6 +12686,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            # We're using at::allclose, which does not have a batching rule
            check_batched_gradgrad=False,
+           gradcheck_fast_mode=not TEST_WITH_ROCM,  # ROCM fails with gradcheck fast and succeeds with slow
            sample_inputs_func=sample_inputs_linalg_svdvals,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack]),
     OpInfo('svd_lowrank',
