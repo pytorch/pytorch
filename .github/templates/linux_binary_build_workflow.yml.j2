@@ -22,7 +22,7 @@ name: !{{ build_environment }}
       LIBTORCH_VARIANT: !{{ config["libtorch_variant"] }}
       DESIRED_DEVTOOLSET: !{{ config["devtoolset"] }}
 {%- else %}
-      DESIRED_PYTHON: !{{ config["python_version"] }}
+      DESIRED_PYTHON: "!{{ config["python_version"] }}"
 {%- endif %}
 {%- endmacro %}
 
