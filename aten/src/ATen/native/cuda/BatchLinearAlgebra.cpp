@@ -2796,7 +2796,7 @@ void svd_kernel(const Tensor& A,
                 const bool compute_uv,
                 const Tensor& U,
                 const Tensor& S,
-                Tensor& Vh,
+                const Tensor& Vh,
                 const Tensor& info) {
 #ifdef USE_CUSOLVER
   // We always use cuSOLVER unless the user has specified they want to use MAGMA
