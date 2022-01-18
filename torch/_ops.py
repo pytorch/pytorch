@@ -170,12 +170,12 @@ class _OpNamespace(types.ModuleType):
         # with qualified_op_name
         torch.jit._builtins._register_builtin(op, qualified_op_name)
         op.__module__ = self.__module__ + "." + namespace_name
-        opoverloadpacket = OpOverloadPacket(qualified_op_name, op_name, op)
-        opoverloadpacket.__module__ = self.__module__ + "." + namespace_name
+        # opoverloadpacket = OpOverloadPacket(qualified_op_name, op_name, op)
+        # opoverloadpacket.__module__ = self.__module__ + "." + namespace_name
         # cache the opoverloadpacket to ensure that each op corresponds to
         # a unique OpOverloadPacket object
-        setattr(self, op_name, opoverloadpacket)
-        return opoverloadpacket
+        setattr(self, op_name, op)
+        return op
 
 class _Ops(types.ModuleType):
     __file__ = '_ops.py'
