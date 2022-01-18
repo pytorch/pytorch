@@ -30,7 +30,7 @@ TORCH_META_FUNC(_convert_indices_from_coo_to_csr) (
 }
 
 TORCH_META_FUNC(_convert_indices_from_csr_to_coo) (
-  const Tensor& crow_indices, const Tensor& col_indices, const bool out_int32
+  const Tensor& crow_indices, const Tensor& col_indices, const bool out_int32, const bool transpose
 ) {
   TORCH_CHECK(crow_indices.dim() == 1, "crow_indices is supposed to be a vector");
   TORCH_CHECK(col_indices.dim() == 1, "col_indices is supposed to be a vector");
@@ -95,17 +95,17 @@ Tensor& unary_op_out(F op_out, const Tensor& self, Tensor& result) {
   return result;
 }
 
-template <typename F>
-Tensor& unary_op_inplace(Tensor& self, const F& op_inplace) {
+template <typename F, typename ...Args>
+Tensor& unary_op_inplace(Tensor& self, const F& op_inplace, Args&&... args) {
   TORCH_INTERNAL_ASSERT(self.is_sparse_csr());
 
   auto self_values = self.values();
-  op_inplace(self_values);
+  (self_values.*op_inplace)(std::forward<Args>(args)...);
   return self;
 }
 
 template <typename input_t, typename output_t>
-void convert_indices_from_csr_to_coo_cpu(const Tensor& indices, const Tensor& crow_indices, const Tensor& col_indices) {
+void convert_indices_from_csr_to_coo_cpu(const Tensor& indices, const Tensor& crow_indices, const Tensor& col_indices, const bool transpose=false) {
   int64_t nrows = crow_indices.numel() - 1;
   if (nrows == 0) {
     indices.zero_();
@@ -114,9 +114,10 @@ void convert_indices_from_csr_to_coo_cpu(const Tensor& indices, const Tensor& cr
   auto crow_indices_ = crow_indices.expect_contiguous();
   const input_t* crow_indices_data_in = crow_indices_->data_ptr<input_t>();
   TORCH_INTERNAL_ASSERT(indices.is_contiguous());
-  output_t* data_out = indices.data_ptr<output_t>();
-
-  indices.select(0, 1).copy_(*col_indices.expect_contiguous());
+  auto row0 = indices.select(0, transpose?1:0);
+  auto row1 = indices.select(0, transpose?0:1);
+  output_t* data_out = row0.data_ptr<output_t>();
+  row1.copy_(*col_indices.expect_contiguous());
   at::parallel_for(0, nrows, GRAIN_SIZE, [&](int64_t start, int64_t end) {
     for (int64_t i = start; i < end; i++) {
       std::fill(&data_out[crow_indices_data_in[i]], &data_out[crow_indices_data_in[i + 1]], static_cast<output_t>(i));
@@ -174,6 +175,10 @@ bool is_square_or_vec(int64_t dim_i, int64_t dim_j, int64_t dim_k) {
   return (dim_i == dim_k  && dim_k == dim_j) || (dim_i == dim_j && dim_k == 1);
 }
 
+Tensor& normal_sparse_csr_(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
+  return unary_op_inplace(self, &Tensor::normal_, mean, std, gen);
+}
+
 /* Implementation of Unary Ufuncs, those supported for Sparse CSR Layout
  * Only simple funcs, with 0->0 correspondence are currently supported. */
 
@@ -189,9 +194,7 @@ bool is_square_or_vec(int64_t dim_i, int64_t dim_j, int64_t dim_k) {
 
 #define CREATE_UNARY_UFUNC_INPLACE(op_name)                                \
   Tensor& op_name##_sparse_csr_(Tensor& self) {                            \
-    return unary_op_inplace(self, [](Tensor& t) {                          \
-      return t.op_name##_();                                               \
-    });                                                                    \
+    return unary_op_inplace(self, &Tensor::op_name##_);                    \
   }
 
 #define CREATE_UNARY_UFUNC(op_name)                                        \
@@ -572,15 +575,15 @@ TORCH_IMPL_FUNC(_convert_indices_from_coo_to_csr_structured_cpu) (
 }
 
 TORCH_IMPL_FUNC(_convert_indices_from_csr_to_coo_structured_cpu) (
-  const Tensor& crow_indices, const Tensor& col_indices, const bool out_int32, const Tensor& result
+  const Tensor& crow_indices, const Tensor& col_indices, const bool out_int32, const bool transpose, const Tensor& result
 ) {
   if (out_int32) {
     AT_DISPATCH_INTEGRAL_TYPES(crow_indices.scalar_type(), "convert_indices_from_csr_to_coo_cpu", [&] {
-      convert_indices_from_csr_to_coo_cpu<scalar_t, int32_t>(result, crow_indices, col_indices);
+      convert_indices_from_csr_to_coo_cpu<scalar_t, int32_t>(result, crow_indices, col_indices, transpose);
     });
   } else {
     AT_DISPATCH_INTEGRAL_TYPES(crow_indices.scalar_type(), "convert_indices_from_csr_to_coo_cpu", [&] {
-      convert_indices_from_csr_to_coo_cpu<scalar_t, int64_t>(result, crow_indices, col_indices);
+      convert_indices_from_csr_to_coo_cpu<scalar_t, int64_t>(result, crow_indices, col_indices, transpose);
     });
   }
 }
