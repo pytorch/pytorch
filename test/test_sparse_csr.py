@@ -1194,6 +1194,10 @@ class TestSparseCSR(TestCase):
 
     @ops(_sparse_csr_ops)
     def test_sparse_csr_consistency(self, device, dtype, op):
+        # linalg_solve has a separate test
+        if op.name == 'linalg.solve':
+            self.skipTest("Skipped!")
+
         samples = op.sample_inputs(device, dtype)
 
         # Fail early to prevent silent success with this test
@@ -1207,9 +1211,9 @@ class TestSparseCSR(TestCase):
             if sample.input.ndim != 2:
                 continue
 
-            expected = op(sample.input)
+            expected = op(sample.input, *sample.args, **sample.kwargs)
             assert torch.is_tensor(expected)
-            output = op(sample.input.to_sparse_csr())
+            output = op(sample.input.to_sparse_csr(), *sample.args, **sample.kwargs)
             assert torch.is_tensor(output)
 
             self.assertEqual(output.to_dense(), expected)
@@ -1286,7 +1290,6 @@ class TestSparseCSR(TestCase):
             self.assertEqual(coo_sparse.to_sparse_csr().to_sparse_coo(), coo_sparse)
 
     @ops(sparse_csr_linalg_solve)
-    @onlyCPU
     def test_linalg_solve_sparse_csr_cusolver(self, device, dtype, op):
         if (device == 'meta') or (device == 'cpu' and not torch.cuda.is_available()):
             self.skipTest("Skipped!")
@@ -1298,10 +1301,10 @@ class TestSparseCSR(TestCase):
                 continue
 
             out = torch.zeros(sample.args[0].size(), dtype=dtype, device=device)
-            if device != 'cpu':
-                with self.assertRaisesRegex(NotImplementedError, "doesn't exist for this backend"):
-                    op(sample.input.to_sparse_csr(), *sample.args, **sample.kwargs, out=out)
-                break
+            # if device != 'cpu':
+            #     with self.assertRaisesRegex(NotImplementedError, "doesn't exist for this backend"):
+            #         op(sample.input.to_sparse_csr(), *sample.args, **sample.kwargs, out=out)
+            #     break
             if not torch.cuda.is_available():
                 with self.assertRaisesRegex(RuntimeError, "PyTorch was not built with CUDA support"):
                     op(sample.input.to_sparse_csr(), *sample.args, **sample.kwargs, out=out)

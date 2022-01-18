@@ -108,6 +108,36 @@ void convert_indices_from_csr_to_coo_cuda(const Tensor& indices, const Tensor& c
 }
 
 template <typename scalar_t>
+void _apply_sparse_csr_qr_solve(
+  const Tensor& input,
+  const Tensor& other,
+  const Tensor& result,
+  int &_singularity) {
+  using value_t = typename c10::scalar_value_type<scalar_t>::type;
+  auto values = input.values();
+  const scalar_t *values_data_ptr = values.data_ptr<scalar_t>();
+  auto crow_indices = input.crow_indices().to(kInt);
+  const int *crow_indices_data_ptr = crow_indices.data_ptr<int>();
+  auto col_indices = input.col_indices().to(kInt);
+  const int *col_indices_data_ptr = col_indices.data_ptr<int>();
+  auto handle = at::cuda::getCurrentCUDASolverSpHandle();
+  auto descrA = at::cuda::sparse::CuSparseMatDescriptor();
+
+  const scalar_t *b = other.data_ptr<scalar_t>();
+  int n = crow_indices.numel() - 1;
+  int nnzA = input._nnz();
+  value_t tol = 0.0;
+  // default reordering of symrcm
+  // Should reorder be an argument provided for users to choose between the following?
+  // symrcm, symamd, csrmetisnd (1, 2, 3)
+  int reorder = 0;
+  scalar_t *x = result.data_ptr<scalar_t>();
+
+  at::cuda::solver::lsvqr<scalar_t, value_t>(handle, n, nnzA, descrA.descriptor(), values_data_ptr,
+    crow_indices_data_ptr, col_indices_data_ptr, b, tol, reorder, x, &_singularity);
+}
+
+template <typename scalar_t>
 void _apply_sparse_csr_lu_solve(
   const Tensor& input,
   const Tensor& other,
@@ -306,7 +336,8 @@ void linalg_solve_sparse_csr_kernel(
   const Tensor& result,
   int& singularity) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "sparse_csr_solve", [&] {
-    _apply_sparse_csr_lu_solve<scalar_t>(input, other, result, singularity);
+    auto func = input.is_cuda() ? _apply_sparse_csr_qr_solve<scalar_t> : _apply_sparse_csr_lu_solve<scalar_t>;
+    func(input, other, result, singularity);
   });
 }
 
