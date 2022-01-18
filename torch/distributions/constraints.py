@@ -16,15 +16,14 @@ The following constraints are implemented:
 - ``constraints.multinomial``
 - ``constraints.nonnegative_integer``
 - ``constraints.one_hot``
-- ``constraints.positive_definite``
 - ``constraints.positive_integer``
 - ``constraints.positive``
+- ``constraints.positive_semidefinite``
+- ``constraints.positive_definite``
 - ``constraints.real_vector``
 - ``constraints.real``
 - ``constraints.simplex``
 - ``constraints.symmetric``
-- ``constraints.symmetric_positive_semidefinite``
-- ``constraints.symmetric_positive_definite``
 - ``constraints.stack``
 - ``constraints.square``
 - ``constraints.symmetric``
@@ -616,8 +615,7 @@ lower_cholesky = _LowerCholesky()
 corr_cholesky = _CorrCholesky()
 square = _Square()
 symmetric = _Symmetric()
+positive_semidefinite = _PositiveSemidefinite()
 positive_definite = _PositiveDefinite()
-symmetric_positive_semidefinite = _SymmetricPositiveSemidefinite()
-symmetric_positive_definite = _SymmetricPositiveDefinite()
 cat = _Cat
 stack = _Stack
