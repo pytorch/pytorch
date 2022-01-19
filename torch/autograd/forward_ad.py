@@ -54,9 +54,11 @@ def make_dual(tensor, tangent, *, level=None):
     named `jvp`, between `J` and a given vector `v` as follows.
 
     Example::
-        >>> inp = make_dual(x, v)
-        >>> out = f(inp)
-        >>> y, jvp = unpack_dual(out)
+
+        >>> with dual_level():
+        ...   inp = make_dual(x, v)
+        ...   out = f(inp)
+        ...   y, jvp = unpack_dual(out)
 
     """
     if level is None:
@@ -90,7 +92,7 @@ def unpack_dual(tensor, *, level=None):
         level = _current_level
 
     if level < 0:
-        return tensor, None
+        return UnpackedDualTensor(tensor, None)
 
     primal, dual = torch._VF._unpack_dual(tensor, level=level)
 

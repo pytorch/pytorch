@@ -3,7 +3,6 @@
 namespace at {
 // views and their in-place version ops
 #define TORCH_VIEW_FNS(m) \
-  m.impl("as_strided", torch::CppFunction::makeFallthrough()); \
   m.impl("as_strided_", torch::CppFunction::makeFallthrough()); \
   m.impl("detach", torch::CppFunction::makeFallthrough()); \
   m.impl("detach_", torch::CppFunction::makeFallthrough()); \
@@ -31,7 +30,6 @@ namespace at {
   m.impl("unfold", torch::CppFunction::makeFallthrough()); \
   m.impl("unsqueeze", torch::CppFunction::makeFallthrough()); \
   m.impl("unsqueeze_", torch::CppFunction::makeFallthrough()); \
-  m.impl("view", torch::CppFunction::makeFallthrough()); \
   m.impl("view_as", torch::CppFunction::makeFallthrough()); \
   m.impl("unbind.int", torch::CppFunction::makeFallthrough()); \
   m.impl("unbind.Dimname", torch::CppFunction::makeFallthrough()); \
@@ -67,3 +65,7 @@ namespace at {
   m.impl("is_floating_point", torch::CppFunction::makeFallthrough()); \
   m.impl("requires_grad_", torch::CppFunction::makeFallthrough());
 }
+
+#define TORCH_VIEW_FNS_NATIVE_FN_REGISTRATION(m) \
+  m.impl("as_strided", torch::CppFunction::makeFallthrough()); \
+  m.impl("view", torch::CppFunction::makeFallthrough());

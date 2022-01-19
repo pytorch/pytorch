@@ -153,6 +153,15 @@ fi
 
 if [ -n "${USE_VULKAN}" ]; then
   CMAKE_ARGS+=("-DUSE_VULKAN=ON")
+  if [ -n "${USE_VULKAN_FP16_INFERENCE}" ]; then
+    CMAKE_ARGS+=("-DUSE_VULKAN_FP16_INFERENCE=ON")
+  fi
+  if [ -n "${USE_VULKAN_RELAXED_PRECISION}" ]; then
+    CMAKE_ARGS+=("-DUSE_VULKAN_RELAXED_PRECISION=ON")
+  fi
+  if [ -n "${USE_VULKAN_SHADERC_RUNTIME}" ]; then
+    CMAKE_ARGS+=("-DUSE_VULKAN_SHADERC_RUNTIME=ON")
+  fi
 fi
 
 # Use-specified CMake arguments go last to allow overridding defaults

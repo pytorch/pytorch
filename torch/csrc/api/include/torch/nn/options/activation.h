@@ -1,7 +1,7 @@
 #pragma once
 
 #include <torch/arg.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/types.h>
 
 namespace torch {
@@ -665,6 +665,8 @@ struct TORCH_API MultiheadAttentionForwardFuncOptions {
   TORCH_ARG(Tensor, static_k) = {};
 
   TORCH_ARG(Tensor, static_v) = {};
+
+  TORCH_ARG(bool, average_attn_weights) = true;
 };
 
 } // namespace functional

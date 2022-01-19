@@ -5,6 +5,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/tensor_int8.h"
 #include "caffe2/operators/quantized/int8_utils.h"
+#include <c10/util/irange.h>
 
 namespace caffe2 {
 
@@ -54,10 +55,10 @@ class Int8ResizeNearestOp final : public Operator<CPUContext> {
     const uint8_t* Xdata = X.t.data<uint8_t>();
     uint8_t* Ydata = Y->t.mutable_data<uint8_t>();
 
-    for (int n = 0; n < N; ++n) {
-      for (int y = 0; y < OH; ++y) {
+    for (const auto n : c10::irange(N)) {
+      for (const auto y : c10::irange(OH)) {
         const int in_y = std::min((int)(y / height_scale_), (IH - 1));
-        for (int x = 0; x < OW; ++x) {
+        for (const auto x : c10::irange(OW)) {
           const int in_x = std::min((int)(x / width_scale_), (IW - 1));
           std::memcpy(
               &Ydata[C * x + C * OW * y + C * OW * OH * n],

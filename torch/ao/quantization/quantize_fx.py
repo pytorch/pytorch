@@ -8,7 +8,7 @@ from torch.nn.intrinsic import _FusedModule
 from .fx import Fuser  # noqa: F401
 from .fx import prepare, convert  # noqa: F401
 from .fx import get_tensorrt_backend_config_dict  # noqa: F401
-from .fx.graph_module import ObservedGraphModule, QuantizedGraphModule
+from .fx.graph_module import ObservedGraphModule
 from .fx.qconfig_utils import (
     check_is_valid_convert_custom_config_dict,
     check_is_valid_fuse_custom_config_dict,
@@ -46,7 +46,9 @@ def _swap_ff_with_fxff(model: torch.nn.Module) -> None:
 
 
 def _fuse_fx(
-    graph_module: GraphModule, fuse_custom_config_dict: Optional[Dict[str, Any]] = None
+    graph_module: GraphModule,
+    fuse_custom_config_dict: Optional[Dict[str, Any]] = None,
+    backend_config_dict: Optional[Dict[str, Any]] = None,
 ) -> GraphModule:
     r""" Internal helper function to fuse modules in preparation for quantization
 
@@ -55,7 +57,7 @@ def _fuse_fx(
     """
     _check_is_graph_module(graph_module)
     fuser = Fuser()
-    return fuser.fuse(graph_module, fuse_custom_config_dict)
+    return fuser.fuse(graph_module, fuse_custom_config_dict, backend_config_dict)
 
 
 class Scope(object):
@@ -176,6 +178,7 @@ def _prepare_fx(
     equalization_qconfig_dict: Optional[Dict[str, Any]] = None,
     backend_config_dict: Optional[Dict[str, Any]] = None,
     is_standalone_module: bool = False,
+    is_qat: bool = False,
 ) -> ObservedGraphModule:
     r""" Internal helper function for prepare_fx
     Args:
@@ -231,7 +234,7 @@ forward graph of the parent module,
     graph_module = GraphModule(model, tracer.trace(model))
     for attr_name in preserved_attributes:
         setattr(graph_module, attr_name, getattr(model, attr_name))
-    graph_module = _fuse_fx(graph_module, prepare_custom_config_dict)
+    graph_module = _fuse_fx(graph_module, prepare_custom_config_dict, backend_config_dict)
     prepared = prepare(
         graph_module,
         qconfig_dict,
@@ -240,6 +243,7 @@ forward graph of the parent module,
         equalization_qconfig_dict=equalization_qconfig_dict,
         backend_config_dict=backend_config_dict,
         is_standalone_module=is_standalone_module,
+        is_qat=is_qat,
     )
 
     for attr_name in preserved_attributes:
@@ -252,6 +256,7 @@ def _prepare_standalone_module_fx(
     qconfig_dict: Any,
     prepare_custom_config_dict: Optional[Dict[str, Any]] = None,
     backend_config_dict: Optional[Dict[str, Any]] = None,
+    is_qat: bool = False,
 ) -> GraphModule:
     r""" [Internal use only] Prepare a standalone module, so that it can be used when quantizing the
     parent module.
@@ -279,8 +284,9 @@ def _prepare_standalone_module_fx(
         model,
         qconfig_dict,
         prepare_custom_config_dict,
-        backend_config_dict,
+        backend_config_dict=backend_config_dict,
         is_standalone_module=True,
+        is_qat=is_qat,
     )
 
 
@@ -392,7 +398,8 @@ def prepare_fx(
                ("submodule.standalone",
                 None,  # qconfig_dict for the prepare function called in the submodule,
                        # None means use qconfig from parent qconfig_dict
-                {"input_quantized_idxs": [], "output_quantized_idxs": []})  # prepare_custom_config_dict
+                {"input_quantized_idxs": [], "output_quantized_idxs": []}),  # prepare_custom_config_dict
+                {}  # backend_config_dict, TODO: point to README doc when it's ready
             ],
 
             "standalone_module_class": [
@@ -400,7 +407,8 @@ def prepare_fx(
                 (StandaloneModule,
                  None,  # qconfig_dict for the prepare function called in the submodule,
                         # None means use qconfig from parent qconfig_dict
-                {"input_quantized_idxs": [0], "output_quantized_idxs": [0]})  # prepare_custom_config_dict
+                {"input_quantized_idxs": [0], "output_quantized_idxs": [0]},  # prepare_custom_config_dict
+                {})  # backend_config_dict, TODO: point to README doc when it's ready
             ],
 
             # user will manually define the corresponding observed
@@ -503,6 +511,7 @@ def prepare_fx(
         prepare_custom_config_dict,
         equalization_qconfig_dict,
         backend_config_dict,
+        is_qat=False,
     )
 
 
@@ -550,6 +559,7 @@ def prepare_qat_fx(
         qconfig_dict,
         prepare_custom_config_dict,
         backend_config_dict=backend_config_dict,
+        is_qat=True,
     )
 
 
@@ -560,7 +570,7 @@ def _convert_fx(
     is_standalone_module: bool = False,
     _remove_qconfig: bool = True,
     qconfig_dict: Dict[str, Any] = None,
-) -> QuantizedGraphModule:
+) -> torch.nn.Module:
     """ `is_standalone_module`: see docs in :func:`~torch.ao.quantization.prepare_standalone_module_fx`
     """
     if convert_custom_config_dict is None:
@@ -590,7 +600,7 @@ def convert_fx(
     convert_custom_config_dict: Optional[Dict[str, Any]] = None,
     _remove_qconfig: bool = True,
     qconfig_dict: Dict[str, Any] = None,
-) -> QuantizedGraphModule:
+) -> torch.nn.Module:
     r""" Convert a calibrated or trained model to a quantized model
 
     Args:
@@ -684,7 +694,7 @@ def _convert_standalone_module_fx(
     graph_module: GraphModule,
     is_reference: bool = False,
     convert_custom_config_dict: Optional[Dict[str, Any]] = None,
-) -> QuantizedGraphModule:
+) -> torch.nn.Module:
     r""" [Internal use only] Convert a model produced by :func:`~torch.ao.quantization.prepare_standalone_module_fx`
     and convert it to a quantized model
 
