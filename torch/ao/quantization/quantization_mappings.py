@@ -137,7 +137,6 @@ DEFAULT_FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS : Dict[Union[Callable, str], Callab
     F.instance_norm: torch.ops.quantized.instance_norm,
     F.layer_norm: torch.ops.quantized.layer_norm,
     F.leaky_relu: torch.ops.quantized.leaky_relu,
-    F.dropout: nn.Identity,
 }
 
 # mapping from module to output activation post process class

@@ -1499,8 +1499,6 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
 @register_quant_pattern(torch.nn.AvgPool1d)
 @register_quant_pattern(torch.nn.AvgPool2d)
 @register_quant_pattern(torch.nn.AvgPool3d)
-# TODO fix it when codebase is stable
-# @register_quant_pattern(torch.nn.Dropout)
 @register_quant_pattern(torch.nn.Hardtanh)
 @register_quant_pattern(torch.nn.MaxPool1d)
 @register_quant_pattern(torch.nn.MaxPool2d)
@@ -1510,7 +1508,6 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
 @register_quant_pattern(torch.adaptive_avg_pool1d)
 @register_quant_pattern(torch.nn.functional.adaptive_avg_pool2d)
 @register_quant_pattern(torch.nn.functional.adaptive_avg_pool3d)
-# @register_quant_pattern(torch.nn.functional.dropout)
 @register_quant_pattern(torch.nn.functional.hardtanh)
 @register_quant_pattern(torch.nn.functional.hardtanh_)
 @register_quant_pattern(torch.nn.functional.interpolate)
