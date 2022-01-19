@@ -627,7 +627,8 @@ std::string generate_code(
   } else {
     env.s("bfloat16_string", "");
   }
-  if (dynamic_casting) {
+  if (f_inputs_type == "std::complex<float>" || result_type == "std::complex<float>" ||
+      f_inputs_type == "std::complex<double>" || result_type == "std::complex<double>"|| dynamic_casting) {
     env.s("complex_string", get_complex_definition());
   } else {
     env.s("complex_string", "");
