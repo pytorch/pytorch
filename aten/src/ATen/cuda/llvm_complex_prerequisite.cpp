@@ -19,6 +19,8 @@ namespace cuda {
 
 extern const std::string complex_prerequisite = jiterator_stringify(
 
+namespace std {
+
 template <class _Tp>
 _Tp&& __declval(int);
 template <class _Tp>
@@ -159,7 +161,9 @@ public:
 template <class _A1, class _A2 = void, class _A3 = void>
 class __promote : public __promote_imp<_A1, _A2, _A3> {};
 
-);  // jiterator_stringify
+} // namespace std
+
+); // jiterator_stringify
 }} // namespace at::cuda
 
 #endif
