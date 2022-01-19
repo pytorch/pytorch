@@ -1661,13 +1661,18 @@ c10::List<Elem> generic_to(IValue ivalue, _fake_type<c10::List<Elem>>) {
 }
 
 template <typename T>
-static std::vector<T> createVectorFromList(const c10::detail::ListImpl* impl) {
-  std::vector<T> result;
+static T createVectorLikeFromList(const c10::detail::ListImpl* impl) {
+  T result;
   result.reserve(impl->list.size());
   for (size_t i = 0, N = impl->list.size(); i < N; ++i) {
-    result.push_back(impl->list[i].to<T>());
+    result.push_back(impl->list[i].to<typename T::value_type>());
   }
   return result;
+}
+
+template <typename T>
+static std::vector<T> createVectorFromList(const c10::detail::ListImpl* impl) {
+  return createVectorLikeFromList<std::vector<T>>(impl);
 }
 
 template <typename T>
@@ -1805,6 +1810,14 @@ inline std::vector<int64_t> IValue::toIntVector() const {
   return createVectorFromList<int64_t>(
       static_cast<const c10::detail::ListImpl*>(payload.u.as_intrusive_ptr));
 }
+inline at::DimVector IValue::toDimVector() const {
+  AT_ASSERT(isIntList(), "Expected IntList but got ", tagKind());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
+      "called toDimVector on null intrusive_ptr IValue");
+  return createVectorLikeFromList<at::DimVector>(
+      static_cast<const c10::detail::ListImpl*>(payload.u.as_intrusive_ptr));
+}
 inline c10::List<double> IValue::toDoubleList() && {
   AT_ASSERT(isDoubleList(), "Expected DoubleList but got ", tagKind());
   return c10::List<double>(moveToIntrusivePtr<c10::detail::ListImpl>());
@@ -1902,26 +1915,37 @@ inline ivalue::Tuple& IValue::toTupleRef() const {
       payload.u.as_intrusive_ptr);
 }
 
-inline bool IValue::isDoubleList() const {
+template <typename T>
+inline bool IValue::isListOf() const {
   // note: avoids calling type() to avoid extra referencing counting for the returned type.
-  return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == FloatType::Kind;
+  if (!isList()) {
+    return false;
+  }
+  const auto& ty = static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType;
+  if (ty->kind() == T::Kind) {
+    return true;
+  }
+  return *ty == *T::get();
+}
+
+inline bool IValue::isDoubleList() const {
+  return isListOf<c10::FloatType>();
 }
 
 inline bool IValue::isComplexDoubleList() const {
-  // note: avoids calling type() to avoid extra referencing counting for the returned type.
-  return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == ComplexType::Kind;
+  return isListOf<c10::ComplexType>();
 }
 
 inline bool IValue::isTensorList() const {
-  return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == TensorType::Kind;
+  return isListOf<c10::TensorType>();
 }
 
 inline bool IValue::isIntList() const {
-  return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == IntType::Kind;
+  return isListOf<c10::IntType>();
 }
 
 inline bool IValue::isBoolList() const {
-  return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == BoolType::Kind;
+  return isListOf<c10::BoolType>();
 }
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Tuple> v)

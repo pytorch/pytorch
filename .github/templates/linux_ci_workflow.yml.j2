@@ -65,7 +65,8 @@ jobs:
       !{{ common.calculate_docker_image(false) }}
       - name: Pull Docker image
         run: |
-          !{{ common.pull_docker("${DOCKER_IMAGE}") }}
+          !{{ common.add_retry_to_env() }}
+          retry docker pull "${DOCKER_IMAGE}"
       !{{ common.parse_ref() }}
       - name: Build
         env:
@@ -199,7 +200,8 @@ jobs:
       !{{ common.checkout_pytorch("recursive") }}
       - name: Pull Docker image
         run: |
-          !{{ common.pull_docker("${DOCKER_IMAGE}") }}
+          !{{ common.add_retry_to_env() }}
+          retry docker pull "${DOCKER_IMAGE}"
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         if: ${{ contains(env.BUILD_ENVIRONMENT, 'cuda') && !contains(matrix.config, 'nogpu') }}
         run: |
@@ -323,7 +325,8 @@ jobs:
       !{{ common.checkout_pytorch("recursive") }}
       - name: Pull Docker image
         run: |
-          !{{ common.pull_docker("${DOCKER_IMAGE}") }}
+          !{{ common.add_retry_to_env() }}
+          retry docker pull "${DOCKER_IMAGE}"
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download PyTorch Build Artifacts
         with:
