@@ -77,8 +77,6 @@ Tensor permute_4d(const Tensor& input, const uvec4& in_size, const uvec4& out_si
 
 Tensor permute(const Tensor& self, IntArrayRef dims) {
   auto nDims = safe_downcast<uint32_t>(self.dim());
-  TORCH_INTERNAL_ASSERT(
-    nDims <= 4, "Vulkan permute expects 4 or less dimensional inputs");
   TORCH_CHECK(dims.size() == (size_t)nDims,
            "number of dims don't match in permute");
 

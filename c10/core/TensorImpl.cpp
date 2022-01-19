@@ -5,6 +5,7 @@
 #include <c10/core/WrapDimMinimal.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/Optional.h>
+#include <c10/util/irange.h>
 
 C10_DEFINE_bool(
     caffe2_keep_on_shrink,
@@ -41,7 +42,7 @@ static void noop_dispatch_fn(
     const PyInterpreter*,
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack,
-    PyObject* dispatcher_type) {
+    const std::shared_ptr<TorchDispatchTypeObject>& type) {
   TORCH_INTERNAL_ASSERT(
       0,
       "attempted to dispatch (__torch_dispatch__) an operator on Tensor with nontrivial PyObject after corresponding interpreter died");
@@ -335,7 +336,7 @@ bool TensorImpl::compute_non_overlapping_and_dense() const {
   }
   SmallVector<int64_t, 5> perm;
   perm.resize(dim());
-  for (int64_t i = 0; i < dim(); i++) {
+  for (const auto i : c10::irange(dim())) {
     perm[i] = i;
   }
   // Sort by strides, leaving 0 and 1 sized dims at the end of the array
@@ -349,7 +350,7 @@ bool TensorImpl::compute_non_overlapping_and_dense() const {
         sizes_and_strides_.stride_at_unchecked(b);
   });
   auto require_stride = 1;
-  for (int64_t i = 0; i < dim(); i++) {
+  for (const auto i : c10::irange(dim())) {
     const auto size_perm_i = sizes_and_strides_.size_at_unchecked(perm[i]);
     if (size_perm_i < 2) {
       return true;
@@ -595,6 +596,23 @@ void TensorImpl::copy_tensor_metadata(
   if (!dest_impl->is_inference()) {
     dest_impl->set_version_counter(std::move(version_counter));
   }
+}
+
+TorchDispatchTypeObject::TorchDispatchTypeObject(
+    PyObject* type_object,
+    c10::impl::PyInterpreter* pyinterpreter)
+    : data_(type_object), pyinterpreter_(pyinterpreter) {}
+
+TorchDispatchTypeObject::~TorchDispatchTypeObject() {
+  pyinterpreter_->decref(data_, /*is_tensor*/ false);
+}
+
+c10::impl::PyInterpreter* TorchDispatchTypeObject::pyinterpreter() const {
+  return pyinterpreter_;
+}
+
+PyObject* TorchDispatchTypeObject::ptr() const {
+  return data_;
 }
 
 namespace impl {

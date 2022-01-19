@@ -7,7 +7,7 @@
 #include<ATen/NumericUtils.h>
 
 namespace at { namespace native {
-namespace {
+inline namespace CPU_CAPABILITY {
 
 template <typename SCALAR_TYPE, typename VALUE_TYPE=SCALAR_TYPE>
 inline VALUE_TYPE zabs (SCALAR_TYPE z) {

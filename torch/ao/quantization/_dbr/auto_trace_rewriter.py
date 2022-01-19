@@ -20,10 +20,9 @@ class AllModuleTracer(torch.fx.Tracer):
 
     def __init__(self, autowrap_modules: Tuple[ModuleType] = (math, ),
                  autowrap_functions: Tuple[Callable, ...] = (),
-                 enable_cpatching: bool = False,
                  param_shapes_constant: bool = False) -> None:
         super().__init__(
-            autowrap_modules, autowrap_functions, enable_cpatching,
+            autowrap_modules, autowrap_functions,
             param_shapes_constant)
         self.node_name_to_dtype = {}
 
@@ -100,6 +99,14 @@ class AllModuleTracer(torch.fx.Tracer):
             target = torch.add
         if target == operator.mul:
             target = torch.mul
+
+        # TODO(future PR): move this into mappings
+        if target == 'add':
+            target = torch.add
+            kind = 'call_function'
+        if target == 'mul':
+            target = torch.mul
+            kind = 'call_function'
 
         dtype_to_use = torch.float
 
