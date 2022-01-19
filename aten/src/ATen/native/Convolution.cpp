@@ -1629,7 +1629,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
       TORCH_CHECK(input.ndimension() == 5);
       std::tie(backend_grad_input, backend_grad_weight, backend_grad_bias) =
         conv_depthwise3d_backward_stub(
-          input.device().type(), grad_output.contiguous(), input.contiguous(), weight, kernel_size, params.stride,
+          input.device().type(), grad_output, input, weight, kernel_size, params.stride,
           params.padding, params.dilation, output_mask);
       break;
     case ConvBackend::Cudnn:
