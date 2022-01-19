@@ -3618,6 +3618,25 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
+    def test_solve_batched_broadcasting(self, device, dtype):
+        from numpy.linalg import solve
+
+        def run_test(A_dims, B_dims):
+            A_matrix_size = A_dims[-1]
+            A_batch_dims = A_dims[:-2]
+            B, A = self.solve_test_helper(A_batch_dims + (A_matrix_size, A_matrix_size), B_dims, device, dtype)
+            actual = torch.linalg.solve(A, B)
+            expected = solve(A.cpu().numpy(), B.cpu().numpy())
+            self.assertEqual(actual, expected)
+
+        # test against numpy.linalg.solve
+        run_test((2, 1, 3, 4, 4), (4, 6))  # broadcasting B
+        run_test((4, 4), (2, 1, 3, 4, 2))  # broadcasting A
+        run_test((1, 3, 1, 4, 4), (2, 1, 3, 4, 5))  # broadcasting A & B
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(*floating_and_complex_types())
     def test_solve_errors_and_warnings(self, device, dtype):
         # solve expects batches of square matrices as input
         with self.assertRaisesRegex(RuntimeError, "must be batches of square matrices"):

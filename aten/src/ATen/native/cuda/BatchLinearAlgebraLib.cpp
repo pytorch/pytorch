@@ -1480,15 +1480,28 @@ void lu_solve_looped_cusolver(const Tensor& b, const Tensor& lu, const Tensor& p
     auto b_stride = matrixStride(b);
     int leading_dimension = cuda_int_cast(std::max<int>(1, n), "leading_dimension");
 
+    // lu and pivots tensors can be broadcast to b
+    // here we construct a helper indexing tensor to linearly index into lu and pivots
+    Tensor lu_index;
+    int64_t* lu_index_data;
+    IntArrayRef lu_batch_shape(lu.sizes().data(), lu.dim() - 2);
+    IntArrayRef b_batch_shape(b.sizes().data(), b.dim() - 2);
+    bool is_broadcasting = !lu_batch_shape.equals(b_batch_shape);
+    if (is_broadcasting) {
+      lu_index = get_linear_indices(batchCount(lu), lu_batch_shape, b_batch_shape);
+      lu_index_data = lu_index.data_ptr<int64_t>();
+    }
+
     auto handle = at::cuda::getCurrentCUDASolverDnHandle();
     for (auto batch = decltype(batch_size){0}; batch < batch_size; ++batch) {
+      int64_t lu_index_i = is_broadcasting ? lu_index_data[batch] : batch;
       at::cuda::solver::getrs<scalar_t>(
         handle,
         n,
         nrhs,
-        lu_data + batch * lu_stride,
+        lu_data + lu_index_i * lu_stride,
         leading_dimension,
-        pivots_data + batch * pivots_stride,
+        pivots_data + lu_index_i * pivots_stride,
         b_data + batch * b_stride,
         leading_dimension,
         info_data,
