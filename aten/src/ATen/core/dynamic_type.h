@@ -194,16 +194,23 @@ struct DynamicTypeTrait {
   }
 };
 
-#define DYNAMIC_TYPE_TAG_VALUE(NAME, _, IS_BASE_TYPE)       \
-  template <>                                               \
-  struct TORCH_API DynamicTypeTrait<NAME##Type> {           \
-    static auto tagValue() {                                \
-      return DynamicType::Tag::NAME;                        \
-    }                                                       \
-    template <typename T = const DynamicTypePtr&>           \
-    static std::enable_if_t<IS_BASE_TYPE, T> getBaseType(); \
-    static constexpr bool isBaseType = IS_BASE_TYPE;        \
-  };
+namespace detail {
+C10_NOINLINE DynamicTypePtr makeBaseType(DynamicType::Tag tag);
+}
+
+#define DYNAMIC_TYPE_TAG_VALUE(NAME, _, IS_BASE_TYPE)      \
+  template <>                                              \
+  struct TORCH_API DynamicTypeTrait<NAME##Type> {          \
+    static auto tagValue() {                               \
+      return DynamicType::Tag::NAME;                       \
+    }                                                      \
+    static constexpr bool isBaseType = IS_BASE_TYPE;       \
+    template <typename T = const DynamicTypePtr&>          \
+    static std::enable_if_t<isBaseType, T> getBaseType() { \
+      static auto type = detail::makeBaseType(tagValue()); \
+      return type;                                         \
+    }                                                      \
+  }; // namespace c10
 FORALL_DYNAMIC_TYPES(DYNAMIC_TYPE_TAG_VALUE)
 #undef DYNAMIC_TYPE_TAG_VALUE
 
