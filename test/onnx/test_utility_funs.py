@@ -627,7 +627,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         # verify that the model state is preserved
         self.assertEqual(model.training, old_state)
 
-    @skipIfUnsupportedMinOpsetVersion(12)
+    @skipIfUnsupportedMinOpsetVersion(15)
     def test_local_function(self):
         class N(torch.nn.Module):
             def __init__(self, prob):
@@ -717,6 +717,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         funcs = onnx_model.functions
         self.assertEqual(len(funcs), 3)
 
+    @skipIfUnsupportedMinOpsetVersion(15)
     def test_local_function_overloads(self):
         class NWithOverloads(torch.nn.Module):
             def forward(self, x, y=None, z=None):

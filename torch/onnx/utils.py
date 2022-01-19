@@ -661,6 +661,10 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             fixed_batch_size=False, custom_opsets=None, add_node_names=True,
             onnx_shape_inference=True, export_modules_as_functions=False):
 
+    if export_modules_as_functions is not False and opset_version < 15:
+        warnings.warn("`export_modules_as_functions` is ignored and the behavior is equivalent to setting "
+                      " this argument to False. This feature requires `opset_version` >= 15. ")
+        export_modules_as_functions = False
     export_modules_as_functions = _setup_trace_module_map(model, export_modules_as_functions)
 
     if isinstance(model, torch.nn.DataParallel):
