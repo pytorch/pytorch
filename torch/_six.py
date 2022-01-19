@@ -19,7 +19,6 @@
 # SOFTWARE.
 
 import math
-import sys
 
 inf = math.inf
 nan = math.nan
