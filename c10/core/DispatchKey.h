@@ -54,7 +54,6 @@ enum class BackendBit : uint8_t {
   HPUBit,
   VEBit,
   LazyBit,
-  NestedTensorBit,
   PrivateUse1Bit,
   PrivateUse2Bit,
   PrivateUse3Bit,
@@ -144,6 +143,8 @@ enum class DispatchKey : uint16_t {
 
   SparseCsrCPU,
   SparseCsrCUDA,
+
+  NestedTensor, // lives out of tree at https://github.com/pytorch/nestedtensor
 
   // In some situations, it is not immediately obvious what the correct
   // backend for function is, because the function in question doesn't
@@ -251,6 +252,18 @@ enum class DispatchKey : uint16_t {
   // See [Note: Per-Backend Functionality Dispatch Keys]
   AutogradFunctionality,
 
+  // Note [Non-Backends that Override Autograd]
+  // NestedTensor is an example of something that isn't a "real backend"
+  // (because it mostly consists of redispatching kernels)
+  // but it would like to override autograd functionality.
+  // We have to hack that functionality in by adding key for AutogradNestedTensor,
+  // and adding an explicit mapping between it and DispatchKey::NestedTensor
+  // in a few places.
+  // Maybe we should enforce in the future that "non-backend" features that want
+  // to override autograd should do it in python?
+  AutogradNestedTensor, // lives out of tree at
+  // https://github.com/pytorch/nestedtensor
+
   Tracer,
 
   // Autocasting precedes VariableTypeId, to ensure casts are autograd-exposed
@@ -319,7 +332,6 @@ enum class DispatchKey : uint16_t {
   HPU, // For out of tree & closed source integration of HPU / Habana
   VE, // For out of tree & closed source integration of SX-Aurora / NEC
   Lazy, // For lazy tensor backends
-  NestedTensor, // lives out of tree at https://github.com/pytorch/nestedtensor
   // Here are reserved backends for user-defined backends, see Note [Private use
   // DispatchKey]
   // To see some example about how to use this, check out ORT
@@ -342,7 +354,6 @@ enum class DispatchKey : uint16_t {
   _QuantizedHPU,
   _QuantizedVE,
   _QuantizedLazy,
-  _QuantizedNestedTensor,
   _QuantizedPrivateUse1,
   _QuantizedPrivateUse2,
   _QuantizedPrivateUse3,
@@ -363,7 +374,6 @@ enum class DispatchKey : uint16_t {
   _SparseHPU,
   SparseVE, // For out of tree & closed source integration of SX-Aurora / NEC
   _SparseLazy,
-  _SparseNestedTensor,
   _SparsePrivateUse1,
   _SparsePrivateUse2,
   _SparsePrivateUse3,
@@ -383,8 +393,6 @@ enum class DispatchKey : uint16_t {
   AutogradHPU,
   _AutogradVE,
   AutogradLazy,
-  AutogradNestedTensor, // lives out of tree at
-  // https://github.com/pytorch/nestedtensor
   // Here are some reserved pre-autograd keys for user-defined backends, see
   // Note [Private use DispatchKey]
   AutogradPrivateUse1,
@@ -513,7 +521,7 @@ C10_API const char* toString(BackendBit);
 C10_API std::ostream& operator<<(std::ostream&, DispatchKey);
 C10_API std::ostream& operator<<(std::ostream&, BackendBit);
 
-C10_API DispatchKey getAutogradKeyFromBackend(BackendBit t);
+C10_API DispatchKey getAutogradKeyFromBackend(DispatchKey k);
 
 // Parses a string into a dispatch key.
 // If the string cannot be correctly parsed, throws an exception.

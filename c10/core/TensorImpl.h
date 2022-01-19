@@ -952,24 +952,15 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // DON'T USE THIS API!! It's only created for testing purpose in
   // file aten/src/ATen/core/boxing/impl/test_helpers.h
   void remove_autograd_key() {
-    constexpr auto autograd_ks = DispatchKeySet({
-      DispatchKey::AutogradFunctionality,
-      DispatchKey::AutogradOther
-    });
-    key_set_ = key_set_.removeFunctionalityKeys(autograd_ks);
+    key_set_ = key_set_ - autograd_dispatch_keyset;
   }
 
   // Inference tensor doesn't have autograd or ADInplaceOrView key.
   // Invariant:
   //   Inference tensor has version_counter_.enabled() == false
   bool is_inference() {
-    constexpr auto inplaceorview_ks = DispatchKeySet(DispatchKey::ADInplaceOrView);
-    constexpr auto autograd_ks = DispatchKeySet({
-      DispatchKey::AutogradFunctionality,
-      DispatchKey::AutogradOther
-    });
-    bool no_ADInplaceOrView = !key_set_.has_any(inplaceorview_ks);
-    bool no_Autograd = !key_set_.has_any(autograd_ks);
+    bool no_ADInplaceOrView = !key_set_.has_any(c10::inplace_or_view_ks);
+    bool no_Autograd = !key_set_.has_any(c10::autograd_dispatch_keyset);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         no_ADInplaceOrView == no_Autograd,
         "ADInplaceOrView and Autograd keys must be on/off at the same time.");
@@ -1107,7 +1098,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       key_set_ = key_set_.add(DispatchKey::Conjugate);
       TORCH_INTERNAL_ASSERT(isComplexType(typeMetaToScalarType(dtype())));
     } else {
-      key_set_ = key_set_.removeFunctionalityKey(DispatchKey::Conjugate);
+      key_set_ = key_set_.remove(DispatchKey::Conjugate);
     }
   }
 
@@ -1128,7 +1119,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
           false,
           "Please call `torch._efficientzerotensor` if you want to create a tensor with no storage.");
     } else {
-      key_set_ = key_set_.removeFunctionalityKey(DispatchKey::ZeroTensor);
+      key_set_ = key_set_.remove(DispatchKey::ZeroTensor);
     }
   }
 
@@ -1148,7 +1139,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     if (value) {
       key_set_ = key_set_.add(DispatchKey::Negative);
     } else {
-      key_set_ = key_set_.removeFunctionalityKey(DispatchKey::Negative);
+      key_set_ = key_set_.remove(DispatchKey::Negative);
     }
   }
 
@@ -1500,7 +1491,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 #endif
     named_tensor_meta_ = std::move(named_tensor_meta);
     if (named_tensor_meta_ == nullptr) {
-      key_set_ = key_set_.removeFunctionalityKey(DispatchKey::Named);
+      key_set_ = key_set_.remove(DispatchKey::Named);
     } else {
       key_set_ = key_set_.add(DispatchKey::Named);
     }
@@ -1511,7 +1502,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     if (k) {
       key_set_ = key_set_.add(python_ks);
     } else {
-      key_set_ = key_set_.removeFunctionalityKeys(python_ks);
+      key_set_ = key_set_ - python_ks;
     }
   }
 
