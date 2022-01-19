@@ -503,6 +503,46 @@ const auto lgamma_string = jiterator_stringify(
   }
 ); // lgamma_string
 
+const auto exp2_string = jiterator_stringify(
+  template <typename T>
+  T exp2_kernel(T a) {
+    return exp2(a);
+  }
+); // exp2_string
+
+const auto erfc_string = jiterator_stringify(
+  template <typename T>
+  T erfc_kernel(T a) {
+    return erfc(a);
+  }
+); // erfc_string
+
+const auto erfinv_string = jiterator_stringify(
+  template <typename T>
+  T erfinv_kernel(T a) {
+    return erfinv(a);
+  }
+); // erfinv_string
+
+const auto entr_string = jiterator_stringify(
+  template <typename T>
+  T entr(T a) {
+    if (a != a) {
+      return a;
+    }
+
+    if (a > 0) {
+      return -a * log(a);
+    }
+
+    if (a == 0) {
+      return 0;
+    }
+
+    return NEG_INFINITY;
+  }
+); // entr_string
+
 const auto i0_string = jiterator_stringify(
   template<typename T>
   T chbevl(T x, const T array[], const int len) {
