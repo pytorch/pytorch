@@ -629,7 +629,7 @@ class ShardedTensor(object):
                 split_size = get_split_size(self.size(reshard_dim), world_size)
                 for idx, placement in enumerate(self._sharding_spec.placements):  # type: ignore[attr-defined]
                     if current_rank == placement.rank():  # type: ignore[union-attr]
-                        new_dim = resharding_spec.placements[idx].placement.rank()
+                        new_dim = resharding_spec.placements[idx].placement.rank()  # type: ignore[union-attr]
                         input_split_sizes[new_dim] = local_shard.size(0)
                         sharded_dim_size = get_chunked_dim_size(
                             self.size(reshard_dim), split_size, idx
@@ -654,8 +654,8 @@ class ShardedTensor(object):
             sharded_dim_size = get_chunked_dim_size(
                 local_shard.size(reshard_dim), split_size, idx
             )
-            input_split_sizes[placement.rank()] = sharded_dim_size
-            if placement.rank() != idx:
+            input_split_sizes[placement.rank()] = sharded_dim_size  # type: ignore[union-attr, index]
+            if placement.rank() != idx:  # type: ignore[union-attr]
                 rearrange_input = True
 
         if rearrange_input:
@@ -666,9 +666,9 @@ class ShardedTensor(object):
             # are not possible. The expected split size will be [4, 4, 4, 1].
             sharded_dim_size_max = max(input_split_sizes)
             for idx, placement in enumerate(resharding_spec.placements):
-                split_size = input_split_sizes[placement.rank()]
+                split_size = input_split_sizes[placement.rank()]  # type: ignore[union-attr, index]
                 offset_start_idx = idx * sharded_dim_size_max
-                indices[placement.rank()] = list(
+                indices[placement.rank()] = list(  # type: ignore[union-attr, index]
                     range(offset_start_idx, offset_start_idx + split_size)
                 )
             indices_flatten = list(idx for indice in indices for idx in indice)
@@ -689,11 +689,11 @@ class ShardedTensor(object):
             output_tensor_size = list(local_shard.size())
             output_tensor_size[current_sharding_dim] = sharded_dim_size
             output_tensor_size[reshard_dim] = input_split_sizes[current_rank]
-            output_tensor_list[placement.rank()] = (
+            output_tensor_list[placement.rank()] = (  # type: ignore[union-attr, index]
                 torch.empty(output_tensor_size, device=local_shard.device)
             )
-            indices.append(placement.rank())
-            if idx != placement.rank():
+            indices.append(placement.rank())  # type: ignore[union-attr, index]
+            if idx != placement.rank():  # type: ignore[union-attr]
                 rearrange_output_list = True
 
         # Perform autograd enabled all2all.
@@ -707,7 +707,7 @@ class ShardedTensor(object):
 
         if rearrange_output_list:
             # Need to re-arrange original shard_dim of output_tensor_list.
-            output_tensor_list = [output_tensor_list[idx] for idx in indices]
+            output_tensor_list = [output_tensor_list[idx] for idx in indices] # type: ignore[call-overload]
         local_shard = torch.cat(output_tensor_list, dim=current_sharding_dim)
         self.local_shards()[0].tensor = local_shard
         return self
