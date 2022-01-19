@@ -160,8 +160,6 @@ at::opmath_type<f_inputs_type> scalar_val=0) {
       needs_dynamic_casting = true;
       // NOTE: can't short-circuit here yet because the dtype check below needs to run on every arg
     }
-    TORCH_CHECK(dtypei != kComplexDouble && dtypei != kComplexFloat,
-                "Encountered an unsupported dtype ", dtypei, "!");
   }
   if (scalar_pos == at::cuda::jit::BinaryFuncVariant::NoScalar) {
     jitted_gpu_kernel_impl</*name*/ name,
