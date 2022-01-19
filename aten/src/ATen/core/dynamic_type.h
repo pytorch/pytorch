@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <type_traits>
 
 #include <ATen/core/class_type.h>
 #include <ATen/core/ivalue.h>
@@ -24,32 +25,35 @@ constexpr DynamicTypeBits kDynamicTupleTypeBit = DYNAMIC_TYPE_BIT(8);
 constexpr DynamicTypeBits kDynamicClassTypeBit = DYNAMIC_TYPE_BIT(10);
 
 #define FORALL_DYNAMIC_TYPES(_)                                              \
-  _(Tensor, DYNAMIC_TYPE_BIT(0))                                             \
-  _(None, kDynamicNoneTypeBit)                                               \
-  _(Bool, DYNAMIC_TYPE_BIT(2))                                               \
-  _(Int, kDynamicIntTypeBit)                                                 \
-  _(Float, kDynamicFloatTypeBit)                                             \
-  _(Complex, kDynamicComplexTypeBit)                                         \
+  _(Tensor, DYNAMIC_TYPE_BIT(0), 1)                                          \
+  _(None, kDynamicNoneTypeBit, 1)                                            \
+  _(Bool, DYNAMIC_TYPE_BIT(2), 1)                                            \
+  _(Int, kDynamicIntTypeBit, 1)                                              \
+  _(Float, kDynamicFloatTypeBit, 1)                                          \
+  _(Complex, kDynamicComplexTypeBit, 1)                                      \
   _(Number,                                                                  \
-    (kDynamicIntTypeBit | kDynamicFloatTypeBit | kDynamicComplexTypeBit))    \
-  _(String, DYNAMIC_TYPE_BIT(6))                                             \
-  _(List, kDynamicListTypeBit)                                               \
-  _(Tuple, (kDynamicTupleTypeBit | kDynamicCovariantTypeBit))                \
-  _(Dict, DYNAMIC_TYPE_BIT(9))                                               \
-  _(Class, kDynamicClassTypeBit)                                             \
+    (kDynamicIntTypeBit | kDynamicFloatTypeBit | kDynamicComplexTypeBit),    \
+    1)                                                                       \
+  _(String, DYNAMIC_TYPE_BIT(6), 1)                                          \
+  _(List, kDynamicListTypeBit, 0)                                            \
+  _(Tuple, (kDynamicTupleTypeBit | kDynamicCovariantTypeBit), 0)             \
+  _(Dict, DYNAMIC_TYPE_BIT(9), 0)                                            \
+  _(Class, kDynamicClassTypeBit, 0)                                          \
   _(Optional,                                                                \
-    (DYNAMIC_TYPE_BIT(11) | kDynamicNoneTypeBit | kDynamicCovariantTypeBit)) \
-  _(AnyList, (kDynamicListTypeBit | kDynamicAnyTypeBit))                     \
+    (DYNAMIC_TYPE_BIT(11) | kDynamicNoneTypeBit | kDynamicCovariantTypeBit), \
+    0)                                                                       \
+  _(AnyList, (kDynamicListTypeBit | kDynamicAnyTypeBit), 1)                  \
   _(AnyTuple,                                                                \
-    (kDynamicTupleTypeBit | kDynamicCovariantTypeBit | kDynamicAnyTypeBit))  \
-  _(DeviceObj, DYNAMIC_TYPE_BIT(12))                                         \
-  _(StreamObj, DYNAMIC_TYPE_BIT(13))                                         \
-  _(Capsule, DYNAMIC_TYPE_BIT(14))                                           \
-  _(Generator, DYNAMIC_TYPE_BIT(15))                                         \
-  _(Storage, DYNAMIC_TYPE_BIT(16))                                           \
-  _(Var, DYNAMIC_TYPE_BIT(17))                                               \
-  _(AnyClass, kDynamicClassTypeBit | kDynamicAnyTypeBit)                     \
-  _(Any, 0xffffffff)
+    (kDynamicTupleTypeBit | kDynamicCovariantTypeBit | kDynamicAnyTypeBit),  \
+    1)                                                                       \
+  _(DeviceObj, DYNAMIC_TYPE_BIT(12), 1)                                      \
+  _(StreamObj, DYNAMIC_TYPE_BIT(13), 1)                                      \
+  _(Capsule, DYNAMIC_TYPE_BIT(14), 1)                                        \
+  _(Generator, DYNAMIC_TYPE_BIT(15), 1)                                      \
+  _(Storage, DYNAMIC_TYPE_BIT(16), 1)                                        \
+  _(Var, DYNAMIC_TYPE_BIT(17), 0)                                            \
+  _(AnyClass, (kDynamicClassTypeBit | kDynamicAnyTypeBit), 1)                \
+  _(Any, 0xffffffff, 1)
 
 class DynamicType;
 using DynamicTypePtr = std::shared_ptr<DynamicType>;
@@ -123,7 +127,7 @@ class DynamicType : public SharedType {
   };
 
   enum class Tag : DynamicTypeBits {
-#define DYNAMIC_TYPE_ITEM(NAME, VAL) NAME = VAL,
+#define DYNAMIC_TYPE_ITEM(NAME, VAL, _) NAME = VAL,
     FORALL_DYNAMIC_TYPES(DYNAMIC_TYPE_ITEM)
 #undef DYNAMIC_TYPE_ITEM
   };
@@ -189,14 +193,24 @@ struct DynamicTypeTrait {
     return DynamicType::Tag::Any;
   }
 };
-#define DYNAMIC_TYPE_TAG_VALUE(NAME, _)           \
-  template <>                                     \
-  struct TORCH_API DynamicTypeTrait<NAME##Type> { \
-    static auto tagValue() {                      \
-      return DynamicType::Tag::NAME;              \
-    }                                             \
-    static const DynamicTypePtr& getBaseType();   \
-  };
+
+namespace detail {
+C10_NOINLINE DynamicTypePtr makeBaseType(DynamicType::Tag tag);
+}
+
+#define DYNAMIC_TYPE_TAG_VALUE(NAME, _, IS_BASE_TYPE)      \
+  template <>                                              \
+  struct TORCH_API DynamicTypeTrait<NAME##Type> {          \
+    static auto tagValue() {                               \
+      return DynamicType::Tag::NAME;                       \
+    }                                                      \
+    static constexpr bool isBaseType = IS_BASE_TYPE;       \
+    template <typename T = const DynamicTypePtr&>          \
+    static std::enable_if_t<isBaseType, T> getBaseType() { \
+      static auto type = detail::makeBaseType(tagValue()); \
+      return type;                                         \
+    }                                                      \
+  }; // namespace c10
 FORALL_DYNAMIC_TYPES(DYNAMIC_TYPE_TAG_VALUE)
 #undef DYNAMIC_TYPE_TAG_VALUE
 
