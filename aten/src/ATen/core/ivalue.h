@@ -386,7 +386,7 @@ public:
   // While some of these accessors could be generated through templates,
   // we prefer to write them manually for clarity
 
-  IValue(at::Tensor t) : tag(Tag::Tensor), is_intrusive_ptr(false) {
+  IValue(at::TensorBase t) : tag(Tag::Tensor), is_intrusive_ptr(false) {
     new (&payload.as_tensor) at::Tensor(std::move(t));
   }
   bool isTensor() const {
