@@ -5225,10 +5225,7 @@ class DistributedTest:
 
         @sandcastle_skip_if(BACKEND == "nccl", "nccl does not support DDP on CPU models")
         def test_static_graph_api_cpu(self):
-            model_DDP = nn.parallel.DistributedDataParallel(DDP_NET, static_graph=True)
-            self.assertEqual(
-                model_DDP._get_ddp_logging_data().get("static_graph"), True
-            )
+            model_DDP = nn.parallel.DistributedDataParallel(DDP_NET)
             expected_err = "should be called before training loop starts"
             with self.assertRaisesRegex(RuntimeError, expected_err):
                 local_bs = 2
