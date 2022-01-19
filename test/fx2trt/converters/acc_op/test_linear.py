@@ -4,6 +4,7 @@ import torch
 import torch.fx.experimental.fx_acc.acc_ops as acc_ops
 from torch.testing._internal.common_fx2trt import AccTestCase, InputTensorSpec
 from parameterized import parameterized
+from torch.testing._internal.common_utils import run_tests
 
 
 class TestLinearConverter(AccTestCase):
@@ -50,3 +51,6 @@ class TestLinearConverter(AccTestCase):
             input_specs,
             expected_ops={acc_ops.linear},
         )
+
+if __name__ == '__main__':
+    run_tests()

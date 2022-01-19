@@ -1,8 +1,8 @@
+#include <ATen/native/RangeFactories.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Parallel.h>
 #include <ATen/Dispatch.h>
-#include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <c10/util/irange.h>
 #include <cmath>
@@ -10,8 +10,6 @@
 
 namespace at { namespace native {
 
-DECLARE_DISPATCH(void(*)(TensorIterator&, const Scalar&, const Scalar&, const Scalar&), arange_stub);
-DECLARE_DISPATCH(void(*)(TensorIterator&, const Scalar&, const Scalar&, int64_t), linspace_stub);
 
 Tensor& linspace_out(const Scalar& start, const Scalar& end, c10::optional<int64_t> optional_steps, Tensor& result) {
   const auto steps = optional_steps.value_or(100);

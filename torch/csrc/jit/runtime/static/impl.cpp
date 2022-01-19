@@ -24,6 +24,13 @@
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/clone_native.h>
+#endif
+
 #include <iterator>
 #include <sstream>
 #include <stdexcept>
@@ -132,6 +139,9 @@ void OptimizeGraph(
     // to exposed folders.
 #ifdef FBCODE_CAFFE2
     ReplaceWithCopy(graph);
+    if (opts.use_maybe_copy_variants) {
+      ReplaceWithMaybeCopy(graph);
+    }
     FuseListUnpack(graph);
     EnableStaticRuntimeLayerNorm(graph);
 #endif
@@ -178,6 +188,14 @@ bool mayContainAlias(AliasDb& db, const Value* a, const Value* b) {
 
 bool mayContainAlias(
     AliasDb& db,
+    const Value* a,
+    const FastSet<const Value*>& b) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  return db.mayContainAlias(const_cast<Value*>(a), valueVecFromFastSet(b));
+}
+
+bool mayContainAlias(
+    AliasDb& db,
     const FastSet<const Value*>& a,
     const FastSet<const Value*>& b) {
   return db.mayContainAlias(valueVecFromFastSet(a), valueVecFromFastSet(b));
@@ -200,7 +218,8 @@ std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
             << opts.cleanup_activations << ", enable_out_variant "
             << opts.enable_out_variant << ", optimize_memory "
             << opts.optimize_memory << ", manage_output_tensors "
-            << opts.manage_output_tensors << ", enable_tensorexpr_fusion "
+            << opts.manage_output_tensors << ", use_maybe_copy_variants "
+            << opts.use_maybe_copy_variants << ", enable_tensorexpr_fusion "
             << opts.enable_tensorexpr_fusion;
 
   Module module = m.copy();
@@ -235,7 +254,7 @@ void ValueGroup::init(
     AliasDb& db) {
   external_aliases_.clear();
   output_aliases_.clear();
-  // Build `input_or_constant_aliases` as we look through nodes forwardly from
+  // Build `external_aliases` as we look through nodes forwardly from
   // the graph's inputs and add aliases of the inputs being created by the
   // nodes.
   external_aliases_.insert(graph->inputs().begin(), graph->inputs().end());
@@ -248,11 +267,11 @@ void ValueGroup::init(
   }
   for (const auto* node : graph->nodes()) {
     if (node->kind() == prim::Constant) {
-      // Constants are already in `input_or_constant_aliases`.
+      // Constants are already in `external_aliases`.
       continue;
     }
     for (const auto* v : node->outputs()) {
-      if (mayContainAlias(db, {v}, external_aliases_)) {
+      if (mayContainAlias(db, v, external_aliases_)) {
         external_aliases_.insert(v);
       }
     }
@@ -270,11 +289,11 @@ void ValueGroup::init(
       // Add values that can aliase input/constant values. Note some output
       // aliases may end up in this category via collection objects (e.g.,
       // Tuple).
-      if (mayContainAlias(db, {v}, external_aliases_)) {
+      if (mayContainAlias(db, v, external_aliases_)) {
         external_aliases_.insert(v);
         continue;
       }
-      if (mayContainAlias(db, {v}, output_aliases_)) {
+      if (mayContainAlias(db, v, output_aliases_)) {
         output_aliases_.insert(v);
       }
     }
@@ -523,8 +542,7 @@ StaticModule::StaticModule(
 
   // Create ProcessedFunction instances first to freeze their addresses to pass
   // to ProcessedNode.
-  AliasDb alias_db(
-      graph_, /*isFrozen=*/false, /*enablePreciseTupleContainerAnalysis=*/true);
+  AliasDb alias_db(graph_, /*isFrozen=*/false);
   GRAPH_DEBUG("AliasDb: ", alias_db.toString());
 
   // Construct constant and function nodes
@@ -920,23 +938,17 @@ void StaticRuntime::resetMemory() noexcept {
 }
 
 c10::IValue StaticRuntime::move_outputs_to_tuple(uint32_t num_outputs) {
-#ifndef NDEBUG
-  for (const auto i : c10::irange(num_outputs)) {
-    // The exact output tensor should never be managed.
-    DCHECK(!isManagedOutputTensor(*outputs_[i]));
-  }
-#endif
   switch (num_outputs) {
     case 1:
-      return c10::ivalue::Tuple::create(std::move(*outputs_[0]));
+      return c10::ivalue::Tuple::create(IValue(std::move(*outputs_[0])));
     case 2:
       return c10::ivalue::Tuple::create(
-          std::move(*outputs_[0]), std::move(*outputs_[1]));
+          IValue(std::move(*outputs_[0])), IValue(std::move(*outputs_[1])));
     case 3:
       return c10::ivalue::Tuple::create(
-          std::move(*outputs_[0]),
-          std::move(*outputs_[1]),
-          std::move(*outputs_[2]));
+          IValue(std::move(*outputs_[0])),
+          IValue(std::move(*outputs_[1])),
+          IValue(std::move(*outputs_[2])));
     default: {
       std::vector<c10::IValue> outputs;
       outputs.reserve(num_outputs);
@@ -1137,8 +1149,6 @@ c10::IValue StaticRuntime::run_impl(
   }
 
   DCHECK(check_for_memory_leak(/*output_returned*/ false));
-  // The exact output tensor should never be managed.
-  DCHECK(!isManagedOutputTensor(*outputs_[0]));
 
   // use move here. Otherwise, clean up outputs_[0] explicitly
   return std::move(*outputs_[0]);
@@ -1556,7 +1566,11 @@ bool StaticRuntime::check_for_memory_leak(bool output_returned) {
     for (const auto i : c10::irange(pnode.num_outputs())) {
       const IValue* ival = &pnode.Output(i);
       const Value* val = pnode.node()->output(i);
-      if (planner_ && isManagedOutputTensorValue(val)) {
+      // subtlety: isManagedOutputTensorValue may give a false
+      // negative here if an output is an alias of this value, so
+      // check the actual tensor!
+      if (planner_ &&
+          (isManagedOutputTensor(*ival) || isManagedOutputTensorValue(val))) {
         // `ival` contains a managed output tensor that the runtime doesn't
         // reclaim at the end of an iteration, but the client does so
         // by explicitly calling `StaticRuntime::deallocateOutputTensors`.
@@ -1564,6 +1578,7 @@ bool StaticRuntime::check_for_memory_leak(bool output_returned) {
       }
       const std::string error_msg = "Output " + c10::to_string(i) + ", %" +
           val->debugName() + " of node " + c10::to_string(n) +
+          " which has kind " + pnode.node()->kind().toQualString() +
           " was not cleaned up";
       if (output_ivalues.count(ival) == 0) {
         // check for intermediates
@@ -1794,8 +1809,9 @@ static bool checkNoMemoryOverlap(const at::Tensor& a, const at::Tensor& b) {
 }
 
 bool ProcessedNode::verify_no_memory_overlap(bool force_check) const {
-  const static std::array<c10::Symbol, 3> special_case_ops = {
+  const static std::array<c10::Symbol, 4> special_case_ops = {
       fromQualString("prim::TypeCheck"),
+      fromQualString("static_runtime::select_tensor"),
       fromQualString("static_runtime::VarTupleUnpack"),
       fromQualString("static_runtime::dict_unpack")};
   if (!force_check &&
