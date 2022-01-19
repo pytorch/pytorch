@@ -73,8 +73,8 @@ class _InstanceNorm(_NormBase):
 
 
 class InstanceNorm1d(_InstanceNorm):
-    r"""Applies Instance Normalization over a 3D input (a mini-batch of 1D
-    inputs with optional additional channel dimension) as described in the paper
+    r"""Applies Instance Normalization over a 2D (unbatched) or 3D (batched) input
+    as described in the paper
     `Instance Normalization: The Missing Ingredient for Fast Stylization
     <https://arxiv.org/abs/1607.08022>`__.
 

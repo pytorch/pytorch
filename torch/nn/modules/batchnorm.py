@@ -229,7 +229,8 @@ class _LazyNormBase(LazyModuleMixin, _NormBase):
 
 class BatchNorm1d(_BatchNorm):
     r"""Applies Batch Normalization over a 2D or 3D input as described in the paper
-    `Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`_ .
+    `Batch Normalization: Accelerating Deep Network Training by Reducing
+    Internal Covariate Shift <https://arxiv.org/abs/1502.03167>`__ .
 
     .. math::
 
@@ -278,7 +279,8 @@ class BatchNorm1d(_BatchNorm):
             in both training and eval modes. Default: ``True``
 
     Shape:
-        - Input: :math:`(N, C)` or :math:`(N, C, L)`, where :math:`N` is the batch size, :math:`C` is the number of features or channels, and :math:`L` is the sequence length
+        - Input: :math:`(N, C)` or :math:`(N, C, L)`, where :math:`N` is the batch size,
+          :math:`C` is the number of features or channels, and :math:`L` is the sequence length
         - Output: :math:`(N, C)` or :math:`(N, C, L)` (same shape as input)
 
     Examples::
