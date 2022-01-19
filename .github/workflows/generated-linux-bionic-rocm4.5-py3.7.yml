@@ -1,7 +1,7 @@
 # @generated DO NOT EDIT MANUALLY
 # Template is at:    .github/templates/linux_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: linux-bionic-py3.7-clang9
+name: linux-bionic-rocm4.5-py3.7
 
 on:
   pull_request:
@@ -13,8 +13,8 @@ on:
   workflow_dispatch:
 
 env:
-  BUILD_ENVIRONMENT: linux-bionic-py3.7-clang9
-  DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-py3.7-clang9
+  BUILD_ENVIRONMENT: linux-bionic-rocm4.5-py3.7
+  DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-rocm4.5-py3.7
   SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
   XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
   TORCH_CUDA_ARCH_LIST: 5.2
@@ -32,7 +32,7 @@ env:
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   PYTORCH_RETRY_TEST_CASES: 1
 concurrency:
-  group: linux-bionic-py3.7-clang9-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: linux-bionic-rocm4.5-py3.7-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:
@@ -43,13 +43,13 @@ jobs:
     if: ${{ (github.repository == 'pytorch/pytorch') && (
             (github.event_name == 'push') ||
             (github.event_name == 'schedule') ||
-            (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cpu') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux') || contains(github.event.pull_request.labels.*.name, 'ciflow/noarch') || contains(github.event.pull_request.labels.*.name, 'ciflow/trunk') || contains(github.event.pull_request.labels.*.name, 'ciflow/xla')) ||
-            ((github.event_name == 'pull_request' && github.event.action != 'unassigned') && !contains(join(github.event.pull_request.labels.*.name), 'ciflow/')))
+            (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux') || contains(github.event.pull_request.labels.*.name, 'ciflow/rocm') || contains(github.event.pull_request.labels.*.name, 'ciflow/trunk')) ||
+            (false))
          }}
     env:
-      JOB_BASE_NAME: linux-bionic-py3.7-clang9-build
+      JOB_BASE_NAME: linux-bionic-rocm4.5-py3.7-build
       IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == 'unassigned') && (github.event.assigneed.login == 'pytorchbot') }}
-      LABEL_CONDITIONS: ${{ contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cpu') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux') || contains(github.event.pull_request.labels.*.name, 'ciflow/noarch') || contains(github.event.pull_request.labels.*.name, 'ciflow/trunk') || contains(github.event.pull_request.labels.*.name, 'ciflow/xla') }}
+      LABEL_CONDITIONS: ${{ contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux') || contains(github.event.pull_request.labels.*.name, 'ciflow/rocm') || contains(github.event.pull_request.labels.*.name, 'ciflow/trunk') }}
     outputs:
       docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
     steps:
@@ -257,8 +257,8 @@ jobs:
     runs-on: ubuntu-18.04
     timeout-minutes: 240
     env:
-      TEST_RUNNER_TYPE: linux.2xlarge
-      ENABLE_DISTRIBUTED_TEST: ''
+      TEST_RUNNER_TYPE: linux.rocm.gpu
+      ENABLE_DISTRIBUTED_TEST: 1
       ENABLE_JIT_LEGACY_TEST: ''
       ENABLE_FX2TRT_TEST: ''
       ENABLE_MULTIGPU_TEST: ''
@@ -267,11 +267,11 @@ jobs:
       ENABLE_SLOW_TEST: ''
       ENABLE_DOCS_TEST: ''
       ENABLE_BACKWARDS_COMPAT_TEST: ''
-      ENABLE_XLA_TEST: 1
-      ENABLE_NOARCH_TEST: 1
+      ENABLE_XLA_TEST: ''
+      ENABLE_NOARCH_TEST: ''
       NUM_TEST_SHARDS: 2
-      MULTIGPU_RUNNER_TYPE: linux.16xlarge.nvidia.gpu
-      DISTRIBUTED_GPU_RUNNER_TYPE: linux.8xlarge.nvidia.gpu
+      MULTIGPU_RUNNER_TYPE: linux.rocm.gpu
+      DISTRIBUTED_GPU_RUNNER_TYPE: linux.rocm.gpu
       NOGPU_RUNNER_TYPE: linux.2xlarge
       PR_BODY: ${{ github.event.pull_request.body }}
     outputs:
@@ -298,52 +298,45 @@ jobs:
     timeout-minutes: 240
     env:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
-      JOB_BASE_NAME: linux-bionic-py3.7-clang9-test
+      JOB_BASE_NAME: linux-bionic-rocm4.5-py3.7-test
       TEST_CONFIG: ${{ matrix.config }}
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - name: Clean workspace
         run: |
           rm -rf "${GITHUB_WORKSPACE}"
           mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set DOCKER_HOST
+        run: echo "DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> "${GITHUB_ENV}"
+      - name: Runner health check system info
+        if: always()
+        run: |
+          cat /etc/os-release || true
+          cat /etc/apt/sources.list.d/rocm.list || true
+          cat /opt/rocm/.info/version || true
+          whoami
+      - name: Runner health check rocm-smi
+        if: always()
+        run: |
+          rocm-smi
+      - name: Runner health check rocminfo
+        if: always()
+        run: |
+          rocminfo
+      - name: Runner health check GPU count
+        if: always()
+        run: |
+          ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
+          if [[ "x$ngpu" != "x4" ]]; then
+              echo "Failed to detect 4 GPUs on the runner"
+              exit 1
+          fi
+      - name: Runner health check disconnect on failure
+        if: ${{ failure() }}
+        run: |
+          killall runsvc.sh
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
@@ -363,11 +356,10 @@ jobs:
               "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
           }
           retry docker pull "${DOCKER_IMAGE}"
-      - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        if: ${{ contains(env.BUILD_ENVIRONMENT, 'cuda') && !contains(matrix.config, 'nogpu') }}
+      - name: ROCm set GPU_FLAG
+        if: ${{ contains(env.BUILD_ENVIRONMENT, 'rocm') && !contains(matrix.config, 'nogpu') }}
         run: |
-          bash .github/scripts/install_nvidia_utils_linux.sh
-          echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Determine shm-size
         run: |
           shm_size="1g"
@@ -389,7 +381,7 @@ jobs:
           unzip -o artifacts.zip
       - name: Output disk space left
         run: |
-          sudo df -H
+          df -H
       - name: Parse ref
         id: parse-ref
         run: .github/scripts/parse_ref.py
@@ -408,14 +400,6 @@ jobs:
             TEST_COMMAND=.jenkins/caffe2/test.sh
           else
             TEST_COMMAND=.jenkins/pytorch/test.sh
-          fi
-          PROXY_ENV=
-          # NOTE: XLA multiprocessing tests appear to have issues with squid proxy, going to disable for now
-          #       We should investigate whether or not there's a list of hostnames we can add to no_proxy to
-          #       make it so that we shouldn't have to fully disable squid for XLA tests
-          if [[ $TEST_CONFIG != 'xla' ]]; then
-            # shellcheck disable=SC2089
-            PROXY_ENV="-e http_proxy=http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128 -e https_proxy=http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128 -e no_proxy=localhost,127.0.0.1,github.com,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock"
           fi
           # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
@@ -443,12 +427,10 @@ jobs:
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
-            ${PROXY_ENV} \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --ulimit stack=10485760:83886080 \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
-            --ipc=host \
             --shm-size="${SHM_SIZE}" \
             --tty \
             --detach \
@@ -458,12 +440,10 @@ jobs:
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
           )
-          docker exec -t "${container_name}" sh -c "sudo chown -R jenkins . && pip install dist/*.whl && ${TEST_COMMAND}"
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+          # jenkins user does not have write permission to mounted workspace; work-around by copying within container to jenkins home
+          docker exec -t "${container_name}" sh -c "cd .. && cp -R workspace pytorch && cd pytorch && pip install dist/*.whl && ${TEST_COMMAND}"
+          # copy test results back to the mounted workspace, needed sudo, resulting permissions were correct
+          docker exec -t "${container_name}" sh -c "cd ../pytorch && sudo cp -R test/test-reports ../workspace/test"
       - name: Install render_test_results dependencies
         if: always()
         shell: bash
@@ -485,8 +465,8 @@ jobs:
           # Remove any previous test jsons if they exist
           rm -f test-jsons-*.zip
           zip -r "test-jsons-${FILE_SUFFIX}.zip" test -i '*.json'
-      - uses: seemethere/upload-artifact-s3@v3
-        name: Store Test Downloaded JSONs on S3
+      - uses: actions/upload-artifact@v2
+        name: Store Test Downloaded JSONs on Github
         if: always()
         with:
           retention-days: 14
@@ -501,10 +481,11 @@ jobs:
           # Remove any previous test reports if they exist
           rm -f test-reports-*.zip
           zip -r "test-reports-${FILE_SUFFIX}.zip" test -i '*.xml'
-      - uses: seemethere/upload-artifact-s3@v3
-        name: Store Test Reports on S3
+      - uses: actions/upload-artifact@v2
+        name: Store Test Reports on Github
         if: always()
         with:
+          name: test-reports
           retention-days: 14
           if-no-files-found: error
           path:
@@ -516,7 +497,7 @@ jobs:
         env:
           AWS_DEFAULT_REGION: us-east-1
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          JOB_BASE_NAME: linux-bionic-py3.7-clang9-test
+          JOB_BASE_NAME: linux-bionic-rocm4.5-py3.7-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
@@ -526,15 +507,6 @@ jobs:
           python3 -m pip install -r requirements.txt
           python3 -m pip install boto3==1.19.12
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - name: Kill containers, clean up images
         if: always()
         run: |
