@@ -389,8 +389,6 @@ class MinMaxObserver(_ObserverBase):
     where :math:`Q_\text{min}` and :math:`Q_\text{max}` are the minimum and
     maximum of the quantized data type.
 
-    .. warning:: Only works with ``torch.per_tensor_symmetric`` quantization scheme
-
     .. warning:: :attr:`dtype` can only take ``torch.qint8`` or ``torch.quint8``.
 
     .. note:: If the running minimum equals to the running maximum, the scale
@@ -846,6 +844,8 @@ class HistogramObserver(_ObserverBase):
         dtype: torch.dtype = torch.quint8,
         qscheme=torch.per_tensor_affine,
         reduce_range=False,
+        quant_min=None,
+        quant_max=None,
         factory_kwargs=None,
     ) -> None:
         # bins: The number of bins used for histogram calculation.
@@ -853,6 +853,8 @@ class HistogramObserver(_ObserverBase):
             dtype=dtype,
             qscheme=qscheme,
             reduce_range=reduce_range,
+            quant_min=quant_min,
+            quant_max=quant_max,
             factory_kwargs=factory_kwargs,
         )
         factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
@@ -898,12 +900,12 @@ class HistogramObserver(_ObserverBase):
 
         # which dst_bins the beginning and end of src_bin belong to?
         dst_bin_of_begin = torch.clamp(
-            src_bin_begin // dst_bin_width, 0, self.dst_nbins - 1
+            torch.div(src_bin_begin, dst_bin_width, rounding_mode='floor'), 0, self.dst_nbins - 1
         )
         dst_bin_of_begin_center = (dst_bin_of_begin + 0.5) * dst_bin_width
 
         dst_bin_of_end = torch.clamp(
-            src_bin_end // dst_bin_width, 0, self.dst_nbins - 1
+            torch.div(src_bin_end, dst_bin_width, rounding_mode='floor'), 0, self.dst_nbins - 1
         )
         dst_bin_of_end_center = (dst_bin_of_end + 0.5) * dst_bin_width
 
@@ -1310,6 +1312,28 @@ class NoopObserver(ObserverBase):
     def calculate_qparams(self):
         raise Exception("calculate_qparams should not be called for NoopObserver")
 
+class ReuseInputObserver(ObserverBase):
+    r""" This observer is used when we want to reuse the observer from the operator
+    that produces the input Tensor, typically used for operators like reshape, e.g.
+    ```
+    x0 = ...
+    x1 = x0.reshape()
+    ```
+    if we configure x0 to be observed by some observer, let's say MinMaxObserver,
+    and reshape is configured with ReuseInputObserver, we'll reuse the observer instance
+    for x0 for x1 (output of reshape). If x0 is not observed, we also won't observe x1.
+
+    Note: this is only enabled in FX Graph Mode Quantization
+    """
+    def __init__(self):
+        super().__init__(torch.quint8)
+
+    def forward(self, x):
+        return x
+
+    @torch.jit.export
+    def calculate_qparams(self):
+        raise Exception("calculate_qparams should not be called for ReuseInputObserver")
 
 def _is_observer_script_module(mod, obs_type_name):
     """Returns true if given mod is an instance of Observer script module."""
@@ -1388,7 +1412,7 @@ def load_observer_state_dict(mod, obs_dict):
 
 
 # Restrict activations to be in the range (0,127)
-default_observer = MinMaxObserver.with_args(reduce_range=True)
+default_observer = MinMaxObserver.with_args(quant_min=0, quant_max=127)
 """
 Default observer for static quantization, usually used for debugging.
 """
@@ -1410,7 +1434,7 @@ default_weight_observer = MinMaxObserver.with_args(
 Default weight observer.
 """
 
-default_histogram_observer = HistogramObserver.with_args(reduce_range=True)
+default_histogram_observer = HistogramObserver.with_args(quant_min=0, quant_max=127)
 """
 Default histogram observer, usually used for PTQ.
 """
@@ -1452,4 +1476,10 @@ default_affine_fixed_qparams_observer = FixedQParamsObserver.with_args(
     scale=1.0 / 256.0, zero_point=0, dtype=torch.quint8, quant_min=0, quant_max=255)
 """
 Default observers for fixed qparams operations.
+"""
+
+default_reuse_input_observer = ReuseInputObserver
+"""
+Default observer for operators like reshape that reuses the observer of input to
+the operator
 """

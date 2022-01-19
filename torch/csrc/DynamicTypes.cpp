@@ -20,10 +20,6 @@
 #include <unordered_map>
 #include <vector>
 
-#ifdef USE_CUDA
-#include <THC/THC.h>
-#endif
-
 namespace torch {
 namespace {
 std::unordered_map<at::DeprecatedTypeProperties*, PyTypeObject*> attype_to_py_storage_type;
@@ -111,7 +107,7 @@ PyObject* createPyObject(const at::Storage& storage) {
   auto type = getPyTypeObject(storage);
   auto obj = THPObjectPtr(type->tp_alloc(type, 0));
   if (!obj) throw python_error();
-  ((THPVoidStorage*)obj.get())->cdata = (THVoidStorage *)at::Storage(/* copy */ storage).unsafeReleaseStorageImpl();
+  ((THPVoidStorage*)obj.get())->cdata = at::Storage(/* copy */ storage).unsafeReleaseStorageImpl();
   return obj.release();
 }
 

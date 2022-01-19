@@ -1,22 +1,19 @@
-#include <ATen/native/TensorAdvancedIndexing.h>
-#include <ATen/native/TensorTransformations.h> // flip
+#define TORCH_ASSERT_NO_OPERATORS
+#include <ATen/native/cuda/IndexKernel.h>
+#include <ATen/native/IndexKernel.h>
 
 #include <type_traits>
-#include <ATen/ATen.h>
+#include <ATen/core/TensorBase.h>
 #include <ATen/Dispatch.h>
-#include <ATen/native/TensorIterator.h>
 #include <ATen/core/Array.h>
-#include <ATen/core/Tensor.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/cub.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
-#include <ATen/ExpandUtils.h>
-#include <ATen/MemoryOverlap.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/KernelUtils.cuh>
-#include <c10/util/MaybeOwned.h>
+
+#include <c10/core/Scalar.h>
 
 namespace at { namespace native {
 
@@ -242,45 +239,10 @@ static void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntAr
   });
 }
 
-static Tensor & masked_select_out_cuda_impl(Tensor & result, const Tensor & self, const Tensor & mask) {
-  NoNamesGuard guard;
-
-  TORCH_CHECK(mask.scalar_type() == ScalarType::Byte || mask.scalar_type() == ScalarType::Bool,
-              "masked_select: expected BoolTensor or ByteTensor for mask");
-  TORCH_CHECK(self.scalar_type() == result.scalar_type(),
-              "masked_select(): self and result must have the same scalar type");
-
-  auto mask_temp = (mask.dim() == 0)
-    ? c10::MaybeOwned<Tensor>::owned(mask.unsqueeze(0))
-    : c10::MaybeOwned<Tensor>::borrowed(mask);
-  auto self_temp = (self.dim() == 0)
-    ? c10::MaybeOwned<Tensor>::owned(self.unsqueeze(0))
-    : c10::MaybeOwned<Tensor>::borrowed(self);
-
-  // Cannot reassign to mask_temp and self_temp here! if they are
-  // owning and expand_outplace returns a borrow, the returned borrow
-  // would dangle.
-  auto mask_self_expanded = expand_outplace(*mask_temp, *self_temp);
-  at::native::index_out(result, *std::get<1>(mask_self_expanded), c10::List<c10::optional<at::Tensor>>({*std::get<0>(std::move(mask_self_expanded))}));
-
-  return result;
-}
-
-Tensor masked_select_cuda(const Tensor & self, const Tensor & mask) {
-  namedinference::compute_broadcast_outnames(self, mask);
-  Tensor result = at::empty({0}, self.options());
-  return masked_select_out_cuda_impl(result, self, mask);
-}
-
-Tensor & masked_select_out_cuda(const Tensor & self, const Tensor & mask, Tensor & result) {
-  namedinference::compute_broadcast_outnames(self, mask);
-  return masked_select_out_cuda_impl(result, self, mask);
-}
-
 template <typename scalar_t, typename index_t, typename func_t>
 void cuda_take_put_kernel(
   TensorIterator& iter,
-  const Tensor& indexed,
+  const TensorBase& indexed,
   const func_t& f) {
   if (!iter.can_use_32bit_indexing()) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
@@ -325,7 +287,7 @@ void cuda_take_put_kernel(
   launch_kernel<launch_size_nd, launch_bound2>(iter.numel(), loop);
 }
 
-void put_kernel(TensorIterator& iter, const Tensor& output, const bool accumulate) {
+void put_kernel(TensorIterator& iter, const TensorBase& output, const bool accumulate) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16, iter.dtype(), "put_cuda", [&] {
     // Cannot use `OpaqueType`, as we need the actual type for `fastSpecializedgpuAtomicAdd`
     AT_DISPATCH_INDEX_TYPES(cuda::detail::canUse32BitIndexMath(output) ? ScalarType::Int : ScalarType::Long,
@@ -350,7 +312,7 @@ void put_kernel(TensorIterator& iter, const Tensor& output, const bool accumulat
 
 void take_kernel(
   TensorIterator& iter,
-  const Tensor& input) {
+  const TensorBase& input) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16, iter.dtype(), "take_cuda", [&] {
     // Cannot use `OpaqueType`, as Tensor::data_ptr<OpaqueType<N>> is not implemented
     AT_DISPATCH_INDEX_TYPES(cuda::detail::canUse32BitIndexMath(input) ? ScalarType::Int : ScalarType::Long,
@@ -374,18 +336,14 @@ __global__ void masked_scatter_size_check(int64_t *mask_exclusive_sum, mask_t *m
 }
 
 template <typename mask_t>
-void masked_scatter_cuda_impl(Tensor& self, const Tensor& mask, const Tensor& source){
+void masked_scatter_cuda_impl(
+    const TensorBase &self, const TensorBase &mask,
+    const TensorBase &maskPrefixSum, const TensorBase &source) {
   auto srcSize = source.numel();
-
-  if (self.numel() == 0) {
-    return;
-  }
-
   auto mask_cont = mask.contiguous();
   auto mask_numel = mask.numel();
 
   // Use a prefix sum to determine the output locations of the masked elements
-  auto maskPrefixSum = at::empty_like(mask_cont, mask.options().dtype(kLong));
   auto maskPrefixSum_data = maskPrefixSum.data_ptr<int64_t>();
   auto mask_data = mask_cont.data_ptr<mask_t>();
 
@@ -433,30 +391,14 @@ void masked_scatter_cuda_impl(Tensor& self, const Tensor& mask, const Tensor& so
 
 } // anonymous namespace
 
-Tensor & masked_scatter__cuda(Tensor& self, const Tensor& mask, const Tensor& source) {
-  at::assert_no_internal_overlap(self);
-  TORCH_CHECK(
-      self.scalar_type() == source.scalar_type(),
-      "masked_scatter: expected self and source to have same dtypes but got",
-      self.scalar_type(),
-      " and ",
-      source.scalar_type());
-
-  c10::MaybeOwned<Tensor> b_mask = expand_inplace(self, mask, "masked_scatter_");
-
-  if (b_mask->dtype() == ScalarType::Byte) {
-    TORCH_WARN("masked_scatter_ received a mask with dtype torch.uint8, this behavior is now deprecated," \
-            "please use a mask with dtype torch.bool instead.");
-  }
-
-  auto mask_dtype = b_mask->scalar_type();
-  if (mask_dtype == ScalarType::Bool) {
-    masked_scatter_cuda_impl<bool>(self, *b_mask, source);
+void launch_masked_scatter_kernel(
+    const TensorBase &self, const TensorBase &mask,
+    const TensorBase &maskPrefixSum, const TensorBase &source) {
+  if (mask.scalar_type() == kBool) {
+    masked_scatter_cuda_impl<bool>(self, mask, maskPrefixSum, source);
   } else {
-    masked_scatter_cuda_impl<uint8_t>(self, *b_mask, source);
+    masked_scatter_cuda_impl<uint8_t>(self, mask, maskPrefixSum, source);
   }
-
-  return self;
 }
 
 template <typename scalar_t>

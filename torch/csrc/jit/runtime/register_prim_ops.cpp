@@ -87,7 +87,7 @@ auto powWrapper(T a, U b) {
   return pow(a, b);
 }
 
-static const OperatorGeneratorArgs opGenArgs[] = {
+static const std::vector<OperatorGeneratorArgs> opGenArgs{
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::str(t elem) -> str"),
         [](Stack& stack) {
@@ -973,7 +973,7 @@ static const OperatorGeneratorArgs opGenArgs[] = {
         TORCH_SELECTIVE_SCHEMA(
             "aten::index.Tensor_hacked_twin(Tensor self, Tensor[] indices) -> Tensor"),
         [](Stack& stack) {
-          auto indices = pop(stack).to<List<c10::optional<at::Tensor>>>();
+          auto indices = pop(stack).to<c10::List<c10::optional<at::Tensor>>>();
           auto self = pop(stack).toTensor();
           auto result = at::index(self, indices);
           push(stack, std::move(result));
@@ -986,7 +986,7 @@ static const OperatorGeneratorArgs opGenArgs[] = {
           auto unsafe = pop(stack).toBool();
           auto accumulate = pop(stack).toBool();
           auto values = pop(stack).toTensor();
-          auto indices = pop(stack).to<List<c10::optional<at::Tensor>>>();
+          auto indices = pop(stack).to<c10::List<c10::optional<at::Tensor>>>();
           auto self = pop(stack).toTensor();
           auto result =
               at::_index_put_impl_(self, indices, values, accumulate, unsafe);
@@ -999,7 +999,7 @@ static const OperatorGeneratorArgs opGenArgs[] = {
         [](Stack& stack) {
           auto accumulate = pop(stack).toBool();
           auto values = pop(stack).toTensor();
-          auto indices = pop(stack).to<List<c10::optional<at::Tensor>>>();
+          auto indices = pop(stack).to<c10::List<c10::optional<at::Tensor>>>();
           auto self = pop(stack).toTensor();
           auto result = at::index_put_(self, indices, values, accumulate);
           push(stack, std::move(result));
@@ -1011,7 +1011,7 @@ static const OperatorGeneratorArgs opGenArgs[] = {
         [](Stack& stack) {
           auto accumulate = pop(stack).toBool();
           auto values = pop(stack).toTensor();
-          auto indices = pop(stack).to<List<c10::optional<at::Tensor>>>();
+          auto indices = pop(stack).to<c10::List<c10::optional<at::Tensor>>>();
           auto self = pop(stack).toTensor();
           auto result = at::index_put_(self, indices, values, accumulate);
           push(stack, std::move(result));
@@ -1133,20 +1133,17 @@ static const OperatorGeneratorArgs opGenArgs[] = {
                               }))};
 
 static std::vector<c10::optional<Operator>> createOperators(
-    const OperatorGeneratorArgs* args,
-    int length) {
+    const std::vector<OperatorGeneratorArgs>& args) {
   std::vector<c10::optional<Operator>> result;
-  result.reserve(length);
-  for (int ii = 0; ii < length; ++ii) {
-    if (args[ii].schema_str) {
-      if (args[ii].isOperationCreator) {
+  result.reserve(args.size());
+  for (const auto& arg : args) {
+    if (arg.schema_str) {
+      if (arg.isOperationCreator) {
         result.push_back(OperatorGenerator(
-            args[ii].schema_str,
-            args[ii].operationCreator,
-            args[ii].aliasAnalysis));
+            arg.schema_str, arg.operationCreator, arg.aliasAnalysis));
       } else {
         result.push_back(OperatorGenerator(
-            args[ii].schema_str, args[ii].operation, args[ii].aliasAnalysis));
+            arg.schema_str, arg.operation, arg.aliasAnalysis));
       }
     }
   }
@@ -1154,7 +1151,7 @@ static std::vector<c10::optional<Operator>> createOperators(
 }
 
 RegisterOperators reg(([]() {
-  auto v = createOperators(opGenArgs, sizeof(opGenArgs) / sizeof(opGenArgs[0]));
+  auto v = createOperators(opGenArgs);
   v.push_back(Operator(
       prim::tolist,
       // This operator has to be unschematized because the return type
@@ -1430,7 +1427,7 @@ void dictConstructFromList(Stack& stack) {
           dictCopy,                                                            \
           aliasAnalysisFromSchema())
 
-static const OperatorGeneratorArgs dict_ops[] = {
+static const std::vector<OperatorGeneratorArgs> dict_ops{
     CREATE_DICT_OPS("str"),
     CREATE_DICT_OPS("int"),
     CREATE_DICT_OPS("bool"),
@@ -1438,8 +1435,7 @@ static const OperatorGeneratorArgs dict_ops[] = {
     CREATE_DICT_OPS("complex"),
     CREATE_DICT_OPS("Tensor"),
 };
-RegisterOperators reg_dict_ops(
-    createOperators(dict_ops, sizeof(dict_ops) / sizeof(dict_ops[0])));
+RegisterOperators reg_dict_ops(createOperators(dict_ops));
 
 // NOLINTNEXTLINE(clang-diagnostic-unused-function)
 constexpr c10::AliasAnalysisKind aliasAnalysisFromSchema() {
@@ -1494,526 +1490,659 @@ int64_t stringFindImpl(
 }
 
 // String Ops
-// Implementations located in torch/csrc/jit/runtime/register_string_ops.cpp
-TORCH_LIBRARY_IMPL(aten, CatchAll, m) {
-  m.impl(TORCH_SELECTIVE_NAME("aten::slice.str"), TORCH_FN(stringSlice));
-  m.impl(
-      TORCH_SELECTIVE_NAME("aten::strip"),
-      [](std::string string, const std::string& chars) {
-        auto rindex = string.find_last_not_of(chars);
-        if (rindex != std::string::npos) {
-          string = string.substr(0, rindex + 1);
-        } else {
-          string = "";
-        }
-        auto lindex = string.find_first_not_of(chars);
-        if (lindex != std::string::npos) {
-          string = string.substr(lindex, string.size());
-        } else {
-          string = "";
-        }
-        return string;
-      });
-  m.impl(
-      TORCH_SELECTIVE_NAME("aten::split.str"),
-      [](const std::string& string,
-         c10::optional<std::string> separator,
-         int64_t max) {
-        if (!separator.has_value()) {
-          // if separator is not specified,
-          // a different splitting algorithm is applied as Python
-          return splitNoneSeparator(string);
-          ;
-        }
-        if (separator.value().empty()) {
-          throw std::runtime_error("ValueError: empty separator");
-        }
-
-        std::string::size_type prev_pos = 0;
-        std::string::size_type pos = 0;
-        c10::List<std::string> splits;
-        auto count = 0;
-
-        while ((pos = string.find(separator.value(), pos)) !=
-               std::string::npos) {
-          count++;
-          if (max >= 0 && count > max) {
-            break;
+// Implementations located in torch/csrc/jit/runtime/register_prim_ops.cpp
+static const std::vector<OperatorGeneratorArgs> stringOpGenArgs{
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::slice.str(str string, int? start=None, int? end=None, int step=1) -> str"),
+        [](Stack& stack) {
+          int64_t step = pop(stack).toInt();
+          c10::optional<int64_t> end = pop(stack).toOptional<int64_t>();
+          c10::optional<int64_t> start = pop(stack).toOptional<int64_t>();
+          std::string string = pop(stack).toStringRef();
+          push(stack, stringSlice(string, start, end, step));
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::strip(str self, str chars=' \\n\\t\\f\\v') -> str"),
+        [](Stack& stack) {
+          std::string chars = pop(stack).toStringRef();
+          std::string string = pop(stack).toStringRef();
+          auto rindex = string.find_last_not_of(chars);
+          if (rindex != std::string::npos) {
+            string = string.substr(0, rindex + 1);
           } else {
-            splits.emplace_back(string.substr(prev_pos, pos - prev_pos));
+            string = "";
           }
-          pos += separator.value().size();
-          prev_pos = pos;
-        }
-        splits.emplace_back(string.substr(prev_pos, string.size() - prev_pos));
-        return splits;
-      });
-  m.impl(
-      TORCH_SELECTIVE_NAME("aten::splitlines"),
-      [](std::string string, bool keepends) {
-        std::string delimiters =
-            "\n\r\r\n\v\x0b\f\x0c\x1c\x1d\x1e\x85\u2028\u2029";
-        c10::List<std::string> splits;
+          auto lindex = string.find_first_not_of(chars);
+          if (lindex != std::string::npos) {
+            string = string.substr(lindex, string.size());
+          } else {
+            string = "";
+          }
+          push(stack, string);
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::split.str(str self, str? separator=None, int max=-1) -> str[]"),
+        [](Stack& stack) {
+          int64_t max = pop(stack).toInt();
+          IValue ivalue = pop(stack);
+          std::string string = pop(stack).toStringRef();
 
-        std::string::size_type prev_pos = 0;
-        std::string::size_type pos = 0;
-        while ((pos = string.find_first_of(delimiters, pos)) !=
-               std::string::npos) {
-          splits.emplace_back(string.substr(prev_pos, pos - prev_pos));
-          if (keepends) {
-            splits.emplace_back(string.substr(pos, 1));
+          std::string::size_type prev_pos = 0;
+          std::string::size_type pos = 0;
+          c10::List<std::string> splits;
+          if (ivalue == c10::nullopt) {
+            // if separator is not specified,
+            // a different splitting algorithm is applied as Python
+            splits = splitNoneSeparator(string);
+            push(stack, std::move(splits));
+            return;
           }
-          pos++;
-          prev_pos = pos;
-        }
-        if (prev_pos != string.size()) {
+
+          const std::string& separator = ivalue.toStringRef();
+
+          if (separator.empty()) {
+            throw std::runtime_error("ValueError: empty separator");
+          }
+
+          auto count = 0;
+
+          while ((pos = string.find(separator, pos)) != std::string::npos) {
+            count++;
+            if (max >= 0 && count > max) {
+              break;
+            } else {
+              splits.emplace_back(string.substr(prev_pos, pos - prev_pos));
+            }
+            pos += separator.size();
+            prev_pos = pos;
+          }
           splits.emplace_back(
               string.substr(prev_pos, string.size() - prev_pos));
-        }
+          push(stack, std::move(splits));
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::splitlines(str self, bool keepends=False) -> str[]"),
+        [](Stack& stack) {
+          bool keepends = pop(stack).toBool();
+          std::string string = pop(stack).toStringRef();
+          std::string delimiters =
+              "\n\r\r\n\v\x0b\f\x0c\x1c\x1d\x1e\x85\u2028\u2029";
+          c10::List<std::string> splits;
 
-        return splits;
-      });
-
-  // upper and lower require there to be at least one alpha character,
-  // and ignore all other characters
-  m.impl(TORCH_SELECTIVE_NAME("aten::isupper"), [](std::string string) {
-    bool found_alpha = false;
-    bool is_upper = true;
-    for (size_t i = 0; i < string.size() && is_upper; ++i) {
-      char c = string[i];
-      found_alpha |= static_cast<bool>(::isalpha(c));
-      is_upper &= (!::isalpha(c) || ::isupper(c));
-    }
-    return found_alpha && is_upper;
-  });
-  m.impl(TORCH_SELECTIVE_NAME("aten::islower"), [](std::string string) {
-    bool found_alpha = false;
-    bool is_lower = true;
-    for (size_t i = 0; i < string.size() && is_lower; ++i) {
-      char c = string[i];
-      found_alpha |= static_cast<bool>(::isalpha(c));
-      is_lower &= (!::isalpha(c) || ::islower(c));
-    }
-    return found_alpha && is_lower;
-  });
-
-  m.impl(TORCH_SELECTIVE_NAME("aten::capitalize"), [](std::string string) {
-    std::stringstream ss;
-    auto first_char = true;
-    for (char c : string) {
-      if (first_char) {
-        ss << static_cast<char>(::toupper(c));
-        first_char = false;
-      } else {
-        ss << static_cast<char>(::tolower(c));
-      }
-    }
-    return ss.str();
-  });
-
-  m.impl(TORCH_SELECTIVE_NAME("aten::title"), [](std::string string) {
-    std::stringstream ss;
-    bool prev_is_nonalpha = true;
-    for (char c : string) {
-      if (prev_is_nonalpha) {
-        ss << static_cast<char>(::toupper(c));
-      } else {
-        ss << static_cast<char>(::tolower(c));
-      }
-      if (::isalpha(c)) {
-        prev_is_nonalpha = false;
-      } else {
-        prev_is_nonalpha = true;
-      }
-    }
-    return ss.str();
-  });
-
-  m.impl(
-      TORCH_SELECTIVE_NAME("aten::center"),
-      [](std::string string, int64_t width, std::string fillchar) {
-        if (fillchar.size() != 1) {
-          // TODO: this should be a TypeError
-          throw std::runtime_error(
-              "TypeError: The fill character must be exactly one character long");
-        }
-        if (string.size() > static_cast<std::string::size_type>(width)) {
-          return string;
-        }
-        std::stringstream ss;
-        std::string::size_type full_padding = width - string.size();
-        std::string::size_type l_pad = full_padding / 2;
-        std::string::size_type r_pad = (full_padding + 1) / 2;
-        if (width % 2) {
-          auto tmp = r_pad;
-          r_pad = l_pad;
-          l_pad = tmp;
-        }
-        for (std::string::size_type i = 0; i < l_pad; ++i) {
-          ss << fillchar;
-        }
-        ss << string;
-        for (std::string::size_type i = 0; i < r_pad; ++i) {
-          ss << fillchar;
-        }
-        return ss.str();
-      });
-
-  // Adapted from
-  // https://stackoverflow.com/questions/22489073/counting-the-number-of-occurrences-of-a-string-within-a-string
-  m.impl(
-      TORCH_SELECTIVE_NAME("aten::count"),
-      [](std::string string, std::string substr, int64_t start, int64_t end) {
-        int64_t size = string.size();
-        if (start > size) {
-          return int64_t(0);
-        }
-        if (start < 0) {
-          start = std::max(int64_t(0), int64_t(size + start));
-        }
-        if (end < 0) {
-          end = std::max(int64_t(0), int64_t(size + end + 1));
-        }
-
-        int64_t occurrences = 0;
-        std::string::size_type pos = start;
-        while ((pos = string.find(substr, pos)) != std::string::npos) {
-          if (pos < static_cast<std::string::size_type>(end)) {
-            ++occurrences;
-          } else {
-            break;
-          }
-          pos += substr.length();
-        }
-        return occurrences;
-      });
-
-  m.impl(
-      TORCH_SELECTIVE_NAME("aten::endswith"),
-      [](std::string string, std::string substr, int64_t start, int64_t end) {
-        int64_t size = string.size();
-        if (start < 0) {
-          start = std::max(int64_t(0), int64_t(size + start));
-        }
-        if (end < 0) {
-          end = std::max(int64_t(0), int64_t(size + end + 1));
-        }
-
-        string = string.substr(start, end - start);
-
-        auto result = false;
-        if (string.length() >= substr.length()) {
-          result = !string.compare(
-              string.length() - substr.length(), substr.length(), substr);
-        }
-        return result;
-      });
-
-  m.impl(
-      TORCH_SELECTIVE_NAME("aten::startswith"),
-      [](std::string string, std::string substr, int64_t start, int64_t end) {
-        int64_t size = string.size();
-        if (start < 0) {
-          start = std::max(int64_t(0), int64_t(size + start));
-        }
-        if (end < 0) {
-          end = std::max(int64_t(0), int64_t(size + end + 1));
-        }
-
-        string = string.substr(start, end - start);
-
-        auto result = false;
-        if (string.length() >= substr.length()) {
-          result = !string.compare(0, substr.length(), substr);
-        }
-        return result;
-      });
-
-  m.impl(
-      TORCH_SELECTIVE_NAME("aten::expandtabs"),
-      [](std::string string, int64_t tabsize) {
-        std::stringstream ss;
-        size_t index = 0;
-        for (const auto& c : string) {
-          if (c != '\t') {
-            ss << c;
-            index++;
-          } else {
-            if (tabsize <= 0) {
-              continue;
+          std::string::size_type prev_pos = 0;
+          std::string::size_type pos = 0;
+          while ((pos = string.find_first_of(delimiters, pos)) !=
+                 std::string::npos) {
+            splits.emplace_back(string.substr(prev_pos, pos - prev_pos));
+            if (keepends) {
+              splits.emplace_back(string.substr(pos, 1));
             }
-            do {
-              ss << ' ';
+            pos++;
+            prev_pos = pos;
+          }
+          if (prev_pos != string.size()) {
+            splits.emplace_back(
+                string.substr(prev_pos, string.size() - prev_pos));
+          }
+
+          push(stack, std::move(splits));
+        },
+        aliasAnalysisFromSchema()),
+    // upper and lower require there to be at least one alpha character,
+    // and ignore all other characters
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::isupper(str self) -> bool"),
+        [](Stack& stack) {
+          std::string string = pop(stack).toStringRef();
+          bool found_alpha = false;
+          bool is_upper = true;
+          for (size_t i = 0; i < string.size() && is_upper; ++i) {
+            char c = string[i];
+            found_alpha |= static_cast<bool>(::isalpha(c));
+            is_upper &= (!::isalpha(c) || ::isupper(c));
+          }
+          push(stack, found_alpha && is_upper);
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::islower(str self) -> bool"),
+        [](Stack& stack) {
+          std::string string = pop(stack).toStringRef();
+          bool found_alpha = false;
+          bool is_lower = true;
+          for (size_t i = 0; i < string.size() && is_lower; ++i) {
+            char c = string[i];
+            found_alpha |= static_cast<bool>(::isalpha(c));
+            is_lower &= (!::isalpha(c) || ::islower(c));
+          }
+          push(stack, found_alpha && is_lower);
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::capitalize(str self) -> str"),
+        [](Stack& stack) {
+          std::string string = pop(stack).toStringRef();
+          std::stringstream ss;
+          auto first_char = true;
+          for (char c : string) {
+            if (first_char) {
+              ss << static_cast<char>(::toupper(c));
+              first_char = false;
+            } else {
+              ss << static_cast<char>(::tolower(c));
+            }
+          }
+          push(stack, ss.str());
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::title(str self) -> str"),
+        [](Stack& stack) {
+          std::string string = pop(stack).toStringRef();
+          std::stringstream ss;
+          bool prev_is_nonalpha = true;
+          for (char c : string) {
+            if (prev_is_nonalpha) {
+              ss << static_cast<char>(::toupper(c));
+            } else {
+              ss << static_cast<char>(::tolower(c));
+            }
+            if (::isalpha(c)) {
+              prev_is_nonalpha = false;
+            } else {
+              prev_is_nonalpha = true;
+            }
+          }
+          push(stack, ss.str());
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::center(str self, int width, str fillchar=' ') -> str"),
+        [](Stack& stack) {
+          std::string fillchar = pop(stack).toStringRef();
+          int64_t width = pop(stack).toInt();
+          std::string string = pop(stack).toStringRef();
+          if (fillchar.size() != 1) {
+            // TODO: this should be a TypeError
+            throw std::runtime_error(
+                "TypeError: The fill character must be exactly one character long");
+          }
+          if (string.size() > static_cast<std::string::size_type>(width)) {
+            push(stack, string);
+            return;
+          }
+          std::stringstream ss;
+          std::string::size_type full_padding = width - string.size();
+          std::string::size_type l_pad = full_padding / 2;
+          std::string::size_type r_pad = (full_padding + 1) / 2;
+          if (width % 2) {
+            auto tmp = r_pad;
+            r_pad = l_pad;
+            l_pad = tmp;
+          }
+          for (std::string::size_type i = 0; i < l_pad; ++i) {
+            ss << fillchar;
+          }
+          ss << string;
+          for (std::string::size_type i = 0; i < r_pad; ++i) {
+            ss << fillchar;
+          }
+          push(stack, ss.str());
+        },
+        aliasAnalysisFromSchema()),
+
+    // Adapted from
+    // https://stackoverflow.com/questions/22489073/counting-the-number-of-occurrences-of-a-string-within-a-string
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::count(str self, str substr, int start=0, int end=-1) -> int"),
+        [](Stack& stack) {
+          int64_t end = pop(stack).toInt();
+          int64_t start = pop(stack).toInt();
+          std::string substr = pop(stack).toStringRef();
+          std::string string = pop(stack).toStringRef();
+          int64_t size = string.size();
+          if (start > size) {
+            push(stack, 0);
+            return;
+          }
+          if (start < 0) {
+            start = std::max(int64_t(0), int64_t(size + start));
+          }
+          if (end < 0) {
+            end = std::max(int64_t(0), int64_t(size + end + 1));
+          }
+
+          int64_t occurrences = 0;
+          std::string::size_type pos = start;
+          while ((pos = string.find(substr, pos)) != std::string::npos) {
+            if (pos < static_cast<std::string::size_type>(end)) {
+              ++occurrences;
+            } else {
+              break;
+            }
+            pos += substr.length();
+          }
+          push(stack, occurrences);
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::endswith(str self, str substr, int start=0, int end=-1) -> bool"),
+        [](Stack& stack) {
+          int64_t end = pop(stack).toInt();
+          int64_t start = pop(stack).toInt();
+          std::string substr = pop(stack).toStringRef();
+          std::string string = pop(stack).toStringRef();
+          int64_t size = string.size();
+          if (start < 0) {
+            start = std::max(int64_t(0), int64_t(size + start));
+          }
+          if (end < 0) {
+            end = std::max(int64_t(0), int64_t(size + end + 1));
+          }
+
+          string = string.substr(start, end - start);
+
+          auto result = false;
+          if (string.length() >= substr.length()) {
+            result = !string.compare(
+                string.length() - substr.length(), substr.length(), substr);
+          }
+          push(stack, result);
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::startswith(str self, str substr, int start=0, int end=-1) -> bool"),
+        [](Stack& stack) {
+          int64_t end = pop(stack).toInt();
+          int64_t start = pop(stack).toInt();
+          std::string substr = pop(stack).toStringRef();
+          std::string string = pop(stack).toStringRef();
+          int64_t size = string.size();
+          if (start < 0) {
+            start = std::max(int64_t(0), int64_t(size + start));
+          }
+          if (end < 0) {
+            end = std::max(int64_t(0), int64_t(size + end + 1));
+          }
+
+          string = string.substr(start, end - start);
+
+          auto result = false;
+          if (string.length() >= substr.length()) {
+            result = !string.compare(0, substr.length(), substr);
+          }
+          push(stack, result);
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::expandtabs(str self, int tabsize=8) -> str"),
+        [](Stack& stack) {
+          int64_t tabsize = pop(stack).toInt();
+          std::string string = pop(stack).toStringRef();
+          std::stringstream ss;
+          size_t index = 0;
+          for (const auto& c : string) {
+            if (c != '\t') {
+              ss << c;
               index++;
-            } while (index % tabsize);
+            } else {
+              if (tabsize <= 0) {
+                continue;
+              }
+              do {
+                ss << ' ';
+                index++;
+              } while (index % tabsize);
+            }
           }
-        }
-        return ss.str();
-      });
+          push(stack, ss.str());
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::find(str self, str substr, int start=0, int end=-1) -> int"),
+        [](Stack& stack) {
+          int64_t end = pop(stack).toInt();
+          int64_t start = pop(stack).toInt();
+          std::string substr = pop(stack).toStringRef();
+          std::string string = pop(stack).toStringRef();
 
-  m.impl(
-      TORCH_SELECTIVE_NAME("aten::find"),
-      [](std::string string, std::string substr, int64_t start, int64_t end) {
-        return stringFindImpl(string, substr, start, end);
-      });
+          push(stack, stringFindImpl(string, substr, start, end));
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::rfind(str self, str substr, int start=0, int end=-1) -> int"),
+        [](Stack& stack) {
+          int64_t end = pop(stack).toInt();
+          int64_t start = pop(stack).toInt();
+          std::string substr = pop(stack).toStringRef();
+          std::string string = pop(stack).toStringRef();
 
-  m.impl(
-      TORCH_SELECTIVE_NAME("aten::rfind"),
-      [](std::string string, std::string substr, int64_t start, int64_t end) {
-        return stringFindImpl(string, substr, start, end, true);
-      });
-
-  m.impl(
-      TORCH_SELECTIVE_NAME("aten::index.str"),
-      [](std::string string, std::string substr, int64_t start, int64_t end) {
-        auto result = stringFindImpl(string, substr, start, end);
-        if (result < 0) {
-          throw std::runtime_error("ValueError: substring not found");
-        }
-        return result;
-      });
-
-  m.impl(
-      TORCH_SELECTIVE_NAME("aten::rindex"),
-      [](std::string string, std::string substr, int64_t start, int64_t end) {
-        auto result = stringFindImpl(string, substr, start, end, true);
-        if (result < 0) {
-          throw std::runtime_error("ValueError: substring not found");
-        }
-        return result;
-      });
-
-  m.impl(TORCH_SELECTIVE_NAME("aten::isidentifier"), [](std::string string) {
-    LOG(WARNING)
-        << "The isidentifier() implementation being used is from Python 2\n";
-    if (string.size() < 1) {
-      return false;
-    }
-    if (::isdigit(string[0])) {
-      return false;
-    }
-    auto result = std::all_of(
-        string.begin(), string.end(), [](char c) { return ::isalnum(c); });
-    return result;
-  });
-
-  m.impl(TORCH_SELECTIVE_NAME("aten::istitle"), [](std::string string) {
-    auto result = false;
-
-    bool prev_is_alpha = false;
-    for (char c : string) {
-      if (prev_is_alpha) {
-        if (c != static_cast<char>(::tolower(c))) {
-          result = false;
-          break;
-        }
-      } else {
-        if (c != static_cast<char>(::toupper(c))) {
-          result = false;
-          break;
-        }
-        // Only true if there exists at least one alpha
-        if (::isalpha(c)) {
-          result = true;
-        }
-      }
-      if (::isalpha(c)) {
-        prev_is_alpha = true;
-      } else {
-        prev_is_alpha = false;
-      }
-    }
-    return result;
-  });
-
-  // Can't reuse DEFINE_STRING_IS_OP because "" is printable
-  m.impl(TORCH_SELECTIVE_NAME("aten::isprintable"), [](std::string string) {
-    auto result = std::all_of(string.begin(), string.end(), [](char c) {
-      return ::isalnum(c) || ::ispunct(c) || c == ' ';
-    });
-    return result;
-  });
-
-  m.impl(
-      TORCH_SELECTIVE_NAME("aten::ljust"),
-      [](std::string string, int64_t width, std::string fillchar) {
-        if (fillchar.size() != 1) {
-          // TODO: this should be a TypeError
-          throw std::runtime_error(
-              "TypeError: The fill character must be exactly one character long");
-        }
-        auto to_append =
-            std::max(int64_t(0), width - static_cast<int64_t>(string.size()));
-
-        std::stringstream ss;
-        ss << string;
-        for (const auto i : c10::irange(to_append)) {
-          (void)i; // Suppress unused variable warning
-          ss << fillchar;
-        }
-
-        return ss.str();
-      });
-
-  m.impl(
-      TORCH_SELECTIVE_NAME("aten::rjust"),
-      [](std::string string, int64_t width, std::string fillchar) {
-        if (fillchar.size() != 1) {
-          // TODO: this should be a TypeError
-          throw std::runtime_error(
-              "TypeError: The fill character must be exactly one character long");
-        }
-        auto to_append =
-            std::max(int64_t(0), width - static_cast<int64_t>(string.size()));
-
-        std::stringstream ss;
-        for (const auto i : c10::irange(to_append)) {
-          (void)i; // Suppress unused variable warning
-          ss << fillchar;
-        }
-        ss << string;
-        return ss.str();
-      });
-
-  m.impl(
-      TORCH_SELECTIVE_NAME("aten::zfill"),
-      [](std::string string, int64_t width) {
-        auto to_append =
-            std::max(int64_t(0), width - static_cast<int64_t>(string.size()));
-
-        std::stringstream ss;
-        for (const auto i : c10::irange(to_append)) {
-          (void)i; // Suppress unused variable warning
-          ss << '0';
-        }
-        ss << string;
-
-        return ss.str();
-      });
-
-  m.impl(
-      TORCH_SELECTIVE_NAME("aten::lstrip"),
-      [](std::string string, std::string chars) {
-        auto index = string.find_first_not_of(chars);
-        if (index != std::string::npos) {
-          string = string.substr(index, string.size());
-        } else {
-          string = "";
-        }
-        return string;
-      });
-
-  m.impl(
-      TORCH_SELECTIVE_NAME("aten::rstrip"),
-      [](std::string string, std::string chars) {
-        auto index = string.find_last_not_of(chars);
-        if (index != std::string::npos) {
-          string = string.substr(0, index + 1);
-        } else {
-          string = "";
-        }
-        return string;
-      });
-
-  m.impl(
-      TORCH_SELECTIVE_NAME("aten::replace"),
-      [](std::string string,
-         std::string old_str,
-         std::string new_str,
-         int64_t max) {
-        int64_t occurrences = 0;
-        std::string::size_type pos = 0;
-        while ((pos = string.find(old_str, pos)) != std::string::npos) {
-          if (max >= 0 && ++occurrences > max) {
-            break;
+          push(stack, stringFindImpl(string, substr, start, end, true));
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::index.str(str self, str substr, int start=0, int end=-1) -> int"),
+        [](Stack& stack) {
+          int64_t end = pop(stack).toInt();
+          int64_t start = pop(stack).toInt();
+          std::string substr = pop(stack).toStringRef();
+          std::string string = pop(stack).toStringRef();
+          auto result = stringFindImpl(string, substr, start, end);
+          if (result < 0) {
+            throw std::runtime_error("ValueError: substring not found");
           }
-          string = string.replace(pos, old_str.length(), new_str);
-          pos += new_str.length();
-        }
+          push(stack, result);
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::rindex(str self, str substr, int start=0, int end=-1) -> int"),
+        [](Stack& stack) {
+          int64_t end = pop(stack).toInt();
+          int64_t start = pop(stack).toInt();
+          std::string substr = pop(stack).toStringRef();
+          std::string string = pop(stack).toStringRef();
+          auto result = stringFindImpl(string, substr, start, end, true);
+          if (result < 0) {
+            throw std::runtime_error("ValueError: substring not found");
+          }
+          push(stack, result);
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::isidentifier(str self) -> bool"),
+        [](Stack& stack) {
+          std::string string = pop(stack).toStringRef();
+          LOG(WARNING)
+              << "The isidentifier() implementation being used is from Python 2\n";
+          if (string.size() < 1) {
+            push(stack, false);
+            return;
+          }
+          if (::isdigit(string[0])) {
+            push(stack, false);
+            return;
+          }
+          auto result = std::all_of(string.begin(), string.end(), [](char c) {
+            return ::isalnum(c);
+          });
+          push(stack, result);
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::istitle(str self) -> bool"),
+        [](Stack& stack) {
+          std::string string = pop(stack).toStringRef();
+          auto result = false;
 
-        return string;
-      });
+          bool prev_is_alpha = false;
+          for (char c : string) {
+            if (prev_is_alpha) {
+              if (c != static_cast<char>(::tolower(c))) {
+                result = false;
+                break;
+              }
+            } else {
+              if (c != static_cast<char>(::toupper(c))) {
+                result = false;
+                break;
+              }
+              // Only true if there exists at least one alpha
+              if (::isalpha(c)) {
+                result = true;
+              }
+            }
+            if (::isalpha(c)) {
+              prev_is_alpha = true;
+            } else {
+              prev_is_alpha = false;
+            }
+          }
+          push(stack, result);
+        },
+        aliasAnalysisFromSchema()),
+    // Can't reuse DEFINE_STRING_IS_OP because "" is printable
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::isprintable(str self) -> bool"),
+        [](Stack& stack) {
+          std::string string = pop(stack).toStringRef();
+          auto result = std::all_of(string.begin(), string.end(), [](char c) {
+            return ::isalnum(c) || ::ispunct(c) || c == ' ';
+          });
+          push(stack, result);
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::ljust(str self, int width, str fillchar=' ') -> str"),
+        [](Stack& stack) {
+          std::string fillchar = pop(stack).toStringRef();
+          int64_t width = pop(stack).toInt();
+          std::string string = pop(stack).toStringRef();
+          if (fillchar.size() != 1) {
+            // TODO: this should be a TypeError
+            throw std::runtime_error(
+                "TypeError: The fill character must be exactly one character long");
+          }
+          auto to_append =
+              std::max(int64_t(0), width - static_cast<int64_t>(string.size()));
 
-  m.impl(
-      TORCH_SELECTIVE_NAME("aten::partition"),
-      [](std::string string, std::string separator) {
-        auto pos = string.find(separator, 0);
-        if (pos == std::string::npos) {
-          pos = string.size();
-          separator = "";
-        }
-        auto pre_partition = string.substr(0, pos);
-        auto post_partition =
-            string.substr(pos + separator.size(), string.size());
+          std::stringstream ss;
+          ss << string;
+          for (const auto i : c10::irange(to_append)) {
+            (void)i; // Suppress unused variable warning
+            ss << fillchar;
+          }
+          push(stack, ss.str());
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::rjust(str self, int width, str fillchar=' ') -> str"),
+        [](Stack& stack) {
+          std::string fillchar = pop(stack).toStringRef();
+          int64_t width = pop(stack).toInt();
+          std::string string = pop(stack).toStringRef();
+          if (fillchar.size() != 1) {
+            // TODO: this should be a TypeError
+            throw std::runtime_error(
+                "TypeError: The fill character must be exactly one character long");
+          }
+          auto to_append =
+              std::max(int64_t(0), width - static_cast<int64_t>(string.size()));
 
-        return std::make_tuple(pre_partition, separator, post_partition);
-      });
+          std::stringstream ss;
+          for (const auto i : c10::irange(to_append)) {
+            (void)i; // Suppress unused variable warning
+            ss << fillchar;
+          }
+          ss << string;
+          push(stack, ss.str());
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::zfill(str self, int width) -> str"),
+        [](Stack& stack) {
+          int64_t width = pop(stack).toInt();
+          std::string string = pop(stack).toStringRef();
+          auto to_append =
+              std::max(int64_t(0), width - static_cast<int64_t>(string.size()));
 
-  m.impl(
-      TORCH_SELECTIVE_NAME("aten::rpartition"),
-      [](std::string string, std::string separator) {
-        auto pos = string.find(separator, 0);
-        auto rpos = pos;
-        do {
-          pos = rpos;
-          rpos = string.find(separator, pos + 1);
-        } while (rpos != std::string::npos);
-
-        if (pos == std::string::npos) {
-          pos = 0;
-          separator = "";
-        }
-
-        auto pre_partition = string.substr(0, pos);
-        auto post_partition =
-            string.substr(pos + separator.size(), string.size());
-
-        return std::make_tuple(pre_partition, separator, post_partition);
-      });
-
-  m.impl(
-      TORCH_SELECTIVE_NAME("aten::rsplit"),
-      [](std::string string, std::string separator, int64_t max) {
-        std::reverse(separator.begin(), separator.end());
-        std::reverse(string.begin(), string.end());
-
-        std::string::size_type prev_pos = 0;
-        std::string::size_type pos = 0;
-        c10::List<std::string> splits;
-        auto count = 0;
-        while ((pos = string.find(separator, pos)) != std::string::npos) {
-          count++;
-          if (max >= 0 && count > max) {
-            break;
+          std::stringstream ss;
+          for (const auto i : c10::irange(to_append)) {
+            (void)i; // Suppress unused variable warning
+            ss << '0';
+          }
+          ss << string;
+          push(stack, ss.str());
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::lstrip(str self, str chars=' \\n\\t\\f\\v') -> str"),
+        [](Stack& stack) {
+          std::string chars = pop(stack).toStringRef();
+          std::string string = pop(stack).toStringRef();
+          auto index = string.find_first_not_of(chars);
+          if (index != std::string::npos) {
+            string = string.substr(index, string.size());
           } else {
-            auto substr = string.substr(prev_pos, pos - prev_pos);
-            std::reverse(substr.begin(), substr.end());
-            splits.emplace(splits.begin(), substr);
+            string = "";
           }
-          pos += separator.size();
-          prev_pos = pos;
-        }
-        auto substr = string.substr(prev_pos, string.size() - prev_pos);
-        std::reverse(substr.begin(), substr.end());
-        splits.emplace(splits.begin(), substr);
-        return splits;
-      });
-
-  m.impl(
-      TORCH_SELECTIVE_NAME("aten::join"),
-      [](const std::string& string, const c10::List<std::string>& values) {
-        std::stringstream ss;
-        for (auto it = values.begin(); it != values.end(); ++it) {
-          ss << static_cast<std::string>(*it);
-          if (it != values.end() - 1) {
-            ss << string;
+          push(stack, string);
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::rstrip(str self, str chars=' \\n\\t\\f\\v') -> str"),
+        [](Stack& stack) {
+          std::string chars = pop(stack).toStringRef();
+          std::string string = pop(stack).toStringRef();
+          auto index = string.find_last_not_of(chars);
+          if (index != std::string::npos) {
+            string = string.substr(0, index + 1);
+          } else {
+            string = "";
           }
-        }
-        return ss.str();
-      });
-}
+          push(stack, string);
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::replace(str self, str old, str new, int max=-1) -> str"),
+        [](Stack& stack) {
+          int64_t max = pop(stack).toInt();
+          std::string new_str = pop(stack).toStringRef();
+          std::string old_str = pop(stack).toStringRef();
+          std::string string = pop(stack).toStringRef();
+          int64_t occurrences = 0;
+          std::string::size_type pos = 0;
+          while ((pos = string.find(old_str, pos)) != std::string::npos) {
+            if (max >= 0 && ++occurrences > max) {
+              break;
+            }
+            string = string.replace(pos, old_str.length(), new_str);
+            pos += new_str.length();
+          }
 
-static const OperatorGeneratorArgs opGenArgs1[] = {
+          push(stack, string);
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::partition(str self, str separator) -> (str, str, str)"),
+        [](Stack& stack) {
+          std::string separator = pop(stack).toStringRef();
+          std::string string = pop(stack).toStringRef();
+          auto pos = string.find(separator, 0);
+          if (pos == std::string::npos) {
+            pos = string.size();
+            separator = "";
+          }
+          auto pre_partition = string.substr(0, pos);
+          auto post_partition =
+              string.substr(pos + separator.size(), string.size());
+          push(stack, pre_partition, separator, post_partition);
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::rpartition(str self, str separator) -> (str, str, str)"),
+        [](Stack& stack) {
+          std::string separator = pop(stack).toStringRef();
+          std::string string = pop(stack).toStringRef();
+          auto pos = string.find(separator, 0);
+          auto rpos = pos;
+          do {
+            pos = rpos;
+            rpos = string.find(separator, pos + 1);
+          } while (rpos != std::string::npos);
+
+          if (pos == std::string::npos) {
+            pos = 0;
+            separator = "";
+          }
+
+          auto pre_partition = string.substr(0, pos);
+          auto post_partition =
+              string.substr(pos + separator.size(), string.size());
+          push(stack, pre_partition, separator, post_partition);
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::rsplit(str self, str separator=' ', int max=-1) -> str[]"),
+        [](Stack& stack) {
+          int64_t max = pop(stack).toInt();
+          std::string separator = pop(stack).toStringRef();
+          std::string string = pop(stack).toStringRef();
+          std::reverse(separator.begin(), separator.end());
+          std::reverse(string.begin(), string.end());
+
+          std::string::size_type prev_pos = 0;
+          std::string::size_type pos = 0;
+          c10::List<std::string> splits;
+          auto count = 0;
+          while ((pos = string.find(separator, pos)) != std::string::npos) {
+            count++;
+            if (max >= 0 && count > max) {
+              break;
+            } else {
+              auto substr = string.substr(prev_pos, pos - prev_pos);
+              std::reverse(substr.begin(), substr.end());
+              splits.emplace(splits.begin(), substr);
+            }
+            pos += separator.size();
+            prev_pos = pos;
+          }
+          auto substr = string.substr(prev_pos, string.size() - prev_pos);
+          std::reverse(substr.begin(), substr.end());
+          splits.emplace(splits.begin(), substr);
+          push(stack, std::move(splits));
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::join(str self, str[] values) -> str"),
+        [](Stack& stack) {
+          IValue ivalue = pop(stack);
+          c10::ArrayRef<IValue> ivalues = ivalue.toListRef();
+          c10::List<std::string> values;
+          for (const auto& v : ivalues) {
+            values.emplace_back(v.toStringRef());
+          }
+          c10::optional<std::string> opt_string =
+              pop(stack).toOptional<std::string>();
+          const std::string& string = opt_string.value_or("");
+          std::stringstream ss;
+          for (auto it = values.begin(); it != values.end(); ++it) {
+            ss << static_cast<std::string>(*it);
+            if (it != values.end() - 1) {
+              ss << string;
+            }
+          }
+          push(stack, ss.str());
+        },
+        aliasAnalysisFromSchema()),
+};
+
+RegisterOperators regStrOps(createOperators(stringOpGenArgs));
+
+static const std::vector<OperatorGeneratorArgs> opGenArgs1{
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::rangelist(int n) -> int[]"),
         [](Stack& stack) {
@@ -2221,7 +2350,7 @@ static const OperatorGeneratorArgs opGenArgs1[] = {
           size.reserve(8);
           for (const auto i : c10::irange(num_inputs)) {
             size =
-                at::infer_size(size, peek(stack, i, num_inputs).toIntVector());
+                at::infer_size(size, peek(stack, i, num_inputs).toDimVector());
           }
           drop(stack, num_inputs);
           push(stack, IValue(size));
@@ -2345,12 +2474,12 @@ static const OperatorGeneratorArgs opGenArgs1[] = {
         [](Stack& stack) {
           IValue self_size, other_size;
           pop(stack, self_size, other_size);
-          auto s = self_size.toIntVector();
-          auto o = other_size.toIntVector();
+          auto s = self_size.toDimVector();
+          auto o = other_size.toDimVector();
           if (s == o) {
-            push(stack, IValue());
+            stack.emplace_back();
           } else {
-            push(stack, s);
+            stack.emplace_back(std::move(self_size));
           }
         },
         aliasAnalysisFromSchema()),
@@ -2364,15 +2493,14 @@ static const OperatorGeneratorArgs opGenArgs1[] = {
         },
         aliasAnalysisFromSchema())};
 
-RegisterOperators reg1(
-    createOperators(opGenArgs1, sizeof(opGenArgs1) / sizeof(opGenArgs1[0])));
+RegisterOperators reg1(createOperators(opGenArgs1));
 
 void hashValue(Stack& stack) {
   auto value = pop(stack);
   push(stack, value.hash());
 }
 
-static const OperatorGeneratorArgs opGenArgs2[] = {
+static const std::vector<OperatorGeneratorArgs> opGenArgs2{
     // registered as Any[] so that heterogenous tuples can be called with len()
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::len.any(Any[] a) -> int"),
@@ -3030,8 +3158,7 @@ static const OperatorGeneratorArgs opGenArgs2[] = {
     DEFINE_COMPLEX_OP_WITH_TENSOR_ARG(Tensor, bool, at::Tensor, bool),
 };
 
-RegisterOperators reg2(
-    createOperators(opGenArgs2, sizeof(opGenArgs2) / sizeof(opGenArgs2[0])));
+RegisterOperators reg2(createOperators(opGenArgs2));
 
 } // namespace
 } // namespace jit

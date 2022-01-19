@@ -33,6 +33,7 @@
 #include "torch/csrc/utils/tensor_numpy.h"
 #include "torch/csrc/utils/tensor_types.h"
 #include "torch/csrc/utils/structseq.h"
+#include "torch/csrc/autograd/python_return_types.h"
 
 #include <ATen/ATen.h>
 #include "c10/util/Optional.h"

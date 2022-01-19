@@ -809,6 +809,7 @@ from torch import random as random
 from torch import distributions as distributions
 from torch import testing as testing
 import torch.backends.cuda
+import torch.backends.cudnn
 import torch.backends.mkl
 import torch.backends.mkldnn
 import torch.backends.openmp
@@ -885,3 +886,6 @@ def _register_device_module(device_type, module):
         raise RuntimeError("The runtime module of '{}' has already "
                            "been registered with '{}'".format(device_type, getattr(m, device_type)))
     setattr(m, device_type, module)
+
+# expose return_types
+from . import return_types

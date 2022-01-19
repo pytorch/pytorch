@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/symbolic_shape_registry.h>
+#include <torch/csrc/jit/runtime/symbolic_shape_registry_util.h>
 #include <torch/csrc/jit/serialization/import_source.h>
 #include <unordered_map>
 
@@ -61,27 +62,10 @@ def prepacked_linear_clamp_run(input: List[int], linearOpContext: Any):
 static const OperatorMap<std::string>& get_schema_to_function_graph() {
   // clang-format off
   static const OperatorMap<std::string> schema_to_function_graph{
-      {"aten::mul.Tensor(Tensor self, Tensor other) -> Tensor", "broadcast"},
-      {"aten::mul.Scalar(Tensor self, Scalar other) -> Tensor", "unary"},
-      {"aten::div.Tensor(Tensor self, Tensor other) -> Tensor", "broadcast"},
-      {"aten::div.Scalar(Tensor self, Scalar other) -> Tensor", "unary"},
-      {"aten::sub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor", "broadcast"},
-      {"aten::sub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)", "broadcast"},
-      {"aten::sub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor", "unary"},
-      {"aten::sub_.Scalar(Tensor(a!) self, Scalar other, Scalar alpha=1) -> Tensor(a!)", "unary"},
       {"aten::contiguous(Tensor(a) self, *, MemoryFormat memory_format=contiguous_format) -> Tensor(a)", "unary"},
-      {"aten::gt.Tensor(Tensor self, Tensor other) -> Tensor", "broadcast"},
       {"aten::rsub.Tensor(Tensor self, Scalar other, Scalar alpha=1) -> Tensor", "unary"},
-      {"aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor", "broadcast"},
-      {"aten::add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor", "unary"},
-      {"aten::hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1) -> Tensor", "unary"},
-      {"aten::hardswish(Tensor self) -> Tensor", "unary"},
-      {"aten::hardsigmoid(Tensor self) -> Tensor", "unary"},
       {"aten::dropout(Tensor input, float p, bool train) -> Tensor", "unary"},
       {"aten::adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor", "adaptive_avg_pool2d"},
-      {"aten::gelu(Tensor self) -> Tensor", "unary"},
-      {"aten::tanh(Tensor self) -> Tensor", "unary"},
-      {"aten::erf(Tensor self) -> (Tensor)", "unary"},
       {"prim::NumToTensor.Scalar(Scalar a) -> Tensor", "zero_dim_tensor"},
       {"prim::NumToTensor.bool(bool a) -> Tensor", "zero_dim_tensor"},
       {"aten::zeros(int[] size, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None) -> (Tensor)", "unary"},
@@ -116,12 +100,13 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::conv3d(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1, int groups=1) -> Tensor", "conv3d"},
       {"aten::flatten.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)", "flatten"},
       {"aten::cat(Tensor[] tensors, int dim=0) -> Tensor", "cat"},
-      {"aten::relu(Tensor self) -> Tensor", "unary"},
       {"aten::permute(Tensor(a) self, int[] dims) -> Tensor(a)", "permute"},
       {"aten::view(Tensor(a) self, int[] size) -> Tensor(a)", "view"},
       {"aten::expand_as(Tensor(a) self, Tensor other) -> Tensor(a)", "expand"},
       {"aten::expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)", "expand_one_unused"},
       {"aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", "mean_dim"},
+      {"aten::max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)", "max_dim"},
+      {"aten::mean(Tensor self, *, ScalarType? dtype=None) -> Tensor", "zero_dim_tensor"},
       {"aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor", "addmm"},
       {"aten::upsample_nearest2d.vec(Tensor input, int[]? output_size, float[]? scale_factors) -> (Tensor)", "upsample_nearest2d"},
       {"aten::quantize_per_tensor(Tensor self, float scale, int zero_point, ScalarType dtype) -> Tensor", "unary"},
@@ -221,8 +206,12 @@ void registerSchema(
 void loadModule(const CompilationUnit& module) {
   std::unordered_map<std::string, std::shared_ptr<Graph>> reused_functions;
 
-  for (const auto& pair :
-       get_schema_to_function_graph().getAllKeysAndValues()) {
+  std::vector<std::pair<std::shared_ptr<Operator>, std::string>>
+      operator_pairs = get_schema_to_function_graph().getAllKeysAndValues();
+  auto te_ops = get_tensorexpr_elementwise_set().getAllKeysAndValues();
+  operator_pairs.insert(operator_pairs.end(), te_ops.begin(), te_ops.end());
+
+  for (const auto& pair : operator_pairs) {
     const FunctionSchema* schema_string = &pair.first->schema();
     const std::string& shape_compute_function_name = pair.second;
 

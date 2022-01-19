@@ -6,6 +6,8 @@
 #else
 #include <hip/hip_runtime_api.h>
 #endif
+
+#include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAException.h>
 
 namespace torch { namespace cuda { namespace shared {
@@ -46,7 +48,7 @@ void initCudartBindings(PyObject* module) {
   cudart.def("cuda" "ProfilerInitialize", cudaProfilerInitialize);
 #endif
   cudart.def("cuda" "MemGetInfo", [](int device) -> std::pair<size_t, size_t> {
-    C10_CUDA_CHECK(cudaGetDevice(&device));
+    c10::cuda::CUDAGuard guard(device);
     size_t device_free;
     size_t device_total;
     cudaMemGetInfo(&device_free, &device_total);

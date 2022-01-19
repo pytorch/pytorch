@@ -1,7 +1,7 @@
 
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
@@ -46,8 +46,6 @@ class TORCH_CUDA_CU_API ThreadPredicateMap {
   struct PredicateInfo {
     // Parallel types where only one thread/block is valid.
     ParallelTypeBitmap limited_types;
-    // Source tensors to grid reductions.
-    SourceMap source_map;
     // Parallel types where only one thread/block is enough.
     ParallelTypeBitmap redundant_types;
   };
@@ -100,7 +98,6 @@ class TORCH_CUDA_CU_API ThreadPredicateMap {
   void insert(
       const TensorView* tv,
       const ParallelTypeBitmap& valid_types,
-      const SourceMap& src_map,
       const ParallelTypeBitmap& redundant_types);
 
   //! Insert a new mapping

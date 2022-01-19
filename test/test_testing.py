@@ -7,7 +7,7 @@ import itertools
 import math
 import os
 import re
-import unittest
+import unittest.mock
 from typing import Any, Callable, Iterator, List, Tuple
 
 import torch
@@ -23,6 +23,7 @@ from torch.testing._internal.common_device_type import \
 from torch.testing._internal.common_methods_invocations import op_db
 import torch.testing._internal.opinfo_helper as opinfo_helper
 from torch.testing._internal.common_dtype import get_all_dtypes
+from torch.testing._internal.common_modules import modules, module_db
 
 # For testing TestCase methods and torch.testing functions
 class TestTesting(TestCase):
@@ -744,7 +745,7 @@ class TestAssertClose(TestCase):
         expected = "0"
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(ValueError, str(type(actual))):
+            with self.assertRaisesRegex(TypeError, str(type(actual))):
                 fn()
 
     def test_mismatching_shape(self):
@@ -761,7 +762,15 @@ class TestAssertClose(TestCase):
         expected = actual.to_mkldnn()
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaises(ValueError):
+            with self.assertRaisesRegex(ValueError, "layout"):
+                fn()
+
+    def test_meta(self):
+        actual = torch.empty((2, 2), device="meta")
+        expected = actual.clone()
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(NotImplementedError, "meta"):
                 fn()
 
     def test_mismatching_layout(self):
@@ -971,6 +980,31 @@ class TestAssertClose(TestCase):
         for fn in assert_close_with_inputs(actual, expected):
             fn(check_dtype=False)
 
+    class UnexpectedException(Exception):
+        """The only purpose of this exception is to test ``assert_close``'s handling of unexpected exceptions. Thus,
+        the test should mock a component to raise this instead of the regular behavior. We avoid using a builtin
+        exception here to avoid triggering possible handling of them.
+        """
+        pass
+
+    @unittest.mock.patch("torch.testing._comparison.TensorLikePair.__init__", side_effect=UnexpectedException)
+    def test_unexpected_error_originate(self, _):
+        actual = torch.tensor(1.0)
+        expected = actual.clone()
+
+        with self.assertRaisesRegex(RuntimeError, "unexpected exception"):
+            torch.testing.assert_close(actual, expected)
+
+    @unittest.mock.patch("torch.testing._comparison.TensorLikePair.compare", side_effect=UnexpectedException)
+    def test_unexpected_error_compare(self, _):
+        actual = torch.tensor(1.0)
+        expected = actual.clone()
+
+        with self.assertRaisesRegex(RuntimeError, "unexpected exception"):
+            torch.testing.assert_close(actual, expected)
+
+
+
 
 class TestAssertCloseMultiDevice(TestCase):
     @deviceCountAtLeast(1)
@@ -1170,36 +1204,14 @@ class TestAssertCloseSparseCOO(TestCase):
         for fn in assert_close_with_inputs(actual, expected):
             fn()
 
-    def test_mismatching_is_coalesced(self):
-        indices = (
-            (0, 1),
-            (1, 0),
-        )
-        values = (1, 2)
-        actual = torch.sparse_coo_tensor(indices, values, size=(2, 2))
-        expected = actual.clone().coalesce()
+    def test_mismatching_sparse_dims(self):
+        t = torch.randn(2, 3, 4)
+        actual = t.to_sparse()
+        expected = t.to_sparse(2)
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, "is_coalesced"):
+            with self.assertRaisesRegex(AssertionError, re.escape("number of sparse dimensions in sparse COO tensors")):
                 fn()
-
-    def test_mismatching_is_coalesced_no_check(self):
-        actual_indices = (
-            (0, 1),
-            (1, 0),
-        )
-        actual_values = (1, 2)
-        actual = torch.sparse_coo_tensor(actual_indices, actual_values, size=(2, 2)).coalesce()
-
-        expected_indices = (
-            (0, 1, 1,),
-            (1, 0, 0,),
-        )
-        expected_values = (1, 1, 1)
-        expected = torch.sparse_coo_tensor(expected_indices, expected_values, size=(2, 2))
-
-        for fn in assert_close_with_inputs(actual, expected):
-            fn(check_is_coalesced=False)
 
     def test_mismatching_nnz(self):
         actual_indices = (
@@ -1462,6 +1474,40 @@ class TestTestParametrization(TestCase):
         test_names = _get_test_names_for_test_class(TestParametrized)
         self.assertEqual(expected_test_names, test_names)
 
+    def test_modules_decorator_misuse_error(self):
+        # Test that @modules errors out when used with instantiate_parametrized_tests().
+
+        class TestParametrized(TestCase):
+            @modules(module_db)
+            def test_modules(self, module_info):
+                pass
+
+        with self.assertRaisesRegex(RuntimeError, 'intended to be used in a device-specific context'):
+            instantiate_parametrized_tests(TestParametrized)
+
+    def test_ops_decorator_misuse_error(self):
+        # Test that @modules errors out when used with instantiate_parametrized_tests().
+
+        class TestParametrized(TestCase):
+            @ops(op_db)
+            def test_ops(self, module_info):
+                pass
+
+        with self.assertRaisesRegex(RuntimeError, 'intended to be used in a device-specific context'):
+            instantiate_parametrized_tests(TestParametrized)
+
+    def test_multiple_handling_of_same_param_error(self):
+        # Test that multiple decorators handling the same param errors out.
+
+        class TestParametrized(TestCase):
+            @parametrize("x", range(3))
+            @parametrize("x", range(5))
+            def test_param(self, x):
+                pass
+
+        with self.assertRaisesRegex(RuntimeError, 'multiple parametrization decorators'):
+            instantiate_parametrized_tests(TestParametrized)
+
     @parametrize("x", [1, subtest(2, decorators=[unittest.expectedFailure]), 3])
     def test_subtest_expected_failure(self, x):
         if x == 2:
@@ -1529,12 +1575,6 @@ class TestTestParametrizationDeviceType(TestCase):
         test_names = _get_test_names_for_test_class(device_cls)
         self.assertEqual(expected_test_names, test_names)
 
-    # Note: Currently, the device string is inserted into the name multiple times.
-    # To fix this, the responsibility for adding the device string can be pushed outside
-    # into instantiate_device_type_tests(). This will result in the device string always being
-    # at the end of the test name, which is different from now for @ops tests. This possibly
-    # breaking change will be made in a future PR.
-    @unittest.expectedFailure
     def test_name_fn(self, device):
         device = self.device_type
 
@@ -1602,12 +1642,6 @@ class TestTestParametrizationDeviceType(TestCase):
         test_names = _get_test_names_for_test_class(device_cls)
         self.assertEqual(expected_test_names, test_names)
 
-    # Note: Currently, the device string is inserted into the name multiple times.
-    # To fix this, the responsibility for adding the device string can be pushed outside
-    # into instantiate_device_type_tests(). This will result in the device string always being
-    # at the end of the test name, which is different from now for @ops tests. This possibly
-    # breaking change will be made in a future PR.
-    @unittest.expectedFailure
     def test_ops_composition_names(self, device):
         device = self.device_type
 
@@ -1623,16 +1657,17 @@ class TestTestParametrizationDeviceType(TestCase):
         expected_test_names = []
         for op in op_db:
             for dtype in op.default_test_dtypes(device):
-                for flag_part in ('_flag_disabled_', '_flag_enabled_'):
-                    op_name = '{}{}'.format(op.name, '_' + op.variant_test_name if op.variant_test_name else '')
-                    part1 = '{}.test_op_parametrized_{}'.format(device_cls.__name__, op_name)
-                    expected_test_names.append(part1 + '_' + dtype_name(dtype) + flag_part + device)
+                for flag_part in ('flag_disabled', 'flag_enabled'):
+                    expected_name = '{}.test_op_parametrized_{}_{}_{}_{}'.format(
+                        device_cls.__name__, op.formatted_name, flag_part, device, dtype_name(dtype))
+                    expected_test_names.append(expected_name)
 
         test_names = _get_test_names_for_test_class(device_cls)
         self.assertEqual(sorted(expected_test_names), sorted(test_names))
 
-    def test_dtypes_composition_names(self, device):
-        # Test checks that @parametrize and @dtypes compose as expected.
+    def test_dtypes_composition_valid(self, device):
+        # Test checks that @parametrize and @dtypes compose as expected when @parametrize
+        # doesn't set dtype.
 
         device = self.device_type
 
@@ -1655,6 +1690,45 @@ class TestTestParametrizationDeviceType(TestCase):
         ]
         test_names = _get_test_names_for_test_class(device_cls)
         self.assertEqual(sorted(expected_test_names), sorted(test_names))
+
+    def test_dtypes_composition_invalid(self, device):
+        # Test checks that @dtypes cannot be composed with parametrization decorators when they
+        # also try to set dtype.
+
+        device = self.device_type
+
+        class TestParametrized(TestCase):
+            @dtypes(torch.float32, torch.float64)
+            @parametrize("dtype", [torch.int32, torch.int64])
+            def test_parametrized(self, dtype):
+                pass
+
+        with self.assertRaisesRegex(RuntimeError, "handled multiple times"):
+            instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+
+        # Verify proper error behavior with @ops + @dtypes, as both try to set dtype.
+
+        class TestParametrized(TestCase):
+            @dtypes(torch.float32, torch.float64)
+            @ops(op_db)
+            def test_parametrized(self, op, dtype):
+                pass
+
+        with self.assertRaisesRegex(RuntimeError, "handled multiple times"):
+            instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+
+    def test_multiple_handling_of_same_param_error(self, device):
+        # Test that multiple decorators handling the same param errors out.
+        # Both @modules and @ops handle the dtype param.
+
+        class TestParametrized(TestCase):
+            @ops(op_db)
+            @modules(module_db)
+            def test_param(self, device, dtype, op, module_info):
+                pass
+
+        with self.assertRaisesRegex(RuntimeError, "handled multiple times"):
+            instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
 
     @parametrize("x", [1, subtest(2, decorators=[unittest.expectedFailure]), 3])
     def test_subtest_expected_failure(self, device, x):

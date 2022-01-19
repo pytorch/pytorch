@@ -150,9 +150,9 @@ struct InitLockAcquire {
 
 struct __attribute__((visibility("hidden"))) ConcreteInterpreterImpl
     : public torch::deploy::InterpreterImpl {
-  ConcreteInterpreterImpl() {
+  explicit ConcreteInterpreterImpl(
+      const std::vector<std::string>& extra_python_paths) {
     BuiltinRegistry::runPreInitialization();
-
     PyPreConfig preconfig;
     PyPreConfig_InitIsolatedConfig(&preconfig);
     PyStatus status = Py_PreInitialize(&preconfig);
@@ -182,7 +182,12 @@ struct __attribute__((visibility("hidden"))) ConcreteInterpreterImpl
     status = Py_InitializeFromConfig(&config);
     PyConfig_Clear(&config);
     TORCH_INTERNAL_ASSERT(!PyStatus_Exception(status))
-
+#ifdef FBCODE_CAFFE2
+    auto sys_path = global_impl("sys", "path");
+    for (const auto& entry : extra_python_paths) {
+      sys_path.attr("insert")(0, entry);
+    }
+#endif
     BuiltinRegistry::runPostInitialization();
 
     int r = PyRun_SimpleString(start);
@@ -402,6 +407,6 @@ torch::deploy::InterpreterSessionImpl* ConcreteInterpreterImpl::
 
 extern "C" __attribute__((visibility("default")))
 torch::deploy::InterpreterImpl*
-newInterpreterImpl(void) {
-  return new ConcreteInterpreterImpl();
+newInterpreterImpl(const std::vector<std::string>& extra_python_paths) {
+  return new ConcreteInterpreterImpl(extra_python_paths);
 }
