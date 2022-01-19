@@ -61,10 +61,15 @@ template <> inline std::string typeName<ctype>(){ \
 }
 
 AT_FORALL_SCALAR_TYPES(TYPE_NAME_FN)
-// JIT uses std::complex directly, because there was such
-// issue like "std::sin(complex) is __host__ only"
-TYPE_NAME_FN(std::complex<float>, ScalarType::ComplexFloat);
-TYPE_NAME_FN(std::complex<double>, ScalarType::ComplexDouble);
 #undef TYPE_NAME_FN
+// JIT uses std::complex directly, because nvRTC compile programs
+// with -default-device there was such issue like:
+//   "std::sin(complex) is __host__ only"
+template <> inline std::string typeName<c10::complex<float>>(){
+    return "std::complex<float>";
+}
+template <> inline std::string typeName<c10::complex<double>>(){
+    return "std::complex<double>";
+}
 
 }}}  // namespace at::cuda::jit

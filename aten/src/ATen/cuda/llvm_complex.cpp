@@ -368,39 +368,39 @@ operator*(const complex<_Tp>& __z, const complex<_Tp>& __w)
     _Tp __bc = __b * __c;
     _Tp __x = __ac - __bd;
     _Tp __y = __ad + __bc;
-    if (std::isnan(__x) && std::isnan(__y))
+    if (isnan(__x) && isnan(__y))
     {
         bool __recalc = false;
-        if (std::isinf(__a) || std::isinf(__b))
+        if (isinf(__a) || isinf(__b))
         {
-            __a = copysign(std::isinf(__a) ? _Tp(1) : _Tp(0), __a);
-            __b = copysign(std::isinf(__b) ? _Tp(1) : _Tp(0), __b);
-            if (std::isnan(__c))
+            __a = copysign(isinf(__a) ? _Tp(1) : _Tp(0), __a);
+            __b = copysign(isinf(__b) ? _Tp(1) : _Tp(0), __b);
+            if (isnan(__c))
                 __c = copysign(_Tp(0), __c);
-            if (std::isnan(__d))
+            if (isnan(__d))
                 __d = copysign(_Tp(0), __d);
             __recalc = true;
         }
-        if (std::isinf(__c) || std::isinf(__d))
+        if (isinf(__c) || isinf(__d))
         {
-            __c = copysign(std::isinf(__c) ? _Tp(1) : _Tp(0), __c);
-            __d = copysign(std::isinf(__d) ? _Tp(1) : _Tp(0), __d);
-            if (std::isnan(__a))
+            __c = copysign(isinf(__c) ? _Tp(1) : _Tp(0), __c);
+            __d = copysign(isinf(__d) ? _Tp(1) : _Tp(0), __d);
+            if (isnan(__a))
                 __a = copysign(_Tp(0), __a);
-            if (std::isnan(__b))
+            if (isnan(__b))
                 __b = copysign(_Tp(0), __b);
             __recalc = true;
         }
-        if (!__recalc && (std::isinf(__ac) || std::isinf(__bd) ||
-                          std::isinf(__ad) || std::isinf(__bc)))
+        if (!__recalc && (isinf(__ac) || isinf(__bd) ||
+                          isinf(__ad) || isinf(__bc)))
         {
-            if (std::isnan(__a))
+            if (isnan(__a))
                 __a = copysign(_Tp(0), __a);
-            if (std::isnan(__b))
+            if (isnan(__b))
                 __b = copysign(_Tp(0), __b);
-            if (std::isnan(__c))
+            if (isnan(__c))
                 __c = copysign(_Tp(0), __c);
-            if (std::isnan(__d))
+            if (isnan(__d))
                 __d = copysign(_Tp(0), __d);
             __recalc = true;
         }
@@ -443,7 +443,7 @@ operator/(const complex<_Tp>& __z, const complex<_Tp>& __w)
     _Tp __c = __w.real();
     _Tp __d = __w.imag();
     _Tp __logbw = logb(fmax(fabs(__c), fabs(__d)));
-    if (std::isfinite(__logbw))
+    if (isfinite(__logbw))
     {
         __ilogbw = static_cast<int>(__logbw);
         __c = scalbn(__c, -__ilogbw);
@@ -452,24 +452,24 @@ operator/(const complex<_Tp>& __z, const complex<_Tp>& __w)
     _Tp __denom = __c * __c + __d * __d;
     _Tp __x = scalbn((__a * __c + __b * __d) / __denom, -__ilogbw);
     _Tp __y = scalbn((__b * __c - __a * __d) / __denom, -__ilogbw);
-    if (std::isnan(__x) && std::isnan(__y))
+    if (isnan(__x) && isnan(__y))
     {
-        if ((__denom == _Tp(0)) && (!std::isnan(__a) || !std::isnan(__b)))
+        if ((__denom == _Tp(0)) && (!isnan(__a) || !isnan(__b)))
         {
             __x = copysign(_Tp(INFINITY), __c) * __a;
             __y = copysign(_Tp(INFINITY), __c) * __b;
         }
-        else if ((std::isinf(__a) || std::isinf(__b)) && std::isfinite(__c) && std::isfinite(__d))
+        else if ((isinf(__a) || isinf(__b)) && isfinite(__c) && isfinite(__d))
         {
-            __a = copysign(std::isinf(__a) ? _Tp(1) : _Tp(0), __a);
-            __b = copysign(std::isinf(__b) ? _Tp(1) : _Tp(0), __b);
+            __a = copysign(isinf(__a) ? _Tp(1) : _Tp(0), __a);
+            __b = copysign(isinf(__b) ? _Tp(1) : _Tp(0), __b);
             __x = _Tp(INFINITY) * (__a * __c + __b * __d);
             __y = _Tp(INFINITY) * (__b * __c - __a * __d);
         }
-        else if (std::isinf(__logbw) && __logbw > _Tp(0) && std::isfinite(__a) && std::isfinite(__b))
+        else if (isinf(__logbw) && __logbw > _Tp(0) && isfinite(__a) && isfinite(__b))
         {
-            __c = copysign(std::isinf(__c) ? _Tp(1) : _Tp(0), __c);
-            __d = copysign(std::isinf(__d) ? _Tp(1) : _Tp(0), __d);
+            __c = copysign(isinf(__c) ? _Tp(1) : _Tp(0), __c);
+            __d = copysign(isinf(__d) ? _Tp(1) : _Tp(0), __d);
             __x = _Tp(0) * (__a * __c + __b * __d);
             __y = _Tp(0) * (__b * __c - __a * __d);
         }
@@ -679,9 +679,9 @@ inline
 _Tp
 norm(const complex<_Tp>& __c)
 {
-    if (std::isinf(__c.real()))
+    if (isinf(__c.real()))
         return abs(__c.real());
-    if (std::isinf(__c.imag()))
+    if (isinf(__c.imag()))
         return abs(__c.imag());
     return __c.real() * __c.real() + __c.imag() * __c.imag();
 }
@@ -724,7 +724,7 @@ complex<_Tp>
 proj(const complex<_Tp>& __c)
 {
     complex<_Tp> __r = __c;
-    if (std::isinf(__c.real()) || std::isinf(__c.imag()))
+    if (isinf(__c.real()) || isinf(__c.imag()))
         __r = complex<_Tp>(INFINITY, copysign(_Tp(0), __c.imag()));
     return __r;
 }
@@ -738,7 +738,7 @@ typename enable_if
 >::type
 proj(_Tp __re)
 {
-    if (std::isinf(__re))
+    if (isinf(__re))
         __re = abs(__re);
     return complex<_Tp>(__re);
 }
@@ -762,25 +762,25 @@ template<class _Tp>
 complex<_Tp>
 polar(const _Tp& __rho, const _Tp& __theta = _Tp())
 {
-    if (std::isnan(__rho) || signbit(__rho))
+    if (isnan(__rho) || signbit(__rho))
         return complex<_Tp>(_Tp(NAN), _Tp(NAN));
-    if (std::isnan(__theta))
+    if (isnan(__theta))
     {
-        if (std::isinf(__rho))
+        if (isinf(__rho))
             return complex<_Tp>(__rho, __theta);
         return complex<_Tp>(__theta, __theta);
     }
-    if (std::isinf(__theta))
+    if (isinf(__theta))
     {
-        if (std::isinf(__rho))
+        if (isinf(__rho))
             return complex<_Tp>(__rho, _Tp(NAN));
         return complex<_Tp>(_Tp(NAN), _Tp(NAN));
     }
     _Tp __x = __rho * cos(__theta);
-    if (std::isnan(__x))
+    if (isnan(__x))
         __x = 0;
     _Tp __y = __rho * sin(__theta);
-    if (std::isnan(__y))
+    if (isnan(__y))
         __y = 0;
     return complex<_Tp>(__x, __y);
 }
@@ -811,13 +811,13 @@ template<class _Tp>
 complex<_Tp>
 sqrt(const complex<_Tp>& __x)
 {
-    if (std::isinf(__x.imag()))
+    if (isinf(__x.imag()))
         return complex<_Tp>(_Tp(INFINITY), __x.imag());
-    if (std::isinf(__x.real()))
+    if (isinf(__x.real()))
     {
         if (__x.real() > _Tp(0))
-            return complex<_Tp>(__x.real(), std::isnan(__x.imag()) ? __x.imag() : copysign(_Tp(0), __x.imag()));
-        return complex<_Tp>(std::isnan(__x.imag()) ? __x.imag() : _Tp(0), copysign(__x.real(), __x.imag()));
+            return complex<_Tp>(__x.real(), isnan(__x.imag()) ? __x.imag() : copysign(_Tp(0), __x.imag()));
+        return complex<_Tp>(isnan(__x.imag()) ? __x.imag() : _Tp(0), copysign(__x.real(), __x.imag()));
     }
     return polar(sqrt(abs(__x)), arg(__x) / _Tp(2));
 }
@@ -832,16 +832,16 @@ exp(const complex<_Tp>& __x)
     if (__i == 0) {
         return complex<_Tp>(exp(__x.real()), copysign(_Tp(0), __x.imag()));
     }
-    if (std::isinf(__x.real()))
+    if (isinf(__x.real()))
     {
         if (__x.real() < _Tp(0))
         {
-            if (!std::isfinite(__i))
+            if (!isfinite(__i))
                 __i = _Tp(1);
         }
-        else if (__i == 0 || !std::isfinite(__i))
+        else if (__i == 0 || !isfinite(__i))
         {
-            if (std::isinf(__i))
+            if (isinf(__i))
                 __i = _Tp(NAN);
             return complex<_Tp>(__x.real(), __i);
         }
@@ -913,23 +913,23 @@ complex<_Tp>
 asinh(const complex<_Tp>& __x)
 {
     const _Tp __pi(atan2(+0., -0.));
-    if (std::isinf(__x.real()))
+    if (isinf(__x.real()))
     {
-        if (std::isnan(__x.imag()))
+        if (isnan(__x.imag()))
             return __x;
-        if (std::isinf(__x.imag()))
+        if (isinf(__x.imag()))
             return complex<_Tp>(__x.real(), copysign(__pi * _Tp(0.25), __x.imag()));
         return complex<_Tp>(__x.real(), copysign(_Tp(0), __x.imag()));
     }
-    if (std::isnan(__x.real()))
+    if (isnan(__x.real()))
     {
-        if (std::isinf(__x.imag()))
+        if (isinf(__x.imag()))
             return complex<_Tp>(__x.imag(), __x.real());
         if (__x.imag() == 0)
             return __x;
         return complex<_Tp>(__x.real(), __x.real());
     }
-    if (std::isinf(__x.imag()))
+    if (isinf(__x.imag()))
         return complex<_Tp>(copysign(__x.imag(), __x.real()), copysign(__pi/_Tp(2), __x.imag()));
     complex<_Tp> __z = log(__x + sqrt(__sqr(__x) + _Tp(1)));
     return complex<_Tp>(copysign(__z.real(), __x.real()), copysign(__z.imag(), __x.imag()));
@@ -942,11 +942,11 @@ complex<_Tp>
 acosh(const complex<_Tp>& __x)
 {
     const _Tp __pi(atan2(+0., -0.));
-    if (std::isinf(__x.real()))
+    if (isinf(__x.real()))
     {
-        if (std::isnan(__x.imag()))
+        if (isnan(__x.imag()))
             return complex<_Tp>(abs(__x.real()), __x.imag());
-        if (std::isinf(__x.imag()))
+        if (isinf(__x.imag()))
         {
             if (__x.real() > 0)
                 return complex<_Tp>(__x.real(), copysign(__pi * _Tp(0.25), __x.imag()));
@@ -957,13 +957,13 @@ acosh(const complex<_Tp>& __x)
             return complex<_Tp>(-__x.real(), copysign(__pi, __x.imag()));
         return complex<_Tp>(__x.real(), copysign(_Tp(0), __x.imag()));
     }
-    if (std::isnan(__x.real()))
+    if (isnan(__x.real()))
     {
-        if (std::isinf(__x.imag()))
+        if (isinf(__x.imag()))
             return complex<_Tp>(abs(__x.imag()), __x.real());
         return complex<_Tp>(__x.real(), __x.real());
     }
-    if (std::isinf(__x.imag()))
+    if (isinf(__x.imag()))
         return complex<_Tp>(abs(__x.imag()), copysign(__pi/_Tp(2), __x.imag()));
     complex<_Tp> __z = log(__x + sqrt(__sqr(__x) - _Tp(1)));
     return complex<_Tp>(copysign(__z.real(), _Tp(0)), copysign(__z.imag(), __x.imag()));
@@ -976,21 +976,21 @@ complex<_Tp>
 atanh(const complex<_Tp>& __x)
 {
     const _Tp __pi(atan2(+0., -0.));
-    if (std::isinf(__x.imag()))
+    if (isinf(__x.imag()))
     {
         return complex<_Tp>(copysign(_Tp(0), __x.real()), copysign(__pi/_Tp(2), __x.imag()));
     }
-    if (std::isnan(__x.imag()))
+    if (isnan(__x.imag()))
     {
-        if (std::isinf(__x.real()) || __x.real() == 0)
+        if (isinf(__x.real()) || __x.real() == 0)
             return complex<_Tp>(copysign(_Tp(0), __x.real()), __x.imag());
         return complex<_Tp>(__x.imag(), __x.imag());
     }
-    if (std::isnan(__x.real()))
+    if (isnan(__x.real()))
     {
         return complex<_Tp>(__x.real(), __x.real());
     }
-    if (std::isinf(__x.real()))
+    if (isinf(__x.real()))
     {
         return complex<_Tp>(copysign(_Tp(0), __x.real()), copysign(__pi/_Tp(2), __x.imag()));
     }
@@ -1008,11 +1008,11 @@ template<class _Tp>
 complex<_Tp>
 sinh(const complex<_Tp>& __x)
 {
-    if (std::isinf(__x.real()) && !std::isfinite(__x.imag()))
+    if (isinf(__x.real()) && !isfinite(__x.imag()))
         return complex<_Tp>(__x.real(), _Tp(NAN));
-    if (__x.real() == 0 && !std::isfinite(__x.imag()))
+    if (__x.real() == 0 && !isfinite(__x.imag()))
         return complex<_Tp>(__x.real(), _Tp(NAN));
-    if (__x.imag() == 0 && !std::isfinite(__x.real()))
+    if (__x.imag() == 0 && !isfinite(__x.real()))
         return __x;
     return complex<_Tp>(sinh(__x.real()) * cos(__x.imag()), cosh(__x.real()) * sin(__x.imag()));
 }
@@ -1023,13 +1023,13 @@ template<class _Tp>
 complex<_Tp>
 cosh(const complex<_Tp>& __x)
 {
-    if (std::isinf(__x.real()) && !std::isfinite(__x.imag()))
+    if (isinf(__x.real()) && !isfinite(__x.imag()))
         return complex<_Tp>(abs(__x.real()), _Tp(NAN));
-    if (__x.real() == 0 && !std::isfinite(__x.imag()))
+    if (__x.real() == 0 && !isfinite(__x.imag()))
         return complex<_Tp>(_Tp(NAN), __x.real());
     if (__x.real() == 0 && __x.imag() == 0)
         return complex<_Tp>(_Tp(1), __x.imag());
-    if (__x.imag() == 0 && !std::isfinite(__x.real()))
+    if (__x.imag() == 0 && !isfinite(__x.real()))
         return complex<_Tp>(abs(__x.real()), __x.imag());
     return complex<_Tp>(cosh(__x.real()) * cos(__x.imag()), sinh(__x.real()) * sin(__x.imag()));
 }
@@ -1040,19 +1040,19 @@ template<class _Tp>
 complex<_Tp>
 tanh(const complex<_Tp>& __x)
 {
-    if (std::isinf(__x.real()))
+    if (isinf(__x.real()))
     {
-        if (!std::isfinite(__x.imag()))
+        if (!isfinite(__x.imag()))
             return complex<_Tp>(copysign(_Tp(1), __x.real()), _Tp(0));
         return complex<_Tp>(copysign(_Tp(1), __x.real()), copysign(_Tp(0), sin(_Tp(2) * __x.imag())));
     }
-    if (std::isnan(__x.real()) && __x.imag() == 0)
+    if (isnan(__x.real()) && __x.imag() == 0)
         return __x;
     _Tp __2r(_Tp(2) * __x.real());
     _Tp __2i(_Tp(2) * __x.imag());
     _Tp __d(cosh(__2r) + cos(__2i));
     _Tp __2rsh(sinh(__2r));
-    if (std::isinf(__2rsh) && std::isinf(__d))
+    if (isinf(__2rsh) && isinf(__d))
         return complex<_Tp>(__2rsh > _Tp(0) ? _Tp(1) : _Tp(-1),
                             __2i > _Tp(0) ? _Tp(0) : _Tp(-0.));
     return  complex<_Tp>(__2rsh/__d, sin(__2i)/__d);
@@ -1075,11 +1075,11 @@ complex<_Tp>
 acos(const complex<_Tp>& __x)
 {
     const _Tp __pi(atan2(+0., -0.));
-    if (std::isinf(__x.real()))
+    if (isinf(__x.real()))
     {
-        if (std::isnan(__x.imag()))
+        if (isnan(__x.imag()))
             return complex<_Tp>(__x.imag(), __x.real());
-        if (std::isinf(__x.imag()))
+        if (isinf(__x.imag()))
         {
             if (__x.real() < _Tp(0))
                 return complex<_Tp>(_Tp(0.75) * __pi, -__x.imag());
@@ -1089,13 +1089,13 @@ acos(const complex<_Tp>& __x)
             return complex<_Tp>(__pi, signbit(__x.imag()) ? -__x.real() : __x.real());
         return complex<_Tp>(_Tp(0), signbit(__x.imag()) ? __x.real() : -__x.real());
     }
-    if (std::isnan(__x.real()))
+    if (isnan(__x.real()))
     {
-        if (std::isinf(__x.imag()))
+        if (isinf(__x.imag()))
             return complex<_Tp>(__x.real(), -__x.imag());
         return complex<_Tp>(__x.real(), __x.real());
     }
-    if (std::isinf(__x.imag()))
+    if (isinf(__x.imag()))
         return complex<_Tp>(__pi/_Tp(2), -__x.imag());
     if (__x.real() == 0 && (__x.imag() == 0 || isnan(__x.imag())))
         return complex<_Tp>(__pi/_Tp(2), -__x.imag());

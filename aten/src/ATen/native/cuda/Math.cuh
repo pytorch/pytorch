@@ -870,7 +870,7 @@ const auto i1e_string = jiterator_stringify(
 
 const auto sinc_string = jiterator_stringify(
   template <typename T>
-  T sinc(T x) {
+  T sinc(T a) {
     if (a == T(0)) {
       return T(1);
     } else {
