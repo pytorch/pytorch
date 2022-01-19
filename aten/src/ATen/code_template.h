@@ -7,8 +7,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace at { namespace jit {
 
 // A template environment is a mapping from template variable names, e.g.,
 // identifier (corresponding to $identifier) to their expansions.
@@ -85,6 +84,7 @@ struct TemplateEnv {
     ss << "key not found: " << k;
     throw std::logic_error(ss.str());
   }
+
   std::unordered_map<std::string, std::string> strings_;
   std::unordered_map<std::string, string_list> lists_;
   TemplateEnv* parent;
@@ -238,9 +238,9 @@ struct CodeTemplate {
   }
   std::string template_text;
 };
+
 static inline std::string format(const std::string& fmt, TemplateEnv& env) {
   return CodeTemplate(fmt).format(env);
 }
 
-} // namespace jit
-} // namespace torch
+}} // at::jit

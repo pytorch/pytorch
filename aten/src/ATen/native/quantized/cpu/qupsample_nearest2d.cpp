@@ -46,25 +46,31 @@ static void upsample_nearest2d_out_frame(
     return;
   }
 
+  // pre calculate input offset for each output index in the feature map plane
+  std::unique_ptr<int64_t []> input_offset_arr(new int64_t[output_height * output_width]);
+  int64_t* input_offset = input_offset_arr.get();
+
   for (const auto h2 : c10::irange(output_height)) {
     const int64_t h1 =
         nn_compute_source_index_fn(height_scale, h2, input_height);
-
     for (const auto w2 : c10::irange(output_width)) {
       const int64_t w1 =
           nn_compute_source_index_fn(width_scale, w2, input_width);
 
-      const auto* pos1 = &i_p[h1 * input_width + w1];
-      auto* pos2 = &o_p[h2 * output_width + w2];
-
-      for (const auto c : c10::irange(channels)) {
-        (void)c; //Suppress unused variable warning
-        pos2[0] = pos1[0];
-        pos1 += input_height * input_width;
-        pos2 += output_height * output_width;
-      }
+      input_offset[h2 * output_width + w2] = h1 * input_width + w1;
     }
   }
+
+  at::parallel_for(0, channels, 0, [&](int64_t begin, int64_t end) {
+    for (const auto c : c10::irange(begin, end)) {
+      const auto* pos1 = &i_p[c * input_height * input_width];
+      auto* pos2 = &o_p[c * output_height * output_width];
+
+      for (const auto i : c10::irange(output_height * output_width)) {
+        pos2[i] = pos1[input_offset[i]];
+      }
+    }
+  });
 }
 
 template <typename scalar_t, nn_compute_source_index_fn_t nn_compute_source_index_fn>
