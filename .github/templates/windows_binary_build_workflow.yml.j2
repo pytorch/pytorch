@@ -8,6 +8,7 @@ name: !{{ build_environment }}
 
 {%- macro binary_env(config) -%}
     env:
+      BINARY_ENV_FILE: ${{ runner.temp }}/env
       PACKAGE_TYPE: !{{ config["package_type"] }}
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -49,7 +50,6 @@ env:
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
   ANACONDA_USER: pytorch
   AWS_DEFAULT_REGION: us-east-1
-  BINARY_ENV_FILE: /tmp/env
   BUILD_ENVIRONMENT: !{{ build_environment }}
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   IN_CI: 1
@@ -59,7 +59,6 @@ env:
   PYTORCH_RETRY_TEST_CASES: 1
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   SKIP_ALL_TESTS: 1
-  BINARY_ENV_FILE: ${{ runner.temp }}/env
   PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
   PYTORCH_ROOT: ${{ github.workspace }}/pytorch
   BUILDER_ROOT: ${{ github.workspace }}/builder
