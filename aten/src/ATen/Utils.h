@@ -2,6 +2,7 @@
 
 #include <ATen/core/ATenGeneral.h>
 #include <ATen/core/Generator.h>
+#include <ATen/EmptyTensor.h>
 #include <ATen/Formatting.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/StorageImpl.h>
@@ -113,26 +114,9 @@ static inline T* get_generator_or_default(const c10::optional<Generator>& gen, c
   return gen.has_value() && gen->defined() ? check_generator<T>(gen) : check_generator<T>(default_gen);
 }
 
-inline void check_size_nonnegative(IntArrayRef size) {
-  for (auto x: size) {
-    TORCH_CHECK(x >= 0, "Trying to create tensor with negative dimension ", x, ": ", size);
-  }
-}
+using at::detail::check_size_nonnegative;
 
 namespace detail {
-TORCH_API
-Tensor empty_cpu(IntArrayRef size, c10::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt,
-                 c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt, c10::optional<c10::MemoryFormat> memory_format_opt);
-
-TORCH_API
-Tensor empty_generic(
-  IntArrayRef size,
-  c10::Allocator* allocator,
-  c10::DispatchKey dispatch_key,
-  ScalarType dtype,
-  c10::optional<c10::MemoryFormat> memory_format
-);
-
 
 template <typename T>
 TORCH_API
