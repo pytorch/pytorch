@@ -1,7 +1,9 @@
 #pragma once
 
+#include <ATen/core/DimVector.h>
 #include <ATen/core/TensorBody.h>
 #include <ATen/core/blob.h>
+#include <ATen/core/custom_class.h>
 #include <ATen/core/ivalue_to.h>
 #include <ATen/core/jit_type_base.h>
 #include <c10/util/C++17.h>
@@ -310,6 +312,9 @@ private:
     return a.is_alias_of(b);
   }
 
+  template <typename T>
+  bool isListOf() const;
+
 public:
   /// @private [doxygen private]
   bool isAliasOf(const IValue& rhs) const {
@@ -381,7 +386,7 @@ public:
   // While some of these accessors could be generated through templates,
   // we prefer to write them manually for clarity
 
-  IValue(at::Tensor t) : tag(Tag::Tensor), is_intrusive_ptr(false) {
+  IValue(at::TensorBase t) : tag(Tag::Tensor), is_intrusive_ptr(false) {
     new (&payload.as_tensor) at::Tensor(std::move(t));
   }
   bool isTensor() const {
@@ -572,6 +577,7 @@ public:
   c10::List<int64_t> toIntList() &&;
   c10::List<int64_t> toIntList() const&;
   std::vector<int64_t> toIntVector() const;
+  at::DimVector toDimVector() const;
 
   // ConstantString
   IValue(c10::intrusive_ptr<ivalue::ConstantString> v);
@@ -888,7 +894,8 @@ public:
     }
   }
 
-  TypePtr type() const;
+  template <typename T = c10::Type>
+  typename T::Ptr type() const;
 
   // Detect aliased tensors.
   struct HashAliasedIValue {
@@ -1046,6 +1053,9 @@ public:
       payload.u = p.u;
     }
   }
+
+  template <typename T>
+  struct TagType {};
 
   friend MaybeOwnedTraits<IValue>;
 
@@ -1255,45 +1265,6 @@ struct TORCH_API WeakOrStrongTypePtr {
 };
 
 
-TORCH_API ska::flat_hash_map<std::type_index, c10::ClassTypePtr>&
-getCustomClassTypeMap();
-
-template <typename T>
-c10::ClassTypePtr getCustomClassTypeImpl() {
-  auto& tmap = c10::getCustomClassTypeMap();
-  auto tindex = std::type_index(typeid(T));
-  auto res = tmap.find(tindex);
-  if (C10_UNLIKELY(res == tmap.end())) {
-    // type_index is not guaranteed to be unique across shared libraries on some platforms
-    // For example see https://github.com/llvm-mirror/libcxx/blob/78d6a7767ed57b50122a161b91f59f19c9bd0d19/include/typeinfo#L133
-    // Also, this is not the case if RTLD_LOCAL option is used, see
-    // https://github.com/pybind/pybind11/blob/f791dc8648e1f6ec33f402d679b6b116a76d4e1b/include/pybind11/detail/internals.h#L101-L106
-    // Take a slow path of iterating over all registered types and compare their names
-    auto class_name = std::string(tindex.name());
-    for(const auto &it: tmap) {
-      if (class_name == it.first.name()) {
-          // Do not modify existing type map here as this template is supposed to be called only once per type
-          // from getCustomClassTypeImpl()
-          return it.second;
-      }
-    }
-    TORCH_CHECK(false, "Can't find class id in custom class type map for ", tindex.name());
-  }
-  return res->second;
-}
-
-template <typename T>
-const c10::ClassTypePtr& getCustomClassType() {
-  // Classes are never unregistered from getCustomClassTypeMap and the
-  // hash lookup can be a hot path, so just cache.
-  // For the same reason, it's fine If this ends up getting duplicated across
-  // DSO boundaries for whatever reason.
-  static c10::ClassTypePtr cache = getCustomClassTypeImpl<T>();
-  return cache;
-}
-
-TORCH_API std::unordered_map<std::string, std::function<PyObject*(void*)>>&
-getClassConverter();
 } // namespace c10
 
 #include <ATen/core/ivalue_inl.h>

@@ -168,7 +168,7 @@ class RReLU(Module):
 
 
 class Hardtanh(Module):
-    r"""Applies the HardTanh function element-wise
+    r"""Applies the HardTanh function element-wise.
 
     HardTanh is defined as:
 
@@ -294,7 +294,9 @@ class Sigmoid(Module):
 
 
 class Hardsigmoid(Module):
-    r"""Applies the element-wise function:
+    r"""Applies the Hardsigmoid function element-wise.
+
+    Hardsigmoid is defined as:
 
     .. math::
         \text{Hardsigmoid}(x) = \begin{cases}
@@ -669,7 +671,9 @@ class GELU(Module):
 
 
 class Hardshrink(Module):
-    r"""Applies the hard shrinkage function element-wise:
+    r"""Applies the Hard Shrinkage (Hardshrink) function element-wise.
+
+    Hardshrink is defined as:
 
     .. math::
         \text{HardShrink}(x) =
@@ -865,8 +869,10 @@ class Softshrink(Module):
 
 class MultiheadAttention(Module):
     r"""Allows the model to jointly attend to information
-    from different representation subspaces.
-    See `Attention Is All You Need <https://arxiv.org/abs/1706.03762>`_.
+    from different representation subspaces as described in the paper:
+    `Attention Is All You Need <https://arxiv.org/abs/1706.03762>`_.
+
+    Multi-Head Attention is defined as:
 
     .. math::
         \text{MultiHead}(Q, K, V) = \text{Concat}(head_1,\dots,head_h)W^O
