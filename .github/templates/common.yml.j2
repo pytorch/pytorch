@@ -12,11 +12,10 @@ concurrency:
   cancel-in-progress: true
 {%- endmacro -%}
 
-{%- macro pull_docker(image) -%}
+{%- macro add_retry_to_env() -%}
           retry () {
               "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
           }
-          retry docker pull "!{{ image }}"
 {%- endmacro -%}
 
 {%- macro display_ec2_information() -%}
@@ -83,11 +82,13 @@ concurrency:
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          !{{ add_retry_to_env() }}
+          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
-          !{{ pull_docker("${ALPINE_IMAGE}") }}
+          !{{ add_retry_to_env() }}
+          retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - name: Clean workspace
