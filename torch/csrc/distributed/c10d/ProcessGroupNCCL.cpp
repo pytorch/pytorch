@@ -2151,8 +2151,6 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::gather(
   check_gpu_tensors(inputTensors);
   assertSingleElementInput(invalidArgument, inputTensors);
 
-  // std::vector<at::Tensor> outputFlattened;
-
   // @lint-ignore CLANGTIDY
   auto tensor = inputTensors.back();
   RECORD_PARAM_COMMS(
