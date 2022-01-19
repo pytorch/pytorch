@@ -19,6 +19,17 @@ from scipy.stats import ttest_ind
 import importlib
 import glob
 import collections
+import contextlib
+
+@contextlib.contextmanager
+def simple_executor():
+    old_profiling_executor = torch._C._jit_set_profiling_executor(True)
+    old_profiling_mode = torch._C._jit_set_profiling_mode(False)
+    try:
+        yield
+    finally:
+        torch._C._jit_set_profiling_executor(old_profiling_executor)
+        torch._C._jit_set_profiling_mode(old_profiling_mode)
 
 def get_unique_suffix():
     return f"{time.time()}_{os.getpid()}"
@@ -618,14 +629,7 @@ if __name__ == "__main__" :
                 assert 'LTC_TS_CUDA' in os.environ and bool(os.environ['LTC_TS_CUDA']), "set LTC_TS_CUDA for cuda device"
 
             with pick_grad(args, current_name):
-                with fuser(args.fuser) if args.fuser != 'noopt' else optimized_execution(False):
-                    if args.fuser == 'noopt':
-                        # TODO(whc) cleaner way to configure the fusers; seems i have to set both optimized_execution(False)
-                        # _and_ disable fusers to get no-optimization
-                        torch._C._jit_override_can_fuse_on_cpu(False)
-                        torch._C._jit_override_can_fuse_on_gpu(False)
-                        torch._C._jit_set_texpr_fuser_enabled(True)
-                        torch._C._jit_set_nvfuser_enabled(False)
+                with fuser(args.fuser) if args.fuser != 'noopt' else simple_executor():
                     if args.fuser == 'fuser2':
                         # special case to disable nvfuser horizontal fusion as it is currently broken
                         # TODO(whc) remove this once it's fixed
