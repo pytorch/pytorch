@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -eux -o pipefail
 
+cat /proc/cpuinfo
 # Set up CircleCI GPG keys for apt, if needed
 curl --retry 3 -s -L https://packagecloud.io/circleci/trusty/gpgkey | sudo apt-key add -
 
