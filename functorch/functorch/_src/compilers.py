@@ -217,10 +217,15 @@ def memory_efficient_fusion(fn, static_argnums=None):
     Recomputes the fwd pass in the bwd pass to perform memory efficient fusion.
     Uses NVFuser as the backend compiler.
     """
-    return aot_module(fn,
-                      fw_compiler=ts_compile,
-                      bw_compiler=ts_compile,
-                      partition_fn=partition_with_recompute_fwd_in_bwd,
-                      hasher_type="StaticShapheHasher",
-                      decompositions=default_decompositions,
-                      static_argnums=static_argnums)
+    config = {
+        'fw_compiler': ts_compile,
+        'bw_compiler': ts_compile,
+        'partition_fn': partition_with_recompute_fwd_in_bwd,
+        'hasher_type': "StaticShapheHasher",
+        'decompositions': default_decompositions,
+        'static_argnums': static_argnums
+    }
+    if isinstance(fn, torch.nn.Module):
+        return aot_module(fn, **config)
+    else:
+        return aot_function(fn, **config)
