@@ -914,11 +914,8 @@ std::shared_ptr<SugaredValue> PythonExceptionValue::call(
             ->insertNode(caller.graph()->createTuple(message_values))
             ->output();
   }
-  Value* qualified_class_name =
-      insertConstant(*caller.graph(), exception_class_qualified_name_, loc);
 
-  return std::make_shared<ExceptionMessageValue>(
-      error_message, qualified_class_name);
+  return std::make_shared<ExceptionMessageValue>(error_message);
 }
 
 bool isNamedTupleClass(const py::object& obj) {

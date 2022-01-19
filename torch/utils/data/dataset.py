@@ -63,7 +63,6 @@ class Dataset(Generic[T_co]):
       sampler that yields integral indices.  To make it work with a map-style
       dataset with non-integral indices/keys, a custom sampler must be provided.
     """
-    functions: Dict[str, Callable] = {}
 
     def __getitem__(self, index) -> T_co:
         raise NotImplementedError
@@ -75,9 +74,13 @@ class Dataset(Generic[T_co]):
     # See NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ]
     # in pytorch/torch/utils/data/sampler.py
 
+
+class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
+    functions: Dict[str, Callable] = {}
+
     def __getattr__(self, attribute_name):
-        if attribute_name in Dataset.functions:
-            function = functools.partial(Dataset.functions[attribute_name], self)
+        if attribute_name in MapDataPipe.functions:
+            function = functools.partial(MapDataPipe.functions[attribute_name], self)
             return function
         else:
             raise AttributeError("'{0}' object has no attribute '{1}".format(self.__class__.__name__, attribute_name))
@@ -87,20 +90,15 @@ class Dataset(Generic[T_co]):
         cls.functions[function_name] = function
 
     @classmethod
-    def register_datapipe_as_function(cls, function_name, cls_to_register, enable_df_api_tracing=False):
+    def register_datapipe_as_function(cls, function_name, cls_to_register):
         if function_name in cls.functions:
             raise Exception("Unable to add DataPipe function name {} as it is already taken".format(function_name))
 
-        def class_function(cls, enable_df_api_tracing, source_dp, *args, **kwargs):
+        def class_function(cls, source_dp, *args, **kwargs):
             result_pipe = cls(source_dp, *args, **kwargs)
-            if isinstance(result_pipe, Dataset):
-                if enable_df_api_tracing or isinstance(source_dp, DFIterDataPipe):
-                    if function_name not in UNTRACABLE_DATAFRAME_PIPES:
-                        result_pipe = result_pipe.trace_as_dataframe()
-
             return result_pipe
 
-        function = functools.partial(class_function, cls_to_register, enable_df_api_tracing)
+        function = functools.partial(class_function, cls_to_register)
         cls.functions[function_name] = function
 
 
@@ -228,6 +226,27 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_DataPipeMeta):
         else:
             raise AttributeError("'{0}' object has no attribute '{1}".format(self.__class__.__name__, attribute_name))
 
+    @classmethod
+    def register_function(cls, function_name, function):
+        cls.functions[function_name] = function
+
+    @classmethod
+    def register_datapipe_as_function(cls, function_name, cls_to_register, enable_df_api_tracing=False):
+        if function_name in cls.functions:
+            raise Exception("Unable to add DataPipe function name {} as it is already taken".format(function_name))
+
+        def class_function(cls, enable_df_api_tracing, source_dp, *args, **kwargs):
+            result_pipe = cls(source_dp, *args, **kwargs)
+            if isinstance(result_pipe, IterDataPipe):
+                if enable_df_api_tracing or isinstance(source_dp, DFIterDataPipe):
+                    if function_name not in UNTRACABLE_DATAFRAME_PIPES:
+                        result_pipe = result_pipe.trace_as_dataframe()
+
+            return result_pipe
+
+        function = functools.partial(class_function, cls_to_register, enable_df_api_tracing)
+        cls.functions[function_name] = function
+
     def __getstate__(self):
         if IterDataPipe.getstate_hook is not None:
             return IterDataPipe.getstate_hook(self)
@@ -253,9 +272,11 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_DataPipeMeta):
             raise Exception("Attempt to override existing reduce_ex_hook")
         IterDataPipe.reduce_ex_hook = hook_fn
 
+
 class DFIterDataPipe(IterDataPipe):
     def _is_dfpipe(self):
         return True
+
 
 class TensorDataset(Dataset[Tuple[Tensor, ...]]):
     r"""Dataset wrapping tensors.
