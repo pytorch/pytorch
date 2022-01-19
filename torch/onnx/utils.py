@@ -662,9 +662,9 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             onnx_shape_inference=True, export_modules_as_functions=False):
 
     if export_modules_as_functions is not False and opset_version < 15:
-        warnings.warn("`export_modules_as_functions` is ignored and the behavior is equivalent to setting "
-                      " this argument to False. This feature requires `opset_version` >= 15. ")
-        export_modules_as_functions = False
+        raise ValueError("`export_modules_as_functions` is not supported for `opset_version` < 15."
+                         "This is because `opset_version` < 15 implies IR version < 8, which means "
+                         "no local function support. ")
     export_modules_as_functions = _setup_trace_module_map(model, export_modules_as_functions)
 
     if isinstance(model, torch.nn.DataParallel):

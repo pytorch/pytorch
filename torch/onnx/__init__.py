@@ -290,8 +290,8 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
         export_modules_as_functions (bool or set of str, type or nn.Module, default False): Flag to enable
             exporting all ``nn.Module`` forward calls as local functions in ONNX. Or a set to indicate the
             particular modules to export as local functions in ONNX.
-            This feature requires ``opset_version`` >= 15, otherwise this argument will be ignored and the
-            behavior will be equivalent to setting this argument to False.
+            This feature requires ``opset_version`` >= 15, otherwise the export will fail. This is because
+            ``opset_version`` < 15 implies IR version < 8, which means no local function support.
 
             * ``False``(default): export ``nn.Module`` forward calls as fine grained nodes.
             * ``True``: export all ``nn.Module`` forward calls as local function nodes.
