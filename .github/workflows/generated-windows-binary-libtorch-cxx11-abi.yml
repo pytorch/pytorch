@@ -106,7 +106,6 @@ jobs:
           name: libtorch-cpu-shared-with-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
@@ -381,7 +380,6 @@ jobs:
           name: libtorch-cpu-shared-without-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
@@ -656,7 +654,6 @@ jobs:
           name: libtorch-cpu-static-with-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
@@ -931,7 +928,6 @@ jobs:
           name: libtorch-cpu-static-without-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
@@ -1207,7 +1203,6 @@ jobs:
           name: libtorch-cuda10_2-shared-with-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
@@ -1485,7 +1480,6 @@ jobs:
           name: libtorch-cuda10_2-shared-without-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
@@ -1763,7 +1757,6 @@ jobs:
           name: libtorch-cuda10_2-static-with-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
@@ -2041,7 +2034,6 @@ jobs:
           name: libtorch-cuda10_2-static-without-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
@@ -2319,7 +2311,6 @@ jobs:
           name: libtorch-cuda11_1-shared-with-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
@@ -2597,7 +2588,6 @@ jobs:
           name: libtorch-cuda11_1-shared-without-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
@@ -2875,7 +2865,6 @@ jobs:
           name: libtorch-cuda11_1-static-with-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
@@ -3153,7 +3142,6 @@ jobs:
           name: libtorch-cuda11_1-static-without-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
@@ -3431,7 +3419,6 @@ jobs:
           name: libtorch-cuda11_3-shared-with-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
@@ -3709,7 +3696,6 @@ jobs:
           name: libtorch-cuda11_3-shared-without-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
@@ -3987,7 +3973,6 @@ jobs:
           name: libtorch-cuda11_3-static-with-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
@@ -4265,7 +4250,6 @@ jobs:
           name: libtorch-cuda11_3-static-without-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
@@ -4543,7 +4527,6 @@ jobs:
           name: libtorch-cuda11_5-shared-with-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
@@ -4821,7 +4804,6 @@ jobs:
           name: libtorch-cuda11_5-shared-without-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
@@ -5099,7 +5081,6 @@ jobs:
           name: libtorch-cuda11_5-static-with-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
@@ -5377,7 +5358,6 @@ jobs:
           name: libtorch-cuda11_5-static-without-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell

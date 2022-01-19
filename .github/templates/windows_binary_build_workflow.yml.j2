@@ -107,7 +107,6 @@ jobs:
           name: !{{ config["build_name"] }}
           retention-days: 14
           if-no-files-found: error
-          path:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       !{{ common.wait_and_kill_ssh_windows('pytorch') }}
   !{{ config["build_name"] }}-test:  # Testing

@@ -105,7 +105,6 @@ jobs:
           name: manywheel-py3_7-cpu
           retention-days: 14
           if-no-files-found: error
-          path:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
@@ -378,7 +377,6 @@ jobs:
           name: manywheel-py3_7-cuda11_1
           retention-days: 14
           if-no-files-found: error
-          path:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
@@ -653,7 +651,6 @@ jobs:
           name: manywheel-py3_7-cuda11_3
           retention-days: 14
           if-no-files-found: error
-          path:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
@@ -928,7 +925,6 @@ jobs:
           name: manywheel-py3_7-cuda11_5
           retention-days: 14
           if-no-files-found: error
-          path:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
@@ -1202,7 +1198,6 @@ jobs:
           name: manywheel-py3_8-cpu
           retention-days: 14
           if-no-files-found: error
-          path:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
@@ -1475,7 +1470,6 @@ jobs:
           name: manywheel-py3_8-cuda11_1
           retention-days: 14
           if-no-files-found: error
-          path:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
@@ -1750,7 +1744,6 @@ jobs:
           name: manywheel-py3_8-cuda11_3
           retention-days: 14
           if-no-files-found: error
-          path:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
@@ -2025,7 +2018,6 @@ jobs:
           name: manywheel-py3_8-cuda11_5
           retention-days: 14
           if-no-files-found: error
-          path:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
@@ -2299,7 +2291,6 @@ jobs:
           name: manywheel-py3_9-cpu
           retention-days: 14
           if-no-files-found: error
-          path:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
@@ -2572,7 +2563,6 @@ jobs:
           name: manywheel-py3_9-cuda11_1
           retention-days: 14
           if-no-files-found: error
-          path:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
@@ -2847,7 +2837,6 @@ jobs:
           name: manywheel-py3_9-cuda11_3
           retention-days: 14
           if-no-files-found: error
-          path:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
@@ -3122,7 +3111,6 @@ jobs:
           name: manywheel-py3_9-cuda11_5
           retention-days: 14
           if-no-files-found: error
-          path:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
@@ -3396,7 +3384,6 @@ jobs:
           name: manywheel-py3_10-cpu
           retention-days: 14
           if-no-files-found: error
-          path:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
@@ -3669,7 +3656,6 @@ jobs:
           name: manywheel-py3_10-cuda11_1
           retention-days: 14
           if-no-files-found: error
-          path:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
@@ -3944,7 +3930,6 @@ jobs:
           name: manywheel-py3_10-cuda11_3
           retention-days: 14
           if-no-files-found: error
-          path:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
@@ -4219,7 +4204,6 @@ jobs:
           name: manywheel-py3_10-cuda11_5
           retention-days: 14
           if-no-files-found: error
-          path:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
