@@ -127,6 +127,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE2(bitwise_xor, Scalar);
   OP_DECOMPOSE(broadcast_tensors);
   OP_DECOMPOSE(broadcast_to);
+  OP_DECOMPOSE(cartesian_prod);
   OP_DECOMPOSE(cdist);
   OP_DECOMPOSE(clip);
   OP_DECOMPOSE2(clip, Tensor );
