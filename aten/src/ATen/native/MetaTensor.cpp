@@ -60,12 +60,20 @@ Tensor empty_strided_meta(
   c10::optional<Device> device_opt,
   c10::optional<bool> pin_memory_opt
 ) {
-  auto t = at::native::empty_meta({0}, dtype_opt, layout_opt, device_opt, pin_memory_opt);
-  // Amazingly the CPU implementation will work for us, because most of resize
-  // is generic except the memcpy, but the memcpy will be skipped if the source
-  // storage is nullptr (which it always is, for meta tensors)
-  at::native::resize_impl_cpu_(t.unsafeGetTensorImpl(), size, stride);
-  return t;
+  auto device = device_or_default(device_opt);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device.type() == DeviceType::Meta);
+  // NB: because there is no SparseMeta (yet), non-strided layout is
+  // exerciseable
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      layout_or_default(layout_opt) == Layout::Strided,
+      "strided meta tensors not supported yet"
+    );
+
+  auto* allocator = GetMetaAllocator();
+  auto dtype = dtype_or_default(dtype_opt);
+  constexpr c10::DispatchKeySet meta_ks(c10::DispatchKey::Meta);
+  return at::detail::empty_strided_generic(
+      size, stride, allocator, meta_ks, dtype);
 }
 
 } // namespace native

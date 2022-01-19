@@ -19,6 +19,22 @@ void check_size_nonnegative(IntArrayRef size) {
   }
 }
 
+size_t computeStorageNbytes(
+    IntArrayRef sizes,
+    IntArrayRef strides,
+    size_t itemsize_bytes) {
+  // size of the underlying storage is 1 bigger than the offset
+  // of the last element according to stride
+  size_t size = 1;
+  for (const auto i : c10::irange(sizes.size())) {
+    if(sizes[i] == 0) {
+      return 0;
+    }
+    size += strides[i]*(sizes[i]-1);
+  }
+  return size * itemsize_bytes;
+}
+
 TensorBase empty_generic(
     IntArrayRef size,
     c10::Allocator* allocator,
@@ -54,6 +70,29 @@ TensorBase empty_generic(
   return tensor;
 }
 
+TensorBase empty_strided_generic(
+    IntArrayRef size,
+    IntArrayRef stride,
+    c10::Allocator* allocator,
+    c10::DispatchKeySet ks,
+    ScalarType scalar_type) {
+  at::detail::check_size_nonnegative(size);
+
+  caffe2::TypeMeta dtype = scalarTypeToTypeMeta(scalar_type);
+  int64_t size_bytes = computeStorageNbytes(size, stride, dtype.itemsize());
+  auto storage_impl = c10::make_intrusive<StorageImpl>(
+      c10::StorageImpl::use_byte_size_t(),
+      size_bytes,
+      allocator->allocate(size_bytes),
+      allocator,
+      /*resizeable=*/true);
+
+  auto tensor = detail::make_tensor_base<TensorImpl>(
+      std::move(storage_impl), ks, dtype);
+  tensor.unsafeGetTensorImpl()->set_sizes_and_strides(size, stride);
+  return tensor;
+}
+
 TensorBase empty_cpu(IntArrayRef size, ScalarType dtype, bool pin_memory,
                      c10::optional<c10::MemoryFormat> memory_format_opt) {
   auto allocator = GetCPUAllocatorMaybePinned(pin_memory);
@@ -86,6 +125,43 @@ TensorBase empty_cpu(
       options.device_opt(),
       options.pinned_memory_opt(),
       options.memory_format_opt());
+}
+
+TensorBase empty_strided_cpu(IntArrayRef size, IntArrayRef stride,
+                             ScalarType dtype, bool pin_memory) {
+  auto allocator = at::detail::GetCPUAllocatorMaybePinned(pin_memory);
+  constexpr c10::DispatchKeySet cpu_ks(c10::DispatchKey::CPU);
+  return at::detail::empty_strided_generic(
+      size, stride, allocator, cpu_ks, dtype);
+}
+
+TensorBase empty_strided_cpu(
+    IntArrayRef size,
+    IntArrayRef stride,
+    c10::optional<ScalarType> dtype_opt,
+    c10::optional<Layout> layout_opt,
+    c10::optional<Device> device_opt,
+    c10::optional<bool> pin_memory_opt) {
+  auto device = device_or_default(device_opt);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device.type() == DeviceType::CPU);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(layout_or_default(layout_opt) == Layout::Strided);
+
+  auto pin_memory = pinned_memory_or_default(pin_memory_opt);
+  auto dtype = dtype_or_default(dtype_opt);
+  return at::detail::empty_strided_cpu(size, stride, dtype, pin_memory);
+}
+
+TensorBase empty_strided_cpu(
+    IntArrayRef size,
+    IntArrayRef stride,
+    const TensorOptions &options) {
+  return at::detail::empty_strided_cpu(
+      size,
+      stride,
+      optTypeMetaToScalarType(options.dtype_opt()),
+      options.layout_opt(),
+      options.device_opt(),
+      options.pinned_memory_opt());
 }
 
 }} // namespace at::detail
