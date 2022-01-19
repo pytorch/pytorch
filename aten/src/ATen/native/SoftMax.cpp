@@ -214,12 +214,13 @@ void host_softmax(
       });
 }
 
-template <typename scalar_t, bool LogSoftMax>
+template <typename scalar_t, bool LogSoftMax, bool MaskedSoftMax = false>
 void host_softmax_backward(
     const Tensor& gI,
     const Tensor& grad,
     const Tensor& output,
-    int64_t dim) {
+    int64_t dim,
+    bool* mask = nullptr) {
 
   int64_t outer_size = 1;
   int64_t dim_size = grad.size(dim);
@@ -235,6 +236,7 @@ void host_softmax_backward(
   scalar_t* gradInput_data_base = gI.data_ptr<scalar_t>();
   scalar_t* output_data_base = output.data_ptr<scalar_t>();
   scalar_t* gradOutput_data_base = grad.data_ptr<scalar_t>();
+  bool* mask_data_base = mask;
   int64_t grain_size = std::min(internal::GRAIN_SIZE / dim_size, (int64_t)1);
   parallel_for(
       0, outer_size * inner_size, grain_size, [&](int64_t begin, int64_t end) {
@@ -247,14 +249,20 @@ void host_softmax_backward(
               output_data_base + outer_idx * outer_stride + inner_idx;
           const scalar_t* gradOutput_data =
               gradOutput_data_base + outer_idx * outer_stride + inner_idx;
+          bool* mask_data = nullptr;
+          if (MaskedSoftMax) {
+            mask_data = mask_data_base + outer_idx * outer_stride + inner_idx;
+          }
 
           acc_type<scalar_t, false> sum = 0;
           for (const auto d : c10::irange(dim_size)) {
-            if (LogSoftMax) {
-              sum += gradOutput_data[d * dim_stride];
-            } else {
-              sum +=
-                  gradOutput_data[d * dim_stride] * output_data[d * dim_stride];
+            if (!MaskedSoftMax || mask_data[d * dim_stride]) {
+              if (LogSoftMax) {
+                sum += gradOutput_data[d * dim_stride];
+              } else {
+                sum +=
+                    gradOutput_data[d * dim_stride] * output_data[d * dim_stride];
+              }
             }
           }
 
@@ -360,7 +368,10 @@ TORCH_IMPL_FUNC(softmax_backward_cpu_out)
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND(
         at::ScalarType::BFloat16, grad.scalar_type(), "softmax_backward", [&] {
-          host_softmax_backward<scalar_t, false>(grad_input, grad_, output, dim_);
+          host_softmax_backward<
+              scalar_t,
+              false /* LogSoftMax */,
+              false /* MaskedSoftmax */>(grad_input, grad_, output, dim_);
         });
   }
 }
@@ -389,7 +400,10 @@ TORCH_IMPL_FUNC(log_softmax_backward_cpu_out) (
           grad.scalar_type(),
           "log_softmax_backward",
           [&] {
-            host_softmax_backward<scalar_t, true>(grad_input, grad_, output_, dim_);
+            host_softmax_backward<
+                scalar_t, 
+                true /* LogSoftMax */,
+                false /* MaskedSoftMax */>(grad_input, grad_, output_, dim_);
           });
     }
   }
@@ -474,12 +488,58 @@ Tensor masked_softmax_cpu(const Tensor& input, const Tensor& mask) {
       mask.scalar_type() == ScalarType::Bool,
       "Mask should be a boolean tensor");
   AT_DISPATCH_FLOATING_TYPES_AND(
-      at::ScalarType::BFloat16, input.scalar_type(), "log_softmax", [&] {
+      at::ScalarType::BFloat16, input.scalar_type(), "masked_softmax", [&] {
         host_softmax<
             scalar_t,
             false /* LogSoftMax */,
             true /* MaskedSoftMax */>(
             output, input, input.dim() - 1, mask.data_ptr<bool>());
+      });
+  return output;
+}
+
+Tensor masked_softmax_backward_cpu(
+    const Tensor& grad,
+    const Tensor& output,
+    int64_t dim,
+    const Tensor& grad_input,
+    const Tensor& mask) {
+  TORCH_CHECK(
+      grad.sizes() == mask.sizes(), "Mask shape should match grad shape");
+  TORCH_CHECK(mask.is_contiguous(), "Mask should always be contiguous");
+  TORCH_CHECK(
+      mask.scalar_type() == ScalarType::Bool,
+      "Mask should be a boolean tensor");
+
+  // int64_t dim_ = maybe_wrap_dim(dim, grad.dim());
+  // auto grad_ = grad.contiguous();
+  // auto output_ = output.contiguous();
+
+  // if (output.numel() == 0) {
+  //   return;
+  // }
+
+  // if (grad_.dim() == 0) {
+  //   grad_ = grad_.view(1);
+  // }
+
+  // if (output_.dim() == 0) {
+  //   output_ = output_.view(1);
+  // }
+
+  TORCH_CHECK(
+      grad_input.sizes() == mask.sizes(), "Mask shape should match grad_input shape");
+  TORCH_CHECK(mask.is_contiguous(), "Mask should always be contiguous");
+  TORCH_CHECK(
+      mask.scalar_type() == ScalarType::Bool,
+      "Mask should be a boolean tensor");
+
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      at::ScalarType::BFloat16, grad.scalar_type(), "masked_softmax_backward", [&] {
+        host_softmax_backward<
+            scalar_t, 
+            false /* LogSoftMax */,
+            true /* MaskedSoftmax */>(grad_input, grad, output, dim);
       });
   return output;
 }
