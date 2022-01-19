@@ -76,7 +76,7 @@ env:
 jobs:
 {%- for config in build_configs %}
   !{{ config["build_name"] }}-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: !{{ ciflow_config.root_job_condition }}
     runs-on: windows.4xlarge
     timeout-minutes: !{{ common.timeout_minutes }}
     !{{ binary_env(config) }}

@@ -42,7 +42,12 @@ concurrency:
 
 jobs:
   conda-py3_7-cpu-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ (github.repository == 'pytorch/pytorch') && (
+            (github.event_name == 'push') ||
+            (github.event_name == 'schedule') ||
+            (contains(github.event.pull_request.labels.*.name, 'ciflow/binaries') || contains(github.event.pull_request.labels.*.name, 'ciflow/binaries/conda') || contains(github.event.pull_request.labels.*.name, 'ciflow/default')) ||
+            ((github.event_name == 'pull_request' && github.event.action != 'unassigned') && !contains(join(github.event.pull_request.labels.*.name), 'ciflow/')))
+         }}
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -312,7 +317,12 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   conda-py3_7-cuda11_1-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ (github.repository == 'pytorch/pytorch') && (
+            (github.event_name == 'push') ||
+            (github.event_name == 'schedule') ||
+            (contains(github.event.pull_request.labels.*.name, 'ciflow/binaries') || contains(github.event.pull_request.labels.*.name, 'ciflow/binaries/conda') || contains(github.event.pull_request.labels.*.name, 'ciflow/default')) ||
+            ((github.event_name == 'pull_request' && github.event.action != 'unassigned') && !contains(join(github.event.pull_request.labels.*.name), 'ciflow/')))
+         }}
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -585,7 +595,12 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   conda-py3_7-cuda11_3-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ (github.repository == 'pytorch/pytorch') && (
+            (github.event_name == 'push') ||
+            (github.event_name == 'schedule') ||
+            (contains(github.event.pull_request.labels.*.name, 'ciflow/binaries') || contains(github.event.pull_request.labels.*.name, 'ciflow/binaries/conda') || contains(github.event.pull_request.labels.*.name, 'ciflow/default')) ||
+            ((github.event_name == 'pull_request' && github.event.action != 'unassigned') && !contains(join(github.event.pull_request.labels.*.name), 'ciflow/')))
+         }}
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -858,7 +873,12 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   conda-py3_7-cuda11_5-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ (github.repository == 'pytorch/pytorch') && (
+            (github.event_name == 'push') ||
+            (github.event_name == 'schedule') ||
+            (contains(github.event.pull_request.labels.*.name, 'ciflow/binaries') || contains(github.event.pull_request.labels.*.name, 'ciflow/binaries/conda') || contains(github.event.pull_request.labels.*.name, 'ciflow/default')) ||
+            ((github.event_name == 'pull_request' && github.event.action != 'unassigned') && !contains(join(github.event.pull_request.labels.*.name), 'ciflow/')))
+         }}
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -1131,7 +1151,12 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   conda-py3_8-cpu-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ (github.repository == 'pytorch/pytorch') && (
+            (github.event_name == 'push') ||
+            (github.event_name == 'schedule') ||
+            (contains(github.event.pull_request.labels.*.name, 'ciflow/binaries') || contains(github.event.pull_request.labels.*.name, 'ciflow/binaries/conda') || contains(github.event.pull_request.labels.*.name, 'ciflow/default')) ||
+            ((github.event_name == 'pull_request' && github.event.action != 'unassigned') && !contains(join(github.event.pull_request.labels.*.name), 'ciflow/')))
+         }}
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -1401,7 +1426,12 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   conda-py3_8-cuda11_1-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ (github.repository == 'pytorch/pytorch') && (
+            (github.event_name == 'push') ||
+            (github.event_name == 'schedule') ||
+            (contains(github.event.pull_request.labels.*.name, 'ciflow/binaries') || contains(github.event.pull_request.labels.*.name, 'ciflow/binaries/conda') || contains(github.event.pull_request.labels.*.name, 'ciflow/default')) ||
+            ((github.event_name == 'pull_request' && github.event.action != 'unassigned') && !contains(join(github.event.pull_request.labels.*.name), 'ciflow/')))
+         }}
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -1674,7 +1704,12 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   conda-py3_8-cuda11_3-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ (github.repository == 'pytorch/pytorch') && (
+            (github.event_name == 'push') ||
+            (github.event_name == 'schedule') ||
+            (contains(github.event.pull_request.labels.*.name, 'ciflow/binaries') || contains(github.event.pull_request.labels.*.name, 'ciflow/binaries/conda') || contains(github.event.pull_request.labels.*.name, 'ciflow/default')) ||
+            ((github.event_name == 'pull_request' && github.event.action != 'unassigned') && !contains(join(github.event.pull_request.labels.*.name), 'ciflow/')))
+         }}
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -1947,7 +1982,12 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   conda-py3_8-cuda11_5-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ (github.repository == 'pytorch/pytorch') && (
+            (github.event_name == 'push') ||
+            (github.event_name == 'schedule') ||
+            (contains(github.event.pull_request.labels.*.name, 'ciflow/binaries') || contains(github.event.pull_request.labels.*.name, 'ciflow/binaries/conda') || contains(github.event.pull_request.labels.*.name, 'ciflow/default')) ||
+            ((github.event_name == 'pull_request' && github.event.action != 'unassigned') && !contains(join(github.event.pull_request.labels.*.name), 'ciflow/')))
+         }}
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -2220,7 +2260,12 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   conda-py3_9-cpu-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ (github.repository == 'pytorch/pytorch') && (
+            (github.event_name == 'push') ||
+            (github.event_name == 'schedule') ||
+            (contains(github.event.pull_request.labels.*.name, 'ciflow/binaries') || contains(github.event.pull_request.labels.*.name, 'ciflow/binaries/conda') || contains(github.event.pull_request.labels.*.name, 'ciflow/default')) ||
+            ((github.event_name == 'pull_request' && github.event.action != 'unassigned') && !contains(join(github.event.pull_request.labels.*.name), 'ciflow/')))
+         }}
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -2490,7 +2535,12 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   conda-py3_9-cuda11_1-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ (github.repository == 'pytorch/pytorch') && (
+            (github.event_name == 'push') ||
+            (github.event_name == 'schedule') ||
+            (contains(github.event.pull_request.labels.*.name, 'ciflow/binaries') || contains(github.event.pull_request.labels.*.name, 'ciflow/binaries/conda') || contains(github.event.pull_request.labels.*.name, 'ciflow/default')) ||
+            ((github.event_name == 'pull_request' && github.event.action != 'unassigned') && !contains(join(github.event.pull_request.labels.*.name), 'ciflow/')))
+         }}
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -2763,7 +2813,12 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   conda-py3_9-cuda11_3-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ (github.repository == 'pytorch/pytorch') && (
+            (github.event_name == 'push') ||
+            (github.event_name == 'schedule') ||
+            (contains(github.event.pull_request.labels.*.name, 'ciflow/binaries') || contains(github.event.pull_request.labels.*.name, 'ciflow/binaries/conda') || contains(github.event.pull_request.labels.*.name, 'ciflow/default')) ||
+            ((github.event_name == 'pull_request' && github.event.action != 'unassigned') && !contains(join(github.event.pull_request.labels.*.name), 'ciflow/')))
+         }}
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -3036,7 +3091,12 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   conda-py3_9-cuda11_5-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ (github.repository == 'pytorch/pytorch') && (
+            (github.event_name == 'push') ||
+            (github.event_name == 'schedule') ||
+            (contains(github.event.pull_request.labels.*.name, 'ciflow/binaries') || contains(github.event.pull_request.labels.*.name, 'ciflow/binaries/conda') || contains(github.event.pull_request.labels.*.name, 'ciflow/default')) ||
+            ((github.event_name == 'pull_request' && github.event.action != 'unassigned') && !contains(join(github.event.pull_request.labels.*.name), 'ciflow/')))
+         }}
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -3309,7 +3369,12 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   conda-py3_10-cpu-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ (github.repository == 'pytorch/pytorch') && (
+            (github.event_name == 'push') ||
+            (github.event_name == 'schedule') ||
+            (contains(github.event.pull_request.labels.*.name, 'ciflow/binaries') || contains(github.event.pull_request.labels.*.name, 'ciflow/binaries/conda') || contains(github.event.pull_request.labels.*.name, 'ciflow/default')) ||
+            ((github.event_name == 'pull_request' && github.event.action != 'unassigned') && !contains(join(github.event.pull_request.labels.*.name), 'ciflow/')))
+         }}
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -3579,7 +3644,12 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   conda-py3_10-cuda11_1-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ (github.repository == 'pytorch/pytorch') && (
+            (github.event_name == 'push') ||
+            (github.event_name == 'schedule') ||
+            (contains(github.event.pull_request.labels.*.name, 'ciflow/binaries') || contains(github.event.pull_request.labels.*.name, 'ciflow/binaries/conda') || contains(github.event.pull_request.labels.*.name, 'ciflow/default')) ||
+            ((github.event_name == 'pull_request' && github.event.action != 'unassigned') && !contains(join(github.event.pull_request.labels.*.name), 'ciflow/')))
+         }}
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -3852,7 +3922,12 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   conda-py3_10-cuda11_3-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ (github.repository == 'pytorch/pytorch') && (
+            (github.event_name == 'push') ||
+            (github.event_name == 'schedule') ||
+            (contains(github.event.pull_request.labels.*.name, 'ciflow/binaries') || contains(github.event.pull_request.labels.*.name, 'ciflow/binaries/conda') || contains(github.event.pull_request.labels.*.name, 'ciflow/default')) ||
+            ((github.event_name == 'pull_request' && github.event.action != 'unassigned') && !contains(join(github.event.pull_request.labels.*.name), 'ciflow/')))
+         }}
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -4125,7 +4200,12 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   conda-py3_10-cuda11_5-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ (github.repository == 'pytorch/pytorch') && (
+            (github.event_name == 'push') ||
+            (github.event_name == 'schedule') ||
+            (contains(github.event.pull_request.labels.*.name, 'ciflow/binaries') || contains(github.event.pull_request.labels.*.name, 'ciflow/binaries/conda') || contains(github.event.pull_request.labels.*.name, 'ciflow/default')) ||
+            ((github.event_name == 'pull_request' && github.event.action != 'unassigned') && !contains(join(github.event.pull_request.labels.*.name), 'ciflow/')))
+         }}
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
