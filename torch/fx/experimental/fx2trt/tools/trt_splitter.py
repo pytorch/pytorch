@@ -3,7 +3,7 @@ from typing import Dict, Iterable, Tuple
 import torch
 import torch.fx.passes.splitter_base as splitter_base
 from torch.fx.experimental.fx2trt.tools.trt_minimizer import TensorRTMinimizer
-from torch.fx.experimental.fx2trt.fx2trt import (
+from torch.fx.experimental.fx2trt import (
     InputTensorSpec,
     TRTModule,
     TRTInterpreter,
@@ -51,7 +51,7 @@ class TRTSplitter(splitter_base._SplitterBase):
             operator_support = create_trt_operator_support()
         if not settings:
             settings = splitter_base._SplitterSettingBase()
-        super().__init__(module, sample_input, operator_support, settings)
+        super().__init__(module, sample_input, operator_support, settings, non_acc_submodule_name="_run_on_gpu_")
 
     def _lower_model_to_backend(
         self,

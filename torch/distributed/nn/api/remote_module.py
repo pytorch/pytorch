@@ -109,6 +109,12 @@ def _raise_not_supported(name: str) -> None:
 
 
 class _RemoteModule(nn.Module):
+
+    def __new__(cls, *args, **kwargs):
+        # Use __new__ for logging purposes.
+        torch._C._log_api_usage_once("torch.distributed.nn.api.remote_module")
+        return super(_RemoteModule, cls).__new__(cls)
+
     def __init__(
         self,
         remote_device: str,
@@ -208,7 +214,6 @@ class _RemoteModule(nn.Module):
             >>> rpc.shutdown()
         """
         super().__init__()
-        torch._C._log_api_usage_once("torch.distributed.nn.api.remote_module")
 
         enable_moving_cpu_tensors_to_cuda = self._prepare_init(remote_device)
 

@@ -8,8 +8,6 @@
 #include <c10/util/hash.h>
 #include <c10/util/irange.h>
 
-#include <THC/THC.h>
-
 #include <nccl.h>
 
 #include <limits>
@@ -90,7 +88,7 @@ ncclDataType_t to_nccl_data_type(c10::ScalarType type) {
       return ncclDataType_t::ncclUint8;
     case at::kBool:
       return ncclDataType_t::ncclUint8;
-#if defined(USE_ROCM) && TORCH_HIP_VERSION >= 301
+#if HAS_NCCL_BF16_DATATYPE
     case at::kBFloat16:
       return ncclDataType_t::ncclBfloat16;
 #endif

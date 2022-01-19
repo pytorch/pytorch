@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/CPUGeneratorImpl.h>
-#include <ATen/Utils.h>
 #include <ATen/Dispatch.h>
+#include <ATen/EmptyTensor.h>
 #include <ATen/Parallel.h>
 #include <ATen/MapAllocator.h>
 #include <ATen/NativeFunctions.h>
@@ -201,10 +201,7 @@ Tensor empty(
 
 Tensor empty_strided_cpu(IntArrayRef size, IntArrayRef stride, c10::optional<ScalarType> dtype_opt,
                          c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
-  check_size_nonnegative(size);
-  auto t = at::native::empty_cpu({0}, dtype_opt, layout_opt, device_opt, pin_memory_opt);
-  at::native::resize_impl_cpu_(t.unsafeGetTensorImpl(), size, stride);
-  return t;
+  return at::detail::empty_strided_cpu(size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 }
 
 Tensor& empty_out(IntArrayRef size,
@@ -265,12 +262,6 @@ Tensor empty_like(
       !(options.layout() != kStrided &&
           optional_memory_format.has_value()),
       "memory format option is only supported by strided tensors");
-  if (options.layout() == kSparse && self.is_sparse()) {
-    auto result = at::empty({0}, options); // to be resized
-    result.sparse_resize_and_clear_(
-        self.sizes(), self.sparse_dim(), self.dense_dim());
-    return result;
-  }
 
   auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Preserve);
 
@@ -349,9 +340,10 @@ Tensor empty_like(
     namedinference::propagate_names(result, self.names());
   }
 
-  // never propagate Conjugate and Negative dispatch key
+  // never propagate Conjugate, Negative, and ZeroTensor dispatch key
   result._set_conj(false);
   result._set_neg(false);
+  result._set_zero(false);
   return result;
 }
 
@@ -434,6 +426,27 @@ Tensor& eye_out_cpu(int64_t n, int64_t m, Tensor& result) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ full ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 namespace {
+
+// The ZeroTensor allocator ignores whatever allocation is requested and always
+// gives you nullptr
+struct ZeroTensorAllocator final : public at::Allocator {
+  ZeroTensorAllocator(at::Device device) : device_(device) {};
+  ~ZeroTensorAllocator() override = default;
+  static void deleter(void* const pointer) {
+    TORCH_INTERNAL_ASSERT(!pointer);
+  }
+  DataPtr allocate(const size_t nbytes) const override {
+    return {nullptr, nullptr, &deleter, device_};
+  }
+  DeleterFnPtr raw_deleter() const override {
+    return deleter;
+  }
+  at::Device device_;
+};
+
+at::Allocator* GetZeroTensorAllocator(ZeroTensorAllocator& zt) {
+  return &zt;
+}
 
 // Performs dtype inference for full
 TensorOptions infer_full_options(
@@ -1057,6 +1070,19 @@ Tensor zeros(IntArrayRef size,
   return result.zero_();
 }
 
+Tensor _efficientzerotensor(IntArrayRef size,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+    auto device_ = device_or_default(device);
+    auto allocator = ZeroTensorAllocator(device_);
+    auto dtype_ = dtype_or_default(dtype);
+    constexpr auto zero_ks = at::DispatchKeySet(at::DispatchKey::ZeroTensor);
+    return at::detail::empty_generic(
+        size, &allocator, zero_ks, dtype_, c10::nullopt);
+}
+
 Tensor& zeros_out(IntArrayRef size, Tensor& result) {
   if (result.is_sparse()) {
     result.sparse_resize_and_clear_(size, size.size(), 0.);
@@ -1077,13 +1103,19 @@ Tensor zeros_like(
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
-  if (options.layout() == kSparse && self.is_sparse()) {
+  if (options.layout() == kSparse) {
     TORCH_CHECK(
         !(optional_memory_format.has_value()),
         "memory format option is only supported by strided tensors");
     auto res = at::empty({0}, options); // to be resized
-    res.sparse_resize_and_clear_(
-        self.sizes(), self.sparse_dim(), self.dense_dim());
+
+    if (self.is_sparse()) {
+      res.sparse_resize_and_clear_(
+          self.sizes(), self.sparse_dim(), self.dense_dim());
+    } else {
+      res.sparse_resize_and_clear_(self.sizes(), self.sizes().size(), 0);
+    }
+
     return res;
   }
   auto result = at::empty_like(self, options, optional_memory_format);
@@ -1421,7 +1453,11 @@ Tensor clone(const Tensor& src, c10::optional<c10::MemoryFormat> optional_memory
     self = at::empty_like(src, src.options(), memory_format);
   }
 
-  self.copy_(src);
+  if (src._is_zerotensor()) {
+    self.zero_();
+  } else {
+    self.copy_(src);
+  }
   return self;
 }
 

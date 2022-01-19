@@ -370,6 +370,11 @@ class TestSortAndSelect(TestCase):
                         k = random.randint(1, testTensor.size(dim))
                         compare(testTensor, k, dim, dir)
 
+        # This tests the code path where on CUDA, topk is implemented with sort.
+        t = torch.randn((2, 100000), device=device)
+        compare(t, 2000, 1, True)
+        compare(t, 2000, 1, False)
+
     def test_topk_arguments(self, device):
         q = torch.randn(10, 2, 10, device=device)
         # Make sure True isn't mistakenly taken as the 2nd dimension (interpreted as 1)
@@ -879,17 +884,6 @@ class TestSortAndSelect(TestCase):
             res1val, res1ind = torch.kthvalue(x, k, keepdim=False)
             self.assertEqual(res1val[:, :], res2val[:, :, k - 1], atol=0, rtol=0)
             self.assertEqual(res1ind[:, :], res2ind[:, :, k - 1], atol=0, rtol=0)
-
-    # test overlapping output
-    @dtypes(torch.double)
-    @onlyNativeDeviceTypes   # Fails on XLA
-    def test_kthvalue_overlap(self, device, dtype):
-        S = 10
-        k = 5
-        a = torch.randn(S, device=device)
-        indices = torch.empty((), device=device, dtype=torch.long)
-        with self.assertRaisesRegex(RuntimeError, "unsupported operation:"):
-            torch.kthvalue(a, k, out=(a, indices))
 
     @dtypes(torch.float)
     @onlyNativeDeviceTypes   # Fails on XLA

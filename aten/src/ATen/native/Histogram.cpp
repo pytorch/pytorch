@@ -57,7 +57,7 @@ void histogramdd_check_inputs(const Tensor& input, const TensorList& bins, const
 
     const int64_t N = input.size(-1);
 
-    TORCH_CHECK(bins.size() == N, "torch.histogramdd: expected ", N, " sequences of bin edges for a ", N,
+    TORCH_CHECK(static_cast<int64_t>(bins.size()) == N, "torch.histogramdd: expected ", N, " sequences of bin edges for a ", N,
                 "-dimensional histogram but got ", bins.size());
 
     auto input_dtype = input.dtype();
@@ -206,7 +206,7 @@ std::pair<double, double> histc_select_outer_bin_edges(const Tensor& input,
     double leftmost_edge = min.to<double>();
     double rightmost_edge = max.to<double>();
 
-    if (leftmost_edge == rightmost_edge) {
+    if (leftmost_edge == rightmost_edge && input.numel() > 0) {
         auto extrema = _aminmax(input);
         leftmost_edge = std::get<0>(extrema).item<double>();
         rightmost_edge = std::get<1>(extrema).item<double>();
@@ -281,7 +281,7 @@ std::vector<Tensor>& histogramdd_bin_edges_out_cpu(const Tensor& self, IntArrayR
     auto outer_bin_edges = select_outer_bin_edges(reshaped_self, range);
 
     for (int64_t dim = 0; dim < N; dim++) {
-        linspace_cpu_out(outer_bin_edges.first[dim], outer_bin_edges.second[dim],
+        linspace_out(outer_bin_edges.first[dim], outer_bin_edges.second[dim],
                 bin_ct[dim] + 1, bin_edges_out[dim]);
     }
 
@@ -362,7 +362,7 @@ histogram_out_cpu(const Tensor& self, int64_t bin_ct, c10::optional<c10::ArrayRe
 
     histogramdd_prepare_out(reshaped_self, std::vector<int64_t>{bin_ct}, hist, bins_out);
     auto outer_bin_edges = select_outer_bin_edges(reshaped_self, range);
-    linspace_cpu_out(outer_bin_edges.first[0], outer_bin_edges.second[0], bin_ct + 1, bin_edges);
+    linspace_out(outer_bin_edges.first[0], outer_bin_edges.second[0], bin_ct + 1, bin_edges);
 
     histogramdd_check_inputs(reshaped_self, bins_in, reshaped_weight);
 
@@ -391,7 +391,7 @@ Tensor& histogram_histc_cpu_out(const Tensor& self, int64_t bin_ct,
     histogramdd_prepare_out(reshaped, std::vector<int64_t>{bin_ct}, hist, bins_out);
 
     auto outer_bin_edges = histc_select_outer_bin_edges(self, min, max);
-    linspace_cpu_out(outer_bin_edges.first, outer_bin_edges.second, bin_ct + 1, bin_edges);
+    linspace_out(outer_bin_edges.first, outer_bin_edges.second, bin_ct + 1, bin_edges);
 
     histogramdd_check_inputs(reshaped, bins_in, {});
 

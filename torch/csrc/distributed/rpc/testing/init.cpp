@@ -34,6 +34,7 @@ PyObject* faulty_agent_init(PyObject* _unused, PyObject* noargs) {
   // Import the rpc_module so we can subclass TensorPipeAgent
   py::module rpc_module = py::module::import("torch.distributed.rpc");
 
+#ifdef USE_TENSORPIPE
   shared_ptr_class_<FaultyTensorPipeRpcBackendOptions>(
       module,
       "FaultyTensorPipeRpcBackendOptions",
@@ -122,6 +123,7 @@ PyObject* faulty_agent_init(PyObject* _unused, PyObject* noargs) {
           (std::vector<WorkerInfo>(TensorPipeAgent::*)() const) &
               TensorPipeAgent::getWorkerInfos,
           py::call_guard<py::gil_scoped_release>());
+#endif // USE_TENSORPIPE
 
   Py_RETURN_TRUE;
 }

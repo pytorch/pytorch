@@ -7,7 +7,7 @@ namespace caffe2 {
 
 REGISTER_CPU_OPERATOR(
     AddGradient,
-    BinaryElementwiseGradientBroadcastOp<
+    BinaryElementwiseGradientOp<
         NumericTypes,
         CPUContext,
         AddFunctor<CPUContext>>);

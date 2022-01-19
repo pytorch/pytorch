@@ -23,11 +23,11 @@ class Shard(object):
 
     def __post_init__(self):
         # verification between local tensor and metadata
-        if list(self.tensor.size()) != self.metadata.shard_lengths:
+        if list(self.tensor.size()) != self.metadata.shard_sizes:
             raise ValueError(
                 "Shard tensor size does not match with metadata.shard_lengths! "
                 f"Found shard tensor size: {list(self.tensor.size())}, "
-                f"metadata.shard_lengths: {self.metadata.shard_lengths}, "
+                f"metadata.shard_lengths: {self.metadata.shard_sizes}, "
             )
         placement_device = cast(_remote_device, self.metadata.placement).device()
         if placement_device != self.tensor.device:
@@ -48,11 +48,11 @@ class Shard(object):
                 of the shard on each dimension.
             rank(int): Specify the rank for the shard.
         """
-        shard_lengths = list(tensor.size())
+        shard_sizes = list(tensor.size())
         placement = _remote_device(f"rank:{rank}/{str(tensor.device)}")
         shard_meta = ShardMetadata(
             shard_offsets=shard_offsets,
-            shard_lengths=shard_lengths,
+            shard_sizes=shard_sizes,
             placement=placement
         )
         return Shard(tensor, shard_meta)

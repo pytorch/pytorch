@@ -48,6 +48,12 @@ OutputSpec::OutputSpec(const c10::IValue& value) {
   auto dict = value.toGenericDict();
   sizes_ = dict.at("sizes").toIntVector();
   dtype_ = dict.at("dtype").toScalarType();
+  if (dict.contains("qscale")) {
+    qscale_ = dict.at("qscale").toDouble();
+  }
+  if (dict.contains("qzero")) {
+    qzero_ = dict.at("qzero").toInt();
+  }
 }
 
 c10::IValue OutputSpec::serialize() const {
@@ -55,10 +61,30 @@ c10::IValue OutputSpec::serialize() const {
       at::StringType::get(), at::AnyType::get());
   dict.insert("sizes", sizes_);
   dict.insert("dtype", dtype_);
+  if (qscale_) {
+    dict.insert("qscale", *qscale_);
+  }
+  if (qzero_) {
+    dict.insert("qzero", *qzero_);
+  }
   return dict;
 }
 
 at::Tensor OutputSpec::allocate() const {
+  if (isQIntType(dtype_)) {
+    TORCH_CHECK(
+        qscale_ && qzero_,
+        "Quantized output tensor must have qscale_ and qzero_");
+    return at::_empty_affine_quantized(
+        sizes_,
+        at::TensorOptions()
+            .dtype(dtype_)
+            .layout(at::kStrided)
+            .device(at::kCPU)
+            .requires_grad(false),
+        *qscale_,
+        *qzero_);
+  }
   return at::empty(
       sizes_,
       at::TensorOptions()

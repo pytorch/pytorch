@@ -82,16 +82,6 @@ def register_backend(
     BackendType.__doc__ = _backend_type_doc
     return BackendType[backend_name]
 
-# TODO: Remove after 1.10 release
-# Create a placeholder for PROCESS_GROUP BackendType
-# which is deprecated. The backend type can be accessed, but
-# will throw an error when the user tries to use it in init_rpc
-register_backend(
-    "PROCESS_GROUP",
-    lambda *args: None,
-    lambda *args: None,
-)
-
 def construct_rpc_backend_options(
     backend,
     rpc_timeout=rpc_constants.DEFAULT_RPC_TIMEOUT_SEC,
