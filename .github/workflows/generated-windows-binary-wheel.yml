@@ -43,7 +43,6 @@ concurrency:
 jobs:
   manywheel-py3_7-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -314,7 +313,6 @@ jobs:
           docker system prune -af
   manywheel-py3_7-cuda11_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -588,7 +586,6 @@ jobs:
           docker system prune -af
   manywheel-py3_7-cuda11_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -862,7 +859,6 @@ jobs:
           docker system prune -af
   manywheel-py3_7-cuda11_5-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -1136,7 +1132,6 @@ jobs:
           docker system prune -af
   manywheel-py3_8-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -1407,7 +1402,6 @@ jobs:
           docker system prune -af
   manywheel-py3_8-cuda11_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -1681,7 +1675,6 @@ jobs:
           docker system prune -af
   manywheel-py3_8-cuda11_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -1955,7 +1948,6 @@ jobs:
           docker system prune -af
   manywheel-py3_8-cuda11_5-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -2229,7 +2221,6 @@ jobs:
           docker system prune -af
   manywheel-py3_9-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -2500,7 +2491,6 @@ jobs:
           docker system prune -af
   manywheel-py3_9-cuda11_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -2774,7 +2764,6 @@ jobs:
           docker system prune -af
   manywheel-py3_9-cuda11_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -3048,7 +3037,6 @@ jobs:
           docker system prune -af
   manywheel-py3_9-cuda11_5-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -3322,7 +3310,6 @@ jobs:
           docker system prune -af
   manywheel-py3_10-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -3593,7 +3580,6 @@ jobs:
           docker system prune -af
   manywheel-py3_10-cuda11_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -3867,7 +3853,6 @@ jobs:
           docker system prune -af
   manywheel-py3_10-cuda11_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -4141,7 +4126,6 @@ jobs:
           docker system prune -af
   manywheel-py3_10-cuda11_5-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:

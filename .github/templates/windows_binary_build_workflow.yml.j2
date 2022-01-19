@@ -77,7 +77,6 @@ jobs:
 {%- for config in build_configs %}
   !{{ config["build_name"] }}-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: windows.4xlarge
     timeout-minutes: !{{ common.timeout_minutes }}
     !{{ binary_env(config) }}

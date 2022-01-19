@@ -43,7 +43,6 @@ concurrency:
 jobs:
   libtorch-cpu-shared-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -317,7 +316,6 @@ jobs:
           docker system prune -af
   libtorch-cpu-shared-without-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -591,7 +589,6 @@ jobs:
           docker system prune -af
   libtorch-cpu-static-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -865,7 +862,6 @@ jobs:
           docker system prune -af
   libtorch-cpu-static-without-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -1139,7 +1135,6 @@ jobs:
           docker system prune -af
   libtorch-cuda10_2-shared-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -1416,7 +1411,6 @@ jobs:
           docker system prune -af
   libtorch-cuda10_2-shared-without-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -1693,7 +1687,6 @@ jobs:
           docker system prune -af
   libtorch-cuda10_2-static-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -1970,7 +1963,6 @@ jobs:
           docker system prune -af
   libtorch-cuda10_2-static-without-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -2247,7 +2239,6 @@ jobs:
           docker system prune -af
   libtorch-cuda11_1-shared-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -2524,7 +2515,6 @@ jobs:
           docker system prune -af
   libtorch-cuda11_1-shared-without-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -2801,7 +2791,6 @@ jobs:
           docker system prune -af
   libtorch-cuda11_1-static-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -3078,7 +3067,6 @@ jobs:
           docker system prune -af
   libtorch-cuda11_1-static-without-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -3355,7 +3343,6 @@ jobs:
           docker system prune -af
   libtorch-cuda11_3-shared-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -3632,7 +3619,6 @@ jobs:
           docker system prune -af
   libtorch-cuda11_3-shared-without-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -3909,7 +3895,6 @@ jobs:
           docker system prune -af
   libtorch-cuda11_3-static-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -4186,7 +4171,6 @@ jobs:
           docker system prune -af
   libtorch-cuda11_3-static-without-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -4463,7 +4447,6 @@ jobs:
           docker system prune -af
   libtorch-cuda11_5-shared-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -4740,7 +4723,6 @@ jobs:
           docker system prune -af
   libtorch-cuda11_5-shared-without-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -5017,7 +4999,6 @@ jobs:
           docker system prune -af
   libtorch-cuda11_5-static-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -5294,7 +5275,6 @@ jobs:
           docker system prune -af
   libtorch-cuda11_5-static-without-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
