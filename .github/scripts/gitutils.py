@@ -232,7 +232,7 @@ class PeekableIterator:
         return rc
 
 
-def patterns_to_regex(allowed_patterns: List[str]) -> re.Pattern:
+def patterns_to_regex(allowed_patterns: List[str]) -> Any:
     """
     pattern is glob-like, i.e. the only special sequences it has are:
       - ? - matches single character
@@ -246,6 +246,7 @@ def patterns_to_regex(allowed_patterns: List[str]) -> re.Pattern:
         if idx > 0:
             rc += "|"
         pattern_ = PeekableIterator(pattern)
+        assert not any(c in pattern for c in "{}()[]\\")
         for c in pattern_:
             if c == ".":
                 rc += "\\."

@@ -3,6 +3,7 @@
 import json
 import os
 import re
+from dataclasses import dataclass
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError
 from typing import cast, Any, Callable, Dict, List, Optional, Tuple
@@ -236,7 +237,7 @@ class GitHubPR:
             m = RE_PULL_REQUEST_RESOLVED.search(msg)
             if m is None:
                 raise RuntimeError(f"Could not find PR-resolved string in {msg} of ghstacked PR {self.pr_num}")
-            if self.org != m.group('owner') or self.project == m.group('repo'):
+            if self.org != m.group('owner') or self.project != m.group('repo'):
                 raise RuntimeError(f"PR {m.group('number')} resolved to wrong owner/repo pair")
             pr_num = int(m.group('number'))
             if pr_num != self.pr_num:
@@ -264,27 +265,23 @@ class GitHubPR:
             repo.push(self.default_branch())
 
 
-def read_merge_rules(repo: GitRepo) -> List[Any]:
+@dataclass
+class MergeRule:
+    name: str
+    patterns: List[str]
+    approved_by: List[str]
+    mandatory_app_id: Optional[int]
+
+
+def read_merge_rules(repo: GitRepo) -> List[MergeRule]:
     from pathlib import Path
-    from types import SimpleNamespace
     rules_path = Path(repo.repo_dir) / ".github" / "merge_rules.json"
     if not rules_path.exists():
         print(f"{rules_path} does not exist, returning empty rules")
         return []
     with open(rules_path) as fp:
-        rc = json.load(fp, object_hook=lambda x: SimpleNamespace(**x))
-    # Validate rules
-    for rule in rc:
-        mandatory_keys = {"name", "patterns", "approved_by"}
-        if not mandatory_keys.issubset(set(rule.__dict__)):
-            raise RuntimeError(f"{mandatory_keys} not found in rule {rule}")
-        if not isinstance(rule.name, str):
-            raise RuntimeError(f"{rule} name must be a string")
-        if not isinstance(rule.patterns, list):
-            raise RuntimeError(f"{rule} patterns must be a list")
-        if not isinstance(rule.approved_by, list):
-            raise RuntimeError(f"{rule} approved_by must be a list")
-    return cast(List[Any], rc)
+        rc = json.load(fp, object_hook=lambda x: MergeRule(**x))
+    return cast(List[MergeRule], rc)
 
 
 def check_if_should_be_merged(pr: GitHubPR, repo: GitRepo) -> None:
@@ -300,9 +297,9 @@ def check_if_should_be_merged(pr: GitHubPR, repo: GitRepo) -> None:
         if len(approvers_intersection) == 0 and len(rule_approvers_set) > 0:
             print(f"Skipping rule {rule_name} due to no approvers overlap")
             continue
-        if hasattr(rule, "mandatory_app_id"):
+        if rule.mandatory_app_id is not None:
             cs_conslusions = pr.get_check_suite_conclusions()
-            mandatory_app_id = int(rule.mandatory_app_id)
+            mandatory_app_id = rule.mandatory_app_id
             if mandatory_app_id not in cs_conslusions or cs_conslusions[mandatory_app_id] != "SUCCESS":
                 print(f"Skipping rule {rule_name} as mandatory app {mandatory_app_id} is not in {cs_conslusions}")
                 continue

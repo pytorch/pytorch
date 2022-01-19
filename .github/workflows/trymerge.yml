@@ -26,5 +26,6 @@ jobs:
       - name: Merge PR
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUM: ${{ github.event.client_payload.pr_num }}
         run: |
-          python3 .github/scripts/trymerge.py ${{ github.event.client_payload.pr_num }}
+          python3 .github/scripts/trymerge.py "${PR_NM}"
