@@ -15,8 +15,13 @@ from torch.distributed._sharded_tensor.ops._common import (
     _handle_max_norm_col_wise,
 )
 from torch.distributed._sharding_spec import ChunkShardingSpec
+from torch.distributed._sharded_tensor import (
+    sharded_op_impl,
+    ShardedTensor
+)
 
 
+@sharded_op_impl(torch.nn.functional.embedding_bag)
 def sharded_embedding_bag(types, args, kwargs, pg):
     """
     Handles ``__torch_function__`` dispatch for ``torch.nn.functional.embedding_bag``.
@@ -173,7 +178,6 @@ def _validate_embedding_bag_param(args, kwargs):
 
     Return: None.
     """
-    from torch.distributed._sharded_tensor import ShardedTensor
 
     input = args[0]
     weight = args[1]

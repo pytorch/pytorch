@@ -4,8 +4,6 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/BucketizationUtils.h>
 #include <ATen/native/Resize.h>
-#include <THC/THC.h>
-#include <ATen/native/Resize.h>
 
 namespace at {
 namespace native {

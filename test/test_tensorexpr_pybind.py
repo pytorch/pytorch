@@ -69,8 +69,8 @@ class TestTensorExprPyBind(JitTestCase):
 
     def test_dynamic_shape(self):
         dN = te.VarHandle(torch.int32)
-        A = te.BufHandle(torch.float64)
-        B = te.BufHandle(torch.float64)
+        A = te.BufHandle([dN], torch.float64)
+        B = te.BufHandle([dN], torch.float64)
 
         def compute(i):
             return A.load(i) - B.load(i)
@@ -91,6 +91,32 @@ class TestTensorExprPyBind(JitTestCase):
 
         test_with_shape(8)
         test_with_shape(31)
+
+    def test_dynamic_shape_2d(self):
+        dN = te.VarHandle(torch.int32)
+        dM = te.VarHandle(torch.int32)
+        A = te.BufHandle([dN, dM], torch.float64)
+        B = te.BufHandle([dN, dM], torch.float64)
+
+        def compute(i, j):
+            return A.load([i, j]) - B.load([i, j])
+
+        C = te.Compute("C", [dN, dM], compute)
+
+        loopnest = te.LoopNest([C])
+        loopnest.prepare_for_codegen()
+
+        cg = te.construct_codegen("ir_eval", loopnest.simplify(), [A, B, C, dN, dM])
+
+        def test_with_shape(n, m):
+            tA = torch.randn(n, m, dtype=torch.double)
+            tB = torch.randn(n, m, dtype=torch.double)
+            tC = torch.empty(n, m, dtype=torch.double)
+            cg.call([tA, tB, tC, n, m])
+            torch.testing.assert_close(tA - tB, tC)
+
+        test_with_shape(2, 4)
+        test_with_shape(5, 3)
 
     def test_dtype_error(self):
         te.BufHandle("a", [1], torch.float32)  # ok

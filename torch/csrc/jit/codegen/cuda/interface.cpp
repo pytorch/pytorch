@@ -5,10 +5,42 @@
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
 
+// NOLINTNEXTLINE
+C10_DEFINE_bool(
+    torch_jit_nvfuser_singleton_fusion,
+    false,
+    "enable single node fusion for nvfuser");
+
+// NOLINTNEXTLINE
+C10_DEFINE_bool(
+    torch_jit_nvfuser_horizontal_fusion,
+    true,
+    "enable single node fusion for nvfuser");
+
 namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
+
+bool getSingletonFusion() {
+  return FLAGS_torch_jit_nvfuser_singleton_fusion;
+}
+
+bool setSingletonFusion(bool value) {
+  bool old_value = FLAGS_torch_jit_nvfuser_singleton_fusion;
+  FLAGS_torch_jit_nvfuser_singleton_fusion = value;
+  return old_value;
+}
+
+bool getHorizontalFusion() {
+  return FLAGS_torch_jit_nvfuser_horizontal_fusion;
+}
+
+bool setHorizontalFusion(bool value) {
+  bool old_value = FLAGS_torch_jit_nvfuser_horizontal_fusion;
+  FLAGS_torch_jit_nvfuser_horizontal_fusion = value;
+  return old_value;
+}
 
 static std::atomic<bool> cuda_fusion_guard_mode{true};
 

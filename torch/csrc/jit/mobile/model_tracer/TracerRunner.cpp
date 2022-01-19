@@ -54,6 +54,10 @@ void call_setup_methods() {
   at::ones({2, 2});
   at::Tensor t1 = at::empty({7, 7});
   at::Tensor t2 = t1.fill_(3);
+  at::Tensor t3 = t1.new_empty_strided(
+      {2, 3},
+      {3,
+       1}); // TODO investigate how this is different from normal empty_strided
   at::narrow(t2, 1, 0, 1);
   at::eq(t1, t2);
   const volatile bool nz = at::native::is_nonzero(at::zeros({1}));
@@ -68,6 +72,7 @@ void call_setup_methods() {
   // Typically, failures show up in CopyKernel.cpp, so enumerating
   // common dtypes that may show up.
   const auto all_dtypes_for_copy = {
+      at::kBool,
       at::kByte,
       at::kFloat,
       at::kInt,
@@ -77,7 +82,9 @@ void call_setup_methods() {
       at::kLong};
   for (const auto dtype : all_dtypes_for_copy) {
     auto tensor1 = at::empty({10}, dtype);
+    tensor1.copy_(at::zeros({10}, at::kBool));
     tensor1.copy_(at::zeros({10}, at::kFloat));
+    tensor1.copy_(at::zeros({10}, at::kInt));
   }
 
   torch::zeros({0, 0}, torch::ScalarType::Float);
