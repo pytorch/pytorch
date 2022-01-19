@@ -3,6 +3,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
 import torch.nn.quantized as nnq
 from torch.ao.quantization import default_qconfig
@@ -643,14 +644,14 @@ class TestEqualizeFx(QuantizationTestCase):
         linearRelu_node_list = [
             ns.call_function(torch.mul),
             ns.call_function(torch.quantize_per_tensor),
-            ns.call_module(nniq.LinearReLU),
+            ns.call_module(nni.modules.fused.LinearReLU),
             ns.call_method('dequantize')
         ]
 
         linearReluLinear_node_list = [
             ns.call_function(torch.mul),
             ns.call_function(torch.quantize_per_tensor),
-            ns.call_module(nniq.LinearReLU),
+            ns.call_module(nni.modules.fused.LinearReLU),
             ns.call_module(nnq.Linear),
             ns.call_method('dequantize')
         ]

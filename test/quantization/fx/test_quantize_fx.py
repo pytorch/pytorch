@@ -372,13 +372,13 @@ class TestFuseFx(QuantizationTestCase):
 
         linearRelu_node_list = [
             ns.call_function(torch.quantize_per_tensor),
-            ns.call_module(nniq.LinearReLU),
+            ns.call_module(nni.modules.fused.LinearReLU),
             ns.call_method('dequantize')
         ]
 
         linearReluLinear_node_list = [
             ns.call_function(torch.quantize_per_tensor),
-            ns.call_module(nniq.LinearReLU),
+            ns.call_module(nni.modules.fused.LinearReLU),
             ns.call_module(nnq.Linear),
             ns.call_method('dequantize')
         ]
@@ -1294,7 +1294,7 @@ class TestQuantizeFx(QuantizationTestCase):
         m(torch.rand(5, 5))
         node_list = [
             ns.call_function(torch.quantize_per_tensor),
-            ns.call_module(nniq.LinearReLU),
+            ns.call_module(nni.modules.fused.LinearReLU),
             ns.call_module(nnq.Linear),
             ns.call_method("dequantize"),
         ]
@@ -3271,11 +3271,11 @@ class TestQuantizeFx(QuantizationTestCase):
 
         def _test(qat):
             if qat:
-              m = M()
-              m = prepare_qat_fx(m, {"": default_qat_qconfig})
+                m = M()
+                m = prepare_qat_fx(m, {"": default_qat_qconfig})
             else:
-              m = M().eval()
-              m = prepare_fx(m, {"": default_qconfig})
+                m = M().eval()
+                m = prepare_fx(m, {"": default_qconfig})
             m_ref = copy.deepcopy(m)
             m_ref = convert_fx(m_ref, is_reference=True)
             m = convert_fx(m)
@@ -3630,7 +3630,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
         for f_relu, quant_type in itertools.product([True, False], [QuantType.STATIC, QuantType.QAT]):
             for model, quantized_node in [
-                    (ModuleLinear(has_relu=True, f_relu=f_relu), ns.call_module(nniq.LinearReLU))]:
+                    (ModuleLinear(has_relu=True, f_relu=f_relu), ns.call_module(nni.modules.fused.LinearReLU))]:
                 self.checkGraphModeFxOp(model, data, quant_type, quantized_node)
 
     @skipIfNoFBGEMM
