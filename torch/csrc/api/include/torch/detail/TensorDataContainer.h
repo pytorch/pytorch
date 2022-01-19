@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
 
 #include <initializer_list>
 
@@ -263,7 +264,7 @@ AT_FORALL_COMPLEX_TYPES(TENSOR)
       stream << "}";
     } else if (is_tensor()) {
       stream << "{";
-      for (int64_t i = 0; i < tensor_.sizes()[0]; i++) {
+      for (const auto i : c10::irange(tensor_.sizes()[0]))  {
         AT_DISPATCH_ALL_TYPES_AND3(
             at::kBool,
             at::kHalf,
