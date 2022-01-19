@@ -14,4 +14,6 @@
 // Currently unsupported on Windows
 #ifndef _WIN32
     #define BUILD_JITERATOR_WITH_CACHE true
+#else
+    #define BUILD_JITERATOR_WITH_CACHE false
 #endif // _WIN32
