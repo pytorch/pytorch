@@ -593,8 +593,6 @@ class DistributedDataParallel(Module, Joinable):
             self.process_group = process_group
 
         self.static_graph = False
-        if static_graph:
-            self._set_static_graph()
         self.dim = dim
         self.module = module
         self.device = list(self.module.parameters())[0].device
@@ -649,6 +647,9 @@ class DistributedDataParallel(Module, Joinable):
         # Builds reducer.
         self._ddp_init_helper(parameters, expect_sparse_gradient, param_to_name_mapping)
         self._has_rebuilt_buckets = False
+
+        if static_graph:
+            self._set_static_graph()
 
     def _sync_params_and_buffers(self, authoritative_rank=0):
         module_states = []
