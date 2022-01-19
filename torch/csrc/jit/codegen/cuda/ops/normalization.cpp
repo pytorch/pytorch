@@ -418,22 +418,6 @@ BackwardNormResult batch_norm_backward(
 
   mean = broadcast(mean, broadcast_mask);
 
-  TensorView* weight_val = nullptr;
-  if (weight == nullptr) {
-    weight_val = TensorViewBuilder()
-                     .ndims(kNumberOfDims)
-                     .dtype(input->getDataType().value())
-                     .shape(std::vector<int64_t>(kNumberOfDims, 1))
-                     .build();
-    IrBuilder::create<UnaryOp>(
-        input->container(),
-        UnaryOpType::Set,
-        weight_val->as<Val>(),
-        (IrBuilder::create<Double>(input->container(), 1.0))->as<Val>());
-  } else {
-    weight_val = broadcast(weight, broadcast_mask);
-  }
-
   auto norm = reciprocal(num_features);
 
   auto grad_output_sum = sum(grad_output, reduction_axes);
@@ -442,7 +426,16 @@ BackwardNormResult batch_norm_backward(
   auto grad_mean = broadcast(mul(grad_output_sum, norm), broadcast_mask);
   auto proj_scale =
       broadcast(mul(mul(dot_p, norm), mul(invstd, invstd)), broadcast_mask);
-  auto grad_scale = mul(broadcast(invstd, broadcast_mask), weight_val);
+  TensorView* grad_scale = nullptr;
+
+  if (weight == nullptr) {
+    grad_scale =
+        mul(broadcast(invstd, broadcast_mask),
+            IrBuilder::create<Double>(input->container(), 1));
+  } else {
+    grad_scale = mul(
+        broadcast(invstd, broadcast_mask), broadcast(weight, broadcast_mask));
+  }
 
   TensorView* grad_input = nullptr;
   if (kTraining) {
