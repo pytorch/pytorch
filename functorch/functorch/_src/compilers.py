@@ -1,12 +1,13 @@
 import torch
 from functools import partial
 from typing import Iterable
-from .aot_autograd import draw_graph, aot_function, partition_with_recompute_fwd_in_bwd
+from .aot_autograd import draw_graph, aot_function, partition_with_recompute_fwd_in_bwd, aot_module
 from .decompositions import decomposition_table
 import time
 
 
 def ts_compile(fx_g, _):
+    # print(fx_g.code)
     for node in fx_g.graph.nodes:
         if node.target == torch.ops.aten.new_zeros:
             if node.args[1] == []:
@@ -194,15 +195,32 @@ def nnc_jit(f):
     return aot_function(f, simple_ts_compile)
 
 
+aten = torch.ops.aten
+default_decompositions = set([
+    aten.detach,
+    aten.gelu_backward,
+    aten._log_softmax_backward_data,
+    aten.leaky_relu_backward,
+    aten.sigmoid_backward,
+    aten.threshold_backward,
+    aten.hardtanh_backward,
+    aten.hardsigmoid_backward,
+    aten.hardswish_backward,
+    aten.tanh_backward,
+    aten.silu_backward,
+])
+default_decompositions = {k: v for k, v in decomposition_table.items() if k in default_decompositions}
+
+
 def memory_efficient_fusion(fn, static_argnums=None):
     """
     Recomputes the fwd pass in the bwd pass to perform memory efficient fusion.
     Uses NVFuser as the backend compiler.
     """
-    return aot_function(fn,
-                        fw_compiler=simple_ts_compile,
-                        bw_compiler=simple_ts_compile,
-                        partition_fn=partition_with_recompute_fwd_in_bwd,
-                        hasher_type="StaticShapheHasher",
-                        decompositions=decomposition_table,
-                        static_argnums=static_argnums)
+    return aot_module(fn,
+                      fw_compiler=ts_compile,
+                      bw_compiler=ts_compile,
+                      partition_fn=partition_with_recompute_fwd_in_bwd,
+                      hasher_type="StaticShapheHasher",
+                      decompositions=default_decompositions,
+                      static_argnums=static_argnums)
