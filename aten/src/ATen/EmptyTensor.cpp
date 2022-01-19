@@ -164,4 +164,102 @@ TensorBase empty_strided_cpu(
       options.pinned_memory_opt());
 }
 
+// The meta allocator ignores whatever allocation is requested and always
+// gives you nullptr
+struct MetaAllocator final : public at::Allocator {
+  MetaAllocator() = default;
+  ~MetaAllocator() override = default;
+  static void deleter(void* const pointer) {
+    TORCH_INTERNAL_ASSERT(!pointer);
+  }
+  DataPtr allocate(const size_t nbytes) const override {
+    return {nullptr, nullptr, &deleter, at::Device(DeviceType::Meta)};
+  }
+  DeleterFnPtr raw_deleter() const override {
+    return deleter;
+  }
+};
+
+static MetaAllocator g_meta_alloc;
+
+at::Allocator* GetMetaAllocator() {
+  return &g_meta_alloc;
+}
+
+TensorBase empty_meta(IntArrayRef size, ScalarType dtype,
+                     c10::optional<c10::MemoryFormat> memory_format_opt) {
+  auto *allocator = GetMetaAllocator();
+  constexpr c10::DispatchKeySet meta_dks(c10::DispatchKey::Meta);
+  return at::detail::empty_generic(
+      size, allocator, meta_dks, dtype, memory_format_opt);
+}
+
+TensorBase empty_meta(
+  IntArrayRef size,
+  c10::optional<ScalarType> dtype_opt,
+  c10::optional<Layout> layout_opt,
+  c10::optional<Device> device_opt,
+  c10::optional<bool> pin_memory_opt,
+  c10::optional<c10::MemoryFormat> memory_format_opt
+) {
+  auto device = device_or_default(device_opt);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device.type() == DeviceType::Meta);
+  // NB: because there is no SparseMeta (yet), non-strided layout is
+  // exerciseable
+  TORCH_CHECK_NOT_IMPLEMENTED(
+    layout_or_default(layout_opt) == Layout::Strided,
+    "non-strided meta tensors not supported yet"
+  );
+
+  auto dtype = dtype_or_default(dtype_opt);
+  return empty_meta(size, dtype, memory_format_opt);
+}
+
+TensorBase empty_meta(
+    IntArrayRef size, const TensorOptions &options) {
+  return at::detail::empty_meta(
+      size,
+      optTypeMetaToScalarType(options.dtype_opt()),
+      options.layout_opt(),
+      options.device_opt(),
+      options.pinned_memory_opt(),
+      options.memory_format_opt());
+}
+
+TensorBase empty_strided_meta(IntArrayRef size, IntArrayRef stride,
+                              ScalarType dtype) {
+  auto *allocator = GetMetaAllocator();
+  constexpr c10::DispatchKeySet meta_dks(c10::DispatchKey::Meta);
+  return at::detail::empty_strided_generic(
+      size, stride, allocator, meta_dks, dtype);
+}
+
+TensorBase empty_strided_meta(
+    IntArrayRef size,
+    IntArrayRef stride,
+    c10::optional<ScalarType> dtype_opt,
+    c10::optional<Layout> layout_opt,
+    c10::optional<Device> device_opt,
+    c10::optional<bool> pin_memory_opt) {
+  auto device = device_or_default(device_opt);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device.type() == DeviceType::Meta);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(layout_or_default(layout_opt) == Layout::Strided);
+
+  auto dtype = dtype_or_default(dtype_opt);
+  return at::detail::empty_strided_meta(size, stride, dtype);
+}
+
+TensorBase empty_strided_meta(
+    IntArrayRef size,
+    IntArrayRef stride,
+    const TensorOptions &options) {
+  return at::detail::empty_strided_meta(
+      size,
+      stride,
+      optTypeMetaToScalarType(options.dtype_opt()),
+      options.layout_opt(),
+      options.device_opt(),
+      options.pinned_memory_opt());
+}
+
 }} // namespace at::detail
