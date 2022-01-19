@@ -17,7 +17,7 @@
 namespace at {
 namespace cuda {
 
-extern const std::string complex_body = jiterator_stringify(
+const std::string complex_body = R"ESCAPE(
 
 namespace std {
 
@@ -1186,7 +1186,17 @@ inline namespace literals
 
 } // namespace std
 
-);  // jiterator_stringify
+)ESCAPE";
+
+
+extern const std::string traits;
+extern const std::string cmath;
+
+const std::string &get_complex_definition() {
+  static std::string result = traits + cmath +  complex_body;
+  return result;
+}
+
 }} // namespace at::cuda
 
 #endif

@@ -17,7 +17,7 @@
 namespace at {
 namespace cuda {
 
-extern const std::string complex_prerequisite = jiterator_stringify(
+extern const std::string traits = R"ESCAPE(
 
 namespace std {
 
@@ -63,6 +63,8 @@ template <bool _C, typename _Tp> struct enable_if{};
 template <typename _Tp> struct enable_if<true, _Tp>{
   using type = _Tp;
 };
+template <bool b, class T=void>
+using enable_if_t = typename enable_if<b,T>::type;
 
 template <class _Tp> struct remove_const            {typedef _Tp type;};
 template <class _Tp> struct remove_const<const _Tp> {typedef _Tp type;};
@@ -163,7 +165,215 @@ class __promote : public __promote_imp<_A1, _A2, _A3> {};
 
 } // namespace std
 
-); // jiterator_stringify
+)ESCAPE";
+
+extern const std::string cmath = R"ESCAPE(
+
+namespace std {
+
+using ::signbit;
+using ::isfinite;
+using ::isinf;
+using ::isnan;
+
+using ::abs;
+
+using ::acos;
+using ::acosf;
+using ::asin;
+using ::asinf;
+using ::atan;
+using ::atanf;
+using ::atan2;
+using ::atan2f;
+using ::ceil;
+using ::ceilf;
+using ::cos;
+using ::cosf;
+using ::cosh;
+using ::coshf;
+
+using ::exp;
+using ::expf;
+
+using ::fabs;
+using ::fabsf;
+using ::floor;
+using ::floorf;
+
+using ::fmod;
+using ::fmodf;
+
+using ::frexp;
+using ::frexpf;
+using ::ldexp;
+using ::ldexpf;
+
+using ::log;
+using ::logf;
+
+using ::log10;
+using ::log10f;
+using ::modf;
+using ::modff;
+
+using ::pow;
+using ::powf;
+
+using ::sin;
+using ::sinf;
+using ::sinh;
+using ::sinhf;
+
+using ::sqrt;
+using ::sqrtf;
+using ::tan;
+using ::tanf;
+
+using ::tanh;
+using ::tanhf;
+
+using ::acosh;
+using ::acoshf;
+using ::asinh;
+using ::asinhf;
+using ::atanh;
+using ::atanhf;
+using ::cbrt;
+using ::cbrtf;
+
+using ::copysign;
+using ::copysignf;
+
+using ::erf;
+using ::erff;
+using ::erfc;
+using ::erfcf;
+using ::exp2;
+using ::exp2f;
+using ::expm1;
+using ::expm1f;
+using ::fdim;
+using ::fdimf;
+using ::fmaf;
+using ::fma;
+using ::fmax;
+using ::fmaxf;
+using ::fmin;
+using ::fminf;
+using ::hypot;
+using ::hypotf;
+using ::ilogb;
+using ::ilogbf;
+using ::lgamma;
+using ::lgammaf;
+using ::llrint;
+using ::llrintf;
+using ::llround;
+using ::llroundf;
+using ::log1p;
+using ::log1pf;
+using ::log2;
+using ::log2f;
+using ::logb;
+using ::logbf;
+using ::lrint;
+using ::lrintf;
+using ::lround;
+using ::lroundf;
+
+using ::nan;
+using ::nanf;
+
+using ::nearbyint;
+using ::nearbyintf;
+using ::nextafter;
+using ::nextafterf;
+using ::remainder;
+using ::remainderf;
+using ::remquo;
+using ::remquof;
+using ::rint;
+using ::rintf;
+using ::round;
+using ::roundf;
+using ::scalbln;
+using ::scalblnf;
+using ::scalbn;
+using ::scalbnf;
+using ::tgamma;
+using ::tgammaf;
+using ::trunc;
+using ::truncf;
+
+// TODO: why does the following code fail to compile?
+// inline float       hypot(       float x,       float y,       float z ) { return sqrt(x*x + y*y + z*z); }
+// inline double      hypot(      double x,      double y,      double z ) { return sqrt(x*x + y*y + z*z); }
+// inline long double hypot( long double x, long double y, long double z ) { return sqrt(x*x + y*y + z*z); }
+
+// template <class _A1, class _A2, class _A3>
+// inline
+// typename enable_if_t
+// <
+//     is_arithmetic<_A1>::value &&
+//     is_arithmetic<_A2>::value &&
+//     is_arithmetic<_A3>::value,
+//     __promote<_A1, _A2, _A3>
+// >::type
+// hypot(_A1 __lcpp_x, _A2 __lcpp_y, _A3 __lcpp_z) noexcept
+// {
+//     typedef typename __promote<_A1, _A2, _A3>::type __result_type;
+//     static_assert((!(is_same<_A1, __result_type>::value &&
+//                      is_same<_A2, __result_type>::value &&
+//                      is_same<_A3, __result_type>::value)), "");
+//     return hypot((__result_type)__lcpp_x, (__result_type)__lcpp_y, (__result_type)__lcpp_z);
+// }
+
+template <typename _Fp>
+constexpr
+_Fp __lerp(_Fp __a, _Fp __b, _Fp __t) noexcept {
+    if ((__a <= 0 && __b >= 0) || (__a >= 0 && __b <= 0))
+        return __t * __b + (1 - __t) * __a;
+
+    if (__t == 1) return __b;
+    const _Fp __x = __a + __t * (__b - __a);
+    if ((__t > 1) == (__b > __a))
+        return __b < __x ? __x : __b;
+    else
+        return __x < __b ? __x : __b;
+}
+
+constexpr float
+lerp(float __a, float __b, float __t)                   noexcept { return __lerp(__a, __b, __t); }
+
+constexpr double
+lerp(double __a, double __b, double __t)                noexcept { return __lerp(__a, __b, __t); }
+
+constexpr long double
+lerp(long double __a, long double __b, long double __t) noexcept { return __lerp(__a, __b, __t); }
+
+template <class _A1, class _A2, class _A3>
+inline
+constexpr typename enable_if_t
+<
+    is_arithmetic<_A1>::value &&
+    is_arithmetic<_A2>::value &&
+    is_arithmetic<_A3>::value,
+    __promote<_A1, _A2, _A3>
+>::type
+lerp(_A1 __a, _A2 __b, _A3 __t) noexcept
+{
+    typedef typename __promote<_A1, _A2, _A3>::type __result_type;
+    static_assert(!(_IsSame<_A1, __result_type>::value &&
+                    _IsSame<_A2, __result_type>::value &&
+                    _IsSame<_A3, __result_type>::value));
+    return __lerp((__result_type)__a, (__result_type)__b, (__result_type)__t);
+}
+
+} // namespace std
+
+)ESCAPE";
+
 }} // namespace at::cuda
 
 #endif
