@@ -804,6 +804,50 @@ class TestIndexing(TestCase):
         out_cpu = t.index_put_(indices, values2d, accumulate=True)
         self.assertEqual(out_cuda.cpu(), out_cpu)
 
+    @onlyCUDA
+    def test_index_put_accumulate_non_contiguous(self, device):
+        t = torch.zeros((5, 2, 2))
+        t_dev = t.to(device)
+        t1 = t_dev[:, 0, :]
+        t2 = t[:, 0, :]
+        self.assertTrue(not t1.is_contiguous())
+        self.assertTrue(not t2.is_contiguous())
+
+        indices = [torch.tensor([0, 1]), ]
+        indices_dev = [i.to(device) for i in indices]
+        value = torch.randn(2, 2)
+        out_cuda = t1.index_put_(indices_dev, value.to(device), accumulate=True)
+        out_cpu = t2.index_put_(indices, value, accumulate=True)
+        self.assertEqual(out_cuda.cpu(), out_cpu)
+
+    @onlyCUDA
+    def test_index_put_accumulate_with_optional_tensors(self, device):
+        # TODO: replace with a better solution.
+        # Currently, here using torchscript to put None into indices.
+        # on C++ it gives indices as a list of 2 optional tensors: first is null and
+        # the second is a valid tensor.
+        @torch.jit.script
+        def func(x, i, v):
+            idx = [None, i]
+            x.index_put_(idx, v, accumulate=True)
+            return x
+
+        n = 4
+        t = torch.arange(n * 2, dtype=torch.float32).reshape(n, 2)
+        t_dev = t.to(device)
+        indices = torch.tensor([1, 0])
+        indices_dev = indices.to(device)
+        value0d = torch.tensor(10.0)
+        value1d = torch.tensor([1.0, 2.0])
+
+        out_cuda = func(t_dev, indices_dev, value0d.cuda())
+        out_cpu = func(t, indices, value0d)
+        self.assertEqual(out_cuda.cpu(), out_cpu)
+
+        out_cuda = func(t_dev, indices_dev, value1d.cuda())
+        out_cpu = func(t, indices, value1d)
+        self.assertEqual(out_cuda.cpu(), out_cpu)
+
     @onlyNativeDeviceTypes
     def test_index_put_accumulate_duplicate_indices(self, device):
         for i in range(1, 512):
@@ -1495,8 +1539,8 @@ class NumpyTests(TestCase):
         expected = b.float().unsqueeze(1).expand(100, 100)
         self.assertEqual(a, expected)
 
-instantiate_device_type_tests(TestIndexing, globals())
-instantiate_device_type_tests(NumpyTests, globals())
+instantiate_device_type_tests(TestIndexing, globals(), except_for='meta')
+instantiate_device_type_tests(NumpyTests, globals(), except_for='meta')
 
 if __name__ == '__main__':
     run_tests()

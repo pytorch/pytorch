@@ -6,10 +6,14 @@ during QAT.
 import torch
 from torch.nn import Module
 from torch.ao.quantization.observer import (
+    MinMaxObserver,
     MovingAverageMinMaxObserver,
     HistogramObserver,
     MovingAveragePerChannelMinMaxObserver,
     PerChannelMinMaxObserver,
+    FixedQParamsObserver,
+    default_affine_fixed_qparams_observer,
+    default_symmetric_fixed_qparams_observer,
     _with_args,
 )
 import re
@@ -24,6 +28,9 @@ def _is_per_tensor(qscheme: 'torch.qscheme') -> bool:
 
 def _is_symmetric_quant(qscheme: 'torch.qscheme') -> bool:
     return qscheme in [torch.per_tensor_symmetric, torch.per_channel_symmetric]
+
+def _is_float_qparams(qscheme: 'torch.qscheme') -> bool:
+    return qscheme in [torch.per_channel_affine_float_qparams, ]
 
 class FakeQuantizeBase(ABC, Module):
     r""" Base fake quantize module
@@ -125,8 +132,12 @@ class FakeQuantize(FakeQuantizeBase):
         self.activation_post_process = observer(**observer_kwargs)
         assert torch.iinfo(self.activation_post_process.dtype).min <= quant_min, 'quant_min out of bound'
         assert quant_max <= torch.iinfo(self.activation_post_process.dtype).max, 'quant_max out of bound'
+        if _is_float_qparams(self.activation_post_process.qscheme):
+            zero_point_dtype = torch.float
+        else:
+            zero_point_dtype = torch.int
         self.register_buffer('scale', torch.tensor([1.0], dtype=torch.float))
-        self.register_buffer('zero_point', torch.tensor([0], dtype=torch.int))
+        self.register_buffer('zero_point', torch.tensor([0], dtype=zero_point_dtype))
         self.dtype = self.activation_post_process.dtype
         self.qscheme = self.activation_post_process.qscheme
         self.ch_axis = self.activation_post_process.ch_axis \
@@ -210,45 +221,24 @@ class FakeQuantize(FakeQuantizeBase):
         super(FakeQuantize, self)._load_from_state_dict(state_dict, prefix, local_metadata, strict,
                                                         missing_keys, unexpected_keys, error_msgs)
 
-class FixedQParamsFakeQuantize(FakeQuantizeBase):
+
+class FixedQParamsFakeQuantize(FakeQuantize):
     """ Simulate quantize and dequantize with fixed quantization
     parameters in training time. Only per tensor quantization
     is supported.
-
-    Args:
-
-        `scale` (float): fixed scale for the fake quantize module
-        `zero_point` (int): fixed zero point for the fake quantize module
-        `dtype`, `qscheme`, `quant_min`, `quant_max`
     """
 
-    scale: torch.Tensor
-    zero_point: torch.Tensor
-
-    def __init__(self,
-                 scale,
-                 zero_point,
-                 dtype=torch.quint8,
-                 qscheme=torch.per_tensor_affine,
-                 quant_min=0,
-                 quant_max=255):
-        super().__init__()
-        assert quant_min <= quant_max, 'quant_min should be less than or equal to quant_max'
-        self.quant_min = quant_min
-        self.quant_max = quant_max
-        self.register_buffer('scale', torch.tensor([scale], dtype=torch.float))
-        self.register_buffer('zero_point', torch.tensor([zero_point], dtype=torch.int))
-        self.dtype = dtype
-        self.qscheme = qscheme
+    def __init__(self, observer):
+        super().__init__(observer=observer)
+        assert type(self.activation_post_process) == FixedQParamsObserver,\
+            "%s's observer must be a %s" % (self.__class__.__name__, FixedQParamsObserver.__name__)
+        self._observer_ctr = observer
+        self.quant_min = self.activation_post_process.quant_min
+        self.quant_max = self.activation_post_process.quant_max
+        self.scale = self.activation_post_process.scale
+        self.zero_point = self.activation_post_process.zero_point
         assert _is_per_tensor(self.qscheme), 'Only per tensor quantization is supported' + \
             ' FixedQParamsFakeQuantize module, got qscheme:' + str(self.qscheme)
-
-    def forward(self, X):
-        if self.fake_quant_enabled[0] == 1:
-            X = torch.fake_quantize_per_tensor_affine(X, self.scale,
-                                                      self.zero_point, self.quant_min,
-                                                      self.quant_max)
-        return X
 
     @torch.jit.export
     def calculate_qparams(self):
@@ -261,6 +251,7 @@ class FixedQParamsFakeQuantize(FakeQuantizeBase):
                    self.fake_quant_enabled, self.observer_enabled,
                    self.scale, self.zero_point, self.dtype,
                    self.quant_min, self.quant_max, self.qscheme)
+
 
 class FusedMovingAvgObsFakeQuantize(FakeQuantize):
     r"""Fused module that is used to observe the input tensor (compute min/max), compute
@@ -346,12 +337,14 @@ default_weight_fake_quant = FakeQuantize.with_args(observer=MovingAverageMinMaxO
 Default fake_quant for weights.
 """
 
-# TODO(future PR): remove these defaults and enforce activation functions
-# to explicitly specify their output range
-default_symmetric_fixed_qparams_fake_quant = FixedQParamsFakeQuantize.with_args(
-    scale=2.0 / 256.0, zero_point=128, dtype=torch.quint8, quant_min=0, quant_max=255)
-default_affine_fixed_qparams_fake_quant = FixedQParamsFakeQuantize.with_args(
-    scale=1.0 / 256.0, zero_point=0, dtype=torch.quint8, quant_min=0, quant_max=255)
+default_dynamic_fake_quant = FakeQuantize.with_args(observer=MinMaxObserver, quant_min=0, quant_max=255,
+                                                    dtype=torch.quint8, memoryless=True)
+"""
+Default dynamic fake_quant for activations.
+"""
+
+default_symmetric_fixed_qparams_fake_quant = FixedQParamsFakeQuantize.with_args(observer=default_symmetric_fixed_qparams_observer)
+default_affine_fixed_qparams_fake_quant = FixedQParamsFakeQuantize.with_args(observer=default_affine_fixed_qparams_observer)
 
 default_per_channel_weight_fake_quant = FakeQuantize.with_args(observer=MovingAveragePerChannelMinMaxObserver,
                                                                quant_min=-128,
@@ -363,7 +356,6 @@ default_per_channel_weight_fake_quant = FakeQuantize.with_args(observer=MovingAv
 """
 Default fake_quant for per-channel weights.
 """
-
 default_embedding_fake_quant = FakeQuantize.with_args(observer=PerChannelMinMaxObserver,
                                                       qscheme=torch.per_channel_affine_float_qparams,
                                                       dtype=torch.quint8,

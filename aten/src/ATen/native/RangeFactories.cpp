@@ -1,8 +1,8 @@
+#include <ATen/native/RangeFactories.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Parallel.h>
 #include <ATen/Dispatch.h>
-#include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <c10/util/irange.h>
 #include <cmath>
@@ -10,10 +10,8 @@
 
 namespace at { namespace native {
 
-DECLARE_DISPATCH(void(*)(TensorIterator&, const Scalar&, const Scalar&, const Scalar&), arange_stub);
-DECLARE_DISPATCH(void(*)(TensorIterator&, const Scalar&, const Scalar&, int64_t), linspace_stub);
 
-Tensor& linspace_cpu_out(const Scalar& start, const Scalar& end, c10::optional<int64_t> optional_steps, Tensor& result) {
+Tensor& linspace_out(const Scalar& start, const Scalar& end, c10::optional<int64_t> optional_steps, Tensor& result) {
   const auto steps = optional_steps.value_or(100);
   TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
 
@@ -26,6 +24,10 @@ Tensor& linspace_cpu_out(const Scalar& start, const Scalar& end, c10::optional<i
 
   if (result.numel() != steps) {
     result.resize_({steps});
+  }
+
+  if (result.device() == kMeta) {
+    return result;
   }
 
   if (steps == 0) {
@@ -44,7 +46,7 @@ Tensor& linspace_cpu_out(const Scalar& start, const Scalar& end, c10::optional<i
   return result;
 }
 
-Tensor& logspace_cpu_out(const Scalar& start, const Scalar& end, c10::optional<int64_t> optional_steps, double base, Tensor& result) {
+Tensor& logspace_out(const Scalar& start, const Scalar& end, c10::optional<int64_t> optional_steps, double base, Tensor& result) {
   const auto steps = optional_steps.value_or(100);
   TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
 
@@ -58,6 +60,11 @@ Tensor& logspace_cpu_out(const Scalar& start, const Scalar& end, c10::optional<i
   if (result.numel() != steps) {
     result.resize_({steps});
   }
+
+  if (result.device() == kMeta) {
+    return result;
+  }
+
   Tensor r = result.is_contiguous() ? result : result.contiguous();
 
   if (steps == 0) {
@@ -113,7 +120,7 @@ Tensor& logspace_cpu_out(const Scalar& start, const Scalar& end, c10::optional<i
   return result;
 }
 
-Tensor& range_cpu_out(const Scalar& start, const Scalar& end, const Scalar& step, Tensor& result) {
+Tensor& range_out(const Scalar& start, const Scalar& end, const Scalar& step, Tensor& result) {
   AT_DISPATCH_ALL_TYPES_AND(kBFloat16, result.scalar_type(), "range_cpu", [&]() {
     using accscalar_t = at::acc_type<scalar_t, false>;
     auto xstart = start.to<accscalar_t>();
@@ -130,6 +137,11 @@ Tensor& range_cpu_out(const Scalar& start, const Scalar& end, const Scalar& step
     if (result.numel() != size) {
       result.resize_({size});
     }
+
+    if (result.device() == kMeta) {
+      return;
+    }
+
     Tensor r = result.is_contiguous() ? result : result.contiguous();
     scalar_t *data_ptr = r.data_ptr<scalar_t>();
 
@@ -147,7 +159,7 @@ Tensor& range_cpu_out(const Scalar& start, const Scalar& end, const Scalar& step
   return result;
 }
 
-Tensor& arange_cpu_out(const Scalar& start, const Scalar& end, const Scalar& step, Tensor& result) {
+Tensor& arange_out(const Scalar& start, const Scalar& end, const Scalar& step, Tensor& result) {
   AT_DISPATCH_ALL_TYPES_AND(kBFloat16, result.scalar_type(), "arange_cpu", [&]() {
     using accscalar_t = at::acc_type<scalar_t, false>;
     auto xstart = start.to<accscalar_t>();
@@ -192,6 +204,10 @@ Tensor& arange_cpu_out(const Scalar& start, const Scalar& end, const Scalar& ste
                     "The out tensor will be resized to a tensor of shape (", size, ",).");
       }
       result.resize_({size});
+    }
+
+    if (result.device() == kMeta) {
+      return;
     }
 
     Tensor r = result.is_contiguous() ? result : result.contiguous();

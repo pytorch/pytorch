@@ -19,13 +19,20 @@ void CompilationUnit::register_function(std::unique_ptr<Function> fn) {
   methods_.emplace_back(std::move(fn));
 }
 
-Function* CompilationUnit::find_function(const c10::QualifiedName& qn) {
+const Function* CompilationUnit::find_function(
+    const c10::QualifiedName& qn) const {
   for (auto& fn : methods_) {
     if (fn->qualname() == qn) {
       return fn.get();
     }
   }
   return nullptr;
+}
+
+Function* CompilationUnit::find_function(const c10::QualifiedName& qn) {
+  // NOLINTNEXTLINE
+  return const_cast<Function*>(
+      static_cast<const CompilationUnit*>(this)->find_function(qn));
 }
 
 Method Module::get_method(const std::string& name) const {
@@ -51,7 +58,10 @@ void set_train_recurse(
   if (auto slot = obj->type()->findAttributeSlot("training")) {
     obj->setSlot(*slot, on);
   } else {
-    TORCH_INTERNAL_ASSERT(false, "'training' attribute not found");
+    TORCH_INTERNAL_ASSERT(
+        false,
+        "'training' attribute not found. Did you accidentally "
+        "call .eval() before saving your model?");
   }
   for (const auto& slot : obj->slots()) {
     if (slot.isObject()) {

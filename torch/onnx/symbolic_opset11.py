@@ -7,7 +7,7 @@ import torch
 import torch.onnx.symbolic_helper as sym_help
 import warnings
 
-from torch.onnx.symbolic_helper import parse_args, _unimplemented, _is_tensor_list
+from torch.onnx.symbolic_helper import parse_args, _unimplemented, _is_tensor_list, ScalarType
 from torch.onnx.symbolic_opset9 import expand, unused, mul
 from torch.nn.modules.utils import _single, _pair, _triple
 from torch.onnx.utils import _add_block, _add_input_to_block, _add_output_to_block
@@ -22,7 +22,7 @@ from torch.onnx.utils import _add_block, _add_input_to_block, _add_output_to_blo
 def hardtanh(g, self, min_val, max_val):
     dtype = self.type().scalarType()
     if dtype is None:
-        dtype = 6  # float
+        dtype = ScalarType.FLOAT
     else:
         dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
     min_val = g.op("Constant", value_t=torch.tensor(min_val, dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
@@ -54,7 +54,7 @@ def clamp(g, self, min, max):
             return clamp_max(g, clamp_min(g, self, min), max)
 
 
-@parse_args('v', 'v')
+@parse_args("v", "v")
 def clamp_min(g, self, min):
     dtype = self.type().scalarType()
     min = g.op("Cast", min, to_i=sym_help.cast_pytorch_to_onnx[dtype])
@@ -65,7 +65,7 @@ def clamp_min(g, self, min):
         return g.op("Max", self, min)
 
 
-@parse_args('v', 'v')
+@parse_args("v", "v")
 def clamp_max(g, self, max):
     dtype = self.type().scalarType()
     max = g.op("Cast", max, to_i=sym_help.cast_pytorch_to_onnx[dtype])
@@ -80,7 +80,7 @@ def relu6(g, input):
     relu = g.op("Relu", input)
     dtype = input.type().scalarType()
     if dtype is None:
-        dtype = 6  # float
+        dtype = ScalarType.FLOAT
     else:
         dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
     min_val = g.op("Constant", value_t=torch.tensor(0, dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
@@ -111,7 +111,7 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
 
     if len(indices_list) > 1:
         for idx_ in range(len(indices_list)):
-            if indices_list[idx_].type().scalarType() == 'Bool':
+            if indices_list[idx_].type().scalarType() == "Bool":
                 indices_list[idx_] = g.op("NonZero", indices_list[idx_])
         index = indices_list[0]
 
@@ -217,7 +217,7 @@ upsample_trilinear3d = _interpolate("upsample_trilinear3d", 5, "linear")
 upsample_bicubic2d = _interpolate("upsample_bicubic2d", 4, "cubic")
 
 
-def __interpolate(g, input, size, scale_factor, mode, align_corners, recompute_scale_factor):
+def __interpolate(g, input, size, scale_factor, mode, align_corners, recompute_scale_factor, antialias):
     return sym_help.__interpolate_helper(g, input, size, scale_factor, mode, align_corners, recompute_scale_factor)
 
 @parse_args("v", "i", "v", "v")

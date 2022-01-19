@@ -8,7 +8,7 @@
 
 #include <ATen/AccumulateType.h>
 
-#include <ATen/cuda/cub.cuh>
+#include <ATen/cuda/cub.h>
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/EmbeddingBackwardKernel.cuh>
 #include <ATen/native/cuda/KernelUtils.cuh>

@@ -3,8 +3,9 @@
 import torch
 import torch.fx.experimental.fx_acc.acc_ops as acc_ops
 import torch.nn as nn
-from caffe2.torch.fb.fx2trt.tests.test_utils import AccTestCase
+from torch.testing._internal.common_fx2trt import AccTestCase
 from parameterized import parameterized
+from torch.testing._internal.common_utils import run_tests
 
 
 class TestSplitConverter(AccTestCase):
@@ -30,3 +31,6 @@ class TestSplitConverter(AccTestCase):
             },
             test_explicit_batch_dim=False,
         )
+
+if __name__ == '__main__':
+    run_tests()

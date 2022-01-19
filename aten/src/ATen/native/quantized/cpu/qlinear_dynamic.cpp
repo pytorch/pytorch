@@ -241,6 +241,8 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(
   // C(output) = A(input) x B(weight), where C, A, B are M x N, M x K, K x N
   // matrices, respectively.
 
+  // Weight packing is not thread safe
+  std::lock_guard<std::mutex> lock(qnnp_mutex_);
   auto packB = w.get();
   size_t rows_w = bias_.size(0);
   size_t cols_w = input_contig.size(input_contig.dim() - 1);
@@ -275,8 +277,6 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(
       /*qmax=*/255);
   float* weight_scales_data = w_scales.data_ptr<float>();
 
-  // QNNPack is not thread safe
-  std::lock_guard<std::mutex> lock(qnnp_mutex_);
   if (!input_scale.has_value() || input_scale.value() != q_params.scale) {
     generate_requantization_scales(
         // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
@@ -301,7 +301,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(
     auto* qnnp_w_data = qnnp_weight.data_ptr<c10::quint8>();
     int8_t* w_data = (int8_t*)weight_contig.data_ptr<c10::qint8>();
     auto wt_numel = weight_contig.numel();
-    for (int i = 0; i < wt_numel; ++i) {
+    for (const auto i : c10::irange(wt_numel)) {
       qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
     }
 

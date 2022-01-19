@@ -7,7 +7,6 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.abs
 import abc
-import unittest
 import unittest.mock as mock
 
 from torch.distributed.elastic.metrics.api import (
@@ -17,7 +16,7 @@ from torch.distributed.elastic.metrics.api import (
     _get_metric_name,
     prof,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 def foo_1():
@@ -48,7 +47,7 @@ class Child(Parent):
         pass
 
 
-class MetricsApiTest(unittest.TestCase):
+class MetricsApiTest(TestCase):
     def foo_2(self):
         pass
 
