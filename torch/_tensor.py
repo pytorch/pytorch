@@ -1169,7 +1169,7 @@ class Tensor(torch._C._TensorBase):
             raise TypeError('stream must be ``int`` or ``none``')
         elif stream is not None and stream != -1:
             if self.device.type == 'cuda':
-                stream = torch.cuda.streams.ExternalStream(stream)
+                stream = torch.cuda.ExternalStream(stream)
                 # Only synchronize on different streams
                 if stream != torch.cuda.current_stream:
                     event = torch.cuda.Event()

@@ -1,11 +1,12 @@
 #include <gtest/gtest.h>
 
+#include <ATen/code_template.h>
 #include <c10/util/irange.h>
 #include <test/cpp/tensorexpr/test_base.h>
-#include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
@@ -63,7 +64,7 @@ TEST_F(Kernel, InliningIntermediates) {
         continue;
       }
 
-      TemplateEnv env;
+      at::jit::TemplateEnv env;
       env.s("device", use_cuda ? "cuda:0" : "cpu");
       const auto graph_string = format(graph_template, env);
       auto graph = std::make_shared<Graph>();
@@ -776,7 +777,7 @@ std::string dtypeConstant(ScalarType scalar_type) {
   if (scalar_type == ScalarType::Undefined) {
     return "None = prim::Constant()";
   } else {
-    TemplateEnv env_dtype;
+    at::jit::TemplateEnv env_dtype;
     env_dtype.d("scalar_type", static_cast<int>(scalar_type));
     return format("int = prim::Constant[value=${scalar_type}]()", env_dtype);
   }
@@ -807,7 +808,7 @@ TEST_F(Kernel, SumAllAxes) {
   auto a = iotaTensor({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
 
   for (auto scalar_type : {ScalarType::Undefined, ScalarType::Double}) {
-    TemplateEnv env;
+    at::jit::TemplateEnv env;
     env.s("dtype", dtypeConstant(scalar_type));
     if (scalar_type == ScalarType::Undefined) {
       env.s("out_dtype", "Float");
@@ -875,7 +876,7 @@ TEST_F(Kernel, SumOneAxis) {
   for (int dim = -a.dim(); dim < a.dim(); ++dim) {
     for (bool keepdim : {false, true}) {
       for (auto scalar_type : {ScalarType::Undefined, ScalarType::Double}) {
-        TemplateEnv env;
+        at::jit::TemplateEnv env;
         env.d("dim", dim);
         env.d("keepdim", keepdim);
         env.s("dtype", dtypeConstant(scalar_type));
@@ -941,7 +942,7 @@ TEST_F(Kernel, SumMultipleAxes) {
   for (const auto dim1 : c10::irange(a.dim())) {
     for (int dim2 = dim1 + 1; dim2 < a.dim(); ++dim2) {
       for (bool keepdim : {false, true}) {
-        TemplateEnv env;
+        at::jit::TemplateEnv env;
         env.d("dim1", dim1);
         env.d("dim2", dim2);
         env.d("keepdim", keepdim);
@@ -1018,7 +1019,7 @@ TEST_F(Kernel, Softmax2D) {
         auto other_dim = (softmax_dim + 1) % a.dim();
         auto ref =
             log_softmax ? a.log_softmax(softmax_dim) : a.softmax(softmax_dim);
-        TemplateEnv env;
+        at::jit::TemplateEnv env;
         env.d("dim", softmax_dim);
         env.s("op", log_softmax ? "log_softmax" : "softmax");
         env.s("size", li_to_str(ref.sizes()));
@@ -1037,7 +1038,7 @@ TEST_F(Kernel, Softmax2D) {
         std::ostringstream oss;
         oss << *s;
 
-        TemplateEnv ver_env;
+        at::jit::TemplateEnv ver_env;
         ver_env.d("other_dim", other_dim);
         ver_env.d("other_dim_size", a.sizes()[other_dim]);
         ver_env.d("softmax_dim", softmax_dim);
@@ -1097,7 +1098,7 @@ TEST_F(Kernel, Softmax3D) {
       auto ref =
           log_softmax ? a.log_softmax(softmax_dim) : a.softmax(softmax_dim);
 
-      TemplateEnv env;
+      at::jit::TemplateEnv env;
       env.d("dim", softmax_dim);
       env.s("op", log_softmax ? "log_softmax" : "softmax");
       env.s("size", li_to_str(ref.sizes()));
@@ -1115,7 +1116,7 @@ TEST_F(Kernel, Softmax3D) {
       std::ostringstream oss;
       oss << *s;
 
-      TemplateEnv ver_env;
+      at::jit::TemplateEnv ver_env;
       ver_env.d("dim1", other_dims[0]);
       ver_env.d("dim1_size", a.sizes()[other_dims[0]]);
       ver_env.d("dim2", other_dims[1]);
@@ -1178,7 +1179,7 @@ TEST_F(Kernel, Softmax4D) {
       auto ref =
           log_softmax ? a.log_softmax(softmax_dim) : a.softmax(softmax_dim);
 
-      TemplateEnv env;
+      at::jit::TemplateEnv env;
       env.d("dim", softmax_dim);
       env.s("op", log_softmax ? "log_softmax" : "softmax");
       env.s("size", li_to_str(ref.sizes()));
@@ -1196,7 +1197,7 @@ TEST_F(Kernel, Softmax4D) {
       std::ostringstream oss;
       oss << *s;
 
-      TemplateEnv ver_env;
+      at::jit::TemplateEnv ver_env;
       ver_env.d("dim1", other_dims[0]);
       ver_env.d("dim1_size", a.sizes()[other_dims[0]]);
       ver_env.d("dim2", other_dims[1]);
@@ -1247,7 +1248,7 @@ TEST_F(Kernel, SignTest) {
   int default_input_size = 100;
   for (auto scalar_type : {ScalarType::Float, ScalarType::Double}) {
     at::Tensor corner_case_inputs;
-    TemplateEnv env;
+    at::jit::TemplateEnv env;
     auto options = common_options;
     switch (scalar_type) {
       case ScalarType::Float: {
