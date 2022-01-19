@@ -28,4 +28,4 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUM: ${{ github.event.client_payload.pr_num }}
         run: |
-          python3 .github/scripts/trymerge.py "${PR_NM}"
+          python3 .github/scripts/trymerge.py "${PR_NUM}"
