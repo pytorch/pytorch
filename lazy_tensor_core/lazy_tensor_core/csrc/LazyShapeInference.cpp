@@ -76,6 +76,25 @@ std::vector<int64_t> expand_param_if_needed(
   }
 }
 
+std::vector<Shape> compute_shape_arange_out(const at::Scalar & start, const at::Scalar & end, const at::Scalar & step, at::Tensor & out) {
+  //Returns a 1-D tensor of size
+  // ceil ( (end - start) / step )
+  // ceil (a/b) = (a + b - 1) / b;
+  assert(step.toFloat() != 0);
+  int64_t size = (end.toFloat() - start.toFloat()) / step.toFloat();
+  assert (size > 0);
+
+  // From torch.arange docs:
+  // dtype (torch.dtype, optional) – the desired data type of returned tensor.
+  // Default: if None, uses a global default (see torch.set_default_tensor_type()).
+  // If dtype is not given, infer the data type from the other input arguments.
+  // If any of start, end, or stop are floating-point, the dtype is inferred to be the default dtype, see get_default_dtype().
+  // Otherwise, the dtype is inferred to be torch.int64.
+
+  // Since out tensor is specified, its dtype should always be used?
+  return {Shape(out.scalar_type(), {size})};
+}
+
 std::vector<Shape> compute_shape_binary_cross_entropy(const at::Tensor & self, const at::Tensor & target, const c10::optional<at::Tensor> & weight, int64_t reduction) {
   if(reduction == at::Reduction::None) {
     return {Shape(self.scalar_type(), self.sizes().vec())};
@@ -151,11 +170,11 @@ std::vector<Shape> compute_shape_convolution(const at::Tensor & input, const at:
   }
 }
 
-std::vector<Shape> compute_shape_masked_fill(at::Tensor & self, const at::Tensor & mask, const at::Scalar & value) {
+std::vector<Shape> compute_shape_masked_fill_(at::Tensor & self, const at::Tensor & mask, const at::Scalar & value) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
-std::vector<Shape> compute_shape_masked_fill(at::Tensor & self, const at::Tensor & mask, const at::Tensor & value) {
+std::vector<Shape> compute_shape_masked_fill_(at::Tensor & self, const at::Tensor & mask, const at::Tensor & value) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
@@ -276,6 +295,10 @@ std::vector<Shape> compute_shape_relu(const at::Tensor& self) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
+std::vector<Shape> compute_shape_relu_(at::Tensor& self) {
+  return compute_shape_relu(self);
+}
+
 std::vector<Shape> compute_shape_bitwise_and(const at::Tensor& self, const at::Scalar& other) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
@@ -293,7 +316,7 @@ std::vector<Shape> compute_shape_sum(
   return {Shape(self.scalar_type(), {})};;
 }
 
-std::vector<Shape> compute_shape_zero(at::Tensor& self) {
+std::vector<Shape> compute_shape_zero_(at::Tensor& self) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 

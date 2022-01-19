@@ -166,7 +166,7 @@ def lazy_tensor_decls(value_types: List[NamedCType], tensor_class: str, schema: 
         if isinstance(t.type, BaseCType):
             lazy_tensor_decls.append(
                 f"{tensor_class} lazy_{t.name} = "
-                f"torch::lazy::GetLtcTensorOrCreateForWrappedNumber({t.name}, *device);")
+                f"torch::lazy::GetLtcTensorOrCreateForWrappedNumber({t.name}, *common_device);")
         elif isinstance(t.type, OptionalCType):
             # TODO(alanwaketan): Maybe we want to apply GetLtcTensorOrCreateForWrappedNumber here, but hold it
             # until we encounter a real world example.
@@ -185,7 +185,7 @@ class GenLazyNativeFuncDefinition:
     @method_with_native_function
     def __call__(self, func: NativeFunction) -> List[str]:
         sig = kernel_signature(func, self.backend_index)
-
+        metadata = self.backend_index.get_kernel(func)
         # Lazy IR stuff
         schema = LazyIrSchema(func.func)
         all_types = schema.filtered_types()
@@ -194,8 +194,12 @@ class GenLazyNativeFuncDefinition:
         returns_length = len(schema.returns)
 
         fallback_str = gen_fallback_code(schema, overload_name=func.func.name.overload_name)
-        value_types_names = ", ".join([f"{t.name}" for t in value_types])
-        get_device_str = f"""auto device = torch::lazy::GetBackendDevice({value_types_names});"""
+        value_types_names = [f"{t.name}" for t in value_types if t.name not in schema.wrapped_scalar_names]
+        assert len(value_types_names) > 0, "Code below assumes there is at least one tensor arg"
+        get_device_str = f"""auto common_device = torch::lazy::GetBackendDevice({', '.join(value_types_names)});
+        TORCH_INTERNAL_ASSERT(common_device);
+        """
+
         lazy_tensor_decls_str = lazy_tensor_decls(value_types, self.tensor_class, schema)
         node_ctor_input_str = node_ctor_inputs(schema)
 
@@ -211,7 +215,7 @@ class GenLazyNativeFuncDefinition:
             meta_str = f"""auto out_meta = at::meta::{schema.aten_name}({', '.join(str(t.name) for t in all_types)});
         {meta_out}"""
         else:
-            shape_sig = ComputeShapeSignature(func)
+            shape_sig = ComputeShapeSignature(metadata.kernel, func)
             meta_str = f"""
         auto shapes = {shape_sig.shape_call};"""
         meta_str += f"""
@@ -219,27 +223,23 @@ class GenLazyNativeFuncDefinition:
 
         node_str = f"""auto node = torch::lazy::MakeNode<ir::ops::{schema.node_name}>({node_ctor_input_str},
                                                                                       std::move(shapes));"""
-
-        assert len(value_types) > 0, f"Only supporting tensor ops so far, none found in {sig}"
-        first_tensor = value_types[0]
-        bridge_str = f"""auto result = torch::lazy::CreateAtenFromLtcTensor(
-            torch::lazy::LazyTensor::Create(std::move(node), lazy_{first_tensor.name}.GetDevice()));"""
+        first_tensor_name = value_types_names[0]
+        bridge_str = f"""auto result = torch::lazy::CreateAtenFromLtcTensor(torch::lazy::LazyTensor::Create(std::move(node), *common_device));"""
         if returns_length > 1:
             bridge_str = f"""std::vector<{self.tensor_class}> lazy_tensors;
         for (int i = 0; i < {returns_length}; i++) {{
-            lazy_tensors.push_back(torch::lazy::LazyTensor::Create(
-                torch::lazy::Value(node, i), lazy_{first_tensor.name}.GetDevice()));
+            lazy_tensors.push_back(torch::lazy::LazyTensor::Create(torch::lazy::Value(node, i), *common_device));
         }}
         auto result = torch::lazy::TupleAtenFromLtcTensors<{returns_length}>(lazy_tensors);"""
         if schema.name.name.inplace:
             assert returns_length == 1, "We assumed there was no such case where an op is an in-place variant " \
                                         "and has tuple outputs."
-            bridge_str = f"""lazy_{first_tensor.name}.SetInPlaceIrValue(node);
-        auto& result = {first_tensor.name};"""
+            bridge_str = f"""lazy_{first_tensor_name}.SetInPlaceIrValue(node);
+        auto& result = {first_tensor_name};"""
 
 
         return [f"""\
-    {sig.decl(name=f"{self.class_method_name}::{schema.aten_name}")} {{
+    {sig.decl(name=f"{self.class_method_name}::{metadata.kernel}")} {{
         {fallback_str}
         TORCH_LAZY_FN_COUNTER("lazy::");
         {get_device_str}
@@ -255,17 +255,17 @@ class ComputeShapeSignature:
     """
     Here we use the base name as the suffix of the signature to avoid generating for in-place variants.
     """
-    @method_with_native_function
-    def __init__(self, f: NativeFunction):
+    def __init__(self, kernel_name: str, f: NativeFunction):
         self.__schema = LazyIrSchema(f.func)
         self.__dispatch_args = ', '.join([a.decl() for a in dispatcher.arguments(f.func)])
         self.__call_args = ", ".join([f"{t.name}" for t in self.__schema.filtered_types()])
+        self.__kernel_name = kernel_name
 
     def __decl_suffix(self) -> str:
-        return f"{self.__schema.base_name}({self.__dispatch_args})"
+        return f"{self.__kernel_name}({self.__dispatch_args})"
 
     def __call_suffix(self) -> str:
-        return f"{self.__schema.base_name}({self.__call_args})"
+        return f"{self.__kernel_name}({self.__call_args})"
 
     @property
     def shape_decl(self) -> str:
@@ -285,7 +285,7 @@ class GenLazyShapeInferenceDefinition:
     # def gen_lazy_shape_inference_decl(f: NativeFunction, backend_index: BackendIndex, tensor_class: str) -> List[str]:
     def __call__(self, f: NativeFunction) -> List[str]:
         sig = kernel_signature(f, self.backend_index)
-
+        metadata = self.backend_index.get_kernel(f)
         # Lazy IR stuff
         schema = LazyIrSchema(f.func)
         value_types = schema.filtered_types(values=True, scalars=False)
@@ -295,7 +295,7 @@ class GenLazyShapeInferenceDefinition:
         # Only generate shape/dtype fn for non-structured kernels,
         # since we just use the meta function for structured kernels
         if not f.structured and f.structured_delegate is None:
-            shape_sig = ComputeShapeSignature(f)
+            shape_sig = ComputeShapeSignature(metadata.kernel, f)
             return ["\n".join([f"{shape_sig.shape_decl};"])]
         else:
             return []
