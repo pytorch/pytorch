@@ -16,7 +16,6 @@
       "libtorch-linux-xenial-cuda11.3-py3.7-gcc7",
       "linux-bionic-cuda10.2-py3.9-gcc7",
       "linux-bionic-py3.7-clang9",
-      "linux-bionic-py3.7-cuda11.2-cudnn8-clang8",
       "linux-docs",
       "linux-docs-push",
       "linux-vulkan-bionic-py3.7-clang9",
@@ -74,7 +73,6 @@
     "ciflow/cpu": [
       "caffe2-linux-xenial-py3.7-gcc5.4",
       "linux-bionic-py3.7-clang9",
-      "linux-bionic-py3.7-cuda11.2-cudnn8-clang8",
       "linux-docs",
       "linux-docs-push",
       "linux-vulkan-bionic-py3.7-clang9",
@@ -111,7 +109,6 @@
       "linux-binary-libtorch-pre-cxx11",
       "linux-binary-manywheel",
       "linux-bionic-py3.7-clang9",
-      "linux-bionic-py3.7-cuda11.2-cudnn8-clang8",
       "linux-docs",
       "linux-vulkan-bionic-py3.7-clang9",
       "linux-xenial-cuda11.3-py3.7-gcc7",
@@ -153,7 +150,6 @@
       "libtorch-linux-xenial-cuda11.3-py3.7-gcc7",
       "linux-bionic-cuda10.2-py3.9-gcc7",
       "linux-bionic-py3.7-clang9",
-      "linux-bionic-py3.7-cuda11.2-cudnn8-clang8",
       "linux-docs",
       "linux-docs-push",
       "linux-vulkan-bionic-py3.7-clang9",
@@ -235,7 +231,6 @@
       "libtorch-linux-xenial-cuda11.3-py3.7-gcc7",
       "linux-bionic-cuda10.2-py3.9-gcc7",
       "linux-bionic-py3.7-clang9",
-      "linux-bionic-py3.7-cuda11.2-cudnn8-clang8",
       "linux-docs",
       "linux-vulkan-bionic-py3.7-clang9",
       "linux-xenial-cuda11.3-py3.7-gcc7",
@@ -268,7 +263,7 @@
       "win-vs2019-cuda11.3-py3"
     ],
     "ciflow/xla": [
-      "linux-bionic-py3.7-cuda11.2-cudnn8-clang8"
+      "linux-bionic-py3.7-clang9"
     ]
   },
   "version": "v1"
