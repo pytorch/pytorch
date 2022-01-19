@@ -1,3 +1,5 @@
+load("@rules_cuda//cuda:defs.bzl", "requires_cuda_enabled")
+
 def define_targets(rules):
     rules.cc_library(
         name = "cuda",
@@ -32,6 +34,7 @@ def define_targets(rules):
             "//c10/macros",
             "//c10/util:base",
         ],
+        target_compatible_with = requires_cuda_enabled(),
     )
 
     rules.cc_library(
