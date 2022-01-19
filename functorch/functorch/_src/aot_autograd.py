@@ -576,7 +576,7 @@ def compiled_module(mod, *args, **kwargs):
     def functional_call(named_params, named_buffers, *args, **kwargs):
         params_and_buffers = {**named_params, **named_buffers}
         # import pdb; pdb.set_trace()
-        return _stateless.functional_call(mod, params_and_buffers, *args, **kwargs)
+        return _stateless.functional_call(mod, params_and_buffers, args, kwargs)
 
     compiled_f = compiled_function(functional_call, *args, **kwargs)
 
