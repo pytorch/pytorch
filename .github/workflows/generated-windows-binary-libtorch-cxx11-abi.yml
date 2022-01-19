@@ -61,6 +61,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -140,6 +143,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -217,6 +223,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -339,6 +348,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -418,6 +430,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -495,6 +510,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -617,6 +635,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -696,6 +717,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -773,6 +797,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -895,6 +922,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -974,6 +1004,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -1051,6 +1084,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -1174,6 +1210,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -1254,6 +1293,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -1332,6 +1374,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -1455,6 +1500,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -1535,6 +1583,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -1613,6 +1664,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -1736,6 +1790,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -1816,6 +1873,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -1894,6 +1954,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -2017,6 +2080,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -2097,6 +2163,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -2175,6 +2244,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -2298,6 +2370,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -2378,6 +2453,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -2456,6 +2534,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -2579,6 +2660,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -2659,6 +2743,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -2737,6 +2824,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -2860,6 +2950,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -2940,6 +3033,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -3018,6 +3114,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -3141,6 +3240,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -3221,6 +3323,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -3299,6 +3404,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -3422,6 +3530,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -3502,6 +3613,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -3580,6 +3694,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -3703,6 +3820,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -3783,6 +3903,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -3861,6 +3984,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -3984,6 +4110,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -4064,6 +4193,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -4142,6 +4274,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -4265,6 +4400,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -4345,6 +4483,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -4423,6 +4564,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -4546,6 +4690,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -4626,6 +4773,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -4704,6 +4854,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -4827,6 +4980,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -4907,6 +5063,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -4985,6 +5144,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -5108,6 +5270,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -5188,6 +5353,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -5266,6 +5434,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -5389,6 +5560,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -5469,6 +5643,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -5547,6 +5724,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.7"
     steps:
       - name: Display EC2 information
         shell: bash
