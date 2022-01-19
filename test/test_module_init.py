@@ -232,6 +232,7 @@ def build_constructor_arg_db():
         torch.nn.quantized.QFunctional: ((), {}),
     }
 
+
 # Instantiates the given class with the given args, kwargs, optionally on a given device.
 def instantiate_class(cls, args, kwargs, extra_kwargs):
     return cls(*args, **kwargs) if extra_kwargs is None else cls(*args, **kwargs, **extra_kwargs)
