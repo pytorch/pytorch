@@ -152,9 +152,6 @@ class TORCH_API ManagedTensorRanges {
 };
 
 struct TORCH_API StaticModuleOptions {
-  // to batch allocate (deallocate) tensor storage for all non-escaping
-  // temporary tensors
-  bool cleanup_activations{true};
   // enabling out variant allows Static Runtime to do memory planning
   bool enable_out_variant{true};
   // to reuse tensor storage for tensors whose live-range do not overlap to
