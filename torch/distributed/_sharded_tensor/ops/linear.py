@@ -177,9 +177,7 @@ def _handle_row_wise_sharding(input, world_size, weight, rank, local_shard_t, bi
     Returns: final result of linear operation.
     """
     # alltoall to gather all the appropriate inputs.
-    input_size = list(reversed(range(input.dim())))
-
-    input_t = input.permute(input_size).contiguous()
+    input_t = input.transpose(0, -1).contiguous()
     input_t_size = input_t.size()
 
     # Compute expected size
@@ -217,8 +215,7 @@ def _handle_row_wise_sharding(input, world_size, weight, rank, local_shard_t, bi
 
     # Perform autograd enabled alltoall
     all_to_all_single(gathered_input, input_t, input_split_sizes=input_split_sizes, group=pg)
-    gathered_input_size = list(reversed(range(gathered_input.dim())))
-    gathered_input = gathered_input.permute(gathered_input_size)
+    gathered_input = gathered_input.transpose(0, -1)
 
     # Perform local matmuls for all shards
     shard_size = local_shard_t.size()[0]
