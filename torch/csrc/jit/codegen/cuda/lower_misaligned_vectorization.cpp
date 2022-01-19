@@ -5,7 +5,6 @@
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
@@ -110,16 +109,11 @@ class MisalignedVectorizationModifier : public kir::ExprMutator {
       const std::vector<kir::ForLoop*>& for_loop_structure,
       const ReferenceTensors& tensors,
       kir::IfThenElse* parent_scope_ite) {
-    kir::IrBuilder ir_builder(GpuLower::current()->kernel());
-
     // Generate vectorize index
     auto indices = (tensors.out_tv->getMemoryType() == MemoryType::Global)
-        ? Index::getConsumerStridedIndices(
-              tensors.out_tv->fuserTv(), for_loop_structure)
+        ? Index::getConsumerStridedIndices(tensors.out_tv, for_loop_structure)
         : Index::getProducerStridedIndices(
-              tensors.in_tv->fuserTv(),
-              tensors.out_tv->fuserTv(),
-              for_loop_structure);
+              tensors.in_tv, tensors.out_tv, for_loop_structure);
 
     // >>>>>>>>>>>>>
     // Number of elements in vectorize access
@@ -128,30 +122,30 @@ class MisalignedVectorizationModifier : public kir::ExprMutator {
 
     // Size of memory type for the elements
     Int* data_size_in_bytes =
-        ir_builder.create<Int>(dataTypeSize(tensors.vec_tv->dtype()));
+        IrBuilder::create<Int>(dataTypeSize(tensors.vec_tv->dtype()));
 
     // The number of bytes in the vectorize access
     auto vector_size_in_bytes =
-        ir_builder.mulExpr(vector_size, data_size_in_bytes);
+        IrBuilder::mulExpr(vector_size, data_size_in_bytes);
 
-    auto index = ir_builder.create<kir::TensorIndex>(
-        tensors.global_tv->fuserTv(), indices);
+    auto index =
+        IrBuilder::create<kir::TensorIndex>(tensors.global_tv, indices);
     auto address = createNamedScalarFromValue(
         parent_scope_ite->thenBody(), index, "address", true);
 
     // offset_size = (address % vector_size_bytes) / data_type_size_bytes
     // shift_init = vector_size - offset_size
-    auto a = ir_builder.modExpr(address, vector_size_in_bytes);
-    auto b = ir_builder.divExpr(a, data_size_in_bytes);
-    auto c = ir_builder.subExpr(vector_size, b);
+    auto a = IrBuilder::modExpr(address, vector_size_in_bytes);
+    auto b = IrBuilder::divExpr(a, data_size_in_bytes);
+    auto c = IrBuilder::subExpr(vector_size, b);
     auto shift_init = createNamedScalarFromValue(
         parent_scope_ite->thenBody(), c, "shift_val");
 
     // shift = (shift_init == vector_size) ? 0 : shift_init
     // The number of elements until the first aligned address
-    auto shift_pred = ir_builder.eqExpr(shift_init, vector_size);
-    auto shift_val =
-        ir_builder.whereExpr(shift_pred, ir_builder.zeroVal(), shift_init);
+    auto shift_pred = IrBuilder::eqExpr(shift_init, vector_size);
+    auto shift_val = IrBuilder::whereExpr(
+        shift_pred, GpuLower::current()->kernel()->zeroVal(), shift_init);
 
     // >>>>>>>>>>>>>
     auto shift = createNamedScalarFromValue(
@@ -163,13 +157,13 @@ class MisalignedVectorizationModifier : public kir::ExprMutator {
 
     // remainder = (extent - shift) % vector_size
     // The number of elements remaining not accessed by vectorized operations
-    auto remaining_extent = ir_builder.subExpr(extent, shift);
-    auto remainder_val = ir_builder.modExpr(remaining_extent, vector_size);
+    auto remaining_extent = IrBuilder::subExpr(extent, shift);
+    auto remainder_val = IrBuilder::modExpr(remaining_extent, vector_size);
     auto remainder = createNamedScalarFromValue(
         parent_scope_ite->thenBody(), remainder_val, "remainder");
 
     // (extent - remainder) is the upper-bound for the vectorize section
-    auto extent_remainder_val = ir_builder.subExpr(extent, remainder);
+    auto extent_remainder_val = IrBuilder::subExpr(extent, remainder);
 
     // >>>>>>>>>>>>>
     auto extent_minus_remainder = createNamedScalarFromValue(
@@ -183,7 +177,7 @@ class MisalignedVectorizationModifier : public kir::ExprMutator {
 
     // >>>>>>>>>>>>>
     auto last_root_domain_index_shift =
-        ir_builder.addExpr(last_root_domain_index, shift);
+        IrBuilder::addExpr(last_root_domain_index, shift);
 
     return {
         vector_size,
@@ -200,20 +194,18 @@ class MisalignedVectorizationModifier : public kir::ExprMutator {
   kir::IfThenElse* createVectorizeSection(
       const std::vector<kir::ForLoop*>& child_loops,
       const VectorizeData& params) {
-    kir::IrBuilder ir_builder(GpuLower::current()->kernel());
-
     auto vectorized_child_loops = cloneForLoops(
         child_loops, params.vector_size, nullptr, true, params.shift);
 
     // Vectorize Range: [shift - (extent-remainder))
     // (last_root_domain_index + shift) < (extent - remainder)
-    Val* vectorize_cond = ir_builder.ltExpr(
+    Val* vectorize_cond = IrBuilder::ltExpr(
         params.last_root_domain_index_shift, params.extent_minus_remainder);
 
     kir::Predicate* vectorize_pred =
-        ir_builder.create<kir::Predicate>(vectorize_cond->as<Bool>());
+        IrBuilder::create<kir::Predicate>(vectorize_cond->as<Bool>());
     kir::IfThenElse* vectorize_ite =
-        ir_builder.create<kir::IfThenElse>(vectorize_pred);
+        IrBuilder::create<kir::IfThenElse>(vectorize_pred);
 
     for (auto cloned_loop : vectorized_child_loops) {
       vectorize_ite->thenBody().push_back(cloned_loop);
@@ -227,20 +219,19 @@ class MisalignedVectorizationModifier : public kir::ExprMutator {
   kir::IfThenElse* createInitialSection(
       const std::vector<kir::ForLoop*>& child_loops,
       const VectorizeData& params) {
-    kir::IrBuilder ir_builder(GpuLower::current()->kernel());
-
     auto pre_child_loops = cloneForLoops(
         child_loops, params.vector_size, params.shift, false, nullptr);
 
     // Initial Range: [0 - shift)
     // last_root_domain_index == 0
-    Val* initial_cond =
-        ir_builder.eqExpr(params.last_root_domain_index, ir_builder.zeroVal());
+    Val* initial_cond = IrBuilder::eqExpr(
+        params.last_root_domain_index,
+        GpuLower::current()->kernel()->zeroVal());
 
     kir::Predicate* initial_pred =
-        ir_builder.create<kir::Predicate>(initial_cond->as<Bool>());
+        IrBuilder::create<kir::Predicate>(initial_cond->as<Bool>());
     kir::IfThenElse* initial_ite =
-        ir_builder.create<kir::IfThenElse>(initial_pred);
+        IrBuilder::create<kir::IfThenElse>(initial_pred);
 
     for (auto cloned_loop : pre_child_loops) {
       initial_ite->thenBody().push_back(cloned_loop);
@@ -254,23 +245,21 @@ class MisalignedVectorizationModifier : public kir::ExprMutator {
   kir::IfThenElse* createRemainderSection(
       const std::vector<kir::ForLoop*>& child_loops,
       const VectorizeData& params) {
-    kir::IrBuilder ir_builder(GpuLower::current()->kernel());
-
     auto post_child_loops = cloneForLoops(
         child_loops, params.vector_size, params.remainder, false, params.shift);
 
     // Remainder Range: [(extent-remainder) - extent)
     // (extent - remainder) <= last_root_domain_index + shift < extent
-    Val* lower_bound = ir_builder.geExpr(
+    Val* lower_bound = IrBuilder::geExpr(
         params.last_root_domain_index_shift, params.extent_minus_remainder);
     Val* upper_bound =
-        ir_builder.ltExpr(params.last_root_domain_index_shift, params.extent);
-    Val* remainder_cond = ir_builder.andExpr(lower_bound, upper_bound);
+        IrBuilder::ltExpr(params.last_root_domain_index_shift, params.extent);
+    Val* remainder_cond = IrBuilder::andExpr(lower_bound, upper_bound);
 
     kir::Predicate* remainder_pred =
-        ir_builder.create<kir::Predicate>(remainder_cond->as<Bool>());
+        IrBuilder::create<kir::Predicate>(remainder_cond->as<Bool>());
     kir::IfThenElse* remainder_ite =
-        ir_builder.create<kir::IfThenElse>(remainder_pred);
+        IrBuilder::create<kir::IfThenElse>(remainder_pred);
 
     for (auto cloned_loop : post_child_loops) {
       remainder_ite->thenBody().push_back(cloned_loop);
@@ -282,8 +271,6 @@ class MisalignedVectorizationModifier : public kir::ExprMutator {
   kir::ForLoop* handleMisalignedVectorize(
       std::vector<kir::ForLoop*> for_loop_structure,
       const kir::ForLoop* parent_for_loop) {
-    kir::IrBuilder ir_builder(GpuLower::current()->kernel());
-
     auto child_loops = findChildForLoops(parent_for_loop);
 
     // Assumption: All vectorize operations have the same shift
@@ -295,17 +282,19 @@ class MisalignedVectorizationModifier : public kir::ExprMutator {
 
     // The parent_for_loop contains allocate, read, compute, write operations
     const auto new_parent_for_loop =
-        ir_builder.create<kir::ForLoop>(parent_for_loop);
+        IrBuilder::create<kir::ForLoop>(parent_for_loop);
 
     // Transfer all expressions except for-loops to new parent for-loop
     // All expressions are placed at the beginning of the new for-loop
     copyExprsExceptForLoops(parent_for_loop, new_parent_for_loop);
 
     // Get the predicate for all but the last root domain
-    auto pred_except_last_root_domain = ir_builder.create<kir::Predicate>(
-        PredicateType::Misaligned, vectorized_expr, ir_builder.trueVal());
+    auto pred_except_last_root_domain = IrBuilder::create<kir::Predicate>(
+        PredicateType::Misaligned,
+        vectorized_expr,
+        GpuLower::current()->kernel()->trueVal());
     kir::IfThenElse* pred_ite =
-        ir_builder.create<kir::IfThenElse>(pred_except_last_root_domain);
+        IrBuilder::create<kir::IfThenElse>(pred_except_last_root_domain);
     new_parent_for_loop->body().push_back(pred_ite);
 
     auto constants = createVectorizeConstants(
@@ -359,7 +348,6 @@ class MisalignedVectorizationModifier : public kir::ExprMutator {
       Val* pred_stop,
       bool vectorize,
       Val* vectorize_shift) {
-    kir::IrBuilder ir_builder(GpuLower::current()->kernel());
     std::vector<kir::ForLoop*> cloned_for_loops;
 
     for (auto fl : for_loops_) {
@@ -371,12 +359,12 @@ class MisalignedVectorizationModifier : public kir::ExprMutator {
       TORCH_INTERNAL_ASSERT(
           !has_vectorize_op || fl->body().exprs().size() == 1);
 
-      const auto new_loop = ir_builder.create<kir::ForLoop>(
+      const auto new_loop = IrBuilder::create<kir::ForLoop>(
           fl->iter_domain(),
           fl->index(),
-          ir_builder.zeroVal(),
+          GpuLower::current()->kernel()->zeroVal(),
           loop_stop,
-          ir_builder.oneVal(),
+          GpuLower::current()->kernel()->oneVal(),
           vectorize && has_vectorize_op,
           vectorize_shift,
           fl->isUnrollRequired());
@@ -386,9 +374,9 @@ class MisalignedVectorizationModifier : public kir::ExprMutator {
       // Predicate the loop body if pred_stop is not null. This is to
       // make sure the loop itself is completely unrollable.
       if (pred_stop != nullptr) {
-        auto body_pred = ir_builder.create<kir::Predicate>(
-            ir_builder.ltExpr(new_loop->index(), pred_stop)->as<Bool>());
-        auto body_ite = ir_builder.create<kir::IfThenElse>(body_pred);
+        auto body_pred = IrBuilder::create<kir::Predicate>(
+            IrBuilder::ltExpr(new_loop->index(), pred_stop)->as<Bool>());
+        auto body_ite = IrBuilder::create<kir::IfThenElse>(body_pred);
         body->push_back(body_ite);
         body = &body_ite->thenBody();
       }
@@ -445,34 +433,29 @@ class MisalignedVectorizationModifier : public kir::ExprMutator {
   // Get full extent for the inner-most, merged root domain
   Val* getVectorizeExtent(TensorView* producer_tv, TensorView* consumer_tv) {
     const auto gpu_lower = GpuLower::current();
-    kir::IrBuilder ir_builder(gpu_lower->kernel());
 
-    auto consumer_fuser_tv = consumer_tv->fuserTv();
-    auto producer_fuser_tv = producer_tv->fuserTv();
-
-    auto p2c =
-        PairwiseRootDomainMap(producer_fuser_tv, consumer_fuser_tv)
-            .mapProducerToConsumer(
-                producer_fuser_tv->domain(), consumer_fuser_tv->domain());
+    auto p2c = PairwiseRootDomainMap(producer_tv, consumer_tv)
+                   .mapProducerToConsumer(
+                       producer_tv->domain(), consumer_tv->domain());
 
     auto consumer_root_right_of_ca_domains = IterVisitor::getInputsTo(
-        {consumer_fuser_tv->domain()->domain().begin() +
-             consumer_fuser_tv->getComputeAtPosition(),
-         consumer_fuser_tv->domain()->domain().end()});
+        {consumer_tv->domain()->domain().begin() +
+             consumer_tv->getComputeAtPosition(),
+         consumer_tv->domain()->domain().end()});
     auto producer_root_right_of_ca_domains = IterVisitor::getInputsTo(
-        {producer_fuser_tv->domain()->domain().begin() +
-             producer_fuser_tv->getComputeAtPosition(),
-         producer_fuser_tv->domain()->domain().end()});
+        {producer_tv->domain()->domain().begin() +
+             producer_tv->getComputeAtPosition(),
+         producer_tv->domain()->domain().end()});
 
-    const auto& consumer_contig = consumer_fuser_tv->domain()->contiguity();
-    const auto& producer_contig = producer_fuser_tv->domain()->contiguity();
+    const auto& consumer_contig = consumer_tv->domain()->contiguity();
+    const auto& producer_contig = producer_tv->domain()->contiguity();
 
-    auto producer_root_domain = producer_fuser_tv->getMaybeRFactorDomain();
+    auto producer_root_domain = producer_tv->getMaybeRFactorDomain();
 
     // Calculate extent of merged root domains
     Val* extent = nullptr;
     auto consumer_root_idx =
-        int(consumer_fuser_tv->getMaybeRFactorDomain().size()) - 1;
+        int(consumer_tv->getMaybeRFactorDomain().size()) - 1;
     for (int i = int(producer_root_domain.size()) - 1; i >= 0; --i) {
       auto producer_root_id = producer_root_domain.at(i);
 
@@ -511,11 +494,10 @@ class MisalignedVectorizationModifier : public kir::ExprMutator {
 
       // We now know it's safe to extend the vectorization domain to these
       // axes. It shouldn't matter whether producer or consumer is used.
-      auto consumer_extent = gpu_lower->lowerValue(consumer_root_id->extent());
       if (extent == nullptr) {
-        extent = consumer_extent;
+        extent = consumer_root_id->extent();
       } else {
-        extent = ir_builder.mulExpr(extent, consumer_extent);
+        extent = IrBuilder::mulExpr(extent, consumer_root_id->extent());
       }
 
       // If it's not contiguous, extending the vectorization domain
@@ -537,13 +519,14 @@ class MisalignedVectorizationModifier : public kir::ExprMutator {
       Val* val,
       const std::string& name,
       bool address = false) {
-    kir::IrBuilder ir_builder(GpuLower::current()->kernel());
-    auto namedScalar = (address) ? ir_builder.addressExprNamedScalar(name, val)
-                                 : ir_builder.setExprNamedScalar(name, val);
+    auto namedScalar = (address) ? IrBuilder::addressExprNamedScalar(name, val)
+                                 : IrBuilder::setExprNamedScalar(name, val);
     TORCH_INTERNAL_ASSERT(namedScalar->definition() != nullptr);
 
-    auto alloc = ir_builder.create<kir::Allocate>(
-        namedScalar, MemoryType::Local, ir_builder.oneVal());
+    auto alloc = IrBuilder::create<kir::Allocate>(
+        namedScalar,
+        MemoryType::Local,
+        GpuLower::current()->kernel()->oneVal());
     body.push_back(alloc);
     body.push_back(namedScalar->definition());
     return namedScalar;

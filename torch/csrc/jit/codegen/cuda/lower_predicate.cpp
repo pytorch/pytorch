@@ -7,7 +7,6 @@
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_shift.h>
@@ -191,9 +190,8 @@ class PredicateAnalyzer : public OptOutDispatch {
 
     // If consumer_id is not going to be materialized as a loop (e.g.,
     // broadcast), no need to predicate
-    const auto gpu_lower = GpuLower::current();
     if (consumer_id->isBroadcast() ||
-        gpu_lower->trivialReductionInfo().isDerived(consumer_id)) {
+        GpuLower::current()->trivialReductionInfo().isDerived(consumer_id)) {
       return;
     }
 
@@ -466,39 +464,17 @@ bool PredicateElimination::canOmitPredicate(const Expr* expr) const {
   return false;
 }
 
-bool PredicateElimination::canKirOmitPredicate(const Expr* kir_expr) const {
-  TORCH_INTERNAL_ASSERT(kir_expr != nullptr);
-  TORCH_INTERNAL_ASSERT(kir_expr->isKirStmt());
-  const auto out_tv = ir_utils::getTvOutput(kir_expr);
-  TORCH_INTERNAL_ASSERT(out_tv != nullptr, "Not a tensor expression");
-  // No need to predicate local tensors to which a scalar is assigned
-  if (out_tv->getMemoryType() == MemoryType::Local) {
-    if (auto uop = dynamic_cast<const UnaryOp*>(kir_expr)) {
-      if (uop->getUnaryOpType() == UnaryOpType::Set && uop->in()->isScalar()) {
-        return true;
-      }
-    }
-  }
-  const auto fuser_tv = out_tv->fuserTv();
-  if (fuser_tv == nullptr) {
-    return false;
-  }
-  return canOmitPredicate(fuser_tv->definition());
-}
-
 Val* PredicateElimination::getInitValue(TensorView* tv) const {
   auto it = init_value_map_.find(tv);
   if (it == init_value_map_.end()) {
     return nullptr;
   }
-  const auto gpu_lower = GpuLower::current();
-  kir::IrBuilder ir_builder(gpu_lower->kernel());
   auto init_val = it->second;
   if (init_val == nullptr) {
     // No reduction restriction. Just use zero
-    return ir_builder.zeroVal();
+    return GpuLower::current()->kernel()->zeroVal();
   } else {
-    return gpu_lower->lowerValue(init_val);
+    return init_val;
   }
 }
 

@@ -1,8 +1,10 @@
-#include <torch/csrc/jit/codegen/cuda/evaluator_common.h>
 #include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
+#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
+
+#include <torch/csrc/jit/codegen/cuda/evaluator_common.h>
 
 namespace torch {
 namespace jit {
@@ -82,54 +84,44 @@ void collectBufferSizes(
   }
 }
 
-//! Kernel IR utility, collects all the kir symbolic
+//! Kernel IR utility, collects all the kernel symbolic
 //!  integers we will need at runtime, i.e. after the
 //!  generated cuda kernel has already been compiled.
 //!  The values are to be used for runtime logic, like
 //!  `computeLaunchparams`.
-std::vector<Val*> collectRuntimeUsedIntegers(Fusion* fusion, GpuLower* lower) {
+std::vector<Val*> collectRuntimeUsedIntegers(kir::Kernel* kernel) {
   std::vector<Val*> ret;
-
+  auto all_tvs = ir_utils::allTvs(kernel);
   // Collect extent and integer inputs
-  for (auto val : fusion->usedMathVals()) {
-    auto kir_val = lower->lowerValue(val);
-    if (auto kir_tv = dynamic_cast<TensorView*>(kir_val)) {
-      for (auto id : kir_tv->domain()->domain()) {
-        ret.push_back(id->extent());
-      }
-    } else if (val->isFusionInput()) {
-      if (kir_val->isA<Int>()) {
-        ret.push_back(kir_val);
-      }
+  for (auto tv : all_tvs) {
+    for (auto id : tv->domain()->domain()) {
+      ret.push_back(id->extent());
     }
   }
-
+  for (auto inp : kernel->inputs()) {
+    if (inp->isA<Int>()) {
+      ret.push_back(inp);
+    }
+  }
   // Collect allocation sizes:
-  collectBufferSizes(ret, lower->kernel()->topLevelExprs());
-
+  collectBufferSizes(ret, kernel->topLevelExprs());
   return makeSortedEvaluationList(ret);
 }
-//! Fusion IR utility, collects all the fusionIR symbolic
-//!  integers we will need at runtime, i.e. after the
-//!  generated cuda kernel has already been compiled.
-//!  The values are to be used for runtime logic, like
-//!  `canSchedule` in heuristic look up.
+
 std::vector<Val*> collectRuntimeUsedIntegers(Fusion* fusion) {
   std::vector<Val*> ret;
-
+  auto all_tvs = ir_utils::allTvs(fusion);
   // Collect extent and integer inputs
-  for (auto val : fusion->usedMathVals()) {
-    if (auto tv = dynamic_cast<TensorView*>(val)) {
-      for (auto id : tv->domain()->domain()) {
-        ret.push_back(id->extent());
-      }
-    } else if (val->isFusionInput()) {
-      if (val->isA<Int>()) {
-        ret.push_back(val);
-      }
+  for (auto tv : all_tvs) {
+    for (auto id : tv->domain()->domain()) {
+      ret.push_back(id->extent());
     }
   }
-
+  for (auto inp : fusion->inputs()) {
+    if (inp->isA<Int>()) {
+      ret.push_back(inp);
+    }
+  }
   return makeSortedEvaluationList(ret);
 }
 
@@ -168,6 +160,17 @@ c10::optional<int64_t> PrecomputedIntegersBase<IRContext>::getMaybeValueFor(
     return c10::nullopt;
   }
   return values_[index];
+}
+
+template <typename IRContext>
+void PrecomputedIntegersBase<IRContext>::print() const {
+  std::cout << "Precomputed Integers:\n";
+  for (auto i : c10::irange(symbols_.size())) {
+    if (defined_[i]) {
+      std::cout << symbols_[i]->toInlineString() << " = " << values_[i]
+                << std::endl;
+    }
+  }
 }
 
 template <typename IRContext>
@@ -372,11 +375,8 @@ void NaiveIntegerMachine<IRContext>::runBinaryOp(int index) {
   precomputed_integers_.defined_[dest_index] = true;
 }
 
-KernelPrecomputedIntegers::KernelPrecomputedIntegers(
-    Fusion* fusion,
-    GpuLower& lower)
-    : lower_(&lower) {
-  loadSymbols(collectRuntimeUsedIntegers(fusion, lower_));
+KernelPrecomputedIntegers::KernelPrecomputedIntegers(kir::Kernel* kernel) {
+  loadSymbols(collectRuntimeUsedIntegers(kernel));
   kir::ExpressionEvaluator evaluator;
   initializeValueList(evaluator, symbols());
   initializeNamedScalars();
@@ -435,12 +435,12 @@ void KernelPrecomputedIntegers::initializeNamedScalars() {
 }
 
 void KernelPrecomputedIntegers::bindKernelInputs(
+    kir::Kernel* kernel,
     const at::ArrayRef<IValue>& aten_inputs) {
   if (hasValidValues()) {
     invalidate();
   }
 
-  auto kernel = lower_->kernel();
   const auto& inputs = kernel->inputs();
 
   for (const auto i : c10::irange(inputs.size())) {

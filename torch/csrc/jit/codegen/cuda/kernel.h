@@ -2,6 +2,7 @@
 
 #include <c10/macros/Export.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
@@ -9,6 +10,7 @@
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 
 #include <memory>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -74,14 +76,22 @@ struct KernelSummary {
 
 //! Container for a lowered Kernel IR
 //!
-//! TODO(kir): currently, it is just pointing to stmts owned
-//!  by a Fusion object. The goal is to have the Kernel object
-//!  own the Kernel IR stmts
-//!
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-class TORCH_CUDA_CU_API Kernel final : public NonCopyable {
+class TORCH_CUDA_CU_API Kernel final : public Fusion {
  public:
-  Kernel() = default;
+  // Kernel starts by grabbing all the nodes from the provided fusion.
+  // Kernel is not SSA, if a definition is not set, we should update it, but
+  // not remove previous definition if it is set. This is primarily because when
+  // we do something like generate an initialization statement for a reduction
+  // TV, we may want to continue to do fusion like analysis on the original
+  // expression.
+  Kernel(Fusion* fusion) : Fusion(*fusion) {}
+
+  Kernel() = delete;
+
+  // No move or copy semantics
+  Kernel(const Kernel&) = delete;
+  Kernel& operator=(const Kernel&) = delete;
 
   //! Finalize a kernel definition
   //!
@@ -90,40 +100,8 @@ class TORCH_CUDA_CU_API Kernel final : public NonCopyable {
   //!
   void finalize(std::vector<Expr*> top_level_exprs);
 
-  //! Register input as an input of the kernel
-  void addInput(Val* input) {
-    inputs_.push_back(input);
-    input_set_.insert(input);
-  }
-
-  //! Register output as an output of the kernel
-  void addOutput(Val* output) {
-    outputs_.push_back(output);
-    output_set_.insert(output);
-  }
-
-  const auto& inputs() const {
-    return inputs_;
-  }
-
-  const auto& outputs() const {
-    return outputs_;
-  }
-
-  bool isInput(Val* val) const {
-    return input_set_.find(val) != input_set_.end();
-  }
-
-  bool isOutput(Val* val) const {
-    return output_set_.find(val) != output_set_.end();
-  }
-
-  const auto& topLevelExprs() const {
+  const std::vector<Expr*>& topLevelExprs() const {
     return top_level_exprs_;
-  }
-
-  const auto& irStmts() const {
-    return ir_stmts_;
   }
 
   const KernelSummary& summary() const {
@@ -132,21 +110,6 @@ class TORCH_CUDA_CU_API Kernel final : public NonCopyable {
 
   const ThreadPredicateMap& predicateMap() const {
     return *predicate_map_;
-  }
-
-  //! Register a new Kernel IR stmt
-  //!
-  //! \note This is a specialized helper for kir::IrBuilder, not
-  //!   intended for general use
-  //!
-  void registerIrStmt(
-      IrBuilderPasskey passkey,
-      std::unique_ptr<Statement> stmt);
-
-  //! Allocates a new value identifier
-  ValueId newValueId(IrBuilderPasskey passkey) {
-    TORCH_CHECK(passkey.kernel == this);
-    return next_value_id_++;
   }
 
   //! Checks if parallel type is padded
@@ -162,31 +125,27 @@ class TORCH_CUDA_CU_API Kernel final : public NonCopyable {
   //! Debug dump of the Kernel IR
   void print() const;
 
+ protected:
+  //! Register the Val with this fusion
+  void registerVal(Val* val) override;
+
+  //! Register expr with this fusion.
+  //! When we register an expression, we want to update the dependency tracking
+  //! of Vals. We add expr to our general expr_set_,
+  void registerExpr(Expr* expr) override;
+
  private:
   // Analyze the kernel IR and caches the summary of interesting data
   void analyze();
 
  private:
-  // Kernel IR stmts
-  std::vector<std::unique_ptr<Statement>> ir_stmts_;
-
   // Top level statements
   std::vector<Expr*> top_level_exprs_;
-
-  // Kernel inputs and outputs
-  std::vector<Val*> inputs_;
-  std::vector<Val*> outputs_;
-  std::unordered_set<Val*> input_set_;
-  std::unordered_set<Val*> output_set_;
-
-  // Used to allocate unique value IDs
-  ValueId next_value_id_ = 1;
 
   // Summary of interesting kernel data
   KernelSummary summary_;
 
   // Predicate map
-  // TODO(kir): consider a simpler, kernel IR based version
   std::unique_ptr<ThreadPredicateMap> predicate_map_;
   WarpPaddedParallelInfo warp_padded_parallel_info_;
 };

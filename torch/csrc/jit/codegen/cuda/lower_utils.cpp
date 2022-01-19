@@ -6,7 +6,6 @@
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
@@ -23,15 +22,13 @@ namespace cuda {
 namespace scope_utils {
 
 //! Create an **empty** Forloop and copy the metadata.
-kir::ForLoop* cloneForLoop(kir::IrBuilder& ir_builder, kir::ForLoop* for_loop) {
-  return ir_builder.create<kir::ForLoop>(for_loop);
+kir::ForLoop* cloneForLoop(kir::ForLoop* for_loop) {
+  return IrBuilder::create<kir::ForLoop>(for_loop);
 }
 
 //! Create an **empty** IfThenElse and copy the metadata.
-kir::IfThenElse* cloneIfThenElse(
-    kir::IrBuilder& ir_builder,
-    kir::IfThenElse* ite) {
-  return ir_builder.create<kir::IfThenElse>(ite->predicate());
+kir::IfThenElse* cloneIfThenElse(kir::IfThenElse* ite) {
+  return IrBuilder::create<kir::IfThenElse>(ite->predicate());
 }
 
 } // namespace scope_utils
@@ -156,11 +153,6 @@ bool hasBlockSync(const Expr* expr, const ThreadPredicateMap& pred_map) {
   }
 
   auto tv = getTvOutput(expr);
-  if (tv->isKirStmt()) {
-    tv = tv->fuserTv();
-    expr = tv->definition();
-  }
-  TORCH_INTERNAL_ASSERT(expr != nullptr);
 
   if (tv->hasBlockReduction() || tv->hasGridReduction()) {
     return true;
@@ -180,12 +172,6 @@ c10::optional<IterDomain*> getMaybeWarpReductionDim(const ReductionOp* node) {
   }
 
   auto tv_in = getTv(node->in());
-  if (node->isKirStmt()) {
-    tv_out = tv_out->fuserTv();
-    tv_in = tv_in->fuserTv();
-    node = tv_out->definition()->as<ReductionOp>();
-    TORCH_INTERNAL_ASSERT(node != nullptr);
-  }
 
   // only support reducing to registers for now.
   if (tv_in->getMemoryType() != MemoryType::Local ||
@@ -246,17 +232,17 @@ bool derivedFromRootCAAxes(const TensorView* tv, IterDomain* axis) {
 
 std::unordered_map<ParallelType, IterDomain*, TypeHash> getParallelDomains(
     Val* val) {
-  TensorView* kir_tv = nullptr;
+  TensorView* tv = nullptr;
   if (val->isA<TensorView>()) {
-    kir_tv = val->as<TensorView>();
+    tv = val->as<TensorView>();
   } else if (val->isA<kir::TensorIndex>()) {
-    kir_tv = val->as<kir::TensorIndex>()->view();
+    tv = val->as<kir::TensorIndex>()->view();
   } else {
     TORCH_INTERNAL_ASSERT("Provided val is not TensorIndex or TensorView.");
   }
 
   std::unordered_map<ParallelType, IterDomain*, TypeHash> parallel_domains;
-  for (auto d : kir_tv->domain()->domain()) {
+  for (auto d : tv->domain()->domain()) {
     if (d->isThread()) {
       parallel_domains.insert(std::make_pair(d->getParallelType(), d));
     }
@@ -320,9 +306,8 @@ BasicAllocInfo getAllocInformation(
         local_id = id_it->second;
       }
     }
-    auto kir_local_id = gpu_lower->lowerValue(local_id)->as<IterDomain>();
 
-    if (loop_map.kirAreMapped(kir_local_id, fl_id)) {
+    if (loop_map.areMapped(local_id, fl_id)) {
       info.alloc_pos++;
     }
 
@@ -374,12 +359,12 @@ class ReplaceExprInput : public OptOutDispatch {
   }
 
  private:
+  // TODO: Replace this with mutator, example of this is done in replace
+  // symbolic sizes
   ReplaceExprInput(
       Expr* expr,
       const std::unordered_map<Val*, Val*>& replacement_map)
-      : gpu_lower_(GpuLower::current()),
-        ir_builder_(gpu_lower_->kernel()),
-        replacement_map_(replacement_map) {
+      : replacement_map_(replacement_map) {
     replaced_expr_ = expr;
   }
 
@@ -406,7 +391,7 @@ class ReplaceExprInput : public OptOutDispatch {
 
   // IR visitor interface
   void handle(kir::ForLoop* for_loop) final {
-    auto new_for_loop = ir_builder_.create<kir::ForLoop>(for_loop);
+    auto new_for_loop = IrBuilder::create<kir::ForLoop>(for_loop);
 
     auto replaced_loop_body =
         replace(for_loop->body().exprs(), replacement_map_);
@@ -418,7 +403,7 @@ class ReplaceExprInput : public OptOutDispatch {
   }
 
   void handle(kir::IfThenElse* ite) final {
-    auto new_ite = ir_builder_.create<kir::IfThenElse>(ite->predicate());
+    auto new_ite = IrBuilder::create<kir::IfThenElse>(ite->predicate());
     auto replaced_then_body =
         replace(ite->thenBody().exprs(), replacement_map_);
     for (auto new_expr : replaced_then_body) {
@@ -437,7 +422,7 @@ class ReplaceExprInput : public OptOutDispatch {
   void handle(UnaryOp* node) final {
     auto replaced_inputs = getMaybeInputReplacementMap(node);
     if (replaced_inputs.has_value()) {
-      replaced_expr_ = ir_builder_.create<UnaryOp>(
+      replaced_expr_ = IrBuilder::create<UnaryOp>(
           node->getUnaryOpType(),
           node->out(),
           replaced_inputs.value().at(node->in()));
@@ -446,7 +431,7 @@ class ReplaceExprInput : public OptOutDispatch {
   void handle(BinaryOp* node) final {
     auto replaced_inputs = getMaybeInputReplacementMap(node);
     if (replaced_inputs.has_value()) {
-      replaced_expr_ = ir_builder_.create<BinaryOp>(
+      replaced_expr_ = IrBuilder::create<BinaryOp>(
           node->getBinaryOpType(),
           node->out(),
           replaced_inputs.value().at(node->lhs()),
@@ -457,7 +442,7 @@ class ReplaceExprInput : public OptOutDispatch {
   void handle(TernaryOp* node) final {
     auto replaced_inputs = getMaybeInputReplacementMap(node);
     if (replaced_inputs.has_value()) {
-      replaced_expr_ = ir_builder_.create<TernaryOp>(
+      replaced_expr_ = IrBuilder::create<TernaryOp>(
           node->getTernaryOpType(),
           node->out(),
           replaced_inputs.value().at(node->in1()),
@@ -469,7 +454,7 @@ class ReplaceExprInput : public OptOutDispatch {
   void handle(ReductionOp* node) final {
     auto replaced_inputs = getMaybeInputReplacementMap(node);
     if (replaced_inputs.has_value()) {
-      replaced_expr_ = ir_builder_.create<ReductionOp>(
+      replaced_expr_ = IrBuilder::create<ReductionOp>(
           node->getReductionOpType(),
           node->init(),
           node->out(),
@@ -480,7 +465,7 @@ class ReplaceExprInput : public OptOutDispatch {
   void handle(BroadcastOp* node) final {
     auto replaced_inputs = getMaybeInputReplacementMap(node);
     if (replaced_inputs.has_value()) {
-      replaced_expr_ = ir_builder_.create<BroadcastOp>(
+      replaced_expr_ = IrBuilder::create<BroadcastOp>(
           node->out(),
           replaced_inputs.value().at(node->in()),
           node->getBroadcastDimFlags());
@@ -490,7 +475,7 @@ class ReplaceExprInput : public OptOutDispatch {
   void handle(WelfordOp* node) final {
     auto replaced_inputs = getMaybeInputReplacementMap(node);
     if (replaced_inputs.has_value()) {
-      replaced_expr_ = ir_builder_.create<WelfordOp>(
+      replaced_expr_ = IrBuilder::create<WelfordOp>(
           node->outAvg(),
           node->outVar(),
           node->outN(),
@@ -504,8 +489,6 @@ class ReplaceExprInput : public OptOutDispatch {
   }
 
  private:
-  GpuLower* gpu_lower_;
-  kir::IrBuilder ir_builder_;
   Expr* replaced_expr_ = nullptr;
   const std::unordered_map<Val*, Val*>& replacement_map_;
 };

@@ -20,6 +20,8 @@ void swap(IrContainer& a, IrContainer& b) noexcept {
   swap(a.exprs_up_, b.exprs_up_);
   swap(a.exprs_, b.exprs_);
 
+  swap(a.raw_ptrs_, b.raw_ptrs_);
+
   swap(a.val_type_name_map_, b.val_type_name_map_);
   swap(a.expr_name_counter_, b.expr_name_counter_);
 
@@ -125,11 +127,19 @@ void IrContainer::removeExpr(Expr* expr) {
 
   exprs_.erase(expr);
   exprs_up_.erase(expr_in_deque);
+  raw_ptrs_.erase((void*)expr);
 }
 
 //! Completely remove val from the fusion, break all dependencies associated
 //! with it
 void IrContainer::removeVal(Val* val) {
+  // Don't remove shortcuts
+  if (val == true_val_.get() || val == false_val_.get() ||
+      val == one_val_.get() || val == zero_val_.get() ||
+      val == magic_zero_val_.get()) {
+    return;
+  }
+
   TORCH_INTERNAL_ASSERT(
       vals_.find(val) != vals_.end(),
       "Wanted to remove a value but it doesn't exist in this container.");
@@ -144,6 +154,7 @@ void IrContainer::removeVal(Val* val) {
 
   vals_.erase(val);
   vals_up_.erase(val_in_deque);
+  raw_ptrs_.erase((void*)val);
 }
 
 //! Register the Val with this container
@@ -151,9 +162,11 @@ void IrContainer::registerVal(Val* val) {
   if (inContainer(val)) {
     return;
   }
+
   vals_up_.emplace_back(std::unique_ptr<Val>(val));
   vals_.emplace(vals_up_.back().get());
   val->setName(IrContainerPasskey(), getValName(vals_up_.back()->vtype()));
+  raw_ptrs_.emplace((void*)vals_up_.back().get());
 }
 
 //! Register expr with this container.
@@ -164,6 +177,7 @@ void IrContainer::registerExpr(Expr* expr) {
   exprs_up_.emplace_back(std::unique_ptr<Expr>(expr));
   exprs_.emplace(exprs_up_.back().get());
   expr->setName(IrContainerPasskey(), getExprName());
+  raw_ptrs_.emplace((void*)exprs_up_.back().get());
 }
 
 void IrContainer::clear() noexcept {
@@ -172,23 +186,89 @@ void IrContainer::clear() noexcept {
   vals_up_.clear();
   exprs_.clear();
   exprs_up_.clear();
+  raw_ptrs_.clear();
 
   val_type_name_map_.clear();
   expr_name_counter_ = 0;
 }
 
 bool IrContainer::inContainer(const Statement* stmt) const {
-  bool in_container = stmt->container() == this;
-  Statement* nonconst_stmt = const_cast<Statement*>(stmt); // NOLINT
+  const void* const_void = (const void*)(stmt);
+  void* nonconst_void = const_cast<void*>(const_void); // NOLINT
+  if (raw_ptrs_.find(nonconst_void) == raw_ptrs_.end()) {
+    return false;
+  }
 
+  TORCH_INTERNAL_ASSERT(
+      stmt->container() == this,
+      "Container claims to own stmt, but stmt disagrees.");
+
+  Statement* nonconst_stmt = const_cast<Statement*>(stmt); // NOLINT
   if (stmt->isExpr()) {
-    in_container &= exprs_.find(nonconst_stmt->as<Expr>()) != exprs_.end();
+    TORCH_INTERNAL_ASSERT(
+        exprs_.find(nonconst_stmt->as<Expr>()) != exprs_.end(),
+        "Somehow container claims to and not to own an Expr.");
   }
   if (stmt->isVal()) {
-    in_container &= vals_.find(nonconst_stmt->as<Val>()) != vals_.end();
+    TORCH_INTERNAL_ASSERT(
+        vals_.find(nonconst_stmt->as<Val>()) != vals_.end(),
+        "Somehow container claims to and not to own an Val.");
   }
 
-  return in_container;
+  return true;
+}
+
+// Shortcuts for frequently used vals
+Int* IrContainer::zeroVal() {
+  if (!zero_val_) {
+    auto zero_val = IrBuilder::create<Int>(this, 0);
+    TORCH_INTERNAL_ASSERT(vals_up_.back().get() == zero_val);
+    zero_val_ = std::unique_ptr<Int>(vals_up_.back().release()->as<Int>());
+    vals_up_.pop_back();
+  }
+  return zero_val_.get();
+}
+
+Int* IrContainer::oneVal() {
+  if (!one_val_) {
+    auto one_val = IrBuilder::create<Int>(this, 1);
+    TORCH_INTERNAL_ASSERT(vals_up_.back().get() == one_val);
+    one_val_ = std::unique_ptr<Int>(vals_up_.back().release()->as<Int>());
+    vals_up_.pop_back();
+  }
+  return one_val_.get();
+}
+
+Bool* IrContainer::falseVal() {
+  if (!false_val_) {
+    auto false_val = IrBuilder::create<Bool>(this, false);
+    TORCH_INTERNAL_ASSERT(vals_up_.back().get() == false_val);
+    false_val_ = std::unique_ptr<Bool>(vals_up_.back().release()->as<Bool>());
+    vals_up_.pop_back();
+  }
+  return false_val_.get();
+}
+
+Bool* IrContainer::trueVal() {
+  if (!true_val_) {
+    auto true_val = IrBuilder::create<Bool>(this, true);
+    TORCH_INTERNAL_ASSERT(vals_up_.back().get() == true_val);
+    true_val_ = std::unique_ptr<Bool>(vals_up_.back().release()->as<Bool>());
+    vals_up_.pop_back();
+  }
+  return true_val_.get();
+}
+
+NamedScalar* IrContainer::magicZeroVal() {
+  if (!magic_zero_val_) {
+    auto magic_zero =
+        IrBuilder::create<NamedScalar>(kMagicZeroName, DataType::Int);
+    TORCH_INTERNAL_ASSERT(vals_up_.back().get() == magic_zero);
+    magic_zero_val_ = std::unique_ptr<NamedScalar>(
+        vals_up_.back().release()->as<NamedScalar>());
+    vals_up_.pop_back();
+  }
+  return magic_zero_val_.get();
 }
 
 } // namespace cuda

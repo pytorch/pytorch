@@ -318,7 +318,7 @@ class VectorizeValidator : public OptInDispatch {
         vector_size,
         " however, vector sizes only upto and including 16 bytes are supported.");
 
-    auto replay_exprs = ExprSort::getExprs(fusion, {v_id});
+    auto replay_exprs = StmtSort::getExprs(fusion, {v_id}, false);
 
     VectorizeValidator validator(v_id);
 
@@ -502,7 +502,7 @@ void validateParallelize(Fusion* fusion) {
   const auto& loop_map = GpuLower::current()->caLoopMap();
   const auto& pred_map = GpuLower::current()->threadPredMap();
 
-  auto exprs = ExprSort::getExprs(fusion);
+  auto exprs = StmtSort::getExprs(fusion);
 
   for (auto expr : exprs) {
     if (!ir_utils::isTvOp(expr)) {
@@ -629,7 +629,7 @@ namespace {
 // each tensor that needs to be computed.
 std::unordered_map<IterDomain*, std::pair<int64_t, int64_t>> getLiveRangeOffsets(
     Fusion* fusion) {
-  auto exprs = ExprSort::getExprs(fusion);
+  auto exprs = StmtSort::getExprs(fusion);
 
   std::unordered_map<IterDomain*, std::pair<int64_t, int64_t>> map;
 
@@ -759,7 +759,9 @@ void validatePartialSplit(Fusion* fusion) {
   auto range_info = getLiveRangeOffsets(fusion);
 
   for (auto tv : ir_utils::allTvs(fusion)) {
-    auto exprs = ir_utils::historyOf(tv);
+    auto exprs = StmtSort::getExprs(
+        tv->fusion(),
+        {tv->domain()->domain().begin(), tv->domain()->domain().end()});
     for (auto split : ir_utils::filterByType<Split>(exprs)) {
       // When the start and stop offsets are not zero, make sure the
       // range defined by the split includes the required range to

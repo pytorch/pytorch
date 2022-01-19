@@ -2,7 +2,6 @@
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_allocation.h>
@@ -61,10 +60,9 @@ class AllocationInserter : public kir::ExprMutator {
   void fillAllocationInformation(AllocationInformation& info, Expr* expr) {
     size_t alloc_pos = 0;
     kir::ForLoop* init_for_loop = nullptr;
-    auto fuser_tv = info.buffer->fuserTv();
     size_t fl_idx_next = 0;
     auto loop_alloc_info =
-        loop_utils::getAllocInformation(info.buffer->fuserTv(), for_loops_);
+        loop_utils::getAllocInformation(info.buffer, for_loops_);
 
     info.init_for_loop = loop_alloc_info.init_for_loop;
     info.alloc_for_loop = loop_alloc_info.alloc_for_loop;
@@ -118,33 +116,29 @@ class AllocationInserter : public kir::ExprMutator {
       return nullptr;
     }
 
-    auto fuser_tv = info.buffer->fuserTv();
-
     std::vector<IterDomain*> init_dims;
-    for (const auto axis_i : c10::irange(info.alloc_pos, fuser_tv->nDims())) {
-      if (info.buffer->fuserTv()->axis(axis_i)->isReduction() ||
-          info.buffer->fuserTv()->axis(axis_i)->isBroadcast()) {
+    for (const auto axis_i :
+         c10::irange(info.alloc_pos, info.buffer->nDims())) {
+      if (info.buffer->axis(axis_i)->isReduction() ||
+          info.buffer->axis(axis_i)->isBroadcast()) {
         continue;
       }
-      auto concrete_id =
-          gpu_lower
-              ->lowerValue(gpu_lower->caParallelMap().getConcreteMappedID(
-                  fuser_tv->axis(axis_i)))
-              ->as<IterDomain>();
+      auto concrete_id = gpu_lower->caParallelMap().getConcreteMappedID(
+          info.buffer->axis(axis_i));
       init_dims.push_back(concrete_id);
     }
     Expr* init_expr =
-        ir_builder.create<UnaryOp>(UnaryOpType::Set, info.buffer, init_val);
+        IrBuilder::create<UnaryOp>(UnaryOpType::Set, info.buffer, init_val);
     for (auto init_loop_it = init_dims.rbegin();
          init_loop_it != init_dims.rend();
          ++init_loop_it) {
       auto id = *init_loop_it;
       kir::ForLoop* new_loop = nullptr;
-      auto extent_with_halo = gpu_lower->haloInfo().kirGetExtent(id);
+      auto extent_with_halo = gpu_lower->haloInfo().getExtent(id);
       if (extent_with_halo) {
-        new_loop = ir_builder.create<kir::ForLoop>(
+        new_loop = IrBuilder::create<kir::ForLoop>(
             id,
-            ir_builder.create<Int>(c10::nullopt),
+            IrBuilder::create<Int>(c10::nullopt),
             nullptr,
             extent_with_halo,
             nullptr,
@@ -152,7 +146,7 @@ class AllocationInserter : public kir::ExprMutator {
             nullptr,
             false);
       } else {
-        new_loop = ir_builder.create<kir::ForLoop>(id);
+        new_loop = IrBuilder::create<kir::ForLoop>(id);
       }
       new_loop->body().push_back(init_expr);
       init_expr = new_loop;
@@ -175,10 +169,10 @@ class AllocationInserter : public kir::ExprMutator {
       }
       auto extent = id->extent();
       // Use halo-extended extent if found
-      auto halo_extent = gpu_lower->haloInfo().kirGetRootAxisInfo(id);
+      auto halo_extent = gpu_lower->haloInfo().getRootAxisInfo(id);
       if (halo_extent.hasHalo()) {
-        extent = ir_builder.addExpr(
-            extent, ir_builder.create<Int>(halo_extent.width()));
+        extent = IrBuilder::addExpr(
+            extent, IrBuilder::create<Int>(halo_extent.width()));
       }
       alloc_dims.push_back(extent);
     }
@@ -218,13 +212,13 @@ class AllocationInserter : public kir::ExprMutator {
         [](IterDomain* dom) { return dom->as<Val>(); });
 
     // Get all exprs involved in generating the allocation IDs
-    auto exprs = ExprSort::getExprs(tv->fusion(), start_vals);
+    auto exprs = StmtSort::getExprs(tv->fusion(), start_vals);
 
     // Get the halo extent if found
     auto getExtent = [this](IterDomain* id) {
       auto extent = gpu_lower->haloInfo().getExtent(id);
       if (extent == nullptr) {
-        extent = gpu_lower->lowerValue(id->extent());
+        extent = id->extent();
       }
       return extent;
     };
@@ -277,7 +271,7 @@ class AllocationInserter : public kir::ExprMutator {
           } else {
             known_extents.insert(
                 {split->in(),
-                 ir_builder.mulExpr(outer_it->second, inner_it->second)});
+                 IrBuilder::mulExpr(outer_it->second, inner_it->second)});
           }
           known_extents.erase(inner_it);
           known_extents.erase(outer_it);
@@ -319,7 +313,6 @@ class AllocationInserter : public kir::ExprMutator {
   }
 
   std::vector<Val*> getNonGlobalAllocExpr(AllocationInformation& info) {
-    auto fuser_tv = info.buffer->fuserTv();
     const auto memory_type = info.buffer->getMemoryType();
     TORCH_INTERNAL_ASSERT(
         memory_type != MemoryType::Global,
@@ -333,9 +326,8 @@ class AllocationInserter : public kir::ExprMutator {
 
     info.allocation_domains = std::make_unique<std::vector<IterDomain*>>();
 
-    for (const auto axis_i : c10::irange(fuser_tv->nDims())) {
-      const auto local_id =
-          gpu_lower->lowerValue(fuser_tv->axis(axis_i))->as<IterDomain>();
+    for (const auto axis_i : c10::irange(info.buffer->nDims())) {
+      const auto local_id = info.buffer->axis(axis_i);
 
       // Don't use reduction/stride/broadcast axis in the allocation
       // computation
@@ -344,11 +336,8 @@ class AllocationInserter : public kir::ExprMutator {
         continue;
       }
 
-      auto concrete_id =
-          gpu_lower
-              ->lowerValue(gpu_lower->caParallelMap().getConcreteMappedID(
-                  fuser_tv->axis(axis_i)))
-              ->as<IterDomain>();
+      auto concrete_id = gpu_lower->caParallelMap().getConcreteMappedID(
+          info.buffer->axis(axis_i));
       const bool is_block_dim =
           isParallelTypeBlockDim(concrete_id->getParallelType());
       const bool is_thread_dim =
@@ -367,7 +356,7 @@ class AllocationInserter : public kir::ExprMutator {
               (memory_type == MemoryType::Global && is_thread))) {
           continue;
         }
-        alloc_domains.push_back(fuser_tv->axis(axis_i));
+        alloc_domains.push_back(info.buffer->axis(axis_i));
       } else {
         if (
             // If shared memory, don't use any IDs bound to a grid dimension
@@ -377,12 +366,13 @@ class AllocationInserter : public kir::ExprMutator {
             (memory_type == MemoryType::Local && is_thread)) {
           continue;
         }
-        alloc_domains.push_back(fuser_tv->axis(axis_i));
+        alloc_domains.push_back(info.buffer->axis(axis_i));
       }
 
       auto extent = concrete_id->extent();
 
-      if (gpu_lower->haloInfo().getExtent(fuser_tv->axis(axis_i)) != nullptr) {
+      if (gpu_lower->haloInfo().getExtent(info.buffer->axis(axis_i)) !=
+          nullptr) {
         has_halo = true;
       }
 
@@ -394,7 +384,7 @@ class AllocationInserter : public kir::ExprMutator {
     // the halo extents from leaf IDs to root IDs
     if (has_halo) {
       info.has_halo = true;
-      return getNonGlobalAllocExprWithHalo(fuser_tv, alloc_domains);
+      return getNonGlobalAllocExprWithHalo(info.buffer, alloc_domains);
     }
 
     return alloc_dims;
@@ -416,11 +406,11 @@ class AllocationInserter : public kir::ExprMutator {
 
     if (alloc_dims.size() == 0 &&
         info.buffer->domain()->noReductions().size() != 0) {
-      alloc_dims.push_back(ir_builder.create<Int>(1));
+      alloc_dims.push_back(info.buffer->container()->oneVal());
     }
 
     // Create the allocation node
-    return ir_builder.create<kir::Allocate>(
+    return IrBuilder::create<kir::Allocate>(
         info.buffer, info.buffer->getMemoryType(), alloc_dims);
   }
 
@@ -438,11 +428,10 @@ class AllocationInserter : public kir::ExprMutator {
       }
 
       auto out_tv = out->as<TensorView>();
-      auto default_val =
-          gpu_lower->predicateElimination().getInitValue(out_tv->fuserTv());
+      auto default_val = gpu_lower->predicateElimination().getInitValue(out_tv);
 
       Val* init = nullptr;
-      if (expr->isA<ReductionOp>() && out_tv->fuserTv()->hasReduction()) {
+      if (expr->isA<ReductionOp>() && out_tv->hasReduction()) {
         TORCH_INTERNAL_ASSERT(
             default_val == nullptr,
             "Reduction should not have a default initialization value for predicate elimination.");
@@ -452,22 +441,22 @@ class AllocationInserter : public kir::ExprMutator {
             default_val == nullptr,
             "Welford should not have a default initialization value for predicate elimination.");
         const auto welford = expr->as<WelfordOp>();
-        if (out->id() == welford->outVar()->id()) {
-          init = welford->initVar() == nullptr ? ir_builder.create<Double>(0)
+        if (out->name() == welford->outVar()->name()) {
+          init = welford->initVar() == nullptr ? IrBuilder::create<Double>(0)
                                                : welford->initVar();
-        } else if (out->id() == welford->outAvg()->id()) {
-          init = welford->initAvg() == nullptr ? ir_builder.create<Double>(0)
+        } else if (out->name() == welford->outAvg()->name()) {
+          init = welford->initAvg() == nullptr ? IrBuilder::create<Double>(0)
                                                : welford->initAvg();
         } else {
           TORCH_INTERNAL_ASSERT(
-              out->id() == welford->outN()->id(), "Unreachable");
+              out->name() == welford->outN()->name(), "Unreachable");
           init = welford->initN();
         }
       } else if (default_val != nullptr) {
         init = default_val;
       }
 
-      const bool is_output = gpu_lower->kernel()->isOutput(out);
+      const bool is_output = out->isFusionOutput();
 
       // Don't need to alloc outputs, and if we don't need to initialize we're
       // done.
@@ -545,13 +534,12 @@ class AllocationInserter : public kir::ExprMutator {
   }
 
   AllocationInserter(const std::vector<Expr*>& exprs)
-      : gpu_lower(GpuLower::current()), ir_builder(gpu_lower->kernel()) {
+      : gpu_lower(GpuLower::current()) {
     kir::ExprMutator::traverseAndInsert(exprs);
   }
 
  private:
   GpuLower* gpu_lower;
-  kir::IrBuilder ir_builder;
 
  public:
   static std::vector<Expr*> insert(const std::vector<Expr*>& exprs) {

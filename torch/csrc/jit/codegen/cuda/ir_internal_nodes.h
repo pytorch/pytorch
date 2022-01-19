@@ -475,9 +475,6 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
       IterType iter_type = IterType::Iteration,
       bool is_rfactor_domain = false);
 
-  // TODO: Remove, only used for lowering
-  explicit IterDomain(IrBuilderPasskey, const IterDomain* iter_domain);
-
   IterDomain(const IterDomain* src, IrCloner* ir_cloner);
 
   bool sameAs(const Statement* other) const override;
@@ -660,10 +657,9 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
   //! domain.
   std::pair<IterDomain*, IterDomain*> stridedSplit(int factor);
 
-  // TODO: Remove only used in kernel IR because IterDomains don't maintain
-  // definitions of split/merge.
+  // TODO: Remove
   bool isSimple() const {
-    return is_simple_;
+    return definition() == nullptr;
   }
 
  protected:
@@ -722,12 +718,7 @@ class TORCH_CUDA_CU_API TensorDomain : public Val {
       std::vector<IterDomain*> domain,
       std::vector<bool> contiguity = std::vector<bool>());
 
-  // TODO: Remove, only used for lowering
   TensorDomain(const TensorDomain* src, IrCloner* ir_cloner);
-
-  explicit TensorDomain(
-      IrBuilderPasskey passkey,
-      const TensorDomain* tensor_domain);
 
   bool operator==(const TensorDomain& other) const;
   bool operator!=(const TensorDomain& other) const {

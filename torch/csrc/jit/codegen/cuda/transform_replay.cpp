@@ -52,7 +52,7 @@ class ReplaySelf : public ReplayTransformations {
     // This is so rfactor ops are replayed correctly.
     IterDomain* ido = IrBuilder::create<IterDomain>(
         s->container(),
-        IrBuilder::create<Int>(s->container(), 0),
+        s->container()->zeroVal(),
         s->innerSplit() ? remainder->as<Int>() : s->factor(),
         s->outer()->getParallelType(),
         s->outer()->getIterType(),
@@ -61,7 +61,7 @@ class ReplaySelf : public ReplayTransformations {
     // inner IterDomain
     IterDomain* idi = IrBuilder::create<IterDomain>(
         s->container(),
-        IrBuilder::create<Int>(s->container(), 0),
+        s->container()->zeroVal(),
         s->innerSplit() ? s->factor() : remainder->as<Int>(),
         s->inner()->getParallelType(),
         s->inner()->getIterType(),
@@ -118,7 +118,7 @@ class ReplaySelf : public ReplayTransformations {
 
     IterDomain* merged_id = IrBuilder::create<IterDomain>(
         m->container(),
-        IrBuilder::create<Int>(m->container(), 0),
+        m->container()->zeroVal(),
         merged_id_size->as<Int>(),
         m->out()->getParallelType(),
         m->outer()->getIterType(),

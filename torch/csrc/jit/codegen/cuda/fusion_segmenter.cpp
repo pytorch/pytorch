@@ -2715,8 +2715,12 @@ void SegmentCandidateFinder::findSegments() {
     }
   }
 
+  auto reduction_ops =
+      ir_utils::getReductionOps(segmented_fusion_->completeFusion());
+  auto welford_ops = ir_utils::filterByType<WelfordOp>(reduction_ops);
+
   if (options_.run_translate_welford &&
-      segmented_fusion_->completeFusion()->hasWelford()) {
+      (welford_ops.begin() != welford_ops.end())) {
     TranslateApplicableWelford::run(segmented_fusion_.get(), runtime_inputs_);
   }
 
@@ -2943,7 +2947,7 @@ void SegmentCandidateFinder::resolveInputsInGroup(SegmentedGroup* group) {
   group->input_vals = IterVisitor::getInputsTo(group->inputs());
 
   // Grab all expressions needed to produce to_visit
-  auto input_exprs = ExprSort::getExprs(completeFusion(), to_visit);
+  auto input_exprs = StmtSort::getExprs(completeFusion(), to_visit);
 
   // Insert those expressions at the beginning of the group
   group->exprs_.insert(

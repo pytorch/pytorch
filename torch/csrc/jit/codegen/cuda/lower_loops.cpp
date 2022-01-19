@@ -32,22 +32,20 @@ LoopNestGenerator::LoopNestGenerator(const std::vector<Expr*>& exprs) {
 
 namespace {
 
-kir::ForLoop* openForHelper(kir::ForLoop* scope, IterDomain* kir_id) {
-  const auto gpu_lower = GpuLower::current();
-  kir::IrBuilder ir_builder(gpu_lower->kernel());
-  auto extent_with_halo = gpu_lower->haloInfo().kirGetExtent(kir_id);
+kir::ForLoop* openForHelper(kir::ForLoop* scope, IterDomain* id) {
+  auto extent_with_halo = GpuLower::current()->haloInfo().getExtent(id);
   kir::ForLoop* new_scope = nullptr;
   if (extent_with_halo) {
     // When an axis is extended with halo, unrolling and vectorization
     // are assumed to not be used for now.
     TORCH_INTERNAL_ASSERT(
-        kir_id->getParallelType() != ParallelType::Unroll &&
-        !isParallelTypeVectorize(kir_id->getParallelType()));
+        id->getParallelType() != ParallelType::Unroll &&
+        !isParallelTypeVectorize(id->getParallelType()));
     // Use the extent that's extended by halo
-    new_scope = ir_builder.create<kir::ForLoop>(
-        kir_id,
-        kir_id->isBroadcast() ? ir_builder.zeroVal()
-                              : ir_builder.create<Int>(c10::nullopt),
+    new_scope = IrBuilder::create<kir::ForLoop>(
+        id,
+        id->isBroadcast() ? GpuLower::current()->kernel()->zeroVal()
+                          : IrBuilder::create<Int>(c10::nullopt),
         nullptr,
         extent_with_halo,
         nullptr,
@@ -55,7 +53,7 @@ kir::ForLoop* openForHelper(kir::ForLoop* scope, IterDomain* kir_id) {
         nullptr,
         false);
   } else {
-    new_scope = ir_builder.create<kir::ForLoop>(kir_id);
+    new_scope = IrBuilder::create<kir::ForLoop>(id);
   }
   if (scope != nullptr) {
     scope->body().insert(0, new_scope);
@@ -65,13 +63,13 @@ kir::ForLoop* openForHelper(kir::ForLoop* scope, IterDomain* kir_id) {
 
 } // namespace
 
-void LoopNestGenerator::openFor(IterDomain* kir_iter_domain) {
+void LoopNestGenerator::openFor(IterDomain* id) {
   if (for_loops_.size() > 0) {
-    const auto new_scope = openForHelper(for_loops_.back(), kir_iter_domain);
+    const auto new_scope = openForHelper(for_loops_.back(), id);
     // for_loop_allocations_.insert({new_scope, 0});
     for_loops_.push_back(new_scope);
   } else {
-    for_loops_.push_back(openForHelper(nullptr, kir_iter_domain));
+    for_loops_.push_back(openForHelper(nullptr, id));
     lowered_exprs_.insert(lowered_exprs_.begin(), for_loops_.back());
   }
 }
@@ -90,9 +88,6 @@ void LoopNestGenerator::pushFront(Expr* expr) {
 }
 
 void LoopNestGenerator::handle(Expr* expr) {
-  const auto gpu_lower = GpuLower::current();
-  kir::IrBuilder ir_builder(gpu_lower->kernel());
-
   // Check if it's a tensor view expression we need to place in the loop nest
   // structure
   if (!ir_utils::isTvOp(expr)) {
@@ -101,7 +96,7 @@ void LoopNestGenerator::handle(Expr* expr) {
     while (!for_loops_.empty()) {
       closeFor();
     }
-    pushFront(gpu_lower->lowerExpr(expr));
+    pushFront(expr);
 
     for (auto out : expr->outputs()) {
       TORCH_INTERNAL_ASSERT(
@@ -111,10 +106,8 @@ void LoopNestGenerator::handle(Expr* expr) {
           " cannot lower ",
           out->getValType().value());
 
-      pushFront(ir_builder.create<kir::Allocate>(
-          gpu_lower->lowerValue(out),
-          MemoryType::Local,
-          ir_builder.create<Int>(1)));
+      pushFront(IrBuilder::create<kir::Allocate>(
+          out, MemoryType::Local, GpuLower::current()->kernel()->oneVal()));
     }
     return;
   }
@@ -129,27 +122,19 @@ void LoopNestGenerator::handle(Expr* expr) {
 
   // Figure out what the entire loop structure should look like.
   std::vector<IterDomain*> loop_structure = loop_structures_.at(out_tv);
-  std::vector<IterDomain*> kir_loop_structure;
 
-  std::transform(
-      loop_structure.begin(),
-      loop_structure.end(),
-      std::back_inserter(kir_loop_structure),
-      [&gpu_lower](IterDomain* id) {
-        return gpu_lower->lowerValue(id)->as<IterDomain>();
-      });
   // Ordering of loop_structure is global, so simply close loops we don't need,
   // and open the ones we do.
 
   while (!for_loops_.empty() &&
          std::find(
-             kir_loop_structure.begin(),
-             kir_loop_structure.end(),
-             for_loops_.back()->iter_domain()) == kir_loop_structure.end()) {
+             loop_structure.begin(),
+             loop_structure.end(),
+             for_loops_.back()->iter_domain()) == loop_structure.end()) {
     closeFor();
   }
 
-  for (auto loop : kir_loop_structure) {
+  for (auto loop : loop_structure) {
     auto find_it = std::find_if(
         for_loops_.begin(), for_loops_.end(), [loop](kir::ForLoop* fl) {
           return fl->iter_domain() == loop;
@@ -159,7 +144,7 @@ void LoopNestGenerator::handle(Expr* expr) {
     }
   }
 
-  pushFront(gpu_lower->lowerExpr(expr));
+  pushFront(expr);
 }
 
 namespace {

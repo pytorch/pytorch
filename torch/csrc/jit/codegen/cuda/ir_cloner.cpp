@@ -142,7 +142,7 @@ TensorView* RecomputeTv::recompute(TensorView* tv) {
       "Cannot recompute buffers that are inputs of the fusion.");
 
   // Grab all the expressions used to generate the TensorView
-  auto exprs = ExprSort::getExprs(tv->fusion(), {tv});
+  auto exprs = StmtSort::getExprs(tv->fusion(), {tv}, false);
 
   // Run the replicator
   RecomputeTv replicator(tv->fusion(), exprs);
@@ -184,7 +184,7 @@ void RecomputeTv::handle(const TensorDomain* td) {
   // Make sure to recompute the history of the iteration domains, explicitly go
   // through the expressions and send them to IrCloner.
   auto exprs =
-      ExprSort::getExprs(fusion_, {td->domain().begin(), td->domain().end()});
+      StmtSort::getExprs(fusion_, {td->domain().begin(), td->domain().end()});
 
   for (auto expr : exprs) {
     IrCloner::handle(expr);

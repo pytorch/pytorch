@@ -178,6 +178,9 @@ class PrecomputedIntegersBase {
   //!  in the workspace and has been evaluated.
   c10::optional<int64_t> getMaybeValueFor(const Val* val);
 
+  //! Debugging helper, prints all the currently known values
+  void print() const;
+
  protected:
   //! Initialize the workspace before first use.
   //!  Assume the given value list IR nodes have
@@ -296,10 +299,12 @@ class KernelPrecomputedIntegers
   using ParallelExtentMap =
       std::unordered_map<ParallelType, std::vector<const Val*>, TypeHash>;
 
-  KernelPrecomputedIntegers(Fusion* fusion, GpuLower& lower);
+  KernelPrecomputedIntegers(kir::Kernel* kernel);
 
   //! Bind concrete values from fusion runtime inputs
-  void bindKernelInputs(const at::ArrayRef<IValue>& aten_inputs);
+  void bindKernelInputs(
+      kir::Kernel* kernel,
+      const at::ArrayRef<IValue>& aten_inputs);
 
   //! Bind concrete values from launch constraints
   void bindParallelExtents(
@@ -320,8 +325,6 @@ class KernelPrecomputedIntegers
   void initializeNamedScalars();
 
  private:
-  GpuLower* lower_ = nullptr;
-
   //! Contains all the named scalars correspond
   //!  to thread size of each parallel type.
   std::unordered_map<ParallelType, std::unique_ptr<std::vector<int>>, TypeHash>

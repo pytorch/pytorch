@@ -25,10 +25,6 @@ class TORCH_CUDA_CU_API PredicateElimination : public IterVisitor {
   //! \param expr Tensor expression
   bool canOmitPredicate(const Expr* expr) const;
 
-  //! True if expr does not need a predicate
-  //!
-  //! \param expr KIR tensor expr
-  bool canKirOmitPredicate(const Expr* expr) const;
   //! Value to initialize out-of-bound regions
   Val* getInitValue(TensorView* tv) const;
 

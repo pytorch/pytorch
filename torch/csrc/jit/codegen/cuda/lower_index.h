@@ -4,7 +4,6 @@
 
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 
@@ -15,8 +14,8 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-// TODO: Need kir mutator as IndexLowering is replacing expr's with versions
-// that are doing indexing
+// TODO: Replace with mutator as IndexLowering is replacing expr's with
+// versions that are doing indexing
 class TORCH_CUDA_CU_API IndexLowering : private OptOutConstDispatch {
  public:
   static std::vector<Expr*> getIndexedExprs(std::vector<Expr*> incoming_exprs) {
@@ -27,7 +26,7 @@ class TORCH_CUDA_CU_API IndexLowering : private OptOutConstDispatch {
   }
 
  private:
-  IndexLowering();
+  IndexLowering() = default;
 
   void pushBack(Expr*);
 
@@ -62,8 +61,6 @@ class TORCH_CUDA_CU_API IndexLowering : private OptOutConstDispatch {
   // Track for loops to send to indexing. Similar to what's done in
   // kir::IrVisitor
   std::vector<kir::ForLoop*> for_loops_;
-
-  kir::IrBuilder ir_builder_;
 };
 
 } // namespace cuda

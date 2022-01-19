@@ -24,12 +24,10 @@ using IterDomainMap = std::unordered_map<IterDomain*, IterDomain*>;
 namespace scope_utils {
 
 //! Create an **empty** Forloop and copy the metadata.
-kir::ForLoop* cloneForLoop(kir::IrBuilder& ir_builder, kir::ForLoop* for_loop);
+kir::ForLoop* cloneForLoop(kir::ForLoop* for_loop);
 
 //! Create an **empty** IfThenElse and copy the metadata.
-kir::IfThenElse* cloneIfThenElse(
-    kir::IrBuilder& ir_builder,
-    kir::IfThenElse* ite);
+kir::IfThenElse* cloneIfThenElse(kir::IfThenElse* ite);
 
 } // namespace scope_utils
 
@@ -87,7 +85,6 @@ bool isScalarOp(const Expr*);
 TensorView* getTv(Val*);
 
 //! Get only TensorView potentially via kir::TensorIndex.
-// TODO: Remove in favor of filterByType
 std::vector<TensorView*> getTvs(const std::vector<Val*>& vals);
 
 //! Return true if axis is derived from a root axis that is an input

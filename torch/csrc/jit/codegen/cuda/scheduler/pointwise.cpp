@@ -514,7 +514,8 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
   // maybe has_reduction for scheduling should be done on a per output tensor
   // basis.
   TORCH_INTERNAL_ASSERT(
-      !fusion->hasReduction(), "This scheduler only handles pointwise ops.");
+      ir_utils::getReductionOps(fusion).empty(),
+      "This scheduler only handles pointwise ops.");
 
   // For intermediate outputs, apply cache_fork
   auto outs = fusion->outputs();

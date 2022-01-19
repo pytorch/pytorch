@@ -306,7 +306,7 @@ class Index {
   //! vectorized loop.
   static std::pair<std::vector<RootPredicateInfo>, ReferenceTensor>
   getReferenceRootPredicates(
-      const TensorView* kir_consumer_tv,
+      TensorView* consumer_tv,
       const std::vector<kir::ForLoop*>& loops,
       kir::ForLoop* unswitch_or_vec_loop,
       bool padding_predicate);

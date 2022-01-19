@@ -1,13 +1,10 @@
 #pragma once
 
+#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/parallel_type_bitmap.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
-
-// TODO(kir): remove these once the Kernel IR is separated from Fusion IR
-#include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/ir_internal_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/parallel_type_bitmap.h>
 
 #include <c10/macros/Export.h>
 #include <c10/util/Optional.h>
@@ -47,8 +44,6 @@ class WelfordOp;
 class BroadcastOp;
 
 namespace kir {
-
-class IrBuilder;
 class Kernel;
 
 // Values
@@ -163,7 +158,6 @@ class TORCH_CUDA_CU_API TensorIndex final : public Val {
 
   TensorView* view() const {
     TORCH_INTERNAL_ASSERT(view_ != nullptr);
-    // TODO(kir): remove the need for const_cast
     return const_cast<TensorView*>(view_); // NOLINT
   }
 
@@ -176,10 +170,6 @@ class TORCH_CUDA_CU_API TensorIndex final : public Val {
 //! is required as an intermediate within a kernel. The extent is the expression
 //! of the size of the buffer that is generated from the TensorView that
 //! describes the output of an operation.
-//!
-//! TODO(kir): The components of Allocate like Type and Name could be separated
-//!   from the the assocated TensorView.  Perhaps that is more appropriate?
-//!
 class TORCH_CUDA_CU_API Allocate final : public Expr {
  public:
   //! Allocation of a multi-dimensional buffer

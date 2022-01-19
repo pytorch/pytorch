@@ -50,8 +50,8 @@ c10::optional<Int::ScalarType> ExpressionEvaluator::evaluate(const Val* value) {
   } else {
     FUSER_PERF_SCOPE("kir::ExpressionEvaluator::evaluate");
 
-    TORCH_CHECK(value->isScalar());
-    TORCH_CHECK(value->dtype() == DataType::Int);
+    TORCH_CHECK(value->isScalar(), value->toString());
+    TORCH_CHECK(value->dtype() == DataType::Int, value->toString());
 
     // Is the value known (either explicit binding or memoized)?
     const auto pre_eval_it = known_values_.find(value);
@@ -78,6 +78,10 @@ void ExpressionEvaluator::print() const {
   std::cout << "--------------------\n";
   for (const auto& kv : known_values_) {
     std::cout << kv.first->toString() << " = " << kv.second << "\n";
+  }
+  std::cout << "\nPre-computed Values\n";
+  if (precomputed_integers_ != nullptr) {
+    precomputed_integers_->print();
   }
   std::cout << "--------------------\n\n";
 }

@@ -34,10 +34,6 @@ class IndexReferenceReplay : public OptInDispatch {
   // Make a new id for the reference replay based on the provided id
   IterDomain* idCopy(IterDomain* id);
 
-  // Use the compute at map to get the fusion IterDomain from the
-  // IterDomain
-  IterDomain* toFusionID(IterDomain* kir_id);
-
   // Return the concrete entry of the non-reference id
   IterDomain* toConcrete(IterDomain* id);
 

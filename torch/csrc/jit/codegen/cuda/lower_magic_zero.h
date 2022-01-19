@@ -17,12 +17,12 @@ namespace cuda {
 std::vector<Expr*> insertMagicZero(const std::vector<Expr*>& exprs);
 
 //! Check if val is a reference to the magic zero variable
-bool isMagicZero(Val* val);
+bool isMagicZero(const Val* val);
 
 //! Check if val is protected with magic zero.
 //!
 //! Specifically, this returns true if val is defined as "x + magic_zero".
-bool isProtectedWithMagicZero(Val* val);
+bool isProtectedWithMagicZero(const Val* val);
 
 } // namespace cuda
 } // namespace fuser

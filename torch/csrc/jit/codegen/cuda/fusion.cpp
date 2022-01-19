@@ -8,9 +8,8 @@
 #include <torch/csrc/jit/codegen/cuda/ir_printer.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
+#include <torch/csrc/jit/codegen/cuda/kernel.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
-
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
 
 namespace torch {
 namespace jit {
@@ -37,14 +36,14 @@ void swap(Fusion& a, Fusion& b) noexcept {
 
   using std::swap;
 
+  swap(static_cast<IrContainer&>(a), static_cast<IrContainer&>(b));
+
   swap(a.inputs_, b.inputs_);
   swap(a.outputs_, b.outputs_);
 
   swap(a.io_alias_, b.io_alias_);
   swap(a.permuted_input_map_, b.permuted_input_map_);
   swap(a.permuted_output_map_, b.permuted_output_map_);
-
-  swap(static_cast<IrContainer&>(a), static_cast<IrContainer&>(b));
 }
 
 std::unique_ptr<SegmentedFusion> Fusion::segment(
@@ -133,7 +132,7 @@ void Fusion::clear() noexcept {
 }
 
 void Fusion::removeExpr(Expr* expr) {
-  assertInFusion(expr, "Cannot remove expr ");
+  assertInContainer(expr, "Cannot remove expr ");
   // If we hit this error too frequently, we could lighten the restrictions so
   // that removing something that doesn't exist simply does nothing. For now,
   // we're going with the strictest model which errors.
@@ -155,7 +154,7 @@ void Fusion::removeExpr(Expr* expr) {
 }
 
 void Fusion::removeVal(Val* val) {
-  assertInFusion(val, "Cannot remove val ");
+  assertInContainer(val, "Cannot remove val ");
 
   TORCH_CHECK(
       !val->isFusionInput(),
@@ -175,7 +174,7 @@ void Fusion::removeVal(Val* val) {
 }
 
 void Fusion::addInput(Val* input) {
-  assertInFusion(input, "Cannot register input ");
+  assertInContainer(input, "Cannot register input ");
 
   if (input->getValType().value() == ValType::TensorView) {
     auto tv = input->as<TensorView>();
@@ -189,7 +188,7 @@ void Fusion::addInput(Val* input) {
 }
 
 void Fusion::addOutput(Val* output) {
-  assertInFusion(output, "Cannot register output ");
+  assertInContainer(output, "Cannot register output ");
   if (output->getValType().value() == ValType::TensorView) {
     auto tv = output->as<TensorView>();
     tv->setMemoryType(MemoryType::Global);
@@ -254,20 +253,8 @@ void Fusion::replaceOutput(Val* output, Val* replacement) {
   }
 }
 
-bool Fusion::inFusion(const Statement* stmt) const {
-  bool in_fusion = stmt->fusion() == this;
-  Statement* nonconst_stmt = const_cast<Statement*>(stmt); // NOLINT
-
-  return inContainer(stmt);
-}
-
-void Fusion::assertInFusion(const Statement* stmt, const std::string& msg)
-    const {
-  TORCH_CHECK(inFusion(stmt), msg, " it was not found in the active fusion.");
-}
-
 std::vector<Expr*> Fusion::exprs() {
-  return ExprSort::getExprs(this);
+  return StmtSort::getExprs(this);
 }
 
 std::vector<Val*> Fusion::inputsOf(Val* val) {
@@ -281,12 +268,24 @@ void Fusion::validateInputs() {
       all_inputs.insert(input);
     }
   }
+
+  std::unordered_set<Val*> input_dims;
+  auto inp_tvs = ir_utils::filterByType<TensorView>(inputs());
+  for (auto tv : inp_tvs) {
+    for (auto id : tv->getMaybeRFactorDomain()) {
+      input_dims.emplace(id->extent());
+    }
+  }
   for (Val* input : all_inputs) {
     if (!input->isConstScalar()) {
       TORCH_CHECK(
-          hasInput(input) || inFusion(input),
+          input->isFusionInput() ||
+              // TODO: Switch:
+              inContainer(input),
+          // to: input_dims.find(input) != input_dims.end(),
+          // https://github.com/csarofeen/pytorch/issues/1365
           "Could not figure out how ",
-          input,
+          input->toString(),
           " is generated, however it was not specified as an input.");
     }
   }
@@ -334,7 +333,7 @@ void Fusion::printMath(bool from_outputs_only) {
         leaf_vals.push_back(val);
       }
     }
-    exprs_for_print = ExprSort::getExprs(this, leaf_vals);
+    exprs_for_print = StmtSort::getExprs(this, leaf_vals);
   }
 
   std::cout << "\n%kernel_math {\n";
@@ -353,7 +352,7 @@ void Fusion::printTransforms() {
 }
 
 void Fusion::registerVal(Val* val) {
-  if (inFusion(val)) {
+  if (inContainer(val)) {
     return;
   }
 
@@ -366,7 +365,7 @@ void Fusion::registerVal(Val* val) {
 }
 
 void Fusion::registerExpr(Expr* expr) {
-  if (inFusion(expr)) {
+  if (inContainer(expr)) {
     return;
   }
 
@@ -377,8 +376,11 @@ void Fusion::registerExpr(Expr* expr) {
 
   IrContainer::registerExpr(expr);
 
+  bool has_tv = false;
+
   for (Val* input : expr->inputs()) {
-    assertInFusion(input, "Input to expr is invalid, ");
+    has_tv = has_tv || input->isA<TensorView>();
+    assertInContainer(input, "Input to expr is invalid, ");
     auto uses_copy = input->uses();
     if (std::find(uses_copy.begin(), uses_copy.end(), expr) ==
         uses_copy.end()) {
@@ -387,15 +389,25 @@ void Fusion::registerExpr(Expr* expr) {
     }
   }
 
+  // Kernel is the only container type that is non-ssa. This is mainly (maybe
+  // only) because of initialization expressions which would overwrite tensor
+  // view definitions.
+  bool is_ssa = !this->isA<kir::Kernel>();
+
   for (Val* output : expr->outputs()) {
-    assertInFusion(output, "Output to expr is invalid, ");
-    if (output->definition() != nullptr) {
+    has_tv = has_tv || output->isA<TensorView>();
+    assertInContainer(output, "Output to expr is invalid, ");
+    if (output->definition() != nullptr && is_ssa) {
       removeExpr(output->definition());
     }
-    output->setDefinition(expr);
+    if (is_ssa || (!is_ssa && output->definition() == nullptr)) {
+      output->setDefinition(expr);
+    }
   }
 
-  resetTvUses();
+  if (has_tv) {
+    resetTvUses();
+  }
 }
 
 void Fusion::resetTvUses() {
@@ -406,7 +418,7 @@ void Fusion::resetTvUses() {
   // remove dead exprs, this could reinsert them. getExprs is also boundeds by
   // inputs as registered inputs will return nullptr as their definition.
   const auto all_tvs = ir_utils::filterByType<TensorView>(vals_);
-  const auto used_exprs = ExprSort::getExprs(this);
+  const auto used_exprs = StmtSort::getExprs(this);
 
   for (auto tv : all_tvs) {
     tv->setUses({});
@@ -426,20 +438,6 @@ void Fusion::resetTvUses() {
 
   all_tv_uses_valid_ = true;
   is_during_update_uses_ = false;
-}
-
-const std::unordered_set<Val*>& Fusion::vals() const noexcept {
-  return vals_;
-}
-
-const std::deque<Val*> Fusion::deterministic_vals() const noexcept {
-  std::deque<Val*> vals_deque;
-  std::transform(
-      vals_up_.begin(),
-      vals_up_.end(),
-      std::back_inserter(vals_deque),
-      [](const std::unique_ptr<Val>& val_up) { return val_up.get(); });
-  return vals_deque;
 }
 
 std::vector<Val*> Fusion::usedMathVals() {
@@ -480,27 +478,13 @@ std::vector<Val*> Fusion::usedMathVals() {
   return used_math_vals;
 }
 
-const std::unordered_set<Expr*>& Fusion::unordered_exprs() const noexcept {
-  return exprs_;
-}
-
 std::unordered_set<Expr*> Fusion::unordered_uses(Val* val) const {
   return std::unordered_set<Expr*>(val->uses().begin(), val->uses().end());
 }
 
 Expr* Fusion::definition(const Val* val) const {
-  assertInFusion(val, "Cannot detect the definition of val, ");
+  assertInContainer(val, "Cannot detect the definition of val, ");
   return val->definition();
-}
-
-bool Fusion::hasInput(const Val* val) const {
-  assertInFusion(val, "Cannot check if val is an input, ");
-  return val->isFusionInput();
-}
-
-bool Fusion::hasOutput(const Val* val) const {
-  assertInFusion(val, "Cannot check if val is an output, ");
-  return val->isFusionOutput();
 }
 
 // Indicate to kernel to set itself up to generate random numbers
@@ -509,28 +493,6 @@ bool Fusion::isStochastic() {
     if (expr->getExprType() == ExprType::UnaryOp)
       if (expr->as<UnaryOp>()->getUnaryOpType() == UnaryOpType::RandLike)
         return true;
-  return false;
-}
-
-bool Fusion::hasReduction() {
-  FUSER_PERF_SCOPE("Fusion::hasReduction");
-
-  for (auto expr : exprs())
-    for (auto out : expr->outputs())
-      if (out->getValType() == ValType::TensorView)
-        if (out->as<TensorView>()->hasReduction())
-          return true;
-
-  return false;
-}
-
-bool Fusion::hasWelford() {
-  FUSER_PERF_SCOPE("Fusion::hasWelford");
-  for (auto expr : exprs()) {
-    if (expr->isA<WelfordOp>()) {
-      return true;
-    }
-  }
   return false;
 }
 

@@ -10,7 +10,6 @@
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_magic_zero.h>
 #include <torch/csrc/jit/codegen/cuda/lower_shift.h>
@@ -65,14 +64,11 @@ class ContigIDs : public OptInDispatch {
   void handle(Split*) override {}
 
   void handle(Merge* merge) override {
-    const auto gpu_lower = GpuLower::current();
-
     // If either input is non-contiguous so is output.
     const auto inner = merge->inner();
     const auto outer = merge->outer();
 
-    if ((!isContig(gpu_lower->lowerValue(inner)->as<IterDomain>()) ||
-         !isContig(gpu_lower->lowerValue(outer)->as<IterDomain>()))) {
+    if (!isContig(inner) || !isContig(outer)) {
       return;
     }
 
@@ -135,36 +131,34 @@ class ContigIDs : public OptInDispatch {
     // If we matched all inputs, the output is contiguous. Only want to keep the
     // top contig ID, lower ids should be placed in the "within_contig_ids" map
     // of top id.
-    auto kir_inner = gpu_lower->lowerValue(merge->inner())->as<IterDomain>();
-    auto kir_outer = gpu_lower->lowerValue(merge->outer())->as<IterDomain>();
-    auto kir_out = gpu_lower->lowerValue(merge->out())->as<IterDomain>();
+    auto out = merge->out()->as<IterDomain>();
     if (ordered_inputs.empty()) {
-      if (contig_ids.find(kir_inner) != contig_ids.end()) {
-        contig_ids.erase(kir_inner);
+      if (contig_ids.find(inner) != contig_ids.end()) {
+        contig_ids.erase(inner);
       }
 
-      if (contig_ids.find(kir_outer) != contig_ids.end()) {
-        contig_ids.erase(kir_outer);
+      if (contig_ids.find(outer) != contig_ids.end()) {
+        contig_ids.erase(outer);
       }
 
-      contig_ids.emplace(kir_out);
+      contig_ids.emplace(out);
 
       std::unordered_set<IterDomain*> within_out;
-      within_out.emplace(kir_inner);
-      if (within_contig_ids.find(kir_inner) != within_contig_ids.end()) {
-        auto in_inner = within_contig_ids.at(kir_inner);
+      within_out.emplace(inner);
+      if (within_contig_ids.find(inner) != within_contig_ids.end()) {
+        auto in_inner = within_contig_ids.at(inner);
         within_out.insert(in_inner.begin(), in_inner.end());
-        within_contig_ids.erase(kir_inner);
+        within_contig_ids.erase(inner);
       }
 
-      within_out.emplace(kir_outer);
-      if (within_contig_ids.find(kir_outer) != within_contig_ids.end()) {
-        auto in_outer = within_contig_ids.at(kir_outer);
+      within_out.emplace(outer);
+      if (within_contig_ids.find(outer) != within_contig_ids.end()) {
+        auto in_outer = within_contig_ids.at(outer);
         within_out.insert(in_outer.begin(), in_outer.end());
-        within_contig_ids.erase(kir_outer);
+        within_contig_ids.erase(outer);
       }
 
-      within_contig_ids[kir_out] = within_out;
+      within_contig_ids[out] = within_out;
     }
   }
 
@@ -192,8 +186,6 @@ class ContigIDs : public OptInDispatch {
         " != ",
         root_contiguity_.size());
 
-    const auto gpu_lower = GpuLower::current();
-
     for (const auto i : c10::irange(root_domain_.size())) {
       // If a root domain has halo, can't use merged domain even if
       // both inputs are contiguous. HaloInfo is also initialized for
@@ -201,19 +193,20 @@ class ContigIDs : public OptInDispatch {
       // RootAxisInfo. This should be safe as no rfactor tensor should
       // need halo.
       if (root_contiguity_[i] &&
-          !gpu_lower->haloInfo().getRootAxisInfo(root_domain_[i]).hasHalo()) {
-        auto kir_root_domain_i =
-            gpu_lower->lowerValue(root_domain_[i])->as<IterDomain>();
-        contig_ids.emplace(kir_root_domain_i);
-        within_contig_ids[kir_root_domain_i] =
-            std::unordered_set<IterDomain*>();
+          !GpuLower::current()
+               ->haloInfo()
+               .getRootAxisInfo(root_domain_[i])
+               .hasHalo()) {
+        auto root_domain_i = root_domain_[i]->as<IterDomain>();
+        contig_ids.emplace(root_domain_i);
+        within_contig_ids[root_domain_i] = std::unordered_set<IterDomain*>();
         is_contig_root[root_domain_[i]] = true;
       } else {
         is_contig_root[root_domain_[i]] = false;
       }
     }
 
-    auto exprs = ExprSort::getExprs(ids[0]->fusion(), {ids.begin(), ids.end()});
+    auto exprs = StmtSort::getExprs(ids[0]->fusion(), {ids.begin(), ids.end()});
 
     for (auto expr : exprs) {
       handle(expr);
@@ -275,19 +268,16 @@ void updateHaloInfoForReference(
 std::unordered_map<IterDomain*, Val*> getReferenceHaloExtentMap(
     const ReferenceTensor& reference,
     const std::unordered_map<IterDomain*, IterDomain*>& index_map_from_ref) {
-  const auto gpu_lower = GpuLower::current();
-
-  const auto& halo_info = gpu_lower->haloInfo();
+  const auto& halo_info = GpuLower::current()->haloInfo();
 
   std::unordered_map<IterDomain*, Val*> reference_halo_extent_map;
 
   // Propagate halo extents of the reference to the consumer or
   // producer tensor
   for (auto kv : index_map_from_ref) {
-    auto ref_id = gpu_lower->lowerValue(kv.first)->as<IterDomain>();
-    auto producer_or_consumer_id =
-        gpu_lower->lowerValue(kv.second)->as<IterDomain>();
-    auto extent = halo_info.kirGetExtent(ref_id);
+    auto ref_id = kv.first;
+    auto producer_or_consumer_id = kv.second;
+    auto extent = halo_info.getExtent(ref_id);
     if (extent != nullptr) {
       reference_halo_extent_map[producer_or_consumer_id] = extent;
     }
@@ -321,9 +311,6 @@ int getProducerHaloOffset(
   const auto p_pad = halo_map.getRootAxisInfo(producer_id).width(0);
   const auto c_pad = halo_map.getRootAxisInfo(consumer_id).width(0);
 
-  const auto gpu_lower = GpuLower::current();
-  kir::IrBuilder ir_builder(gpu_lower->kernel());
-
   auto offset = p_pad - c_pad;
 
   // If the consumer is a result of shifting the producer, adjust the
@@ -348,10 +335,7 @@ Val* getProducerIndexWithHalo(
     return producer_index;
   }
 
-  const auto gpu_lower = GpuLower::current();
-  kir::SimplifyingIrBuilder ir_builder(gpu_lower->kernel());
-
-  producer_index = ir_builder.addExpr(producer_index, offset);
+  producer_index = SimplifyingIrBuilder::addExpr(producer_index, offset);
 
   return producer_index;
 }
@@ -371,19 +355,18 @@ Val* getProducerOffsetWithGather(
     const std::unordered_map<IterDomain*, IterDomain*>& concrete_to_ref_map =
         {}) {
   const auto gpu_lower = GpuLower::current();
-  kir::SimplifyingIrBuilder ir_builder(gpu_lower->kernel());
 
   const auto gather_expr = dynamic_cast<GatherOp*>(consumer_tv->definition());
 
   if (gather_expr == nullptr) {
-    return ir_builder.zeroVal();
+    return gpu_lower->kernel()->zeroVal();
   }
 
   // If the window extent is one, no specific offsetting
   // is necessary
   if (consumer_root_axis >= gather_expr->windowShape().size() ||
       gather_expr->windowShape()[consumer_root_axis] == 1) {
-    return ir_builder.zeroVal();
+    return gpu_lower->kernel()->zeroVal();
   }
 
   // Basically, the goal is to build an expression of producer_index +
@@ -403,16 +386,15 @@ Val* getProducerOffsetWithGather(
     window_id = concrete_2_ref_it->second;
   }
 
-  auto window_idx =
-      index_map.at(gpu_lower->lowerValue(window_id)->as<IterDomain>());
+  auto window_idx = index_map.at(window_id);
 
   // Positive padding at offset zero means the indexing shifted to the
   // negative direction.
   auto pad_width = gather_expr->padWidth()[consumer_root_axis][0];
 
   // producer offset: window_index - padding
-  auto producer_offset =
-      ir_builder.subExpr(window_idx, ir_builder.create<Int>(pad_width));
+  auto producer_offset = SimplifyingIrBuilder::subExpr(
+      window_idx, IrBuilder::create<Int>(pad_width));
   return producer_offset;
 }
 
@@ -454,22 +436,18 @@ Val* getProducerIndexWithGather(
       ", producer_axis: ",
       producer_root_axis);
 
-  kir::SimplifyingIrBuilder ir_builder(GpuLower::current()->kernel());
   auto offset = getProducerOffsetWithGather(
       consumer_axis, consumer_tv, ref_index_map, true, concrete_to_ref_map);
-  return ir_builder.addExpr(producer_index, offset);
+  return SimplifyingIrBuilder::addExpr(producer_index, offset);
 }
 
 // Adjusts a global consumer index when its root domain is partially
 // split. Note that non-global consumer indices don't need any
 // adjustment.
 Val* getGlobalConsumerOffsetWithPartialSplit(IterDomain* root_id) {
-  const auto gpu_lower = GpuLower::current();
-  kir::IrBuilder ir_builder(gpu_lower->kernel());
-
-  auto offset = gpu_lower->partialSplitMap().kirGetStartOffset(root_id);
+  auto offset = GpuLower::current()->partialSplitMap().getStartOffset(root_id);
   if (offset == nullptr) {
-    return ir_builder.zeroVal();
+    return GpuLower::current()->kernel()->zeroVal();
   } else {
     return offset;
   }
@@ -488,7 +466,6 @@ Val* getProducerIndexWithPartialSplit(
     const TensorView* producer_tv,
     const TensorView* consumer_tv) {
   const auto gpu_lower = GpuLower::current();
-  kir::IrBuilder ir_builder(gpu_lower->kernel());
 
   auto p2c =
       PairwiseRootDomainMap(producer_tv, consumer_tv)
@@ -503,31 +480,29 @@ Val* getProducerIndexWithPartialSplit(
 
   auto consumer_offset =
       gpu_lower->partialSplitMap().getStartOffset(consumer_root_id);
-  auto consumer_offset_kir = consumer_offset == nullptr
-      ? ir_builder.zeroVal()
-      : gpu_lower->lowerValue(consumer_offset);
+  consumer_offset = consumer_offset == nullptr ? gpu_lower->kernel()->zeroVal()
+                                               : consumer_offset;
 
   auto producer_offset =
       gpu_lower->partialSplitMap().getStartOffset(producer_root_id);
-  auto producer_offset_kir = producer_offset == nullptr
-      ? ir_builder.zeroVal()
-      : gpu_lower->lowerValue(producer_offset);
+  producer_offset = producer_offset == nullptr ? gpu_lower->kernel()->zeroVal()
+                                               : producer_offset;
 
   // If the producer is on global memory, it's always allocated
   // without trimming the out-of-bounds region, so the consumer offset
   // should be added to the index.
   if (producer_tv->getMemoryType() == MemoryType::Global) {
-    if (consumer_offset_kir->isZeroInt()) {
+    if (consumer_offset->isZeroInt()) {
       return producer_index;
     } else {
-      return ir_builder.addExpr(producer_index, consumer_offset_kir);
+      return IrBuilder::addExpr(producer_index, consumer_offset);
     }
   }
 
   // Non-global case. Difference of the split offsets must be
   // accounted.
 
-  auto diff = ir_builder.subExpr(consumer_offset_kir, producer_offset_kir);
+  auto diff = IrBuilder::subExpr(consumer_offset, producer_offset);
   kir::ExpressionEvaluator ee;
   auto diff_eval = ee.evaluate(diff);
   // We currently only allow constant offsetting
@@ -537,19 +512,16 @@ Val* getProducerIndexWithPartialSplit(
     return producer_index;
   }
 
-  return ir_builder.addExpr(
-      producer_index, ir_builder.create<Int>(diff_eval.value()));
+  return IrBuilder::addExpr(
+      producer_index, IrBuilder::create<Int>(diff_eval.value()));
 }
 
 } // namespace
 
 void IndexCompute::handle(Split* split) {
-  const auto gpu_lower = GpuLower::current();
-  kir::IrBuilder ir_builder(gpu_lower->kernel());
-
-  auto in_id = gpu_lower->lowerValue(split->in())->as<IterDomain>();
-  auto outer_id = gpu_lower->lowerValue(split->outer())->as<IterDomain>();
-  auto inner_id = gpu_lower->lowerValue(split->inner())->as<IterDomain>();
+  auto in_id = split->in()->as<IterDomain>();
+  auto outer_id = split->outer()->as<IterDomain>();
+  auto inner_id = split->inner()->as<IterDomain>();
 
   auto outer_it = index_map_.find(outer_id);
   auto inner_it = index_map_.find(inner_id);
@@ -582,8 +554,8 @@ void IndexCompute::handle(Split* split) {
   }
 
   if (isZero(in_id)) {
-    index_map_[in_id] = ir_builder.create<Int>(0);
-    extent_map_[in_id] = ir_builder.create<Int>(0);
+    index_map_[in_id] = GpuLower::current()->kernel()->zeroVal();
+    extent_map_[in_id] = GpuLower::current()->kernel()->zeroVal();
   } else if (zero_merged_in && outer_zero) {
     index_map_[in_id] = inner_ind;
     extent_map_[in_id] = getExtent(inner_id);
@@ -591,24 +563,21 @@ void IndexCompute::handle(Split* split) {
     index_map_[in_id] = outer_ind;
     extent_map_[in_id] = getExtent(outer_id);
   } else {
-    index_map_[in_id] = ir_builder.addExpr(
-        ir_builder.mulExpr(outer_ind, getExtent(inner_id)), inner_ind);
+    index_map_[in_id] = IrBuilder::addExpr(
+        IrBuilder::mulExpr(outer_ind, getExtent(inner_id)), inner_ind);
     // The extent should be updated only when its allocation is
     // partial, i.e., zero_merged_in is true. See PR #1270.
     if (zero_merged_in) {
       extent_map_[in_id] =
-          ir_builder.mulExpr(getExtent(outer_id), getExtent(inner_id));
+          IrBuilder::mulExpr(getExtent(outer_id), getExtent(inner_id));
     }
   }
 }
 
 void IndexCompute::handle(Merge* merge) {
-  const auto gpu_lower = GpuLower::current();
-  kir::IrBuilder ir_builder(gpu_lower->kernel());
-
-  auto out_id = gpu_lower->lowerValue(merge->out())->as<IterDomain>();
-  auto outer_id = gpu_lower->lowerValue(merge->outer())->as<IterDomain>();
-  auto inner_id = gpu_lower->lowerValue(merge->inner())->as<IterDomain>();
+  auto out_id = merge->out();
+  auto outer_id = merge->outer();
+  auto inner_id = merge->inner();
 
   auto out_it = index_map_.find(out_id);
   if (out_it == index_map_.end()) {
@@ -616,7 +585,7 @@ void IndexCompute::handle(Merge* merge) {
   }
   auto out_ind = out_it->second;
 
-  auto zero = ir_builder.zeroVal();
+  auto zero = GpuLower::current()->kernel()->zeroVal();
 
   if (isZero(out_id)) {
     index_map_[outer_id] = zero;
@@ -637,13 +606,10 @@ void IndexCompute::handle(Merge* merge) {
     TORCH_INTERNAL_ASSERT(!input_ids.empty());
 
     for (auto root_id : input_ids) {
-      index_map_[gpu_lower->lowerValue(root_id)->as<IterDomain>()] = zero;
+      index_map_[root_id] = zero;
     }
 
-    index_map_[gpu_lower
-                   ->lowerValue(*(input_ids.end() - 1))
-                   // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
-                   ->as<IterDomain>()] = out_ind;
+    index_map_[*(input_ids.end() - 1)] = out_ind;
     return;
   }
 
@@ -712,8 +678,8 @@ void IndexCompute::handle(Merge* merge) {
     zero_merged_in_.emplace(inner_id);
     zero_merged_in_.emplace(outer_id);
   } else {
-    index_map_[outer_id] = ir_builder.divExpr(out_ind, inner_extent);
-    index_map_[inner_id] = ir_builder.modExpr(out_ind, inner_extent);
+    index_map_[outer_id] = IrBuilder::divExpr(out_ind, inner_extent);
+    index_map_[inner_id] = IrBuilder::modExpr(out_ind, inner_extent);
   }
 }
 
@@ -804,18 +770,14 @@ IndexCompute IndexCompute::updateIndexCompute(
     const std::unordered_map<IterDomain*, Val*>& reference_halo_extent_map) {
   FUSER_PERF_SCOPE("GpuLower::Lower::updateIndexCompute");
 
-  const auto gpu_lower = GpuLower::current();
-
   std::unordered_map<IterDomain*, Val*> updated_index_map;
   std::unordered_map<IterDomain*, Val*> updated_extent_map;
   std::unordered_set<IterDomain*> updated_zero_domains;
   std::unordered_set<IterDomain*> updated_zero_merged_in;
 
   for (auto id_entry : id_map) {
-    IterDomain* prev_id =
-        gpu_lower->lowerValue(id_entry.first)->as<IterDomain>();
-    IterDomain* new_id =
-        gpu_lower->lowerValue(id_entry.second)->as<IterDomain>();
+    IterDomain* prev_id = id_entry.first;
+    IterDomain* new_id = id_entry.second;
 
     if (index_map_.find(prev_id) != index_map_.end()) {
       updated_index_map[new_id] = index_map_.at(prev_id);
@@ -875,11 +837,9 @@ class UpdateLeafIndices : public IterVisitor {
   using IterVisitor::handle;
 
   void handle(Split* split) override {
-    const auto gpu_lower = GpuLower::current();
-
-    auto in_id = gpu_lower->lowerValue(split->in())->as<IterDomain>();
-    auto outer_id = gpu_lower->lowerValue(split->outer())->as<IterDomain>();
-    auto inner_id = gpu_lower->lowerValue(split->inner())->as<IterDomain>();
+    auto in_id = split->in();
+    auto outer_id = split->outer();
+    auto inner_id = split->inner();
 
     // Nothing need to be done when mappings for the output axes
     // already exist.
@@ -890,20 +850,17 @@ class UpdateLeafIndices : public IterVisitor {
       return;
     }
 
-    kir::IrBuilder ir_builder(gpu_lower->kernel());
-    auto factor = gpu_lower->lowerValue(split->factor());
-    index_map_[inner_id] = ir_builder.modExpr(index_map_[in_id], factor);
+    auto factor = split->factor();
+    index_map_[inner_id] = IrBuilder::modExpr(index_map_[in_id], factor);
     extent_map_[inner_id] = factor;
-    index_map_[outer_id] = ir_builder.divExpr(index_map_[in_id], factor);
-    extent_map_[outer_id] = ir_builder.ceilDivExpr(getExtent(in_id), factor);
+    index_map_[outer_id] = IrBuilder::divExpr(index_map_[in_id], factor);
+    extent_map_[outer_id] = IrBuilder::ceilDivExpr(getExtent(in_id), factor);
   }
 
   void handle(Merge* merge) override {
-    const auto gpu_lower = GpuLower::current();
-
-    auto out_id = gpu_lower->lowerValue(merge->out())->as<IterDomain>();
-    auto outer_id = gpu_lower->lowerValue(merge->outer())->as<IterDomain>();
-    auto inner_id = gpu_lower->lowerValue(merge->inner())->as<IterDomain>();
+    auto out_id = merge->out();
+    auto outer_id = merge->outer();
+    auto inner_id = merge->inner();
 
     // Nothing need to be done when mappings for the output axes
     // already exist.
@@ -916,13 +873,12 @@ class UpdateLeafIndices : public IterVisitor {
     TORCH_INTERNAL_ASSERT(
         index_map_.find(inner_id) != index_map_.end(), "Inner ID not found");
 
-    kir::IrBuilder ir_builder(gpu_lower->kernel());
-    index_map_[out_id] = ir_builder.mulExpr(
+    index_map_[out_id] = IrBuilder::mulExpr(
         index_map_[inner_id],
-        ir_builder.mulExpr(index_map_[outer_id], getExtent(inner_id)));
+        IrBuilder::mulExpr(index_map_[outer_id], getExtent(inner_id)));
 
     extent_map_[out_id] =
-        ir_builder.mulExpr(getExtent(outer_id), getExtent(inner_id));
+        IrBuilder::mulExpr(getExtent(outer_id), getExtent(inner_id));
   }
 
   // return extent_map_[id] if exists, else return id->extent()
@@ -943,17 +899,14 @@ class UpdateLeafIndices : public IterVisitor {
 // Returns halo-extended extent if id has halo. Otherwise, just
 // returns id->extent.
 Val* getHaloExtentOfRootAxis(IterDomain* id, Val* normal_extent = nullptr) {
-  const auto gpu_lower = GpuLower::current();
-  kir::IrBuilder ir_builder(gpu_lower->kernel());
-
   if (normal_extent == nullptr) {
-    normal_extent = gpu_lower->lowerValue(id->extent());
+    normal_extent = id->extent();
   }
 
-  const auto& halo = gpu_lower->haloInfo().getRootAxisInfo(id);
+  const auto& halo = GpuLower::current()->haloInfo().getRootAxisInfo(id);
   if (halo.hasHalo()) {
     auto halo_extent =
-        ir_builder.addExpr(normal_extent, ir_builder.create<Int>(halo.width()));
+        IrBuilder::addExpr(normal_extent, IrBuilder::create<Int>(halo.width()));
     return halo_extent;
   } else {
     return normal_extent;
@@ -984,8 +937,6 @@ void IndexSwizzle::run() {
       swizzle_type_ == SwizzleType::NoSwizzle ||
           swizzle_type_ == SwizzleType::Transpose,
       "Invalid swizzle type");
-  const auto gpu_lower = GpuLower::current();
-  kir::IrBuilder ir_builder(gpu_lower->kernel());
   if (swizzle_type_ == SwizzleType::Transpose) {
     // Shifts the second axis by the first axis as ((idx_1 + idx_2) %
     // ext). Alternatively, ((idx_1 - idx_2) & (ext - 1)) would also
@@ -1001,20 +952,16 @@ void IndexSwizzle::run() {
 
     IterDomain* id_to_swizzle_i = ids_to_swizzle_.at(0);
     IterDomain* id_to_swizzle_j = ids_to_swizzle_.at(1);
-    IterDomain* id_to_swizzle_i_kir =
-        gpu_lower->lowerValue(id_to_swizzle_i)->as<IterDomain>();
-    IterDomain* id_to_swizzle_j_kir =
-        gpu_lower->lowerValue(id_to_swizzle_j)->as<IterDomain>();
 
-    if (indexMap().find(id_to_swizzle_i_kir) != indexMap().end() &&
-        indexMap().find(id_to_swizzle_j_kir) != indexMap().end()) {
-      auto idx_to_swizzle_i = indexMap().at(id_to_swizzle_i_kir);
-      auto idx_to_swizzle_j = indexMap().at(id_to_swizzle_j_kir);
+    if (indexMap().find(id_to_swizzle_i) != indexMap().end() &&
+        indexMap().find(id_to_swizzle_j) != indexMap().end()) {
+      auto idx_to_swizzle_i = indexMap().at(id_to_swizzle_i);
+      auto idx_to_swizzle_j = indexMap().at(id_to_swizzle_j);
 
-      auto swizzled_idx = ir_builder.modExpr(
-          ir_builder.addExpr(idx_to_swizzle_i, idx_to_swizzle_j),
-          id_to_swizzle_j_kir->extent());
-      index_map_[id_to_swizzle_j_kir] = swizzled_idx;
+      auto swizzled_idx = IrBuilder::modExpr(
+          IrBuilder::addExpr(idx_to_swizzle_i, idx_to_swizzle_j),
+          id_to_swizzle_j->extent());
+      index_map_[id_to_swizzle_j] = swizzled_idx;
       swizzled_ids_.insert(id_to_swizzle_j);
       IndexCompute::run();
     }
@@ -1051,7 +998,6 @@ indexMapFromTV(
     kir::ForLoop* alloc_loop,
     bool as_consumer) {
   const auto gpu_lower = GpuLower::current();
-  kir::IrBuilder ir_builder(gpu_lower->kernel());
 
   bool within_alloc = false;
   if (alloc_loop == nullptr) {
@@ -1077,11 +1023,10 @@ indexMapFromTV(
         tv->domain()->domain().begin(),
         tv->domain()->domain().end(),
         [&](IterDomain* tv_id) {
-          auto kir_tv_id = gpu_lower->lowerValue(tv_id)->as<IterDomain>();
           // Matching is done using the index and loop maps. See
           // validateParallelize as well.
-          return gpu_lower->caIndexMap().kirAreMapped(id, kir_tv_id) ||
-              (gpu_lower->caLoopMap().kirAreMapped(id, kir_tv_id) &&
+          return gpu_lower->caIndexMap().areMapped(id, tv_id) ||
+              (gpu_lower->caLoopMap().areMapped(id, tv_id) &&
                ir_utils::derivedFromRootCAAxes(tv, tv_id));
         });
     if (it == tv->domain()->domain().end()) {
@@ -1109,7 +1054,7 @@ indexMapFromTV(
           (loop->iter_domain()->isThread() && is_global)) {
         idx = loop->index();
       } else {
-        idx = ir_builder.zeroVal();
+        idx = GpuLower::current()->kernel()->zeroVal();
         zero_loops.insert(loop);
       }
     } else if (
@@ -1131,7 +1076,7 @@ indexMapFromTV(
         // parallel type
         (loop->iter_domain()->isThread() && is_local && same_parallel_type) ||
         loop->vectorize()) {
-      idx = ir_builder.zeroVal();
+      idx = GpuLower::current()->kernel()->zeroVal();
       if (!loop->vectorize()) {
         zero_loops.insert(loop);
       }
@@ -1170,8 +1115,6 @@ void ensureStaticIndexing(
     within_alloc = true;
   }
 
-  const auto gpu_lower = GpuLower::current();
-
   for (auto loop : loops) {
     if (!within_alloc) {
       if (loop == alloc_loop) {
@@ -1189,7 +1132,7 @@ void ensureStaticIndexing(
     auto it = std::find_if(
         tv->domain()->domain().begin(),
         tv->domain()->domain().end(),
-        [loop_id, gpu_lower, &id_map](IterDomain* id) {
+        [loop_id, &id_map](IterDomain* id) {
           if (id->isBroadcast() || id->isReduction() || id->isStride()) {
             return false;
           }
@@ -1197,8 +1140,7 @@ void ensureStaticIndexing(
           if (id_replacement != id_map.end()) {
             id = id_replacement->second;
           }
-          auto kir_id = gpu_lower->lowerValue(id)->as<IterDomain>();
-          return gpu_lower->caLoopMap().kirAreMapped(loop_id, kir_id);
+          return GpuLower::current()->caLoopMap().areMapped(loop_id, id);
         });
     if (it != tv->domain()->domain().end()) {
       loop->requireUnroll();
@@ -1252,7 +1194,6 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
     const std::vector<kir::ForLoop*>& loops) {
   FUSER_PERF_SCOPE("GpuLower::Lower::getGlobalProducerIndex");
   const auto gpu_lower = GpuLower::current();
-  kir::IrBuilder ir_builder(gpu_lower->kernel());
 
   // Get a reference tensor replayed as existing loop structure
   auto reference = IndexReferenceReplay::getReference(loops);
@@ -1341,25 +1282,24 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
   auto root_dom = producer_tv->getMaybeRFactorDomain();
 
   // TODO: Abstract stride logic to reuse with consumer indexing
-  auto zero = ir_builder.create<Int>(0);
   std::vector<Val*> strides(root_dom.size(), nullptr);
   {
     int stride_i = 0;
     for (const auto i : c10::irange(root_dom.size())) {
       if (root_dom[i]->isReduction() ||
           root_dom[i]->getIterType() == IterType::BroadcastWithoutStride) {
-        strides[i] = zero;
+        strides[i] = GpuLower::current()->kernel()->oneVal();
         continue;
       }
       std::stringstream ss;
       ss << "T" << producer_tv->name() << ".stride[" << stride_i++ << "]";
-      strides[i] = ir_builder.create<NamedScalar>(ss.str(), DataType::Int);
+      strides[i] = IrBuilder::create<NamedScalar>(ss.str(), DataType::Int);
     }
   }
 
   TORCH_INTERNAL_ASSERT(
       root_dom.size() == producer_tv->domain()->contiguity().size());
-  Val* cur_contig_stride = ir_builder.create<Int>(1);
+  Val* cur_contig_stride = GpuLower::current()->kernel()->oneVal();
   for (const auto i : c10::irange(root_dom.size())) {
     auto dim = root_dom.size() - i - 1;
     if (root_dom[dim]->isReduction()) {
@@ -1370,12 +1310,11 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
     }
 
     Val* root_ind = nullptr;
-    auto kir_root_dom = gpu_lower->lowerValue(root_dom[dim])->as<IterDomain>();
-    if (producer_indexing.indexMap().find(kir_root_dom) !=
+    if (producer_indexing.indexMap().find(root_dom[dim]) !=
         producer_indexing.indexMap().end()) {
-      root_ind = producer_indexing.indexMap().at(kir_root_dom);
+      root_ind = producer_indexing.indexMap().at(root_dom[dim]);
     } else if (root_dom[dim]->getIterType() == IterType::BroadcastWithStride) {
-      root_ind = zero;
+      root_ind = GpuLower::current()->kernel()->zeroVal();
     }
 
     TORCH_INTERNAL_ASSERT(
@@ -1395,12 +1334,12 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
       // by extent of this dimension
       auto root_dim_extent = getHaloExtentOfRootAxis(root_dom[dim]);
       cur_contig_stride =
-          ir_builder.mulExpr(cur_contig_stride, root_dim_extent);
+          IrBuilder::mulExpr(cur_contig_stride, root_dim_extent);
     } else {
       // If non contiguous dimension, keep local stride information, set cur
       // stride to local stride * local raw extent
       auto root_dim_extent = getHaloExtentOfRootAxis(root_dom[dim]);
-      cur_contig_stride = ir_builder.mulExpr(strides[dim], root_dim_extent);
+      cur_contig_stride = IrBuilder::mulExpr(strides[dim], root_dim_extent);
     }
   }
 
@@ -1408,7 +1347,8 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
       loops.empty() ? nullptr : loops.back()->vectorize_shift();
 
   // Global striding
-  std::vector<Val*> strided_inds(root_dom.size(), ir_builder.zeroVal());
+  std::vector<Val*> strided_inds(
+      root_dom.size(), GpuLower::current()->kernel()->zeroVal());
   for (const auto i : c10::irange(root_dom.size())) {
     // If the domain is derived from a trivial reduction, no indexing
     // to create.
@@ -1419,19 +1359,17 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
       continue;
     }
 
-    auto kir_root_dom_i = gpu_lower->lowerValue(root_dom[i])->as<IterDomain>();
-
     TORCH_INTERNAL_ASSERT(
-        producer_indexing.indexMap().find(kir_root_dom_i) !=
+        producer_indexing.indexMap().find(root_dom[i]) !=
             producer_indexing.indexMap().end(),
         "Couldn't find root mapping for TV",
         producer_tv->name(),
         " dim: ",
         i,
         " id: ",
-        kir_root_dom_i->toString());
+        root_dom[i]->toString());
 
-    auto root_ind = producer_indexing.indexMap().at(kir_root_dom_i);
+    auto root_ind = producer_indexing.indexMap().at(root_dom[i]);
 
     root_ind = getProducerIndexWithHalo(producer_tv, i, root_ind, consumer_tv);
 
@@ -1449,9 +1387,9 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
     if (root_ind->isZeroInt()) {
       continue;
     } else {
-      auto strided_ind = ir_builder.mulExpr(root_ind, strides[i]);
+      auto strided_ind = IrBuilder::mulExpr(root_ind, strides[i]);
       if (i == root_dom.size() - 1 && vectorize_shift != nullptr) {
-        strided_inds[i] = ir_builder.addExpr(strided_ind, vectorize_shift);
+        strided_inds[i] = IrBuilder::addExpr(strided_ind, vectorize_shift);
       } else {
         strided_inds[i] = strided_ind;
       }
@@ -1467,7 +1405,6 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
     const TensorView* consumer_tv,
     const std::vector<kir::ForLoop*>& loops) {
   const auto gpu_lower = GpuLower::current();
-  kir::IrBuilder ir_builder(gpu_lower->kernel());
 
   // Get a reference tensor replayed as existing loop structure
   auto reference = IndexReferenceReplay::getReference(loops);
@@ -1534,8 +1471,7 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
   // indexing reference.
   TORCH_INTERNAL_ASSERT(loops.size() <= reference_domain->nDims());
   for (const auto loop_i : c10::irange(loops.size())) {
-    auto ref_axis =
-        gpu_lower->lowerValue(reference_domain->axis(loop_i))->as<IterDomain>();
+    auto ref_axis = reference_domain->axis(loop_i);
     ref_id_to_ind_map[ref_axis] = loop_to_ind_map[loops[loop_i]];
     if (zero_loops.count(loops[loop_i]) > 0) {
       ref_zero_domains.insert(ref_axis);
@@ -1662,8 +1598,7 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
     }
 
     // Already an entry for this root domain, continue
-    if (index_map.find(gpu_lower->lowerValue(root_id)->as<IterDomain>()) !=
-        index_map.end()) {
+    if (index_map.find(root_id) != index_map.end()) {
       continue;
     }
 
@@ -1675,24 +1610,23 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
     }
   }
 
-  std::vector<Val*> strided_inds(root_dom.size(), ir_builder.zeroVal());
+  std::vector<Val*> strided_inds(
+      root_dom.size(), GpuLower::current()->kernel()->zeroVal());
   for (const auto i : c10::irange(root_dom.size())) {
     if (skip_indexing.count(root_dom[i])) {
       continue;
     }
 
-    auto kir_root_dom_i = gpu_lower->lowerValue(root_dom[i])->as<IterDomain>();
-
     TORCH_INTERNAL_ASSERT(
-        index_map.find(kir_root_dom_i) != index_map.end(),
+        index_map.find(root_dom[i]) != index_map.end(),
         "Couldn't find root mapping for TV",
         producer_tv->name(),
         " dim: ",
         i,
         " id: ",
-        kir_root_dom_i->toString());
+        root_dom[i]->toString());
 
-    auto root_ind_i = index_map.at(kir_root_dom_i);
+    auto root_ind_i = index_map.at(root_dom[i]);
 
     root_ind_i =
         getProducerIndexWithHalo(producer_tv, i, root_ind_i, consumer_tv);
@@ -1719,11 +1653,8 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
         continue;
       }
 
-      auto kir_root_dom_j =
-          gpu_lower->lowerValue(root_dom[j])->as<IterDomain>();
-
       TORCH_INTERNAL_ASSERT(
-          index_map.find(kir_root_dom_j) != index_map.end(),
+          index_map.find(root_dom[j]) != index_map.end(),
           "Couldn't find root mapping for TV",
           consumer_tv->name(),
           " dim: ",
@@ -1731,23 +1662,23 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
           " id: ",
           root_dom[i]);
 
-      auto root_ext_j = extent_map.find(kir_root_dom_j) == extent_map.end()
-          ? kir_root_dom_j->extent()
-          : extent_map.at(kir_root_dom_j);
+      auto root_ext_j = extent_map.find(root_dom[j]) == extent_map.end()
+          ? root_dom[j]->extent()
+          : extent_map.at(root_dom[j]);
 
       root_ext_j = getHaloExtentOfRootAxis(root_dom[j], root_ext_j);
 
-      if (zero_domain_map.count(kir_root_dom_j) == 0) {
+      if (zero_domain_map.count(root_dom[j]) == 0) {
         if (stride == nullptr) {
           stride = root_ext_j;
         } else {
-          stride = ir_builder.mulExpr(stride, root_ext_j);
+          stride = IrBuilder::mulExpr(stride, root_ext_j);
         }
       }
     }
 
     if (stride != nullptr) {
-      strided_inds[i] = ir_builder.mulExpr(root_ind_i, stride);
+      strided_inds[i] = IrBuilder::mulExpr(root_ind_i, stride);
     } else {
       strided_inds[i] = root_ind_i;
     }
@@ -1761,7 +1692,6 @@ std::vector<Val*> Index::getGlobalConsumerStridedIndices(
     const std::vector<kir::ForLoop*>& loops) {
   FUSER_PERF_SCOPE("GpuLower::Lower::getGlobalConsumerIndex");
   const auto gpu_lower = GpuLower::current();
-  kir::SimplifyingIrBuilder ir_builder(gpu_lower->kernel());
 
   // Get a reference tensor replayed as existing loop structure
   auto reference = IndexReferenceReplay::getReference(loops);
@@ -1797,26 +1727,27 @@ std::vector<Val*> Index::getGlobalConsumerStridedIndices(
   auto root_dom = consumer_tv->getMaybeRFactorDomain();
 
   // TODO: Abstract stride logic to reuse with producer indexing
-  auto zero = ir_builder.zeroVal();
-  std::vector<Val*> strides(root_dom.size(), zero);
+  std::vector<Val*> strides(
+      root_dom.size(), GpuLower::current()->kernel()->oneVal());
   {
     int stride_i = 0;
     for (const auto i : c10::irange(root_dom.size())) {
       if (root_dom[i]->isReduction() ||
           root_dom[i]->getIterType() == IterType::BroadcastWithoutStride ||
           root_dom[i]->isStride()) {
-        strides[i] = zero;
+        strides[i] = GpuLower::current()->kernel()->oneVal();
         continue;
       }
       std::stringstream ss;
       ss << "T" << consumer_tv->name() << ".stride[" << stride_i++ << "]";
-      strides[i] = ir_builder.create<NamedScalar>(ss.str(), DataType::Int);
+      strides[i] =
+          SimplifyingIrBuilder::create<NamedScalar>(ss.str(), DataType::Int);
     }
   }
 
   TORCH_INTERNAL_ASSERT(
       root_dom.size() == consumer_tv->domain()->contiguity().size());
-  Val* cur_contig_stride = ir_builder.oneVal();
+  Val* cur_contig_stride = GpuLower::current()->kernel()->oneVal();
   for (const auto i : c10::irange(root_dom.size())) {
     auto dim = root_dom.size() - i - 1;
     if (root_dom[dim]->isReduction() || root_dom[dim]->isStride()) {
@@ -1827,12 +1758,11 @@ std::vector<Val*> Index::getGlobalConsumerStridedIndices(
     }
 
     Val* root_ind = nullptr;
-    auto kir_root_dom = gpu_lower->lowerValue(root_dom[dim])->as<IterDomain>();
-    if (consumer_indexing.indexMap().find(kir_root_dom) !=
+    if (consumer_indexing.indexMap().find(root_dom[dim]) !=
         consumer_indexing.indexMap().end()) {
-      root_ind = consumer_indexing.indexMap().at(kir_root_dom);
+      root_ind = consumer_indexing.indexMap().at(root_dom[dim]);
     } else if (root_dom[dim]->getIterType() == IterType::BroadcastWithStride) {
-      root_ind = zero;
+      root_ind = GpuLower::current()->kernel()->zeroVal();
     }
 
     TORCH_INTERNAL_ASSERT(
@@ -1852,11 +1782,11 @@ std::vector<Val*> Index::getGlobalConsumerStridedIndices(
       // by extent of this dimension
       auto root_dim_extent = getHaloExtentOfRootAxis(root_dom[dim]);
       cur_contig_stride =
-          ir_builder.mulExpr(cur_contig_stride, root_dim_extent);
+          SimplifyingIrBuilder::mulExpr(cur_contig_stride, root_dim_extent);
     } else {
       // If non contiguous dimension, keep local stride information, set cur
       // stride to local stride * local raw extent
-      cur_contig_stride = ir_builder.mulExpr(
+      cur_contig_stride = SimplifyingIrBuilder::mulExpr(
           strides[dim], getHaloExtentOfRootAxis(root_dom[dim]));
     }
   }
@@ -1865,7 +1795,8 @@ std::vector<Val*> Index::getGlobalConsumerStridedIndices(
       loops.empty() ? nullptr : loops.back()->vectorize_shift();
 
   // Global striding
-  std::vector<Val*> strided_inds(root_dom.size(), ir_builder.zeroVal());
+  std::vector<Val*> strided_inds(
+      root_dom.size(), GpuLower::current()->kernel()->zeroVal());
   for (const auto i : c10::irange(root_dom.size())) {
     // See a comment in indexing to root domains in getGlobalProducerIndex.
     if (root_dom[i]->isReduction() ||
@@ -1876,29 +1807,28 @@ std::vector<Val*> Index::getGlobalConsumerStridedIndices(
       continue;
     }
 
-    auto kir_root_dom_i = gpu_lower->lowerValue(root_dom[i])->as<IterDomain>();
-
     TORCH_INTERNAL_ASSERT(
-        consumer_indexing.indexMap().find(kir_root_dom_i) !=
+        consumer_indexing.indexMap().find(root_dom[i]) !=
             consumer_indexing.indexMap().end(),
         "Couldn't find root mapping for TV",
         consumer_tv->name(),
         " dim: ",
         i,
         " id: ",
-        kir_root_dom_i->toString());
+        root_dom[i]->toString());
 
-    auto root_ind = consumer_indexing.indexMap().at(kir_root_dom_i);
+    auto root_ind = consumer_indexing.indexMap().at(root_dom[i]);
 
-    root_ind = ir_builder.addExpr(
-        root_ind, getGlobalConsumerOffsetWithPartialSplit(kir_root_dom_i));
+    root_ind = SimplifyingIrBuilder::addExpr(
+        root_ind, getGlobalConsumerOffsetWithPartialSplit(root_dom[i]));
 
     if (root_ind->isZeroInt()) {
       continue;
     } else {
-      auto strided_ind = ir_builder.mulExpr(root_ind, strides[i]);
+      auto strided_ind = SimplifyingIrBuilder::mulExpr(root_ind, strides[i]);
       if (i == root_dom.size() - 1 && vectorize_shift != nullptr) {
-        strided_inds[i] = ir_builder.addExpr(strided_ind, vectorize_shift);
+        strided_inds[i] =
+            SimplifyingIrBuilder::addExpr(strided_ind, vectorize_shift);
       } else {
         strided_inds[i] = strided_ind;
       }
@@ -1913,7 +1843,6 @@ std::vector<Val*> Index::getNonGlobalConsumerStridedIndices(
     const TensorView* consumer_tv,
     const std::vector<kir::ForLoop*>& loops) {
   const auto gpu_lower = GpuLower::current();
-  kir::IrBuilder ir_builder(gpu_lower->kernel());
 
   // Get a reference tensor replayed as existing loop structure
   auto reference = IndexReferenceReplay::getReference(loops);
@@ -1938,8 +1867,7 @@ std::vector<Val*> Index::getNonGlobalConsumerStridedIndices(
   // indexing reference.
   TORCH_INTERNAL_ASSERT(loops.size() <= reference_domain->nDims());
   for (const auto loop_i : c10::irange(loops.size())) {
-    auto ref_axis =
-        gpu_lower->lowerValue(reference_domain->axis(loop_i))->as<IterDomain>();
+    auto ref_axis = reference_domain->axis(loop_i);
     ref_id_to_ind_map[ref_axis] = loop_to_ind_map[loops[loop_i]];
     if (zero_loops.count(loops[loop_i]) > 0) {
       ref_zero_domains.insert(ref_axis);
@@ -2004,7 +1932,8 @@ std::vector<Val*> Index::getNonGlobalConsumerStridedIndices(
   // Indices should now be mapped onto IterDomains in consumer, so just grab
   // and use them.
   auto root_dom = consumer_tv->getMaybeRFactorDomain();
-  std::vector<Val*> strided_inds(root_dom.size(), ir_builder.zeroVal());
+  std::vector<Val*> strided_inds(
+      root_dom.size(), GpuLower::current()->kernel()->zeroVal());
   for (const auto i : c10::irange(root_dom.size())) {
     if (root_dom[i]->isReduction() || root_dom[i]->isBroadcast() ||
         gpu_lower->trivialReductionInfo().isDerived(root_dom[i]) ||
@@ -2012,18 +1941,16 @@ std::vector<Val*> Index::getNonGlobalConsumerStridedIndices(
       continue;
     }
 
-    auto kir_root_dom_i = gpu_lower->lowerValue(root_dom[i])->as<IterDomain>();
-
     TORCH_INTERNAL_ASSERT(
-        index_map.find(kir_root_dom_i) != index_map.end(),
+        index_map.find(root_dom[i]) != index_map.end(),
         "Couldn't find root mapping for TV",
         consumer_tv->name(),
         " dim: ",
         i,
         " id: ",
-        kir_root_dom_i->toString());
+        root_dom[i]->toString());
 
-    const auto root_ind_i = index_map.at(kir_root_dom_i);
+    const auto root_ind_i = index_map.at(root_dom[i]);
     if (root_ind_i->isZeroInt()) {
       continue;
     }
@@ -2037,11 +1964,8 @@ std::vector<Val*> Index::getNonGlobalConsumerStridedIndices(
         continue;
       }
 
-      auto kir_root_dom_j =
-          gpu_lower->lowerValue(root_dom[j])->as<IterDomain>();
-
       TORCH_INTERNAL_ASSERT(
-          index_map.find(kir_root_dom_j) != index_map.end(),
+          index_map.find(root_dom[j]) != index_map.end(),
           "Couldn't find root mapping for TV",
           consumer_tv->name(),
           " dim: ",
@@ -2049,23 +1973,23 @@ std::vector<Val*> Index::getNonGlobalConsumerStridedIndices(
           " id: ",
           root_dom[i]);
 
-      auto root_ext_j = extent_map.find(kir_root_dom_j) == extent_map.end()
-          ? kir_root_dom_j->extent()
-          : extent_map.at(kir_root_dom_j);
+      auto root_ext_j = extent_map.find(root_dom[j]) == extent_map.end()
+          ? root_dom[j]->extent()
+          : extent_map.at(root_dom[j]);
 
       root_ext_j = getHaloExtentOfRootAxis(root_dom[j], root_ext_j);
 
-      if (zero_domain_map.count(kir_root_dom_j) == 0) {
+      if (zero_domain_map.count(root_dom[j]) == 0) {
         if (stride == nullptr) {
           stride = root_ext_j;
         } else {
-          stride = ir_builder.mulExpr(stride, root_ext_j);
+          stride = IrBuilder::mulExpr(stride, root_ext_j);
         }
       }
     }
 
     if (stride != nullptr) {
-      strided_inds[i] = ir_builder.mulExpr(root_ind_i, stride);
+      strided_inds[i] = IrBuilder::mulExpr(root_ind_i, stride);
     } else {
       strided_inds[i] = root_ind_i;
     }
@@ -2079,12 +2003,10 @@ std::vector<Val*> Index::getProducerStridedIndices(
     const TensorView* consumer,
     const std::vector<kir::ForLoop*>& loops) {
   FUSER_PERF_SCOPE("GpuLower::Lower::Index::getProducerStridedIndices");
-  const auto gpu_lower = GpuLower::current();
-  kir::IrBuilder ir_builder(gpu_lower->kernel());
-
   if (producer->domain()->noReductions().size() == 0) {
     return std::vector<Val*>(
-        producer->getMaybeRFactorDomain().size(), ir_builder.zeroVal());
+        producer->getMaybeRFactorDomain().size(),
+        GpuLower::current()->kernel()->zeroVal());
   }
 
   std::vector<Val*> strided_indices;
@@ -2107,23 +2029,18 @@ kir::TensorIndex* Index::getProducerIndex(
     TensorView* producer,
     const TensorView* consumer,
     const std::vector<kir::ForLoop*>& loops) {
-  const auto gpu_lower = GpuLower::current();
-  kir::IrBuilder ir_builder(gpu_lower->kernel());
-
   auto strided_indices = getProducerStridedIndices(producer, consumer, loops);
-  return ir_builder.create<kir::TensorIndex>(producer, strided_indices);
+  return IrBuilder::create<kir::TensorIndex>(producer, strided_indices);
 }
 
 std::vector<Val*> Index::getConsumerStridedIndices(
     const TensorView* consumer,
     const std::vector<kir::ForLoop*>& loops) {
   FUSER_PERF_SCOPE("GpuLower::Lower::Index::getConsumerStridedIndices");
-  const auto gpu_lower = GpuLower::current();
-  kir::IrBuilder ir_builder(gpu_lower->kernel());
-
   if (consumer->domain()->noReductions().size() == 0) {
     return std::vector<Val*>(
-        consumer->getMaybeRFactorDomain().size(), ir_builder.zeroVal());
+        consumer->getMaybeRFactorDomain().size(),
+        GpuLower::current()->kernel()->zeroVal());
   }
 
   std::vector<Val*> strided_indices;
@@ -2143,11 +2060,8 @@ std::vector<Val*> Index::getConsumerStridedIndices(
 kir::TensorIndex* Index::getConsumerIndex(
     const TensorView* consumer,
     const std::vector<kir::ForLoop*>& loops) {
-  const auto gpu_lower = GpuLower::current();
-  kir::IrBuilder ir_builder(gpu_lower->kernel());
-
   auto strided_indices = getConsumerStridedIndices(consumer, loops);
-  return ir_builder.create<kir::TensorIndex>(consumer, strided_indices);
+  return IrBuilder::create<kir::TensorIndex>(consumer, strided_indices);
 }
 
 namespace {
@@ -2191,10 +2105,7 @@ std::vector<PredicateDomainInfo> getPredicateContigIds(
   std::unordered_set<IterDomain*> excluded_ids;
 
   for (auto consumer_root_id : consumer_root_domain) {
-    if (GpuLower::current()
-            ->haloInfo()
-            .getRootAxisInfo(consumer_root_id)
-            .hasHalo()) {
+    if (gpu_lower->haloInfo().getRootAxisInfo(consumer_root_id).hasHalo()) {
       excluded_ids.insert(consumer_root_id);
       continue;
     }
@@ -2228,7 +2139,7 @@ std::vector<PredicateDomainInfo> getPredicateContigIds(
   }
 
   // Run through iteration domain history
-  auto exprs = ExprSort::getExprs(
+  auto exprs = StmtSort::getExprs(
       consumer_tv->fusion(),
       {consumer_tv->domain()->domain().begin(),
        consumer_tv->domain()->domain().end()});
@@ -2282,8 +2193,7 @@ IterDomain* getMappedReferenceDomain(
     IterDomain* id,
     const ReferenceTensor& reference) {
   // Partially overlaps with getPredicateContigIds()
-  const auto gpu_lower = GpuLower::current();
-  auto concrete_id = gpu_lower->caIndexMap().getConcreteMappedID(id);
+  auto concrete_id = GpuLower::current()->caIndexMap().getConcreteMappedID(id);
   auto it = reference.concrete_to_id.find(concrete_id);
   if (it == reference.concrete_to_id.end()) {
     return nullptr;
@@ -2332,7 +2242,6 @@ int getUnswitchStopOffset(
     IterDomain* consumer_root_id,
     TensorView* consumer_tv) {
   const auto gpu_lower = GpuLower::current();
-  kir::SimplifyingIrBuilder ir_builder(gpu_lower->kernel());
 
   AxisHaloInfo halo_info =
       gpu_lower->haloInfo().getRootAxisInfo(consumer_root_id);
@@ -2372,9 +2281,6 @@ std::pair<Val*, Val*> getStartAndStopOffsetsForShift(
     TensorView* consumer_tv,
     IterDomain* consumer_id,
     bool padding_predicate) {
-  const auto gpu_lower = GpuLower::current();
-  kir::SimplifyingIrBuilder ir_builder(gpu_lower->kernel());
-
   TORCH_INTERNAL_ASSERT(consumer_id != nullptr);
 
   auto shift_expr = dynamic_cast<ShiftOp*>(consumer_tv->definition());
@@ -2382,7 +2288,9 @@ std::pair<Val*, Val*> getStartAndStopOffsetsForShift(
   // Adjustment is not necessary if not shift.
   // Even so, padding predicate does not need any adjustment.
   if (shift_expr == nullptr || padding_predicate) {
-    return {ir_builder.zeroVal(), ir_builder.zeroVal()};
+    return {
+        GpuLower::current()->kernel()->zeroVal(),
+        GpuLower::current()->kernel()->zeroVal()};
   }
 
   const auto root_axis_pos = consumer_tv->domain()->rootPosOf(consumer_id);
@@ -2403,8 +2311,8 @@ std::pair<Val*, Val*> getStartAndStopOffsetsForShift(
   }
 
   return {
-      ir_builder.create<Int>(start_offset),
-      ir_builder.create<Int>(stop_offset)};
+      IrBuilder::create<Int>(start_offset),
+      IrBuilder::create<Int>(stop_offset)};
 }
 
 std::pair<Val*, Val*> getStartAndStopOffsetsForGather(
@@ -2413,15 +2321,14 @@ std::pair<Val*, Val*> getStartAndStopOffsetsForGather(
     const std::unordered_map<IterDomain*, Val*>& ref_start_index_map,
     const std::unordered_map<IterDomain*, Val*>& ref_stop_index_map,
     bool padding_predicate) {
-  const auto gpu_lower = GpuLower::current();
-  kir::SimplifyingIrBuilder ir_builder(gpu_lower->kernel());
-
   TORCH_INTERNAL_ASSERT(consumer_id != nullptr);
 
   // Adjustment is not necessary if not gather. Even so, padding
   // predicate does not need any adjustment.
   if (!consumer_tv->definition()->isA<GatherOp>() || padding_predicate) {
-    return {ir_builder.zeroVal(), ir_builder.zeroVal()};
+    return {
+        GpuLower::current()->kernel()->zeroVal(),
+        GpuLower::current()->kernel()->zeroVal()};
   }
 
   const auto root_axis_pos = consumer_tv->domain()->rootPosOf(consumer_id);
@@ -2432,8 +2339,8 @@ std::pair<Val*, Val*> getStartAndStopOffsetsForGather(
   auto producer_stop_offset = getProducerOffsetWithGather(
       root_axis_pos, consumer_tv, ref_stop_index_map);
 
-  auto consumer_start_offset = ir_builder.zeroVal();
-  auto consumer_stop_offset = ir_builder.zeroVal();
+  auto consumer_start_offset = GpuLower::current()->kernel()->zeroVal();
+  auto consumer_stop_offset = GpuLower::current()->kernel()->zeroVal();
 
   if (producer_start_offset->isZeroInt() && producer_stop_offset->isZeroInt()) {
     return {consumer_start_offset, consumer_stop_offset};
@@ -2472,16 +2379,17 @@ std::pair<Val*, Val*> getStartAndStopOffsetsForGather(
   // producer start pred: index + window_index - pad_left >= 0
 
   const auto producer_ext_adj = window_size - 1 - pad_left - pad_right;
-  producer_stop_offset = ir_builder.subExpr(
-      producer_stop_offset, ir_builder.create<Int>(producer_ext_adj));
+  producer_stop_offset = SimplifyingIrBuilder::subExpr(
+      producer_stop_offset,
+      SimplifyingIrBuilder::create<Int>(producer_ext_adj));
 
   // As commented above, when pad_left is zero, the consumer predicate
   // is always more restrictive than the producer predicate.
   if (pad_left == 0) {
     start_offset = consumer_start_offset;
   } else {
-    start_offset =
-        ir_builder.minExpr(consumer_start_offset, producer_start_offset);
+    start_offset = SimplifyingIrBuilder::minExpr(
+        consumer_start_offset, producer_start_offset);
   }
 
   // As commented above, when pad_right is zero, the consumer
@@ -2490,8 +2398,8 @@ std::pair<Val*, Val*> getStartAndStopOffsetsForGather(
   if (pad_right == 0) {
     stop_offset = consumer_stop_offset;
   } else {
-    stop_offset =
-        ir_builder.maxExpr(consumer_stop_offset, producer_stop_offset);
+    stop_offset = SimplifyingIrBuilder::maxExpr(
+        consumer_stop_offset, producer_stop_offset);
   }
 
   TORCH_INTERNAL_ASSERT(start_offset != nullptr);
@@ -2511,13 +2419,11 @@ std::pair<Val*, Val*> getStartAndStopLimitOffsets(
     bool padding_predicate,
     bool non_divisible_pred) {
   const auto gpu_lower = GpuLower::current();
-  kir::SimplifyingIrBuilder ir_builder(gpu_lower->kernel());
 
   TORCH_INTERNAL_ASSERT(consumer_id != nullptr);
 
-  Val* start_limit = gpu_lower->lowerValue(consumer_id->start());
-  Val* stop_limit =
-      ir_builder.negExpr(gpu_lower->lowerValue(consumer_id->stopOffset()));
+  Val* start_limit = consumer_id->start();
+  Val* stop_limit = SimplifyingIrBuilder::negExpr(consumer_id->stopOffset());
 
   if (!non_divisible_pred) {
     AxisHaloInfo halo_info = gpu_lower->haloInfo().getRootAxisInfo(consumer_id);
@@ -2530,12 +2436,14 @@ std::pair<Val*, Val*> getStartAndStopLimitOffsets(
     // [0, left halo)[start_limit, stop_limit)[0, right halo)
     //
     if (!padding_predicate) {
-      start_limit = ir_builder.addExpr(start_limit, halo_info.width(0));
-      stop_limit = ir_builder.addExpr(stop_limit, halo_info.width(0));
+      start_limit =
+          SimplifyingIrBuilder::addExpr(start_limit, halo_info.width(0));
+      stop_limit =
+          SimplifyingIrBuilder::addExpr(stop_limit, halo_info.width(0));
     } else {
       // In case of the padding predicate, the whole range, including both left
       // and right halo regions, is computed.
-      stop_limit = ir_builder.addExpr(stop_limit, halo_info.width());
+      stop_limit = SimplifyingIrBuilder::addExpr(stop_limit, halo_info.width());
     }
   } else {
     // For non-divisible predicates, the index must be predicated such
@@ -2544,7 +2452,7 @@ std::pair<Val*, Val*> getStartAndStopLimitOffsets(
     // isn't a root domain.
     if (gpu_lower->haloInfo().hasHaloWidth(consumer_id)) {
       auto halo = gpu_lower->haloInfo().getHaloWidth(consumer_id);
-      stop_limit = ir_builder.addExpr(stop_limit, halo);
+      stop_limit = SimplifyingIrBuilder::addExpr(stop_limit, halo);
     }
   }
 
@@ -2560,9 +2468,6 @@ auto getPredicateReferenceIndexing(
     const ReferenceTensor& reference,
     kir::ForLoop* unswitch_or_vec_loop,
     bool start) {
-  const auto gpu_lower = GpuLower::current();
-  kir::SimplifyingIrBuilder ir_builder(gpu_lower->kernel());
-
   auto reference_domain = reference.domain;
 
   std::unordered_map<kir::ForLoop*, Val*> loop_to_ind_map;
@@ -2590,7 +2495,6 @@ auto getPredicateReferenceIndexing(
         "Invalid reference generated.");
 
     bool within_unswitch = false;
-    const auto one = ir_builder.oneVal();
 
     for (const auto loop_i : c10::irange(loops.size())) {
       auto loop = loops[loop_i];
@@ -2644,20 +2548,21 @@ auto getPredicateReferenceIndexing(
           if (loop->stop() == loop_id->extent()) {
             loop_to_ind_map[loop] = loop->start();
           } else if (start) {
-            loop_to_ind_map[loop] = ir_builder.zeroVal();
+            loop_to_ind_map[loop] = GpuLower::current()->kernel()->zeroVal();
           } else {
             // Note that the parallel dimension is used rather than
             // loop-stop(). See the above comment.
-            loop_to_ind_map[loop] = ir_builder.subExpr(
-                gpu_lower->parallelDimensionMap().get(loop_pt),
-                ir_builder.create<Int>(1));
+            loop_to_ind_map[loop] = SimplifyingIrBuilder::subExpr(
+                GpuLower::current()->parallelDimensionMap().get(loop_pt),
+                GpuLower::current()->kernel()->zeroVal());
           }
         } else if (start) {
-          loop_to_ind_map[loop] = ir_builder.zeroVal();
+          loop_to_ind_map[loop] = GpuLower::current()->kernel()->zeroVal();
         } else {
           // Similar to the above, loop_id()->extent() is
           // used here instead of loop->stop(). See the above comment.
-          loop_to_ind_map[loop] = ir_builder.subExpr(loop_id->extent(), one);
+          loop_to_ind_map[loop] = SimplifyingIrBuilder::subExpr(
+              loop_id->extent(), GpuLower::current()->kernel()->oneVal());
         }
       }
 
@@ -2679,19 +2584,19 @@ auto getPredicateReferenceIndexing(
     auto loop = loops[loop_i];
     auto ind = loop_to_ind_map[loops[loop_i]];
     auto ref_axis = reference_domain->axis(loop_i);
-    auto kir_ref_axis = gpu_lower->lowerValue(ref_axis)->as<IterDomain>();
 
     if (Index::protectWithMagicZero(loop, ref_axis, ind)) {
-      magic_zero_loop = kir_ref_axis;
+      magic_zero_loop = ref_axis;
     }
 
-    ref_id_to_ind_map[kir_ref_axis] = loop_to_ind_map[loop];
+    ref_id_to_ind_map[ref_axis] = loop_to_ind_map[loop];
   }
 
   if (ref_id_to_ind_map.count(magic_zero_loop)) {
     auto& ind = ref_id_to_ind_map[magic_zero_loop];
     if (!ind->isConstScalar()) {
-      ind = ir_builder.addExpr(ind, ir_builder.magicZeroVal());
+      ind = SimplifyingIrBuilder::addExpr(
+          ind, GpuLower::current()->kernel()->magicZeroVal());
     }
   }
 
@@ -2731,20 +2636,19 @@ std::pair<Val*, Val*> getStartAndStopOffsets(
     bool padding_predicate,
     bool unswitch,
     bool non_divisible_pred) {
-  const auto gpu_lower = GpuLower::current();
-  kir::SimplifyingIrBuilder ir_builder(gpu_lower->kernel());
-
   // By default, the offsets for the start and stop predicates are
   // just zero. All halo-related adjustments are done at root domains,
   // so consumer_id is not a root domain, no adjustment is required.
   if (consumer_id->definition() != nullptr && !non_divisible_pred) {
-    return {ir_builder.zeroVal(), ir_builder.zeroVal()};
+    return {
+        GpuLower::current()->kernel()->zeroVal(),
+        GpuLower::current()->kernel()->zeroVal()};
   }
 
   auto consumer_def = consumer_tv->definition();
 
-  Val* start_offset = ir_builder.zeroVal();
-  Val* stop_offset = ir_builder.zeroVal();
+  Val* start_offset = GpuLower::current()->kernel()->zeroVal();
+  Val* stop_offset = GpuLower::current()->kernel()->zeroVal();
 
   // These adjustments are not required when predicating non-divisible splits
   if (!non_divisible_pred) {
@@ -2761,10 +2665,12 @@ std::pair<Val*, Val*> getStartAndStopOffsets(
     }
 
     // Adjustment for partial split
-    auto partial_split_offset = getGlobalConsumerOffsetWithPartialSplit(
-        gpu_lower->lowerValue(consumer_id)->as<IterDomain>());
-    start_offset = ir_builder.addExpr(start_offset, partial_split_offset);
-    stop_offset = ir_builder.addExpr(stop_offset, partial_split_offset);
+    auto partial_split_offset =
+        getGlobalConsumerOffsetWithPartialSplit(consumer_id);
+    start_offset =
+        SimplifyingIrBuilder::addExpr(start_offset, partial_split_offset);
+    stop_offset =
+        SimplifyingIrBuilder::addExpr(stop_offset, partial_split_offset);
 
     // If generating a predicate for unswitch, adjust the stop offset to
     // accommodate the addition of halo to the loop stop. See the
@@ -2774,7 +2680,8 @@ std::pair<Val*, Val*> getStartAndStopOffsets(
           !padding_predicate, "Unswitch should not use the padding predicate");
       auto stop_unswitch_offset =
           getUnswitchStopOffset(consumer_id, consumer_tv);
-      stop_offset = ir_builder.addExpr(stop_offset, stop_unswitch_offset);
+      stop_offset =
+          SimplifyingIrBuilder::addExpr(stop_offset, stop_unswitch_offset);
     }
   }
 
@@ -2794,8 +2701,8 @@ std::pair<Val*, Val*> getStartAndStopOffsets(
   //  index + (start_offset - start_limit) >= 0
   //  index + (stop_offset - stop_limit)  < extent
 
-  start_offset = ir_builder.subExpr(start_offset, limits.first);
-  stop_offset = ir_builder.subExpr(stop_offset, limits.second);
+  start_offset = SimplifyingIrBuilder::subExpr(start_offset, limits.first);
+  stop_offset = SimplifyingIrBuilder::subExpr(stop_offset, limits.second);
 
   return {start_offset, stop_offset};
 }
@@ -2823,7 +2730,7 @@ Val* simplifyStartOffset(Val* start_offset) {
 bool canOmitStopPredicate(
     Val* stop_index,
     Val* stop_offset,
-    IterDomain* kir_contig_id) {
+    IterDomain* contig_id) {
   bool index_simple = stop_index->definition() == nullptr;
   // The definition may be just adding the magic zero, which can be
   // effectively considered "simple"
@@ -2836,7 +2743,7 @@ bool canOmitStopPredicate(
   }
 
   // Omit only when both the index and extent are "simple".
-  if (!(index_simple && kir_contig_id->extent()->definition() == nullptr)) {
+  if (!(index_simple && contig_id->extent()->definition() == nullptr)) {
     return false;
   }
 
@@ -2849,8 +2756,7 @@ bool canOmitStopPredicate(
 
   auto stop_offset_val = stop_offset->as<Int>()->value();
 
-  auto halo_ext =
-      gpu_lower->haloInfo().kirGetRootAxisInfo(kir_contig_id).width();
+  auto halo_ext = gpu_lower->haloInfo().getRootAxisInfo(contig_id).width();
 
   // If they are not compile-time constant, can't prove the
   // condition.
@@ -2865,9 +2771,9 @@ bool canOmitStopPredicate(
   // When the domain is parallelized, the parallel dimension must be
   // exact. Otherwise, there would be extra threads/blocks that need
   // to be predicated out.
-  if (isParallelTypeThread(kir_contig_id->getParallelType())) {
+  if (isParallelTypeThread(contig_id->getParallelType())) {
     if (!gpu_lower->parallelDimensionMap().isExact(
-            kir_contig_id->getParallelType())) {
+            contig_id->getParallelType())) {
       return false;
     }
     // If the domain has halo, the loop is expanded by the halo
@@ -2884,25 +2790,21 @@ bool canOmitStopPredicate(
 } // namespace
 
 // Returns predicates and the concrete (by loop map) root domains they cover
-std::pair<std::vector<RootPredicateInfo>, ReferenceTensor> Index::
-    getReferenceRootPredicates(
-        const TensorView* kir_consumer_tv,
+std::pair<std::vector<RootPredicateInfo>, ReferenceTensor> Index::getReferenceRootPredicates(
+        TensorView* consumer_tv,
         const std::vector<kir::ForLoop*>& loops,
         kir::ForLoop* unswitch_or_vec_loop,
         bool shift_padding) {
   FUSER_PERF_SCOPE("GpuLower::Lower::Index::getReferenceRootPredicates");
 
   const auto gpu_lower = GpuLower::current();
-  kir::SimplifyingIrBuilder ir_builder(gpu_lower->kernel());
 
   const bool is_unswitch = unswitch_or_vec_loop != nullptr;
 
   // Nothing needs to be done when padding is not required.
-  if (shift_padding && !needsPadding(kir_consumer_tv->fuserTv())) {
+  if (shift_padding && !needsPadding(consumer_tv)) {
     return {{RootPredicateInfo::getFalseInfo()}, ReferenceTensor{}};
   }
-
-  auto consumer_tv = kir_consumer_tv->fuserTv();
 
   // Get a reference tensor replayed as existing loop structure
   ReferenceTensor reference = IndexReferenceReplay::getReference(loops);
@@ -2967,10 +2869,9 @@ std::pair<std::vector<RootPredicateInfo>, ReferenceTensor> Index::
     }
 
     auto root_ids = contig_id_entry.covered_ids;
-    auto kir_contig_id = gpu_lower->lowerValue(contig_id)->as<IterDomain>();
 
     const auto consumer_stop_indexing_it =
-        consumer_stop_index_map.find(kir_contig_id);
+        consumer_stop_index_map.find(contig_id);
 
     // First condition below happens with Misaligned predicates, where
     // inner-most vectorized loops are not included in the loops
@@ -3009,18 +2910,19 @@ std::pair<std::vector<RootPredicateInfo>, ReferenceTensor> Index::
         contig_id_entry.is_non_divisible_split);
 
     auto stop_index = consumer_stop_indexing_it->second;
-    auto start_index = consumer_start_index_map.at(kir_contig_id);
+    auto start_index = consumer_start_index_map.at(contig_id);
 
     // Build predicates for start positions as:
     //   start_index + start_offset >= 0
     auto start_offset = simplifyStartOffset(info.start_offset_);
     if (start_offset == nullptr) {
-      info.start_predicate_ = ir_builder.trueVal();
+      info.start_predicate_ = GpuLower::current()->kernel()->trueVal();
     } else {
       auto offsetted_start_index =
-          ir_builder.addExpr(start_index, start_offset);
+          SimplifyingIrBuilder::addExpr(start_index, start_offset);
       auto start_pred =
-          ir_builder.geExpr(offsetted_start_index, ir_builder.zeroVal())
+          SimplifyingIrBuilder::geExpr(
+              offsetted_start_index, GpuLower::current()->kernel()->zeroVal())
               ->as<Bool>();
       info.start_predicate_ = start_pred;
     }
@@ -3028,13 +2930,14 @@ std::pair<std::vector<RootPredicateInfo>, ReferenceTensor> Index::
     // Build predicates for stop positions as:
     //   stop_index + stop_offset < IterDomain::extent
     auto stop_offset = info.stop_offset_;
-    if (canOmitStopPredicate(stop_index, stop_offset, kir_contig_id)) {
-      info.stop_predicate_ = ir_builder.trueVal();
+    if (canOmitStopPredicate(stop_index, stop_offset, contig_id)) {
+      info.stop_predicate_ = GpuLower::current()->kernel()->trueVal();
     } else {
-      auto offsetted_stop_index = ir_builder.addExpr(stop_index, stop_offset);
-      auto stop_pred =
-          ir_builder.ltExpr(offsetted_stop_index, kir_contig_id->extent())
-              ->as<Bool>();
+      auto offsetted_stop_index =
+          SimplifyingIrBuilder::addExpr(stop_index, stop_offset);
+      auto stop_pred = SimplifyingIrBuilder::ltExpr(
+                           offsetted_stop_index, contig_id->extent())
+                           ->as<Bool>();
       info.stop_predicate_ = stop_pred;
     }
 
@@ -3061,12 +2964,9 @@ bool Index::protectWithMagicZero(
 }
 
 RootPredicateInfo RootPredicateInfo::getFalseInfo() {
-  const auto gpu_lower = GpuLower::current();
-  kir::SimplifyingIrBuilder ir_builder(gpu_lower->kernel());
-
   RootPredicateInfo info;
-  info.start_predicate_ = ir_builder.falseVal();
-  info.stop_predicate_ = ir_builder.falseVal();
+  info.start_predicate_ = GpuLower::current()->kernel()->falseVal();
+  info.stop_predicate_ = GpuLower::current()->kernel()->falseVal();
 
   return info;
 }

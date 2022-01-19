@@ -48,7 +48,7 @@ namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
-
+class IrContainer;
 class Fusion;
 
 // Hierarchal dispatch functions for handle
@@ -188,15 +188,15 @@ class TORCH_CUDA_CU_API OptOutDispatch : public PolymorphicBase {
   virtual void handle(GatherOp* stmt);
   virtual void handle(ViewOp* stmt);
 
-  virtual void handle(kir::Allocate*);
-  virtual void handle(kir::Sync*);
-  virtual void handle(kir::InitMagicZero*);
-  virtual void handle(kir::UpdateMagicZero*);
-  virtual void handle(kir::ForLoop*);
-  virtual void handle(kir::IfThenElse*);
-  virtual void handle(kir::GridReduction*);
-  virtual void handle(kir::GridBroadcast*);
-  virtual void handle(kir::GridWelford*);
+  virtual void handle(kir::Allocate* stmt);
+  virtual void handle(kir::Sync* stmt);
+  virtual void handle(kir::InitMagicZero* stmt);
+  virtual void handle(kir::UpdateMagicZero* stmt);
+  virtual void handle(kir::ForLoop* stmt);
+  virtual void handle(kir::IfThenElse* stmt);
+  virtual void handle(kir::GridReduction* stmt);
+  virtual void handle(kir::GridBroadcast* stmt);
+  virtual void handle(kir::GridWelford* stmt);
 };
 
 class TORCH_CUDA_CU_API OptInConstDispatch : public OptOutConstDispatch {
@@ -215,63 +215,80 @@ class TORCH_CUDA_CU_API OptInDispatch : public OptOutDispatch {
   virtual void unhandled(Statement* stmt) final;
 };
 
+// Class to perform mutations on Fusion IR. Exprs can simply be redefined, but
+// when mutating values they have to be registered through registerMutation so
+// that exprs can detect there's been a muatation and know to modify all
+// instances of that Val. This means each Val should be mutated "consistently".
+// Otherwise behavior may be difficult to understand as it depends on which
+// order mutate is called in. This class expects user to topologically call the
+// statments of interest so inputs are called and mutated before exprs depending
+// on them.
+//
+// Warning: TensorViews need to be treated carefully. As we don't generally
+// register their mutation when their tensor domains only change. If a TV needs
+// to be swapped out, it needs to be registered as a "proper" mutation like
+// other vals, on top of TensorDomain being updated in the mutated TensorView.
+//
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class TORCH_CUDA_CU_API OptOutMutator : public PolymorphicBase {
  public:
   // Hierarchal dispatch functions for handle
-  virtual Statement* mutate(Statement* s);
-  virtual Statement* mutate(Expr* e);
-  virtual Statement* mutate(Val* v);
-
-  // We always want to dispatch through a Val, so we can capture and dispatch
-  // correctly members of nodes like Split->TensorDomain If we don't call the
-  // below function or manually cast to use mutate(Val* v) we can't intercept
-  // and mutate by capturing mutate(Val* v), which is what we do when we want to
-  // replace all instances of a value.
-  Statement* mutateAsVal(Val* v);
+  virtual void mutate(Statement* s);
+  virtual void mutate(Expr* e);
+  virtual void mutate(Val* v);
 
   void registerMutation(Val* val, Val* mutation);
+
+  Val* maybeMutated(Val* val) {
+    if (mutations.find(val) == mutations.end()) {
+      return val;
+    }
+    return mutations.at(val);
+  }
 
   std::unordered_map<Val*, Val*> mutations;
 
   //****Functions below defined in mutator.cpp*****
 
   // Vals
-  virtual Statement* mutate(Bool*);
-  virtual Statement* mutate(Double*);
-  virtual Statement* mutate(Int*);
-  virtual Statement* mutate(NamedScalar*);
-  virtual Statement* mutate(IterDomain*);
-  virtual Statement* mutate(TensorDomain*);
-  virtual Statement* mutate(TensorView*);
+  virtual void mutate(Bool*);
+  virtual void mutate(Double*);
+  virtual void mutate(Int*);
+  virtual void mutate(NamedScalar*);
+  virtual void mutate(IterDomain*);
+  virtual void mutate(TensorDomain*);
+  virtual void mutate(TensorView*);
 
-  virtual Statement* mutate(kir::Predicate*);
-  virtual Statement* mutate(kir::TensorIndex*);
+  virtual void mutate(kir::Predicate*);
+  virtual void mutate(kir::TensorIndex*);
 
   // Exprs
-  virtual Statement* mutate(UnaryOp*);
-  virtual Statement* mutate(BinaryOp*);
-  virtual Statement* mutate(TernaryOp*);
-  virtual Statement* mutate(ReductionOp*);
-  virtual Statement* mutate(WelfordOp*);
-  virtual Statement* mutate(BroadcastOp*);
+  virtual void mutate(UnaryOp*);
+  virtual void mutate(BinaryOp*);
+  virtual void mutate(TernaryOp*);
+  virtual void mutate(ReductionOp*);
+  virtual void mutate(WelfordOp*);
+  virtual void mutate(BroadcastOp*);
 
-  virtual Statement* mutate(Split*);
-  virtual Statement* mutate(Merge*);
-  virtual Statement* mutate(TransposeOp*);
-  virtual Statement* mutate(ShiftOp*);
-  virtual Statement* mutate(GatherOp*);
-  virtual Statement* mutate(ViewOp*);
+  virtual void mutate(Split*);
+  virtual void mutate(Merge*);
+  virtual void mutate(TransposeOp*);
+  virtual void mutate(ShiftOp*);
+  virtual void mutate(GatherOp*);
+  virtual void mutate(ViewOp*);
 
-  virtual Statement* mutate(kir::Allocate*);
-  virtual Statement* mutate(kir::Sync*);
-  virtual Statement* mutate(kir::InitMagicZero*);
-  virtual Statement* mutate(kir::UpdateMagicZero*);
-  virtual Statement* mutate(kir::ForLoop*);
-  virtual Statement* mutate(kir::IfThenElse*);
-  virtual Statement* mutate(kir::GridReduction*);
-  virtual Statement* mutate(kir::GridBroadcast*);
-  virtual Statement* mutate(kir::GridWelford*);
+  virtual void mutate(kir::Allocate*);
+  virtual void mutate(kir::Sync*);
+  virtual void mutate(kir::InitMagicZero*);
+  virtual void mutate(kir::UpdateMagicZero*);
+  virtual void mutate(kir::ForLoop*);
+  virtual void mutate(kir::IfThenElse*);
+  virtual void mutate(kir::GridReduction*);
+  virtual void mutate(kir::GridBroadcast*);
+  virtual void mutate(kir::GridWelford*);
+
+ protected:
+  void removeExpr(IrContainer*, Expr*);
 };
 
 } // namespace cuda

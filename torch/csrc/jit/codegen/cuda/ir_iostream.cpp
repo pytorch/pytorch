@@ -24,10 +24,8 @@ std::string varName(const Val* val) {
   std::stringstream value_name;
   if (val == nullptr) {
     value_name << "$nullptr";
-  } else if (val->name() != kInvalidStmName) {
-    value_name << val->name();
   } else {
-    value_name << val->id();
+    value_name << val->name();
   }
   return value_name.str();
 }
@@ -165,17 +163,15 @@ void IrPrinter::handle(const TensorView* tv) {
     }
     handle(tv->domain());
 
-    if (!tv->isKirStmt()) {
-      if (tv->getComputeAtPosition() > 0) {
-        os_ << " ca_pos( ";
-        os_ << tv->getComputeAtPosition();
-        os_ << " )";
-      }
-      if (tv->getMaxProducerPosition() > 0) {
-        os_ << " produce_pos( ";
-        os_ << tv->getMaxProducerPosition();
-        os_ << ")";
-      }
+    if (tv->getComputeAtPosition() > 0) {
+      os_ << " ca_pos( ";
+      os_ << tv->getComputeAtPosition();
+      os_ << " )";
+    }
+    if (tv->getMaxProducerPosition() > 0) {
+      os_ << " produce_pos( ";
+      os_ << tv->getMaxProducerPosition();
+      os_ << ")";
     }
   }
 }

@@ -39,7 +39,7 @@ class SymbolicSizePrinter : private OptOutConstDispatch {
     } else if (node->isConst()) {
       os_ << *node->value();
     } else {
-      os_ << "ki" << node->id();
+      os_ << "ki" << node->name();
     }
   }
 
@@ -462,15 +462,15 @@ class BufferUseDefInfo {
       return;
     }
 
-    auto kir_tv = dynamic_cast<TensorView*>(alloc->buffer());
-    if (!kir_tv) {
+    auto tv = dynamic_cast<TensorView*>(alloc->buffer());
+    if (!tv) {
       return;
     }
 
     // Collect the allocate info data
 
     // Collect memory type, skip global buffers
-    auto mem_type = kir_tv->getMemoryType();
+    auto mem_type = tv->getMemoryType();
     if (mem_type != MemoryType::Local && mem_type != MemoryType::Shared) {
       return;
     }
@@ -489,12 +489,12 @@ class BufferUseDefInfo {
       }
     }
 
-    auto data_type = kir_tv->dtype();
+    auto data_type = tv->dtype();
     auto size_print = SymbolicSizePrinter::printSize(alloc);
 
     // Make sure we don't have conflicting information on record
     TORCH_INTERNAL_ASSERT(!map_allocate_to_info_.count(alloc));
-    TORCH_INTERNAL_ASSERT(!map_tv_to_allocations_.count(kir_tv->name()));
+    TORCH_INTERNAL_ASSERT(!map_tv_to_allocations_.count(tv->name()));
 
     // make AllocationUseDefInfo:
     auto alloc_info = makeUseDefInfo();
@@ -507,7 +507,7 @@ class BufferUseDefInfo {
 
     // record short cuts
     map_allocate_to_info_[alloc] = alloc_info;
-    map_tv_to_allocations_[kir_tv->name()] = alloc_info;
+    map_tv_to_allocations_[tv->name()] = alloc_info;
   }
 
   void collectScopeUseDefInfo(const std::vector<Expr*>& exprs) {
@@ -592,7 +592,6 @@ class BufferUseDefInfo {
     }
 
     auto out_tv = expr->outputs()[0]->as<TensorView>();
-    auto fuser_out_tv = out_tv->fuserTv();
 
     // Collect all tv's that resolves broadcast in this
     //  expr. The current analysis isn't enough to capture
@@ -600,7 +599,7 @@ class BufferUseDefInfo {
     for (auto input_tv : ir_utils::filterByType<TensorView>(expr->inputs())) {
       auto maybe_alloc_info = getMaybeAllocInfoFromTV(input_tv);
       if (maybe_alloc_info.has_value()) {
-        if (isSerialBroadcastResolution(input_tv->fuserTv(), fuser_out_tv)) {
+        if (isSerialBroadcastResolution(input_tv, out_tv)) {
           maybe_alloc_info.value()->inner_live_interval->markRead(current_pos_);
         } else {
           // Disable inner alias info for this buffer, since line number based
@@ -988,9 +987,8 @@ class AllocateReuseModifier {
     }
     // Assume inputs are TV allocations, which should have been checked
     //  before reaching this point.
-    auto this_tv =
-        alloc_info->alloc_expr->buffer()->as<TensorView>()->fuserTv();
-    auto reuse_tv = to_reuse->alloc_expr->buffer()->as<TensorView>()->fuserTv();
+    auto this_tv = alloc_info->alloc_expr->buffer()->as<TensorView>();
+    auto reuse_tv = to_reuse->alloc_expr->buffer()->as<TensorView>();
 
     // Check the values in between the two buffers.
     auto vals_between_this_and_reuse =
@@ -1074,7 +1072,7 @@ class AllocateReuseModifier {
 
     // Check index map for the corresponding axes.
     for (const auto id_it : c10::irange(alloc_domains.size())) {
-      if (!GpuLower::current()->caIndexMap().kirAreMapped(
+      if (!GpuLower::current()->caIndexMap().areMapped(
               alloc_domains[id_it], reuse_domains[id_it])) {
         return false;
       }

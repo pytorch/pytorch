@@ -274,8 +274,7 @@ ForwardNormResult batch_norm(
       auto mean_hat = mul(running_mean, rev_momentum);
       auto new_mean_hat = add(mean_hat, current_mean_hat);
 
-      auto num_feature_decrement =
-          sub(num_features, IrBuilder::create<Int>(x->container(), 1));
+      auto num_feature_decrement = sub(num_features, x->container()->oneVal());
       auto unbiased_var =
           mul(welford_out.var_sum, reciprocal(num_feature_decrement));
       auto current_var_hat = mul(unbiased_var, momentum);
@@ -305,14 +304,14 @@ ForwardNormResult batch_norm(
         fusion->aliasOutputToInput(casted_output, input_to_cast);
       };
 
-      if (fusion->hasInput(running_mean)) {
+      if (running_mean->isFusionInput()) {
         fusion->addOutput(new_mean_hat);
         fusion->aliasOutputToInput(new_mean_hat, running_mean);
       } else {
         cast_to_input_dtype(running_mean, new_mean_hat);
       }
 
-      if (fusion->hasInput(running_var)) {
+      if (running_var->isFusionInput()) {
         fusion->addOutput(new_var_hat);
         fusion->aliasOutputToInput(new_var_hat, running_var);
       } else {
@@ -536,8 +535,7 @@ ForwardNormResult instance_norm(
       fusion->addOutput(new_mean_channels_only);
       fusion->aliasOutputToInput(new_mean_channels_only, running_mean);
 
-      auto num_feature_decrement =
-          sub(N, IrBuilder::create<Int>(x->container(), 1));
+      auto num_feature_decrement = sub(N, x->container()->oneVal());
       auto unbiased_var =
           mul(welford_out.var_sum, reciprocal(num_feature_decrement));
       auto current_var_hat = mul(unbiased_var, momentum);

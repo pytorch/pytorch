@@ -60,9 +60,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     for (Val* val : params) {
       if (const auto tv = dynamic_cast<TensorView*>(val)) {
         code_ << "Tensor<" << val->dtype() << ", "
-              << TensorDomain::noReductions(
-                     tv->fuserTv()->getMaybeRFactorDomain())
-                     .size()
+              << TensorDomain::noReductions(tv->getMaybeRFactorDomain()).size()
               << "> " << varName(tv);
       } else {
         TORCH_INTERNAL_ASSERT(val->isScalar()); // NOLINT (LLVM bug 48525)
@@ -217,22 +215,15 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     return tmp_code.str();
   }
 
-  // TODO(kir): consider automatic var naming
   std::string varName(const Val* val) {
-    std::string prefix = "";
+    std::stringstream name;
     if (val->isA<TensorView>()) {
-      prefix = "T";
+      name << "T";
     } else {
-      prefix = typePrefix(val->dtype());
+      name << typePrefix(val->dtype());
     }
-
-    std::stringstream value_name;
-    if (val->name() != kInvalidStmName) {
-      value_name << prefix << val->name();
-    } else {
-      value_name << "k" << prefix << val->id();
-    }
-    return value_name.str();
+    name << val->name();
+    return name.str();
   }
 
   std::string genInline(const Statement* stmt) {
@@ -337,7 +328,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
       bool vectorize_op = false;
       bool misaligned_op = false;
 
-      for (auto id : ti->view()->fuserTv()->domain()->domain()) {
+      for (auto id : ti->view()->domain()->domain()) {
         if (!isParallelTypeVectorize(id->getParallelType())) {
           continue;
         }
@@ -685,7 +676,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
 
     const ParallelTypeBitmap domains =
         kernel_->predicateMap().getParallelBroadcastDomains(
-            tensor_index->view()->fuserTv());
+            tensor_index->view());
 
     const bool thread_x = domains.get(ParallelType::TIDx);
     const bool thread_y = domains.get(ParallelType::TIDy);
@@ -1128,7 +1119,6 @@ class CudaKernelGenerator : private OptOutConstDispatch {
   }
 
   void handle(const kir::ForLoop* loop) final {
-    // TODO(kir): handle this during lowering
     if (loop->iter_domain()->isBroadcast()) {
       handleScope(loop->body());
       return;
@@ -1320,8 +1310,6 @@ class CudaKernelGenerator : private OptOutConstDispatch {
   const kir::Kernel* kernel_;
   int block_nest_level_ = 0;
   int block_reduce_name_ = 0;
-
-  // TODO(kir): replace with explicit assignment statements
   bool print_inline_ = false;
 
   // Mark when we are inside of a vectorized for-loop

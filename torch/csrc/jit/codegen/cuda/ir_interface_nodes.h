@@ -172,9 +172,6 @@ class TORCH_CUDA_CU_API TensorView : public Val {
 
   TensorView(const TensorView* src, IrCloner* ir_cloner);
 
-  // TODO: Remove, only used for lowering
-  explicit TensorView(IrBuilderPasskey, const TensorView* tv);
-
   TensorDomain* domain() const {
     return domain_;
   }
@@ -223,12 +220,10 @@ class TORCH_CUDA_CU_API TensorView : public Val {
 
   // Does it share outer axes with other tensors?
   bool hasComputeAt() const {
-    TORCH_INTERNAL_ASSERT(!isKirStmt(), "Function invalid for kir.");
     return compute_at_pos_ > 0;
   }
 
   bool hasMaxProducerPosition() const {
-    TORCH_INTERNAL_ASSERT(!isKirStmt(), "Function invalid for kir.");
     return max_producer_pos_ > 0;
   }
 
@@ -236,14 +231,12 @@ class TORCH_CUDA_CU_API TensorView : public Val {
 
   // Returns the position that this tensor is produced at relative to its axes.
   unsigned int getComputeAtPosition() const {
-    TORCH_INTERNAL_ASSERT(!isKirStmt(), "Function invalid for kir.");
     return compute_at_pos_;
   }
 
   // Returns the maximum position of producers are being computed at relative to
   // this tensor. This position dictates the clear expectations of producers.
   unsigned int getMaxProducerPosition() const {
-    TORCH_INTERNAL_ASSERT(!isKirStmt(), "Function invalid for kir.");
     return max_producer_pos_;
   }
 
@@ -382,13 +375,6 @@ class TORCH_CUDA_CU_API TensorView : public Val {
     return axes_to_swizzle_;
   }
 
-  // TODO: Remove, only used for lowering
-  TensorView* fuserTv() const {
-    TORCH_INTERNAL_ASSERT(fuser_tv_ != nullptr);
-    TORCH_INTERNAL_ASSERT(isKirStmt(), "Function invalid for fusion.");
-    return const_cast<TensorView*>(fuser_tv_); // NOLINT
-  }
-
   friend TORCH_CUDA_CU_API TransformPropagator;
   friend TORCH_CUDA_CU_API TransformReplay;
   friend TORCH_CUDA_CU_API OptOutMutator;
@@ -426,9 +412,6 @@ class TORCH_CUDA_CU_API TensorView : public Val {
   MemoryType memory_type_ = MemoryType::Local;
   SwizzleType swizzle_type_ = SwizzleType::NoSwizzle;
   std::vector<IterDomain*> axes_to_swizzle_;
-
-  // TODO: Remove, only used for lowering
-  const TensorView* fuser_tv_ = nullptr;
 };
 
 //! A simple TensorView builder

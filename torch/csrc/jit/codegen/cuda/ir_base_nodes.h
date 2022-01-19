@@ -55,8 +55,9 @@ class IrBuilderPasskey;
 class IrContainerPasskey;
 
 namespace kir {
+class Kernel;
 class Predicate;
-}
+} // namespace kir
 
 // Passkey for container to register names with statements
 class ExprPasskey {
@@ -95,7 +96,7 @@ class TORCH_CUDA_CU_API Statement : public NonCopyable, public PolymorphicBase {
   static void constDispatch(T handler, const Statement* const);
 
   template <typename T>
-  static Statement* mutatorDispatch(T mutator, Statement*);
+  static void mutatorDispatch(T mutator, Statement*);
 
   // Accessor functions to types. Vals always have a DataType, Exprs never do
   virtual c10::optional<ValType> getValType() const {
@@ -125,6 +126,9 @@ class TORCH_CUDA_CU_API Statement : public NonCopyable, public PolymorphicBase {
   // Return the fusion this statement belongs to
   Fusion* fusion() const;
 
+  // Return the kernel this statement belongs to
+  kir::Kernel* kernel() const;
+
   // Return the container this statement belongs to
   IrContainer* container() const {
     return ir_container_;
@@ -133,10 +137,6 @@ class TORCH_CUDA_CU_API Statement : public NonCopyable, public PolymorphicBase {
   // Return the int that represents its name
   StmtNameType name() const {
     return name_;
-  }
-
-  bool isKirStmt() const {
-    return is_kir_stmt_;
   }
 
   // Set the statements' name. Typically the container will set the name,
@@ -161,6 +161,7 @@ class TORCH_CUDA_CU_API Statement : public NonCopyable, public PolymorphicBase {
   }
 
   std::string toString() const;
+  std::string toInlineString() const;
 
  protected:
   Statement(IrBuilderPasskey);
@@ -170,8 +171,6 @@ class TORCH_CUDA_CU_API Statement : public NonCopyable, public PolymorphicBase {
 
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   IrContainer* ir_container_ = nullptr;
-
-  const bool is_kir_stmt_ = false;
 };
 
 //! A Val represents a "value." These are objects, like tensors, scalars, and
@@ -220,7 +219,7 @@ class TORCH_CUDA_CU_API Val : public Statement {
   static void constDispatch(T handler, const Val* const);
 
   template <typename T>
-  static Statement* mutatorDispatch(T mutator, Val*);
+  static void mutatorDispatch(T mutator, Val*);
 
   c10::optional<ValType> getValType() const override {
     return vtype_;
@@ -304,12 +303,6 @@ class TORCH_CUDA_CU_API Val : public Statement {
     return evaluator_index_;
   }
 
-  // Temporarily added as merger from kir::Val
-
-  ValueId id() const {
-    return id_;
-  }
-
   // Following is managed by Fusion (or kirIrBuilder) and can change.
   // TODO: Protect with a passkey.
   void setDefinition(Expr* expr) {
@@ -346,9 +339,6 @@ class TORCH_CUDA_CU_API Val : public Statement {
 
   Expr* definition_ = nullptr;
   std::vector<Expr*> uses_;
-
-  // All Kernel IR values have IDs (unique within the same Kernel)
-  ValueId id_ = -1;
 
   // Expr evaluator idx;
   int evaluator_index_ = -1;
@@ -435,7 +425,7 @@ class TORCH_CUDA_CU_API Expr : public Statement {
   static void constDispatch(T handler, const Expr* const);
 
   template <typename T>
-  static Statement* mutatorDispatch(T mutator, Expr*);
+  static void mutatorDispatch(T mutator, Expr*);
 
   // TODO: Protect based on being in kernel container
   kir::Predicate* predicate() const;

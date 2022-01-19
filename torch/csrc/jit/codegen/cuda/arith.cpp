@@ -124,8 +124,8 @@ TensorView* newOutputTV(const std::vector<Val*>& vals, DataType dtype) {
         }
       }
       out_domain[dim_i] = IrBuilder::create<IterDomain>(
-          IrBuilder::create<Int>(0),
-          IrBuilder::create<Int>(1),
+          FusionGuard::getCurFusion()->zeroVal(),
+          FusionGuard::getCurFusion()->oneVal(),
           ParallelType::Serial,
           itype);
     }
@@ -681,7 +681,7 @@ TensorView* sum(
   if (isFloatingPointType(dtype)) {
     init = IrBuilder::create<Double>(0.0);
   } else if (isIntegralType(dtype)) {
-    init = IrBuilder::create<Int>(0);
+    init = FusionGuard::getCurFusion()->zeroVal();
   } else {
     TORCH_CHECK(
         false,
@@ -774,8 +774,8 @@ TensorView* broadcast(
   while (ibdim < is_broadcast_dim.size()) {
     if (is_broadcast_dim[ibdim]) {
       out_domain.push_back(IrBuilder::create<IterDomain>(
-          IrBuilder::create<Int>(0),
-          IrBuilder::create<Int>(1),
+          FusionGuard::getCurFusion()->zeroVal(),
+          FusionGuard::getCurFusion()->oneVal(),
           ParallelType::Serial,
           IterType::BroadcastWithoutStride));
     } else {
@@ -807,7 +807,7 @@ WelfordResult Welford(
   TORCH_CHECK(axes.size() > 0, "No reduction axis specified");
 
   if (init_N == nullptr) {
-    init_N = IrBuilder::create<Int>(0);
+    init_N = FusionGuard::getCurFusion()->zeroVal();
   }
 
   // Initial values for welford op are tensors, so their dims have to match the
@@ -867,7 +867,7 @@ WelfordResult Welford(
       init_N, /*init var/avg/count */
       tv,
       nullptr,
-      IrBuilder::create<Int>(1)); /*in var/avg/count */
+      FusionGuard::getCurFusion()->oneVal()); /*in var/avg/count */
 
   return WelfordResult(out_avg, out_var, out_N);
 }
@@ -1450,14 +1450,14 @@ TensorView* gather(
     const auto out_stop_offset = inp_stop_offset.value() + extent_adjustment;
     Val* out_axis_dim = nullptr;
     out_root_domains.push_back(IrBuilder::create<IterDomain>(
-        IrBuilder::create<Int>(0),
+        FusionGuard::getCurFusion()->zeroVal(),
         inp_axis->extent(),
         IrBuilder::create<Int>(out_stop_offset),
         ParallelType::Serial,
         inp_axis->getIterType()));
     // create a new axis for the gathered domain
     out_gather_dom.push_back(IrBuilder::create<IterDomain>(
-        IrBuilder::create<Int>(0),
+        FusionGuard::getCurFusion()->zeroVal(),
         IrBuilder::create<Int>(window_dim),
         ParallelType::Serial,
         IterType::Gather));

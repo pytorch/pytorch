@@ -28,13 +28,11 @@ namespace executor_utils {
 // Include all the functions we might need in generated code
 std::string kernelPreamble();
 
-// TODO(kir): rewrite in terms of Kernel inputs
 void validateKernelInputs(
     Fusion* fusion,
     const at::ArrayRef<IValue>& inputs,
     const c10::Device& device);
 
-// TODO(kir): rewrite in terms of Kernel outputs
 void validateKernelOutputs(
     Fusion* fusion,
     const std::vector<at::Tensor>& outputs,
@@ -42,13 +40,6 @@ void validateKernelOutputs(
 
 // Returns if vectorizing the aten value by word size is possible
 bool canVectorize(const IValue& aten_val, int word_size);
-
-// Returns if vectorizing the aten value by word size is possible
-bool canVectorize(
-    TensorView* fusion_tv,
-    int word_size,
-    GpuLower& lower,
-    kir::ExpressionEvaluator& expr_eval);
 
 //! Bind kernel input values to runtime values
 kir::ExpressionEvaluator bindKernelInputs(
@@ -284,7 +275,7 @@ class ExecutorCompileTimeEntry {
 //! Returns the vector of tensorviews that will be used to bind parallel
 //!  dimensions.
 std::vector<IterDomain*> getParallelBindingsIterDomains(
-    GpuLower& lower,
+    GpuLower* lower,
     const std::vector<TensorView*>& used_tvs);
 
 using ParallelExtentMap =
@@ -293,33 +284,24 @@ using ParallelExtentMap =
 //! Returns the extents of all parallel binding iterdomains corresponding
 //!  to each parallel type.
 std::unique_ptr<ParallelExtentMap> getParallelIterExtents(
-    GpuLower& lower,
     std::vector<IterDomain*>& parallel_binding_ids);
 
 //! Returns the simplified set of extents necessary for launch parameter
 //!  binding.
 std::unique_ptr<ParallelExtentMap> getSimplifiedParallelIterExtents(
-    GpuLower& lower,
+    GpuLower* lower,
     std::vector<IterDomain*>& parallel_binding_ids);
 
 //! Returns the symbolic or constant extetns of warp padded parallel
 //!  iterdomains in the given vector.
 std::unique_ptr<caching::WarpPaddedExtentsInfo> getWarpPaddedExtentsInfo(
-    GpuLower& lower,
+    kir::Kernel* lower,
     std::vector<IterDomain*>& parallel_binding_ids);
 
-//! Returns the position information of vectorized input/output tensors
-//!  in the given fusion.
-std::unique_ptr<caching::VectorizedTensorInfo> getVectorizedTensorValidationInfo(
-    Fusion* fusion,
-    GpuLower& lower);
-
-// TODO(kir): rewrite in terms of Kernel tensors
 void validateVectorizedTensors(
-    Fusion* fusion,
+    kir::Kernel* kernel,
     const at::ArrayRef<IValue>& inputs,
     const std::vector<at::Tensor>& outputs,
-    GpuLower& lower,
     caching::ExecutorCompileTimeInfoCache* data_cache,
     kir::ExpressionEvaluator& expr_eval);
 

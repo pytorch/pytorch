@@ -4,7 +4,6 @@
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 
@@ -20,30 +19,29 @@ namespace {
 Bool* getPredicatePerParallelType(
     ParallelType pt,
     const ThreadPredicateMap::PredicateInfo& pred_info) {
-  kir::SimplifyingIrBuilder ir_builder(GpuLower::current()->kernel());
 
   auto pt_dim = GpuLower::current()->parallelDimensionMap().get(pt);
 
   // If pt is not used or is proven to be one, no need to predicate.
   if (pt_dim == nullptr || pt_dim->isOneInt()) {
-    return ir_builder.trueVal();
+    return GpuLower::current()->kernel()->trueVal();
   }
-
   // When BID needs to be predicated, that means it's an output of a grid
   // reduction and only the last block index in that dimension has the right
   // value from the grid reduce.
   if (isParallelTypeBlockDim(pt) && pred_info.limited_types.get(pt)) {
-    return ir_builder
-        .eqExpr(
-            NamedScalar::getParallelIndex(pt),
-            ir_builder.subExpr(
-                NamedScalar::getParallelDim(pt), ir_builder.oneVal()))
+    return SimplifyingIrBuilder::eqExpr(
+               NamedScalar::getParallelIndex(pt),
+               SimplifyingIrBuilder::subExpr(
+                   NamedScalar::getParallelDim(pt),
+                   GpuLower::current()->kernel()->oneVal()))
         ->as<Bool>();
   }
 
   // Otherwise, only thread of index 0 executes the computation
-  return ir_builder
-      .eqExpr(NamedScalar::getParallelIndex(pt), ir_builder.zeroVal())
+  return SimplifyingIrBuilder::eqExpr(
+             NamedScalar::getParallelIndex(pt),
+             GpuLower::current()->kernel()->zeroVal())
       ->as<Bool>();
 }
 
@@ -51,21 +49,17 @@ Bool* getPredicatePerParallelType(
 
 Bool* ThreadPredicateMap::getPredicateFromPredicateInfo(
     const ThreadPredicateMap::PredicateInfo& pred_info) {
-  kir::SimplifyingIrBuilder ir_builder(GpuLower::current()->kernel());
-
   const auto pred_types = pred_info.limited_types | pred_info.redundant_types;
 
   if (pred_types.none()) {
-    return ir_builder.trueVal();
+    return GpuLower::current()->kernel()->trueVal();
   }
 
   Bool* pred = nullptr;
-
   for (const auto pt : pred_types) {
     const auto tp = getPredicatePerParallelType(pt, pred_info);
-    pred = ir_builder.andExpr(pred, tp)->as<Bool>();
+    pred = SimplifyingIrBuilder::andExpr(pred, tp)->as<Bool>();
   }
-
   TORCH_INTERNAL_ASSERT(pred != nullptr);
 
   return pred;

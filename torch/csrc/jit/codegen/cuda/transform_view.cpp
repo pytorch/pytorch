@@ -137,7 +137,7 @@ class MergeTransform final : public ViewTransform {
         mul(merged_id->extent(), new_root_domain[index_ + 1]->extent());
 
     auto new_merged_id = IrBuilder::create<IterDomain>(
-        IrBuilder::create<Int>(0),
+        FusionGuard::getCurFusion()->zeroVal(),
         merged_extent,
         ParallelType::Serial,
         IterType::Iteration,
@@ -198,7 +198,7 @@ class SplitTransform final : public ViewTransform {
 
     // outer loop IterDomain
     IterDomain* factor_id = IrBuilder::create<IterDomain>(
-        IrBuilder::create<Int>(0),
+        FusionGuard::getCurFusion()->zeroVal(),
         factor,
         id->getParallelType(),
         id->getIterType(),
@@ -206,7 +206,7 @@ class SplitTransform final : public ViewTransform {
 
     // inner loop IterDomain
     IterDomain* remainder_id = IrBuilder::create<IterDomain>(
-        IrBuilder::create<Int>(0),
+        FusionGuard::getCurFusion()->zeroVal(),
         remainder->as<Int>(),
         ParallelType::Serial,
         IterType::Iteration,

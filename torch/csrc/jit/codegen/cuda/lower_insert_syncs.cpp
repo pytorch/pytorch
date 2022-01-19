@@ -2,7 +2,6 @@
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_insert_syncs.h>
@@ -261,8 +260,7 @@ class WarSyncInserter : private kir::ExprMutator {
 
     // WAR Sync is necessary in this loop, register its insertion.
     if (insert_sync) {
-      kir::IrBuilder ir_builder(GpuLower::current()->kernel());
-      auto sync_expr = ir_builder.create<kir::Sync>(true);
+      auto sync_expr = IrBuilder::create<kir::Sync>(true);
       kir::ExprMutator::registerInsertAfter(
           for_loop->body().exprs().back(), sync_expr, &for_loop->body());
       handle(sync_expr);
@@ -278,8 +276,8 @@ class WarSyncInserter : private kir::ExprMutator {
   WarMemoryInfo& getMemInfo(TensorView* tv) {
     auto maybe_aliased_tv = alloc_map_.getRealBuffer(tv);
     auto alloc_it = smem_allocations_.find(maybe_aliased_tv);
-    auto ca_loop = loop_utils::getAllocInformation(tv->fuserTv(), for_loops_)
-                       .init_for_loop;
+    auto ca_loop =
+        loop_utils::getAllocInformation(tv, for_loops_).init_for_loop;
     if (alloc_it == smem_allocations_.end()) {
       WarMemoryInfo mem_info;
       mem_info.ca_loop = ca_loop;
@@ -453,9 +451,8 @@ class ReadAfterWriteSyncs : public kir::ExprMutator {
       // out of or saving state for tensor view ID -> for loop
       // TODO: Explicitly test the 3 cases below
 
-      kir::IrBuilder ir_builder(GpuLower::current()->kernel());
-      auto sync_expr = ir_builder.create<kir::Sync>();
-      if (out_tv->fuserTv()->getComputeAtPosition() == 0) {
+      auto sync_expr = IrBuilder::create<kir::Sync>();
+      if (out_tv->getComputeAtPosition() == 0) {
         // Sync should be placed at global scope, after its outer most loop if
         // it has one.
         Expr* place_after = for_loops_.size() > 0 ? for_loops_[0] : expr;
@@ -473,19 +470,14 @@ class ReadAfterWriteSyncs : public kir::ExprMutator {
       } else {
         // Find the last loop in computeAt of out_tv, this is the loop where we
         // would place an allocation for out_tv
-        auto fuser_tv = out_tv->fuserTv();
-        auto lowered_local_id =
-            GpuLower::current()
-                ->lowerValue(fuser_tv->axis(
-                    (int)out_tv->fuserTv()->getComputeAtPosition() - 1))
-                ->as<IterDomain>();
+        auto local_id = out_tv->axis((int)out_tv->getComputeAtPosition() - 1);
 
         auto loops_it = std::find_if(
             for_loops_.begin(),
             for_loops_.end(),
-            [&lowered_local_id](const auto& loop) {
-              return GpuLower::current()->caLoopMap().kirAreMapped(
-                         loop->iter_domain(), lowered_local_id) ||
+            [&local_id](const auto& loop) {
+              return GpuLower::current()->caLoopMap().areMapped(
+                         loop->iter_domain(), local_id) ||
                   loop->iter_domain()->getParallelType() ==
                   ParallelType::Unroll;
             });

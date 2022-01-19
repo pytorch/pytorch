@@ -12,7 +12,7 @@ void PartialSplitMap::build(Fusion* fusion) {
   auto used_vals = ir_utils::allTvs(fusion);
 
   for (auto tv : ir_utils::filterByType<TensorView>(used_vals)) {
-    auto exprs = ExprSort::getExprs(
+    auto exprs = StmtSort::getExprs(
         fusion, {tv->domain()->domain().begin(), tv->domain()->domain().end()});
     for (auto split : ir_utils::filterByType<Split>(exprs)) {
       // Only needs to check root domains as partial split is only
@@ -24,22 +24,15 @@ void PartialSplitMap::build(Fusion* fusion) {
         continue;
       }
       auto root_domain = split->in();
-      auto kir_root_domain =
-          gpu_lower->lowerValue(split->in())->as<IterDomain>();
       auto start_offset = split->startOffset();
       start_offset_map_.insert({root_domain, start_offset});
-      kir_start_offset_map_.insert(
-          {kir_root_domain, gpu_lower->lowerValue(start_offset)->as<Val>()});
       auto stop_offset = split->stopOffset();
       stop_offset_map_.insert({root_domain, stop_offset});
-      kir_stop_offset_map_.insert(
-          {kir_root_domain, gpu_lower->lowerValue(stop_offset)->as<Val>()});
     }
   }
 }
 
 Val* PartialSplitMap::getStartOffset(IterDomain* root_domain) const {
-  TORCH_INTERNAL_ASSERT(!root_domain->isKirStmt());
   auto it = start_offset_map_.find(root_domain);
   if (it == start_offset_map_.end()) {
     return nullptr;
@@ -48,30 +41,9 @@ Val* PartialSplitMap::getStartOffset(IterDomain* root_domain) const {
   }
 }
 
-Val* PartialSplitMap::kirGetStartOffset(IterDomain* root_domain) const {
-  TORCH_INTERNAL_ASSERT(root_domain->isKirStmt());
-  auto it = kir_start_offset_map_.find(root_domain);
-  if (it == kir_start_offset_map_.end()) {
-    return nullptr;
-  } else {
-    return it->second;
-  }
-}
-
 Val* PartialSplitMap::getStopOffset(IterDomain* root_domain) const {
-  TORCH_INTERNAL_ASSERT(!root_domain->isKirStmt());
   auto it = stop_offset_map_.find(root_domain);
   if (it == stop_offset_map_.end()) {
-    return nullptr;
-  } else {
-    return it->second;
-  }
-}
-
-Val* PartialSplitMap::kirGetStopOffset(IterDomain* root_domain) const {
-  TORCH_INTERNAL_ASSERT(root_domain->isKirStmt());
-  auto it = kir_stop_offset_map_.find(root_domain);
-  if (it == kir_stop_offset_map_.end()) {
     return nullptr;
   } else {
     return it->second;

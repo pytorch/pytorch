@@ -2,7 +2,6 @@
 #include <torch/csrc/jit/codegen/cuda/kernel.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
@@ -25,6 +24,9 @@ Predicate::Predicate(
       expr_(expr),
       thread_pred_(thread_pred) {
   TORCH_INTERNAL_ASSERT(
+      passkey.ir_container_->isA<kir::Kernel>(),
+      "IR type only valid for Kernel container.");
+  TORCH_INTERNAL_ASSERT(
       ptype != PredicateType::Unswitch && ptype != PredicateType::Manual);
 }
 
@@ -32,6 +34,9 @@ Predicate::Predicate(IrBuilderPasskey passkey, ForLoop* unrolled_loop)
     : Val(passkey, ValType::Predicate, DataType::Bool),
       ptype_(PredicateType::Unswitch),
       unrolled_loop_(unrolled_loop) {
+  TORCH_INTERNAL_ASSERT(
+      passkey.ir_container_->isA<kir::Kernel>(),
+      "IR type only valid for Kernel container.");
   TORCH_INTERNAL_ASSERT(unrolled_loop != nullptr);
 }
 
@@ -39,16 +44,22 @@ Predicate::Predicate(IrBuilderPasskey passkey, Bool* value)
     : Val(passkey, ValType::Predicate, DataType::Bool),
       ptype_(PredicateType::Manual),
       value_(value) {
+  TORCH_INTERNAL_ASSERT(
+      passkey.ir_container_->isA<kir::Kernel>(),
+      "IR type only valid for Kernel container.");
   TORCH_INTERNAL_ASSERT(value != nullptr);
 }
 
 TensorIndex::TensorIndex(
     IrBuilderPasskey passkey,
-    const fuser::cuda::TensorView* view,
+    const TensorView* view,
     std::vector<Val*> indices)
     : Val(passkey, ValType::TensorIndex, view->getDataType().value()),
-      view_(GpuLower::current()->lowerValue(view)->as<TensorView>()),
+      view_(view),
       indices_(indices) {
+  TORCH_INTERNAL_ASSERT(
+      passkey.ir_container_->isA<kir::Kernel>(),
+      "IR type only valid for Kernel container.");
   TORCH_INTERNAL_ASSERT(
       std::all_of(
           indices.begin(),
@@ -63,18 +74,30 @@ TensorIndex::TensorIndex(
       indices_.end());
   // If indices becomes empty, just put one ZeroInt
   if (indices_.empty()) {
-    indices_.push_back(kir::IrBuilder(GpuLower::current()->kernel()).zeroVal());
+    indices_.push_back(FusionGuard::getCurFusion()->zeroVal());
   }
 }
 
 Sync::Sync(IrBuilderPasskey passkey, bool war_sync)
-    : Expr(passkey, ExprType::Sync), war_sync_(war_sync) {}
+    : Expr(passkey, ExprType::Sync), war_sync_(war_sync) {
+  TORCH_INTERNAL_ASSERT(
+      passkey.ir_container_->isA<kir::Kernel>(),
+      "IR type only valid for Kernel container.");
+}
 
 InitMagicZero::InitMagicZero(IrBuilderPasskey passkey)
-    : Expr(passkey, ExprType::InitMagicZero) {}
+    : Expr(passkey, ExprType::InitMagicZero) {
+  TORCH_INTERNAL_ASSERT(
+      passkey.ir_container_->isA<kir::Kernel>(),
+      "IR type only valid for Kernel container.");
+}
 
 UpdateMagicZero::UpdateMagicZero(IrBuilderPasskey passkey)
-    : Expr(passkey, ExprType::UpdateMagicZero) {}
+    : Expr(passkey, ExprType::UpdateMagicZero) {
+  TORCH_INTERNAL_ASSERT(
+      passkey.ir_container_->isA<kir::Kernel>(),
+      "IR type only valid for Kernel container.");
+}
 
 void Scope::insert(std::vector<Expr*>::const_iterator pos, Expr* expr) {
   exprs_.insert(pos, expr);
@@ -156,23 +179,20 @@ ForLoop::ForLoop(
       vectorize_shift_(vectorize_shift),
       unroll_required_(unroll_required),
       body_(this) {
+  TORCH_INTERNAL_ASSERT(
+      passkey.ir_container_->isA<kir::Kernel>(),
+      "IR type only valid for Kernel container.");
   TORCH_INTERNAL_ASSERT(index->dtype() == DataType::Int);
   addInput(index);
   addInput(iter_domain);
   if (start_ == nullptr && iter_domain->isThread()) {
-    start_ =
-        IrBuilder(GpuLower::current()->kernel())
-            .create<NamedScalar>(
-                stringifyThread(iter_domain->getParallelType()), DataType::Int);
+    start_ = NamedScalar::getParallelIndex(iter_domain->getParallelType());
   }
   if (step_ == nullptr) {
     if (iter_domain->isThread()) {
-      step_ = IrBuilder(GpuLower::current()->kernel())
-                  .create<NamedScalar>(
-                      stringifyThreadSize(iter_domain->getParallelType()),
-                      DataType::Int);
+      step_ = NamedScalar::getParallelDim(iter_domain->getParallelType());
     } else {
-      step_ = IrBuilder(GpuLower::current()->kernel()).oneVal();
+      step_ = FusionGuard::getCurFusion()->oneVal();
     }
   }
 }
@@ -181,16 +201,18 @@ ForLoop::ForLoop(IrBuilderPasskey passkey, IterDomain* iter_domain)
     : ForLoop(
           passkey,
           iter_domain,
-          iter_domain->isBroadcast()
-              ? IrBuilder(GpuLower::current()->kernel()).zeroVal()
-              : IrBuilder(GpuLower::current()->kernel())
-                    .create<Int>(c10::nullopt),
+          iter_domain->isBroadcast() ? FusionGuard::getCurFusion()->zeroVal()
+                                     : IrBuilder::create<Int>(c10::nullopt),
           nullptr,
           nullptr,
           nullptr,
           isParallelTypeVectorize(iter_domain->getParallelType()),
           nullptr,
-          false) {}
+          false) {
+  TORCH_INTERNAL_ASSERT(
+      passkey.ir_container_->isA<kir::Kernel>(),
+      "IR type only valid for Kernel container.");
+}
 
 ForLoop::ForLoop(IrBuilderPasskey passkey, const ForLoop* other)
     : ForLoop(
@@ -202,7 +224,11 @@ ForLoop::ForLoop(IrBuilderPasskey passkey, const ForLoop* other)
           other->step(),
           other->vectorize(),
           other->vectorize_shift(),
-          other->isUnrollRequired()) {}
+          other->isUnrollRequired()) {
+  TORCH_INTERNAL_ASSERT(
+      passkey.ir_container_->isA<kir::Kernel>(),
+      "IR type only valid for Kernel container.");
+}
 
 bool ForLoop::isUnrollable() const {
   // Start and stop must be constant, must not be a broadcast
@@ -298,7 +324,9 @@ Allocate::Allocate(
       memory_type_(memory_type),
       shape_(std::move(shape)),
       zero_init_(zero_init) {
-  kir::IrBuilder ir_builder(GpuLower::current()->kernel());
+  TORCH_INTERNAL_ASSERT(
+      passkey.ir_container_->isA<kir::Kernel>(),
+      "IR type only valid for Kernel container.");
   if (!shape_.empty()) {
     TORCH_INTERNAL_ASSERT(
         (shape_.size() == 1 && shape_[0]->isOneInt()) ||
@@ -317,12 +345,12 @@ Allocate::Allocate(
     if (size_ == nullptr) {
       size_ = s;
     } else {
-      size_ = ir_builder.mulExpr(size_, s);
+      size_ = IrBuilder::mulExpr(size_, s);
     }
   }
 
   if (size_ == nullptr) {
-    size_ = ir_builder.oneVal();
+    size_ = FusionGuard::getCurFusion()->oneVal();
   }
 
   addInput(size_);
@@ -339,7 +367,11 @@ Allocate::Allocate(
           buffer,
           memory_type,
           size == nullptr ? std::vector<Val*>{} : std::vector<Val*>{size},
-          zero_init) {}
+          zero_init) {
+  TORCH_INTERNAL_ASSERT(
+      passkey.ir_container_->isA<kir::Kernel>(),
+      "IR type only valid for Kernel container.");
+}
 
 GridReduction::GridReduction(
     IrBuilderPasskey passkey,
@@ -349,7 +381,11 @@ GridReduction::GridReduction(
     : Expr(passkey, ExprType::GridReduction),
       reduction_op_(reduction_op),
       reduction_buffer_(reduction_buffer),
-      sync_buffer_(sync_buffer) {}
+      sync_buffer_(sync_buffer) {
+  TORCH_INTERNAL_ASSERT(
+      passkey.ir_container_->isA<kir::Kernel>(),
+      "IR type only valid for Kernel container.");
+}
 
 GridBroadcast::GridBroadcast(
     IrBuilderPasskey passkey,
@@ -359,7 +395,11 @@ GridBroadcast::GridBroadcast(
     : Expr(passkey, ExprType::GridBroadcast),
       broadcast_op_(broadcast_op),
       broadcast_buffer_(broadcast_buffer),
-      sync_buffer_(sync_buffer) {}
+      sync_buffer_(sync_buffer) {
+  TORCH_INTERNAL_ASSERT(
+      passkey.ir_container_->isA<kir::Kernel>(),
+      "IR type only valid for Kernel container.");
+}
 
 GridWelford::GridWelford(
     IrBuilderPasskey passkey,
@@ -373,7 +413,11 @@ GridWelford::GridWelford(
       var_buffer_(var_buffer),
       avg_buffer_(avg_buffer),
       n_buffer_(n_buffer),
-      sync_buffer_(sync_buffer) {}
+      sync_buffer_(sync_buffer) {
+  TORCH_INTERNAL_ASSERT(
+      passkey.ir_container_->isA<kir::Kernel>(),
+      "IR type only valid for Kernel container.");
+}
 
 } // namespace kir
 } // namespace cuda

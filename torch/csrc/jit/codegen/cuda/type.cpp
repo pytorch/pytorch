@@ -87,6 +87,9 @@ ValType promote_type(const ValType& t1, const ValType& t2) {
       (t1 == ValType::Scalar || t1 == ValType::NamedScalar)) {
     return ValType::Scalar;
   }
+  if (t1 == ValType::NamedScalar && t2 == ValType::NamedScalar) {
+    return ValType::Scalar;
+  }
   TORCH_CHECK(false, "Expected promotable ValTypes but got: ", t1, " and ", t2);
 }
 
@@ -107,7 +110,7 @@ static const char* data_type2string(DataType t) {
     case DataType::Int32:
       return "int";
     case DataType::Null:
-      return "nullptr";
+      return "null_type";
     default:
       break;
   }

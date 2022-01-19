@@ -4,8 +4,8 @@
 #include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
+#include <torch/csrc/jit/codegen/cuda/kernel.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
@@ -20,13 +20,6 @@ namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
-
-// TODO: Remove
-// Convience wrapper until we unify the multiple builders
-#define BUILDER_WRAPPER(PASSKEY, TYPE, ARG)              \
-  PASSKEY.ir_container_ == nullptr                       \
-      ? kir::IrBuilder(PASSKEY.kernel).create<TYPE>(ARG) \
-      : IrBuilder::create<TYPE>(PASSKEY.ir_container_, ARG)
 
 namespace {
 
@@ -90,10 +83,7 @@ Bool::Bool(IrBuilderPasskey passkey, c10::optional<bool> value)
     : Val(passkey, ValType::Scalar, DataType::Bool), maybe_value_{value} {}
 
 Bool::Bool(const Bool* src, IrCloner* ir_cloner)
-    : Val(src, ir_cloner), maybe_value_(src->maybe_value_) {
-  TORCH_INTERNAL_ASSERT(
-      !src->isKirStmt() && !isKirStmt(), "Function invalid for kir.");
-}
+    : Val(src, ir_cloner), maybe_value_(src->maybe_value_) {}
 
 bool Bool::sameAs(const Statement* other) const {
   if (this == other) {
@@ -120,10 +110,7 @@ Double::Double(IrBuilderPasskey passkey, c10::optional<ScalarType> value)
     : Val(passkey, ValType::Scalar, DataType::Double), maybe_value_{value} {}
 
 Double::Double(const Double* src, IrCloner* ir_cloner)
-    : Val(src, ir_cloner), maybe_value_(src->maybe_value_) {
-  TORCH_INTERNAL_ASSERT(
-      !src->isKirStmt() && !isKirStmt(), "Function invalid for kir.");
-}
+    : Val(src, ir_cloner), maybe_value_(src->maybe_value_) {}
 
 bool Double::sameAs(const Statement* other) const {
   if (this == other) {
@@ -149,10 +136,7 @@ Int::Int(IrBuilderPasskey passkey, c10::optional<ScalarType> value)
     : Val(passkey, ValType::Scalar, DataType::Int), maybe_value_{value} {}
 
 Int::Int(const Int* src, IrCloner* ir_cloner)
-    : Val(src, ir_cloner), maybe_value_(src->maybe_value_) {
-  TORCH_INTERNAL_ASSERT(
-      !src->isKirStmt() && !isKirStmt(), "Function invalid for kir.");
-}
+    : Val(src, ir_cloner), maybe_value_(src->maybe_value_) {}
 
 bool Int::sameAs(const Statement* other) const {
   if (this == other) {
@@ -181,10 +165,7 @@ UnaryOp::UnaryOp(const UnaryOp* src, IrCloner* ir_cloner)
     : Expr(src, ir_cloner),
       unary_op_type_(src->unary_op_type_),
       out_(ir_cloner->clone(src->out_)),
-      in_(ir_cloner->clone(src->in_)) {
-  TORCH_INTERNAL_ASSERT(
-      !src->isKirStmt() && !isKirStmt(), "Function invalid for kir.");
-}
+      in_(ir_cloner->clone(src->in_)) {}
 
 bool UnaryOp::sameAs(const Statement* other) const {
   if (this == other) {
@@ -220,10 +201,7 @@ BinaryOp::BinaryOp(const BinaryOp* src, IrCloner* ir_cloner)
       binary_op_type_(src->binary_op_type_),
       out_(ir_cloner->clone(src->out_)),
       lhs_(ir_cloner->clone(src->lhs_)),
-      rhs_(ir_cloner->clone(src->rhs_)) {
-  TORCH_INTERNAL_ASSERT(
-      !src->isKirStmt() && !isKirStmt(), "Function invalid for kir.");
-}
+      rhs_(ir_cloner->clone(src->rhs_)) {}
 
 bool BinaryOp::sameAs(const Statement* other) const {
   if (this == other) {
@@ -263,10 +241,7 @@ TernaryOp::TernaryOp(const TernaryOp* src, IrCloner* ir_cloner)
       out_(ir_cloner->clone(src->out_)),
       in1_(ir_cloner->clone(src->in1_)),
       in2_(ir_cloner->clone(src->in2_)),
-      in3_(ir_cloner->clone(src->in3_)) {
-  TORCH_INTERNAL_ASSERT(
-      !src->isKirStmt() && !isKirStmt(), "Function invalid for kir.");
-}
+      in3_(ir_cloner->clone(src->in3_)) {}
 
 bool TernaryOp::sameAs(const Statement* other) const {
   if (this == other) {
@@ -305,9 +280,7 @@ BroadcastOp::BroadcastOp(
   addOutput(out);
   addInput(in);
 
-  // TODO: Switch to early return on TensorIndex once KIR also supports
-  // PairwiseRootDomainMap
-  if (passkey.kernel != nullptr) {
+  if (!out->isA<TensorView>() || !in->isA<TensorView>()) {
     return;
   }
 
@@ -357,10 +330,7 @@ BroadcastOp::BroadcastOp(const BroadcastOp* src, IrCloner* ir_cloner)
     : Expr(src, ir_cloner),
       out_(ir_cloner->clone(src->out_)),
       in_(ir_cloner->clone(src->in_)),
-      is_broadcast_dims_(src->is_broadcast_dims_) {
-  TORCH_INTERNAL_ASSERT(
-      !src->isKirStmt() && !isKirStmt(), "Function invalid for kir.");
-}
+      is_broadcast_dims_(src->is_broadcast_dims_) {}
 
 bool BroadcastOp::sameAs(const Statement* other) const {
   if (this == other) {
@@ -502,10 +472,7 @@ WelfordOp::WelfordOp(const WelfordOp* src, IrCloner* ir_cloner)
       init_N_(ir_cloner->clone(src->init_N_)),
       in_avg_(ir_cloner->clone(src->in_avg_)),
       in_var_(src->in_var_ ? ir_cloner->clone(src->in_var_) : nullptr),
-      in_N_(ir_cloner->clone(src->in_N_)) {
-  TORCH_INTERNAL_ASSERT(
-      !src->isKirStmt() && !isKirStmt(), "Function invalid for kir.");
-}
+      in_N_(ir_cloner->clone(src->in_N_)) {}
 
 namespace {
 inline bool sameOptionalVal(Val* a, Val* b) {
@@ -533,10 +500,7 @@ ReductionOp::ReductionOp(const ReductionOp* src, IrCloner* ir_cloner)
       reduction_op_type_(src->reduction_op_type_),
       init_(ir_cloner->clone(src->init_)),
       out_(ir_cloner->clone(src->out_)),
-      in_(ir_cloner->clone(src->in_)) {
-  TORCH_INTERNAL_ASSERT(
-      !src->isKirStmt() && !isKirStmt(), "Function invalid for kir.");
-}
+      in_(ir_cloner->clone(src->in_)) {}
 
 bool ReductionOp::sameAs(const Statement* other) const {
   if (this == other) {
@@ -598,10 +562,7 @@ TransposeOp::TransposeOp(const TransposeOp* src, IrCloner* ir_cloner)
     : Expr(src, ir_cloner),
       out_(ir_cloner->clone(src->out_)),
       in_(ir_cloner->clone(src->in_)),
-      new2old_(src->new2old_) {
-  TORCH_INTERNAL_ASSERT(
-      !src->isKirStmt() && !isKirStmt(), "Function invalid for kir.");
-}
+      new2old_(src->new2old_) {}
 
 ShiftOp::ShiftOp(
     IrBuilderPasskey passkey,
@@ -648,10 +609,7 @@ ShiftOp::ShiftOp(const ShiftOp* src, IrCloner* ir_cloner)
       out_(ir_cloner->clone(src->out_)),
       in_(ir_cloner->clone(src->in_)),
       offsets_(src->offsets_),
-      pad_width_(src->pad_width_) {
-  TORCH_INTERNAL_ASSERT(
-      !src->isKirStmt() && !isKirStmt(), "Function invalid for kir.");
-}
+      pad_width_(src->pad_width_) {}
 
 bool ShiftOp::sameAs(const Statement* other) const {
   if (this == other) {
@@ -713,10 +671,7 @@ GatherOp::GatherOp(const GatherOp* src, IrCloner* ir_cloner)
       out_(ir_cloner->clone(src->out_)),
       in_(ir_cloner->clone(src->in_)),
       window_shape_(src->window_shape_),
-      pad_width_(src->pad_width_) {
-  TORCH_INTERNAL_ASSERT(
-      !src->isKirStmt() && !isKirStmt(), "Function invalid for kir.");
-}
+      pad_width_(src->pad_width_) {}
 
 bool GatherOp::sameAs(const Statement* other) const {
   if (this == other) {
@@ -746,16 +701,12 @@ ViewOp::ViewOp(IrBuilderPasskey passkey, TensorView* out, TensorView* in)
     : Expr(passkey, ExprType::ViewOp), out_(out), in_(in) {
   addOutput(out);
   addInput(in);
-  TORCH_INTERNAL_ASSERT(!isKirStmt(), "Function invalid for kir.");
 }
 
 ViewOp::ViewOp(const ViewOp* src, IrCloner* ir_cloner)
     : Expr(src, ir_cloner),
       out_(ir_cloner->clone(src->out_)),
-      in_(ir_cloner->clone(src->in_)) {
-  TORCH_INTERNAL_ASSERT(
-      !src->isKirStmt() && !isKirStmt(), "Function invalid for kir.");
-}
+      in_(ir_cloner->clone(src->in_)) {}
 
 IterDomain::IterDomain(
     IrBuilderPasskey passkey,
@@ -785,7 +736,7 @@ IterDomain::IterDomain(
       start_(start),
       extent_(extent),
       stop_offset_(
-          stop_offset == nullptr ? BUILDER_WRAPPER(passkey, Int, 0)
+          stop_offset == nullptr ? passkey.ir_container_->zeroVal()
                                  : stop_offset),
       parallel_type_(parallel_type),
       iter_type_(iter_type),
@@ -816,28 +767,7 @@ IterDomain::IterDomain(const IterDomain* src, IrCloner* ir_cloner)
       iter_type_(src->iter_type_),
       is_rfactor_domain_(src->is_rfactor_domain_),
       is_padded_dimension_(src->is_padded_dimension_),
-      padded_to_size_(src->padded_to_size_) {
-  TORCH_INTERNAL_ASSERT(
-      !src->isKirStmt() && !isKirStmt(), "Function invalid for kir.");
-}
-
-// TODO: Remove, only used for lowering at the moment
-IterDomain::IterDomain(
-    IrBuilderPasskey passkey,
-    const fuser::cuda::IterDomain* iter_domain)
-    : Val(passkey, ValType::IterDomain, iter_domain->getDataType().value()),
-      start_(GpuLower::current()->lowerValue(iter_domain->start())),
-      extent_(GpuLower::current()->lowerValue(iter_domain->extent())),
-      stop_offset_(GpuLower::current()->lowerValue(iter_domain->stopOffset())),
-      parallel_type_(iter_domain->getParallelType()),
-      iter_type_(iter_domain->getIterType()),
-      is_rfactor_domain_(iter_domain->isRFactorProduct()),
-      is_padded_dimension_(iter_domain->hasPaddingToMultipleOfWarp()),
-      padded_to_size_(iter_domain->padded_to_size_),
-      is_simple_(iter_domain->definition() == nullptr) {
-  // preserve the fusion node's name
-  setName(passkey, iter_domain->name());
-}
+      padded_to_size_(src->padded_to_size_) {}
 
 bool IterDomain::sameAs(const Statement* other) const {
   if (other == this) {
@@ -930,7 +860,7 @@ IterDomain* IterDomain::merge(IterDomain* outer, IterDomain* inner) {
 
   IterDomain* merged_id = IrBuilder::create<IterDomain>(
       outer->container(),
-      IrBuilder::create<Int>(outer->container(), 0),
+      outer->container()->zeroVal(),
       merged_id_size->as<Int>(),
       outer->getParallelType(),
       itype,
@@ -959,7 +889,8 @@ std::pair<IterDomain*, IterDomain*> IterDomain::split(
   if (factor->getValType() == ValType::Scalar) {
     TORCH_CHECK(
         factor->isConstScalar() ||
-            FusionGuard::getCurFusion()->hasInput(factor),
+            (FusionGuard::getCurFusion() == factor->fusion() &&
+             factor->isFusionInput()),
         factor,
         " is not a constant nor an input. It must be one or the other to be used in a split.",
         " If you want a symbolic split based on a thread dimension please use IterDomain::split(IterDomain*, ParallelType);");
@@ -983,7 +914,7 @@ std::pair<IterDomain*, IterDomain*> IterDomain::split(
   // outer loop IterDomain
   IterDomain* ido = IrBuilder::create<IterDomain>(
       in->container(),
-      IrBuilder::create<Int>(in->container(), 0),
+      in->container()->zeroVal(),
       inner_split ? remainder->as<Int>() : factor,
       in->getParallelType(),
       in->getIterType(),
@@ -992,7 +923,7 @@ std::pair<IterDomain*, IterDomain*> IterDomain::split(
   // inner loop IterDomain
   IterDomain* idi = IrBuilder::create<IterDomain>(
       in->container(),
-      IrBuilder::create<Int>(in->container(), 0),
+      in->container()->zeroVal(),
       inner_split ? factor : remainder->as<Int>(),
       in->getParallelType(),
       in->getIterType(),
@@ -1183,10 +1114,7 @@ TensorDomain::TensorDomain(const TensorDomain* src, IrCloner* ir_cloner)
       no_reduction_domain_(ir_cloner->clone(src->no_reduction_domain_)),
       rfactor_domain_(ir_cloner->clone(src->rfactor_domain_)),
       contiguity_(src->contiguity()),
-      has_nontrivial_reduction_(src->has_nontrivial_reduction_) {
-  TORCH_INTERNAL_ASSERT(
-      !src->isKirStmt() && !isKirStmt(), "Function invalid for kir.");
-}
+      has_nontrivial_reduction_(src->has_nontrivial_reduction_) {}
 
 namespace {
 std::vector<IterDomain*> lowerIterDomains(
@@ -1194,28 +1122,11 @@ std::vector<IterDomain*> lowerIterDomains(
   std::vector<IterDomain*> lowered_domains;
   lowered_domains.reserve(domains.size());
   for (const auto iter_domain : domains) {
-    lowered_domains.push_back(
-        GpuLower::current()->lowerValue(iter_domain)->as<IterDomain>());
+    lowered_domains.push_back(iter_domain);
   }
   return lowered_domains;
 };
 } // namespace
-
-// TODO: Remove, only used for lowering
-TensorDomain::TensorDomain(
-    IrBuilderPasskey passkey,
-    const fuser::cuda::TensorDomain* tensor_domain)
-    : Val(passkey, ValType::TensorDomain, DataType::Null),
-      root_domain_(lowerIterDomains(tensor_domain->getRootDomain())),
-      domain_(lowerIterDomains(tensor_domain->domain())),
-      no_bcast_domain_(lowerIterDomains(tensor_domain->noBroadcasts())),
-      no_reduction_domain_(lowerIterDomains(tensor_domain->noReductions())),
-      rfactor_domain_(lowerIterDomains(tensor_domain->getRFactorDomain())),
-      contiguity_(tensor_domain->contiguity()),
-      has_nontrivial_reduction_(tensor_domain->has_nontrivial_reduction_) {
-  // preserve the fusion node's name
-  setName(passkey, tensor_domain->name());
-}
 
 bool TensorDomain::hasBlockBroadcast() const {
   return std::any_of(domain_.begin(), domain_.end(), [](IterDomain* id) {
@@ -1448,7 +1359,6 @@ void TensorDomain::merge(int axis_o, int axis_i) {
 
 // Reorder axes according to map[old_pos] = new_pos
 void TensorDomain::reorder(const std::unordered_map<int, int>& old2new_) {
-  TORCH_INTERNAL_ASSERT(!isKirStmt(), "Function invalid for kir.");
   TORCH_INTERNAL_ASSERT(
       !(nDims() == 0 && old2new_.size() > 0),
       "Tried to reorder a 0-dim domain");
@@ -1609,14 +1519,13 @@ Split::Split(
       inner_split_{inner_split},
       start_offset_{
           start_offset != nullptr ? start_offset
-                                  : BUILDER_WRAPPER(passkey, Int, 0)},
+                                  : passkey.ir_container_->zeroVal()},
       stop_offset_{
           stop_offset != nullptr ? stop_offset
-                                 : BUILDER_WRAPPER(passkey, Int, 0)} {
+                                 : passkey.ir_container_->zeroVal()} {
   TORCH_INTERNAL_ASSERT(
       factor_->isAnInt(),
       "Attempted to create a Split node with a non-integer factor.");
-  TORCH_INTERNAL_ASSERT(!isKirStmt(), "Invalid node for kir.");
   addOutput(outer);
   addOutput(inner);
   addInput(in);
@@ -1632,9 +1541,7 @@ Split::Split(const Split* src, IrCloner* ir_cloner)
       factor_(ir_cloner->clone(src->factor_)),
       inner_split_(src->inner_split_),
       start_offset_(ir_cloner->clone(src->start_offset_)),
-      stop_offset_(ir_cloner->clone(src->stop_offset_)) {
-  TORCH_INTERNAL_ASSERT(!isKirStmt(), "Invalid node for kir.");
-}
+      stop_offset_(ir_cloner->clone(src->stop_offset_)) {}
 
 Val* Split::extent(Val* in_extent, Val* start_offset, Val* stop_offset) {
   TORCH_INTERNAL_ASSERT(in_extent != nullptr);
@@ -1670,7 +1577,6 @@ Merge::Merge(
     IterDomain* outer,
     IterDomain* inner)
     : Expr(passkey, ExprType::Merge), out_{out}, outer_{outer}, inner_{inner} {
-  TORCH_INTERNAL_ASSERT(!isKirStmt(), "Invalid node for kir.");
   addOutput(out);
   addInput(outer);
   addInput(inner);
@@ -1680,9 +1586,7 @@ Merge::Merge(const Merge* src, IrCloner* ir_cloner)
     : Expr(src, ir_cloner),
       out_(ir_cloner->clone(src->out_)),
       outer_(ir_cloner->clone(src->outer_)),
-      inner_(ir_cloner->clone(src->inner_)) {
-  TORCH_INTERNAL_ASSERT(!isKirStmt(), "Invalid node for kir.");
-}
+      inner_(ir_cloner->clone(src->inner_)) {}
 
 bool Merge::sameAs(const Statement* other) const {
   if (this == other) {
@@ -1701,10 +1605,7 @@ NamedScalar::NamedScalar(
     : Val(passkey, ValType::NamedScalar, dtype), name_(std::move(name)) {}
 
 NamedScalar::NamedScalar(const NamedScalar* src, IrCloner* ir_cloner)
-    : Val(src, ir_cloner), name_(src->name_) {
-  TORCH_INTERNAL_ASSERT(
-      !src->isKirStmt() && !isKirStmt(), "Function invalid for kir.");
-}
+    : Val(src, ir_cloner), name_(src->name_) {}
 
 bool NamedScalar::sameAs(const Statement* other) const {
   if (this == other) {

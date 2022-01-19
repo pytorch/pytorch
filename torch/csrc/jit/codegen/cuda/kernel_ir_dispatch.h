@@ -26,7 +26,8 @@ class Scope;
 // When traversing through ITE/FLs it will use a copy
 // of the provided expressions to make it safe to insert/delete nodes.
 //
-// Provides a simple base class to inherit from for typical kir passes
+// Provides a simple base class to inherit from for typical lowering passes on
+// Expr list
 class TORCH_CUDA_CU_API IrVisitor : public OptOutDispatch {
  public:
   std::vector<Expr*> handle(const std::vector<Expr*>& expr);

@@ -29,24 +29,18 @@ namespace cuda {
 // container for this information that we can reuse. Would be nice to generate
 // such a structure and propagate it through lowering.
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-class TORCH_CUDA_CU_API GpuLower {
+class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
   class KernelIrMapper;
 
  public:
-  GpuLower() = default;
+  GpuLower() = delete;
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  explicit GpuLower(Fusion* fusion) : fusion_(fusion) {
-    lower();
+  explicit GpuLower(Fusion* fusion) {
+    lower(fusion);
   }
 
   kir::Kernel* kernel() const;
-
-  //! Converts a Fusion IR value into the Kernel IR equivalent
-  Val* lowerValue(const Val* val);
-
-  //! Converts a Fusion IR expression into the Kernel IR equivalent
-  Expr* lowerExpr(const Expr* expr);
 
   //! Returns the currently active lowering object
   //! (or nullptr if no lowering is in progress)
@@ -68,7 +62,7 @@ class TORCH_CUDA_CU_API GpuLower {
     return ca_parallel_map_;
   }
 
-  const auto& trivialReductionInfo() const {
+  const TrivialReductionInfo& trivialReductionInfo() const {
     return trivial_reduction_info_;
   }
 
@@ -121,15 +115,7 @@ class TORCH_CUDA_CU_API GpuLower {
   }
 
  private:
-  void lower();
-
-  // TensorViews are all based on symbolic sizes. When we first initialize them
-  // we don't know if they're inputs or outputs which would mean that they have
-  // runtime shapes. Intermediate tensors (those not going to global memory) do
-  // not have this information. Since we need to have the correct information in
-  // the kernel being fetched for shapes, we want to replace input and output
-  // tensors to reference the runtime structure containing sizes.
-  void replaceSymbolicSizes();
+  void lower(Fusion* fusion);
 
   // Goes through the parallelized iterdomains of the used TVs and find
   //  the parallel dimensions that need to be padded to a multiples of
@@ -139,10 +125,6 @@ class TORCH_CUDA_CU_API GpuLower {
  private:
   // Lowered Kernel IR
   std::unique_ptr<kir::Kernel> kernel_;
-
-  // Fusion IR node to Kernel IR node mapping
-  std::unordered_map<const Val*, Val*> kir_val_map_;
-  std::unordered_map<const Expr*, Expr*> kir_expr_map_;
 
   // Some stateful information during lowering
   ThreadPredicateMap thread_pred_map_;

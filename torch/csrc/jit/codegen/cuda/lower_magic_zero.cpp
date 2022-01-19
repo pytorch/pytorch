@@ -2,7 +2,6 @@
 
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 
@@ -26,11 +25,10 @@ class MagicZeroInserter : public kir::ExprMutator {
     kir::ForLoop* fl = nullptr;
   };
 
-  MagicZeroInserter(const std::vector<Expr*>& exprs)
-      : ir_builder(GpuLower::current()->kernel()) {
+  MagicZeroInserter(const std::vector<Expr*>& exprs) {
     TORCH_INTERNAL_ASSERT(exprs.size());
     kir::ExprMutator::registerInsertBefore(
-        exprs.front(), ir_builder.create<kir::InitMagicZero>(), nullptr);
+        exprs.front(), IrBuilder::create<kir::InitMagicZero>(), nullptr);
     kir::ExprMutator::traverseAndInsert(exprs);
   }
 
@@ -38,19 +36,17 @@ class MagicZeroInserter : public kir::ExprMutator {
     if (fl->isUnrolled()) {
       if (scope_.empty()) {
         kir::ExprMutator::registerInsertAfter(
-            fl, ir_builder.create<kir::UpdateMagicZero>());
+            fl, IrBuilder::create<kir::UpdateMagicZero>());
       } else {
         TORCH_INTERNAL_ASSERT(
             scope_.back()->exprs().size(), "Not expecting an empty loop.");
         kir::ExprMutator::registerInsertAfter(
-            fl, ir_builder.create<kir::UpdateMagicZero>(), scope_.back());
+            fl, IrBuilder::create<kir::UpdateMagicZero>(), scope_.back());
       }
     } else {
       kir::ExprMutator::handle(fl);
     }
   }
-
-  kir::IrBuilder ir_builder;
 
   std::vector<InsertionInfo> insertion_list_;
 };
@@ -63,11 +59,9 @@ std::vector<Expr*> insertMagicZero(const std::vector<Expr*>& exprs) {
   // update it.
   const auto gpu_lower = GpuLower::current();
   auto kernel = gpu_lower->kernel();
-  const bool has_magic_zero = std::any_of(
-      kernel->irStmts().begin(),
-      kernel->irStmts().end(),
-      [](const std::unique_ptr<Statement>& ir_node) {
-        return ir_node->isA<Val>() && isMagicZero(ir_node->as<Val>());
+  const bool has_magic_zero =
+      std::any_of(kernel->vals().begin(), kernel->vals().end(), [](Val* val) {
+        return isMagicZero(val);
       });
 
   if (!has_magic_zero) {
@@ -77,19 +71,21 @@ std::vector<Expr*> insertMagicZero(const std::vector<Expr*>& exprs) {
   return MagicZeroInserter::insert(exprs);
 }
 
-bool isMagicZero(Val* val) {
-  auto ns = dynamic_cast<NamedScalar*>(val);
-  if (ns == nullptr) {
+bool isMagicZero(const Val* val) {
+  if (!val->isA<NamedScalar>()) {
     return false;
   }
+  auto ns = val->as<NamedScalar>();
   return ns->dtype() == DataType::Int &&
       ns->name() == std::string(kMagicZeroName);
 }
 
-bool isProtectedWithMagicZero(Val* val) {
-  auto def = dynamic_cast<BinaryOp*>(val->definition());
-  return def && def->getBinaryOpType() == BinaryOpType::Add &&
-      isMagicZero(def->rhs());
+bool isProtectedWithMagicZero(const Val* val) {
+  if (val->definition() == nullptr || !val->definition()->isA<BinaryOp>()) {
+    return false;
+  }
+  auto bop = val->definition()->as<BinaryOp>();
+  return bop->getBinaryOpType() == BinaryOpType::Add && isMagicZero(bop->rhs());
 }
 
 } // namespace cuda

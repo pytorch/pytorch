@@ -6,7 +6,6 @@
 #include <torch/csrc/jit/codegen/cuda/index_compute.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
 
@@ -35,8 +34,7 @@ bool isOutputLocal(const Expr* expr) {
 } // namespace
 
 bool ParallelizedDomainPredicate::PredicateInfo::addDomain(IterDomain* id) {
-  const auto gpu_lower = GpuLower::current();
-  auto concrete_id = gpu_lower->caIndexMap().kirGetConcreteMappedID(id);
+  auto concrete_id = GpuLower::current()->caIndexMap().getConcreteMappedID(id);
   if (std::find(ids_.begin(), ids_.end(), concrete_id) == ids_.end()) {
     ids_.push_back(concrete_id);
     return true;
@@ -46,20 +44,18 @@ bool ParallelizedDomainPredicate::PredicateInfo::addDomain(IterDomain* id) {
 }
 
 Bool* ParallelizedDomainPredicate::PredicateInfo::getPredicate() const {
-  const auto gpu_lower = GpuLower::current();
-  kir::SimplifyingIrBuilder ir_builder(gpu_lower->kernel());
-
   Bool* pred = nullptr;
 
-  auto index =
-      ir_builder.create<NamedScalar>(stringifyThread(pt_), DataType::Int);
+  auto index = SimplifyingIrBuilder::create<NamedScalar>(
+      stringifyThread(pt_), DataType::Int);
 
   for (const auto& pred_id : ids()) {
     // Just sanity check that pred_id is concrete
     TORCH_INTERNAL_ASSERT(
-        pred_id == gpu_lower->caIndexMap().kirGetConcreteMappedID(pred_id));
-    auto new_pred = ir_builder.ltExpr(index, pred_id->extent());
-    pred = ir_builder.andExpr(pred, new_pred)->as<Bool>();
+        pred_id ==
+        GpuLower::current()->caIndexMap().getConcreteMappedID(pred_id));
+    auto new_pred = SimplifyingIrBuilder::ltExpr(index, pred_id->extent());
+    pred = SimplifyingIrBuilder::andExpr(pred, new_pred)->as<Bool>();
   }
 
   return pred;
@@ -70,16 +66,12 @@ namespace {
 std::unordered_set<Val*> getNonUnswitchedRootDomains(
     const std::vector<kir::ForLoop*>& loops,
     size_t unswitched_loop_index) {
-  const auto gpu_lower = GpuLower::current();
-
   std::vector<Val*> non_unswited_leaf_domains;
   std::transform(
       loops.begin(),
       loops.begin() + unswitched_loop_index,
       std::back_inserter(non_unswited_leaf_domains),
-      [&](kir::ForLoop* loop) {
-        return gpu_lower->caIndexMap().toFusion(loop->iter_domain());
-      });
+      [&](kir::ForLoop* loop) { return loop->iter_domain(); });
 
   auto non_unswitched_inputs =
       IterVisitor::getInputsTo(non_unswited_leaf_domains);
@@ -96,7 +88,7 @@ std::unordered_set<Val*> getNonUnswitchedRootDomains(
           non_unswitched_concrete_root_domains,
           non_unswitched_concrete_root_domains.end()),
       [&](auto root_dom) {
-        return gpu_lower->caIndexMap().getConcreteMappedID(root_dom);
+        return GpuLower::current()->caIndexMap().getConcreteMappedID(root_dom);
       });
 
   return non_unswitched_concrete_root_domains;
@@ -105,17 +97,14 @@ std::unordered_set<Val*> getNonUnswitchedRootDomains(
 bool isFullyUnswitched(
     IterDomain* loop_id,
     const std::unordered_set<Val*>& non_unswitched_root_domains) {
-  const auto gpu_lower = GpuLower::current();
-
-  auto root_vals =
-      IterVisitor::getInputsTo({gpu_lower->caIndexMap().toFusion(loop_id)});
+  auto root_vals = IterVisitor::getInputsTo({loop_id});
 
   auto root_domains = ir_utils::filterByType<IterDomain>(root_vals);
 
   return std::none_of(
       root_domains.begin(), root_domains.end(), [&](auto root_dom) {
         auto concrete_root_dom =
-            gpu_lower->caIndexMap().getConcreteMappedID(root_dom);
+            GpuLower::current()->caIndexMap().getConcreteMappedID(root_dom);
         return non_unswitched_root_domains.count(concrete_root_dom) > 0;
       });
 }
@@ -131,8 +120,6 @@ ParallelizedDomainPredicate::getPredicateMap(
     const std::vector<kir::ForLoop*>& loops,
     kir::ForLoop* unswitched_loop) {
   const auto gpu_lower = GpuLower::current();
-  kir::IrBuilder ir_builder(gpu_lower->kernel());
-
   auto output_tvs = ir_utils::getTvs(expr->outputs());
 
   if (output_tvs.empty()) {
@@ -183,7 +170,7 @@ ParallelizedDomainPredicate::getPredicateMap(
           tv->domain()->domain().begin(),
           tv->domain()->domain().end(),
           [&](auto tv_id) {
-            return gpu_lower->caIndexMap().kirAreMapped(loop_id, tv_id);
+            return gpu_lower->caIndexMap().areMapped(loop_id, tv_id);
           });
       if (it == tv->domain()->domain().end()) {
         continue;
@@ -217,18 +204,16 @@ ParallelizedDomainPredicate::getPredicateMap(
 Bool* ParallelizedDomainPredicate::getPredicate(
     const Expr* expr,
     const std::vector<kir::ForLoop*>& loops) {
-  kir::SimplifyingIrBuilder ir_builder(GpuLower::current()->kernel());
-
   auto pred_map = getPredicateMap(expr, loops);
 
-  Val* pred = ir_builder.trueVal();
+  Val* pred = GpuLower::current()->kernel()->trueVal();
 
   for (auto pt : kParallelTypeThreads) {
     auto pred_info_it = pred_map.find(pt);
     if (pred_info_it != pred_map.end()) {
       const auto& pred_info = pred_info_it->second;
       auto tid_pred = pred_info.getPredicate();
-      pred = ir_builder.andExpr(pred, tid_pred);
+      pred = SimplifyingIrBuilder::andExpr(pred, tid_pred);
     }
   }
 
@@ -256,8 +241,6 @@ UnswitchPredicateKey::UnswitchPredicateKey(
     TensorView* consumer_tv,
     IterDomain* predicated_concrete_id)
     : predicated_concrete_id_(predicated_concrete_id) {
-  const auto gpu_lower = GpuLower::current();
-
   // Initialize the parallelized domain map
   for (auto pt : kParallelTypeThreads) {
     parallel_concrete_ids_.insert({pt, nullptr});
@@ -302,7 +285,7 @@ UnswitchPredicateKey::UnswitchPredicateKey(
   for (auto consumer_leaf : parallelized_consumer_leaf_ids) {
     auto pt = consumer_leaf->getParallelType();
     auto concrete_leaf =
-        gpu_lower->caIndexMap().getConcreteMappedID(consumer_leaf);
+        GpuLower::current()->caIndexMap().getConcreteMappedID(consumer_leaf);
     parallel_concrete_ids_.at(pt) = concrete_leaf;
   }
 }
@@ -344,11 +327,10 @@ Bool* PredicateCompute::getInlinePredicate(
   FUSER_PERF_SCOPE("GpuLower::Lower::getInlinePredicate");
 
   const auto gpu_lower = GpuLower::current();
-  kir::SimplifyingIrBuilder ir_builder(gpu_lower->kernel());
 
   // If outputs are registers, no need to predicate for threads
   if (isOutputLocal(expr)) {
-    thread_pred = ir_builder.trueVal();
+    thread_pred = gpu_lower->kernel()->trueVal();
   }
 
   if (loops.empty()) {
@@ -359,7 +341,7 @@ Bool* PredicateCompute::getInlinePredicate(
   auto out_tv = ir_utils::getTvOutput(expr);
   TORCH_INTERNAL_ASSERT(out_tv != nullptr, "Missing TensorView output");
 
-  if (gpu_lower->predicateElimination().canKirOmitPredicate(expr)) {
+  if (gpu_lower->predicateElimination().canOmitPredicate(expr)) {
     return thread_pred;
   }
 
@@ -404,7 +386,7 @@ Bool* PredicateCompute::getInlinePredicate(
   // gridReduce, if all reduction axes start with zero, we can just
   // use the same predicate for reads. nullptr is returned then.
   if (pred_type == PredicateType::ReductionWrite && !non_zero_start_found &&
-      !out_tv->fuserTv()->domain()->hasGridReduction()) {
+      !out_tv->domain()->hasGridReduction()) {
     return nullptr;
   }
 
@@ -419,12 +401,12 @@ Bool* PredicateCompute::getInlinePredicate(
   }
 
   if (preds.empty()) {
-    return ir_builder.trueVal();
+    return GpuLower::current()->kernel()->trueVal();
   }
 
   Val* cond = preds[0];
   for (const auto i : c10::irange(1, preds.size())) {
-    cond = ir_builder.andExpr(cond, preds[i]);
+    cond = SimplifyingIrBuilder::andExpr(cond, preds[i]);
   }
 
   return cond->as<Bool>();
@@ -435,13 +417,11 @@ Bool* UnswitchPredicate::get(
     kir::ForLoop* unrolled_loop) {
   FUSER_PERF_SCOPE("GpuLower::Lower::UnswitchPredicate::get");
 
-  kir::SimplifyingIrBuilder ir_builder(GpuLower::current()->kernel());
-
   UnswitchPredicate up(outer_loops, unrolled_loop);
 
-  Val* unswitch_pred = ir_builder.trueVal();
+  Val* unswitch_pred = GpuLower::current()->kernel()->trueVal();
   for (auto pred : up.predicates_) {
-    unswitch_pred = ir_builder.andExpr(unswitch_pred, pred);
+    unswitch_pred = SimplifyingIrBuilder::andExpr(unswitch_pred, pred);
   }
 
   return unswitch_pred->as<Bool>();
@@ -455,9 +435,7 @@ void UnswitchPredicate::predicateOn(Expr* tv_expr) {
   }
 
   const auto gpu_lower = GpuLower::current();
-  kir::IrBuilder ir_builder(gpu_lower->kernel());
-
-  if (gpu_lower->predicateElimination().canKirOmitPredicate(tv_expr)) {
+  if (gpu_lower->predicateElimination().canOmitPredicate(tv_expr)) {
     return;
   }
 
@@ -491,13 +469,12 @@ void UnswitchPredicate::predicateOn(Expr* tv_expr) {
     for (auto root_id : root_ids) {
       auto concrete_root_id =
           gpu_lower->caIndexMap().getConcreteMappedID(root_id);
-      auto kir_root_id = gpu_lower->lowerValue(root_id)->as<IterDomain>();
 
-      if (kir_root_id->isBroadcast()) {
+      if (root_id->isBroadcast()) {
         continue;
       }
 
-      UnswitchPredicateKey key(root_id, out_tv->fuserTv(), concrete_root_id);
+      UnswitchPredicateKey key(root_id, out_tv, concrete_root_id);
       auto inserted = predicated_keys_.insert(key).second;
       add_pred = add_pred || inserted;
 
@@ -627,7 +604,6 @@ void UnswitchPredicate::openIte(kir::IfThenElse* ite) {
 }
 
 void UnswitchPredicate::finalize() {
-  kir::SimplifyingIrBuilder ir_builder(GpuLower::current()->kernel());
   for (const auto& merged_pred : pending_predicates_) {
     const auto& start_info = merged_pred.start;
     if (start_info.static_pred) {

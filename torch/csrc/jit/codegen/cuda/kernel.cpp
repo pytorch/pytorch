@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/kernel.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir_dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 
 #include <iostream>
@@ -12,7 +13,8 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-IrBuilderPasskey::IrBuilderPasskey(kir::Kernel* kernel) : kernel(kernel) {}
+IrBuilderPasskey::IrBuilderPasskey(IrContainer* ir_container)
+    : ir_container_(ir_container) {}
 
 namespace kir {
 
@@ -20,16 +22,14 @@ namespace {
 
 //! Scan all primary expressions in the Kernel IR and build
 //! lists of specialized nodes and other interesting information
-class KernelIrScanner : private OptOutConstDispatch {
+class KernelIrScanner : private IrVisitor {
  public:
   explicit KernelIrScanner(const Kernel* kernel) {
-    for (const auto& stmts : kernel->irStmts()) {
-      OptOutConstDispatch::handle(stmts.get());
-    }
+    IrVisitor::handle(kernel->topLevelExprs());
     const auto gpu_lower = GpuLower::current();
     for (auto split : gpu_lower->nonDivisibleSplitInfo().splitsToValidate()) {
-      auto extent = gpu_lower->lowerValue(split->in()->extent());
-      auto factor = gpu_lower->lowerValue(split->factor());
+      auto extent = split->in()->extent();
+      auto factor = split->factor();
       summary_.splits_to_validate.emplace_back(extent, factor);
     }
   }
@@ -39,7 +39,17 @@ class KernelIrScanner : private OptOutConstDispatch {
   }
 
  private:
-  void handle(const kir::Sync* sync) final {
+  using IrVisitor::handle;
+  void handle(Expr* expr) final {
+    IrVisitor::handle(expr);
+    for (auto inp : expr->inputs()) {
+      handle(inp);
+    }
+    for (auto out : expr->outputs()) {
+      handle(out);
+    }
+  }
+  void handle(Sync* sync) final {
     // TODO: Move to a dedicated validation pass
     // which is not on the common execution/compilation path
     if (sync->isWarHazardSync()) {
@@ -47,7 +57,7 @@ class KernelIrScanner : private OptOutConstDispatch {
     }
   }
 
-  void handle(const kir::Allocate* allocate) final {
+  void handle(Allocate* allocate) final {
     switch (allocate->memoryType()) {
       case MemoryType::Global:
         summary_.global_allocations.push_back(allocate);
@@ -68,17 +78,16 @@ class KernelIrScanner : private OptOutConstDispatch {
     }
   }
 
-  void handle(const UnaryOp* unary_op) final {
+  void handle(UnaryOp* unary_op) final {
     if (unary_op->getUnaryOpType() == UnaryOpType::RandLike) {
       // This kernel is using random numbers
       summary_.is_stochastic = true;
     }
   }
 
-  void handle(const kir::TensorIndex* tensor_index) final {
+  void handle(TensorIndex* tensor_index) final {
     const auto tv = tensor_index->view();
     const auto domain = tv->domain();
-
     // Do we have any reductions?
     summary_.has_block_reductions =
         summary_.has_block_reductions || domain->hasBlockReduction();
@@ -97,37 +106,35 @@ class KernelIrScanner : private OptOutConstDispatch {
         summary_.largest_smem_data_type = data_type;
       }
     }
-
-    // Update Welford
-    if (tensor_index->definition() != nullptr &&
-        tensor_index->definition()->isA<WelfordOp>()) {
-      summary_.has_welford = true;
-      summary_.has_block_welford =
-          summary_.has_block_welford || domain->hasBlockReduction();
-      summary_.has_grid_welford =
-          summary_.has_grid_welford || domain->hasGridReduction();
-    }
   }
 
-  void handle(const kir::GridWelford* grid_welford) final {
-    const auto dom = grid_welford->welford_op()
-                         ->out()
-                         ->as<kir::TensorIndex>()
-                         ->view()
-                         ->domain();
+  void handle(WelfordOp* welford_op) final {
+    summary_.has_welford = true;
+    TORCH_INTERNAL_ASSERT(welford_op->outAvg()->isA<TensorIndex>());
+    auto out_dom = welford_op->outAvg()->as<TensorIndex>()->view()->domain();
+    summary_.has_block_welford =
+        summary_.has_block_welford || out_dom->hasBlockReduction();
+  }
+
+  void handle(GridWelford* grid_welford) final {
+    summary_.has_welford = true;
+    summary_.has_grid_welford = true;
+    const auto dom =
+        grid_welford->welford_op()->out()->as<TensorIndex>()->view()->domain();
     updateGridReductionInLoop(dom);
   }
 
-  void handle(const kir::GridReduction* grid_reduction) final {
+  void handle(GridReduction* grid_reduction) final {
+    summary_.has_grid_reductions = true;
     const auto dom = grid_reduction->reduction_op()
                          ->out()
-                         ->as<kir::TensorIndex>()
+                         ->as<TensorIndex>()
                          ->view()
                          ->domain();
     updateGridReductionInLoop(dom);
   }
 
-  void handle(const kir::GridBroadcast*) final {
+  void handle(GridBroadcast*) final {
     summary_.has_cooperative_grid_reduction = true;
   }
 
@@ -139,10 +146,9 @@ class KernelIrScanner : private OptOutConstDispatch {
   void updateGridReductionInLoop(TensorDomain* dom) {
     summary_.has_grid_reductions = true;
 
-    const auto gpu_lower = GpuLower::current();
     for (const auto i : c10::irange(dom->nDims())) {
-      const auto id =
-          gpu_lower->caParallelMap().kirGetConcreteMappedID(dom->domain()[i]);
+      const auto id = GpuLower::current()->caParallelMap().getConcreteMappedID(
+          dom->domain()[i]);
 
       summary_.has_cooperative_grid_reduction =
           summary_.has_cooperative_grid_reduction ||
@@ -188,7 +194,7 @@ class ValidateAllocation : private OptOutConstDispatch {
     TORCH_INTERNAL_ASSERT(live_allocations_.empty());
   }
 
-  void handle(const kir::Allocate* allocate) final {
+  void handle(const Allocate* allocate) final {
     TORCH_INTERNAL_ASSERT(!live_allocations_.empty());
     live_allocations_.back().push_back(allocate);
   }
@@ -198,9 +204,8 @@ class ValidateAllocation : private OptOutConstDispatch {
   // during in the allocation lowering if it's thread-parallel and not
   // allocated on shared or global memories, or if it's block-parallel
   // ando not allocated on global memory.
-  void validate(const kir::ForLoop* for_loop) {
+  void validate(const ForLoop* for_loop) {
     const auto loop_id = for_loop->iter_domain();
-    const auto gpu_lower = GpuLower::current();
     for (const auto& allocations : live_allocations_) {
       for (const auto& allocate : allocations) {
         const auto tv = dynamic_cast<TensorView*>(allocate->buffer());
@@ -208,7 +213,7 @@ class ValidateAllocation : private OptOutConstDispatch {
           continue;
         }
         for (const auto& axis : tv->domain()->domain()) {
-          if (!gpu_lower->caParallelMap().kirAreMapped(loop_id, axis)) {
+          if (!GpuLower::current()->caParallelMap().areMapped(loop_id, axis)) {
             continue;
           }
           if (isParallelTypeThreadDim(loop_id->getParallelType())) {
@@ -226,7 +231,7 @@ class ValidateAllocation : private OptOutConstDispatch {
     }
   }
 
-  void handle(const kir::ForLoop* for_loop) final {
+  void handle(const ForLoop* for_loop) final {
     if (for_loop->stop() != for_loop->iter_domain()->extent() &&
         isParallelTypeThread(for_loop->iter_domain()->getParallelType())) {
       validate(for_loop);
@@ -239,7 +244,7 @@ class ValidateAllocation : private OptOutConstDispatch {
     live_allocations_.pop_back();
   }
 
-  void handle(const kir::IfThenElse* ite) final {
+  void handle(const IfThenElse* ite) final {
     for (const auto& expr : ite->thenBody().exprs()) {
       OptOutConstDispatch::handle(expr);
     }
@@ -253,20 +258,6 @@ class ValidateAllocation : private OptOutConstDispatch {
 };
 
 } // namespace
-
-void Kernel::registerIrStmt(
-    IrBuilderPasskey passkey,
-    std::unique_ptr<Statement> stmt) {
-  TORCH_INTERNAL_ASSERT(passkey.kernel == this);
-  ir_stmts_.push_back(std::move(stmt));
-  auto stmt_ptr = ir_stmts_.back().get();
-  if (stmt_ptr->isA<Expr>()) {
-    Expr* expr = stmt_ptr->as<Expr>();
-    for (auto out : expr->outputs()) {
-      out->setDefinition(expr);
-    }
-  }
-}
 
 // TODO(kir): Kernel IR validation
 void Kernel::finalize(std::vector<Expr*> top_level_exprs) {
@@ -289,6 +280,61 @@ void Kernel::analyze() {
 void Kernel::print() const {
   IrPrinter ir_printer(std::cout);
   ir_printer.handle(this);
+}
+
+//! Register the Val with this fusion
+void Kernel::registerVal(Val* val) {
+  if (inContainer(val)) {
+    return;
+  }
+  if (val->kernel()) {
+    TORCH_CHECK(
+        val->kernel() == this,
+        val->toString(),
+        " was not found in the active kernel.");
+  }
+
+  Fusion::registerVal(val);
+}
+
+//! Register expr with this fusion.
+//! When we register an expression, we want to update the dependency tracking
+//! of Vals. We add expr to our general expr_set_,
+void Kernel::registerExpr(Expr* expr) {
+  if (inContainer(expr)) {
+    return;
+  }
+
+  if (expr->kernel()) {
+    TORCH_CHECK(
+        expr->kernel() == this,
+        expr->toString(),
+        " was not found in the active kernel.");
+  }
+
+  for (Val* input : expr->inputs()) {
+    TORCH_INTERNAL_ASSERT(
+        inContainer(input),
+        "Input\n",
+        input->toString(),
+        " to expr,\n",
+        expr->toString(),
+        ",\n is invalid because it is not in the same kernel.");
+  }
+
+  for (Val* output : expr->outputs()) {
+    TORCH_INTERNAL_ASSERT(
+        inContainer(output),
+        "Output\n",
+        output->toString(),
+        " to expr,\n",
+        expr->toString(),
+        ",\n is invalid because it is not in the same kernel.");
+  }
+
+  // Register expr is explicitly non-SSA when coming from a kernel. This is
+  // detected inside Fusion::registerExpr
+  Fusion::registerExpr(expr);
 }
 
 } // namespace kir

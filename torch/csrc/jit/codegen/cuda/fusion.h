@@ -77,7 +77,7 @@ class TORCH_CUDA_CU_API FusionGuard {
 //! The Fusion owns the whole IR graph (Vals and Exprs)
 //!
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-class TORCH_CUDA_CU_API Fusion final : public IrContainer {
+class TORCH_CUDA_CU_API Fusion : public IrContainer {
   typedef std::unordered_map<int, std::vector<int64_t>> PermutationMap;
 
  public:
@@ -104,37 +104,22 @@ class TORCH_CUDA_CU_API Fusion final : public IrContainer {
   void removeVal(Val* val) override;
 
   //! Register input as an input of the fusion
-  // TODO: Rename to register
   void addInput(Val* input);
 
   //! Register output as an output of the fusion
-  // TODO: Rename to register
   void addOutput(Val* output);
 
   //! Register output as an output of the fusion
-  // TODO: Rename to register
   void addOutput(WelfordResult& output);
 
   //! Deregister input as an input of the fusion
-  // TODO: Rename to register
   void removeInput(Val* input);
 
   //! Deregister output as an output of the fusion
-  // TODO: Rename to register
   void removeOutput(Val* output);
 
   //! Replace output with another value
   void replaceOutput(Val* output, Val* replacement);
-
-  //! Clear Expr's from TV uses that are not required to produce outputs from
-  //! inputs
-  void resetTvUses();
-
-  //! Check if stmt is properly registered with this fusion
-  bool inFusion(const Statement* stmt) const;
-
-  //! Throw an error if stmt is not in this fusion
-  void assertInFusion(const Statement* stmt, const std::string& msg = "") const;
 
   //! Assert that all leaves found from outputs are registered as an input
   void validateInputs();
@@ -159,12 +144,6 @@ class TORCH_CUDA_CU_API Fusion final : public IrContainer {
   //! Return a vector of fusion inputs that feed this Val
   std::vector<Val*> inputsOf(Val* val);
 
-  //! Return the set of Vals registered with this fusion
-  const std::unordered_set<Val*>& vals() const noexcept;
-
-  //! Return in insertion order
-  const std::deque<Val*> deterministic_vals() const noexcept;
-
   //! Return all Vals in math expressions that cannot be eliminated.
   //!
   //! It is generally equivalent to vals that are used to generate
@@ -172,11 +151,6 @@ class TORCH_CUDA_CU_API Fusion final : public IrContainer {
   //! some of the outputs are used, the remaining unused outputs are
   //! also included as they must show up in the final code.
   std::vector<Val*> usedMathVals();
-
-  //! Return the set of Exprs registered with this fusion. Warning: This will
-  //! return exprs outside inputs/outputs, so can be unsafe for use with
-  //! segmented fusions.
-  const std::unordered_set<Expr*>& unordered_exprs() const noexcept;
 
   //! Return all Exprs that use val
   std::unordered_set<Expr*> unordered_uses(Val* val) const;
@@ -186,12 +160,6 @@ class TORCH_CUDA_CU_API Fusion final : public IrContainer {
 
   //! Indicate to kernel to set itself up to generate random numbers
   bool isStochastic();
-
-  //! Indicate that the fusion contains reduction operations
-  bool hasReduction();
-
-  //! Indicate that the fusion contains welford operations
-  bool hasWelford();
 
   //! Run fusion segmentation algorithm to create a segmented fusion
   std::unique_ptr<SegmentedFusion> segment(
@@ -206,9 +174,6 @@ class TORCH_CUDA_CU_API Fusion final : public IrContainer {
   }
 
   std::vector<Val*> getTerminatingOutputs();
-
-  bool hasInput(const Val* val) const;
-  bool hasOutput(const Val* val) const;
 
   // Aliasing output to input value, this is a WAR to allow inplace update on
   // input tensor.
@@ -260,16 +225,25 @@ class TORCH_CUDA_CU_API Fusion final : public IrContainer {
   friend SegmentCandidateFinder;
   friend SegmentedFusion;
   friend class TranslateApplicableWelford;
+  friend Val;
 
   static IrCloner copy(const Fusion* from, Fusion* to);
 
   //! Register the Val with this fusion
-  void registerVal(Val* val) override;
+  virtual void registerVal(Val* val) override;
 
   //! Register expr with this fusion.
   //! When we register an expression, we want to update the dependency tracking
-  //! of Vals. We add expr to our general expr_set_,
-  void registerExpr(Expr* expr) override;
+  //! of Vals. If this container is a not a Kernel, it will remove previous
+  //! definitions of outputs and register this Expr as the definition. Otherwise
+  //! will update definition if not previously set, but will not remove old
+  //! definitions.
+  virtual void registerExpr(Expr* expr) override;
+
+  //! Clear Expr's from TV uses that are not required to produce outputs from
+  //! inputs. Only other place this is used (other than Fusion) is in
+  //! Val::uses()
+  void resetTvUses();
 
  private:
   // Determine if the two values are compatible for aliasing

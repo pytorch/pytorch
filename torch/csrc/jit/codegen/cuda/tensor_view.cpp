@@ -52,7 +52,9 @@ TensorView::TensorView(
     : Val(passkey,
           ValType::TensorView,
           aten_opt_type_map(tensor_type->scalarType())) {
-  TORCH_INTERNAL_ASSERT(!isKirStmt(), "Function invalid for kir.");
+  TORCH_INTERNAL_ASSERT(
+      !container()->isA<kir::Kernel>(),
+      "Function invalid for kernel container.");
   std::vector<IterDomain*> sizes;
 
   TORCH_CHECK(
@@ -63,13 +65,13 @@ TensorView::TensorView(
         tensor_type->sizes()[i].value() == 1) {
       // If size is known to be 1, assuem it needs to be broadcasted.
       sizes.push_back(IrBuilder::create<IterDomain>(
-          IrBuilder::create<Int>(0),
-          IrBuilder::create<Int>(1),
+          passkey.ir_container_->zeroVal(),
+          passkey.ir_container_->oneVal(),
           ParallelType::Serial,
           IterType::BroadcastWithStride));
     } else {
       sizes.push_back(IrBuilder::create<IterDomain>(
-          IrBuilder::create<Int>(0), IrBuilder::create<Int>()));
+          passkey.ir_container_->zeroVal(), IrBuilder::create<Int>()));
     }
   }
 
@@ -111,7 +113,9 @@ TensorView::TensorView(
     IrBuilderPasskey passkey,
     const std::shared_ptr<Value>& jit_value)
     : TensorView(passkey, jit_value->type()->cast<c10::TensorType>()) {
-  TORCH_INTERNAL_ASSERT(!isKirStmt(), "Function invalid for kir.");
+  TORCH_INTERNAL_ASSERT(
+      !container()->isA<kir::Kernel>(),
+      "Function invalid for kernel container.");
 }
 
 TensorView::TensorView(const TensorView* src, IrCloner* ir_cloner)
@@ -121,23 +125,9 @@ TensorView::TensorView(const TensorView* src, IrCloner* ir_cloner)
       max_producer_pos_(src->max_producer_pos_),
       memory_type_(src->memory_type_),
       swizzle_type_(src->swizzle_type_) {
-  TORCH_INTERNAL_ASSERT(
-      !src->isKirStmt() && !isKirStmt(), "Function invalid for kir.");
   for (const auto id : src->axesToSwizzle()) {
     axes_to_swizzle_.push_back(ir_cloner->clone(id));
   }
-}
-
-// TODO: Remove, only used for lowering
-TensorView::TensorView(
-    IrBuilderPasskey passkey,
-    const fuser::cuda::TensorView* tv)
-    : Val(passkey, ValType::TensorView, tv->getDataType().value()),
-      fuser_tv_(tv) {
-  TORCH_INTERNAL_ASSERT(isKirStmt(), "Function invalid for fusion.");
-  setName(passkey, tv->name());
-  domain_ = GpuLower::current()->lowerValue(tv->domain())->as<TensorDomain>();
-  memory_type_ = tv->getMemoryType();
 }
 
 bool TensorView::hasAnyReduction() const {
@@ -199,7 +189,9 @@ IterDomain* TensorView::axis(int pos) const {
 }
 
 void TensorView::setComputeAt(unsigned int pos, bool decrease) {
-  TORCH_INTERNAL_ASSERT(!isKirStmt(), "Function invalid for kir.");
+  TORCH_INTERNAL_ASSERT(
+      !container()->isA<kir::Kernel>(),
+      "Function invalid for kernel container.");
   if (pos <= compute_at_pos_ && !decrease) {
     return;
   }
@@ -215,7 +207,9 @@ void TensorView::setComputeAt(unsigned int pos, bool decrease) {
 }
 
 void TensorView::setMaxProducer(unsigned int pos, bool decrease) {
-  TORCH_INTERNAL_ASSERT(!isKirStmt(), "Function invalid for kir.");
+  TORCH_INTERNAL_ASSERT(
+      !container()->isA<kir::Kernel>(),
+      "Function invalid for kernel container.");
   if (pos <= max_producer_pos_ && !decrease) {
     return;
   }
@@ -234,7 +228,9 @@ TensorView* TensorView::computeAt(
     TensorView* consumer,
     int position,
     ComputeAtMode mode) {
-  TORCH_INTERNAL_ASSERT(!isKirStmt(), "Function invalid for kir.");
+  TORCH_INTERNAL_ASSERT(
+      !container()->isA<kir::Kernel>(),
+      "Function invalid for kernel container.");
   // Make sure this and consumer are not the same tensor, that's illegal
   TORCH_CHECK(!sameAs(consumer), "Cannot call this->computeAt(this, ...)");
 
@@ -263,7 +259,9 @@ TensorView* TensorView::computeWith(
     TensorView* consumer,
     int position,
     ComputeAtMode mode) {
-  TORCH_INTERNAL_ASSERT(!isKirStmt(), "Function invalid for kir.");
+  TORCH_INTERNAL_ASSERT(
+      !container()->isA<kir::Kernel>(),
+      "Function invalid for kernel container.");
   // Make sure this and consumer are not the same tensor, that's illegal
   TORCH_CHECK(!sameAs(consumer), "Cannot call this->computeAt(this, ...)");
 
@@ -372,7 +370,9 @@ TensorView* TensorView::merge(int axis_o, int axis_i) {
 }
 
 TensorView* TensorView::reorder(const std::unordered_map<int, int>& old2new_) {
-  TORCH_INTERNAL_ASSERT(!isKirStmt(), "Function invalid for kir.");
+  TORCH_INTERNAL_ASSERT(
+      !container()->isA<kir::Kernel>(),
+      "Function invalid for kernel container.");
   TORCH_INTERNAL_ASSERT(
       !(nDims() == 0 && old2new_.size() > 0),
       "Tried to reorder a 0-dim TensorView");
@@ -420,7 +420,9 @@ TensorView* TensorView::reorder(const std::unordered_map<int, int>& old2new_) {
 TensorView* TensorView::swizzle(
     SwizzleType type,
     const std::vector<int>& axes) {
-  TORCH_INTERNAL_ASSERT(!isKirStmt(), "Function invalid for kir.");
+  TORCH_INTERNAL_ASSERT(
+      !container()->isA<kir::Kernel>(),
+      "Function invalid for kernel container.");
   swizzle_type_ = type;
 
   // Clear previously set swizzle axes if any
@@ -470,7 +472,9 @@ TensorView* TensorView::swizzle(
 }
 
 TensorView* TensorView::rFactor(const std::vector<int>& axes) {
-  TORCH_INTERNAL_ASSERT(!isKirStmt(), "Function invalid for kir.");
+  TORCH_INTERNAL_ASSERT(
+      !container()->isA<kir::Kernel>(),
+      "Function invalid for kernel container.");
   // TODO: I think we should do this but
   // NVFuserTest.FusionSmemBlockGemmCache_CUDA prevents it from going in at the
   // moment.
@@ -529,7 +533,9 @@ TensorView* TensorView::rFactor(const std::vector<int>& axes) {
 TensorView* TensorView::welfordRfactorHelper(
     TensorView* tv,
     const std::vector<int>& axes) {
-  TORCH_INTERNAL_ASSERT(!isKirStmt(), "Function invalid for kir.");
+  TORCH_INTERNAL_ASSERT(
+      !container()->isA<kir::Kernel>(),
+      "Function invalid for kernel container.");
   // Hack:
   // Semantically we should always keep the outputs of welfordOp scheduled
   // the same but the user end cannot guarantee that.
@@ -587,7 +593,9 @@ WelfordResult TensorView::rFactor(
     TensorView* avg,
     TensorView* var,
     TensorView* n) {
-  TORCH_INTERNAL_ASSERT(!isKirStmt(), "Function invalid for kir.");
+  TORCH_INTERNAL_ASSERT(
+      !container()->isA<kir::Kernel>(),
+      "Function invalid for kernel container.");
   TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to rFactor a 0-dim TensorView");
   FusionGuard fg(fusion());
   TORCH_CHECK(
@@ -658,7 +666,9 @@ WelfordResult TensorView::rFactor(
 }
 
 TensorView* TensorView::cache_before() {
-  TORCH_INTERNAL_ASSERT(!isKirStmt(), "Function invalid for kir.");
+  TORCH_INTERNAL_ASSERT(
+      !container()->isA<kir::Kernel>(),
+      "Function invalid for kernel container.");
   FusionGuard fg(fusion());
 
   TORCH_CHECK(
@@ -745,7 +755,9 @@ TensorView* TensorView::cache_before() {
 }
 
 TensorView* TensorView::cache_fork() {
-  TORCH_INTERNAL_ASSERT(!isKirStmt(), "Function invalid for kir.");
+  TORCH_INTERNAL_ASSERT(
+      !container()->isA<kir::Kernel>(),
+      "Function invalid for kernel container.");
   FusionGuard fg(fusion());
 
   // Before: [Expr] -> This TV (Global Output) -> [Usage Expr]
@@ -753,7 +765,7 @@ TensorView* TensorView::cache_fork() {
   //                            (Fork) -> [Set Expr]   -> New TV (Global Output)
 
   TORCH_CHECK(
-      fusion()->hasOutput(this) && !this->uses().empty(),
+      this->isFusionOutput() && !this->uses().empty(),
       "Error adding cache_fork ",
       this,
       " this TensorView must be an output with subsequent uses");
@@ -790,14 +802,14 @@ TensorView* TensorView::cache_fork() {
 }
 
 TensorView* TensorView::cache_after() {
-  TORCH_INTERNAL_ASSERT(!isKirStmt(), "Function invalid for kir.");
+  TORCH_INTERNAL_ASSERT(
+      !container()->isA<kir::Kernel>(),
+      "Function invalid for kernel container.");
   FusionGuard fg(fusion());
-
-  const bool kIsFusionInput = fusion()->hasInput(this);
 
   // Get all the uses for this Tensorview
   TORCH_CHECK(
-      !fusion()->hasOutput(this),
+      !isFusionOutput(),
       "Error adding cache_after ",
       this,
       " we restrict using cache_after on an output.");
@@ -811,7 +823,7 @@ TensorView* TensorView::cache_after() {
   // It also did additional transformation when this tensor is an
   // input and the outputs of its consumers have computeAt. Make sure
   // we no longer rely on that behavior.
-  if (kIsFusionInput) {
+  if (isFusionInput()) {
     for (const auto& expr : uses()) {
       for (TensorView* output :
            ir_utils::filterByType<TensorView>(expr->outputs())) {
@@ -861,9 +873,8 @@ TensorView* TensorView::cache_after() {
 }
 
 void TensorView::setMemoryType(MemoryType mt) {
-  TORCH_INTERNAL_ASSERT(!isKirStmt(), "Function invalid for kir.");
   memory_type_ = mt;
-  if (fusion()->hasInput(this) || fusion()->hasOutput(this)) {
+  if (isFusionInput() || isFusionOutput()) {
     TORCH_INTERNAL_ASSERT(
         mt == MemoryType::Global,
         "Tried to set an input or output to the fusion to a non-global memory type.");
@@ -937,7 +948,7 @@ TensorView* TensorViewBuilder::build() const {
   for (const auto i : c10::irange(ndims_)) {
     if (shape_.empty() || shape_[i] == -1) {
       domain[i] = IrBuilder::create<IterDomain>(
-          IrBuilder::create<Int>(0), IrBuilder::create<Int>());
+          FusionGuard::getCurFusion()->zeroVal(), IrBuilder::create<Int>());
     } else {
       TORCH_CHECK(
           shape_[i] >= 0,
@@ -946,13 +957,14 @@ TensorView* TensorViewBuilder::build() const {
       if (shape_[i] == 1) {
         // If size is known to be 1, assume it needs to be broadcasted.
         domain[i] = IrBuilder::create<IterDomain>(
-            IrBuilder::create<Int>(0),
-            IrBuilder::create<Int>(1),
+            FusionGuard::getCurFusion()->zeroVal(),
+            FusionGuard::getCurFusion()->oneVal(),
             ParallelType::Serial,
             IterType::BroadcastWithStride);
       } else {
         domain[i] = IrBuilder::create<IterDomain>(
-            IrBuilder::create<Int>(0), IrBuilder::create<Int>(shape_[i]));
+            FusionGuard::getCurFusion()->zeroVal(),
+            IrBuilder::create<Int>(shape_[i]));
       }
     }
   }

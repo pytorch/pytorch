@@ -5,7 +5,6 @@
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 
 #include <sstream>
@@ -101,7 +100,6 @@ void ParallelDimensionMap::populateDimensionMapWithSingleCASet(
   TORCH_INTERNAL_ASSERT(dom_set.size() == 1);
 
   const auto gpu_lower = GpuLower::current();
-  kir::IrBuilder ir_builder(gpu_lower->kernel());
 
   // pt is used by only one concrete domain
   auto id = *dom_set.begin();
@@ -109,7 +107,7 @@ void ParallelDimensionMap::populateDimensionMapWithSingleCASet(
 
   if (it != constant_extent_map_.end()) {
     if (it->second.size() == 1) {
-      dim_map_.insert({pt, ir_builder.create<Int>(*(it->second.begin()))});
+      dim_map_.insert({pt, IrBuilder::create<Int>(*(it->second.begin()))});
       exact_types_.insert(pt);
     } else {
       // Multiple constant dimensions found; Use the corresponding
@@ -129,7 +127,6 @@ void ParallelDimensionMap::populateDimensionMapWithMultipleCASet(
   TORCH_INTERNAL_ASSERT(dom_set.size() > 1);
 
   const auto gpu_lower = GpuLower::current();
-  kir::IrBuilder ir_builder(gpu_lower->kernel());
 
   bool all_equal = true;
   // Use nullptr to signal it's not initialied yet
@@ -171,7 +168,7 @@ void ParallelDimensionMap::populateDimensionMapWithMultipleCASet(
     // At this point, it still remains undetermined whether this id
     // matches with those previously looked at. Constant check failed,
     // but symbolic matching may succeed.
-    auto this_dimension = gpu_lower->lowerValue(concrete_id->extent());
+    auto this_dimension = concrete_id->extent();
     if (known_dimension == nullptr) {
       // No previous dimension found yet
       known_dimension = this_dimension;
@@ -190,7 +187,7 @@ void ParallelDimensionMap::populateDimensionMapWithMultipleCASet(
   }
   // Use the const value, if found, as its dimension
   if (all_equal && known_const != -1) {
-    dim_map_.insert({pt, ir_builder.create<Int>(known_const)});
+    dim_map_.insert({pt, IrBuilder::create<Int>(known_const)});
   } else {
     dim_map_.insert({pt, NamedScalar::getParallelDim(pt)});
   }
@@ -198,7 +195,6 @@ void ParallelDimensionMap::populateDimensionMapWithMultipleCASet(
 
 void ParallelDimensionMap::adjustMappingsForWarpPadding() {
   const auto gpu_lower = GpuLower::current();
-  kir::IrBuilder ir_builder(gpu_lower->kernel());
 
   // If TIDx is padded to a multiple of the warp size, mark it as
   // non-exact.
@@ -228,7 +224,7 @@ void ParallelDimensionMap::adjustMappingsForWarpPadding() {
   // single warp, use the constant warp size as the dimension of
   // TIDx. Otherwise, jsut use blockDim.x.
   if (warp_info.is_tidx_single_warp) {
-    dim_map_.at(ParallelType::TIDx) = ir_builder.create<Int>(warp_size);
+    dim_map_.at(ParallelType::TIDx) = IrBuilder::create<Int>(warp_size);
   } else {
     dim_map_.at(ParallelType::TIDx) =
         NamedScalar::getParallelDim(ParallelType::TIDx);

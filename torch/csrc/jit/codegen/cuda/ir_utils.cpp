@@ -434,13 +434,31 @@ std::vector<TensorView*> allTvs(Fusion* fusion) {
   return uniqueEntries({used_tvs.begin(), used_tvs.end()});
 }
 
-std::vector<Expr*> historyOf(TensorDomain* td) {
-  return ExprSort::getExprs(
-      td->fusion(), {td->domain().begin(), td->domain().end()});
-}
-
-std::vector<Expr*> historyOf(TensorView* tv) {
-  return historyOf(tv->domain());
+std::vector<Expr*> getReductionOps(Fusion* fusion) {
+  std::vector<Expr*> red_ops;
+  for (auto expr : fusion->exprs()) {
+    const Val* out_val = nullptr;
+    if (expr->isA<ReductionOp>()) {
+      out_val = expr->as<ReductionOp>()->out();
+    } else if (expr->isA<WelfordOp>()) {
+      out_val = expr->as<WelfordOp>()->outAvg();
+    } else {
+      continue;
+    }
+    if (out_val == nullptr || !out_val->isA<TensorView>()) {
+      continue;
+    }
+    auto out_tv = out_val->as<TensorView>();
+    if (std::any_of(
+            out_tv->getRootDomain().begin(),
+            out_tv->getRootDomain().end(),
+            [](IterDomain* id) {
+              return id->isReduction() && !id->isTrivialReduction();
+            })) {
+      red_ops.push_back(expr);
+    }
+  }
+  return red_ops;
 }
 
 } // namespace ir_utils

@@ -20,15 +20,11 @@ class TORCH_CUDA_CU_API PartialSplitMap {
   void build(Fusion* fusion);
 
   Val* getStartOffset(IterDomain* root_domain) const;
-  Val* kirGetStartOffset(IterDomain* root_domain) const;
   Val* getStopOffset(IterDomain* root_domain) const;
-  Val* kirGetStopOffset(IterDomain* root_domain) const;
 
  private:
   std::unordered_map<IterDomain*, Val*> start_offset_map_;
-  std::unordered_map<IterDomain*, Val*> kir_start_offset_map_;
   std::unordered_map<IterDomain*, Val*> stop_offset_map_;
-  std::unordered_map<IterDomain*, Val*> kir_stop_offset_map_;
 };
 
 } // namespace cuda

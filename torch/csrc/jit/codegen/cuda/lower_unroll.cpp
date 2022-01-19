@@ -6,7 +6,6 @@
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_misaligned_vectorization.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
@@ -21,8 +20,7 @@ namespace {
 
 // Provide a new for loop matching the one provided
 kir::ForLoop* cloneLoopNest(const kir::ForLoop* for_loop) {
-  kir::IrBuilder ir_builder(GpuLower::current()->kernel());
-  const auto new_loop = ir_builder.create<kir::ForLoop>(for_loop);
+  const auto new_loop = IrBuilder::create<kir::ForLoop>(for_loop);
   for (auto expr : for_loop->body().exprs()) {
     if (auto nested_for_loop = dynamic_cast<kir::ForLoop*>(expr)) {
       expr = cloneLoopNest(nested_for_loop);
@@ -67,17 +65,16 @@ void UnrollPass::handle(Expr* expr) {
       return;
     }
 
-    kir::IrBuilder ir_builder(GpuLower::current()->kernel());
     const auto thread_pred = isReductionInitExpr(expr)
-        ? ir_builder.trueVal()
-        : GpuLower::current()->threadPredMap().getPredicate(out_tv->fuserTv());
+        ? GpuLower::current()->kernel()->trueVal()
+        : GpuLower::current()->threadPredMap().getPredicate(out_tv);
 
     // When this expr is in an unswitched block, only attach the
     // thread predicate to the expr as thread predicates are not
     // grouped to the unswitch predicate.
     kir::Predicate* thread_pred_expr = nullptr;
     if (unswitched_loop_) {
-      thread_pred_expr = ir_builder.create<kir::Predicate>(thread_pred);
+      thread_pred_expr = IrBuilder::create<kir::Predicate>(thread_pred);
     }
 
     non_trivial_pred_found_ = true;
@@ -94,7 +91,7 @@ void UnrollPass::handle(Expr* expr) {
     if (!isReductionInitExpr(expr) && out_tv->domain()->hasReduction()) {
       const auto write_pred = unswitched_loop_
           ? thread_pred_expr
-          : ir_builder.create<kir::Predicate>(
+          : IrBuilder::create<kir::Predicate>(
                 PredicateType::ReductionWrite, expr, thread_pred);
       expr->setWritePredicate(write_pred);
     }
@@ -104,7 +101,7 @@ void UnrollPass::handle(Expr* expr) {
     if (ir_utils::hasBlockSync(expr, GpuLower::current()->threadPredMap())) {
       const auto pred = unswitched_loop_
           ? thread_pred_expr
-          : ir_builder.create<kir::Predicate>(
+          : IrBuilder::create<kir::Predicate>(
                 PredicateType::Inline, expr, thread_pred);
       expr->setPredicate(pred);
       return;
@@ -118,17 +115,17 @@ void UnrollPass::handle(Expr* expr) {
               return fl->iter_domain()->getParallelType() ==
                   ParallelType::Vectorize;
             })) {
-      pred = ir_builder.create<kir::Predicate>(PredicateType::Vectorize);
+      pred = IrBuilder::create<kir::Predicate>(PredicateType::Vectorize);
     }
 
     if (pred == nullptr) {
       pred = unswitched_loop_ ? thread_pred_expr
-                              : ir_builder.create<kir::Predicate>(
+                              : IrBuilder::create<kir::Predicate>(
                                     PredicateType::Inline, expr, thread_pred);
     }
 
     // If we need a predicate, put expr inside an if then else
-    kir::IfThenElse* inline_ite = ir_builder.create<kir::IfThenElse>(pred);
+    kir::IfThenElse* inline_ite = IrBuilder::create<kir::IfThenElse>(pred);
     if (for_loops_.empty()) {
       // Special handling for top level output expressions that still
       // need predicates. One motivating example is a reduction op that
@@ -171,10 +168,9 @@ void UnrollPass::handle(kir::ForLoop* fl) {
     return;
   }
 
-  kir::IrBuilder ir_builder(GpuLower::current()->kernel());
-  auto unroll_pred = ir_builder.create<kir::Predicate>(fl);
+  auto unroll_pred = IrBuilder::create<kir::Predicate>(fl);
 
-  kir::IfThenElse* unroll_ite = ir_builder.create<kir::IfThenElse>(unroll_pred);
+  kir::IfThenElse* unroll_ite = IrBuilder::create<kir::IfThenElse>(unroll_pred);
 
   // Get the loop nest for the unrolled path
   kir::ForLoop* unrolled_loop_nest = cloneLoopNest(fl);
@@ -228,7 +224,7 @@ bool UnrollPass::canOmitElseClause(kir::ForLoop* fl) {
     for (auto expr : loop->body().exprs()) {
       if (expr->isA<BroadcastOp>()) {
         const ParallelTypeBitmap domains = pred_map.getParallelBroadcastDomains(
-            expr->outputs()[0]->as<TensorView>()->fuserTv());
+            expr->outputs()[0]->as<TensorView>());
         if (domains.any()) {
           return false;
         }
