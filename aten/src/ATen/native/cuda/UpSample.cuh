@@ -147,7 +147,7 @@ __device__ __forceinline__ static int nearest_neighbor_exact_compute_source_inde
   // input_index = round(index_f32)
   // Same as Pillow and Scikit-Image/Scipy ndi.zoom
   const int src_index =
-      min(static_cast<int>(floorf((dst_index + 0.5) * scale)), input_size - 1);
+      min(static_cast<int>(floorf((dst_index + static_cast<float>(0.5)) * scale)), input_size - 1);
   return src_index;
 }
 
@@ -171,7 +171,7 @@ __device__ __forceinline__ static int nearest_neighbor_exact_bw_compute_source_i
     int output_size) {
   // Equivalent to Pillow and Scikit-Image/Scipy ndi.zoom
   const int src_index =
-      min(static_cast<int>(ceilf(dst_index * scale - 0.5)), output_size);
+      min(static_cast<int>(ceilf(dst_index * scale - static_cast<float>(0.5))), output_size);
   return src_index;
 }
 
@@ -262,13 +262,13 @@ namespace upsample_antialias {
 // src/libImaging/Resample.c#L20-L29
 template <typename accscalar_t>
 __device__ __forceinline__ static accscalar_t bilinear_filter(accscalar_t x) {
-  if (x < 0.0) {
+  if (x < 0) {
     x = -x;
   }
-  if (x < 1.0) {
-    return static_cast<accscalar_t>(1.0) - x;
+  if (x < 1) {
+    return 1 - x;
   }
-  return static_cast<accscalar_t>(0.0);
+  return 0;
 }
 
 // taken from
@@ -277,18 +277,17 @@ __device__ __forceinline__ static accscalar_t bilinear_filter(accscalar_t x) {
 template <typename accscalar_t>
 __device__ __forceinline__ static accscalar_t bicubic_filter(accscalar_t x) {
   // https://en.wikipedia.org/wiki/Bicubic_interpolation#Bicubic_convolution_algorithm
-#define a -0.5
-  if (x < 0.0) {
+  const accscalar_t a = -0.5;
+  if (x < 0) {
     x = -x;
   }
-  if (x < 1.0) {
-    return ((a + 2.0) * x - (a + 3.0)) * x * x + static_cast<accscalar_t>(1.0);
+  if (x < 1) {
+    return ((a + 2) * x - (a + 3)) * x * x + 1;
   }
-  if (x < 2.0) {
+  if (x < 2) {
     return (((x - 5) * x + 8) * x - 4) * a;
   }
-  return static_cast<accscalar_t>(0.0);
-#undef a
+  return 0;
 }
 
 template <typename accscalar_t>
@@ -300,9 +299,9 @@ __device__ __forceinline__ static void _compute_weights_span(
     int& xmin,
     int& xsize,
     accscalar_t& center) {
-  center = scale * (i + 0.5);
-  xmin = max(static_cast<int>(center - support + 0.5), static_cast<int>(0));
-  xsize = min(static_cast<int>(center + support + 0.5), input_size) - xmin;
+  center = scale * (i + static_cast<accscalar_t>(0.5));
+  xmin = max(static_cast<int>(center - support + static_cast<accscalar_t>(0.5)), static_cast<int>(0));
+  xsize = min(static_cast<int>(center + support + static_cast<accscalar_t>(0.5)), input_size) - xmin;
 }
 
 template <typename scalar_t, typename accscalar_t, typename filter_fn_t>
@@ -313,11 +312,11 @@ __device__ __forceinline__ static void _compute_weights(
     filter_fn_t filter_fn,
     accscalar_t xmin_m_center,
     int xsize) {
-  accscalar_t invscale = (scale >= 1.0) ? 1.0 / scale : 1.0;
+  accscalar_t invscale = (scale >= 1) ?  static_cast<accscalar_t>(1.0) / scale : 1;
   accscalar_t total_w = 0.0;
   int j = 0;
   for (j = 0; j < xsize; j++) {
-    accscalar_t w = filter_fn((j + xmin_m_center + 0.5) * invscale);
+    accscalar_t w = filter_fn((j + xmin_m_center + static_cast<accscalar_t>(0.5)) * invscale);
     wt_ptr[j] = static_cast<scalar_t>(w);
     total_w += w;
   }
