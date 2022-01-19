@@ -838,7 +838,7 @@ linalg_svd_rank_restricted(
     // in a single tensor. However, a view + zero_ on a buffer breaks CompositeCompliance tests.
     // TODO: fix that once and if things with the autograd composite compliance become
     // more flexible.
-    auto r_mask = at::ones({unique_rank.numel(), k}, input.options().dtype(at::kBool));
+    auto r_mask = at::ones({k}, input.options().dtype(at::kBool));
     r_mask.narrow(-1, r, k - r).zero_();
 
     // Form an index for matrices of rank r.
