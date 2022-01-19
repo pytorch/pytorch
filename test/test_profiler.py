@@ -316,6 +316,10 @@ class TestProfiler(TestCase):
                             assert "Device Type" in evt["args"]
                             assert "Device Id" in evt["args"]
                             assert "Bytes" in evt["args"]
+
+                            # Memory should be an instantaneous event.
+                            assert "dur" not in evt["args"]
+                            assert "cat" not in evt["args"]
                     assert found_memory_events
 
         if torch.cuda.is_available():
