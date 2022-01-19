@@ -869,8 +869,10 @@ class Softshrink(Module):
 
 class MultiheadAttention(Module):
     r"""Allows the model to jointly attend to information
-    from different representation subspaces.
-    See `Attention Is All You Need <https://arxiv.org/abs/1706.03762>`_.
+    from different representation subspaces as described in the paper:
+    `Attention Is All You Need <https://arxiv.org/abs/1706.03762>`_.
+
+    Multi-Head Attention is defined as:
 
     .. math::
         \text{MultiHead}(Q, K, V) = \text{Concat}(head_1,\dots,head_h)W^O
