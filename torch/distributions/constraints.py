@@ -577,6 +577,28 @@ class _Stack(Constraint):
                             for v, constr in zip(vs, self.cseq)], self.dim)
 
 
+class _LogicalAnd(Constraint):
+    """
+    Description
+    """
+
+    def __init__(self, constraints: List[Constraint]):
+        self.constraints = constraints
+
+    def check(self, value):
+        shape = value.shape
+        result = torch.zeros(shape, dtype=torch.bool)
+        for constraint in self.constraints:
+            result = result.logical_and(constraint.check(value))
+            # Shape of the return tensor should be checked to return intersection of shape
+            # of each constraint.check result.
+            # result = result.logical_and(constraint.check(value).expand(shape))
+        return result
+
+
+# class _LogicalOr(Constraint):
+
+
 # Public interface.
 dependent = _Dependent()
 dependent_property = _DependentProperty
@@ -605,5 +627,9 @@ square = _Square()
 symmetric = _Symmetric()
 positive_semidefinite = _PositiveSemidefinite()
 positive_definite = _PositiveDefinite()
+symmetric_positive_semidefinite = _LogicalAnd(symmetric, positive_semidefinite)
+symmetric_positive_definite = _LogicalAnd(symmetric, positive_definite)
 cat = _Cat
 stack = _Stack
+logical_and = _LogicalAnd
+logical_or = _LogicalOr
