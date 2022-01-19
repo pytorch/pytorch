@@ -1,10 +1,6 @@
 #!/usr/bin/env bash
 set -eux -o pipefail
 
-# get system info
-cat /sys/devices/cpu/caps/pmu_name
-cat /proc/cpuinfo | grep 'model name' | uniq
-
 # Set up CircleCI GPG keys for apt, if needed
 curl --retry 3 -s -L https://packagecloud.io/circleci/trusty/gpgkey | sudo apt-key add -
 
