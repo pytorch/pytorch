@@ -12,12 +12,9 @@ architectures:
 
 from typing import Dict, List, Tuple
 
-
 CUDA_ARCHES = ["10.2", "11.1", "11.3", "11.5"]
 
-
 ROCM_ARCHES = ["4.3.1", "4.5.2"]
-
 
 def arch_type(arch_version: str) -> str:
     if arch_version in CUDA_ARCHES:
