@@ -145,8 +145,7 @@ TensorImpl::TensorImpl(
       numel_(0),
       data_type_(data_type),
       device_opt_(storage_.device()),
-      key_set_(key_set.removeFunctionalityKey(
-          DispatchKey::Python)) { // See [Note: Python key removal]
+      key_set_(key_set.remove(DispatchKey::Python)) { // See [Note: Python key removal]
   init_bitfields();
   // Inference tensor doesn't have version counter.
   if (!is_inference()) {
@@ -192,19 +191,19 @@ TensorImpl::TensorImpl(
   key_set = key_set | getAutocastRelatedKeySetFromBackend(k);
 
   key_set =
-      key_set.removeFunctionalityKey(DispatchKey::Python); // See [Note: Python key removal]
+      key_set.remove(DispatchKey::Python); // See [Note: Python key removal]
 
   // Inference tensor doesn't have autograd related keys.
   if (inference_mode) {
     // See Note [Expected TLS state in InferenceMode] for why we exclude
     // Autograd & ADInplaceOrView keys. Normally key_set only contains backend
     // keys but we do the substraction here to make sure.
-    key_set_ = key_set.removeFunctionalityKeys(c10::autograd_dispatch_keyset_with_ADInplaceOrView);
+    key_set_ = key_set - c10::autograd_dispatch_keyset_with_ADInplaceOrView;
   } else {
     // TODO: Ideally we only add AutogradBackend key when the tensor requires
     // grad.
     //       See Note [Dream: skip VariableType kernel when requires_grad=false]
-    key_set_ = key_set | getAutogradRelatedKeySetFromBackend(k);
+    key_set_ = key_set | getAutogradRelatedKeySetFromBackend(k, key_set);
   }
 
   // Inference tensor doesn't have version counter.
@@ -564,7 +563,7 @@ void TensorImpl::copy_tensor_metadata_except_version_counter(
   dest_impl->storage_offset_ = src_impl->storage_offset_;
   dest_impl->data_type_ = src_impl->data_type_;
   dest_impl->device_opt_ = src_impl->device_opt_;
-  dest_impl->key_set_ = src_impl->key_set_.removeFunctionalityKey(DispatchKey::Python);
+  dest_impl->key_set_ = src_impl->key_set_.remove(DispatchKey::Python);
   dest_impl->is_contiguous_ = src_impl->is_contiguous_;
   dest_impl->has_contiguity_ = src_impl->has_contiguity_;
   dest_impl->is_channels_last_contiguous_ =

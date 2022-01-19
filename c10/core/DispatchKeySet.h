@@ -258,6 +258,7 @@ class DispatchKeySet final {
   // Compute the set difference self - other,
   // but ONLY for the functionality keys.
   // Any backend bits set on self will remain unchanged.
+  // See Note [Removing keys from DispatchKeySet Only Affects Functionality Keys]
   DispatchKeySet operator-(DispatchKeySet other) const {
     return DispatchKeySet(repr_ & (full_backend_mask | ~other.repr_));
   }
@@ -286,29 +287,28 @@ class DispatchKeySet final {
   }
 
   // Remove a DispatchKey from the DispatchKey set.
-  // Only functionality bits are allowed to be removed from a keyset.
   // This is generally not an operation you should be doing
   // (it's used to implement operator<<)
-  constexpr DispatchKeySet removeFunctionalityKey(DispatchKey t) const {
-    // For now, we're only allowing removal of "functionality bits" from the keyset,
-    // which is specifically needed by the fallthrough key calculation logic.
-    // Why is removing backend bits problematic? Consider this example:
-    //
-    // DispatchKeySet([DispatchKey.CPU, DispatchKey.AutogradCUDA, DispatchKey.CUDA]).remove(DispatchKey.AutogradCUDA)
-    // DispatchKeySet([DispatchKey.CPU, DispatchKey.AutogradCUDA]).remove(DispatchKey.AutogradCUDA)
-    //
-    // What do we want to happen?
-    // Technically, we'd like it to be true that after removal,
-    // the first keyset still has the CUDA dispatch key while the second doesn't.
-    // Unfortunately there's no way to represent that, because the two keysets are represented the same way internally:
-    // functionality bits: Autograd, Dense
-    // backend bits: CPU, CUDA
-    //
-    // Instead, removeFunctionalityKey(DispatchKey.AutogradCPU) will only remove the "Autograd" bit from the bitset.
+  //
+  // Note [Removing keys from DispatchKeySet Only Affects Functionality Keys]
+  // Only functionality bits are allowed to be removed from a keyset.
+  // For now, we're only allowing removal of "functionality bits" from the keyset,
+  // which is specifically needed by the fallthrough key calculation logic.
+  // Why is removing backend bits problematic? Consider this example:
+  //
+  // DispatchKeySet([DispatchKey.CPU, DispatchKey.AutogradCUDA, DispatchKey.CUDA]).remove(DispatchKey.AutogradCUDA)
+  // DispatchKeySet([DispatchKey.CPU, DispatchKey.AutogradCUDA]).remove(DispatchKey.AutogradCUDA)
+  //
+  // What do we want to happen?
+  // Technically, we'd like it to be true that after removal,
+  // the first keyset still has the CUDA dispatch key while the second doesn't.
+  // Unfortunately there's no way to represent that, because the two keysets are represented the same way internally:
+  // functionality bits: Autograd, Dense
+  // backend bits: CPU, CUDA
+  //
+  // Instead, remove(DispatchKey.AutogradCPU) will only remove the "Autograd" bit from the bitset.
+  constexpr DispatchKeySet remove(DispatchKey t) const {
     return DispatchKeySet(repr_ & ~(DispatchKeySet(t).repr_ & ~full_backend_mask));
-  }
-  constexpr DispatchKeySet removeFunctionalityKeys(DispatchKeySet ks) const {
-    return DispatchKeySet(repr_ & ~(ks.repr_ & ~full_backend_mask));
   }
   // Is the set empty?  (AKA undefined tensor)
   bool empty() const {
@@ -477,13 +477,25 @@ class DispatchKeySet final {
 C10_API std::string toString(DispatchKeySet);
 C10_API std::ostream& operator<<(std::ostream&, DispatchKeySet);
 
-// autograd_dispatch_keyset should include all runtime autograd keys.
-// Alias key DispatchKey::Autograd maps to autograd_dispatch_keyset.
+
+// Alias key DispatchKey::Autograd maps to
+// (autograd_dispatch_keyset x full_backend_mask)
 // NB: keys in this set also get associated with CompositeImplicitAutograd
+//
+// Note [autograd_dispatch_keyset Does Not Include Backend Bits]
+// We don't want to include any backend bits (BackendBit::CPUBit, etc)
+// directly in autograd_dispatch_keyset.
+// Why? keysets like autograd_dispatch_keyset are commonly used to remove autograd keys
+// from a DispatchKeySet throughout the code base. However, you are only allowed
+// to remove functionality bits from a keyset, not backend bits.
+// See Note [Removing keys from DispatchKeySet Only Affects Functionality Keys] for details.
+// To be consistent and avoid confusion, we're explicitly setting up autograd_dispatch_keyset
+// to not have any backend bits.
 constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
         DispatchKey::AutogradFunctionality,
         DispatchKey::AutogradOther,
-    }) | DispatchKeySet(DispatchKeySet::RAW, full_backend_mask);
+        DispatchKey::AutogradNestedTensor,
+    });
 
 constexpr DispatchKeySet autocast_dispatch_keyset = DispatchKeySet({
         DispatchKey::AutocastCPU,
@@ -519,7 +531,11 @@ constexpr DispatchKeySet autogradother_backends = DispatchKeySet(
         DispatchKey::SparseCsrCUDA,
         DispatchKey::CustomRNGKeyId,
         DispatchKey::MkldnnCPU,
-        DispatchKey::Meta});
+        DispatchKey::Meta,
+        // Sparse and Quantized backends also live here.
+        DispatchKey::Sparse,
+        DispatchKey::Quantized})
+        | DispatchKeySet(DispatchKeySet::RAW, full_backend_mask);
 
 // The set of dispatch keys that come after autograd
 // n.b. this relies on the fact that AutogradOther is currently the lowest
@@ -535,7 +551,7 @@ constexpr DispatchKeySet after_ADInplaceOrView_keyset = DispatchKeySet(
 // The set of dispatch keys that come after Functionalize
 constexpr DispatchKeySet after_func_keyset =
         DispatchKeySet(DispatchKeySet::FULL_AFTER, c10::DispatchKey::Functionalize)
-            .removeFunctionalityKey(
+            .remove(
                 // NOTE: we also need to remove ADInplaceOrView from the keyset when
                 // redispatching after the func kernels. This is because we're not
                 // calling the same op; we originally called an inplace op, and now
@@ -548,23 +564,6 @@ constexpr DispatchKeySet after_func_keyset =
                 // get us that, But at::redispatch is more performant. We can get
                 // away with it by explicitly removing the key here.
                 c10::DispatchKey::ADInplaceOrView);
-
-// backend_dispatch_keyset should include all runtime backend keys.
-// Alias key DispatchKey::CompositeExplicitAutograd maps to
-// backend_dispatch_keyset
-constexpr DispatchKeySet backend_dispatch_keyset = autogradother_backends |
-        DispatchKeySet(DispatchKeySet::RAW, full_backend_mask) |
-        DispatchKeySet({
-            DispatchKey::Dense,
-            DispatchKey::Sparse,
-            DispatchKey::Quantized,
-        });
-
-// math_dispatch_keyset contains all keys in backend_dispatch_keyset and
-// autograd_dispatch_keyset Alias key DispatchKey::CompositeImplicitAutograd
-// maps to math_dispatch_keyset.
-constexpr DispatchKeySet math_dispatch_keyset =
-        backend_dispatch_keyset | autograd_dispatch_keyset;
 
 constexpr DispatchKeySet backend_bitset_mask = DispatchKeySet(
     DispatchKeySet::RAW, (1ULL << num_backends) - 1);
@@ -614,7 +613,13 @@ C10_API DispatchKeySet getBackendKeySetFromAutograd(DispatchKey t);
 // returning an optional<DispatchKey>, or throwing. But it makes callers
 // responsible for either a) enforcing the invariant that only backend keys
 // be passed as arguments, or b) interpreting our return value carefully.
-inline DispatchKeySet getAutogradRelatedKeySetFromBackend(BackendBit t) {
+inline DispatchKeySet getAutogradRelatedKeySetFromBackend(BackendBit t, DispatchKeySet ks) {
+  // See Note [Non-Backends that Override Autograd]
+  // If we can get rid of this, then we could drop the ks argument from this function
+  // (which would enforce that only backends can have autograd keys).
+  if (t == BackendBit::InvalidBit && ks.has(DispatchKey::NestedTensor)) {
+    return inplace_or_view_ks | autograd_nestedtensor_ks;
+  }
   switch (t) {
     case BackendBit::CPUBit:
       return inplace_or_view_ks | autograd_cpu_ks;
@@ -630,8 +635,6 @@ inline DispatchKeySet getAutogradRelatedKeySetFromBackend(BackendBit t) {
       return inplace_or_view_ks | autograd_mlc_ks;
     case BackendBit::HPUBit:
       return inplace_or_view_ks | autograd_hpu_ks;
-    case BackendBit::NestedTensorBit:
-      return inplace_or_view_ks | autograd_nestedtensor_ks;
     case BackendBit::PrivateUse1Bit:
       return inplace_or_view_ks | autograd_privateuse1_ks;
     case BackendBit::PrivateUse2Bit:
@@ -674,10 +677,10 @@ static inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
   // top of existing "backend" keys like CPU/CUDA, you need to add it
   // here.  At the moment, autograd keys and ADInplaceOrView key need this
   // treatment;
-  auto ks = s.removeFunctionalityKey(DispatchKey::AutogradFunctionality)
-             .removeFunctionalityKey(DispatchKey::ADInplaceOrView)
-             .removeFunctionalityKey(DispatchKey::AutocastCPU)
-             .removeFunctionalityKey(DispatchKey::AutocastCUDA);
+  auto ks = s.remove(DispatchKey::AutogradFunctionality)
+             .remove(DispatchKey::ADInplaceOrView)
+             .remove(DispatchKey::AutocastCPU)
+             .remove(DispatchKey::AutocastCUDA);
   return ks.highestPriorityTypeId();
 }
 

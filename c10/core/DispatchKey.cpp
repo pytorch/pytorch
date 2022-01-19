@@ -1,4 +1,5 @@
 #include <c10/core/DispatchKey.h>
+#include <c10/core/DispatchKeySet.h>
 
 #include <unordered_map>
 
@@ -18,8 +19,6 @@ const char* toString(BackendBit t) {
       return "LazyBit";
     case BackendBit::XPUBit:
       return "XPUBit";
-    case BackendBit::NestedTensorBit:
-      return "NestedTensorBit";
     case BackendBit::MLCBit:
       return "MLCBit";
     case BackendBit::HPUBit:
@@ -135,8 +134,6 @@ const char* toString(DispatchKey t) {
       return "AutogradMLC";
     case DispatchKey::AutogradHPU:
       return "AutogradHPU";
-    case DispatchKey::AutogradNestedTensor:
-      return "AutogradNestedTensor";
     case DispatchKey::AutogradPrivateUse1:
       return "AutogradPrivateUse1";
     case DispatchKey::AutogradPrivateUse2:
@@ -145,6 +142,8 @@ const char* toString(DispatchKey t) {
       return "AutogradPrivateUse3";
     case DispatchKey::AutogradOther:
       return "AutogradOther";
+    case DispatchKey::AutogradNestedTensor:
+      return "AutogradNestedTensor";
 
     case DispatchKey::ZeroTensor:
       return "ZeroTensor";
@@ -225,38 +224,13 @@ std::ostream& operator<<(std::ostream& str, BackendBit rhs) {
 
 // for a given backend key, return the associated autograd key.
 // for non-backend keys, return AutogradOther as a default.
-// Note: it's convenient and fast to return a default here rather than (say)
-// returning an optional<DispatchKey>, or throwing. But it makes callers
-// responsible for either a) enforcing the invariant that only backend keys
-// be passed as arguments, or b) interpreting our return value carefully.
-//
-DispatchKey getAutogradKeyFromBackend(BackendBit t) {
-  switch (t) {
-    case BackendBit::CPUBit:
-      return DispatchKey::AutogradCPU;
-    case BackendBit::XPUBit:
-      return DispatchKey::AutogradXPU;
-    case BackendBit::CUDABit:
-      return DispatchKey::AutogradCUDA;
-    case BackendBit::XLABit:
-      return DispatchKey::AutogradXLA;
-    case BackendBit::LazyBit:
-      return DispatchKey::AutogradLazy;
-    case BackendBit::MLCBit:
-      return DispatchKey::AutogradMLC;
-    case BackendBit::HPUBit:
-      return DispatchKey::AutogradHPU;
-    case BackendBit::NestedTensorBit:
-      return DispatchKey::AutogradNestedTensor;
-    case BackendBit::PrivateUse1Bit:
-      return DispatchKey::AutogradPrivateUse1;
-    case BackendBit::PrivateUse2Bit:
-      return DispatchKey::AutogradPrivateUse2;
-    case BackendBit::PrivateUse3Bit:
-      return DispatchKey::AutogradPrivateUse3;
-    default:
-      return DispatchKey::AutogradOther;
-  }
+// Or, for non-backends that do override autograd, handle them specially.
+// See Note [Non-Backends that Override Autograd]
+DispatchKey getAutogradKeyFromBackend(DispatchKey k) {
+  // We want this to return an autograd key. We're relying on the fact that
+  // getAutogradRelatedKeySetFromBackend returns an autograd key + ADInplaceOrView,
+  // and autograd has higher precedence.
+  return getAutogradRelatedKeySetFromBackend(toBackendBit(k), DispatchKeySet(k)).highestPriorityTypeId();
 }
 
 c10::DispatchKey parseDispatchKey(const std::string& k) {
@@ -287,6 +261,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"ADInplaceOrView", c10::DispatchKey::ADInplaceOrView},
       {"AutogradOther", c10::DispatchKey::AutogradOther},
       {"AutogradFunctionality", c10::DispatchKey::AutogradFunctionality},
+      {"AutogradNestedTensor", c10::DispatchKey::AutogradNestedTensor},
       {"Tracer", c10::DispatchKey::Tracer},
       {"AutocastCPU", c10::DispatchKey::AutocastCPU},
       {"AutocastCUDA", c10::DispatchKey::AutocastCUDA},
@@ -331,7 +306,6 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"AutogradXPU", c10::DispatchKey::AutogradXPU},
       {"AutogradMLC", c10::DispatchKey::AutogradMLC},
       {"AutogradHPU", c10::DispatchKey::AutogradHPU},
-      {"AutogradNestedTensor", c10::DispatchKey::AutogradNestedTensor},
       {"AutogradPrivateUse1", c10::DispatchKey::AutogradPrivateUse1},
       {"AutogradPrivateUse2", c10::DispatchKey::AutogradPrivateUse2},
       {"AutogradPrivateUse3", c10::DispatchKey::AutogradPrivateUse3},

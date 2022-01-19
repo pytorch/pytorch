@@ -7,7 +7,7 @@ namespace c10 {
 void DispatchKeyExtractor::setOperatorHasFallthroughForKey(DispatchKey k, bool has_fallthrough) {
   // (1) update nonFallthroughKeys_
   if (has_fallthrough) {
-    nonFallthroughKeys_ = nonFallthroughKeys_.removeFunctionalityKey(k);
+    nonFallthroughKeys_ = nonFallthroughKeys_.remove(k);
   } else {
     nonFallthroughKeys_ = nonFallthroughKeys_.add(k);
   }
@@ -20,7 +20,7 @@ void DispatchKeyExtractor::setOperatorHasFallthroughForKey(DispatchKey k, bool h
     // But the enum starts with BackendBit::InvalidBit.
     auto backend_idx = static_cast<uint8_t>(toBackendBit(k)) - 1;
     if (has_fallthrough) {
-      nonFallthroughKeysPerBackend_[backend_idx] = nonFallthroughKeysPerBackend_[backend_idx].removeFunctionalityKey(k);
+      nonFallthroughKeysPerBackend_[backend_idx] = nonFallthroughKeysPerBackend_[backend_idx].remove(k);
     } else {
       nonFallthroughKeysPerBackend_[backend_idx] = nonFallthroughKeysPerBackend_[backend_idx].add(k);
     }
@@ -42,7 +42,7 @@ void DispatchKeyExtractor::setOperatorHasFallthroughForKey(DispatchKey k, bool h
   // (which should almost never happen)
   for (size_t i = 0; i <= num_backends; ++i) {
     if (has_fallthrough) {
-      nonFallthroughKeysPerBackend_[i] = nonFallthroughKeysPerBackend_[i].removeFunctionalityKey(k);
+      nonFallthroughKeysPerBackend_[i] = nonFallthroughKeysPerBackend_[i].remove(k);
     } else {
       nonFallthroughKeysPerBackend_[i] = nonFallthroughKeysPerBackend_[i].add(k);
     }

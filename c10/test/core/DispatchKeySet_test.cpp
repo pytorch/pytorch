@@ -155,7 +155,7 @@ TEST(DispatchKeySet, SingletonFunctionalityKeys) {
     ASSERT_EQ(sing, sing | sing);
     ASSERT_FALSE(sing.empty());
     ASSERT_TRUE(sing.has(tid));
-    ASSERT_EQ(sing.removeFunctionalityKey(tid), DispatchKeySet());
+    ASSERT_EQ(sing.remove(tid), DispatchKeySet());
   }
 }
 
@@ -189,10 +189,10 @@ TEST(DispatchKeySet, SingletonPerBackendFunctionalityKeys) {
     auto expected_ks = DispatchKeySet(functionality_key) | DispatchKeySet(backend_key);
     ASSERT_EQ(sing, expected_ks);
     // These two sets should be equivalent:
-    // DispatchKeySet(DispatchKey::CPU).removeFunctionalityKey(DispatchKey::Dense)
+    // DispatchKeySet(DispatchKey::CPU).remove(DispatchKey::Dense)
     // DispatchKeySet(BackendBit::CPUBit)
     expected_ks = DispatchKeySet(toBackendBit(tid));
-    ASSERT_EQ(sing.removeFunctionalityKey(tid), expected_ks);
+    ASSERT_EQ(sing.remove(tid), expected_ks);
   }
 }
 

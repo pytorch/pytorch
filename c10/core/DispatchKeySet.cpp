@@ -3,6 +3,11 @@
 
 namespace c10 {
 
+// backend_dispatch_keyset includes all dispatch keys that map to backends.
+// Alias key DispatchKey::CompositeExplicitAutograd maps to backend_dispatch_keyset
+constexpr DispatchKeySet backend_dispatch_keyset = autogradother_backends |
+        DispatchKeySet(DispatchKey::Dense);
+
 bool isBackendDispatchKey(DispatchKey t) {
   return t != DispatchKey::Undefined
       // See Note [No Alias Keys in DispatchKeySet]
@@ -15,11 +20,21 @@ bool isBackendDispatchKey(DispatchKey t) {
       && backend_dispatch_keyset.has(t);
 }
 
+// math_dispatch_keyset contains all keys in backend_dispatch_keyset and
+// autograd_dispatch_keyset Alias key DispatchKey::CompositeImplicitAutograd
+// maps to [math_dispatch_keyset x full_backend_mask]
+constexpr DispatchKeySet math_dispatch_keyset =
+        backend_dispatch_keyset | autograd_dispatch_keyset;
+
 DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
   TORCH_INTERNAL_ASSERT(t != DispatchKey::Undefined);
   switch (t) {
     case DispatchKey::Autograd:
-      return autograd_dispatch_keyset;
+      // See Note [autograd_dispatch_keyset Does Not Include Backend Bits]
+      // That's why we OR it with a mask of the backend bits here.
+      // getRuntimeDispatchKeySet() expects to return a keyset of runtime dispatch keys,
+      // like AutogradCPU, but that requires having backend bits.
+      return autograd_dispatch_keyset | DispatchKeySet(DispatchKeySet::RAW, full_backend_mask);
     case DispatchKey::CompositeImplicitAutograd:
       return math_dispatch_keyset;
     case DispatchKey::CompositeExplicitAutograd:
@@ -33,7 +48,7 @@ bool runtimeDispatchKeySetHas(DispatchKey t, DispatchKey k) {
   TORCH_INTERNAL_ASSERT(t != DispatchKey::Undefined);
   switch (t) {
     case DispatchKey::Autograd:
-      return autograd_dispatch_keyset.has(k);
+      return autograd_dispatch_keyset.has(toFunctionalityKey(k));
     case DispatchKey::CompositeImplicitAutograd:
       // See Note [NestedTensor Not Included in Backend Keys]
       return k != DispatchKey::NestedTensor && math_dispatch_keyset.has(k);

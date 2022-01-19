@@ -331,7 +331,7 @@ void OperatorEntry::updateDispatchTable_(const c10::Dispatcher& dispatcher, Disp
   // However, there are some backends that should be included in this set that don't have the dense key set.
   // E.g. DispatchKey::Meta, DispatchKey::ORT.
   if (c10::isBackendDispatchKey(dispatch_key)) {
-    DispatchKey autograd_key = getAutogradKeyFromBackend(DispatchKeySet(dispatch_key).highestBackendKey());
+    DispatchKey autograd_key = getAutogradKeyFromBackend(dispatch_key);
     updateDispatchTableEntry_(dispatcher, autograd_key);
   }
 }
