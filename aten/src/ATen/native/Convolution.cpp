@@ -1621,7 +1621,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
     {
       std::array<bool, 2> input_weight_output_mask = {output_mask[0], output_mask[1]};
       std::tie(backend_grad_input, backend_grad_weight) =
-        conv_depthwise2d_backward_stub(input.device().type(), grad_output.contiguous(), input.contiguous(),
+        conv_depthwise2d_backward_stub(input.device().type(), grad_output, input,
           weight, kernel_size, params.stride, params.padding, params.dilation, input_weight_output_mask);
       break;
     }
