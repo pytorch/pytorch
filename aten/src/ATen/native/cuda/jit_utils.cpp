@@ -1,12 +1,27 @@
-#include <sstream>
-
 #include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
+#include <c10/util/hash.h>
+#include <c10/util/Optional.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/code_template.h>
 #include <ATen/native/cuda/jit_utils.h>
+
+#include <sstream>
+#include <fstream>
+#include <cstdio>
+#include <iterator> // istreambuf_iterator
+#include <cstdlib>
+#include <string>
+
+#if BUILD_JITERATOR_WITH_CACHE
+  // Uses POSIX headers, which is why these are guarded behind BUILD_JITERATOR_WITH_CACHE
+  // TODO: C++17 has the fileystem header, which may replace these
+  #include <sys/types.h>
+  #include <sys/stat.h> // mkdir
+  #include <unistd.h>
+#endif // BUILD_JITERATOR_WITH_CACHE
 
 
 namespace at { namespace cuda { namespace jit {
@@ -510,52 +525,58 @@ const at::cuda::NVRTC& nvrtc() {
 // TODO refactor so this function is usable both from jit and from aten
 void codegenOutputQuery(
     const cudaDeviceProp* const prop,
-    int& major,
-    int& minor,
+    int& cuda_major,
+    int& cuda_minor,
+    int& nvrtc_major,
+    int& nvrtc_minor,
     bool& compile_to_sass) {
-  using CudaVersion = std::pair<int, int>;
-  CudaVersion nvrtc_version;
-  AT_CUDA_NVRTC_CHECK(
-      nvrtc().nvrtcVersion(&nvrtc_version.first, &nvrtc_version.second));
 
+  AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcVersion(&nvrtc_major, &nvrtc_minor));
   TORCH_CHECK(
-      nvrtc_version.first >= 6,
-      "NVRTC versions less than 6 are not supported. Is: ",
-      nvrtc_version.first);
+      nvrtc_major >= 6, "NVRTC versions less than 6 are not supported. Is: ", nvrtc_major);
 
   // Version supported by device
   // Usually any lower version works too but is less efficient
-  const CudaVersion dev_version = CudaVersion(prop->major, prop->minor);
+  using CUDAVersion = std::pair<int, int>;
+  const CUDAVersion nvrtc_version{nvrtc_major, nvrtc_minor};
+  const CUDAVersion dev_version{prop->major, prop->minor};
   // Maximum version supported by the driver, cap dev_version to this
-  CudaVersion max_dev_version;
-  if (nvrtc_version.first <= 7) { // 7 supports 2-5.x
-    max_dev_version = CudaVersion(5, 0);
-  } else if (nvrtc_version.first <= 8) { // 8 supports 2-6.x
-    max_dev_version = CudaVersion(6, 0);
-  } else if (nvrtc_version.first <= 9) { // 9 supports 3-7.2
-    max_dev_version = CudaVersion(7, 2);
-  } else if (nvrtc_version.first <= 10) { // 10 supports 3-7.5
-    max_dev_version = CudaVersion(7, 5);
-  } else if (nvrtc_version == CudaVersion(11, 0)) { // 11.0 supports 3-8.0
-    max_dev_version = CudaVersion(8, 0);
+  CUDAVersion max_dev_version;
+  if (nvrtc_major <= 7) { // 7 supports 2-5.x
+    max_dev_version = CUDAVersion(5, 0);
+  } else if (nvrtc_major <= 8) { // 8 supports 2-6.x
+    max_dev_version = CUDAVersion(6, 0);
+  } else if (nvrtc_major <= 9) { // 9 supports 3-7.2
+    max_dev_version = CUDAVersion(7, 2);
+  } else if (nvrtc_major <= 10) { // 10 supports 3-7.5
+    max_dev_version = CUDAVersion(7, 5);
+  } else if (nvrtc_version == CUDAVersion(11, 0)) { // 11.0 supports 3-8.0
+    max_dev_version = CUDAVersion(8, 0);
   } else {
     // If the driver version is unknown (i.e. newer than this code)
     // assume the driver supports this device
     max_dev_version = dev_version;
   }
+
   if (dev_version > max_dev_version) {
-    major = max_dev_version.first;
-    minor = max_dev_version.second;
+    cuda_major = max_dev_version.first;
+    cuda_minor = max_dev_version.second;
     // if we are clamping major/minor, sass is not compatible
     compile_to_sass = false;
   } else {
-    major = dev_version.first;
-    minor = dev_version.second;
+    cuda_major = dev_version.first;
+    cuda_minor = dev_version.second;
     compile_to_sass = true;
   }
+
+  #if defined(CUDA_VERSION) && CUDA_VERSION < 11010
+    // compile to sass is not allowed prior to CUDA 11.1
+    compile_to_sass = false;
+  #endif
 }
 
-//TODO another copy paste from jit, refactor so it's usable from both
+// TODO: another copy paste from jit, refactor so it's usable from both
+// TODO: try making the CUcontext thread local to see if that improves performance - why is this slow?
 void __inline__ initializeCudaContext() {
   // lazily construct context if non-existing yet;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -644,11 +665,13 @@ std::string generate_code(
           "loader", std::string("LoadWithCast<" + std::to_string(nInputs) + ">"));
       env.s("storer", "StoreWithCast");
     }
+
     if (contiguous) {
       env.s("offset_calculator", "TrivialOffsetCalculator");
     } else {
       env.s("offset_calculator", "OffsetCalculator");
     }
+
     std::stringstream load_inputs;
     for (int i = 0; i < nInputs; i++) {
       auto i_string = std::to_string(i);
@@ -663,8 +686,10 @@ std::string generate_code(
     store_outputs << "s.store<" << result_type
                   << ">(out[j], data[0], output_offsets[0]);\n";
     env.s("store_outputs", store_outputs.str());
+
     static auto cuda_template = at::jit::CodeTemplate(jit_common_types + jit_code_template);
-    return cuda_template.format(env);
+    const auto code = cuda_template.format(env);
+    return code;
   }
 
   // vectorized case
@@ -697,28 +722,148 @@ std::string generate_code(
   env.s("load_unrolled_inputs", load_unrolled_inputs.str());
 
   static auto cuda_template = at::jit::CodeTemplate(jit_common_types + jit_vectorized_code_template);
-  return cuda_template.format(env);
+  const auto code = cuda_template.format(env);
+  return code;
 }
 
-// Compiles the kernel
+
+#ifdef BUILD_JITERATOR_WITH_CACHE
+// Acquires (possibly creating) the kernel cache directory
+c10::optional<std::string> get_cache_dir() {
+  // If the environment variable USE_TORCH_KERNEL_CACHE is set to "0" then no persistent cache is used
+  const char* uptkc = std::getenv("USE_PYTORCH_KERNEL_CACHE");
+  const bool use_kernel_cache = (uptkc == nullptr) ? true : std::strcmp(uptkc, "0");
+
+  if (!use_kernel_cache) {
+    return {};
+  }
+
+  // Cache path comes from PYTORCH_KERNEL_CACHE_PATH, then XDG_CACHE_HOME, then HOME environment variables
+  std::string cache_dir;
+  char* ptkcp = std::getenv("PYTORCH_KERNEL_CACHE_PATH");
+  if (ptkcp != nullptr) {
+    cache_dir = std::string(ptkcp);
+  } else {
+    // USES XDG_CACHE_HOME if it's set
+    ptkcp = std::getenv("XDG_CACHE_HOME");
+    if (ptkcp != nullptr) {
+      cache_dir = std::string(ptkcp) + "/torch/kernels";
+    } else {
+      // Falls back to HOME/.cache
+      ptkcp = std::getenv("HOME");
+      if (ptkcp == nullptr) {
+        TORCH_WARN_ONCE("No PYTORCH_KERNEL_CACHE_PATH or HOME environment variable set!",
+                        " This disables kernel caching.");
+        return {};
+      } else {
+        cache_dir = std::string(ptkcp) + "/.cache/torch/kernels";
+      }
+    }
+  }
+
+  // Creates the cache directory if it does not exist
+  const char* p_cache_dir = cache_dir.c_str();
+  const bool cache_dir_exists = (access(p_cache_dir, F_OK) == 0);
+  if (!cache_dir_exists) {
+    if (mkdir(p_cache_dir, S_IRWXU | S_IRWXG | S_IRWXO) != 0) {
+      TORCH_WARN_ONCE("Specified kernel cache directory could not be created! This disables kernel caching.",
+                      " Specified directory is ", cache_dir, ".",
+                      " This warning will appear only once per process.");
+      return {};
+    }
+  }
+
+  // Checks that the cache directory is readable and writable
+  const bool cache_dir_readable = (access(p_cache_dir, R_OK) == 0);
+  if (!cache_dir_readable) {
+    TORCH_WARN_ONCE("Specified kernel cache directory is not readable! This disables kernel caching.",
+                    " Specified directory is ", cache_dir, ".",
+                    " This warning will appear only once per process.");
+    return {};
+  }
+
+  const bool cache_dir_writable = (access(p_cache_dir, W_OK) == 0);
+  if (!cache_dir_writable) {
+    TORCH_WARN_ONCE("Specified kernel cache directory is not writable! This disables kernel caching.",
+                    " Specified directory is ", cache_dir, ".",
+                    " This warning will appear only once per process.");
+    return {};
+  }
+
+  return cache_dir;
+}
+#endif // BUILD_JITERATOR_WITH_CACHE
+
+// Compiles the kernel, or acquires if from the cache if caching
 NvrtcFunction jit_pwise_function(
     const std::string& code,
     const std::string& kernel_name) {
-  // Acquires device and NVRTC properties (for compile arch and occupancy calculations)
+
+  initializeCudaContext();
+
+  // Acquires CUDA and nvrtc versions and whether we're compiling to ptx or SASS
   const cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
-  int major = 0, minor = 0;
+  int cuda_major = 0, cuda_minor = 0, nvrtc_major = 0, nvrtc_minor = 0;
   bool compile_to_sass = false;
-  codegenOutputQuery(prop, major, minor, compile_to_sass);
+  at::cuda::jit::codegenOutputQuery(
+    prop, cuda_major, cuda_minor, nvrtc_major, nvrtc_minor, compile_to_sass);
+
+  // Objects used whether loading from the cache or jit compiling
+  const auto& nvrtc = at::globalContext().getNVRTC();
+  NvrtcFunction compiled_kernel_;
+  std::string name = kernel_name + "_kernel";
+
+  #ifdef BUILD_JITERATOR_WITH_CACHE
+    static const c10::optional<std::string> cache_dir = get_cache_dir();
+
+    std::string file_path;
+    if (cache_dir.has_value()) {
+      // Attemps to read from the cache.
+      // Cubin name is <kernel name>_arch<major>.<minor>_nvrtc<major>.<minor>_<ptx or sass>_<program length>_<string hash>
+      // Note that the SHA1 hash used in the file name is NOT the SHA1 hash of the file's contents,
+      //   because we hash on the CUDA code, but we save the compiled ptx or sass
+
+      // Acquires SHA1 hash
+      c10::sha1 sha1_hash{code};
+      const auto hash_code = sha1_hash.str();
+
+      // Constructs file path by appending constructed cubin name to cache path
+      std::stringstream ss;
+      ss << *cache_dir << "/";
+      ss << kernel_name;
+      ss << "_arch" << cuda_major << "." << cuda_minor;
+      ss << "_nvrtc" << nvrtc_major << "." << nvrtc_minor;
+      ss << (compile_to_sass ? "_sass" : "_ptx");
+      ss << "_" << code.length();
+      ss << "_" << hash_code;
+      file_path = ss.str();
+
+      std::ifstream readin{file_path, std::ios::in | std::ifstream::binary};
+      if (readin.fail()) {
+        // NOTE: this does not warn because the file might not exist
+        // TODO: consider if this should explicilty check for the file's existence or not to throw
+        //   an informative warning
+        readin.close();
+      } else {
+        // TODO: try passing the "mapped" file directly to cuModuleLoadCall instead of using an intermediate buffer
+        std::vector<char> buffer(std::istreambuf_iterator<char>(readin), {});
+        AT_CUDA_DRIVER_CHECK(nvrtc.cuModuleLoadData(&(compiled_kernel_.module), buffer.data()));
+        AT_CUDA_DRIVER_CHECK(
+          nvrtc.cuModuleGetFunction(&(compiled_kernel_.function), compiled_kernel_.module, name.c_str()));
+        readin.close();
+        return compiled_kernel_;
+      }
+    }
+  #endif // BUILD_JITERATOR_WITH_CACHE
+
+  // Just-in-time compiles the program
+
   // Creates the NVRTC program
   nvrtcProgram program;
-  const auto& nvrtc = at::globalContext().getNVRTC();
   AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcCreateProgram(
       &program, code.c_str(), nullptr, 0, nullptr, nullptr));
-  // constructs nvrtc build arguments
-#if defined(CUDA_VERSION) && CUDA_VERSION < 11010
-  // compile to sass is not allowed prior to CUDA 11.1
-  compile_to_sass = false;
-#endif
+
+  // Constructs nvrtc build arguments
   // CUDA 11.1 allows going directly to SASS (sm_) instead of PTX (compute_)
   // which gives better backwards compatibility to work on older driver,
   // (since older driver doesn't necessrily recognize PTX emitted by new
@@ -727,23 +872,24 @@ NvrtcFunction jit_pwise_function(
   // `unsupported_arch==True`), since SASS are not necessarily compatible,
   // we fallback to PTX instead.
   const std::string compute = std::string("--gpu-architecture=") +
-      (compile_to_sass ? "sm_" : "compute_") + std::to_string(major) +
-      std::to_string(minor);
+      (compile_to_sass ? "sm_" : "compute_") + std::to_string(cuda_major) +
+      std::to_string(cuda_minor);
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<const char*> args = {
       "--std=c++14", compute.c_str(), "-default-device"};
 
-#ifndef NDEBUG
-  // Add line info to generated kernels
-  args.push_back("-lineinfo");
-#else
-  // Avoid excessive register usage from assertion
-  args.push_back("-DNDEBUG");
-#endif
-  // compiles and validates result
-  initializeCudaContext();
+  #ifndef NDEBUG
+    // Add line info to generated kernels
+    args.push_back("-lineinfo");
+  #else
+    // Avoid excessive register usage from assertion
+    args.push_back("-DNDEBUG");
+  #endif
+
   const auto compilation_result =
       nvrtc.nvrtcCompileProgram(program, args.size(), args.data());
+
+  // Throws an error on compilation failure
   if (compilation_result != NVRTC_SUCCESS) {
     size_t logsize;
     AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcGetProgramLogSize(program, &logsize));
@@ -753,9 +899,10 @@ NvrtcFunction jit_pwise_function(
     cu << log.data();
     throw std::runtime_error(cu.str() + code);
   }
+
   size_t ptx_size = 0;
   std::vector<char> ptx;
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11010
+  #if defined(CUDA_VERSION) && CUDA_VERSION >= 11010
     // compile_to_sass determines whether we are generating SASS or PTX, hence
     // the different API.
     const auto getSize = compile_to_sass
@@ -764,23 +911,54 @@ NvrtcFunction jit_pwise_function(
     const auto getFunc = compile_to_sass
         ? at::globalContext().getNVRTC().nvrtcGetCUBIN
         : at::globalContext().getNVRTC().nvrtcGetPTX;
-#else
+  #else
     const auto getSize = at::globalContext().getNVRTC().nvrtcGetPTXSize;
     const auto getFunc = at::globalContext().getNVRTC().nvrtcGetPTX;
-#endif
-    AT_CUDA_NVRTC_CHECK(getSize(program, &ptx_size));
-    ptx.resize(ptx_size);
-    AT_CUDA_NVRTC_CHECK(getFunc(program, ptx.data()));
+  #endif
 
-    NvrtcFunction compiled_kernel_;
-    AT_CUDA_DRIVER_CHECK(nvrtc.cuModuleLoadData(&(compiled_kernel_.module), ptx.data()));
-    std::string name = kernel_name + "_kernel";
-    AT_CUDA_DRIVER_CHECK(
-        nvrtc.cuModuleGetFunction(&(compiled_kernel_.function), compiled_kernel_.module, name.c_str()));
-    // TODO: use guards to avoid leaking
-    AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcDestroyProgram(&program));
+  AT_CUDA_NVRTC_CHECK(getSize(program, &ptx_size));
+  ptx.resize(ptx_size);
+  AT_CUDA_NVRTC_CHECK(getFunc(program, ptx.data()));
 
-    return compiled_kernel_;
+  AT_CUDA_DRIVER_CHECK(nvrtc.cuModuleLoadData(&(compiled_kernel_.module), ptx.data()));
+
+  AT_CUDA_DRIVER_CHECK(
+      nvrtc.cuModuleGetFunction(&(compiled_kernel_.function), compiled_kernel_.module, name.c_str()));
+  // TODO: use guards to avoid leaking
+  AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcDestroyProgram(&program));
+
+  #ifdef BUILD_JITERATOR_WITH_CACHE
+    if (cache_dir.has_value()) {
+      // Writes the program to the cache if caching
+      // NOTE: Actually writes to a per-process temporary file to avoid multi-process contention.
+      //   The temporary file is then renamed to the actual file.
+      //   If the actual file already exists then the rename may fail or replace the actual file,
+      //     the behavior is implementation-specific.
+      //   Files replaced through this process should remain extant if they are being read because
+      //     of UNIX filesystem properties, but this behavior is unverified and may require
+      //     additional review in the future.
+      // TODO: In C++17 we should be able to use the filesystem header.
+      const auto pid = getpid();
+      std::stringstream tmp_file_path_ss;
+      tmp_file_path_ss << file_path << "_tmp_" << pid;
+      const std::string tmp_file_path = tmp_file_path_ss.str();
+      std::ofstream cubin(tmp_file_path, std::ios::out | std::ofstream::binary);
+      if (cubin.fail()) {
+        TORCH_WARN_ONCE("Failed to write temporarily kernel cache file!",
+                        " File path was ", tmp_file_path, ".",
+                        " This warning will only appear once per process.");
+      } else {
+        std::copy(ptx.begin(), ptx.end(), std::ostreambuf_iterator<char>(cubin));
+        if (std::rename(tmp_file_path.c_str(), file_path.c_str()) != 0) {
+          // Removes tmp file if the rename failed
+          std::remove(tmp_file_path.c_str());
+        }
+      }
+      cubin.close();
+    }
+  #endif // BUILD_JITERATOR_WITH_CACHE
+
+  return compiled_kernel_;
 }
 
 // TODO: may need/want to initialize CUDA context here (refactor into nvrtc call)
