@@ -6,21 +6,21 @@ namespace caffe2 {
 namespace {
 template <typename T>
 __global__ void LRNFillScaleNCHW(const int nthreads, const T* in,
-    const int num, const int channels, const int height,
+    const int channels, const int height,
     const int width, const int size, const T alpha_over_size,
     const T bias, T* scale) {
   CUDA_1D_KERNEL_LOOP(index, nthreads) {
     // find out the local offset
-    int w = index % width;
-    int h = (index / width) % height;
-    int n = index / width / height;
-    int offset = (n * channels * height + h) * width + w;
-    int step = height * width;
+    const int w = index % width;
+    const int h = (index / width) % height;
+    const int n = index / width / height;
+    const int offset = (n * channels * height + h) * width + w;
+    const int step = height * width;
     in += offset;
     scale += offset;
     int head = 0;
-    int pre_pad = (size - 1) / 2;
-    int post_pad = size - pre_pad - 1;
+    const int pre_pad = (size - 1) / 2;
+    const int post_pad = size - pre_pad - 1;
     T accum_scale = 0;
     // fill the scale at [n, :, h, w]
     // accumulate values
@@ -54,16 +54,15 @@ __global__ void LRNFillScaleNCHW(const int nthreads, const T* in,
 }
 
 template <typename T>
-__global__ void LRNFillScaleNHWC(const int nthreads, const T* in,
-    const int num, const int height, const int width,
+__global__ void LRNFillScaleNHWC(const int nthreads, const T *const in,
     const int channels, const int size, const T alpha_over_size,
     const T bias, T* scale) {
   CUDA_1D_KERNEL_LOOP(index, nthreads) {
-    int c = index % channels;
-    int pre_pad = (size - 1) / 2;
+    const int c = index % channels;
+    const int pre_pad = (size - 1) / 2;
     scale[index] = 0;
     for (int i = 0; i < size; ++i) {
-      int raw_idx = c + i - pre_pad;
+      const int raw_idx = c + i - pre_pad;
       if (raw_idx >= 0 && raw_idx < channels) {
         scale[index] += in[index + i - pre_pad] * in[index + i - pre_pad];
       }
@@ -85,17 +84,17 @@ __global__ void LRNComputeOutput(const int nthreads, const T* in,
 template <typename T>
 __global__ void LRNComputeDiffNCHW(const int nthreads, const T* bottom_data,
     const T* top_data, const T* scale, const T* top_diff,
-    const int num, const int channels, const int height,
+    const int channels, const int height,
     const int width, const int size, const T negative_beta,
     const T cache_ratio,
     T* bottom_diff) {
   CUDA_1D_KERNEL_LOOP(index, nthreads) {
     // find out the local offset
-    int w = index % width;
-    int h = (index / width) % height;
-    int n = index / width / height;
-    int offset = (n * channels * height + h) * width + w;
-    int step = height * width;
+    const int w = index % width;
+    const int h = (index / width) % height;
+    const int n = index / width / height;
+    const int offset = (n * channels * height + h) * width + w;
+    const int step = height * width;
     bottom_data += offset;
     top_data += offset;
     scale += offset;
@@ -155,13 +154,12 @@ __global__ void LRNComputeDiffNCHW(const int nthreads, const T* bottom_data,
 template <typename T>
 __global__ void LRNComputeDiffNHWC(const int nthreads, const T* bottom_data,
     const T* top_data, const T* scale, const T* top_diff,
-    const int num, const int height, const int width, const int channels,
-    const int size, const T negative_beta, const T cache_ratio,
+    const int channels, const int size, const T negative_beta, const T cache_ratio,
     T* bottom_diff) {
   CUDA_1D_KERNEL_LOOP(index, nthreads) {
     // find out the local channel offset
-    int c = index % channels;
-    int pre_pad = size / 2;
+    const int c = index % channels;
+    const int pre_pad = size / 2;
     T accum_ratio = 0;
     for (int i = -pre_pad; i < size - pre_pad; ++i) {
       if (c + i >= 0 && c + i < channels) {
@@ -200,7 +198,7 @@ bool LRNOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   int n_threads = N * H * W;
   LRNFillScaleNCHW<float><<<CAFFE_GET_BLOCKS(n_threads), CAFFE_CUDA_NUM_THREADS,
                         0, context_.cuda_stream()>>>(
-      n_threads, Xdata, N, C, H, W, size_, alpha_ / size_, bias_, scale_data);
+      n_threads, Xdata, C, H, W, size_, alpha_ / size_, bias_, scale_data);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   n_threads = X.numel();
@@ -237,7 +235,7 @@ bool LRNOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   int n_threads = X.numel();
   LRNFillScaleNHWC<float><<<CAFFE_GET_BLOCKS(n_threads), CAFFE_CUDA_NUM_THREADS,
                         0, context_.cuda_stream()>>>(
-      n_threads, Xdata, N, H, W, C, size_, alpha_ / size_, bias_, scale_data);
+      n_threads, Xdata, C, size_, alpha_ / size_, bias_, scale_data);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   LRNComputeOutput<float><<<CAFFE_GET_BLOCKS(n_threads), CAFFE_CUDA_NUM_THREADS,
@@ -271,20 +269,20 @@ bool LRNGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
     scale_ = &local_scale_tensor_;
   }
   scale_->ResizeLike(X);
-  float* scale_data = scale_->template mutable_data<float>();
-  int n_threads = N * H * W;
+  float *const scale_data = scale_->template mutable_data<float>();
+  const int n_threads = N * H * W;
   LRNFillScaleNCHW<float><<<CAFFE_GET_BLOCKS(n_threads), CAFFE_CUDA_NUM_THREADS,
                         0, context_.cuda_stream()>>>(
-      n_threads, Xdata, N, C, H, W, size_, alpha_ / size_, bias_, scale_data);
+      n_threads, Xdata, C, H, W, size_, alpha_ / size_, bias_, scale_data);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-  const float* dYdata = dY.data<float>();
-  float* dXdata = dX->template mutable_data<float>();
+  const float *const dYdata = dY.data<float>();
+  float *const dXdata = dX->template mutable_data<float>();
 
   LRNComputeDiffNCHW<float><<<CAFFE_GET_BLOCKS(n_threads),
                               CAFFE_CUDA_NUM_THREADS,
                               0, context_.cuda_stream()>>>(
-      n_threads, Xdata, Ydata, scale_data, dYdata, N, C, H, W, size_, -beta_,
+      n_threads, Xdata, Ydata, scale_data, dYdata, C, H, W, size_, -beta_,
       2.f * alpha_ * beta_ / size_, dXdata);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
@@ -317,7 +315,7 @@ bool LRNGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   int n_threads = X.numel();
   LRNFillScaleNHWC<float><<<CAFFE_GET_BLOCKS(n_threads), CAFFE_CUDA_NUM_THREADS,
                         0, context_.cuda_stream()>>>(
-      n_threads, Xdata, N, H, W, C, size_, alpha_ / size_, bias_, scale_data);
+      n_threads, Xdata, C, size_, alpha_ / size_, bias_, scale_data);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   LRNComputeDiffNHWC<float>
@@ -330,9 +328,6 @@ bool LRNGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
           Y.data<float>(),
           scale_data,
           dY.data<float>(),
-          X.dim32(0),
-          X.dim32(1),
-          X.dim32(2),
           X.dim32(3),
           size_,
           -beta_,
