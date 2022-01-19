@@ -580,6 +580,7 @@ class DistributedDataParallel(Module, Joinable):
         else:
             self.process_group = process_group
 
+        self.static_graph = False
         if static_graph:
             self._set_static_graph()
         self.dim = dim
