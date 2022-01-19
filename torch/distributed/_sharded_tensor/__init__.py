@@ -561,7 +561,7 @@ def _reshard_output(
     return module
 
 
-def _collect_local_shards(module: torch.nn.Module) -> torch.nn.Module:
+def _collect_local_shard(module: torch.nn.Module) -> torch.nn.Module:
     """
     Hook a module with local shards collection in the forward pass.
 
@@ -573,6 +573,6 @@ def _collect_local_shards(module: torch.nn.Module) -> torch.nn.Module:
     """
 
     def hook_func(_module, _input, output):
-        return output.collect_local_shards()
+        return output.collect_local_shard()
     module.register_forward_hook(hook_func)
     return module
