@@ -133,7 +133,6 @@ class KIRCleaner : public OptOutDispatch {
 
 } // namespace
 
-
 void GpuLower::collectPaddedParallelDims() {
   ExpressionEvaluator ee(fusion_);
   bool can_be_single_warp = true;

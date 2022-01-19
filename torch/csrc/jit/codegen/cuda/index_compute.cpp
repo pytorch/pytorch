@@ -2790,7 +2790,8 @@ bool canOmitStopPredicate(
 } // namespace
 
 // Returns predicates and the concrete (by loop map) root domains they cover
-std::pair<std::vector<RootPredicateInfo>, ReferenceTensor> Index::getReferenceRootPredicates(
+std::pair<std::vector<RootPredicateInfo>, ReferenceTensor> Index::
+    getReferenceRootPredicates(
         TensorView* consumer_tv,
         const std::vector<kir::ForLoop*>& loops,
         kir::ForLoop* unswitch_or_vec_loop,

@@ -79,8 +79,7 @@ kir::Kernel* Statement::kernel() const {
 
 // When we create a Val we immediately register them with the active fusion.
 Val::Val(IrBuilderPasskey passkey, ValType _vtype, DataType _dtype)
-    : Statement(passkey), vtype_(_vtype), dtype_(_dtype) {
-}
+    : Statement(passkey), vtype_(_vtype), dtype_(_dtype) {}
 
 // NOTE: we don't clone the definition_ and uses_ here
 //  since they may introduce cloning cycles. Instead, we copy
@@ -207,8 +206,7 @@ bool Val::isConsumerOf(const Val* other) const {
 // We don't register with the active fusion in Expr as this needs to be done
 // after inputs and outputs are registered with the Expr
 Expr::Expr(IrBuilderPasskey passkey, ExprType etype)
-    : Statement(passkey), etype_{etype} {
-}
+    : Statement(passkey), etype_{etype} {}
 
 Expr::Expr(const Expr* src, IrCloner* ir_cloner)
     : Statement(src, ir_cloner),

@@ -19,7 +19,6 @@ namespace {
 Bool* getPredicatePerParallelType(
     ParallelType pt,
     const ThreadPredicateMap::PredicateInfo& pred_info) {
-
   auto pt_dim = GpuLower::current()->parallelDimensionMap().get(pt);
 
   // If pt is not used or is proven to be one, no need to predicate.

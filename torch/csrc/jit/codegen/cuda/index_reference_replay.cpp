@@ -264,7 +264,6 @@ TensorDomain* IndexReferenceReplay::computeReplay() {
 IndexCompute getReferenceIndexing(
     const std::vector<kir::ForLoop*>& loop_structure,
     TensorDomain* reference_tensor) {
-
   // Create a simple index mapping from loop iter domains to their local index.
   // This is only applicable to global memory buffers.
   std::unordered_map<IterDomain*, Val*> initial_index_map;
