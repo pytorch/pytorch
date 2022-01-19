@@ -62,6 +62,15 @@ void FoldFrozenConvBatchnorm(Block* b) {
         continue;
       }
 
+      auto bn_rm_ivalue = bn->namedInput("running_mean");
+      auto bn_rv_ivalue = bn->namedInput("running_var");
+      // check running_mean and running_var has value, if they are
+      // None(track_running_stats=False), skiping the folding path.
+      if (bn_rm_ivalue->type() == NoneType::get() &&
+          bn_rv_ivalue->type() == NoneType::get()) {
+        continue;
+      }
+
       auto bn_rm = constant_as<Tensor>(bn->namedInput("running_mean")).value();
       auto bn_rv = constant_as<Tensor>(bn->namedInput("running_var")).value();
       auto bn_eps = constant_as<double>(bn->namedInput("eps")).value();
