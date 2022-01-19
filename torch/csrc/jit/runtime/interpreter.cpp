@@ -668,12 +668,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             INST_NEXT;
           case INST(FORMAT): {
             INST_GUARD;
-            aten_format(stack);
-          }
-            INST_NEXT;
-          case INST(SIZE): {
-            INST_GUARD;
-            size(stack);
+            format(stack, inst.X);
           }
             INST_NEXT;
           case INST(DEVICE): {
@@ -694,11 +689,6 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           case INST(__NOT__): {
             INST_GUARD;
             _not(stack);
-          }
-            INST_NEXT;
-          case INST(BOOL_TENSOR): {
-            INST_GUARD;
-            boolTensor(stack);
           }
             INST_NEXT;
           case INST(DICT_INDEX): {

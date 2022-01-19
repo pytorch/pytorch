@@ -376,6 +376,11 @@ struct CodeImpl {
     insertInstruction(op, X, N);
   }
 
+  void emitFormat(Node* node) {
+    emitLoadInputs(node->inputs());
+    insertInstruction(FORMAT, node->inputs().size(), 0);
+  }
+
   void checkNodeAndEmit(Node* node) {
     // check if the node should be emitted as instruction or operator
     const Operator& op = node->getOperator();
@@ -742,7 +747,7 @@ struct CodeImpl {
         emitLoadInputsAndNode(node, __NOT__);
         break;
       case aten::format:
-        emitLoadInputsAndNode(node, FORMAT);
+        emitFormat(node);
         break;
       case aten::__is__:
         emitLoadInputsAndNode(node, __IS__);

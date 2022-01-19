@@ -270,11 +270,7 @@ bool InterpreterState::run(Stack& stack) {
           frame.step();
         } break;
         case FORMAT: {
-          aten_format(stack);
-          frame.step();
-        } break;
-        case SIZE: {
-          size(stack);
+          format(stack, inst.X);
           frame.step();
         } break;
         case DEVICE: {
@@ -291,10 +287,6 @@ bool InterpreterState::run(Stack& stack) {
         } break;
         case __NOT__: {
           _not(stack);
-          frame.step();
-        } break;
-        case BOOL_TENSOR: {
-          boolTensor(stack);
           frame.step();
         } break;
         case DICT_INDEX: {

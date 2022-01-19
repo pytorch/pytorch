@@ -181,7 +181,6 @@ TEST(BackendTest, TestComposite) {
 
   std::stringstream ss;
   c._save_for_mobile(ss);
-  c._save_for_mobile("test_model.ptl");
   auto mc = _load_for_mobile(ss);
   auto res_mobile = mc.forward(inputs);
 
