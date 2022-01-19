@@ -97,6 +97,17 @@ full_codegen:
   - triu
   - trunc
   - zero_
+  - any
+  - bitwise_or.Tensor
+  - log
+  - max.dim
+  - maximum
+  - minimum
+  - neg
+  - remainder.Tensor
+  - upsample_bilinear2d
+  - upsample_nearest2d
+  - upsample_nearest2d_backward
 supported:
   - as_strided
   - as_strided_

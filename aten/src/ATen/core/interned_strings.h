@@ -223,6 +223,8 @@ namespace c10 {
   _(aten, linalg_vector_norm)        \
   _(aten, linalg_matrix_norm)        \
   _(aten, matmul)                    \
+  _(aten, minimum)                   \
+  _(aten, maximum)                   \
   _(aten, linalg_matmul)             \
   _(aten, linalg_matrix_exp)         \
   _(aten, append)                    \
