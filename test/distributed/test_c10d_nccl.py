@@ -1617,10 +1617,8 @@ class DistributedDataParallelTest(
             device_ids=[device_id],
             process_group=process_group,
             gradient_as_bucket_view=gradient_as_bucket_view,
+            static_graph=static_graph,
         )
-
-        if static_graph:
-            gpu_model._set_static_graph()
 
         # Register a DDP communication hook if any.
         if hook is not None:
@@ -2169,9 +2167,8 @@ class DistributedDataParallelTest(
             device_ids=[self.rank],
             process_group=process_group,
             find_unused_parameters=find_unused_parameters,
+            static_graph=static_graph,
         )
-        if static_graph:
-            ddp_model._set_static_graph()
         self.assertEqual(
             ddp_model._get_ddp_logging_data().get("static_graph", 0), static_graph
         )
