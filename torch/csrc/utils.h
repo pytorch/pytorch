@@ -185,3 +185,7 @@ void storage_set(at::Storage self, ptrdiff_t idx, uint8_t value);
 uint8_t storage_get(at::Storage self, ptrdiff_t idx);
 
 #endif
+
+#if defined(_MSC_VER) && !defined(ssize_t)
+using ssize_t = std::make_signed<size_t>::type;
+#endif
