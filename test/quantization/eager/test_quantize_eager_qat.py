@@ -288,7 +288,6 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
                 def checkQuantized(model):
                     self.assertEqual(type(model.fc1), nnq.Linear)
                     self.assertEqual(type(model.dropout), nnq.Dropout)
-                    self.assertEqual(type(model.fc2), nnq.Linear)
                     test_only_eval_fn(model, self.calib_data)
                     self.checkScriptable(model, self.calib_data)
                     self.checkNoQconfig(model)
