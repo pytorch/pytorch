@@ -1,5 +1,4 @@
-from __future__ import annotations
-from collections.abc import Iterable
+from __future__ import annotations  # type: ignore[attr-defined]
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import (
@@ -10,6 +9,7 @@ from typing import (
     Union
 )
 
+import copy
 import threading
 import torch
 import torch.distributed as dist
@@ -20,7 +20,6 @@ from torch.distributed._sharding_spec import (
     EnumerableShardingSpec,
     ShardMetadata,
     ShardingSpec,
-    ReshardingSpec,
 )
 from torch.distributed._sharding_spec._internals import (
     check_tensor,
@@ -29,13 +28,12 @@ from torch.distributed._sharding_spec._internals import (
     validate_non_overlapping_shards_metadata,
 )
 from torch.distributed.nn.functional import (
+    all_to_all,
+    all_to_all_single,
     reduce_scatter,
 )
 from torch.types import Number
 from .metadata import TensorProperties, ShardedTensorMetadata
-from .ops import (
-    elementwise_ops,
-)
 from .shard import Shard
 from .utils import (
     get_current_process_group,
@@ -129,6 +127,15 @@ class ShardedTensor(object):
             :class:`torch.distributed.rpc.RRef`s pointing to remote shards.
             Need to initialize the RPC Framework if specified as ``True``.
             Default: ``False``.
+
+    .. note:: ShardedTensor uses collectives to do various operations, i.e. it
+        uses all_gather to do cross rank validations. For NCCL-based processed
+        groups, internal tensor representations of objects must be moved to the
+        GPU device before communication takes place. In this case, the device
+        used is given by ``torch.cuda.current_device()`` and it is the user's
+        responsiblity to ensure that this is set so that each rank has an
+        individual GPU, via ``torch.cuda.set_device()``
+
     """
 
     def __new__(cls, *args, **kwargs):
@@ -286,13 +293,11 @@ class ShardedTensor(object):
         # will revise this part with CPU support and use dist.gather()
         # once NCCL support for gather() is ready
         # https://github.com/pytorch/pytorch/issues/66187
-        device = torch.device(f"cuda:{rank % world_size}")
-        with torch.cuda.device(device):
-            dist.all_gather_object(
-                obj=local_shards,
-                object_list=gathered_shards,
-                group=self._process_group,
-            )
+        dist.all_gather_object(
+            obj=local_shards,
+            object_list=gathered_shards,
+            group=self._process_group,
+        )
 
         if rank == dst:
             dims = len(full_size)
@@ -345,22 +350,11 @@ class ShardedTensor(object):
         if world_size > 1:
             gathered_metadatas = [None for _ in range(world_size)]
 
-            if isinstance(process_group, dist.ProcessGroupNCCL):
-                # with GPU/NCCL, we need to set a device for all_gather_object
-                # to use as we need to know which device we should put the
-                # serialized tensor on before the NCCL collective.
-                with torch.cuda.device(current_rank):
-                    dist.all_gather_object(
-                        gathered_metadatas,
-                        local_sharded_tensor_metadata,
-                        group=process_group
-                    )
-            else:
-                dist.all_gather_object(
-                    gathered_metadatas,
-                    local_sharded_tensor_metadata,
-                    group=process_group
-                )
+            dist.all_gather_object(
+                gathered_metadatas,
+                local_sharded_tensor_metadata,
+                group=process_group
+            )
         else:
             gathered_metadatas = [local_sharded_tensor_metadata]
 
@@ -390,7 +384,7 @@ class ShardedTensor(object):
         sharded_tensor_metadata: ShardedTensorMetadata,
         process_group=None,
         init_rrefs=False,
-    ):
+    ) -> "ShardedTensor":
         """
         Initialize a ShardedTensor with local shards and a global
         ShardedTensorMetadata built on each rank.
@@ -559,46 +553,179 @@ class ShardedTensor(object):
         """
         return self._sharding_spec
 
-    def reshard(self, resharding_spec: ReshardingSpec) -> Union[ShardedTensor, torch.Tensor]:
+    def reshard(self, resharding_spec: ShardingSpec) -> ShardedTensor:
         """
-        Reshards a tensor given the resharding_spec, if output_local_tensors is
-        True in resharding_spec.
+        Reshard a sharded tensor given the ``resharding_spec``. For now, we only support
+        single local shard.
 
-        It would output the local shard on each rank instead of ShardedTensor
-        (only works for a single local shard).
+        If ``resharding_spec`` is same as the original one, this becomes a no-op.
+        If only ``resharding_spec`` shares the same sharding dim with the original one,
+        we swap local shards directly.
+        For more generic cases, we merge different shards across different ranks and split
+        the local shards based on the ``resharding_spec`` via `all_to_all` collective API.
+
+        Args:
+            resharding_spec (:class:`torch.distributed._sharding_spec.ShardingSpec`): The
+                specification describing how the tensor is sharded.
+
+        Returns:
+            A :class:`ShardedTensor` object whose local shards are resharded.
+
+        Examples:
+            >>> # We have 2 process groups, 2 ranks.
+            >>> tensor = torch.arange(4, dtype=torch.int64) + 1 + 2 * rank
+            >>> tensor = torch.stack([tensor, tensor])
+            >>> tensor
+            tensor([[1, 2, 3, 4], [1, 2, 3, 4]]) # Rank 0
+            tensor([[3, 4, 5, 6], [3, 4, 5, 6]]) # Rank 1
+            tensor([[5, 6, 7, 8], [5, 6, 7, 8]]) # Rank 2
+            tensor([[7, 8, 9, 10], [7, 8, 9, 10]]) # Rank 3
+            >>> sharding_dim = 0
+            >>> spec = ChunkShardingSpec(
+                    dim=sharding_dim,
+                    placements=[
+                        "rank:0/cuda:0",
+                        "rank:1/cuda:1",
+                        "rank:2/cuda:2",
+                        "rank:3/cuda:3",
+                    ],
+                )
+            >>> st = _sharded_tensor.rand(spec, 8, 2)
+            >>> st.local_shards()[0].tensor = tensor
+            >>> sharding_dim = 1
+            >>> resharding_spec = ChunkShardingSpec(
+                    dim=sharding_dim,
+                    placements=[
+                        "rank:0/cuda:0",
+                        "rank:1/cuda:1",
+                        "rank:2/cuda:2",
+                        "rank:3/cuda:3",
+                    ],
+                )
+            >>> st.reshard(resharding_spec)
+            >>> tensor = st.local_shards()[0].tensor
+            >>> tensor
+            tensor([[1], [1], [3], [3], [5], [5], [7], [7]]) # Rank 0
+            tensor([[2], [2], [4], [4], [6], [6], [8], [8]]) # Rank 1
+            tensor([[3], [3], [5], [5], [7], [7], [9], [9]]) # Rank 2
+            tensor([[4], [4], [6], [6], [8], [8], [10], [10]]) # Rank 3
         """
-        # TODO: implement the reshard for ShardedTensor to ShardedTensor.
-        output_local_tensors = resharding_spec.output_local_tensors
-        if not output_local_tensors:
-            raise RuntimeError(
-                "Reshard not supported for ShardedTensor output yet."
-            )
-        from torch.distributed._sharded_tensor.ops._common import (
-            _result_distribute_with_col_rearrange,
-        )
+        if (
+            not isinstance(resharding_spec, ChunkShardingSpec) or
+            not isinstance(self._sharding_spec, ChunkShardingSpec)
+        ):
+            raise NotImplementedError("Only ChunkShardingSpec supported for reshard.")
+        current_sharding_dim = int(self._sharding_spec.dim)  # type: ignore[attr-defined]
+        reshard_dim = int(resharding_spec.dim)
         local_shard = self.local_shards()[0].tensor
-        local_results = []
-        for i in range(local_shard.size(0)):
-            local_results.append(local_shard[i].t().contiguous())
+        current_rank = dist.get_rank(self._process_group)
+        world_size = dist.get_world_size(self._process_group)
+        if current_sharding_dim == reshard_dim:
+            if self._sharding_spec.placements == resharding_spec.placements:  # type: ignore[attr-defined]
+                return self
+            else:
+                input_split_sizes = [0] * world_size
+                sharded_dim_size = 0
+                split_size = get_split_size(self.size(reshard_dim), world_size)
+                for idx, placement in enumerate(self._sharding_spec.placements):  # type: ignore[attr-defined]
+                    if current_rank == placement.rank():  # type: ignore[union-attr]
+                        new_dim = resharding_spec.placements[idx].placement.rank()  # type: ignore[union-attr]
+                        input_split_sizes[new_dim] = local_shard.size(0)
+                        sharded_dim_size = get_chunked_dim_size(
+                            self.size(reshard_dim), split_size, idx
+                        )
+                        break
+                gathered_input_size = list(local_shard.size())
+                gathered_input_size[reshard_dim] = sharded_dim_size
+                gathered_input = torch.empty(gathered_input_size, device=local_shard.device)
+                local_shard = all_to_all_single(
+                    gathered_input,
+                    local_shard,
+                    input_split_sizes=input_split_sizes,
+                    group=self._process_group,
+                )
+                return self
 
-        # Distribute results to each rank with col rearrangement.
-        output = _result_distribute_with_col_rearrange(
-            local_results,
-            local_shard,
-            len(self._metadata.shards_metadata),
-            self,
-            self._process_group,
+        # Compute expected size
+        split_size = get_split_size(local_shard.size(reshard_dim), world_size)
+        input_split_sizes = [0] * world_size
+        rearrange_input = False
+        for idx, placement in enumerate(resharding_spec.placements):  # type: ignore[attr-defined]
+            sharded_dim_size = get_chunked_dim_size(
+                local_shard.size(reshard_dim), split_size, idx
+            )
+            input_split_sizes[placement.rank()] = sharded_dim_size  # type: ignore[union-attr, index]
+            if placement.rank() != idx:  # type: ignore[union-attr]
+                rearrange_input = True
+
+        if rearrange_input:
+            # Need to re-arrange reshard_dim of local_shard before all2all.
+            indices: List[List[int]] = [[0]] * world_size
+            # When we do the chunk split, we always ensure the first N - 1 chunks get max out
+            # and then the Nth chunk gets the rest. So input_split_sizes like [3, 3, 3, 4]
+            # are not possible. The expected split size will be [4, 4, 4, 1].
+            sharded_dim_size_max = max(input_split_sizes)
+            for idx, placement in enumerate(resharding_spec.placements):
+                split_size = input_split_sizes[placement.rank()]  # type: ignore[union-attr, index]
+                offset_start_idx = idx * sharded_dim_size_max
+                indices[placement.rank()] = list(  # type: ignore[union-attr, index]
+                    range(offset_start_idx, offset_start_idx + split_size)
+                )
+            indices_flatten = list(idx for indice in indices for idx in indice)
+            local_shard = local_shard.index_select(
+                reshard_dim, torch.tensor(indices_flatten, device=local_shard.device)
+            )
+
+        # Because reshard_dim != original shard_dim. We need to compute the
+        # size of tensor from each rank.
+        output_tensor_list = [torch.tensor(1)] * world_size
+        split_size = get_split_size(self.size(current_sharding_dim), world_size)
+        rearrange_output_list = False
+        indices = []
+        for idx, placement in enumerate(self._sharding_spec.placements):
+            sharded_dim_size = get_chunked_dim_size(
+                self.size(current_sharding_dim), split_size, idx
+            )
+            output_tensor_size = list(local_shard.size())
+            output_tensor_size[current_sharding_dim] = sharded_dim_size
+            output_tensor_size[reshard_dim] = input_split_sizes[current_rank]
+            output_tensor_list[placement.rank()] = (  # type: ignore[union-attr, index]
+                torch.empty(output_tensor_size, device=local_shard.device)
+            )
+            indices.append(placement.rank())  # type: ignore[union-attr, index, arg-type]
+            if idx != placement.rank():  # type: ignore[union-attr]
+                rearrange_output_list = True
+
+        # Perform autograd enabled all2all.
+        input_tensor_list = torch.split(local_shard, input_split_sizes, dim=reshard_dim)
+        input_tensor_list = [tensor.contiguous() for tensor in input_tensor_list]
+        output_tensor_list = all_to_all(
+            output_tensor_list,
+            input_tensor_list,
+            group=self._process_group,
         )
 
-        # transpose the output and return result.
-        return output.t().contiguous()
+        if rearrange_output_list:
+            # Need to re-arrange original shard_dim of output_tensor_list.
+            output_tensor_list = [output_tensor_list[idx] for idx in indices]  # type: ignore[call-overload]
+        local_shard = torch.cat(output_tensor_list, dim=current_sharding_dim)
+        self.local_shards()[0].tensor = local_shard
+        return self
+
+    def collect_local_shard(self) -> torch.Tensor:
+        """
+        Return local shards for a sharded_tensor. For now we only support single local shard.
+
+        Returns:
+            A :class:`torch.Tensor` of the local shard.
+        """
+        if len(self.local_shards()) != 1:
+            raise NotImplementedError("Only single local shard is supported.")
+        return self.local_shards()[0].tensor
 
     def __torch_function__(self, func, types, args=(), kwargs=None):
         if func in _SHARDED_OPS:
             return _SHARDED_OPS[func](types, args, kwargs, self._process_group)
-        elif func == torch.nn.functional.gelu:
-            kwargs['op'] = torch.nn.functional.gelu
-            return elementwise_ops(types, args, kwargs)
         raise RuntimeError(
             f"torch function '{func.__name__}', with args: {args} and "
             f"kwargs: {kwargs} not supported for ShardedTensor!")
@@ -798,59 +925,118 @@ def _create_tensor_from_params(*size, local_device, tensor_init_params: TensorIn
         raise ValueError(f'Unsupported create_op: {tensor_init_params.create_op}')
 
 
-class PartialTensor(object):
+class _PartialTensor(object):
     """
     PartialTensor is an abstraction to represent Tensors that need
     aggregation across multiple devices and multiple processes.
 
     PartialTensor is initialized in an SPMD like fashion where each rank
     initializes the PartialTensor. The PartialTensor object on each rank
-    then only stores the local partial shard and provides global metadata
-    for all the shards.
+    then only stores the local partial shard, process group and the
+    aggregation way to get a full tensor.
 
     PartialTensor doesn't provide any Tensor like operations but is a
-    wrapper providing the Tensor representing the local partial shard
-    and the global metadata.
+    wrapper providing the Tensor representing the local partial shard.
 
-    Using these, users can apply custom distributed sharded computations
-    on top of this primitive. The local shards are all initialized using
-    the create_op specified by tensor_init_params.create_op, e.g.,
-    torch.ones, or torch.empty.
+    We assume the size of each local tensor to be exactly the same.
+
+    Users can apply custom distributed sharded computations on top of
+    this primitive.
 
     Args:
-        local_partial_results (List(Tensor)):
-            Partial results are stored across ranks and in a form of a list.
+        local_partial_shard (Tensor): Partial result stored across ranks.
+        pg (ProcessGroup): The process group to aggregate on.
+        aggr_op (distributed_c10d.ReduceOp): Way to aggregate the partial result.
+            Default: ``distributed_c10d.ReduceOp.SUM``
+
+    Examples:
+        >>> # All tensors below are of torch.int64 type.
+        >>> # We have 2 process groups, 2 ranks.
+        >>> tensor = torch.arange(2, dtype=torch.int64) + 1 + 2 * rank
+        >>> tensor = torch.stack([tensor, tensor])
+        >>> tensor
+        tensor([[1, 2], [1, 2]]) # Rank 0
+        tensor([[3, 4], [3, 4]]) # Rank 1
+        >>> partial_tensor = _PartialTensor(tensor, distributed_c10d.ReduceOp.MAX)
+        >>> sharding_dim = 0
+        >>> collect_spec = ChunkShardingSpec(
+                dim=sharding_dim,
+                placements=[
+                    "rank:0/cuda:0",
+                    "rank:1/cuda:1",
+                ],
+            )
+        >>> complete_tensor = partial_tensor.reshard(collect_spec)
+        >>> complete_tensor
+        tensor([3, 4]) # Rank 0
+        tensor([3, 4]) # Rank 1
+
+        >>> # All tensors below are of torch.cfloat type.
+        >>> # We have 2 process groups, 2 ranks.
+        >>> tensor = torch.tensor([1+1j, 2+2j], dtype=torch.cfloat) + 2 * rank * (1+1j)
+        >>> tensor = torch.stack([tensor, tensor])
+        >>> tensor
+        tensor([[1.+1.j, 2.+2.j], [1.+1.j, 2.+2.j]]) # Rank 0
+        tensor([[3.+3.j, 4.+4.j], [3.+3.j, 4.+4.j]]) # Rank 1
+        >>> partial_tensor = _PartialTensor(tensor)
+        >>> complete_tensor = partial_tensor.reshard(collect_spec)
+        >>> complete_tensor
+        tensor([4.+4.j, 6.+6.j]) # Rank 0
+        tensor([4.+4.j, 6.+6.j]) # Rank 1
     """
 
-    def __init__(self, local_partial_results):
-        self.local_partial_results = local_partial_results
+    def __init__(self, local_partial_shard, pg, aggr_op=distributed_c10d.ReduceOp.SUM):
+        self.local_partial_shard = local_partial_shard
+        self.pg = pg
+        self.aggr_op = aggr_op
 
     def __post_init__(self):
-        if not isinstance(self.local_partial_results, Iterable):
-            raise ValueError('local_partial_results needs to be a Iterable.')
-        for tensor in self.local_partial_results:
-            if not isinstance(tensor, torch.Tensor):
-                raise ValueError('Element in local_partial_results needs to be a Tensor.')
+        if not isinstance(self.local_partial_shard, torch.Tensor):
+            raise ValueError("local_partial_shard needs to be a Tensor.")
+        if not isinstance(self.aggr_op, distributed_c10d.ReduceOp):
+            raise ValueError(
+                "aggr_op needs to be a member of distributed_c10d.ReduceOp."
+            )
 
-    def reshard(self, _resharding_spec: ReshardingSpec) -> torch.Tensor:
+    def reshard(self, resharding_spec: ShardingSpec) -> ShardedTensor:
         """
-        Consolidate all partial tensors across multiple ranks based on resharding
-        spec.
+        Consolidate all partial tensors across multiple ranks and covert to a sharded
+        tensor based on the resharding spec.
+
+        Args:
+            resharding_spec (:class:`torch.distributed._sharding_spec.ShardingSpec`):
+                The specification describing how we reshard the aggregated local result.
+
+        Returns:
+            A :class:`ShardedTensor` filled with local aggregated result.
         """
-        local_result = torch.empty_like(self.local_partial_results[0])
-        return reduce_scatter(local_result, self.local_partial_results)
+        sharding_dim = int(resharding_spec.dim)  # type: ignore[attr-defined]
+        world_size = dist.get_world_size(self.pg)
+        local_shards = torch.tensor_split(self.local_partial_shard, world_size)
+        local_result = reduce_scatter(
+            torch.empty_like(local_shards[0]), list(local_shards), op=self.aggr_op
+        )
 
+        rank = dist.get_rank(self.pg)
+        local_metadata = None
+        shard_tensor_size = list(local_result.size())
+        shard_tensor_size[sharding_dim] *= world_size
+        current_offsets = [0] * len(local_result.size())
+        shards = []
+        for idx, placement in enumerate(resharding_spec.placements):  # type: ignore[attr-defined]
+            if rank == placement.rank():  # type: ignore[union-attr]
+                local_metadata = ShardMetadata(
+                    shard_offsets=current_offsets,
+                    shard_sizes=list(local_result.size()),
+                    placement=placement,
+                )
+                shards.append(Shard(local_result, local_metadata))
+                break
+            current_offsets[sharding_dim] += local_result.size(sharding_dim)  # type: ignore[index]
 
-class ModuleResharder(torch.nn.Module):
-    """
-    A module that will reshard its output based on the resharding_spec.
-    """
+        st = ShardedTensor._init_from_local_shards(
+            shards, tuple(shard_tensor_size), process_group=self.pg
+        )
+        st._sharding_spec = copy.deepcopy(resharding_spec)
 
-    def __init__(self, original_module, resharding_spec):
-        super().__init__()
-        self.original_module = original_module
-        self.resharding_spec = resharding_spec
-
-    def forward(self, *args, **kwargs):
-        output = self.original_module(*args, **kwargs)
-        return output.reshard(self.resharding_spec, **kwargs)
+        return st
