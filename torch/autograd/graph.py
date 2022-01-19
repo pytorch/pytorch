@@ -58,21 +58,21 @@ class saved_tensors_hooks():
         to undefined behavior.
 
     .. warning ::
-        Only one pair of hooks is allowed at a time. Recursively nesting this
-        context-manager is not yet supported.
+        Only one pair of hooks is allowed at a time. When recursively nesting this
+        context-manager, only the inner-most pair of hooks will be applied.
     """
     def __init__(self, pack_hook: Callable[[torch.Tensor], Any], unpack_hook: Callable[[Any], torch.Tensor]):
         self.pack_hook = pack_hook
         self.unpack_hook = unpack_hook
 
     def __enter__(self):
-        torch._C._autograd._register_saved_tensors_default_hooks(self.pack_hook, self.unpack_hook)
+        torch._C._autograd._push_saved_tensors_default_hooks(self.pack_hook, self.unpack_hook)
 
     def __exit__(self, *args: Any):
-        torch._C._autograd._reset_saved_tensors_default_hooks()
+        torch._C._autograd._pop_saved_tensors_default_hooks()
 
 
-class save_on_cpu():
+class save_on_cpu(saved_tensors_hooks):
     """Context-manager under which tensors saved by the forward pass will be
     stored on cpu, then retrieved for backward.
 
@@ -113,20 +113,24 @@ class save_on_cpu():
         >>> # all intermediary tensors are released (deleted) after the call to backward
 
     """
+    # NOTE: when pin_memory=True, save_on_cpu does asynchronous copy when moving
+    # tensor to CPU and GPU. In general, this means that it is the user's job
+    # to do necessary synchronizations, however in this case it is impossible
+    # for the end user to ever have access to this tensor saved by autograd. Any
+    # modification to this feature should ensure that this remain the case.
     def __init__(self, pin_memory=False):
         def pack_to_cpu(tensor):
             packed = tensor.to("cpu", non_blocking=pin_memory)
+            # NOTE: do NOT try to use the "packed" tensor or modify it in
+            # any way, as this will cause application synchronization issues
+            # when pin_memory=True!
             return (tensor.device, packed)
 
         def unpack_from_cpu(packed):
             device, tensor = packed
+            # NOTE: do NOT try to use the "packed" tensor or modify it in
+            # any way, as this will cause application synchronization issues
+            # when pin_memory=True!
             return tensor.to(device, non_blocking=pin_memory)
 
-        self.pack_hook = pack_to_cpu
-        self.unpack_hook = unpack_from_cpu
-
-    def __enter__(self):
-        torch._C._autograd._register_saved_tensors_default_hooks(self.pack_hook, self.unpack_hook)
-
-    def __exit__(self, *args: Any):
-        torch._C._autograd._reset_saved_tensors_default_hooks()
+        super().__init__(pack_to_cpu, unpack_from_cpu)
