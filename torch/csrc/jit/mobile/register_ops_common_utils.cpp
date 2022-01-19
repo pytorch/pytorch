@@ -48,10 +48,10 @@ IValue tensorToListRecursive(
   } else {
     // If the output type is a scalar, read and push one scalar of
     // the right type onto the stack.
-    if (ty == at::DynamicTypeTrait<at::IntType>::getBaseType()) {
+    if (ty == at::IntType::get()) {
       int64_t scalar = *(int64_t*)data;
       return IValue(scalar);
-    } else if (ty == at::DynamicTypeTrait<at::FloatType>::getBaseType()) {
+    } else if (ty == at::FloatType::get()) {
       TORCH_INTERNAL_ASSERT(
           scalar_ty == at::ScalarType::Float ||
               scalar_ty == at::ScalarType::Double,
@@ -59,7 +59,7 @@ IValue tensorToListRecursive(
       double scalar =
           scalar_ty == at::ScalarType::Float ? *(float*)data : *(double*)data;
       return IValue(scalar);
-    } else if (ty == at::DynamicTypeTrait<at::ComplexType>::getBaseType()) {
+    } else if (ty == at::ComplexType::get()) {
       TORCH_INTERNAL_ASSERT(
           scalar_ty == at::ScalarType::ComplexFloat ||
               scalar_ty == at::ScalarType::ComplexDouble,
@@ -68,7 +68,7 @@ IValue tensorToListRecursive(
           ? *(c10::complex<float>*)data
           : *(c10::complex<double>*)data;
       return IValue(scalar);
-    } else if (ty == at::DynamicTypeTrait<at::BoolType>::getBaseType()) {
+    } else if (ty == at::BoolType::get()) {
       bool scalar = *(bool*)data;
       return IValue(scalar);
     } else {
@@ -78,6 +78,7 @@ IValue tensorToListRecursive(
           " is not one of the supported types for tolist: int, float, bool");
     }
   }
+
   // Make the result list consisting of elements of type ty. Since this
   // invocation is processing dimension cur_dim, there will be sizes[cur_dim]
   // output elements.
