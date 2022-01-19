@@ -429,7 +429,8 @@ MultiheadAttentionImpl::MultiheadAttentionImpl(const MultiheadAttentionOptions& 
 std::tuple<Tensor, Tensor> MultiheadAttentionImpl::forward(
   const Tensor& query, const Tensor& key,
   const Tensor& value, const Tensor& key_padding_mask,
-  bool need_weights, const Tensor& attn_mask) {
+  bool need_weights, const Tensor& attn_mask,
+  bool average_attn_weights) {
   if (!_qkv_same_embed_dim) {
     return F::multi_head_attention_forward(
       query, key, value,
@@ -452,6 +453,7 @@ std::tuple<Tensor, Tensor> MultiheadAttentionImpl::forward(
        .q_proj_weight(q_proj_weight)
        .k_proj_weight(k_proj_weight)
        .v_proj_weight(v_proj_weight)
+       .average_attn_weights(average_attn_weights)
     );
   } else {
     return F::multi_head_attention_forward(
@@ -471,6 +473,7 @@ std::tuple<Tensor, Tensor> MultiheadAttentionImpl::forward(
        .key_padding_mask(key_padding_mask)
        .need_weights(need_weights)
        .attn_mask(attn_mask)
+       .average_attn_weights(average_attn_weights)
     );
   }
 }

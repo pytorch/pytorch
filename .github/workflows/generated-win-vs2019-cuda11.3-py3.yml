@@ -10,7 +10,6 @@ on:
     branches:
       - master
       - release/*
-      - fbsync
   workflow_dispatch:
 
 env:
@@ -139,6 +138,7 @@ jobs:
           rm -rf ./*
 
   generate-test-matrix:
+    needs: build
     runs-on: ubuntu-18.04
     timeout-minutes: 240
     env:
@@ -313,7 +313,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
-          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
+          WORKFLOW_ID: '${{ github.run_id }}'
         shell: bash
         run: |
           python3 -m pip install -r requirements.txt
