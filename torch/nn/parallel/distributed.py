@@ -482,10 +482,10 @@ class DistributedDataParallel(Module, Joinable):
                      static. Static graph means 1) The set of used and unused
                      parameters will not change during the whole training loop; in
                      this case, it does not matter whether users set
-                     find_unused_parameters = True or not. 2) How the graph is trained
+                     ``find_unused_parameters = True`` or not. 2) How the graph is trained
                      will not change during the whole training loop (meaning there is
                      no control flow depending on iterations).
-                     When static_graph is set to be True, DDP will support cases that
+                     When static_graph is set to be ``True``, DDP will support cases that
                      can not be supported in the past:
                      1) Reentrant backwards.
                      2) Activation checkpointing multiple times.
@@ -493,7 +493,18 @@ class DistributedDataParallel(Module, Joinable):
                      4) There are model parameters that are outside of forward function.
                      5) Potentially improve performance when there are unused parameters,
                      as DDP will not search graph in each iteraton to detect unused
-                     parameters when static_graph is set to be True.
+                     parameters when static_graph is set to be ``True``.
+                     To check whether you can set static_graph to be ``True``, one way is to
+                     check ddp logging data at the end of your previous model training,
+                     if ``ddp_logging_data.get("can_set_static_graph") == True``, mostly you
+                     can set ``static_graph = True`` as well.
+
+                     Example::
+                         >>> model_DDP = torch.nn.parallel.DistributedDataParallel(model)
+                         >>> # Training loop
+                         >>> .....
+                         >>> ddp_logging_data = model_DDP._get_ddp_logging_data()
+                         >>> static_graph = ddp_logging_data.get("can_set_static_graph")
 
 
     Attributes:
