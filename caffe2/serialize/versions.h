@@ -12,7 +12,7 @@ namespace serialize {
 constexpr uint64_t kMinSupportedFileFormatVersion = 0x1L;
 
 #if ENABLE_UPGRADERS
-constexpr uint64_t kMaxSupportedFileFormatVersion = 0x7L;
+constexpr uint64_t kMaxSupportedFileFormatVersion = 0x8L;
 #else
 constexpr uint64_t kMaxSupportedFileFormatVersion = 0x6L;
 #endif
@@ -64,7 +64,8 @@ constexpr uint64_t kMaxSupportedFileFormatVersion = 0x6L;
 //     1. aten::div is changed at version 4
 //     2. aten::full is changed at version 5
 //     3. torch.package uses version 6
-constexpr uint64_t kProducedFileFormatVersion = 0x7L;
+//     4. aten::linspace is changed at version 7
+constexpr uint64_t kProducedFileFormatVersion = 0x8L;
 #else
 constexpr uint64_t kProducedFileFormatVersion = 0x3L;
 #endif
@@ -100,7 +101,7 @@ constexpr uint64_t kMinProducedFileFormatVersion = 0x3L;
 //  Refer to the summary of https://github.com/pytorch/pytorch/pull/56845
 //  for details.
 //  0x7L: Enable support for operators with default arguments plus out arguments.
-constexpr uint64_t kProducedBytecodeVersion = 0x7L;
+constexpr uint64_t kProducedBytecodeVersion = 0x8L;
 
 static_assert(kProducedBytecodeVersion >= kProducedFileFormatVersion,
     "kProducedBytecodeVersion must be higher or equal to kProducedFileFormatVersion.");

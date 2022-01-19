@@ -14,7 +14,14 @@ namespace torch {
 namespace jit {
 
 static std::unordered_map<std::string, std::string> kUpgradersEntryMap(
-    {{"div_Tensor_0_3", R"SCRIPT(
+    {{"linspace_0_7", R"SCRIPT(
+  def linspace_0_7(start: Union[int, float, complex], end: Union[int, float, complex], steps: int, *, dtype: Optional[int],
+                   layout: Optional[int], device: Optional[torch.device], pin_memory: Optional[bool]):
+    if (steps == None):
+      raise RuntimeError('Step size must be provided')
+    return torch.linspace(start=start, end=end, steps=steps, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory)
+)SCRIPT"},
+    {"div_Tensor_0_3", R"SCRIPT(
 def div_Tensor_0_3(self: Tensor, other: Tensor) -> Tensor:
   if (self.is_floating_point() or other.is_floating_point()):
     return self.true_divide(other)

@@ -64,6 +64,13 @@ with torch._jit_internal._disable_emit_hooks():
     def full_out_0_4(size: List[int], fill_value: Union[int, float], *, out: torch.Tensor) -> torch.Tensor:
         return torch.full(size, fill_value, out=out)
 
+    @torch.jit.script
+    def linspace_0_7(start: Union[int, float, complex], end: Union[int, float, complex], steps: int, *, dtype: Optional[int], layout: Optional[int], device: Optional[torch.device],
+                 pin_memory: Optional[bool]):
+        if (steps == None):
+            raise RuntimeError("Step size must be provided")
+        return torch.linspace(start=start, end=end, steps=steps, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory)
+
 def format_bytecode(table):
     # given a nested tuples, convert them to nested list
     def listify(content):
