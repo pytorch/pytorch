@@ -37,7 +37,16 @@ fi
 
 EXTRA_CONDA_FLAGS=""
 NUMPY_PIN=""
-if [[ "\$python_nodot" = *39* || "\$python_nodot" = *310* ]]; then
+PROTOBUF_PACKAGE="defaults::protobuf"
+if [[ "\$python_nodot" = *310* ]]; then
+  EXTRA_CONDA_FLAGS="-c=conda-forge"
+  # There's an issue with conda channel priority where it'll randomly pick 1.19 over 1.20
+  # we set a lower boundary here just to be safe
+  NUMPY_PIN=">=1.21.2"
+  PROTOBUF_PACKAGE="protobuf>=3.19.0"
+fi
+
+if [[ "\$python_nodot" = *39*  ]]; then
   EXTRA_CONDA_FLAGS="-c=conda-forge"
   # There's an issue with conda channel priority where it'll randomly pick 1.19 over 1.20
   # we set a lower boundary here just to be safe
@@ -73,7 +82,7 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
       ninja \
       dataclasses \
       typing-extensions \
-      defaults::protobuf \
+      ${PROTOBUF_PACKAGE} \
       six
     if [[ "$DESIRED_CUDA" == 'cpu' ]]; then
       retry conda install -c pytorch -y cpuonly
