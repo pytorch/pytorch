@@ -677,7 +677,6 @@ class TestCommon(TestCase):
     # NB: onlyCPU because CompositeImplicitAutograd ops go through the same
     # codepath on all devices. Ideally we'd use a meta device here but coverage
     # for that is not good yet.
-    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, '__torch_dispatch__ does not work in fbcode')
     @onlyCPU
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_composite_compliance(self, device, dtype, op):
