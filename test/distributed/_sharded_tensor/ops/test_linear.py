@@ -122,6 +122,12 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
             self._run_sharded_linear(spec, [7, 23], [23, 13], 0)
             self._run_sharded_linear(spec, [4, 15], [15, 14], 0)
 
+            # Test multiple input dims
+            self._run_sharded_linear(spec, [10, 2, 17], [17, 12], 0)
+            self._run_sharded_linear(spec, [13, 8, 21], [21, 11], 0)
+            self._run_sharded_linear(spec, [27, 7, 23], [23, 13], 0)
+            self._run_sharded_linear(spec, [100, 12, 4, 15], [15, 14], 0)
+
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
@@ -133,6 +139,11 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
             # Test uneven split.
             self._run_sharded_linear(spec, [5, 19], [19, 11], 1)
             self._run_sharded_linear(spec, [10, 21], [21, 11], 1)
+
+            # Test multiple input dims
+            self._run_sharded_linear(spec, [13, 8, 16], [16, 11], 1)
+            self._run_sharded_linear(spec, [10, 5, 19], [19, 11], 1)
+            self._run_sharded_linear(spec, [12, 15, 10, 21], [21, 11], 1)
 
 
 if __name__ == "__main__":
