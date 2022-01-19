@@ -112,6 +112,7 @@ class Conf:
             parameters["resource_class"] = "xlarge"
         if hasattr(self, 'filters'):
             parameters['filters'] = self.filters
+        parameters["resource_class"] = "xlarge"
         return parameters
 
     def gen_workflow_job(self, phase):
