@@ -47,11 +47,6 @@ jobs:
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -79,6 +74,14 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -90,11 +93,11 @@ jobs:
           repository: pytorch/builder
           path: ${{ env.BUILDER_ROOT }}
       - name: Populate binary env
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
       - uses: seemethere/upload-artifact-s3@v3
@@ -103,7 +106,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            ${{ runner.temp }}/artifacts/*
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -123,11 +126,6 @@ jobs:
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -155,11 +153,19 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
           name: conda-py3_7-cpu
-          path: "${{ runner.temp }}/artifacts/"
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -171,11 +177,11 @@ jobs:
           repository: pytorch/builder
           path: ${{ env.BUILDER_ROOT }}
       - name: Populate binary env
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Test PyTorch binary
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
       - name: Wait until all sessions have drained
@@ -196,11 +202,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_7-cpu-test
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -318,11 +319,6 @@ jobs:
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -351,6 +347,14 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -362,11 +366,11 @@ jobs:
           repository: pytorch/builder
           path: ${{ env.BUILDER_ROOT }}
       - name: Populate binary env
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
       - uses: seemethere/upload-artifact-s3@v3
@@ -375,7 +379,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            ${{ runner.temp }}/artifacts/*
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -395,11 +399,6 @@ jobs:
     runs-on: windows.8xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -428,11 +427,19 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
           name: conda-py3_7-cuda11_1
-          path: "${{ runner.temp }}/artifacts/"
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -444,11 +451,11 @@ jobs:
           repository: pytorch/builder
           path: ${{ env.BUILDER_ROOT }}
       - name: Populate binary env
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Test PyTorch binary
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
       - name: Wait until all sessions have drained
@@ -469,11 +476,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_7-cuda11_1-test
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -592,11 +594,6 @@ jobs:
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -625,6 +622,14 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -636,11 +641,11 @@ jobs:
           repository: pytorch/builder
           path: ${{ env.BUILDER_ROOT }}
       - name: Populate binary env
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
       - uses: seemethere/upload-artifact-s3@v3
@@ -649,7 +654,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            ${{ runner.temp }}/artifacts/*
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -669,11 +674,6 @@ jobs:
     runs-on: windows.8xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -702,11 +702,19 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
           name: conda-py3_7-cuda11_3
-          path: "${{ runner.temp }}/artifacts/"
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -718,11 +726,11 @@ jobs:
           repository: pytorch/builder
           path: ${{ env.BUILDER_ROOT }}
       - name: Populate binary env
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Test PyTorch binary
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
       - name: Wait until all sessions have drained
@@ -743,11 +751,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_7-cuda11_3-test
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -866,11 +869,6 @@ jobs:
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -899,6 +897,14 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -910,11 +916,11 @@ jobs:
           repository: pytorch/builder
           path: ${{ env.BUILDER_ROOT }}
       - name: Populate binary env
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
       - uses: seemethere/upload-artifact-s3@v3
@@ -923,7 +929,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            ${{ runner.temp }}/artifacts/*
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -943,11 +949,6 @@ jobs:
     runs-on: windows.8xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -976,11 +977,19 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
           name: conda-py3_7-cuda11_5
-          path: "${{ runner.temp }}/artifacts/"
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -992,11 +1001,11 @@ jobs:
           repository: pytorch/builder
           path: ${{ env.BUILDER_ROOT }}
       - name: Populate binary env
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Test PyTorch binary
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
       - name: Wait until all sessions have drained
@@ -1017,11 +1026,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_7-cuda11_5-test
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -1140,11 +1144,6 @@ jobs:
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -1172,6 +1171,14 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -1183,11 +1190,11 @@ jobs:
           repository: pytorch/builder
           path: ${{ env.BUILDER_ROOT }}
       - name: Populate binary env
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
       - uses: seemethere/upload-artifact-s3@v3
@@ -1196,7 +1203,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            ${{ runner.temp }}/artifacts/*
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -1216,11 +1223,6 @@ jobs:
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -1248,11 +1250,19 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
           name: conda-py3_8-cpu
-          path: "${{ runner.temp }}/artifacts/"
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -1264,11 +1274,11 @@ jobs:
           repository: pytorch/builder
           path: ${{ env.BUILDER_ROOT }}
       - name: Populate binary env
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Test PyTorch binary
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
       - name: Wait until all sessions have drained
@@ -1289,11 +1299,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_8-cpu-test
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -1411,11 +1416,6 @@ jobs:
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -1444,6 +1444,14 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -1455,11 +1463,11 @@ jobs:
           repository: pytorch/builder
           path: ${{ env.BUILDER_ROOT }}
       - name: Populate binary env
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
       - uses: seemethere/upload-artifact-s3@v3
@@ -1468,7 +1476,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            ${{ runner.temp }}/artifacts/*
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -1488,11 +1496,6 @@ jobs:
     runs-on: windows.8xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -1521,11 +1524,19 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
           name: conda-py3_8-cuda11_1
-          path: "${{ runner.temp }}/artifacts/"
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -1537,11 +1548,11 @@ jobs:
           repository: pytorch/builder
           path: ${{ env.BUILDER_ROOT }}
       - name: Populate binary env
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Test PyTorch binary
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
       - name: Wait until all sessions have drained
@@ -1562,11 +1573,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_8-cuda11_1-test
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -1685,11 +1691,6 @@ jobs:
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -1718,6 +1719,14 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -1729,11 +1738,11 @@ jobs:
           repository: pytorch/builder
           path: ${{ env.BUILDER_ROOT }}
       - name: Populate binary env
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
       - uses: seemethere/upload-artifact-s3@v3
@@ -1742,7 +1751,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            ${{ runner.temp }}/artifacts/*
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -1762,11 +1771,6 @@ jobs:
     runs-on: windows.8xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -1795,11 +1799,19 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
           name: conda-py3_8-cuda11_3
-          path: "${{ runner.temp }}/artifacts/"
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -1811,11 +1823,11 @@ jobs:
           repository: pytorch/builder
           path: ${{ env.BUILDER_ROOT }}
       - name: Populate binary env
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Test PyTorch binary
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
       - name: Wait until all sessions have drained
@@ -1836,11 +1848,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_8-cuda11_3-test
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -1959,11 +1966,6 @@ jobs:
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -1992,6 +1994,14 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -2003,11 +2013,11 @@ jobs:
           repository: pytorch/builder
           path: ${{ env.BUILDER_ROOT }}
       - name: Populate binary env
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
       - uses: seemethere/upload-artifact-s3@v3
@@ -2016,7 +2026,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            ${{ runner.temp }}/artifacts/*
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -2036,11 +2046,6 @@ jobs:
     runs-on: windows.8xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -2069,11 +2074,19 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
           name: conda-py3_8-cuda11_5
-          path: "${{ runner.temp }}/artifacts/"
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -2085,11 +2098,11 @@ jobs:
           repository: pytorch/builder
           path: ${{ env.BUILDER_ROOT }}
       - name: Populate binary env
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Test PyTorch binary
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
       - name: Wait until all sessions have drained
@@ -2110,11 +2123,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_8-cuda11_5-test
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -2233,11 +2241,6 @@ jobs:
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -2265,6 +2268,14 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -2276,11 +2287,11 @@ jobs:
           repository: pytorch/builder
           path: ${{ env.BUILDER_ROOT }}
       - name: Populate binary env
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
       - uses: seemethere/upload-artifact-s3@v3
@@ -2289,7 +2300,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            ${{ runner.temp }}/artifacts/*
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -2309,11 +2320,6 @@ jobs:
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -2341,11 +2347,19 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
           name: conda-py3_9-cpu
-          path: "${{ runner.temp }}/artifacts/"
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -2357,11 +2371,11 @@ jobs:
           repository: pytorch/builder
           path: ${{ env.BUILDER_ROOT }}
       - name: Populate binary env
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Test PyTorch binary
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
       - name: Wait until all sessions have drained
@@ -2382,11 +2396,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_9-cpu-test
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -2504,11 +2513,6 @@ jobs:
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -2537,6 +2541,14 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -2548,11 +2560,11 @@ jobs:
           repository: pytorch/builder
           path: ${{ env.BUILDER_ROOT }}
       - name: Populate binary env
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
       - uses: seemethere/upload-artifact-s3@v3
@@ -2561,7 +2573,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            ${{ runner.temp }}/artifacts/*
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -2581,11 +2593,6 @@ jobs:
     runs-on: windows.8xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -2614,11 +2621,19 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
           name: conda-py3_9-cuda11_1
-          path: "${{ runner.temp }}/artifacts/"
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -2630,11 +2645,11 @@ jobs:
           repository: pytorch/builder
           path: ${{ env.BUILDER_ROOT }}
       - name: Populate binary env
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Test PyTorch binary
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
       - name: Wait until all sessions have drained
@@ -2655,11 +2670,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_9-cuda11_1-test
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -2778,11 +2788,6 @@ jobs:
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -2811,6 +2816,14 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -2822,11 +2835,11 @@ jobs:
           repository: pytorch/builder
           path: ${{ env.BUILDER_ROOT }}
       - name: Populate binary env
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
       - uses: seemethere/upload-artifact-s3@v3
@@ -2835,7 +2848,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            ${{ runner.temp }}/artifacts/*
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -2855,11 +2868,6 @@ jobs:
     runs-on: windows.8xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -2888,11 +2896,19 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
           name: conda-py3_9-cuda11_3
-          path: "${{ runner.temp }}/artifacts/"
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -2904,11 +2920,11 @@ jobs:
           repository: pytorch/builder
           path: ${{ env.BUILDER_ROOT }}
       - name: Populate binary env
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Test PyTorch binary
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
       - name: Wait until all sessions have drained
@@ -2929,11 +2945,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_9-cuda11_3-test
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -3052,11 +3063,6 @@ jobs:
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -3085,6 +3091,14 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -3096,11 +3110,11 @@ jobs:
           repository: pytorch/builder
           path: ${{ env.BUILDER_ROOT }}
       - name: Populate binary env
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
       - uses: seemethere/upload-artifact-s3@v3
@@ -3109,7 +3123,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            ${{ runner.temp }}/artifacts/*
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -3129,11 +3143,6 @@ jobs:
     runs-on: windows.8xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -3162,11 +3171,19 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
           name: conda-py3_9-cuda11_5
-          path: "${{ runner.temp }}/artifacts/"
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -3178,11 +3195,11 @@ jobs:
           repository: pytorch/builder
           path: ${{ env.BUILDER_ROOT }}
       - name: Populate binary env
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Test PyTorch binary
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
       - name: Wait until all sessions have drained
@@ -3203,11 +3220,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_9-cuda11_5-test
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -3326,11 +3338,6 @@ jobs:
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -3358,6 +3365,14 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -3369,11 +3384,11 @@ jobs:
           repository: pytorch/builder
           path: ${{ env.BUILDER_ROOT }}
       - name: Populate binary env
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
       - uses: seemethere/upload-artifact-s3@v3
@@ -3382,7 +3397,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            ${{ runner.temp }}/artifacts/*
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -3402,11 +3417,6 @@ jobs:
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -3434,11 +3444,19 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
           name: conda-py3_10-cpu
-          path: "${{ runner.temp }}/artifacts/"
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -3450,11 +3468,11 @@ jobs:
           repository: pytorch/builder
           path: ${{ env.BUILDER_ROOT }}
       - name: Populate binary env
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Test PyTorch binary
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
       - name: Wait until all sessions have drained
@@ -3475,11 +3493,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_10-cpu-test
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -3597,11 +3610,6 @@ jobs:
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -3630,6 +3638,14 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -3641,11 +3657,11 @@ jobs:
           repository: pytorch/builder
           path: ${{ env.BUILDER_ROOT }}
       - name: Populate binary env
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
       - uses: seemethere/upload-artifact-s3@v3
@@ -3654,7 +3670,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            ${{ runner.temp }}/artifacts/*
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -3674,11 +3690,6 @@ jobs:
     runs-on: windows.8xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -3707,11 +3718,19 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
           name: conda-py3_10-cuda11_1
-          path: "${{ runner.temp }}/artifacts/"
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -3723,11 +3742,11 @@ jobs:
           repository: pytorch/builder
           path: ${{ env.BUILDER_ROOT }}
       - name: Populate binary env
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Test PyTorch binary
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
       - name: Wait until all sessions have drained
@@ -3748,11 +3767,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_10-cuda11_1-test
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -3871,11 +3885,6 @@ jobs:
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -3904,6 +3913,14 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -3915,11 +3932,11 @@ jobs:
           repository: pytorch/builder
           path: ${{ env.BUILDER_ROOT }}
       - name: Populate binary env
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
       - uses: seemethere/upload-artifact-s3@v3
@@ -3928,7 +3945,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            ${{ runner.temp }}/artifacts/*
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -3948,11 +3965,6 @@ jobs:
     runs-on: windows.8xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -3981,11 +3993,19 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
           name: conda-py3_10-cuda11_3
-          path: "${{ runner.temp }}/artifacts/"
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -3997,11 +4017,11 @@ jobs:
           repository: pytorch/builder
           path: ${{ env.BUILDER_ROOT }}
       - name: Populate binary env
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Test PyTorch binary
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
       - name: Wait until all sessions have drained
@@ -4022,11 +4042,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_10-cuda11_3-test
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -4145,11 +4160,6 @@ jobs:
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -4178,6 +4188,14 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -4189,11 +4207,11 @@ jobs:
           repository: pytorch/builder
           path: ${{ env.BUILDER_ROOT }}
       - name: Populate binary env
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
       - uses: seemethere/upload-artifact-s3@v3
@@ -4202,7 +4220,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            ${{ runner.temp }}/artifacts/*
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
         working-directory: pytorch
@@ -4222,11 +4240,6 @@ jobs:
     runs-on: windows.8xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
@@ -4255,11 +4268,19 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
           name: conda-py3_10-cuda11_5
-          path: "${{ runner.temp }}/artifacts/"
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -4271,11 +4292,11 @@ jobs:
           repository: pytorch/builder
           path: ${{ env.BUILDER_ROOT }}
       - name: Populate binary env
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Test PyTorch binary
-        shell: bash.exe
+        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
       - name: Wait until all sessions have drained
@@ -4296,11 +4317,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_10-cuda11_5-test
     env:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      BINARY_ENV_FILE: ${{ runner.temp }}/env
-      PYTORCH_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
