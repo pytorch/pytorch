@@ -5,6 +5,8 @@ namespace at {
 namespace detail {
 
 TORCH_API void check_size_nonnegative(IntArrayRef size);
+TORCH_API size_t computeStorageNbytes(
+    IntArrayRef sizes, IntArrayRef strides, size_t itemsize);
 
 TORCH_API TensorBase empty_generic(
     IntArrayRef size,
@@ -12,6 +14,13 @@ TORCH_API TensorBase empty_generic(
     c10::DispatchKeySet ks,
     ScalarType scalar_type,
     c10::optional<c10::MemoryFormat> memory_format_opt);
+
+TORCH_API TensorBase empty_strided_generic(
+    IntArrayRef size,
+    IntArrayRef stride,
+    c10::Allocator* allocator,
+    c10::DispatchKeySet ks,
+    ScalarType scalar_type);
 
 TORCH_API TensorBase empty_cpu(
     IntArrayRef size,
@@ -29,6 +38,25 @@ TORCH_API TensorBase empty_cpu(
 
 TORCH_API TensorBase empty_cpu(
     IntArrayRef size,
+    const TensorOptions &options);
+
+TORCH_API TensorBase empty_strided_cpu(
+    IntArrayRef size,
+    IntArrayRef stride,
+    ScalarType dtype,
+    bool pin_memory=false);
+
+TORCH_API TensorBase empty_strided_cpu(
+    IntArrayRef size,
+    IntArrayRef stride,
+    c10::optional<ScalarType> dtype_opt,
+    c10::optional<Layout> layout_opt,
+    c10::optional<Device> device_opt,
+    c10::optional<bool> pin_memory_opt);
+
+TORCH_API TensorBase empty_strided_cpu(
+    IntArrayRef size,
+    IntArrayRef stride,
     const TensorOptions &options);
 
 }}  // namespace at::detail
