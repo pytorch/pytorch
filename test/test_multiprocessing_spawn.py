@@ -1,6 +1,7 @@
 # Owner(s): ["module: multiprocessing"]
 
 import os
+import pickle
 import random
 import signal
 import sys
@@ -217,6 +218,16 @@ class SpawnTest(TestCase, _TestMultiProcessing):
 )
 class ForkTest(TestCase, _TestMultiProcessing):
     start_method = 'fork'
+
+
+class ErrorTest(TestCase):
+    def test_errors_pickleable(self):
+        for error in (
+            mp.ProcessRaisedException("Oh no!", 1, 1),
+            mp.ProcessExitedException("Oh no!", 1, 1, 1),
+        ):
+            pickle.loads(pickle.dumps(error))
+
 
 if __name__ == '__main__':
     run_tests()

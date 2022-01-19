@@ -1789,7 +1789,7 @@ void concrete_dispatch_fn(
     torch::jit::push(stack, torch::jit::toIValue(out.ptr(), op.schema().returns()[0].type()));
   } else {
     auto outs = py::cast<py::sequence>(out);
-    for (unsigned idx = 0; idx < outs.size(); idx++) {
+    for (const auto idx : c10::irange(outs.size())) {
       torch::jit::push(stack, torch::jit::toIValue(outs[idx].ptr(), op.schema().returns()[idx].type()));
     }
   }

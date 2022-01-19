@@ -1,6 +1,6 @@
 import warnings
 from collections import OrderedDict, abc as container_abcs
-from itertools import islice
+from itertools import chain, islice
 import operator
 
 import torch
@@ -183,7 +183,7 @@ class ModuleList(Module):
         return str(idx)
 
     @_copy_to_script_wrapper
-    def __getitem__(self, idx: int) -> Module:
+    def __getitem__(self, idx: int) -> Union[Module, 'ModuleList']:
         if isinstance(idx, slice):
             return self.__class__(list(self._modules.values())[idx])
         else:
@@ -213,6 +213,12 @@ class ModuleList(Module):
 
     def __iadd__(self, modules: Iterable[Module]) -> 'ModuleList':
         return self.extend(modules)
+
+    def __add__(self, other: Iterable[Module]) -> 'ModuleList':
+        combined = ModuleList()
+        for i, module in enumerate(chain(self, other)):
+            combined.add_module(str(i), module)
+        return combined
 
     @_copy_to_script_wrapper
     def __dir__(self):
