@@ -692,7 +692,7 @@ class ShardedTensor(object):
             output_tensor_list[placement.rank()] = (  # type: ignore[union-attr, index]
                 torch.empty(output_tensor_size, device=local_shard.device)
             )
-            indices.append(placement.rank())  # type: ignore[union-attr, index]
+            indices.append(placement.rank())  # type: ignore[union-attr, index, arg-type]
             if idx != placement.rank():  # type: ignore[union-attr]
                 rearrange_output_list = True
 
@@ -707,7 +707,7 @@ class ShardedTensor(object):
 
         if rearrange_output_list:
             # Need to re-arrange original shard_dim of output_tensor_list.
-            output_tensor_list = [output_tensor_list[idx] for idx in indices] # type: ignore[call-overload]
+            output_tensor_list = [output_tensor_list[idx] for idx in indices]  # type: ignore[call-overload]
         local_shard = torch.cat(output_tensor_list, dim=current_sharding_dim)
         self.local_shards()[0].tensor = local_shard
         return self
