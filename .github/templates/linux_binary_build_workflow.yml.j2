@@ -22,17 +22,27 @@ name: !{{ build_environment }}
       LIBTORCH_VARIANT: !{{ config["libtorch_variant"] }}
       DESIRED_DEVTOOLSET: !{{ config["devtoolset"] }}
 {%- else %}
-      DESIRED_PYTHON: !{{ config["python_version"] }}
+      DESIRED_PYTHON: "!{{ config["python_version"] }}"
 {%- endif %}
 {%- endmacro %}
 
 on:
+# TODO: Migrate to new ciflow trigger, reference https://github.com/pytorch/pytorch/pull/70321
   pull_request:
     types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
+    # NOTE: This workflow should only trigger when changes are made to binary builds
+    # Should catch most of the binary build / test scripts
+    paths:
+      - '.github/workflows/generated-linux-binary-*.yml'
+      - '.circleci/scripts/binary_*.sh'
   push:
-    tags:
-      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+    # NOTE: Meta Employees can trigger new nightlies using: https://fburl.com/trigger_pytorch_nightly_build
+    branches:
       - nightly
+    tags:
+      # NOTE: Binary build pipelines should only get triggered on release candidate builds
+      # Release candidate tags look like: v1.11.0-rc1
+      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
   workflow_dispatch:
 
 env:
@@ -88,7 +98,8 @@ jobs:
 {%- endif %}
       - name: Pull Docker image
         run: |
-          !{{ common.pull_docker("${DOCKER_IMAGE}") }}
+          !{{ common.add_retry_to_env() }}
+          retry docker pull "${DOCKER_IMAGE}"
       - name: Build PyTorch binary
         run: |
           set -x
@@ -164,7 +175,8 @@ jobs:
 {%- endif %}
       - name: Pull Docker image
         run: |
-          !{{ common.pull_docker("${DOCKER_IMAGE}") }}
+          !{{ common.add_retry_to_env() }}
+          retry docker pull "${DOCKER_IMAGE}"
       - name: Test PyTorch binary
         run: |
           set -x
@@ -216,13 +228,13 @@ jobs:
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
-          echo "DRY_RUN='disabled'" >> "$GITHUB_ENV"
+          echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
-            echo "UPLOAD_CHANNEL='test'" >> "$GITHUB_ENV"
+            echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
           fi
       - name: Upload binaries
         env:
