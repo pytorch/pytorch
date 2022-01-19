@@ -6,7 +6,6 @@ import torch
 from torch.distributed._sharding_spec import (
     ChunkShardingSpec,
     ShardingSpec,
-    ReshardingSpec,
 )
 from torch.distributed._sharding_spec._internals import (
     get_chunked_dim_size,
@@ -16,9 +15,8 @@ from typing import List
 
 from .api import (
     _register_sharded_op,
+    _PartialTensor,
     CreateOp,
-    ModuleResharder,
-    PartialTensor,
     Shard,
     ShardMetadata,
     ShardedTensor,
@@ -39,7 +37,7 @@ def empty(sharding_spec: ShardingSpec,
           pin_memory=False,
           memory_format=torch.contiguous_format,
           process_group=None,
-          init_rrefs=False):
+          init_rrefs=False) -> ShardedTensor:
     """
     Returns a :class:`ShardedTensor` filled with uninitialized data.
         Needs to be called on all ranks in an SPMD fashion.
@@ -91,7 +89,7 @@ def ones(sharding_spec: ShardingSpec,
          pin_memory=False,
          memory_format=torch.contiguous_format,
          process_group=None,
-         init_rrefs=False):
+         init_rrefs=False) -> ShardedTensor:
     """
     Returns a :class:`ShardedTensor` with the scalar value 1.
         Needs to be called on all ranks in an SPMD fashion.
@@ -142,7 +140,7 @@ def rand(sharding_spec: ShardingSpec,
          pin_memory=False,
          memory_format=torch.contiguous_format,
          process_group=None,
-         init_rrefs=False):
+         init_rrefs=False) -> ShardedTensor:
     """
     Returns a :class:`ShardedTensor` filled with random numbers from a uniform distribution on the
         interval :math:`[0, 1)`. Needs to be called on all ranks in an SPMD fashion.
@@ -194,7 +192,7 @@ def zeros(sharding_spec: ShardingSpec,
           pin_memory=False,
           memory_format=torch.contiguous_format,
           process_group=None,
-          init_rrefs=False):
+          init_rrefs=False) -> ShardedTensor:
     """
     Returns a :class:`ShardedTensor` filled with the scalar value 0.
         Needs to be called on all ranks in an SPMD fashion.
@@ -247,7 +245,7 @@ def full(sharding_spec: ShardingSpec,
          pin_memory=False,
          memory_format=torch.contiguous_format,
          process_group=None,
-         init_rrefs=False):
+         init_rrefs=False) -> ShardedTensor:
     """
     Creates a :class:`ShardedTensor` filled with fill_value. The tensor’s dtype
         is inferred from fill_value. If dtype is specified, it will override the
@@ -298,7 +296,7 @@ def init_from_local_shards(
         local_shards: List[Shard],
         *global_size,
         process_group=None,
-        init_rrefs=False):
+        init_rrefs=False) -> ShardedTensor:
     """
     Creates an :class:`ShardedTensor` from local shards and the global metadata.
     Needs to be called on all ranks in an SPMD fashion.
@@ -370,7 +368,7 @@ def pre_load_state_dict_hook(module, state_dict, prefix, local_metadata, strict,
             key = prefix + submodule_name + '.' + attr_name
             if key in state_dict:
                 if isinstance(state_dict[key], ShardedTensor):
-                    setattr(module, attr_name, state_dict[key])
+                    setattr(submodule, attr_name, state_dict[key])
 
 def shard_parameter(
         module: torch.nn.Module,
@@ -426,8 +424,7 @@ def shard_parameter(
 
     # Validate src_rank and sharding_spec are same across all ranks.
     gathered_list = [None] * world_size
-    with torch.cuda.device(tensor.device):
-        dist.all_gather_object(gathered_list, (src_rank, sharding_spec), group=pg)
+    dist.all_gather_object(gathered_list, (src_rank, sharding_spec), group=pg)
 
     for idx, entry in enumerate(gathered_list):
         if src_rank != entry[0]:  # type: ignore[index]
@@ -543,10 +540,39 @@ def sharded_op_impl(func):
 # Import all builtin sharded ops
 from .ops import *  # noqa: F403
 
-def reshard_output(
+def _reshard_output(
         module: torch.nn.Module,
-        resharding_spec: ReshardingSpec) -> ModuleResharder:
+        resharding_spec: ShardingSpec) -> torch.nn.Module:
     """
-    Replaces a module with a new module that will reshard its output.
+    Hook a module with local shards collection in the forward pass according
+    to the given ``resharding_spec``.
+
+    Args:
+        module (:class:`torch.nn.Module`): Module whose output needs to be resharded.
+        resharding_spec (:class:`torch.distributed._sharding_spec.ShardingSpec`): The
+            specification describing how the sharded tensor will be resharded.
+
+    Returns:
+        A :class:`torch.nn.Module` object with collection API hooked.
     """
-    return ModuleResharder(module, resharding_spec)
+    def hook_func(_module, _input, output):
+        return output.reshard(resharding_spec)
+    module.register_forward_hook(hook_func)
+    return module
+
+
+def _collect_local_shards(module: torch.nn.Module) -> torch.nn.Module:
+    """
+    Hook a module with local shards collection in the forward pass.
+
+    Args:
+        module (:class:`torch.nn.Module`): Module whose output needs to be resharded.
+
+    Returns:
+        A :class:`torch.nn.Module` object with collection API hooked.
+    """
+
+    def hook_func(_module, _input, output):
+        return output.collect_local_shards()
+    module.register_forward_hook(hook_func)
+    return module

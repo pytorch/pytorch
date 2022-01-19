@@ -76,6 +76,12 @@ TORCH_API Tensor computeQuantizedAdd(
     const c10::optional<ScalarType>& outputType,
     at::Device device);
 
+Tensor computeQuantizedAddExternalCall(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device);
+
 TORCH_API Tensor computeQuantizedMul(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,

@@ -5,5 +5,4 @@ from .api import (
     PlacementSpec,
     ShardMetadata,
     ShardingSpec,
-    ReshardingSpec,
 )
