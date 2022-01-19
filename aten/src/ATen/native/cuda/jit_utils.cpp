@@ -7,6 +7,7 @@
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/code_template.h>
 #include <ATen/native/cuda/jit_utils.h>
+#include <ATen/cuda/jitted_complex.h>
 
 #include <sstream>
 #include <fstream>
@@ -58,9 +59,9 @@ const std::string jit_common_types = R"ESCAPE(
   _(at::Half, Half) /* 5 */                                  \
   _(float, Float) /* 6 */                                \
   _(double, Double) /* 7 */                              \
-  _(c10::complex<c10::Half>, ComplexHalf) /* 8 */        \
-  _(c10::complex<float>, ComplexFloat) /* 9 */                          \
-  _(c10::complex<double>, ComplexDouble) /* 10 */                         \
+  _(std::complex<c10::Half>, ComplexHalf) /* 8 */        \
+  _(std::complex<float>, ComplexFloat) /* 9 */                          \
+  _(std::complex<double>, ComplexDouble) /* 10 */                         \
   _(bool, Bool) /* 11 */                                 \
   _(void, QInt8) /* 12 */                          \
   _(void, QUInt8) /* 13 */                        \
@@ -78,8 +79,8 @@ const std::string jit_common_types = R"ESCAPE(
   _(at::BFloat16, BFloat16)       \
   _(double, Double)               \
   _(bool, Bool)                   \
-  _(c10::complex<float>, ComplexFloat)   \
-  _(c10::complex<double>, ComplexDouble)
+  _(std::complex<float>, ComplexFloat)   \
+  _(std::complex<double>, ComplexDouble)
 
 
   enum class ScalarType : int8_t {
@@ -182,31 +183,6 @@ struct alignas(2) BFloat16 {
   }
 
 };
-}
-)ESCAPE";
-
-//copy-pasted from util/complex.h
-const std::string jiterator_complex_support_literal = R"ESCAPE(
-//a very limited complex class, the only thing it currently allows is implicit conversion
-//to complex, and complex -> real that is unused
-namespace c10 {
-  template<typename T>
-  struct alignas(sizeof(T) * 2) complex {
-    using value_type = T;
-
-    T real_ = T(0);
-    T imag_ = T(0);
-    constexpr complex() = default;
-    inline __host__ __device__ constexpr complex(const T& re, const T& im = T())
-      : real_(re), imag_(im) {}
-
-    //FIXME I didn't find how complex -> real conversion is done in eager
-    //we are not going to use it, but it's needed for compilation
-    inline __host__ __device__ operator T() const{
-      return real_;
-    }
-
-  };
 }
 )ESCAPE";
 
@@ -651,7 +627,7 @@ std::string generate_code(
     env.s("bfloat16_string", "");
   }
   if (dynamic_casting) {
-    env.s("complex_string", jiterator_complex_support_literal);
+    env.s("complex_string", get_complex_definition());
   } else {
     env.s("complex_string", "");
   }
