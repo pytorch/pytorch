@@ -9,6 +9,7 @@
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/mobile/promoted_prim_ops.h>
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
@@ -515,21 +516,27 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     aten::size,
     aten_size,
     [](Node* n) -> SROperator {
-      if (!n->matches(
+      if (n->matches(
               torch::schema("aten::size(Tensor self, int dim) -> int"))) {
-        LogAndDumpSchema(n);
-        return nullptr;
-      }
-      return [](ProcessedNode* p_node) {
-        const auto& input = p_node->Input(0).toTensor();
-        auto dim = p_node->Input(1).toInt();
-        const auto ndim = input.dim();
+        return [](ProcessedNode* p_node) {
+          const auto& input = p_node->Input(0).toTensor();
+          auto dim = p_node->Input(1).toInt();
+          const auto ndim = input.dim();
 
-        if (dim < 0 || dim >= ndim) {
-          dim = c10::maybe_wrap_dim(dim, ndim);
-        }
-        p_node->Output(0) = input.sizes()[dim];
-      };
+          if (dim < 0 || dim >= ndim) {
+            dim = c10::maybe_wrap_dim(dim, ndim);
+          }
+          p_node->Output(0) = input.sizes()[dim];
+        };
+      }
+      if (n->matches(torch::schema("aten::size(Tensor self) -> int[]"))) {
+        return [](ProcessedNode* p_node) {
+          const auto& input = p_node->Input(0).toTensor();
+          p_node->Output(0) = input.sizes();
+        };
+      }
+      LogAndDumpSchema(n);
+      return nullptr;
     });
 
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
@@ -686,6 +693,152 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       return [](ProcessedNode* pnode) {
         const auto& input = pnode->Input(0).toTensor();
         pnode->Output(0) = at::native::item(input).toInt();
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    prim::TupleIndex,
+    prim_TupleIndex,
+    [](Node*) -> SROperator {
+      return [](ProcessedNode* pnode) {
+        const auto& elems = pnode->Input(0).toTupleRef().elements();
+        const auto num_elems = elems.size();
+        auto idx = pnode->Input(1).toInt();
+        idx = normalizeIndex(idx, num_elems);
+        if (idx < 0 || idx >= num_elems) {
+          // Use std::runtime_error instead of c10::Error to be consistent with
+          // JIT
+          throw std::runtime_error("Tuple index out of range");
+        }
+        pnode->Output(0) = elems[idx];
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    prim::RaiseExecption,
+    prim_RaiseExeception,
+    [](Node*) -> SROperator {
+      return [](ProcessedNode* pnode) {
+        const auto& message = pnode->Input(0).toStringRef();
+        throw std::runtime_error(message);
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    prim::Uninitialized,
+    prim_Uninitialized,
+    [](Node*) -> SROperator {
+      return [](ProcessedNode* pnode) {
+        pnode->Output(0) = IValue::uninitialized();
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::format,
+    aten_format,
+    [](Node*) -> SROperator {
+      return [](ProcessedNode* pnode) {
+        const auto num_inputs = pnode->num_inputs();
+        TORCH_CHECK(num_inputs > 0);
+        std::vector<IValue> stack;
+        stack.reserve(num_inputs);
+        for (const auto i : c10::irange(num_inputs)) {
+          stack.push_back(pnode->Input(i));
+        }
+        format(stack, num_inputs);
+        DCHECK_EQ(stack.size(), 1);
+        pnode->Output(0) = std::move(stack[0]);
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    prim::device,
+    prim_device,
+    [](Node*) -> SROperator {
+      return [](ProcessedNode* pnode) {
+        const auto& input = pnode->Input(0).toTensor();
+        pnode->Output(0) = input.device();
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    prim::dtype,
+    prim_dtype,
+    [](Node*) -> SROperator {
+      return [](ProcessedNode* pnode) {
+        const auto& input = pnode->Input(0).toTensor();
+        pnode->Output(0) = static_cast<int64_t>(input.scalar_type());
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(aten::dim, aten_dim, [](Node*) -> SROperator {
+  return [](ProcessedNode* pnode) {
+    const auto& input = pnode->Input(0).toTensor();
+    pnode->Output(0) = input.dim();
+  };
+});
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::__not__,
+    aten_not,
+    [](Node*) -> SROperator {
+      return [](ProcessedNode* pnode) {
+        auto input = pnode->Input(0).toBool();
+        pnode->Output(0) = !input;
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::Bool,
+    aten_Bool,
+    [](Node* n) -> SROperator {
+      if (n->matches(torch::schema("aten::Bool.Tensor(Tensor a) -> bool"))) {
+        return [](ProcessedNode* pnode) {
+          const auto& input = pnode->Input(0).toTensor();
+          pnode->Output(0) = at::native::is_nonzero(input);
+        };
+      }
+
+      if (n->matches(torch::schema("aten::Bool.int(int a) -> bool"))) {
+        return [](ProcessedNode* pnode) {
+          const auto input = pnode->Input(0).toInt();
+          pnode->Output(0) = static_cast<bool>(input);
+        };
+      }
+
+      if (n->matches(torch::schema("aten::Bool.float(float a) -> bool"))) {
+        return [](ProcessedNode* pnode) {
+          const auto input = pnode->Input(0).toDouble();
+          pnode->Output(0) = static_cast<bool>(input);
+        };
+      }
+
+      LogAndDumpSchema(n);
+      return nullptr;
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    prim::is_cuda,
+    prim_is_cuda,
+    [](Node*) -> SROperator {
+      return [](ProcessedNode* pnode) {
+        const auto& input = pnode->Input(0).toTensor();
+        pnode->Output(0) = input.is_cuda();
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    prim::tolist,
+    prim_tolist,
+    [](Node*) -> SROperator {
+      return [](ProcessedNode* pnode) {
+        const auto& input = pnode->Input(0).toTensor();
+        const auto dim = pnode->Input(1).toInt();
+        const auto elem_type = pnode->Input(2).toInt();
+        std::vector<IValue> stack{input, dim, elem_type};
+        toList(stack);
+        DCHECK_EQ(stack.size(), 1);
+        pnode->Output(0) = std::move(stack[0]);
       };
     });
 
