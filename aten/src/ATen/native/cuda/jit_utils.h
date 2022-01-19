@@ -60,6 +60,11 @@ template <> inline std::string typeName<ctype>(){ \
     return std::string(#ctype);    \
 }
 
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(TYPE_NAME_FN)
+AT_FORALL_SCALAR_TYPES(TYPE_NAME_FN)
+// JIT uses std::complex directly, because there was such
+// issue like "std::sin(complex) is __host__ only"
+TYPE_NAME_FN(std::complex<float>, ScalarType::ComplexFloat);
+TYPE_NAME_FN(std::complex<double>, ScalarType::ComplexDouble);
+#undef TYPE_NAME_FN
 
 }}}  // namespace at::cuda::jit
