@@ -3,6 +3,7 @@
 #include <c10/util/hash.h>
 #include <c10/util/Optional.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <ATen/jit_macros.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/code_template.h>
@@ -727,7 +728,7 @@ std::string generate_code(
 }
 
 
-#ifdef BUILD_JITERATOR_WITH_CACHE
+#if BUILD_JITERATOR_WITH_CACHE
 // Acquires (possibly creating) the kernel cache directory
 c10::optional<std::string> get_cache_dir() {
   // If the environment variable USE_TORCH_KERNEL_CACHE is set to "0" then no persistent cache is used
@@ -813,7 +814,7 @@ NvrtcFunction jit_pwise_function(
   NvrtcFunction compiled_kernel_;
   std::string name = kernel_name + "_kernel";
 
-  #ifdef BUILD_JITERATOR_WITH_CACHE
+  #if BUILD_JITERATOR_WITH_CACHE
     static const c10::optional<std::string> cache_dir = get_cache_dir();
 
     std::string file_path;
@@ -927,7 +928,7 @@ NvrtcFunction jit_pwise_function(
   // TODO: use guards to avoid leaking
   AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcDestroyProgram(&program));
 
-  #ifdef BUILD_JITERATOR_WITH_CACHE
+  #if BUILD_JITERATOR_WITH_CACHE
     if (cache_dir.has_value()) {
       // Writes the program to the cache if caching
       // NOTE: Actually writes to a per-process temporary file to avoid multi-process contention.
