@@ -3,11 +3,12 @@ import math
 import torch
 import torch.nn as nn
 from torch import Tensor
-from functorch import make_functional_with_buffers, make_fx
+from functorch import make_fx
 import torch.fx as fx
 from torch.fx import immutable_collections
 import torch.utils._pytree as pytree
 import torch.utils.dlpack
+from torch.nn.utils import _stateless
 from torch.fx.passes import graph_drawer
 import copy
 import operator
@@ -571,8 +572,13 @@ def clear_compile_cache():
 
 
 def compiled_module(mod, *args, **kwargs):
-    func_mod, params, buffers = make_functional_with_buffers(mod)
-    compiled_f = compiled_function(func_mod, *args, **kwargs)
+
+    def functional_call(named_params, named_buffers, *args, **kwargs):
+        params_and_buffers = {**named_params, **named_buffers}
+        # import pdb; pdb.set_trace()
+        return _stateless.functional_call(mod, params_and_buffers, *args, **kwargs)
+
+    compiled_f = compiled_function(functional_call, *args, **kwargs)
 
     class CompiledModule(nn.Module):
         def __init__(self):
@@ -581,8 +587,8 @@ def compiled_module(mod, *args, **kwargs):
 
         def forward(self, *args, **kwargs):
             return compiled_f(
-                tuple(self.parameters()),
-                tuple(self.buffers()),
+                dict(self.orig_module.named_parameters()),
+                dict(self.orig_module.named_buffers()),
                 *args,
                 **kwargs
             )
