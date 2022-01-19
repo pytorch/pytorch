@@ -119,12 +119,6 @@ void jitted_gpu_kernel(TensorIteratorBase& iter, const std::string& f,
 at::opmath_type<f_inputs_type> scalar_val=0) {
   // TODO: much of preamble is common to both jitted_gpu_kernel and gpu_kernel
   //   Maybe it could be refactored?
-  static_assert((!std::is_same<return_type, c10::complex<double>>::value &&
-  !std::is_same<return_type, c10::complex<float>>::value), "complex types are not supported \
-  in jiterator functors");
-  static_assert((!std::is_same<f_inputs_type, c10::complex<double>>::value &&
-  !std::is_same<return_type, c10::complex<float>>::value), "complex types are not supported \
-  in jiterator functors");
   for (int arg = 0; arg < iter.ntensors(); arg++) {
     TORCH_INTERNAL_ASSERT(
       iter.device(arg).is_cuda(),
