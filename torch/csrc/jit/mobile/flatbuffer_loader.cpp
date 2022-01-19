@@ -324,7 +324,6 @@ IValue FlatbufferLoader::parseObject(
       IValue input = getIValue(object->state());
       mobile::Function* setstate = getFunction(object->setstate_func());
       auto obj = c10::ivalue::Object::create(at::StrongTypePtr(cu_, cls), 0);
-      std::cerr << "here 2: " << cls.get() << std::endl;
       stack.push_back(obj);
       stack.emplace_back(std::move(input));
       setstate->run(stack);
@@ -336,7 +335,6 @@ IValue FlatbufferLoader::parseObject(
       IValue input = getIValue(object->state());
       auto obj = c10::ivalue::Object::create(
           c10::StrongTypePtr(nullptr, custom_class_type), 1);
-      std::cerr << "here 3: " << cls.get() << std::endl;
       stack.push_back(obj);
       stack.emplace_back(std::move(input));
       custom_class_type->getMethod("__setstate__").run(stack);
