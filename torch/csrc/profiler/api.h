@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ATen/ATen.h>
 #include <ATen/record_function.h>
 #include <torch/csrc/Export.h>
 

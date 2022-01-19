@@ -161,9 +161,10 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
         'includes': [f'#include <{path}>' for path in [
             tensor_class_hdr,
             "ATen/MetaFunctions.h",
+            "torch/csrc/lazy/core/metrics.h",
             "torch/csrc/lazy/core/shape.h",
             "lazy_tensor_core/csrc/aten_ltc_bridge.h",
-            "lazy_tensors/computation_client/metrics.h",
+            "lazy_tensor_core/csrc/lazy_graph_executor.h",
             f"{output_dir}/{backend_key}NativeFunctions.h",
             f"{output_dir}/{backend_key}LazyIr.h",
             f"{output_dir}/{backend_key}ShapeInference.h",
@@ -175,26 +176,6 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
             dest.GenLazyNativeFuncDefinition(f'{backend_key}NativeFunctions',
                                              backend_indices[backend_key],
                                              tensor_class),
-            grouped_native_functions,
-            codegenInplaceVariant=True
-        )),
-    })
-    # Generate headers for shape/dtype funcs for non-meta kernels
-    fm.write_with_template(f'{backend_key}ShapeInference.h', 'ShapeInference.h', lambda: {
-        'lazy_ir_sysinc': [f'#include <{path}>' for path in [
-            "ATen/Tensor.h",
-            "c10/core/ScalarType.h",
-            "c10/util/Optional.h",
-            "torch/csrc/lazy/core/ir.h",
-            "torch/csrc/lazy/core/shape.h",
-            "vector",
-        ]],
-        'lazy_ir_inc': [],
-        'DispatchKey': backend_key,
-        'dispatch_namespace': backend_key.lower(),
-        'func_declarations': list(concat_map_codegen(
-            dest.GenLazyShapeInferenceDefinition(backend_indices[backend_key],
-                                                 tensor_class),
             grouped_native_functions,
             codegenInplaceVariant=True
         )),
