@@ -12,6 +12,7 @@ from torch.distributed._sharding_spec._internals import (
     check_tensor,
     get_split_size,
     get_chunked_dim_size,
+    get_chunk_sharding_params,
 )
 
 from torch.testing._internal.common_utils import (
@@ -247,6 +248,33 @@ class TestShardingSpec(TestCase):
         self.assertEqual(4, get_chunked_dim_size(13, 4, 0))
         self.assertEqual(1, get_chunked_dim_size(13, 4, 3))
         self.assertEqual(0, get_chunked_dim_size(5, 2, 3))
+
+    def test_get_chunk_sharding_params(self):
+        ranks = [
+            "rank:0/cuda:0",
+            "rank:1/cuda:1",
+            "rank:2/cuda:2",
+            "rank:3/cuda:3",
+        ]
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=ranks,
+        )
+        result = get_chunk_sharding_params(21, 4, spec, 1)
+        self.assertEqual(6, result[0])
+        self.assertEqual(6, result[1])
+        result = get_chunk_sharding_params(21, 4, spec, 3)
+        self.assertEqual(18, result[0])
+        self.assertEqual(3, result[1])
+        ranks[1], ranks[2] = ranks[2], ranks[1]
+        ranks[0], ranks[3] = ranks[3], ranks[0]
+        spec.placements = ranks
+        result = get_chunk_sharding_params(21, 4, spec, 1)
+        self.assertEqual(12, result[0])
+        self.assertEqual(6, result[1])
+        result = get_chunk_sharding_params(21, 4, spec, 3)
+        self.assertEqual(0, result[0])
+        self.assertEqual(6, result[1])
 
 if __name__ == '__main__':
     run_tests()

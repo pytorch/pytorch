@@ -66,7 +66,6 @@ class AccTracerTest(unittest.TestCase):
 
         a = torch.randn(*input_shape)
         traced = acc_tracer.trace(m, [a])
-
         ph_a = acc_op_node = None
         for node in traced.graph.nodes:
             if node.op == "placeholder":
@@ -105,11 +104,12 @@ class AccTracerTest(unittest.TestCase):
                 )
 
     def test_sum(self):
-        def torch_sum(x, *args, **kwargs):
-            return x.sum(*args, **kwargs)
+        self._make_acc_op_function_test(acc_ops.sum, torch.sum)
+        self._make_acc_op_function_test(acc_ops.sum, torch.sum, dim=(1,), keepdim=True)
 
-        self._make_acc_op_function_test(acc_ops.sum, torch_sum)
-        self._make_acc_op_function_test(acc_ops.sum, torch_sum, dim=(1,), keepdim=True)
+    def test_mean(self):
+        self._make_acc_op_function_test(acc_ops.mean, torch.mean)
+        self._make_acc_op_function_test(acc_ops.mean, torch.mean, dim=(1,), keepdim=True)
 
     def test_pad(self):
         self._make_acc_op_function_test(acc_ops.pad, torch.nn.functional.pad, pad=(2, 0))
@@ -492,6 +492,10 @@ class AccTracerTest(unittest.TestCase):
                 bn_mean = node
             elif node.op == "get_attr" and node.target == "bn.running_var":
                 bn_var = node
+            elif node.op == "get_attr" and node.target == "bn.scale":
+                bn_scale = node
+            elif node.op == "get_attr" and node.target == "bn.zero_point":
+                bn_zero_point = node
             elif node.op == "call_function":
                 self.assertEqual(node.target, acc_ops.quantized_batch_norm2d)
                 self.assertEqual(node.kwargs["input"], ph)
@@ -499,6 +503,8 @@ class AccTracerTest(unittest.TestCase):
                 self.assertEqual(node.kwargs["bias"], bias_attr)
                 self.assertEqual(node.kwargs["running_mean"], bn_mean)
                 self.assertEqual(node.kwargs["running_var"], bn_var)
+                self.assertEqual(node.kwargs["acc_out_ty"][6]["scale"], bn_scale)
+                self.assertEqual(node.kwargs["acc_out_ty"][6]["zero_point"], bn_zero_point)
                 bn = node
             elif node.op == "output":
                 self.assertEqual(bn, node.args[0])
@@ -1370,6 +1376,18 @@ class AccTracerTest(unittest.TestCase):
     def test_relu(self):
         self._make_acc_op_function_test(acc_ops.relu, torch.relu)
 
+    def test_leaky_relu(self):
+        self._make_acc_op_function_test(acc_ops.leaky_relu, torch.nn.functional.leaky_relu)
+
+    def test_elu(self):
+        self._make_acc_op_function_test(acc_ops.elu, torch.nn.functional.elu)
+
+    def test_selu(self):
+        self._make_acc_op_function_test(acc_ops.selu, torch.nn.functional.selu)
+
+    def test_softsign(self):
+        self._make_acc_op_function_test(acc_ops.softsign, torch.nn.functional.softsign)
+
     def test_sigmoid(self):
         self._make_acc_op_function_test(acc_ops.sigmoid, torch.sigmoid)
 
@@ -1438,6 +1456,17 @@ class AccTracerTest(unittest.TestCase):
 
     def test_torch_mul(self):
         self._make_acc_op_function_test(acc_ops.mul, lambda x: torch.mul(x, 7))
+
+    def test_div(self):
+        self._make_acc_op_function_test(acc_ops.div, lambda x: torch.div(x, 2))
+        self._make_acc_op_function_test(acc_ops.div, lambda x: x / 2)
+
+    def test_floor_div(self):
+        self._make_acc_op_function_test(acc_ops.floor_div, lambda x: torch.div(x, 2, rounding_mode="floor"))
+
+    def test_trunc_div(self):
+        self._make_acc_op_function_test(acc_ops.trunc_div, lambda x: torch.div(x, 2, rounding_mode="trunc"))
+        self._make_acc_op_function_test(acc_ops.trunc_div, lambda x: torch.floor_divide(x, 2))
 
     def test_view(self):
         """
@@ -1894,8 +1923,14 @@ class AccTracerTest(unittest.TestCase):
                 acc_ops.sub,
                 acc_ops.mul,
                 acc_ops.div,
+                acc_ops.floor_div,
+                acc_ops.trunc_div,
                 acc_ops.pow,
                 acc_ops.relu,
+                acc_ops.leaky_relu,
+                acc_ops.elu,
+                acc_ops.selu,
+                acc_ops.softsign,
                 acc_ops.tuple_construct,
                 acc_ops.unsqueeze,
                 acc_ops.sigmoid,
@@ -1943,6 +1978,7 @@ class AccTracerTest(unittest.TestCase):
                 acc_ops.linalg_norm,
                 acc_ops.slice_tensor,
                 acc_ops.hardsigmoid,
+                acc_ops.mean,
                 acc_ops.hardtanh,
                 acc_ops.gelu,
                 acc_ops.cumsum,

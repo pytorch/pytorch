@@ -1,6 +1,7 @@
 
 #pragma once
 
+#include <ATen/jit_macros.h>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/TensorIteratorDynamicCasting.h>
@@ -79,23 +80,27 @@ __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
 // memory access introduce regression on ROCm.
 
 #if !defined(USE_ROCM)
-#include <ATen/native/cuda/CUDALoops.cuh>
-#define USE_JITERATOR
+  #include <ATen/native/cuda/CUDALoops.cuh>
 #else
-#include <ATen/native/cuda/ROCmLoops.cuh>
+  #include <ATen/native/cuda/ROCmLoops.cuh>
 #endif
 
 namespace at { namespace native {
-#ifdef USE_JITERATOR
 
+#ifdef USE_JITERATOR
 /* Note [Jiterator]
 The "jiterator" simply just-in-time compiles the same kernels that
 Loops.cuh (and CUDALoops.cuh) usually build. This reduces build time,
-build size, and CUDA context size.
+build size, and initial CUDA context size.
+
+By default on non-Windows systems, it also caches compiled kernels in ~/.cache/torch/kernels.
+This behavior is controlled with two environment variables:
+  - USE_PYTORCH_KERNEL_CACHE, if set to zero then this will disable all cache use
+  - PYTORCH_KERNEL_CACHE_PATH, if set specifies the folder to use for cached kernels
 
 The jiterator currently has some limitations, however. It cannot:
-  - handle float16, bfloat16, or complex datatypes
-  - handle scalar inputs
+  - handle math on complex datatypes
+  - handle kernels with scalar parameters
 
 These improvements will likely come soon.
 
@@ -114,6 +119,12 @@ void jitted_gpu_kernel(TensorIteratorBase& iter, const std::string& f,
 at::opmath_type<f_inputs_type> scalar_val=0) {
   // TODO: much of preamble is common to both jitted_gpu_kernel and gpu_kernel
   //   Maybe it could be refactored?
+  static_assert((!std::is_same<return_type, c10::complex<double>>::value &&
+  !std::is_same<return_type, c10::complex<float>>::value), "complex types are not supported \
+  in jiterator functors");
+  static_assert((!std::is_same<f_inputs_type, c10::complex<double>>::value &&
+  !std::is_same<return_type, c10::complex<float>>::value), "complex types are not supported \
+  in jiterator functors");
   for (int arg = 0; arg < iter.ntensors(); arg++) {
     TORCH_INTERNAL_ASSERT(
       iter.device(arg).is_cuda(),
@@ -146,10 +157,6 @@ at::opmath_type<f_inputs_type> scalar_val=0) {
   if (dtype0 != return_scalar_type) {
     needs_dynamic_casting = true;
   }
-  // TODO: FIXME: support these datatypes!
-  TORCH_CHECK(dtype0 != kComplexDouble && dtype0 != kComplexFloat &&
-              dtype0 != kBFloat16 && dtype0 != at::kHalf,
-                "Encountered an unsupported dtype ", dtype0, "!");
 
   // Checks input(s)
   const ScalarType inputs_scalar_type = c10::CppTypeToScalarType<f_inputs_type>::value;
@@ -159,8 +166,7 @@ at::opmath_type<f_inputs_type> scalar_val=0) {
       needs_dynamic_casting = true;
       // NOTE: can't short-circuit here yet because the dtype check below needs to run on every arg
     }
-    TORCH_CHECK(dtypei != kComplexDouble && dtypei != kComplexFloat &&
-                dtypei != kBFloat16 && dtypei != at::kHalf,
+    TORCH_CHECK(dtypei != kComplexDouble && dtypei != kComplexFloat,
                 "Encountered an unsupported dtype ", dtypei, "!");
   }
   if (scalar_pos == at::cuda::jit::BinaryFuncVariant::NoScalar) {
@@ -206,7 +212,7 @@ void opmath_jitted_gpu_kernel_with_scalars(TensorIteratorBase& iter, const std::
     jitted_gpu_kernel<name, return_type, f_inputs_type, 2>(iter, f);
   }
 }
-#endif //USE_JITERATOR
+#endif // USE_JITERATOR
 
 template <typename func_t>
 void gpu_kernel(TensorIteratorBase& iter, const func_t& f) {

@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/observer.h>
+#include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/mobile/upgrader_mobile.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
@@ -77,11 +78,6 @@
 // Note that the following function-schema fields are not supported:
 //  - Argument::{known_length_,kwarg_only_}
 //  - FunctionSchema::{overload_name_, is_vararg_, is_varret_}
-
-namespace c10 {
-// std::string serializeType(const Type &t);
-TypePtr parseType(const std::string& pythonStr);
-} // namespace c10
 
 namespace torch {
 namespace jit {
@@ -302,20 +298,6 @@ void BytecodeDeserializer::parseFunctionSchema(
 
 void BytecodeDeserializer::init_upgrader(mobile::Function* function) {
   for (auto& byteCodeFunctionWithOperator : getUpgraderBytecodeList()) {
-    // When kUpgraderByteCode is initialized in upgrader_mobile.h, the mobile
-    // function is initialized with everything (instruction, constants, types,
-    // registerer size and etc), except operator. The operator function is also
-    // static initialized and is available later. The oprator for the upgrader
-    // function will be initialized when the first module is loaded.
-    if (byteCodeFunctionWithOperator.function.get_code().operators_.empty()) {
-      for (const auto& op : byteCodeFunctionWithOperator.operators) {
-        byteCodeFunctionWithOperator.function.append_operator(
-            op.name,
-            op.overload_name,
-            op.num_specified_args,
-            caffe2::serialize::kMaxSupportedFileFormatVersion);
-      }
-    }
     function->append_function(byteCodeFunctionWithOperator.function);
   }
 }
@@ -516,7 +498,8 @@ c10::IValue BytecodeDeserializer::readArchive(
       type_resolver,
       obj_loader,
       device_,
-      *reader_.get());
+      *reader_.get(),
+      nullptr);
   return ivalues;
 }
 

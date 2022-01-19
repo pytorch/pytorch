@@ -11,10 +11,8 @@ from torch.distributed._sharded_optim import (
 )
 from torch.distributed._sharded_tensor import (
     shard_parameter,
-    reshard_output,
-)
-from torch.distributed._sharding_spec import (
-    ReshardingSpec,
+    _collect_local_shard,
+    _reshard_output,
 )
 from torch.testing._internal.common_distributed import (
     requires_nccl,
@@ -57,51 +55,56 @@ class TestShardedTensorMegatronLinear(ShardedTensorTestBase):
         def forward(self, inp):
             return self.fc2(self.gelu(self.fc1(inp)))
 
-        def weight_override(self, module):
-            self.fc1.weight = clone_module_parameter(module.fc1, "weight")
-            self.fc1.bias = clone_module_parameter(module.fc1, "bias")
-            self.fc2.weight = clone_module_parameter(module.fc2, "weight")
-            self.fc2.bias = clone_module_parameter(module.fc2, "bias")
+    def _run_megatron_linear(self, spec, input_size, linear_size):
+        def _weight_override(module_dst, module_src):
+            module_dst.fc1.weight = clone_module_parameter(module_src.fc1, "weight")
+            module_dst.fc1.bias = clone_module_parameter(module_src.fc1, "bias")
+            module_dst.fc2.weight = clone_module_parameter(module_src.fc2, "weight")
+            module_dst.fc2.bias = clone_module_parameter(module_src.fc2, "bias")
 
-        def shard_parameter(self, spec):
-            shard_parameter(self.fc1, "weight", spec[0])
-            shard_parameter(self.fc2, "weight", spec[1])
+        def _shard_parameter(module, spec):
+            shard_parameter(module.fc1, "weight", spec[0])
+            shard_parameter(module.fc2, "weight", spec[1])
 
-        def get_weight_grad(self):
-            return (self.fc1.weight.grad, self.fc2.weight.grad)
+        def _get_weight_grad(module):
+            return (module.fc1.weight.grad, module.fc2.weight.grad)
 
-        def get_bias_grad(self):
-            return (self.fc1.bias.grad, self.fc2.bias.grad)
+        def _get_bias_grad(module):
+            return (module.fc1.bias.grad, module.fc2.bias.grad)
 
-        def get_weights(self):
-            return (self.fc1.weight, self.fc2.weight)
+        def _get_weights(module):
+            return (module.fc1.weight, module.fc2.weight)
 
-        def get_bias(self):
-            return (self.fc1.bias, self.fc2.bias)
+        def _get_bias(module):
+            return (module.fc1.bias, module.fc2.bias)
 
-        def get_weight_local_shard(self):
+        def _get_weight_local_shard(module):
             return (
-                self.fc1.weight.local_shards()[0].tensor,
-                self.fc2.weight.local_shards()[0].tensor,
+                module.fc1.weight.local_shards()[0].tensor,
+                module.fc2.weight.local_shards()[0].tensor,
             )
 
-    def _run_megatron_linear(self, spec, input_size, linear_size):
         # Use same seed.
         torch.manual_seed(0)
         local_megatron_lm = self.SimpleMegatronLM(linear_size, rank=self.rank).cuda(
             self.rank
         )
         sharded_megatron_lm = self.SimpleMegatronLM(linear_size)
-        sharded_megatron_lm.weight_override(local_megatron_lm)
+        _weight_override(sharded_megatron_lm, local_megatron_lm)
 
         # Shard the parameter. First col-wise sharding and then row-wise
-        sharded_megatron_lm.shard_parameter(spec)
+        _shard_parameter(sharded_megatron_lm, spec)
 
         # Run sharded computation
         torch.manual_seed(self.rank)  # inputs different on each rank
         inp = torch.rand(*input_size).cuda(self.rank)
-        resharding_spec = ReshardingSpec(copy.deepcopy(spec[1]), True)
-        sharded_megatron_lm = reshard_output(sharded_megatron_lm, resharding_spec)
+        reshard_spec = copy.deepcopy(spec[1])
+        reshard_spec.placements.sort(key=lambda placement: placement.rank())
+        reshard_spec.dim = 0
+
+        sharded_megatron_lm = _collect_local_shard(
+            _reshard_output(sharded_megatron_lm, reshard_spec)
+        )
         sharded_output = sharded_megatron_lm(inp)
 
         # Run local computation
@@ -116,16 +119,15 @@ class TestShardedTensorMegatronLinear(ShardedTensorTestBase):
         (
             local_weight_grad_fc1,
             local_weight_grad_fc2,
-        ) = local_megatron_lm.get_weight_grad()
-        local_bias_grad_fc1, local_bias_grad_fc2 = local_megatron_lm.get_bias_grad()
+        ) = _get_weight_grad(local_megatron_lm)
+        local_bias_grad_fc1, local_bias_grad_fc2 = _get_bias_grad(local_megatron_lm)
 
         # Verify that weights in both layers and biases in the sharded linear has non-None grad.
-        sharded_megatron_lm_original = sharded_megatron_lm.original_module
         (
             sharded_weight_fc1,
             sharded_weight_fc2,
-        ) = sharded_megatron_lm_original.get_weight_local_shard()
-        bias_grad_fc1, bias_grad_fc2 = sharded_megatron_lm_original.get_bias_grad()
+        ) = _get_weight_local_shard(sharded_megatron_lm)
+        bias_grad_fc1, bias_grad_fc2 = _get_bias_grad(sharded_megatron_lm)
         self.assertNotEqual(sharded_weight_fc1.grad, None)
         self.assertNotEqual(sharded_weight_fc2.grad, None)
         self.assertNotEqual(bias_grad_fc1, None)
@@ -136,7 +138,7 @@ class TestShardedTensorMegatronLinear(ShardedTensorTestBase):
         dist.all_reduce(local_weight_grad_fc2)
         dist.all_reduce(local_bias_grad_fc1)
         dist.all_reduce(local_bias_grad_fc2)
-        local_weight_fc1, local_weight_fc2 = local_megatron_lm.get_weights()
+        local_weight_fc1, local_weight_fc2 = _get_weights(local_megatron_lm)
         (
             start_pos_fc1,
             chunk_size_fc1,
@@ -163,8 +165,8 @@ class TestShardedTensorMegatronLinear(ShardedTensorTestBase):
         self.assertEqual(bias_grad_fc2, local_bias_grad_fc2)
 
         # Test optimizer.
-        bias_fc1, bias_fc2 = sharded_megatron_lm_original.get_bias()
-        local_bias_fc1, local_bias_fc2 = local_megatron_lm.get_bias()
+        bias_fc1, bias_fc2 = _get_bias(sharded_megatron_lm)
+        local_bias_fc1, local_bias_fc2 = _get_bias(local_megatron_lm)
         self.assertEqual(bias_fc1, local_bias_fc1)
         self.assertEqual(bias_fc2, local_bias_fc2)
         self.assertEqual(bias_fc1.grad, local_bias_fc1.grad)
@@ -176,7 +178,7 @@ class TestShardedTensorMegatronLinear(ShardedTensorTestBase):
         optim = torch.optim.SGD(local_megatron_lm.parameters(), lr=0.1)
         optim.step()
         sharded_optim = ShardedOptimizer(
-            dict(named_params_with_sharded_tensor(sharded_megatron_lm_original)),
+            dict(named_params_with_sharded_tensor(sharded_megatron_lm)),
             torch.optim.SGD,
             lr=0.1,
         )
@@ -197,12 +199,11 @@ class TestShardedTensorMegatronLinear(ShardedTensorTestBase):
         self.assertEqual(sharded_weight_fc2, local_weight_fc2_narrowed)
 
         # Test bias value after optimizer.
-        local_bias_fc1, local_bias_fc2 = local_megatron_lm.get_bias()
+        local_bias_fc1, local_bias_fc2 = _get_bias(local_megatron_lm)
         self.assertNotEqual(previous_bias_fc1, bias_fc1)
         self.assertEqual(bias_fc1, local_bias_fc1)
         self.assertNotEqual(previous_bias_fc2, bias_fc2)
-        # Sharded bias get double updated here for fc2.
-        # self.assertEqual(bias_fc2, local_bias_fc2)
+        self.assertEqual(bias_fc2, local_bias_fc2)
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)

@@ -1,8 +1,12 @@
+import copy
+
 import torch
 from torch.distributed._sharded_tensor import (
     sharded_op_impl,
+    Shard,
     ShardedTensor,
 )
+
 
 @sharded_op_impl(torch.nn.functional.gelu)
 def gelu(types, args=(), kwargs=None, pg=None):
@@ -19,6 +23,13 @@ def gelu(types, args=(), kwargs=None, pg=None):
     if isinstance(input, torch.Tensor):
         return op(args[0])
     else:
+        local_shards_new = []
         for local_shard in input.local_shards():
-            local_shard.tensor = op(local_shard.tensor)
-        return input
+            local_shards_new.append(Shard(op(local_shard.tensor), local_shard.metadata))
+        new_st = ShardedTensor._init_from_local_shards(
+            local_shards_new, input.size(), process_group=pg
+        )
+
+        # Manually set sharding_spec
+        new_st._sharding_spec = copy.deepcopy(input._sharding_spec)
+        return new_st

@@ -4,7 +4,7 @@
 #include <c10/util/string_view.h>
 #include <c10/util/irange.h>
 #include <ATen/core/jit_type.h>
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/alias_info.h>
 #include <ATen/core/operator_name.h>
@@ -141,6 +141,15 @@ struct Argument {
       const Argument& old,
       std::ostream* why_not=nullptr) const;
 
+  // this function checks whether this Argument is forward compatible with
+  // the old one. we consider the following cases are forward compatible:
+  //   1) two arguments are equal
+  //   2) this arg's type should be subtype of old
+  //   3) this arg must provide the same default value if old arg has one,
+  bool isForwardCompatibleWith(
+      const Argument& old,
+      std::ostream* why_not = nullptr) const;
+
  private:
   std::string name_;
   TypePtr type_;
@@ -238,6 +247,28 @@ struct FunctionSchema {
       const FunctionSchema& old,
       std::ostream* why_not = nullptr) const;
 
+  // Checks whether this schema is forward compatible with the old one.
+  // The following conditions must be true:
+  // [Function structure] The new schema's name, overload-name, varargs, and
+  //      return arity are the same.
+  // [Output Narrowing] The new schema's output type must be the same class
+  //      or inherit from the old schema's output type.
+  // [Arg Compatibility] Every argument in the old schema has a corresponding
+  //      argument in the new schema that:
+  //        * is at the same position.
+  //        * has the same name.
+  //        * is either positional, or kwarg and the old argument was kwarg.
+  //        * has the same type, or the old argument's type inherits from the
+  //          new argument's type.
+  // [Default Values] Every new argument must have a default value.
+  //         Each default value type should NOT be a container type.
+  // [Positioning] All defaults arguments MUST go after either old
+  //         default arguments or the end of positional arguments
+  //         and right BEFORE all out arguments
+  bool isForwardCompatibleWith(
+      const FunctionSchema& old,
+      std::ostringstream& why_not) const;
+
  private:
   OperatorName name_;
   std::vector<Argument> arguments_;
@@ -255,6 +286,7 @@ struct FunctionSchema {
   // this should always be set no matter what
   c10::optional<AliasAnalysisKind> alias_kind_;
 
+  template <typename T>
   void checkArg(const IValue& value, const Argument& argument, optional<size_t> pos) const;
 
   void checkSchema() const {
@@ -358,6 +390,7 @@ struct FunctionSchema {
 
   // Check that inputs have the correct types and appends any missing default
   // values.
+  template <typename T = c10::Type>
   void checkAndNormalizeInputs(
       std::vector<IValue>& inputs,
       const std::unordered_map<std::string, IValue>& kwargs =
