@@ -13,13 +13,17 @@ constant_folding_opset_versions = [9, 10, 11, 12, 13, 14]
 
 
 class ExportTypes:
-    PROTOBUF_FILE = 1
-    ZIP_ARCHIVE = 2
-    COMPRESSED_ZIP_ARCHIVE = 3
-    DIRECTORY = 4
+    r""""Specifies how the ONNX model is stored."""
+
+    PROTOBUF_FILE = "Saves model in the specified protobuf file."
+    ZIP_ARCHIVE = "Saves model in the specified ZIP file (uncompressed)."
+    COMPRESSED_ZIP_ARCHIVE = "Saves model in the specified ZIP file (compressed)."
+    DIRECTORY = "Saves model in the specified folder."
 
 
 class CheckerError(Exception):
+    r"""Raised when ONNX checker detects an invalid model."""
+
     pass
 
 
@@ -170,18 +174,18 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
                   %3 : Float = onnx::Mul(%2, %0)
                   return (%3)
 
-              If an op is in the TorchScript namespace "quantized", it will be exported
-              in the ONNX opset domain "caffe2". These ops are produced by
-              the modules described in
+              If PyTorch was built with Caffe2 (i.e. with ``BUILD_CAFFE2=1``), then
+              Caffe2-specific behavior will be enabled, including special support
+              for ops are produced by the modules described in
               `Quantization <https://pytorch.org/docs/stable/quantization.html>`_.
 
               .. warning::
 
                 Models exported this way are probably runnable only by Caffe2.
 
-        opset_version (int, default 9):
-            Must be ``== _onnx_main_opset or in _onnx_stable_opsets``,
-            defined in torch/onnx/symbolic_helper.py.
+        opset_version (int, default 9): The version of the
+            `default (ai.onnx) opset <https://github.com/onnx/onnx/blob/master/docs/Operators.md>`_
+            to target. Must be >= 7 and <= 15.
         do_constant_folding (bool, default False): Apply the constant-folding optimization.
             Constant-folding will replace some of the ops that have all constant inputs
             with pre-computed constant nodes.
@@ -312,8 +316,6 @@ def export_to_pretty_string(*args, **kwargs) -> str:
     as :func:`export`.
 
     Args:
-      f:  Deprecated and ignored. Will be removed in the next release of
-          PyTorch.
       add_node_names (bool, default True): Whether or not to set
           NodeProto.name. This makes no difference unless
           ``google_printer=True``.
@@ -326,12 +328,6 @@ def export_to_pretty_string(*args, **kwargs) -> str:
     """
     from torch.onnx import utils
     return utils.export_to_pretty_string(*args, **kwargs)
-
-
-def _export_to_pretty_string(*args, **kwargs):
-    from torch.onnx import utils
-    return utils._export_to_pretty_string(*args, **kwargs)
-
 
 def _optimize_trace(graph, operator_export_type):
     from torch.onnx import utils
@@ -390,5 +386,15 @@ def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
 
 
 def unregister_custom_op_symbolic(symbolic_name, opset_version):
+    r"""
+    Unregisters ``symbolic_name``. See
+    "Custom Operators" in the module documentation for an example usage.
+
+    Args:
+      symbolic_name (str): The name of the custom operator in "<domain>::<op>"
+        format.
+      opset_version (int): The ONNX opset version in which to unregister.
+    """
+
     from torch.onnx import utils
     utils.unregister_custom_op_symbolic(symbolic_name, opset_version)
