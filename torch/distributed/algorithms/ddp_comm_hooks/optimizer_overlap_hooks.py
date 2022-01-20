@@ -2,6 +2,7 @@ from typing import Any, Callable
 
 import torch
 import torch.distributed as dist
+from torch.distributed.optim import create_functional_optim
 
 _FUNCTIONAL_OPTIM_STEP_METHOD_NAME = "step_param"
 
@@ -16,11 +17,10 @@ class _OptimizerHookState(object):
     def __init__(
         self, functional_optim_cls, *functional_optim_args, **functional_optim_kwargs
     ):
-        self.functional_optimizer = functional_optim_cls(
-            [],
+        self.functional_optimizer = create_functional_optim(
+            functional_optim_cls,
             *functional_optim_args,
             **functional_optim_kwargs,
-            _allow_empty_param_list=True,
         )
         self._check_valid_functional_optim()
 
