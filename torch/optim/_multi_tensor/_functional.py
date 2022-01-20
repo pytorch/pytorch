@@ -188,10 +188,10 @@ def asgd(params: List[Tensor],
 
     # update eta and mu
     for i in range(len(mus)):
-        new_eta = torch.tensor(lr / math.pow((1 + lambd * lr * state_steps[i].item()), alpha))
-        etas[i].copy_(new_eta)
-        new_mu = torch.tensor(1 / max(1, state_steps[i].item() - t0))
-        mus[i].copy_(new_mu)
+        new_eta = lr / math.pow((1 + lambd * lr * state_steps[i].item()), alpha)
+        etas[i].fill_(new_eta)
+        new_mu = 1 / max(1, state_steps[i].item() - t0)
+        mus[i].fill_(new_mu)
 
 
 def radam(params: List[Tensor],
