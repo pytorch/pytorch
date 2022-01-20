@@ -5577,7 +5577,7 @@ for shape in [(1,), ()]:
                   check_backward_ad=False, check_batched_grad=False)
 
     def test_custom_function_forward_mode_forward_is_no_op(self):
-        error_regex =  "A custom Function's forward is returning a view (or one of the input as-is)*"
+        error_regex = "A custom Function's forward is returning a view (or one of the input as-is)*"
         for jvp_return_view in (True, False):
             class MyFn(torch.autograd.Function):
                 @staticmethod
