@@ -478,6 +478,33 @@ class DistributedDataParallel(Module, Joinable):
                       gradients. If hitting such errors, please fix it by
                       referring to the :meth:`~torch.optim.Optimizer.zero_grad`
                       function in ``torch/optim/optimizer.py`` as a solution.
+        static_graph (bool): When set to ``True``, DDP knows the trained graph is
+                     static. Static graph means 1) The set of used and unused
+                     parameters will not change during the whole training loop; in
+                     this case, it does not matter whether users set
+                     ``find_unused_parameters = True`` or not. 2) How the graph is trained
+                     will not change during the whole training loop (meaning there is
+                     no control flow depending on iterations).
+                     When static_graph is set to be ``True``, DDP will support cases that
+                     can not be supported in the past:
+                     1) Reentrant backwards.
+                     2) Activation checkpointing multiple times.
+                     3) Activation checkpointing when model has unused parameters.
+                     4) There are model parameters that are outside of forward function.
+                     5) Potentially improve performance when there are unused parameters,
+                     as DDP will not search graph in each iteraton to detect unused
+                     parameters when static_graph is set to be ``True``.
+                     To check whether you can set static_graph to be ``True``, one way is to
+                     check ddp logging data at the end of your previous model training,
+                     if ``ddp_logging_data.get("can_set_static_graph") == True``, mostly you
+                     can set ``static_graph = True`` as well.
+
+                     Example::
+                         >>> model_DDP = torch.nn.parallel.DistributedDataParallel(model)
+                         >>> # Training loop
+                         >>> .....
+                         >>> ddp_logging_data = model_DDP._get_ddp_logging_data()
+                         >>> static_graph = ddp_logging_data.get("can_set_static_graph")
 
 
     Attributes:
@@ -501,6 +528,7 @@ class DistributedDataParallel(Module, Joinable):
         find_unused_parameters=False,
         check_reduction=False,
         gradient_as_bucket_view=False,
+        static_graph=False,
     ):
 
         super(DistributedDataParallel, self).__init__()
@@ -620,6 +648,9 @@ class DistributedDataParallel(Module, Joinable):
         self._ddp_init_helper(parameters, expect_sparse_gradient, param_to_name_mapping)
         self._has_rebuilt_buckets = False
 
+        if static_graph:
+            self._set_static_graph()
+
     def _sync_params_and_buffers(self, authoritative_rank=0):
         module_states = []
         for name, param in self.module.named_parameters():
@@ -727,7 +758,8 @@ class DistributedDataParallel(Module, Joinable):
         # Builds reducer
         self._ddp_init_helper(parameters, expect_sparse_gradient, param_to_name_mapping)
         if self.static_graph:
-            self._set_static_graph()
+            self.reducer._set_static_graph()
+            self.logger._set_static_graph()
 
     def _build_params_for_reducer(self):
         # Build tuple of (module, parameter) for all parameters that require grads.
@@ -1635,30 +1667,15 @@ class DistributedDataParallel(Module, Joinable):
 
     def _set_static_graph(self):
         """
-        Users can explicitly let DDP know the trained graph is static,
-        when 1) the set of used and unused parameters will not change
-        during the whole training loop; in this case, it does not matter
-        whether users set find_unsued_parameters = true or not.
-        2) how the graph is trained will not change during the whole training
-        loop (meaning there is no control flow depending on iterations).
-        When graph is set to be static, DDP will support cases that can not
-        be supported in the past: 1) reentrant backwards
-        2) activation checkpointing multiple times 3)
-        activation checkpointing with find_unused_parameters = true.
-        4) not all output tensors are used in loss calculation.
-        5) there is model parameter that is outside of forward function.
-        6) potentially improve performance when find_unsued_parameters = true
-        or there are unused parameters, as DDP will not search graph in each
-        iteraton to detect unused parameters when static_graph is set to be True.
-
-        This API should be called after DistributedDataParallel construction, and
-        before training loops starts. Also it should be called in the same way for
-        all ranks. For example:
-            ddp_model = DistributedDataParallel(model)
-            ddp_model._set_static_graph()
-            for i in range(n):
-                .....
+        It is recommended to set static graph in the DDP constructor, which will
+        call this private API internally.
         """
+        # If self.static_graph has been set, no need to set it again
+        if self.static_graph:
+            warnings.warn(
+                "You've set static_graph to be True, no need to set it again."
+            )
+            return
         self.static_graph = True
         self.reducer._set_static_graph()
         self.logger._set_static_graph()
