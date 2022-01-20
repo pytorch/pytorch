@@ -357,6 +357,7 @@ class TestOperators(TestCase):
         # Composite ops that do bad things. Need to be fixed in PyTorch core.
         # RuntimeError: Cannot access data pointer of Tensor that doesn't have storage
         xfail('linalg.inv'),
+        xfail('linalg.eigvals'),
         xfail('linalg.matrix_power'),
         xfail('linalg.cholesky'),
         xfail('tensor_split'),
@@ -369,6 +370,12 @@ class TestOperators(TestCase):
 
         # Causing an error with calling a forward mode of a forward mode
         xfail('nn.functional.batch_norm', device_type='cpu'),
+
+        # Some kind of issue with unsymmetric tangent type
+        # Runtime Error: The tangent part of the matrix A should also be symmetric.
+        xfail('linalg.eigh'),
+
+
     }))
     def test_jvp(self, device, dtype, op):
         # TODO: when we change supports_autograd to supports_backward_ad, also change in this file
@@ -530,6 +537,7 @@ class TestOperators(TestCase):
         xfail('index_copy'),
         xfail('index_fill'),
         xfail('linalg.det', ''),
+        xfail('linalg.eig'), # Uses aten::allclose
         xfail('linalg.eigh'),
         xfail('linalg.householder_product'),
         xfail('linalg.matrix_norm'),
@@ -659,6 +667,7 @@ class TestOperators(TestCase):
         # RuntimeError: Cannot access data pointer of Tensor that doesn't have storage
         xfail('tensor_split'),
         xfail('linalg.inv'),
+        xfail('linalg.eigvals'),
         xfail('linalg.matrix_power'),
         xfail('linalg.cholesky'),
 
@@ -669,7 +678,11 @@ class TestOperators(TestCase):
         skip('true_divide', device_type='cuda'),
 
         # Causing multiple forward mode AD issues, needs investigation
-        xfail('nn.functional.batch_norm', device_type='cpu')
+        xfail('nn.functional.batch_norm', device_type='cpu'),
+
+        # Some kind of issue with unsymmetric tangent type
+        # Runtime Error: The tangent part of the matrix A should also be symmetric.
+        xfail('linalg.eigh'),
     })
     def test_vmapjvp(self, device, dtype, op):
         if is_inplace(op, op.get_op()):
@@ -724,6 +737,7 @@ class TestOperators(TestCase):
         xfail('quantile'),
         xfail('var_mean'),
         xfail('as_strided'),
+        xfail('linalg.eigvals'),
         xfail('linalg.eigvalsh'),
         xfail('fill_'),
         xfail('linalg.cholesky'),
@@ -744,6 +758,10 @@ class TestOperators(TestCase):
         xfail('masked_scatter'),
         xfail('view_as_complex'),
         xfail('prod'),
+
+        # Some kind of issue with unsymmetric tangent type
+        # Runtime Error: The tangent part of the matrix A should also be symmetric.
+        xfail('linalg.eigh'),
     })
     # This is technically a superset of test_vmapjvp. We should either delete test_vmapjvp
     # or figure out if we can split vmapjvpall. It's useful to keep test_vmapjvp intact
