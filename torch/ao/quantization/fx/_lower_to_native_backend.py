@@ -1,4 +1,9 @@
 import torch
+import torch.nn as nn
+import torch.nn.intrinsic as nni
+import torch.nn.intrinsic.quantized as nniq
+import torch.nn.quantized as nnq
+import torch.nn.quantized._reference as nnqr
 from torch.nn.quantized.modules.utils import ReferenceableQuantizedModule
 from . import subgraph_rewriter_FORKED_DO_NOT_USE
 from .graph_module import QuantizedGraphModule
@@ -6,27 +11,29 @@ from .quantized_fusion_patterns_and_replacements import get_fbgemm_patterns_and_
 from .match_utils import is_match
 from .match_utils import MatchAllNode
 from ..utils import _parent_name
-from typing import Dict, Type
+from typing import Dict, Tuple, Type
 
 # Mapping from reference module class to the replacement quantized module class for lowering
-LOWER_MODULE_MAP: Dict[Type[torch.nn.Module], Type[ReferenceableQuantizedModule]] = {
-    torch.nn.quantized._reference.Linear: torch.nn.quantized.Linear,
-    torch.nn.quantized._reference.Conv1d: torch.nn.quantized.Conv1d,
-    torch.nn.quantized._reference.Conv2d: torch.nn.quantized.Conv2d,
-    torch.nn.quantized._reference.Conv3d: torch.nn.quantized.Conv3d,
+LOWER_MODULE_MAP: Dict[Type[nn.Module], Type[ReferenceableQuantizedModule]] = {
+    nnqr.Linear: nnq.Linear,
+    nnqr.Conv1d: nnq.Conv1d,
+    nnqr.Conv2d: nnq.Conv2d,
+    nnqr.Conv3d: nnq.Conv3d,
 }
 
-# A set of fused modules that have a lowering path
-FUSED_MODULES_TO_LOWER = set([
-    torch.nn.intrinsic.modules.fused.LinearReLU
-])
+# Mapping from fused module class to a 2-tuple of:
+#   1) The inner reference module class
+#   2) The replacement quantized module class for lowering
+LOWER_FUSED_MODULE_MAP: Dict[Type[nn.Module], Tuple[Type[nn.Module], Type[ReferenceableQuantizedModule]]] = {
+    nni.LinearReLU: (nnqr.Linear, nniq.LinearReLU)
+}
 
-def _lower_weighted_ref_module(model: QuantizedGraphModule, ref_class: Type[torch.nn.Module]) -> QuantizedGraphModule:
+def _lower_weighted_ref_module(model: QuantizedGraphModule, ref_class: Type[nn.Module]) -> QuantizedGraphModule:
     """
     Traverse the graph and find dequantize - ref module (- ReLU) - quantize patterns
     and replace them with the quantized version of the ref module.
     """
-    if ref_class not in LOWER_MODULE_MAP and ref_class not in FUSED_MODULES_TO_LOWER:
+    if ref_class not in LOWER_MODULE_MAP and ref_class not in LOWER_FUSED_MODULE_MAP:
         raise ValueError("Lowering is currently not supported for reference module %s" % ref_class.__name__)
 
     pattern = (torch.quantize_per_tensor,
@@ -60,28 +67,22 @@ def _lower_weighted_ref_module(model: QuantizedGraphModule, ref_class: Type[torc
 
         # change this pattern to use the corresponding quantized module
         ref_module = modules[ref_node.target]
-        orig_ref_module = ref_module
         output_scale = getattr(model, scale_node.target)
         output_zero_point = getattr(model, zero_point_node.target)
-        if ref_class in FUSED_MODULES_TO_LOWER:
-            ref_module = ref_module[0]
-        q_class = LOWER_MODULE_MAP[type(ref_module)]
+        # For fused modules, we also check whether the inner module is a reference module
+        # If so, we replace the entire fused module with the corresponding quantized module
+        if ref_class in LOWER_FUSED_MODULE_MAP:
+            inner_ref_class, q_class = LOWER_FUSED_MODULE_MAP[ref_class]
+            if type(ref_module[0]) != inner_ref_class:
+                continue
+        else:
+            q_class = LOWER_MODULE_MAP[type(ref_module)]
         assert issubclass(q_class, ReferenceableQuantizedModule)  # suppress mypy warnings
         q_module = q_class.from_reference(ref_module, output_scale, output_zero_point)
 
-        # For fused modules, we simply replace the node with a modified version of the same
-        # node whose child reference module is swapped with the corresponding quantized module.
-        # For now, we assume the child reference module to lower is always the first module,
-        # though this may not be sufficient for all future use cases.
-        if ref_class in FUSED_MODULES_TO_LOWER:
-            orig_ref_module[0] = q_module
-            lowered_module = orig_ref_module
-        else:
-            lowered_module = q_module
-
         # replace reference module with quantized module
         parent_name, module_name = _parent_name(ref_node.target)
-        setattr(modules[parent_name], module_name, lowered_module)
+        setattr(modules[parent_name], module_name, q_module)
         # remove dq node:
         dq_node_input = dq_node.args[0]
 
@@ -101,7 +102,7 @@ def _lower_to_native_backend(model: QuantizedGraphModule) -> QuantizedGraphModul
     to the native backend in PyTorch (fbgemm/qnnpack), both backends shares the same
     operator signature so they can be lowered with the same function
     """
-    for ref_class in list(LOWER_MODULE_MAP.keys()) + list(FUSED_MODULES_TO_LOWER):
+    for ref_class in list(LOWER_MODULE_MAP.keys()) + list(LOWER_FUSED_MODULE_MAP):
         model = _lower_weighted_ref_module(model, ref_class)
     model.recompile()
     for pattern, replacement in get_fbgemm_patterns_and_replacements():

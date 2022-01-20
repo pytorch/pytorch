@@ -372,13 +372,13 @@ class TestFuseFx(QuantizationTestCase):
 
         linearRelu_node_list = [
             ns.call_function(torch.quantize_per_tensor),
-            ns.call_module(nni.modules.fused.LinearReLU),
+            ns.call_module(nniq.LinearReLU),
             ns.call_method('dequantize')
         ]
 
         linearReluLinear_node_list = [
             ns.call_function(torch.quantize_per_tensor),
-            ns.call_module(nni.modules.fused.LinearReLU),
+            ns.call_module(nniq.LinearReLU),
             ns.call_module(nnq.Linear),
             ns.call_method('dequantize')
         ]
@@ -1294,7 +1294,7 @@ class TestQuantizeFx(QuantizationTestCase):
         m(torch.rand(5, 5))
         node_list = [
             ns.call_function(torch.quantize_per_tensor),
-            ns.call_module(nni.modules.fused.LinearReLU),
+            ns.call_module(nniq.LinearReLU),
             ns.call_module(nnq.Linear),
             ns.call_method("dequantize"),
         ]
@@ -3285,7 +3285,7 @@ class TestQuantizeFx(QuantizationTestCase):
             # check that reference pattern for quantized linear module is fused
             expected_node_occurrence = {
                 ns.call_function(torch.quantize_per_tensor): 1,
-                ns.call_module(torch.nn.quantized.Linear): 1,
+                ns.call_module(nnq.Linear): 1,
                 ns.call_method("dequantize"): 1
             }
             self.checkGraphModuleNodes(m, expected_node_occurrence=expected_node_occurrence)
@@ -3321,10 +3321,9 @@ class TestQuantizeFx(QuantizationTestCase):
             out = m(data)
 
             # check that reference pattern for the linear relu module is fused
-            linear_relu_module = torch.nn.intrinsic.modules.fused.LinearReLU
             expected_node_occurrence = {
                 ns.call_function(torch.quantize_per_tensor): 1,
-                ns.call_module(linear_relu_module): 1,
+                ns.call_module(nniq.LinearReLU): 1,
                 ns.call_method("dequantize"): 1
             }
             self.checkGraphModuleNodes(m, expected_node_occurrence=expected_node_occurrence)
@@ -3630,7 +3629,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
         for f_relu, quant_type in itertools.product([True, False], [QuantType.STATIC, QuantType.QAT]):
             for model, quantized_node in [
-                    (ModuleLinear(has_relu=True, f_relu=f_relu), ns.call_module(nni.modules.fused.LinearReLU))]:
+                    (ModuleLinear(has_relu=True, f_relu=f_relu), ns.call_module(nniq.LinearReLU))]:
                 self.checkGraphModeFxOp(model, data, quant_type, quantized_node)
 
     @skipIfNoFBGEMM
