@@ -7,7 +7,6 @@
 
 #include <c10/util/irange.h>
 #include <ATen/cuda/detail/LazyNVRTC.h>
-#include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 
 #ifdef __HIP_PLATFORM_HCC__
     // pass -- jiterator not supported on HIP platforms
