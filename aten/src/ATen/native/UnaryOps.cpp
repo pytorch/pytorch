@@ -31,7 +31,7 @@ namespace meta {
 // For complex inputs, the output type should be the same as input type.
 #define CREATE_UNARY_FLOAT_META_FUNC(func)                  \
   TORCH_META_FUNC(func) (const Tensor& self) {        \
-    build_unary_float_op(maybe_get_output(), self);   \
+    build_borrowing_unary_float_op(maybe_get_output(), self);   \
   }
 
 CREATE_UNARY_FLOAT_META_FUNC(acos)
@@ -73,13 +73,13 @@ CREATE_UNARY_FLOAT_META_FUNC(tanh)
 
 TORCH_META_FUNC(polygamma)(int64_t n, const Tensor& self) {
   TORCH_CHECK(n >= 0, "polygamma(n, x) does not support negative n.");
-  build_unary_float_op(maybe_get_output(), self);
+  build_borrowing_unary_float_op(maybe_get_output(), self);
 }
 
 // These are normal unary ops that preserve dtype
 #define CREATE_UNARY_META_FUNC(func)                  \
   TORCH_META_FUNC(func) (const Tensor& self) {        \
-    build_unary_op(maybe_get_output(), self);   \
+    build_borrowing_unary_op(maybe_get_output(), self);   \
   }
 CREATE_UNARY_META_FUNC(bitwise_not)
 CREATE_UNARY_META_FUNC(frac)
@@ -90,41 +90,41 @@ TORCH_META_FUNC(neg)(const Tensor& self) {
   TORCH_CHECK(self.scalar_type() != kBool,
               "Negation, the `-` operator, on a bool tensor is not supported. "
               "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
-  build_unary_op(maybe_get_output(), self);
+  build_borrowing_unary_op(maybe_get_output(), self);
 }
 
 TORCH_META_FUNC(trunc) (const Tensor& self) {
   // Note: this is consistent with NumPy
   TORCH_CHECK(!self.is_complex(),
     "trunc is not supported for complex inputs");
-  build_unary_op(maybe_get_output(), self);
+  build_borrowing_unary_op(maybe_get_output(), self);
 }
 
 TORCH_META_FUNC(floor) (const Tensor& self) {
   // Note: this is consistent with NumPy
   TORCH_CHECK(!self.is_complex(),
     "floor is not supported for complex inputs");
-  build_unary_op(maybe_get_output(), self);
+  build_borrowing_unary_op(maybe_get_output(), self);
 }
 
 TORCH_META_FUNC(sign) (const Tensor& self) {
   TORCH_CHECK(!self.is_complex(),
               "Unlike NumPy, torch.sign is not intended to support complex numbers. Please use torch.sgn instead.");
-  build_unary_op(maybe_get_output(), self);
+  build_borrowing_unary_op(maybe_get_output(), self);
 }
 
 TORCH_META_FUNC(signbit) (const Tensor& self) {
   TORCH_CHECK(!self.is_complex(), "signbit is not implemented for complex tensors.");
   TORCH_CHECK(maybe_get_output().defined() ? maybe_get_output().dtype() == at::kBool : true,
               "signbit does not support non-boolean outputs.");
-  build_unary_force_boolean_op(maybe_get_output(), self);
+  build_borrowing_unary_force_boolean_op(maybe_get_output(), self);
 }
 
 TORCH_META_FUNC(ceil) (const Tensor& self) {
   // Note: this is consistent with NumPy
   TORCH_CHECK(!self.is_complex(),
     "ceil is not supported for complex inputs");
-  build_unary_op(maybe_get_output(), self);
+  build_borrowing_unary_op(maybe_get_output(), self);
 }
 
 } // namespace meta

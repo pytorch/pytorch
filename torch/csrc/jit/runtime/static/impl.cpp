@@ -1032,7 +1032,7 @@ void StaticRuntime::verify_and_correct_memory_overlap(ProcessedNode& n) {
     if (C10_UNLIKELY(!planner_)) {
       // slow check, for first iter only
       n.verify_and_correct_memory_overlap();
-    } else if (planner_) {
+    } else {
       bool overlap_detected_with_fast_check = false;
       for (size_t i = 0; i < n.outputs().size(); i++) {
         auto& output = n.Output(i);
