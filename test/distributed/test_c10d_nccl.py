@@ -380,8 +380,8 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
     @requires_nccl()
     @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
     def test_allreduce_coalesced_error(self):
-        store = c10d.FileStore(self.file.name, self.world_size)
-        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_nccl(store, self.opts())
 
         tensors = [torch.tensor([i],
                                 dtype=torch.float,
