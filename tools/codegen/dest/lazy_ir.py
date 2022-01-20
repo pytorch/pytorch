@@ -231,7 +231,9 @@ class GenLazyNativeFuncDefinition:
             lazy_tensors.push_back(torch::lazy::LazyTensor::Create(torch::lazy::Value(node, i), *common_device));
         }}
         auto result = torch::lazy::TupleAtenFromLtcTensors<{returns_length}>(lazy_tensors);"""
-        if schema.name.name.inplace:
+
+        if schema.name.name.inplace or "out" in func.func.name.overload_name:
+            # TODO(whc) ensure a clean way to match kernels that are out= variants and need same handling as inplace
             assert returns_length == 1, "We assumed there was no such case where an op is an in-place variant " \
                                         "and has tuple outputs."
             bridge_str = f"""lazy_{first_tensor_name}.SetInPlaceIrValue(node);
