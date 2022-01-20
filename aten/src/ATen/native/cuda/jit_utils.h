@@ -71,5 +71,11 @@ template <> inline std::string typeName<c10::complex<float>>(){
 template <> inline std::string typeName<c10::complex<double>>(){
     return "std::complex<double>";
 }
+template <> inline std::string typeName<at::Half>(){
+    return "at::Half";
+}
+template <> inline std::string typeName<at::BFloat16>(){
+    return "at::BFloat16";
+}
 
 }}}  // namespace at::cuda::jit

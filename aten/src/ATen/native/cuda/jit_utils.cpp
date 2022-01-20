@@ -63,7 +63,7 @@ const std::string jit_common_types = R"ESCAPE(
   _(at::Half, Half) /* 5 */                                  \
   _(float, Float) /* 6 */                                \
   _(double, Double) /* 7 */                              \
-  _(std::complex<c10::Half>, ComplexHalf) /* 8 */        \
+  _(std::complex<at::Half>, ComplexHalf) /* 8 */        \
   _(std::complex<float>, ComplexFloat) /* 9 */                          \
   _(std::complex<double>, ComplexDouble) /* 10 */                         \
   _(bool, Bool) /* 11 */                                 \
