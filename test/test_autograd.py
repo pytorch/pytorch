@@ -5553,6 +5553,29 @@ for shape in [(1,), ()]:
         with self.assertRaisesRegex(RuntimeError, "Jacobian computed with forward mode mismatch for output 0"):
             gradcheck(UserFn.apply, (inp, True), check_forward_ad=True)
 
+    def test_custom_function_forward_mode_non_tensor_before_tensor_args(self):
+        class MyFn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, nt, x, nt2, y):
+                return x * 2 + y * 3
+
+            @staticmethod
+            def jvp(ctx, nt, x_t, nt2, y_t):
+                self.assertIsNone(nt)
+                self.assertIsNone(nt2)
+                return x_t * 2 + y_t * 3
+
+        x = torch.tensor(1., dtype=torch.double)
+        t = torch.tensor(1., dtype=torch.double)
+        y = torch.tensor(1., dtype=torch.double)
+
+        with fwAD.dual_level():
+            dual_x = fwAD.make_dual(x, t)
+            MyFn.apply(1, dual_x, 1, y)
+
+        gradcheck(MyFn.apply, (1, x.requires_grad_(True), 1, y.requires_grad_(True)), check_forward_ad=True,
+                  check_backward_ad=False, check_batched_grad=False)
+
     def test_custom_function_local_inplace(self):
         class MyFn(torch.autograd.Function):
             @staticmethod
