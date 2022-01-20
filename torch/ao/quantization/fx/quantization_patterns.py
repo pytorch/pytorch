@@ -1557,7 +1557,7 @@ class CopyNodeQuantizeHandler(QuantizeHandler):
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
         # always produce reference pattern for following functions
         module_type_list = [
-            # torch.nn.ReLU,
+            torch.nn.ReLU,
             torch.nn.ReLU6,
             torch.nn.AdaptiveAvgPool1d,
             torch.nn.AdaptiveAvgPool2d,
