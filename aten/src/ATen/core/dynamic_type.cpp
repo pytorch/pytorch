@@ -1,6 +1,7 @@
 #include <ATen/core/dynamic_type.h>
 
 #include <string>
+#include "ATen/core/jit_type_base.h"
 
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
@@ -271,6 +272,12 @@ TypePtr DynamicType::fallback() const {
       return VarType::create(*name_);
     case Tag::AnyClass:
       return AnyClassType::get();
+    case Tag::QScheme:
+      return QSchemeType::get();
+    case Tag::Quantizer:
+      return QuantizerType::get();
+    case Tag::AnyEnum:
+      return AnyEnumType::get();
     case Tag::Any:
       return AnyType::get();
   }
