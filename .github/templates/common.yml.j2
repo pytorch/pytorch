@@ -12,11 +12,10 @@ concurrency:
   cancel-in-progress: true
 {%- endmacro -%}
 
-{%- macro pull_docker(image) -%}
+{%- macro add_retry_to_env() -%}
           retry () {
               "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
           }
-          retry docker pull "!{{ image }}"
 {%- endmacro -%}
 
 {%- macro display_ec2_information() -%}
@@ -35,14 +34,20 @@ concurrency:
           echo "instance-type: $(get_ec2_metadata instance-type)"
 {%- endmacro -%}
 
-{%- macro parse_ref() -%}
+{%- macro parse_ref(pytorch_directory="") -%}
       - name: Parse ref
+{%- if pytorch_directory %}
+        working-directory: !{{ pytorch_directory }}
+{%- endif %}
         id: parse-ref
         run: .github/scripts/parse_ref.py
 {%- endmacro -%}
 
-{%- macro upload_test_statistics(build_environment, when="always()") -%}
+{%- macro upload_test_statistics(build_environment, when="always()", pytorch_directory="") -%}
       - name: Display and upload test statistics (Click Me)
+{%- if pytorch_directory %}
+        working-directory: !{{ pytorch_directory }}
+{%- endif %}
         if: !{{ when }}
         # temporary hack: set CIRCLE_* vars, until we update
         # tools/stats/print_test_stats.py to natively support GitHub Actions
@@ -61,6 +66,14 @@ concurrency:
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
 {%- endmacro -%}
 
+{%- macro chown_dir(dir) -%}
+      - name: Chown artifacts
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "!{{ dir }}:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+{%- endmacro -%}
+
 {%- macro setup_ec2_linux() -%}
       !{{ display_ec2_information() }}
       - name: Log in to ECR
@@ -69,17 +82,19 @@ concurrency:
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          !{{ add_retry_to_env() }}
+          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
-          !{{ pull_docker("${ALPINE_IMAGE}") }}
+          !{{ add_retry_to_env() }}
+          retry docker pull "${ALPINE_IMAGE}"
           # Ensure the working directory gets chowned back to the current user
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - name: Clean workspace
         run: |
-          rm -rf "${GITHUB_WORKSPACE:?}/*"
-          rm -f ~/.ssh/authorized_keys
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: seemethere/add-github-ssh-key@v1
         with:
@@ -89,8 +104,11 @@ concurrency:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
 {%- endmacro -%}
 
-{%- macro teardown_ec2_linux() -%}
+{%- macro teardown_ec2_linux(pytorch_directory="") -%}
       - name: Hold runner for 2 hours or until ssh sessions have drained
+{%- if pytorch_directory %}
+        working-directory: !{{ pytorch_directory }}
+{%- endif %}
         # Always hold for active ssh sessions
         if: always()
         run: .github/scripts/wait_for_ssh_to_drain.sh
