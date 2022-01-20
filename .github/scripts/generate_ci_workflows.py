@@ -29,9 +29,22 @@ WINDOWS_RUNNERS = {
 LINUX_CPU_TEST_RUNNER = "linux.2xlarge"
 # contains 1 gpu
 LINUX_CUDA_TEST_RUNNER = "linux.4xlarge.nvidia.gpu"
+# contains 4 gpus
+LINUX_ROCM_TEST_RUNNER = "linux.rocm.gpu"
 LINUX_RUNNERS = {
     LINUX_CPU_TEST_RUNNER,
     LINUX_CUDA_TEST_RUNNER,
+    LINUX_ROCM_TEST_RUNNER,
+}
+
+LINUX_DISTRIBUTED_GPU_RUNNERS = {
+    LINUX_CUDA_TEST_RUNNER : "linux.8xlarge.nvidia.gpu",
+    LINUX_ROCM_TEST_RUNNER : LINUX_ROCM_TEST_RUNNER,
+}
+
+LINUX_MULTIGPU_RUNNERS = {
+    LINUX_CUDA_TEST_RUNNER : "linux.16xlarge.nvidia.gpu",
+    LINUX_ROCM_TEST_RUNNER : LINUX_ROCM_TEST_RUNNER,
 }
 
 MACOS_TEST_RUNNER_10_15 = "macos-10.15"
@@ -46,6 +59,9 @@ CUDA_RUNNERS = {
     WINDOWS_CUDA_TEST_RUNNER,
     LINUX_CUDA_TEST_RUNNER,
 }
+ROCM_RUNNERS = {
+    LINUX_ROCM_TEST_RUNNER,
+}
 CPU_RUNNERS = {
     WINDOWS_CPU_TEST_RUNNER,
     LINUX_CPU_TEST_RUNNER,
@@ -55,6 +71,7 @@ LABEL_CIFLOW_ALL = "ciflow/all"
 LABEL_CIFLOW_BAZEL = "ciflow/bazel"
 LABEL_CIFLOW_CPU = "ciflow/cpu"
 LABEL_CIFLOW_CUDA = "ciflow/cuda"
+LABEL_CIFLOW_ROCM = "ciflow/rocm"
 LABEL_CIFLOW_DOCS = "ciflow/docs"
 LABEL_CIFLOW_DEFAULT = "ciflow/default"
 LABEL_CIFLOW_LIBTORCH = "ciflow/libtorch"
@@ -164,6 +181,8 @@ class CIWorkflow:
 
     # Optional fields
     test_runner_type: str = ''
+    multigpu_runner_type: str = ''
+    distributed_gpu_runner_type: str = ''
     ciflow_config: CIFlowConfig = field(default_factory=CIFlowConfig)
     cuda_version: str = ''
     docker_image_base: str = ''
@@ -205,6 +224,9 @@ class CIWorkflow:
         if self.fx2trt_test:
             self.enable_fx2trt_test = 1
 
+        self.multigpu_runner_type = LINUX_MULTIGPU_RUNNERS.get(self.test_runner_type, "linux.16xlarge.nvidia.gpu")
+        self.distributed_gpu_runner_type = LINUX_DISTRIBUTED_GPU_RUNNERS.get(self.test_runner_type, "linux.8xlarge.nvidia.gpu")
+
         # If num_test_shards_on_pull_request is not user-defined, default to num_test_shards unless we are
         # only running smoke tests on the pull request.
         if self.num_test_shards_on_pull_request == -1:
@@ -235,6 +257,8 @@ class CIWorkflow:
             assert self.test_runner_type != ''
         if self.test_runner_type in CUDA_RUNNERS:
             assert LABEL_CIFLOW_CUDA in self.ciflow_config.labels
+        if self.test_runner_type in ROCM_RUNNERS:
+            assert LABEL_CIFLOW_ROCM in self.ciflow_config.labels
         if self.test_runner_type in CPU_RUNNERS and not self.exclude_test:
             assert LABEL_CIFLOW_CPU in self.ciflow_config.labels
         if self.is_scheduled:
@@ -574,6 +598,16 @@ LINUX_WORKFLOWS = [
         exclude_test=True,
         ciflow_config=CIFlowConfig(
             labels=set([LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU]),
+        ),
+    ),
+    CIWorkflow(
+        arch="linux",
+        build_environment="linux-bionic-rocm4.5-py3.7",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm4.5-py3.7",
+        test_runner_type=LINUX_ROCM_TEST_RUNNER,
+        num_test_shards=2,
+        ciflow_config=CIFlowConfig(
+            labels=set([LABEL_CIFLOW_LINUX, LABEL_CIFLOW_ROCM]),
         ),
     ),
     CIWorkflow(
