@@ -468,7 +468,8 @@ facebook::jni::local_ref<JIValue> JIValue::newJIValueFromAtIValue(
 
     facebook::jni::throwNewJavaException(
         facebook::jni::gJavaLangIllegalArgumentException,
-        "Unsupported IValue-Dict key type");
+        "Unsupported IValue-Dict key type: %s",
+        keyType->str());
   }
 
   facebook::jni::throwNewJavaException(
