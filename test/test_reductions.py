@@ -18,7 +18,7 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, skipIfNoSciPy, slowTest, torch_to_numpy_dtype_dict,
-    IS_WINDOWS, assertWarnsOnceRegex)
+    IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
     OpDTypes, expectedFailureMeta, instantiate_device_type_tests, onlyCPU, dtypes, dtypesIfCUDA, dtypesIfCPU,
     onlyNativeDeviceTypes, onlyCUDA, largeTensorTest, ops, precisionOverride)
@@ -1039,14 +1039,14 @@ class TestReductions(TestCase):
     def test_aminmax(self, device, dtype):
 
         def _amin_wrapper(x, dim=None, keepdims=False):
-            with assertWarnsOnceRegex(UserWarning, "_aminmax is deprecated"):
+            with self.assertWarnsOnceRegex(UserWarning, "_aminmax is deprecated"):
                 if dim is None:
                     return torch._aminmax(x)[0]
                 else:
                     return torch._aminmax(x, dim, keepdims)[0]
 
         def _amax_wrapper(x, dim=None, keepdims=False):
-            with assertWarnsOnceRegex(UserWarning, "_aminmax is deprecated"):
+            with self.assertWarnsOnceRegex(UserWarning, "_aminmax is deprecated"):
                 if dim is None:
                     return torch._aminmax(x)[1]
                 else:
