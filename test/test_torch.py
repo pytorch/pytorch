@@ -1288,6 +1288,10 @@ class AbstractTestCases:
                 output_shape[dim] = output_size
                 self.assertEqual(output.shape, output_shape)
 
+                optional_out = torch.randn(output_shape, dtype=dtype, device=device)
+                expected_optional = optional_out.clone()
+                input.scatter_reduce(dim, index, "sum", output_size=output_size, optional_out=optional_out)
+
                 expected = torch.zeros(output_shape, dtype=dtype, device=device)
                 for i, j, k in itertools.product(range(shape[0]), range(shape[1]), range(shape[2])):
                     v = input[i, j, k]
@@ -1301,11 +1305,12 @@ class AbstractTestCases:
                         k = m
 
                     expected[i, j, k] += v
+                    expected_optional[i, j, k] += v
+
 
                 self.assertTrue(torch.allclose(output, expected))
+                self.assertTrue(torch.allclose(optional_out, expected_optional))
 
-                torch.scatter_reduce(input, dim, index, "sum", out=output)
-                self.assertTrue(torch.allclose(output, expected))
 
             with self.assertRaisesRegex(RuntimeError, "Expected `dim` to be in range -3 to 2"):
                 torch.scatter_reduce(input, 4, index, "sum")
