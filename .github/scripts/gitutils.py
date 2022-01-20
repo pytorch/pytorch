@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 
 from collections import defaultdict
-from collections.abc import Iterator
 from datetime import datetime
-from typing import cast, Any, Dict, List, Optional, Tuple, Union
+from typing import cast, Any, Dict, Iterator, List, Optional, Tuple, Union
 import os
 import re
 
