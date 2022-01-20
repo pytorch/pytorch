@@ -13,6 +13,7 @@ from torch.utils.mobile_optimizer import (LintCode,
 from torch.nn import functional as F
 from torch._C import MobileOptimizerType
 from torch.testing._internal.common_quantized import override_quantized_engine
+from test_binary_ufuncs import IS_JETSON
 
 try:
     import torchvision
@@ -21,8 +22,6 @@ except ImportError:
     HAS_TORCHVISION = False
 
 FileCheck = torch._C.FileCheck
-dev_name = torch.cuda.get_device_name(torch.cuda.current_device()).lower()
-IS_JETSON = 'xavier' in dev_name or 'nano' in dev_name or 'jetson' in dev_name or 'tegra' in dev_name
 
 class TestOptimizer(TestCase):
 
