@@ -145,7 +145,6 @@ void fractional_max_pool3d_backward_out_cuda_template(
   Tensor& gradInput,
   const Tensor& gradOutput,
   const Tensor& input,
-  IntArrayRef pool_size /* unused */,
   IntArrayRef output_size,
   const Tensor& indices) {
     int64_t dimt = 1;
@@ -317,7 +316,6 @@ Tensor& fractional_max_pool3d_backward_out_cuda(const at::Tensor& gradOutput_,
       gradInput,
       gradOutput_,
       input,
-      pool_size,
       output_size,
       indices
     );
@@ -338,7 +336,6 @@ Tensor fractional_max_pool3d_backward_cuda(
       gradInput,
       gradOutput,
       input,
-      pool_size,
       output_size,
       indices
     );
