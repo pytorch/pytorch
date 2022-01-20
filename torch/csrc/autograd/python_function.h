@@ -94,6 +94,7 @@ struct THPFunction {
     std::vector<bool> is_variable_input;
     char has_freed_buffers;
 
+    PyObject *saved_for_forward;
     // In jvp the 'saved_tensor' attribute return tensors saved with saved_for_forward
     // In vjp (or backward) the 'saved_tensor' attribute unpacks and returns tensors
     // saved with saved_for_backward
