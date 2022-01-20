@@ -94,6 +94,10 @@ struct THPFunction {
     std::vector<bool> is_variable_input;
     char has_freed_buffers;
 
+    // In jvp the 'saved_tensor' attribute return tensors saved with saved_for_forward
+    // In vjp (or backward) the 'saved_tensor' attribute unpacks and returns tensors
+    // saved with saved_for_backward
+    bool is_saved_tensor_for_backward = false;
     // The actual PyNode (in the autograd graph) that this data was
     // saved for.  This field may be NULL (because a user can construct
     // a THPFunction directly from Python), but when this field is non-NULL,

@@ -5576,6 +5576,32 @@ for shape in [(1,), ()]:
         gradcheck(MyFn.apply, (1, x.requires_grad_(True), 1, y.requires_grad_(True)), check_forward_ad=True,
                   check_backward_ad=False, check_batched_grad=False)
 
+    def test_custom_function_save_for_forward(self):
+        class MyFn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                ctx.save_for_forward(x*2, {"blah": [(1, 2, 3)]})
+                return x.clone()
+
+            @staticmethod
+            def jvp(ctx, x_t):
+                print("jvp: ", ctx.saved_tensors)
+                return x_t
+
+            @staticmethod
+            def vjp(ctx, x_t):
+                print("vjp: ", ctx.saved_tensors)
+                return x_t
+
+        x = torch.tensor(1., requires_grad=True)
+        t = torch.tensor(1.)
+
+        with fwAD.dual_level():
+            dual_x = fwAD.make_dual(x, t)
+            out = MyFn.apply(dual_x)
+            out.backward()
+
     def test_custom_function_local_inplace(self):
         class MyFn(torch.autograd.Function):
             @staticmethod

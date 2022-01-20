@@ -639,6 +639,11 @@ PyObject* process_outputs(PyObject *op_obj, const std::shared_ptr<PyNode>& cdata
     grad_fn->non_differentiable = nullptr;
   }
 
+  if (PyObject_HasAttrString((PyObject*) grad_fn, "saved_for_forward")) {
+    PyObject_DelAttrString((PyObject*) grad_fn, "saved_for_forward");
+  }
+  grad_fn->is_saved_tensor_for_backward = true;
+
   // Unpack the output, unless .forward() returned a tuple
   if (unpack_output) {
     PyObject *output = PyTuple_GET_ITEM(outputs.get(), 0);
@@ -813,9 +818,20 @@ static PyObject *unpack_saved_variables(
 PyObject *THPFunction_saved_tensors(THPFunction *self, void *_unused)
 {
   HANDLE_TH_ERRORS
-  return unpack_saved_variables(self, [](const Variable& var) {
-    return THPVariable_Wrap(var);
-  });
+  // return unpack_saved_variables(self, [](const Variable& var) {
+  //     return THPVariable_Wrap(var);
+  //   });
+  if (self->is_saved_tensor_for_backward){
+    return unpack_saved_variables(self, [](const Variable& var) {
+      return THPVariable_Wrap(var);
+    });
+  } else {
+    if (PyObject_HasAttrString((PyObject*) self, "saved_for_forward")) {
+      return PyObject_GetAttrString((PyObject*) self, "saved_for_forward");
+    } else {
+      return PyTuple_New(0);
+    }
+  }
   END_HANDLE_TH_ERRORS
 }
 
