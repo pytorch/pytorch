@@ -231,13 +231,13 @@ TORCH_IMPL_FUNC(fractional_max_pool3d_out_cpu)(
   int64_t outputH,
   int64_t outputW,
   const at::Tensor& randomSamples,
-  const at::Tensor& output,
-  const at::Tensor& indices,
   int64_t numBatch,
   int64_t numPlanes,
   int64_t inputT,
   int64_t inputH,
-  int64_t inputW) {
+  int64_t inputW,
+  const at::Tensor& output,
+  const at::Tensor& indices) {
 
   /* get contiguous input */
   auto input = input_.contiguous();

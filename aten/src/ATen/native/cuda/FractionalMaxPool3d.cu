@@ -242,13 +242,13 @@ TORCH_IMPL_FUNC(fractional_max_pool3d_out_cuda) (
   int64_t outputH,
   int64_t outputW,
   const Tensor& randomSamples,
-  const Tensor& output,
-  const Tensor& indices,
   int64_t numBatch,
   int64_t numPlanes,
   int64_t inputT,
   int64_t inputH,
-  int64_t inputW) {
+  int64_t inputW,
+  const Tensor& output,
+  const Tensor& indices) {
 
   auto output_ = output;
   auto indices_ = indices;

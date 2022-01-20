@@ -1603,23 +1603,23 @@ class Precompute:
         assert isinstance(src, list)
 
         # src is a list of strings of the format:
-        #   [{add decl}[, {add decl}, ...]]
         #   {kernel param name} -> {replacement decl}[, {replacement decl}, ...]
-        # The first line is optional and contains the precomputed parameters that are
+        #   [{add decl}[, {add decl}, ...]]
+        # The last line is optional and contains the precomputed parameters that are
         # added without replacement.
         # The other lines are parsed to get the names of which precomputed elements
         # should replace which kernel arguments.
         add_args = []
-        if ' -> ' not in src[0]:
-            add_list = src[0].split(',')
+        if ' -> ' not in src[-1]:
+            add_list = src[-1].split(',')
             add_args = [Argument.parse(name.strip()) for name in add_list]
-            src = src[1:]
+            src = src[:-1]
 
         replace = {}
         for raw_replace_item in src:
             assert isinstance(raw_replace_item, str)
             assert ' -> ' in raw_replace_item, 'precomputed parameters without replacement' \
-                                               ' are allowed only in the first line'
+                                               ' are allowed only in the last line'
 
             arg, with_list_raw = raw_replace_item.split(' -> ')
             with_list = with_list_raw.split(',')
