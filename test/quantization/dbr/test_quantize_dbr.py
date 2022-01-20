@@ -1409,10 +1409,6 @@ class TestQuantizeDBRMultipleOps(QuantizeDBRTestCase):
         self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 1, 1),))
 
     def test_inplace_add(self):
-        # TODO(next): this is failing because output dtype is being defaulted
-        # to torch.float, and the model returns x.  FX just leaves it alone,
-        # which is likely technically incorrect. Need to pass dtype long in
-        # prepare custom config dict.
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
