@@ -213,17 +213,27 @@ namespace {
     int64_t gOut_sD = grad_output.stride(2);
     int64_t gOut_sH = grad_output.stride(3);
     int64_t gOut_sW = grad_output.stride(4);
-    int64_t gInp_sN = grad_input.stride(0);
-    int64_t gInp_sC = grad_input.stride(1);
-    int64_t gInp_sD = grad_input.stride(2);
-    int64_t gInp_sH = grad_input.stride(3);
-    int64_t gInp_sW = grad_input.stride(4);
+    int64_t gInp_sN;
+    int64_t gInp_sC;
+    int64_t gInp_sD;
+    int64_t gInp_sH;
+    int64_t gInp_sW;
+    if (input_requires_grad) {
+      gInp_sN = grad_input.stride(0);
+      gInp_sC = grad_input.stride(1);
+      gInp_sD = grad_input.stride(2);
+      gInp_sH = grad_input.stride(3);
+      gInp_sW = grad_input.stride(4);
+    }
     int64_t gGrid_sN = grad_grid.stride(0);
     int64_t gGrid_sW = grad_grid.stride(3);
     scalar_t *inp_ptr = input.data_ptr<scalar_t>();
     scalar_t *grid_ptr = grid.data_ptr<scalar_t>();
     scalar_t *gOut_ptr = grad_output.data_ptr<scalar_t>();
-    scalar_t *gInp_ptr = grad_input.data_ptr<scalar_t>();
+    scalar_t *gInp_ptr = nullptr;
+    if (input_requires_grad) {
+      gInp_ptr = grad_input.data_ptr<scalar_t>();
+    }
     scalar_t *gGrid_ptr = grad_grid.data_ptr<scalar_t>();
     // loop over each output pixel
     at::parallel_for(0, N, 0, [&](int64_t start, int64_t end) {
@@ -294,22 +304,26 @@ namespace {
 
                 scalar_t gix = static_cast<scalar_t>(0), giy = static_cast<scalar_t>(0), giz = static_cast<scalar_t>(0);
                 scalar_t *gOut_ptr_NCDHW = gOut_ptr + n * gOut_sN + d * gOut_sD + h * gOut_sH + w * gOut_sW;
-                scalar_t *gInp_ptr_NC = gInp_ptr + n * gInp_sN;
                 scalar_t *inp_ptr_NC = inp_ptr_N;
+                scalar_t *gInp_ptr_NC = nullptr;
+                if (input_requires_grad) {
+                  gInp_ptr_NC = gInp_ptr + n * gInp_sN;
+                }
                 // calculate bilinear weighted pixel value and set output pixel
-                for (int64_t c = 0; c < C; ++c, gOut_ptr_NCDHW += gOut_sC, gInp_ptr_NC += gInp_sC, inp_ptr_NC += inp_sC) {
+                for (int64_t c = 0; c < C; ++c, gOut_ptr_NCDHW += gOut_sC, gInp_ptr_NC += input_requires_grad ? gInp_sC : 0, inp_ptr_NC += inp_sC) {
                   scalar_t gOut = *gOut_ptr_NCDHW;
 
                   // calculate and set grad_input
-                  safe_add_3d(gInp_ptr_NC, iz_tnw, iy_tnw, ix_tnw, gInp_sD, gInp_sH, gInp_sW, inp_D, inp_H, inp_W, tnw * gOut);
-                  safe_add_3d(gInp_ptr_NC, iz_tne, iy_tne, ix_tne, gInp_sD, gInp_sH, gInp_sW, inp_D, inp_H, inp_W, tne * gOut);
-                  safe_add_3d(gInp_ptr_NC, iz_tsw, iy_tsw, ix_tsw, gInp_sD, gInp_sH, gInp_sW, inp_D, inp_H, inp_W, tsw * gOut);
-                  safe_add_3d(gInp_ptr_NC, iz_tse, iy_tse, ix_tse, gInp_sD, gInp_sH, gInp_sW, inp_D, inp_H, inp_W, tse * gOut);
-                  safe_add_3d(gInp_ptr_NC, iz_bnw, iy_bnw, ix_bnw, gInp_sD, gInp_sH, gInp_sW, inp_D, inp_H, inp_W, bnw * gOut);
-                  safe_add_3d(gInp_ptr_NC, iz_bne, iy_bne, ix_bne, gInp_sD, gInp_sH, gInp_sW, inp_D, inp_H, inp_W, bne * gOut);
-                  safe_add_3d(gInp_ptr_NC, iz_bsw, iy_bsw, ix_bsw, gInp_sD, gInp_sH, gInp_sW, inp_D, inp_H, inp_W, bsw * gOut);
-                  safe_add_3d(gInp_ptr_NC, iz_bse, iy_bse, ix_bse, gInp_sD, gInp_sH, gInp_sW, inp_D, inp_H, inp_W, bse * gOut);
-
+                  if (input_requires_grad) {
+                    safe_add_3d(gInp_ptr_NC, iz_tnw, iy_tnw, ix_tnw, gInp_sD, gInp_sH, gInp_sW, inp_D, inp_H, inp_W, tnw * gOut);
+                    safe_add_3d(gInp_ptr_NC, iz_tne, iy_tne, ix_tne, gInp_sD, gInp_sH, gInp_sW, inp_D, inp_H, inp_W, tne * gOut);
+                    safe_add_3d(gInp_ptr_NC, iz_tsw, iy_tsw, ix_tsw, gInp_sD, gInp_sH, gInp_sW, inp_D, inp_H, inp_W, tsw * gOut);
+                    safe_add_3d(gInp_ptr_NC, iz_tse, iy_tse, ix_tse, gInp_sD, gInp_sH, gInp_sW, inp_D, inp_H, inp_W, tse * gOut);
+                    safe_add_3d(gInp_ptr_NC, iz_bnw, iy_bnw, ix_bnw, gInp_sD, gInp_sH, gInp_sW, inp_D, inp_H, inp_W, bnw * gOut);
+                    safe_add_3d(gInp_ptr_NC, iz_bne, iy_bne, ix_bne, gInp_sD, gInp_sH, gInp_sW, inp_D, inp_H, inp_W, bne * gOut);
+                    safe_add_3d(gInp_ptr_NC, iz_bsw, iy_bsw, ix_bsw, gInp_sD, gInp_sH, gInp_sW, inp_D, inp_H, inp_W, bsw * gOut);
+                    safe_add_3d(gInp_ptr_NC, iz_bse, iy_bse, ix_bse, gInp_sD, gInp_sH, gInp_sW, inp_D, inp_H, inp_W, bse * gOut);
+                  }
                   // calculate grad_grid
                   if (within_bounds_3d(iz_tnw, iy_tnw, ix_tnw, inp_D, inp_H, inp_W)) {
                     scalar_t tnw_val = inp_ptr_NC[iz_tnw * inp_sD + iy_tnw * inp_sH + ix_tnw * inp_sW];
@@ -372,11 +386,14 @@ namespace {
 
                 // assign nearest neighor pixel value to output pixel
                 scalar_t *gOut_ptr_NCDHW = gOut_ptr + n * gOut_sN + d * gOut_sD + h * gOut_sH + w * gOut_sW;
-                scalar_t *gInp_ptr_NC = gInp_ptr + n * gInp_sN;
-                for (int64_t c = 0; c < C; ++c, gOut_ptr_NCDHW += gOut_sC, gInp_ptr_NC += gInp_sC) {
-                  // calculate and set grad_input
-                  safe_add_3d(gInp_ptr_NC, iz_nearest, iy_nearest, ix_nearest,
-                              gInp_sD, gInp_sH, gInp_sW, inp_D, inp_H, inp_W, *gOut_ptr_NCDHW);
+                scalar_t *gInp_ptr_NC = nullptr;
+                if (input_requires_grad) {
+                  gInp_ptr_NC = gInp_ptr + n * gInp_sN;
+                  for (int64_t c = 0; c < C; ++c, gOut_ptr_NCDHW += gOut_sC, gInp_ptr_NC += gInp_sC) {
+                    // calculate and set grad_input
+                    safe_add_3d(gInp_ptr_NC, iz_nearest, iy_nearest, ix_nearest,
+                                gInp_sD, gInp_sH, gInp_sW, inp_D, inp_H, inp_W, *gOut_ptr_NCDHW);
+                  }
                 }
               }
             }
