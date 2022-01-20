@@ -699,6 +699,24 @@ linalg_svd_rank_revealing_out(
     Tensor& S,
     Tensor& Vh,
     Tensor& rank) {
+  Tensor atol, rtol;
+  std::tie(atol, rtol) = get_atol_rtol(input, atol_opt, rtol_opt, "torch.linalg.svd_rank_revealing");
+
+  checkSameDevice("torch.linalg.svd_rank_revealing", U, input);
+  checkSameDevice("torch.linalg.svd_rank_revealing", S, input);
+  checkSameDevice("torch.linalg.svd_rank_revealing", Vh, input);
+  checkSameDevice("torch.linalg.svd_rank_revealing", rank, input);
+  checkSameDevice("torch.linalg.svd_rank_revealing", atol, input, "atol");
+  checkSameDevice("torch.linalg.svd_rank_revealing", rtol, input, "rtol");
+  ScalarType output_type = ScalarType::Long;
+  checkLinalgCompatibleDtype("torch.linalg.svd_rank_revealing", rank.scalar_type(), output_type);
+
+  // Matrices or batch of matrices are allowed
+  TORCH_CHECK(input.dim() >= 2, "torch.linalg.svd_rank_revealing: Expected as input a matrix or a batch of matrices, but got a tensor of size: ", input.sizes());
+
+  checkNotComplexTolerance(atol, "torch.linalg.svd_rank_revealing", "atol");
+  checkNotComplexTolerance(rtol, "torch.linalg.svd_rank_revealing", "rtol");
+
   at::_linalg_svd_rank_restricted_helper_outf(
       input, atol_opt, rtol_opt, full_matrices,
       // No need to compute unique ranks for this function.
@@ -912,6 +930,24 @@ linalg_svd_rank_restricted_out(
     Tensor& S,
     Tensor& Vh,
     Tensor& rank) {
+  Tensor atol, rtol;
+  std::tie(atol, rtol) = get_atol_rtol(input, atol_opt, rtol_opt, "torch.linalg.svd_rank_restricted");
+
+  checkSameDevice("torch.linalg.svd_rank_revealing", U, input);
+  checkSameDevice("torch.linalg.svd_rank_revealing", S, input);
+  checkSameDevice("torch.linalg.svd_rank_revealing", Vh, input);
+  checkSameDevice("torch.linalg.svd_rank_revealing", rank, input);
+  checkSameDevice("torch.linalg.svd_rank_revealing", atol, input, "atol");
+  checkSameDevice("torch.linalg.svd_rank_revealing", rtol, input, "rtol");
+  ScalarType output_type = ScalarType::Long;
+  checkLinalgCompatibleDtype("torch.linalg.svd_rank_revealing", rank.scalar_type(), output_type);
+
+  // Matrices or batch of matrices are allowed
+  TORCH_CHECK(input.dim() >= 2, "torch.linalg.svd_rank_revealing: Expected as input a matrix or a batch of matrices, but got a tensor of size: ", input.sizes());
+
+  checkNotComplexTolerance(atol, "torch.linalg.svd_rank_revealing", "atol");
+  checkNotComplexTolerance(rtol, "torch.linalg.svd_rank_revealing", "rtol");
+
   at::_linalg_svd_rank_restricted_helper_outf(
       input, atol_opt, rtol_opt, full_matrices,
       /*compute_unique_rank=*/false,

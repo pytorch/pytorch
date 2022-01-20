@@ -4286,10 +4286,7 @@ class TestLinalg(TestCase):
     def test_matrix_rank_empty(self, device, dtype):
         self._test_matrix_rank_empty(device, dtype)
 
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(*floating_and_complex_types())
-    def test_matrix_rank_out_errors_and_warnings(self, device, dtype, matrix_rank=None):
+    def _test_matrix_rank_out_errors_and_warnings(self, device, dtype, matrix_rank=None):
 
         if matrix_rank is None:
             matrix_rank = torch.linalg.matrix_rank
@@ -4315,6 +4312,12 @@ class TestLinalg(TestCase):
             # Check warning occurs
             self.assertEqual(len(w), 1)
             self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(*floating_and_complex_types())
+    def test_matrix_rank_out_errors_and_warnings(self, device, dtype):
+        self._test_matrix_rank_out_errors_and_warnings(device, dtype)
 
     def _test_matrix_rank_basic(self, device, dtype, matrix_rank=None):
         if matrix_rank is None:

@@ -12699,7 +12699,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(
                    unittest.skip("Skipped!"),
                    'TestJit', 'test_variant_consistency_jit',
-                   device_type='cuda', dtypes=(torch.float32,)
+                   device_type='cuda', dtypes=(torch.float32, torch.complex64)
                ),
            )),
     OpInfo('linalg.svd_rank_restricted',
@@ -12735,7 +12735,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(
                    unittest.skip("Skipped!"),
                    'TestJit', 'test_variant_consistency_jit',
-                   device_type='cuda', dtypes=(torch.float32,)
+                   device_type='cuda', dtypes=(torch.float32, torch.complex64)
                ),
                # test does not work with passing lambda for op
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
@@ -12758,7 +12758,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(
                    unittest.skip("Skipped!"),
                    'TestJit', 'test_variant_consistency_jit',
-                   device_type='cuda', dtypes=(torch.float32,)
+                   device_type='cuda', dtypes=(torch.complex64, torch.float32)
                ),
            )),
     OpInfo('linalg.svdvals',
