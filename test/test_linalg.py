@@ -4129,11 +4129,10 @@ class TestLinalg(TestCase):
         self._test_dot_vdot_invalid_args(device, torch.dot)
         self._test_dot_vdot_invalid_args(device, torch.dot, complex_dtypes=True)
 
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(*floating_and_complex_types())
-    def test_matrix_rank(self, device, dtype):
-        matrix_rank = torch.linalg.matrix_rank
+    def _test_matrix_rank(self, device, dtype, matrix_rank=None):
+
+        if matrix_rank is None:
+            matrix_rank = torch.linalg.matrix_rank
 
         def run_test(shape0, shape1, batch):
             a = torch.randn(*batch, shape0, shape1, dtype=dtype, device=device)
@@ -4175,7 +4174,16 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
-    def test_matrix_rank_atol(self, device, dtype):
+    def test_matrix_rank(self, device, dtype):
+        self._test_matrix_rank(device, dtype)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(*floating_and_complex_types())
+    def test_matrix_rank_atol(self, device, dtype, matrix_rank=None):
+
+        if matrix_rank is None:
+            matrix_rank = torch.linalg.matrix_rank
 
         def run_test_atol(shape0, shape1, batch):
             a = make_tensor((*batch, shape0, shape1), dtype=dtype, device=device)
@@ -4189,8 +4197,8 @@ class TestLinalg(TestCase):
             if a.ndim > 2:
                 tolerances.append(make_tensor(a.shape[-3], dtype=torch.float32, device=device, low=0))
             for tol in tolerances:
-                actual = torch.linalg.matrix_rank(a, atol=tol)
-                actual_tol = torch.linalg.matrix_rank(a, tol=tol)
+                actual = matrix_rank(a, atol=tol)
+                actual_tol = matrix_rank(a, tol=tol)
                 self.assertEqual(actual, actual_tol)
                 numpy_tol = tol if isinstance(tol, float) else tol.cpu().numpy()
                 expected = np.linalg.matrix_rank(a.cpu().numpy(), tol=numpy_tol)
@@ -4204,7 +4212,11 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float64)
-    def test_matrix_rank_atol_rtol(self, device, dtype):
+    def test_matrix_rank_atol_rtol(self, device, dtype, matrix_rank=None):
+
+        if matrix_rank is None:
+            matrix_rank = torch.linalg.matrix_rank
+
         make_fullrank = make_fullrank_matrices_with_distinct_singular_values
         make_arg = partial(make_fullrank, device=device, dtype=dtype)
 
@@ -4216,22 +4228,20 @@ class TestLinalg(TestCase):
         # test float and tensor variants
         for tol_value in [0.81, torch.tensor(0.81, device=device)]:
             # using rtol (relative tolerance) takes into account the largest singular value (1.5 in this case)
-            result = torch.linalg.matrix_rank(a, rtol=tol_value)
+            result = matrix_rank(a, rtol=tol_value)
             self.assertEqual(result, 2)  # there are 2 singular values above 1.5*0.81 = 1.215
 
             # atol is used directly to compare with singular values
-            result = torch.linalg.matrix_rank(a, atol=tol_value)
+            result = matrix_rank(a, atol=tol_value)
             self.assertEqual(result, 7)  # there are 7 singular values above 0.81
 
             # when both are specified the maximum tolerance is used
-            result = torch.linalg.matrix_rank(a, atol=tol_value, rtol=tol_value)
+            result = matrix_rank(a, atol=tol_value, rtol=tol_value)
             self.assertEqual(result, 2)  # there are 2 singular values above max(0.81, 1.5*0.81)
 
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(*floating_and_complex_types())
-    def test_matrix_rank_empty(self, device, dtype):
-        matrix_rank = torch.linalg.matrix_rank
+    def _test_matrix_rank_empty(self, device, dtype, matrix_rank=None):
+        if matrix_rank is None:
+            matrix_rank = torch.linalg.matrix_rank
 
         # NumPy doesn't work for input with no elements
         def run_test(shape0, shape1, batch):
@@ -4267,34 +4277,42 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
-    def test_matrix_rank_out_errors_and_warnings(self, device, dtype):
+    def test_matrix_rank_empty(self, device, dtype):
+        self._test_matrix_rank_empty(device, dtype)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(*floating_and_complex_types())
+    def test_matrix_rank_out_errors_and_warnings(self, device, dtype, matrix_rank=None):
+
+        if matrix_rank is None:
+            matrix_rank = torch.linalg.matrix_rank
+
         # dtypes should be safely castable
         a = torch.eye(2, dtype=dtype, device=device)
         out = torch.empty(0, dtype=torch.bool, device=device)
         with self.assertRaisesRegex(RuntimeError, "but got result with dtype Bool"):
-            torch.linalg.matrix_rank(a, out=out)
+            matrix_rank(a, out=out)
 
         # device should match
         if torch.cuda.is_available():
             wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
             out = torch.empty(0, dtype=dtype, device=wrong_device)
             with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
-                torch.linalg.matrix_rank(a, out=out)
+                matrix_rank(a, out=out)
 
         # if out tensor with wrong shape is passed a warning is given
         with warnings.catch_warnings(record=True) as w:
             out = torch.empty(3, dtype=dtype, device=device)
             # Trigger warning
-            torch.linalg.matrix_rank(a, out=out)
+            matrix_rank(a, out=out)
             # Check warning occurs
             self.assertEqual(len(w), 1)
             self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
 
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(*floating_and_complex_types())
-    def test_matrix_rank_basic(self, device, dtype):
-        matrix_rank = torch.linalg.matrix_rank
+    def _test_matrix_rank_basic(self, device, dtype, matrix_rank=None):
+        if matrix_rank is None:
+            matrix_rank = torch.linalg.matrix_rank
 
         a = torch.eye(10, dtype=dtype, device=device)
         self.assertEqual(matrix_rank(a).item(), 10)
@@ -4303,6 +4321,61 @@ class TestLinalg(TestCase):
         a[5, 5] = 0
         self.assertEqual(matrix_rank(a).item(), 9)
         self.assertEqual(matrix_rank(a, hermitian=True).item(), 9)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(*floating_and_complex_types())
+    def test_matrix_rank_basic(self, device, dtype):
+        self._test_matrix_rank_basic(device, dtype)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(*floating_and_complex_types())
+    def test_linalg_svd_rank_revealing_restricted_as_matrix_rank(self, device, dtype):
+
+        def matrix_rank(x, *args, **kwargs):
+            if 'full_matrices' in kwargs:
+                full_matrices = kwargs['full_matrices']
+            else:
+                full_matrices = True
+
+            if len(args):
+                tol = args[0]
+            elif 'tol' in kwargs:
+                tol = kwargs['tol']
+            else:
+                tol = None
+
+            if 'out' in kwargs:
+                svd = torch.linalg.svd(x, full_matrices=full_matrices)
+                out = {
+                    'out': (
+                        torch.empty_like(svd[0]),
+                        torch.empty_like(svd[1]),
+                        torch.empty_like(svd[2]),
+                        kwargs['out']
+                    )
+                }
+            else:
+                out = {}
+
+            if tol is not None:
+                return op(x, tol=tol, full_matrices=full_matrices, **out)[-1]
+            else:
+                atol = kwargs['atol'] if 'atol' in kwargs else None
+                rtol = kwargs['rtol'] if 'rtol' in kwargs else None
+                return op(x, atol=atol, rtol=rtol, full_matrices=full_matrices, **out)[-1]
+
+        for op in (torch.linalg.svd_rank_revealing, torch.linalg.svd_rank_restricted):
+            for full_matrices in (True, False):
+
+                def matrix_rank_fn(*args, **kwargs):
+                    return matrix_rank(*args, full_matrices=full_matrices, **kwargs)
+
+                for attr in dir(self):
+                    if attr.startswith('_test_matrix_rank'):
+                        test = getattr(self, attr)
+                        test(device, dtype, matrix_rank=matrix_rank_fn)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
