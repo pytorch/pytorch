@@ -24,6 +24,7 @@ from torch.testing._internal.common_utils import TestCase, IS_WINDOWS, \
     TEST_DILL, run_tests, download_file, BytesIOContext, TemporaryFileName
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_dtype import get_all_dtypes
+from test_binary_ufuncs import IS_JETSON
 
 # These tests were all copied from `test/test_torch.py` at some point, so see
 # the actual blame, see this revision
@@ -43,9 +44,6 @@ with warnings.catch_warnings(record=True) as warns:
             if "Couldn't retrieve source code" in warn.message.args[0]:
                 can_retrieve_source = False
                 break
-
-dev_name = torch.cuda.get_device_name(torch.cuda.current_device()).lower()
-IS_JETSON = 'xavier' in dev_name or 'nano' in dev_name or 'jetson' in dev_name or 'tegra' in dev_name
 
 class FilelikeMock(object):
     def __init__(self, data, has_fileno=True, has_readinto=False):

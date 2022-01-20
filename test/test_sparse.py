@@ -28,6 +28,7 @@ from torch.testing._internal.common_methods_invocations import \
 from torch.testing._internal.common_dtype import (
     floating_and_complex_types, floating_and_complex_types_and, get_all_dtypes, get_all_int_dtypes,
 )
+from test_binary_ufuncs import IS_JETSON
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -35,9 +36,6 @@ load_tests = load_tests
 
 # batched grad doesn't support sparse
 gradcheck = functools.partial(gradcheck, check_batched_grad=False)
-
-dev_name = torch.cuda.get_device_name(torch.cuda.current_device()).lower()
-IS_JETSON = 'xavier' in dev_name or 'nano' in dev_name or 'jetson' in dev_name or 'tegra' in dev_name
 
 CUSPARSE_SPMM_COMPLEX128_SUPPORTED = (
     IS_WINDOWS and torch.version.cuda and LooseVersion(torch.version.cuda) > "11.2"

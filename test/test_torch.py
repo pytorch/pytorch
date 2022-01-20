@@ -56,6 +56,7 @@ from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp3
 from torch.testing._internal.common_dtype import (
     get_all_fp_dtypes, get_all_int_dtypes, get_all_math_dtypes, get_all_dtypes, get_all_complex_dtypes
 )
+from test_binary_ufuncs import IS_JETSON
 
 # Protects against includes accidentally setting the default dtype
 assert torch.get_default_dtype() is torch.float32
@@ -65,8 +66,6 @@ assert torch.get_default_dtype() is torch.float32
 load_tests = load_tests
 
 AMPERE_OR_ROCM = TEST_WITH_ROCM or tf32_is_not_fp32()
-dev_name = torch.cuda.get_device_name(torch.cuda.current_device()).lower()
-IS_JETSON = 'xavier' in dev_name or 'nano' in dev_name or 'jetson' in dev_name or 'tegra' in dev_name
 
 # Wrap base test class into a class to hide it from testing
 # See https://stackoverflow.com/a/25695512

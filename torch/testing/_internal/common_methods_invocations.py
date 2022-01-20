@@ -41,6 +41,7 @@ from torch.testing._internal.common_utils import \
 import torch.testing._internal.opinfo_helper as opinfo_helper
 
 from distutils.version import LooseVersion
+from test_binary_ufuncs import IS_JETSON
 
 has_scipy_fft = False
 if TEST_SCIPY:
@@ -50,9 +51,6 @@ if TEST_SCIPY:
         has_scipy_fft = True
     except ModuleNotFoundError:
         pass
-
-dev_name = torch.cuda.get_device_name(torch.cuda.current_device()).lower()
-IS_JETSON = 'xavier' in dev_name or 'nano' in dev_name or 'jetson' in dev_name or 'tegra' in dev_name
 
 # Reasonable testing sizes for dimensions
 L = 20

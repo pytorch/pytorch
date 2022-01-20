@@ -28,9 +28,8 @@ from torch.utils.dlpack import to_dlpack
 # TODO: refactor tri_tests_args, _compare_trilu_indices, run_additional_tri_tests
 from torch.testing._internal.common_methods_invocations import (
     tri_tests_args, _compare_trilu_indices, run_additional_tri_tests)
+from test_binary_ufuncs import IS_JETSON
 
-dev_name = torch.cuda.get_device_name(torch.cuda.current_device()).lower()
-IS_JETSON = 'xavier' in dev_name or 'nano' in dev_name or 'jetson' in dev_name or 'tegra' in dev_name
 
 # TODO: replace with make_tensor
 def _generate_input(shape, dtype, device, with_extremal):
