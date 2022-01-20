@@ -615,17 +615,22 @@ std::string generate_code(
   env.s("compute_type", compute_type);
   env.s("functor", func);
   env.s("name", name);
-  std::string function_param = "";
-  std::string function_call = "";
+
+  // Generate `extra_params` for function signature
+  // and `extra_args` for computation call if
+  // extra arguments to capture runtime state are passed.
+  // (look at polygamma for example).
+  std::string extra_params = "";
+  std::string extra_args = "";
   for (size_t i = 0; i < extra_args_typenames.size(); i++) {
     auto type = std::string(extra_args_typenames[i]);
     auto name = "extra_arg_" + std::string(to_string(i));
-    function_param += "," + type + " " + name;
-    function_call += ", " + name;
+    extra_params += "," + type + " " + name;
+    extra_args += ", " + name;
   }
 
-  env.s("extra_params", function_param);
-  env.s("extra_args", function_call);
+  env.s("extra_params", extra_params);
+  env.s("extra_args", extra_args);
   std::stringstream declare_load_arrays;
   for (int i = 0; i < nInputs; i++) {
     // TODO these arrays are potentially of the different types, use function
