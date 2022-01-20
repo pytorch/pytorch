@@ -262,7 +262,7 @@ class GitHubPR:
             self.merge_ghstack_into(repo)
 
         if not dry_run:
-            repo.push(self.default_branch())
+            repo.push(self.default_branch(), dry_run)
 
 
 @dataclass

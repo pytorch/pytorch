@@ -99,11 +99,14 @@ def parse_fuller_format(lines: Union[str, List[str]]) -> GitCommit:
 
 
 class GitRepo:
-    def __init__(self, path: str, remote: str = "origin") -> None:
+    def __init__(self, path: str, remote: str = "origin", debug: bool = False) -> None:
         self.repo_dir = path
         self.remote = remote
+        self.debug = debug
 
     def _run_git(self, *args: Any) -> str:
+        if self.debug:
+            print(f"+ git -C {self.repo_dir} {' '.join(args)}")
         return _check_output(["git", "-C", self.repo_dir] + list(args))
 
     def revlist(self, revision_range: str) -> List[str]:
@@ -183,11 +186,15 @@ class GitRepo:
             self.checkout(orig_branch)
             return
         for commit in reversed(from_commits):
+            print(f"Cherry picking commit {commit}")
             self.cherry_pick(commit)
         self.checkout(orig_branch)
 
-    def push(self, branch: str) -> None:
-        self._run_git("push", self.remote, branch)
+    def push(self, branch: str, dry_run: bool) -> None:
+        if dry_run:
+            self._run_git("push", "--dry-run", self.remote, branch)
+        else:
+            self._run_git("push", self.remote, branch)
 
     def head_hash(self) -> str:
         return self._run_git("show-ref", "--hash", "HEAD").strip()
