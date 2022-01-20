@@ -211,22 +211,54 @@ class GitRepo:
         self._run_git("commit", "--amend", "-m", msg)
 
 
-def parse_args() -> Any:
-    from argparse import ArgumentParser
-    parser = ArgumentParser("Merge PR/branch into default branch")
-    parser.add_argument("--sync-branch", default="sync")
-    parser.add_argument("--default-branch", type=str, default="main")
-    parser.add_argument("--dry-run", action="store_true")
-    return parser.parse_args()
+class PeekableIterator:
+    def __init__(self, val: str) -> None:
+        self._val = val
+        self._idx = -1
+
+    def peek(self) -> Optional[str]:
+        if self._idx + 1 >= len(self._val):
+            return None
+        return self._val[self._idx + 1]
+
+    def __iter__(self) -> Any:
+        return self
+
+    def __next__(self) -> str:
+        rc = self.peek()
+        if rc is None:
+            raise StopIteration
+        self._idx += 1
+        return rc
 
 
-def main() -> None:
-    args = parse_args()
-    repo = GitRepo(get_git_repo_dir())
-    repo.cherry_pick_commits(args.sync_branch, args.default_branch)
-    if not args.dry_run:
-        repo.push(args.default_branch)
-
-
-if __name__ == '__main__':
-    main()
+def patterns_to_regex(allowed_patterns: List[str]) -> Any:
+    """
+    pattern is glob-like, i.e. the only special sequences it has are:
+      - ? - matches single character
+      - * - matches any non-folder separator characters
+      - ** - matches any characters
+      Assuming that patterns are free of braces and backslashes
+      the only character that needs to be escaped are dot and plus
+    """
+    rc = "("
+    for idx, pattern in enumerate(allowed_patterns):
+        if idx > 0:
+            rc += "|"
+        pattern_ = PeekableIterator(pattern)
+        assert not any(c in pattern for c in "{}()[]\\")
+        for c in pattern_:
+            if c == ".":
+                rc += "\\."
+            elif c == "+":
+                rc += "\\+"
+            elif c == "*":
+                if pattern_.peek() == "*":
+                    next(pattern_)
+                    rc += ".+"
+                else:
+                    rc += "[^/]+"
+            else:
+                rc += c
+    rc += ")"
+    return re.compile(rc)
