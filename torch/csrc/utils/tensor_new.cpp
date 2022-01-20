@@ -304,7 +304,7 @@ Tensor internal_new_from_data(
       TensorOptions opts = at::initialTensorOptions().dtype(inferred_scalar_type);
 
       // If the device is Meta, take the shortcut. We don't want to allocate an
-      // empty CPU tensor which would break our contract for meta tensors.
+      // empty CPU tensor which would break our contract for meta tensors 
       if (device == at::kMeta) {
         return at::empty(sizes, opts.device(device));
       }
