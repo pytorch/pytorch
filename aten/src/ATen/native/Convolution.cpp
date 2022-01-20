@@ -1638,7 +1638,9 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
       std::array<bool, 2> input_weight_output_mask = {output_mask[0], output_mask[1]};
       std::tie(backend_grad_input, backend_grad_weight) = cudnn_convolution_backward_stub(
           input.device().type(),
-          input.contiguous(backend_memory_format), grad_output, weight, params.padding, params.stride,
+          // Only make input contiguous when it is necessary for the backwards computation
+          output_mask[1] ? input.contiguous(backend_memory_format) : input,
+          grad_output, weight, params.padding, params.stride,
           params.dilation, params.groups, params.benchmark, params.deterministic, params.allow_tf32,
           input_weight_output_mask);
       break;
@@ -1649,7 +1651,9 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
       std::array<bool, 2> input_weight_output_mask = {output_mask[0], output_mask[1]};
       std::tie(backend_grad_input, backend_grad_weight) = cudnn_convolution_transpose_backward_stub(
         input.device().type(),
-        input.contiguous(backend_memory_format), grad_output, weight, params.padding, params.output_padding,
+        // Only make input contiguous when it is necessary for the backwards computation
+        output_mask[1] ? input.contiguous(backend_memory_format) : input,
+        grad_output, weight, params.padding, params.output_padding,
         params.stride, params.dilation, params.groups, params.benchmark, params.deterministic, params.allow_tf32,
         input_weight_output_mask);
       break;
