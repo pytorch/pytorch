@@ -147,17 +147,16 @@ def _validate_linear_op_param(args, kwargs):
         raise TypeError("bias needs to be torch.Tensor")
     if not isinstance(weight, ShardedTensor):
         raise TypeError("weight needs to be ShardedTensor")
-    if len(input.size()) < 2:
-        raise ValueError("Input needs to have at least 2 dims")
+    if len(input.size()) < 1:  # type: ignore[arg-type]
+        raise ValueError("Input needs to have at least 1 dim")
     weight_size = cast(torch.Size, weight.size())
     if len(weight_size) != 2:
         raise ValueError("Weight needs to have exactly 2 dims")
     if len(bias.size()) != 1:
         raise ValueError("Bias needs to have exactly 1 dim")
-
-    if input.size()[-1] != weight_size[1]:
+    if input.size()[-1] != weight_size[1]:  # type: ignore[index]
         raise ValueError(
-            f"Input dim: {input.size()[1]} does not match "
+            f"Input dim: {input.size()[-1]} does not match "  # type: ignore[index]
             f"appropriate weight dim: {weight_size[1]}"
         )
     if not isinstance(weight._sharding_spec, ChunkShardingSpec):
@@ -198,9 +197,12 @@ def _handle_col_wise_sharding(input, world_size, weight, rank, local_shard_t, bi
         indices[placement.rank()] = idx
     for i, inp in enumerate(gathered_inputs):
         results[indices[i]] = inp.matmul(local_shard_t) + local_bias
-    results = torch.cat(results)
+    if len(input.size()) == 1:  # type: ignore[arg-type]
+        temp_results = torch.stack(results)
+    else:
+        temp_results = torch.cat(results)
     return _init_sharded_tensor_from_local_result(
-        weight, results, 0, results.dim() - 1, world_size, pg
+        weight, temp_results, 0, temp_results.dim() - 1, world_size, pg
     )
 
 
@@ -225,7 +227,7 @@ def _handle_row_wise_sharding_tensor(
         A :class:`_PartialTensor` object which stores the partial local result.
     """
     # alltoall to gather all the appropriate inputs.
-    input_t = input.t().contiguous()
+    input_t = input.transpose(0, -1).contiguous()
     input_t_size = input_t.size()
 
     # Compute expected size
@@ -258,21 +260,18 @@ def _handle_row_wise_sharding_tensor(
             0, torch.tensor(indices_flatten, device=input_t.device)
         )
 
-    gathered_input = torch.empty(
-        input_split_sizes[rank] * world_size, input_t_size[1], device=input_t.device
-    )
+    gathered_input_size = [input_split_sizes[rank] * world_size] + list(input_t_size[1:])
+    gathered_input = torch.empty(gathered_input_size, device=input_t.device)
 
     # Perform autograd enabled alltoall
-    all_to_all_single(
-        gathered_input, input_t, input_split_sizes=input_split_sizes, group=pg
-    )
-    gathered_input = gathered_input.t()
+    all_to_all_single(gathered_input, input_t, input_split_sizes=input_split_sizes, group=pg)
+    gathered_input = gathered_input.transpose(0, -1)
 
     # Perform local matmuls for all shards
     results = []
     shard_size = local_shard_t.size()[0]
     for r in range(world_size):
-        inp = torch.narrow(gathered_input, 1, r * shard_size, shard_size)
+        inp = torch.narrow(gathered_input, -1, r * shard_size, shard_size)
         results.append(
             inp.matmul(local_shard_t) + _BiasTensorPartial.apply(world_size, bias)
         )
@@ -353,15 +352,14 @@ def _init_sharded_tensor_from_local_result(
     current_offsets[result_shard_dim] = sharded_weight_metadata.shard_offsets[
         tensor_shard_dim
     ]
+    global_size = list(local_result.size())
+    global_size[result_shard_dim] = sharded_tensor.size(tensor_shard_dim)
     local_shard_metadata = ShardMetadata(
         shard_offsets=current_offsets,
         shard_sizes=list(local_result.size()),
         placement=sharded_weight_metadata.placement,
     )
     local_shards = [Shard(local_result, local_shard_metadata)]
-    global_size = list(local_result.size())
-    global_size[result_shard_dim] = sharded_tensor.size(tensor_shard_dim)
-
     new_st = ShardedTensor._init_from_local_shards(
         local_shards, tuple(global_size), process_group=pg
     )
