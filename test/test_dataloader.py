@@ -1503,7 +1503,7 @@ except RuntimeError as e:
             self.dataset, batch_size=batch_size, sampler=sampler))
         self.assertEqual(int(math.ceil(float(num_samples) / batch_size)),
                          count_num_samples_in_data_loader)
-    
+
     def test_random_sampler_len_without_replacement(self):
         from torch.utils.data import RandomSampler
         # add 5 extra samples
