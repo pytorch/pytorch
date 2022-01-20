@@ -1144,7 +1144,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
             rref.rpc_sync().non_exist()
 
         with self.assertRaisesRegex(AttributeError, msg):
-            rref.rpc_async().non_exist()
+            rref.rpc_async().non_exist().wait()
 
         with self.assertRaisesRegex(AttributeError, msg):
             rref.remote().non_exist()
@@ -4956,7 +4956,10 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture, RpcTestCommon):
         # which blocks on the RRef being created on owner node, until the
         # specified timeout.
         with self.assertRaisesRegex(RuntimeError, expected_error):
-            rref_api(timeout=timeout).my_instance_method(torch.ones(2, 2))
+            result = rref_api(timeout=timeout).my_instance_method(torch.ones(2, 2))
+            # rpc_async returns immediately and surface a timeout through wait()
+            if rref_api == slow_rref.rpc_async:
+                result.wait()
 
         # FIXME We wait until the remote completed creating the OwnerRRef
         # because there's currently a race if we shut down RPC before that.
