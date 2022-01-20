@@ -818,9 +818,6 @@ static PyObject *unpack_saved_variables(
 PyObject *THPFunction_saved_tensors(THPFunction *self, void *_unused)
 {
   HANDLE_TH_ERRORS
-  // return unpack_saved_variables(self, [](const Variable& var) {
-  //     return THPVariable_Wrap(var);
-  //   });
   if (self->is_saved_tensor_for_backward){
     return unpack_saved_variables(self, [](const Variable& var) {
       return THPVariable_Wrap(var);
