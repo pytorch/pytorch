@@ -155,10 +155,7 @@ def adagrad(params: List[Tensor],
     if foreach and torch.jit.is_scripting():
         raise RuntimeError('torch.jit.script not supported with foreach optimizers')
 
-    if has_sparse_grad is None:
-        has_sparse_grad = any([grad.is_sparse for grad in grads])
-
-    if foreach and not torch.jit.is_scripting() and (not has_sparse_grad):
+    if foreach and not torch.jit.is_scripting():
         func = _multi_tensor_adagrad
     else:
         func = _single_tensor_adagrad
@@ -170,7 +167,8 @@ def adagrad(params: List[Tensor],
          lr=lr,
          weight_decay=weight_decay,
          lr_decay=lr_decay,
-         eps=eps)
+         eps=eps,
+         has_sparse_grad=has_sparse_grad)
 
 
 def _make_sparse(grad, grad_indices, values):
@@ -188,7 +186,8 @@ def _single_tensor_adagrad(params: List[Tensor],
                            lr: float,
                            weight_decay: float,
                            lr_decay: float,
-                           eps: float):
+                           eps: float,
+                           has_sparse_grad: bool):
 
     for (param, grad, state_sum, step_t) in zip(params, grads, state_sums, state_steps):
         # update step
@@ -234,11 +233,26 @@ def _multi_tensor_adagrad(params: List[Tensor],
                           lr: float,
                           weight_decay: float,
                           lr_decay: float,
-                          eps: float):
+                          eps: float,
+                          has_sparse_grad: bool):
 
     # Foreach functions will throw errors if given empty lists
     if len(params) == 0:
         return
+
+    if has_sparse_grad is None:
+        has_sparse_grad = any([grad.is_sparse for grad in grads])
+
+    if has_sparse_grad:
+        return _single_tensor_adagrad(params,
+                                      grads,
+                                      state_sums,
+                                      state_steps,
+                                      lr=lr,
+                                      weight_decay=weight_decay,
+                                      lr_decay=lr_decay,
+                                      eps=eps,
+                                      has_sparse_grad=has_sparse_grad)
 
     # Update steps
     torch._foreach_add_(state_steps, 1)
