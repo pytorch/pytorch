@@ -174,28 +174,6 @@ TORCH_META_FUNC(scatter_add)
   scatter_meta_impl(*this, self, dim, index, src, "add");
 }
 
-TORCH_META_FUNC2(scatter_reduce, two)
-(const Tensor& self,
- int64_t dim,
- const Tensor& index,
- const c10::string_view reduce,
- const c10::optional<int64_t> output_size) {
-
-  TORCH_CHECK(dim >= -self.dim() && dim < self.dim(),
-      "Expected `dim` to be in range ", -self.dim(), " to ", self.dim() - 1, " (got ", dim, ")");
-
-  auto sizes = self.sizes().vec();
-
-  dim = dim < 0 ? dim + self.dim() : dim;
-
-  if (output_size.has_value())
-    sizes[dim] = output_size.value();
-  else
-    sizes[dim] = index.numel() > 0 ? index.max().item<int64_t>() + 1: 0;
-
-  set_output(sizes, self.options());
-}
-
 TORCH_PRECOMPUTE_META_FUNC(index_add)
 (const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Scalar& alpha) {
   dim = maybe_wrap_dim(dim, self.dim());
@@ -1299,15 +1277,40 @@ TORCH_IMPL_FUNC(scatter_add)
   }
 }
 
-TORCH_IMPL_FUNC(scatter_reduce_structured_cpu)
-(const Tensor& self,
- int64_t dim,
- const Tensor& index,
- const c10::string_view reduce,
- const c10::optional<int64_t> output_size,
- const Tensor& out) {
+Tensor scatter_reduce_two_cpu(const Tensor& self,
+                              int64_t dim,
+                              const Tensor& index,
+                              const c10::string_view reduce,
+                              const c10::optional<int64_t> output_size,
+                              const c10::optional<Tensor>& optional_out) {
 
   // TODO: Add documentation.
+
+  TORCH_CHECK(dim >= -self.dim() && dim < self.dim(),
+      "Expected `dim` to be in range ", -self.dim(), " to ", self.dim() - 1, " (got ", dim, ")");
+
+  dim = dim < 0 ? dim + self.dim() : dim;
+
+  Tensor out;
+  if (optional_out.has_value()) {
+    out = optional_out.value();
+    for (auto i = 0; i < out.dim(); i++) {
+      if (i != dim) {
+        TORCH_CHECK(self.size(i) == out.size(i),
+            "All dimensions of `self` and `optional_out` must have the same size except `dim`=", dim,
+            "Mismatch on dimension", i, " got size ", self.size(i), " for `self` and size ",
+            out.size(i), "for optional_out");
+      }
+    }
+  } else {
+    auto sizes = self.sizes().vec();
+    if (output_size.has_value()) {
+      sizes[dim] = output_size.value();
+    } else {
+      sizes[dim] = index.numel() > 0 ? index.max().item<int64_t>() + 1: 0;
+    }
+    out = at::empty(sizes, self.options());
+  }
 
   TORCH_CHECK(self.dim() == index.dim(),
       "Shape mismatch between `self` (got ", self.sizes(), ") and `index` (got ", index.sizes(), ")");
@@ -1325,9 +1328,11 @@ TORCH_IMPL_FUNC(scatter_reduce_structured_cpu)
 
   dim = dim < 0 ? dim + self.dim() : dim;
 
-  out.zero_();
 
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, self.scalar_type(), "scatter_reduce", [&] {
+    if (!optional_out.has_value()) {
+      out.fill_((scalar_t)0);
+    }
     auto self_data = self.data_ptr<scalar_t>();
     auto index_data = index.data_ptr<int64_t>();
     auto out_data = out.data_ptr<scalar_t>();
@@ -1352,6 +1357,8 @@ TORCH_IMPL_FUNC(scatter_reduce_structured_cpu)
       }
     }
   });
+
+  return out;
 }
 
 Tensor masked_scatter(const Tensor & self, const Tensor & mask, const Tensor & source) {
