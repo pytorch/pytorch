@@ -59,7 +59,7 @@ extern template struct RegisterDefinition<c10::DispatchKey::CUDA>;
 extern template struct RegisterDefinition<c10::DispatchKey::HIP>;
 
 struct TORCH_API RegisterSchema {
-  RegisterSchema(const char *schema_str);
+  explicit RegisterSchema(const char *schema_str);
 };
 
 } // namespace detail
