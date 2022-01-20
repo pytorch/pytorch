@@ -1279,7 +1279,7 @@ class RNNDynamicQuantizeHandler(QuantizeHandler):
 ARGS_TO_SKIP = {
     torch._ops.ops.quantized.hardswish: ['inplace'],
     torch._ops.ops.quantized.elu: ['inplace'],
-    torch._ops.ops.quantized.dropout: ['training', 'inplace'],
+    torch._ops.ops.quantized.dropout: ['inplace'],
     torch._ops.ops.quantized.instance_norm:
     ['running_mean', 'running_var', 'use_input_stats', 'momentum'],
 }

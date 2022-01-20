@@ -10,7 +10,7 @@ namespace native {
 DEFINE_DISPATCH(qdropout_stub);
 
 Tensor quantized_dropout(
-    const Tensor& qx, double output_scale, int64_t output_zero_point, const Scalar& p, const Scalar& scale, const Scalar& input_scale) {
+    const Tensor& qx, double output_scale, int64_t output_zero_point, const Scalar& p, bool training, const Scalar& scale, const Scalar& input_scale) {
   return qx;
 }
 

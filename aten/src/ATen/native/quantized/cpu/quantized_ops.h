@@ -40,6 +40,7 @@ using qhardswish_fn = void (*)(const at::Tensor& /*qx*/, at::Tensor& /*qy*/);
 using qdropout_fn = void(*)(
     const at::Tensor& /*qx*/,
     const Scalar& /*p*/,
+    bool training /*training*/,
     const Scalar& /*scale*/,
     const Scalar& /*input_scale*/,
     at::Tensor& /*qy*/);
