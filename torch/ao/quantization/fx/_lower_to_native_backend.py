@@ -113,15 +113,13 @@ def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphMo
     ]
 
     for n in model.graph.nodes:
-        if isinstance(type(n), torch.fx.node.Node):
-           continue
         q_node = n
         if q_node.target == torch.quantize_per_tensor:
             ref_node = q_node.args[0]
 
             is_call_function = ref_node.op == "call_function" and ref_node.target in func_list
             is_call_method = ref_node.op == "call_method" and ref_node.target in method_list
-            is_call_module = ref_node.op == "call_module" and type(modules[ref_node.target]) in module_type_list
+            is_call_module = ref_node.op == "call_module" and type(modules[str(ref_node.target)]) in module_type_list
 
             if is_call_module or is_call_function or is_call_method:
                 dq_node = ref_node.args[0]

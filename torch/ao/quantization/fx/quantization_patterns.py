@@ -1587,7 +1587,7 @@ class CopyNodeQuantizeHandler(QuantizeHandler):
         ]
         is_call_function = node.op == "call_function" and node.target in func_list
         is_call_method = node.op == "call_method" and node.target in method_list
-        is_call_module = node.op == "call_module" and type(modules[node.target]) in module_type_list
+        is_call_module = node.op == "call_module" and type(modules[str(node.target)]) in module_type_list
 
         if is_reference or (is_call_function or is_call_method or is_call_module):
             # when activation dtype is torch.float, the node does not require
