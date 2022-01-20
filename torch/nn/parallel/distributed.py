@@ -1417,8 +1417,7 @@ class DistributedDataParallel(Module, Joinable):
         which might not be as efficient if implemented in Python using a Python communication hook.
 
         Args:
-            comm_hook_type (dist.BuiltinCommHookType): type of communication hook, such as
-            ALLREDUCE, FP16_COMPRESS, etc.
+            comm_hook_type (dist.BuiltinCommHookType): type of communication hook, such as ALLREDUCE, FP16_COMPRESS, etc.
 
         .. warning ::
             DDP communication hook can only be registered once and should be registered
@@ -1435,7 +1434,7 @@ class DistributedDataParallel(Module, Joinable):
         self.logger._set_comm_hook_name(str(comm_hook_type))
         dist._register_builtin_comm_hook(self.reducer, comm_hook_type)
 
-    def _register_fused_optim(self, optim: Type, *args, **kwargs):
+    def _register_fused_optim(self, optim: Type, *args, optim_params=None, **kwargs):
         r"""
         Registers an optimizer with DDP such that the optimization for a
         parameter will run immediately when that parameter's gradient is
@@ -1486,7 +1485,8 @@ class DistributedDataParallel(Module, Joinable):
         # Note: importing in function, otherwise this will cause a circular
         # import as optimizer_overlap module needs to import DistributedDataParallel.
         from torch.distributed.algorithms.optimizer_overlap import _as_overlapped_optim
-        overlapped_optim = _as_overlapped_optim(optim, *args, **kwargs)
+
+        overlapped_optim = _as_overlapped_optim(optim, optim_params, *args, **kwargs)
         try:
             overlapped_optim.register_ddp(self)
         except NotImplementedError:

@@ -56,10 +56,10 @@ class OverlappedOptimizer(ABC):
 class _OverlappedStandardOptimizer(OverlappedOptimizer):
     """Overlaps a regular ``Optimizer``."""
 
-    def __init__(self, optim_cls: Type, *optim_args, **optim_kwargs) -> None:
+    def __init__(self, optim_cls: Type, params, *optim_args, **optim_kwargs) -> None:
         super().__init__(optim_cls)
         f_optim = as_functional_optim(self.optim_cls, *optim_args, **optim_kwargs)
-        self._opt_hook_state = _OptimizerHookState.from_functional_optim(f_optim)
+        self._opt_hook_state = _OptimizerHookState.from_functional_optim(f_optim, params)
 
     def register_ddp(self, ddp_inst: DistributedDataParallel):
         # NOTE: using a custom communication hook and fused optimizer is not
@@ -72,14 +72,14 @@ class _OverlappedStandardOptimizer(OverlappedOptimizer):
     # TODO: register_fsdp once FSDP supports communication hook.
 
 
-def _as_overlapped_optim(optim_cls: Type, *args, **kwargs):
+def _as_overlapped_optim(optim_cls: Type, params, *args, **kwargs):
     """
     Returns a new ``OverlappedOptimizer`` instance that supports ``optim_cls``.
     """
     for registered_optim_cls, overlapped_optim_cls in _registered_overlapped_optims.items():
         if issubclass(optim_cls, registered_optim_cls):
-            return overlapped_optim_cls(optim_cls, *args, **kwargs)
+            return overlapped_optim_cls(optim_cls, params, *args, **kwargs)
 
     # Fallback to standard overlapped optimizer, which will raise errors if user
     # is attempting to use an unsupported optimizer.
-    return _OverlappedStandardOptimizer(optim_cls, *args, **kwargs)
+    return _OverlappedStandardOptimizer(optim_cls, params, *args, **kwargs)
