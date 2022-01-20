@@ -2587,11 +2587,13 @@ class TestQuantizedOps(TestCase):
                     mha.eval()
 
                     # Prepare
-                    mha.qconfig = torch.ao.quantization.get_default_qconfig(qengine)
                     if qengine_is_onednn():
-                        # Use `reduce_range = True` in qconfig here for ONEDNN
-                        # Otherwise the test fails on machines without VNNI
+                        # `reduce_range` is False by default for ONEDNN backend
+                        # but the test fails on earlier CPUs without VNNI.
+                        # So we use a default qconfig with `reduce_range=True` here
                         mha.qconfig = torch.ao.quantization.get_default_qconfig()
+                    else:
+                        mha.qconfig = torch.ao.quantization.get_default_qconfig(qengine)
                     mha_prepared = torch.ao.quantization.prepare(
                         mha, prepare_custom_config_dict=custom_module_config)
 

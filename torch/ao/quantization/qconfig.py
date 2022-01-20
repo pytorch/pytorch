@@ -239,8 +239,7 @@ def get_default_qat_qconfig(backend='fbgemm', version=1):
         elif backend == 'onednn':
             qconfig = QConfig(activation=FakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
                                                                 quant_min=0,
-                                                                quant_max=255,
-                                                                reduce_range=False),
+                                                                quant_max=255),
                               weight=default_per_channel_weight_fake_quant)
         else:
             qconfig = default_qat_qconfig
@@ -261,8 +260,7 @@ def get_default_qat_qconfig(backend='fbgemm', version=1):
         elif backend == 'onednn':
             qconfig = QConfig(activation=FusedMovingAvgObsFakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
                                                                                  quant_min=0,
-                                                                                 quant_max=255,
-                                                                                 reduce_range=False),
+                                                                                 quant_max=255),
                               weight=default_fused_per_channel_wt_fake_quant)
         else:
             qconfig = default_qat_qconfig_v2

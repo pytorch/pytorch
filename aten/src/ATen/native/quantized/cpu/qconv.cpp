@@ -9,7 +9,6 @@
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <ATen/native/quantized/cpu/onednn_utils.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/quantized/cpu/quant_utils.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
