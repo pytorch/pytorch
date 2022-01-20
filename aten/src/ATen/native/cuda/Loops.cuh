@@ -229,6 +229,7 @@ void jitted_gpu_kernel(
   }
 }
 
+// TODO: support runtime state capture similar to `jitted_gpu_kernel`.
 template <char const *name, typename return_type, typename f_inputs_type>
 void opmath_jitted_gpu_kernel_with_scalars(TensorIteratorBase& iter, const std::string& f) {
   TORCH_INTERNAL_ASSERT(iter.ntensors() == 3);
