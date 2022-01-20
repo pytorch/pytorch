@@ -168,21 +168,22 @@ Tensor slice_backward_wrapper(
     c10::optional<int64_t> start,
     c10::optional<int64_t> end,
     int64_t step);
-Tensor linalg_eig_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
-                           const Tensor& L, const Tensor& V);
 std::tuple<Tensor, Tensor> linalg_eig_jvp(const Tensor& dA,
                                           const Tensor& L,
-                                          const Tensor& V);
+                                          const Tensor& V,
+                                          const bool is_hermitian);
+Tensor linalg_eig_backward(const Tensor& gL,
+                           const Tensor& gV,
+                           const Tensor& L,
+                           const Tensor& V,
+                           const bool is_hermitian,
+                           const bool symeig_eigenvectors=true);
 Tensor linalg_lstsq_jvp(
   const Tensor& A,
   const Tensor& B,
   const Tensor& dA,
   const Tensor& dB
 );
-Tensor eigh_jvp_eigenvectors(const Tensor& input_tangent, const Tensor& eigenvalues, const Tensor& eigenvectors);
-Tensor eigh_jvp_eigenvalues(const Tensor& input_tangent, const Tensor& eigenvalues, const Tensor& eigenvectors);
-Tensor eigh_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
-                    bool eigenvectors, const Tensor& L, const Tensor& V);
 std::tuple<Tensor, Tensor> triangular_solve_backward(
     const Tensor & grad_x, const Tensor & grad_m,
     const Tensor & b, const Tensor & a, const Tensor & x,
@@ -380,6 +381,53 @@ Tensor lu_factor_ex_jvp(
   const Tensor& pivs
 );
 
+Tensor batch_norm_jvp(
+  const Tensor& input_p, const Tensor& input_t,
+  const Tensor& weight_p, const Tensor& weight_t,
+  const Tensor& bias_p, const Tensor& bias_t,
+  const c10::optional<Tensor>& running_mean,
+  const c10::optional<Tensor>& running_var,
+  const Tensor& saved_mean, const Tensor& saved_invstd,
+  bool train,
+  double eps
+);
+
+Tensor batch_norm_jvp_saved_var(
+  const Tensor& input_p, const Tensor& input_t,
+  const Tensor& weight_p, const Tensor& weight_t,
+  const Tensor& bias_p, const Tensor& bias_t,
+  const c10::optional<Tensor>& running_mean,
+  const c10::optional<Tensor>& running_var,
+  const Tensor& saved_mean, const Tensor& saved_var,
+  bool train,
+  double eps
+);
+
+Tensor layer_norm_jvp(
+  const Tensor& input_p, const Tensor& input_t,
+  const Tensor& weight_p, const Tensor& weight_t,
+  const Tensor& bias_p, const Tensor& bias_t,
+  const Tensor& saved_mean, const Tensor& saved_invstd,
+  IntArrayRef normalized_shape
+);
+
+Tensor group_norm_jvp(
+  const Tensor& input_p, const Tensor& input_t,
+  const Tensor& weight_p, const Tensor& weight_t,
+  const Tensor& bias_p, const Tensor& bias_t,
+  const Tensor& saved_mean, const Tensor& saved_invstd,
+  int64_t groups
+);
+Tensor group_norm_mean_jvp(
+  const Tensor& input_t,
+  const Tensor& mean_p,
+  int64_t groups
+);
+Tensor group_norm_invstd_jvp(
+  const Tensor& input_p, const Tensor& input_t,
+  const Tensor& mean_p, const Tensor& invstd_p,
+  int64_t groups
+);
 
 Tensor convolution_jvp(
   const Tensor& input_p, const Tensor& input_t,
