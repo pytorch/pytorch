@@ -2,6 +2,7 @@
 
 #include <memory>
 
+#include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type_base.h>
 #include <c10/util/Optional.h>
 
@@ -15,7 +16,6 @@ struct Function;
 namespace c10 {
 
 struct FunctionSchema;
-struct IValue;
 
 // This enumerator represents the 'kind' of an attribute - a buffer, a parameter, or neither.
 // This state is mutually exclusive. Buffers and Parameters can only appear on modules.
@@ -257,17 +257,7 @@ struct TORCH_API ClassType : public NamedType {
 
   size_t addConstant(const std::string& name, const IValue& value);
 
-  c10::optional<size_t> findConstantSlot(const std::string& name) const {
-    TORCH_CHECK(constantNames_.size() == constantValues_.size());
-    size_t slot = 0;
-    for (const auto& constant : constantNames_) {
-      if (name == constant) {
-        return slot;
-      }
-      slot++;
-    }
-    return c10::nullopt;
-  }
+  c10::optional<size_t> findConstantSlot(const std::string& name) const;
 
   size_t getConstantSlot(const std::string& name) const {
     if (auto r = findConstantSlot(name)) {
@@ -281,11 +271,7 @@ struct TORCH_API ClassType : public NamedType {
         "'");
   }
 
-  const std::string& getConstantName(size_t slot) const {
-    TORCH_CHECK(constantNames_.size() == constantValues_.size());
-    TORCH_CHECK(slot < constantNames_.size());
-    return constantNames_[slot];
-  }
+  const std::string& getConstantName(size_t slot) const;
 
   const std::string& doc_string() const {
     return doc_string_;
@@ -297,18 +283,13 @@ struct TORCH_API ClassType : public NamedType {
 
   c10::optional<IValue> findConstant(const std::string& name) const;
 
-  size_t numConstants() const {
-    TORCH_INTERNAL_ASSERT(constantNames_.size() == constantValues_.size());
-    return constantNames_.size();
-  }
+  size_t numConstants() const;
 
   at::ArrayRef<std::string> constantNames() const {
     return constantNames_;
   }
 
-  at::ArrayRef<IValue> constantValues() const {
-    return constantValues_;
-  }
+  at::ArrayRef<IValue> constantValues() const;
 
   // [Internal Only] Remove constant from the ClassType
   // caller is responsible to make sure the modification is safe:
