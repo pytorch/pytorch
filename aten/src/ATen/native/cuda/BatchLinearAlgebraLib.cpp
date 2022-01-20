@@ -1482,19 +1482,14 @@ void lu_solve_looped_cusolver(const Tensor& b, const Tensor& lu, const Tensor& p
 
     // lu and pivots tensors can be broadcast to b
     // here we construct a helper indexing tensor to linearly index into lu and pivots
-    Tensor lu_index;
-    int64_t* lu_index_data;
     IntArrayRef lu_batch_shape(lu.sizes().data(), lu.dim() - 2);
     IntArrayRef b_batch_shape(b.sizes().data(), b.dim() - 2);
-    bool is_broadcasting = !lu_batch_shape.equals(b_batch_shape);
-    if (is_broadcasting) {
-      lu_index = get_linear_indices(batchCount(lu), lu_batch_shape, b_batch_shape);
-      lu_index_data = lu_index.data_ptr<int64_t>();
-    }
+    BroadcastLinearIndices lu_index(
+        batchCount(lu), lu_batch_shape, b_batch_shape);
 
     auto handle = at::cuda::getCurrentCUDASolverDnHandle();
     for (auto batch = decltype(batch_size){0}; batch < batch_size; ++batch) {
-      int64_t lu_index_i = is_broadcasting ? lu_index_data[batch] : batch;
+      int64_t lu_index_i = lu_index(batch);
       at::cuda::solver::getrs<scalar_t>(
         handle,
         n,
