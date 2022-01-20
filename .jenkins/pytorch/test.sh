@@ -80,7 +80,10 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   rocminfo | grep -E 'Name:.*\sgfx|Marketing'
 
   # Manually set NUM_TEST_SHARDS since Jenkins doesn't do it
-  export NUM_TEST_SHARDS=2
+  # TODO: Can remove this once ROCm migration from Jenkins to GHA is complete.
+  if [[ -z "${GITHUB_ACTIONS}" ]]; then
+    export NUM_TEST_SHARDS=2
+  fi
 fi
 
 # --user breaks ppc64le builds and these packages are already in ppc64le docker
