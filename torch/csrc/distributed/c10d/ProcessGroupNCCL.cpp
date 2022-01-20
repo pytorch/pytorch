@@ -156,6 +156,9 @@ std::vector<at::Device> getDeviceList(const std::vector<at::Tensor>& tensors) {
   std::vector<at::Device> res;
   res.reserve(tensors.size());
   for (auto& tensor : tensors) {
+    // tensors must all be on the same device, or all on distinct devices.
+    // The line below assumes that constraint has already been enforced
+    // (by check_gpu_tensors_same_device or check_gpu_tensors_different_devices).
     if (res.size() == 0 || tensor.device() != res[0]) {
       res.push_back(tensor.device());
     }
@@ -1375,8 +1378,15 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   // Bump collective counter
   seq_++;
 
-  // Inputs must either all be on different devices,
-  // or all be on the same device.
+  // Currently, the API permits two scenarios where inputs.size() and outputs.size() are > 0.
+  // 1. If the call was a _coalesced call, all inputs must be on the same device.
+  //    The group of nccl calls applies the collective separately to each input,
+  //    but the group as a whole should be efficient, and might even execute as a
+  //    single fused kernel.
+  // 2. If the call was a _multigpu call, all inputs must be on different devices.
+  //    The nccl group applies the collective across them (eg, if the collective is
+  //    an allreduce, the output on each device contains contributions summed across
+  //    `inputs' tensors).
   const auto devices = getDeviceList(inputs);
   const bool inputs_same_dev = (devices.size() == 1);
   const auto key = getKeyFromDevices(devices);
