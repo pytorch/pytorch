@@ -4177,10 +4177,7 @@ class TestLinalg(TestCase):
     def test_matrix_rank(self, device, dtype):
         self._test_matrix_rank(device, dtype)
 
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(*floating_and_complex_types())
-    def test_matrix_rank_atol(self, device, dtype, matrix_rank=None):
+    def _test_matrix_rank_atol(self, device, dtype, matrix_rank=None):
 
         if matrix_rank is None:
             matrix_rank = torch.linalg.matrix_rank
@@ -4211,8 +4208,11 @@ class TestLinalg(TestCase):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypes(torch.float64)
-    def test_matrix_rank_atol_rtol(self, device, dtype, matrix_rank=None):
+    @dtypes(*floating_and_complex_types())
+    def test_matrix_rank_atol(self, device, dtype):
+        self._test_matrix_rank_atol(device, dtype)
+
+    def _test_matrix_rank_atol_rtol(self, device, dtype, matrix_rank=None):
 
         if matrix_rank is None:
             matrix_rank = torch.linalg.matrix_rank
@@ -4238,6 +4238,12 @@ class TestLinalg(TestCase):
             # when both are specified the maximum tolerance is used
             result = matrix_rank(a, atol=tol_value, rtol=tol_value)
             self.assertEqual(result, 2)  # there are 2 singular values above max(0.81, 1.5*0.81)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float64)
+    def test_matrix_rank_atol_rtol(self, device, dtype):
+        self._test_matrix_rank_atol_rtol(device, dtype)
 
     def _test_matrix_rank_empty(self, device, dtype, matrix_rank=None):
         if matrix_rank is None:
