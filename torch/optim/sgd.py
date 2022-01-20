@@ -189,9 +189,6 @@ def sgd(params: List[Tensor],
     if foreach and torch.jit.is_scripting():
         raise RuntimeError('torch.jit.script not supported with foreach optimizers')
 
-    if has_sparse_grad is None:
-        has_sparse_grad = any([grad.is_sparse for grad in d_p_list])
-
     if foreach and not torch.jit.is_scripting():
         func = _multi_tensor_sgd
     else:
@@ -211,14 +208,14 @@ def sgd(params: List[Tensor],
 def _single_tensor_sgd(params: List[Tensor],
                        d_p_list: List[Tensor],
                        momentum_buffer_list: List[Optional[Tensor]],
-                       has_sparse_grad: bool = False,
                        *,
                        weight_decay: float,
                        momentum: float,
                        lr: float,
                        dampening: float,
                        nesterov: bool,
-                       maximize: bool):
+                       maximize: bool,
+                       has_sparse_grad: bool):
 
     for i, param in enumerate(params):
 
@@ -247,17 +244,20 @@ def _single_tensor_sgd(params: List[Tensor],
 def _multi_tensor_sgd(params: List[Tensor],
                       grads: List[Tensor],
                       momentum_buffer_list: List[Optional[Tensor]],
-                      has_sparse_grad: bool = False,
                       *,
                       weight_decay: float,
                       momentum: float,
                       lr: float,
                       dampening: float,
                       nesterov: bool,
-                      maximize: bool):
+                      maximize: bool,
+                      has_sparse_grad: bool):
 
     if len(params) == 0:
         return
+
+    if has_sparse_grad is None:
+        has_sparse_grad = any([grad.is_sparse for grad in grads])
 
     if weight_decay != 0:
         grads = torch._foreach_add(grads, params, alpha=weight_decay)
