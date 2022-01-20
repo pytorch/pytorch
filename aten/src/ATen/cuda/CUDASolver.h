@@ -13,9 +13,9 @@ namespace at {
 namespace cuda {
 namespace solver {
 
-#define CUSOLVER_LINEAR_SOLVER_ARGTYPES(scalar_t, value_t)                         \
-    cusolverSpHandle_t handle, int n, int nnzA, const cusparseMatDescr_t descrA,  \
-    const scalar_t *csrValA, const int *csrRowPtrA, const int *csrColIndA,        \
+#define CUSOLVER_LINEAR_SOLVER_ARGTYPES(scalar_t, value_t)                          \
+    cusolverSpHandle_t handle, int n, int nnzA, const cusparseMatDescr_t descrA,    \
+    const scalar_t *csrValA, const int *csrRowPtrA, const int *csrColIndA,          \
     const scalar_t *b, value_t tol, int reorder, scalar_t *x, int *singularity
 
 template <typename scalar_t, typename value_t>
