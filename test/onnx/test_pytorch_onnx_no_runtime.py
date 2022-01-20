@@ -73,7 +73,6 @@ class TestOptionalOutput(unittest.TestCase):
         self.assertEqual(len(output_0_tensor_type.shape.dim), len(x.shape))
 
 
-
 instantiate_parametrized_tests(TestOptionalOutput)
 
 

@@ -93,8 +93,7 @@ def convert_to_onnx(model, input=None, opset_version=9, do_constant_folding=True
                        dynamic_axes=dynamic_axes,
                        input_names=input_names, output_names=output_names,
                        fixed_batch_size=fixed_batch_size, training=training,
-                       onnx_shape_inference=onnx_shape_inference,
-                       verbose=True)
+                       onnx_shape_inference=onnx_shape_inference)
 
     # compute onnxruntime output prediction
     so = onnxruntime.SessionOptions()
@@ -119,12 +118,12 @@ def unpack_to_numpy(values):
 
 
 def run_ort(ort_sess, inputs):
-    inputs = unpack_to_numpy(flatten_tuples(inputs))
-    ort_inputs = {}
     kw_inputs = {}
     if inputs and isinstance(inputs[-1], dict):
         kw_inputs = inputs[-1]
         inputs = inputs[:-1]
+    inputs = unpack_to_numpy(flatten_tuples(inputs))
+    ort_inputs = {}
     for input_name, input in kw_inputs.items():
         ort_inputs[input_name] = to_numpy(input)
     inputs = to_numpy(inputs)
@@ -1801,8 +1800,9 @@ class TestONNXRuntime(unittest.TestCase):
         y = 2
         self.run_test(ArithmeticModule(), (x, y))
 
-    # TODO: Add a comment explaining why this doesn't work in scripting.
-    # @skipScriptTest()
+    # In tracing, None outputs are removed. In Scripting they're kept, but
+    # we don't know Optional.elem_type, so we can't construct a valid Optional.
+    @skipScriptTest()
     def test_tuple_with_none_outputs(self):
         class TupleModel(torch.nn.Module):
             def forward(self, x):

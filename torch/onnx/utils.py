@@ -416,7 +416,7 @@ def _resolve_and_flatten_graph_inputs(model, args_params):
     sig = _signature(model)
     param_keys = list(sig.parameters.keys())
     resolved_args = []  # type: ignore[var-annotated]
-    if isinstance(model, torch.jit.ScriptModule) or isinstance(model, torch.jit.ScriptFunction):
+    if isinstance(model, (torch.jit.ScriptFunction, torch.jit.ScriptModule)):
         for i, var in enumerate(args_params):
             if var is None:
                 resolved_args.append(sig.parameters[param_keys[i]].default)
@@ -565,9 +565,6 @@ def _model_to_graph(model, args, verbose=False,
 
     _set_input_and_output_names(graph, input_names, output_names)
     params_dict = _get_named_param_dict(graph, params)
-    # make sure that the param dict and the graph match each other
-    flatten_args = _resolve_and_flatten_graph_inputs(model, args)
-    assert len(params) + len(flatten_args) == sum(1 for _ in graph.inputs())
 
     if training is None or training == TrainingMode.EVAL:
         params_dict = torch._C._jit_pass_onnx_eval_peephole(graph, params_dict)
