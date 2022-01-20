@@ -6708,10 +6708,20 @@ def sample_inputs_scatter_reduce(op_info, device, dtype, requires_grad):
 
     for ((shape, dim), reduce) in itertools.product(shapes_and_dims, reduces):
         for d in range(dim):
+            index = _index(shape, shape[d])
+            size_dim = index.max().item() + 1
+            out_shape = shape[:d] + (size_dim,) + shape[d + 1:]
             sample_inputs.append(
                 SampleInput(
                     _tensor(shape),
-                    args=(d, _index(shape, shape[d]), reduce),
+                    args=(d, index, reduce),
+                )
+            )
+            sample_inputs.append(
+                SampleInput(
+                    _tensor(shape),
+                    args=(d, index, reduce),
+                    kwargs=dict(optional_out=_tensor(out_shape)),
                 )
             )
 
@@ -15265,8 +15275,11 @@ op_db: List[OpInfo] = [
         'scatter_reduce',
         dtypes=all_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_scatter_reduce,
-        supports_out=True,
+        supports_out=False,
         decorators=(onlyCPU,),
+        skips=(
+            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+        )
     ),
 ]
 

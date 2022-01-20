@@ -174,29 +174,6 @@ TORCH_META_FUNC(scatter_add)
   scatter_meta_impl(*this, self, dim, index, src, "add");
 }
 
-TORCH_META_FUNC2(scatter_reduce, two)
-(const Tensor& self,
- int64_t dim,
- const Tensor& index,
- const c10::string_view reduce,
- const c10::optional<int64_t> output_size) {
-
-  TORCH_CHECK(dim >= -self.dim() && dim < self.dim(),
-      "Expected `dim` to be in range ", -self.dim(), " to ", self.dim() - 1, " (got ", dim, ")");
-
-  auto sizes = self.sizes().vec();
-
-  dim = dim < 0 ? dim + self.dim() : dim;
-
-  if (output_size.has_value())
-    sizes[dim] = output_size.value();
-  else
-    sizes[dim] = index.numel() > 0 ? index.max().item<int64_t>() + 1: 0;
-
-  set_output(sizes, self.options());
-
-}
-
 TORCH_PRECOMPUTE_META_FUNC(index_add)
 (const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Scalar& alpha) {
   dim = maybe_wrap_dim(dim, self.dim());
@@ -1300,15 +1277,42 @@ TORCH_IMPL_FUNC(scatter_add)
   }
 }
 
-TORCH_IMPL_FUNC(scatter_reduce_structured_cpu)
-(const Tensor& self,
- int64_t dim,
- const Tensor& index,
- const c10::string_view reduce,
- const c10::optional<int64_t> output_size,
- const Tensor& out) {
+Tensor scatter_reduce_two_cpu(const Tensor& self,
+                              int64_t dim,
+                              const Tensor& index,
+                              const c10::string_view reduce,
+                              const c10::optional<int64_t> output_size,
+                              const c10::optional<Tensor>& optional_out) {
 
   // TODO: Add documentation.
+
+
+  TORCH_CHECK(dim >= -self.dim() && dim < self.dim(),
+      "Expected `dim` to be in range ", -self.dim(), " to ", self.dim() - 1, " (got ", dim, ")");
+
+  dim = dim < 0 ? dim + self.dim() : dim;
+
+  Tensor out;
+  auto out_has_value = optional_out.has_value();
+  if (out_has_value) {
+    out = optional_out.value().clone();
+    for (auto i = 0; i < out.dim(); i++) {
+      if (i != dim) {
+        TORCH_CHECK(self.size(i) == out.size(i),
+            "All dimensions of `self` and `optional_out` must have the same size except `dim`=", dim,
+            "Mismatch on dimension", i, " got size ", self.size(i), " for `self` and size ",
+            out.size(i), "for optional_out");
+      }
+    }
+  } else {
+    auto sizes = self.sizes().vec();
+    if (output_size.has_value()) {
+      sizes[dim] = output_size.value();
+    } else {
+      sizes[dim] = index.numel() > 0 ? index.max().item<int64_t>() + 1: 0;
+    }
+    out = at::empty(sizes, self.options());
+  }
 
   TORCH_CHECK(self.dim() == index.dim(),
       "Shape mismatch between `self` (got ", self.sizes(), ") and `index` (got ", index.sizes(), ")");
@@ -1320,22 +1324,22 @@ TORCH_IMPL_FUNC(scatter_reduce_structured_cpu)
   TORCH_CHECK(reduce == "sum" || reduce == "prod" || reduce == "mean" || reduce == "amax" || reduce =="amin",
               "`reduce` argument must be one of ('sum', 'prod', 'mean', 'amax', 'amin'");
 
-  dim = dim < 0 ? dim + self.dim() : dim;
+  if (self.numel() == 0) {
+    out = out_has_value ? out : out.zero_();
+    return out;
+  }
 
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, self.scalar_type(), "scatter_reduce", [&] {
-    if (self.numel() == 0) {
-      out.fill_(0);
-      return;
-    }
-
-    if (reduce == "prod") {
-      out.fill_((scalar_t)1);
-    } else if (reduce == "amax") {
-      out.fill_(std::numeric_limits<scalar_t>::lowest());
-    } else if (reduce == "amin") {
-      out.fill_(std::numeric_limits<scalar_t>::max());
-    } else {
-      out.fill_((scalar_t)0);
+    if (!out_has_value) {
+      if (reduce == "prod") {
+        out.fill_((scalar_t)1);
+      } else if (reduce == "amax") {
+        out.fill_(std::numeric_limits<scalar_t>::lowest());
+      } else if (reduce == "amin") {
+        out.fill_(std::numeric_limits<scalar_t>::max());
+      } else {
+        out.fill_((scalar_t)0);
+      }
     }
 
     auto self_cont = self.contiguous();
@@ -1346,7 +1350,7 @@ TORCH_IMPL_FUNC(scatter_reduce_structured_cpu)
     auto out_cont = out.contiguous();
     auto out_cont_data = out_cont.data_ptr<scalar_t>();
 
-    auto counts = at::zeros_like(out_cont);
+    auto counts = out_has_value ? at::ones_like(out_cont) : at::zeros_like(out_cont);
     auto counts_data = counts.data_ptr<scalar_t>();
 
 
@@ -1376,10 +1380,8 @@ TORCH_IMPL_FUNC(scatter_reduce_structured_cpu)
             counts_data[ind] += 1;
           } else if (reduce == "amax") {
             out_cont_data[ind] = std::max(out_cont_data[ind], value);
-          } else if (reduce == "amin") {
-            out_cont_data[ind] = std::min(out_cont_data[ind], value);
           } else {
-            AT_ERROR("Expected `reduce` to be one of 'sum', 'prod', 'mean', 'amax', 'amin' but got ", reduce, ".");
+            out_cont_data[ind] = std::min(out_cont_data[ind], value);
           }
         }
       }
@@ -1395,6 +1397,8 @@ TORCH_IMPL_FUNC(scatter_reduce_structured_cpu)
     }
 
   });
+
+  return out;
 }
 
 Tensor masked_scatter(const Tensor & self, const Tensor & mask, const Tensor & source) {
