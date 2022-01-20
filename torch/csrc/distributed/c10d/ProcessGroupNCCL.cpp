@@ -1206,7 +1206,7 @@ void check_gpu_single_tensor(const at::Tensor& tensor) {
 }
 
 // Checks that all `tensors' have the same type and shape and reside on distinct GPUs.
-int64_t check_gpu_tensors_different_devices(const std::vector<at::Tensor>& tensors) {
+void check_gpu_tensors_different_devices(const std::vector<at::Tensor>& tensors) {
   if (tensors.size() == 0) {
     TORCH_CHECK(false, "Tensor list must be nonempty");
   }
@@ -1221,7 +1221,6 @@ int64_t check_gpu_tensors_different_devices(const std::vector<at::Tensor>& tenso
   std::unordered_set<decltype(first.get_device())> usedDevices;
   usedDevices.reserve(tensors.size());
 
-  int64_t total_numel = 0;
   for (const auto& t : tensors) {
     if (!t.is_cuda() || t.is_sparse()) {
       TORCH_CHECK(false, "Tensors must be CUDA and dense");
@@ -1242,10 +1241,7 @@ int64_t check_gpu_tensors_different_devices(const std::vector<at::Tensor>& tenso
     if (!inserted) {
       TORCH_CHECK(false, "Tensors must be on distinct GPU devices");
     }
-    total_numel += t.numel();
   }
-
-  return total_numel;
 }
 
 // Checks that all `tensors' have the same type and shape and reside on the same GPU.
