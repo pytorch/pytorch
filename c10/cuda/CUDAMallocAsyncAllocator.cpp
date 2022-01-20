@@ -88,8 +88,8 @@ std::vector<void*> ungraphed_ptrs_defer_free_until_no_capture;
 // These two help setMemoryFraction limit the amount of memory
 // used by Pytorch in particular (as opposed to other libraries
 // in the same process that might be sharing the same cudaMemPool_t).
-std::vector<uint64_t> pytorch_used_bytes;
-std::vector<uint64_t> pytorch_memory_limits;
+std::vector<size_t> pytorch_used_bytes;
+std::vector<size_t> pytorch_memory_limits;
 
 // Graph-specific helpers
 
@@ -430,19 +430,58 @@ void emptyCache(void) {
   }
 }
 
-void cacheInfo(int dev_id, size_t* cachedAndFree, size_t* largestBlock) {
-  TORCH_CHECK(false,
-              "Calling cacheInfo with backend:cudaMallocAsync is not meaningful. "
-              "(For backend:native, cacheInfo returns the total and largest sizes "
-              "of all currently-unallocated blocks held by the allocator, but "
-              "the cudaMallocAsync backend does not track individual blocks.");
-  // Alternative 1: TORCH_WARN that the call is not meaningful,
-  //                and set cachedAndFree and largestBlock to 0.
-  // Alternative 2: Set cachedAndFree to a "best guess analogue", ie
-  //                the pool's current reserved mem - the pool's current used mem.
-
+void cacheInfo(int device, size_t* maxWorkspaceGuess) {
   // The only consumer of cacheInfo is getMaxWorkspaceSize in Conv_v7.cpp.
-  // See that function for further discussion about what this PR must enable.
+  // Afaict, the role of cacheInfo is to give getMaxWorkspaceSize a reasonable
+  // maximum workspace size to use for an upcoming cudnnFind call.
+  //
+  // The native allocator's cacheInfo chooses to return the size of its largest unused block
+  // (which is the largest allocation the native allocator can service immediately and
+  // asynchronously without a cudaMalloc.
+  //
+  // Here, we use a different heuristic: figure out the max usable workspace size with
+  // a bit of educated trial and error. It's ok to be perf-inefficient because cacheInfo
+  // is a prelude to cudnnFind.
+  //
+  // The algo cache then stores the best-performing algo with workspace <= maxWorkspaceGuess.
+  // Later calls with the same param set hit in cache and try to allocate the same workspace.
+  // If, in one of those future calls, workspace allocation fails (ie because less ambient
+  // memory is available), the bindings rerun cudnnFind, including calling cacheInfo again
+  // beforehand to estimate a new (smaller) largest-available workspace.
+  // Over a few such calls, the cache should settle to the algo with a workspace size that's
+  // small enough to succeed every time (for that param set).
+  //
+  // So the strategy here is to return a rough, largeish guess and let the bindings retry to
+  // trim as needed over time.
+  //
+  // The only caveat is, even if a workspace is allocated without OOM errors now
+  // and in future calls, it's hard to be sure those later error-free cudaMallocAsyncs are
+  // fast and come straight from the pool (ie, cudaMallocAsync didn't need to reserve
+  // more memory from the system). Hopefully, after repeated workspace requests, the pool's
+  // reserved memory also stabilizes to a point where they all come straight from the pool.
+  std::lock_guard<std::mutex> lk(general_mutex);
+  assertValidDevice(device);
+  CUDAGuard g(device);
+  lazy_init_device(device);
+
+  size_t free_upper_bound;
+  size_t device_total;
+  C10_CUDA_CHECK(cudaMemGetInfo(&free_upper_bound, &device_total));
+  TORCH_INTERNAL_ASSERT(free_upper_bound + pytorch_used_bytes[device] <= device_total);
+  size_t guess = std::min(free_upper_bound, pytorch_memory_limits[device] - pytorch_used_bytes[device]);
+
+  void* dummy;
+  while(true) {
+    try {
+      malloc(&dummy, device, guess, c10::cuda::getCurrentCUDAStream());
+      free(dummy);
+      *maxWorkspaceGuess = guess;
+      return;
+    } catch (c10::CUDAOutOfMemoryError &e) {
+      cudaGetLastError(); // clear CUDA error
+      guess >>= 1; // quick and dirty: try half the size next iteration
+    }
+  }
 }
 
 void* getBaseAllocation(void* ptr, size_t* size) {

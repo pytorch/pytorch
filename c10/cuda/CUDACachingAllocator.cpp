@@ -621,8 +621,8 @@ class DeviceCachingAllocator {
     release_cached_blocks();
   }
 
-  /** Retrieves info (total size + largest block) of the memory cache **/
-  void cacheInfo(size_t* total, size_t* largest) {
+  /** Retrieves size of largest unused block held by the memory cache **/
+  void cacheInfo(size_t* largest) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     if (*largest ==
         0) { // make an initial guess if a zero *largest is passed in
@@ -631,11 +631,11 @@ class DeviceCachingAllocator {
           largest, // Use free memory as an optimistic initial guess of *largest
           &tmp_bytes);
     }
-    cache_info_aux(large_blocks, total, largest);
-    cache_info_aux(small_blocks, total, largest);
+    cache_info_aux(large_blocks, largest);
+    cache_info_aux(small_blocks, largest);
     for (const auto& gp : graph_pools) {
-      cache_info_aux(gp.second->large_blocks, total, largest);
-      cache_info_aux(gp.second->small_blocks, total, largest);
+      cache_info_aux(gp.second->large_blocks, largest);
+      cache_info_aux(gp.second->small_blocks, largest);
     }
   }
 
@@ -1241,11 +1241,10 @@ class DeviceCachingAllocator {
     }
   }
 
-  // Accumulates sizes of all memory blocks for given device in given pool
-  void cache_info_aux(const BlockPool& pool, size_t* total, size_t* largest) {
+  // Iterates over sizes of all memory blocks for given device in given pool
+  void cache_info_aux(const BlockPool& pool, size_t* largest) {
     for (const auto& block : pool.blocks) {
       const auto blocksize = block->size;
-      *total += blocksize;
       if (blocksize > *largest) {
         *largest = blocksize;
       }
@@ -1452,9 +1451,8 @@ void emptyCache(void) {
   caching_allocator.emptyCache();
 }
 
-void cacheInfo(int dev_id, size_t* cachedAndFree, size_t* largestBlock) {
-  caching_allocator.device_allocator[dev_id]->cacheInfo(
-      cachedAndFree, largestBlock);
+void cacheInfo(int dev_id, size_t* largestBlock) {
+  caching_allocator.device_allocator[dev_id]->cacheInfo(largestBlock);
 }
 
 void* getBaseAllocation(void* ptr, size_t* size) {

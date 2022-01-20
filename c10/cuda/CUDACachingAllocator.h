@@ -130,7 +130,7 @@ C10_CUDA_API Allocator* get(); \
 C10_CUDA_API void init(int device_count); \
 C10_CUDA_API void setMemoryFraction(double fraction, int device); \
 C10_CUDA_API void emptyCache(); \
-C10_CUDA_API void cacheInfo(int dev_id, size_t* cachedAndFree, size_t* largestBlock); \
+C10_CUDA_API void cacheInfo(int dev_id, size_t* largestBlock); \
 C10_CUDA_API void* getBaseAllocation(void* ptr, size_t* size); \
 C10_CUDA_API void recordStream(const DataPtr&, CUDAStream stream); \
 C10_CUDA_API DeviceStats getDeviceStats(int device); \
@@ -224,13 +224,10 @@ inline void emptyCache() {
   return f();
 }
 
-inline void cacheInfo(
-    int dev_id,
-    size_t* cachedAndFree,
-    size_t* largestBlock) {
+inline void cacheInfo(int dev_id, size_t* largestBlock) {
   static auto f = (std::strcmp(allocatorBackend(), "native") == 0) ?
     THC::cacheInfo : CudaMallocAsync::cacheInfo;
-  return f(dev_id, cachedAndFree, largestBlock);
+  return f(dev_id, largestBlock);
 }
 
 inline void* getBaseAllocation(void* ptr, size_t* size) {
