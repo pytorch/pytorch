@@ -54,12 +54,16 @@ struct delayed_false : std::false_type {
 };
 
 // Defines type names
+// NOTE: General case is instantiated only for invalid types.
+// All the valid types have specialization using the TYPE_NAME_FN
+// macro below.
 template <typename T>
 inline std::string typeName() {
   // we can't use static_assert(false) directly as the
-  // program will be ill-formed, so we use delayed `false`
+  // program will be not compile even if the template is not
+  // instantiated, so we use `delayed_false`
   // to make sure compiler doesn't eagerly raise
-  // this assert.
+  // fail this assertion.
   static_assert(delayed_false<T>::value, "invalid type for jiterator");
   return "void";
 }

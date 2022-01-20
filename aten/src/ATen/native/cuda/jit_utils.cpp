@@ -628,9 +628,9 @@ std::string generate_code(
     extra_params += "," + type + " " + name;
     extra_args += ", " + name;
   }
-
   env.s("extra_params", extra_params);
   env.s("extra_args", extra_args);
+
   std::stringstream declare_load_arrays;
   for (int i = 0; i < nInputs; i++) {
     // TODO these arrays are potentially of the different types, use function
