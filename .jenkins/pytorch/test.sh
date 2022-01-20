@@ -302,7 +302,8 @@ test_backward_compatibility() {
   pushd test/backward_compatibility
   python -m venv venv
   . venv/bin/activate
-  pip_install --pre torch -f https://download.pytorch.org/whl/test/cpu/torch_test.html
+  # check for backward compatibility with torch 1.8.1
+  pip_install --pre torch==1.8.1 -f https://download.pytorch.org/whl/test/cpu/torch_test.html
   pip show torch
   python dump_all_function_schemas.py --filename nightly_schemas.txt
   deactivate
