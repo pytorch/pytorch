@@ -283,6 +283,9 @@ FileStore::FileStore(const std::string& path, int numWorkers)
 }
 
 FileStore::~FileStore() {
+  // decrement world size
+  add(worldSizeKey_, -1);
+
   // If the file does not exist - exit.
   // This can happen when FileStore is invoked from python language which has
   // GC. If python code has directory cleanup procedure, the race condition may
@@ -307,9 +310,6 @@ FileStore::~FileStore() {
     // Best effort removal without checking the return
     std::remove(path_.c_str());
   }
-
-  // decrement world size
-  add(worldSizeKey_, -1);
 }
 
 void FileStore::set(const std::string& key, const std::vector<uint8_t>& value) {
