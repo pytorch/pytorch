@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 from collections import defaultdict
+from collections.abc import Iterator
 from datetime import datetime
 from typing import cast, Any, Dict, List, Optional, Tuple, Union
 import os
@@ -211,7 +212,7 @@ class GitRepo:
         self._run_git("commit", "--amend", "-m", msg)
 
 
-class PeekableIterator:
+class PeekableIterator(Iterator[str]):
     def __init__(self, val: str) -> None:
         self._val = val
         self._idx = -1
@@ -221,7 +222,7 @@ class PeekableIterator:
             return None
         return self._val[self._idx + 1]
 
-    def __iter__(self) -> Any:
+    def __iter__(self) -> "PeekableIterator":
         return self
 
     def __next__(self) -> str:
