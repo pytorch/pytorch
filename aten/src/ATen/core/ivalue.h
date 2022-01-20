@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/core/DimVector.h>
 #include <ATen/core/TensorBody.h>
 #include <ATen/core/blob.h>
 #include <ATen/core/custom_class.h>
@@ -385,7 +386,7 @@ public:
   // While some of these accessors could be generated through templates,
   // we prefer to write them manually for clarity
 
-  IValue(at::Tensor t) : tag(Tag::Tensor), is_intrusive_ptr(false) {
+  IValue(at::TensorBase t) : tag(Tag::Tensor), is_intrusive_ptr(false) {
     new (&payload.as_tensor) at::Tensor(std::move(t));
   }
   bool isTensor() const {
@@ -576,6 +577,7 @@ public:
   c10::List<int64_t> toIntList() &&;
   c10::List<int64_t> toIntList() const&;
   std::vector<int64_t> toIntVector() const;
+  at::DimVector toDimVector() const;
 
   // ConstantString
   IValue(c10::intrusive_ptr<ivalue::ConstantString> v);
