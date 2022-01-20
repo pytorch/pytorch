@@ -12,7 +12,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from, gradcheck, gradgradcheck)
-from unittest.mock import patch
+from unittest.mock import patch, call
 
 
 class TestModule(TestCase):
@@ -122,9 +122,9 @@ class TestModule(TestCase):
                     with patch.object(torch.nn.UninitializedBuffer, '__new__', uninit_buffer_new):
                         m = module_cls(*args, **kwargs)
                         uninit_param_new.mock.assert_has_calls(
-                            [mock.call(device=device, dtype=dtype) for _ in uninit_param_new.mock.mock_calls])
+                            [call(device=device, dtype=dtype) for _ in uninit_param_new.mock.mock_calls])
                         uninit_buffer_new.mock.assert_has_calls(
-                            [mock.call(device=device, dtype=dtype) for _ in uninit_buffer_new.mock.mock_calls])
+                            [call(device=device, dtype=dtype) for _ in uninit_buffer_new.mock.mock_calls])
             else:
                 # Check device placement and dtype for created parameters and buffers.
                 # Only verify floating point dtypes since that's what the kwarg applies to.
@@ -421,9 +421,13 @@ class TestModule(TestCase):
 
             params = tuple(m.parameters())
 
-            # === Perform gradient check on the input_args ===
+            # === Lazy modules need to see an input to initialize params before gradcheck is run. ===
             input_args, input_kwargs = module_input.forward_input.args, module_input.forward_input.kwargs
+            if issubclass(module_info.module_cls, torch.nn.modules.lazy.LazyModuleMixin):
+                with torch.no_grad():
+                    m(*input_args, **input_kwargs)
 
+            # === Perform gradient check on the input_args ===
             other_kwargs = {}
             kwarg_tensors = []
             for name, obj in input_kwargs.items():
