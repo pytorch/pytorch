@@ -167,7 +167,7 @@ class __promote : public __promote_imp<_A1, _A2, _A3> {};
 
 )ESCAPE";
 
-const std::string &get_traits_definition() {
+const std::string &get_traits_string() {
     return traits;
 }
 
@@ -378,7 +378,7 @@ lerp(_A1 __a, _A2 __b, _A3 __t) noexcept
 
 )ESCAPE";
 
-const std::string &get_cmath_definition() {
+const std::string &get_cmath_string() {
     return cmath;
 }
 

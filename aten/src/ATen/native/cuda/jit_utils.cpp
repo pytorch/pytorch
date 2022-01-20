@@ -86,6 +86,20 @@ const std::string jit_common_types = R"ESCAPE(
   _(std::complex<float>, ComplexFloat)   \
   _(std::complex<double>, ComplexDouble)
 
+  #define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(_) \
+  _(uint8_t, Byte)                                                 \
+  _(int8_t, Char)                                                  \
+  _(int16_t, Short)                                                \
+  _(int, Int)                                                      \
+  _(int64_t, Long)                                                 \
+  _(at::Half, Half)                                                \
+  _(float, Float)                                                  \
+  _(double, Double)                                                \
+  _(std::complex<float>, ComplexFloat)                             \
+  _(std::complex<double>, ComplexDouble)                           \
+  _(bool, Bool)                                                    \
+  _(at::BFloat16, BFloat16)
+
 
   enum class ScalarType : int8_t {
   #define DEFINE_ENUM(_1, n) n,
@@ -190,16 +204,61 @@ struct alignas(2) BFloat16 {
 }
 )ESCAPE";
 
+const std::string dynamic_cast_support_literal = R"ESCAPE(
 
-const std::string jit_code_template = R"ESCAPE(
+  template <typename T>
+  struct is_complex : public std::false_type {};
+
+  template <typename T>
+  struct is_complex<std::complex<T>> : public std::true_type {};
+
+  template <typename dest_t, typename src_t>
+  struct needs_real {
+    constexpr static bool value =
+        (is_complex<src_t>::value && !is_complex<dest_t>::value);
+  };
+
+  template <bool, typename src_t>
+  struct maybe_real {
+    static inline src_t apply(src_t src) {
+      return src;
+    }
+  };
+
+  template <typename src_t>
+  struct maybe_real<true, src_t> {
+    static inline decltype(auto) apply(src_t src) {
+      return src.real();
+    }
+  };
+
+  template <typename dest_t, typename src_t>
+  struct static_cast_with_inter_type {
+    static inline dest_t apply(
+        src_t src) {
+      constexpr bool real = needs_real<dest_t, src_t>::value;
+      return static_cast<dest_t>(maybe_real<real, src_t>::apply(src));
+    }
+  };
+
+  template <typename src_t>
+  struct static_cast_with_inter_type<uint8_t, src_t> {
+    static inline uint8_t apply(
+        src_t src) {
+      constexpr bool real = needs_real<uint8_t, src_t>::value;
+      return static_cast<uint8_t>(
+          static_cast<int64_t>(maybe_real<real, src_t>::apply(src)));
+    }
+  };
 
   // Fetch a value with dynamic type src_type from ptr, and cast it to static type dest_t.
-  // For now, simplified version that does not handle complex and special casting to uint8
-  #define FETCH_AND_CAST_CASE(type, scalartype) case ScalarType::scalartype: return static_cast<dest_t>(*(const type *)ptr);
+  #define FETCH_AND_CAST_CASE(type, scalartype) \
+    case ScalarType::scalartype:                \
+      return static_cast_with_inter_type<dest_t, type>::apply(*(const type*)ptr);
   template<typename dest_t>
   __device__ inline dest_t fetch_and_cast(const ScalarType src_type, const void *ptr) {
     switch (src_type) {
-        AT_FORALL_SCALAR_TYPES(FETCH_AND_CAST_CASE)
+        AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(FETCH_AND_CAST_CASE)
         default:
           ERROR_UNSUPPORTED_CAST
     }
@@ -207,22 +266,18 @@ const std::string jit_code_template = R"ESCAPE(
   }
 
   // Cast a value with static type src_t into dynamic dest_type, and store it to ptr.
-  #define CAST_AND_STORE_CASE(type, scalartype) case ScalarType::scalartype: *(type *)ptr = static_cast<type>(value); return;
+  #define CAST_AND_STORE_CASE(type, scalartype)                             \
+    case ScalarType::scalartype:                                            \
+      *(type*)ptr = static_cast_with_inter_type<type, src_t>::apply(value); \
+      return;
   template<typename src_t>
   __device__ inline void cast_and_store(const ScalarType dest_type, void *ptr, src_t value) {
   switch (dest_type) {
-      AT_FORALL_SCALAR_TYPES(CAST_AND_STORE_CASE)
+      AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(CAST_AND_STORE_CASE)
       default:;
   }
   ERROR_UNSUPPORTED_CAST
   }
-
-  struct LoadWithoutCast {
-  template <typename scalar_t>
-  __device__ scalar_t load(char* base_ptr, uint32_t offset, int arg=0) {
-      return *(reinterpret_cast<scalar_t*>(base_ptr) + offset);
-  }
-  };
 
   template <int N>
   struct LoadWithCast {
@@ -238,13 +293,6 @@ const std::string jit_code_template = R"ESCAPE(
   }
   };
 
-  struct StoreWithoutCast {
-  template<typename scalar_t>
-  __device__ void store(scalar_t value, char *base_ptr, uint32_t offset) {
-      *(reinterpret_cast<scalar_t *>(base_ptr) + offset) = value;
-  }
-  };
-
   struct StoreWithCast {
   ScalarType dtype;
   uint32_t element_size;
@@ -255,6 +303,30 @@ const std::string jit_code_template = R"ESCAPE(
       cast_and_store<scalar_t>(dtype, ptr, value);
   }
   };
+
+)ESCAPE";
+
+const std::string no_dynamic_cast_support_literal = R"ESCAPE(
+
+  struct LoadWithoutCast {
+  template <typename scalar_t>
+  __device__ scalar_t load(char* base_ptr, uint32_t offset, int arg=0) {
+    return *(reinterpret_cast<scalar_t*>(base_ptr) + offset);
+  }
+  };
+
+  struct StoreWithoutCast {
+  template<typename scalar_t>
+  __device__ void store(scalar_t value, char *base_ptr, uint32_t offset) {
+    *(reinterpret_cast<scalar_t *>(base_ptr) + offset) = value;
+  }
+  };
+
+)ESCAPE";
+
+const std::string jit_code_template = R"ESCAPE(
+
+  ${dynamic_casting_string}
 
   template <typename T>
   struct DivMod {
@@ -593,8 +665,8 @@ std::string generate_code(
   env.s("compute_type", compute_type);
   env.s("functor", func);
   env.s("name", name);
-  env.s("traits_string", get_traits_definition());
-  env.s("cmath_string", get_cmath_definition());
+  env.s("traits_string", get_traits_string());
+  env.s("cmath_string", get_cmath_string());
   std::stringstream declare_load_arrays;
   for (int i = 0; i < nInputs; i++) {
     // TODO these arrays are potentially of the different types, use function
@@ -634,7 +706,7 @@ std::string generate_code(
   }
   if (f_inputs_type == "std::complex<float>" || result_type == "std::complex<float>" ||
       f_inputs_type == "std::complex<double>" || result_type == "std::complex<double>"|| dynamic_casting) {
-    env.s("complex_string", get_complex_definition());
+    env.s("complex_string", get_complex_string());
   } else {
     env.s("complex_string", "");
   }
@@ -643,10 +715,12 @@ std::string generate_code(
     if (!dynamic_casting) {
       env.s("loader", "LoadWithoutCast");
       env.s("storer", "StoreWithoutCast");
+      env.s("dynamic_casting_string", no_dynamic_cast_support_literal);
     } else {
       env.s(
           "loader", std::string("LoadWithCast<" + std::to_string(nInputs) + ">"));
       env.s("storer", "StoreWithCast");
+      env.s("dynamic_casting_string", dynamic_cast_support_literal);
     }
 
     if (contiguous) {

@@ -5,8 +5,8 @@
 namespace at {
 namespace cuda {
 
-const std::string &get_traits_definition();
-const std::string &get_cmath_definition();
-const std::string &get_complex_definition();
+const std::string &get_traits_string();
+const std::string &get_cmath_string();
+const std::string &get_complex_string();
 
 }} // namespace at

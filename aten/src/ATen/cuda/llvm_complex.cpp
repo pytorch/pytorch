@@ -1188,7 +1188,7 @@ inline namespace literals
 
 )ESCAPE";
 
-const std::string &get_complex_definition() {
+const std::string &get_complex_string() {
   static std::string result = complex_body;
   return result;
 }
