@@ -1,9 +1,11 @@
-from typing import Any, Tuple, Sequence, Union, List, Optional
+import operator
+import warnings
+from typing import Any, Tuple, Sequence, Union, List, Optional, Dict, Callable
 
 import numpy as np
 import tensorrt as trt
 import torch
-from torch.fx.node import Target
+from torch.fx.node import Target, Argument
 from torch.fx.experimental.fx2trt.types import *  # noqa: F403
 from torch.fx.experimental.fx2trt.utils import torch_dtype_from_trt
 
@@ -73,7 +75,7 @@ def extend_attr_to_tuple(
     num_elem: int,
 ) -> Tuple[Any, ...]:
     """
-    If `val` is not a tuple, then we make a tuple of size `num_elem` by
+    If `val` is not a tuple or a list, then we make a tuple of size `num_elem` by
     replicating `val` `num_elem` times.
 
     Args:
@@ -82,7 +84,7 @@ def extend_attr_to_tuple(
     Returns:
         A tuple.
     """
-    if not isinstance(val, tuple):
+    if not isinstance(val, (tuple, list)):
         val = (val,) * num_elem
     return val
 
@@ -324,11 +326,12 @@ def add_binary_elementwise_layer(
     name: str
 ) -> TRTTensor:
     """
-    This function adds a TensorRT elementwise layer. We only allow at most one
-    operand to not be a trt tensor, otherwise, we should const fold it first.
-    If any operand is not a trt tensor, we make it a trt constant layer which
-    has the same type as the other trt tensor. Then we broadcast these two inputs
-    to have the same number of dimensions.
+    This function adds a TensorRT elementwise layer. We allow both operands to be
+    constant (not a trt tensor) because in implicit batch dimension mode, we could
+    introduce constant via .size() op. Other scenario should be const folded first.
+    If any operand is not a trt tensor, we make it a trt constant layer which has
+    the same type as the other trt tensor. Then we broadcast these two inputs to
+    have the same number of dimensions.
 
     Limitation:
         If we are using implicit batch dim mode, the operand that is not a trt
@@ -357,8 +360,9 @@ def add_binary_elementwise_layer(
         dtype = torch_dtype_from_trt(rhs_val.dtype)
         is_rhs_trt_tensor = True
     if not is_lhs_trt_tensor and not is_rhs_trt_tensor:
-        raise RuntimeError(f"Both operands of the binary elementwise op {name}"
-                           "are constant. In this case, please consider constant fold the model first.")
+        warnings.warn(f"Both operands of the binary elementwise op {name} "
+                      "are constant. In this case, please consider constant fold the model first.")
+        return get_python_op_from_trt_elementwise_op(op_type)(lhs_val, rhs_val)
 
     lhs_val = get_trt_tensor(network, lhs_val, f"{name}_lhs", dtype)
     rhs_val = get_trt_tensor(network, rhs_val, f"{name}_rhs", dtype)
@@ -446,6 +450,58 @@ def add_activation_layer(
         layer.alpha = alpha
     if beta:
         layer.beta = beta
+    set_layer_name(layer, target, name)
+    return layer.get_output(0)
+
+
+def add_reduce_layer(
+    network: TRTNetwork,
+    target: Target,
+    args: Tuple[Argument, ...],
+    kwargs: Dict[str, Argument],
+    operation_type: trt.ActivationType,
+    name: str,
+) -> TRTTensor:
+    """
+    Add a TensorRT Reduce layer to `network`.
+
+    Args:
+        network (TRTNetwork): TensorRT network object.
+        target (Target): Target of fx node.
+        args (Tuple[Argument, ...]): Args of the fx node.
+        kwargs (Dict[str, Argument]): Kwargs of the fx node.
+        operation_type (trt.ElementWiseOperation): Type of the TensorRT activation
+            operation.
+        name (str): The name we want to assign to the created TensorRT layer.
+
+    Returns:
+        The output of TensorRT Reduce layer.
+    """
+    input_val = kwargs["input"]
+    if not isinstance(input_val, TRTTensor):
+        raise RuntimeError(
+            f"{name} received input {input_val} that is not part "
+            "of the TensorRT region!"
+        )
+
+    # If dim is specified, then the op is reducing over certain dimensions.
+    # Otherwise, it's reducing over all elements, which is only supported in
+    # explicit batch dimension.
+    if "dim" not in kwargs:
+        assert (
+            not network.has_implicit_batch_dimension
+        ), f"We don't support reduce({name}) over all the elements if batch dim is implicit."
+        dim = range(0, len(input_val.shape))
+    else:
+        dim = kwargs["dim"]  # type: ignore[assignment]
+
+    keepdim = False if "keepdim" not in kwargs else kwargs["keepdim"]
+    layer = network.add_reduce(
+        input_val,
+        operation_type,
+        get_axes_for_reduce_op(dim, network.has_implicit_batch_dimension),
+        keepdim,
+    )
     set_layer_name(layer, target, name)
     return layer.get_output(0)
 
@@ -562,3 +618,18 @@ def trunc_div(
                                           trt.ElementWiseOperation.PROD, target, f"{name}_output")
 
     return output
+
+
+def get_python_op_from_trt_elementwise_op(trt_op: TRTElementWiseOp) -> Callable[[Any, Any], Any]:
+    if trt_op == trt.ElementWiseOperation.SUM:
+        return operator.add
+    elif trt_op == trt.ElementWiseOperation.PROD:
+        return operator.mul
+    elif trt_op == trt.ElementWiseOperation.SUB:
+        return operator.sub
+    elif trt_op == trt.ElementWiseOperation.DIV:
+        return operator.truediv
+    elif trt_op == trt.ElementWiseOperation.FLOOR_DIV:
+        return operator.floordiv
+    else:
+        raise RuntimeError(f"{trt_op} is not supported yet!")

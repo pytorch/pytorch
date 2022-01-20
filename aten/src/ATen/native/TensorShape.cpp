@@ -12,6 +12,7 @@
 #include <ATen/native/TensorShape.h>
 #include <ATen/native/cpu/CatKernel.h>
 #include <ATen/native/cpu/StackKernel.h>
+#include <ATen/native/cpu/SerialStackImpl.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/SparseTensorUtils.h>
@@ -84,6 +85,82 @@ Tensor& set_cpu_(Tensor& result) {
   result.set_(storage, 0, {0}, {});
   TORCH_INTERNAL_ASSERT(dtype == result.dtype());
   return result;
+}
+
+Tensor sparse_broadcast_to(const Tensor& self, IntArrayRef size) {
+  TORCH_CHECK(self.is_sparse(), "input must be sparse tensor");
+  int64_t sparse_extra_ndim = size.size() - self.dim();
+  int64_t sparse_ndim = size.size() - self.dense_dim();
+  TORCH_CHECK(sparse_extra_ndim >= 0, "input not broadcastable to size with smaller dimensionality");
+  Tensor indices = self._indices();
+  Tensor values = self._values();
+  auto nnz = values.size(0);
+
+  std::vector<int64_t> broadcast_sizes;
+  std::vector<int64_t> broadcast_dense_sizes;
+  std::vector<int64_t> broadcast_dims;
+  std::vector<int64_t> unchanged_dims;
+  broadcast_sizes.reserve(sparse_ndim);
+  broadcast_dense_sizes.reserve(self.dense_dim() + 1);
+  broadcast_dims.reserve(self.sparse_dim());
+  unchanged_dims.reserve(self.sparse_dim());
+  int64_t nnz_factor = 1;
+  int64_t min_broadcast_dim = (sparse_extra_ndim > 0 ? 0: -1);
+  int64_t max_unchanged_dim = -1;
+  for (int64_t i=0; i<sparse_extra_ndim; i++) {
+    auto d = size[i];
+    nnz_factor *= d;
+    broadcast_sizes.emplace_back(d);
+  }
+  for (int64_t i=0; i<self.sparse_dim(); i++) {
+    auto d = size[sparse_extra_ndim + i];
+    if (self.size(i) != d) {
+      TORCH_CHECK(self.size(i) == 1,
+                  "The expanded size of the tensor (",size[sparse_extra_ndim + i],") ",
+                  "must match the existing size (",self.size(i),")");
+      nnz_factor *= d;
+      broadcast_sizes.emplace_back(d);
+      if (min_broadcast_dim == -1) {
+        min_broadcast_dim = sparse_extra_ndim + i;
+      }
+      broadcast_dims.emplace_back(i);
+    } else {
+      unchanged_dims.emplace_back(i);
+      max_unchanged_dim = sparse_extra_ndim + i;
+    }
+  }
+  // to_broadcast conserves is_coalesced property iff only the last
+  // sparse dimensions are expaned. Possible expansion of dense
+  // dimensions can be discarded as it does not affect the is_coalesce
+  // property.
+  bool is_coalesced = self.dim()==0 || (self.is_coalesced() && (max_unchanged_dim < min_broadcast_dim || min_broadcast_dim == -1));
+
+  broadcast_dense_sizes.emplace_back(nnz);
+  for (int64_t i=0; i<self.dense_dim(); i++) {
+    broadcast_dense_sizes.emplace_back(size[sparse_extra_ndim + self.sparse_dim() + i]);
+  }
+
+  std::vector<int64_t> new_indices_size{sparse_ndim, nnz * nnz_factor};
+  std::vector<int64_t> new_values_size(values.sizes().vec());
+  new_values_size[0] = new_indices_size[1];
+
+  Tensor new_values = values.expand(broadcast_dense_sizes).repeat_interleave(nnz_factor, 0);
+  Tensor new_indices = at::native::new_empty(indices, new_indices_size);
+  if (broadcast_sizes.size()>0) {
+    // ones(broadcast_sizes).nonzero() is equivalent to
+    // product(map(arange, broadcast_sizes)) but avoids creating
+    // auxilary arange tensors
+    Tensor broadcast_indices = at::native::new_ones(indices, broadcast_sizes).nonzero().transpose(0, 1).tile(nnz);
+    new_indices.narrow(0, 0, sparse_extra_ndim).copy_(broadcast_indices.narrow(0, 0, sparse_extra_ndim));
+    for (size_t i=0; i<broadcast_dims.size(); i++) {
+      int64_t j=broadcast_dims[i];
+      new_indices.select(0, sparse_extra_ndim + j).copy_(broadcast_indices.select(0, sparse_extra_ndim + i));
+    }
+  }
+  for (int64_t j:unchanged_dims) {
+    new_indices.select(0, sparse_extra_ndim + j).copy_(indices.select(0, j).repeat_interleave(nnz_factor));
+  }
+  return at::sparse_coo_tensor(new_indices, new_values, size)._coalesced_(is_coalesced);
 }
 
 Tensor broadcast_to(const Tensor& self, IntArrayRef size) {
@@ -750,7 +827,7 @@ Tensor sum_to_size(const Tensor& self, IntArrayRef size) {
 // We currently do not support per-channel quant for unfold, diagonal, expand, permute.
 // TODO: Make this an aten function and replace as_strided_qtensorimpl once that is done.
 Tensor make_qtensor(const Tensor& self, IntArrayRef size, IntArrayRef stride, QuantizerPtr quantizer) {
-  auto result = detail::make_tensor<QTensorImpl>(
+  auto result = at::detail::make_tensor<QTensorImpl>(
       c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype(), quantizer);
   setStrided(result, size, stride, self.storage_offset());
   return result;
@@ -758,7 +835,7 @@ Tensor make_qtensor(const Tensor& self, IntArrayRef size, IntArrayRef stride, Qu
 
 Tensor as_strided_tensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
-  auto result = detail::make_tensor<TensorImpl>(
+  auto result = at::detail::make_tensor<TensorImpl>(
       c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype());
   setStrided(result, size, stride, storage_offset);
   return result;
@@ -770,7 +847,7 @@ Tensor as_strided_qtensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef 
   TORCH_CHECK(
       quantizer->qscheme() == QScheme::PER_TENSOR_AFFINE,
       "Setting strides is possible only on uniformly quantized tensor");
-  auto result = detail::make_tensor<QTensorImpl>(
+  auto result = at::detail::make_tensor<QTensorImpl>(
       c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype(), quantizer);
   setStrided(result, size, stride, storage_offset);
   return result;
@@ -1016,11 +1093,11 @@ Tensor alias_with_sizes_and_strides(
     const Vec& strides) {
   Tensor self_;
   if (self.is_quantized()) {
-    self_ = detail::make_tensor<QTensorImpl>(
+    self_ = at::detail::make_tensor<QTensorImpl>(
       c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype(), get_qtensorimpl(self)->quantizer());
     setStrided(self_, sizes, strides, self.storage_offset());
   } else {
-    self_ = detail::make_tensor<TensorImpl>(
+    self_ = at::detail::make_tensor<TensorImpl>(
       c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype());
     setStrided(self_, sizes, strides, self.storage_offset());
   }
@@ -1420,73 +1497,9 @@ static inline std::vector<Tensor> get_stack_inputs(TensorList tensors, int64_t d
   return inputs;
 }
 
-// Checks to see whether native stack can be invoked under these conditions:
-// - result and input tensors are contiguous
-// - only one thread is used
-// - no type promotion has to occur
-// - tensors dtype is Double or Float
-bool inline can_use_native_serial_stack(Tensor& result, TensorList tensors, int64_t dim) {
-  TORCH_CHECK(tensors.size() > 0, "expected a non-empty list of Tensors");
-
-  const Tensor& firstTensor = tensors[0];
-  // stack dimension should be in range [0,firstTensor.dim())
-  // dim == firstTensor.dim() is a valid input, but it is handled by default code path
-  // that uses unsqueeze
-  if (dim >= firstTensor.dim()) return false;
-  // Native stack doesn't apply any tensor is skipped.
-  if (should_skip(firstTensor)) return false;
-  // there should be no type promotion
-  if (result.dtype() != firstTensor.dtype()) return false;
-
-  // Inputs cannot alias the output tensor
-  for (const auto i : c10::irange(tensors.size())) {
-    auto lap = at::get_overlap_status(result, tensors[i]);
-    TORCH_CHECK(lap != at::MemOverlapStatus::PARTIAL &&
-        lap != at::MemOverlapStatus::FULL, 0,
-        "unsupported operation: the input tensors cannot refer to any of the "
-        "output memory locations. Found overlap in input tensor ", i);
-  }
-
-  auto first_tensor_mem_format = firstTensor.suggest_memory_format();
-  ScalarType dtype = firstTensor.scalar_type();
-
-  if (!result.is_contiguous(first_tensor_mem_format)) {
-    return false;
-  }
-
-  // fast path only works for Double and Float
-  if (dtype != ScalarType::Double && dtype != ScalarType::Float) {
-    return false;
-  }
-
-  // check remainder of inputs
-  auto const &first_tensor_shape = firstTensor.sizes();
-  for (const auto i : c10::irange(1, tensors.size())) {
-    auto const &tensor = tensors[i];
-    TORCH_CHECK(tensors[i].sizes() == firstTensor.sizes(),
-      "stack expects each tensor to be equal size, but got ", first_tensor_shape,
-      " at entry 0 and ", tensor.sizes(), " at entry ", i);
-
-    // every tensor must be contiguous
-    // tensor sizes and strides must be the same
-    // there should be no type promotion
-    if (!tensor.is_contiguous(first_tensor_mem_format) ||
-      tensor.strides() != firstTensor.strides() ||
-      tensor.dtype() != dtype) {
-      return false;
-    }
-  }
-
-  // fast native stack should only be used when it is not worth using multiple threads
-  // or there is only one thread. Note that we aren't checking result.numel() here because
-  // it may not have been resized and we want to defer that cost till later.
-  int64_t numel_in_stack = firstTensor.numel() * tensors.size();
-  return numel_in_stack < at::internal::GRAIN_SIZE && at::get_num_threads() == 1;
-}
-
 bool inline maybe_native_stack(Tensor& result, TensorList tensors, int64_t dim) {
   dim = maybe_wrap_dim(dim, tensors[0].dim() + 1);
-  if (can_use_native_serial_stack(result, tensors, dim)) {
+  if (detail::CanUseNativeSerialStack<TensorList, /*skip_overlap_check*/ false>::call(result, tensors, dim)) {
     // compute the size of the result
     auto result_sizes = tensors[0].sizes().vec();
     result_sizes.insert(result_sizes.begin() + dim, tensors.size());
@@ -1518,11 +1531,29 @@ Tensor _stack_cpu(TensorList tensors, int64_t dim) {
   return at::native::_stack_out_cpu(tensors, dim, result);
 }
 
+void check_stack_inputs(TensorList tensors, int64_t dim) {
+  at::IntArrayRef entry_shape = tensors[0].sizes();
+  for (const auto i : c10::irange(1, tensors.size())) {
+    TORCH_CHECK(tensors[i].sizes() == entry_shape,
+      "stack expects each tensor to be equal size, but got ", entry_shape,
+      " at entry 0 and ", tensors[i].sizes(), " at entry ", i);
+  }
+}
+
 // TODO(msubkhankulov): refactor to use _stack
 Tensor stack(TensorList tensors, int64_t dim) {
   TORCH_CHECK(tensors.size() > 0,
            "stack expects a non-empty TensorList");
-  return at::cat(get_stack_inputs(tensors, dim), dim);
+  auto wrapped_dim = maybe_wrap_dim(dim, tensors[0].ndimension()+1);
+  if (wrapped_dim < tensors[0].ndimension() && !tensors[0].is_sparse()) {
+    check_stack_inputs(tensors, wrapped_dim);
+    auto result_sizes = tensors[0].sizes().vec();
+    result_sizes.insert(result_sizes.begin() + wrapped_dim, tensors.size());
+    auto out = at::cat(tensors, wrapped_dim);
+    return out.view(result_sizes); // one can always split a dimension with view
+  } else { //dim = tensors[0].ndimension() cannot be efficiently handled by view
+    return at::cat(get_stack_inputs(tensors, dim), dim);
+  }
 }
 
 // CPU specific implementation
@@ -1543,7 +1574,24 @@ Tensor& _stack_out(TensorList tensors, int64_t dim, Tensor& result) {
 Tensor& stack_out(TensorList tensors, int64_t dim, Tensor& result) {
   TORCH_CHECK(tensors.size() > 0,
            "stack expects a non-empty TensorList");
+  auto wrapped_dim = maybe_wrap_dim(dim, tensors[0].ndimension()+1);
+  if (wrapped_dim < tensors[0].ndimension() && !tensors[0].is_sparse()) {
+    check_stack_inputs(tensors, wrapped_dim);
+    auto result_sizes = tensors[0].sizes().vec();
+    result_sizes.insert(result_sizes.begin() + wrapped_dim, tensors.size());
+    at::native::resize_output(result, result_sizes);
+    auto cat_sizes = tensors[0].sizes().vec();
+    cat_sizes[wrapped_dim] *= tensors.size();
+    auto strides = at::detail::computeStride(result.sizes(), result.strides(), cat_sizes);
+    if (strides.has_value()) {
+      //can take fast cat path
+      auto result_view = result.view(cat_sizes);
+      at::cat_out(result_view, tensors, wrapped_dim);
+      return result;
+    }
+  }
   return at::cat_out(result, get_stack_inputs(tensors, dim), dim);
+
 }
 
 Tensor hstack(TensorList tensors) {
@@ -1625,6 +1673,36 @@ static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t di
   return self;
 }
 
+static inline Tensor sparse_csr_transpose(const Tensor & self) {
+  TORCH_INTERNAL_ASSERT(self.is_sparse_csr());
+
+  auto sizes = self.sizes();
+  auto crow_indices = self.crow_indices();
+  auto col_indices = self.col_indices();
+  auto values = self.values();
+
+  // convert CSR indices to COO indices and swap its rows
+  const bool out_int32 = crow_indices.scalar_type() == ScalarType::Int;
+  Tensor indices_transposed = _convert_indices_from_csr_to_coo(crow_indices, col_indices, out_int32, true);
+
+  // sort transposed indices
+  auto indices_scalar = at::sparse::flatten_indices(indices_transposed, {sizes[1], sizes[0]});
+  auto indicesPermutation = std::get<1>(indices_scalar.sort(0));
+  auto indices_transposed_sorted = indices_transposed.index_select(1, indicesPermutation);
+
+  // construct a CSR tensor that is transpose of self
+  auto new_row_indices = indices_transposed_sorted.select(0, 0);
+  auto new_col_indices = indices_transposed_sorted.select(0, 1);
+  auto new_values = values.index_select(0, indicesPermutation);
+  Tensor new_crow_indices = _convert_indices_from_coo_to_csr(new_row_indices, sizes[1], out_int32);
+
+  return at::native::_sparse_csr_tensor_unsafe(new_crow_indices, new_col_indices, new_values,
+                                               {sizes[1], sizes[0]},
+                                               new_values.scalar_type(),
+                                               self.layout(),
+                                               new_values.device());
+}
+
 // torch.row_stack, alias for torch.vstack
 Tensor& row_stack_out(TensorList tensors, Tensor& result) {
   return at::vstack_out(result, tensors);
@@ -1693,6 +1771,12 @@ Tensor & transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
     return self;
   }
 
+  // Sparse COO is an exceptional sparse format as it allows transpose
+  // to be a view operation which is a convinient property for
+  // in-place operations. For other sparse formats, the in-place
+  // transpose would not be possible without shuffling the specified
+  // values. So we don't support this as it would defeat the purpose
+  // of in-place opeations of being memory-efficient.
   if (self.is_sparse()) {
     return sparse_transpose_(self, dim0, dim1);
   }
@@ -1713,13 +1797,28 @@ Tensor transpose(const Tensor & self, int64_t dim0, int64_t dim1) {
   auto ndims = self.dim();
   dim0 = maybe_wrap_dim(dim0, ndims);
   dim1 = maybe_wrap_dim(dim1, ndims);
-  if (dim0 == dim1) {
-    return self;
+
+  // Transpose of a sparse tensor is a copy operation because the
+  // compression scheme of specified values into a contiguous tensor
+  // is different for the transposed sparse tensor, in general.
+  if (self.is_sparse_csr() || self.is_sparse()) {
+    if (dim0 == dim1) {
+      return self.clone();
+    }
+    if (self.is_sparse_csr()) {
+      // Sparse CSR transpose is a copy operation as the values of
+      // transposed CSR tensor are permuted values of the input CSR
+      // tensor.
+      return sparse_csr_transpose(self);
+    } else {  // sparse COO
+      Tensor self_clone = self.clone();
+      return sparse_transpose_(self_clone, dim0, dim1);
+    }
   }
 
-  if (self.is_sparse()) {
-    Tensor self_clone = self.clone();  // yes, this is what THS does
-    return sparse_transpose_(self_clone, dim0, dim1);
+  // Transpose of a strided tensor is a view operation.
+  if (dim0 == dim1) {
+    return self;
   }
 
   if (self.is_mkldnn()) {
@@ -2185,7 +2284,7 @@ std::vector<Tensor> meshgrid(TensorList tensors,
   // swap the outputs if we swapped the inputs.
   //
   // * Why do we even support this function for exactly one input?
-  bool swap_first_and_second_tensors;
+  bool swap_first_and_second_tensors = false;
 
   if (indexing == "xy") {
     // We can only swap if there are multiple tensors.
@@ -2199,7 +2298,6 @@ std::vector<Tensor> meshgrid(TensorList tensors,
     TORCH_CHECK(indexing == "ij",
                 "torch.meshgrid: indexing must be one of \"xy\" or \"ij\", "
                 "but received: ", indexing);
-    swap_first_and_second_tensors = false;
   }
 
   std::vector<int64_t> shape(size);

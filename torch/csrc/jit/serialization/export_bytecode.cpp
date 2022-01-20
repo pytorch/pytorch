@@ -133,7 +133,7 @@ std::vector<std::unique_ptr<GraphFunction>> inlineFunctions(
   return inlined_functions;
 }
 
-std::unique_ptr<mobile::Code> compileGraphToMobileCode(
+mobile::Code compileGraphToMobileCode(
     const std::string& name,
     const std::shared_ptr<Graph>& graph,
     const CompilationOptions& compilation_options,
@@ -144,9 +144,7 @@ std::unique_ptr<mobile::Code> compileGraphToMobileCode(
       compilation_options.enable_default_value_for_unspecified_arg,
       compilation_options.enable_default_args_before_out_args);
 
-  std::unique_ptr<mobile::Code> mobile_code_ptr =
-      std::make_unique<mobile::Code>();
-  mobile::Code& mobile_code = *mobile_code_ptr;
+  mobile::Code mobile_code;
 
   // operator names
   std::vector<std::string> method_names;
@@ -245,35 +243,35 @@ std::unique_ptr<mobile::Code> compileGraphToMobileCode(
 
   mobile_code.types_ = code.type_table();
   mobile_code.register_size_ = code.register_size();
-  return mobile_code_ptr;
+  return mobile_code;
 }
 
 std::unique_ptr<mobile::Function> convertJitFunctionToMobileFunction(
     const GraphFunction& function,
     const CompilationOptions& options) {
   BackendDebugInfoRecorder debug_handle;
-  std::shared_ptr<mobile::Code> mobileCode = compileGraphToMobileCode(
+  auto mobileCode = compileGraphToMobileCode(
       function.name(), function.graph(), options, debug_handle);
   const auto& schema = function.getSchema();
   return std::make_unique<mobile::Function>(
-      function.qualname(), mobileCode, schema);
+      function.qualname(), std::move(mobileCode), schema);
 }
 
 IValue convertMobileFunctionToCodeTable(
     const mobile::Function& func,
     const CompilationOptions& compilation_options) {
-  const std::shared_ptr<mobile::Code> code = func.get_code();
+  auto code = func.get_code();
   std::vector<IValue> instructions;
-  instructions.reserve(code->instructions_.size());
-  for (Instruction ins : code->instructions_) {
+  instructions.reserve(code.instructions_.size());
+  for (Instruction ins : code.instructions_) {
     instructions.emplace_back(to_tuple({toString(ins.op), ins.X, ins.N}));
   }
 
   std::vector<IValue> operators;
-  operators.reserve(code->op_names_.size());
-  for (int i = 0; i < code->op_names_.size(); ++i) {
-    const auto& opname = code->op_names_[i];
-    const int size = code->operator_input_sizes_[i];
+  operators.reserve(code.op_names_.size());
+  for (int i = 0; i < code.op_names_.size(); ++i) {
+    const auto& opname = code.op_names_[i];
+    const int size = code.operator_input_sizes_[i];
     if (compilation_options.enable_default_value_for_unspecified_arg) {
       operators.emplace_back(to_tuple({opname.name, opname.overload_name}));
     } else {
@@ -283,16 +281,16 @@ IValue convertMobileFunctionToCodeTable(
   }
 
   std::vector<IValue> types;
-  for (const TypePtr& t : code->types_) {
+  for (const TypePtr& t : code.types_) {
     std::string type_str = t->annotation_str();
     types.emplace_back(type_str);
   }
 
-  auto register_size = static_cast<int>(code->register_size_);
+  auto register_size = static_cast<int>(code.register_size_);
   auto codeTable = Table(
       {{"instructions", to_tuple(instructions)},
        {"operators", to_tuple(operators)},
-       {"constants", to_tuple(code->constants_)},
+       {"constants", to_tuple(code.constants_)},
        {"types", to_tuple(types)},
        {"register_size", register_size}});
 
@@ -360,12 +358,12 @@ mobile::Module jitModuleToMobile(
 
   for (const auto& func :
        inlineFunctions(methods_to_export, options.incl_interface_call)) {
-    std::shared_ptr<mobile::Code> mobile_code_ptr = compileGraphToMobileCode(
+    auto mobile_code = compileGraphToMobileCode(
         func->name(), func->graph(), options, debug_info_recorder);
     const auto& schema = func->getSchema();
     checkSchema(schema);
     auto mobile_func = std::make_unique<mobile::Function>(
-        func->qualname(), mobile_code_ptr, schema);
+        func->qualname(), std::move(mobile_code), schema);
     mcu->register_function(std::move(mobile_func));
   }
 

@@ -61,6 +61,7 @@ class TORCH_API IRPrinter : public IRVisitor {
   void visit(BlockPtr v) override;
   void visit(AllocatePtr v) override;
   void visit(FreePtr v) override;
+  void visit(PlacementAllocatePtr v) override;
   void visit(LetPtr v) override;
 
   // A child class may have a difference rule for generating dtype

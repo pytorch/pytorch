@@ -39,14 +39,15 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-
-  ciflow_should_run:
-    runs-on: linux.large
+  build:
+    runs-on: "windows.4xlarge"
     timeout-minutes: 240
     env:
+      JOB_BASE_NAME: periodic-win-vs2019-cuda11.1-py3-build
+      http_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
+      https_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
       IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == 'unassigned') && (github.event.assigneed.login == 'pytorchbot') }}
       LABEL_CONDITIONS: ${{ contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cuda') || contains(github.event.pull_request.labels.*.name, 'ciflow/scheduled') || contains(github.event.pull_request.labels.*.name, 'ciflow/win') }}
-      LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
     if: ${{ (github.repository == 'pytorch/pytorch') && (
             (github.event_name == 'push') ||
             (github.event_name == 'schedule') ||
@@ -54,19 +55,8 @@ jobs:
             (false))
          }}
     steps:
-      - name: noop
-        run: echo running ciflow_should_run
       - name: print labels
-        run: echo "${LABELS}"
-  build:
-    runs-on: "windows.4xlarge"
-    needs: [ciflow_should_run]
-    timeout-minutes: 240
-    env:
-      JOB_BASE_NAME: periodic-win-vs2019-cuda11.1-py3-build
-      http_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
-      https_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
-    steps:
+        run: echo "${PR_LABELS}"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: seemethere/add-github-ssh-key@v1
         with:
@@ -77,6 +67,10 @@ jobs:
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
           submodules: recursive
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
       - name: Display EC2 information
         shell: bash
         run: |
@@ -142,7 +136,7 @@ jobs:
           rm -rf ./*
 
   generate-test-matrix:
-    needs: [ciflow_should_run]
+    needs: build
     runs-on: ubuntu-18.04
     timeout-minutes: 240
     env:
@@ -178,7 +172,7 @@ jobs:
       http_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
       https_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
       PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
-    needs: [build, generate-test-matrix, ciflow_should_run]
+    needs: [build, generate-test-matrix]
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
       fail-fast: false
@@ -207,6 +201,10 @@ jobs:
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
           submodules: recursive
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
@@ -313,7 +311,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
-          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
+          WORKFLOW_ID: '${{ github.run_id }}'
         shell: bash
         run: |
           python3 -m pip install -r requirements.txt
