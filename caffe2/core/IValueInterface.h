@@ -22,7 +22,7 @@ TORCH_API caffe2::Tensor contiguous(caffe2::Tensor);
 class TORCH_API IValueInterface {
 public:
   IValueInterface(): values_(nullptr), size_(0) {}
-  IValueInterface(c10::ArrayRef<c10::IValue> values);
+  explicit IValueInterface(c10::ArrayRef<c10::IValue> values);
   ~IValueInterface();
 
   bool isTensorList(size_t idx) const;
