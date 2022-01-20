@@ -1,7 +1,6 @@
 #include <ATen/core/dynamic_type.h>
 
 #include <string>
-#include "ATen/core/jit_type_base.h"
 
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
