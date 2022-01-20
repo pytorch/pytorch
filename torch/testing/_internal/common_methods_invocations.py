@@ -12701,6 +12701,8 @@ op_db: List[OpInfo] = [
                    'TestJit', 'test_variant_consistency_jit',
                    device_type='cuda', dtypes=(torch.float32, torch.complex64)
                ),
+               # TODO: investigate. Probably implement a custom backward
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
            )),
     OpInfo('linalg.svd_rank_restricted',
            variant_test_name='singular',
@@ -12739,6 +12741,8 @@ op_db: List[OpInfo] = [
                ),
                # test does not work with passing lambda for op
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+               # TODO: investigate. Probably implement a custom backward
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
            )),
     OpInfo('linalg.svd_rank_revealing',
            op=torch.linalg.svd_rank_revealing,
