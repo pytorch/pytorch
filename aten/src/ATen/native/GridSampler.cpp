@@ -178,8 +178,12 @@ namespace {
                                     const Tensor& input, const Tensor& grid,
                                     GridSamplerInterpolation interpolation_mode,
                                     GridSamplerPadding padding_mode,
-                                    bool align_corners) {
-    auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+                                    bool align_corners, std::array<bool,2> output_mask) {
+    auto input_requires_grad = output_mask[0];
+    Tensor grad_input;
+    if (input_requires_grad) {
+        grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    }
     auto grad_grid = at::empty_like(grid, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     // If interpolation mode is Nearest, then grad_grid is not filled in the
     // loop below.
@@ -920,12 +924,15 @@ DEFINE_DISPATCH(grid_sampler_2d_backward_cpu_kernel);
 // No shape checking needed here. See # NOTE [ grid_sampler Native Functions ].
 std::tuple<Tensor, Tensor>
 grid_sampler_3d_backward_cpu(const Tensor& grad_output, const Tensor& input, const Tensor& grid,
-                             int64_t interpolation_mode, int64_t padding_mode, bool align_corners) {
+                             int64_t interpolation_mode, int64_t padding_mode, bool align_corners,
+                             std::array<bool,2> output_mask) {
+
   return AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "grid_sampler_3d_backward_cpu", [&] {
     return grid_sampler_3d_backward_cpu_impl<scalar_t>(
       grad_output, input, grid,
       static_cast<GridSamplerInterpolation>(interpolation_mode),
-      static_cast<GridSamplerPadding>(padding_mode), align_corners);
+      static_cast<GridSamplerPadding>(padding_mode),
+      align_corners, output_mask);
   });
 }
 
