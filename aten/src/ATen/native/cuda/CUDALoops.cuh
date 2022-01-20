@@ -192,7 +192,9 @@ static inline void launch_jitted_unrolled_kernel(
   // pack args for kernel launch
   auto extra_args_array = parameter_pack_to_arg_array(extra_args...);
   constexpr int kernel_args = 7;
-  void* args[kernel_args + extra_args_array.size()];
+  // size of `extra_args` is known at compile-time
+  constexpr auto extra_args_size = sizeof...(extra_args);
+  void* args[kernel_args + extra_args_size];
   args[0] = static_cast<void*>(&N);
   args[1] = static_cast<void*>(&data);
   args[2] = static_cast<void*>(&ic);
@@ -201,7 +203,7 @@ static inline void launch_jitted_unrolled_kernel(
   args[5] = static_cast<void*>(&s);
   args[6] = static_cast<void*>(&scalar_val);
 
-  for (int i = 0; i < extra_args_array.size(); i++) {
+  for (size_t i = 0; i < extra_args_size; ++i) {
     // since 7 slots are already filled in `args`
     args[i + 7] = extra_args_array[i];
   }
@@ -271,16 +273,18 @@ at::opmath_type<f_inputs_type> scalar_val, Args... extra_args) {
   }
 
   auto extra_args_array = parameter_pack_to_arg_array(extra_args...);
+  // size of `extra_args` is known at compile-time
+  constexpr auto extra_args_size = sizeof...(extra_args);
 
   if (vectorized) {
     // pack args for kernel launch
     constexpr int kernel_args = 3;
-    void* args[kernel_args + extra_args_array.size()];
+    void* args[kernel_args + extra_args_size];
     args[0] = static_cast<void*>(&N);
     args[1] = static_cast<void*>(&data);
     args[2] = static_cast<void*>(&scalar_val);
 
-    for (int i = 0; i < extra_args_array.size(); i++) {
+    for (size_t i = 0; i < extra_args_size; i++) {
       // since 3 slots are already filled in `args`
       args[i + 3] = extra_args_array[i];
     }
@@ -295,7 +299,7 @@ at::opmath_type<f_inputs_type> scalar_val, Args... extra_args) {
 
     // pack args for kernel launch
     constexpr int kernel_args = 7;
-    void* args[kernel_args + extra_args_array.size()];
+    void* args[kernel_args + extra_args_size];
     args[0] = static_cast<void*>(&N);
     args[1] = static_cast<void*>(&data);
     args[2] = static_cast<void*>(&ic);
@@ -304,7 +308,7 @@ at::opmath_type<f_inputs_type> scalar_val, Args... extra_args) {
     args[5] = static_cast<void*>(&s);
     args[6] = static_cast<void*>(&scalar_val);
 
-    for (int i = 0; i < extra_args_array.size(); i++) {
+    for (size_t i = 0; i < extra_args_size; i++) {
       // since 7 slots are already filled in `args`
       args[i + 7] = extra_args_array[i];
     }
