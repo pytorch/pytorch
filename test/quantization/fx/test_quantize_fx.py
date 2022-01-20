@@ -496,6 +496,43 @@ class TestQuantizeFx(QuantizationTestCase):
             if n.op == 'call_module' and type(modules[n.target]) == nn.ReLU:
                 self.assertTrue(is_match(modules, n, pattern))
 
+    def test_fused_module_qat_swap(self):
+        class Tmp(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.tmp = torch.nn.Linear(5, 5)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                x = self.tmp(x)
+                return self.relu(x)
+
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mods1 = torch.nn.Sequential(Tmp(), torch.nn.Linear(5, 5))
+                self.mods2 = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                a = self.mods1(x)
+                x = torch.add(x, 5)
+                x = self.mods2(x)
+                x = torch.add(x, 5)
+                return a, x
+
+
+        model = M().train()
+        qconfig_dict = {
+            "": None,
+            "object_type": [
+                (torch.nn.Linear, default_qat_qconfig),
+                (torch.nn.ReLU, default_qat_qconfig),
+            ],
+        }
+        prepared = prepare_qat_fx(model, qconfig_dict)
+        self.assertTrue(isinstance(getattr(prepared.mods1, "0").tmp, torch.nn.intrinsic.qat.LinearReLU))
+
     def _get_conv_linear_test_cases(self, is_reference):
         """ Returns a list of test cases, with format:
         is_dynamic, ModuleClass, module_constructor_inputs,
@@ -4830,10 +4867,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 x = self.maxpool2d(x)
                 x = self.maxpool3d(x)
                 x = torch.flatten(x)
-                x = torch.max(x)
-                x = torch.min(x)
                 x = x.reshape([-1])
-                x = x.resize_(1, 1, x.numel())
+                x = x.resize_(1, 1, x)
                 x = x.view(-1)
                 # prim::ListConstruct
                 xs = [x, x]
@@ -4850,7 +4885,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 x, y = torch.chunk(x, 2)
                 x = F.dropout(x)
                 x = self.dropout(x)
-                x, _ = torch.sort(x)
                 x = x.permute(0, 2, 3, 1)
                 x = x.repeat_interleave(3, 1)
                 x = torch.repeat_interleave(x, 3, 1)
@@ -4893,9 +4927,9 @@ class TestQuantizeFxOps(QuantizationTestCase):
         # check exact counts of quantize and dequantize
         count_check = {
             # input of conv and two outputs of getitem
-            ns.call_function(torch.quantize_per_tensor) : 3,
+            ns.call_function(torch.quantize_per_tensor) : 2,
             # output of the model and two outputs of getitem
-            ns.call_method('dequantize') : 3
+            ns.call_method('dequantize') : 2
         }
         order_check = [
             ns.call_function(torch.quantize_per_tensor),
@@ -5619,6 +5653,16 @@ class TestQuantizeFxModels(QuantizationTestCase):
                 model_quantized = convert_fx(model_prepared_second, is_reference=True)
                 out = model_quantized(input.to(device_after))
                 self.assertEqual(out.device.type, device_after)
+
+    @skip_if_no_torchvision
+    def test_model_dropout(self):
+        from torchvision import models
+        m = models.mobilenet_v3_small()
+        qconfig_dict = {'': torch.quantization.get_default_qat_qconfig('fbgemm')}
+        mp = prepare_qat_fx(m, qconfig_dict)
+        mp(torch.randn(1, 3, 224, 224))
+        mq = convert_fx(mp)
+        res = mq(torch.randn(1, 3, 224, 224))
 
     def _test_model_impl(
             self, mode, name, model, eager_quantizable_model,
