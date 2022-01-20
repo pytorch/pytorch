@@ -8528,7 +8528,7 @@ Args:
     :meth:`select` is equivalent to slicing. For example,
     ``tensor.select(0, index)`` is equivalent to ``tensor[index]`` and
     ``tensor.select(2, index)`` is equivalent to ``tensor[:,:,index]``.
-""".format(**common_args)))
+""".format(**common_args))
 
 add_docstr(torch.select_scatter,
            r"""
@@ -8557,7 +8557,7 @@ Example::
     >>> a.select_scatter(b, 0, 0)
     tensor([[1., 1.],
             [0., 0.]])
-""".format(**common_args)))
+""".format(**common_args))
 
 add_docstr(torch.slice_scatter,
            r"""
@@ -8600,7 +8600,7 @@ Example::
             [0., 0., 1., 0., 1., 0., 0., 0.],
             [0., 0., 1., 0., 1., 0., 0., 0.],
             [0., 0., 1., 0., 1., 0., 0., 0.]])
-""".format(**common_args)))
+""".format(**common_args))
 
 add_docstr(torch.set_flush_denormal,
            r"""
