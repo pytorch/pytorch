@@ -486,17 +486,18 @@ LINUX_WORKFLOWS = [
             labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_MOBILE, LABEL_CIFLOW_DEFAULT},
         ),
     ),
-    CIWorkflow(
-        arch="linux",
-        build_environment="linux-xenial-py3-clang5-mobile-custom-build-static",
-        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
-        test_runner_type=LINUX_CPU_TEST_RUNNER,
-        build_generates_artifacts=False,
-        exclude_test=True,
-        ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_MOBILE, LABEL_CIFLOW_DEFAULT},
-        ),
-    ),
+    # TODO: Re-enable this CI test after JIT op registry is enabled for static dispatch
+    # CIWorkflow(
+    #     arch="linux",
+    #     build_environment="linux-xenial-py3-clang5-mobile-custom-build-static",
+    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
+    #     test_runner_type=LINUX_CPU_TEST_RUNNER,
+    #     build_generates_artifacts=False,
+    #     exclude_test=True,
+    #     ciflow_config=CIFlowConfig(
+    #         labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_MOBILE, LABEL_CIFLOW_DEFAULT},
+    #     ),
+    # ),
     CIWorkflow(
         arch="linux",
         build_environment="linux-xenial-py3.7-clang7-asan",

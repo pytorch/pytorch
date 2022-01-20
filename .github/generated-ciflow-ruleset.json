@@ -24,7 +24,6 @@
       "linux-xenial-cuda11.3-py3.7-gcc7-bazel-test",
       "linux-xenial-cuda11.3-py3.7-gcc7-no-ops",
       "linux-xenial-py3-clang5-mobile-build",
-      "linux-xenial-py3-clang5-mobile-custom-build-static",
       "linux-xenial-py3.7-clang7-asan",
       "linux-xenial-py3.7-clang7-onnx",
       "linux-xenial-py3.7-gcc5.4",
@@ -115,7 +114,6 @@
       "linux-xenial-cuda11.3-py3.7-gcc7",
       "linux-xenial-cuda11.3-py3.7-gcc7-bazel-test",
       "linux-xenial-py3-clang5-mobile-build",
-      "linux-xenial-py3-clang5-mobile-custom-build-static",
       "linux-xenial-py3.7-clang7-asan",
       "linux-xenial-py3.7-clang7-onnx",
       "linux-xenial-py3.7-gcc5.4",
@@ -159,7 +157,6 @@
       "linux-xenial-cuda11.3-py3.7-gcc7-bazel-test",
       "linux-xenial-cuda11.3-py3.7-gcc7-no-ops",
       "linux-xenial-py3-clang5-mobile-build",
-      "linux-xenial-py3-clang5-mobile-custom-build-static",
       "linux-xenial-py3.7-clang7-asan",
       "linux-xenial-py3.7-clang7-onnx",
       "linux-xenial-py3.7-gcc5.4",
@@ -189,8 +186,7 @@
       "macos-11-py3-x86-64"
     ],
     "ciflow/mobile": [
-      "linux-xenial-py3-clang5-mobile-build",
-      "linux-xenial-py3-clang5-mobile-custom-build-static"
+      "linux-xenial-py3-clang5-mobile-build"
     ],
     "ciflow/noarch": [
       "linux-bionic-py3.7-clang9"
@@ -243,7 +239,6 @@
       "linux-xenial-cuda11.3-py3.7-gcc7-bazel-test",
       "linux-xenial-cuda11.3-py3.7-gcc7-no-ops",
       "linux-xenial-py3-clang5-mobile-build",
-      "linux-xenial-py3-clang5-mobile-custom-build-static",
       "linux-xenial-py3.7-clang7-asan",
       "linux-xenial-py3.7-clang7-onnx",
       "linux-xenial-py3.7-gcc5.4",
