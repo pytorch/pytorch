@@ -2,13 +2,13 @@
 
 #include <torch/csrc/utils/python_stub.h>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function_hook.h>
 #include <torch/csrc/autograd/cpp_hook.h>
 #include <torch/csrc/autograd/forward_grad.h>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/NamedTensorUtils.h>
 #include <c10/util/Exception.h>
 
@@ -107,15 +107,15 @@ namespace impl {
 
   // WARNING: This may return a nullptr.  If you require AutogradMeta to return
   // a materialized structure, use materialize_autograd_meta instead.
-  TORCH_API AutogradMeta* get_autograd_meta(const Variable&);
+  TORCH_API AutogradMeta* get_autograd_meta(const at::TensorBase&);
 
   // WARNING: This will return a nullptr if the Tensor is not a view.
-  TORCH_API DifferentiableViewMeta* get_view_autograd_meta(const Variable&);
+  TORCH_API DifferentiableViewMeta* get_view_autograd_meta(const at::TensorBase&);
 
   // Returns the current autograd meta, materializing it if it was previously
   // none.  This counts as a *mutating* operation, so do not call it on
   // "read-only" operators; in particular, this is NOT thread safe
-  TORCH_API AutogradMeta* materialize_autograd_meta(const Variable&);
+  TORCH_API AutogradMeta* materialize_autograd_meta(const at::TensorBase&);
 
   /// Set the gradient accumulator of the `Variable`. This is only applicable to
   /// leaf variables. Interior variables should call `set_gradient_edge()`.
@@ -171,11 +171,11 @@ namespace impl {
 
   TORCH_API void set_name(const Variable&, const std::string& name);
 
-  TORCH_API void add_hook(const Variable&, std::shared_ptr<FunctionPreHook> hook);
+  TORCH_API void add_hook(const at::TensorBase&, std::shared_ptr<FunctionPreHook> hook);
   TORCH_API const std::vector<std::shared_ptr<FunctionPreHook>>& hooks(const Variable&);
-  TORCH_API void clear_hooks(const Variable&);
+  TORCH_API void clear_hooks(const at::TensorBase&);
 
-  TORCH_API void create_cpp_hook(const Variable&);
+  TORCH_API void create_cpp_hook(const at::TensorBase&);
 }
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -252,9 +252,9 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
     return grad_;
   }
 
-  const Variable& fw_grad(uint64_t level, const Variable& self) const override;
+  const Variable& fw_grad(uint64_t level, const at::TensorBase& self) const override;
 
-  void set_fw_grad(const Variable& new_grad, const Variable& self, uint64_t level, bool is_inplace_op) override;
+  void set_fw_grad(const at::TensorBase& new_grad, const at::TensorBase& self, uint64_t level, bool is_inplace_op) override;
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   AutogradMeta(at::TensorImpl* self_impl = nullptr, bool requires_grad = false, Edge gradient_edge = Edge() ) {

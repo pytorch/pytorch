@@ -7,10 +7,11 @@
 #include <ATen/native/quantized/cpu/packed_params.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <c10/util/irange.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
 
-torch::class_<LinearPackedParamsBase> register_linear_params();
+int register_linear_params();
 
 namespace at { namespace native {
 
@@ -539,7 +540,7 @@ template<typename T>
 static std::vector<T> unpair_vec(std::vector<pair_of<T>>&& vals) {
   std::vector<T> result;
   result.reserve(vals.size() * 2);
-  for (size_t i = 0; i < vals.size(); i++) {
+  for (const auto i : c10::irange(vals.size())) {
     result.push_back(std::move(vals[i].first));
     result.push_back(std::move(vals[i].second));
   }
@@ -986,7 +987,7 @@ struct PackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
     // are completed now). The sliced parts are also saved, because we will need
     // to return a tensor of final hidden state.
     auto hidden = input_hidden;
-    for (int64_t i = 0; i < num_steps; ++i) {
+    for (const auto i : c10::irange(num_steps)) {
       const int64_t batch_size = batch_sizes[i];
       auto step_input = input_ptr->narrow(0, input_offset, batch_size);
       input_offset += batch_size;
@@ -1121,7 +1122,7 @@ apply_layer_stack(const Layer<io_type, hidden_type, weight_type>& layer, const i
   auto hidden_it = hiddens.begin();
   auto weight_it = weights.begin();
   std::vector<hidden_type> final_hiddens;
-  for (int64_t l = 0; l < num_layers; ++l) {
+  for (const auto l : c10::irange(num_layers)) {
     auto layer_output = layer(layer_input, *(hidden_it++), *(weight_it++));
     final_hiddens.push_back(layer_output.final_hidden);
     layer_input = layer_output.outputs;
@@ -1177,7 +1178,7 @@ std::tuple<io_type, Tensor, Tensor> _lstm_impl(
   int64_t total_layers = layer_hx.size();
   std::vector<typename LSTMCell<cell_params>::hidden_type> hiddens;
   hiddens.reserve(total_layers);
-  for (int64_t i = 0; i < total_layers; ++i) {
+  for (const auto i : c10::irange(total_layers)) {
     hiddens.emplace_back(std::move(layer_hx[i]), std::move(layer_cx[i]));
   }
 
@@ -1209,10 +1210,10 @@ bool _use_cudnn_rnn_flatten_weight() {
   DEFINE_DISPATCH(NAME##_miopen_stub);                                      \
   DEFINE_DISPATCH(NAME##_packed_cudnn_stub);                                \
   DEFINE_DISPATCH(NAME##_packed_miopen_stub);                               \
-  REGISTER_NO_CPU_DISPATCH(NAME##_cudnn_stub, rnn_fn);                      \
-  REGISTER_NO_CPU_DISPATCH(NAME##_miopen_stub, rnn_fn);                     \
-  REGISTER_NO_CPU_DISPATCH(NAME##_packed_cudnn_stub, rnn_packed_fn);        \
-  REGISTER_NO_CPU_DISPATCH(NAME##_packed_miopen_stub, rnn_packed_fn);       \
+  REGISTER_NO_CPU_DISPATCH(NAME##_cudnn_stub);                              \
+  REGISTER_NO_CPU_DISPATCH(NAME##_miopen_stub);                             \
+  REGISTER_NO_CPU_DISPATCH(NAME##_packed_cudnn_stub);                       \
+  REGISTER_NO_CPU_DISPATCH(NAME##_packed_miopen_stub);                      \
                                                                             \
   std::tuple<Tensor, Tensor> NAME(                                          \
       const Tensor& _input,                                                 \
@@ -1463,10 +1464,10 @@ DEFINE_DISPATCH(lstm_cudnn_stub);
 DEFINE_DISPATCH(lstm_packed_cudnn_stub);
 DEFINE_DISPATCH(lstm_miopen_stub);
 DEFINE_DISPATCH(lstm_packed_miopen_stub);
-REGISTER_NO_CPU_DISPATCH(lstm_cudnn_stub, lstm_fn);
-REGISTER_NO_CPU_DISPATCH(lstm_packed_cudnn_stub, lstm_packed_fn);
-REGISTER_NO_CPU_DISPATCH(lstm_miopen_stub, lstm_fn);
-REGISTER_NO_CPU_DISPATCH(lstm_packed_miopen_stub, lstm_packed_fn);
+REGISTER_NO_CPU_DISPATCH(lstm_cudnn_stub);
+REGISTER_NO_CPU_DISPATCH(lstm_packed_cudnn_stub);
+REGISTER_NO_CPU_DISPATCH(lstm_miopen_stub);
+REGISTER_NO_CPU_DISPATCH(lstm_packed_miopen_stub);
 
 std::tuple<Tensor, Tensor, Tensor> lstm(
       const Tensor& _input, TensorList hx,
@@ -1984,7 +1985,7 @@ namespace {
 static auto ensure_linear_params_registered = register_linear_params();
 
 static auto cell_params_base_registry =
-    torch::class_<CellParamsBase>("rnn", "CellParamsBase")
+    torch::selective_class_<CellParamsBase>("rnn", TORCH_SELECTIVE_CLASS("CellParamsBase"))
         .def_pickle(
             [](const c10::intrusive_ptr<CellParamsBase>& self)
                 -> CellParamsSerializationType { return self->__getstate__(); },

@@ -8,6 +8,7 @@
 
 #pragma once
 #include <qnnpack/math.h>
+#include <stdint.h>
 
 // Legend:
 //  dq: Design-time Quantization
@@ -455,11 +456,14 @@ static inline void pytorch_pack_q8dw_wrq(
   }
 }
 
-static inline void pytorch_pack_q8dw_w_dilation(
+static inline void pytorch_pack_q8dw_3d_w_dilation(
+    size_t d,
     size_t h,
     size_t w,
     size_t c,
     size_t cr,
+    size_t z_start,
+    size_t z_end,
     size_t y_start,
     size_t y_end,
     size_t x_start,
@@ -474,24 +478,57 @@ static inline void pytorch_pack_q8dw_w_dilation(
       for (size_t cr_block_offset = 0; cr_block_offset < cr_block_size;
            cr_block_offset++) {
         *((int32_t*)packed_w) = b ? b[cr_block_start + cr_block_offset] : 0.0f;
-        packed_w = (void*)((uintptr_t)packed_w + sizeof(int32_t));
+        packed_w = (void*)((int32_t*)packed_w + 1);
       }
       packed_w =
-          (void*)((uintptr_t)packed_w + (cr - cr_block_size) * sizeof(int32_t));
+          (void*)((int32_t*)packed_w + (cr - cr_block_size));
     }
     for (size_t x = x_start; x < x_end; x++) {
       for (size_t y = y_start; y < y_end; y++) {
-        for (size_t cr_block_offset = 0; cr_block_offset < cr_block_size;
-             cr_block_offset++) {
-          *((uint8_t*)packed_w) =
-              k[((cr_block_start + cr_block_offset) * h + y) * w + x];
-          packed_w = (void*)((uintptr_t)packed_w + sizeof(uint8_t));
+        for (size_t z = z_start; z < z_end; z++) {
+          for (size_t cr_block_offset = 0; cr_block_offset < cr_block_size;
+              cr_block_offset++) {
+            *((uint8_t*)packed_w) =
+                k[(((cr_block_start + cr_block_offset) * d + z) * h + y) * w + x];
+            packed_w = (void*)((uint8_t*)packed_w + 1);
+          }
+          packed_w =
+              (void*)((uint8_t*)packed_w + (cr - cr_block_size));
         }
-        packed_w =
-            (void*)((uintptr_t)packed_w + (cr - cr_block_size) * sizeof(uint8_t));
       }
     }
   }
+}
+
+static inline void pytorch_pack_q8dw_2d_w_dilation(
+    size_t h,
+    size_t w,
+    size_t c,
+    size_t cr,
+    size_t y_start,
+    size_t y_end,
+    size_t x_start,
+    size_t x_end,
+    const uint8_t* k,
+    const int32_t* b,
+    void* packed_w,
+    bool pytorch_pack_b) {
+  pytorch_pack_q8dw_3d_w_dilation(
+      1, /* d */
+      h,
+      w,
+      c,
+      cr,
+      0, /* z_start */
+      1, /* z_end */
+      y_start,
+      y_end,
+      x_start,
+      x_end,
+      k,
+      b,
+      packed_w,
+      pytorch_pack_b);
 }
 
 static inline void pytorch_pack_swizzle_q8gemm_bdq(

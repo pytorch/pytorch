@@ -30,21 +30,7 @@ def get_processor_arch_name(gpu_version):
         "cu" + gpu_version.strip("cuda") if gpu_version.startswith("cuda") else gpu_version
     )
 
-LINUX_PACKAGE_VARIANTS = OrderedDict(
-    manywheel=[
-        "3.6m",
-        "3.7m",
-        "3.8m",
-        "3.9m"
-    ],
-    conda=dimensions.STANDARD_PYTHON_VERSIONS,
-    libtorch=[
-        "3.7m",
-    ],
-)
-
 CONFIG_TREE_DATA = OrderedDict(
-    linux=(dimensions.GPU_VERSIONS, LINUX_PACKAGE_VARIANTS),
     macos=([None], OrderedDict(
         wheel=dimensions.STANDARD_PYTHON_VERSIONS,
         conda=dimensions.STANDARD_PYTHON_VERSIONS,
@@ -63,7 +49,8 @@ CONFIG_TREE_DATA = OrderedDict(
         ],
     )),
     windows=(
-        [v for v in dimensions.GPU_VERSIONS if v not in dimensions.ROCM_VERSION_LABELS],
+        # Stop building Win+CU102, see https://github.com/pytorch/pytorch/issues/65648
+        [v for v in dimensions.GPU_VERSIONS if v not in dimensions.ROCM_VERSION_LABELS and v != "cuda102"],
         OrderedDict(
             wheel=dimensions.STANDARD_PYTHON_VERSIONS,
             conda=dimensions.STANDARD_PYTHON_VERSIONS,

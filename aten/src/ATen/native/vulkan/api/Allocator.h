@@ -17,7 +17,7 @@
   #define VMA_DYNAMIC_VULKAN_FUNCTIONS 0
 #endif
 
-#define VMA_DEFAULT_LARGE_HEAP_BLOCK_SIZE (64ull * 1024 * 1024)
+#define VMA_DEFAULT_LARGE_HEAP_BLOCK_SIZE (32ull * 1024 * 1024)
 #define VMA_SMALL_HEAP_MAX_SIZE (256ull * 1024 * 1024)
 
 #ifdef DEBUG
@@ -30,11 +30,13 @@
   #define VMA_DEBUG_MIN_BUFFER_IMAGE_GRANULARITY 256
   #define VMA_RECORDING_ENABLED 1
 
-  #define VMA_DEBUG_LOG(format, ...)  \
-    do {                              \
-      printf(format, ##__VA_ARGS__);  \
-      printf("\n");                   \
-    } while (false)
+  #define VMA_DEBUG_LOG(format, ...)
+  /*
+  #define VMA_DEBUG_LOG(format, ...) do { \
+      printf(format, __VA_ARGS__); \
+      printf("\n"); \
+  } while(false)
+  */
 #endif /* DEBUG */
 
 #ifdef __clang__
