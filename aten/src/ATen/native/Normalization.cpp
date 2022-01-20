@@ -537,7 +537,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
 std::tuple<Tensor, Tensor, Tensor> _batch_norm_impl_index_backward(
     int64_t impl_index,
     const Tensor& input, const Tensor& grad_output, const c10::optional<Tensor>& weight_opt /* optional */, const c10::optional<Tensor>& running_mean_opt /* optional */, const c10::optional<Tensor>& running_var_opt /* optional */, const c10::optional<Tensor>& save_mean_opt /* optional */, const c10::optional<Tensor>& save_var_transform_opt /* optional */,
-    bool train, double epsilon, std::array<bool, 3> output_mask, const Tensor &reservedSpace) {
+    bool train, double epsilon, std::array<bool, 3> output_mask, const Tensor &reservedSpace,
+    const c10::optional<Tensor>& grad_input_inplace,
+    const c10::optional<Tensor>& grad_weight_inplace,
+    const c10::optional<Tensor>& grad_bias_inplace
+    ) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
@@ -574,7 +578,8 @@ std::tuple<Tensor, Tensor, Tensor> _batch_norm_impl_index_backward(
   } else if (impl_index == 1) {
     // TODO: _batch_norm_impl_index_backward is only used in JIT. cudnn NHWC
     // format conversion is done inside cudnn_batch_norm_backward instead
-    return at::cudnn_batch_norm_backward(input, grad_output, weight, running_mean, running_var, save_mean, save_var_transform, epsilon, reservedSpace);
+    return at::cudnn_batch_norm_backward(input, grad_output, weight, running_mean, running_var, save_mean, save_var_transform, epsilon, reservedSpace,
+      grad_input_inplace, grad_weight_inplace, grad_bias_inplace);
   } else if (impl_index == 2) {
     return at::miopen_batch_norm_backward(input, grad_output, weight, running_mean, running_var, save_mean, save_var_transform, epsilon);
   }
@@ -686,12 +691,15 @@ std::tuple<Tensor, Tensor, Tensor> _instance_norm_channels_last_backward(
       use_input_stats,
       epsilon,
       {true, affine, affine}, // output_mask
-      reservedSpace);
+      reservedSpace,
+      grad_input[i],
+      get_batch_if_defined(grad_weight, i, c),
+      get_batch_if_defined(grad_bias, i, c));
 
     // Todo: remove those copies and make them calculated inplace, in the above BN backward call
-    vectorized_copy(grad_input, std::get<0>(res), i, grad_input_slice_numel);
-    vectorized_copy(get_batch_if_defined(grad_weight, i, c).value(), std::get<1>(res), 0, c);
-    vectorized_copy(get_batch_if_defined(grad_bias, i, c).value(), std::get<2>(res), 0, c);
+    // vectorized_copy(grad_input, std::get<0>(res), i, grad_input_slice_numel);
+    // vectorized_copy(get_batch_if_defined(grad_weight, i, c).value(), std::get<1>(res), 0, c);
+    // vectorized_copy(get_batch_if_defined(grad_bias, i, c).value(), std::get<2>(res), 0, c);
   };
 
   return std::make_tuple(grad_input, grad_weight, grad_bias);

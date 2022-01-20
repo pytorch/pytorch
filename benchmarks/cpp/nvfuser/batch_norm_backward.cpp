@@ -185,7 +185,10 @@ static void Baseline_BatchNorm_BWD(
         save_mean,
         save_var,
         kEps,
-        std::get<3>(fwd_result));
+        std::get<3>(fwd_result),
+        c10::nullopt,
+        c10::nullopt,
+        c10::nullopt);
 
     benchmark_state.SetIterationTime(timer.elapsed() / 1000.0);
     cudaDeviceSynchronize();

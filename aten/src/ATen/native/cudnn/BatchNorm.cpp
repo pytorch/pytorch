@@ -24,7 +24,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
 
 std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
     const Tensor& input, const Tensor& grad_output, const Tensor& weight, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt, const c10::optional<Tensor>& save_mean_opt, const c10::optional<Tensor>& save_var_opt,
-    double epsilon, const Tensor& reservedSpace) {
+    double epsilon, const Tensor& reservedSpace,
+    const c10::optional<Tensor>& grad_input_inplace,
+    const c10::optional<Tensor>& grad_weight_inplace,
+    const c10::optional<Tensor>& grad_bias_inplace
+    ) {
   AT_ERROR("cudnn_batch_norm_backward: ATen not compiled with cuDNN support");
 }
 
@@ -261,7 +265,11 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
     const c10::optional<Tensor>& save_mean_t_opt,
     const c10::optional<Tensor>& save_var_t_opt,
     double epsilon,
-    const Tensor& reserveSpace) {
+    const Tensor& reserveSpace,
+    const c10::optional<Tensor>& grad_input_inplace,
+    const c10::optional<Tensor>& grad_weight_inplace,
+    const c10::optional<Tensor>& grad_bias_inplace
+    ) {
   // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& save_mean_t =
       c10::value_or_else(save_mean_t_opt, [] { return Tensor(); });
@@ -307,9 +315,9 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
                                 input->dim()
                               );
 
-  auto grad_input_t  = at::empty(input->sizes(), input->options(), input->suggest_memory_format());
-  auto grad_weight_t = at::empty(weight->sizes(), weight->options());
-  auto grad_bias_t   = at::empty(weight->sizes(), weight->options());
+  auto grad_input_t  = grad_input_inplace.has_value() ? grad_input_inplace.value() : at::empty(input->sizes(), input->options(), input->suggest_memory_format());
+  auto grad_weight_t = grad_weight_inplace.has_value() ? grad_weight_inplace.value() : at::empty(weight->sizes(), weight->options());
+  auto grad_bias_t   = grad_bias_inplace.has_value() ? grad_bias_inplace.value() : at::empty(weight->sizes(), weight->options());
 
   auto handle = getCudnnHandle();
   auto dataType = getCudnnDataType(*input);
