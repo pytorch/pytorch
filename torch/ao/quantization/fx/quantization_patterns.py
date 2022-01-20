@@ -229,6 +229,7 @@ default_op_supported_dtypes = {
     torch.nn.SiLU: fp16_dtypes,
     torch.nn.Mish: fp16_dtypes,
     torch.nn.GELU: int8_dtypes,
+    torch.nn.Dropout: int8_dtypes,
     torch.nn.Softmax: int8_dtypes,
     torch.nn.functional.elu: int8_dtypes,
     torch.nn.functional.hardswish: int8_dtypes,
@@ -1293,11 +1294,11 @@ ARGS_TO_SKIP = {
 @register_quant_pattern(torch.nn.LayerNorm)
 @register_quant_pattern(torch.nn.SiLU)
 @register_quant_pattern(torch.nn.Mish)
+@register_quant_pattern(torch.nn.Dropout)
 # we currently only support reference patterns for these ops so they have been removed
 # until they receive a proper fp16 kernel. To use the reference pattern, use a custom qconfig
 # @register_quant_pattern(torch.nn.GELU)
 # @register_quant_pattern(torch.nn.Softmax)
-@register_quant_pattern(torch.nn.functional.dropout)
 @register_quant_pattern(torch.nn.functional.elu)
 @register_quant_pattern(torch.nn.functional.hardswish)
 @register_quant_pattern(torch.nn.functional.instance_norm)
@@ -1305,6 +1306,7 @@ ARGS_TO_SKIP = {
 @register_quant_pattern(torch.nn.functional.leaky_relu)
 @register_quant_pattern(torch.nn.functional.silu)
 @register_quant_pattern(torch.nn.functional.mish)
+@register_quant_pattern(torch.nn.functional.dropout)
 # we currently only support reference patterns for these ops so they have been removed
 # until they receive a proper fp16 kernel. To use the reference pattern, use a custom qconfig
 # @register_quant_pattern(torch.nn.functional.gelu)
