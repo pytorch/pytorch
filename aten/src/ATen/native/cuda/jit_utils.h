@@ -63,7 +63,7 @@ template <> inline std::string typeName<ctype>(){ \
 AT_FORALL_SCALAR_TYPES(TYPE_NAME_FN)
 #undef TYPE_NAME_FN
 // JIT uses std::complex directly, because nvRTC compile programs
-// with -default-device there was such issue like:
+// with -default-device, so there is no such issue like:
 //   "std::sin(complex) is __host__ only"
 template <> inline std::string typeName<c10::complex<float>>(){
     return "std::complex<float>";
