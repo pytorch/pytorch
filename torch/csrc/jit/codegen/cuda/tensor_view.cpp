@@ -651,11 +651,11 @@ TensorView* TensorView::cache_before() {
   // Create Producer Domain
   // This domain will be the consumer which needs a new domain, so replace the
   // producers domain with this domain.
-  auto root_domain = getRootDomain();
 
   TensorView* producer = new TensorView(
       new TensorDomain(
           domain()->getRootDomain(),
+          domain()->getRFactorDomain(),
           domain()->domain(),
           domain()->contiguity()),
       getDataType().value());
@@ -664,7 +664,8 @@ TensorView* TensorView::cache_before() {
   TensorView* consumer = this;
 
   size_t i = 0;
-  auto no_reduction_root_domain = TensorDomain::noReductions(getRootDomain());
+  auto no_reduction_root_domain =
+      TensorDomain::noReductions(getMaybeRFactorDomain());
   std::vector<IterDomain*> new_root_domain(no_reduction_root_domain.size());
   for (const auto& dom : no_reduction_root_domain) {
     new_root_domain[i++] = dom->clone();
@@ -715,7 +716,7 @@ TensorView* TensorView::cache_fork() {
       "Caching computed-at tensors is not allowed. Apply caching before computeAt");
 
   // This domain will be the producer, so create the consumer
-  auto root_domain = TensorDomain::noReductions(getRootDomain());
+  auto root_domain = TensorDomain::noReductions(getMaybeRFactorDomain());
   TensorView* new_output = new TensorView(
       new TensorDomain(
           IterDomain::clone(root_domain),
@@ -773,7 +774,8 @@ TensorView* TensorView::cache_after() {
   // Keep Broadcast Axis (Permanent)
   // Remove Reduction Axis
   size_t i = 0;
-  auto no_reduction_root_domain = TensorDomain::noReductions(getRootDomain());
+  auto no_reduction_root_domain =
+      TensorDomain::noReductions(getMaybeRFactorDomain());
   std::vector<IterDomain*> new_root_domain(no_reduction_root_domain.size());
   for (const auto& dom : no_reduction_root_domain) {
     new_root_domain[i++] = dom->clone();
@@ -876,7 +878,16 @@ TensorView* TensorViewBuilder::build() const {
           shape_[i] >= 0,
           "Invalid extent value. ",
           "For a tensor representing a single scalar use ndims = 0 with no sizes set.");
-      domain[i] = new IterDomain(new Int(0), new Int(shape_[i]));
+      if (shape_[i] == 1) {
+        // If size is known to be 1, assume it needs to be broadcasted.
+        domain[i] = new IterDomain(
+            new Int(0),
+            new Int(1),
+            ParallelType::Serial,
+            IterType::BroadcastWithStride);
+      } else {
+        domain[i] = new IterDomain(new Int(0), new Int(shape_[i]));
+      }
     }
   }
 

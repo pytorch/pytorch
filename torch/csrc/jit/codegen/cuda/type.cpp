@@ -479,6 +479,8 @@ static const char* iter_type2string(IterType t) {
       return "b";
     case IterType::Gather:
       return "g";
+    case IterType::Stride:
+      return "s";
     default:
       // Don't try to print t as it would recursively call this function
       TORCH_INTERNAL_ASSERT(false, "Unexpected IterType");

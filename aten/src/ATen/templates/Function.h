@@ -15,7 +15,7 @@
 #include <c10/util/Deprecated.h>
 #include <c10/util/Optional.h>
 
-${static_dispatch_extra_headers}
+${static_dispatch_ops_headers}
 
 ${operator_includes}
 

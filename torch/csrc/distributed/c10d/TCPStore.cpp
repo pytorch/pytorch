@@ -996,9 +996,13 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
 }
 
 TCPStore::~TCPStore() {
+  cleanUp();
+};
+
+void TCPStore::cleanUp() {
   // decrement world size
   add(worldSizeKey_, -1);
-};
+}
 
 void TCPStore::waitForWorkers() {
   if (numWorkers_ == c10::nullopt) {
