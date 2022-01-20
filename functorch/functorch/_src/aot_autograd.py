@@ -297,13 +297,33 @@ def partition_with_recompute_fwd_in_bwd(joint_module: fx.GraphModule, _joint_inp
 
 
 def create_joint_forward_backward(fn):
-    def joint_forward_backward(primals, tangents):
-        out = fn(*primals)
-        primals = [p for p in pytree.tree_flatten(primals)[0] if isinstance(p, Tensor) and p.requires_grad]
+    def joint_forward_backward(primals: List[Any], tangents: List[Any]) -> Tuple[List[Any], List[Any]]:
+        # Call the forward pass
+        outs = fn(*primals)
+        # Get the inputs that need gradients
+        grad_primals = []
+        inputs_needs_grads = []
+        for p in primals:
+            is_grad_tensor = (isinstance(p, Tensor) and p.requires_grad)
+            inputs_needs_grads.append(is_grad_tensor)
+            if is_grad_tensor:
+                grad_primals.append(p)
+
+        # Get the outputs that need gradients
+        assert len(tangents) == len(outs)
+        needed_outs = []
+        needed_tangents = []
+        for out, tangent in zip(outs, tangents):
+            if isinstance(out, Tensor) and out.requires_grad:
+                needed_outs.append(out)
+                needed_tangents.append(tangent)
         backward_out = []
-        if primals:  # todo(chilli): Make it support it if not all outputs have gradients
-            backward_out = torch.autograd.grad(out, primals, grad_outputs=tangents, allow_unused=True)
-        return out, backward_out
+        # Call the backwards pass
+        if grad_primals:
+            backward_out = torch.autograd.grad(needed_outs, grad_primals,
+                                               grad_outputs=needed_tangents, allow_unused=True)
+        backward_out_iter = iter(backward_out)
+        return outs, [next(backward_out_iter) if i else None for i in inputs_needs_grads]
     return joint_forward_backward
 
 
@@ -377,9 +397,7 @@ def create_compiled_function(flat_fn, fw_compiler, bw_compiler, partition_fn, de
             # contiguous_args = [t.contiguous() for t in flat_args]
             contiguous_args = [t for t in flat_args]
             out = normalize_as_list(compiled_bw(*ctx.saved_tensors, *contiguous_args))
-            out_iter = iter(out)
-            grad_out = [next(out_iter) if p else None for p in ctx.needs_input_grad]
-            return tuple(grad_out)
+            return tuple(out)
 
     return CompiledFunction
 

@@ -10,6 +10,7 @@ import torch.nn as nn
 import torch.utils._pytree as pytree
 import unittest
 import warnings
+import itertools
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from functorch import (
     grad, vjp, vmap, jacrev,
@@ -234,7 +235,9 @@ def _nop_compile(x, _):
 
 def _outs_and_grads(fn, inps):
     outs = fn(*inps)
-    [out.sum().backward(retain_graph=True) for out in pytree.tree_flatten(outs)[0]]
+    for out in pytree.tree_flatten(outs)[0]:
+        if isinstance(out, torch.Tensor) and out.requires_grad:
+            out.sum().backward(retain_graph=True)
     grads = [inp.grad for inp in pytree.tree_flatten(inps)[0]]
     for inp in pytree.tree_flatten(inps)[0]:
         inp.grad = None
@@ -270,6 +273,15 @@ class TestAOTAutograd(TestCase):
         inp = [torch.randn(3, 3, requires_grad=True), torch.randn(3, 3)]
         self.verify_aot_autograd(f, inp)
 
+    def test_no_grad_input_output(self):
+        def f(a, b):
+            return a.cos(), b.cos(), a * b
+
+        inp_thunks = [lambda: torch.randn(5, requires_grad=True), lambda: torch.randn(5, requires_grad=False)]
+        for inps in itertools.product(inp_thunks, repeat=2):
+            inps = [i() for i in inps]
+            self.verify_aot_autograd(f, inps)
+
     def test_output_dict(self):
         def f(x):
             return {'a': x, 'b': x}
@@ -295,10 +307,10 @@ class TestAOTAutograd(TestCase):
         inp = torch.randn(32, 32)
         ref_out = mod(inp)
         ref_out.sum().backward()
-        ref_grads = [p.grad for p in mod.parameters()]
+        ref_grads = sorted([(name, p.grad) for name, p in mod.named_parameters()])
         out = compiled_mod(inp)
         out.sum().backward()
-        grads = [p.grad for p in compiled_mod.parameters()]
+        grads = sorted([(name, p.grad) for name, p in mod.named_parameters()])
         self.assertEqual((out, grads), (ref_out, ref_grads))
 
     def test_batchnorm(self):
