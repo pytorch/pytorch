@@ -375,6 +375,13 @@ class TORCH_CUDA_CU_API TensorView : public Val {
     return axes_to_swizzle_;
   }
 
+  // Apply double buffering transformation
+  void doubleBuffer();
+
+  bool isDoubleBuffered() const {
+    return is_double_buffered_;
+  }
+
   friend TORCH_CUDA_CU_API TransformPropagator;
   friend TORCH_CUDA_CU_API TransformReplay;
   friend TORCH_CUDA_CU_API OptOutMutator;
@@ -412,6 +419,7 @@ class TORCH_CUDA_CU_API TensorView : public Val {
   MemoryType memory_type_ = MemoryType::Local;
   SwizzleType swizzle_type_ = SwizzleType::NoSwizzle;
   std::vector<IterDomain*> axes_to_swizzle_;
+  bool is_double_buffered_ = false;
 };
 
 //! A simple TensorView builder

@@ -263,7 +263,8 @@ TensorDomain* IndexReferenceReplay::computeReplay() {
 
 IndexCompute getReferenceIndexing(
     const std::vector<kir::ForLoop*>& loop_structure,
-    TensorDomain* reference_tensor) {
+    TensorDomain* reference_tensor,
+    kir::ForLoop* double_buffer_loop) {
   // Create a simple index mapping from loop iter domains to their local index.
   // This is only applicable to global memory buffers.
   std::unordered_map<IterDomain*, Val*> initial_index_map;
@@ -278,6 +279,14 @@ IndexCompute getReferenceIndexing(
     initial_index_map[ref_axis] = ind;
     if (loop->vectorize()) {
       initial_index_map[ref_axis] = GpuLower::current()->kernel()->zeroVal();
+    } else if (double_buffer_loop == loop) {
+      // This version of getReferenceIndexing is only used for
+      // indexing global tensors. When indexing global producers, the
+      // index for a double buffered loop needs to be incremented. The
+      // parameter double_buffer_loop should be nullptr when indexing
+      // global consumers tensors.
+      initial_index_map[ref_axis] =
+          IrBuilder::addExpr(ind, GpuLower::current()->kernel()->oneVal());
     }
 
     if (Index::protectWithMagicZero(loop, ref_axis, ind)) {

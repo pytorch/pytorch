@@ -559,11 +559,13 @@ class ReadAfterWriteSyncs : public kir::ExprMutator {
         cleanSharedMemory(smem);
       }
 
-      for (auto out : expr->outputs()) {
-        if (out->isA<TensorView>()) {
-          if (out->as<TensorView>()->getMemoryType() == MemoryType::Shared) {
-            smem[out] = expr;
-          }
+      for (auto tv : ir_utils::filterByType<TensorView>(expr->outputs())) {
+        // Double buffered tensors do not need RAW sync to be inserted
+        // here, except for the initial load part, which is taken care
+        // separately by DoubleBufferInserter.
+        if (tv->getMemoryType() == MemoryType::Shared &&
+            !tv->isDoubleBuffered()) {
+          smem[tv] = expr;
         }
       }
 

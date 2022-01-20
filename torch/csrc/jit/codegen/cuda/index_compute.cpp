@@ -11,6 +11,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
+#include <torch/csrc/jit/codegen/cuda/lower_double_buffer.h>
 #include <torch/csrc/jit/codegen/cuda/lower_magic_zero.h>
 #include <torch/csrc/jit/codegen/cuda/lower_shift.h>
 #include <torch/csrc/jit/codegen/cuda/lower_unroll.h>
@@ -996,7 +997,8 @@ indexMapFromTV(
     const TensorView* tv,
     const std::vector<kir::ForLoop*>& loops,
     kir::ForLoop* alloc_loop,
-    bool as_consumer) {
+    bool as_consumer,
+    kir::ForLoop* double_buffer_loop = nullptr) {
   const auto gpu_lower = GpuLower::current();
 
   bool within_alloc = false;
@@ -1082,6 +1084,10 @@ indexMapFromTV(
       }
     } else {
       idx = loop->index();
+    }
+
+    if (loop == double_buffer_loop) {
+      idx = IrBuilder::addExpr(idx, GpuLower::current()->kernel()->oneVal());
     }
 
     loop_to_ind_map[loop] = idx;
@@ -1238,9 +1244,12 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
     }
   }
 
+  kir::ForLoop* db_loop = gpu_lower->doubleBufferInfo().getDoubleBufferLoop(
+      consumer_tv, loops, true);
+
   // Index into the reference tensor. Reference indexing will handle vectorized
   // dims where index should be set to 0
-  auto ref_compute = getReferenceIndexing(loops, reference_domain);
+  auto ref_compute = getReferenceIndexing(loops, reference_domain, db_loop);
 
   // Forward vectorized IDs to index into producer correctly
   // We want p_id to be vectorized like consumer just for the indexing, then we
@@ -1447,6 +1456,10 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
     }
   }
 
+  kir::ForLoop* consumer_db_loop =
+      gpu_lower->doubleBufferInfo().getDoubleBufferLoop(
+          consumer_tv, loops, true);
+
   // Find allocation point of producer relative to loop nests. P2C map is
   // required because producer was replayed as consumer, so we can't use the
   // regular compute at maps to line up its iter domains with the for loops.
@@ -1454,8 +1467,8 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
       loop_utils::getAllocInformation(producer_tv, loops, p2c_alloc_map, true);
   std::unordered_map<kir::ForLoop*, Val*> loop_to_ind_map;
   std::unordered_set<kir::ForLoop*> zero_loops;
-  std::tie(loop_to_ind_map, zero_loops) =
-      indexMapFromTV(producer_tv, loops, alloc_info.init_for_loop, false);
+  std::tie(loop_to_ind_map, zero_loops) = indexMapFromTV(
+      producer_tv, loops, alloc_info.init_for_loop, false, consumer_db_loop);
 
   ensureStaticIndexing(
       producer_tv, alloc_info.init_for_loop, loops, p2c_alloc_map);
@@ -1684,6 +1697,19 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
     }
   }
 
+  if (producer_tv->isDoubleBuffered()) {
+    auto db_loop = gpu_lower->doubleBufferInfo().getDoubleBufferLoop(
+        producer_tv, loops, true);
+    if (db_loop != nullptr) {
+      auto db_switch_index =
+          IrBuilder::modExpr(db_loop->index(), IrBuilder::create<Int>(2));
+      auto original_alloc_size =
+          gpu_lower->doubleBufferInfo().getOriginalAllocSize(producer_tv);
+      auto db_strided_index =
+          IrBuilder::mulExpr(db_switch_index, original_alloc_size);
+      strided_inds.push_back(db_strided_index);
+    }
+  }
   return strided_inds;
 }
 
@@ -1834,6 +1860,9 @@ std::vector<Val*> Index::getGlobalConsumerStridedIndices(
       }
     }
   }
+
+  TORCH_INTERNAL_ASSERT(
+      strided_inds.size() == consumer_tv->getMaybeRFactorDomain().size());
 
   return strided_inds;
 }
@@ -1995,6 +2024,30 @@ std::vector<Val*> Index::getNonGlobalConsumerStridedIndices(
     }
   }
 
+  // This check was originally done in getConsumerStridedIndices, but
+  // the number of strided index values depends on the loop where the
+  // consumer tensor is located. If it's double buffered and not in
+  // the prologue loop, strided_inds ends up having one more
+  // index, so it's just much simpler to check here before adding the
+  // additional index for double buffering.
+  TORCH_INTERNAL_ASSERT(
+      strided_inds.size() == consumer_tv->getMaybeRFactorDomain().size());
+
+  if (consumer_tv->isDoubleBuffered()) {
+    auto db_loop = gpu_lower->doubleBufferInfo().getDoubleBufferLoop(
+        consumer_tv, loops, true);
+    if (db_loop != nullptr) {
+      auto db_switch_index = IrBuilder::subExpr(
+          gpu_lower->kernel()->oneVal(),
+          IrBuilder::modExpr(db_loop->index(), IrBuilder::create<Int>(2)));
+      auto original_alloc_size =
+          gpu_lower->doubleBufferInfo().getOriginalAllocSize(consumer_tv);
+      auto db_strided_index =
+          IrBuilder::mulExpr(db_switch_index, original_alloc_size);
+      strided_inds.push_back(db_strided_index);
+    }
+  }
+
   return strided_inds;
 }
 
@@ -2019,7 +2072,9 @@ std::vector<Val*> Index::getProducerStridedIndices(
   }
 
   TORCH_INTERNAL_ASSERT(
-      strided_indices.size() == producer->getMaybeRFactorDomain().size());
+      strided_indices.size() ==
+      producer->getMaybeRFactorDomain().size() +
+          (producer->isDoubleBuffered() ? 1 : 0));
 
   return strided_indices;
 }
@@ -2049,9 +2104,6 @@ std::vector<Val*> Index::getConsumerStridedIndices(
   } else {
     strided_indices = getNonGlobalConsumerStridedIndices(consumer, loops);
   }
-
-  TORCH_INTERNAL_ASSERT(
-      strided_indices.size() == consumer->getMaybeRFactorDomain().size());
 
   return strided_indices;
 }
@@ -2467,6 +2519,7 @@ auto getPredicateReferenceIndexing(
     const std::vector<kir::ForLoop*>& loops,
     const ReferenceTensor& reference,
     kir::ForLoop* unswitch_or_vec_loop,
+    IterDomain* double_buffer_axis,
     bool start) {
   auto reference_domain = reference.domain;
 
@@ -2570,6 +2623,24 @@ auto getPredicateReferenceIndexing(
       // Don't continue unswitching loops.
       if (vectorized_pred && within_unswitch) {
         break;
+      }
+    }
+  }
+
+  if (double_buffer_axis != nullptr) {
+    auto db_loop = GpuLower::current()->doubleBufferInfo().getDoubleBufferLoop(
+        double_buffer_axis, loops, true);
+    if (db_loop != nullptr) {
+      auto loop_to_ind_map_it = loop_to_ind_map.find(db_loop);
+      TORCH_INTERNAL_ASSERT(loop_to_ind_map_it != loop_to_ind_map.end());
+      auto cur_index = loop_to_ind_map_it->second;
+      // if cur_index is not the same as the index of db_loop, it must
+      // be true that that index has been modified to support
+      // unswitch. In that case, it is not necessary to move ahead the
+      // index for double buffering.
+      if (cur_index == db_loop->index()) {
+        loop_to_ind_map[db_loop] = IrBuilder::addExpr(
+            cur_index, GpuLower::current()->kernel()->oneVal());
       }
     }
   }
@@ -2819,13 +2890,15 @@ std::pair<std::vector<RootPredicateInfo>, ReferenceTensor> Index::
   const auto reference_halo_extent_map =
       getReferenceHaloExtentMap(reference, ref_2_consumer);
 
+  auto db_axis = gpu_lower->doubleBufferInfo().getDoubleBufferAxis(consumer_tv);
+
   // Both start and stop positions may need to be predicated. Indexing
   // differs when generating predicates for unswitch.
   // NOTE: If we could find-and-replace KIR nodes, we could just
   // generate one index map, clone it and replace the loop-to-index
   // mappings of unswitched loops for the start predicate.
   auto ref_stop_indexing = getPredicateReferenceIndexing(
-      loops, reference, unswitch_or_vec_loop, false);
+      loops, reference, unswitch_or_vec_loop, db_axis, false);
   const auto consumer_stop_indexing = ref_stop_indexing.updateIndexCompute(
       consumer_tv->domain(),
       ref_2_consumer,
@@ -2838,7 +2911,7 @@ std::pair<std::vector<RootPredicateInfo>, ReferenceTensor> Index::
   std::unordered_map<IterDomain*, Val*> consumer_start_index_map;
   if (is_unswitch) {
     auto ref_start_indexing = getPredicateReferenceIndexing(
-        loops, reference, unswitch_or_vec_loop, true);
+        loops, reference, unswitch_or_vec_loop, db_axis, true);
     const auto consumer_start_indexing = ref_start_indexing.updateIndexCompute(
         consumer_tv->domain(),
         ref_2_consumer,

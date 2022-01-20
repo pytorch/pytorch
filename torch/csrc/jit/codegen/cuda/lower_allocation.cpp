@@ -409,6 +409,23 @@ class AllocationInserter : public kir::ExprMutator {
       alloc_dims.push_back(info.buffer->container()->oneVal());
     }
 
+    // Double the allocation size if double-buffered. Record the
+    // original size for indexing.
+    if (info.buffer->isDoubleBuffered()) {
+      Val* original_alloc_size = nullptr;
+      for (auto alloc_dim : alloc_dims) {
+        if (original_alloc_size == nullptr) {
+          original_alloc_size = alloc_dim;
+        } else {
+          original_alloc_size =
+              IrBuilder::mulExpr(original_alloc_size, alloc_dim);
+        }
+      }
+      GpuLower::current()->doubleBufferInfo().setOriginalAllocSize(
+          info.buffer, original_alloc_size);
+      alloc_dims.push_back(IrBuilder::create<Int>(2));
+    }
+
     // Create the allocation node
     return IrBuilder::create<kir::Allocate>(
         info.buffer, info.buffer->getMemoryType(), alloc_dims);

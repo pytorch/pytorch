@@ -1169,6 +1169,19 @@ class CudaKernelGenerator : private OptOutConstDispatch {
                << " " << gen(loop->index()) << " = 0;\n";
       handleScope(loop->body());
       return;
+    } else if (
+        // Special case handling for a pattern where start == end - 1.
+        loop->start()->definition()->isA<BinaryOp>() &&
+        loop->start()->definition()->as<BinaryOp>()->getBinaryOpType() ==
+            BinaryOpType::Sub &&
+        loop->start()->definition()->as<BinaryOp>()->lhs() == loop->stop() &&
+        loop->start()->definition()->as<BinaryOp>()->rhs()->isOneInt()) {
+      indent() << "const "
+               << "nvfuser_index_t"
+               << " " << gen(loop->index()) << " = " << genInline(loop->start())
+               << ";\n";
+      handleScope(loop->body());
+      return;
     }
 
     const auto gen_index = gen(loop->index());

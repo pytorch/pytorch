@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/lower_alias_memory.h>
 #include <torch/csrc/jit/codegen/cuda/lower_allocation.h>
+#include <torch/csrc/jit/codegen/cuda/lower_double_buffer.h>
 #include <torch/csrc/jit/codegen/cuda/lower_expr_sort.h>
 #include <torch/csrc/jit/codegen/cuda/lower_fusion_simplifier.h>
 #include <torch/csrc/jit/codegen/cuda/lower_index.h>
@@ -257,6 +258,9 @@ void GpuLower::lower(Fusion* fusion) {
   predicateElimination().build(fusion_);
 
   nonDivisibleSplitInfo().build(fusion_);
+
+  doubleBufferInfo().build(fusion_);
+
   // Run our passes keeping the lowered expressions and forwarding
   // them
 
@@ -284,12 +288,14 @@ void GpuLower::lower(Fusion* fusion) {
   // Insert SyncThreads at end of for-loop to avoid WAR race condition
   const auto exprs_war_sync = insertWarThreadSynchronization(exprs_reuse_mem);
 
+  const auto exprs_double_buffered = DoubleBufferPass::run(exprs_war_sync);
+
   // This pass inserts predicates as well as branches in the code. Up until now
   // the code is explicitly single shot for loop based. Need to be careful in
   // later passes when doing any kind of insertions in loop nest structure as
   // insertions could be on if then or else instead of directly on a for loop.
   const auto exprs_unrolled_loops =
-      UnrollPass::runPass(fusion_, exprs_war_sync);
+      UnrollPass::runPass(fusion_, exprs_double_buffered);
 
   const auto exprs_unrolled_mv_loops =
       processMisalignedVectorization(exprs_unrolled_loops);

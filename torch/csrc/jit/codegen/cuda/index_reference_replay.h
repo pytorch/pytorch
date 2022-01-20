@@ -92,7 +92,8 @@ IndexCompute getReferenceIndexing(
 // in the loop structure.
 IndexCompute getReferenceIndexing(
     const std::vector<kir::ForLoop*>& loop_structure,
-    TensorDomain* reference_domain);
+    TensorDomain* reference_domain,
+    kir::ForLoop* double_buffer_loop = nullptr);
 
 // When indexing there are sometimes an option to propagate an index down
 // multiple paths. This will return the IterDomains in the history of the

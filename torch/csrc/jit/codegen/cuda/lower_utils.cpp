@@ -298,6 +298,14 @@ BasicAllocInfo getAllocInformation(
       outer_alloc_found = true;
     }
 
+    // Allocation of a double buffered tensor is placed outside its
+    // double buffer axis.
+    if (tv->isDoubleBuffered() &&
+        tv->axis(info.alloc_pos) ==
+            gpu_lower->doubleBufferInfo().getDoubleBufferAxis(tv)) {
+      outer_alloc_found = true;
+    }
+
     auto local_id = tv->axis(info.alloc_pos);
 
     if (use_id_map) {

@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
+#include <torch/csrc/jit/codegen/cuda/lower_double_buffer.h>
 
 // Cleanup
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
@@ -124,7 +125,8 @@ TensorView::TensorView(const TensorView* src, IrCloner* ir_cloner)
       compute_at_pos_(src->compute_at_pos_),
       max_producer_pos_(src->max_producer_pos_),
       memory_type_(src->memory_type_),
-      swizzle_type_(src->swizzle_type_) {
+      swizzle_type_(src->swizzle_type_),
+      is_double_buffered_(src->is_double_buffered_) {
   for (const auto id : src->axesToSwizzle()) {
     axes_to_swizzle_.push_back(ir_cloner->clone(id));
   }
@@ -900,6 +902,14 @@ void TensorView::clearReductionIterDomains() {
   }
 
   setDomain(IrBuilder::create<TensorDomain>(container(), new_root, new_contig));
+}
+
+void TensorView::doubleBuffer() {
+  // Early correctness checking. May miss eventual errors as the
+  // checks depend on memory types and parallelization, which may not
+  // be finalized until lowering.
+  validateDoubleBufferedTensor(this);
+  is_double_buffered_ = true;
 }
 
 bool TensorView::isEmptyTensor() const {

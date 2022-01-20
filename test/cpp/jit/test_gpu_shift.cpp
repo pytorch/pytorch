@@ -644,6 +644,8 @@ TEST_F(NVFuserTest, FusionShift3ptStencil_CUDA) {
     }
   }
 
+  cache->doubleBuffer();
+
   int numel_x = 99;
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
@@ -714,6 +716,8 @@ TEST_F(NVFuserTest, FusionShift5ptStencil_CUDA) {
       }
     }
   }
+
+  cache->doubleBuffer();
 
   int numel_x = 99;
   int numel_y = 101;
@@ -800,6 +804,8 @@ TEST_F(NVFuserTest, FusionShift9ptStencil_CUDA) {
       }
     }
   }
+
+  cache->doubleBuffer();
 
   int numel_x = 99;
   int numel_y = 101;
@@ -914,6 +920,8 @@ TEST_F(NVFuserTest, FusionShift3ptStencilParallel_CUDA) {
   tv0_cache->setMemoryType(MemoryType::Shared);
   tv_out->axis(-1)->parallelize(ParallelType::TIDx);
   tv0_cache->axis(-1)->parallelize(ParallelType::TIDx);
+
+  tv0_cache->doubleBuffer();
 
   int numel_x = 99;
 
@@ -5303,6 +5311,59 @@ TEST_F(NVFuserTest, FusionNonDivisibleHalo2_CUDA) {
   auto t4 = t3.sum({-2, -1});
 
   testValidate(&fusion, cg_outputs, {t0}, {t4}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionGather9ptStencilDoubleBuffering_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = gather(tv0, {3, 3}, {{1, 1}, {1, 1}});
+  auto tv2 = sum(tv1, {-2, -1});
+  auto tv3 = div(tv2, IrBuilder::create<Double>(9));
+
+  auto out = tv3;
+
+  fusion.addOutput(out);
+
+  auto tv0_cache = tv0->cache_after();
+
+  tv0_cache->setMemoryType(MemoryType::Shared);
+
+  out->split(-2, 4);
+  out->split(-1, 32);
+  out->reorder({{1, 2}, {2, 1}});
+  TransformPropagator::from(out);
+
+  tv0->computeAt(out, 2);
+
+  out->axis(3)->parallelize(ParallelType::TIDx);
+  out->axis(2)->parallelize(ParallelType::TIDy);
+  out->axis(0)->parallelize(ParallelType::BIDx);
+
+  scheduler_utils::parallelizeAllLike(out, ir_utils::allTvs(&fusion));
+
+  tv0_cache->doubleBuffer();
+
+  int numel_x = 99;
+  int numel_y = 101;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({numel_x, numel_y}, options);
+  std::vector<IValue> inputs = {t0};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, inputs);
+  auto outputs = fe.runFusion(inputs);
+
+  auto t1 = gather(t0, {3, 3}, {{1, 1}, {1, 1}});
+  auto t2 = sum(t1, {-2, -1});
+  auto t3 = t2 / 9;
+  auto ref = t3;
+
+  testValidate(&fusion, outputs, inputs, {ref}, __LINE__, __FILE__);
 }
 
 } // namespace jit

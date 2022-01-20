@@ -19774,6 +19774,457 @@ TEST_F(NVFuserTest, FusionIssue1305Repro_CUDA) {
   TORCH_INTERNAL_ASSERT(t3->getComputeAtPosition() == 1);
 }
 
+TEST_F(NVFuserTest, FusionDoubleBuffering1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = set(tv0);
+  auto tv2 = add(tv1, IrBuilder::create<Double>(1.0));
+  auto tv3 = set(tv2);
+  fusion.addOutput(tv3);
+
+  tv1->setMemoryType(MemoryType::Shared);
+
+  tv3->split(-1, 128);
+  tv3->split(-1, 32);
+  TransformPropagator::from(tv3);
+
+  tv0->computeAt(tv3, 1);
+
+  tv3->axis(-2)->parallelize(ParallelType::BIDx);
+  tv3->axis(-1)->parallelize(ParallelType::TIDx);
+  scheduler_utils::parallelizeAllLike(tv3, ir_utils::allTvs(&fusion));
+
+  tv1->doubleBuffer();
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  auto t0 = at::randn({1000}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto cg_outputs = fe.runFusion({t0});
+
+  auto ref = t0 + 1;
+
+  testValidate(&fusion, cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionDoubleBuffering2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = set(tv0);
+  auto tv2 = add(tv1, IrBuilder::create<Double>(1.0));
+  auto tv3 = set(tv2);
+  fusion.addOutput(tv3);
+
+  tv3->split(-1, 128);
+  tv3->split(-1, 32);
+  TransformPropagator::from(tv3);
+
+  tv0->computeAt(tv3, -1);
+
+  tv3->axis(-2)->parallelize(ParallelType::BIDx);
+  tv3->axis(-1)->parallelize(ParallelType::TIDx);
+  scheduler_utils::parallelizeAllLike(tv3, ir_utils::allTvs(&fusion));
+
+  tv1->doubleBuffer();
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  auto t0 = at::randn({1000}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto cg_outputs = fe.runFusion({t0});
+
+  auto ref = t0 + 1;
+
+  testValidate(&fusion, cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionDoubleBuffering3_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, IrBuilder::create<Double>(1.0));
+  auto tv2 = set(tv1);
+  auto tv3 = add(tv2, IrBuilder::create<Double>(1.0));
+  fusion.addOutput(tv3);
+
+  tv1->setMemoryType(MemoryType::Shared);
+
+  tv3->split(-1, 128);
+  tv3->split(-1, 32);
+  TransformPropagator::from(tv3);
+
+  tv0->computeAt(tv3, 1);
+
+  // tv2 is invalid to double-buffer as its producer, tv1, is
+  // computed inside the double-buffering loop.
+  ASSERT_ANY_THROW(tv2->doubleBuffer());
+
+  // Moving tv2 inner makes tv1 large enough to double-buffer tv2
+  tv2->computeAt(tv3, 2);
+
+  tv2->doubleBuffer();
+
+  tv3->axis(-1)->parallelize(ParallelType::TIDx);
+  scheduler_utils::parallelizeAllLike(tv3, ir_utils::allTvs(&fusion));
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  auto t0 = at::randn({1000}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto cg_outputs = fe.runFusion({t0});
+
+  auto ref = t0 + 2;
+
+  testValidate(&fusion, cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+// Double buffering smem to local and unswitch
+TEST_F(NVFuserTest, FusionDoubleBuffering4_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, IrBuilder::create<Double>(1.0));
+  auto tv2 = set(tv1);
+  auto tv3 = add(tv2, IrBuilder::create<Double>(1.0));
+  fusion.addOutput(tv3);
+
+  tv1->setMemoryType(MemoryType::Shared);
+
+  tv3->split(-1, 128);
+  tv3->split(-1, 32);
+  tv3->split(-1, 8);
+  TransformPropagator::from(tv3);
+
+  tv0->computeAt(tv3, 2);
+  tv2->computeAt(tv3, -1);
+
+  tv3->axis(-1)->parallelize(ParallelType::TIDx);
+  tv3->axis(1)->parallelize(ParallelType::Unswitch);
+  scheduler_utils::parallelizeAllLike(tv3, ir_utils::allTvs(&fusion));
+
+  tv2->doubleBuffer();
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  auto t0 = at::randn({1000}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto cg_outputs = fe.runFusion({t0});
+
+  auto ref = t0 + 2;
+
+  testValidate(&fusion, cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+// Double buffering gmem to shared and unswitch
+TEST_F(NVFuserTest, FusionDoubleBuffering5_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = set(tv0);
+  auto tv2 = add(tv1, IrBuilder::create<Double>(1.0));
+  fusion.addOutput(tv2);
+
+  tv1->setMemoryType(MemoryType::Shared);
+
+  tv2->split(-1, 128);
+  tv2->split(-1, 32);
+  tv2->split(-1, 8);
+  TransformPropagator::from(tv2);
+
+  tv0->computeAt(tv2, 2);
+  tv1->computeAt(tv2, -1);
+
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+  tv2->axis(1)->parallelize(ParallelType::Unswitch);
+  scheduler_utils::parallelizeAllLike(tv2, ir_utils::allTvs(&fusion));
+
+  tv1->doubleBuffer();
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  auto t0 = at::randn({1000}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto cg_outputs = fe.runFusion({t0});
+
+  auto ref = t0 + 1;
+
+  testValidate(&fusion, cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+// Double buffering smem to local and unroll
+TEST_F(NVFuserTest, FusionDoubleBuffering6_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, IrBuilder::create<Double>(1.0));
+  auto tv2 = set(tv1);
+  auto tv3 = add(tv2, IrBuilder::create<Double>(1.0));
+  fusion.addOutput(tv3);
+
+  tv1->setMemoryType(MemoryType::Shared);
+
+  tv3->split(-1, 128);
+  tv3->split(-1, 16);
+  tv3->split(-2, 4);
+  tv3->split(-2, 2);
+  TransformPropagator::from(tv3);
+
+  tv0->computeAt(tv3, 1);
+  tv2->computeAt(tv3, -1);
+
+  tv3->axis(2)->parallelize(ParallelType::Unroll);
+  tv3->axis(4)->parallelize(ParallelType::TIDx);
+
+  tv2->doubleBuffer();
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  auto t0 = at::randn({199}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto cg_outputs = fe.runFusion({t0});
+
+  auto ref = t0 + 2;
+
+  testValidate(&fusion, cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+// Double buffering and vectorize
+TEST_F(NVFuserTest, FusionDoubleBuffering7_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = set(tv0);
+  auto tv2 = add(tv1, IrBuilder::create<Double>(1.0));
+  fusion.addOutput(tv2);
+
+  tv2->split(-1, 128);
+  tv2->split(-1, 4);
+  TransformPropagator::from(tv2);
+
+  tv1->computeAt(tv2, 2);
+
+  tv2->axis(-2)->parallelize(ParallelType::TIDx);
+
+  tv1->axis(-1)->parallelize(ParallelType::Vectorize);
+
+  tv1->doubleBuffer();
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  auto t0 = at::randn({200}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto cg_outputs = fe.runFusion({t0});
+
+  auto ref = t0 + 1;
+
+  testValidate(&fusion, cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+// Multiple tensors to double-buffer
+TEST_F(NVFuserTest, FusionDoubleBuffering8_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(1);
+  fusion.addInput(tv0);
+  auto tv1 = makeContigTensor(1);
+  fusion.addInput(tv1);
+
+  auto tv2 = set(tv0);
+  auto tv3 = set(tv1);
+  auto tv4 = add(tv2, tv3);
+  fusion.addOutput(tv4);
+
+  tv4->split(0, 32);
+  tv4->split(0, 4);
+  TransformPropagator::from(tv4);
+
+  tv0->computeAt(tv4, 1);
+  tv1->computeAt(tv4, 1);
+
+  tv4->axis(-1)->parallelize(ParallelType::TIDx);
+  scheduler_utils::parallelizeAllLike(tv4, ir_utils::allTvs(&fusion));
+
+  tv2->doubleBuffer();
+  tv3->doubleBuffer();
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  auto t0 = at::randn({100}, options);
+  auto t1 = at::randn({100}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0, t1});
+  auto cg_outputs = fe.runFusion({t0, t1});
+
+  auto ref = t0 + t1;
+
+  testValidate(&fusion, cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
+}
+
+// Nested double buffering from gmem to smem and smem to register
+TEST_F(NVFuserTest, FusionDoubleBuffering9_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(1);
+  fusion.addInput(tv0);
+  auto tv1 = add(tv0, IrBuilder::create<Double>(1));
+  auto out = tv1;
+  fusion.addOutput(out);
+
+  auto tv2 = tv0->cache_after();
+  auto tv3 = tv2->cache_after();
+
+  out->split(0, 32);
+  out->split(0, 4);
+  TransformPropagator::from(out);
+
+  tv2->setMemoryType(MemoryType::Shared);
+
+  tv2->computeAt(out, 1);
+  tv3->computeAt(out, -1);
+
+  out->axis(-1)->parallelize(ParallelType::TIDx);
+  scheduler_utils::parallelizeAllLike(out, ir_utils::allTvs(&fusion));
+
+  tv2->doubleBuffer();
+  tv3->doubleBuffer();
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  auto t0 = at::randn({1001}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto cg_outputs = fe.runFusion({t0});
+
+  auto ref = t0 + 1;
+
+  testValidate(&fusion, cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+// FusionSmemBlockGemmCache + double buffering at both smem and local
+TEST_F(NVFuserTest, FusionSmemBlockGemmCacheDoubleBuffer_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Algorithm
+  TensorView* tv0 = makeSymbolicTensor(2); // (M, K)
+  TensorView* tv1 = makeSymbolicTensor(2); // (K, N)
+  TensorView* tv2 = broadcast(tv0, {false, false, true}); // (M, K, B)
+  TensorView* tv3 = broadcast(tv1, {true, false, false}); // (B, K, N)
+  TensorView* tv4 = mul(tv2, tv3); // M, K, N
+  TensorView* tv5 = sum(tv4, {1}); // M, R, N
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+  fusion.addOutput(tv5);
+
+  TensorView* tv6 = tv5->cache_before();
+
+  // For smem double buffering
+  auto tv0_cache_local = tv0->cache_after();
+  auto tv1_cache_local = tv1->cache_after();
+
+  // For register double buffering
+  auto tv0_cache_smem = tv0->cache_after();
+  auto tv1_cache_smem = tv1->cache_after();
+
+  const int BSX = 32;
+  const int TSX = 8;
+
+  // [M, K, N]
+  tv6->split(-1, BSX);
+  tv6->split(-1, TSX);
+  tv6->split(1, BSX);
+  tv6->split(0, BSX);
+  tv6->split(1, TSX);
+  // [M/BSX, BSX/TSX, TSX, K/BSX, BSX, N/BSX, BSX/TSX, TSX]
+  tv6->reorder(
+      {{4, 7}, {7, 6}, {6, 5}, {2, 4}, {1, 3}, {3, 2}, {5, 1}, {0, 0}});
+  // [M/BSX, N/BSX, K/BSX, BSX/TSX, BSX/TSX, TSX, TSX, BSX]
+
+  auto tv6_rf = tv6->rFactor({-1});
+
+  TransformPropagator::from(tv6_rf);
+
+  tv0->computeAt(tv6, 3);
+  tv1->computeAt(tv6, 3);
+
+  tv6_rf->computeAt(tv6, -1);
+  tv0_cache_local->computeAt(tv6_rf, -1);
+  tv1_cache_local->computeAt(tv6_rf, -1);
+
+  tv0_cache_smem->setMemoryType(MemoryType::Shared);
+  tv1_cache_smem->setMemoryType(MemoryType::Shared);
+
+  tv5->axis(0)->parallelize(ParallelType::BIDx);
+  tv5->axis(1)->parallelize(ParallelType::BIDy);
+  tv5->axis(-3)->parallelize(ParallelType::TIDy);
+  tv5->axis(-1)->parallelize(ParallelType::TIDx);
+
+  scheduler_utils::parallelizeAllLike(tv5, ir_utils::allTvs(&fusion));
+
+  tv0_cache_local->doubleBuffer();
+  tv1_cache_local->doubleBuffer();
+
+  tv0_cache_smem->doubleBuffer();
+  tv1_cache_smem->doubleBuffer();
+
+  constexpr int M = 154, K = 45, N = 1524;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({M, K}, options);
+  at::Tensor t1 = at::randn({K, N}, options);
+  at::Tensor aten_output = matmul(t0.to(at::kDouble), t1.to(at::kDouble));
+
+  std::vector<IValue> aten_inputs = {t0, t1};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, aten_inputs);
+  auto cg_outputs = fe.runFusion(aten_inputs);
+
+  testValidate(
+      &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)
