@@ -304,15 +304,22 @@ __device__ __forceinline__ static void _compute_weights_span(
   xsize = min(static_cast<int>(center + support + static_cast<accscalar_t>(0.5)), input_size) - xmin;
 }
 
-template <typename scalar_t, typename accscalar_t, typename filter_fn_t>
+template <typename scalar_t, typename accscalar_t, int interp_mode>
 __device__ __forceinline__ static void _compute_weights(
     scalar_t* wt_ptr,
     const accscalar_t scale,
     int interp_size,
-    filter_fn_t filter_fn,
     accscalar_t xmin_m_center,
     int xsize) {
-  accscalar_t invscale = (scale >= 1) ?  static_cast<accscalar_t>(1.0) / scale : 1;
+
+  scalar_t (*filter_fn)(scalar_t);
+  if (interp_mode == 2) {
+    filter_fn = upsample_antialias::bilinear_filter;
+  } else {
+    filter_fn = upsample_antialias::bicubic_filter;
+  }
+
+  accscalar_t invscale = (scale >= 1.0) ? 1.0 / scale : 1.0;
   accscalar_t total_w = 0.0;
   int j = 0;
   for (j = 0; j < xsize; j++) {

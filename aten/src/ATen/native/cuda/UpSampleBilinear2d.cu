@@ -506,22 +506,13 @@ __global__ void upsample_gen2d_aa_out_frame(
   upsample_antialias::_compute_weights_span(
       output_y, input_height, height_scale, support_h, ymin, ysize, ycenter);
 
-  typedef scalar_t (*aa_filter_fn_t)(scalar_t);
-  aa_filter_fn_t filter_fn;
-  if (interp_size == 2) {
-    filter_fn = upsample_antialias::bilinear_filter;
-  } else {
-    filter_fn = upsample_antialias::bicubic_filter;
-  }
-
   if (threadIdx.y == 0)
   {
     // All threadIdx.y have the same wx weights
-    upsample_antialias::_compute_weights(
+    upsample_antialias::_compute_weights<scalar_t, accscalar_t, interp_size>(
         wx,
         width_scale,
         interp_width,
-        filter_fn,
         xmin - xcenter,
         xsize);
   }
@@ -529,11 +520,10 @@ __global__ void upsample_gen2d_aa_out_frame(
   if (threadIdx.x == 0)
   {
     // All threadIdx.x have the same wy weights
-    upsample_antialias::_compute_weights(
+    upsample_antialias::_compute_weights<scalar_t, accscalar_t, interp_size>(
         wy,
         height_scale,
         interp_height,
-        filter_fn,
         ymin - ycenter,
         ysize);
   }
@@ -616,22 +606,13 @@ __global__ void upsample_gen2d_aa_backward_out_frame(
   upsample_antialias::_compute_weights_span(
       output_y, input_height, height_scale, support_h, ymin, ysize, ycenter);
 
-  typedef scalar_t (*aa_filter_fn_t)(scalar_t);
-  aa_filter_fn_t filter_fn;
-  if (interp_size == 2) {
-    filter_fn = upsample_antialias::bilinear_filter;
-  } else {
-    filter_fn = upsample_antialias::bicubic_filter;
-  }
-
   if (threadIdx.y == 0)
   {
     // All threadIdx.y have the same wx weights
-    upsample_antialias::_compute_weights(
+    upsample_antialias::_compute_weights<scalar_t, accscalar_t, interp_size>(
         wx,
         width_scale,
         interp_width,
-        filter_fn,
         xmin - xcenter,
         xsize);
   }
@@ -639,11 +620,10 @@ __global__ void upsample_gen2d_aa_backward_out_frame(
   if (threadIdx.x == 0)
   {
     // All threadIdx.x have the same wy weights
-    upsample_antialias::_compute_weights(
+    upsample_antialias::_compute_weights<scalar_t, accscalar_t, interp_size>(
         wy,
         height_scale,
         interp_height,
-        filter_fn,
         ymin - ycenter,
         ysize);
   }
