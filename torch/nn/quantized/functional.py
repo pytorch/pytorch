@@ -493,6 +493,19 @@ def elu(input: Tensor, scale: float, zero_point: int, alpha: float = 1.) -> Tens
         raise ValueError("Input to 'quantized.elu' must be quantized!")
     return torch.ops.quantized.elu(input, scale, zero_point, alpha)
 
+def dropout(input: Tensor, scale: float, zero_point: int, p: float = 0.5) -> Tensor:
+    r"""This is the quantized version of :func:`~torch.nn.functional.dropout`.
+
+    Args:
+        input: quantized input
+        scale: quantization scale of the output tensor
+        zero_point: quantization zero point of the output tensor
+        alpha: the alpha constant
+    """
+    if not input.is_quantized:
+        raise ValueError("Input to 'quantized.elu' must be quantized!")
+    return torch.ops.quantized.dropout(input, scale, zero_point, p)
+
 def hardsigmoid(input: Tensor, inplace: bool = False) -> Tensor:
     r"""This is the quantized version of :func:`~torch.nn.functional.hardsigmoid`.
     """

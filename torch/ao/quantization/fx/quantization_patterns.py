@@ -239,6 +239,7 @@ default_op_supported_dtypes = {
     torch.nn.functional.mish: fp16_dtypes,
     torch.nn.functional.gelu: int8_dtypes,
     torch.nn.functional.softmax: int8_dtypes,
+    torch.nn.functional.dropout: int8_dtypes,
     torch.sum: fp16_dtypes,
 }
 
@@ -1277,6 +1278,7 @@ class RNNDynamicQuantizeHandler(QuantizeHandler):
 ARGS_TO_SKIP = {
     torch._ops.ops.quantized.hardswish: ['inplace'],
     torch._ops.ops.quantized.elu: ['inplace'],
+    torch._ops.ops.quantized.dropout: ['training', 'inplace'],
     torch._ops.ops.quantized.instance_norm:
     ['running_mean', 'running_var', 'use_input_stats', 'momentum'],
 }
@@ -1295,6 +1297,7 @@ ARGS_TO_SKIP = {
 # until they receive a proper fp16 kernel. To use the reference pattern, use a custom qconfig
 # @register_quant_pattern(torch.nn.GELU)
 # @register_quant_pattern(torch.nn.Softmax)
+@register_quant_pattern(torch.nn.functional.dropout)
 @register_quant_pattern(torch.nn.functional.elu)
 @register_quant_pattern(torch.nn.functional.hardswish)
 @register_quant_pattern(torch.nn.functional.instance_norm)
