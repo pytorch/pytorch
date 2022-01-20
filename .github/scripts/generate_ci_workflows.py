@@ -198,6 +198,7 @@ class CIWorkflow:
     fx2trt_test: bool = False
     timeout_after: int = 240
     xcode_version: str = ''
+    only_on_pr: bool = False
 
     # The following variables will be set as environment variables,
     # so it's easier for both shell and Python scripts to consume it if false is represented as the empty string.
@@ -606,6 +607,7 @@ LINUX_WORKFLOWS = [
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm4.5-py3.7",
         test_runner_type=LINUX_ROCM_TEST_RUNNER,
         num_test_shards=2,
+        only_on_pr=True,
         ciflow_config=CIFlowConfig(
             labels=set([LABEL_CIFLOW_LINUX, LABEL_CIFLOW_ROCM]),
         ),
