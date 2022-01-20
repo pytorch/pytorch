@@ -96,12 +96,14 @@ class TORCH_API LazyGraphExecutor {
   Value GetIrValueForScalar(
       const at::Scalar& value,
       const BackendDevice& device);
-  Value GetIrValueForScalar(
-      const at::Scalar& value,
-      c10::ScalarType type,
-      c10::ArrayRef<int64_t> dimensions,
-      const BackendDevice& device);
-  Value GetIrValueForScalar(
+
+  // TODO: even though this API is currently used **only** in codegen to
+  // generate real scalar IR values vs scalar tensors, we would like to
+  // use it in other cases where `GetIrValueForXXXScalar` is used, as well
+  // In order to do that, we need to untangle the cases where we don't need
+  // `expand` and where we don't expect a scalar tensor
+  Value GetIrValueForScalarFromCodegen(const at::Scalar& value);
+  Value GetIrValueForExpandedScalar(
       const at::Scalar& value,
       const Shape& shape,
       const BackendDevice& device);
