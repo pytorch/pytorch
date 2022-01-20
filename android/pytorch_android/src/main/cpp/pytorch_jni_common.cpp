@@ -287,8 +287,51 @@ class TensorHybrid : public facebook::jni::HybridClass<TensorHybrid> {
   at::Tensor tensor_;
 };
 
+facebook::jni::local_ref<JIValue> JIValue::newJIValueFromStringDict(
+    c10::Dict<c10::IValue, c10::IValue> dict) {
+  static auto jMethodDictStringKey =
+      JIValue::javaClassStatic()
+          ->getStaticMethod<facebook::jni::local_ref<JIValue>(
+              facebook::jni::alias_ref<facebook::jni::JMap<
+                  facebook::jni::alias_ref<facebook::jni::JString::javaobject>,
+                  facebook::jni::alias_ref<JIValue::javaobject>>>)>(
+              "dictStringKeyFrom");
+
+  auto jmap = JHashMap<
+      facebook::jni::alias_ref<facebook::jni::JString::javaobject>,
+      facebook::jni::alias_ref<JIValue::javaobject>>::create();
+  for (auto& pair : dict) {
+    jmap->put(
+        facebook::jni::make_jstring(pair.key().toString()->string()),
+        JIValue::newJIValueFromAtIValue(pair.value()));
+  }
+  return jMethodDictStringKey(JIValue::javaClassStatic(), jmap);
+}
+
+facebook::jni::local_ref<JIValue> JIValue::newJIValueFromIntDict(
+    c10::Dict<c10::IValue, c10::IValue> dict) {
+  static auto jMethodDictLongKey =
+      JIValue::javaClassStatic()
+          ->getStaticMethod<facebook::jni::local_ref<JIValue>(
+              facebook::jni::alias_ref<facebook::jni::JMap<
+                  facebook::jni::alias_ref<facebook::jni::JLong::javaobject>,
+                  facebook::jni::alias_ref<JIValue::javaobject>>>)>(
+              "dictLongKeyFrom");
+  auto jmap = JHashMap<
+      facebook::jni::alias_ref<facebook::jni::JLong::javaobject>,
+      facebook::jni::alias_ref<JIValue::javaobject>>::create();
+  for (auto& pair : dict) {
+    jmap->put(
+        facebook::jni::JLong::valueOf(pair.key().toInt()),
+        JIValue::newJIValueFromAtIValue(pair.value()));
+  }
+  return jMethodDictLongKey(JIValue::javaClassStatic(), jmap);
+}
+
 facebook::jni::local_ref<JIValue> JIValue::newJIValueFromAtIValue(
-    const at::IValue& ivalue) {
+    const at::IValue& ivalue,
+    DictCallback stringDictCallback,
+    DictCallback intDictCallback) {
   Trace _s{"jni::JIValue::newJIValueFromAtIValue"};
   if (ivalue.isNone()) {
     static auto jMethodOptionalNull =
@@ -428,42 +471,9 @@ facebook::jni::local_ref<JIValue> JIValue::newJIValueFromAtIValue(
     }
 
     if (*keyType == *c10::StringType::get()) {
-      static auto jMethodDictStringKey =
-          JIValue::javaClassStatic()
-              ->getStaticMethod<facebook::jni::local_ref<JIValue>(
-                  facebook::jni::alias_ref<facebook::jni::JMap<
-                      facebook::jni::alias_ref<
-                          facebook::jni::JString::javaobject>,
-                      facebook::jni::alias_ref<JIValue::javaobject>>>)>(
-                  "dictStringKeyFrom");
-
-      auto jmap = JHashMap<
-          facebook::jni::alias_ref<facebook::jni::JString::javaobject>,
-          facebook::jni::alias_ref<JIValue::javaobject>>::create();
-      for (auto& pair : dict) {
-        jmap->put(
-            facebook::jni::make_jstring(pair.key().toString()->string()),
-            JIValue::newJIValueFromAtIValue(pair.value()));
-      }
-      return jMethodDictStringKey(JIValue::javaClassStatic(), jmap);
+      return stringDictCallback(std::move(dict));
     } else if (*keyType == *c10::IntType::get()) {
-      static auto jMethodDictLongKey =
-          JIValue::javaClassStatic()
-              ->getStaticMethod<facebook::jni::local_ref<JIValue>(
-                  facebook::jni::alias_ref<facebook::jni::JMap<
-                      facebook::jni::alias_ref<
-                          facebook::jni::JLong::javaobject>,
-                      facebook::jni::alias_ref<JIValue::javaobject>>>)>(
-                  "dictLongKeyFrom");
-      auto jmap = JHashMap<
-          facebook::jni::alias_ref<facebook::jni::JLong::javaobject>,
-          facebook::jni::alias_ref<JIValue::javaobject>>::create();
-      for (auto& pair : dict) {
-        jmap->put(
-            facebook::jni::JLong::valueOf(pair.key().toInt()),
-            JIValue::newJIValueFromAtIValue(pair.value()));
-      }
-      return jMethodDictLongKey(JIValue::javaClassStatic(), jmap);
+      return intDictCallback(std::move(dict));
     }
 
     facebook::jni::throwNewJavaException(
