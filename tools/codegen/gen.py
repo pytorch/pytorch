@@ -1280,6 +1280,35 @@ def gen_headers(
         'view_inverse_declarations': list(mapMaybe(gen_functionalization_view_inverse_declaration, native_functions))
     })
 
+
+    def gen_aten_interned_strings() -> Dict[str, str]:
+        attrs = set()  # All function argument names
+        names = set()  # All ATen function names
+        for func in native_functions:
+            names.add(str(func.func.name.name))
+            # Some operators don't have a functional variant but we still create a
+            # symbol without the underscore
+            names.add(func.func.name.name.base)
+
+            for arg in func.func.schema_order_arguments():
+                attrs.add(arg.name)
+
+        # These are keywords in C++, so aren't valid symbol names
+        # https://en.cppreference.com/w/cpp/language/operator_alternative
+        names -= set(['and', 'and_eq', 'bitand', 'bitor', 'compl', 'not',
+                      'not_eq', 'or', 'or_eq', 'xor', 'xor_eq'])
+
+        return {
+            'aten_symbols': ' \\\n'.join([
+                f"_(aten, {name})" for name in sorted(names)
+            ]),
+            'attr_symbols': ' \\\n'.join([
+                f"_(attr, {name})" for name in sorted(attrs)
+            ]),
+        }
+
+    core_fm.write('aten_interned_strings.h', gen_aten_interned_strings)
+
 def gen_source_files(
         *,
         native_functions: Sequence[NativeFunction],
