@@ -162,7 +162,8 @@ void _process_forward_mode_AD(const variable_list &inputs,
           // If the matching input has a forward grad, the user should have returned a view of that Tensor
           if (matching_input_grad.defined()) {
             TORCH_CHECK(out_grad.is_view() && impl::get_view_autograd_meta(out_grad)->has_fw_view(),
-                        "A custom Function's forward is returning a view but the jvp is not returning a view.");
+                        "A custom Function's forward is returning a view (or one of the input as-is) but the jvp is not "
+                        "returning a view.");
 
             const auto& out_grad_base = impl::get_view_autograd_meta(out_grad)->get_forward_view().base_;
             if (matching_input_grad.is_view() && impl::get_view_autograd_meta(matching_input_grad)->has_fw_view()) {
@@ -260,6 +261,7 @@ optional_variable_list _process_backward_mode_ad(
       // Run in no_grad mode to mimic the behavior of the forward.
       {
         AutoGradMode grad_mode(false);
+        at::AutoFwGradMode fw_grad_mode(false);
         var = var.view_as(var);
       }
       impl::set_gradient_edge(var, {cdata, output_nr});
