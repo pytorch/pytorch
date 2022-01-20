@@ -27,9 +27,7 @@ name: !{{ build_environment }}
 {%- endmacro %}
 
 on:
-# TODO: Migrate to new ciflow trigger, reference https://github.com/pytorch/pytorch/pull/70321
   pull_request:
-    types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
     # NOTE: This workflow should only trigger when changes are made to binary builds
     # Should catch most of the binary build / test scripts
     paths:
@@ -43,6 +41,11 @@ on:
       # NOTE: Binary build pipelines should only get triggered on release candidate builds
       # Release candidate tags look like: v1.11.0-rc1
       - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+{%- for label in ciflow_config.labels | sort %}
+  {%- if label != "ciflow/default" %}
+      - '!{{ label }}/*'
+  {%- endif %}
+{%- endfor %}
   workflow_dispatch:
 
 env:
@@ -66,16 +69,9 @@ env:
 !{{ common.concurrency(build_environment) }}
 
 jobs:
-  should-run:
-    if: !{{ ciflow_config.root_job_condition }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: noop
-        run: echo "This job is here so we don't have a bunch of skipped binary builds :D"
 {%- for config in build_configs %}
   !{{ config["build_name"] }}-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: linux.4xlarge
     timeout-minutes: !{{ common.timeout_minutes }}
     !{{ binary_env(config) }}

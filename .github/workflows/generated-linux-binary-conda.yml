@@ -4,9 +4,7 @@
 name: linux-binary-conda
 
 on:
-# TODO: Migrate to new ciflow trigger, reference https://github.com/pytorch/pytorch/pull/70321
   pull_request:
-    types: [opened, synchronize, reopened, unassigned]
     # NOTE: This workflow should only trigger when changes are made to binary builds
     # Should catch most of the binary build / test scripts
     paths:
@@ -20,6 +18,8 @@ on:
       # NOTE: Binary build pipelines should only get triggered on release candidate builds
       # Release candidate tags look like: v1.11.0-rc1
       - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+      - 'ciflow/binaries/*'
+      - 'ciflow/binaries_conda/*'
   workflow_dispatch:
 
 env:
@@ -45,20 +45,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  should-run:
-    if: ${{ (github.repository == 'pytorch/pytorch') && (
-            (github.event_name == 'push') ||
-            (github.event_name == 'schedule') ||
-            (contains(github.event.pull_request.labels.*.name, 'ciflow/binaries') || contains(github.event.pull_request.labels.*.name, 'ciflow/binaries/conda') || contains(github.event.pull_request.labels.*.name, 'ciflow/default')) ||
-            ((github.event_name == 'pull_request' && github.event.action != 'unassigned') && !contains(join(github.event.pull_request.labels.*.name), 'ciflow/')))
-         }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: noop
-        run: echo "This job is here so we don't have a bunch of skipped binary builds :D"
   conda-py3_7-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: linux.4xlarge
     timeout-minutes: 240
     env:
@@ -437,7 +425,6 @@ jobs:
           docker system prune -af
   conda-py3_7-cuda10_2-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: linux.4xlarge
     timeout-minutes: 240
     env:
@@ -824,7 +811,6 @@ jobs:
           docker system prune -af
   conda-py3_7-cuda11_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: linux.4xlarge
     timeout-minutes: 240
     env:
@@ -1214,7 +1200,6 @@ jobs:
           docker system prune -af
   conda-py3_7-cuda11_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: linux.4xlarge
     timeout-minutes: 240
     env:
@@ -1604,7 +1589,6 @@ jobs:
           docker system prune -af
   conda-py3_7-cuda11_5-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: linux.4xlarge
     timeout-minutes: 240
     env:
@@ -1994,7 +1978,6 @@ jobs:
           docker system prune -af
   conda-py3_8-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: linux.4xlarge
     timeout-minutes: 240
     env:
@@ -2373,7 +2356,6 @@ jobs:
           docker system prune -af
   conda-py3_8-cuda10_2-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: linux.4xlarge
     timeout-minutes: 240
     env:
@@ -2760,7 +2742,6 @@ jobs:
           docker system prune -af
   conda-py3_8-cuda11_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: linux.4xlarge
     timeout-minutes: 240
     env:
@@ -3150,7 +3131,6 @@ jobs:
           docker system prune -af
   conda-py3_8-cuda11_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: linux.4xlarge
     timeout-minutes: 240
     env:
@@ -3540,7 +3520,6 @@ jobs:
           docker system prune -af
   conda-py3_8-cuda11_5-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: linux.4xlarge
     timeout-minutes: 240
     env:
@@ -3930,7 +3909,6 @@ jobs:
           docker system prune -af
   conda-py3_9-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: linux.4xlarge
     timeout-minutes: 240
     env:
@@ -4309,7 +4287,6 @@ jobs:
           docker system prune -af
   conda-py3_9-cuda10_2-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: linux.4xlarge
     timeout-minutes: 240
     env:
@@ -4696,7 +4673,6 @@ jobs:
           docker system prune -af
   conda-py3_9-cuda11_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: linux.4xlarge
     timeout-minutes: 240
     env:
@@ -5086,7 +5062,6 @@ jobs:
           docker system prune -af
   conda-py3_9-cuda11_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: linux.4xlarge
     timeout-minutes: 240
     env:
@@ -5476,7 +5451,6 @@ jobs:
           docker system prune -af
   conda-py3_9-cuda11_5-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: linux.4xlarge
     timeout-minutes: 240
     env:
@@ -5866,7 +5840,6 @@ jobs:
           docker system prune -af
   conda-py3_10-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: linux.4xlarge
     timeout-minutes: 240
     env:
@@ -6245,7 +6218,6 @@ jobs:
           docker system prune -af
   conda-py3_10-cuda10_2-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: linux.4xlarge
     timeout-minutes: 240
     env:
@@ -6632,7 +6604,6 @@ jobs:
           docker system prune -af
   conda-py3_10-cuda11_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: linux.4xlarge
     timeout-minutes: 240
     env:
@@ -7022,7 +6993,6 @@ jobs:
           docker system prune -af
   conda-py3_10-cuda11_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: linux.4xlarge
     timeout-minutes: 240
     env:
@@ -7412,7 +7382,6 @@ jobs:
           docker system prune -af
   conda-py3_10-cuda11_5-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: should-run
     runs-on: linux.4xlarge
     timeout-minutes: 240
     env:
