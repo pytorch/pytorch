@@ -15,20 +15,12 @@ else
   export VC_YEAR=2019
 fi
 
-<<<<<<< HEAD
 if [[ "${DESIRED_CUDA}" == "cu111" ]]; then
-  export BUILD_SPLIT_CUDA="ON"
-=======
-if [[ "${DESIRED_CUDA}" == "cu111" || "${DESIRED_CUDA}" == "cu113" ]]; then
     export BUILD_SPLIT_CUDA="ON"
 fi
 
 echo "Free Space for CUDA DEBUG BUILD"
 if [[ "$CIRCLECI" == 'true' ]]; then
-    if [[ -d "C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Community" ]]; then
-        rm -rf "C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Community"
-    fi
-
     if [[ -d "C:\\Program Files (x86)\\Microsoft Visual Studio 14.0" ]]; then
         rm -rf "C:\\Program Files (x86)\\Microsoft Visual Studio 14.0"
     fi
@@ -56,7 +48,6 @@ if [[ "$CIRCLECI" == 'true' ]]; then
     if [[ -d "C:\\Program Files (x86)\\Google" ]]; then
         rm -rf "C:\\Program Files (x86)\\Google"
     fi
->>>>>>> 3dc588d577... Fix: no enough space for cu102 debug nightly build (#62465)
 fi
 
 set +x
