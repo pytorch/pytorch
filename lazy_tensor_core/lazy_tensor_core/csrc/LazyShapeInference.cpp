@@ -87,6 +87,9 @@ std::vector<Shape> compute_shape_binary_cross_entropy_backward(const at::Tensor 
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
+std::vector<Shape> compute_shape_clamp_min(const at::Tensor & self, const at::Scalar & min) {
+  return {Shape(self.scalar_type(), self.sizes().vec())};
+}
 
 std::vector<Shape> compute_shape_constant_pad_nd(const at::Tensor & self, at::IntArrayRef pad, const at::Scalar & value) {
   // Based on aten/src/ATen/native/ConstantPadNd.cpp::constant_pad_nd
@@ -366,6 +369,7 @@ std::vector<Shape> compute_shape_nll_loss2d_backward(
     int64_t reduction, int64_t ignore_index, const at::Tensor& total_weight) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
+
 
 } // namespace ops
 } // namespace ir

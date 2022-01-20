@@ -1,26 +1,34 @@
 backend: Lazy
 cpp_namespace: torch_lazy_tensors
 full_codegen:
+  # - _index_put_impl_
+  # - _local_scalar_dense
   - _log_softmax
   - _log_softmax_backward_data
   - _softmax
   - _softmax_backward_data
+  # NB: Not sure if we can implement the shape inference for this
+  # - _unique
   - add.Tensor
   - addcdiv
   - addcmul
   - addmm
+  - any
+  # - arange
   - avg_pool2d
   - avg_pool2d_backward
   - baddbmm
   - binary_cross_entropy
   - binary_cross_entropy_backward
   - bitwise_and.Tensor
+  - bitwise_or.Tensor
   - bmm
+  - clamp
+  - clamp_min
   - constant_pad_nd
   - convolution
   - convolution_backward
   - cos
-  - clamp
   - div.Tensor
   - div.Tensor_mode
   - elu
@@ -38,24 +46,29 @@ full_codegen:
   - gelu_backward
   - gt.Scalar
   - gt.Tensor
+  # - index.Tensor
   - index_select
   - kl_div_backward
   - le.Scalar
   - le.Tensor
   - leaky_relu
   - leaky_relu_backward
+  - log
   - log2
-  - logdet
   - log_sigmoid_backward
   - log_sigmoid_forward
+  - logdet
   - lt.Scalar
   - lt.Tensor
   - masked_fill_.Scalar
   - masked_fill_.Tensor
+  - max.dim
   - max_pool2d_with_indices
   - max_pool2d_with_indices_backward
+  - maximum
   - mean
   - mean.dim
+  - minimum
   - mm
   - mul.Tensor
   - mv
@@ -65,14 +78,18 @@ full_codegen:
   - native_layer_norm_backward
   - ne.Scalar
   - ne.Tensor
-  - nll_loss_backward
-  - nll_loss_forward
   - nll_loss2d_backward
   - nll_loss2d_forward
+  - nll_loss_backward
+  - nll_loss_forward
+  # NB: Not sure if we can implement the shape inference for this
+  # - nonzero
   - pow.Tensor_Scalar
   - pow.Tensor_Tensor
+  # - randperm
   - relu
   - relu_
+  - remainder.Tensor
   - rsqrt
   - sigmoid
   - sigmoid_backward
@@ -84,8 +101,8 @@ full_codegen:
   - sort
   - sqrt
   - std
-  - std.dim
   - std.correction
+  - std.dim
   - sum
   - sum.dim_IntList
   - tanh
@@ -96,6 +113,9 @@ full_codegen:
   - trace
   - triu
   - trunc
+  - upsample_bilinear2d
+  - upsample_nearest2d
+  - upsample_nearest2d_backward
   - zero_
 supported:
   - as_strided
