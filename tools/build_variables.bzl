@@ -451,6 +451,16 @@ def libtorch_core_sources_without_mobile_gen():
 
 libtorch_core_sources_without_mobile = libtorch_core_sources_without_mobile_gen()
 
+def mobile_interface_without_mobile_files_gen():
+    core_sources_full_mobile_no_backend_interface_without_mobile_files = []
+    for file_name in core_sources_full_mobile_no_backend_interface:
+        core_sources_full_mobile_no_backend_interface_without_mobile_files.append(file_name)
+    for file_name in mobile_sources_used_full_jit:
+        core_sources_full_mobile_no_backend_interface_without_mobile_files.remove(file_name)
+    return core_sources_full_mobile_no_backend_interface_without_mobile_files
+
+core_sources_full_mobile_no_backend_interface_without_mobile_files = mobile_interface_without_mobile_files_gen()
+
 # These files are the only ones that are supported on Windows.
 libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/FileStore.cpp",
