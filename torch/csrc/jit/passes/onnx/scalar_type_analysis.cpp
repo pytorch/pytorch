@@ -1,8 +1,8 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
+#include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
 
 namespace torch {
 namespace jit {
@@ -289,8 +289,7 @@ static void UpdateScalarTypeForInputs(
 static void UpdateScalarTypeForOutput(
     Node* n,
     const c10::ScalarType& scalar_type) {
-  auto output_tensor_type = n->output()->type()->cast<TensorType>();
-  if (output_tensor_type) {
+  if (auto output_tensor_type = n->output()->type()->cast<TensorType>()) {
     n->output()->setType(CreateProfiledTensorTypeWithScalarType(
         output_tensor_type, scalar_type));
   }

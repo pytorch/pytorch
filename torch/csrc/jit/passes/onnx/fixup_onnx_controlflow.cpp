@@ -253,8 +253,8 @@ void FixupONNXLoopBlockOutputs(Node* n) {
       if (block->outputs().at(i)->type()->cast<NoneType>()) {
         ReplaceBlockOutputWithOptional(
             // Output 0 is continue_condition.
-            // Inputs (0, 1) are (i, cond). So input i + 1 corresponds to output
-            // i.
+            // Inputs (0, 1) are (loop_counter, cond). So input i + 1
+            // corresponds to output i.
             block->inputs().at(i + 1)->type()->cast<OptionalType>(),
             block,
             i);
