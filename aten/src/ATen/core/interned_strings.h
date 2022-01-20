@@ -506,7 +506,8 @@ namespace c10 {
   _(attr, cache_id)                  \
   _(attr, new_axis)                  \
   _(attr, warn_id)                   \
-  _(attr, allowzero)
+  _(attr, allowzero)                 \
+  _(attr, debug_name)
 
 enum class _keys : unique_t {
     #define DEFINE_KEY(ns, s) ns##_##s,

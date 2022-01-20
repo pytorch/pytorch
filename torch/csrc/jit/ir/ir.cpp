@@ -2230,8 +2230,19 @@ std::vector<Value*> insertGraph(
   for (const auto i : c10::irange(inputs.size())) {
     value_map[callee.inputs()[i]] = inputs[i];
   }
+
+  //Prefix debug_name with insertion point's debug_name
+  Node* insert_point = g.insertPoint();
+  bool insert_point_has_debug_name = insert_point->hasAttribute(attr::debug_name);
+  std::string debug_name_prefix = insert_point_has_debug_name ? insert_point->s(attr::debug_name) + "/" : "";
   for (auto* node : callee.nodes()) {
     auto* new_node = g.insertNode(g.createClone(node, value_map_func));
+    if (insert_point_has_debug_name) {
+      bool new_node_has_debug_name = new_node->hasAttribute(attr::debug_name);
+      std::string new_node_debug_name = new_node_has_debug_name ?  new_node->s(attr::debug_name) : new_node->kind().toQualString();
+      new_node->s_(attr::debug_name, debug_name_prefix + new_node_debug_name);
+    }
+
     for (size_t i = 0; i < node->outputs().size(); ++i) {
       value_map[node->outputs()[i]] = new_node->outputs()[i];
     }

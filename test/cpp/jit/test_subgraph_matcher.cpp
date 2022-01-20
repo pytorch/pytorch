@@ -478,6 +478,16 @@ graph(%a, %b):
         &pattern);
     AT_ASSERT(!findPatternMatches(pattern, graph).empty());
   }
+  {
+    Graph pattern;
+    parseIR(
+        R"IR(
+graph(%a, %b):
+  %c = a::c[myattr="q.*", debug_name="somename"](%a, %b)
+  return (%c))IR",
+        &pattern);
+    AT_ASSERT(!findPatternMatches(pattern, graph).empty());
+  }
 }
 
 TEST(SubgraphMatcherTest, BadPattern) {

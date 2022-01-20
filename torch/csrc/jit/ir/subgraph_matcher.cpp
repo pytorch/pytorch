@@ -40,7 +40,7 @@ class SubgraphMatcher {
  private:
   bool matchValues(const Value* v1, Value* v2);
   bool matchNodes(const Node* n1, Node* n2);
-  bool matchAttributes(const Node* n1, Node* n2);
+  bool matchAttributes(const Node* n1, Node* n2, bool match_attr_debug_name = false);
 
   static bool isInput(const Value* v);
   static bool isOutput(const Value* v);
@@ -128,12 +128,22 @@ bool SubgraphMatcher::matchValues(const Value* v1, Value* v2) {
   return matchNodes(v1->node(), v2->node());
 }
 
-bool SubgraphMatcher::matchAttributes(const Node* n1, Node* n2) {
-  if (n1->numAttributes() != n2->numAttributes()) {
+bool SubgraphMatcher::matchAttributes(const Node* n1, Node* n2, bool match_attr_debug_name) {
+  int n1_num_attributes = n1->numAttributes();
+  int n2_num_attributes = n2->numAttributes();
+  if (!match_attr_debug_name) {
+    if (n1->hasAttribute(attr::debug_name)) n1_num_attributes -= 1;
+    if (n2->hasAttribute(attr::debug_name)) n2_num_attributes -= 1;
+  }
+
+  if (n1_num_attributes != n2_num_attributes) {
     GRAPH_DEBUG("Nodes did not match in number attributes:\n", *n1, *n2);
     return false;
   }
   for (const Symbol& attr_name : n1->attributeNames()) {
+    if (!match_attr_debug_name && attr_name == attr::debug_name) {
+      continue;
+    }
     if (n1->kindOf(attr_name) != n2->kindOf(attr_name)) {
       GRAPH_DEBUG(
           "Nodes did not match because type of attribute '",

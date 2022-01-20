@@ -17,7 +17,7 @@ TEST(SubgraphRewriterTest, FilterMatch) {
 graph(%0):
   %a = a::aaa(%0)
   %b : int = prim::Constant[value=1]()
-  %c = c::ccc(%a, %b)
+  %c = c::ccc[debug_name="graph_ccc"](%a, %b)
   return (%c))IR",
       graph.get());
 
@@ -63,7 +63,7 @@ graph(%a, %b):
   {
     auto g = graph->copy();
     rewriter.runOnGraph(g, b_is_constant);
-    FileCheck().check("d::ddd")->check_not("c::ccc")->run(*g);
+    FileCheck().check("d::ddd[debug_name=\"graph_ccc/d::ddd\"]")->check_not("c::ccc")->run(*g);
   }
 
   // b is constant and the value is one, the match will succeed
