@@ -727,15 +727,18 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
         self.checkGraphModuleNodes(m.standalone, expected_node_occurrence=standalone_node_occurrence)
         m = _convert_fx_do_not_use(m, is_reference=True, backend_config_dict=backend_config_dict)
         node_occurrence = {
-            ns.call_function(torch.quantize_per_tensor): 3,
+            # two inputs for standalone module
+            ns.call_function(torch.quantize_per_tensor): 2,
             ns.call_module(nn.Conv2d): 1,
             ns.call_method("dequantize"): 1,
         }
         self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
         standalone_node_occurrence = {
+            # output for the pattern in standalone module
             ns.call_function(torch.quantize_per_tensor): 1,
             ns.call_module(nn.Conv2d): 1,
             ns.call_module(torch.nn.ReLU): 1,
+            # two input and one output for the pattern in standalone module
             ns.call_method("dequantize"): 3,
         }
         self.checkGraphModuleNodes(m.standalone, expected_node_occurrence=standalone_node_occurrence)
