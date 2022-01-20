@@ -442,7 +442,9 @@ libtorch_core_sources = sorted(
 )
 
 def libtorch_core_sources_without_mobile_gen():
-    libtorch_core_sources_without_mobile = libtorch_core_sources
+    libtorch_core_sources_without_mobile = []
+    for file_name in libtorch_core_sources:
+        libtorch_core_jit_sources_without_mobile.append(file_name)
     for file_name in mobile_sources_used_full_jit:
         libtorch_core_sources_without_mobile.remove(file_name)
     return libtorch_core_sources_without_mobile
