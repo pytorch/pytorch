@@ -113,100 +113,6 @@ static inline C10_HOST_DEVICE scalar_t calc_i0(scalar_t _x) {
 // TODO: elaborate in this comment on the structure of math.cuh
 #ifdef USE_JITERATOR
 
-const auto polygamma_string = jiterator_stringify(
-    template <typename T>
-    T zeta(T x, T q) {
-      const T MACHEP{1.11022302462515654042E-16};
-      constexpr T zero{0};
-      constexpr T half{0.5};
-      constexpr T one{1};
-      static const T A[] = {
-          12.0,
-          -720.0,
-          30240.0,
-          -1209600.0,
-          47900160.0,
-          -1.8924375803183791606e9, /*1.307674368e12/691*/
-          7.47242496e10,
-          -2.950130727918164224e12, /*1.067062284288e16/3617*/
-          1.1646782814350067249e14, /*5.109094217170944e18/43867*/
-          -4.5979787224074726105e15, /*8.028576626982912e20/174611*/
-          1.8152105401943546773e17, /*1.5511210043330985984e23/854513*/
-          -7.1661652561756670113e18 /*1.6938241367317436694528e27/236364091*/
-      };
-
-      int i = 0;
-      T a, b, k, s, t, w;
-
-      // Short-circuits x -> +infty
-      if (x == one) {
-        return POS_INFINITY;
-      }
-
-      // Short-circuits x < 1 -> NaN
-      if (x < one) {
-        return NAN;
-      }
-
-      // Short-circuits negative q integers map to +infty,
-      //   negative q non-integers map to NaN
-      if (q <= zero) {
-        if (q == floor(q)) {
-          return POS_INFINITY;
-        }
-        if (x != floor(x)) {
-          return NAN;
-        }
-      }
-
-      s = pow(q, -x);
-      a = q;
-      i = 0;
-      b = zero;
-      while ((i < 9) || (a <= T{9.0})) {
-        i += 1;
-        a += one;
-        b = pow(a, -x);
-        s += b;
-        if ((-MACHEP * s < b) && (b < MACHEP * s)) {
-          return s;
-        }
-      };
-
-      w = a;
-      s += b * w / (x - one);
-      s -= half * b;
-      a = one;
-      k = zero;
-      for (int i = 0; i < 12; i++) {
-        a *= x + k;
-        b /= w;
-        t = a * b / A[i];
-        s = s + t;
-        t = fabs(t / s);
-
-        if (t < MACHEP) {
-          return s;
-        }
-
-        k += one;
-        a *= x + k;
-        b /= w;
-        k += one;
-      }
-
-      return s;
-    }
-
-    template <typename scalar_t>
-    scalar_t polygamma(scalar_t x, int n) {
-      // already blocked if n <= 1
-      const auto one = scalar_t{1};
-      return ((n % 2) ? one : -one) *
-          ::exp(::lgamma(static_cast<scalar_t>(n) + one)) *
-          zeta<scalar_t>(static_cast<scalar_t>(n + 1), x);
-    }); // polygamma_string
-
 const auto ndtri_string = jiterator_stringify(
   /*
   * This function is derived from the implementation of the digamma function in the Cephes Math Library.
@@ -223,14 +129,17 @@ const auto ndtri_string = jiterator_stringify(
   * coef[0] = C  , ..., coef[N] = C  .
   *            N                   0
   */
-template <typename T>
-T polevl(const T x, const T A[], const int len) {
-  T result = 0;
-  for (int i = 0; i < len; ++i) {
-    result = result * x + A[i];
+  template <typename T>
+  T polevl(const T x, const T A[], const int len) {
+    // NOTE: This `polevl` is different from other `polevl`
+    // implementation (in PyTorch) which expect the `len`  to be
+    // `len(A)` instead of `len(A) - 1`.
+    T result = 0;
+    for (int i = 0; i < len; ++i) {
+      result = result * x + A[i];
+    }
+    return result;
   }
-  return result;
-}
 
   /*
   * This function is derived from the implementation of the i1e function in the Cephes Math Library.
@@ -595,6 +504,16 @@ const auto lgamma_string = jiterator_stringify(
     return lgamma(a);
   }
 ); // lgamma_string
+
+const auto polygamma_string = zeta_string + jiterator_stringify(
+  template <typename T>
+  T polygamma(T x, int n) {
+    // already blocked if n <= 1
+    const auto one = T{1};
+    return ((n % 2) ? one : -one) * exp(lgamma(static_cast<T>(n) + one)) *
+        zeta<T>(static_cast<T>(n + 1), x);
+  }
+); // polygamma_string
 
 const auto exp2_string = jiterator_stringify(
   template <typename T>
