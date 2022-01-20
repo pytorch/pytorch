@@ -1114,7 +1114,6 @@ def multimarginloss_no_reduce_test():
             loss_reference_fns['MultiMarginLoss'](i, t.data.type_as(i).long(), reduction='none'),
         check_sum_reduction=True,
         check_gradgrad=False,
-        supports_forward_ad=True,
         pickle=False)
 
 
@@ -1132,7 +1131,6 @@ def multimarginloss_1d_no_reduce_test():
             loss_reference_fns['MultiMarginLoss'](i, t.data.type_as(i).long(), reduction='none'),
         check_sum_reduction=True,
         check_gradgrad=False,
-        supports_forward_ad=True,
         pickle=False)
 
 
@@ -1150,7 +1148,6 @@ def multimarginloss_1d_input_0d_target_no_reduce_test():
             loss_reference_fns['MultiMarginLoss'](i, t.data.type_as(i).long(), reduction='none'),
         check_sum_reduction=True,
         check_gradgrad=False,
-        supports_forward_ad=True,
         pickle=False)
 
 
@@ -1168,7 +1165,6 @@ def multimarginloss_p_no_reduce_test():
             loss_reference_fns['MultiMarginLoss'](i, t.data.type_as(i).long(), p=2, reduction='none'),
         check_sum_reduction=True,
         check_gradgrad=False,
-        supports_forward_ad=True,
         pickle=False)
 
 
@@ -1188,7 +1184,6 @@ def multimarginloss_margin_no_reduce_test():
                                                   margin=0.5, reduction='none'),
         check_sum_reduction=True,
         check_gradgrad=False,
-        supports_forward_ad=True,
         pickle=False)
 
 
@@ -1210,7 +1205,6 @@ def multimarginloss_weights_no_reduce_test():
                                                   weight=weights, reduction='none'),
         check_sum_reduction=True,
         check_gradgrad=False,
-        supports_forward_ad=True,
         pickle=False)
 
 

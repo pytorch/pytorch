@@ -1395,14 +1395,14 @@ Tensor kl_div_target_backward(Tensor grad_output, Tensor self, Tensor target, in
     if (!areAnyTensorSubclassLike({self, target}) && !grad_output._is_zerotensor()) {
       grad_target = grad_output.mul(target.log().add_(1).sub_(self)).masked_fill_(target == 0, 0.);
     } else {
-      grad_target = grad_output.mul(target.log().add(1).sub(self)).masked_fill(target == 0, 0.);
+      grad_target = grad_output.mul(target.log().add(1).sub(self)).masked_fill_(target == 0, 0.);
     }
   }
   else {
     if (!areAnyTensorSubclassLike({self, target})) {
       grad_target = grad_output.mul(target.add(1).sub_(self).mul_(target.exp()));
     } else {
-      grad_target = grad_output.mul(target.add(1).sub(self).mul(target.exp()));
+      grad_target = grad_output.mul(target.add(1).sub(self).mul_(target.exp()));
     }
   }
 
