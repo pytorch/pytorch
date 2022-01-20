@@ -1557,9 +1557,12 @@ class CopyNodeQuantizeHandler(QuantizeHandler):
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
         # always produce reference pattern for following functions
         func_list = [
+            torch.nn.AdaptiveAvgPool2d,
+            torch.nn.functional.adaptive_avg_pool2d,
             torch.nn.functional.relu,
             torch.nn.ReLU6,
             torch.nn.functional.hardtanh,
+            torch.nn.functional.hardtanh_,
             torch.mean,
             'relu',
             'relu_',
