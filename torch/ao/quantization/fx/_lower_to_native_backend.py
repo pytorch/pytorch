@@ -78,6 +78,87 @@ def _lower_weighted_ref_module(model: QuantizedGraphModule, ref_class: Type[torc
     model.recompile()
     return model
 
+
+def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphModule:
+    modules = dict(model.named_modules(remove_duplicate=False))
+    nodes = list(model.graph.nodes)
+    module_type_list = [
+        torch.nn.ReLU,
+        torch.nn.ReLU6,
+        torch.nn.AdaptiveAvgPool1d,
+        torch.nn.AdaptiveAvgPool2d,
+        torch.nn.AdaptiveAvgPool3d,
+        torch.nn.AvgPool1d,
+        torch.nn.AvgPool2d,
+        torch.nn.AvgPool3d,
+        torch.nn.MaxPool1d,
+        torch.nn.MaxPool2d,
+        torch.nn.MaxPool3d,
+    ]
+    func_list = [
+        torch.nn.functional.adaptive_avg_pool1d,
+        torch.nn.functional.adaptive_avg_pool2d,
+        torch.nn.functional.adaptive_avg_pool3d,
+        torch.nn.functional.max_pool1d,
+        torch.nn.functional.max_pool2d,
+        torch.nn.functional.max_pool3d,
+        torch.nn.functional.relu,
+        torch.nn.functional.hardtanh,
+        torch.nn.functional.hardtanh_,
+    ]
+    method_list = [
+        torch.mean,
+        'relu',
+        'relu_',
+    ]
+
+    for n in model.graph.nodes:
+        if isinstance(type(n), torch.fx.node.Node):
+           continue
+        q_node = n
+        if q_node.target == torch.quantize_per_tensor:
+            ref_node = q_node.args[0]
+
+            is_call_function = ref_node.op == "call_function" and ref_node.target in func_list
+            is_call_method = ref_node.op == "call_method" and ref_node.target in method_list
+            is_call_module = ref_node.op == "call_module" and type(modules[ref_node.target]) in module_type_list
+
+            if is_call_module or is_call_function or is_call_method:
+                dq_node = ref_node.args[0]
+                if dq_node.target == 'dequantize':
+                    # get output scale/zero_point/dtype from the quantize node
+                    scale_node = q_node.args[1]
+                    zero_point_node = q_node.args[2]
+                    dtype = q_node.args[3]
+
+                    output_scale = getattr(model, scale_node.target)
+                    output_zero_point = getattr(model, zero_point_node.target)
+
+                    if is_call_module:
+                        ref_module = modules[ref_node.target]
+                        # change this pattern to use the corresponding quantized module
+                        # replace reference module with quantized module
+                        parent_name, module_name = _parent_name(ref_node.target)
+                        setattr(modules[parent_name], module_name, ref_module)
+                    else:
+                        dq_node.target = ref_node
+
+                    # remvoe dq node:
+                    dq_node_input = dq_node.args[0]
+                    dq_node.replace_all_uses_with(dq_node_input)
+                    model.graph.erase_node(dq_node)
+
+                    # remove q node and args:
+                    q_node_input = q_node.args[0]
+                    q_node.replace_all_uses_with(q_node_input)
+                    model.graph.erase_node(q_node)
+                    model.graph.erase_node(scale_node)
+                    model.graph.erase_node(zero_point_node)
+
+
+    model.recompile()
+    return model
+
 def _lower_to_native_backend(model: QuantizedGraphModule) -> QuantizedGraphModule:
     """ Lower a quantized reference model (with reference quantized operator patterns)
     to the native backend in PyTorch (fbgemm/qnnpack), both backends shares the same
@@ -86,7 +167,11 @@ def _lower_to_native_backend(model: QuantizedGraphModule) -> QuantizedGraphModul
     for ref_class in LOWER_MODULE_MAP.keys():
         model = _lower_weighted_ref_module(model, ref_class)
     model.recompile()
+
     for pattern, replacement in get_fbgemm_patterns_and_replacements():
         subgraph_rewriter_FORKED_DO_NOT_USE.replace_pattern(model, pattern, replacement)
+
+    special_pattern_replacement(model)
+
     model.graph.lint()
     return model
