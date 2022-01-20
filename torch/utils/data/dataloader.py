@@ -371,10 +371,13 @@ class DataLoader(Generic[T_co]):
 
     # Each persistent worker, as a daemonic process, would be
     # terminated when the main process exits and causes failure
-    # of sending data to worker_result_queue
-    # Therefore, a proper exit function is required to be invoked
-    # before the main process ends making sure the lifetime of
-    # the iterator is aligned with DataLoader object
+    # when pin_memory_thread gets corrupted data from
+    # worker_result_queue
+    # Therefore, a proper clean-up function is required to be invoked
+    # before the main process exits
+    # The iterator is dereferenced from DataLoader object and destructor
+    # of the iterator would be invoked to make sure pin_memory_thread
+    # exiting before worker process
     def _cleanup_persistent_workers(self):
         if hasattr(self, "_iterator") and self._iterator is not None:
             self._iterator = None
