@@ -201,7 +201,7 @@ C10_NOINLINE DynamicTypePtr makeBaseType(DynamicType::Tag tag);
 #define DYNAMIC_TYPE_TAG_VALUE(NAME, _, IS_BASE_TYPE)      \
   template <>                                              \
   struct TORCH_API DynamicTypeTrait<NAME##Type> {          \
-    static auto tagValue() {                               \
+    C10_ERASE static auto tagValue() {                     \
       return DynamicType::Tag::NAME;                       \
     }                                                      \
     static constexpr bool isBaseType = IS_BASE_TYPE;       \

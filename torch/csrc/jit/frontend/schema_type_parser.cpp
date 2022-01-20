@@ -41,32 +41,33 @@ namespace jit {
 
 TypePtr SchemaTypeParser::parseBaseType() {
   static std::unordered_map<std::string, TypePtr> type_map = {
-      {"Generator", GeneratorType::get()},
-      {"Dimname", StringType::get()},
-      {"ScalarType", IntType::get()},
-      {"Layout", IntType::get()},
-      {"MemoryFormat", IntType::get()},
-      {"Storage", StorageType::get()},
-      {"QScheme", QSchemeType::get()},
-      {"Quantizer", QuantizerType::get()},
+      {"Generator", c10::TypeFactory::get<GeneratorType>()},
+      {"Dimname", c10::TypeFactory::get<StringType>()},
+      {"ScalarType", c10::TypeFactory::get<IntType>()},
+      {"Layout", c10::TypeFactory::get<IntType>()},
+      {"MemoryFormat", c10::TypeFactory::get<IntType>()},
+      {"Storage", c10::TypeFactory::get<StorageType>()},
+      {"QScheme", c10::TypeFactory::get<QSchemeType>()},
+      {"Quantizer", c10::TypeFactory::get<QuantizerType>()},
       {"ConstQuantizerPtr",
-       IntType::get()}, // TODO This type should be removed from the schema
-                        // parser, it should use the custom class mechanism
-                        // instead. @jerryzh
-      {"Device", DeviceObjType::get()},
-      {"Stream", StreamObjType::get()},
-      {"Scalar", NumberType::get()},
-      {"str", StringType::get()},
-      {"float", FloatType::get()},
-      {"complex", ComplexType::get()},
-      {"int", IntType::get()},
-      {"bool", BoolType::get()},
-      {"None", NoneType::get()},
-      {"NoneType", NoneType::get()},
-      {"Capsule", CapsuleType::get()},
-      {"Any", at::AnyType::get()},
-      {"AnyClassType", at::AnyClassType::get()},
-      {"AnyEnumType", at::AnyEnumType::get()},
+       c10::TypeFactory::get<IntType>()}, // TODO This type should be removed
+                                          // from the schema parser, it should
+                                          // use the custom class mechanism
+                                          // instead. @jerryzh
+      {"Device", c10::TypeFactory::get<DeviceObjType>()},
+      {"Stream", c10::TypeFactory::get<StreamObjType>()},
+      {"Scalar", c10::TypeFactory::get<NumberType>()},
+      {"str", c10::TypeFactory::get<StringType>()},
+      {"float", c10::TypeFactory::get<FloatType>()},
+      {"complex", c10::TypeFactory::get<ComplexType>()},
+      {"int", c10::TypeFactory::get<IntType>()},
+      {"bool", c10::TypeFactory::get<BoolType>()},
+      {"None", c10::TypeFactory::get<NoneType>()},
+      {"NoneType", c10::TypeFactory::get<NoneType>()},
+      {"Capsule", c10::TypeFactory::get<CapsuleType>()},
+      {"Any", c10::TypeFactory::get<c10::AnyType>()},
+      {"AnyClassType", c10::TypeFactory::get<c10::AnyClassType>()},
+      {"AnyEnumType", c10::TypeFactory::get<c10::AnyEnumType>()},
   };
   auto tok = L.cur();
   if (!L.nextIf(TK_NONE) && !L.nextIf(TK_NONE_TYPE)) {
@@ -332,7 +333,7 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
     value = RRefType::create(subtype);
   } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Tensor") {
     L.next();
-    value = TensorType::get();
+    value = c10::TypeFactory::get<TensorType>();
     alias_info = parseAliasAnnotation();
   } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Dict") {
     L.next();
