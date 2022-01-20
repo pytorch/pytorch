@@ -4729,13 +4729,14 @@ class TestQuantizeFxOps(QuantizationTestCase):
             self.checkGraphModeFxOp(
                 M(), data, quant_type, expected_node_list=node_list)
 
-
     @skipIfNoFBGEMM
-    def test_my(self):
+    def test_1(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super(M, self).__init__()
-                self.adaptive_avg_pool2d_1 = torch.nn.AdaptiveAvgPool2d((1, 1))
+                self.adaptive_avg_pool1d = torch.nn.AdaptiveAvgPool1d((1))
+                #self.adaptive_avg_pool2d = torch.nn.AdaptiveAvgPool2d((1, 1))
+                #self.adaptive_avg_pool3d = torch.nn.AdaptiveAvgPool3d((1, 1, 1))
                 # self.adaptive_avg_pool2d_2 = torch.nn.AdaptiveAvgPool2d((2, 2))
                 # self.conv = torch.nn.Conv2d(2, 2, 2).float()
                 # self.conv = torch.nn.quantized._reference.Conv2d(2,2,2)
@@ -4745,28 +4746,29 @@ class TestQuantizeFxOps(QuantizationTestCase):
             def forward(self, x):
                 # x = self.conv(x)
                 # x = F.avg_pool2d(x, 3)
-                x = self.adaptive_avg_pool2d_1(x)
+                x = self.adaptive_avg_pool1d(x)
+                #x = self.adaptive_avg_pool2d(x)
+                #x = self.adaptive_avg_pool3d(x)
                 # x = self.adaptive_avg_pool2d_2(x)
                 #x = self.hardtanh_(x)
                 # x = F.hardtanh_(x)
                 # x = x.relu_()
                 return x
 
-        data = (torch.rand((1, 2, 5, 5), dtype=torch.float),)
+        data = (torch.rand((1, 2, 5), dtype=torch.float),)
         # list of node that should occur in order
         node_list = [
-            ns.call_function(torch.quantize_per_tensor),
+            #ns.call_function(torch.quantize_per_tensor),
             # ns.call_module(nnq.Conv2d),
             # ns.call_function(F.hardtanh_),
             # ns.call_method('relu_'),
             # ns.call_function(F.avg_pool2d),
             # ns.call_module(torch.nn.AdaptiveAvgPool2d),
-            ns.call_method('dequantize'),
+            #ns.call_method('dequantize'),
         ]
         for quant_type in self.static_quant_types:
             self.checkGraphModeFxOp(
-                M(), data, quant_type, expected_node_list=node_list, print_debug_info=False)
-
+                M(), data, quant_type, expected_node_list=node_list, print_debug_info=True)
 
 
     def test_fixed_qparams_ops_fp16(self):

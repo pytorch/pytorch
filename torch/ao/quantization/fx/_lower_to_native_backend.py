@@ -84,9 +84,37 @@ def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphMo
     modules = dict(model.named_modules(remove_duplicate=False))
     nodes = list(model.graph.nodes)
     module_type_list = [
+        torch.nn.ReLU,
+        torch.nn.ReLU6,
+        torch.nn.AdaptiveAvgPool1d,
         torch.nn.AdaptiveAvgPool2d,
+        torch.nn.AdaptiveAvgPool3d,
+        torch.nn.AvgPool1d,
+        torch.nn.AvgPool2d,
+        torch.nn.AvgPool3d,
+        torch.nn.MaxPool1d,
+        torch.nn.MaxPool2d,
+        torch.nn.MaxPool3d,
+    ]
+    func_list = [
+        torch.nn.functional.adaptive_avg_pool1d,
+        torch.nn.functional.adaptive_avg_pool2d,
+        torch.nn.functional.adaptive_avg_pool3d,
+        torch.nn.functional.max_pool1d,
+        torch.nn.functional.max_pool2d,
+        torch.nn.functional.max_pool3d,
+        torch.nn.functional.relu,
+        torch.nn.functional.hardtanh,
+        torch.nn.functional.hardtanh_,
+    ]
+    method_list = [
+        torch.mean,
+        'relu',
+        'relu_',
     ]
     for n in model.graph.nodes:
+        if isinstance(type(n), type(torch.fx.node.Node)):
+            continue
         dq_node = n
         if dq_node.target == 'dequantize':
             ref_node = dq_node.args[0]

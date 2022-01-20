@@ -1556,19 +1556,40 @@ class CopyNodeQuantizeHandler(QuantizeHandler):
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
         # always produce reference pattern for following functions
-        func_list = [
-            torch.nn.AdaptiveAvgPool2d,
-            torch.nn.functional.adaptive_avg_pool2d,
-            torch.nn.functional.relu,
+        module_type_list = [
+            torch.nn.ReLU,
             torch.nn.ReLU6,
+            torch.nn.AdaptiveAvgPool1d,
+            torch.nn.AdaptiveAvgPool2d,
+            torch.nn.AdaptiveAvgPool3d,
+            torch.nn.AvgPool1d,
+            # torch.nn.AvgPool2d,
+            torch.nn.AvgPool3d,
+            torch.nn.MaxPool1d,
+            torch.nn.MaxPool2d,
+            torch.nn.MaxPool3d,
+        ]
+        func_list = [
+            torch.nn.functional.adaptive_avg_pool1d,
+            torch.nn.functional.adaptive_avg_pool2d,
+            torch.nn.functional.adaptive_avg_pool3d,
+            torch.nn.functional.max_pool1d,
+            torch.nn.functional.max_pool2d,
+            torch.nn.functional.max_pool3d,
+            torch.nn.functional.relu,
             torch.nn.functional.hardtanh,
             torch.nn.functional.hardtanh_,
+        ]
+        method_list = [
             torch.mean,
             'relu',
             'relu_',
         ]
-        is_func = node.op == "call_function" and node.target in func_list
-        if is_reference or is_func:
+        is_call_function = node.op == "call_function" and node.target in func_list
+        is_call_method = node.op == "call_method" and node.target in method_list
+        is_call_module = node.op == "call_module" and type(modules[node.target]) in module_type_list
+
+        if is_reference or (is_call_function or is_call_method or is_call_module):
             # when activation dtype is torch.float, the node does not require
             # observation
             # e.g. dynamic quantization or weight_only quantization
