@@ -4915,12 +4915,9 @@ class TestQuantizeFxOps(QuantizationTestCase):
         # in the same forward
         m = M().eval()
         qconfig_dict = {'': default_qconfig}
-        # print(m)
         prepared = prepare_fx(m, qconfig_dict)
-        # print(prepared)
         # not runnable
         quantized = convert_fx(prepared)
-        print(quantized)
 
         # This checks that the dequantize from the output of first conv
         # is being propagated to the end, so that we don't insert extra
