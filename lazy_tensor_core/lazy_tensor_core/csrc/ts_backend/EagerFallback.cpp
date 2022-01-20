@@ -4,6 +4,7 @@
 #include <ATen/Functions.h>
 #include <ATen/core/boxing/KernelFunction.h>
 #include <ATen/native/CPUFallback.h>
+#include <torch/csrc/lazy/core/tensor.h>
 #include <torch/library.h>
 
 namespace torch_lazy_tensors {

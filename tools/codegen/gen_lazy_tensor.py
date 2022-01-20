@@ -162,6 +162,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
             tensor_class_hdr,
             "ATen/Functions.h",
             "ATen/MetaFunctions.h",
+            "ATen/Operators.h",
             "torch/csrc/lazy/core/lazy_graph_executor.h",
             "torch/csrc/lazy/core/metrics.h",
             "torch/csrc/lazy/core/shape.h",
