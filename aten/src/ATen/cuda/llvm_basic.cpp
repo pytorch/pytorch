@@ -167,6 +167,10 @@ class __promote : public __promote_imp<_A1, _A2, _A3> {};
 
 )ESCAPE";
 
+const std::string &get_traits_definition() {
+    return traits;
+}
+
 extern const std::string cmath = R"ESCAPE(
 
 namespace std {
@@ -373,6 +377,10 @@ lerp(_A1 __a, _A2 __b, _A3 __t) noexcept
 } // namespace std
 
 )ESCAPE";
+
+const std::string &get_cmath_definition() {
+    return cmath;
+}
 
 }} // namespace at::cuda
 

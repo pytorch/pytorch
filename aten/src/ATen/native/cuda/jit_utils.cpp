@@ -8,7 +8,7 @@
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/code_template.h>
 #include <ATen/native/cuda/jit_utils.h>
-#include <ATen/cuda/jitted_complex.h>
+#include <ATen/cuda/llvm_jit_strings.h>
 
 #include <sstream>
 #include <fstream>
@@ -48,6 +48,8 @@ const std::string jit_common_types = R"ESCAPE(
   //TODO use _assert_fail, because assert is disabled in non-debug builds
   #define ERROR_UNSUPPORTED_CAST assert(false);
 
+  ${traits_string}
+  ${cmath_string}
 
   // NB: Order matters for this macro; it is relied upon in
   // _promoteTypesLookup and the serialization format.
@@ -591,6 +593,8 @@ std::string generate_code(
   env.s("compute_type", compute_type);
   env.s("functor", func);
   env.s("name", name);
+  env.s("traits_string", get_traits_definition());
+  env.s("cmath_string", get_cmath_definition());
   std::stringstream declare_load_arrays;
   for (int i = 0; i < nInputs; i++) {
     // TODO these arrays are potentially of the different types, use function

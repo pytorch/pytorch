@@ -1188,12 +1188,8 @@ inline namespace literals
 
 )ESCAPE";
 
-
-extern const std::string traits;
-extern const std::string cmath;
-
 const std::string &get_complex_definition() {
-  static std::string result = traits + cmath +  complex_body;
+  static std::string result = complex_body;
   return result;
 }
 
