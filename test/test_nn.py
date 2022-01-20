@@ -2936,7 +2936,6 @@ class TestNN(NNTestCase):
         self.assertEqual(len(module.parametrizations.weight), 1)
         self.assertTrue(isinstance(module.parametrizations.weight[0], Identity))
 
-
     # FIXME: Rewrite this test using functions not depending on LAPACK
     #        and remove the `@skipIfNoLapack` (see #70995)
     @skipIfNoLapack
