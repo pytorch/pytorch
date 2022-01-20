@@ -257,7 +257,7 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
     # on that process before rpc.shutdown(), as the agent initialization can
     # take longer than 5s.
     api._all_gather(None, timeout=rpc_backend_options.rpc_timeout)
-
+    
     try:
         _tensorpipe_check_remote_device_maps(agent, rpc_backend_options)
 

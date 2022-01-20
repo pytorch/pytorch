@@ -158,6 +158,10 @@ if is_available():
                 backend
             )
 
+        # world_size is None, then it is a dynamic group
+        if not world_size:
+            world_size = -1
+
         # Rendezvous.
         # This rendezvous state sometimes is destroyed before all processes
         # finishing handshaking. To avoid that issue, we make it global to
@@ -176,6 +180,8 @@ if is_available():
             global _init_counter
             store = dist.PrefixStore(str("rpc_prefix_{}".format(_init_counter)), store)
             _init_counter += 1
+
+        print(f"rank: {rank}, world_size: {world_size}")
 
         # Initialize autograd before RPC since _init_rpc_backend guarantees all
         # processes sync via the store. If we initialize autograd after RPC,
@@ -229,7 +235,6 @@ if is_available():
             world_size=world_size,
             rpc_backend_options=rpc_backend_options,
         )
-
         api._init_rpc_states(rpc_agent)
 
     @api._require_initialized

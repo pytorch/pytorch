@@ -423,6 +423,12 @@ TensorPipeAgent::TensorPipeAgent(
       nameToAddressStore_("addrs", store),
       shutdownStore_("shutdown", store),
       worldSize_(worldSize) {
+  // if worldSize_ is -1, then this is a dynamic group
+  if (worldSize == -1) {
+    worldSize_ = store->getWorldSize();
+    isDynamic = true;
+  }
+
   // collect worker names
   prepareNames();
 
@@ -1099,6 +1105,7 @@ void TensorPipeAgent::join(bool shutdown) {
   // from the callback of a future).
   while (true) {
     {
+      worldSize_ = shutdownStore_.getWorldSize();
       std::unique_lock<std::mutex> lock(callCountMutex_);
       // It is enough to wait for there to be no more active client calls, since
       // each server call corresponds to a client call for some other worker.

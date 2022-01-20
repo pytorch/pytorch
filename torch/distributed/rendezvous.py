@@ -72,10 +72,8 @@ def rendezvous(url: str, rank: int = -1, world_size: int = -1, **kwargs):
         ), "The url: {url} has node-specific arguments(rank, world_size) already.".format(
             url=url
         )
-        if rank != -1:
-            query_dict["rank"] = rank
-        if world_size != -1:
-            query_dict["world_size"] = world_size
+        query_dict["rank"] = rank
+        query_dict["world_size"] = world_size
 
         result = result._replace(
             query="{}".format(
@@ -154,8 +152,9 @@ def _create_c10d_store(hostname, port, rank, world_size, timeout) -> Store:
         return PrefixStore(f"/worker/attempt_{attempt}", tcp_store)
     else:
         start_daemon = rank == 0
+        wait_for_workers = world_size != -1
         return TCPStore(
-            hostname, port, world_size, start_daemon, timeout, multi_tenant=True
+            hostname, port, world_size, start_daemon, timeout, wait_for_workers=wait_for_workers, multi_tenant=True
         )
 
 
@@ -196,6 +195,9 @@ def _env_rendezvous_handler(
 
     def _env_error(var):
         return _error("environment variable %s expected, but not set" % var)
+
+    def _get_env(env_var: str) -> str:
+        return os.environ.get(env_var, None)
 
     def _get_env_or_raise(env_var: str) -> str:
         env_val = os.environ.get(env_var, None)
