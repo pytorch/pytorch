@@ -3,6 +3,8 @@
 #include <ATen/Config.h>
 #include <ATen/cuda/CUDAConfig.h>
 
+#include <iostream>
+
 #if !AT_CUDNN_ENABLED()
 
 namespace at { namespace native {
@@ -11,7 +13,12 @@ namespace at { namespace native {
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
     const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt,
-    bool training, double exponential_average_factor, double epsilon) {
+    bool training, double exponential_average_factor, double epsilon,
+    const c10::optional<Tensor>& output_inplace,
+    const c10::optional<Tensor>& save_mean_inplace,
+    const c10::optional<Tensor>& save_var_inplace
+    ) {
+
   AT_ERROR("cudnn_batch_norm: ATen not compiled with cuDNN support");
 }
 
@@ -76,7 +83,11 @@ cudnnBatchNormMode_t getCudnnBatchNormMode(bool training, at::MemoryFormat memor
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
     const Tensor& input_t, const Tensor& weight_t, const c10::optional<Tensor>& bias_t_opt, const c10::optional<Tensor>& running_mean_t_opt, const c10::optional<Tensor>& running_var_t_opt,
-    bool training, double exponential_average_factor, double epsilon)
+    bool training, double exponential_average_factor, double epsilon,
+    const c10::optional<Tensor>& output_inplace,
+    const c10::optional<Tensor>& save_mean_inplace,
+    const c10::optional<Tensor>& save_var_inplace
+    )
 {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> bias_t_maybe_owned = at::borrow_from_optional_tensor(bias_t_opt);
@@ -121,7 +132,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
                                 input->dim()
                               );
 
-  auto output_t = at::empty_like(*input, input->options(), input->suggest_memory_format());
+  // auto output_t = at::empty_like(*input, input->options(), input->suggest_memory_format());
+  at::Tensor output_t = output_inplace.has_value() \
+    ? output_inplace.value() \
+    : at::empty_like(*input, input->options(), input->suggest_memory_format());
 
   TensorArg output{ output_t, "output", 0 };
 
@@ -139,8 +153,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
   if (training) {
 
     int64_t num_features = input_t.size(1);
-    save_mean = at::empty({ num_features }, weight_t.options());
-    save_var = at::empty({ num_features }, weight_t.options());
+    save_mean = save_mean_inplace.has_value() ? save_mean_inplace.value() : at::empty({ num_features }, weight_t.options());
+    save_var = save_var_inplace.has_value() ? save_var_inplace.value() : at::empty({ num_features }, weight_t.options());
 
 #if CUDNN_VERSION >= 7400
     auto op = CUDNN_BATCHNORM_OPS_BN;

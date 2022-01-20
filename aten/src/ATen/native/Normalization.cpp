@@ -439,7 +439,10 @@ inline bool _batch_norm_use_cudnn(const Tensor& input, const Tensor& weight, con
 std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
     const Tensor& input, const c10::optional<Tensor>& weight_opt /* optional */, const c10::optional<Tensor>& bias_opt /* optional */, const c10::optional<Tensor>& running_mean_opt /* optional */, const c10::optional<Tensor>& running_var_opt /* optional */,
     bool training, double momentum, double eps, bool cudnn_enabled,
-    const c10::optional<Tensor>& pre_allocated_output) {
+    const c10::optional<Tensor>& output_inplace,
+    const c10::optional<Tensor>& save_mean_inplace,
+    const c10::optional<Tensor>& save_var_inplace
+    ) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
@@ -493,7 +496,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
     Tensor output, save_mean, save_var, reserve;
     std::tie(output, save_mean, save_var, reserve) =
         at::cudnn_batch_norm(input_c, weight_c, bias_c, rmean_c, rvar_c,
-                             training, momentum, eps);
+                             training, momentum, eps, output_inplace, save_mean_inplace, save_var_inplace);
 
     return std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t>(
         output, save_mean, save_var, reserve, 1);
@@ -587,20 +590,111 @@ Tensor batch_norm(
   const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
   const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
   return std::get<0>(at::_batch_norm_impl_index(input, weight, bias, running_mean, running_var,
-                                                training, momentum, eps, cudnn_enabled, c10::nullopt));
+                                                training, momentum, eps, cudnn_enabled, c10::nullopt, c10::nullopt, c10::nullopt));
 }
 
-void batch_norm_out(
+// Input t is a 1-D tensor, with b * c elements, where b is the batch size.
+inline c10::optional<Tensor> get_batch_if_defined(const c10::optional<Tensor>& t, int64_t batch_idx, const int64_t c) {
+    return (t.has_value() && t.value().defined()) ? t.value().slice(0, batch_idx * c, batch_idx * c + c) : t;
+};
+
+std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _instance_norm_channels_last(
     const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
     const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt,
-    bool training, double momentum, double eps, bool cudnn_enabled, const at::Tensor& pre_allocated_output) {
-  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
-  const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
-  const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
+    bool use_input_stats, double momentum, double epsilon, bool cudnn_enabled) {
+  int64_t b = input.size(0);
+  int64_t c = input.size(1);
+  at::MemoryFormat memory_format = input.suggest_memory_format();
 
-  std::get<0>(at::_batch_norm_impl_index(input, weight, bias, running_mean, running_var,
-                                                training, momentum, eps, cudnn_enabled, pre_allocated_output));
+  auto input_cont = input.contiguous(memory_format);
+  at::Tensor out = at::empty_like(input_cont, input_cont.options(), memory_format);
+
+  c10::TensorOptions save_mean_var_options;
+  if (weight_opt.has_value()) {
+    save_mean_var_options = weight_opt.value().options();
+  } else {
+    save_mean_var_options = input.options().dtype(
+        at::toAccumulateType(input.scalar_type(), /*is_cuda=*/input.is_cuda()));
+  }
+  at::Tensor save_mean = at::empty({b, c}, save_mean_var_options);
+  at::Tensor save_var = at::empty({b, c}, save_mean_var_options);
+
+  auto slice_numel = input[0].numel();
+  // at::Tensor buffer;
+  at::Tensor reservedSpace;
+  int64_t impl_index;
+  for (int64_t i = 0; i < b; i++) {
+    auto res = at::_batch_norm_impl_index(
+      input_cont.slice(0, i, i+1),
+      get_batch_if_defined(weight_opt, i, c),
+      get_batch_if_defined(bias_opt, i, c),
+      get_batch_if_defined(running_mean_opt, i, c),
+      get_batch_if_defined(running_var_opt, i, c),
+      use_input_stats, momentum, epsilon, cudnn_enabled,
+      out[i],
+      save_mean[i],
+      save_var[i]);
+    reservedSpace = std::get<3>(res);
+    impl_index = std::get<4>(res);
+  }
+  return std::make_tuple(out, save_mean, save_var, reservedSpace, impl_index);
+}
+
+std::tuple<Tensor, Tensor, Tensor> _instance_norm_channels_last_backward(
+    int64_t impl_index,
+    const Tensor& input,
+    const Tensor& grad_output,
+    const c10::optional<Tensor>& weight_opt,
+    const c10::optional<Tensor>& running_mean_opt,
+    const c10::optional<Tensor>& running_var_opt,
+    const c10::optional<Tensor>& save_mean_opt,
+    const c10::optional<Tensor>& save_var_opt,
+    bool use_input_stats,
+    double epsilon,
+    const Tensor& reservedSpace) {
+  const bool affine = weight_opt.has_value();
+  at::MemoryFormat memory_format = input.suggest_memory_format();
+
+  const at::Tensor input_cont = input.contiguous(memory_format);
+  const at::Tensor grad_output_cont = grad_output.contiguous(memory_format);
+  at::Tensor grad_input = at::empty_like(input, input.options(), memory_format);
+  at::Tensor grad_weight = affine ? at::empty_like(weight_opt.value(), weight_opt.value().options()) : at::Tensor();
+  at::Tensor grad_bias = affine ? at::empty_like(weight_opt.value(), weight_opt.value().options()) : at::Tensor();
+
+  int64_t b = input.size(0);
+  int64_t c = input.size(1);
+
+  // This function calls vectorized_elementwise_kernel to do copy on GPU, which has much better performance than
+  //   unrolled_elementwise_kernel for channels_last strided tensors.
+  auto vectorized_copy = [&](const at::Tensor& dest, const at::Tensor& src, int64_t batch_idx, int64_t numel) {
+    if (!dest.defined()) return;
+    dest[batch_idx].as_strided(numel, 1).copy_(src.as_strided(numel, 1), /* non_blocking= */ true);
+  };
+
+  auto grad_input_slice_numel = grad_input[0].numel();
+
+  for (int64_t i = 0; i < b; i++) {
+    auto res = at::_batch_norm_impl_index_backward(
+      impl_index,
+      input_cont.slice(0, i, i+1),
+      grad_output_cont.slice(0, i, i+1),
+      get_batch_if_defined(weight_opt, i, c),
+      get_batch_if_defined(running_mean_opt, i, c),
+      get_batch_if_defined(running_var_opt, i, c),
+      save_mean_opt.has_value() ? save_mean_opt.value()[i] : save_mean_opt,
+      save_var_opt.has_value() ? save_var_opt.value()[i] : save_var_opt,
+      use_input_stats,
+      epsilon,
+      {true, affine, affine}, // output_mask
+      reservedSpace);
+
+    // Todo: remove those copies and make them calculated inplace, in the above BN backward call
+    vectorized_copy(grad_input, std::get<0>(res), i, grad_input_slice_numel);
+    vectorized_copy(get_batch_if_defined(grad_weight, i, c).value(), std::get<1>(res), 0, c);
+    vectorized_copy(get_batch_if_defined(grad_bias, i, c).value(), std::get<2>(res), 0, c);
+  };
+
+  return std::make_tuple(grad_input, grad_weight, grad_bias);
 }
 
 Tensor instance_norm(
@@ -626,36 +720,19 @@ Tensor instance_norm(
   Tensor running_mean_ = repeat_if_defined(running_mean, b);
   Tensor running_var_ = repeat_if_defined(running_var, b);
 
+  const bool use_cudnn = _batch_norm_use_cudnn(input, weight, bias, running_mean, running_var, use_input_stats, eps, cudnn_enabled);
   auto memory_format = input.suggest_memory_format();
   at::Tensor out;
 
-  switch (memory_format) {
-    case at::MemoryFormat::ChannelsLast:
-    case at::MemoryFormat::ChannelsLast3d: {
-      auto get_batch_if_defined = [&](const at::Tensor& t, int64_t i) -> at::Tensor {
-        return t.defined() ? t.slice(0, i * c, i * c + c) : t;
-      };
-      auto input_cont = input.contiguous(memory_format);
-      out = at::empty_like(input_cont);
-      auto slice_numel = input[0].numel();
-      for (int64_t i = 0; i < b; i++) {
-        at::Tensor buffer = at::batch_norm(input_cont.slice(0, i, i+1),
-                                           get_batch_if_defined(weight_, i),
-                                           get_batch_if_defined(bias_, i),
-                                           get_batch_if_defined(running_mean_, i),
-                                           get_batch_if_defined(running_var_, i),
-                                           use_input_stats, momentum, eps, cudnn_enabled);
-        out[i].as_strided(slice_numel, 1).copy_(buffer.as_strided(slice_numel, 1), /* non_blocking= */ true);
-      }
-    } break;
-    case at::MemoryFormat::Contiguous: {
-      auto input_reshaped = input.contiguous().view(shape);
-      out = at::batch_norm(input_reshaped, weight_, bias_, running_mean_, running_var_,
-                                use_input_stats, momentum, eps, cudnn_enabled);
-      out = out.view(input.sizes());
-    } break;
-    default:
-      TORCH_CHECK(false, "instance_norm: unknown memory_format of the input tensor, ", memory_format);
+  if (use_cudnn && (memory_format == at::MemoryFormat::ChannelsLast ||
+                    memory_format == at::MemoryFormat::ChannelsLast3d)) {
+    out = std::get<0>(at::_instance_norm_channels_last(input, weight_, bias_, running_mean_, running_var_,
+        use_input_stats, momentum, eps, cudnn_enabled));
+  } else {
+    auto input_reshaped = input.contiguous().view(shape);
+    out = at::batch_norm(input_reshaped, weight_, bias_, running_mean_, running_var_,
+                              use_input_stats, momentum, eps, cudnn_enabled);
+    out = out.view(input.sizes()).contiguous(memory_format);
   }
 
   // we alias running_mean and running_var because they are const but we want to modify their data

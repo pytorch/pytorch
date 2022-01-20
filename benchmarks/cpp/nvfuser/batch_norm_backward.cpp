@@ -165,6 +165,8 @@ static void Baseline_BatchNorm_BWD(
       kMomentum,
       kEps,
       true,
+      c10::nullopt,
+      c10::nullopt,
       c10::nullopt);
   cudaDeviceSynchronize();
 

@@ -2386,7 +2386,7 @@
 # because it should be merged into the previous convolution (left for future
 # work.)
 # NB2: The quotes around the gradient are needed to appease YAML parsing rules.
-- name: cudnn_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float exponential_average_factor, float epsilon) -> (Tensor, Tensor, Tensor, Tensor)
+- name: cudnn_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float exponential_average_factor, float epsilon, Tensor? output_inplace, Tensor? save_mean_inplace, Tensor? save_var_inplace) -> (Tensor, Tensor, Tensor, Tensor)
   input, weight, bias: "grad.defined() ? (training ? cudnn_batch_norm_backward(input, grad.contiguous(input.suggest_memory_format()), weight, running_mean, running_var, result1, result2, epsilon, retain_variables ? result3.clone() : result3) : native_batch_norm_backward(grad, input, weight, running_mean, running_var, result1, result2, training, epsilon, grad_input_mask)) : std::tuple<Tensor, Tensor, Tensor>()"
   result0: batch_norm_jvp_saved_var(input_p, input_t, weight_p, weight_t, bias_p, bias_t, running_mean, running_var, result1, result2, training, epsilon)
 
@@ -2398,6 +2398,9 @@
   save_var: not_implemented("cudnn_batch_norm_backward save_var")
   reserveSpace: not_implemented("cudnn_batch_norm_backward reserveSpace")
   input, weight, grad_output: batchnorm_double_backward(input, weight, grads[0], grads[1], grads[2], grad_output, running_mean, running_var, true, epsilon, save_mean, save_var, grad_input_mask)
+
+- name: _instance_norm_channels_last(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, float momentum, float epsilon, bool cudnn_enabled) -> (Tensor, Tensor, Tensor, Tensor, int)
+  input, weight, bias: "grad.defined() ? _instance_norm_channels_last_backward(result4, input, grad.contiguous(input.suggest_memory_format()), weight, running_mean, running_var, result1, result2, use_input_stats, epsilon, retain_variables ? result3.clone() : result3) : std::tuple<Tensor, Tensor, Tensor>()"
 
 # nnpack
 

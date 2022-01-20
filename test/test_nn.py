@@ -12586,7 +12586,11 @@ class TestNNDeviceType(NNTestCase):
         mean = out_reshaped.mean(1)
         var = out_reshaped.var(1, unbiased=False)
 
-        self.assertEqual(torch.abs(mean.data).mean(), 0, atol=1e-5, rtol=0)
+        try:
+            self.assertEqual(torch.abs(mean.data).mean(), 0, atol=1e-5, rtol=0)
+        except:
+            print(input.size(), memory_format, mean)
+            raise
         self.assertEqual(torch.abs(var.data).mean(), 1, atol=1e-5, rtol=0)
 
         # check that eval mode doesn't change behavior
