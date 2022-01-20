@@ -177,7 +177,7 @@ mobile_sources_used_full_jit = [
     "torch/csrc/jit/mobile/observer.cpp",
 ]
 
-core_sources_full_mobile_no_backend_interface = mobile_sources_used_full_jit + [
+core_sources_mobile_no_backend_interface_without_mobile_files = [
     "torch/csrc/jit/api/function_impl.cpp",
     "torch/csrc/jit/api/module.cpp",
     "torch/csrc/jit/api/object.cpp",
@@ -373,6 +373,8 @@ core_sources_full_mobile_no_backend_interface = mobile_sources_used_full_jit + [
     "torch/csrc/utils/variadic.cpp",
 ]
 
+core_sources_full_mobile_no_backend_interface = mobile_sources_used_full_jit + core_sources_mobile_no_backend_interface_without_mobile_files
+
 core_sources_full_mobile = core_sources_full_mobile_no_backend_interface + [
     "torch/csrc/jit/backends/backend_debug_info.cpp",
     "torch/csrc/jit/backends/backend_interface.cpp",
@@ -440,26 +442,6 @@ libtorch_core_sources = sorted(
     libtorch_profiler_sources +
     lazy_tensor_core_sources,
 )
-
-def libtorch_core_sources_without_mobile_gen():
-    libtorch_core_sources_without_mobile = []
-    for file_name in libtorch_core_sources:
-        libtorch_core_sources_without_mobile.append(file_name)
-    for file_name in mobile_sources_used_full_jit:
-        libtorch_core_sources_without_mobile.remove(file_name)
-    return libtorch_core_sources_without_mobile
-
-libtorch_core_sources_without_mobile = libtorch_core_sources_without_mobile_gen()
-
-def mobile_interface_without_mobile_files_gen():
-    core_sources_full_mobile_no_backend_interface_without_mobile_files = []
-    for file_name in core_sources_full_mobile_no_backend_interface:
-        core_sources_full_mobile_no_backend_interface_without_mobile_files.append(file_name)
-    for file_name in mobile_sources_used_full_jit:
-        core_sources_full_mobile_no_backend_interface_without_mobile_files.remove(file_name)
-    return core_sources_full_mobile_no_backend_interface_without_mobile_files
-
-core_sources_full_mobile_no_backend_interface_without_mobile_files = mobile_interface_without_mobile_files_gen()
 
 # These files are the only ones that are supported on Windows.
 libtorch_distributed_base_sources = [
@@ -605,14 +587,9 @@ libtorch_extra_sources = libtorch_core_jit_sources + [
     "torch/csrc/jit/mobile/backport_manager.cpp",
     # To be included for eager symbolication in lite interpreter
     # when it is built in libtorch
-    "torch/csrc/jit/mobile/debug_info.cpp",
-    "torch/csrc/jit/mobile/function.cpp",
     "torch/csrc/jit/mobile/import.cpp",
     "torch/csrc/jit/mobile/import_data.cpp",
-    "torch/csrc/jit/mobile/interpreter.cpp",
     "torch/csrc/jit/mobile/model_compatibility.cpp",
-    "torch/csrc/jit/mobile/module.cpp",
-    "torch/csrc/jit/mobile/observer.cpp",
     "torch/csrc/jit/mobile/parse_bytecode.cpp",
     "torch/csrc/jit/mobile/parse_operators.cpp",
     "torch/csrc/jit/mobile/train/export_data.cpp",
