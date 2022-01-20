@@ -16,6 +16,7 @@
       "libtorch-linux-xenial-cuda11.3-py3.7-gcc7",
       "linux-bionic-cuda10.2-py3.9-gcc7",
       "linux-bionic-py3.7-clang9",
+      "linux-bionic-rocm4.5-py3.7",
       "linux-docs",
       "linux-docs-push",
       "linux-vulkan-bionic-py3.7-clang9",
@@ -150,6 +151,7 @@
       "libtorch-linux-xenial-cuda11.3-py3.7-gcc7",
       "linux-bionic-cuda10.2-py3.9-gcc7",
       "linux-bionic-py3.7-clang9",
+      "linux-bionic-rocm4.5-py3.7",
       "linux-docs",
       "linux-docs-push",
       "linux-vulkan-bionic-py3.7-clang9",
@@ -196,6 +198,9 @@
     "ciflow/onnx": [
       "linux-xenial-py3.7-clang7-onnx"
     ],
+    "ciflow/rocm": [
+      "linux-bionic-rocm4.5-py3.7"
+    ],
     "ciflow/sanitizers": [
       "linux-xenial-py3.7-clang7-asan"
     ],
@@ -231,6 +236,7 @@
       "libtorch-linux-xenial-cuda11.3-py3.7-gcc7",
       "linux-bionic-cuda10.2-py3.9-gcc7",
       "linux-bionic-py3.7-clang9",
+      "linux-bionic-rocm4.5-py3.7",
       "linux-docs",
       "linux-vulkan-bionic-py3.7-clang9",
       "linux-xenial-cuda11.3-py3.7-gcc7",
