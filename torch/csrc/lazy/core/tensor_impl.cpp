@@ -7,6 +7,12 @@
 
 namespace torch {
 namespace lazy {
+
+static std::function<void()> fptr_;
+
+TORCH_API void registerPythonPrinter(std::function<void()> fptr) {
+  fptr_ = fptr;
+}
 namespace {
 
 // LTCGuardImpl is used by CompositeExplicitAutograd ops or eager fallbacks to make sure that some particular tensors
@@ -133,6 +139,10 @@ int64_t LTCTensorImpl::stride(int64_t d) const {
 }
 
 void LTCTensorImpl::setup_size_properties() {
+
+  if (fptr_) {
+    fptr_();
+  }
   size_t generation = tensor_.generation();
   if (generation != generation_) {
     // Fill up the basic dimension data members which the base class

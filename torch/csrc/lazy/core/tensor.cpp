@@ -14,6 +14,7 @@
 
 namespace torch {
 namespace lazy {
+
 namespace {
 LazyTensor GetOrCreateLtcTensor(const at::Tensor& tensor,
                                 const BackendDevice& device) {

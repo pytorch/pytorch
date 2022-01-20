@@ -9,6 +9,8 @@
 namespace torch {
 namespace lazy {
 
+void registerPythonPrinter(std::function<void()> fptr);
+
 // Tensor implementation class used to be fed to the at::Tensor.
 // Its scope is just to handle an LazyTensor.
 class TORCH_API LTCTensorImpl final : public c10::TensorImpl {

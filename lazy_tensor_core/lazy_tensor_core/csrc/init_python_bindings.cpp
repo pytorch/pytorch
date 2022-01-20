@@ -10,6 +10,8 @@
 #include <torch/csrc/lazy/core/tensor_util.h>
 #include <torch/csrc/lazy/core/thread_pool.h>
 #include <torch/csrc/lazy/core/util.h>
+#include <torch/csrc/lazy/core/tensor_impl.h>
+#include <c10/util/Backtrace.h>
 
 #include <cstring>
 #include <sstream>
@@ -437,6 +439,9 @@ void InitLtcModuleBindings(py::module m) {
           };
           return GetTensorsDump(tensors, coverter);
         });
+  m.def("_print_text", [](const std::string& s) {
+    std::cerr << s << std::endl;
+  });
   m.def("_get_ltc_tensors_text",
         [](const std::vector<at::Tensor>& tensors) -> std::string {
           auto coverter = [](c10::ArrayRef<torch::lazy::Node*> nodes) {
@@ -667,6 +672,24 @@ void InitLtcModuleBindings(py::module m) {
   m.def("_ltc_metric_names", []() { return torch::lazy::GetMetricNames(); });
   m.def("_ltc_metric_data", [](const std::string& name) -> py::object {
     return GetMetricData(name);
+  });
+  m.def("_set_custom_printer",
+        [](py::object pyobj) {
+          //pyobj();
+
+          std::function<void()> printer = [pyobj]() {
+            py::gil_scoped_acquire acquire;
+            std::cerr << "========python==========\n";
+            pyobj();
+            std::cerr << "=========cpp=========\n";
+            std::cerr << c10::get_backtrace();
+          };
+          torch::lazy::registerPythonPrinter(printer);
+
+          //torch::lazy::getPythonPrinter() = pyobj;
+          //std::cerr << "after assignment\n";
+          //torch::lazy::getPythonPrinter()();
+          //std::cerr << "in _set_custom_printer " << py::str(getPythonPrinter().attr("__name__")) << std::endl;
   });
   m.def("_ltc_metrics_report",
         []() { return lazy_tensors::metrics_reader::CreateMetricReport(); });
