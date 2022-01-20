@@ -41,6 +41,8 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       guardAgainstNamedTensor<autograd::Variable>(var);
       return var;
     }
+    case TypeKind::StorageType:
+      return py::cast<at::Storage>(obj);
     case TypeKind::FloatType:
       return py::cast<double>(obj);
     case TypeKind::ComplexType: {
@@ -331,7 +333,6 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
     case TypeKind::DynamicType:
     case TypeKind::FunctionType:
     case TypeKind::GeneratorType:
-    case TypeKind::StorageType:
     case TypeKind::QuantizerType:
     case TypeKind::VarType:
     case TypeKind::QSchemeType:
