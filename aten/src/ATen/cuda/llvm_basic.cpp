@@ -17,7 +17,7 @@
 namespace at {
 namespace cuda {
 
-extern const std::string traits = R"ESCAPE(
+const std::string traits = R"ESCAPE(
 
 namespace std {
 
@@ -171,7 +171,7 @@ const std::string &get_traits_string() {
     return traits;
 }
 
-extern const std::string cmath = R"ESCAPE(
+const std::string cmath = R"ESCAPE(
 
 namespace std {
 

@@ -17,7 +17,7 @@
 namespace at {
 namespace cuda {
 
-const std::string complex_body = R"ESCAPE(
+const std::string complex_body1 = R"ESCAPE(
 
 namespace std {
 
@@ -672,6 +672,10 @@ arg(_Tp __re)
     return atan2f(0.F, __re);
 }
 
+)ESCAPE";
+
+const std::string complex_body2 = R"ESCAPE(
+
 // norm
 
 template<class _Tp>
@@ -1189,8 +1193,8 @@ inline namespace literals
 )ESCAPE";
 
 const std::string &get_complex_string() {
-  static std::string result = complex_body;
-  return result;
+  static std::string complex_body = complex_body1 + complex_body2;
+  return complex_body;
 }
 
 }} // namespace at::cuda
