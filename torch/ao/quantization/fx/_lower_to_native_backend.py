@@ -28,7 +28,6 @@ def _lower_weighted_ref_module(model: QuantizedGraphModule, ref_class: Type[torc
     pattern = (torch.quantize_per_tensor,
                (ref_class, "dequantize"),
                MatchAllNode, MatchAllNode, MatchAllNode)
-
     modules = dict(model.named_modules(remove_duplicate=False))
     nodes = list(model.graph.nodes)
     # TODO: maybe orgnize this better (e.g. break down to more functions)
@@ -81,7 +80,6 @@ def _lower_weighted_ref_module(model: QuantizedGraphModule, ref_class: Type[torc
 
 
 def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphModule:
-    print('*'*100)
     modules = dict(model.named_modules(remove_duplicate=False))
     nodes = list(model.graph.nodes)
     module_type_list = [
@@ -113,34 +111,37 @@ def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphMo
         'relu',
         'relu_',
     ]
+
     for n in model.graph.nodes:
-        # print(type(n))
         if isinstance(type(n), torch.fx.node.Node):
            continue
-        dq_node = n
-        # print(dq_node.target)
-        if dq_node.target == 'dequantize':
-            # print(dq_node.target, 'e'*100)
-            ref_node = dq_node.args[0]
+        q_node = n
+        if q_node.target == torch.quantize_per_tensor:
+            ref_node = q_node.args[0]
 
-            q_node = ref_node.args[0]
-            # print(dq_node.target, ref_node.target, q_node.target)
-            if q_node.target == torch.quantize_per_tensor:
-                # get output scale/zero_point/dtype from the quantize node
-                scale_node = q_node.args[1]
-                zero_point_node = q_node.args[2]
-                dtype = q_node.args[3]
+            is_call_function = ref_node.op == "call_function" and ref_node.target in func_list
+            is_call_method = ref_node.op == "call_method" and ref_node.target in method_list
+            is_call_module = ref_node.op == "call_module" and type(modules[ref_node.target]) in module_type_list
 
-                if ref_node.op == 'call_module' and type(modules[ref_node.target]) in module_type_list:
-                    ref_module = modules[ref_node.target]
-                    # print(ref_module)
-                    # change this pattern to use the corresponding quantized module
+            if is_call_module or is_call_function or is_call_method:
+                dq_node = ref_node.args[0]
+                if dq_node.target == 'dequantize':
+                    # get output scale/zero_point/dtype from the quantize node
+                    scale_node = q_node.args[1]
+                    zero_point_node = q_node.args[2]
+                    dtype = q_node.args[3]
+
                     output_scale = getattr(model, scale_node.target)
                     output_zero_point = getattr(model, zero_point_node.target)
 
-                    # replace reference module with quantized module
-                    parent_name, module_name = _parent_name(ref_node.target)
-                    setattr(modules[parent_name], module_name, ref_module)
+                    if is_call_module:
+                        ref_module = modules[ref_node.target]
+                        # change this pattern to use the corresponding quantized module
+                        # replace reference module with quantized module
+                        parent_name, module_name = _parent_name(ref_node.target)
+                        setattr(modules[parent_name], module_name, ref_module)
+                    else:
+                        dq_node.target = ref_node
 
                     # remvoe dq node:
                     dq_node_input = dq_node.args[0]
@@ -153,6 +154,8 @@ def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphMo
                     model.graph.erase_node(q_node)
                     model.graph.erase_node(scale_node)
                     model.graph.erase_node(zero_point_node)
+
+
     model.recompile()
     return model
 
