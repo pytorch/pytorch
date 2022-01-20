@@ -81,6 +81,7 @@ def _lower_weighted_ref_module(model: QuantizedGraphModule, ref_class: Type[torc
 
 
 def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphModule:
+    print('*'*100)
     modules = dict(model.named_modules(remove_duplicate=False))
     nodes = list(model.graph.nodes)
     module_type_list = [
@@ -113,12 +114,17 @@ def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphMo
         'relu_',
     ]
     for n in model.graph.nodes:
-        if isinstance(type(n), type(torch.fx.node.Node)):
-            continue
+        # print(type(n))
+        if isinstance(type(n), torch.fx.node.Node):
+           continue
         dq_node = n
+        # print(dq_node.target)
         if dq_node.target == 'dequantize':
+            # print(dq_node.target, 'e'*100)
             ref_node = dq_node.args[0]
+
             q_node = ref_node.args[0]
+            # print(dq_node.target, ref_node.target, q_node.target)
             if q_node.target == torch.quantize_per_tensor:
                 # get output scale/zero_point/dtype from the quantize node
                 scale_node = q_node.args[1]
@@ -127,6 +133,7 @@ def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphMo
 
                 if ref_node.op == 'call_module' and type(modules[ref_node.target]) in module_type_list:
                     ref_module = modules[ref_node.target]
+                    # print(ref_module)
                     # change this pattern to use the corresponding quantized module
                     output_scale = getattr(model, scale_node.target)
                     output_zero_point = getattr(model, zero_point_node.target)
