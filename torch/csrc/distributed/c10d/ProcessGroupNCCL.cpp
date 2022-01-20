@@ -1229,14 +1229,14 @@ int64_t check_gpu_tensors_different_devices(const std::vector<at::Tensor>& tenso
     if (t.scalar_type() != first.scalar_type()) {
       TORCH_CHECK(false, "Tensors must have identical type");
     }
-    if (!t.is_non_overlapping_and_dense()) {
-      TORCH_CHECK(false, "Tensors must be non-overlapping and dense");
-    }
     if (t.sizes() != first.sizes()) {
       TORCH_CHECK(false, "Tensors must have identical size");
     }
     if (t.strides() != first.strides()) {
       TORCH_CHECK(false, "Tensors must have identical strides");
+    }
+    if (!t.is_non_overlapping_and_dense()) {
+      TORCH_CHECK(false, "Tensors must be non-overlapping and dense");
     }
     const auto inserted = usedDevices.insert(t.get_device()).second;
     if (!inserted) {
