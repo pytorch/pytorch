@@ -104,9 +104,9 @@ class FunctionCtx(object):
         """
         primals = []
         for tensor in tensors:
-            assert isinstance(tensor, torch.Tensor) or tensor is None, ("save_for_forward"
-                "expects all arguments to be tensors; you should pass non-tensors as "
-                "attributes on ctx.")
+            assert isinstance(tensor, torch.Tensor) or tensor is None, (
+                "save_for_forward expects all arguments to be tensors; you should "
+                "pass non-tensors as attributes on ctx.")
             if tensor is None:
                 primals.append(None)
             else:
