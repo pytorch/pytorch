@@ -53,6 +53,9 @@ constexpr DynamicTypeBits kDynamicClassTypeBit = DYNAMIC_TYPE_BIT(10);
   _(Storage, DYNAMIC_TYPE_BIT(16), 1)                                        \
   _(Var, DYNAMIC_TYPE_BIT(17), 0)                                            \
   _(AnyClass, (kDynamicClassTypeBit | kDynamicAnyTypeBit), 1)                \
+  _(QScheme, DYNAMIC_TYPE_BIT(18), 1)                                        \
+  _(Quantizer, DYNAMIC_TYPE_BIT(19), 1)                                      \
+  _(AnyEnum, DYNAMIC_TYPE_BIT(20), 1)                                        \
   _(Any, 0xffffffff, 1)
 
 class DynamicType;
