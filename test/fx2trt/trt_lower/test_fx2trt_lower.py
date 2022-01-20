@@ -1,4 +1,4 @@
-# Owner(s): ["oncall: fx"]
+# Owner(s): ["oncall: aiacc"]
 
 import logging
 # @manual=//caffe2:torch_fx2trt
