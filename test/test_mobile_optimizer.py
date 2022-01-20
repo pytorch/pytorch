@@ -151,7 +151,7 @@ class TestOptimizer(TestCase):
         bn_scripted_module = torch.jit.script(bn_test_module)
         bn_scripted_module.eval()
 
-        self.assertEqual(len(torch.jit.export_opnames(bn_scripted_module)), 14)
+        self.assertEqual(len(torch.jit.export_opnames(bn_scripted_module)), 11)
         FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
                    .run(str(get_forward(bn_scripted_module._c).graph))
 
@@ -252,7 +252,7 @@ class TestOptimizer(TestCase):
         bn_no_forward_scripted_module = torch.jit.script(bn_test_no_forward_module)
         bn_no_forward_scripted_module.eval()
 
-        self.assertEqual(len(torch.jit.export_opnames(bn_no_forward_scripted_module)), 14)
+        self.assertEqual(len(torch.jit.export_opnames(bn_no_forward_scripted_module)), 11)
         FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
                    .run(bn_no_forward_scripted_module.foo.graph)
 

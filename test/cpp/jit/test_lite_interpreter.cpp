@@ -200,9 +200,26 @@ TEST(LiteInterpreterTest, AtenFormat) {
   std::vector<torch::jit::IValue> inputs;
   auto output_bc = bc.get_method("forward")(inputs);
   auto output_m = m.get_method("forward")(inputs);
-  std::cout << output_m.toStringRef() << "\n"
-            << output_bc.toStringRef() << std::endl;
+  // std::cout << output_m.toStringRef() << "\n"
+  //           << output_bc.toStringRef() << std::endl;
   AT_ASSERT(output_m.toStringRef() == output_bc.toStringRef());
+}
+
+TEST(LiteInterpreterTest, PrimDevice) {
+  Module m("m");
+  m.define(R"""(
+  def forward(self, x:torch.Tensor):
+    return x.device
+  )""");
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  std::vector<torch::jit::IValue> inputs;
+  auto minput = 3.5 * torch::ones({});
+  inputs.emplace_back(minput);
+  auto output_bc = bc.get_method("forward")(inputs);
+  auto output_m = m.get_method("forward")(inputs);
+  AT_ASSERT(output_bc.toDevice().str() == output_m.toDevice().str());
 }
 
 TEST(LiteInterpreterTest, Dict) {
