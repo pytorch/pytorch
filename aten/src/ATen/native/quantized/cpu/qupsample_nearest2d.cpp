@@ -46,9 +46,12 @@ static void upsample_nearest2d_out_frame(
     return;
   }
 
+  // safe check for int32 indexing
+  TORCH_CHECK(input_height * input_width <= std::numeric_limits<int32_t>::max());
+
   // pre calculate input offset for each output index in the feature map plane
-  std::unique_ptr<int64_t []> input_offset_arr(new int64_t[output_height * output_width]);
-  int64_t* input_offset = input_offset_arr.get();
+  std::unique_ptr<int32_t []> input_offset_arr(new int32_t[output_height * output_width]);
+  int32_t* input_offset = input_offset_arr.get();
 
   for (const auto h2 : c10::irange(output_height)) {
     const int64_t h1 =
@@ -57,7 +60,7 @@ static void upsample_nearest2d_out_frame(
       const int64_t w1 =
           nn_compute_source_index_fn(width_scale, w2, input_width);
 
-      input_offset[h2 * output_width + w2] = h1 * input_width + w1;
+      input_offset[h2 * output_width + w2] = static_cast<int32_t>(h1 * input_width + w1);
     }
   }
 
