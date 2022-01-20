@@ -41,6 +41,7 @@ Functions
 .. autofunction:: ndtri
 .. autofunction:: round
 .. autofunction:: sinc
+.. autofunction:: softmax
 .. autofunction:: xlog1py
 .. autofunction:: xlogy
 .. autofunction:: zeta

@@ -111,6 +111,8 @@ class TORCH_API ProcessGroupWrapper : public ProcessGroup {
   c10::intrusive_ptr<ProcessGroup::Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override;
 
+  c10::intrusive_ptr<ProcessGroup> getWrappedPg() const;
+
  private:
   // Underlying process group that actual application collectives will be
   // dispatched to

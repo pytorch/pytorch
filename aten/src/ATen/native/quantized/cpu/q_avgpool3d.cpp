@@ -5,6 +5,8 @@
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
+
+#include <c10/util/irange.h>
 #include <c10/util/math_compat.h>
 
 #include <algorithm>
@@ -128,59 +130,29 @@ Tensor q_avg_pool3d(
       input_nhwc.q_zero_point(),
       c10::nullopt);
   // fast path for channel last: qavg_pool_2d_nhwc_stub
-  if (output_shape.size() == 4) {
-    qavg_pool3d_nhwc_stub(
-        input_nhwc.device().type(),
-        input_nhwc,
-        output,
-        0,
-        nInputPlane,
-        inputWidth,
-        inputHeight,
-        inputDepth,
-        outputWidth,
-        outputHeight,
-        outputDepth,
-        kW,
-        kH,
-        kD,
-        dW,
-        dH,
-        dD,
-        padW,
-        padH,
-        padD,
-        count_include_pad,
-        divisor_override);
-  } else {
-    at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-      for (auto b = start; b < end; b++) {
-        qavg_pool3d_nhwc_stub(
-            input_nhwc.device().type(),
-            input_nhwc,
-            output,
-            b,
-            nInputPlane,
-            inputWidth,
-            inputHeight,
-            inputDepth,
-            outputWidth,
-            outputHeight,
-            outputDepth,
-            kW,
-            kH,
-            kD,
-            dW,
-            dH,
-            dD,
-            padW,
-            padH,
-            padD,
-            count_include_pad,
-            divisor_override);
-      }
-    });
-  }
+  qavg_pool3d_nhwc_stub(
+      input_nhwc.device().type(),
+      input_nhwc,
+      output,
+      nbatch,
+      nInputPlane,
+      inputWidth,
+      inputHeight,
+      inputDepth,
+      outputWidth,
+      outputHeight,
+      outputDepth,
+      kW,
+      kH,
+      kD,
+      dW,
+      dH,
+      dD,
+      padW,
+      padH,
+      padD,
+      count_include_pad,
+      divisor_override);
   return output;
 }
 

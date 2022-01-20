@@ -2,12 +2,10 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/Optional.h>
 
-#include <ATen/ATen.h>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/cuda/SortingCommon.cuh>
-#include <ATen/native/Resize.h>
-#include <THC/THCNumerics.cuh> // for ScalarConvert
+#include <ATen/native/cuda/Sort.h>
 
 namespace at { namespace native {
 
@@ -38,13 +36,13 @@ __device__ inline void bitonicSort(K keys[Power2SortSize],
                                    V values[Power2SortSize],
                                    bool valid[Power2SortSize],
                                    const Comparator& comp) {
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 #pragma unroll
 #endif
   for (unsigned int size = 2; size < Power2SortSize; size *= 2) {
     bool flag = ((threadIdx.x & (size / 2)) != 0);
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 #pragma unroll
 #endif
     for (unsigned int stride = size / 2; stride > 0; stride /= 2) {
@@ -59,7 +57,7 @@ __device__ inline void bitonicSort(K keys[Power2SortSize],
     }
   }
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 #pragma unroll
 #endif
   for (unsigned int stride = Power2SortSize / 2; stride > 0; stride /= 2) {
@@ -120,9 +118,9 @@ bitonicSortKVInPlace(at::cuda::detail::TensorInfo<K, IndexType> keys,
 
     bool valid1 = (elem1 < keySliceSize);
     K k1 = valid1 ?
-      keys.data[keyStartOffset + elem1 * keySliceStride] : ScalarConvert<int, K>::to(0);
+      keys.data[keyStartOffset + elem1 * keySliceStride] : static_cast<K>(0);
     V v1 = valid1 ?
-      values.data[valueStartOffset + elem1 * valueSliceStride] : ScalarConvert<int, V>::to(0);
+      values.data[valueStartOffset + elem1 * valueSliceStride] : static_cast<V>(0);
 
     sharedKeys[elem1] = k1;
     sharedValues[elem1] = v1;
@@ -130,9 +128,9 @@ bitonicSortKVInPlace(at::cuda::detail::TensorInfo<K, IndexType> keys,
 
     bool valid2 = (elem2 < keySliceSize);
     K k2 = valid2 ?
-      keys.data[keyStartOffset + elem2 * keySliceStride] : ScalarConvert<int, K>::to(0);
+      keys.data[keyStartOffset + elem2 * keySliceStride] : static_cast<K>(0);
     V v2 = valid2 ?
-      values.data[valueStartOffset + elem2 * valueSliceStride] : ScalarConvert<int, V>::to(0);
+      values.data[valueStartOffset + elem2 * valueSliceStride] : static_cast<V>(0);
 
     sharedKeys[elem2] = k2;
     sharedValues[elem2] = v2;
@@ -160,8 +158,4 @@ bitonicSortKVInPlace(at::cuda::detail::TensorInfo<K, IndexType> keys,
   }
 }
 
-bool should_use_small_sort(const Tensor &self, int64_t dim);
-void sortKeyValueInplace(const Tensor& key,
-                         const Tensor& value,
-                         int dim, bool dir);
 }} // at::native

@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Owner(s): ["module: unknown"]
+
 
 import logging
 
@@ -96,7 +98,8 @@ class TestFakeSparsity(TestCase):
         mask = torch.zeros(model_load.seq[1].weight.shape)
         parametrize.register_parametrization(model_load.seq[1], 'weight',
                                              utils.FakeSparsity(mask))
-        model_load.load_state_dict(state_dict)
+        # Keep this strict, as we are not loading the 'mask'
+        model_load.load_state_dict(state_dict, strict=False)
 
         # Check the parametrizations are preserved
         assert hasattr(model_load.linear, 'parametrizations')
@@ -114,13 +117,15 @@ class TestFakeSparsity(TestCase):
         self.assertEqual(model_save.seq[1].parametrizations['weight'].original,
                          model_load.seq[1].parametrizations['weight'].original)
 
-        # Check the masks are preserved
-        self.assertEqual(model_save.linear.parametrizations['weight'][0].mask,
-                         model_load.linear.parametrizations['weight'][0].mask)
-        self.assertEqual(model_save.seq[0].parametrizations['weight'][0].mask,
-                         model_load.seq[0].parametrizations['weight'][0].mask)
-        self.assertEqual(model_save.seq[1].parametrizations['weight'][0].mask,
-                         model_load.seq[1].parametrizations['weight'][0].mask)
+        # Check the masks are not preserved in the state_dict
+        # We store the state_dicts in the sparsifier, not in the model itself.
+        # TODO: Need to find a clean way of exporting the parametrized model
+        self.assertNotEqual(model_save.linear.parametrizations['weight'][0].mask,
+                            model_load.linear.parametrizations['weight'][0].mask)
+        self.assertNotEqual(model_save.seq[0].parametrizations['weight'][0].mask,
+                            model_load.seq[0].parametrizations['weight'][0].mask)
+        self.assertNotEqual(model_save.seq[1].parametrizations['weight'][0].mask,
+                            model_load.seq[1].parametrizations['weight'][0].mask)
 
     def test_jit_trace(self):
         model = ModelUnderTest(bias=False)

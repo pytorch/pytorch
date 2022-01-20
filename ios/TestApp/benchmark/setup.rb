@@ -42,7 +42,6 @@ targets.each do |target|
         end
     end
 end
-
 group = project.main_group.find_subpath(File.join('TestApp'),true)
 group.set_source_tree('SOURCE_ROOT')
 group.files.each do |file|
@@ -93,6 +92,7 @@ end
 
 puts "Linking static libraries..."
 libs = ['libc10.a', 'libclog.a', 'libpthreadpool.a', 'libXNNPACK.a', 'libeigen_blas.a', 'libcpuinfo.a', 'libpytorch_qnnpack.a', 'libtorch_cpu.a', 'libtorch.a']
+frameworks = ['CoreML', 'Metal', 'MetalPerformanceShaders', 'Accelerate', 'UIKit']
 targets.each do |target|
     target.frameworks_build_phases.clear
     for lib in libs do
@@ -102,6 +102,17 @@ targets.each do |target|
             target.frameworks_build_phases.add_file_reference(libref)
         end
     end
+     # link system frameworks
+    if frameworks
+        frameworks.each do |framework|
+            path = "System/Library/Frameworks/#{framework}.framework"
+            framework_ref = project.frameworks_group.new_reference(path)
+            framework_ref.name = "#{framework}.framework"
+            framework_ref.source_tree = 'SDKROOT'
+            target.frameworks_build_phases.add_file_reference(framework_ref)
+        end
+    end
+
 end
 
 project.save

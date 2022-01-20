@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
 
 #include <ATen/core/Reduction.h>
+#include <ATen/core/type_factory.h>
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parse_string_literal.h>
@@ -27,7 +28,7 @@ namespace jit {
 namespace {
 struct SchemaParser {
   SchemaParser(const std::string& str)
-      : L(std::make_shared<Source>(str)),
+      : L(std::make_shared<SourceView>(c10::string_view(str))),
         type_parser(L, /*parse_complete_tensor_types*/ false) {}
 
   either<OperatorName, FunctionSchema> parseDeclaration() {
@@ -139,7 +140,7 @@ struct SchemaParser {
     std::string name;
     if (L.nextIf('[')) {
       // note: an array with a size hint can only occur at the Argument level
-      type = ListType::create(type);
+      type = ListType::create(std::move(type));
       N = c10::stoll(L.expect(TK_NUMBER).text());
       L.expect(']');
       auto container = type_parser.parseAliasAnnotation();
@@ -148,7 +149,7 @@ struct SchemaParser {
       }
       alias_info = std::move(container);
       if (L.nextIf('?')) {
-        type = OptionalType::create(type);
+        type = c10::TypeFactory::create<c10::OptionalType>(std::move(type));
       }
     }
     if (is_return) {
@@ -161,7 +162,7 @@ struct SchemaParser {
     } else {
       name = L.expect(TK_IDENT).text();
       if (L.nextIf('=')) {
-        default_value = parseDefaultValue(type, N);
+        default_value = parseDefaultValue(*type, type->kind(), N);
       }
     }
     return Argument(
@@ -172,7 +173,11 @@ struct SchemaParser {
         !is_return && kwarg_only,
         std::move(alias_info));
   }
-  IValue parseSingleConstant(TypeKind kind) {
+  IValue parseSingleConstant(const c10::Type& type, TypeKind kind) {
+    if (kind == c10::TypeKind::DynamicType) {
+      return parseSingleConstant(
+          type, type.expectRef<c10::DynamicType>().dynamicKind());
+    }
     switch (L.cur().kind) {
       case TK_TRUE:
         L.next();
@@ -227,6 +232,7 @@ struct SchemaParser {
     }
   }
   IValue convertToList(
+      const c10::Type& type,
       TypeKind kind,
       const SourceRange& range,
       const std::vector<IValue>& vs) {
@@ -239,21 +245,24 @@ struct SchemaParser {
         return fmap(vs, [](const IValue& v) { return v.toInt(); });
       case TypeKind::BoolType:
         return fmap(vs, [](const IValue& v) { return v.toBool(); });
+      case TypeKind::DynamicType:
+        return convertToList(
+            type, type.expectRef<c10::DynamicType>().dynamicKind(), range, vs);
       default:
         throw ErrorReport(range)
             << "lists are only supported for float, int and complex types";
     }
   }
-  IValue parseConstantList(TypeKind kind) {
+  IValue parseConstantList(const c10::Type& type, TypeKind kind) {
     auto tok = L.expect('[');
     std::vector<IValue> vs;
     if (L.cur().kind != ']') {
       do {
-        vs.push_back(parseSingleConstant(kind));
+        vs.push_back(parseSingleConstant(type, kind));
       } while (L.nextIf(','));
     }
     L.expect(']');
-    return convertToList(kind, tok.range, vs);
+    return convertToList(type, kind, tok.range, vs);
   }
 
   IValue parseTensorDefault(const SourceRange& range) {
@@ -261,10 +270,11 @@ struct SchemaParser {
     return IValue();
   }
   IValue parseDefaultValue(
-      const TypePtr& arg_type,
+      const c10::Type& arg_type,
+      TypeKind kind,
       c10::optional<int32_t> arg_N) {
     auto range = L.cur().range;
-    switch (arg_type->kind()) {
+    switch (kind) {
       case TypeKind::TensorType:
       case TypeKind::GeneratorType:
       case TypeKind::QuantizerType: {
@@ -277,7 +287,7 @@ struct SchemaParser {
       case TypeKind::BoolType:
       case TypeKind::FloatType:
       case TypeKind::ComplexType:
-        return parseSingleConstant(arg_type->kind());
+        return parseSingleConstant(arg_type, kind);
         break;
       case TypeKind::DeviceObjType: {
         auto device_text =
@@ -286,17 +296,22 @@ struct SchemaParser {
         break;
       }
       case TypeKind::ListType: {
-        auto elem_kind = arg_type->castRaw<ListType>()->getElementType();
+        auto elem_type = arg_type.containedType(0);
         if (L.cur().kind == TK_IDENT) {
           return parseTensorDefault(range);
         } else if (arg_N && L.cur().kind != '[') {
-          IValue v = parseSingleConstant(elem_kind->kind());
+          IValue v = parseSingleConstant(*elem_type, elem_type->kind());
           std::vector<IValue> repeated(*arg_N, v);
-          return convertToList(elem_kind->kind(), range, repeated);
+          return convertToList(*elem_type, elem_type->kind(), range, repeated);
         } else {
-          return parseConstantList(elem_kind->kind());
+          return parseConstantList(*elem_type, elem_type->kind());
         }
       } break;
+      case TypeKind::DynamicType:
+        return parseDefaultValue(
+            arg_type,
+            arg_type.expectRef<c10::DynamicType>().dynamicKind(),
+            arg_N);
       default:
         throw ErrorReport(range) << "unexpected type, file a bug report";
     }
@@ -307,7 +322,7 @@ struct SchemaParser {
       int begin,
       int sep,
       int end,
-      const std::function<void()>& callback) {
+      c10::function_ref<void()> callback) {
     auto r = L.cur().range;
     if (begin != TK_NOTHING)
       L.expect(begin);
@@ -334,7 +349,7 @@ C10_EXPORT FunctionSchema parseSchema(const std::string& schema) {
   TORCH_CHECK(
       parsed.is_right(),
       "Tried to parse a function schema but only the operator name was given");
-  return parsed.right();
+  return std::move(parsed.right());
 }
 
 C10_EXPORT OperatorName parseName(const std::string& name) {
@@ -342,7 +357,7 @@ C10_EXPORT OperatorName parseName(const std::string& name) {
   TORCH_CHECK(
       parsed.is_left(),
       "Tried to parse an operator name but function schema was given");
-  return parsed.left();
+  return std::move(parsed.left());
 }
 
 } // namespace jit

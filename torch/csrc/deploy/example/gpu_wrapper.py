@@ -57,8 +57,8 @@ if __name__ == '__main__':
     from torch.package import PackageImporter
     i = PackageImporter(sys.argv[1])
     torch.version.interp = 0
-    model = i.load_pickle('model', 'model.pkl')
-    eg = i.load_pickle('model', 'example.pkl')
+    model = i.loadPickle('model', 'model.pkl')
+    eg = i.loadPickle('model', 'example.pkl')
     r = model(*eg)
 
     gpu_model = GPUWrapper(model)

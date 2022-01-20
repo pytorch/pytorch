@@ -1,13 +1,13 @@
 #include <ATen/ATen.h>
+#include <ATen/EmptyTensor.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/InitialTensorOptions.h>
-#include <ATen/native/cuda/Resize.cuh>
+#include <ATen/native/cuda/Resize.h>
 #include <ATen/native/TensorFactories.h>
 #include <ATen/NativeFunctions.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/Exception.h>
-#include <THC/THCGeneral.h>
 
 #include <algorithm>
 #include <cmath>
@@ -66,9 +66,13 @@ Tensor empty_cuda(IntArrayRef size, c10::optional<ScalarType> dtype_opt, c10::op
 }
 
 Tensor empty_strided_cuda(IntArrayRef size, IntArrayRef stride, c10::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
-  auto t = at::native::empty_cuda({0}, dtype_opt, layout_opt, device_opt, pin_memory_opt);
-  at::native::resize_impl_cuda_(t.unsafeGetTensorImpl(), size, stride);
-  return t;
+  TORCH_CHECK(device_or_default(device_opt).is_cuda());
+  TORCH_CHECK(!pin_memory_opt.has_value() || !*pin_memory_opt, "Only dense CPU tensors can be pinned");
+  auto* allocator = at::cuda::getCUDADeviceAllocator();
+  auto dtype = dtype_or_default(dtype_opt);
+  constexpr c10::DispatchKeySet cuda_ks(c10::DispatchKey::CUDA);
+  return at::detail::empty_strided_generic(
+      size, stride, allocator, cuda_ks, dtype);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangle ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -224,7 +228,7 @@ inline void get_coordinate_in_triu_trapezoid(
 
 template <typename scalar_t>
 __global__
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_1(512)
 #endif
 void tril_indices_kernel(scalar_t * tensor,

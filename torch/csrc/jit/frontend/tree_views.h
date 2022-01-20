@@ -459,6 +459,9 @@ struct ClassDef : public TreeView {
   explicit ClassDef(const TreeRef& tree) : TreeView(tree) {
     tree->match(TK_CLASS_DEF);
   }
+  explicit ClassDef(TreeRef&& tree) : TreeView(std::move(tree)) {
+    tree_->match(TK_CLASS_DEF);
+  }
   ClassDef withName(std::string new_name) const {
     auto new_ident = Ident::create(name().range(), std::move(new_name));
     return create(range(), new_ident, superclass(), body());
@@ -498,16 +501,7 @@ struct ClassDef : public TreeView {
       const Maybe<Expr>& superclass,
       const List<Stmt>& body,
       const List<Property>& properties,
-      const List<Assign>& assigns) {
-    return ClassDef(Compound::create(
-        TK_CLASS_DEF,
-        range,
-        {name,
-         superclass,
-         body,
-         Maybe<List<Property>>::create(range, properties),
-         Maybe<List<Assign>>::create(range, assigns)}));
-  }
+      const List<Assign>& assigns);
 };
 
 TORCH_API std::vector<std::string> getUnresolvedClassAttributes(

@@ -1,3 +1,5 @@
+# Owner(s): ["module: dataloader"]
+
 import math
 import sys
 import errno
@@ -29,10 +31,11 @@ from torch.utils.data import (
 from torch.utils.data._utils import MP_STATUS_CHECK_INTERVAL
 from torch.utils.data.dataset import random_split
 from torch.utils.data.datapipes.iter import IterableWrapper
+from torch.utils.data.datapipes.map import SequenceWrapper
 from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS,
                                                   IS_IN_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
-                                                  load_tests, TEST_WITH_TSAN, IS_SANDCASTLE)
+                                                  load_tests, TEST_WITH_ASAN, TEST_WITH_TSAN, IS_SANDCASTLE)
 
 
 try:
@@ -830,10 +833,21 @@ class BulkLoadingSampler(torch.utils.data.Sampler):
         return int(math.ceil(len(self.dataset) / float(self.batch_size)))
 
 
+class CustomList(list):
+    pass
+
+
+class CustomDict(dict):
+    pass
+
+
 @unittest.skipIf(
     TEST_WITH_TSAN,
     "Fails with TSAN with the following error: starting new threads after multi-threaded "
     "fork is not supported. Dying (set die_after_fork=0 to override)")
+@unittest.skipIf(
+    TEST_WITH_ASAN,
+    "DataLoader tests hang in ASAN, see: https://github.com/pytorch/pytorch/issues/66223")
 class TestDataLoader(TestCase):
 
     def setUp(self):
@@ -1524,6 +1538,28 @@ except RuntimeError as e:
         ):
             self.assertEqual(list(fn()), list(fn()))
 
+        for sampler in (
+            RandomSampler(self.dataset, num_samples=5, replacement=True),
+            RandomSampler(self.dataset, replacement=False),
+            WeightedRandomSampler(weights, num_samples=5, replacement=True),
+            WeightedRandomSampler(weights, num_samples=5, replacement=False),
+            SubsetRandomSampler(range(10)),
+        ):
+            torch.manual_seed(0)
+            l1 = list(sampler) + list(sampler)
+
+            torch.manual_seed(0)
+            l2 = list(sampler) + list(sampler)
+            self.assertEqual(l1, l2)
+
+            its = (iter(sampler), iter(sampler))
+            ls = ([], [])
+            for idx in range(len(sampler)):
+                for i in range(2):
+                    if idx == 0:
+                        torch.manual_seed(0)
+                    ls[i].append(next(its[i]))
+            self.assertEqual(ls[0], ls[1])
 
     def _test_sampler(self, **kwargs):
         indices = range(2, 12)  # using a regular iterable
@@ -1878,6 +1914,24 @@ except RuntimeError as e:
             batch = next(iter(loader))
             self.assertIsInstance(batch, tt)
 
+    def test_default_convert_mapping_keep_type(self):
+        data = CustomDict({"a": 1, "b": 2})
+        converted = _utils.collate.default_convert(data)
+
+        self.assertEqual(converted, data)
+
+    def test_default_convert_sequence_keep_type(self):
+        data = CustomList([1, 2, 3])
+        converted = _utils.collate.default_convert(data)
+
+        self.assertEqual(converted, data)
+
+    def test_default_convert_sequence_dont_keep_type(self):
+        data = range(2)
+        converted = _utils.collate.default_convert(data)
+
+        self.assertEqual(converted, [0, 1])
+
     def test_default_collate_dtype(self):
         arr = [1, 2, -1]
         collated = _utils.collate.default_collate(arr)
@@ -1898,6 +1952,30 @@ except RuntimeError as e:
         # Should be a no-op
         arr = ['a', 'b', 'c']
         self.assertEqual(arr, _utils.collate.default_collate(arr))
+
+    def test_default_collate_mapping_keep_type(self):
+        batch = [CustomDict({"a": 1, "b": 2}), CustomDict({"a": 3, "b": 4})]
+        collated = _utils.collate.default_collate(batch)
+
+        expected = CustomDict({"a": torch.tensor([1, 3]), "b": torch.tensor([2, 4])})
+        self.assertEqual(collated, expected)
+
+    def test_default_collate_sequence_keep_type(self):
+        batch = [CustomList([1, 2, 3]), CustomList([4, 5, 6])]
+        collated = _utils.collate.default_collate(batch)
+
+        expected = CustomList([
+            torch.tensor([1, 4]),
+            torch.tensor([2, 5]),
+            torch.tensor([3, 6]),
+        ])
+        self.assertEqual(collated, expected)
+
+    def test_default_collate_sequence_dont_keep_type(self):
+        batch = [range(2), range(2)]
+        collated = _utils.collate.default_collate(batch)
+
+        self.assertEqual(collated, [torch.tensor([0, 0]), torch.tensor([1, 1])])
 
     @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
     def test_default_collate_bad_numpy_types(self):
@@ -1979,7 +2057,25 @@ class TestDataLoader2(TestCase):
         self.assertEqual(list(dl), list(dl2))
         self.assertEqual(list(dl), list(dl2_threading))
 
+    def test_shuffle(self):
+        items = list(range(1000))
+        dp = IterableWrapper(items).sharding_filter().shuffle()
 
+        dl = DataLoader2(dp, batch_size=None, num_workers=2, shuffle=False)
+        self.assertEqual(items, list(dl))
+
+        dl = DataLoader(dp, batch_size=None, num_workers=2, shuffle=False,
+                        worker_init_fn=torch.utils.data.backward_compatibility.worker_init_fn)
+        self.assertEqual(items, list(dl))
+
+        dl = DataLoader2(dp, batch_size=None, num_workers=2, shuffle=True)
+        self.assertNotEqual(items, list(dl))
+        self.assertEqual(items, sorted(list(dl)))
+
+        dl = DataLoader(dp, batch_size=None, num_workers=2, shuffle=True,
+                        worker_init_fn=torch.utils.data.backward_compatibility.worker_init_fn)
+        self.assertNotEqual(items, list(dl))
+        self.assertEqual(items, sorted(list(dl)))
 
 @unittest.skipIf(
     TEST_WITH_TSAN,
@@ -2005,6 +2101,41 @@ class TestDataLoader2_EventLoop(TestCase):
         clean_me(process, req_queue, res_queue)
 
         self.assertEqual(list(range(100)), actual)
+
+    @skipIfNoDill
+    def test_basic_mapdatapipe_threading(self):
+        def clean_me(process, req_queue, res_queue):
+            req_queue.put(communication.messages.TerminateRequest())
+            _ = res_queue.get()
+            process.join()
+
+        input_len = 100
+        it = list(range(input_len))
+        numbers_dp = SequenceWrapper(it)
+        (process, req_queue, res_queue, _thread_local_datapipe) = communication.eventloop.SpawnThreadForDataPipeline(
+            numbers_dp)
+
+        process.start()
+
+        # Functional Test: Ensure that you can retrieve every element from the Queue and DataPipe
+        local_datapipe = communication.map.QueueWrapperForMap(
+            communication.protocol.MapDataPipeQueueProtocolClient(req_queue, res_queue))
+        actual = list(local_datapipe)
+        self.assertEqual([(x, x) for x in range(100)], actual)
+
+        # Functional Test: raise Error when input
+        local_datapipe = communication.map.QueueWrapperForMap(
+            communication.protocol.MapDataPipeQueueProtocolClient(req_queue, res_queue))
+        with self.assertRaisesRegex(IndexError, "out of bound"):
+            local_datapipe[1000]
+
+        # __len__ Test: Ensure that the correct length is returned
+        local_datapipe = communication.map.QueueWrapperForMap(
+            communication.protocol.MapDataPipeQueueProtocolClient(req_queue, res_queue))
+        self.assertEqual(input_len, len(local_datapipe))
+
+        clean_me(process, req_queue, res_queue)
+
 
 class StringDataset(Dataset):
     def __init__(self):
@@ -2110,6 +2241,8 @@ class DummyDataset(torch.utils.data.Dataset):
     TEST_WITH_TSAN,
     "Fails with TSAN with the following error: starting new threads after multi-threaded "
     "fork is not supported. Dying (set die_after_fork=0 to override)")
+@unittest.skipIf(
+    TEST_WITH_ASAN, "DataLoader tests hang in ASAN, see: https://github.com/pytorch/pytorch/issues/66223")
 class TestDataLoaderPersistentWorkers(TestDataLoader):
 
     def setUp(self):
@@ -2306,6 +2439,9 @@ class TestWorkerQueueDataset(Dataset):
     TEST_WITH_TSAN,
     "Fails with TSAN with the following error: starting new threads after multi-threaded "
     "fork is not supported. Dying (set die_after_fork=0 to override)")
+@unittest.skipIf(
+    TEST_WITH_ASAN,
+    "Flaky with ASAN, see https://github.com/pytorch/pytorch/issues/65727")
 class TestIndividualWorkerQueue(TestCase):
     def setUp(self):
         super(TestIndividualWorkerQueue, self).setUp()
@@ -2314,7 +2450,7 @@ class TestIndividualWorkerQueue(TestCase):
     def _run_ind_worker_queue_test(self, batch_size, num_workers):
         loader = DataLoader(
             self.dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers,
-            worker_init_fn=self.dataset.worker_init_fn
+            timeout=5, worker_init_fn=self.dataset.worker_init_fn
         )
         current_worker_idx = 0
         for i, (worker_ids, sample) in enumerate(loader):
