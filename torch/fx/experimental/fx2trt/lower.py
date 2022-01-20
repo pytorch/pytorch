@@ -43,6 +43,46 @@ TModule = t.TypeVar("TModule", bound=nn.Module)
 
 @dc.dataclass
 class LowerSetting:
+    """
+    Basic configuration for lowering stack.
+
+    Args:
+    max_batch_size: The maximum batch size which can be used at execution time,
+    and also the batch size for which the ICudaEngine will be optimized.
+
+    input_specs: Specs for inputs to engine, can either be a single size or a
+    range defined by Min, Optimal, Max sizes.
+
+    explicit_batch_dimension: Use explicit batch dimension during lowering.
+
+    fp16_mode: Enable FP16 dtype during lowering.
+
+    max_workspace_size: The maximum workspace size. The maximum GPU temporary
+    memory which the TensorRT engine can use at execution time.
+
+    strict_type_constraints: Require TensorRT engine to strictly follow data type
+    setting at execution time.
+
+    enable_fuse: Enable pass fuse duirng lowering, i.e. fuse multiple operations
+    as (a->b->c->d)=>(e). Current available fuse source patterns are:
+    sparse->matmul->add
+    permute->linear
+    permute->matmul
+    unsqueeze->cat->sum
+
+    enable_fuse_for_sparsity: Enable pass fuse for sparsity.
+
+    verbose_log: Enable TensorRT engine verbose log mode.
+
+    algo_selector: Enable TensorRT algorithm selector at execution time.
+
+    timing_cache_prefix: TensorRT timing cache file path. TensorRT engine will use timing
+    cache file at execution time if valid timing cache file is provided.
+
+    save_timing_cache: Save updated timing cache data into timing cache file if the timing
+    cache file is provided.
+
+    """
     max_batch_size: int = 2048
     input_specs: List[InputTensorSpec] = field(default_factory=list)
     explicit_batch_dimension: bool = True

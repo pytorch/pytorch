@@ -4,6 +4,7 @@ import torch
 import torch.fx.experimental.fx_acc.acc_ops as acc_ops
 from torch.testing._internal.common_fx2trt import AccTestCase
 from parameterized import parameterized, param
+from torch.testing._internal.common_utils import run_tests
 
 
 class TestClampConverter(AccTestCase):
@@ -27,3 +28,6 @@ class TestClampConverter(AccTestCase):
 
         inputs = [torch.randn(3, 4)]
         self.run_test(TestModule(), inputs, expected_ops={acc_ops.clamp})
+
+if __name__ == '__main__':
+    run_tests()
