@@ -158,7 +158,7 @@ at::opmath_type<f_inputs_type> scalar_val=0) {
     const auto dtypei = iter.dtype(i);
     if (dtypei != inputs_scalar_type) {
       needs_dynamic_casting = true;
-      // NOTE: can't short-circuit here yet because the dtype check below needs to run on every arg
+      break;
     }
   }
   if (scalar_pos == at::cuda::jit::BinaryFuncVariant::NoScalar) {
