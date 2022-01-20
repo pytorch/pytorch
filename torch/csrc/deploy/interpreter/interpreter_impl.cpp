@@ -300,7 +300,7 @@ struct __attribute__((visibility("hidden"))) ConcreteInterpreterSessionImpl
     for (size_t i = 0, N = obj.storages_.size(); i < N; ++i) {
       py::object new_storage =
           py::reinterpret_steal<py::object>(torch::createPyObject(
-              obj.storages_[i], scalarTypeToTypeMeta(obj.types_[i])));
+              obj.storages_[i]));
       storages[i] = std::move(new_storage);
     }
     py::tuple dtypes(obj.types_.size());
