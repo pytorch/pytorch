@@ -2329,8 +2329,8 @@ if __name__ == '__main__':
         RandomDataset(64, (28, 28)),
         batch_size=16,
         num_workers=2,
+        pin_memory=True,
         persistent_workers=True,
-        pin_memory=True
     )
 
     for _ in dl:

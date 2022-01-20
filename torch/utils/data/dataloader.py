@@ -359,8 +359,6 @@ class DataLoader(Generic[T_co]):
         # the iterator is only created once in the lifetime of the
         # DataLoader object so that workers can be reused
         if self.persistent_workers and self.num_workers > 0:
-            import atexit
-            atexit.register(self._cleanup_persistent_workers)
             if self._iterator is None:
                 self._iterator = self._get_iterator()
             else:
@@ -368,19 +366,6 @@ class DataLoader(Generic[T_co]):
             return self._iterator
         else:
             return self._get_iterator()
-
-    # Each persistent worker, as a daemonic process, would be
-    # terminated when the main process exits and causes failure
-    # when pin_memory_thread gets corrupted data from
-    # worker_result_queue
-    # Therefore, a proper clean-up function is required to be invoked
-    # before the main process exits
-    # The iterator is dereferenced from DataLoader object and destructor
-    # of the iterator would be invoked to make sure pin_memory_thread
-    # exiting before worker process
-    def _cleanup_persistent_workers(self):
-        if hasattr(self, "_iterator") and self._iterator is not None:
-            self._iterator = None
 
     @property
     def _auto_collation(self):
@@ -961,6 +946,18 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         else:
             self._data_queue = self._worker_result_queue
 
+        # In some rare cases, persistent workers (daemonic processes)
+        # would be terminated before `__del__` of iterator is invoked
+        # when main process exits
+        # It would cause failure when pin_memory_thread tries to read
+        # corrupted data from worker_result_queue
+        # atexit is used to prevent persistent workers exiting before
+        # pin_memory_thread
+        if self._persistent_workers and self._pin_memory:
+            import atexit
+            for w in self._workers:
+                atexit.register(_MultiProcessingDataLoaderIter._clean_up_persistent_worker, w)
+
         # .pid can be None only before process is spawned (not the case, so ignore)
         _utils.signal_handling._set_worker_pids(id(self), tuple(w.pid for w in self._workers))  # type: ignore[misc]
         _utils.signal_handling._set_SIGCHLD_handler()
@@ -1347,6 +1344,15 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                         # here, which we shouldn't, (e.g., pytorch/pytorch#39570),
                         # we kill the worker.
                         w.terminate()
+
+
+    @staticmethod
+    def _clean_up_persistent_worker(w):
+        if w.is_alive():
+            try:
+                w.join(timeout=_utils.MP_STATUS_CHECK_INTERVAL)
+            finally:
+                w.terminate()
 
     def __del__(self):
         self._shutdown_workers()
