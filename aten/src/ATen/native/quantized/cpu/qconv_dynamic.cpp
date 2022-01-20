@@ -126,12 +126,12 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_dynamic(
     const at::Tensor& input,
     bool reduce_range) {
 
-  float x_min = 0, x_max = 0;
-  ideep::utils::find_min_max(
-      /*data=*/input.data_ptr<float>(),
-      /*min=*/&x_min,
-      /*max=*/&x_max,
-      /*len=*/input.numel());
+  // Find min/max of input
+  float x_max = 0, x_min = 0;
+  if (input.numel() > 0) {
+    x_min = input.min().item<float>();
+    x_max = input.max().item<float>();
+  }
 
   // Input tensor is quantized as 8-bit unsigned values
   static constexpr int precision = 8;

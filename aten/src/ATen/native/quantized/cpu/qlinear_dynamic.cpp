@@ -489,13 +489,13 @@ at::Tensor PackedLinearWeightsOnednn::apply_dynamic_impl(
   ideep::attr_t op_attr = ReluFused ? ideep::attr_t::fuse_relu() : ideep::attr_t();
   ideep::tensor x;
   x.init(input_desc, input_contig.data_ptr());
-  float x_max, x_min;
+  // Find quantization parameters
+  float x_max = 0, x_min = 0;
+  if (input.numel() > 0) {
+    x_min = input_contig.min().item<float>();
+    x_max = input_contig.max().item<float>();
+  }
   const int precision = 8;
-  ideep::utils::find_min_max(
-      /*data=*/input_reshaped.data_ptr<float>(),
-      /*min=*/&x_min,
-      /*max=*/&x_max,
-      /*len=*/input.numel());
   auto q_params = quant_utils::ChooseQuantizationParams(
       /*min=*/x_min,
       /*max=*/x_max,
