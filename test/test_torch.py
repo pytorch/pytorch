@@ -4340,7 +4340,7 @@ else:
 
         test_func(torch.gather)
         test_func(torch.Tensor.gather)
-
+    @unittest.skipIf(IS_JETSON, "Flaky on Jetson")
     def test_nondeterministic_alert_grid_sample_2d(self, device):
         input = torch.empty(1, 1, 2, 2, device=device, requires_grad=True)
         grid = torch.empty(1, 1, 1, 2, device=device)
@@ -4469,6 +4469,14 @@ else:
                 expected[idx[i]] += src[i]
 
             self.assertEqual(res, expected, atol=0, rtol=0)
+
+    @onlyNativeDeviceTypes
+    def test_scatter_zero_size_index(self, device) -> None:
+        null_index = torch.zeros((0, 4), dtype=torch.int64)
+        null_arr = torch.zeros((0, 4))
+        original = torch.arange(4, dtype=torch.float32)
+        result = original.scatter(0, null_index, null_arr)
+        self.assertEqual(result, original, atol=0, rtol=0)
 
     @onlyCUDA
     def test_sync_warning(self, device):
@@ -5612,6 +5620,42 @@ else:
             # not the data
             self.assertEqual(x, y)
 
+    @onlyNativeDeviceTypes
+    def test_copy_math_view(self, device):
+        for dst_dtype, src_dtype in [
+                (torch.float32, torch.float32),
+                (torch.float64, torch.float32),
+                (torch.int64, torch.int32),
+                (torch.complex128, torch.complex64),
+        ]:
+            src = make_tensor((100,), dtype=src_dtype, device=device)
+            dst = torch.empty(100, dtype=dst_dtype, device=device)
+
+            dst.copy_(src)
+            self.assertEqual(dst, src, exact_dtype=False)
+
+            dst.copy_(src._neg_view())
+            self.assertEqual(dst, src.neg(), exact_dtype=False)
+
+            dst._neg_view().copy_(torch._neg_view(src))
+            self.assertEqual(dst, src, exact_dtype=False)
+
+            dst._neg_view().copy_(src)
+            self.assertEqual(dst, src.neg(), exact_dtype=False)
+
+        for dst_dtype, src_dtype in [
+                (torch.complex64, torch.complex64),
+                (torch.complex128, torch.complex64),
+        ]:
+            src = make_tensor((100,), dtype=src_dtype, device=device)
+            dst = torch.empty(100, dtype=dst_dtype, device=device)
+
+            dst.conj().copy_(src)
+            self.assertEqual(dst, src.conj_physical(), exact_dtype=False)
+
+            dst.conj().copy_(src._neg_view())
+            self.assertEqual(dst, src.neg().conj_physical(), exact_dtype=False)
+
     def test_clone_all_dtypes_and_devices(self, device):
         for dt in get_all_dtypes():
             x = torch.tensor((1, 1), dtype=dt, device=device)
@@ -6627,6 +6671,8 @@ else:
         # use dim0>=46342 for forward, see:
         # https://github.com/pytorch/pytorch/issues/30583
         # Compare output using GPU with the CPU implementation, as brute_pdist uses too much memory
+        if device != 'cpu' and IS_JETSON:
+            self.skipTest("Killed on Jetson GPU")
         if 'cuda' in device:
             x = torch.randn(50000, 1, dtype=torch.float32)
             expected_cpu = torch.pdist(x, p=2)
@@ -6933,6 +6979,7 @@ else:
 
     @deviceCountAtLeast(2)
     @onlyCUDA
+    @unittest.skipIf(IS_JETSON, "Flaky on Jetson")
     def test_multinomial_gpu_device_constrain(self, devices):
         x = torch.empty(0, device=devices[0])
         y = torch.empty(0, device=devices[1])
