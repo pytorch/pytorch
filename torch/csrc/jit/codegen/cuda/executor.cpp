@@ -145,9 +145,9 @@ void FusionExecutor::debugCompileFusionFromStr(
 
 void FusionExecutor::compileFusion(
     Fusion* fusion,
-    CompileOptions options,
     const at::ArrayRef<IValue>& inputs,
-    const LaunchParams& launch_constraints) {
+    const LaunchParams& launch_constraints,
+    CompileOptions options) {
   FUSER_PERF_SCOPE("compileFusion");
 
   TORCH_INTERNAL_ASSERT(

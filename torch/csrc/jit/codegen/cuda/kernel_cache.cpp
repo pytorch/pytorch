@@ -350,7 +350,7 @@ std::vector<at::Tensor> FusionKernelRuntime::runKernelWithInput(
       launch_params = scheduler_entry->pointwiseParams().lparams;
     }
     executors_[group_id].compileFusion(
-        fusion_to_run.get(), options, inputs, launch_params);
+        fusion_to_run.get(), inputs, launch_params, options);
   } else {
     // Load launch params for reduction and normalization kernels
     if (scheduler_entry->hasReductionParam()) {
