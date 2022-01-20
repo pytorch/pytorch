@@ -667,6 +667,30 @@ class TestFXExperimental(JitTestCase):
 
         self.assertEqual(fused(inp), rn18(inp))
 
+    def test_conv_bn_fusion_not_running_state(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv = torch.nn.Conv2d(32, 64, 3, stride=2)
+                self.bn = torch.nn.BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=False)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                return x
+
+        model = M().eval()
+
+        traced = symbolic_trace(model)
+        fused = optimization.fuse(traced)
+        inp = torch.randn([1, 32, 50, 50])
+
+        # bn need not be folded in conv
+        self.assertTrue(
+            any(isinstance(m, torch.nn.BatchNorm2d) for m in fused.modules())
+        )
+        self.assertEqual(fused(inp), model(inp))
+
     def test_call_to_assert_no_msg(self):
         class M(torch.nn.Module):
             def forward(self, a, b):
@@ -851,6 +875,28 @@ terrible spacing
         a = torch.rand(64, 3, 7, 7)
         module_with_submodules = split_module(traced, m, lambda node: 0)
         module_with_submodules(a)
+
+    def test_split_module_default_arg(self):
+        class ModelToTrace(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = torch.nn.Linear(512, 512)
+
+            def forward(self, x, targets=None):
+                x = self.lin(x)
+
+                if targets is not None:
+                    x = x + targets
+
+                return x
+
+        mtt = ModelToTrace()
+        traced = torch.fx.symbolic_trace(mtt, concrete_args={'targets': None})
+
+        split = split_module(traced, mtt, lambda node: 0)
+
+        x = torch.randn(50, 512)
+        torch.testing.assert_allclose(split(x), traced(x))
 
     def test_normalize_binary_operators(self):
         ops_to_test = {
