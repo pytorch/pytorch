@@ -2,6 +2,7 @@
 #include <c10/core/GeneratorImpl.h>
 #include <algorithm>
 
+#include "caffe2/utils/cub_namespace.cuh"
 #include <cub/device/device_radix_sort.cuh>
 #include "caffe2/sgd/adagrad_fused_op_gpu.cuh"
 #include "caffe2/utils/math.h"
@@ -86,7 +87,7 @@ void sort_pairs_wrapper(
 }
 
 template <typename T>
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(1024, SEGREDUCE_MINBLOCKS)
 #endif
 __global__ void gradient_mean_kernel(
@@ -104,7 +105,7 @@ __global__ void gradient_mean_kernel(
 }
 
 template <typename SIndex, typename TParam, typename T, bool ExactBlock = false>
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(1024, SEGREDUCE_MINBLOCKS)
 #endif
 __global__ void sparse_adagrad_fused_length_sum_gradient_kernel(
@@ -171,23 +172,22 @@ __global__ void sparse_adagrad_fused_length_sum_gradient_kernel(
 }
 
 template <typename SIndex, typename TParam, typename T, int NumThreads>
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(1024, SEGREDUCE_MINBLOCKS)
 #endif
 __global__ void sparse_adagrad_fused_length_weighted_sum_gradient_kernel(
-    const int* __restrict__ prefix_sum_length_data,
-    int N, // number of rows (hash size) of embedding table
-    int block_size, // embedding dimension size
-    int num_lengths, // number of segments
+    const int *const __restrict__ prefix_sum_length_data,
+    const int N, // number of rows (hash size) of embedding table
+    const int block_size, // embedding dimension size
     const float epsilon,
-    TParam* param,
-    TParam* param_mom,
-    const SIndex* indices,
-    const T* __restrict__ grad,
-    const T* __restrict__ weights,
-    T* __restrict__ weights_grad_out,
-    const float* lr,
-    float weight_decay = 0.f) {
+    TParam *const param,
+    TParam *const param_mom,
+    const SIndex *const indices,
+    const T *const __restrict__ grad,
+    const T *const __restrict__ weights,
+    T *const __restrict__ weights_grad_out,
+    const float *const lr,
+    const float weight_decay = 0.f) {
   const float LR = lr[0];
   // num_lengths blocks, each block process one segment
   int group = blockIdx.x; // the group-th segment
@@ -252,7 +252,7 @@ __global__ void sparse_adagrad_fused_length_weighted_sum_gradient_kernel(
 
 // Construct a reverse map of offset_of_idx -> segment_id.
 template <typename SIndex>
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(1024, SEGREDUCE_MINBLOCKS)
 #endif
 __global__ void linear_index_weight_offsets_dedup_kernel(
@@ -279,25 +279,21 @@ template <
     typename T,
     bool ExactBlock = false,
     roundOption roundOpt = NEAREST>
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(1024, SEGREDUCE_MINBLOCKS)
 #endif
 __global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_dedup_kernel(
-    const int* __restrict__ prefix_sum_length_data, // prefix of lengths
-                                                    // (offsets for the
-                                                    // segments)
-    int N, // number of rows (hash size) of embedding table
-    int block_size, // embedding dimension size
-    int num_lengths, // number of segments
-    int num_indices, // number of indices
+    const int N, // number of rows (hash size) of embedding table
+    const int block_size, // embedding dimension size
+    const int num_lengths, // number of segments
+    const int num_indices, // number of indices
     const float epsilon,
-    TParam* param,
-    T* param_mom,
-    const SIndex* indices,
-    const T* __restrict__ grad,
-    const SIndex* sorted_linear_ind_data, // sorted linear indices
-    const int* __restrict__ sorted_seg_id_data, // sorted segment id
-    const float* lr,
+    TParam *const param,
+    T *const param_mom,
+    const T *const __restrict__ grad,
+    const SIndex *const sorted_linear_ind_data, // sorted linear indices
+    const int *const __restrict__ sorted_seg_id_data, // sorted segment id
+    const float *const lr,
     ulong2 seed,
     float weight_decay = 0.f) {
 
@@ -343,7 +339,7 @@ __global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_dedup_kernel(
             sorted_linear_ind_data[sorted_linear_indice_id + num_dup + threadIdx.x] ==
             index;
       }
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
       int32_t num_dup_incr = __popc(__ballot_sync(0xFFFFFFFF, segment_continue));
 #else
       int32_t num_dup_incr = __popc(__ballot(segment_continue));
@@ -438,7 +434,7 @@ __global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_dedup_kernel(
 }
 
 template <typename SIndex, typename TParam, typename T, int NumThreads>
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(1024, SEGREDUCE_MINBLOCKS)
 #endif
 __global__
@@ -446,9 +442,8 @@ __global__
         const int* __restrict__ prefix_sum_length_data, // prefix of lengths
                                                         // (offsets for the
                                                         // segments)
-        int N, // number of rows (hash size) of embedding table
-        int block_size, // embedding dimension size
-        int num_lengths, // number of segments
+        const int N, // number of rows (hash size) of embedding table
+        const int block_size, // embedding dimension size
         const float epsilon,
         TParam* param,
         T* param_mom,
@@ -460,18 +455,18 @@ __global__
         float weight_decay = 0.f) {
   const float LR = lr[0];
   // num_lengths blocks, each block process one segment
-  int group = blockIdx.x; // the group-th segment
-  int start = group == 0
+  const int group = blockIdx.x; // the group-th segment
+  const int start = group == 0
       ? 0
       : prefix_sum_length_data[group - 1]; // start offset of the segment
-  int end = prefix_sum_length_data[group]; // end offset of the segment
+  const int end = prefix_sum_length_data[group]; // end offset of the segment
   CUDA_KERNEL_ASSERT(start <= N);
   CUDA_KERNEL_ASSERT(end <= N);
 
   // TODO: Tuning NumThreads for w_grad
   typedef cub::BlockReduce<float, NumThreads> BlockReduce;
   __shared__ typename BlockReduce::TempStorage temp_storage;
-  int valid = min(block_size, blockDim.x);
+  const int valid = min(block_size, blockDim.x);
 
   // for avg_square_weight. Can we reuse temp_storage
   __shared__ typename BlockReduce::TempStorage temp_storage2;
@@ -811,7 +806,6 @@ class CUDASparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
           prefix_sum_length_data,
           N,
           block_size,
-          num_lengths,
           epsilon_,
           paramOut,
           momentOut,
@@ -831,7 +825,6 @@ class CUDASparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
           prefix_sum_length_data,
           N,
           block_size,
-          num_lengths,
           epsilon_,
           paramOut,
           momentOut,
@@ -851,7 +844,6 @@ class CUDASparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
           prefix_sum_length_data,
           N,
           block_size,
-          num_lengths,
           epsilon_,
           paramOut,
           momentOut,
@@ -871,7 +863,6 @@ class CUDASparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
           prefix_sum_length_data,
           N,
           block_size,
-          num_lengths,
           epsilon_,
           paramOut,
           momentOut,
@@ -1314,7 +1305,6 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientExactOp final
                threads,
                sm_size,
                context_.cuda_stream()>>>(
-                prefix_sum_length_data,
                 N,
                 block_size,
                 num_lengths,
@@ -1322,7 +1312,6 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientExactOp final
                 epsilon_,
                 paramOut,
                 momentOut,
-                indices,
                 is_mean ? grad_buffer_data : grad,
                 sorted_linear_ind_buffer_.template data<IndexType>(),
                 sorted_seg_id_buffer_.template data<int>(),
@@ -1341,7 +1330,6 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientExactOp final
                threads,
                sm_size,
                context_.cuda_stream()>>>(
-                prefix_sum_length_data,
                 N,
                 block_size,
                 num_lengths,
@@ -1349,7 +1337,6 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientExactOp final
                 epsilon_,
                 paramOut,
                 momentOut,
-                indices,
                 is_mean ? grad_buffer_data : grad,
                 sorted_linear_ind_buffer_.template data<IndexType>(),
                 sorted_seg_id_buffer_.template data<int>(),
@@ -1376,7 +1363,6 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientExactOp final
                std::min(maxThreads, block_size),
                sm_size,
                context_.cuda_stream()>>>(
-                prefix_sum_length_data,
                 N,
                 block_size,
                 num_lengths,
@@ -1384,7 +1370,6 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientExactOp final
                 epsilon_,
                 paramOut,
                 momentOut,
-                indices,
                 is_mean ? grad_buffer_data : grad,
                 sorted_linear_ind_buffer_.template data<IndexType>(),
                 sorted_seg_id_buffer_.template data<int>(),
@@ -1403,7 +1388,6 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientExactOp final
                std::min(maxThreads, block_size),
                sm_size,
                context_.cuda_stream()>>>(
-                prefix_sum_length_data,
                 N,
                 block_size,
                 num_lengths,
@@ -1411,7 +1395,6 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientExactOp final
                 epsilon_,
                 paramOut,
                 momentOut,
-                indices,
                 is_mean ? grad_buffer_data : grad,
                 sorted_linear_ind_buffer_.template data<IndexType>(),
                 sorted_seg_id_buffer_.template data<int>(),
@@ -1558,7 +1541,6 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
           prefix_sum_length_data,
           N,
           block_size,
-          num_lengths,
           epsilon_,
           paramOut,
           momentOut,
@@ -1578,7 +1560,6 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
           prefix_sum_length_data,
           N,
           block_size,
-          num_lengths,
           epsilon_,
           paramOut,
           momentOut,
@@ -1598,7 +1579,6 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
           prefix_sum_length_data,
           N,
           block_size,
-          num_lengths,
           epsilon_,
           paramOut,
           momentOut,
@@ -1618,7 +1598,6 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
           prefix_sum_length_data,
           N,
           block_size,
-          num_lengths,
           epsilon_,
           paramOut,
           momentOut,

@@ -43,3 +43,42 @@ class ConcaterMapDataPipe(MapDataPipe):
         if self.length == -1:
             self.length = sum(len(dp) for dp in self.datapipes)
         return self.length
+
+
+@functional_datapipe('zip')
+class ZipperMapDataPipe(MapDataPipe[Tuple[T_co, ...]]):
+    r""" :class:`ZipperMapDataPipe`.
+
+    Map DataPipe that aggregates elements into a tuple from each of
+    the input DataPipe. This MataPipe is out of bound when the
+    shortest input DataPipe is exhausted.
+
+    Args:
+        *datapipes: Map DataPipes being aggregated
+    """
+    datapipes: Tuple[MapDataPipe[T_co], ...]
+    length: int
+
+    def __init__(self, *datapipes: MapDataPipe[T_co]) -> None:
+        if len(datapipes) == 0:
+            raise ValueError("Expected at least one DataPipe, but got nothing")
+        if not all(isinstance(dp, MapDataPipe) for dp in datapipes):
+            raise TypeError("Expected all inputs to be `MapDataPipe`")
+        if not all(isinstance(dp, Sized) for dp in datapipes):
+            raise TypeError("Expected all inputs to be `Sized`")
+        self.datapipes = datapipes
+        self.length = -1
+
+    def __getitem__(self, index) -> Tuple[T_co, ...]:
+        res = []
+        for dp in self.datapipes:
+            try:
+                res.append(dp[index])
+            except IndexError:
+                raise IndexError(f"Index {index} is out of range for one of the input MapDataPipes {dp}.")
+        return tuple(res)
+
+    def __len__(self) -> int:
+        if self.length == -1:
+            self.length = min(len(dp) for dp in self.datapipes)
+        return self.length

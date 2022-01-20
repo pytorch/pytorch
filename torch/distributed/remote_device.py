@@ -120,6 +120,7 @@ class _remote_device(object):
         if (
             self._worker_name == other._worker_name
             and self._device == other._device
+            and self._rank == other._rank
         ):
             return True
 

@@ -114,7 +114,7 @@ class C10_API Error : public std::exception {
 
 class C10_API WarningHandler {
  public:
-  virtual ~WarningHandler() noexcept(false) {}
+  virtual ~WarningHandler() = default;
   /// The default warning handler. Prints the message to stderr.
   virtual void process(
       const SourceLocation& source_location,
@@ -159,6 +159,19 @@ C10_API void warn(
 C10_API void set_warning_handler(WarningHandler* handler) noexcept(true);
 /// Gets the global warning handler.
 C10_API WarningHandler* get_warning_handler() noexcept(true);
+
+class C10_API WarningHandlerGuard {
+  WarningHandler* prev_handler_;
+
+ public:
+  WarningHandlerGuard(WarningHandler* new_handler)
+      : prev_handler_(c10::Warning::get_warning_handler()) {
+    c10::Warning::set_warning_handler(new_handler);
+  }
+  ~WarningHandlerGuard() {
+    c10::Warning::set_warning_handler(prev_handler_);
+  }
+};
 
 /// The TORCH_WARN_ONCE macro is difficult to test for. Use
 /// setWarnAlways(true) to turn it into TORCH_WARN, which can be
@@ -213,6 +226,12 @@ class C10_API EnforceFiniteError : public Error {
 // Used in Onnxifi backend lowering.  These turn into
 // ExitException when they cross to Python.
 class C10_API OnnxfiBackendSystemError : public Error {
+  using Error::Error;
+};
+
+// Used for numerical errors from the linalg module. These
+// turn into LinAlgError when they cross into Python.
+class C10_API LinAlgError : public Error {
   using Error::Error;
 };
 
@@ -473,6 +492,10 @@ namespace detail {
 // TODO: We're going to get a lot of similar looking string literals
 // this way; check if this actually affects binary size.
 
+// Like TORCH_CHECK, but raises LinAlgError instead of Error.
+#define TORCH_CHECK_LINALG(cond, ...) \
+  TORCH_CHECK_WITH_MSG(LinAlgError, cond, "LINALG", __VA_ARGS__)
+
 // Like TORCH_CHECK, but raises IndexErrors instead of Errors.
 #define TORCH_CHECK_INDEX(cond, ...) \
   TORCH_CHECK_WITH_MSG(IndexError, cond, "INDEX", __VA_ARGS__)
@@ -537,6 +560,11 @@ namespace detail {
   } else {                                \
     _TORCH_WARN_ONCE(__VA_ARGS__);        \
   }
+
+// Report an error with a specific argument
+// NOTE: using the argument name in TORCH_CHECK's message is preferred
+#define TORCH_CHECK_ARG(cond, argN, ...) \
+  TORCH_CHECK(cond, "invalid argument ", argN, ": ", __VA_ARGS__)
 
 // ----------------------------------------------------------------------------
 // Deprecated macros

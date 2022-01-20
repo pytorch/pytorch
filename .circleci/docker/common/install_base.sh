@@ -11,8 +11,13 @@ install_ubuntu() {
   #   "$UBUNTU_VERSION" == "18.04"
   if [[ "$UBUNTU_VERSION" == "18.04"* ]]; then
     cmake3="cmake=3.10*"
+    maybe_libiomp_dev="libiomp-dev"
+  elif [[ "$UBUNTU_VERSION" == "20.04"* ]]; then
+    cmake3="cmake=3.16*"
+    maybe_libiomp_dev=""
   else
     cmake3="cmake=3.5*"
+    maybe_libiomp_dev="libiomp-dev"
   fi
 
   # Install common dependencies
@@ -33,7 +38,7 @@ install_ubuntu() {
     git \
     libatlas-base-dev \
     libc6-dbg \
-    libiomp-dev \
+    ${maybe_libiomp_dev} \
     libyaml-dev \
     libz-dev \
     libjpeg-dev \
@@ -43,6 +48,10 @@ install_ubuntu() {
     sudo \
     wget \
     vim
+
+  # Should resolve issues related to various apt package repository cert issues
+  # see: https://github.com/pytorch/pytorch/issues/65931
+  apt-get install -y libgnutls30
 
   # Cleanup package manager
   apt-get autoclean && apt-get clean
@@ -109,14 +118,11 @@ esac
 # Install Valgrind separately since the apt-get version is too old.
 mkdir valgrind_build && cd valgrind_build
 VALGRIND_VERSION=3.16.1
-if ! wget http://valgrind.org/downloads/valgrind-${VALGRIND_VERSION}.tar.bz2
-then
-  wget https://sourceware.org/ftp/valgrind/valgrind-${VALGRIND_VERSION}.tar.bz2
-fi
+wget https://ossci-linux.s3.amazonaws.com/valgrind-${VALGRIND_VERSION}.tar.bz2
 tar -xjf valgrind-${VALGRIND_VERSION}.tar.bz2
 cd valgrind-${VALGRIND_VERSION}
 ./configure --prefix=/usr/local
-make -j 4
+make -j6
 sudo make install
 cd ../../
 rm -rf valgrind_build

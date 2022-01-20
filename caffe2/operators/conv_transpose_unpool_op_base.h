@@ -121,7 +121,7 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
     }
 
     // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (int dim = 0; dim < kernel_.size(); ++dim) {
+    for (const auto dim : c10::irange(kernel_.size())) {
       CAFFE_ENFORCE_GT(kernel_[dim], 0);
       CAFFE_ENFORCE_GT(stride_[dim], 0);
       CAFFE_ENFORCE_GE(adj_[dim], 0);

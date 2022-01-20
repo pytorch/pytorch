@@ -106,6 +106,36 @@ def _get_model_bytecode_version(f_input) -> int:
     else:
         return torch._C._get_model_bytecode_version_from_buffer(f_input.read())
 
+def _get_mobile_model_contained_types(f_input) -> int:
+    r"""
+    Args:
+        f_input: a file-like object (has to implement read, readline, tell, and seek),
+            or a string containing a file name
+
+    Returns:
+        type_list: A set of string, like ("int", "Optional"). These are types used in bytecode.
+
+    Example:
+
+    .. testcode::
+
+        from torch.jit.mobile import _get_mobile_model_contained_types
+
+        # Get type list from a saved file path
+        type_list = _get_mobile_model_contained_types("path/to/model.ptl")
+
+    """
+    if isinstance(f_input, str):
+        if not os.path.exists(f_input):
+            raise ValueError(f"The provided filename {f_input} does not exist")
+        if os.path.isdir(f_input):
+            raise ValueError(f"The provided filename {f_input} is a directory")
+
+    if (isinstance(f_input, str) or isinstance(f_input, pathlib.Path)):
+        return torch._C._get_mobile_model_contained_types(str(f_input))
+    else:
+        return torch._C._get_mobile_model_contained_types_from_buffer(f_input.read())
+
 def _backport_for_mobile(f_input, f_output, to_version):
     r"""
     Args:

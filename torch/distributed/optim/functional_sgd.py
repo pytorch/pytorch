@@ -23,7 +23,8 @@ class _FunctionalSGD(object):
         dampening: float = 0.0,
         weight_decay: float = 0.0,
         nesterov: bool = False,
-        _allow_empty_param_list: bool = False
+        maximize: bool = False,
+        _allow_empty_param_list: bool = False,
     ):
         self.defaults = {
             "lr": lr,
@@ -32,6 +33,7 @@ class _FunctionalSGD(object):
             "weight_decay": weight_decay,
         }
         self.nesterov = nesterov
+        self.maximize = maximize
         self.state = torch.jit.annotate(Dict[torch.Tensor, Dict[str, torch.Tensor]], {})
 
         if len(params) == 0 and not _allow_empty_param_list:
@@ -74,6 +76,7 @@ class _FunctionalSGD(object):
                 lr=lr,
                 dampening=dampening,
                 nesterov=self.nesterov,
+                maximize=self.maximize,
             )
         # update momentum_buffer in state
         state = self.state[param]
@@ -120,7 +123,9 @@ class _FunctionalSGD(object):
                   momentum=momentum,
                   lr=lr,
                   dampening=dampening,
-                  nesterov=self.nesterov)
+                  nesterov=self.nesterov,
+                  maximize=self.maximize,
+                  )
 
         # update momentum_buffers in state
         for i, p in enumerate(params_with_grad):

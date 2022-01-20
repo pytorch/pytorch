@@ -3,6 +3,7 @@
 #include <ATen/div_rtn.h>
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/detail/KernelUtils.h>
+#include <ATen/native/ConvUtils.h>
 #include <ATen/native/cuda/block_reduce.cuh>
 #include <ATen/native/Resize.h>
 #include <ATen/native/IndexingUtils.h>
@@ -69,11 +70,11 @@ __global__ void conv_depthwise2d_forward_kernel(
 
     acc_t value = biasEnabled ? static_cast<acc_t>(bias.data()[c]) : acc_t(0);
     const index_t offset0 = (n * inputChannels + inputChannel) * inputHeight * inputWidth;
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 #pragma unroll
 #endif
     for (int kH = 0; kH < KH_LIMIT; ++kH) {
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 #pragma unroll
 #endif
       for (int kW = 0; kW < KW_LIMIT; ++kW) {
@@ -125,17 +126,17 @@ __global__ void conv_depthwise2d_backward_kernel(
 
     acc_t value(0);
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 #pragma unroll
 #endif
     for (int multiplier = 0; multiplier < depthwiseMultiplier; ++multiplier) {
       int och = (c * depthwiseMultiplier) + multiplier;
       int weightOffset = och * kernelHeight * kernelWidth;
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 #pragma unroll
 #endif
       for (int kh = 0; kh < KH_LIMIT; ++kh) {
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 #pragma unroll
 #endif
         for (int kw = 0; kw < KW_LIMIT; ++kw) {
@@ -621,6 +622,8 @@ std::tuple<Tensor, Tensor> conv_depthwise2d_backward_cuda(
       grad_input,
       grad_weight);
 }
+
+REGISTER_CUDA_DISPATCH(conv_depthwise2d_backward_stub, &conv_depthwise2d_backward_cuda);
 
 } // namespace native
 } // namespace at
