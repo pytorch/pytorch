@@ -478,6 +478,8 @@ class DistributedDataParallel(Module, Joinable):
                       gradients. If hitting such errors, please fix it by
                       referring to the :meth:`~torch.optim.Optimizer.zero_grad`
                       function in ``torch/optim/optimizer.py`` as a solution.
+                      Note that gradients will be views after first iteration, so
+                      the peak memory saving should be checked after first iteration.
         static_graph (bool): When set to ``True``, DDP knows the trained graph is
                      static. Static graph means 1) The set of used and unused
                      parameters will not change during the whole training loop; in
