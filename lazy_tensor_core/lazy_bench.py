@@ -385,7 +385,7 @@ def lazy_overhead_experiment(args, results, benchmark, lazy_benchmark):
               f"{pvalue:.4e},{args.warmup},{args.repeat},{warmup_time:.2f},{bench_time:.2f}")
     return (overhead, pvalue)
 
-def lazy_compute_experiment(args, experiment, results, benchmark, lazy_benchmark, sync_every_iter=False, to_dev_sync=None):
+def lazy_compute_experiment(args, experiment, results, benchmark, lazy_benchmark, sync_every_iter=False, to_dev_sync=None, run_eager=True, run_lazy=True):
     timings = np.zeros((args.repeat, 2), np.float64)
     if to_dev_sync is not None:
         ref_sync = ToDeviceSync(to_dev_sync, sync_every_iter=sync_every_iter)
@@ -398,8 +398,10 @@ def lazy_compute_experiment(args, experiment, results, benchmark, lazy_benchmark
     warmup0 = time.perf_counter()
     for rep in range(args.warmup):
         # warmup
-        timed(args, benchmark, sync=ref_sync)
-        timed(args, lazy_benchmark, sync=lazy_sync)
+        if run_eager:
+            timed(args, benchmark, sync=ref_sync)
+        if run_lazy:
+            timed(args, lazy_benchmark, sync=lazy_sync)
     warmup_time = time.perf_counter() - warmup0
 
     # fresh metrics for each timed run
@@ -407,8 +409,14 @@ def lazy_compute_experiment(args, experiment, results, benchmark, lazy_benchmark
     bench0 = time.perf_counter()
     for rep in range(args.repeat):
         # measure
-        _, timings[rep, 0] = timed(args, benchmark, times=args.inner_loop_repeat, sync=ref_sync)
-        _, timings[rep, 1] = timed(args, lazy_benchmark, times=args.inner_loop_repeat, sync=lazy_sync)
+        if run_eager:
+            _, timings[rep, 0] = timed(args, benchmark, times=args.inner_loop_repeat, sync=ref_sync)
+        if run_lazy:
+            _, timings[rep, 1] = timed(args, lazy_benchmark, times=args.inner_loop_repeat, sync=lazy_sync)
+
+    if not run_eager or not run_lazy:
+        return
+
     bench_time = time.perf_counter() - bench0
     lazy_metrics = dump_lazy_metrics(reset=True)
     if 'CachedCompile' not in lazy_metrics or lazy_metrics['CachedCompile'] != args.repeat * args.inner_loop_repeat:
@@ -597,6 +605,11 @@ if __name__ == "__main__" :
     parser.add_argument("--dump_lazy_counters", action='store_true', help="dump lazy counter values after each timing run")
     parser.add_argument("--run_tracing_execute_noops", action='store_true',
                         help="Run the tracing portion only, with noop backend, useful for running under a profiler.")
+    parser.add_argument("--amortized_eager_run", action='store_true',
+                        help="Run warmup and amortized execution in the eager mode")
+    parser.add_argument("--amortized_lazy_run", action='store_true',
+                        help="Run warmup and amortized execution in the lazy mode")
+
     parser.add_argument("--run_in_subprocess", "-s", type=str, help="which model run in subprocess.This will ignore filter and exclude")
     args = parser.parse_args()
     results = []
@@ -643,6 +656,16 @@ if __name__ == "__main__" :
                         print(f"Profiling {current_name}")
                         run_tracing_execute_noops(args.test, lazy_benchmark)
                         # when profiling, we really don't want to do anything else
+                        exit(0)
+
+                    if args.amortized_eager_run:
+                        print(f"Eager executing {current_name}")
+                        lazy_compute_experiment(args, f"amortized {args.inner_loop_repeat}x", results, benchmark, lazy_benchmark, run_eager=True, run_lazy=False)
+                        exit(0)
+
+                    if args.amortized_lazy_run:
+                        print(f"Lazy executing {current_name}")
+                        lazy_compute_experiment(args, f"amortized {args.inner_loop_repeat}x", results, benchmark, lazy_benchmark, run_eager=False, run_lazy=True)
                         exit(0)
 
                     if args.test == 'eval':
