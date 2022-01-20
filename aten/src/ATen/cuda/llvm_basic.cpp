@@ -11,6 +11,7 @@
 
 #include <string>
 #include <ATen/jit_macros.h>
+#include <ATen/cuda/llvm_jit_strings.h>
 
 #ifdef USE_JITERATOR
 
