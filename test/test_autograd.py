@@ -5576,31 +5576,64 @@ for shape in [(1,), ()]:
         gradcheck(MyFn.apply, (1, x.requires_grad_(True), 1, y.requires_grad_(True)), check_forward_ad=True,
                   check_backward_ad=False, check_batched_grad=False)
 
+    def test_custom_function_forward_mode_forward_is_no_op(self):
+        for jvp_return_view in (True, False):
+            class MyFn(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x, y):
+                    return x + y, x
+
+                @staticmethod
+                def vjp(ctx, gO1, gO2):
+                    return gO1 + gO2, gO1
+
+                @staticmethod
+                def jvp(ctx, x_t, y_t):
+                    if jvp_return_view:
+                        return x_t + y_t, x_t.view_as(x_t)
+                    else:
+                        return x_t + y_t, x_t
+
+            x = torch.tensor(1., dtype=torch.double, requires_grad=True)
+            t = torch.tensor(1., dtype=torch.double)
+            y = torch.tensor(1., dtype=torch.double, requires_grad=True)
+
+            if not jvp_return_view:
+                with self.assertRaisesRegex(RuntimeError, "A custom Function's forward is returning a view (or one of the input as-is)*"):
+                    gradcheck(MyFn.apply, (x, y), check_forward_ad=True)
+            else:
+                gradcheck(MyFn.apply, (x, y), check_forward_ad=True)
+
     def test_custom_function_save_for_forward(self):
-        class MyFn(torch.autograd.Function):
+        class Func(torch.autograd.Function):
             @staticmethod
-            def forward(ctx, x):
-                ctx.save_for_backward(x)
-                ctx.save_for_forward(x*2, {"blah": [(1, 2, 3)]})
-                return x.clone()
-
-            @staticmethod
-            def jvp(ctx, x_t):
-                print("jvp: ", ctx.saved_tensors)
-                return x_t
+            def forward(ctx, x: torch.Tensor, y: torch.Tensor, z: int):
+                ctx.save_for_backward(x, y)
+                ctx.save_for_forward(x, y)
+                ctx.z = z
+                ctx.prod = x * y
+                return z * ctx.prod
 
             @staticmethod
-            def vjp(ctx, x_t):
-                print("vjp: ", ctx.saved_tensors)
-                return x_t
+            def jvp(ctx, x_t, y_t, _):
+                x_p, y_p = ctx.saved_tensors
+                z = ctx.z
+                return z * (y_p * x_t + x_p * y_t)
 
-        x = torch.tensor(1., requires_grad=True)
-        t = torch.tensor(1.)
+            @staticmethod
+            def vjp(ctx, grad_out):
+                x, y = ctx.saved_tensors
+                z = ctx.z
+                return z * grad_out * y, z * grad_out * x, None
 
+        a = torch.tensor(1., requires_grad=True, dtype=torch.double)
+        t = torch.tensor(1., dtype=torch.double)
+        b = torch.tensor(2., requires_grad=True, dtype=torch.double)
+        c = 4
         with fwAD.dual_level():
-            dual_x = fwAD.make_dual(x, t)
-            out = MyFn.apply(dual_x)
-            out.backward()
+            a_dual = fwAD.make_dual(a, t)
+            d = Func.apply(a_dual, b, c)
+            torch.autograd.gradcheck(Func.apply, (a, b, c))
 
     def test_custom_function_local_inplace(self):
         class MyFn(torch.autograd.Function):
