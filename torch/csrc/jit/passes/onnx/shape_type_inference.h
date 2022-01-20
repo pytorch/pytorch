@@ -56,7 +56,8 @@ TORCH_API void ONNXAssignOutputShape(
     std::shared_ptr<Graph>& graph,
     at::ArrayRef<at::Tensor> outputs,
     const python::IODescriptor& desc,
-    bool onnx_shape_inference);
+    bool onnx_shape_inference,
+    bool is_script);
 
 // Utilize ONNX Shape Inference for node.
 // The node must have ONNX namespace, and is valid ONNX node according to spec.

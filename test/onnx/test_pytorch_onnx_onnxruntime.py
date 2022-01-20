@@ -1802,7 +1802,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(ArithmeticModule(), (x, y))
 
     # TODO: Add a comment explaining why this doesn't work in scripting.
-    @skipScriptTest()
+    # @skipScriptTest()
     def test_tuple_with_none_outputs(self):
         class TupleModel(torch.nn.Module):
             def forward(self, x):
@@ -8112,16 +8112,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         self.assertRaises(RuntimeError, check_proto)
 
-    @skipIfUnsupportedMinOpsetVersion(11)
-    def test_split_tensor_scalar_scripting(self):
-        class SplitModel(torch.nn.Module):
-            def forward(self, x):
-                return torch.split(x, x.size(1))
-
-        x = torch.randn(1, 2, 3, requires_grad=True)
-        self.run_test(SplitModel(), x)
-
-    @skipScriptTest()  # Scripting fails to export dynamic split for opsets < 11
+    @skipScriptTest(min_opset_version=11)  # dynamic split support addded in 11
     def test_split_tensor_scalar(self):
         class SplitModel(torch.nn.Module):
             def forward(self, x):

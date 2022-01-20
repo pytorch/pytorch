@@ -543,24 +543,25 @@ def _model_to_graph(model, args, verbose=False,
                             dynamic_axes=dynamic_axes, input_names=input_names,
                             module=module)
     from torch.onnx.symbolic_helper import _onnx_shape_inference
-    if isinstance(model, torch.jit.ScriptModule) or isinstance(model, torch.jit.ScriptFunction):
+    is_script = isinstance(model, (torch.jit.ScriptFunction, torch.jit.ScriptModule))
+    if is_script:
         example_outputs = _get_example_outputs(model, args)
         example_outputs_final = ()
         for example_output in example_outputs:
             example_outputs_final += unpack_quantized_tensor(example_output)
         out_vars, desc = torch.jit._flatten(example_outputs_final)
-        torch._C._jit_pass_onnx_assign_output_shape(graph, out_vars, desc, _onnx_shape_inference)
+        torch._C._jit_pass_onnx_assign_output_shape(graph, out_vars, desc, _onnx_shape_inference, is_script)
 
     # NB: ONNX requires complete information about output types, which might be
     # erased by some optimizations, so we need to set it explicitly again.
-    if torch_out is not None:
-        if not (isinstance(torch_out, list) or isinstance(torch_out, tuple)):
+    else:
+        if not isinstance(torch_out, (list, tuple)):
             output_wrapped = [torch_out]
         else:
             output_wrapped = torch_out  # type: ignore[assignment]
 
         output_tensors, out_desc = torch._C._jit_flatten(tuple(output_wrapped))
-        torch._C._jit_pass_onnx_assign_output_shape(graph, output_tensors, out_desc, _onnx_shape_inference)
+        torch._C._jit_pass_onnx_assign_output_shape(graph, output_tensors, out_desc, _onnx_shape_inference, is_script)
 
     _set_input_and_output_names(graph, input_names, output_names)
     params_dict = _get_named_param_dict(graph, params)

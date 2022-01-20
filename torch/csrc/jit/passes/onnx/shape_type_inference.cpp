@@ -2243,7 +2243,8 @@ size_t ONNXAssignOutputShape(
     std::shared_ptr<Graph>& graph,
     size_t outputs_index,
     PyObject* output_obj,
-    bool onnx_shape_inference) {
+    bool onnx_shape_inference,
+    bool is_script) {
   auto index_check = [&]() {
     TORCH_INTERNAL_ASSERT(
         outputs_index <= graph->outputs().size(),
@@ -2251,9 +2252,6 @@ size_t ONNXAssignOutputShape(
   };
 
   index_check();
-
-  std::cerr << "ONNXAssignOutputShape(" << outputs_index << ", "
-            << output_obj->ob_type->tp_name << std::endl;
 
   if (THPVariable_Check(output_obj)) {
     const at::Tensor& var = THPVariable_Unpack(output_obj);
@@ -2267,7 +2265,8 @@ size_t ONNXAssignOutputShape(
           graph,
           outputs_index,
           PyTuple_GET_ITEM(output_obj, i),
-          onnx_shape_inference);
+          onnx_shape_inference,
+          is_script);
     }
   } else if (PyList_Check(output_obj)) {
     const auto list_len = PyList_GET_SIZE(output_obj);
@@ -2314,7 +2313,8 @@ size_t ONNXAssignOutputShape(
             graph,
             outputs_index,
             PyList_GET_ITEM(output_obj, i),
-            onnx_shape_inference);
+            onnx_shape_inference,
+            is_script);
       }
     }
   } else if (PyDict_Check(output_obj)) {
@@ -2329,7 +2329,8 @@ size_t ONNXAssignOutputShape(
           graph,
           outputs_index,
           PyList_GET_ITEM(unrolled_dict.ptr(), i),
-          onnx_shape_inference);
+          onnx_shape_inference,
+          is_script);
     }
   } else if (THPUtils_checkString(output_obj)) {
     // Ignore string, since they are not supported as output in ONNX.
@@ -2338,16 +2339,16 @@ size_t ONNXAssignOutputShape(
     // both tracing and scripting.
     // If we don't increment outputs_index here, then scripting fails
     // for
-    // python test/onnx/test_pytorch_onnx_no_runtime.py
+    // `python test/onnx/test_pytorch_onnx_no_runtime.py`.
     // If we do increment it, then tracing fails for
-    // python test/onnx/test_pytorch_onnx_onnxruntime.py
-    // TestONNXRuntime.test_tuple_with_none_outputs.
-    // Issue is that in tracing we
-    // flatten the outputs while tracing, which means the graph output has None
+    // `python test/onnx/test_pytorch_onnx_onnxruntime.py
+    //  TestONNXRuntime.test_tuple_with_none_outputs`.
+    // Cause: in tracing we flatten the outputs in ONNXTracedModule.forward
+    // in torch/jit/_trace.py while tracing. This means the output has None
     // objects omitted. But then the outputs passed in here are un-flattened,
-    // which means they contain None objects. Flattening the outputs during
-    // tracing happens in ONNXTracedModule.forward in torch/jit/_trace.py.
-    // outputs_index++;
+    // which means they contain None objects.
+    // Ideally we'd remove this difference.
+    outputs_index += static_cast<size_t>(is_script);
   } else {
     std::string msg =
         ("Model output has unsupported type. See "
@@ -2365,13 +2366,14 @@ void ONNXAssignOutputShape(
     std::shared_ptr<Graph>& graph,
     at::ArrayRef<at::Tensor> outputs,
     const python::IODescriptor& desc,
-    bool onnx_shape_inference) {
+    bool onnx_shape_inference,
+    bool is_script) {
   size_t outputs_index = 0;
   PyObject* py_obj = unflatten(outputs, desc);
   TORCH_INTERNAL_ASSERT(PyTuple_Check(py_obj));
 
-  outputs_index =
-      ONNXAssignOutputShape(graph, outputs_index, py_obj, onnx_shape_inference);
+  outputs_index = ONNXAssignOutputShape(
+      graph, outputs_index, py_obj, onnx_shape_inference, is_script);
 
   TORCH_INTERNAL_ASSERT(
       outputs_index == graph->outputs().size(),
