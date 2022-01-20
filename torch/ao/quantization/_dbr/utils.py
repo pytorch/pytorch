@@ -99,6 +99,19 @@ class SeenQOpInfo:
         return s
 
 
+@dataclasses.dataclass
+class SeenNonQOpInfo:
+    # Python type of the seen op. For modules, this is type(mod). For
+    # functions, this is the target function.
+    type: Callable
+    # Information about the input tensors
+    # Non-tensor inputs are represented with None.
+    input_tensor_infos: List[Optional[QTensorInfo]]
+    # Information about the output tensors
+    # Non-tensor outputs are represented with None.
+    output_tensor_infos: List[QTensorInfo]
+
+
 def op_needs_quantization(op: Callable) -> bool:
     if op in functions_supported_by_quantization:
         return True

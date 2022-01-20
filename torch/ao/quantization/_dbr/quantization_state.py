@@ -1,4 +1,4 @@
-from typing import Callable, List, Tuple, Any, Optional, Dict, Set
+from typing import Callable, List, Tuple, Any, Optional, Dict
 
 import torch
 import torch.nn.functional as F
@@ -12,6 +12,7 @@ from .utils import (
     _raise_obs_op_mismatch,
     op_needs_quantization,
     SeenQOpInfo,
+    SeenNonQOpInfo,
     QTensorInfo,
     FuncOutputObsType,
     get_func_output_obs_type,
@@ -77,8 +78,15 @@ class AutoQuantizationState(torch.nn.Module):
         # this is a ModuleDict in order to properly register observers
         # to be within the module hierarchy.
         self.tensor_id_to_observer = torch.nn.ModuleDict()
+
         # TODO(future PR): include kwargs
+        # Note: seen quantizeable ops are recorded with an index,
+        # because we enforce order of execution. However, seen
+        # unquantizeable ops are recorded without an index, because
+        # we do not enforce order of execution.
         self.idx_to_seen_q_op_infos: Dict[int, SeenQOpInfo] = {}
+        self.seen_nonq_op_infos: List[SeenNonQOpInfo] = []
+
         # qtensor_info objects of tensor outputs of the module, specified
         # in order of iteration through the output type. Non-tensor outputs
         # are represented with `None`.
@@ -117,10 +125,6 @@ class AutoQuantizationState(torch.nn.Module):
         # to its final value after tracing.
         self.needs_dtype_transform_on_outputs = True
 
-        # For debugging only, stores the types of ops seen by the parent which
-        # did not require op hooks.
-        self.seen_op_types_without_op_hooks: Set[Callable] = set()
-
     def get_extra_state(self):
         return {"tensor_id_to_scale_zp": self.tensor_id_to_scale_zp}
 
@@ -152,13 +156,18 @@ class AutoQuantizationState(torch.nn.Module):
             s += "}\n"
         else:
             s += "(seen_q_op_infos): {}\n"
+        if len(self.seen_nonq_op_infos):
+            s += "(seen_nonq_op_infos): {\n"
+            for n in self.seen_nonq_op_infos:
+                s += f"  {n}\n"
+            s += "}\n"
+        else:
+            s += "(seen_nonq_op_infos): {}\n"
         # output_qtensor_infos
         s += "(output_qtensor_infos): ["
         for i in self.output_qtensor_infos:
             s += f"{i} "
         s += "]\n"
-        # seen_op_types_without_op_hooks
-        s += f"(seen_op_types_without_op_hooks): {self.seen_op_types_without_op_hooks}\n"
         # idx_to_packed_weight_name
         if len(self.idx_to_packed_weight_name):
             s += "(idx_to_packed_weight_name): {\n"
@@ -271,6 +280,7 @@ class AutoQuantizationState(torch.nn.Module):
         qtensor_id: List[int],
         fqn: str,
         root_module: torch.nn.Module,
+        is_quantizeable_op: bool,
     ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
         """
         This function is expected to be called on args and kwargs of
@@ -284,7 +294,8 @@ class AutoQuantizationState(torch.nn.Module):
         The function returns modified `args` and `kwargs`.
         """
         return self._first_call_op_prepare_before_hook_create_subgraphs(
-            op, args, kwargs, qtensor_id, fqn, root_module)
+            op, args, kwargs, qtensor_id, fqn, root_module,
+            is_quantizeable_op)
 
     def op_prepare_before_hook(
         self,
@@ -323,6 +334,7 @@ class AutoQuantizationState(torch.nn.Module):
         output: Any,
         args: Tuple[Any, ...],
         qtensor_id: List[int],
+        is_quantizeable_op: bool,
     ) -> Any:
         """
         This function is called after an op call on a prepared model.
@@ -331,10 +343,8 @@ class AutoQuantizationState(torch.nn.Module):
           `tensor_id_to_observer`
         * amend the current seen op with the tensor ID of the output
         """
-        seen_q_op_info = self._get_cur_seen_q_op_info()
         self._first_call_op_prepare_after_hook_adjust_subgraphs(
-            op, output, args, qtensor_id,
-            seen_q_op_info)
+            op, output, args, qtensor_id, is_quantizeable_op)
         return output
 
     def op_prepare_after_hook(
@@ -684,13 +694,12 @@ class AutoQuantizationState(torch.nn.Module):
         qtensor_id: List[int],
         fqn: str,
         root_module: torch.nn.Module,
+        is_quantizeable_op: bool,
     ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
         """
         Given an op, args, kwargs about to be executed, records the subgraph
         of this op in `self`.
         """
-        op_packing_only_uses_module_attributes = \
-            get_op_packing_only_uses_module_attributes(op, args, root_module)
         arg_tensor_infos: List[Optional[QTensorInfo]] = []
         for arg in args:
             if isinstance(arg, (list, tuple)):
@@ -700,6 +709,16 @@ class AutoQuantizationState(torch.nn.Module):
             else:
                 self._first_call_op_prepare_before_hook_create_subgraphs_tensor(
                     op, arg, arg_tensor_infos, qtensor_id)
+
+        if not is_quantizeable_op:
+            op_type_is_module = isinstance(op, torch.nn.Module)
+            op_type : Callable = type(op) if op_type_is_module else op  # type: ignore[assignment]
+            self.seen_nonq_op_infos.append(SeenNonQOpInfo(
+                op_type, arg_tensor_infos, []))
+            return args, kwargs
+
+        op_packing_only_uses_module_attributes = \
+            get_op_packing_only_uses_module_attributes(op, args, root_module)
 
         packable_tensor_idx_to_name = {}
         packable_nontensor_idx_to_arg = {}
@@ -728,7 +747,7 @@ class AutoQuantizationState(torch.nn.Module):
 
         if self.idx not in self.idx_to_seen_q_op_infos:
             op_type_is_module = isinstance(op, torch.nn.Module)
-            op_type : Callable = type(op) if op_type_is_module else op  # type: ignore[assignment]
+            op_type = type(op) if op_type_is_module else op  # type: ignore[assignment]
             qconfig = get_cur_qconfig(self.qconfig_dict, fqn, op_type)
             self.idx_to_seen_q_op_infos[self.idx] = SeenQOpInfo(
                 self.idx, op_type, op_type_is_module, fqn, arg_tensor_infos, [],
@@ -744,7 +763,7 @@ class AutoQuantizationState(torch.nn.Module):
         output: Any,
         args: Tuple[Any, ...],
         qtensor_id: List[int],
-        seen_q_op_info: SeenQOpInfo,
+        is_quantizeable_op: bool,
     ) -> None:
         """
         After `op` was just executed, modifies the subgraph recorded
@@ -755,50 +774,60 @@ class AutoQuantizationState(torch.nn.Module):
         # TODO(future PR): check if _qtensor_id needs to become an actual
         # attribute of Tensor
         # TODO(future PR): handle non-tensor outputs
+        if is_quantizeable_op:
 
-        func_output_dtype_type = get_func_output_dtype_type(seen_q_op_info)
-        if func_output_dtype_type == FuncOutputDTypeType.DTYPE_DEPENDS_ON_QCONFIG:
-            if isinstance(op, torch.nn.Module):
-                # For now, assume that eager mode convert has attached qconfig
-                # objects to any leaf module which needs quantization
-                if hasattr(op, 'activation_post_process'):
-                    dtype_to_use = op.activation_post_process.dtype
+            seen_q_op_info = self._get_cur_seen_q_op_info()
+            func_output_dtype_type = get_func_output_dtype_type(seen_q_op_info)
+            if func_output_dtype_type == FuncOutputDTypeType.DTYPE_DEPENDS_ON_QCONFIG:
+                if isinstance(op, torch.nn.Module):
+                    # For now, assume that eager mode convert has attached qconfig
+                    # objects to any leaf module which needs quantization
+                    if hasattr(op, 'activation_post_process'):
+                        dtype_to_use = op.activation_post_process.dtype
+                    else:
+                        dtype_to_use = torch.float
                 else:
-                    dtype_to_use = torch.float
+                    qconfig = get_cur_qconfig(self.qconfig_dict, seen_q_op_info.fqn, op)
+                    if qconfig is None:
+                        dtype_to_use = torch.float
+                    else:
+                        dtype_to_use = qconfig.activation().dtype
+
+            elif func_output_dtype_type == FuncOutputDTypeType.DTYPE_DEFAULT_BC_UNSUPPORTED_SYNTAX:
+                dtype_to_use = torch.float
             else:
-                qconfig = get_cur_qconfig(self.qconfig_dict, seen_q_op_info.fqn, op)
-                if qconfig is None:
-                    dtype_to_use = torch.float
+                # TODO(future PR): respect qconfig for torch.cat
+                if isinstance(args[0], (tuple, list)):  # for torch.cat
+                    unique_arg_dtypes = [
+                        arg._qtensor_info.inf_dtype for arg in args[0]]
+                    assert len(set(unique_arg_dtypes)) == 1, \
+                        'an iterable with arguments with different inference ' + \
+                        'dtypes is not supported yet'
+                    dtype_to_use = args[0][0]._qtensor_info.inf_dtype
                 else:
-                    dtype_to_use = qconfig.activation().dtype
+                    dtype_to_use = args[0]._qtensor_info.inf_dtype
 
-        elif func_output_dtype_type == FuncOutputDTypeType.DTYPE_DEFAULT_BC_UNSUPPORTED_SYNTAX:
-            dtype_to_use = torch.float
         else:
-            # TODO(future PR): respect qconfig for torch.cat
-            if isinstance(args[0], (tuple, list)):  # for torch.cat
-                unique_arg_dtypes = [
-                    arg._qtensor_info.inf_dtype for arg in args[0]]
-                assert len(set(unique_arg_dtypes)) == 1, \
-                    'an iterable with arguments with different inference ' + \
-                    'dtypes is not supported yet'
-                dtype_to_use = args[0][0]._qtensor_info.inf_dtype
-            else:
-                dtype_to_use = args[0]._qtensor_info.inf_dtype
+            dtype_to_use = None  # type: ignore[assignment]
 
-        def _add_output_qtensor_info(output):
+        def _add_output_qtensor_info(output, dtype_to_use):
+            if dtype_to_use is None:
+                dtype_to_use = output.dtype
             output._qtensor_info = QTensorInfo(
                 qtensor_id[0], output.dtype, dtype_to_use)  # type: ignore[arg-type]
-            self.idx_to_seen_q_op_infos[self.idx].output_tensor_infos.append(
-                output._qtensor_info)
+            if is_quantizeable_op:
+                target = self.idx_to_seen_q_op_infos[self.idx].output_tensor_infos
+            else:
+                target = self.seen_nonq_op_infos[-1].output_tensor_infos
+            target.append(output._qtensor_info)
             qtensor_id[0] += 1
 
         if isinstance(output, torch.Tensor):
-            _add_output_qtensor_info(output)
+            _add_output_qtensor_info(output, dtype_to_use)
         elif isinstance(output, tuple):
             for element in output:
                 if isinstance(element, torch.Tensor):
-                    _add_output_qtensor_info(element)
+                    _add_output_qtensor_info(element, dtype_to_use)
 
     def _maybe_insert_input_observers(self, seen_q_op_info: SeenQOpInfo):
         func_output_dtype_type = get_func_output_dtype_type(seen_q_op_info)
@@ -898,6 +927,3 @@ class AutoQuantizationState(torch.nn.Module):
     def forward(self, x):
         raise NotImplementedError('Calling AutoQuantizationState.forward is not supported')
         # return x
-
-    def add_seen_op_type_without_op_hooks(self, op_type: Callable) -> None:
-        self.seen_op_types_without_op_hooks.add(op_type)
