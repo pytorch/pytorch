@@ -745,7 +745,7 @@ class TestAssertClose(TestCase):
         expected = "0"
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(ValueError, str(type(actual))):
+            with self.assertRaisesRegex(TypeError, str(type(actual))):
                 fn()
 
     def test_mismatching_shape(self):
@@ -762,7 +762,15 @@ class TestAssertClose(TestCase):
         expected = actual.to_mkldnn()
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaises(ValueError):
+            with self.assertRaisesRegex(ValueError, "layout"):
+                fn()
+
+    def test_meta(self):
+        actual = torch.empty((2, 2), device="meta")
+        expected = actual.clone()
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(NotImplementedError, "meta"):
                 fn()
 
     def test_mismatching_layout(self):
@@ -973,6 +981,10 @@ class TestAssertClose(TestCase):
             fn(check_dtype=False)
 
     class UnexpectedException(Exception):
+        """The only purpose of this exception is to test ``assert_close``'s handling of unexpected exceptions. Thus,
+        the test should mock a component to raise this instead of the regular behavior. We avoid using a builtin
+        exception here to avoid triggering possible handling of them.
+        """
         pass
 
     @unittest.mock.patch("torch.testing._comparison.TensorLikePair.__init__", side_effect=UnexpectedException)
@@ -1192,36 +1204,14 @@ class TestAssertCloseSparseCOO(TestCase):
         for fn in assert_close_with_inputs(actual, expected):
             fn()
 
-    def test_mismatching_is_coalesced(self):
-        indices = (
-            (0, 1),
-            (1, 0),
-        )
-        values = (1, 2)
-        actual = torch.sparse_coo_tensor(indices, values, size=(2, 2))
-        expected = actual.clone().coalesce()
+    def test_mismatching_sparse_dims(self):
+        t = torch.randn(2, 3, 4)
+        actual = t.to_sparse()
+        expected = t.to_sparse(2)
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, "is_coalesced"):
+            with self.assertRaisesRegex(AssertionError, re.escape("number of sparse dimensions in sparse COO tensors")):
                 fn()
-
-    def test_mismatching_is_coalesced_no_check(self):
-        actual_indices = (
-            (0, 1),
-            (1, 0),
-        )
-        actual_values = (1, 2)
-        actual = torch.sparse_coo_tensor(actual_indices, actual_values, size=(2, 2)).coalesce()
-
-        expected_indices = (
-            (0, 1, 1,),
-            (1, 0, 0,),
-        )
-        expected_values = (1, 1, 1)
-        expected = torch.sparse_coo_tensor(expected_indices, expected_values, size=(2, 2))
-
-        for fn in assert_close_with_inputs(actual, expected):
-            fn(check_is_coalesced=False)
 
     def test_mismatching_nnz(self):
         actual_indices = (

@@ -369,8 +369,8 @@ std::ostream& operator<<(std::ostream& output, const NetDef& n) {
   template <>                                                          \
   C10_EXPORT T ArgumentHelper::GetSingleArgument<T>(                   \
       c10::string_view name, const T& default_value) const {           \
-    auto it = CAFFE2_ARG_MAP_FIND(arg_map_, name);                      \
-    if (it == arg_map_.end()) {                                         \
+    auto it = CAFFE2_ARG_MAP_FIND(arg_map_, name);                     \
+    if (it == arg_map_.end()) {                                        \
       VLOG(1) << "Using default parameter value " << default_value     \
               << " for parameter " << name;                            \
       return default_value;                                            \
@@ -380,7 +380,7 @@ std::ostream& operator<<(std::ostream& output, const NetDef& n) {
         "Argument ",                                                   \
         name,                                                          \
         " does not have the right field: expected field " #fieldname); \
-    auto value = it->second.fieldname();                               \
+    const auto& value = it->second.fieldname();                        \
     if (enforce_lossless_conversion) {                                 \
       auto supportsConversion =                                        \
           SupportsLosslessConversion<decltype(value), T>(value);       \
