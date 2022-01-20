@@ -37,11 +37,4 @@ class LinearReLU(nnq.Linear):
 
     @classmethod
     def from_reference(cls, ref_linear_relu, output_scale, output_zero_point):
-        r"""Create a (fbgemm/qnnpack) quantized module from a reference quantized module
-        Args:
-            ref_module (Module): a reference quantized  module, either produced by torch.ao.quantization
-                          utilities or provided by the user
-            output_scale (float): scale for output Tensor
-            zero_point (int): zero point for output Tensor
-        """
         return super().from_reference(ref_linear_relu[0], output_scale, output_zero_point)

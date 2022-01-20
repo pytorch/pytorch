@@ -30,7 +30,7 @@ LOWER_FUSED_MODULE_MAP: Dict[Type[nn.Module], Tuple[Type[nn.Module], Type[Refere
 
 def _lower_weighted_ref_module(model: QuantizedGraphModule, ref_class: Type[nn.Module]) -> QuantizedGraphModule:
     """
-    Traverse the graph and find dequantize - ref module (- ReLU) - quantize patterns
+    Traverse the graph and find dequantize - ref module - quantize patterns
     and replace them with the quantized version of the ref module.
     """
     if ref_class not in LOWER_MODULE_MAP and ref_class not in LOWER_FUSED_MODULE_MAP:
