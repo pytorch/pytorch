@@ -5,7 +5,6 @@ import gc
 import io
 import itertools
 import logging
-import math
 import numpy as np
 import os
 import re
@@ -369,7 +368,7 @@ def lazy_overhead_experiment(args, results, benchmark, lazy_benchmark):
     pvalue = ttest_ind(timings[:, 0], timings[:, 1]).pvalue
     median = np.median(timings, axis=0)
     fallbacks = ";".join([f"{m}:{lazy_metrics[m]}" for m in lazy_metrics if "aten::" in m])
-    ops = int(sum([lazy_metrics[m] for m in lazy_metrics if 'lazy::'  in m or 'aten::' in m]) / args.repeat)
+    ops = int(sum([lazy_metrics[m] for m in lazy_metrics if 'lazy::' in m or 'aten::' in m]) / args.repeat)
     trace_us = median[1] / 1e-6
     us_per_op = trace_us / ops
     overhead = median[1] / median[0]
@@ -612,7 +611,8 @@ if __name__ == "__main__" :
     parser.add_argument("--just_run_once", action="store_true")
     parser.add_argument("--run_tracing_execute_noops", action='store_true',
                         help="Run the tracing portion only, with noop backend, useful for running under a profiler.")
-    parser.add_argument("--run_in_subprocess", "-s", type=str, help="which model run in subprocess.This will ignore filter and exclude")
+    parser.add_argument("--run_in_subprocess", "-s", type=str,
+                        help="which model run in subprocess. This will ignore filter and exclude")
     args = parser.parse_args()
     results = []
 

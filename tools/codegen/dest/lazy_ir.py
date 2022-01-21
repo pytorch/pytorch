@@ -222,11 +222,13 @@ class GenLazyNativeFuncDefinition:
 
         assert len(value_types) > 0, f"Only supporting tensor ops so far, none found in {sig}"
         first_tensor = value_types[0]
-        bridge_str = f"""auto result = torch::lazy::CreateAtenFromLtcTensor(torch::lazy::LazyTensor::Create(std::move(node), lazy_{first_tensor.name}.GetDevice()));"""
+        bridge_str = f"""auto result = torch::lazy::CreateAtenFromLtcTensor(
+            torch::lazy::LazyTensor::Create(std::move(node), lazy_{first_tensor.name}.GetDevice()));"""
         if returns_length > 1:
             bridge_str = f"""std::vector<{self.tensor_class}> lazy_tensors;
         for (int i = 0; i < {returns_length}; i++) {{
-            lazy_tensors.push_back(torch::lazy::LazyTensor::Create(torch::lazy::Value(node, i), lazy_{first_tensor.name}.GetDevice()));
+            lazy_tensors.push_back(torch::lazy::LazyTensor::Create(
+                torch::lazy::Value(node, i), lazy_{first_tensor.name}.GetDevice()));
         }}
         auto result = torch::lazy::TupleAtenFromLtcTensors<{returns_length}>(lazy_tensors);"""
         if schema.name.name.inplace:
