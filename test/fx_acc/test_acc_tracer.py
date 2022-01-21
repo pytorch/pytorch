@@ -63,7 +63,7 @@ class AccTracerTest(unittest.TestCase):
                 return self._torch_op(a, *self._args, **self._kwargs)
 
         m = TestModule(torch_op, args, kwargs)
-
+        m.eval()
         a = torch.randn(*input_shape)
         traced = acc_tracer.trace(m, [a])
         ph_a = acc_op_node = None
@@ -1225,6 +1225,16 @@ class AccTracerTest(unittest.TestCase):
             None,
             lambda x: nn.functional.dropout(x, training=False),
             input_shape=(1, 2, 3),
+        )
+
+    def test_stochastic_depth(self):
+        self._make_acc_op_function_test(
+            None,
+            lambda x, p, mode, training: torchvision.ops.stochastic_depth(x, p=p, mode=mode, training=training),
+            input_shape=(1, 2, 3),
+            p=0.5,
+            mode="row",
+            training=False,
         )
 
     def test_hardsigmoid(self):
