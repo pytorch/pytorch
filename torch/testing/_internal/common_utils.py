@@ -2070,7 +2070,7 @@ class TestCase(expecttest.TestCase):
         # Hide this function from `pytest`'s traceback
         __tracebackhide__ = True
 
-        # numpy's dtypes are a superset of what PyTorch supports. In case we encouter an unsupported dtype, we fall
+        # numpy's dtypes are a superset of what PyTorch supports. In case we encounter an unsupported dtype, we fall
         # back to an elementwise comparison. Note that this has to happen here and not for example in
         # `TensorOrArrayPair`, since at that stage we can no longer split the array into its elements and perform
         # multiple comparisons.
@@ -2082,9 +2082,9 @@ class TestCase(expecttest.TestCase):
 
             x = to_list(x)
             y = to_list(y)
-        # When comparing a sequence of numbers to a tensor, we need to convert the sequence to a tensor here. Otherwise
-        # the pair orgination of `assert_equal` will fail, because the sequence is recognized as container that should
-        # be checked elementwise while the tensor is not.
+        # When comparing a sequence of numbers to a tensor, we need to convert the sequence to a tensor here.
+        # Otherwise, the pair origination of `assert_equal` will fail, because the sequence is recognized as container
+        # that should be checked elementwise while the tensor is not.
         elif isinstance(x, torch.Tensor) and isinstance(y, Sequence):
             y = torch.as_tensor(y, dtype=x.dtype, device=x.device)
         elif isinstance(x, Sequence) and isinstance(y, torch.Tensor):
