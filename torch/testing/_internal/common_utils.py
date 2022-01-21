@@ -1390,18 +1390,19 @@ def remove_device_and_dtype_suffixes(test_name: str) -> str:
 def check_if_enable(test: unittest.TestCase):
     test_suite = str(test.__class__).split('\'')[1]
     raw_test_name = f'{test._testMethodName} ({test_suite})'
-    sanitized_test_name = remove_device_and_dtype_suffixes(test._testMethodName)
-    print(sanitized_test_name)
     if slow_tests_dict is not None and raw_test_name in slow_tests_dict:
         getattr(test, test._testMethodName).__dict__['slow_test'] = True
         if not TEST_WITH_SLOW:
             raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
+    sanitized_test_method_name = remove_device_and_dtype_suffixes(test._testMethodName)
     if not IS_SANDCASTLE and disabled_tests_dict is not None:
-        for test, (issue_url, platforms) in disabled_tests_dict:
-            disable_test_name = test.split()[0]
-            disable_test_suite = test.split()[1][1:-1]
-            if (test._testMethodName is disable_test_name or sanitized_test_name is disable_test_name) \
-               and test_suite in disable_test_suite:
+        for disabled_test, (issue_url, platforms) in disabled_tests_dict.items():
+            disabled_test_name = disabled_test.split()[0]
+            disabled_test_suite = disabled_test.split()[1][1:-1]
+            # if test method name or its sanitized version exactly matches the disabled test method name
+            # AND allow non-parametrized suite names to disable parametrized ones (TestSuite disables TestSuiteCPU/CUDA)
+            if (test._testMethodName == disabled_test_name or sanitized_test_method_name == disabled_test_name) \
+               and disabled_test_suite in test_suite:
                 platform_to_conditional: Dict = {
                     "mac": IS_MACOS,
                     "macos": IS_MACOS,
