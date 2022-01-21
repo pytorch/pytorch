@@ -8466,10 +8466,12 @@ class TestDevicePrecision(TestCase):
             actual = x[..., :1].clamp(lb, ub)
             self.assertEqual(expect, actual)
 
-    def test_device_idx(self, device):
+    @onlyCUDA
+    def test_cuda_device_idx(self, device):
         x = torch.zeros(3, device=device)
         y = torch._efficientzerotensor(3, device=device)
         self.assertEqual(x.device, y.device)
+        self.assertTrue(x.is_cuda())
 
 
 # we implemented custom deallocation for subclasses, so it behooves
