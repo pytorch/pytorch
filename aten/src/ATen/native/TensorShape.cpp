@@ -1964,12 +1964,14 @@ Tensor squeeze_qtensor(const Tensor& self, int64_t dim) {
 
 Tensor squeeze(const Tensor& self) {
   auto g = inferSqueezeGeometry(self);
-  at::Tensor result;
-  if (self.is_quantized()) {
-    result = squeeze_qtensor(self);
-  } else {
-    result = self.as_strided(std::get<0>(g), std::get<1>(g));
-  }
+  at::Tensor result = self.as_strided(std::get<0>(g), std::get<1>(g));
+  auto maybe_outnames = namedinference::compute_squeeze_outnames(self);
+  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
+  return result;
+}
+
+Tensor squeeze_quantized(const Tensor& self) {
+  at::Tensor result = squeeze_qtensor(self);
   auto maybe_outnames = namedinference::compute_squeeze_outnames(self);
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
@@ -1978,10 +1980,6 @@ Tensor squeeze(const Tensor& self) {
 Tensor squeeze(const Tensor& self, int64_t dim) {
   int64_t dims = self.dim();
   dim = maybe_wrap_dim(dim, dims);
-
-  if (self.is_quantized()) {
-    return squeeze_qtensor(self, dim);
-  }
   if (dims == 0 || self.sizes()[dim] != 1) {
     return self.as_strided(self.sizes(), self.strides());
   }
@@ -1989,6 +1987,12 @@ Tensor squeeze(const Tensor& self, int64_t dim) {
   auto result = self.as_strided(std::get<0>(g), std::get<1>(g));
   namedinference::propagate_names_except(result, self, {dim});
   return result;
+}
+
+Tensor squeeze_quantized(const Tensor& self, int64_t dim) {
+  int64_t dims = self.dim();
+  dim = maybe_wrap_dim(dim, dims);
+  return squeeze_qtensor(self, dim);
 }
 
 Tensor & squeeze_(Tensor& self) {
@@ -2067,6 +2071,7 @@ Tensor unsqueeze_qtensor(const Tensor& self, int64_t dim) {
   return make_qtensor(self, g.sizes, g.strides, quantizer);
 }
 
+// todo: dispatcher. Currently no sparse & quantized
 Tensor unsqueeze(const Tensor& self, int64_t dim) {
   dim = maybe_wrap_dim(dim, self.dim() + 1);
 
