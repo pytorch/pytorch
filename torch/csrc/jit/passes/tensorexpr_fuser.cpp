@@ -227,9 +227,10 @@ void removeProfileNodesAndSpecializeTypes(Block* b) {
       // them.  This situation can happen if, e.g., loop unrolling duplicates
       // profiled types in a loop body in a manner that isn't logically
       // consistent (see TestTEFuser.test_unrolled_cat).
-      TensorTypePtr merged_tensor_type = profiled_type;
-      if (input_tensor_type != TensorType::get()) {
-        merged_tensor_type = input_tensor_type->merge(*profiled_type);
+      if (input_tensor_type == TensorType::get()) {
+        it->input()->setType(profiled_type);
+      } else {
+        it->input()->setType(input_tensor_type->merge(*profiled_type));
       }
 
       it.destroyCurrent();
