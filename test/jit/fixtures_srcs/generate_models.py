@@ -152,7 +152,7 @@ likely this script is running with the commit to make the change.
 3. The model already exists in `test/jit/fixtures`.
 
 """
-def generate_models():
+def generate_models(model_directory_path: Path):
     all_models = get_all_models()
     for a_module, expect_operator in ALL_MODULES.items():
         print(a_module, expect_operator)
@@ -187,12 +187,14 @@ def generate_models():
                 f"however it doesn't cover the operator {expect_operator}."
                 f"Please ensure the output model includes the tested operator.")
 
-        export_model_path = str(get_fixtures_path() / (str(model_name) + ".ptl"))
+        # export_model_path = str(get_fixtures_path() / (str(model_name) + ".ptl"))
+        export_model_path = str(model_directory_path / (str(model_name) + ".ptl"))
         script_module._save_for_lite_interpreter(export_model_path)
         logger.info(f"Generating model {model_name} and it's save to {export_model_path}")
 
 def main() -> None:
-    generate_models()
+    model_directory_path = get_fixtures_path()
+    generate_models(model_directory_path)
 
 if __name__ == '__main__':
     main()
