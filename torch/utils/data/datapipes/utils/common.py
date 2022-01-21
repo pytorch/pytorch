@@ -3,7 +3,6 @@ import fnmatch
 import warnings
 
 from io import IOBase
-from functools import lru_cache
 from typing import Iterable, List, Tuple, Union
 
 try:
