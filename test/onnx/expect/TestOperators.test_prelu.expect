@@ -4,7 +4,7 @@ producer_version: "CURRENT_VERSION"
 graph {
   node {
     input: "input"
-    input: "4"
+    input: "onnx::PRelu_4"
     output: "3"
     name: "PRelu_0"
     op_type: "PRelu"
@@ -15,7 +15,7 @@ graph {
     dims: 1
     dims: 1
     data_type: 1
-    name: "4"
+    name: "onnx::PRelu_4"
     raw_data: "\000\000\200>\000\000\200>"
   }
   input {
@@ -41,7 +41,7 @@ graph {
     }
   }
   input {
-    name: "4"
+    name: "onnx::PRelu_4"
     type {
       tensor_type {
         elem_type: 1

@@ -12,7 +12,7 @@ import torch.nn.intrinsic.qat as nniqat
 from torch._ops import ops
 from torch.nn.common_types import _size_1_t
 from torch.nn.modules.utils import _single, _pair, _triple
-from torch.nn.quantized.modules.utils import _quantize_weight
+from torch.nn.quantized.modules.utils import _quantize_weight, ReferenceableQuantizedModule
 from torch.nn.utils import fuse_conv_bn_weights
 
 _SUPPORTED_PADDING = {
@@ -29,7 +29,7 @@ def _reverse_repeat_padding(padding: List[int]) -> List[int]:
             _reversed_padding_repeated_twice.append(padding[N - idx - 1])
     return _reversed_padding_repeated_twice
 
-class _ConvNd(nn.Module):
+class _ConvNd(ReferenceableQuantizedModule):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
                  padding_mode='zeros', device=None, dtype=None):
@@ -236,6 +236,33 @@ class _ConvNd(nn.Module):
                 mod = mod[0]
             weight_post_process = mod.qconfig.weight()
         return cls.get_qconv(mod, activation_post_process, weight_post_process)
+
+    @classmethod
+    def from_reference(cls, ref_qconv, output_scale, output_zero_point):
+        r"""Create a (fbgemm/qnnpack) quantized module from a reference quantized module
+        Args:
+            ref_module (Module): a reference quantized  module, either produced by torch.ao.quantization
+                          utilities or provided by the user
+            output_scale (float): scale for output Tensor
+            zero_point (int): zero point for output Tensor
+        """
+        qconv = cls(
+            ref_qconv.in_channels,
+            ref_qconv.out_channels,
+            ref_qconv.kernel_size,  # type: ignore[arg-type]
+            ref_qconv.stride,  # type: ignore[arg-type]
+            ref_qconv.padding,  # type: ignore[arg-type]
+            ref_qconv.dilation,  # type: ignore[arg-type]
+            ref_qconv.groups,
+            ref_qconv.bias is not None,  # type: ignore[arg-type]
+            ref_qconv.padding_mode,
+            device=ref_qconv.weight.device,
+            dtype=ref_qconv.weight.dtype)
+        qweight = ref_qconv.get_quantized_weight()
+        qconv.set_weight_bias(qweight, ref_qconv.bias)
+        qconv.scale = float(output_scale)
+        qconv.zero_point = int(output_zero_point)
+        return qconv
 
 class Conv1d(_ConvNd):
     r"""Applies a 1D convolution over a quantized input signal composed of

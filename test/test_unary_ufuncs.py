@@ -3,7 +3,6 @@
 import torch
 import numpy as np
 
-import warnings
 import math
 from itertools import product, chain
 from numbers import Number
@@ -218,8 +217,6 @@ def generate_numeric_tensors_extremal(device, dtype, *,
 
 
 # TODO: port test_unary_out_op_mem_overlap
-# TODO: add out= tests (different devices, dtypes, mismatched sizes,
-#                       correct sizes, 0 size, broadcasted out)
 # TODO: add test for inplace variants erroring on broadcasted inputs
 class TestUnaryUfuncs(TestCase):
     exact_dtype = True
@@ -272,7 +269,7 @@ class TestUnaryUfuncs(TestCase):
 
         # Some NumPy functions return scalars, not arrays
         if isinstance(expected, Number):
-            self.assertEqual(actual.item(), expected, **kwargs)
+            self.assertEqual(actual.item(), expected, msg, **kwargs)
         elif isinstance(expected, np.ndarray):
             # Handles exact dtype comparisons between arrays and tensors
             if exact_dtype:
@@ -608,32 +605,6 @@ class TestUnaryUfuncs(TestCase):
         # torch.frexp returns exponent in int32 to be compatible with np.frexp
         self.assertTrue(exponent.dtype == torch.int32)
         self.assertTrue(torch_to_numpy_dtype_dict[exponent.dtype] == np_exponent.dtype)
-
-    @skipCUDAIfRocm
-    @dtypes(*get_all_fp_dtypes(include_half=True, include_bfloat16=False))
-    def test_frexp_out(self, device, dtype):
-        input = make_tensor((50, 50), device, dtype)
-        outputs = (
-            (torch.empty_like(input), torch.empty_like(input, dtype=torch.int)),
-            (torch.empty_like(input).transpose(0, 1), make_tensor((50, 50), device, torch.int, noncontiguous=True)),
-        )
-        for mantissa, exponent in outputs:
-            torch.frexp(input, out=(mantissa, exponent))
-            np_mantissa, np_exponent = np.frexp(input.cpu().numpy())
-            self.assertEqual(mantissa, np_mantissa)
-            self.assertEqual(exponent, np_exponent)
-
-
-        # The warning is given when output tensors have wrong shape
-        with warnings.catch_warnings(record=True) as w:
-            mantissa = torch.empty((2, 2), device=device, dtype=dtype)
-            exponent = torch.empty((5, 5), device=device, dtype=torch.int)
-
-            torch.frexp(input, out=(mantissa, exponent))
-
-            self.assertEqual(len(w), 2)
-            self.assertTrue("An output with one or more elements was resized" in str(w[0].message))
-            self.assertTrue("An output with one or more elements was resized" in str(w[1].message))
 
     @skipCUDAIfRocm
     def test_frexp_assert_raises(self, device):
@@ -1373,34 +1344,6 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(torch.Size([0, 0]), y.shape)
         self.assertEqual(1, len(z))
         self.assertEqual(torch.empty(0, dtype=torch.long), z[0])
-
-    @dtypes(*get_all_dtypes())
-    def test_nonzero_noncontiguous(self, device, dtype):
-        x = make_tensor((10, 10, 10), dtype=dtype, device=device,
-                        low=1, noncontiguous=False)
-        mask = make_tensor((10, 10, 10), dtype=torch.bool, device=device)
-        x[mask] = 0
-
-        def permute_storage(tensor, dims):
-            dest_dims = tuple(range(len(dims)))
-            return tensor.permute(dims).contiguous().movedim(dims, dest_dims)
-
-        # Assume contiguous case is correct
-        expect = x.nonzero()
-
-        # Dense, permuted
-        self.assertEqual(permute_storage(x, [0, 2, 1]).nonzero(), expect)
-        self.assertEqual(permute_storage(x, [2, 1, 0]).nonzero(), expect)
-
-        # Non-dense
-        nondense = torch.empty((40, 10, 20), dtype=dtype, device=device)[::4, :, ::2]
-        nondense[:] = x
-        self.assertEqual(nondense.nonzero(), expect)
-
-        # Non-dense, permuted
-        nondense = nondense.permute([0, 2, 1])
-        nondense[:] = x
-        self.assertEqual(nondense.nonzero(), expect)
 
     # TODO: rationalize with exp OpInfo
     @dtypes(*(get_all_fp_dtypes(include_half=False) +

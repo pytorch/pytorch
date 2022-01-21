@@ -33,9 +33,8 @@ from .pattern_utils import (
     get_default_output_activation_post_process_map,
     Pattern,
 )
-
+from ..utils import _parent_name
 from .utils import (
-    _parent_name,
     all_node_args_have_no_tensors,
     quantize_node,
     get_per_tensor_qparams,
@@ -576,6 +575,7 @@ class CatQuantizeHandler(QuantizeHandler):
 @register_quant_pattern((torch.nn.ReLU, torch.nn.Conv3d))
 @register_quant_pattern((torch.nn.functional.relu, torch.nn.Conv2d))
 @register_quant_pattern((torch.nn.functional.relu, torch.nn.Conv3d))
+# TODO: rename Relu -> ReLU to be more consistent with other classes
 class ConvReluQuantizeHandler(QuantizeHandler):
     def __init__(self, node: Node, modules: Dict[str, torch.nn.Module]):
         super().__init__(node, modules)
@@ -635,7 +635,12 @@ class ConvReluQuantizeHandler(QuantizeHandler):
             output_activation_post_process = \
                 self._maybe_get_last_node_only_observer(modules)
             assert output_activation_post_process is not None
-            if is_reference:
+
+            # We'll always produce reference pattern for torch.nn.Conv*d,
+            # will remove the else branch after we migrated all use cases
+            if is_reference or \
+                    type(self.conv) in [torch.nn.Conv1d, torch.nn.Conv2d, torch.nn.Conv3d] and \
+                    dtypes in [(torch.quint8, torch.qint8, None)]:
                 # produce dequant - float_op - quant pattern
                 dtype = torch.float
                 if activation_int8_quantized:
@@ -682,7 +687,7 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                 # we can have a map from module to reference module
                 # and allow user to register new ones
                 qconv_cls = get_static_quant_module_class(
-                    type(float_conv), is_reference=is_reference)
+                    type(float_conv), is_reference=True)
                 ref_conv = qconv_cls.from_float(float_conv, weight_qparams)  # type: ignore[attr-defined]
                 # if the parent is a fused conv (Sequential), we can replace the first
                 # item to ref conv, otherwise we can update
@@ -1161,6 +1166,8 @@ class BatchNormQuantizeHandler(QuantizeHandler):
                 load_arg(quantized=[0])(self.bn_node.args),
                 load_arg(quantized=torch.float)(self.bn_node.kwargs))
 
+@register_quant_pattern(torch.nn.qat.Embedding)
+@register_quant_pattern(torch.nn.qat.EmbeddingBag)
 @register_quant_pattern(torch.nn.Embedding)
 @register_quant_pattern(torch.nn.EmbeddingBag)
 class EmbeddingQuantizeHandler(QuantizeHandler):
@@ -1516,9 +1523,7 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
 @register_quant_pattern(torch._C._nn.avg_pool3d)
 @register_quant_pattern(torch.clamp)
 @register_quant_pattern(torch.flatten)
-@register_quant_pattern(torch.max)
 @register_quant_pattern(torch.mean)
-@register_quant_pattern(torch.min)
 @register_quant_pattern(operator.floordiv)
 @register_quant_pattern('clamp')
 @register_quant_pattern('mean')
@@ -1613,14 +1618,12 @@ class CustomModuleQuantizeHandler(QuantizeHandler):
 @register_quant_pattern(torch.nn.Identity)
 @register_quant_pattern(torch.transpose)
 @register_quant_pattern(torch.repeat_interleave)
-@register_quant_pattern(torch.sort)
 @register_quant_pattern(torch.squeeze)
 @register_quant_pattern(torch.stack)
 @register_quant_pattern(torch.unsqueeze)
 @register_quant_pattern('contiguous')
 @register_quant_pattern('detach')
 @register_quant_pattern('detach_')
-@register_quant_pattern('numel')
 @register_quant_pattern('permute')
 @register_quant_pattern('repeat')
 @register_quant_pattern('repeat_interleave')
