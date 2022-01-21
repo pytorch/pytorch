@@ -20,6 +20,18 @@ class Fx2trtLowerTests(TestCase):
         mod_lowered = lower(mod_traced, input)
         assert mod_lowered
 
+    def test_lower_with_batchnorm_act_rewrite(self):
+        class TestModule(torch.nn.BatchNorm1d):
+            def forward(self, x):
+                return x
+
+
+        module = TestModule(2)
+        inputs = torch.randn(1)
+        lower = Lowerer.create(LowerSetting(ast_rewriter_allow_list={TestModule}))
+        result = lower(module, inputs)
+        assert result
+
 
 class _Mod(nn.Module):
     def forward(self, x):
