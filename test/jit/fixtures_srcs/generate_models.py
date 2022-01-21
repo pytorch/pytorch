@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Set
 
 import torch
-from test.jit.fixtures_srcs.fixtures_src import TestVersionedDivTensorExampleV4
+from test.jit.fixtures_srcs.fixtures_src import *
 from torch.jit.mobile import _load_for_lite_interpreter, _export_operator_list
 
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
