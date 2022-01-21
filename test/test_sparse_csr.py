@@ -26,7 +26,6 @@ load_tests = load_tests
 
 # Unary Ufuncs supported by Sparse CSR Layout
 sparse_csr_unary_ufuncs = [op for op in sparse_csr_funcs if isinstance(op, UnaryUfuncInfo)]
-sparse_csr_linalg_solve = [op for op in sparse_csr_funcs if op.name == 'linalg.solve']
 
 def _check_cusparse_triangular_solve_available():
     version = _get_torch_cuda_version()
@@ -1194,10 +1193,6 @@ class TestSparseCSR(TestCase):
 
     @ops(_sparse_csr_ops)
     def test_sparse_csr_consistency(self, device, dtype, op):
-        # linalg_solve has a separate test
-        if op.name == 'linalg.solve':
-            self.skipTest("Skipped!")
-
         samples = op.sample_inputs(device, dtype)
 
         # Fail early to prevent silent success with this test
@@ -1289,12 +1284,14 @@ class TestSparseCSR(TestCase):
 
             self.assertEqual(coo_sparse.to_sparse_csr().to_sparse_coo(), coo_sparse)
 
-    @ops(sparse_csr_linalg_solve)
-    def test_linalg_solve_sparse_csr_cusolver(self, device, dtype, op):
+    @dtypes(*floating_and_complex_types())
+    def test_linalg_solve_sparse_csr_cusolver(self, device, dtype):
+        from torch.testing._internal.common_methods_invocations import sample_inputs_linalg_solve
+
+        samples = sample_inputs_linalg_solve(None, device, dtype)
+
         if (device == 'meta') or (device == 'cpu' and not torch.cuda.is_available()):
             self.skipTest("Skipped!")
-
-        samples = op.sample_inputs(device, dtype)
 
         for sample in samples:
             if sample.input.ndim != 2:
@@ -1303,22 +1300,22 @@ class TestSparseCSR(TestCase):
             out = torch.zeros(sample.args[0].size(), dtype=dtype, device=device)
             if not torch.cuda.is_available():
                 with self.assertRaisesRegex(RuntimeError, "PyTorch was not built with CUDA support"):
-                    op(sample.input.to_sparse_csr(), *sample.args, **sample.kwargs, out=out)
+                    torch.linalg.solve(sample.input.to_sparse_csr(), *sample.args, **sample.kwargs, out=out)
                 break
 
             if sample.args[0].ndim != 1:
                 with self.assertRaisesRegex(RuntimeError, "not implemented yet"):
-                    op(sample.input.to_sparse_csr(), *sample.args, **sample.kwargs, out=out)
+                    torch.linalg.solve(sample.input.to_sparse_csr(), *sample.args, **sample.kwargs, out=out)
                 break
             if not sample.args[0].numel():
                 with self.assertRaisesRegex(RuntimeError,
                                             "Expected non-empty other tensor, but found empty tensor"):
-                    op(sample.input.to_sparse_csr(), *sample.args, **sample.kwargs, out=out)
+                    torch.linalg.solve(sample.input.to_sparse_csr(), *sample.args, **sample.kwargs, out=out)
                 break
 
-            expect = op(sample.input, *sample.args, **sample.kwargs)
+            expect = torch.linalg.solve(sample.input, *sample.args, **sample.kwargs)
             sample.input = sample.input.to_sparse_csr()
-            op(sample.input, *sample.args, **sample.kwargs, out=out)
+            torch.linalg.solve(sample.input, *sample.args, **sample.kwargs, out=out)
             self.assertEqual(expect, out)
 
     @skipMeta
