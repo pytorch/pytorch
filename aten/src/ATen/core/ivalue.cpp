@@ -6,6 +6,7 @@
 #include <ATen/core/function.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
+#include <ATen/core/type_factory.h>
 #include <c10/util/irange.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/hash.h>
@@ -76,6 +77,7 @@ const std::string ivalue::EnumHolder::unqualifiedClassName() const {
 
 } // namespace ivalue
 
+#ifndef C10_MOBILE
 c10::TypePtr IValue::TagType<c10::Type>::get(const IValue& v) {
   switch (v.tag) {
       case Tag::None:
@@ -130,6 +132,7 @@ c10::TypePtr IValue::TagType<c10::Type>::get(const IValue& v) {
   // switch above is complete but this silences compiler warnings
   TORCH_INTERNAL_ASSERT(false, "unhandled case in IValue::type()");
 }
+#endif
 
 void IValue::visit(const std::function<bool (const IValue &)>& visitor) const {
   if (visitor(*this)) {
@@ -401,6 +404,39 @@ bool IValue::is(const IValue& rhs) const {
     return rhs.is_intrusive_ptr && ptrEqual(lhs, rhs);
   }
   return lhs == rhs;
+}
+
+template <typename T>
+inline bool IValue::isListOf() const {
+  // note: avoids calling type() to avoid extra referencing counting for the returned type.
+  if (!isList()) {
+    return false;
+  }
+  const auto& ty = static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType;
+  if (ty->kind() == T::Kind) {
+    return true;
+  }
+  return *ty == *TypeFactory::get<T>();
+}
+
+bool IValue::isDoubleList() const {
+  return isListOf<c10::FloatType>();
+}
+
+bool IValue::isComplexDoubleList() const {
+  return isListOf<c10::ComplexType>();
+}
+
+bool IValue::isTensorList() const {
+  return isListOf<c10::TensorType>();
+}
+
+bool IValue::isIntList() const {
+  return isListOf<c10::IntType>();
+}
+
+bool IValue::isBoolList() const {
+  return isListOf<c10::BoolType>();
 }
 
 namespace {

@@ -1915,39 +1915,6 @@ inline ivalue::Tuple& IValue::toTupleRef() const {
       payload.u.as_intrusive_ptr);
 }
 
-template <typename T>
-inline bool IValue::isListOf() const {
-  // note: avoids calling type() to avoid extra referencing counting for the returned type.
-  if (!isList()) {
-    return false;
-  }
-  const auto& ty = static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType;
-  if (ty->kind() == T::Kind) {
-    return true;
-  }
-  return *ty == *T::get();
-}
-
-inline bool IValue::isDoubleList() const {
-  return isListOf<c10::FloatType>();
-}
-
-inline bool IValue::isComplexDoubleList() const {
-  return isListOf<c10::ComplexType>();
-}
-
-inline bool IValue::isTensorList() const {
-  return isListOf<c10::TensorType>();
-}
-
-inline bool IValue::isIntList() const {
-  return isListOf<c10::IntType>();
-}
-
-inline bool IValue::isBoolList() const {
-  return isListOf<c10::BoolType>();
-}
-
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Tuple> v)
     : tag(Tag::Tuple), is_intrusive_ptr(true) {
   payload.u.as_intrusive_ptr = null_to_undefined_tensor(v.release());
