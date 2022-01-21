@@ -1,8 +1,14 @@
 import warnings
 
-from torch.utils.data import IterDataPipe, functional_datapipe
-from typing import Any, Callable, Iterator, List, Optional, Set, Sized, Tuple, TypeVar, Deque
 from collections import deque
+from typing import Any, Callable, Iterator, List, Optional, Set, Sized, Tuple, TypeVar, Deque
+
+from torch.utils.data import IterDataPipe, functional_datapipe
+from torch.utils.data.datapipes.utils.common import DILL_AVAILABLE, check_lambda_fn
+
+if DILL_AVAILABLE:
+    import dill
+    dill.extend(use_dill=False)
 
 T_co = TypeVar('T_co', covariant=True)
 
@@ -42,18 +48,6 @@ class ConcaterIterDataPipe(IterDataPipe):
         else:
             self.length = -1
         return len(self)
-
-
-# This is fake class to show API, going to be replaced by the copy from torchdata
-# TODO(VitalyFedyunin): Replace with valid version, documentation and tests
-class IterateBuffer(IterDataPipe):
-
-    def __init__(self, buffer):
-        self.buffer = buffer
-
-    def __iter__(self):
-        for i in self.buffer:
-            yield i
 
 
 @functional_datapipe('fork')
@@ -202,6 +196,9 @@ class DemultiplexerIterDataPipe(IterDataPipe):
                 classifier_fn: Callable[[T_co], Optional[int]], drop_none: bool = False, buffer_size: int = 1000):
         if num_instances < 1:
             raise ValueError(f"Expected `num_instaces` larger than 0, but {num_instances} is found")
+
+        check_lambda_fn(classifier_fn)
+
         # When num_instances == 1, demux can be replaced by filter,
         # but keep it as Demultiplexer for the sake of consistency
         # like throwing Error when classification result is out of o range
@@ -288,6 +285,42 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
         self.child_buffers = [deque() for _ in range(self.num_instances)]
         self.instance_started = [False] * self.num_instances
         self.main_datapipe_exhausted = False
+
+    def __getstate__(self):
+        if IterDataPipe.getstate_hook is not None:
+            return IterDataPipe.getstate_hook(self)
+
+        if DILL_AVAILABLE:
+            dill_function = dill.dumps(self.classifier_fn)
+        else:
+            dill_function = self.classifier_fn
+        state = (
+            self.main_datapipe,
+            self.num_instances,
+            self.buffer_size,
+            dill_function,
+            self.drop_none,
+        )
+        return state
+
+    def __setstate__(self, state):
+        (
+            self.main_datapipe,
+            self.num_instances,
+            self.buffer_size,
+            dill_function,
+            self.drop_none,
+        ) = state
+        if DILL_AVAILABLE:
+            self.classifier_fn = dill.loads(dill_function)  # type: ignore[assignment]
+        else:
+            self.classifier_fn = dill_function  # type: ignore[assignment]
+        self._datapipe_iterator = None
+        self.current_buffer_usage = 0
+        self.child_buffers = [deque() for _ in range(self.num_instances)]
+        self.instance_started = [False] * self.num_instances
+        self.main_datapipe_exhausted = False
+
 
 @functional_datapipe('mux')
 class MultiplexerIterDataPipe(IterDataPipe):

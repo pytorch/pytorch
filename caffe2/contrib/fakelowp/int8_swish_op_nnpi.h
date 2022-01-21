@@ -29,7 +29,7 @@ void SwishFakeInt8NNPI(
   int32_t quant_val = 0;
   uint8_t result = 0;
 
-  for (auto i = 0; i < N; ++i) {
+  for (const auto i : c10::irange(N)) {
     deq_val = (static_cast<uint8_t>(in[i]) - X_offset) / X_scale_fp32;
     deq_swish = deq_val / (1 + exp(-deq_val));
     quant_val = round(deq_swish / Y_scale + Y_offset);

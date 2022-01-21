@@ -1,6 +1,6 @@
 #include <ATen/core/function_schema.h>
-#include <ATen/core/interned_strings.h>
 #include <ATen/core/jit_type.h>
+#include <ATen/core/symbol.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
@@ -10,6 +10,13 @@
 #include <torch/csrc/jit/passes/dtype_analysis.h>
 #include <torch/csrc/jit/passes/utils/op_registry.h>
 #include <torch/library.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#endif
+
 #include <algorithm>
 #include <memory>
 #include <stdexcept>
@@ -249,13 +256,18 @@ struct DtypePropagationPass {
         return false;
       case prim::ListConstruct:
       case prim::ListUnpack:
-        TORCH_INTERNAL_ASSERT(false, "not supported IR");
+        TORCH_INTERNAL_ASSERT(
+            false,
+            "List Construct and Unpack is not supported in Dtype Propagation");
         break;
       default:
         if (n->kind().is_aten()) {
           return processAtenOps(n);
         } else {
-          TORCH_INTERNAL_ASSERT(false, "not supported IR");
+          TORCH_INTERNAL_ASSERT(
+              false,
+              n->kind().toDisplayString(),
+              "Op is not supported in Dtype Propagation");
         }
     }
     return false;
