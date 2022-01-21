@@ -839,14 +839,14 @@ class TensorLikePair(Pair):
     ) -> None:
         """Checks if the values of two tensors are close up to a desired tolerance."""
         actual, expected = self._promote_for_comparison(actual, expected)
-        mismatches = ~torch.isclose(actual, expected, rtol=rtol, atol=atol, equal_nan=equal_nan)
-        if not torch.any(mismatches):
+        matches = torch.isclose(actual, expected, rtol=rtol, atol=atol, equal_nan=equal_nan)
+        if torch.all(matches):
             return
 
         if actual.shape == torch.Size([]):
             msg = make_scalar_mismatch_msg(actual.item(), expected.item(), rtol=rtol, atol=atol, identifier=identifier)
         else:
-            msg = make_tensor_mismatch_msg(actual, expected, mismatches, rtol=rtol, atol=atol, identifier=identifier)
+            msg = make_tensor_mismatch_msg(actual, expected, ~matches, rtol=rtol, atol=atol, identifier=identifier)
         raise self._make_error_meta(AssertionError, msg)
 
     def _promote_for_comparison(
