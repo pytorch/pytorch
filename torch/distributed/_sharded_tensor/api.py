@@ -287,7 +287,7 @@ class ShardedTensor(object):
 
         world_size = dist.get_world_size(self._process_group)
 
-        gathered_shards: List[Optional[Shard]] = [None] * world_size if rank == dst else []
+        gathered_shards: List[Optional[List[Shard]]] = [None] * world_size if rank == dst else []
         dist.gather_object(
             obj=local_shards,
             object_gather_list=gathered_shards,
@@ -307,6 +307,7 @@ class ShardedTensor(object):
                     tensor = shard.tensor
 
                     out_narrow_view = out
+                    assert out_narrow_view is not None
                     for dim in range(dims):
                         out_narrow_view = out_narrow_view.narrow(
                             dim,
