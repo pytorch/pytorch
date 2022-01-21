@@ -860,6 +860,10 @@ void initJITBindings(PyObject* module) {
             getTEMustUseLLVMOnCPU() = use_llvm;
           })
       .def(
+          "_jit_set_te_dynamic_shape_fusion",
+          &setTensorExprDynamicShapeFusionEnabled)
+      .def("_jit_te_dynamic_shape_fusion", &tensorExprDynamicShapeFusionEnabled)
+      .def(
           "_jit_cat_wo_conditionals",
           [](bool optimize_cat) {
             using namespace torch::jit::tensorexpr;
