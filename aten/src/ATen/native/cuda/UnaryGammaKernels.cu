@@ -69,8 +69,6 @@ void polygamma_kernel_cuda(TensorIteratorBase& iter, int64_t n) {
               /*arity=*/1>(
               iter,
               polygamma_string,
-              /*scalar_pos=*/at::cuda::jit::BinaryFuncVariant::NoScalar,
-              /*scalar_val=*/0,
               /*extra_args=*/n);
         });
 #else

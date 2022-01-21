@@ -123,6 +123,47 @@ arguments provided by TensorIterator. Eg. While capturing `n`, where
 
 */
 
+namespace {
+template <typename return_type, typename f_inputs_type, int arity>
+bool needs_dynamic_casting_jiterator(TensorIteratorBase& iter) {
+  // Computes if dynamic casting is needed for jiterator inputs
+  // Dynamic casting is needed if an input's dtype differs from the common dtype
+  //   or if the result dtype differs from the output's dtype
+  // Note: this is intentionally divergent from calling needs_dynamic_casting,
+  //   which is more general and inspects a lambda to determine if dynamic
+  //   casting is needed.
+  bool needs_dynamic_casting = false;
+
+  // Checks output
+  const ScalarType return_scalar_type =
+      c10::CppTypeToScalarType<return_type>::value;
+  const auto dtype0 = iter.dtype(0);
+  if (dtype0 != return_scalar_type) {
+    needs_dynamic_casting = true;
+  }
+
+  // Checks input(s)
+  const ScalarType inputs_scalar_type =
+      c10::CppTypeToScalarType<f_inputs_type>::value;
+  for (auto i = decltype(arity){1}; i < (arity + 1); ++i) {
+    const auto dtypei = iter.dtype(i);
+    if (dtypei != inputs_scalar_type) {
+      needs_dynamic_casting = true;
+      // NOTE: can't short-circuit here yet because the dtype check below needs
+      // to run on every arg
+    }
+    TORCH_CHECK(
+        dtypei != kComplexDouble && dtypei != kComplexFloat,
+        "Encountered an unsupported dtype ",
+        dtypei,
+        "!");
+  }
+
+  return needs_dynamic_casting;
+}
+
+} // namespace
+
 // Entrypoint for jitted GPU kernels.
 // Only handles elementwise unary and binary kernels with a
 //   common dtype and a single output.
@@ -136,18 +177,13 @@ template <
 void jitted_gpu_kernel(
     TensorIteratorBase& iter,
     const std::string& f,
-    at::cuda::jit::BinaryFuncVariant scalar_pos =
-        at::cuda::jit::BinaryFuncVariant::NoScalar,
-    at::opmath_type<f_inputs_type> scalar_val = 0,
     Args... extra_args) {
   // TODO: much of preamble is common to both jitted_gpu_kernel and gpu_kernel
   //   Maybe it could be refactored?
-  static_assert((!std::is_same<return_type, c10::complex<double>>::value &&
-  !std::is_same<return_type, c10::complex<float>>::value), "complex types are not supported \
-  in jiterator functors");
-  static_assert((!std::is_same<f_inputs_type, c10::complex<double>>::value &&
-  !std::is_same<return_type, c10::complex<float>>::value), "complex types are not supported \
-  in jiterator functors");
+  static_assert(
+      (!c10::is_complex<return_type>::value &&
+       !c10::is_complex<f_inputs_type>::value),
+      "complex types are not supported in jiterator functors");
   for (int arg = 0; arg < iter.ntensors(); arg++) {
     TORCH_INTERNAL_ASSERT(
       iter.device(arg).is_cuda(),
@@ -161,75 +197,71 @@ void jitted_gpu_kernel(
   if (!iter.can_use_32bit_indexing()) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
       jitted_gpu_kernel<name, return_type, f_inputs_type, arity, Args...>(
-          sub_iter, f, scalar_pos, scalar_val, extra_args...);
+          sub_iter, f, extra_args...);
     }
 
     return;
   }
 
-  // Computes if dynamic casting is needed
-  // Dynamic casting is needed if an input's dtype differs from the common dtype
-  //   or if the result dtype differs from the output's dtype
-  // Note: this is intentionally divergent from calling needs_dynamic_casting,
-  //   which is more general and inspects a lambda to determine if dynamic
-  //   casting is needed.
-  bool needs_dynamic_casting = false;
+  auto dynamic_casting = needs_dynamic_casting_jiterator<return_type, f_inputs_type, arity>(iter);
 
-  // Checks output
-  const ScalarType return_scalar_type = c10::CppTypeToScalarType<return_type>::value;
-  const auto dtype0 = iter.dtype(0);
-  if (dtype0 != return_scalar_type) {
-    needs_dynamic_casting = true;
+  // NOTE: With `scalar_pos=NoScalar`,`scalar_val` is not used
+  // for computation in the generated code and hence we pass a dummy
+  // value of `0`.
+  jitted_gpu_kernel_impl<
+      /*name*/ name,
+      /*return_type=*/return_type,
+      /*f_inputs_type=*/f_inputs_type,
+      arity,
+      at::cuda::jit::BinaryFuncVariant::NoScalar>(
+      iter, f, dynamic_casting, /*scalar_val=*/0, extra_args...);
+}
+
+// TODO: support runtime state capture similar to `jitted_gpu_kernel`.
+// `jitted_gpu_kernel_scalar` currently only supports Binary Operators
+template <
+    char const* name,
+    typename return_type,
+    typename f_inputs_type,
+    int arity,
+    at::cuda::jit::BinaryFuncVariant scalar_pos>
+void jitted_gpu_kernel_scalar(
+    TensorIteratorBase& iter,
+    const std::string& f,
+    at::opmath_type<f_inputs_type> scalar_val) {
+  // TODO: much of preamble is common to both jitted_gpu_kernel and gpu_kernel
+  //   Maybe it could be refactored?
+  static_assert(
+      (!c10::is_complex<return_type>::value &&
+       !c10::is_complex<f_inputs_type>::value),
+      "complex types are not supported in jiterator functors");
+  for (int arg = 0; arg < iter.ntensors(); arg++) {
+    TORCH_INTERNAL_ASSERT(
+      iter.device(arg).is_cuda(),
+      "argument ", arg, ": expected a CUDA device but found ", iter.device(arg));
   }
 
-  // Checks input(s)
-  const ScalarType inputs_scalar_type = c10::CppTypeToScalarType<f_inputs_type>::value;
-  for (auto i = decltype(arity){1}; i < (arity + 1); ++i) {
-    const auto dtypei = iter.dtype(i);
-    if (dtypei != inputs_scalar_type) {
-      needs_dynamic_casting = true;
-      // NOTE: can't short-circuit here yet because the dtype check below needs to run on every arg
+  if (iter.numel() == 0) {
+    return;
+  }
+
+  if (!iter.can_use_32bit_indexing()) {
+    for (auto& sub_iter : iter.with_32bit_indexing()) {
+      jitted_gpu_kernel_scalar<name, return_type, f_inputs_type, arity, scalar_pos>(
+          sub_iter, f, scalar_val);
     }
-    TORCH_CHECK(dtypei != kComplexDouble && dtypei != kComplexFloat,
-                "Encountered an unsupported dtype ", dtypei, "!");
-  }
-  if (scalar_pos == at::cuda::jit::BinaryFuncVariant::NoScalar) {
-    // NOTE: With `scalar_pos=NoScalar`,`scalar_val` is not used
-    // for computation in the generated code and hence we pass a dummy
-    // value of `0`.
-    jitted_gpu_kernel_impl<
-        /*name*/ name,
-        /*return_type=*/return_type,
-        /*f_inputs_type=*/f_inputs_type,
-        arity,
-        at::cuda::jit::BinaryFuncVariant::NoScalar>(
-        iter, f, needs_dynamic_casting, /*scalar_val=*/0, extra_args...);
-  } else if (scalar_pos == at::cuda::jit::BinaryFuncVariant::RhsScalar) {
-    jitted_gpu_kernel_impl<
-        /*name*/ name,
-        /*return_type=*/return_type,
-        /*f_inputs_type=*/f_inputs_type,
-        arity,
-        at::cuda::jit::BinaryFuncVariant::RhsScalar>(
-        iter,
-        f,
-        needs_dynamic_casting,
-        scalar_val,
-        extra_args...);
 
-  } else {
-    jitted_gpu_kernel_impl<
-        /*name*/ name,
-        /*return_type=*/return_type,
-        /*f_inputs_type=*/f_inputs_type,
-        arity,
-        at::cuda::jit::BinaryFuncVariant::LhsScalar>(
-        iter,
-        f,
-        needs_dynamic_casting,
-        scalar_val,
-        extra_args...);
+    return;
   }
+
+  auto dynamic_casting = needs_dynamic_casting_jiterator<return_type, f_inputs_type, arity>(iter);
+
+  jitted_gpu_kernel_impl<
+      /*name*/ name,
+      /*return_type=*/return_type,
+      /*f_inputs_type=*/f_inputs_type,
+      arity,
+      scalar_pos>(iter, f, dynamic_casting, scalar_val);
 }
 
 // TODO: support runtime state capture similar to `jitted_gpu_kernel`.
@@ -247,11 +279,11 @@ void opmath_jitted_gpu_kernel_with_scalars(TensorIteratorBase& iter, const std::
     // kernels device guards, but structured kernels do it right and
     // we can assume the device is already set correctly
     const OptionalDeviceGuard device_guard(iter.device(1));
-    jitted_gpu_kernel<name, return_type, f_inputs_type, 1>(iter, f, at::cuda::jit::BinaryFuncVariant::LhsScalar, scalar_val);
+    jitted_gpu_kernel_scalar<name, return_type, f_inputs_type, 1, at::cuda::jit::BinaryFuncVariant::LhsScalar>(iter, f, scalar_val);
   } else if (iter.is_cpu_scalar(2)) {
     auto scalar_val = iter.scalar_value<opmath_t>(2);
     iter.remove_operand(2);
-    jitted_gpu_kernel<name, return_type, f_inputs_type, 1>(iter, f, at::cuda::jit::BinaryFuncVariant::RhsScalar, scalar_val);
+    jitted_gpu_kernel_scalar<name, return_type, f_inputs_type, 1, at::cuda::jit::BinaryFuncVariant::RhsScalar>(iter, f, scalar_val);
   } else {
     jitted_gpu_kernel<name, return_type, f_inputs_type, 2>(iter, f);
   }
