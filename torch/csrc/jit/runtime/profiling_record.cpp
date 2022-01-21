@@ -125,7 +125,7 @@ bool isOptionalTensorType(const TypePtr& type) {
 
 // Inserts profiling nodes.
 //
-// The prim::profile node profile Tensor and Optional[Tensor].
+// The prim::profile node profiles Tensor and Optional[Tensor].
 //
 // It stores two fields:
 // 1. attr::seen_none, an integer, which is initially 0 and is set to 1 if the

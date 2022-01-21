@@ -538,7 +538,7 @@ GraphExecutor* getDifferentiableGraphOpExecutor(Operation& op) {
 } // namespace detail
 
 void GraphExecutorImplBase::run(Stack& stack) {
-  GRAPH_DUMP("about to run GraphExecutorImplBase", graph);
+  GRAPH_DUMP("About to run GraphExecutorImplBase on: ", graph);
   TORCH_CHECK(
       stack.size() >= num_inputs,
       "expected ",
