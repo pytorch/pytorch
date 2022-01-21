@@ -1556,7 +1556,7 @@ class CopyNodeQuantizeHandler(QuantizeHandler):
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
         # always produce reference pattern for following functions
-        module_type_list = [
+        module_type_list = {
             torch.nn.ReLU,
             torch.nn.ReLU6,
             torch.nn.AdaptiveAvgPool1d,
@@ -1568,8 +1568,8 @@ class CopyNodeQuantizeHandler(QuantizeHandler):
             torch.nn.MaxPool1d,
             torch.nn.MaxPool2d,
             torch.nn.MaxPool3d,
-        ]
-        func_list = [
+        }
+        func_list = {
             torch.nn.functional.adaptive_avg_pool1d,
             torch.nn.functional.adaptive_avg_pool2d,
             torch.nn.functional.adaptive_avg_pool3d,
@@ -1579,12 +1579,12 @@ class CopyNodeQuantizeHandler(QuantizeHandler):
             torch.nn.functional.relu,
             torch.nn.functional.hardtanh,
             torch.nn.functional.hardtanh_,
-        ]
-        method_list = [
+        }
+        method_list = {
             torch.mean,
             'relu',
             'relu_',
-        ]
+        }
         is_call_function = node.op == "call_function" and node.target in func_list
         is_call_method = node.op == "call_method" and node.target in method_list
         is_call_module = node.op == "call_module" and type(modules[str(node.target)]) in module_type_list

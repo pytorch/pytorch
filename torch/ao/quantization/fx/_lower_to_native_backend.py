@@ -16,6 +16,36 @@ LOWER_MODULE_MAP: Dict[Type[torch.nn.Module], Type[ReferenceableQuantizedModule]
     torch.nn.quantized._reference.Conv3d: torch.nn.quantized.Conv3d,
 }
 
+module_type_list = {
+    torch.nn.ReLU,
+    torch.nn.ReLU6,
+    torch.nn.AdaptiveAvgPool1d,
+    torch.nn.AdaptiveAvgPool2d,
+    torch.nn.AdaptiveAvgPool3d,
+    torch.nn.AvgPool1d,
+    torch.nn.AvgPool2d,
+    torch.nn.AvgPool3d,
+    torch.nn.MaxPool1d,
+    torch.nn.MaxPool2d,
+    torch.nn.MaxPool3d,
+}
+func_list = {
+    torch.nn.functional.adaptive_avg_pool1d,
+    torch.nn.functional.adaptive_avg_pool2d,
+    torch.nn.functional.adaptive_avg_pool3d,
+    torch.nn.functional.max_pool1d,
+    torch.nn.functional.max_pool2d,
+    torch.nn.functional.max_pool3d,
+    torch.nn.functional.relu,
+    torch.nn.functional.hardtanh,
+    torch.nn.functional.hardtanh_,
+}
+method_list = {
+    torch.mean,
+    'relu',
+    'relu_',
+}
+
 def _lower_weighted_ref_module(model: QuantizedGraphModule, ref_class: Type[torch.nn.Module]) -> QuantizedGraphModule:
     """
     Traverse the graph and find dequantize - ref module - quantize patterns
@@ -82,40 +112,11 @@ def _lower_weighted_ref_module(model: QuantizedGraphModule, ref_class: Type[torc
 def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphModule:
     modules = dict(model.named_modules(remove_duplicate=False))
     nodes = list(model.graph.nodes)
-    module_type_list = [
-        torch.nn.ReLU,
-        torch.nn.ReLU6,
-        torch.nn.AdaptiveAvgPool1d,
-        torch.nn.AdaptiveAvgPool2d,
-        torch.nn.AdaptiveAvgPool3d,
-        torch.nn.AvgPool1d,
-        torch.nn.AvgPool2d,
-        torch.nn.AvgPool3d,
-        torch.nn.MaxPool1d,
-        torch.nn.MaxPool2d,
-        torch.nn.MaxPool3d,
-    ]
-    func_list = [
-        torch.nn.functional.adaptive_avg_pool1d,
-        torch.nn.functional.adaptive_avg_pool2d,
-        torch.nn.functional.adaptive_avg_pool3d,
-        torch.nn.functional.max_pool1d,
-        torch.nn.functional.max_pool2d,
-        torch.nn.functional.max_pool3d,
-        torch.nn.functional.relu,
-        torch.nn.functional.hardtanh,
-        torch.nn.functional.hardtanh_,
-    ]
-    method_list = [
-        torch.mean,
-        'relu',
-        'relu_',
-    ]
-
     for n in model.graph.nodes:
         q_node = n
         if q_node.target == torch.quantize_per_tensor:
-            ref_node = q_node.args[0]
+            # get output scale/zero_point/dtype from the quantize node
+            ref_node, scale_node, zero_point_node, dtype = q_node.args
 
             is_call_function = ref_node.op == "call_function" and ref_node.target in func_list
             is_call_method = ref_node.op == "call_method" and ref_node.target in method_list
@@ -124,11 +125,6 @@ def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphMo
             if is_call_module or is_call_function or is_call_method:
                 dq_node = ref_node.args[0]
                 if dq_node.target == 'dequantize':
-                    # get output scale/zero_point/dtype from the quantize node
-                    scale_node = q_node.args[1]
-                    zero_point_node = q_node.args[2]
-                    dtype = q_node.args[3]
-
                     if is_call_module:
                         ref_module = modules[ref_node.target]
                         # change this pattern to use the corresponding quantized module
@@ -138,7 +134,7 @@ def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphMo
                     else:
                         dq_node.target = ref_node
 
-                    # remvoe dq node:
+                    # remove dq node:
                     dq_node_input = dq_node.args[0]
                     dq_node.replace_all_uses_with(dq_node_input)
                     model.graph.erase_node(dq_node)
