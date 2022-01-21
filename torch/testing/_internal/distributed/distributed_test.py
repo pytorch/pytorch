@@ -71,7 +71,6 @@ from torch.testing._internal.common_utils import (
     sandcastle_skip_if,
 )
 
-
 import torch.distributed.optim.post_localSGD_optimizer as post_localSGD_optimizer
 
 from torch.utils.data.distributed import DistributedSampler
@@ -4042,8 +4041,8 @@ class DistributedTest:
             adam_betas = (0.9, 0.99)
             adam_eps = 1e-6
             self._test_ddp_hook_with_optimizer_parity(
-                True, # grad as bucket view
-                False, # static graph
+                True,  # grad as bucket view
+                False,  # static graph
                 torch.optim.Adam,
                 adam_lr,
                 betas=adam_betas,
@@ -4063,8 +4062,8 @@ class DistributedTest:
             # Not testing grad_as_bucket_view and static_graph as they are
             # tested in AdamW test above.
             self._test_ddp_hook_with_optimizer_parity(
-                True, # grad as bucket view
-                False, # static_graph
+                True,  # grad as bucket view
+                False,  # static_graph
                 torch.optim.SGD,
                 sgd_lr,
                 momentum=sgd_momentum,
