@@ -109,7 +109,6 @@ class StreamWrapper:
 
     def __getattr__(self, name):
         file_obj = self.__dict__['file_obj']
-        print(name)
         return getattr(file_obj, name)
 
     def __dir__(self):
@@ -127,5 +126,14 @@ class StreamWrapper:
         for line in self.file_obj:
             yield line
 
+    def __next__(self):
+        return next(self.file_obj)
+
     def __repr__(self):
         return "StreamWrapper<" + repr(self.file_obj) + ">"
+
+    def __getstate__(self):
+        return self.file_obj
+
+    def __setstate__(self, obj):
+        self.file_obj = obj

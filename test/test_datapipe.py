@@ -185,7 +185,6 @@ class TestStreamWrapper(TestCase):
                 yield str(i)
 
         def close(self):
-            print("Closed")
             self.closed = True
 
     def test_dir(self):
@@ -210,6 +209,22 @@ class TestStreamWrapper(TestCase):
         self.assertFalse(fd.closed)
         del wrap_fd
         self.assertTrue(fd.closed)
+
+    def test_pickle(self):
+        f = tempfile.TemporaryFile()
+        with self.assertRaises(TypeError) as ctx1:
+            pickle.dumps(f)
+
+        wrap_f = StreamWrapper(f)
+        with self.assertRaises(TypeError) as ctx2:
+            pickle.dumps(wrap_f)
+
+        # Same exception when pickle
+        self.assertEqual(str(ctx1.exception), str(ctx2.exception))
+
+        fd = TestStreamWrapper._FakeFD("")
+        wrap_fd = StreamWrapper(fd)
+        _ = pickle.loads(pickle.dumps(wrap_fd))
 
 
 class TestIterableDataPipeBasic(TestCase):
