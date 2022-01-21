@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 #include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
@@ -48,6 +48,11 @@ TORCH_CUDA_CU_API LstmResult lstm(
 TORCH_CUDA_CU_API Val* fast_gelu(Val* x);
 TORCH_CUDA_CU_API Val* fast_gelu_backward(Val* dy, Val* x);
 TORCH_CUDA_CU_API Val* gelu_backward(Val* dy, Val* x);
+
+TORCH_CUDA_CU_API TensorView* view(
+    TensorView* x,
+    const std::vector<int64_t>& x_sizes,
+    const std::vector<int64_t>& new_sizes);
 
 } // namespace cuda
 } // namespace fuser

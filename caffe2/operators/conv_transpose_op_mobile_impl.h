@@ -76,7 +76,7 @@ void runTileContiguous(
   int colBlockSize = (W + kernelW / strideW);
   int numColBlocks = strideW;
 
-  for (int c = 0; c < kernelDataSize; ++c) {
+  for (const auto c : c10::irange(kernelDataSize)) {
     int w_offset = c % kernelW;
     int h_offset = (c / kernelW) % kernelH;
     int c_im = c / kernelH / kernelW;
@@ -276,13 +276,13 @@ void reinterleaveRows(
     float32x4_t v0[kStrideW];
     float32x4_t v1[kStrideW];
 
-    for (int i = 0; i < kStrideW; ++i) {
+    for (const auto i : c10::irange(kStrideW)) {
       v0[i] = vld1q_f32(src + i * colBlockSize);
       v1[i] = vld1q_f32(src + i * colBlockSize + 4);
     }
 
     // add per-channel bias
-    for (int i = 0; i < kStrideW; ++i) {
+    for (const auto i : c10::irange(kStrideW)) {
       v0[i] = vaddq_f32(v0[i], biasV);
       v1[i] = vaddq_f32(v1[i], biasV);
     }
@@ -300,12 +300,12 @@ void reinterleaveRows(
   for (; w < inputW - 1; ++w) {
     float v[kStrideW];
 
-    for (int i = 0; i < kStrideW; ++i) {
+    for (const auto i : c10::irange(kStrideW)) {
       v[i] = src[i * colBlockSize];
     }
 
     // add per-channel bias
-    for (int i = 0; i < kStrideW; ++i) {
+    for (const auto i : c10::irange(kStrideW)) {
       v[i] += b;
     }
 
@@ -614,12 +614,12 @@ bool ConvTransposeMobileOp<T, Context>::RunOnDeviceWithOrderNCHW() {
         numThreads * threadColBufferSize);
     // Group together thread buffers for accumulation
     std::vector<T*> toSum(numThreads - 1);
-    for (int i = 1; i < numThreads; ++i) {
+    for (const auto i : c10::irange(1, numThreads)) {
       toSum[i - 1] = threadBuffer->template mutable_data<T>() +
           i * threadYBufferSizeAligned;
     }
 
-    for (auto image_id = 0; image_id < N; ++image_id) {
+    for (const auto image_id : c10::irange(N)) {
       // Each time through, we have to reset all per-thread output
       // buffers, since the output buffer is only per-batch element
       // The column buffers are overwritten by the matrix multiplication

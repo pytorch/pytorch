@@ -2,6 +2,7 @@
 
 #include <ATen/core/ivalue.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/autograd/profiler.h>
 
 #include <algorithm>
 #include <bitset>
@@ -165,7 +166,7 @@ RegisterOperators reg(
            if (size.isNone()) {
              push(stack, std::move(self));
            } else {
-             push(stack, at::sum_to(self.toTensor(), size.toIntVector()));
+             push(stack, at::sum_to(self.toTensor(), size.toDimVector()));
            }
          },
          aliasAnalysisFromSchema()),
@@ -350,7 +351,8 @@ RegisterOperators logging_operators(
              tracer::recordSourceLocation(node);
              graph->insertNode(node);
            }
-           auto output = autograd::profiler::getTime(/*allow_monotonic=*/true);
+           auto output =
+               torch::profiler::impl::getTime(/*allow_monotonic=*/true);
            push(stack, output);
            if (jit::tracer::isTracing()) {
              jit::tracer::addOutput(node, output);
@@ -720,7 +722,7 @@ IValue convert_scale_factor_to_double(const IValue& int_ivalue) {
   if (int_ivalue.isInt()) {
     scale_factor_double = static_cast<double>(int_ivalue.toInt());
   } else if (int_ivalue.isIntList()) {
-    auto int_list = int_ivalue.toIntVector();
+    auto int_list = int_ivalue.toDimVector();
     std::vector<double> double_vec(int_list.begin(), int_list.end());
     scale_factor_double = double_vec;
   } else if (int_ivalue.isNone()) {

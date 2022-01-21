@@ -1,17 +1,7 @@
-from cimodel.lib.conf_tree import ConfigNode, X
+from cimodel.lib.conf_tree import ConfigNode
 
 
 CONFIG_TREE_DATA = [
-    ("xenial", [
-        ("gcc", [
-            ("5.4", [  # All this subtree rebases to master and then build
-                ("3.6", [
-                    ("important", [X(True)]),
-                ]),
-            ]),
-            # TODO: bring back libtorch test
-        ]),
-    ]),
 ]
 
 
