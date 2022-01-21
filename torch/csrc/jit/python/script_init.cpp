@@ -8,10 +8,10 @@
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
-#include <torch/csrc/jit/mobile/backport.h>
 #include <torch/csrc/jit/mobile/code.h>
+#include <torch/csrc/jit/mobile/compatibility/backport.h>
+#include <torch/csrc/jit/mobile/compatibility/model_compatibility.h>
 #include <torch/csrc/jit/mobile/import.h>
-#include <torch/csrc/jit/mobile/model_compatibility.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/operator_upgraders/upgraders.h>
 #include <torch/csrc/jit/operator_upgraders/upgraders_guard.h>
