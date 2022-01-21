@@ -1485,7 +1485,7 @@ class DistributedDataParallel(Module, Joinable):
         """
         # Note: importing in function, otherwise this will cause a circular
         # import as optimizer_overlap module needs to import DistributedDataParallel.
-        from torch.distributed.algorithms.optimizer_overlap import _as_overlapped_optim
+        from torch.distributed.algorithms._optimizer_overlap import _as_overlapped_optim
         overlapped_optim = _as_overlapped_optim(optim, *args, **kwargs)
         try:
             overlapped_optim.register_ddp(self)
