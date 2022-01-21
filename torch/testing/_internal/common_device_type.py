@@ -13,7 +13,7 @@ import torch
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
     skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN, \
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, IS_WINDOWS, DeterministicGuard, TEST_SKIP_NOARCH, \
-    _TestParametrizer, compose_parametrize_fns, dtype_name, TEST_WITH_MIOPEN_SUGGEST_NHWC
+    _TestParametrizer, compose_parametrize_fns, dtype_name, TEST_WITH_MIOPEN_SUGGEST_NHWC, NATIVE_DEVICES
 from torch.testing._internal.common_cuda import _get_torch_cuda_version, TEST_CUSPARSE_GENERIC
 from torch.testing._internal.common_dtype import get_all_dtypes
 
@@ -934,8 +934,6 @@ class deviceCountAtLeast(object):
 
 # Only runs the test on the native device type (currently CPU, CUDA, Meta)
 def onlyNativeDeviceTypes(fn):
-    NATIVE_DEVICES = ('cpu', 'cuda', 'meta')
-
     @wraps(fn)
     def only_fn(self, *args, **kwargs):
         if self.device_type not in NATIVE_DEVICES:

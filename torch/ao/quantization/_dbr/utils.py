@@ -15,9 +15,16 @@ from .mappings import (
     add_and_mul_ops,
 )
 
+from ..qconfig import QConfigAny
+
 from torch.quantization import (
     ObserverBase,
     FakeQuantizeBase,
+    is_activation_post_process,
+)
+
+from ..qconfig_dict_utils import (
+    maybe_adjust_qconfig_for_module_type_or_name,
 )
 
 def _raise_obs_not_found_error(func):
@@ -75,6 +82,8 @@ SeenOpInfo = collections.namedtuple(
         # This is False if some packable args are results of other functions.
         # bool
         'op_packing_only_uses_module_attributes',
+        # QConfig for the op, can be None
+        'qconfig',
     ],
 )
 def seen_op_info_repr(self) -> str:
@@ -113,6 +122,7 @@ class ObserverWrapper(torch.nn.Identity):
     def __init__(self, child):
         super().__init__()
         self.child = child
+        self.dtype = child.dtype
 
 def wrap_observers_in_placeholders(module: torch.nn.Module) -> None:
     """
@@ -159,14 +169,32 @@ def trace_with_inputs(
 
 # TODO(future PR): verify correctness of this for all
 # quantizeable modules
-def is_leaf(m: torch.nn.Module) -> bool:
+def is_leaf(
+    m: torch.nn.Module,
+    prepare_custom_config_dict: Optional[Dict[str, Any]],
+) -> bool:
+    if prepare_custom_config_dict is None:
+        prepare_custom_config_dict = {}
+
+    if 'non_traceable_module_class' in prepare_custom_config_dict:
+        for target_cls in prepare_custom_config_dict['non_traceable_module_class']:
+            if isinstance(m, target_cls):
+                return True
+
+    # TODO(future PR): extend to the rest of the container classes
+    container_classes = (
+        torch.nn.Sequential,
+        torch.nn.ModuleList,
+    )
     return (
-        # allowlist everything in torch.nn except nn.Sequential
+        # allowlist everything in torch.nn except containers
         (m.__module__.startswith('torch.nn') and (
-            not isinstance(m, torch.nn.Sequential)
+            not isinstance(m, container_classes)
         )) or
         # allowlist nni modules, as they inherit from nn.Sequential
-        m.__module__.startswith('torch.nn.intrinsic')
+        m.__module__.startswith('torch.nn.intrinsic') or
+        # observers and fake quants are leaves
+        is_activation_post_process(m)
     )
 
 class FuncOutputObsType(enum.Enum):
@@ -180,6 +208,9 @@ def get_func_output_obs_type(
     op_type = seen_op_info.type
     is_module = isinstance(op_type, type(torch.nn.Module))
     if is_module:
+        return FuncOutputObsType.NONE
+
+    if seen_op_info.qconfig is None:
         return FuncOutputObsType.NONE
 
     # check for ops which need packed weights but the weights are
@@ -213,6 +244,8 @@ def converted_func_needs_scale_zp(seen_op_info: SeenOpInfo) -> bool:
     op_type = seen_op_info.type
     is_module = isinstance(op_type, type(torch.nn.Module))
     if is_module:
+        return False
+    if seen_op_info.qconfig is None:
         return False
     if op_type in add_and_mul_ops:
         # check if both arguments are tensors
@@ -508,7 +541,12 @@ def get_torch_function_hook_type(
 
     if needs_op_hooks:
         return HookType.OP_HOOKS
-    elif parent_module_has_qstate:
+    elif (
+        parent_module_has_qstate and
+        # do not attempt to dequantize the args to dequantize, as that will
+        # lead to infinite recursion
+        func != torch.Tensor.dequantize
+    ):
         return HookType.ARG_DEQUANTS
     else:
         return HookType.NONE
@@ -623,3 +661,24 @@ def get_input_args_quant_dequant_info(
             quant_infos.append(None)
             dequant_infos.append(False)
     return quant_infos, dequant_infos, any_arg_quant_or_dequant_needed
+
+def get_cur_qconfig(
+    qconfig_dict: Dict[str, Any],
+    cur_fqn: str,
+    cur_op: Callable,
+) -> Optional[QConfigAny]:
+    # precedence: global -> object_type -> module_name_regex -> module_name
+    #   -> module_name_object_type_order
+    # (module_name_regex, module_name_object_type_order not implemented yet)
+
+    # global
+    global_qconfig = qconfig_dict['']
+
+    # object_type
+    is_module = isinstance(cur_op, type(torch.nn.Module))
+    cur_op_type = type(cur_op) if is_module else cur_op
+
+    qconfig = maybe_adjust_qconfig_for_module_type_or_name(
+        qconfig_dict, cur_op_type, cur_fqn, global_qconfig)
+
+    return qconfig

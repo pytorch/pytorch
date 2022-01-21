@@ -534,6 +534,12 @@ def fractional_max_pool3d_with_indices(
         return_indices: if ``True``, will return the indices along with the outputs.
                         Useful to pass to :func:`~torch.nn.functional.max_unpool3d`.
 
+    Shape:
+        - Input: :math:`(N, C, T_{in}, H_{in}, W_{in})` or :math:`(C, T_{in}, H_{in}, W_{in})`.
+        - Output: :math:`(N, C, T_{out}, H_{out}, W_{out})` or :math:`(C, T_{out}, H_{out}, W_{out})`, where
+          :math:`(T_{out}, H_{out}, W_{out})=\text{output\_size}` or
+          :math:`(T_{out}, H_{out}, W_{out})=\text{output\_ratio} \times (T_{in}, H_{in}, W_{in})`
+
     Examples::
         >>> input = torch.randn(20, 16, 50, 32, 16)
         >>> # pool of cubic window of size=3, and target output size 13x12x11
@@ -561,13 +567,14 @@ def fractional_max_pool3d_with_indices(
         assert output_ratio is not None
         _output_ratio = _triple(output_ratio)
         output_size = [
-            int(input.size(2) * _output_ratio[0]),
-            int(input.size(3) * _output_ratio[1]),
-            int(input.size(4) * _output_ratio[2]),
+            int(input.size(-3) * _output_ratio[0]),
+            int(input.size(-2) * _output_ratio[1]),
+            int(input.size(-1) * _output_ratio[2]),
         ]
 
     if _random_samples is None:
-        _random_samples = torch.rand(input.size(0), input.size(1), 3, dtype=input.dtype, device=input.device)
+        n_batch = 1 if input.dim() == 4 else input.size(0)
+        _random_samples = torch.rand(n_batch, input.size(-4), 3, dtype=input.dtype, device=input.device)
     return torch._C._nn.fractional_max_pool3d(input, kernel_size, output_size, _random_samples)
 
 
@@ -2527,15 +2534,15 @@ def ctc_loss(
         {backward_reproducibility_note}
 
     Args:
-        log_probs: :math:`(T, N, C)` where `C = number of characters in alphabet including blank`,
+        log_probs: :math:`(T, N, C)` or :math:`(T, C)` where `C = number of characters in alphabet including blank`,
             `T = input length`, and `N = batch size`.
             The logarithmized probabilities of the outputs
             (e.g. obtained with :func:`torch.nn.functional.log_softmax`).
         targets: :math:`(N, S)` or `(sum(target_lengths))`.
             Targets cannot be blank. In the second form, the targets are assumed to be concatenated.
-        input_lengths: :math:`(N)`.
+        input_lengths: :math:`(N)` or :math:`()`.
             Lengths of the inputs (must each be :math:`\leq T`)
-        target_lengths: :math:`(N)`.
+        target_lengths: :math:`(N)` or :math:`()`.
             Lengths of the targets
         blank (int, optional):
             Blank label. Default :math:`0`.
@@ -2888,14 +2895,10 @@ def cross_entropy(
     See :class:`~torch.nn.CrossEntropyLoss` for details.
 
     Args:
-        input (Tensor) : :math:`(N, C)` where `C = number of classes` or :math:`(N, C, H, W)`
-            in case of 2D Loss, or :math:`(N, C, d_1, d_2, ..., d_K)` where :math:`K \geq 1`
-            in the case of K-dimensional loss. `input` is expected to contain unnormalized scores
-            (often referred to as logits).
-        target (Tensor) : If containing class indices, shape :math:`(N)` where each value is
-            :math:`0 \leq \text{targets}[i] \leq C-1`, or :math:`(N, d_1, d_2, ..., d_K)` with
-            :math:`K \geq 1` in the case of K-dimensional loss. If containing class probabilities,
-            same shape as the input.
+        input (Tensor) : Predicted unnormalized scores (often referred to as logits);
+            see Shape section below for supported shapes.
+        target (Tensor) : Ground truth class indices or class probabilities;
+            see Shape section below for supported shapes.
         weight (Tensor, optional): a manual rescaling weight given to each
             class. If given, has to be a Tensor of size `C`
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
@@ -2922,6 +2925,21 @@ def cross_entropy(
             of smoothing when computing the loss, where 0.0 means no smoothing. The targets
             become a mixture of the original ground truth and a uniform distribution as described in
             `Rethinking the Inception Architecture for Computer Vision <https://arxiv.org/abs/1512.00567>`__. Default: :math:`0.0`.
+
+    Shape:
+        - Input: Shape :math:`(C)`, :math:`(N, C)` or :math:`(N, C, d_1, d_2, ..., d_K)` with :math:`K \geq 1`
+          in the case of `K`-dimensional loss.
+        - Target: If containing class indices, shape :math:`()`, :math:`(N)` or :math:`(N, d_1, d_2, ..., d_K)` with
+          :math:`K \geq 1` in the case of K-dimensional loss where each value should be between :math:`[0, C)`.
+          If containing class probabilities, same shape as the input and each value should be between :math:`[0, 1]`.
+
+        where:
+
+        .. math::
+            \begin{aligned}
+                C ={} & \text{number of classes} \\
+                N ={} & \text{batch size} \\
+            \end{aligned}
 
     Examples::
 
@@ -2991,9 +3009,9 @@ def binary_cross_entropy(
 
     Examples::
 
-        >>> input = torch.randn((3, 2), requires_grad=True)
-        >>> target = torch.rand((3, 2), requires_grad=False)
-        >>> loss = F.binary_cross_entropy(F.sigmoid(input), target)
+        >>> input = torch.randn(3, 2, requires_grad=True)
+        >>> target = torch.rand(3, 2, requires_grad=False)
+        >>> loss = F.binary_cross_entropy(torch.sigmoid(input), target)
         >>> loss.backward()
     """
     if has_torch_function_variadic(input, target, weight):
@@ -3348,7 +3366,7 @@ def multilabel_soft_margin_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:
-    r"""multilabel_soft_margin_loss(input, target, weight=None, size_average=None) -> Tensor
+    r"""multilabel_soft_margin_loss(input, target, weight=None, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.MultiLabelSoftMarginLoss` for details.
     """
@@ -3695,7 +3713,7 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
             be used directly for interpolation.
         antialias (bool, optional): flag to apply anti-aliasing. Default: ``False``. Using anti-alias
             option together with ``align_corners=False``, interpolation result would match Pillow
-            result for downsampling operation. Supported modes: ``'bilinear'``.
+            result for downsampling operation. Supported modes: ``'bilinear'``, ``'bicubic'``.
 
     .. note::
         With ``mode='bicubic'``, it's possible to cause overshoot, in other words it can produce
@@ -3835,8 +3853,8 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
             output_size = [int(math.floor(float(input.size(i + 2)) * scale_factors[i])) for i in range(dim)]
         scale_factors = None
 
-    if antialias and not (mode in ("bilinear", ) and input.ndim == 4):
-        raise ValueError("Anti-alias option is only supported for bilinear mode")
+    if antialias and not (mode in ("bilinear", "bicubic") and input.ndim == 4):
+        raise ValueError("Anti-alias option is only supported for bilinear and bicubic modes")
 
     if input.dim() == 3 and mode == "nearest":
         return torch._C._nn.upsample_nearest1d(input, output_size, scale_factors)
@@ -3885,6 +3903,13 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
         return torch._C._nn.upsample_trilinear3d(input, output_size, align_corners, scale_factors)
     if input.dim() == 4 and mode == "bicubic":
         assert align_corners is not None
+        # Enforce that the full call with the new kwarg is not invoked when scripting.
+        # TODO: Remove this scripting logic once the 2-week FC window has passed.
+        if antialias:
+            if not torch.jit.is_scripting():
+                return torch._C._nn._upsample_bicubic2d_aa(input, output_size, align_corners, scale_factors)
+            else:
+                raise RuntimeError("TorchScript currently does not support antialias in interpolate")
         return torch._C._nn.upsample_bicubic2d(input, output_size, align_corners, scale_factors)
 
     if input.dim() == 3 and mode == "bilinear":
@@ -5003,6 +5028,53 @@ def _scaled_dot_product_attention(
     return output, attn
 
 
+def _mha_shape_check(query: Tensor, key: Tensor, value: Tensor,
+                     key_padding_mask: Optional[Tensor], attn_mask: Optional[Tensor], num_heads: int):
+    # Verifies the expected shape for `query, `key`, `value`, `key_padding_mask` and `attn_mask`
+    # and returns if the input is batched or not.
+    # Raises an error if `query` is not 2-D (unbatched) or 3-D (batched) tensor.
+
+    # Shape check.
+    if query.dim() == 3:
+        # Batched Inputs
+        is_batched = True
+        assert key.dim() == 3 and value.dim() == 3, \
+            ("For batched (3-D) `query`, expected `key` and `value` to be 3-D"
+             f" but found {key.dim()}-D and {value.dim()}-D tensors respectively")
+        if key_padding_mask is not None:
+            assert key_padding_mask.dim() == 2, \
+                ("For batched (3-D) `query`, expected `key_padding_mask` to be `None` or 2-D"
+                 f" but found {key_padding_mask.dim()}-D tensor instead")
+        if attn_mask is not None:
+            assert attn_mask.dim() in (2, 3), \
+                ("For batched (3-D) `query`, expected `attn_mask` to be `None`, 2-D or 3-D"
+                 f" but found {attn_mask.dim()}-D tensor instead")
+    elif query.dim() == 2:
+        # Unbatched Inputs
+        is_batched = False
+        assert key.dim() == 2 and value.dim() == 2, \
+            ("For unbatched (2-D) `query`, expected `key` and `value` to be 2-D"
+             f" but found {key.dim()}-D and {value.dim()}-D tensors respectively")
+
+        if key_padding_mask is not None:
+            assert key_padding_mask.dim() == 1, \
+                ("For unbatched (2-D) `query`, expected `key_padding_mask` to be `None` or 1-D"
+                 f" but found {key_padding_mask.dim()}-D tensor instead")
+
+        if attn_mask is not None:
+            assert attn_mask.dim() in (2, 3), \
+                ("For unbatched (2-D) `query`, expected `attn_mask` to be `None`, 2-D or 3-D"
+                 f" but found {attn_mask.dim()}-D tensor instead")
+            if attn_mask.dim() == 3:
+                expected_shape = (num_heads, query.shape[0], key.shape[0])
+                assert attn_mask.shape == expected_shape, \
+                    (f"Expected `attn_mask` shape to be {expected_shape} but got {attn_mask.shape}")
+    else:
+        raise AssertionError(
+            f"query should be unbatched 2D or batched 3D tensor but received {query.dim()}-D query tensor")
+
+    return is_batched
+
 def multi_head_attention_forward(
     query: Tensor,
     key: Tensor,
@@ -5027,6 +5099,7 @@ def multi_head_attention_forward(
     v_proj_weight: Optional[Tensor] = None,
     static_k: Optional[Tensor] = None,
     static_v: Optional[Tensor] = None,
+    average_attn_weights: bool = True,
 ) -> Tuple[Tensor, Optional[Tensor]]:
     r"""
     Args:
@@ -5052,17 +5125,20 @@ def multi_head_attention_forward(
             a combination of q_proj_weight, k_proj_weight, v_proj_weight.
         q_proj_weight, k_proj_weight, v_proj_weight, in_proj_bias: input projection weight and bias.
         static_k, static_v: static key and value used for attention operators.
+        average_attn_weights: If true, indicates that the returned ``attn_weights`` should be averaged across heads.
+            Otherwise, ``attn_weights`` are provided separately per head. Note that this flag only has an effect
+            when ``need_weights=True.``. Default: True
 
 
     Shape:
         Inputs:
-        - query: :math:`(L, N, E)` where L is the target sequence length, N is the batch size, E is
+        - query: :math:`(L, E)` or :math:`(L, N, E)` where L is the target sequence length, N is the batch size, E is
           the embedding dimension.
-        - key: :math:`(S, N, E)`, where S is the source sequence length, N is the batch size, E is
+        - key: :math:`(S, E)` or :math:`(S, N, E)`, where S is the source sequence length, N is the batch size, E is
           the embedding dimension.
-        - value: :math:`(S, N, E)` where S is the source sequence length, N is the batch size, E is
+        - value: :math:`(S, E)` or :math:`(S, N, E)` where S is the source sequence length, N is the batch size, E is
           the embedding dimension.
-        - key_padding_mask: :math:`(N, S)` where N is the batch size, S is the source sequence length.
+        - key_padding_mask: :math:`(S)` or :math:`(N, S)` where N is the batch size, S is the source sequence length.
           If a ByteTensor is provided, the non-zero positions will be ignored while the zero positions
           will be unchanged. If a BoolTensor is provided, the positions with the
           value of ``True`` will be ignored while the position with the value of ``False`` will be unchanged.
@@ -5079,10 +5155,13 @@ def multi_head_attention_forward(
           N is the batch size, E is the embedding dimension. E/num_heads is the head dimension.
 
         Outputs:
-        - attn_output: :math:`(L, N, E)` where L is the target sequence length, N is the batch size,
+        - attn_output: :math:`(L, E)` or :math:`(L, N, E)` where L is the target sequence length, N is the batch size,
           E is the embedding dimension.
-        - attn_output_weights: :math:`(N, L, S)` where N is the batch size,
-          L is the target sequence length, S is the source sequence length.
+        - attn_output_weights: Only returned when ``need_weights=True``. If ``average_attn_weights=True``, returns
+          attention weights averaged across heads of shape :math:`(L, S)` when input is unbatched or
+          :math:`(N, L, S)`, where :math:`N` is the batch size, :math:`L` is the target sequence length, and
+          :math:`S` is the source sequence length. If ``average_weights=False``, returns attention weights per
+          head of shape :math:`(num_heads, L, S)` when input is unbatched or :math:`(N, num_heads, L, S)`.
     """
     tens_ops = (query, key, value, in_proj_weight, in_proj_bias, bias_k, bias_v, out_proj_weight, out_proj_bias)
     if has_torch_function(tens_ops):
@@ -5113,6 +5192,19 @@ def multi_head_attention_forward(
             static_k=static_k,
             static_v=static_v,
         )
+
+    is_batched = _mha_shape_check(query, key, value, key_padding_mask, attn_mask, num_heads)
+
+    # For unbatched input, we unsqueeze at the expected batch-dim to pretend that the input
+    # is batched, run the computation and before returning squeeze the
+    # batch dimension so that the output doesn't carry this temporary batch dimension.
+    if not is_batched:
+        # unsqueeze if the input is unbatched
+        query = query.unsqueeze(1)
+        key = key.unsqueeze(1)
+        value = value.unsqueeze(1)
+        if key_padding_mask is not None:
+            key_padding_mask = key_padding_mask.unsqueeze(0)
 
     # set up shape vars
     tgt_len, bsz, embed_dim = query.shape
@@ -5254,8 +5346,18 @@ def multi_head_attention_forward(
     attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
 
     if need_weights:
-        # average attention weights over heads
+        # optionally average attention weights over heads
         attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
-        return attn_output, attn_output_weights.sum(dim=1) / num_heads
+        if average_attn_weights:
+            attn_output_weights = attn_output_weights.sum(dim=1) / num_heads
+
+        if not is_batched:
+            # squeeze the output if input was unbatched
+            attn_output = attn_output.squeeze(1)
+            attn_output_weights = attn_output_weights.squeeze(0)
+        return attn_output, attn_output_weights
     else:
+        if not is_batched:
+            # squeeze the output if input was unbatched
+            attn_output = attn_output.squeeze(1)
         return attn_output, None

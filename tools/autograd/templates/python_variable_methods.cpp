@@ -33,6 +33,7 @@
 #include "torch/csrc/utils/tensor_numpy.h"
 #include "torch/csrc/utils/tensor_types.h"
 #include "torch/csrc/utils/structseq.h"
+#include "torch/csrc/autograd/python_return_types.h"
 
 #include <ATen/ATen.h>
 #include "c10/util/Optional.h"
@@ -920,7 +921,7 @@ static PyObject * THPVariable_storage(PyObject* self, PyObject* arg)
     return handle_torch_function(self, "storage");
   }
   auto& self_ = THPVariable_Unpack(self);
-  return createPyObject(self_.storage(), self_.dtype());
+  return createPyObject(self_.storage());
   END_HANDLE_TH_ERRORS
 }
 
