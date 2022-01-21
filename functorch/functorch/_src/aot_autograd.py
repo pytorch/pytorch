@@ -135,8 +135,8 @@ def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values):
     fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module)
     primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
     tangent_inputs = list(filter(_is_tangent, joint_module.graph.nodes))
-
-    # Construct the backward graph to filter out unused saved values
+    # Construct the forward module
+    fwd_graph = _extract_graph_with_inputs_outputs(joint_module.graph, primal_inputs, fwd_outputs + saved_values)
     bwd_graph = _extract_graph_with_inputs_outputs(joint_module.graph, saved_values + tangent_inputs, bwd_outputs)
 
     # This is to filter out saved values that don't actually end up being used by the backwards pass
@@ -161,16 +161,10 @@ def default_partition(joint_module: fx.GraphModule, _joint_inputs):
     primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
     fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module)
     forward_only_graph = _extract_graph_with_inputs_outputs(joint_module.graph, primal_inputs, fwd_outputs)
-    forward_node_names = set([node.name for node in forward_only_graph.nodes])
+    forward_node_names = set([node.name for node in forward_only_graph.nodes if node.op != 'output'])
 
-    # Find the ops at the boundary of fwd and bwd graph. If any of the fwd op
-    # has a user not present in the fwd graph, then it has to be saved.
     def node_saved(node):
-        return (
-            node.name in forward_node_names
-            and "tensor_meta" in node.meta
-            and any([user.name not in forward_node_names for user in node.users])
-        )
+        return node.name in forward_node_names and 'tensor_meta' in node.meta
     saved_values = [node for node in joint_module.graph.nodes if node_saved(node)]
     return _extract_fwd_bwd_modules(joint_module, saved_values)
 
