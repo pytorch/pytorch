@@ -43,7 +43,7 @@ __host__ __device__ static inline c10::complex<T> real_wrapper(c10::complex<T> v
 }
 
 void real_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "real_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES(iter.dtype(), "real_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return real_wrapper(a);
     });
@@ -62,7 +62,7 @@ __host__ __device__ static inline c10::complex<T> imag_wrapper(c10::complex<T> v
 }
 
 void imag_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "imag_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES(iter.dtype(), "imag_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return imag_wrapper(a);
     });
@@ -82,7 +82,7 @@ __host__ __device__ static inline c10::complex<T> conj_wrapper(c10::complex<T> v
 
 // NB: Ignores the negative bit on tensors
 void conj_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+  AT_DISPATCH_ALL_TYPES_AND3(
       kBool, kBFloat16, kHalf, iter.common_dtype(), "conj_cuda", [&]() {
         gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t {
           return conj_wrapper(a);

@@ -11,7 +11,7 @@
 namespace at { namespace native {
 
 void acos_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
       iter.common_dtype(), "acos_cuda",
       [&]() {
@@ -22,7 +22,7 @@ void acos_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 void asin_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
       iter.common_dtype(), "asin_cuda",
       [&]() {
@@ -33,7 +33,7 @@ void asin_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 void atan_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
       iter.common_dtype(), "atan_cuda",
       [&]() {
@@ -44,7 +44,7 @@ void atan_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 void sin_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
       iter.common_dtype(), "sin_cuda",
       [&]() {
@@ -55,7 +55,7 @@ void sin_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 void cos_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
       iter.common_dtype(), "cos_cuda",
       [&]() {
@@ -66,7 +66,7 @@ void cos_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 void sinh_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
       iter.common_dtype(), "sinh_cuda",
       [&]() {
@@ -77,7 +77,7 @@ void sinh_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 void cosh_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
       iter.common_dtype(), "cosh_cuda",
       [&]() {
@@ -88,7 +88,7 @@ void cosh_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 void tanh_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
       iter.common_dtype(), "tanh_cuda",
       [&]() {
@@ -99,7 +99,7 @@ void tanh_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 void acosh_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
       iter.common_dtype(), "acosh_cuda",
       [&]() {
@@ -110,7 +110,7 @@ void acosh_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 void asinh_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
       iter.common_dtype(), "asinh_cuda",
       [&]() {
@@ -121,7 +121,7 @@ void asinh_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 void atanh_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
       iter.common_dtype(), "atanh_cuda",
       [&]() {
@@ -132,7 +132,7 @@ void atanh_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 void tan_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
       iter.common_dtype(), "tan_cuda",
       [&]() {

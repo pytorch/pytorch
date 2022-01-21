@@ -21,7 +21,7 @@ struct AddFunctor {
 };
 
 void add_kernel_cuda(TensorIteratorBase& iter, const Scalar& alpha_scalar) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBool, kBFloat16, iter.common_dtype(), "add_cuda/sub_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBool, kBFloat16, iter.common_dtype(), "add_cuda/sub_cuda", [&]() {
     using opmath_t = at::opmath_type<scalar_t>;
     opmath_gpu_kernel_with_scalars<scalar_t>(iter, AddFunctor<opmath_t>(alpha_scalar.to<opmath_t>()));
   });

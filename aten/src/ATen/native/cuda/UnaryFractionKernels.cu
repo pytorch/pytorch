@@ -97,7 +97,7 @@ __host__ __device__ static inline c10::complex<T> reciprocal_wrapper(c10::comple
 }
 
 void reciprocal_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
       iter.common_dtype(), "reciprocal_cuda",
       [&]() {
