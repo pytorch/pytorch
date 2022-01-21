@@ -18,7 +18,6 @@ from .functional_rprop import _FunctionalRprop
 from .functional_adamax import _FunctionalAdamax
 from .utils import (
     functional_optim_map,
-    create_functional_optim,
     as_functional_optim,
 )
 
