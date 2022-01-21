@@ -2071,7 +2071,6 @@ Tensor unsqueeze_qtensor(const Tensor& self, int64_t dim) {
   return make_qtensor(self, g.sizes, g.strides, quantizer);
 }
 
-// todo: dispatcher. Currently no sparse & quantized
 Tensor unsqueeze(const Tensor& self, int64_t dim) {
   dim = maybe_wrap_dim(dim, self.dim() + 1);
 
