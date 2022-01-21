@@ -129,13 +129,22 @@ static inline void launch_vectorized_kernel(int64_t N, const func_t& f, array_t 
 
 namespace {
 
-// Helper function to return an array of void* from
-// template parameter pack.
-// All the arguments should be l-value references
-// so that taking the address works.
-template <typename... Args>
-auto parameter_pack_to_arg_array(Args&... args) {
-  return std::array<void*, sizeof...(args)>{static_cast<void*>(&args)...};;
+template <typename Tuple, std::size_t... I>
+constexpr auto tuple_to_array_helper(Tuple& t, std::index_sequence<I...> seq) {
+    constexpr auto size = seq.size();
+    (void)t; // warning : unused parameter when tuple is empty.
+    return std::array<void*, size>{static_cast<void*>(&std::get<I>(t))...};
+}
+
+// Helper function convert tuple to std::array<void*, N>
+// for passing the arguments to CUDA Kernel
+// NOTE: We capture tuple by reference,
+// so the pointers in returned array are only valid
+// till tuple is alive.
+template <typename ...Args>
+constexpr auto tuple_to_array(std::tuple<Args...>& extra_args) {
+    constexpr auto tuple_size = sizeof...(Args);
+    return tuple_to_array_helper(extra_args, std::make_index_sequence<tuple_size>{});
 }
 
 // Helper function to return a vector<string>
@@ -161,7 +170,7 @@ static inline void launch_jitted_unrolled_kernel(
   DeviceIndex dev_idx, int64_t N, const std::string& f, array_t data,
   inp_calc_t ic, out_calc_t oc, loader_t l, storer_t s, bool contiguous,
   at::opmath_type<f_inputs_type> scalar_val,
-  Args... extra_args) {
+  std::tuple<Args...> extra_args) {
 
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
   const int64_t grid = (N + block_work_size() - 1) / block_work_size();
@@ -190,10 +199,9 @@ static inline void launch_jitted_unrolled_kernel(
   }
 
   // pack args for kernel launch
-  auto extra_args_array = parameter_pack_to_arg_array(extra_args...);
   constexpr int kernel_args = 7;
   // size of `extra_args` is known at compile-time
-  constexpr auto extra_args_size = sizeof...(extra_args);
+  constexpr auto extra_args_size = sizeof...(Args);
   void* args[kernel_args + extra_args_size];
   args[0] = static_cast<void*>(&N);
   args[1] = static_cast<void*>(&data);
@@ -203,6 +211,7 @@ static inline void launch_jitted_unrolled_kernel(
   args[5] = static_cast<void*>(&s);
   args[6] = static_cast<void*>(&scalar_val);
 
+  auto extra_args_array = tuple_to_array(extra_args);
   for (const auto i : c10::irange(extra_args_size)) {
     // since 7 slots are already filled in `args`
     args[i + 7] = extra_args_array[i];
@@ -220,7 +229,7 @@ template<
   at::cuda::jit::BinaryFuncVariant scalar_pos,
   typename array_t, typename ... Args>
 static inline void launch_jitted_vectorized_kernel(DeviceIndex dev_idx, int64_t N, const std::string& f, array_t data,
-at::opmath_type<f_inputs_type> scalar_val, Args... extra_args) {
+at::opmath_type<f_inputs_type> scalar_val, std::tuple<Args...> extra_args) {
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
   const int64_t grid = (N + block_work_size() - 1) / block_work_size();
   const int vec_size = memory::jitted_can_vectorize_up_to<result_type, f_inputs_type, arity>(data);
@@ -272,9 +281,9 @@ at::opmath_type<f_inputs_type> scalar_val, Args... extra_args) {
     }
   }
 
-  auto extra_args_array = parameter_pack_to_arg_array(extra_args...);
   // size of `extra_args` is known at compile-time
-  constexpr auto extra_args_size = sizeof...(extra_args);
+  constexpr auto extra_args_size = sizeof...(Args);
+  auto extra_args_array = tuple_to_array(extra_args);
 
   if (vectorized) {
     // pack args for kernel launch
@@ -309,8 +318,8 @@ at::opmath_type<f_inputs_type> scalar_val, Args... extra_args) {
     args[6] = static_cast<void*>(&scalar_val);
 
     for (const auto i : c10::irange(extra_args_size)) {
-      // since 7 slots are already filled in `args`
-      args[i + 7] = extra_args_array[i];
+      // since 3 slots are already filled in `args`
+      args[i + 3] = extra_args_array[i];
     }
     at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args, grid, num_threads());
     C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -319,7 +328,7 @@ at::opmath_type<f_inputs_type> scalar_val, Args... extra_args) {
 
 template <char const *name, typename result_type, typename compute_type, int arity,
           at::cuda::jit::BinaryFuncVariant scalar_pos=at::cuda::jit::BinaryFuncVariant::NoScalar, typename ... Args>
-void jitted_gpu_kernel_impl(TensorIteratorBase& iter, const std::string& f, const bool dynamic_casting, compute_type scalar_val, Args... extra_args) {
+void jitted_gpu_kernel_impl(TensorIteratorBase& iter, const std::string& f, const bool dynamic_casting, compute_type scalar_val, std::tuple<Args...> extra_args) {
   TORCH_INTERNAL_ASSERT(iter.can_use_32bit_indexing());
   TORCH_INTERNAL_ASSERT(iter.ninputs() == arity);
   TORCH_INTERNAL_ASSERT(iter.noutputs() == 1);
@@ -345,7 +354,7 @@ void jitted_gpu_kernel_impl(TensorIteratorBase& iter, const std::string& f, cons
     if (contiguous) {
       // Case 1: no dynamic casting and contiguous
       launch_jitted_vectorized_kernel<name, result_type, compute_type, arity, scalar_pos>(
-        iter.device().index(), numel, f, data, scalar_val, extra_args...);
+        iter.device().index(), numel, f, data, scalar_val, extra_args);
       return;
     }
 
@@ -356,7 +365,7 @@ void jitted_gpu_kernel_impl(TensorIteratorBase& iter, const std::string& f, cons
     auto storer = memory::StoreWithoutCast();
     launch_jitted_unrolled_kernel<name, result_type, compute_type, scalar_pos>(
       iter.device().index(), numel, f, data, input_offset_calculator,
-      output_offset_calculator, loader, storer, contiguous, scalar_val, extra_args...);
+      output_offset_calculator, loader, storer, contiguous, scalar_val, extra_args);
     return;
   }
 
@@ -379,7 +388,7 @@ void jitted_gpu_kernel_impl(TensorIteratorBase& iter, const std::string& f, cons
     auto output_offset_calculator = TrivialOffsetCalculator<1>();
     launch_jitted_unrolled_kernel<name, result_type, compute_type, scalar_pos>(
       iter.device().index(), numel, f, data, input_offset_calculator,
-      output_offset_calculator, loader, storer, contiguous, scalar_val, extra_args...);
+      output_offset_calculator, loader, storer, contiguous, scalar_val, extra_args);
     return;
   }
 
@@ -388,7 +397,7 @@ void jitted_gpu_kernel_impl(TensorIteratorBase& iter, const std::string& f, cons
   auto output_offset_calculator = make_output_offset_calculator(iter);
   launch_jitted_unrolled_kernel<name, result_type, compute_type, scalar_pos>(
     iter.device().index(), numel, f, data, input_offset_calculator,
-    output_offset_calculator, loader, storer, contiguous, scalar_val, extra_args...);
+    output_offset_calculator, loader, storer, contiguous, scalar_val, extra_args);
 }
 #endif // USE_JITERATOR
 

@@ -127,6 +127,9 @@ arguments provided by TensorIterator. Eg. While capturing `n`, where
 // Only handles elementwise unary and binary kernels with a
 //   common dtype and a single output.
 // NOTE: this assumes the op's iterator has a common_dtype.
+// NOTE: We use std::tuple for extra_args due to following
+// bug on older versions of clang
+// https://bugs.llvm.org/show_bug.cgi?id=23029
 template <
     char const* name,
     typename return_type,
@@ -139,7 +142,7 @@ void jitted_gpu_kernel(
     at::cuda::jit::BinaryFuncVariant scalar_pos =
         at::cuda::jit::BinaryFuncVariant::NoScalar,
     at::opmath_type<f_inputs_type> scalar_val = 0,
-    Args... extra_args) {
+    std::tuple<Args...> extra_args = std::make_tuple()) {
   // TODO: much of preamble is common to both jitted_gpu_kernel and gpu_kernel
   //   Maybe it could be refactored?
   static_assert((!std::is_same<return_type, c10::complex<double>>::value &&
@@ -160,8 +163,8 @@ void jitted_gpu_kernel(
 
   if (!iter.can_use_32bit_indexing()) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
-      jitted_gpu_kernel<name, return_type, f_inputs_type, arity, Args...>(
-          sub_iter, f, scalar_pos, scalar_val, extra_args...);
+      jitted_gpu_kernel<name, return_type, f_inputs_type, arity>(
+          sub_iter, f, scalar_pos, scalar_val, extra_args);
     }
 
     return;
@@ -203,7 +206,7 @@ void jitted_gpu_kernel(
         /*f_inputs_type=*/f_inputs_type,
         arity,
         at::cuda::jit::BinaryFuncVariant::NoScalar>(
-        iter, f, needs_dynamic_casting, /*scalar_val=*/0, extra_args...);
+        iter, f, needs_dynamic_casting, /*scalar_val=*/0, extra_args);
   } else if (scalar_pos == at::cuda::jit::BinaryFuncVariant::RhsScalar) {
     jitted_gpu_kernel_impl<
         /*name*/ name,
@@ -215,7 +218,7 @@ void jitted_gpu_kernel(
         f,
         needs_dynamic_casting,
         scalar_val,
-        extra_args...);
+        extra_args);
 
   } else {
     jitted_gpu_kernel_impl<
@@ -228,7 +231,7 @@ void jitted_gpu_kernel(
         f,
         needs_dynamic_casting,
         scalar_val,
-        extra_args...);
+        extra_args);
   }
 }
 

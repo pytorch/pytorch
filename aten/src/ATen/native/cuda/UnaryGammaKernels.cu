@@ -57,8 +57,6 @@ void polygamma_kernel_cuda(TensorIteratorBase& iter, int64_t n) {
     trigamma_kernel_cuda(iter);
   } else {
 #ifdef USE_JITERATOR
-    // NOTE: extra_args have to be at the end as they are
-    // implemented with template parameter pack.
     // TODO : `unary_jitted_gpu_kernel` for cleaner UX.
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(
         iter.common_dtype(), "polygamma_cuda", [&]() {
@@ -71,7 +69,7 @@ void polygamma_kernel_cuda(TensorIteratorBase& iter, int64_t n) {
               polygamma_string,
               /*scalar_pos=*/at::cuda::jit::BinaryFuncVariant::NoScalar,
               /*scalar_val=*/0,
-              /*extra_args=*/n);
+              /*extra_args=*/std::make_tuple(n));
         });
 #else
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(
