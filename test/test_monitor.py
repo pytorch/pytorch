@@ -28,10 +28,16 @@ class TestMonitor(TestCase):
             (Aggregation.SUM, Aggregation.COUNT),
             timedelta(milliseconds=1),
         )
-        s.add(2)
-        time.sleep(0.002)
-        s.add(3)
         self.assertEqual(s.name, "asdf")
+
+        s.add(2)
+        for _ in range(100):
+            # NOTE: different platforms sleep may be inaccurate so we loop
+            # instead (i.e. win)
+            time.sleep(1 / 1000)  # ms
+            s.add(3)
+            if len(events) >= 1:
+                break
         self.assertGreaterEqual(len(events), 1)
         unregister_event_handler(handle)
 
