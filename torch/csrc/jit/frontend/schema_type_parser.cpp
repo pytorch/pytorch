@@ -396,7 +396,7 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
     if (L.cur().kind == '[' && L.lookahead().kind == ']') {
       L.next(); // [
       L.next(); // ]
-      value = ListType::create(value);
+      value = c10::TypeFactory::create<ListType>(value);
       auto container = parseAliasAnnotation();
       if (container && alias_info) {
         container->addContainedType(std::move(*alias_info));
