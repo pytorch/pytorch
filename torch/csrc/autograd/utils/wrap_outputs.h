@@ -2,7 +2,8 @@
 
 // Wrap tensor operation outputs as PyObject*
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/ScalarOps.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/python_headers.h>
 #include <tuple>
