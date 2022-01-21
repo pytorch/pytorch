@@ -1047,7 +1047,7 @@ class TensorExprFuser {
       // Allow only if the node has a shape function defined.
       // ListConstruct node is an exception since that is needed to fuse
       // aten::cat, though it does not have a shape function.
-      REQ(node->kind() == prim::ListConstruct ||
+      REQ(node->kind() == prim::ListConstruct || node->kind() == prim::TensorExprGroup ||
           (node->maybeSchema() && shapeComputeGraphForSchema(node->schema())));
     }
 
