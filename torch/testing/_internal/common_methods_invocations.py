@@ -5983,8 +5983,8 @@ def sample_inputs_softmax_variant(op_info, device, dtype, requires_grad, with_dt
 
     # PyTorch on XLA throws an error when passed with dim argument for 0d tensor.
     # See https://github.com/pytorch/xla/issues/3061 for more details.
-    # if torch.device(device).type != 'xla':
-    #     cases.append(((), (0, )))
+    if torch.device(device).type != 'xla':
+        cases.append(((), (0, )))
 
     return [
         SampleInput(make_arg(shape), args=dim, kwargs=dict(dtype=torch.float64) if with_dtype else None)
@@ -6035,15 +6035,9 @@ def sample_inputs_masked_softmax2(op_info, device, dtype, requires_grad, **kwarg
     for shape, dim in cases:
         mask = make_tensor(shape, device, torch.bool, requires_grad=False)
         sample_input = SampleInput(make_arg(shape), args=(dim, mask), kwargs={})
+        inputs.append(sample_input)
 
-        inputs.append(SampleInput(sample_input.input.detach().clone().requires_grad_(requires_grad),
-                                  args=sample_input.args))
-
-    print("final input", inputs[0])
-    print(inputs[-1])
-    print()
     return inputs
-
 
 def sample_inputs_masked_normalize(op_info, device, dtype, requires_grad, **kwargs):
     """Sample inputs for masked normalize.
@@ -8111,6 +8105,22 @@ def gradcheck_wrapper_masked_operation(op, input, *args, **kwargs):
     """
     output = op(input, *args, **kwargs)
     mask = kwargs.get('mask')
+    if mask is not None:
+        output_mask = torch._masked._output_mask(op, input, *args, **kwargs)
+        output = torch.where(output_mask, output, output.new_zeros([]))
+    return output
+
+
+def gradcheck_wrapper_masked_operation2(op, input, *args, **kwargs):
+    """Gradcheck wrapper for masked operations.
+
+    When mask is specified, replaces masked-out elements with zeros.
+
+    Use for operations that produce non-finite masked-out elements,
+    for instance, for minimum and maximum reductions.
+    """
+    output = op(input, *args, **kwargs)
+    mask = args[1]
     if mask is not None:
         output_mask = torch._masked._output_mask(op, input, *args, **kwargs)
         output = torch.where(output_mask, output, output.new_zeros([]))
@@ -14985,7 +14995,7 @@ op_db: List[OpInfo] = [
     ),
     OpInfo(
         '_masked_softmax',
-        # method_variant=None,
+        method_variant=None,
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_masked_softmax2,
@@ -14995,7 +15005,7 @@ op_db: List[OpInfo] = [
             # use keyword-only arguments with defaults
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
         ),
-        # gradcheck_wrapper=gradcheck_wrapper_masked_operation,
+        gradcheck_wrapper=gradcheck_wrapper_masked_operation2,
         supports_out=False),
     # OpInfo(
     #     '_masked.softmax',
