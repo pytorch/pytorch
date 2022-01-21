@@ -287,13 +287,11 @@ class ShardedTensor(object):
 
         world_size = dist.get_world_size(self._process_group)
 
-        gathered_shards = [None] * world_size
-        # will revise this part with CPU support and use dist.gather()
-        # once NCCL support for gather() is ready
-        # https://github.com/pytorch/pytorch/issues/66187
-        dist.all_gather_object(
+        gathered_shards = [None] * world_size if rank == dst else None
+        dist.gather_object(
             obj=local_shards,
-            object_list=gathered_shards,
+            object_gather_list=gathered_shards,
+            dst=dst,
             group=self._process_group,
         )
 
