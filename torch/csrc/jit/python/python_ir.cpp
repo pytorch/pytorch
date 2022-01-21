@@ -432,6 +432,7 @@ void initPythonIRBindings(PyObject* module_) {
           "insertConstant",
           [](Graph& g, const IValue& ival) { return g.insertConstant(ival); })
       .GS(lint)
+      .def("block", [](Graph& g) { return g.block(); })
       .GS(insertNode);
 #undef GS
 
@@ -540,6 +541,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def("inputsSize", [](Node& n) { return n.inputs().size(); })
       .def("outputsSize", [](Node& n) { return n.outputs().size(); })
       .NS(kind)
+      .def("prev", [](Node& n) { return n.prev(); })
       .def("owningBlock", [](Node& n) { return n.owningBlock(); })
       .def("inputsAt", [](Node& n, size_t i) { return n.inputs().at(i); })
       .def(

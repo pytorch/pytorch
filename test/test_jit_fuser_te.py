@@ -125,6 +125,28 @@ class TestTEFuser(JitTestCase):
         torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
         torch._C._jit_set_te_must_use_llvm_cpu(self.old_te_must_use_llvm_cpu)
 
+    def assertAllFused(self, graph, except_for = {}):
+        # TODO - upstream
+        guards = "prim::TypeCheck", "prim::RequiresGradCheck", "prim::TensorExprDynamicGuard"
+        guard_found = False
+
+        for node in graph.block().nodes():
+            if node.kind() == "prim::Constant":
+                continue
+            if node.kind() in except_for:
+                continue
+            if node.kind() in guards:
+                self.assertFalse(guard_found)
+                guard_found = True
+                continue
+            if node.kind() == "prim::If":
+                self.assertTrue(node.prev().kind() in guards)
+                continue
+            self.assertTrue(False, "Found unexpected node:" + node.kind())
+
+        self.assertTrue(guard_found)
+
+
     def assertLastGraphAllFused(self):
         self.assertAllFused(torch.jit.last_executed_optimized_graph())
 
@@ -751,6 +773,7 @@ class TestTEFuser(JitTestCase):
 
             x = torch.tensor([-1, -0.5, 0, 1, 2, 3], device=device)
             scripted = self.checkScript(f, (x,))
+            import pdb; pdb.set_trace()
             self.assertAllFused(scripted.graph_for(x))
 
     def test_scalar_arg(self):
@@ -2056,7 +2079,7 @@ class TestTEFuser(JitTestCase):
             lambda n: R(n, n + 1, n + 2, n + 3).to(memory_format=torch.channels_last),
         )
 
-        with texpr_dynamic_enabled():
+        with texpr_enable_strategy([("DYNAMIC", 20)]):
             def foo(x, y, z):
                 return torch.sigmoid(torch.tanh(x))
 
