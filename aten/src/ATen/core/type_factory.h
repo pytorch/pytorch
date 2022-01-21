@@ -2,6 +2,7 @@
 
 #include <ATen/core/dynamic_type.h>
 #include <ATen/core/jit_type.h>
+#include <type_traits>
 
 namespace c10 {
 
@@ -31,6 +32,22 @@ struct TORCH_API DynamicTypeFactory {
   static const std::unordered_map<std::string, c10::TypePtr>& basePythonTypes();
 };
 
+// Helper functions for constructing DynamicTypes inline.
+template <
+    typename T,
+    std::enable_if_t<DynamicTypeTrait<T>::isBaseType, int> = 0>
+DynamicTypePtr dynT() {
+  return DynamicTypeTrait<T>::getBaseType();
+}
+
+template <
+    typename T,
+    typename... Args,
+    std::enable_if_t<!DynamicTypeTrait<T>::isBaseType, int> = 0>
+DynamicTypePtr dynT(Args&&... args) {
+  return DynamicTypeFactory::create<T>(std::forward<Args>(args)...);
+}
+
 struct TORCH_API DefaultTypeFactory {
   template <typename T, typename... Args>
   static c10::TypePtr create(TypePtr ty, Args&&... args) {
@@ -48,5 +65,13 @@ struct TORCH_API DefaultTypeFactory {
   }
   static const std::unordered_map<std::string, c10::TypePtr>& basePythonTypes();
 };
+
+using TypeFactory =
+#ifdef C10_MOBILE
+    DynamicTypeFactory
+#else
+    DefaultTypeFactory
+#endif
+    ;
 
 } // namespace c10
