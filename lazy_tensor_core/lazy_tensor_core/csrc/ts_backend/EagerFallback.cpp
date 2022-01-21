@@ -1,14 +1,16 @@
 #include "lazy_tensor_core/csrc/ts_backend/EagerFallback.h"
 
 #include <sstream>
-
 #include <ATen/Functions.h>
 #include <ATen/core/boxing/KernelFunction.h>
 #include <ATen/native/CPUFallback.h>
+#include <torch/csrc/lazy/core/tensor.h>
 #include <torch/library.h>
 
 namespace torch_lazy_tensors {
 namespace {
+using torch::lazy::LazyTensor;
+using torch::lazy::GetLtcTensor;
 
 std::vector<at::Tensor> _to_eager(at::TensorList tensors,
                                   c10::DeviceType device_type) {

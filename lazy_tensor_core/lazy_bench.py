@@ -5,7 +5,6 @@ import gc
 import io
 import itertools
 import logging
-import math
 import numpy as np
 import os
 import re
@@ -119,9 +118,10 @@ class DivAddMul(nn.Module):
     def __init__(self, dims, device='cuda', jit=False):
         super(DivAddMul, self).__init__()
         self.attention_head_size = dims[1]
+        self.W = torch.ones(*dims[-2:], device=device, dtype=torch.float32)
         self.name = "DivAddMul[" + ','.join([str(d) for d in dims]) + ']'
         self.example_inputs = (
-            torch.randn(*dims, device=device, dtype=torch.float32),
+            torch.ones(*dims, device=device, dtype=torch.float32),
             torch.randn(*dims, device=device, dtype=torch.float32),
         )
 
@@ -132,10 +132,11 @@ class DivAddMul(nn.Module):
         return self.name
 
     def forward(self, inputs, mask):
-        out1 = inputs / math.sqrt(self.attention_head_size)
-        out2 = out1 + mask
-        out3 = out2 * 5.0
-        return out3
+        out3 = ((inputs / 0.1) + mask) * 2.0
+        out5 = out3.matmul(self.W)
+        out8 = ((out5 / 0.1) + mask) * 2.00
+        return out8
+
 toy_models = [
     HardSwishBenchmark,
     DivAddMulBenchmark,
@@ -367,7 +368,7 @@ def lazy_overhead_experiment(args, results, benchmark, lazy_benchmark):
     pvalue = ttest_ind(timings[:, 0], timings[:, 1]).pvalue
     median = np.median(timings, axis=0)
     fallbacks = ";".join([f"{m}:{lazy_metrics[m]}" for m in lazy_metrics if "aten::" in m])
-    ops = int(sum([lazy_metrics[m] for m in lazy_metrics if 'lazy::'  in m or 'aten::' in m]) / args.repeat)
+    ops = int(sum([lazy_metrics[m] for m in lazy_metrics if 'lazy::' in m or 'aten::' in m]) / args.repeat)
     trace_us = median[1] / 1e-6
     us_per_op = trace_us / ops
     overhead = median[1] / median[0]
@@ -453,6 +454,18 @@ def check_eval_correctness(args, benchmark, lazy_benchmark, name):
         save_error(name, args.test, e, args.output_dir)
         return False
     return True
+
+def just_run_once(args, lazy_benchmark):
+    torch.manual_seed(1337)
+    if args.test == 'eval':
+        model, example_inputs = lazy_benchmark.get_module()
+        results.append(call_model_with(model, example_inputs))
+    elif args.test == 'train':
+        lazy_benchmark.train(niter=1)
+    ltm.mark_step()
+    ltm.wait_device_ops()
+    if current_device == 'cuda':
+        torch.cuda.synchronize()
 
 def check_results_impl(correct_result, lazy_result):
     # recursive helper for dealing with nested data structures
@@ -595,9 +608,11 @@ if __name__ == "__main__" :
     parser.add_argument("--torchbench_dir", type=str, help="path to torchbenchmark repo")
     parser.add_argument("--output_dir", type=str, default=".", help="path to write output files")
     parser.add_argument("--dump_lazy_counters", action='store_true', help="dump lazy counter values after each timing run")
+    parser.add_argument("--just_run_once", action="store_true")
     parser.add_argument("--run_tracing_execute_noops", action='store_true',
                         help="Run the tracing portion only, with noop backend, useful for running under a profiler.")
-    parser.add_argument("--run_in_subprocess", "-s", type=str, help="which model run in subprocess.This will ignore filter and exclude")
+    parser.add_argument("--run_in_subprocess", "-s", type=str,
+                        help="which model run in subprocess. This will ignore filter and exclude")
     args = parser.parse_args()
     results = []
 
@@ -643,6 +658,10 @@ if __name__ == "__main__" :
                         print(f"Profiling {current_name}")
                         run_tracing_execute_noops(args.test, lazy_benchmark)
                         # when profiling, we really don't want to do anything else
+                        exit(0)
+
+                    if args.just_run_once:
+                        just_run_once(args, lazy_benchmark)
                         exit(0)
 
                     if args.test == 'eval':
