@@ -10,14 +10,14 @@
 //===----------------------------------------------------------------------===//
 
 #include <string>
-#include <ATen/jit_macros.h>
 #include <ATen/cuda/llvm_jit_strings.h>
-
-#ifdef USE_JITERATOR
 
 namespace at {
 namespace cuda {
 
+// copy-pasted from some llvm files:
+// - https://github.com/llvm/llvm-project/blob/main/libcxx/include/type_traits
+// - https://github.com/llvm/llvm-project/blob/main/clang/test/Headers/Inputs/include/type_traits
 const std::string traits = R"ESCAPE(
 
 namespace std {
@@ -172,6 +172,8 @@ const std::string &get_traits_string() {
     return traits;
 }
 
+// This is copy-pasted from the following llvm file:
+// - https://github.com/llvm/llvm-project/blob/main/libcxx/include/cmath
 const std::string cmath = R"ESCAPE(
 
 namespace std {
@@ -384,5 +386,3 @@ const std::string &get_cmath_string() {
 }
 
 }} // namespace at::cuda
-
-#endif

@@ -1,4 +1,5 @@
-// This file is modified from LLVM, see the following copyright information
+// This is copy-pasted (with modification) from the following llvm file:
+// - https://github.com/llvm/llvm-project/blob/main/libcxx/include/complex
 //
 // -*- C++ -*-
 //===----------------------------------------------------------------------===//
@@ -10,15 +11,13 @@
 //===----------------------------------------------------------------------===//
 
 #include <string>
-#include <ATen/jit_macros.h>
 #include <ATen/cuda/llvm_jit_strings.h>
 
-#ifdef USE_JITERATOR
 
 namespace at {
 namespace cuda {
 
-const std::string complex_body1 = R"ESCAPE(
+const std::string complex_body = R"ESCAPE(
 
 namespace std {
 
@@ -87,7 +86,6 @@ public:
 };
 
 template<> class complex<double>;
-template<> class complex<long double>;
 
 template<>
 class complex<float>
@@ -101,8 +99,6 @@ public:
         : __re_(__re), __im_(__im) {}
 
     explicit constexpr complex(const complex<double>& __c);
-
-    explicit constexpr complex(const complex<long double>& __c);
 
     constexpr float real() const {return __re_;}
     constexpr float imag() const {return __im_;}
@@ -160,8 +156,6 @@ public:
 
     constexpr complex(const complex<float>& __c);
 
-    explicit constexpr complex(const complex<long double>& __c);
-
     constexpr double real() const {return __re_;}
     constexpr double imag() const {return __im_;}
 
@@ -205,64 +199,6 @@ public:
         }
 };
 
-template<>
-class complex<long double>
-{
-    long double __re_;
-    long double __im_;
-public:
-    typedef long double value_type;
-
-    constexpr complex(long double __re = 0.0L, long double __im = 0.0L)
-        : __re_(__re), __im_(__im) {}
-
-    constexpr complex(const complex<float>& __c);
-
-    constexpr complex(const complex<double>& __c);
-
-    constexpr long double real() const {return __re_;}
-    constexpr long double imag() const {return __im_;}
-
-    void real(value_type __re) {__re_ = __re;}
-    void imag(value_type __im) {__im_ = __im;}
-
-    complex& operator= (long double __re)
-        {__re_ = __re; __im_ = value_type(); return *this;}
-    complex& operator+=(long double __re) {__re_ += __re; return *this;}
-    complex& operator-=(long double __re) {__re_ -= __re; return *this;}
-    complex& operator*=(long double __re) {__re_ *= __re; __im_ *= __re; return *this;}
-    complex& operator/=(long double __re) {__re_ /= __re; __im_ /= __re; return *this;}
-
-    template<class _Xp> complex& operator= (const complex<_Xp>& __c)
-        {
-            __re_ = __c.real();
-            __im_ = __c.imag();
-            return *this;
-        }
-    template<class _Xp> complex& operator+=(const complex<_Xp>& __c)
-        {
-            __re_ += __c.real();
-            __im_ += __c.imag();
-            return *this;
-        }
-    template<class _Xp> complex& operator-=(const complex<_Xp>& __c)
-        {
-            __re_ -= __c.real();
-            __im_ -= __c.imag();
-            return *this;
-        }
-    template<class _Xp> complex& operator*=(const complex<_Xp>& __c)
-        {
-            *this = *this * complex(__c.real(), __c.imag());
-            return *this;
-        }
-    template<class _Xp> complex& operator/=(const complex<_Xp>& __c)
-        {
-            *this = *this / complex(__c.real(), __c.imag());
-            return *this;
-        }
-};
-
 inline
 constexpr
 complex<float>::complex(const complex<double>& __c)
@@ -270,28 +206,9 @@ complex<float>::complex(const complex<double>& __c)
 
 inline
 constexpr
-complex<float>::complex(const complex<long double>& __c)
-    : __re_(__c.real()), __im_(__c.imag()) {}
-
-inline
-constexpr
 complex<double>::complex(const complex<float>& __c)
     : __re_(__c.real()), __im_(__c.imag()) {}
 
-inline
-constexpr
-complex<double>::complex(const complex<long double>& __c)
-    : __re_(__c.real()), __im_(__c.imag()) {}
-
-inline
-constexpr
-complex<long double>::complex(const complex<float>& __c)
-    : __re_(__c.real()), __im_(__c.imag()) {}
-
-inline
-constexpr
-complex<long double>::complex(const complex<double>& __c)
-    : __re_(__c.real()), __im_(__c.imag()) {}
 
 // 26.3.6 operators:
 
@@ -639,17 +556,6 @@ arg(const complex<_Tp>& __c)
     return atan2(__c.imag(), __c.real());
 }
 
-template <class _Tp>
-inline
-typename enable_if<
-    is_same<_Tp, long double>::value,
-    long double
->::type
-arg(_Tp __re)
-{
-    return atan2l(0.L, __re);
-}
-
 template<class _Tp>
 inline
 typename enable_if
@@ -673,9 +579,17 @@ arg(_Tp __re)
     return atan2f(0.F, __re);
 }
 
+}
+
 )ESCAPE";
 
-const std::string complex_body2 = R"ESCAPE(
+const std::string &get_complex_body_string() {
+  return complex_body;
+}
+
+const std::string complex_math = R"ESCAPE(
+
+namespace std {
 
 // norm
 
@@ -1155,17 +1069,6 @@ inline namespace literals
 {
   inline namespace complex_literals
   {
-    constexpr complex<long double> operator""il(long double __im)
-    {
-        return { 0.0l, __im };
-    }
-
-    constexpr complex<long double> operator""il(unsigned long long __im)
-    {
-        return { 0.0l, static_cast<long double>(__im) };
-    }
-
-
     constexpr complex<double> operator""i(long double __im)
     {
         return { 0.0, static_cast<double>(__im) };
@@ -1193,11 +1096,8 @@ inline namespace literals
 
 )ESCAPE";
 
-const std::string &get_complex_string() {
-  static std::string complex_body = complex_body1 + complex_body2;
-  return complex_body;
+const std::string &get_complex_math_string() {
+  return complex_math;
 }
 
 }} // namespace at::cuda
-
-#endif

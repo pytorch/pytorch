@@ -112,7 +112,8 @@ const std::string jit_common_types = R"ESCAPE(
 
   ${half_string}
   ${bfloat16_string}
-  ${complex_string}
+  ${complex_body_string}
+  ${complex_math_string}
 
 
 )ESCAPE";
@@ -690,11 +691,18 @@ std::string generate_code(
   } else {
     env.s("bfloat16_string", "");
   }
+  // the definition of complex math functions is only needed when the compute type is complex
+  // but the definition of std::complex is needed for dynamic casting even if the compute type is not complex
   if (f_inputs_type == "std::complex<float>" || result_type == "std::complex<float>" ||
-      f_inputs_type == "std::complex<double>" || result_type == "std::complex<double>"|| dynamic_casting) {
-    env.s("complex_string", get_complex_string());
+      f_inputs_type == "std::complex<double>" || result_type == "std::complex<double>") {
+    env.s("complex_body_string", get_complex_body_string());
+    env.s("complex_math_string", get_complex_math_string());
+  } else if (dynamic_casting) {
+    env.s("complex_body_string", get_complex_body_string());
+    env.s("complex_math_string", "");
   } else {
-    env.s("complex_string", "");
+    env.s("complex_body_string", "");
+    env.s("complex_math_string", "");
   }
 
   if (!vectorized) {
