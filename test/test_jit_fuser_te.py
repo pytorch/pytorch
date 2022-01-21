@@ -39,6 +39,8 @@ from jit.test_fuser_common import TestFuserCommon  # noqa: F401
 FUSION_GROUP = 'prim::TensorExprGroup'
 LLVM_ENABLED = torch._C._llvm_enabled()
 
+autograd_check_set = {'aten::__is__', 'prim::AutogradAllNonZero', 'prim::AutogradAllZero', 'prim::ListConstruct'}
+
 def strip_profiling_nodes(nodes):
     profiling_opcodes = set(['prim::BailoutTemplate', 'prim::BailOut'])
     return [n for n in nodes if n.kind() not in profiling_opcodes]
@@ -130,17 +132,32 @@ class TestTEFuser(JitTestCase):
         guards = "prim::TypeCheck", "prim::RequiresGradCheck", "prim::TensorExprDynamicGuard"
         guard_found = False
 
+        def autodiff_guard(node):
+            if node.kind() != "aten::all":
+                return False
+            inps = list(node.inputs())
+            if len(inps) != 1 or inps[0].node().kind() != "prim::ListConstruct":
+                return False
+            li_inps = list(inps[0].node().inputs())
+            for li_inp in li_inps:
+                if li_inp.node().kind() in ("prim::AutogradAllNonZero", "prim::AutogradAllZero"):
+                    return True
+            return False
+
+        def is_guard(node):
+            return node.kind() in guards or autodiff_guard(node)
+
         for node in graph.block().nodes():
             if node.kind() == "prim::Constant":
                 continue
-            if node.kind() in except_for:
-                continue
-            if node.kind() in guards:
+            if is_guard(node):
                 self.assertFalse(guard_found)
                 guard_found = True
                 continue
+            if node.kind() in except_for:
+                continue
             if node.kind() == "prim::If":
-                self.assertTrue(node.prev().kind() in guards)
+                self.assertTrue(is_guard(node.prev()))
                 continue
             self.assertTrue(False, "Found unexpected node:" + node.kind())
 
@@ -484,7 +501,7 @@ class TestTEFuser(JitTestCase):
                 with enable_profiling_mode_for_profiling_tests():
                     warmup_backward(c.sum())
                 graph = backward_graph(s)
-                self.assertAllFused(graph, except_for={'aten::Float', 'aten::_grad_sum_to_size'})
+                self.assertAllFused(graph, except_for={'aten::Float', 'aten::_grad_sum_to_size'}.union(autograd_check_set))
 
     def test_clamp_double(self):
         for device in self.devices:
@@ -494,7 +511,7 @@ class TestTEFuser(JitTestCase):
             x = torch.tensor([1.0, 1.0], dtype=torch.double, device=device)
             eta = 1e-9
             s = self.checkScript(clamp_double, (x, eta), profiling=ProfilingMode.PROFILING, atol=1e-10, rtol=1e-5)
-            self.assertAllFused(s.graph_for(x, eta))
+            self.assertAllFused(s.graph_for(x, eta), except_for={'aten::sub'})
 
     def test_clamp_int(self):
         for device in self.devices:
