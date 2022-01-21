@@ -479,7 +479,7 @@ Tensor log_softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype) 
   return at::log_softmax(self, dimname_to_position(self, dim), dtype);
 }
 
-Tensor masked_softmax_cpu(const Tensor& input, const Tensor& mask) {
+Tensor masked_softmax_cpu(const Tensor& input, int64_t dim, const Tensor& mask) {
   Tensor output = at::empty_like(input, input.options());
   TORCH_CHECK(
       input.sizes() == mask.sizes(), "Mask shape should match input shape");
@@ -493,7 +493,7 @@ Tensor masked_softmax_cpu(const Tensor& input, const Tensor& mask) {
             scalar_t,
             false /* LogSoftMax */,
             true /* MaskedSoftMax */>(
-            output, input, input.dim() - 1, mask.data_ptr<bool>());
+            output, input, dim, mask.data_ptr<bool>());
       });
   return output;
 }
@@ -502,7 +502,6 @@ Tensor masked_softmax_backward_cpu(
     const Tensor& grad,
     const Tensor& output,
     int64_t dim,
-    const Tensor& grad_input,
     const Tensor& mask) {
   TORCH_CHECK(
       grad.sizes() == mask.sizes(), "Mask shape should match grad shape");
@@ -528,12 +527,13 @@ Tensor masked_softmax_backward_cpu(
   // }
 
   TORCH_CHECK(
-      grad_input.sizes() == mask.sizes(), "Mask shape should match grad_input shape");
+      grad.sizes() == mask.sizes(), "Mask shape should match grad shape");
   TORCH_CHECK(mask.is_contiguous(), "Mask should always be contiguous");
   TORCH_CHECK(
       mask.scalar_type() == ScalarType::Bool,
       "Mask should be a boolean tensor");
 
+  auto grad_input = at::empty({0}, grad.options());
   AT_DISPATCH_FLOATING_TYPES_AND(
       at::ScalarType::BFloat16, grad.scalar_type(), "masked_softmax_backward", [&] {
         host_softmax_backward<
@@ -541,7 +541,7 @@ Tensor masked_softmax_backward_cpu(
             false /* LogSoftMax */,
             true /* MaskedSoftmax */>(grad_input, grad, output, dim);
       });
-  return output;
+  return grad_input;
 }
 }
 }

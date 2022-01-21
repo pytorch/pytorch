@@ -942,12 +942,12 @@ TORCH_IMPL_FUNC(softmax_backward_cuda_out)
   host_softmax_backward<SoftMaxBackwardEpilogue,false>(tmp, output, dim, half_to_float, grad_input);
 }
 
-Tensor masked_softmax_cuda(const Tensor& input, const Tensor& mask) {
+Tensor masked_softmax_cuda(const Tensor& input, int64_t dim, const Tensor& mask) {
     TORCH_CHECK(mask.scalar_type() == ScalarType::Bool, "Mask should be a boolean tensor");
     bool is_transformer_mask = (input.dim() == 4 && mask.dim() == 2 && input.size(0) == mask.size(0) && input.size(2) == mask.size(1) && input.size(3) == mask.size(1));
     TORCH_CHECK(mask.sizes() == input.sizes() || is_transformer_mask, "Mask shape should match input");
     // Always do masked softmax on last dim
-    int softmax_elements = input.size(input.dim() - 1);
+    int softmax_elements = input.size(dim);
     // Persistent softmax only support softmax_elements <= 1024,
     // Therefore once softmax_elements > 1024, we need to fallback to vanilla masked_softmax
     Tensor output = at::empty_like(input, input.options());
@@ -1013,13 +1013,13 @@ Tensor masked_softmax_backward_cuda(
     const Tensor& grad,
     const Tensor& output,
     int64_t dim,
-    const Tensor& grad_input,
     const Tensor& mask) {
   TORCH_CHECK(
-        grad_input.sizes() == mask.sizes(), "Mask shape should match grad_input shape");
+        grad.sizes() == mask.sizes(), "Mask shape should match grad_input shape");
   TORCH_CHECK(mask.scalar_type() == ScalarType::Bool, "Mask should be a boolean tensor");
   TORCH_CHECK(mask.is_contiguous(), "Mask should always be contiguous");
 
+  auto grad_input = at::empty({0}, grad.options());
   int64_t dim_size = grad_input.size(dim);
   TORCH_CHECK(dim_size <= 1024, "TODO: Masked softmax only support softmax elements <= 1024");
 
@@ -1041,7 +1041,7 @@ Tensor masked_softmax_backward_cuda(
         mask.data_ptr<bool>()
       );
     });
-  return output;
+  return grad_input;
 }
 }
 }

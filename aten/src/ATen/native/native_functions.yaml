@@ -5840,12 +5840,12 @@
 - func: masked_scatter(Tensor self, Tensor mask, Tensor source) -> Tensor
   variants: function, method
 
-- func: _masked_softmax(Tensor self, Tensor mask) -> Tensor
+- func: _masked_softmax(Tensor self, int dim, Tensor mask) -> Tensor
   dispatch:
     CUDA: masked_softmax_cuda
     CPU: masked_softmax_cpu
 
-- func: _masked_softmax_backward(Tensor grad_output, Tensor output, int dim, Tensor grad_input, Tensor mask) -> Tensor
+- func: _masked_softmax_backward(Tensor grad_output, Tensor output, int dim, Tensor mask) -> Tensor
   dispatch:
     CUDA: masked_softmax_backward_cuda
     CPU: masked_softmax_backward_cpu
