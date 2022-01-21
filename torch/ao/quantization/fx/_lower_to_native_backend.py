@@ -5,7 +5,7 @@ from .graph_module import QuantizedGraphModule
 from .quantized_fusion_patterns_and_replacements import get_fbgemm_patterns_and_replacements
 from .match_utils import is_match
 from .match_utils import MatchAllNode
-from ..utils import _parent_name
+from ..utils import _parent_name, check_node
 from typing import Dict, Type
 
 # Mapping from reference module class to the replacement quantized module class for lowering
@@ -14,36 +14,6 @@ LOWER_MODULE_MAP: Dict[Type[torch.nn.Module], Type[ReferenceableQuantizedModule]
     torch.nn.quantized._reference.Conv1d: torch.nn.quantized.Conv1d,
     torch.nn.quantized._reference.Conv2d: torch.nn.quantized.Conv2d,
     torch.nn.quantized._reference.Conv3d: torch.nn.quantized.Conv3d,
-}
-
-module_type_list = {
-    torch.nn.ReLU,
-    torch.nn.ReLU6,
-    torch.nn.AdaptiveAvgPool1d,
-    torch.nn.AdaptiveAvgPool2d,
-    torch.nn.AdaptiveAvgPool3d,
-    torch.nn.AvgPool1d,
-    torch.nn.AvgPool2d,
-    torch.nn.AvgPool3d,
-    torch.nn.MaxPool1d,
-    torch.nn.MaxPool2d,
-    torch.nn.MaxPool3d,
-}
-func_list = {
-    torch.nn.functional.adaptive_avg_pool1d,
-    torch.nn.functional.adaptive_avg_pool2d,
-    torch.nn.functional.adaptive_avg_pool3d,
-    torch.nn.functional.max_pool1d,
-    torch.nn.functional.max_pool2d,
-    torch.nn.functional.max_pool3d,
-    torch.nn.functional.relu,
-    torch.nn.functional.hardtanh,
-    torch.nn.functional.hardtanh_,
-}
-method_list = {
-    torch.mean,
-    'relu',
-    'relu_',
 }
 
 def _lower_weighted_ref_module(model: QuantizedGraphModule, ref_class: Type[torch.nn.Module]) -> QuantizedGraphModule:
@@ -118,10 +88,7 @@ def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphMo
             # get output scale/zero_point/dtype from the quantize node
             ref_node, scale_node, zero_point_node, dtype = q_node.args
 
-            is_call_function = ref_node.op == "call_function" and ref_node.target in func_list
-            is_call_method = ref_node.op == "call_method" and ref_node.target in method_list
-            is_call_module = ref_node.op == "call_module" and type(modules[str(ref_node.target)]) in module_type_list
-
+            is_call_function, is_call_method, is_call_module = check_node(ref_node, modules)
             if is_call_module or is_call_function or is_call_method:
                 dq_node = ref_node.args[0]
                 if dq_node.target == 'dequantize':
