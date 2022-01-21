@@ -3351,8 +3351,8 @@ class TestQuantizedLinear(TestCase):
             np.testing.assert_equal(
                 W_q.q_zero_point(), W_q_origin.q_zero_point())
 
-# @unittest.skipIf(IS_MACOS, "Known test failure on Mac.")
-# @unittest.skipIf(not BUILD_WITH_CAFFE2, "Test needs Caffe2")
+@unittest.skipIf(IS_MACOS, "Known test failure on Mac.")
+@unittest.skipIf(not BUILD_WITH_CAFFE2, "Test needs Caffe2")
 class TestQuantizedEmbeddingOps(TestCase):
     def _test_embedding_bag_unpack_fn(self, pack_fn, unpack_fn, num_embeddings, embedding_dim, bit_rate, optimized_qparams,
                                       num_batches, data_type=np.float32):
