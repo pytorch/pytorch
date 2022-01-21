@@ -2350,7 +2350,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
           size.reserve(8);
           for (const auto i : c10::irange(num_inputs)) {
             size =
-                at::infer_size(size, peek(stack, i, num_inputs).toIntVector());
+                at::infer_size(size, peek(stack, i, num_inputs).toDimVector());
           }
           drop(stack, num_inputs);
           push(stack, IValue(size));
@@ -2474,12 +2474,12 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
         [](Stack& stack) {
           IValue self_size, other_size;
           pop(stack, self_size, other_size);
-          auto s = self_size.toIntVector();
-          auto o = other_size.toIntVector();
+          auto s = self_size.toDimVector();
+          auto o = other_size.toDimVector();
           if (s == o) {
-            push(stack, IValue());
+            stack.emplace_back();
           } else {
-            push(stack, s);
+            stack.emplace_back(std::move(self_size));
           }
         },
         aliasAnalysisFromSchema()),
