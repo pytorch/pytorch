@@ -4075,8 +4075,8 @@ class DistributedTest:
             adam_betas = (0.9, 0.99)
             adam_eps = 1e-6
             self._test_ddp_hook_with_optimizer_parity(
-                True, # grad as bucket view
-                False, # static graph
+                True,  # grad as bucket view
+                False,  # static graph
                 _FunctionalAdam,
                 construct_from_functional,
                 adam_lr,
@@ -4098,8 +4098,8 @@ class DistributedTest:
             # Not testing grad_as_bucket_view and static_graph as they are
             # tested in AdamW test above.
             self._test_ddp_hook_with_optimizer_parity(
-                True, # grad as bucket view
-                False, # static_graph
+                True,  # grad as bucket view
+                False,  # static_graph
                 _FunctionalSGD,
                 construct_from_functional,
                 sgd_lr,
