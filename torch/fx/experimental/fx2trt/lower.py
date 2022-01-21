@@ -1,20 +1,13 @@
 import dataclasses as dc
 import logging
 import typing as t
-from typing import Callable, Optional, List
+from dataclasses import field
+from typing import Callable, Type, Set, Optional, List
 
 import torch
 import torch.fx as fx
-
 import torch.fx.experimental.fx_acc.acc_tracer as acc_tracer
 import torch.nn as nn
-from torch.fx.experimental.fx2trt.tools.timing_cache_utils import (
-    TimingCacheManager,
-)
-from torch.fx.experimental.fx2trt.split import (
-    Splitter,
-    SplitFunc,
-)
 from torch.fx.experimental.const_fold import split_const_subgraphs
 from torch.fx.experimental.fx2trt import (
     TRTInterpreter,
@@ -32,7 +25,14 @@ from torch.fx.experimental.fx2trt.passes.remove_duplicate_output_args import (
     RemoveDuplicateOutputArgsFunc,
     remove_duplicate_output_args,
 )
-from dataclasses import field
+from torch.fx.experimental.fx2trt.split import (
+    Splitter,
+    SplitFunc,
+)
+from torch.fx.experimental.fx2trt.tools.timing_cache_utils import (
+    TimingCacheManager,
+)
+from torch.fx.experimental.fx_acc import acc_normalizer
 
 
 logger = logging.getLogger(__name__)
@@ -86,6 +86,12 @@ class LowerSetting:
     save_timing_cache: Save updated timing cache data into timing cache file if the timing
     cache file is provided.
 
+    ast_rewriter_allow_list (Optional[Set[nn.Module]]): Optional allow list of
+    modules that need AST rewriting. This is aiming to eliminate input variable involve in
+    exception checking control flow.
+
+    leaf_module_list (Optional[Set[nn.Module]]): Optional leaf module list where
+    modules will not be traced into.
     """
     max_batch_size: int = 2048
     input_specs: List[InputTensorSpec] = field(default_factory=list)
@@ -101,6 +107,8 @@ class LowerSetting:
     algo_selector = None
     timing_cache_prefix: str = ""
     save_timing_cache: bool = False
+    ast_rewriter_allow_list: Optional[Set[Type[nn.Module]]] = None
+    leaf_module_list: Optional[Set[Type[nn.Module]]] = None
 
 
 
@@ -261,7 +269,12 @@ class Lowerer(LowerFunc):
 
         return Lowerer(
             split=Splitter.create(not lower_setting.explicit_batch_dimension),
-            acc_trace=lambda mod, input: acc_tracer.trace(mod, input),  # type: ignore[arg-type]
+            acc_trace=lambda mod, input:
+            acc_tracer.trace(
+                mod,
+                input,  # type: ignore[arg-type]
+                ast_rewriter_allow_list=lower_setting.ast_rewriter_allow_list,
+                leaf_module_list=lower_setting.leaf_module_list),  # type: ignore[arg-type]
             remove_duplicate_output_args=remove_duplicate_output_args,
             trt_interpreter=LowerTrtInterpreter.create(lower_setting),
             fp16=lower_setting.fp16_mode,
@@ -278,10 +291,16 @@ class Lowerer(LowerFunc):
         if self.fp16:
             module.eval().half()
             input = tuple(x.half() if x.dtype == torch.float32 else x for x in input)
+
+        # Exure ast_rewrite is done for input module before const_fold
+        module = self.acc_trace(module, input)  # type: ignore[misc]
+
         const_split_mod = split_const_subgraphs(module, skip_folding_node_fn)
         const_split_mod.run_folding()
-        module = self.acc_trace(const_split_mod, input)  # type: ignore[misc]
-        split_module, splits = self.split(module, input)  # type: ignore[arg-type]
+
+        acc_normalizer.normalize(const_split_mod, expect_nodes_have_shapes=False)
+
+        split_module, splits = self.split(const_split_mod, input)  # type: ignore[arg-type]
         split_module.eval()  # type: ignore[attr-defined]
         for _split in splits:  # type: ignore[attr-defined]
             if _split.device == "acc":

@@ -129,9 +129,6 @@ def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphMo
                     zero_point_node = q_node.args[2]
                     dtype = q_node.args[3]
 
-                    output_scale = getattr(model, scale_node.target)
-                    output_zero_point = getattr(model, zero_point_node.target)
-
                     if is_call_module:
                         ref_module = modules[ref_node.target]
                         # change this pattern to use the corresponding quantized module
