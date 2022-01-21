@@ -17,6 +17,7 @@
 #include <c10/util/irange.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/UnaryOps.h>
+#include <ATen/cuda/CUDAContext.h>
 
 #include <algorithm>
 #include <cctype>
@@ -26,6 +27,7 @@
 
 namespace at {
 namespace native {
+
 namespace {
 void window_function_checks(
     const char* function_name,
@@ -426,27 +428,6 @@ Tensor& eye_out_cpu(int64_t n, int64_t m, Tensor& result) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ full ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 namespace {
-
-// The ZeroTensor allocator ignores whatever allocation is requested and always
-// gives you nullptr
-struct ZeroTensorAllocator final : public at::Allocator {
-  ZeroTensorAllocator(at::Device device) : device_(device) {};
-  ~ZeroTensorAllocator() override = default;
-  static void deleter(void* const pointer) {
-    TORCH_INTERNAL_ASSERT(!pointer);
-  }
-  DataPtr allocate(const size_t nbytes) const override {
-    return {nullptr, nullptr, &deleter, device_};
-  }
-  DeleterFnPtr raw_deleter() const override {
-    return deleter;
-  }
-  at::Device device_;
-};
-
-at::Allocator* GetZeroTensorAllocator(ZeroTensorAllocator& zt) {
-  return &zt;
-}
 
 // Performs dtype inference for full
 TensorOptions infer_full_options(
@@ -1076,11 +1057,11 @@ Tensor _efficientzerotensor(IntArrayRef size,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
     auto device_ = device_or_default(device);
-    auto allocator = ZeroTensorAllocator(device_);
+    auto allocator = at::native::ZeroTensorAllocator(device_);
     auto dtype_ = dtype_or_default(dtype);
-    constexpr auto zero_ks = at::DispatchKeySet(at::DispatchKey::ZeroTensor);
-    return at::detail::empty_generic(
-        size, &allocator, zero_ks, dtype_, c10::nullopt);
+    auto out = at::detail::empty_generic(size, &allocator, at::DispatchKeySet(c10::DispatchKey::CPU), dtype_, c10::nullopt);
+    out._set_zero(true);
+    return out;
 }
 
 Tensor& zeros_out(IntArrayRef size, Tensor& result) {

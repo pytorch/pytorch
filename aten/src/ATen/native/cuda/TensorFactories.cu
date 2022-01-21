@@ -65,6 +65,23 @@ Tensor empty_cuda(IntArrayRef size, c10::optional<ScalarType> dtype_opt, c10::op
   return tensor;
 }
 
+Tensor _efficientzerotensor_cuda(IntArrayRef size,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+    auto device_ = device_or_default(device);
+    if (!device_.has_index()) {
+      device_.set_index(at::cuda::current_device());
+    }
+    auto allocator = at::native::ZeroTensorAllocator(device_);
+    auto dtype_ = dtype_or_default(dtype);
+    auto out = at::detail::empty_generic(size, &allocator, at::DispatchKeySet(c10::DispatchKey::CUDA), dtype_, c10::nullopt);
+    out._set_zero(true);
+    return out;
+}
+
+
 Tensor empty_strided_cuda(IntArrayRef size, IntArrayRef stride, c10::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
   TORCH_CHECK(device_or_default(device_opt).is_cuda());
   TORCH_CHECK(!pin_memory_opt.has_value() || !*pin_memory_opt, "Only dense CPU tensors can be pinned");
