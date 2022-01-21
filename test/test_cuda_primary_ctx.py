@@ -1,7 +1,7 @@
 # Owner(s): ["module: cuda"]
 
 import torch
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocmVersionLessThan
 import sys
 import unittest
 
@@ -25,6 +25,7 @@ class TestCudaPrimaryCtx(TestCase):
         "where CUDA contexts are never created. Use either run_test.py or add "
         "--subprocess to run each test in a different subprocess.")
 
+    @skipIfRocmVersionLessThan((4, 4, 21504))
     def setUp(self):
         for device in range(torch.cuda.device_count()):
             # Ensure context has not been created beforehand
