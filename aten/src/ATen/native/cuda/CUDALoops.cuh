@@ -203,7 +203,7 @@ static inline void launch_jitted_unrolled_kernel(
   args[5] = static_cast<void*>(&s);
   args[6] = static_cast<void*>(&scalar_val);
 
-  for (size_t i = 0; i < extra_args_size; ++i) {
+  for (const auto i : c10::irange(extra_args_size)) {
     // since 7 slots are already filled in `args`
     args[i + 7] = extra_args_array[i];
   }
@@ -284,7 +284,7 @@ at::opmath_type<f_inputs_type> scalar_val, Args... extra_args) {
     args[1] = static_cast<void*>(&data);
     args[2] = static_cast<void*>(&scalar_val);
 
-    for (size_t i = 0; i < extra_args_size; i++) {
+    for (const auto i : c10::irange(extra_args_size)) {
       // since 3 slots are already filled in `args`
       args[i + 3] = extra_args_array[i];
     }
@@ -308,7 +308,7 @@ at::opmath_type<f_inputs_type> scalar_val, Args... extra_args) {
     args[5] = static_cast<void*>(&s);
     args[6] = static_cast<void*>(&scalar_val);
 
-    for (size_t i = 0; i < extra_args_size; i++) {
+    for (const auto i : c10::irange(extra_args_size)) {
       // since 7 slots are already filled in `args`
       args[i + 7] = extra_args_array[i];
     }

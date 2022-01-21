@@ -132,8 +132,8 @@ const auto ndtri_string = jiterator_stringify(
   template <typename T>
   T polevl(const T x, const T A[], const int len) {
     // NOTE: This `polevl` is different from other `polevl`
-    // implementation (in PyTorch) which expect the `len`  to be
-    // `len(A)` instead of `len(A) - 1`.
+    // implementation (in PyTorch) which expect the `len` to be
+    // `len(A) - 1` instead of `len(A)`.
     T result = 0;
     for (int i = 0; i < len; ++i) {
       result = result * x + A[i];
