@@ -1393,6 +1393,57 @@ def sample_inputs_dsplit(op_info, device, dtype, requires_grad):
                                     requires_grad=requires_grad),
                         args=(2,),),)
 
+def error_inputs_hsplit(op_info, device, **kwargs):
+    err_msg1 = ("torch.hsplit requires a tensor with at least 1 dimension, "
+                "but got a tensor with 0 dimensions!")
+    si1 = SampleInput(make_tensor((),
+                                  dtype=torch.float32,
+                                  device=device),
+                      args=(0,),)
+    err_msg2 = (f"torch.hsplit attempted to split along dimension 1, "
+                f"but the size of the dimension {S} "
+                f"is not divisible by the split_size 0!")
+    si2 = SampleInput(make_tensor((S, S, S),
+                                  dtype=torch.float32,
+                                  device=device),
+                      args=(0,),)
+    return (ErrorInput(si1, error_type=RuntimeError, error_regex=err_msg1),
+            ErrorInput(si2, error_type=RuntimeError, error_regex=err_msg2),)
+
+def error_inputs_vsplit(op_info, device, **kwargs):
+    err_msg1 = ("torch.vsplit requires a tensor with at least 2 dimension, "
+                "but got a tensor with 1 dimensions!")
+    si1 = SampleInput(make_tensor((S,),
+                                  dtype=torch.float32,
+                                  device=device),
+                      args=(0,),)
+    err_msg2 = (f"torch.vsplit attempted to split along dimension 0, "
+                f"but the size of the dimension {S} "
+                f"is not divisible by the split_size 0!")
+    si2 = SampleInput(make_tensor((S, S, S),
+                                  dtype=torch.float32,
+                                  device=device),
+                      args=(0,),)
+    return (ErrorInput(si1, error_type=RuntimeError, error_regex=err_msg1),
+            ErrorInput(si2, error_type=RuntimeError, error_regex=err_msg2),)
+
+def error_inputs_dsplit(op_info, device, **kwargs):
+    err_msg1 = ("torch.dsplit requires a tensor with at least 3 dimension, "
+                "but got a tensor with 1 dimensions!")
+    si1 = SampleInput(make_tensor((S,),
+                                  dtype=torch.float32,
+                                  device=device),
+                      args=(0,),)
+    err_msg2 = (f"torch.dsplit attempted to split along dimension 2, "
+                f"but the size of the dimension {S} "
+                f"is not divisible by the split_size 0!")
+    si2 = SampleInput(make_tensor((S, S, S),
+                                  dtype=torch.float32,
+                                  device=device),
+                      args=(0,),)
+    return (ErrorInput(si1, error_type=RuntimeError, error_regex=err_msg1),
+            ErrorInput(si2, error_type=RuntimeError, error_regex=err_msg2),)
+
 def sample_inputs_linalg_multi_dot(op_info, device, dtype, requires_grad):
     # Each test case consists of the sizes in the chain of multiplications
     # e.g. [2, 3, 4, 5] generates matrices (2, 3) @ (3, 4) @ (4, 5)
@@ -12246,19 +12297,22 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_hsplit,),
+           sample_inputs_func=sample_inputs_hsplit,
+           error_inputs_func=error_inputs_hsplit,),
     OpInfo('vsplit',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_vsplit,),
+           sample_inputs_func=sample_inputs_vsplit,
+           error_inputs_func=error_inputs_vsplit,),
     OpInfo('dsplit',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_dsplit,),
+           sample_inputs_func=sample_inputs_dsplit,
+           error_inputs_func=error_inputs_dsplit,),
     OpInfo('triangular_solve',
            op=torch.triangular_solve,
            dtypes=floating_and_complex_types(),
