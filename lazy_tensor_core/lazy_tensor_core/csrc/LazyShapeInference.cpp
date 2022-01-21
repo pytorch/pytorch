@@ -46,6 +46,7 @@
 // #include <functional>
 #include "torch/csrc/lazy/core/shape.h"
 #include <ATen/native/ConvUtils.h>
+#include <ATen/AccumulateType.h>
 #include "aten/src/ATen/native/ReduceOpsUtils.h"
 #include "lazy_tensor_core/csrc/ts_backend/LazyShapeInference.h"
 #include "torch/csrc/api/include/torch/enum.h"
@@ -77,12 +78,45 @@ std::vector<int64_t> expand_param_if_needed(
 }
 
 std::vector<Shape> compute_shape_arange_out(const at::Scalar & start, const at::Scalar & end, const at::Scalar & step, at::Tensor & out) {
-  //Returns a 1-D tensor of size
-  // ceil ( (end - start) / step )
-  // ceil (a/b) = (a + b - 1) / b;
-  assert(step.toFloat() != 0);
-  int64_t size = (end.toFloat() - start.toFloat()) / step.toFloat();
-  assert (size > 0);
+  double size_d;
+  // shape inference code copied from RangeFactories.cpp arange_out function
+  // Note: AT_DISPATCH_ALL_TYPES_AND is just a macro that defines the correct scalar_t based on your platform
+  AT_DISPATCH_ALL_TYPES_AND(c10::kBFloat16, out.scalar_type(), "compute_shape_arange_out", [&]() {
+    using accscalar_t = at::acc_type<scalar_t, false>;
+    auto xstart = start.to<accscalar_t>();
+    auto xend = end.to<accscalar_t>();
+    auto xstep = step.to<accscalar_t>();
+
+    // we use double precision for (start - end) / step
+    // to compute size_d for consistency across devices.
+    // The problem with using accscalar_t is that accscalar_t might be float32 on gpu for a float32 scalar_t,
+    // but double on cpu for the same,
+    // and the effective output size starts differing on CPU vs GPU because of precision issues, which
+    // we dont want.
+    // the corner-case we do want to take into account is int64_t, which has higher precision than double
+    double size_d;
+    // NOLINTNEXTLINE(bugprone-branch-clone)
+    if (std::is_same<scalar_t, int64_t>::value) {
+      size_d = std::ceil(static_cast<double>(end.to<accscalar_t>() - start.to<accscalar_t>())
+                         / step.to<accscalar_t>());
+    } else {
+      size_d = std::ceil(static_cast<double>(end.to<double>() - start.to<double>())
+                         / step.to<double>());
+    }
+
+    TORCH_CHECK(xstep > 0 || xstep < 0, "step must be nonzero");
+    TORCH_CHECK(std::isfinite(static_cast<double>(xstart)) &&
+             std::isfinite(static_cast<double>(xend)),
+             "unsupported range: ", xstart, " -> ", xend);
+    TORCH_CHECK(((xstep > 0) && (xend >= xstart)) || ((xstep < 0) && (xend <= xstart)),
+             "upper bound and larger bound inconsistent with step sign");
+
+    TORCH_CHECK(size_d >= 0 && size_d <= static_cast<double>(std::numeric_limits<int64_t>::max()),
+             "invalid size, possible overflow?");
+  });
+
+  int64_t size = static_cast<int64_t>(size_d);
+
 
   // From torch.arange docs:
   // dtype (torch.dtype, optional) – the desired data type of returned tensor.
