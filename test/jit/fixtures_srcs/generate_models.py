@@ -1,11 +1,12 @@
-import torch
-from fixtures_src import TestVersionedDivTensorExampleV4
-from pathlib import Path
-from typing import Set
 import io
-import zipfile
 import logging
 import sys
+import zipfile
+from pathlib import Path
+from typing import Set
+
+import torch
+from test.jit.fixtures_srcs.fixtures_src import TestVersionedDivTensorExampleV4
 from torch.jit.mobile import _load_for_lite_interpreter, _export_operator_list
 
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
@@ -20,19 +21,22 @@ A systematic workflow to change operator is needed to ensure
 Backwards Compatibility (BC) / Forwards Compatibility (FC) for operator changes. For BC-breaking operator change,
 an upgrader is needed. Here is the flow to properly land a BC-breaking operator change.
 
-1. Write an upgrader in caffe2/torch/jit/operator_upgraders.py file. The softly enforced naming format
-is <operator_name>_<operator_overload>_<start>_<end>. For example, the below example means that div.Tensor at
-version from 0 to 3 needs to be replaced by this upgrader.
+1. Write an upgrader in caffe2/torch/csrc/jit/operator_upgraders/upgraders_entry.cpp file. The softly enforced
+naming format is <operator_name>_<operator_overload>_<start>_<end>. For example, the below example means that
+div.Tensor at version from 0 to 3 needs to be replaced by this upgrader.
 
 ```
+/*
 div_Tensor_0_3 is added for a change of operator div in pr xxxxxxx.
 Create date: 12/02/2021
 Expire date: 06/02/2022
-@torch.jit.script
-def div_Tensor_0_3(self: torch.Tensor, other: torch.Tensor) -> torch.Tensor:
-    if (self.is_floating_point() or other.is_floating_point()):
-        return self.true_divide(other)
-    return self.divide(other, rounding_mode='trunc')
+*/
+     {"div_Tensor_0_3", R"SCRIPT(
+def div_Tensor_0_3(self: Tensor, other: Tensor) -> Tensor:
+  if (self.is_floating_point() or other.is_floating_point()):
+    return self.true_divide(other)
+  return self.divide(other, rounding_mode='trunc')
+)SCRIPT"},
 ```
 
 2. In caffe2/torch/csrc/jit/operator_upgraders/version_map.h, add changes like below.
@@ -52,14 +56,30 @@ python pytorch/tools/codegen/operator_versions/gen_mobile_upgraders.py
 ```
 
 4. Generate the test to cover upgrader.
+
 4.1 Switch the commit before the operator change, and add a module in
-`test/jit/fixtures_srcs/fixtures_src.py`. This module should includes the changed operator.
+`test/jit/fixtures_srcs/fixtures_src.py`. The reason why switching to commit is that,
+an old model with the old operator before the change is needed to ensure the upgrader
+is working as expected. In `test/jit/fixtures_srcs/generate_models.py`, add the module and
+it's corresponding changed operator like following
+```
+ALL_MODULES = {
+    TestVersionedDivTensorExampleV4(): "aten::div.Tensor",
+}
+```
+This module should includes the changed operator. If the operator isn't covered in the model,
+the model export process in step 4.2 will fail.
+
 4.2 Export the model to `test/jit/fixtures` by running
 ```
 python /Users/chenlai/pytorch/test/jit/fixtures_src/generate_models.py
 ```
+
 4.3 In `test/jit/test_save_load_for_op_version.py`, add a test to cover the old models and
 ensure the result is equivalent between current module and old module + upgrader.
+
+4.4 Save all change in 4.1, 4.2 and 4.3, as well as previous changes made in step 1, 2, 3.
+Submit a pr
 
 """
 
