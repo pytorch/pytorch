@@ -468,7 +468,7 @@ class TestFunctionalIterDataPipe(TestCase):
             (dp.iter.Collator, (lambda x: x,), {}),
             (dp.iter.Demultiplexer, (2, lambda x: x % 2,), {}),
             (dp.iter.Filter, (lambda x: x >= 5,), {}),
-            # (dp.iter.Grouper, (lambda x: x >= 5,), {}),  # TODO: Need custom __getstate__ for Grouper
+            (dp.iter.Grouper, (lambda x: x >= 5,), {}),
             (dp.iter.Mapper, (lambda x: x, ), {}),
         ]
         if HAS_DILL:
