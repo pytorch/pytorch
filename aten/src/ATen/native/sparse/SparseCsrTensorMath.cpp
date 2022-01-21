@@ -610,7 +610,7 @@ Tensor& linalg_solve_sparse_csr_out(const Tensor& input, const Tensor& other, Te
     c10::MaybeOwned<Tensor> result_ = result.expect_contiguous();
 
     if (other.ndimension() > 1) {
-      TORCH_CHECK(false, "NotImplementedError: other tensor with dimension > 1 is not implemented yet.");
+      TORCH_CHECK(other.size(-1) == 1, "NotImplementedError: multiple vector case stored in 'other' tensor is not implemented yet.");
     }
 
     // the "other" Tensor needs to be a vector
