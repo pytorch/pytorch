@@ -3140,7 +3140,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.embedding_bag'),
         xfail('nonzero'),
         xfail('nn.functional.glu'),
-        xfail('cartesian_prod'),
     }
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
@@ -3283,7 +3282,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.glu'),
         xfail('nn.functional.prelu'),
         xfail('isclose'),
-        xfail('cartesian_prod'),
         xfail('nn.functional.fractional_max_pool3d'),
         xfail('nn.functional.rrelu'),
         xfail('nn.functional.bilinear'),
