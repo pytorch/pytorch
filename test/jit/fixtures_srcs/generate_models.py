@@ -104,8 +104,8 @@ def get_fixtures_path() -> Path:
 """
 Get all models' name in `test/jit/fixtures`
 """
-def get_all_models() -> Set[str]:
-    files_in_fixtures = get_fixtures_path().glob('**/*')
+def get_all_models(model_directory_path: Path) -> Set[str]:
+    files_in_fixtures = model_directory_path.glob('**/*')
     all_models_from_fixtures = [fixture.stem for fixture in files_in_fixtures if fixture.is_file()]
     return set(all_models_from_fixtures)
 
@@ -153,7 +153,7 @@ likely this script is running with the commit to make the change.
 
 """
 def generate_models(model_directory_path: Path):
-    all_models = get_all_models()
+    all_models = get_all_models(model_directory_path)
     for a_module, expect_operator in ALL_MODULES.items():
         print(a_module, expect_operator)
         script_module = torch.jit.script(a_module)
@@ -179,6 +179,7 @@ def generate_models(model_directory_path: Path):
                 f"Actual model version {actual_model_version} "
                 f"doesn't match the expect model version {expect_model_version}. "
                 f"Please run the script before the commit to change operator.")
+            continue
 
         actual_operator_list = get_operator_list(script_module)
         if expect_operator not in actual_operator_list:
@@ -186,8 +187,8 @@ def generate_models(model_directory_path: Path):
                 f"The model includes operator: {actual_operator_list}, "
                 f"however it doesn't cover the operator {expect_operator}."
                 f"Please ensure the output model includes the tested operator.")
+            continue
 
-        # export_model_path = str(get_fixtures_path() / (str(model_name) + ".ptl"))
         export_model_path = str(model_directory_path / (str(model_name) + ".ptl"))
         script_module._save_for_lite_interpreter(export_model_path)
         logger.info(f"Generating model {model_name} and it's save to {export_model_path}")
