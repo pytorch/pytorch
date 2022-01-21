@@ -2035,9 +2035,9 @@ graph(%inp : Tensor,
   auto none_bias = c10::IValue();
 
   stack.clear();
-  stack.push_back(input);
-  stack.push_back(weight);
-  stack.push_back(none_bias);
+  stack.emplace_back(input);
+  stack.emplace_back(weight);
+  stack.emplace_back(none_bias);
   is = InterpreterState{cd};
   is.run(stack);
 
