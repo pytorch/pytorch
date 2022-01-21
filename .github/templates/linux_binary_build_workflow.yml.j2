@@ -77,11 +77,7 @@ jobs:
     !{{ binary_env(config) }}
     steps:
       !{{ common.setup_ec2_linux() }}
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
-        with:
-          path: pytorch
-          submodules: recursive
+      !{{ common.checkout_pytorch("recursive", deep_clone=False, pytorch_directory="pytorch") }}
       - name: Clone pytorch/builder
         uses: actions/checkout@v2
         with:
