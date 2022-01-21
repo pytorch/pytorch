@@ -254,7 +254,7 @@ class GitHubPR:
         if repo.current_branch() != self.default_branch():
             repo.checkout(self.default_branch())
         if not self.is_ghstack_pr():
-            msg = self.get_title() + "\n" + self.get_body()
+            msg = self.get_title() + "\n\n" + self.get_body()
             msg += f"\nPull Request resolved: {self.get_pr_url()}\n"
             repo._run_git("merge", "--squash", f"{repo.remote}/{self.head_ref()}")
             repo._run_git("commit", f"--author=\"{self.get_author()}\"", "-m", msg)
@@ -262,7 +262,7 @@ class GitHubPR:
             self.merge_ghstack_into(repo)
 
         if not dry_run:
-            repo.push(self.default_branch())
+            repo.push(self.default_branch(), dry_run)
 
 
 @dataclass
