@@ -1290,7 +1290,6 @@ class AbstractTestCases:
 
             for reduce in reduces:
                 for dim in range(len(shape)):
-                    # Result without `optional_out` kwarg
                     output = input.scatter_reduce(dim, index, reduce, output_size=output_size)
 
                     # Check that output is of the correct size
@@ -1298,7 +1297,6 @@ class AbstractTestCases:
                     output_shape[dim] = output_size
                     self.assertEqual(output.shape, output_shape)
 
-                    # Fill expected with default values when `optional_out` is not passed
                     expected = torch.zeros(output_shape, dtype=dtype, device=device)
                     expected.fill_(fills[reduce])
                     counts = torch.zeros(output_shape, dtype=dtype, device=device)
@@ -1320,7 +1318,6 @@ class AbstractTestCases:
                             op(expected[i, j, k], v)
                         counts[i, j, k] += 1
 
-                    # expect untouched indices to be zeroed out when `optional_out` kwarg is not passed
                     if (reduce == "amin" or reduce == "amax"):
                         expected.masked_fill_(counts == 0, 0)
 
