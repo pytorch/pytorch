@@ -1281,8 +1281,7 @@ Tensor scatter_reduce_two_cpu(const Tensor& self,
                               int64_t dim,
                               const Tensor& index,
                               const c10::string_view reduce,
-                              const c10::optional<int64_t> output_size,
-                              const c10::optional<Tensor>& optional_out) {
+                              const c10::optional<int64_t> output_size) {
 
   // TODO: Add documentation.
 
@@ -1291,26 +1290,13 @@ Tensor scatter_reduce_two_cpu(const Tensor& self,
 
   dim = dim < 0 ? dim + self.dim() : dim;
 
-  Tensor out;
-  if (optional_out.has_value()) {
-    out = optional_out.value();
-    for (auto i = 0; i < out.dim(); i++) {
-      if (i != dim) {
-        TORCH_CHECK(self.size(i) == out.size(i),
-            "All dimensions of `self` and `optional_out` must have the same size except `dim`=", dim,
-            "Mismatch on dimension", i, " got size ", self.size(i), " for `self` and size ",
-            out.size(i), "for optional_out");
-      }
-    }
+  auto sizes = self.sizes().vec();
+  if (output_size.has_value()) {
+    sizes[dim] = output_size.value();
   } else {
-    auto sizes = self.sizes().vec();
-    if (output_size.has_value()) {
-      sizes[dim] = output_size.value();
-    } else {
-      sizes[dim] = index.numel() > 0 ? index.max().item<int64_t>() + 1: 0;
-    }
-    out = at::empty(sizes, self.options());
+    sizes[dim] = index.numel() > 0 ? index.max().item<int64_t>() + 1: 0;
   }
+  Tensor out = at::empty(sizes, self.options());
 
   TORCH_CHECK(self.dim() == index.dim(),
       "Shape mismatch between `self` (got ", self.sizes(), ") and `index` (got ", index.sizes(), ")");
@@ -1326,13 +1312,9 @@ Tensor scatter_reduce_two_cpu(const Tensor& self,
   TORCH_CHECK(index.is_contiguous(), "`index` needs to be contiguous");
   TORCH_CHECK(out.is_contiguous(), "`out` needs to be contiguous");
 
-  dim = dim < 0 ? dim + self.dim() : dim;
-
 
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, self.scalar_type(), "scatter_reduce", [&] {
-    if (!optional_out.has_value()) {
-      out.fill_((scalar_t)0);
-    }
+    out.fill_((scalar_t)0);
     auto self_data = self.data_ptr<scalar_t>();
     auto index_data = index.data_ptr<int64_t>();
     auto out_data = out.data_ptr<scalar_t>();
