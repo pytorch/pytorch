@@ -606,8 +606,8 @@ Tensor& linalg_solve_sparse_csr_out(const Tensor& input, const Tensor& other, Te
   if (at::globalContext().hasCUDA()) {
     TORCH_INTERNAL_ASSERT(input.is_sparse_csr());
 
-    other.expect_contiguous();
-    result.expect_contiguous();
+    c10::MaybeOwned<Tensor> other_ = other.expect_contiguous();
+    c10::MaybeOwned<Tensor> result_ = result.expect_contiguous();
 
     if (other.ndimension() > 1) {
       TORCH_CHECK(false, "NotImplementedError: other tensor with dimension > 1 is not implemented yet.");
@@ -615,15 +615,9 @@ Tensor& linalg_solve_sparse_csr_out(const Tensor& input, const Tensor& other, Te
 
     // the "other" Tensor needs to be a vector
     TORCH_CHECK(
-      other.ndimension() == 1,
-      "other tensor must be a vector (1-dimensional), but got tensor with dimension: ",
+      other.ndimension() == 1 || (other.ndimension() == 2 && other.size(1) == 1),
+      "other tensor must be a vector, but got tensor with dimension: ",
       other.ndimension());
-
-    // Ensure other tensor is not empty
-    TORCH_CHECK(
-      other.numel(),
-      "Expected non-empty other tensor, but found empty other tensor."
-    );
 
     // The API expects a square matrix
     TORCH_CHECK(
@@ -640,15 +634,19 @@ Tensor& linalg_solve_sparse_csr_out(const Tensor& input, const Tensor& other, Te
       input.size(0), ", 1) or (", input.size(0), ",)"
     );
 
-    at::native::resize_output(result, other.sizes());
-
     TORCH_CHECK(
       other.scalar_type() == result.scalar_type(),
       "other (got: ", result.scalar_type(), ") and out (got: ", result.scalar_type(), ") tensors must have same dtype.");
 
+    at::native::resize_output(result, other.sizes());
+    // Return for an empty other tensor
+    if (other.numel() == 0) return result;
+
     int singularity = -1;
 
-    linalg_solve_sparse_csr_stub(kCUDA, input, other, result, singularity);
+    linalg_solve_sparse_csr_stub(kCUDA, input, *other_, *result_, singularity);
+
+    result.copy_(*result_);
 
     TORCH_CHECK_LINALG(singularity == -1, "torch.linalg.solve",
         ": The diagonal element ", singularity , " is zero, the solve could not be completed because the input matrix is singular.");
@@ -672,6 +670,7 @@ REGISTER_ARCH_DISPATCH(linalg_solve_sparse_csr_stub, DEFAULT, &linalg_solve_spar
 REGISTER_AVX512_DISPATCH(linalg_solve_sparse_csr_stub, &linalg_solve_sparse_csr_kernel_error);
 REGISTER_AVX2_DISPATCH(linalg_solve_sparse_csr_stub, &linalg_solve_sparse_csr_kernel_error);
 REGISTER_VSX_DISPATCH(linalg_solve_sparse_csr_stub, &linalg_solve_sparse_csr_kernel_error);
+REGISTER_ZVECTOR_DISPATCH(linalg_solve_sparse_csr_stub, &linalg_solve_sparse_csr_kernel_error);
 
 } // namespace native
 } // namespace at
