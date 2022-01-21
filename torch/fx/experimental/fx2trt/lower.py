@@ -1,20 +1,13 @@
 import dataclasses as dc
 import logging
 import typing as t
-from typing import List
+from dataclasses import field
+from typing import Callable, Type, Set, Optional, List
 
 import torch
 import torch.fx as fx
-
 import torch.fx.experimental.fx_acc.acc_tracer as acc_tracer
 import torch.nn as nn
-from torch.fx.experimental.fx2trt.tools.timing_cache_utils import (
-    TimingCacheManager,
-)
-from torch.fx.experimental.fx2trt.split import (
-    Splitter,
-    SplitFunc,
-)
 from torch.fx.experimental.const_fold import split_const_subgraphs
 from torch.fx.experimental.fx2trt import (
     TRTInterpreter,
@@ -32,7 +25,14 @@ from torch.fx.experimental.fx2trt.passes.remove_duplicate_output_args import (
     RemoveDuplicateOutputArgsFunc,
     remove_duplicate_output_args,
 )
-from dataclasses import field
+from torch.fx.experimental.fx2trt.split import (
+    Splitter,
+    SplitFunc,
+)
+from torch.fx.experimental.fx2trt.tools.timing_cache_utils import (
+    TimingCacheManager,
+)
+from torch.fx.experimental.fx_acc import acc_normalizer
 
 
 logger = logging.getLogger(__name__)
@@ -43,10 +43,62 @@ TModule = t.TypeVar("TModule", bound=nn.Module)
 
 @dc.dataclass
 class LowerSetting:
+    """
+    Basic configuration for lowering stack.
+
+    Args:
+    max_batch_size: The maximum batch size which can be used at execution time,
+    and also the batch size for which the ICudaEngine will be optimized.
+
+    input_specs: Specs for inputs to engine, can either be a single size or a
+    range defined by Min, Optimal, Max sizes.
+
+    explicit_batch_dimension: Use explicit batch dimension during lowering.
+
+    explicit_precision: Use explicit precision during lowering.
+
+    fp16_mode: Enable FP16 dtype during lowering.
+
+    int8_mode: Enable Int8 dtype during lowering.
+
+    max_workspace_size: The maximum workspace size. The maximum GPU temporary
+    memory which the TensorRT engine can use at execution time.
+
+    strict_type_constraints: Require TensorRT engine to strictly follow data type
+    setting at execution time.
+
+    enable_fuse: Enable pass fuse duirng lowering, i.e. fuse multiple operations
+    as (a->b->c->d)=>(e). Current available fuse source patterns are:
+    sparse->matmul->add
+    permute->linear
+    permute->matmul
+    unsqueeze->cat->sum
+
+    enable_fuse_for_sparsity: Enable pass fuse for sparsity.
+
+    verbose_log: Enable TensorRT engine verbose log mode.
+
+    algo_selector: Enable TensorRT algorithm selector at execution time.
+
+    timing_cache_prefix: TensorRT timing cache file path. TensorRT engine will use timing
+    cache file at execution time if valid timing cache file is provided.
+
+    save_timing_cache: Save updated timing cache data into timing cache file if the timing
+    cache file is provided.
+
+    ast_rewriter_allow_list (Optional[Set[nn.Module]]): Optional allow list of
+    modules that need AST rewriting. This is aiming to eliminate input variable involve in
+    exception checking control flow.
+
+    leaf_module_list (Optional[Set[nn.Module]]): Optional leaf module list where
+    modules will not be traced into.
+    """
     max_batch_size: int = 2048
     input_specs: List[InputTensorSpec] = field(default_factory=list)
     explicit_batch_dimension: bool = True
+    explicit_precision: bool = False
     fp16_mode: bool = False
+    int8_mode: bool = False
     max_workspace_size: int = 1 << 30
     strict_type_constraints: bool = False
     enable_fuse: bool = True
@@ -55,6 +107,9 @@ class LowerSetting:
     algo_selector = None
     timing_cache_prefix: str = ""
     save_timing_cache: bool = False
+    ast_rewriter_allow_list: Optional[Set[Type[nn.Module]]] = None
+    leaf_module_list: Optional[Set[Type[nn.Module]]] = None
+
 
 
 @dc.dataclass
@@ -98,6 +153,7 @@ class LowerTrtInterpreter:
             mod,
             input_specs=input_specs_val,
             explicit_batch_dimension=self.lower_setting.explicit_batch_dimension,
+            explicit_precision=self.lower_setting.explicit_precision,
             logger_level=trt.Logger.VERBOSE
             if self.lower_setting.verbose_log
             else trt.Logger.WARNING,
@@ -107,6 +163,7 @@ class LowerTrtInterpreter:
             max_batch_size=self.lower_setting.max_batch_size,
             max_workspace_size=self.lower_setting.max_workspace_size,
             fp16_mode=self.lower_setting.fp16_mode,
+            int8_mode=self.lower_setting.int8_mode,
             strict_type_constraints=self.lower_setting.strict_type_constraints,
             algorithm_selector=algo_selector,
             timing_cache=cache_data,
@@ -212,7 +269,12 @@ class Lowerer(LowerFunc):
 
         return Lowerer(
             split=Splitter.create(not lower_setting.explicit_batch_dimension),
-            acc_trace=lambda mod, input: acc_tracer.trace(mod, input),  # type: ignore[arg-type]
+            acc_trace=lambda mod, input:
+            acc_tracer.trace(
+                mod,
+                input,  # type: ignore[arg-type]
+                ast_rewriter_allow_list=lower_setting.ast_rewriter_allow_list,
+                leaf_module_list=lower_setting.leaf_module_list),  # type: ignore[arg-type]
             remove_duplicate_output_args=remove_duplicate_output_args,
             trt_interpreter=LowerTrtInterpreter.create(lower_setting),
             fp16=lower_setting.fp16_mode,
@@ -223,15 +285,22 @@ class Lowerer(LowerFunc):
         module: nn.Module,
         input: Input,
         cuda_graph_batch_size: int = -1,
+        skip_folding_node_fn: Optional[Callable[[fx.Node], bool]] = None,
     ) -> nn.Module:
         """See `LowerFunc` protocol"""
         if self.fp16:
             module.eval().half()
             input = tuple(x.half() if x.dtype == torch.float32 else x for x in input)
-        const_split_mod = split_const_subgraphs(module)
+
+        # Exure ast_rewrite is done for input module before const_fold
+        module = self.acc_trace(module, input)  # type: ignore[misc]
+
+        const_split_mod = split_const_subgraphs(module, skip_folding_node_fn)
         const_split_mod.run_folding()
-        module = self.acc_trace(const_split_mod, input)  # type: ignore[misc]
-        split_module, splits = self.split(module, input)  # type: ignore[arg-type]
+
+        acc_normalizer.normalize(const_split_mod, expect_nodes_have_shapes=False)
+
+        split_module, splits = self.split(const_split_mod, input)  # type: ignore[arg-type]
         split_module.eval()  # type: ignore[attr-defined]
         for _split in splits:  # type: ignore[attr-defined]
             if _split.device == "acc":
