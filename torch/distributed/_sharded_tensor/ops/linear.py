@@ -90,8 +90,8 @@ def sharded_linear(types, args, kwargs, pg):
         raise TypeError("input and bias need to be torch.Tensor")
     if not isinstance(weight, ShardedTensor):
         raise TypeError("weight needs to be ShardedTensor")
-    if len(input.size()) < 2:
-        raise ValueError("Input needs to have at least 2 dims")
+    if len(input.size()) < 1:
+        raise ValueError("Input needs to have at least 1 dim")
     weight_size = cast(torch.Size, weight.size())
     if len(weight_size) != 2:
         raise ValueError("Weight needs to have exactly 2 dims")
@@ -100,7 +100,7 @@ def sharded_linear(types, args, kwargs, pg):
 
     if input.size()[-1] != weight_size[1]:
         raise ValueError(
-            f"Input dim: {input.size()[1]} does not match "
+            f"Input dim: {input.size()[-1]} does not match "
             f"appropriate weight dim: {weight_size[1]}"
         )
     if not isinstance(weight._sharding_spec, ChunkShardingSpec):

@@ -19,16 +19,25 @@
 name: !{{ build_environment }}
 
 on:
+{%- if is_default %}
   pull_request:
-    types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
-{%- if is_scheduled %}
-  schedule:
-    - cron: !{{ is_scheduled }}
-{%- else %}
+{%- endif %}
   push:
+{%- for label in ciflow_config.labels | sort %}
+  {%- if loop.first %}
+    tags:
+  {%- endif %}
+  {%- if label != "ciflow/default" %}
+      - '!{{ label }}/*'
+  {%- endif %}
+{%- endfor %}
+{%- if not is_scheduled %}
     branches:
       - master
       - release/*
+{%- else %}
+  schedule:
+    - cron: !{{ is_scheduled }}
 {%- endif %}
   workflow_dispatch:
 
@@ -71,9 +80,6 @@ jobs:
       JOB_BASE_NAME: !{{ build_environment }}-build
       http_proxy: "!{{ common. squid_proxy }}"
       https_proxy: "!{{ common.squid_proxy }}"
-      IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == '!{{ ciflow_config.trigger_action }}') && (github.event.assigneed.login == '!{{ ciflow_config.trigger_actor }}') }}
-      LABEL_CONDITIONS: ${{ !{{ ciflow_config.label_conditions }} }}
-    if: !{{ ciflow_config.root_job_condition }}
     steps:
       - name: print labels
         run: echo "${PR_LABELS}"

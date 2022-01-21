@@ -522,5 +522,12 @@ $6 = torch._ops.aten.add_($1, $5)''')
         with self.assertRaisesRegex(RuntimeError, "but got None"):
             out.backward()
 
+    def test_storage_can_be_converted_to_python_object(self):
+        with enable_python_mode(LoggingTensor):
+            s = torch.Storage()
+            z = LoggingTensor(torch.empty([]))
+            z.set_(s)
+
+
 if __name__ == '__main__':
     run_tests()

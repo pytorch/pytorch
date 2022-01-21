@@ -2641,7 +2641,9 @@ class DistributedTest:
             )
 
         # SCATTER
-        def _test_scatter_helper(self, group, group_id, rank, dtype=torch.float):
+        def _test_scatter_helper(
+            self, group, group_id, rank, cuda=False, rank_to_GPU=None, dtype=torch.float
+        ):
             for dest in group:
                 tensor = _build_tensor(dest + 1, -1, dtype=dtype)
                 expected_tensor = _build_tensor(dest + 1, rank, dtype=dtype)
@@ -2650,6 +2652,9 @@ class DistributedTest:
                     if rank == dest
                     else []
                 )
+                if cuda:
+                    tensor = tensor.cuda(rank_to_GPU[rank][0])
+                    tensors = [t.cuda(rank_to_GPU[rank][0]) for t in tensors]
                 if dtype == torch.complex64:
                     tensor_shapes = [torch.view_as_real(t).shape for t in tensors]
                 else:
@@ -2662,6 +2667,7 @@ class DistributedTest:
                     src=dest,
                     scatter_list=tensors,
                     group=group_id,
+                    expect_event=False,
                     tensor_shapes=tensor_shapes,
                 )
                 self.assertEqual(tensor, expected_tensor)
@@ -2691,30 +2697,51 @@ class DistributedTest:
                 dist.scatter(output)
             self.assertEqual(output, one * rank)
 
+        @sandcastle_skip_if(BACKEND == "nccl", "Nccl does not support CPU tensors")
         def test_scatter(self):
             group, group_id, rank = self._init_global_test()
             self._test_scatter_helper(group, group_id, rank)
 
+        @sandcastle_skip_if(BACKEND != "nccl", "Only Nccl supports CUDA gather")
+        @skip_if_no_gpu
+        def test_scatter_cuda(self):
+            group, group_id, rank = self._init_global_test()
+            rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
+            self._test_scatter_helper(group, group_id, rank, True, rank_to_GPU)
+
+        @sandcastle_skip_if(BACKEND == "nccl", "Nccl does not support CPU tensors")
         def test_scatter_complex(self):
             group, group_id, rank = self._init_global_test()
             self._test_scatter_helper(group, group_id, rank, dtype=torch.cfloat)
 
+        @sandcastle_skip_if(BACKEND != "nccl", "Only Nccl supports CUDA gather")
+        @skip_if_no_gpu
+        def test_scatter_cuda_complex(self):
+            group, group_id, rank = self._init_global_test()
+            rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
+            self._test_scatter_helper(group, group_id, rank, True, rank_to_GPU, dtype=torch.cfloat)
+
+        @sandcastle_skip_if(BACKEND == "nccl", "Nccl does not support CPU tensors")
         @skip_if_small_worldsize
         def test_scatter_group(self):
             group, group_id, rank = self._init_group_test()
             self._test_scatter_helper(group, group_id, rank)
 
+        @sandcastle_skip_if(BACKEND == "nccl", "Nccl does not support CPU tensors")
         def test_scatter_full_group(self):
             group, group_id, rank = self._init_full_group_test()
             self._test_scatter_helper(group, group_id, rank)
 
         # GATHER
-        def _test_gather_helper(self, group, group_id, rank):
+        def _test_gather_helper(self, group, group_id, rank, cuda=False, rank_to_GPU=None):
             for dest in group:
                 tensor = _build_tensor(dest + 1, rank)
                 tensors = (
                     [_build_tensor(dest + 1, -1) for i in group] if rank == dest else []
                 )
+                if cuda:
+                    tensor = tensor.cuda(rank_to_GPU[rank][0])
+                    tensors = [t.cuda(rank_to_GPU[rank][0]) for t in tensors]
                 self.call_dist_op(
                     ":gather",
                     False,
@@ -2723,6 +2750,7 @@ class DistributedTest:
                     dst=dest,
                     gather_list=tensors,
                     group=group_id,
+                    expect_event=False,
                     tensor_shapes=[tensors[0].shape] if len(tensors) > 0 else None,
                 )
                 if rank == dest:
@@ -2764,7 +2792,7 @@ class DistributedTest:
         @skip_if_no_gpu
         def test_gather_cuda(self):
             group, group_id, rank = self._init_global_test()
-            rank_to_GPU = self._init_multigpu_helper()
+            rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
             self._test_gather_helper(group, group_id, rank, True, rank_to_GPU)
 
         @sandcastle_skip_if(BACKEND == "nccl", "Nccl does not support CPU tensors")
@@ -2818,7 +2846,6 @@ class DistributedTest:
             self._test_all_gather_helper(group, group_id, rank)
 
         @sandcastle_skip_if(BACKEND != "nccl", "Only Nccl supports CUDA all gather")
-        @sandcastle_skip_if(BACKEND == "nccl", "CUDA all gather skipped for NCCL")
         @skip_if_no_gpu
         def test_all_gather_cuda(self):
             group, group_id, rank = self._init_global_test()
@@ -2831,7 +2858,6 @@ class DistributedTest:
             self._test_all_gather_helper(group, group_id, rank, dtype=torch.cfloat)
 
         @sandcastle_skip_if(BACKEND != "nccl", "Only Nccl supports CUDA all gather")
-        @sandcastle_skip_if(BACKEND == "nccl", "CUDA all gather skipped for NCCL")
         @skip_if_no_gpu
         def test_all_gather_cuda_complex(self):
             group, group_id, rank = self._init_global_test()
@@ -3674,6 +3700,7 @@ class DistributedTest:
             output_device=None,
             gradient_as_bucket_view=False,
             static_graph=False,
+            set_static_graph_twice=False,
         ):
             # Run a simple end to end DDP model, use result of single node model
             # as baseline
@@ -3692,8 +3719,10 @@ class DistributedTest:
                 model_DDP,
                 device_ids=gpu_subset,
                 gradient_as_bucket_view=gradient_as_bucket_view,
+                static_graph=static_graph,
             )
-            if static_graph:
+
+            if set_static_graph_twice:
                 model_DDP._set_static_graph()
 
             # test serializable/unserializable
@@ -3932,10 +3961,9 @@ class DistributedTest:
                             copy.deepcopy(model).cuda(),
                             device_ids=[self.rank],
                             gradient_as_bucket_view=grad_as_bucket_view,
+                            static_graph=static_graph,
                         )
                     )
-                    if static_graph:
-                        ddp_model_with_optimizer_hook._set_static_graph()
 
                     # Register hook that runs allreduce + functional optimizer
                     # step.
@@ -3955,9 +3983,8 @@ class DistributedTest:
                         copy.deepcopy(model).cuda(),
                         device_ids=[self.rank],
                         gradient_as_bucket_view=grad_as_bucket_view,
+                        static_graph=static_graph,
                     )
-                    if static_graph:
-                        ddp_model_with_no_hook._set_static_graph()
 
                     mapping = {v: k for k, v in functional_optim_map.items()}
                     optimizer_no_hook = mapping.get(functional_optim_cls)(
@@ -4464,6 +4491,15 @@ class DistributedTest:
                     rank=rank,
                     gradient_as_bucket_view=use_bucket_view,
                     static_graph=static_graph,
+                )
+
+                # test set static graph twice
+                self._test_DistributedDataParallel(
+                    gpu_subset=gpus,
+                    rank=rank,
+                    gradient_as_bucket_view=use_bucket_view,
+                    static_graph=static_graph,
+                    set_static_graph_twice=True,
                 )
 
                 # test output_device
@@ -5214,10 +5250,6 @@ class DistributedTest:
         @sandcastle_skip_if(BACKEND == "nccl", "nccl does not support DDP on CPU models")
         def test_static_graph_api_cpu(self):
             model_DDP = nn.parallel.DistributedDataParallel(DDP_NET)
-            model_DDP._set_static_graph()
-            self.assertEqual(
-                model_DDP._get_ddp_logging_data().get("static_graph"), True
-            )
             expected_err = "should be called before training loop starts"
             with self.assertRaisesRegex(RuntimeError, expected_err):
                 local_bs = 2
@@ -5531,12 +5563,14 @@ class DistributedTest:
                     group=pg
                 )
 
-        @require_backend({"gloo", "nccl"})
+        @require_backend({"gloo"})
+        @sandcastle_skip_if(BACKEND == "nccl", "NCCL does not support gather_object")
         @with_dist_debug_levels(levels=["DETAIL", "OFF", "INFO"])
         def test_gather_object(self):
             return self._test_gather_object()
 
-        @require_backend({"gloo", "nccl"})
+        @require_backend({"gloo"})
+        @sandcastle_skip_if(BACKEND == "nccl", "NCCL does not support gather_object")
         @with_dist_debug_levels(levels=["DETAIL", "OFF", "INFO"])
         def test_gather_object_subgroup(self):
             default = _get_default_group()
@@ -6366,9 +6400,8 @@ class DistributedTest:
                     device_ids=[device_id],
                     find_unused_parameters=find_unused,
                     broadcast_buffers=broadcast_buffers,
+                    static_graph=static_graph,
                 )
-                if static_graph:
-                    ddp._set_static_graph()
                 # Materialize new params. These are not registered in DDP and thus
                 # don't have autograd hooks installed on them.
                 ddp.module.fc2 = nn.Linear(1, 1, bias=False).to(device_id)
@@ -6486,10 +6519,11 @@ class DistributedTest:
             model = ToyModel().to(torch.cuda.current_device())
             for static in [True, False]:
                 ddp_model = torch.nn.parallel.DistributedDataParallel(
-                    copy.deepcopy(model), device_ids=[self.rank], find_unused_parameters=True
+                    copy.deepcopy(model),
+                    device_ids=[self.rank],
+                    find_unused_parameters=True,
+                    static_graph=static,
                 )
-                if static:
-                    ddp_model._set_static_graph()
                 inp = torch.randn(20, 10, device=self.rank)
                 for i in range(6):
                     loss = ddp_model(inp)
@@ -6731,8 +6765,8 @@ class DistributedTest:
             model = torch.nn.parallel.DistributedDataParallel(
                 ControlFlowToyModel().cuda(self.rank),
                 device_ids=[self.rank],
+                static_graph=True,
             )
-            model._set_static_graph()
             random_input = torch.randn(20, 10, device=self.rank)
             ones_input = torch.ones(20, 10, device=self.rank)
             # unused parameter in the first iteration got used
@@ -7258,9 +7292,8 @@ class DistributedTest:
                 device_ids=[self.rank],
                 find_unused_parameters=find_unused_parameters,
                 gradient_as_bucket_view=True,
+                static_graph=static_graph,
             )
-            if static_graph:
-                ddp_model._set_static_graph()
             random_input = torch.randn(20, 10, device=self.rank)
             for i in range(10):
                 out = ddp_model(random_input)
@@ -7878,8 +7911,8 @@ class DistributedTest:
             model_static_graph = torch.nn.parallel.DistributedDataParallel(
                 model,
                 device_ids=[rank],
+                static_graph=True,
             )
-            model_static_graph._set_static_graph()
             inp = torch.randn(10, 100)
             type_mapping = {
                 "list": list,
@@ -7931,10 +7964,9 @@ class DistributedTest:
                     model,
                     device_ids=[self.rank],
                     output_device=self.rank,
-                    find_unused_parameters=find_unused
+                    find_unused_parameters=find_unused,
+                    static_graph=static_graph,
                 )
-                if static_graph:
-                    ddp._set_static_graph()
                 for i in range(6):
                     out = ddp(inp)
                     self.assertFalse(out[0].requires_grad)
@@ -8025,10 +8057,8 @@ class DistributedTest:
                     output_device=self.rank,
                     broadcast_buffers=False,
                     find_unused_parameters=find_unused,
+                    static_graph=static_graph,
                 )
-
-                if static_graph:
-                    ddp._set_static_graph()
 
                 opt = [None for _ in range(3)]
                 for i in range(2):
