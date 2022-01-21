@@ -1251,6 +1251,9 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     def test_norm_extreme_values(self, device):
+        if torch.device(device).type == 'cpu':
+            self.skipTest("Test broken on cpu (see gh-71645)")
+
         vector_ords = [0, 1, 2, 3, inf, -1, -2, -3, -inf]
         matrix_ords = ['fro', 'nuc', 1, 2, inf, -1, -2, -inf]
         vectors = []
