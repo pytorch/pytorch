@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 
+#include <ATen/core/interned_strings.h>
 #include <ATen/core/symbol.h>
 #include <ATen/record_function.h>
 #include <c10/util/FunctionRef.h>
@@ -22,7 +23,6 @@
 #include <torch/csrc/jit/runtime/symbolic_shape_registry_util.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/utils/memory.h>
-#include <ATen/core/interned_strings.h>
 
 // NOLINTNEXTLINE
 C10_DEFINE_bool(
@@ -839,7 +839,7 @@ class TensorExprFuser {
       "aten::__rshift__.Scalar(Tensor self, Scalar other) -> Tensor",
       "aten::__rshift__.Tensor(Tensor self, Tensor other) -> Tensor",
     };
-    static const OperatorSet cpu_only_operator_set{
+    static const OperatorSet cpu_compute_heavy_set{
       "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor",
       "aten::matmul(Tensor self, Tensor other) -> Tensor",
     };
@@ -921,7 +921,11 @@ class TensorExprFuser {
     }
 
     // Operator is only supported on CPU.
-    if (node->isMemberOf(cpu_only_operator_set)) {
+    if (node->isMemberOf(cpu_compute_heavy_set)) {
+      if (fuse_to_dynamic_shapes_) {
+        return false;
+      }
+
       auto device = tensorexpr::pickDeviceType(node->inputs());
       if (!device) {
         device = tensorexpr::pickDeviceType(node->outputs());
@@ -1039,7 +1043,7 @@ class TensorExprFuser {
     // A hook to optimizations limitter to allow bisecting the pass
     REQ(JIT_OPT_ALLOWED);
 
-    if (tensorExprDynamicShapeFusionEnabled()) {
+    if (fuse_to_dynamic_shapes_) {
       // Allow only if the node has a shape function defined.
       // ListConstruct node is an exception since that is needed to fuse
       // aten::cat, though it does not have a shape function.
@@ -1245,7 +1249,8 @@ void FuseTensorExprs(
 }
 
 Operation createTensorExprOp(const Node* node) {
-  if (!tensorExprDynamicShapeFusionEnabled()) {
+  bool dynamic_shape_fusion_node = node->hasAttribute(attr::striding_inputs_desc);
+  if (!dynamic_shape_fusion_node) {
     auto kernel =
         std::make_shared<tensorexpr::TensorExprKernel>(node->g(attr::Subgraph));
     return [kernel](Stack& stack) {
@@ -1293,9 +1298,11 @@ Operation createTensorExprOp(const Node* node) {
     stride_map[v] = striding_inputs[index];
     index++;
   }
-  std::vector<std::string> output_desc = node->ival(attr::striding_outputs_desc).to<std::vector<std::string>>();
+  std::vector<std::string> output_desc =
+      node->ival(attr::striding_outputs_desc).to<std::vector<std::string>>();
   for (size_t i = 0; i < subgraph->outputs().size(); ++i) {
-    stride_map[subgraph->outputs().at(i)] = {strideInputFromString(output_desc.at(i))};
+    stride_map[subgraph->outputs().at(i)] = {
+        strideInputFromString(output_desc.at(i))};
   }
 
   std::shared_ptr<tensorexpr::TensorExprKernel> kernel =

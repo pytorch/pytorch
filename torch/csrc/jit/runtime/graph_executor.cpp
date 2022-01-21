@@ -892,7 +892,9 @@ void runNondiffOptimization(
   GRAPH_DEBUG("After BatchMM, before Fusion\n", *graph);
   if (getProfilingMode()) {
     if (tensorExprFuserEnabled()) {
-      FuseTensorExprs(graph);
+      auto min_size = getFusionGroupInlining() ? 2 : 1;
+      auto dyn_shapes = tensorExprDynamicShapeFusionEnabled();
+      FuseTensorExprs(graph, min_size, /*composed_op*/false, dyn_shapes);
     }
   } else {
     FuseGraph(graph, strict_fuser_check);
@@ -963,7 +965,7 @@ void runOptimization(
   HoistCommonExpression(graph);
   GRAPH_DEBUG("After HoistCommonExpression, before CheckInplace\n", *graph);
   CheckInplace(graph);
-  GRAPH_DEBUG("After CheckInplace (end of runOptimization)", *graph);
+  GRAPH_DEBUG("After CheckInplace (end of runOptimization)\n", *graph);
 }
 
 Node* replaceBlockWithFallbackGraph(Block* b, ArrayRef<Value*> inputs) {
