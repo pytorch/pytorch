@@ -91,9 +91,11 @@ TensorView* squeeze(TensorView* x, const std::vector<int64_t>& sizes, int dim) {
     dim = (int)(x->nDims()) + dim;
   }
   TORCH_INTERNAL_ASSERT(dim >= 0 && dim < x->nDims());
-  TORCH_INTERNAL_ASSERT(sizes[dim] == 1);
-
-  return sum(x, {dim});
+  if (sizes[dim] == 1) {
+    return sum(x, {dim});
+  } else {
+    return set(x);
+  }
 }
 
 TensorView* unsqueeze(TensorView* x, int dim) {

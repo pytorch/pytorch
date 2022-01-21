@@ -3576,6 +3576,57 @@ class TestCudaFuser(JitTestCase):
             t_jit = torch.jit.script(t)
             self._run_helper(t_jit, t, x, y)
 
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_shape_expression(self):
+        x = torch.randn(4, 2, 1, 3, device="cuda")
+
+        def t_unsqueeze(x):
+            t0 = x.relu()
+            t1 = t0.unsqueeze(1)
+            t2 = t1 + 1.0
+            t3 = t1.size()
+            return t2, t3
+
+        def t_squeeze(x):
+            t0 = x.relu()
+            t1 = t0.squeeze()
+            t2 = t1 + 1.0
+            t3 = t1.size()
+            return t2, t3
+
+        def t_squeeze_dim(x):
+            t0 = x.relu()
+            t1 = t0.squeeze(-2)
+            t2 = t1 + 1.0
+            t3 = t1.size()
+            return t2, t3
+
+        # squeezing a non-size 1 dimension should be a no op
+        def t_squeeze_dim_no_op(x):
+            t0 = x.relu()
+            t1 = t0.squeeze(1)
+            t2 = t1 + 1.0
+            t3 = t1.size()
+            return t2, t3
+
+        def run(fn):
+            jit_fn = torch.jit.script(fn)
+            jit_o = jit_fn(x)
+            jit_o = jit_fn(x)
+            jit_o = jit_fn(x)
+            o = fn(x)
+            # output 0 is a tensor, so we check dtype and value
+            self.assertEqual(o[0].dtype, jit_o[0].dtype)
+            self.assertEqual(o[0], jit_o[0])
+            # output 1 is shape
+            self.assertEqual(o[1], jit_o[1])
+            self.assertGraphContainsExactly(jit_fn.graph_for(x), FUSION_GUARD, 1)
+
+        for t in [t_unsqueeze, t_squeeze, t_squeeze_dim, t_squeeze_dim_no_op]:
+            run(t)
+
 class TestPassManagerCudaFuser(JitTestCase):
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")

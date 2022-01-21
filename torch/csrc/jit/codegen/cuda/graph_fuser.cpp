@@ -49,6 +49,13 @@ bool usedOnlyInDtype(Value* v) {
 Value* broadcastSizes(at::ArrayRef<Value*> sizes) {
   AT_ASSERT(!sizes.empty());
   Graph* graph = sizes[0]->owningGraph();
+  Node* insertion_point = sizes[0]->node()->next();
+  for (size_t i = 1; i < sizes.size(); i++) {
+    if (insertion_point->isBefore(sizes[i]->node()->next())) {
+      insertion_point = sizes[i]->node()->next();
+    }
+  }
+  WithInsertPoint guard(insertion_point);
   Node* broadcast_n =
       graph->insertNode(graph->create(prim::BroadcastSizes, sizes));
   broadcast_n->output()->setType(ListType::ofInts());
@@ -880,6 +887,22 @@ struct CudaGraphFuser {
     // before the CudaFusionGroup
     graph->setInsertPoint(fusion_group);
 
+    // hmmm, do I need to setInsertPoint...
+    const auto map_inputs = [&](Value* v) -> Value* {
+      // if constant ever has an input, it has to come from
+      // profile_ivalue dependency
+      if (v->node()->kind() == prim::Param &&
+          fusion_group->input(v->offset())->node()->kind() ==
+              prim::profile_ivalue) {
+        // we need to map it along profile_ivalue dependency
+        return fusion_group->input(v->offset());
+      } else {
+        throw std::runtime_error(
+            std::string("unexpected input from node") +
+            v->node()->kind().toDisplayString());
+      }
+    };
+
     for (Node* n : subgraph->nodes()) {
       // XXX: Use of shape_of.emplace is crucial to the output shape
       // optimization!
@@ -923,21 +946,6 @@ struct CudaGraphFuser {
                 n->input(2)->node()->kind() == prim::Constant,
             "only supports reduction axes and keepdim being constant");
 
-        // hmmm, do I need to setInsertPoint...
-        const auto map_inputs = [&](Value* v) -> Value* {
-          // if constant ever has an input, it has to come from
-          // profile_ivalue dependency
-          if (v->node()->kind() == prim::Param &&
-              fusion_group->input(v->offset())->node()->kind() ==
-                  prim::profile_ivalue) {
-            // we need to map it along profile_ivalue dependency
-            return fusion_group->input(v->offset());
-          } else {
-            throw std::runtime_error(
-                std::string("unexpected input from node") +
-                v->node()->kind().toDisplayString());
-          }
-        };
         Node* in1_const = graph->createClone(n->input(1)->node(), map_inputs);
         graph->insertNode(in1_const);
         Node* in2_const = graph->createClone(n->input(2)->node(), map_inputs);
@@ -1019,6 +1027,49 @@ struct CudaGraphFuser {
         shape_of.emplace(n->output(1), shape_of.at(n->input(0)));
         continue;
       }
+      if (n->kind() == prim::unsqueeze_copy) {
+        TORCH_INTERNAL_ASSERT(
+            shape_of.count(n->input(0)) > 0,
+            "buildShapeExpressions failed at accessing input shapes");
+        TORCH_INTERNAL_ASSERT(
+            n->input(1)->node()->kind() == prim::Constant,
+            "only supports unsqueeze axes being constant");
+        Node* dim_const = graph->createClone(n->input(1)->node(), map_inputs);
+        graph->insertNode(dim_const);
+        std::vector<Value*> inputs = {
+            shape_of.at(n->input(0)), dim_const->output()};
+        Node* size_node = graph->insertNode(graph->create(
+            Symbol::fromQualString("prim::infer_unsqueeze_size"), inputs, 1));
+        Value* size = size_node->output(0);
+        size->setType(ListType::ofInts());
+        shape_of.emplace(n->output(), size);
+        continue;
+      }
+      if (n->kind() == prim::squeeze_copy) {
+        TORCH_INTERNAL_ASSERT(
+            shape_of.count(n->input(0)) > 0,
+            "buildShapeExpressions failed at accessing input shapes");
+        TORCH_INTERNAL_ASSERT(
+            n->inputs().size() == 2 || n->inputs().size() == 1,
+            "prim::squeeze_copy expects one or two inputs");
+        std::vector<Value*> inputs = {shape_of.at(n->input(0))};
+
+        if (n->inputs().size() == 2) {
+          TORCH_INTERNAL_ASSERT(
+              n->input(1)->node()->kind() == prim::Constant,
+              "only supports squeeze axes being constant");
+          Node* dim_const = graph->createClone(n->input(1)->node(), map_inputs);
+          graph->insertNode(dim_const);
+          inputs.push_back(dim_const->output());
+        }
+        Node* size_node = graph->insertNode(graph->create(
+            Symbol::fromQualString("prim::infer_squeeze_size"), inputs, 1));
+        Value* size = size_node->output(0);
+        size->setType(ListType::ofInts());
+        shape_of.emplace(n->output(), size);
+        continue;
+      }
+
       auto tensor_inputs = filter(n->inputs(), [](Value* v) {
         return v->type()->isSubtypeOf(*TensorType::get());
       });

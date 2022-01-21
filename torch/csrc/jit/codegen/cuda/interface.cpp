@@ -652,6 +652,68 @@ RegisterOperators reg_unsqueeze_copy({
         },
         aliasAnalysisFromSchema()),
 });
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+RegisterOperators reg_infer_unsqueeze_size({
+    Operator(
+        "prim::infer_unsqueeze_size(int[] a, int dim) -> int[]",
+        [](const Node* node) -> Operation {
+          return [](Stack& stack) {
+            auto dim = pop(stack).toInt();
+            auto size = pop(stack).toIntVector();
+            if (dim < 0) {
+              dim = dim + 1 + size.size();
+            }
+            auto it = size.begin() + dim;
+            size.insert(it, 1);
+            push(stack, IValue(size));
+          };
+        },
+        aliasAnalysisFromSchema()),
+});
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+RegisterOperators reg_infer_squeeze_dim_size({
+    Operator(
+        "prim::infer_squeeze_size(int[] a, int dim) -> int[]",
+        [](const Node* node) -> Operation {
+          return [](Stack& stack) {
+            auto dim = pop(stack).toInt();
+            auto size = pop(stack).toIntVector();
+            if (dim < 0) {
+              dim = dim + size.size();
+            }
+            auto it = size.begin() + dim;
+            if (*it == 1) {
+              size.erase(it);
+            }
+            push(stack, IValue(size));
+          };
+        },
+        aliasAnalysisFromSchema()),
+});
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+RegisterOperators reg_infer_squeeze_size({
+    Operator(
+        "prim::infer_squeeze_size(int[] a) -> int[]",
+        [](const Node* node) -> Operation {
+          return [](Stack& stack) {
+            auto size = pop(stack).toIntVector();
+
+            for (auto it = size.begin(); it != size.end(); it++) {
+              if (*it == 1) {
+                auto pre = it - 1;
+                size.erase(it);
+                it = pre;
+              }
+            }
+            push(stack, IValue(size));
+          };
+        },
+        aliasAnalysisFromSchema()),
+});
+
 } // namespace
 
 } // namespace jit

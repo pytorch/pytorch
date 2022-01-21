@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/runtime/graph_executor.h>
 
 #include <c10/util/irange.h>
+#include <torch/csrc/jit/jit_log.h>
 
 namespace torch {
 namespace jit {
