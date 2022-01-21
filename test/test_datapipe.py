@@ -46,6 +46,7 @@ from torch.utils.data import (
     runtime_validation_disabled,
 )
 from torch.utils.data.graph import traverse
+from torch.utils.data.datapipes.utils.common import StreamWrapper
 from torch.utils.data.datapipes.utils.decoder import (
     basichandlers as decoder_basichandlers,
 )
@@ -168,6 +169,47 @@ class TestDataChunk(TestCase):
         rng.shuffle(elements)
 
         self.assertEqual(chunk, elements)
+
+
+class TestStreamWrapper(TestCase):
+    class _FakeFD:
+        def __init__(self, filepath):
+            self.filepath = filepath
+            self.closed = False
+
+        def read(self):
+            return "".join(self)
+
+        def __iter__(self):
+            for i in range(10):
+                yield str(i)
+
+        def close(self):
+            print("Closed")
+            self.closed = True
+
+    def test_dir(self):
+        fd = TestStreamWrapper._FakeFD("")
+        wrap_fd = StreamWrapper(fd)
+
+        s = set(dir(wrap_fd))
+        self.assertTrue('read' in s and 'close' in s)
+
+    def test_read(self):
+        f = tempfile.TemporaryFile()
+        exp_text = b"1234abcd"
+        f.write(exp_text)
+        f.seek(0)
+        wrap_f = StreamWrapper(f)
+        self.assertEqual(wrap_f.read(), exp_text)
+
+    def test_auto_close(self):
+        fd = TestStreamWrapper._FakeFD("")
+        wrap_fd = StreamWrapper(fd)
+
+        self.assertFalse(fd.closed)
+        del wrap_fd
+        self.assertTrue(fd.closed)
 
 
 class TestIterableDataPipeBasic(TestCase):
