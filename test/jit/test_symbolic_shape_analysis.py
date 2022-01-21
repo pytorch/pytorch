@@ -637,7 +637,7 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         # Test shape propagation with both ops that don't have schemas
         # and ones that do.
 
-        # assert that exp2 is not available in rule based schemas
+        # assert that exp2 is not available in shape registry
         # If this fails, update the test to use a different op.
         if hasattr(torch.jit, "_shapes"):
             self.assertFalse(hasattr(torch.jit._shapes, "exp2"))
@@ -646,7 +646,7 @@ class TestSymbolicShapeAnalysis(JitTestCase):
             c = torch.exp2(a)  # Only available in metatensors
             return c + b       # Available in both metatensors and schemas
 
-        # Show that we can propagate both concrete changes through metatensors
+        # Show that we can propagate both concrete changes through registry
         graph = torch.jit.script(test_fn).graph
         self.assert_meta_shape_equal_eager(test_fn, [[2, 3], [2, 3]])
         self.assert_meta_shape_equal_eager(test_fn, [[1, 3], [2, 1]])
@@ -666,3 +666,18 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         # Expect nothing to propagate through exp2 without concrete shapes
         output_shape = self.prop_shapes(graph, [[sym3, 1, 1], [1, sym1, sym2]])
         self.assertIsNone(output_shape)
+
+    def test_prop_mixed_2(self):
+        # Test that metatensors can still take in concrete shapes
+        # from non-metatensor ops
+
+        @torch.jit.script
+        def test_fn(a):
+            c = a.hardswish()     # Only availabe in registry
+            return torch.exp2(c)  # Only available in metatensors
+
+        # Show that metatensors can't calculate hardswish
+        self.assert_meta_shape_equal(test_fn, [[1, 3]], None)
+
+        output_shape = self.prop_shapes(test_fn.graph, [[1, 3]])
+        self.assertEqual(output_shape, [1, 3])
