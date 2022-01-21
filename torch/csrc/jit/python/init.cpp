@@ -206,6 +206,9 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_onnx_function_substitution", ONNXFunctionCallSubstitution)
       .def("_jit_pass_integer_value_refinement", RefineIntegerValues)
       .def(
+          "_jit_pass_test_propagate_shape_with_metatensors",
+          _testPropagateShapesUsingMetatensors)
+      .def(
           "_jit_set_symbolic_shapes_test_mode",
           &setSymbolicShapeAnalysisTestMode)
       .def(

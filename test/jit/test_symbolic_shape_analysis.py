@@ -10,6 +10,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_methods_invocations import sample_inputs_cat_concat
 from torch.testing._internal.common_utils import make_tensor
 from torch.testing._internal.jit_utils import JitTestCase, execWrapper
+from torch.jit._passes._property_propagation import apply_input_props_using_example
 
 if __name__ == "__main__":
     raise RuntimeError(
@@ -31,24 +32,34 @@ class TestSymbolicShapeAnalysis(JitTestCase):
             self.prev_symbolic_shapes_test_enabled
         )
 
+    @staticmethod
+    def prop_shapes(graph, shapes):
+        # This will not work on anything with a `self` argument
+        # torch._C._jit_erase_non_input_shape_information(graph)
+        torch._C._jit_pass_erase_shape_information(graph)
+
+        inputs = list(graph.inputs())
+        assert len(inputs) == len(shapes)
+        for tensor, shape in zip(inputs, shapes):
+            tensor.setType(tensor.type().with_sizes(shape))
+
+        torch._C._jit_pass_propagate_shapes_on_graph(graph)
+
+        graph_out = list(graph.outputs())
+        assert len(graph_out) == 1
+        return graph_out[0].type().symbolic_sizes()
+
     def test_shape_analysis(self):
         @torch.jit.script
         def foo(x, y):
             return x * y
 
-        inputs = list(foo.graph.inputs())
-
-        def prop_shapes_on_graph(inp0, inp1):
-            inputs[0].setType(inputs[0].type().with_sizes(inp0))
-            inputs[1].setType(inputs[1].type().with_sizes(inp1))
-            torch._C._jit_pass_propagate_shapes_on_graph(foo.graph)
-
-        prop_shapes_on_graph([1, 6, 5], [1, 7, 1, 5])
+        self.prop_shapes(foo.graph, [[1, 6, 5], [1, 7, 1, 5]])
         FileCheck().check("1, 7, 6, 5").run(foo.graph)
 
         # None implicitly creates a new symbolic symbol
-        prop_shapes_on_graph([None, None], [None, None, None])
-        output_shape = foo.graph.findNode("aten::mul").output().type().symbolic_sizes()
+        output_shape = self.prop_shapes(foo.graph, [[None, None], [None, None, None]])
+        inputs = list(foo.graph.inputs())
         inp0_shape = inputs[0].type().symbolic_sizes()
         inp1_shape = inputs[1].type().symbolic_sizes()
 
@@ -65,11 +76,9 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         sym1 = torch._C._new_symbolic_shape_symbol()
         sym2 = torch._C._new_symbolic_shape_symbol()
         sym3 = torch._C._new_symbolic_shape_symbol()
-        prop_shapes_on_graph([sym1, 1, sym3], [1, sym2, sym3])
-        output_shape = foo.graph.findNode("aten::mul").output().type().symbolic_sizes()
-        self.assertEqual(output_shape[0], sym1)
-        self.assertEqual(output_shape[1], sym2)
-        self.assertEqual(output_shape[2], sym3)
+
+        output_shape = self.prop_shapes(foo.graph, [[sym1, 1, sym3], [1, sym2, sym3]])
+        self.assertEqual(output_shape, [sym1, sym2, sym3])
 
     def test_shared_shape_graph(self):
         @torch.jit.script
@@ -390,6 +399,7 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         for i in [0, 2, 3]:
             self.assertTrue(output_sizes[i] < 0)
         self.assertTrue(output_sizes[1] >= 0)
+
         g = shape_compute_graph.partial_eval_shape_graph()
         # to make into a jit function cant have multiple outputs
         g.makeMultiOutputIntoTuple()
@@ -577,3 +587,82 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         m2_shape = [20, 10]
         res = torch.jit._shapes.matmul(m1_shape, m2_shape)
         self.assertEqual(res, [10, 10])
+
+    # -----------------
+    # Testing Metatensors
+    # -----------------
+
+    def assert_meta_shape_equal_eager(self, fn, example_shapes):
+        in_examples = [torch.randn(*shape) for shape in example_shapes]
+        expected_res: torch.Tensor = fn(*in_examples)
+        self.assert_meta_shape_equal(fn, example_shapes, expected_res.shape)
+
+    def assert_meta_shape_equal(self, fn, example_shapes, expected_shape):
+        # Specifically use the metatensor code to test validity
+        with self.subTest(f"In shapes: {example_shapes}"):
+            in_examples = [
+                None if shape is None else torch.rand(shape) for shape in example_shapes
+            ]
+            graph = torch.jit.script(fn).graph
+            torch._C._jit_pass_erase_shape_information(graph)
+            apply_input_props_using_example(graph, in_examples)
+
+            torch._C._jit_pass_test_propagate_shape_with_metatensors(graph)
+
+            graph_out = list(graph.outputs())
+            assert len(graph_out) == 1
+            actual_shape = graph_out[0].type().sizes()
+            self.assertEqual(expected_shape, actual_shape)
+
+    def test_propagate_with_meta_simple(self):
+        def test_fn(a, b):
+            return a * b
+
+        self.assert_meta_shape_equal_eager(test_fn, [[2, 3], [2, 3]])
+        self.assert_meta_shape_equal_eager(test_fn, [[1, 3], [2, 1]])
+        self.assert_meta_shape_equal(test_fn, [[2, 3], []], [2, 3])
+        self.assert_meta_shape_equal(test_fn, [[1, 3], None], None)
+
+    def test_propagate_with_meta_complex(self):
+        def test_fn(a, b):
+            c = a * b
+            return b + c
+
+        self.assert_meta_shape_equal_eager(test_fn, [[2, 3], [2, 3]])
+        self.assert_meta_shape_equal_eager(test_fn, [[1, 3], [2, 1]])
+        self.assert_meta_shape_equal(test_fn, [[2, 3], []], [2, 3])
+        self.assert_meta_shape_equal(test_fn, [[1, 3], None], None)
+
+    def test_propagate_mixed(self):
+        # Test shape propagation with both ops that don't have schemas
+        # and ones that do.
+
+        # assert that exp2 is not available in rule based schemas
+        # If this fails, update the test to use a different op.
+        if hasattr(torch.jit, "_shapes"):
+            self.assertFalse(hasattr(torch.jit._shapes, "exp2"))
+
+        def test_fn(a, b):
+            c = torch.exp2(a)  # Only available in metatensors
+            return c + b       # Available in both metatensors and schemas
+
+        # Show that we can propagate both concrete changes through metatensors
+        graph = torch.jit.script(test_fn).graph
+        self.assert_meta_shape_equal_eager(test_fn, [[2, 3], [2, 3]])
+        self.assert_meta_shape_equal_eager(test_fn, [[1, 3], [2, 1]])
+
+        out_shape = self.prop_shapes(graph, [[1, 3], [2, 1]])
+        self.assertEqual(out_shape, [2, 3])
+
+        sym1 = torch._C._new_symbolic_shape_symbol()
+        sym2 = torch._C._new_symbolic_shape_symbol()
+        sym3 = torch._C._new_symbolic_shape_symbol()
+
+        # Test that we can have symbolic shape prop use the output
+        # of a op calculated with metatensors
+        output_shape = self.prop_shapes(graph, [[3, 1, 1], [1, sym1, sym2]])
+        self.assertEqual(output_shape, [3, sym1, sym2])
+
+        # Expect nothing to propagate through exp2 without concrete shapes
+        output_shape = self.prop_shapes(graph, [[sym3, 1, 1], [1, sym1, sym2]])
+        self.assertIsNone(output_shape)

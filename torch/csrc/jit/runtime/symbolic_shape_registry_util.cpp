@@ -114,7 +114,7 @@ const OperatorMap<std::string>& get_tensorexpr_elementwise_set() {
       {"aten::addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor", "broadcast_three"},
       {"aten::where.self(Tensor condition, Tensor self, Tensor other) -> Tensor", "broadcast_three"},
       {"aten::where.ScalarSelf(Tensor condition, Scalar self, Tensor other) -> Tensor", "broadcast_one_three"},
-      // TODO: enable slice, shape inference is not implemented for this op yet
+      // slice is implemented in symbolic_shape_registry.cpp .
   };
   return tensorexpr_elementwise_set;
 }

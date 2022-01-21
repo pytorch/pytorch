@@ -1,4 +1,5 @@
 #include <ATen/core/symbol.h>
+#include <ATen/ops/empty.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
@@ -186,6 +187,71 @@ bool shapeGraphCleanupPasses(std::shared_ptr<Graph> graph) {
 void replaceWithIValue(Value* v, IValue val) {
   WithInsertPoint guard(*v->node()->owningBlock()->nodes().begin());
   v->replaceAllUsesWith(v->owningGraph()->insertConstant(val));
+}
+
+std::shared_ptr<Stack> getMTensorShapeArgStack(Node* n) {
+  // returns null if the stack can't be made
+  auto stack = std::make_shared<std::vector<IValue>>();
+  for (Value* inp : n->inputs()) {
+    if (auto tt = inp->type()->cast<TensorType>()) {
+      c10::SymbolicShape symbolic_shapes = tt->symbolic_sizes();
+      if (!symbolic_shapes.isComplete()) {
+        return nullptr;
+      }
+      auto tensor_size = tt->sizes().concrete_sizes();
+      TORCH_INTERNAL_ASSERT(
+          tensor_size.has_value(),
+          "Failed to materialize tensor size for a concrete tensor");
+
+      // at::ScalarType::Meta - can be used
+      stack->emplace_back(
+          at::empty(*tensor_size, at::TensorOptions(at::kMeta)));
+      continue;
+    }
+    if (auto ival = toIValue(inp)) {
+      // Non-tensor IValue
+      stack->emplace_back(ival);
+      continue;
+    }
+    // Need to decide what else to support
+    return nullptr;
+  }
+  return stack;
+}
+
+void setOutputShape(Node* n, std::shared_ptr<Stack> stack) {
+  for (size_t i = 0; i < n->outputs().size(); ++i) {
+    auto output = n->outputs()[i];
+    if (auto tt = output->type()->cast<TensorType>()) {
+      auto shape = stack->at(i).toTensor().sizes();
+      n->output(i)->setType(
+          n->output(i)->type()->expect<TensorType>()->withSymbolicShapes(
+              shape));
+    }
+  }
+}
+
+bool metatensorInferNodeShape(Node* n) {
+  // Infers the shape of node outputs based on
+  auto opt_op = n->maybeOperator();
+  if (!opt_op) {
+    return false;
+  }
+  Operation op = opt_op->getOperation();
+  std::shared_ptr<Stack> stack;
+  try {
+    stack = getMTensorShapeArgStack(n);
+    if (!stack) {
+      return false;
+    }
+    op(*stack);
+  } catch (...) {
+    GRAPH_DEBUG("caught exception with Metatensor run!");
+    return false;
+  }
+  // Now apply the shapes back to the tensor
+  setOutputShape(n, stack);
+  return true;
 }
 
 } // namespace
@@ -889,8 +955,11 @@ struct SymbolicShapeGraphAnalyzer {
   propagateShapesAndGatherPartialEvalShapeGraphs(AliasDb& db) {
     std::unordered_map<Node*, std::shared_ptr<Graph>> partial_evaluated_graphs;
     for (auto it = beg_->iterator(); it != end_->iterator(); it++) {
-      auto curr = *it;
+      Node* curr = *it;
       if (curr->maybeSchema()) {
+        if (metatensorInferNodeShape(curr)) {
+          continue;
+        }
         if (auto maybe_graph = shapeComputeGraphForSchema(curr->schema())) {
           partial_evaluated_graphs[curr] =
               PropagateShapesWithShapeFunction(curr, *maybe_graph, db);
@@ -910,6 +979,14 @@ struct SymbolicShapeGraphAnalyzer {
   Node* end_;
 };
 
+void _testPropagateShapesUsingMetatensors(std::shared_ptr<Graph>& graph) {
+  // Test function to check that metatensors actually propagates shapes
+  // without the other shape passes. Not intended to be complete.
+  for (Node* n : graph->block()->nodes()) {
+    metatensorInferNodeShape(n);
+  }
+}
+
 void PropagateShapesOnBlock(Block* b, const AliasDb& db) {
   for (Node* n : b->nodes()) {
     // TODO: handle loop
@@ -919,6 +996,9 @@ void PropagateShapesOnBlock(Block* b, const AliasDb& db) {
       PropagateShapesOnBlock(if_v.elseBlock(), db);
       mergeTypes(if_v.thenOutputs(), if_v.elseOutputs(), if_v.outputs());
     } else if (n->maybeSchema()) {
+      if (metatensorInferNodeShape(n)) {
+        continue;
+      }
       if (auto maybe_graph = shapeComputeGraphForSchema(n->schema())) {
         PropagateShapesWithShapeFunction(n, *maybe_graph, db);
       }

@@ -45,7 +45,10 @@ std::unique_ptr<Stack> MTensorArgumentCreator(Node* n) {
           tensor_size, at::TensorOptions(at::kMeta).dtype(*tp->scalarType())));
       continue;
     }
-    // Someday Todo: Fill in concrete values that we know.
+    if (auto ival = toIValue(inp)) {
+      stack->emplace_back(ival);
+      continue;
+    }
     if (inp->type() == FloatType::get()) {
       stack->emplace_back(1.);
     } else if (inp->type() == IntType::get()) {
@@ -110,7 +113,6 @@ c10::optional<Tensor> inferWithMetaTensor(Node* n) {
     GRAPH_DEBUG("Running op for ", getHeader(n));
     op(*stack);
     GRAPH_DEBUG("op run successfully", getHeader(n));
-    GRAPH_DEBUG("After receive!");
     return stack->back().toTensor();
 
   } catch (...) {

@@ -47,5 +47,10 @@ PropagateShapesAndBuildLargeShapeComputeGraph(
 TORCH_API bool setSymbolicShapeAnalysisTestMode(bool value);
 TORCH_API bool symbolicShapeAnalysisTestModeEnabled();
 
+// Test function to check that metatensors actually propagates shapes
+// without the other shape passes. Not intended to be complete.
+TORCH_API void _testPropagateShapesUsingMetatensors(
+    std::shared_ptr<Graph>& graph);
+
 } // namespace jit
 } // namespace torch
