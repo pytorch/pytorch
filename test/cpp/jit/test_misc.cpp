@@ -16,7 +16,6 @@
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
-#include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
@@ -2868,7 +2867,7 @@ TEST_F(Composed, ComposedOp) {
   WithCPUFuser g(true);
    bool fusable_on_device = torch::jit::tensorexpr::getTEMustUseLLVMOnCPU();
   torch::jit::tensorexpr::getTEMustUseLLVMOnCPU() = false;
-   FuseTensorExprs(graph, /*min_group_size*/2, /*add_composed_op*/true, /*fuse_to_dynamic_shapes*/true);
+  FuseTensorExprs(graph, /*min_group_size*/2, /*add_composed_op*/true, /*fuse_to_dynamic_shapes*/true);
   Code code(graph, "");
   InterpreterState interpreter{code};
   std::vector<IValue> stack = {a, b};
