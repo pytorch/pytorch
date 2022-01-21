@@ -194,13 +194,16 @@ void jitted_gpu_kernel(
                 "Encountered an unsupported dtype ", dtypei, "!");
   }
   if (scalar_pos == at::cuda::jit::BinaryFuncVariant::NoScalar) {
+    // NOTE: With `scalar_pos=NoScalar`,`scalar_val` is not used
+    // for computation in the generated code and hence we pass a dummy
+    // value of `0`.
     jitted_gpu_kernel_impl<
         /*name*/ name,
         /*return_type=*/return_type,
         /*f_inputs_type=*/f_inputs_type,
         arity,
         at::cuda::jit::BinaryFuncVariant::NoScalar>(
-        iter, f, needs_dynamic_casting, 0, extra_args...);
+        iter, f, needs_dynamic_casting, /*scalar_val=*/0, extra_args...);
   } else if (scalar_pos == at::cuda::jit::BinaryFuncVariant::RhsScalar) {
     jitted_gpu_kernel_impl<
         /*name*/ name,
