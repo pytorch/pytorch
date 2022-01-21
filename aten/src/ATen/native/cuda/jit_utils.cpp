@@ -191,6 +191,7 @@ struct alignas(2) BFloat16 {
 }
 )ESCAPE";
 
+// copy-pasted from c10/util/TypeCast.h
 const std::string dynamic_cast_support_literal = R"ESCAPE(
 
   template <typename T>
