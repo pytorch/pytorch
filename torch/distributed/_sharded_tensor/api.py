@@ -287,7 +287,7 @@ class ShardedTensor(object):
 
         world_size = dist.get_world_size(self._process_group)
 
-        gathered_shards = [None] * world_size if rank == dst else None
+        gathered_shards: List[Optional[Shard]] = [None] * world_size if rank == dst else []
         dist.gather_object(
             obj=local_shards,
             object_gather_list=gathered_shards,
