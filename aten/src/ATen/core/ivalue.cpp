@@ -1,6 +1,8 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/Dict.h>
 #include <ATen/core/Formatting.h>
+#include <ATen/core/class_type.h>
+#include <ATen/core/enum_type.h>
 #include <ATen/core/function.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
@@ -24,11 +26,11 @@ namespace ivalue {
 
 // This is in ivalue.cpp because we need to access Type::annotation_str, which
 // is declared in jit_type.h
-void checkCustomClassType(const Type* expected_type, const Type* actual_type) {
+void checkCustomClassType(const ClassType* expected_type, const Type* actual_type) {
   // NB: doing pointer comparison here
   // If in the future there ever arises a need to call operator== on custom class
   // Type's, this needs to be changed!
-  TORCH_CHECK(actual_type == expected_type,
+  TORCH_CHECK(actual_type == static_cast<const Type*>(expected_type),
               "Tried to convert an IValue of type ",
               actual_type ? actual_type->repr_str() : std::string("*NULL*"),
               " to custom class type ",
@@ -60,14 +62,6 @@ bool operator==(const ivalue::Tuple& lhs, const ivalue::Tuple& rhs) {
              _fastEqualsForContainer);
 }
 
-TupleTypePtr Tuple::type() const {
-  if (!type_) {
-    type_ = TupleType::create(
-        fmap(elements(), [&](const IValue& v) { return v.type(); }));
-  }
-  return type_;
-}
-
 bool operator==(const ivalue::EnumHolder& lhs, const ivalue::EnumHolder& rhs) {
   return lhs.name() == rhs.name() && *rhs.type() == *lhs.type();
 }
@@ -82,56 +76,56 @@ const std::string ivalue::EnumHolder::unqualifiedClassName() const {
 
 } // namespace ivalue
 
-TypePtr IValue::type() const {
-  switch (tag) {
-    case Tag::None:
-      return NoneType::get();
-    case Tag::Tensor:
-      return TensorType::create(toTensor());
-    case Tag::Storage:
-      return StorageType::get();
-    case Tag::Double:
-      return FloatType::get();
-    case Tag::ComplexDouble:
-      return ComplexType::get();
-    case Tag::Int:
-      return IntType::get();
-    case Tag::Bool:
-      return BoolType::get();
-    case Tag::String:
-      return StringType::get();
-    case Tag::Blob:
-      return AnyType::get();
-    case Tag::GenericDict: {
-      auto d = toGenericDict();
-      return DictType::create(d.keyType(), d.valueType());
-    }
-    case Tag::GenericList:
-      return ListType::create(toList().elementType());
-    case Tag::Future:
-      return FutureType::create(toFuture()->elementType());
-    case Tag::RRef:
-      return RRefType::create(toRRef()->type());
-    case Tag::Device:
-      return DeviceObjType::get();
-    case Tag::Stream:
-      return StreamObjType::get();
-    case Tag::Object:
-      return toObjectRef().type();
-    case Tag::PyObject:
-      return PyObjectType::get();
-    case Tag::Uninitialized:
-      return AnyType::get();
-    case Tag::Capsule:
-      return CapsuleType::get();
-    case Tag::Tuple:
-      return toTupleRef().type();
-    case Tag::Generator:
-      return GeneratorType::get();
-    case Tag::Quantizer:
-      return QuantizerType::get();
-    case Tag::Enum:
-      return toEnumHolder()->type();
+c10::TypePtr IValue::TagType<c10::Type>::get(const IValue& v) {
+  switch (v.tag) {
+      case Tag::None:
+        return NoneType::get();
+      case Tag::Tensor:
+        return TensorType::create(v.toTensor());
+      case Tag::Storage:
+        return StorageType::get();
+      case Tag::Double:
+        return FloatType::get();
+      case Tag::ComplexDouble:
+        return ComplexType::get();
+      case Tag::Int:
+        return IntType::get();
+      case Tag::Bool:
+        return BoolType::get();
+      case Tag::String:
+        return StringType::get();
+      case Tag::Blob:
+        return AnyType::get();
+      case Tag::GenericDict: {
+        auto d = v.toGenericDict();
+        return DictType::create(d.keyType(), d.valueType());
+      }
+      case Tag::GenericList:
+        return ListType::create(v.toList().elementType());
+      case Tag::Future:
+        return FutureType::create(v.toFuture()->elementType());
+      case Tag::RRef:
+        return RRefType::create(v.toRRef()->type());
+      case Tag::Device:
+        return DeviceObjType::get();
+      case Tag::Stream:
+        return StreamObjType::get();
+      case Tag::Object:
+        return v.toObjectRef().type();
+      case Tag::PyObject:
+        return PyObjectType::get();
+      case Tag::Uninitialized:
+        return AnyType::get();
+      case Tag::Capsule:
+        return CapsuleType::get();
+      case Tag::Tuple:
+        return v.toTupleRef().type();
+      case Tag::Generator:
+        return GeneratorType::get();
+      case Tag::Quantizer:
+        return QuantizerType::get();
+      case Tag::Enum:
+        return v.toEnumHolder()->type();
   }
   // switch above is complete but this silences compiler warnings
   TORCH_INTERNAL_ASSERT(false, "unhandled case in IValue::type()");
@@ -786,6 +780,13 @@ std::shared_ptr<ClassType> ivalue::Object::type() const {
   return type_.type_->expect<ClassType>();
 }
 
+c10::intrusive_ptr<ivalue::Object> ivalue::Object::create(
+    ClassTypePtr classType, size_t numSlots) {
+  return ivalue::Object::create(
+      StrongTypePtr(nullptr, std::move(classType)), numSlots);
+}
+
+
 IValue IValue::deepcopy() const {
   IValue::HashAliasedIValueMap memo;
   return deepcopy(memo);
@@ -839,6 +840,13 @@ IValue IValue::deepcopy(
       } else {
         copy = IValue(toObject()->deepcopy(memo));
       }
+    } break;
+    case IValue::Tag::Enum: {
+      auto enum_holder = toEnumHolder();
+      copy = IValue(c10::make_intrusive<ivalue::EnumHolder>(
+          enum_holder->type(),
+          enum_holder->name(),
+          enum_holder->value().deepcopy(memo)));
     } break;
     case IValue::Tag::String:
     case IValue::Tag::None:
@@ -938,7 +946,7 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(IValue::HashAliasedI
 
 StrongTypePtr::StrongTypePtr(
     std::shared_ptr<torch::jit::CompilationUnit> cu,
-    std::shared_ptr<Type> type) {
+    TypePtr type) {
   cu_ = std::move(cu);
   type_ = type;
   TORCH_INTERNAL_ASSERT(type_);
@@ -959,19 +967,6 @@ WeakTypePtr WeakOrStrongTypePtr::asWeakTypePtr() const {
         cu_.getStrongRefOrThrow();
     return WeakTypePtr(weak_cu, type_);
   }
-}
-
-
-ska::flat_hash_map<std::type_index, c10::ClassTypePtr>& getCustomClassTypeMap() {
-    static ska::flat_hash_map<std::type_index, c10::ClassTypePtr> tmap;
-    return tmap;
-}
-
-std::unordered_map<std::string, std::function<PyObject*(void*)>>&
-getClassConverter() {
-  static std::unordered_map<std::string, std::function<PyObject*(void*)>>
-      classConverter;
-  return classConverter;
 }
 
 // Needs to be in this .cpp file to access the full definition of PyObjectHolder
