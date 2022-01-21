@@ -707,7 +707,7 @@ struct SymbolicShapeGraphAnalyzer {
             output_index_to_symbolic_shape_[i];
       }
     }
-    for (size_t i = erase_indices.size() - 1; i >= 0; i--) {
+    for (int64_t i = (int64_t)erase_indices.size() - 1; i >= 0; i--) {
       stitched_shape_compute_graph->eraseOutput(erase_indices[i]);
     }
     for (size_t i = 0; i < stitched_shape_compute_graph->inputs().size();) {
