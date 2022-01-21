@@ -4,9 +4,6 @@ from collections import namedtuple
 
 from typing import Any
 
-# TODO(alband): Once most of the formulas are implemented, these functions need to be added
-# to the main doc to make them fully "public".
-
 # Global variable used to make the python API simpler to use
 _current_level = -1
 
@@ -60,6 +57,9 @@ def make_dual(tensor, tangent, *, level=None):
         ...   out = f(inp)
         ...   y, jvp = unpack_dual(out)
 
+    Please see our `forward-mode AD tutorial <https://pytorch.org/tutorials/intermediate/forward_ad_usage.html>`__
+    for detailed steps on how to use this API.
+
     """
     if level is None:
         level = _current_level
@@ -87,6 +87,9 @@ def unpack_dual(tensor, *, level=None):
         ...   out = f(inp)
         ...   y, jvp = unpack_dual(out)
         ...   jvp = unpack_dual(out).tangent
+
+    Please see our `forward-mode AD tutorial <https://pytorch.org/tutorials/intermediate/forward_ad_usage.html>`__
+    for detailed steps on how to use this API.
     """
     if level is None:
         level = _current_level
@@ -99,11 +102,18 @@ def unpack_dual(tensor, *, level=None):
     return UnpackedDualTensor(primal, dual)
 
 class dual_level(_DecoratorContextManager):
-    r"""Context-manager that controls the current forward ad level. It
-    appropriately enters and exit the dual level.
+    r"""Context-manager that enables forward ad. All forward AD computation must
+    be performed in a ``dual_level`` context.
 
-    This function also updates the current level that is used by default
-    by the other functions in this API.
+    .. Note::
+
+        The ``dual_level`` context appropriately enters and exit the dual level to
+        controls the current forward ad level, which is used by default by the other
+        functions in this API.
+
+        We currently don't plan to support nested ``dual_level`` contexts, however, so
+        only a single forward ad level is supported. To compute higher-order
+        forward grads, one can use `functorch <https://github.com/pytorch/functorch>`__.
 
     Example::
 
@@ -121,6 +131,8 @@ class dual_level(_DecoratorContextManager):
         >>> grad is None
         True
 
+    Please see our `forward-mode AD tutorial <https://pytorch.org/tutorials/intermediate/forward_ad_usage.html>`__
+    for detailed steps on how to use this API.
     """
     def __init__(self):
         super().__init__()
