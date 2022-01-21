@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/AccumulateType.h>
+#include <ATen/jit_macros.h>
 #include <c10/macros/Macros.h>
 #include <ATen/native/cuda/jit_utils.h>
 
@@ -110,9 +111,7 @@ static inline C10_HOST_DEVICE scalar_t calc_i0(scalar_t _x) {
 
 // See note [Jiterator]
 // TODO: elaborate in this comment on the structure of math.cuh
-// The jiterator is not currently supported on ROCm
-// TODO: update this to USE_JITERATOR in the future (requires refactoring the macro)
-#ifndef USE_ROCM
+#ifdef USE_JITERATOR
 
 const auto ndtri_string = jiterator_stringify(
   /*
@@ -502,6 +501,46 @@ const auto lgamma_string = jiterator_stringify(
     return lgamma(a);
   }
 ); // lgamma_string
+
+const auto exp2_string = jiterator_stringify(
+  template <typename T>
+  T exp2_kernel(T a) {
+    return exp2(a);
+  }
+); // exp2_string
+
+const auto erfc_string = jiterator_stringify(
+  template <typename T>
+  T erfc_kernel(T a) {
+    return erfc(a);
+  }
+); // erfc_string
+
+const auto erfinv_string = jiterator_stringify(
+  template <typename T>
+  T erfinv_kernel(T a) {
+    return erfinv(a);
+  }
+); // erfinv_string
+
+const auto entr_string = jiterator_stringify(
+  template <typename T>
+  T entr(T a) {
+    if (a != a) {
+      return a;
+    }
+
+    if (a > 0) {
+      return -a * log(a);
+    }
+
+    if (a == 0) {
+      return 0;
+    }
+
+    return NEG_INFINITY;
+  }
+); // entr_string
 
 const auto i0_string = jiterator_stringify(
   template<typename T>
@@ -1341,7 +1380,7 @@ const auto erfcx_string = jiterator_stringify(
   }
 ); // erfcx_string
 
-#else // USE_ROCM
+#else // !USE_JITERATOR -- kernels must be precompiled
 
 template <typename scalar_t>
 static inline C10_HOST_DEVICE scalar_t calc_gcd(scalar_t a_in, scalar_t b_in) {
@@ -1607,7 +1646,7 @@ static inline C10_HOST_DEVICE scalar_t calc_i1e(scalar_t _x) {
   return (_x < scalar_t{0.0}) ? -out : out;
 }
 
-#endif // USE_ROCM (false/true)
+#endif // USE_JITERATOR (this closes the "else" branch of a if/else preprocessor directive)
 
 } // namespace native
 } // namespace at
