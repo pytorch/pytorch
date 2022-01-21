@@ -773,7 +773,7 @@ c10::intrusive_ptr<Future> GraphExecutor::runAsync(
 }
 
 size_t GraphExecutor::getDefaultNumBailOuts() {
-  return getProfilingMode() ? getBailoutDepth().load() : 0;
+  return getProfilingMode() ? getBailoutDepth() : 0;
 }
 
 const ExecutionPlan& GraphExecutor::getPlanFor(
