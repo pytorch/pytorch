@@ -247,9 +247,8 @@ IValue FlatbufferLoader::parseList(const mobile::serialization::List* list) {
   for (int i : *list->items()) {
     res.emplace_back(getIValue(i));
   }
-  auto type =
-      getOrCreateTypeAnnotations(list->annotation_str())->cast<ListType>();
-  res.unsafeSetElementType(type->getElementType());
+  auto type = getOrCreateTypeAnnotations(list->annotation_str());
+  res.unsafeSetElementType(type->containedType(0));
   return res;
 }
 
@@ -270,10 +269,9 @@ IValue FlatbufferLoader::parseDict(const mobile::serialization::Dict* dict) {
     uint32_t val = values->Get(i);
     result.insert_or_assign(getIValue(key), getIValue(val));
   }
-  auto type =
-      getOrCreateTypeAnnotations(dict->annotation_str())->cast<DictType>();
-  result.unsafeSetKeyType(type->getKeyType());
-  result.unsafeSetValueType(type->getValueType());
+  auto type = getOrCreateTypeAnnotations(dict->annotation_str());
+  result.unsafeSetKeyType(type->containedType(0));
+  result.unsafeSetValueType(type->containedType(1));
   return result;
 }
 
@@ -308,7 +306,9 @@ IValue FlatbufferLoader::parseObject(
       if (!initialized) {
         for (uint32_t i = 0; i < object->attrs()->size(); i++) {
           IValue val = getIValue(object->attrs()->Get(i));
-          cls->addAttribute(obj_type->attr_names()->Get(i)->str(), val.type());
+          cls->addAttribute(
+              obj_type->attr_names()->Get(i)->str(),
+              val.type<c10::DynamicType>());
           obj->setSlot(i, std::move(val));
         }
         initialized_types_.insert(object->type_index());
@@ -324,7 +324,6 @@ IValue FlatbufferLoader::parseObject(
       IValue input = getIValue(object->state());
       mobile::Function* setstate = getFunction(object->setstate_func());
       auto obj = c10::ivalue::Object::create(at::StrongTypePtr(cu_, cls), 0);
-      std::cerr << "here 2: " << cls.get() << std::endl;
       stack.push_back(obj);
       stack.emplace_back(std::move(input));
       setstate->run(stack);
@@ -336,7 +335,6 @@ IValue FlatbufferLoader::parseObject(
       IValue input = getIValue(object->state());
       auto obj = c10::ivalue::Object::create(
           c10::StrongTypePtr(nullptr, custom_class_type), 1);
-      std::cerr << "here 3: " << cls.get() << std::endl;
       stack.push_back(obj);
       stack.emplace_back(std::move(input));
       custom_class_type->getMethod("__setstate__").run(stack);
