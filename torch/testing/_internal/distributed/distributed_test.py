@@ -81,8 +81,6 @@ from torch.testing._internal.common_utils import (
     sandcastle_skip_if,
 )
 
-from torch.distributed.optim import functional_optim_map
-
 from torch.distributed.optim.functional_sgd import _FunctionalSGD
 from torch.distributed.optim.functional_adam import _FunctionalAdam
 from torch.distributed.optim.functional_adamw import _FunctionalAdamW
@@ -4080,8 +4078,8 @@ class DistributedTest:
             adam_betas = (0.9, 0.99)
             adam_eps = 1e-6
             self._test_ddp_hook_with_optimizer_parity(
-                True, # grad as bucket view
-                False, # static graph
+                True,  # grad as bucket view
+                False,  # static graph
                 _FunctionalAdam,
                 construct_from_functional,
                 adam_lr,
@@ -4103,8 +4101,8 @@ class DistributedTest:
             # Not testing grad_as_bucket_view and static_graph as they are
             # tested in AdamW test above.
             self._test_ddp_hook_with_optimizer_parity(
-                True, # grad as bucket view
-                False, # static_graph
+                True,  # grad as bucket view
+                False,  # static_graph
                 _FunctionalSGD,
                 construct_from_functional,
                 sgd_lr,
