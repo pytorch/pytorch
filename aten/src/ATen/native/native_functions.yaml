@@ -4655,7 +4655,9 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CompositeExplicitAutograd: unsqueeze
+    CPU, CUDA: unsqueeze
+    SparseCPU, SparseCUDA: unsqueeze_sparse
+    QuantizedCPU, QuantizedCUDA: unsqueeze_quantized
 
 - func: unsqueeze_(Tensor(a!) self, int dim) -> Tensor(a!)
   variants: method
