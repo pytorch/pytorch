@@ -6043,11 +6043,17 @@ def sample_inputs_logit(op_info, device, dtype, requires_grad, **kwargs):
     return samples
 
 def sample_inputs_isin(op_info, device, dtype, requires_grad):
-    element = make_tensor((L,), device, dtype, low=None, high=None, requires_grad=requires_grad)
-    indices = torch.randint(0, L, size=[S])
-    test_elements = element[indices].clone()
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    # isin has two paths based on the size of elements and test_elements.
+    # if elements.numel() < 10 * pow(test_elements.numel(), 0.145):
+    #   # Path 1
+    # else:
+    #   # Path 2
     return [
-        SampleInput(element, args=(test_elements,))
+        # Sample for Path 1
+        SampleInput(make_arg((L,)), args=(make_arg((S,)),)),
+        # Sample for Path 2
+        SampleInput(make_arg((S,)), args=(make_arg((L,)),))
     ]
 
 def sample_inputs_masked_scatter(op_info, device, dtype, requires_grad, **kwargs):
@@ -9619,11 +9625,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types(),
            dtypesIfCUDA=all_types_and(torch.half),
            supports_autograd=False,
-           sample_inputs_func=sample_inputs_isin,
-           skips=(
-               # https://github.com/pytorch/pytorch/issues/67432
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='cpu'),  # noqa: B950
-           )),
+           sample_inputs_func=sample_inputs_isin),
     OpInfo('kthvalue',
            dtypes=all_types_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.float16),
@@ -9682,10 +9684,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_linalg_cholesky,
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
-           skips=(
-               # Pre-existing condition; Needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
-           )),
+           ),
     OpInfo('linalg.cholesky_ex',
            aten_name='linalg_cholesky_ex',
            dtypes=floating_and_complex_types(),
@@ -9820,10 +9819,7 @@ op_db: List[OpInfo] = [
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, skipCUDAIfRocm],
            sample_inputs_func=sample_inputs_linalg_matrix_power,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-           skips=(
-               # Pre-existing condition; Needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
-           ),),
+           ),
     OpInfo('linalg.multi_dot',
            # Need this lambda because gradcheck does not work with TensorList inputs
            aten_name='linalg_multi_dot',
@@ -10043,10 +10039,6 @@ op_db: List[OpInfo] = [
            check_batched_gradgrad=False,
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_linalg_lu_factor,
-           skips=(
-               # Call to .item<int64_t>() in checkErrors
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
-           ),
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack]),
     OpInfo('linalg.lu_factor_ex',
            aten_name='linalg_lu_factor_ex',
@@ -12434,10 +12426,6 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
-           skips=(
-               # Pre-existing condition; Needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
-           ),
            ),
     OpInfo('linalg.inv_ex',
            aten_name='linalg_inv_ex',
