@@ -277,6 +277,10 @@ TypePtr DynamicType::fallback() const {
       return QuantizerType::get();
     case Tag::AnyEnum:
       return AnyEnumType::get();
+    case Tag::RRef:
+      return RRefType::create(arguments_.elems[0].ty->fallback());
+    case Tag::Future:
+      return FutureType::create(arguments_.elems[0].ty->fallback());
     case Tag::Any:
       return AnyType::get();
   }

@@ -80,7 +80,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
     if (text.size() > 0 && islower(text[0])) {
       // lower case identifiers that are not otherwise valid types
       // are treated as type variables
-      return VarType::create(text);
+      return c10::TypeFactory::createNamed<VarType>(text);
     }
     throw ErrorReport(tok.range) << "unknown type specifier";
   }
@@ -314,7 +314,7 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
         alias_info->addContainedType(std::move(*r.second));
       }
     });
-    value = TupleType::create(std::move(types));
+    value = c10::TypeFactory::create<TupleType>(std::move(types));
   } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Future") {
     L.next(); // Future
     L.expect('(');
@@ -322,7 +322,7 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
     auto subtype = std::move(p.first);
     auto subalias = std::move(p.second);
     L.expect(')');
-    value = FutureType::create(subtype);
+    value = c10::TypeFactory::create<FutureType>(subtype);
   } else if (L.cur().kind == TK_IDENT && L.cur().text() == "RRef") {
     L.next(); // RRef
     L.expect('(');
@@ -330,7 +330,7 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
     auto subtype = std::move(p.first);
     auto subalias = std::move(p.second);
     L.expect(')');
-    value = RRefType::create(subtype);
+    value = c10::TypeFactory::create<RRefType>(subtype);
   } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Tensor") {
     L.next();
     value = c10::TypeFactory::get<TensorType>();

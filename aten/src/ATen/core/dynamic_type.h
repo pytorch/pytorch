@@ -56,6 +56,8 @@ constexpr DynamicTypeBits kDynamicClassTypeBit = DYNAMIC_TYPE_BIT(10);
   _(QScheme, DYNAMIC_TYPE_BIT(18), 1)                                        \
   _(Quantizer, DYNAMIC_TYPE_BIT(19), 1)                                      \
   _(AnyEnum, DYNAMIC_TYPE_BIT(20), 1)                                        \
+  _(RRef, DYNAMIC_TYPE_BIT(21), 0)                                           \
+  _(Future, DYNAMIC_TYPE_BIT(22), 0)                                         \
   _(Any, 0xffffffff, 1)
 
 class DynamicType;
@@ -191,7 +193,7 @@ class DynamicType : public SharedType {
 
 template <typename T>
 struct DynamicTypeTrait {
-  static auto tagValue() {
+  C10_NOINLINE static auto tagValue() {
     TORCH_CHECK(false);
     return DynamicType::Tag::Any;
   }

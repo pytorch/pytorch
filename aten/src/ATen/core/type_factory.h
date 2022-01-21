@@ -32,6 +32,13 @@ struct TORCH_API DynamicTypeFactory {
         c10::DynamicType::Arguments(fields, types));
   }
   template <typename T>
+  C10_ERASE static c10::DynamicTypePtr createNamed(const std::string& name) {
+    return std::make_shared<c10::DynamicType>(
+        c10::DynamicTypeTrait<T>::tagValue(),
+        name,
+        c10::DynamicType::Arguments{});
+  }
+  template <typename T>
   C10_ERASE static c10::DynamicTypePtr get() {
     return DynamicTypeTrait<T>::getBaseType();
   }
@@ -68,6 +75,10 @@ struct TORCH_API DefaultTypeFactory {
       const std::vector<c10::string_view>& fields,
       const std::vector<c10::TypePtr>& types) {
     return c10::TupleType::createNamed(name, fields, types);
+  }
+  template <typename T>
+  C10_ERASE static c10::TypePtr createNamed(const std::string& name) {
+    return T::create(name);
   }
   static const std::unordered_map<std::string, c10::TypePtr>& basePythonTypes();
   template <typename T>
