@@ -20,11 +20,15 @@ bool contains(DynamicType::Tag lhs, DynamicType::Tag rhs) {
   return contains(lhs, static_cast<DynamicTypeBits>(rhs));
 }
 
-C10_NOINLINE DynamicTypePtr makeBaseType(DynamicType::Tag tag) {
+} // namespace
+
+namespace detail {
+
+DynamicTypePtr makeBaseType(DynamicType::Tag tag) {
   return std::make_shared<DynamicType>(tag, DynamicType::Arguments{});
 }
 
-} // namespace
+} // namespace detail
 
 std::string DynamicType::str() const {
   if (name_) {
@@ -103,6 +107,8 @@ DynamicType::DynamicType(const Type& other) : SharedType(DynamicType::Kind) {
     if (const auto& qn = n->name()) {
       name_ = qn->qualifiedName();
     }
+  } else if (auto v = other.castRaw<VarType>()) {
+    name_ = v->name();
   }
 
   if (auto cls = other.cast<ClassType>()) {
@@ -111,9 +117,9 @@ DynamicType::DynamicType(const Type& other) : SharedType(DynamicType::Kind) {
     return;
   }
   switch (kind) {
-#define CASE_TYPE(T, _) \
-  case T##Type::Kind:   \
-    tag_ = Tag::T;      \
+#define CASE_TYPE(T, _, __) \
+  case T##Type::Kind:       \
+    tag_ = Tag::T;          \
     break;
     FORALL_DYNAMIC_TYPES(CASE_TYPE)
 #undef CASE_TYPE
@@ -190,6 +196,86 @@ bool DynamicType::isSubtypeOfExt(const Type& rhs, std::ostream*) const {
 TypePtr DynamicType::containedType(size_t i) const {
   TORCH_INTERNAL_ASSERT(tag_ != Tag::Class);
   return arguments_.elems.at(i).ty;
+}
+
+TypeKind DynamicType::dynamicKind() const {
+  switch (tag_) {
+#define CASE_TYPE(T, _, __) \
+  case Tag::T:              \
+    return TypeKind::T##Type;
+    FORALL_DYNAMIC_TYPES(CASE_TYPE)
+#undef CASE_TYPE
+    default:
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false);
+      return TypeKind::AnyType;
+  }
+}
+
+TypePtr DynamicType::fallback() const {
+  switch (tag_) {
+    case Tag::Tensor:
+      return TensorType::get();
+    case Tag::None:
+      return NoneType::get();
+    case Tag::Bool:
+      return BoolType::get();
+    case Tag::Int:
+      return IntType::get();
+    case Tag::Float:
+      return FloatType::get();
+    case Tag::Complex:
+      return ComplexType::get();
+    case Tag::Number:
+      return NumberType::get();
+    case Tag::String:
+      return StringType::get();
+    case Tag::List:
+      return ListType::create(arguments_.elems[0].ty->fallback());
+    case Tag::Tuple: {
+      std::vector<TypePtr> fallbacks;
+      for (const auto& elem : arguments_.elems) {
+        fallbacks.push_back(elem.ty->fallback());
+      }
+      if (name_) {
+        std::vector<c10::string_view> fields;
+        for (const auto& elem : arguments_.elems) {
+          fields.emplace_back(*elem.label);
+        }
+        return TupleType::createNamed(*name_, fields, fallbacks);
+      }
+      return TupleType::create(std::move(fallbacks));
+    }
+    case Tag::Dict:
+      return DictType::create(
+          arguments_.elems[0].ty->fallback(),
+          arguments_.elems[1].ty->fallback());
+    case Tag::Class:
+      return std::make_shared<ClassType>(*class_);
+    case Tag::Optional:
+      return OptionalType::create(arguments_.elems[0].ty->fallback());
+    case Tag::AnyList:
+      return AnyListType::get();
+    case Tag::AnyTuple:
+      return AnyTupleType::get();
+    case Tag::DeviceObj:
+      return DeviceObjType::get();
+    case Tag::StreamObj:
+      return StreamObjType::get();
+    case Tag::Capsule:
+      return CapsuleType::get();
+    case Tag::Generator:
+      return GeneratorType::get();
+    case Tag::Storage:
+      return StorageType::get();
+    case Tag::Var:
+      return VarType::create(*name_);
+    case Tag::AnyClass:
+      return AnyClassType::get();
+    case Tag::Any:
+      return AnyType::get();
+  }
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false);
+  return nullptr;
 }
 
 bool DynamicType::LabeledDynamicType::isSubtypeOf(
@@ -276,11 +362,8 @@ ivalue::TupleTypeFactory<TupleType>::fallback(const Type& type) {
 #endif
 }
 
-#define DYNAMIC_TYPE_TAG_VALUE(NAME, _)                               \
-  const DynamicTypePtr& DynamicTypeTrait<NAME##Type>::getBaseType() { \
-    static auto type = makeBaseType(tagValue());                      \
-    return type;                                                      \
-  }
+#define DYNAMIC_TYPE_TAG_VALUE(NAME, _, __) \
+  constexpr bool DynamicTypeTrait<NAME##Type>::isBaseType;
 FORALL_DYNAMIC_TYPES(DYNAMIC_TYPE_TAG_VALUE)
 #undef DYNAMIC_TYPE_TAG_VALUE
 
