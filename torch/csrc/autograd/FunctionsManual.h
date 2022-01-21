@@ -460,13 +460,12 @@ std::tuple<Tensor, Tensor> _cudnn_convolution_backward(
     at::IntArrayRef output_padding, at::IntArrayRef stride, at::IntArrayRef dilation, bool transposed, int64_t groups,
     ::std::array<bool,2> output_mask);
 
-std::tuple<Tensor, Tensor> scatter_reduce_backward(
+Tensor scatter_reduce_backward(
   const Tensor& grad,
   const Tensor& input,
   int dim,
   const Tensor& index,
   c10::string_view reduce,
-  const c10::optional<Tensor>& optional_out,
   const Tensor& result
 );
 

@@ -1281,8 +1281,7 @@ Tensor scatter_reduce_two_cpu(const Tensor& self,
                               int64_t dim,
                               const Tensor& index,
                               const c10::string_view reduce,
-                              const c10::optional<int64_t> output_size,
-                              const c10::optional<Tensor>& optional_out) {
+                              const c10::optional<int64_t> output_size) {
 
   // TODO: Add documentation.
 
@@ -1292,27 +1291,13 @@ Tensor scatter_reduce_two_cpu(const Tensor& self,
 
   dim = dim < 0 ? dim + self.dim() : dim;
 
-  Tensor out;
-  auto out_has_value = optional_out.has_value();
-  if (out_has_value) {
-    out = optional_out.value().clone();
-    for (auto i = 0; i < out.dim(); i++) {
-      if (i != dim) {
-        TORCH_CHECK(self.size(i) == out.size(i),
-            "All dimensions of `self` and `optional_out` must have the same size except `dim`=", dim,
-            "Mismatch on dimension", i, " got size ", self.size(i), " for `self` and size ",
-            out.size(i), "for optional_out");
-      }
-    }
+  auto sizes = self.sizes().vec();
+  if (output_size.has_value()) {
+    sizes[dim] = output_size.value();
   } else {
-    auto sizes = self.sizes().vec();
-    if (output_size.has_value()) {
-      sizes[dim] = output_size.value();
-    } else {
-      sizes[dim] = index.numel() > 0 ? index.max().item<int64_t>() + 1: 0;
-    }
-    out = at::empty(sizes, self.options());
+    sizes[dim] = index.numel() > 0 ? index.max().item<int64_t>() + 1: 0;
   }
+  Tensor out = at::empty(sizes, self.options());
 
   TORCH_CHECK(self.dim() == index.dim(),
       "Shape mismatch between `self` (got ", self.sizes(), ") and `index` (got ", index.sizes(), ")");
@@ -1325,22 +1310,20 @@ Tensor scatter_reduce_two_cpu(const Tensor& self,
               "`reduce` argument must be one of ('sum', 'prod', 'mean', 'amax', 'amin'");
 
   if (self.numel() == 0) {
-    out = out_has_value ? out : out.zero_();
-    return out;
+    return out.zero_();
   }
 
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, self.scalar_type(), "scatter_reduce", [&] {
-    if (!out_has_value) {
-      if (reduce == "prod") {
-        out.fill_((scalar_t)1);
-      } else if (reduce == "amax") {
-        out.fill_(std::numeric_limits<scalar_t>::lowest());
-      } else if (reduce == "amin") {
-        out.fill_(std::numeric_limits<scalar_t>::max());
-      } else {
-        out.fill_((scalar_t)0);
-      }
+    if (reduce == "prod") {
+      out.fill_((scalar_t)1);
+    } else if (reduce == "amax") {
+      out.fill_(std::numeric_limits<scalar_t>::lowest());
+    } else if (reduce == "amin") {
+      out.fill_(std::numeric_limits<scalar_t>::max());
+    } else {
+      out.fill_((scalar_t)0);
     }
+
 
     auto self_cont = self.contiguous();
     auto index_cont = index.contiguous();
@@ -1350,7 +1333,7 @@ Tensor scatter_reduce_two_cpu(const Tensor& self,
     auto out_cont = out.contiguous();
     auto out_cont_data = out_cont.data_ptr<scalar_t>();
 
-    auto counts = out_has_value ? at::ones_like(out_cont) : at::zeros_like(out_cont);
+    auto counts = at::zeros_like(out_cont);
     auto counts_data = counts.data_ptr<scalar_t>();
 
 

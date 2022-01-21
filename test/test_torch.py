@@ -1298,11 +1298,6 @@ class AbstractTestCases:
                     output_shape[dim] = output_size
                     self.assertEqual(output.shape, output_shape)
 
-                    # Result with a randomly initialized `optional_out` kwarg
-                    optional_out = torch.randn(output_shape, dtype=dtype, device=device)
-                    expected_optional = optional_out.clone()
-                    output_optional = input.scatter_reduce(dim, index, reduce, output_size=output_size, optional_out=optional_out)
-
                     # Fill expected with default values when `optional_out` is not passed
                     expected = torch.zeros(output_shape, dtype=dtype, device=device)
                     expected.fill_(fills[reduce])
@@ -1321,10 +1316,8 @@ class AbstractTestCases:
                         op = fns[reduce]
                         if (reduce == "mean"):
                             op(expected[i, j, k], v, counts[i, j, k])
-                            op(expected_optional[i, j, k], v, counts[i, j, k] + 1)
                         else:
                             op(expected[i, j, k], v)
-                            op(expected_optional[i, j, k], v)
                         counts[i, j, k] += 1
 
                     # expect untouched indices to be zeroed out when `optional_out` kwarg is not passed
@@ -1332,7 +1325,6 @@ class AbstractTestCases:
                         expected.masked_fill_(counts == 0, 0)
 
                     self.assertTrue(torch.allclose(output, expected))
-                    self.assertTrue(torch.allclose(output_optional, expected_optional))
 
             with self.assertRaisesRegex(RuntimeError, "Expected `dim` to be in range -3 to 2"):
                 torch.scatter_reduce(input, 4, index, "sum")

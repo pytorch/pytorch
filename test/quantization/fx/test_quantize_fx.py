@@ -4751,7 +4751,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 x = self.hardtanh(x)
                 self.hardtanh_(x)
                 x = F.hardtanh(x)
-                F.hardtanh_(x)
                 return x
 
         data = (torch.rand((1, 2, 5, 5), dtype=torch.float),)
@@ -4759,7 +4758,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
         node_list = [
             ns.call_function(torch.quantize_per_tensor),
             ns.call_module(nnq.Conv2d),
-            ns.call_function(F.hardtanh_),
             ns.call_method('dequantize')
         ]
         for quant_type in self.static_quant_types:
