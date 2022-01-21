@@ -318,8 +318,8 @@ at::opmath_type<f_inputs_type> scalar_val, std::tuple<Args...> extra_args) {
     args[6] = static_cast<void*>(&scalar_val);
 
     for (const auto i : c10::irange(extra_args_size)) {
-      // since 3 slots are already filled in `args`
-      args[i + 3] = extra_args_array[i];
+      // since 7 slots are already filled in `args`
+      args[i + 7] = extra_args_array[i];
     }
     at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args, grid, num_threads());
     C10_CUDA_KERNEL_LAUNCH_CHECK();
