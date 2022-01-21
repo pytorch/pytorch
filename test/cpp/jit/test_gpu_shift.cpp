@@ -3125,8 +3125,8 @@ TEST_F(NVFuserTest, FusionConv2DNoPadding_CUDA) {
   auto cg_outputs = fe.runFusion(inputs);
 
   at_inp = at_inp.unsqueeze(0); // at::conv2d needs the N axis
-  at::IntArrayRef stride = {1, 1};
-  at::IntArrayRef padding = {0, 0};
+  std::vector<int64_t> stride = {1, 1};
+  std::vector<int64_t> padding = {0, 0};
   auto at_out = at::conv2d(at_inp, at_w, {}, stride, padding);
   at_out = at_out.squeeze(0); // drop the N axis
 
@@ -3219,8 +3219,8 @@ TEST_F(NVFuserTest, FusionConv2DNoPaddingStrided_CUDA) {
   auto cg_outputs = fe.runFusion(inputs);
 
   at_inp = at_inp.unsqueeze(0); // at::conv2d needs the N axis
-  at::IntArrayRef stride = {2, 2};
-  at::IntArrayRef padding = {0, 0};
+  std::vector<int64_t> stride = {2, 2};
+  std::vector<int64_t> padding = {0, 0};
   auto at_out = at::conv2d(at_inp, at_w, {}, stride, padding);
   at_out = at_out.squeeze(0); // drop the N axis
 

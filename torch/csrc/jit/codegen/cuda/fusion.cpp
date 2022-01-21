@@ -306,6 +306,10 @@ void Fusion::print() {
 
 void Fusion::printKernel() {
   FUSER_PERF_SCOPE("Fusion::printKernel");
+  TORCH_INTERNAL_ASSERT(
+      !this->isA<kir::Kernel>(),
+      "Cannot \"print kernel\" of a kernel container. ",
+      "This would require lowering during lowering.");
   std::cout << codegen::generateCudaKernel(GpuLower(this).kernel());
 }
 

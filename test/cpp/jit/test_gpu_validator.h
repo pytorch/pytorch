@@ -86,8 +86,8 @@ std::pair<double, double> getTolerance(
       } else {
         // Reduction case
         size_t entry = 0;
-        while (sum_tolerance_entry[entry][0] < reduction_size &&
-               entry < sum_tolerance_entry.size()) {
+        while (entry < sum_tolerance_entry.size() &&
+               sum_tolerance_entry[entry][0] < reduction_size) {
           entry++;
         }
         double abs_tol = 0.0;
