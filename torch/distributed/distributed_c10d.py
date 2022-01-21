@@ -1690,7 +1690,12 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
         since it does not provide an async_op handle and thus will be a blocking
         call.
 
-    .. note:: Note that this API is not supported when using the NCCL backend.
+    .. note:: For NCCL-based processed groups, internal tensor representations
+        of objects must be moved to the GPU device before communication takes
+        place. In this case, the device used is given by
+        ``torch.cuda.current_device()`` and it is the user's responsiblity to
+        ensure that this is set so that each rank has an individual GPU, via
+        ``torch.cuda.set_device()``.
 
     .. warning::
         :func:`gather_object` uses ``pickle`` module implicitly, which is
@@ -1765,6 +1770,8 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
         return
     for i, tensor in enumerate(output_tensors):
         tensor = tensor.type(torch.uint8)
+        if tensor.device != torch.device("cpu"):
+            tensor = tensor.cpu()
         tensor_size = object_size_list[i]
         object_gather_list[i] = _tensor_to_object(tensor, tensor_size)
 
