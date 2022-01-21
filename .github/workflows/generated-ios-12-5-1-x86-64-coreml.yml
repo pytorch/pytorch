@@ -131,7 +131,7 @@ jobs:
           mkdir -p ../models
           if [ "${USE_COREML_DELEGATE}" == 1 ]; then
             pip install coremltools==5.0b5
-            pip install six
+            pip install six==1.16.0
             python coreml_backend.py
           else
             python trace_model.py
