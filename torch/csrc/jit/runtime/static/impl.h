@@ -590,9 +590,6 @@ class TORCH_API StaticRuntime {
       const std::vector<c10::IValue>& args,
       const KeywordArgs& kwargs);
 
-  // Memory planning is only enabled if sm->opts().cleanup_activations is true.
-  // Otherwise, the memory used by activations is cached inside the static
-  // runtime.
   const StaticModule& static_module_;
   // Cache this so we don't have to call static_module_.first_input_is_self()
   const bool first_input_is_self_;
