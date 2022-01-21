@@ -106,9 +106,11 @@ class PipeWithDDPTest(RpcAgentTestFixture):
             layer2
         )
         model = Pipe(model, chunks=2, checkpoint=checkpoint)
-        model = DistributedDataParallel(model, find_unused_parameters=find_unused_parameters)
-        if static_graph:
-            model._set_static_graph()
+        model = DistributedDataParallel(
+            model,
+            find_unused_parameters=find_unused_parameters,
+            static_graph=static_graph,
+        )
 
         # Ensure inputs are different across ranks to verify that gradient
         # sync indeed occurs.
