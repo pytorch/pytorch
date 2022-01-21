@@ -23,6 +23,8 @@ env:
   BUILD_ENVIRONMENT: ios-12-5-1-arm64-full-jit
   IN_CI: 1
   IS_GHA: 1
+  IOS_PLATFORM: OS
+  IOS_ARCH: arm64
 
 
 jobs:
@@ -54,6 +56,27 @@ jobs:
           auto-update-conda: true
           python-version: 3.8
           activate-environment: build
+      - name: Populate CI build options
+        run: |
+          # Most builds use the lite interpreter, if certain builds shouldn't
+          # build the lite interpreter this env variable should get over-written
+          # in the following case statement
+          echo "BUILD_LITE_INTERPRETER=1" >> "${GITHUB_ENV}"
+
+          case ${BUILD_ENVIRONMENT} in
+            *metal*)
+              echo "USE_PYTORCH_METAL=1" >> "${GITHUB_ENV}"
+              ;;
+            *full_jit*)
+              echo "BUILD_LITE_INTERPRETER=0" >> "${GITHUB_ENV}"
+              ;;
+            *custom*)
+              echo "SELECTED_OP_LIST=${GITHUB_WORKSPACE}/ios/TestApp/custom_build/mobilenetv2.yaml" >> "${GITHUB_ENV}"
+              ;;
+            *coreml*)
+              echo "USE_COREML_DELEGATE=1" >> "${GITHUB_ENV}"
+              ;;
+          esac
       - name: Install ios / conda Dependencies
         run: |
           # Install dependencies
@@ -86,7 +109,20 @@ jobs:
           python -VV
           export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}
           scripts/build_ios.sh
-
+      - name: Run Build Test
+        run: |
+          PROFILE=PyTorch_CI_2022
+          # run the ruby build script
+          if ! [ -x "$(command -v xcodebuild)" ]; then
+            echo 'Error: xcodebuild is not installed.'
+            exit 1
+          fi
+          echo "${IOS_DEV_TEAM_ID}"
+          if [ "${IOS_PLATFORM}" != "SIMULATOR" ]; then
+            ruby scripts/xcode_build.rb -i build_ios/install -x ios/TestApp/TestApp.xcodeproj -p "${IOS_PLATFORM}" -c "${PROFILE}" -t "${IOS_DEV_TEAM_ID}"
+          else
+            ruby scripts/xcode_build.rb -i build_ios/install -x ios/TestApp/TestApp.xcodeproj -p "${IOS_PLATFORM}"
+          fi
 
 concurrency:
   group: ios-12-5-1-arm64-full-jit-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
