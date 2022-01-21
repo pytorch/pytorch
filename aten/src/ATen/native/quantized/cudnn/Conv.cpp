@@ -35,6 +35,8 @@ uint8_t getAlignment(const Tensor &t) {
 cudnn_frontend::Tensor getTensorDescriptor(const Tensor &t, int64_t id, uint8_t alignment) {
   auto shape = t.sizes();
   auto strides = t.strides();
+  std::cout << "shape:" << shape << std::endl;
+  std::cout << "strides:" << strides << std::endl;
   return cudnn_frontend::TensorBuilder()
     .setDim(shape.size(), shape.data())
     .setStrides(strides.size(), strides.data())
@@ -57,6 +59,13 @@ cudnn_frontend::ConvDesc_v8 getConvDescriptor(cudnnDataType_t dataType, IntArray
     .build();
 }
 
+cudnn_frontend::PointWiseDesc_v8 getPointWiseMulDescriptor(cudnnDataType_t dataType) {
+  return cudnn_frontend::PointWiseDescBuilder()
+    .setMode(CUDNN_POINTWISE_MUL)
+    .setMathPrecision(dataType)
+    .build();
+}
+
 void filterEngineConfigs(
   cudnn_frontend::EngineConfigList &from,
   cudnn_frontend::EngineConfigList &to,
@@ -69,9 +78,8 @@ void filterEngineConfigs(
     }
     if (scalar_type == kFloat || !allow_tf32) {
       if (cudnn_frontend::hasNumericalNote<CUDNN_NUMERICAL_NOTE_DOWN_CONVERT_INPUTS>(c)) return true;
-      std::cout << "after down convert" << std::endl;
+      std::cout << "scalar type:" << scalar_type << std::endl;
       if (cudnn_frontend::hasNumericalNote<CUDNN_NUMERICAL_NOTE_TENSOR_CORE>(c)) return true;
-      std::cout << "after tensorcore" << std::endl;
     }
     return false;
   };
@@ -99,6 +107,19 @@ get_execplan_from_heuristics_else_fall_back(cudnn_frontend::OperationGraph&& opG
     } catch (cudnn_frontend::cudnnException& e) {
       continue;
     }
+  }
+
+  {
+    auto total_engines = opGraph.getEngineCount();
+    std::cout << opGraph.describe() << " has " << total_engines << " engines." << std::endl;
+    auto engine = cudnn_frontend::EngineBuilder().setGlobalEngineIdx(0).setOperationGraph(opGraph).build();
+    std::cout << engine.describe() << std::endl;
+
+    auto engine_config = cudnn_frontend::EngineConfigBuilder().setEngine(engine).build();
+
+    std::cout << engine_config.describe() << std::endl;
+
+    return cudnn_frontend::ExecutionPlanBuilder().setHandle(handle_).setEngineConfig(engine_config).build();
   }
 }
 
@@ -148,12 +169,23 @@ void raw_cudnn_convolution_forward_out(
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups,
-    bool benchmark, bool deterministic, bool allow_tf32) {
+    bool benchmark,
+    bool deterministic,
+    bool allow_tf32,
+    float requantize_multiplier
+) {
   TORCH_CHECK(!benchmark, "not supported yet");
   if (output.numel() == 0) {
     return;
   }
 
+  std::cout << "input sizes:" << input.sizes() << std::endl;;
+  std::cout << "weight sizes:" << weight.sizes() << std::endl;
+  std::cout << "output sizes:" << output.sizes() << std::endl;
+
+  Tensor requantize_multiplier_tensor = at::empty_like(output);
+  requantize_multiplier_tensor.fill_(requantize_multiplier);
+  Tensor requantized_tensor = at::empty_like(output);
   cudnnHandle_t handle = getCudnnHandle();
 
   CacheKey key;
@@ -192,17 +224,24 @@ void raw_cudnn_convolution_forward_out(
     return;
   }
 
-  auto op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR)
+  auto conv_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR)
       .setxDesc(getTensorDescriptor(input, 'x', key.input_alignment))
       .setyDesc(getTensorDescriptor(output, 'y', key.output_alignment))
       .setwDesc(getTensorDescriptor(weight, 'w', key.weight_alignment))
       .setcDesc(getConvDescriptor(key.params.dataType, padding, stride, dilation))
       .build();
-  std::cout << "operator:" << op.describe() << std::endl;
+  std::cout << "operator:" << conv_op.describe() << std::endl;
   // TODO: add bias
-  // TODO: move requantize here
 
-  std::array<cudnn_frontend::Operation const *, 1> ops = {&op};
+  auto requant_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
+    .setxDesc(conv_op.getOutputTensor())
+    .setbDesc(getTensorDescriptor(requantize_multiplier_tensor, 's', getAlignment(requantize_multiplier_tensor)))
+    .setyDesc(getTensorDescriptor(requantized_tensor, 's', getAlignment(requantized_tensor)))
+    .setpwDesc(getPointWiseMulDescriptor(getCudnnDataType(requantized_tensor)))
+    .build();
+  std::cout << "operator:" << requant_op.describe() << std::endl;
+
+  std::array<cudnn_frontend::Operation const *, 2> ops = {&conv_op, &requant_op};
 
   auto opGraph = cudnn_frontend::OperationGraphBuilder()
       .setHandle(handle)
@@ -227,11 +266,12 @@ void raw_cudnn_convolution_forward_out(
   // filterEngineConfigs(fallback_list, filtered_configs, deterministic, allow_tf32, input.scalar_type());
 
   for (auto &cfg : engine_configs) {
+    std::cout << "trying out cfg:" << cfg << std::endl;
     try {
       run(cfg);
       engine_cache[key] = cfg;
       return;
-    } catch (cudnn_frontend::cudnnException &e) {std::cout << "cudnn:" << e.what() << std::endl;} catch(CuDNNError &e) { std::cout << e.what() << std::endl;}
+    } catch (cudnn_frontend::cudnnException &e) {std::cout << "cudnn error:" << e.what() << std::endl;} catch(CuDNNError &e) { std::cout << "other error" << e.what() << std::endl;}
   }
   TORCH_CHECK(false, "Unable to find an engine to execute this computation");
 }
@@ -248,7 +288,10 @@ Tensor raw_cudnn_convolution_forward(
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups,
-    bool benchmark, bool deterministic, bool allow_tf32) {
+    bool benchmark,
+    bool deterministic,
+    bool allow_tf32,
+    float requantize_multiplier) {
   // TODO: add dimension validations for input/weight/bias
   const int N = act.size(0);
   const int C = act.size(1);
@@ -262,7 +305,7 @@ Tensor raw_cudnn_convolution_forward(
   Tensor output_fp32 = at::empty(
       output_shape,
       at::device(at::kCUDA).dtype(at::kFloat),
-      at::MemoryFormat::Contiguous
+      at::MemoryFormat::ChannelsLast
   );
 
   raw_cudnn_convolution_forward_out(
@@ -270,7 +313,8 @@ Tensor raw_cudnn_convolution_forward(
       padding, stride, dilation, groups,
       benchmark,
       deterministic,
-      allow_tf32);
+      allow_tf32,
+      requantize_multiplier);
   return output_fp32;
 }
 
@@ -291,26 +335,27 @@ class QConvInt8 final {
     TORCH_CHECK(!kReluFused, "conv relu not supported yet");
     TORCH_CHECK(!bias.has_value(), "bias is not supported yet");
     std::cout << "before run" << std::endl;
-    // TODO: check all zero_points are zero/all tensors are symmetrically quantized
-    Tensor output_fp32 = raw_cudnn_convolution_forward<kSpatialDim>(
-        act.int_repr(), weight.int_repr(),
-        IntArrayRef(padding.vec()), IntArrayRef(stride.vec()), IntArrayRef(dilation.vec()), groups,
-        false /* benchmark */,
-        true /* deterministic */,
-        false /* allow_tf32 */);
-
-    std::cout << "before requantize" << std::endl;
+    act = act.contiguous(c10::MemoryFormat::ChannelsLast);
     // requantization
     // out_int8 = act_int8 * weight_int8 * act_scale * w_scale / output_scale
     auto act_scale = act.q_scale();
     auto weight_scale = weight.q_scale();
     auto requantize_multiplier = act_scale * weight_scale / output_scale;
-    Tensor out = output_fp32 * requantize_multiplier;
+    // TODO: check all zero_points are zero/all tensors are symmetrically quantized
+    Tensor output_fp32_requant = raw_cudnn_convolution_forward<kSpatialDim>(
+        act.int_repr(), weight.int_repr(),
+        IntArrayRef(padding.vec()), IntArrayRef(stride.vec()), IntArrayRef(dilation.vec()), groups,
+        false /* benchmark */,
+        true /* deterministic */,
+        false /* allow_tf32 */,
+        requantize_multiplier
+    );
+
     std::cout << "before reassemble" << std::endl;
     // convert output fp32 Tensor to int8 by clamping
     // TODO: get the range based on target output dtype, for now
     // we hardcode this to the range for int8
-    Tensor clampped = out.clamp(-128, 127);
+    Tensor clampped = output_fp32_requant.clamp(-128, 127);
     Tensor quantized_output = at::_make_per_tensor_quantized_tensor(clampped, output_scale, output_zero_point);
     std::cout << "after reassemble" << std::endl;
     return quantized_output;

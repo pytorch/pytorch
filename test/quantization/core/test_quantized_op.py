@@ -436,6 +436,30 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(qY, qY_hat,
                          msg="F.celu failed ({} vs {})".format(qY, qY_hat))
 
+    """Tests the correctness of the quantized::gelu op."""
+    def test_qgelu(self):
+        shapes = ((4,), (4, 4), (4, 4, 4), (4, 4, 4, 4))
+        dtypes = (torch.quint8, torch.qint8)
+        memory_formats = (torch.channels_last, torch.contiguous_format)
+        test_cases = itertools.product(shapes, dtypes, memory_formats)
+        for shape, dtype, memory_format in test_cases:
+            if memory_format == torch.channels_last and len(shape) != 4:
+                continue
+            X, scale, zero_point, torch_type = \
+                torch.randn(*shape), 0.1, 0, dtype
+            X = X.to(memory_format=memory_format)
+
+            qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                           dtype=torch_type)
+            dqX = qX.dequantize()
+
+            op = torch.nn.functional.gelu
+            dqY = op(dqX)
+            qY = torch.quantize_per_tensor(dqY, scale=scale, zero_point=zero_point,
+                                           dtype=torch_type)
+            qY_hat = op(qX)
+            self.assertEqual(qY.dequantize(), qY_hat.dequantize(),
+                             msg="F.gelu failed ({} vs {})".format(qY, qY_hat))
 
     """Tests the correctness of the quantized::qlayer_norm op."""
     @skipIfNoFBGEMM
@@ -3808,7 +3832,9 @@ class TestQuantizedConv(TestCase):
         output_channels_per_group, groups, kernels, strides, pads, dilations,
         X_scale, X_zero_point, W_scale, W_zero_point,
         use_bias, use_channelwise, use_transpose,
-        device=torch.device("cpu")
+        device=torch.device("cpu"),
+        input_dtype=torch.quint8,
+        weight_dtype=torch.qint8,
     ):
         assert not (use_channelwise and use_transpose), \
                "Cannot generate channelwise qconv_transpose_tensors "
@@ -3876,15 +3902,15 @@ class TestQuantizedConv(TestCase):
         b = b.to(device)
 
         X_q = torch.quantize_per_tensor(
-            X, scale=X_scale, zero_point=X_zero_point, dtype=torch.quint8)
+            X, scale=X_scale, zero_point=X_zero_point, dtype=input_dtype)
         if use_channelwise:
             W_q = torch.quantize_per_channel(
                 W, W_scales_tensor, W_zero_points_tensor.long(), 0,
-                dtype=torch.qint8)
+                dtype=weight_dtype)
         else:
             W_q = torch.quantize_per_tensor(
                 W, scale=W_scale[0], zero_point=W_zero_point[0],
-                dtype=torch.qint8)
+                dtype=weight_dtype)
 
         bias_float = b if use_bias else None
 
@@ -3897,13 +3923,16 @@ class TestQuantizedConv(TestCase):
         dilations, X_scale, X_zero_point, W_scale, W_zero_point, Y_scale,
         Y_zero_point, use_bias, use_relu, use_channelwise, use_transpose,
         device=torch.device("cpu"),
-        dtype=torch.quint8,
+        input_dtype=torch.quint8,
+        weight_dtype=torch.qint8,
+        output_dtype=torch.quint8,
     ):
         (X, W), (X_q, W_q), bias_float = self._make_qconv_tensors(
             batch_size, input_channels_per_group, input_feature_map_shape,
             output_channels_per_group, groups, kernels,
             strides, pads, dilations, X_scale, X_zero_point, W_scale,
-            W_zero_point, use_bias, use_channelwise, use_transpose, device=device)
+            W_zero_point, use_bias, use_channelwise, use_transpose,
+            device=device, input_dtype=input_dtype, weight_dtype=weight_dtype)
         if bias_float is not None:
             bias_float = bias_float.to(device)
         # Assign weights
@@ -3922,7 +3951,7 @@ class TestQuantizedConv(TestCase):
         # Quantize reference results for comparison
         result_ref_q = torch.quantize_per_tensor(
             result_ref, scale=Y_scale, zero_point=Y_zero_point,
-            dtype=dtype)
+            dtype=output_dtype)
 
         if qconv_prepack_fn is not None:
             if use_transpose:
@@ -4046,7 +4075,7 @@ class TestQuantizedConv(TestCase):
            height=st.integers(10, 16),
            width=st.integers(7, 14),
            # output_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
-           output_channels_per_group=st.sampled_from([6, 32]),
+           output_channels_per_group=st.sampled_from([16, 32]),
            # groups=st.integers(1, 3),
            groups = st.integers(1, 1),
            kernel_h=st.integers(1, 7),
@@ -4100,7 +4129,15 @@ class TestQuantizedConv(TestCase):
         strides = (stride_h, stride_w)
         pads = (pad_h, pad_w)
         dilations = (dilation, dilation)
+
+        height = 224
+        width = 224
+        kernels = (3, 3)
+        strides = (1, 1)
+        pads = (0, 0)
+        dilations = (1, 1)
         print("params:")
+        print(torch.backends.quantized.engine)
         print(batch_size,
               input_channels_per_group,
               height,
@@ -4143,7 +4180,7 @@ class TestQuantizedConv(TestCase):
             dilations, X_scale, X_zero_point, W_scale, W_zero_point,
             Y_scale, Y_zero_point, use_bias, use_relu, use_channelwise, False,
             device=torch.device("cuda"),
-            dtype=torch.qint8)
+            input_dtype=torch.qint8, weight_dtype=torch.qint8, output_dtype=torch.qint8)
 
     """Tests the correctness of quantized convolution op."""
     @given(batch_size=st.integers(1, 3),
