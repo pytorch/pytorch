@@ -3,12 +3,10 @@
 // We then 'manually' compute a lower-priority to re-dispatch to (e.g. CPU) to get to the eventually correct backend.
 // ${generated_comment}
 
-#include <ATen/ATen.h>
-#include <ATen/Dispatch.h>
-#include <ATen/Operators.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <torch/library.h>
-#include <c10/core/TensorOptions.h>
 
 namespace at {
 
