@@ -487,13 +487,21 @@ Tensor masked_softmax_cpu(const Tensor& input, int64_t dim, const Tensor& mask) 
   TORCH_CHECK(
       mask.scalar_type() == ScalarType::Bool,
       "Mask should be a boolean tensor");
+  
+  auto input_ = input.contiguous();
+  int64_t dim_ = maybe_wrap_dim(dim, input_.dim());
+
+  if (input_.dim() == 0) {
+    input_ = input_.view(1);
+  }
+
   AT_DISPATCH_FLOATING_TYPES_AND(
       at::ScalarType::BFloat16, input.scalar_type(), "masked_softmax", [&] {
         host_softmax<
             scalar_t,
             false /* LogSoftMax */,
             true /* MaskedSoftMax */>(
-            output, input, dim, mask.data_ptr<bool>());
+            output, input_, dim_, mask.data_ptr<bool>());
       });
   return output;
 }
@@ -510,28 +518,17 @@ Tensor masked_softmax_backward_cpu(
       mask.scalar_type() == ScalarType::Bool,
       "Mask should be a boolean tensor");
 
-  // int64_t dim_ = maybe_wrap_dim(dim, grad.dim());
-  // auto grad_ = grad.contiguous();
-  // auto output_ = output.contiguous();
+  int64_t dim_ = maybe_wrap_dim(dim, grad.dim());
+  auto grad_ = grad.contiguous();
+  auto output_ = output.contiguous();
 
-  // if (output.numel() == 0) {
-  //   return;
-  // }
+  if (grad_.dim() == 0) {
+    grad_ = grad_.view(1);
+  }
 
-  // if (grad_.dim() == 0) {
-  //   grad_ = grad_.view(1);
-  // }
-
-  // if (output_.dim() == 0) {
-  //   output_ = output_.view(1);
-  // }
-
-  TORCH_CHECK(
-      grad.sizes() == mask.sizes(), "Mask shape should match grad shape");
-  TORCH_CHECK(mask.is_contiguous(), "Mask should always be contiguous");
-  TORCH_CHECK(
-      mask.scalar_type() == ScalarType::Bool,
-      "Mask should be a boolean tensor");
+  if (output_.dim() == 0) {
+    output_ = output_.view(1);
+  }
 
   auto grad_input = at::empty({0}, grad.options());
   AT_DISPATCH_FLOATING_TYPES_AND(
@@ -539,7 +536,7 @@ Tensor masked_softmax_backward_cpu(
         host_softmax_backward<
             scalar_t, 
             false /* LogSoftMax */,
-            true /* MaskedSoftmax */>(grad_input, grad, output, dim);
+            true /* MaskedSoftmax */>(grad_input, grad_, output_, dim_);
       });
   return grad_input;
 }

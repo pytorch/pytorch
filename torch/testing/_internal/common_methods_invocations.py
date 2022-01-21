@@ -6022,7 +6022,7 @@ def sample_inputs_masked_softmax2(op_info, device, dtype, requires_grad, **kwarg
         ((S, ), 0),
         ((S, S), 0),
         ((S, S), 1),
-        ((S, S), -1),
+        # ((S, S), -1),
         ((S, M, S), 2),
     ]
 
