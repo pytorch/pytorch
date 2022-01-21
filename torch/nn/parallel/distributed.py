@@ -1451,6 +1451,10 @@ class DistributedDataParallel(Module, Joinable):
             optim_cls (Type): a ``torch.optim.Optimizer`` class to be registered
             as a fused optimizer.
             *args (Sequence[Any]): Arguments to forward to `optim_cls`.
+            optim_params (Optional[Iterable[torch.Tensor]]): Set of parameters
+            to optimize, similar to `params` argument of traditional `torch.optim`
+            Optimizers. If this is omitted, all DDP model parameters will be
+            optimized.
             **kwargs: (Dict[str, Any]): Keyword arguments to forward to `optim_cls`.
 
     .. warning ::
@@ -1481,10 +1485,15 @@ class DistributedDataParallel(Module, Joinable):
         >>> betas = (0.9, 0.99)
         >>> eps = 1e-6
         >>> net._register_fused_optim(torch.optim.Adam, lr, betas=betas, eps=eps)
+        >>> # Example with subset of parameters
+        >>> params_to_opt = [list(net.parameters())[0]]
+        >>> net._register_fused_optim(
+            torch.optim.Adam, lr, optim_params=params_to_opt,  betas=betas, eps=eps
+        )
         """
         # Note: importing in function, otherwise this will cause a circular
         # import as optimizer_overlap module needs to import DistributedDataParallel.
-        from torch.distributed.algorithms.optimizer_overlap import _as_overlapped_optim
+        from torch.distributed.algorithms._optimizer_overlap import _as_overlapped_optim
 
         overlapped_optim = _as_overlapped_optim(optim, optim_params, *args, **kwargs)
         try:
