@@ -127,7 +127,8 @@ arguments provided by TensorIterator. Eg. While capturing `n`, where
 // Only handles elementwise unary and binary kernels with a
 //   common dtype and a single output.
 // NOTE: this assumes the op's iterator has a common_dtype.
-// NOTE: We use std::tuple for extra_args due to following
+// NOTE: We use std::tuple instead of parameter pack
+//  for `extra_args` due to following
 // bug on older versions of clang
 // https://bugs.llvm.org/show_bug.cgi?id=23029
 template <
