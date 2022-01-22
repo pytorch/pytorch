@@ -32,7 +32,7 @@ __device__ inline int max(int a, int b) {
 
 template <typename scalar_t, typename accscalar_t>
 __global__ void avg_pool2d_out_cuda_frame(const int nthreads,
-    const scalar_t* const bottom_data, const int num, const int channels,
+    const scalar_t* const bottom_data, const int channels,
     const int height, const int width, const int pooled_height,
     const int pooled_width, const int kernel_h, const int kernel_w,
     const int stride_h, const int stride_w, const int pad_h, const int pad_w,
@@ -81,7 +81,7 @@ __global__ void avg_pool2d_out_cuda_frame(const int nthreads,
 
 template <typename scalar_t, typename accscalar_t>
 __global__ void avg_pool2d_out_cuda_frame_nhwc(const int nthreads,
-    const scalar_t* const bottom_data, const int num, const int channels,
+    const scalar_t* const bottom_data, const int channels,
     const int height, const int width, const int pooled_height,
     const int pooled_width, const int kernel_h, const int kernel_w,
     const int stride_h, const int stride_w, const int pad_h, const int pad_w,
@@ -130,7 +130,7 @@ __global__ void avg_pool2d_out_cuda_frame_nhwc(const int nthreads,
 
 template <typename scalar_t, typename accscalar_t>
 __global__ void avg_pool2d_backward_out_cuda_frame(const int nthreads, const scalar_t* const top_diff,
-    const int num, const int channels, const int height,
+    const int channels, const int height,
     const int width, const int pooled_height, const int pooled_width,
     const int kernel_h, const int kernel_w, const int stride_h,
     const int stride_w, const int pad_h, const int pad_w,
@@ -187,7 +187,7 @@ __global__ void avg_pool2d_backward_out_cuda_frame(const int nthreads, const sca
 template <typename scalar_t, typename accscalar_t>
 __global__ void avg_pool2d_backward_out_cuda_frame_nhwc(const int nthreads,
     const scalar_t* const top_diff,
-    const int num, const int channels, const int height,
+    const int channels, const int height,
     const int width, const int pooled_height, const int pooled_width,
     const int kernel_h, const int kernel_w, const int stride_h,
     const int stride_w, const int pad_h, const int pad_w,
@@ -268,7 +268,6 @@ TORCH_IMPL_FUNC(avg_pool2d_out_cuda)
   const int padW = safe_downcast<int, int64_t>(padW_);
 
   /* sizes */
-  const int64_t nbatch = input_.ndimension() == 4 ? input_.size(-4) : 1;
   const int64_t nInputPlane = input_.size(-3);
   const int64_t inputHeight = input_.size(-2);
   const int64_t inputWidth = input_.size(-1);
@@ -305,7 +304,6 @@ TORCH_IMPL_FUNC(avg_pool2d_out_cuda)
                    at::cuda::getCurrentCUDAStream()>>>(
                     count,
                     input_data,
-                    nbatch,
                     nInputPlane,
                     inputHeight,
                     inputWidth,
@@ -332,7 +330,6 @@ TORCH_IMPL_FUNC(avg_pool2d_out_cuda)
                    at::cuda::getCurrentCUDAStream()>>>(
                     count,
                     input_data,
-                    nbatch,
                     nInputPlane,
                     inputHeight,
                     inputWidth,
@@ -390,7 +387,6 @@ TORCH_IMPL_FUNC(avg_pool2d_backward_out_cuda) (
   const Tensor input = input_.contiguous(memory_format);
   const Tensor gradOutput = gradOutput_.contiguous(memory_format);
 
-  const int64_t nbatch = input.ndimension() == 4 ? input.size(-4) : 1;
   const int64_t nInputPlane = input.size(-3);
   const int64_t inputHeight = input.size(-2);
   const int64_t inputWidth = input.size(-1);
@@ -425,7 +421,6 @@ TORCH_IMPL_FUNC(avg_pool2d_backward_out_cuda) (
             <<<num_blocks, num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
               count,
               gradOutput_data,
-              nbatch,
               nInputPlane,
               inputHeight, inputWidth,
               outputHeight, outputWidth,
@@ -443,7 +438,6 @@ TORCH_IMPL_FUNC(avg_pool2d_backward_out_cuda) (
             <<<num_blocks, num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
               count,
               gradOutput_data,
-              nbatch,
               nInputPlane,
               inputHeight, inputWidth,
               outputHeight, outputWidth,
