@@ -1,6 +1,8 @@
 #pragma once
 
 #include <ATen/core/ATenGeneral.h>
+#include <ATen/core/Generator.h>
+#include <ATen/EmptyTensor.h>
 #include <ATen/Formatting.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/StorageImpl.h>
@@ -89,30 +91,9 @@ std::array<int64_t, N> check_intlist(ArrayRef<int64_t> list, const char * name, 
   return res;
 }
 
-inline void check_size_nonnegative(IntArrayRef size) {
-  for (auto x: size) {
-    TORCH_CHECK(x >= 0, "Trying to create tensor with negative dimension ", x, ": ", size);
-  }
-}
+using at::detail::check_size_nonnegative;
 
 namespace detail {
-TORCH_API
-Tensor empty_cpu(IntArrayRef size, c10::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt,
-                 c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt, c10::optional<c10::MemoryFormat> memory_format_opt);
-
-TORCH_API
-Tensor empty_generic(
-  IntArrayRef size,
-  c10::Allocator* allocator,
-  // technically this can be inferred from the device, but usually the
-  // correct setting is obvious from the call site so just make callers
-  // pass it in
-  c10::DispatchKey dispatch_key,
-  ScalarType dtype,
-  Device device,
-  c10::optional<c10::MemoryFormat> memory_format
-);
-
 
 template <typename T>
 TORCH_API
