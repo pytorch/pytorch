@@ -89,7 +89,7 @@ void max_pool3d_with_indices_out_frame(
   const Tensor& indices,
   int totalZ,
   int itime, int iheight, int iwidth,
-  int otime, int oheight, int owidth,
+  int oheight, int owidth,
   int kT, int kH, int kW,
   int dT, int dH, int dW,
   int pT, int pH, int pW,
@@ -129,9 +129,6 @@ __global__ static void max_pool3d_with_indices_backward_single_out_frame(
   PackedTensorAccessor64<scalar_t, 4> gradOutput,
   PackedTensorAccessor64<int64_t, 4> indices,
   int itime, int iheight, int iwidth,
-  int dT, int dH, int dW,
-  int pT, int pH, int pW,
-  int dilationT, int dilationH, int dilationW,
   int offsetZ)
 {
   int oColumn = blockIdx.x * blockDim.x + threadIdx.x;
@@ -156,10 +153,7 @@ void max_pool3d_with_indices_backward_out_frame(
   const Tensor& indices,
   int64_t totalZ,
   int itime, int iheight, int iwidth,
-  int oheight, int owidth,
-  int dT, int dH, int dW,
-  int pT, int pH, int pW,
-  int dilationT, int dilationH, int dilationW)
+  int oheight, int owidth)
 {
   int offsetZ = 0;
   dim3 block(32, 8);
@@ -175,9 +169,6 @@ void max_pool3d_with_indices_backward_out_frame(
         gradOutput.packed_accessor64<scalar_t, 4>(),
         indices.packed_accessor64<int64_t, 4>(),
         itime, iheight, iwidth,
-        dT, dH, dW,
-        pT, pH, pW,
-        dilationT, dilationH, dilationW,
         offsetZ);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 
@@ -285,7 +276,7 @@ void max_pool3d_with_indices_out_cuda_template(
         input_data, work_output, work_indices,
         totalZ,
         itime, iheight, iwidth,
-        otime, oheight, owidth,
+        oheight, owidth,
         kT, kH, kW,
         dT, dH, dW,
         pT, pH, pW,
@@ -302,8 +293,7 @@ void max_pool3d_with_indices_backward_out_cuda_template(
            IntArrayRef kernel_size,
            IntArrayRef stride,
            IntArrayRef padding,
-           IntArrayRef dilation,
-           bool ceil_mode)
+           IntArrayRef dilation)
 {
   TensorArg gradInput_arg{ gradInput, "gradInput", 1 };
   TensorArg gradOutput_arg{ gradOutput, "gradOutput", 2 };
@@ -401,10 +391,7 @@ void max_pool3d_with_indices_backward_out_cuda_template(
         grad_input_data, work_grad_output, work_indices,
         totalZ,
         itime, iheight, iwidth,
-        oheight, owidth,
-        dT, dH, dW,
-        pT, pH, pW,
-        dilationT, dilationH, dilationW);
+        oheight, owidth);
     }
   );
 }
@@ -482,8 +469,7 @@ Tensor& max_pool3d_with_indices_backward_out_cuda(const Tensor& gradOutput,
     kernel_size,
     stride,
     padding,
-    dilation,
-    ceil_mode);
+    dilation);
   return gradInput;
 }
 
@@ -509,8 +495,7 @@ Tensor max_pool3d_with_indices_backward_cuda(
     kernel_size,
     stride,
     padding,
-    dilation,
-    ceil_mode);
+    dilation);
   return gradInput;
 }
 
