@@ -188,7 +188,8 @@ TORCH_LIBRARY(quantized, m) {
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::leaky_relu(Tensor qx, Scalar negative_slope, bool inplace, float output_scale, int output_zero_point) -> Tensor"));
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::sigmoid(Tensor qx, float output_scale, int output_zero_point) -> Tensor"));
 
-  // quantized ops implemented in cudnn
+  // quantized ops implemented in cudnn, with QuantizedCUDA dispatch
+  // TODO: use the same signature as quantized::conv2d
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::conv2d_cudnn(Tensor act, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor"));
 }
 
