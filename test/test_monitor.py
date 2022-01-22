@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: r2p"]
+
 from torch.testing._internal.common_utils import (
     TestCase, run_tests,
 )
@@ -13,6 +15,7 @@ from torch.monitor import (
     log_event,
     register_event_handler,
     unregister_event_handler,
+    Stat,
 )
 
 class TestMonitor(TestCase):
@@ -28,6 +31,7 @@ class TestMonitor(TestCase):
             (Aggregation.SUM, Aggregation.COUNT),
             timedelta(milliseconds=1),
         )
+        self.assertIsInstance(s, Stat)
         self.assertEqual(s.name, "asdf")
 
         s.add(2)
@@ -47,6 +51,7 @@ class TestMonitor(TestCase):
             (Aggregation.SUM, Aggregation.COUNT),
             3,
         )
+        self.assertIsInstance(s, Stat)
         s.add(1)
         s.add(2)
         name = s.name
