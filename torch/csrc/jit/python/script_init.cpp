@@ -14,6 +14,7 @@
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/operator_upgraders/upgraders.h>
+#include <torch/csrc/jit/operator_upgraders/upgraders_entry.h>
 #include <torch/csrc/jit/operator_upgraders/upgraders_guard.h>
 #include <torch/csrc/jit/operator_upgraders/version_map.h>
 #include <torch/csrc/jit/python/module_python.h>
@@ -1615,14 +1616,7 @@ void initJitScriptBindings(PyObject* module) {
       py::arg("force_outplace"),
       py::arg("argument_names") = std::vector<std::string>());
 
-  m.def(
-      "_compile_graph_to_code_table",
-      [](const std::string& name, const std::shared_ptr<Graph>& graph) {
-        CompilationOptions options;
-        GraphFunction jitFunc(name, graph, nullptr);
-        auto mobileFunc = convertJitFunctionToMobileFunction(jitFunc, options);
-        return convertMobileFunctionToCodeTable(*mobileFunc, options);
-      });
+  m.def("_generate_upgraders_bytecode", &generate_bytecode_list);
 
   m.def(
       "_jit_script_class_compile",
