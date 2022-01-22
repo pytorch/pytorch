@@ -8631,12 +8631,16 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped! sparse backward not supported"),
                                     'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
                    )),
-    OpInfo('atan2',
-           aliases=('arctan2',),
-           dtypes=all_types_and(torch.bool),
-           dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
-           sample_inputs_func=sample_inputs_atan2,
-           ),
+    BinaryUfuncInfo('atan2',
+                    aliases=('arctan2',),
+                    dtypes=all_types_and(torch.bool),
+                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+                    promotes_int_to_float=True,
+                    sample_inputs_func=sample_inputs_atan2,
+                    skips=(
+                        # TypeError: atan2(): argument 'other' (position 2) must be Tensor, not float
+                        DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs'),
+                    )),
     UnaryUfuncInfo('atanh',
                    aliases=('arctanh', ),
                    ref=np.arctanh,
@@ -8708,26 +8712,40 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', dtypes=[torch.float32]),
            ),
            sample_inputs_func=sample_inputs_block_diag),
-    OpInfo('bitwise_and',
-           dtypes=integral_types_and(torch.bool),
-           supports_autograd=False,
-           sample_inputs_func=sample_inputs_binary_pwise),
+    BinaryUfuncInfo('bitwise_and',
+                    dtypes=integral_types_and(torch.bool),
+                    supports_autograd=False,
+                    sample_inputs_func=sample_inputs_binary_pwise,
+                    skips=(
+                        # RuntimeError: "bitwise_and_cuda" not implemented for 'Half'
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
+                    )),
     UnaryUfuncInfo('bitwise_not',
                    ref=np.bitwise_not,
                    dtypes=integral_types_and(torch.bool),
                    supports_autograd=False),
-    OpInfo('bitwise_left_shift',
-           op=torch.bitwise_left_shift,
-           dtypes=all_types(),
-           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
-           supports_autograd=False,
-           sample_inputs_func=sample_inputs_bitwise_shift),
-    OpInfo('bitwise_right_shift',
-           op=torch.bitwise_right_shift,
-           dtypes=all_types(),
-           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
-           supports_autograd=False,
-           sample_inputs_func=sample_inputs_bitwise_shift),
+    BinaryUfuncInfo('bitwise_left_shift',
+                    op=torch.bitwise_left_shift,
+                    dtypes=all_types(),
+                    dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
+                    supports_autograd=False,
+                    sample_inputs_func=sample_inputs_bitwise_shift,
+                    skips=(
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
+                        # FIXME: Undefined behavior sanitizer: shift exponent -9 is negative
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', device_type='cpu'),
+                    )),
+    BinaryUfuncInfo('bitwise_right_shift',
+                    op=torch.bitwise_right_shift,
+                    dtypes=all_types(),
+                    dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
+                    supports_autograd=False,
+                    sample_inputs_func=sample_inputs_bitwise_shift,
+                    skips=(
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
+                        # FIXME: Undefined behavior sanitizer
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', device_type='cpu'),
+                    )),
     OpInfo('combinations',
            op=torch.combinations,
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -8921,19 +8939,24 @@ op_db: List[OpInfo] = [
                # RuntimeError: Tensor must have a last dimension with stride 1
                DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples"),
            )),
-    OpInfo('complex',
-           dtypes=floating_types(),
-           sample_inputs_func=sample_inputs_complex,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           ),
-    OpInfo('copysign',
-           dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
-           sample_inputs_func=sample_inputs_copysign,
-           supports_inplace_autograd=False,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           ),
+    BinaryUfuncInfo('complex',
+                    dtypes=floating_types(),
+                    sample_inputs_func=sample_inputs_complex,
+                    supports_forward_ad=True,
+                    supports_fwgrad_bwgrad=True,
+                    skips=(
+                        # RuntimeError: Expected object of scalar type Float but got scalar type Double for second argument
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
+                        # TypeError: complex(): argument 'imag' (position 2) must be Tensor, not float
+                        DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs'),
+                    )),
+    BinaryUfuncInfo('copysign',
+                    dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
+                    promotes_int_to_float=True,
+                    sample_inputs_func=sample_inputs_copysign,
+                    supports_inplace_autograd=False,
+                    supports_forward_ad=True,
+                    supports_fwgrad_bwgrad=True),
     OpInfo('corrcoef',
            dtypes=all_types_and_complex(),
            dtypesIfCUDA=all_types_and_complex_and(torch.half, *[torch.bfloat16] if CUDA11OrLater else []),
@@ -9200,54 +9223,93 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_diagonal_scatter),
-    OpInfo('eq',
-           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
-           supports_autograd=False,
-           sample_inputs_func=sample_inputs_comparison_ops),
-    OpInfo('fmax',
-           op=torch.fmax,
-           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_max_min_binary,),
-    OpInfo('fmin',
-           op=torch.fmin,
-           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_max_min_binary,),
-    OpInfo('fmod',
-           ref=np.fmod,
-           dtypes=all_types_and(torch.float16),
-           sample_inputs_func=sample_inputs_fmod_remainder),
-    OpInfo('fmod',
-           ref=np.fmod,
-           variant_test_name='autodiffed',
-           dtypes=all_types_and(torch.float16, torch.bool),
-           assert_autodiffed=True,
-           sample_inputs_func=partial(sample_inputs_fmod_remainder, autodiffed=True)),
-    OpInfo('remainder',
-           ref=np.remainder,
-           dtypes=all_types_and(torch.float16, torch.bfloat16),
-           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_fmod_remainder),
-    OpInfo('remainder',
-           ref=np.remainder,
-           variant_test_name='autodiffed',
-           dtypes=all_types_and(torch.float16, torch.bool, torch.bfloat16),
-           dtypesIfCUDA=all_types_and(torch.float16, torch.bool, torch.bfloat16),
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           assert_autodiffed=True,
-           sample_inputs_func=partial(sample_inputs_fmod_remainder, autodiffed=True),
-           decorators=(
-               # Fails on XLA
-               # False is not true : Tensors failed to compare as equal!
-               # Attempted to compare equality of tensors with different dtypes
-               DecorateInfo(unittest.expectedFailure, 'TestOpInfo', device_type='xla', dtypes=(torch.long,)),
-           )),
+    BinaryUfuncInfo('eq',
+                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+                    always_returns_bool=True,
+                    supports_autograd=False,
+                    sample_inputs_func=sample_inputs_comparison_ops),
+    BinaryUfuncInfo('fmax',
+                    op=torch.fmax,
+                    dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+                    supports_forward_ad=True,
+                    supports_fwgrad_bwgrad=True,
+                    sample_inputs_func=sample_inputs_max_min_binary,
+                    skips=(
+                        # RuntimeError: "max_elementwise_cuda" not implemented for 'ComplexFloat'
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
+                        # TypeError: fmax(): argument 'other' (position 2) must be Tensor, not float
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs'),
+                    )),
+    BinaryUfuncInfo('fmin',
+                    op=torch.fmin,
+                    dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+                    supports_forward_ad=True,
+                    supports_fwgrad_bwgrad=True,
+                    sample_inputs_func=sample_inputs_max_min_binary,
+                    skips=(
+                        # RuntimeError: "min_elementwise_cuda" not implemented for 'ComplexFloat'
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
+                        # TypeError: fmin(): argument 'other' (position 2) must be Tensor, not float
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs'),
+                    )),
+    BinaryUfuncInfo('fmod',
+                    ref=np.fmod,
+                    dtypes=all_types_and(torch.float16),
+                    rhs_make_tensor_kwargs={'exclude_zero': True},
+                    sample_inputs_func=sample_inputs_fmod_remainder,
+                    skips=(
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                                     dtypes=(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)),
+                    )),
+    BinaryUfuncInfo('fmod',
+                    ref=np.fmod,
+                    variant_test_name='autodiffed',
+                    dtypes=all_types_and(torch.float16, torch.bool),
+                    assert_autodiffed=True,
+                    rhs_make_tensor_kwargs={'exclude_zero': True},
+                    sample_inputs_func=partial(sample_inputs_fmod_remainder, autodiffed=True),
+                    skips=(
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                                     dtypes=(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)),
+                    )),
+    BinaryUfuncInfo('remainder',
+                    ref=np.remainder,
+                    dtypes=all_types_and(torch.float16, torch.bfloat16),
+                    dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
+                    supports_forward_ad=True,
+                    supports_fwgrad_bwgrad=True,
+                    rhs_make_tensor_kwargs={'exclude_zero': True},
+                    sample_inputs_func=sample_inputs_fmod_remainder,
+                    skips=(
+                        # AssertionError: False is not true : Tensors failed to compare as equal!
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                                     dtypes=(torch.bfloat16,)),
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                                     dtypes=(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)),
+                    )),
+    BinaryUfuncInfo('remainder',
+                    ref=np.remainder,
+                    variant_test_name='autodiffed',
+                    dtypes=all_types_and(torch.float16, torch.bool, torch.bfloat16),
+                    dtypesIfCUDA=all_types_and(torch.float16, torch.bool, torch.bfloat16),
+                    supports_forward_ad=True,
+                    supports_fwgrad_bwgrad=True,
+                    assert_autodiffed=True,
+                    rhs_make_tensor_kwargs={'exclude_zero': True},
+                    sample_inputs_func=partial(sample_inputs_fmod_remainder, autodiffed=True),
+                    decorators=(
+                        # Fails on XLA
+                        # False is not true : Tensors failed to compare as equal!
+                        # Attempted to compare equality of tensors with different dtypes
+                        DecorateInfo(unittest.expectedFailure, 'TestOpInfo', device_type='xla', dtypes=(torch.long,)),
+                    ),
+                    skips=(
+                        # AssertionError: False is not true : Tensors failed to compare as equal!
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                                     dtypes=(torch.bfloat16,)),
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                                     dtypes=(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)),
+                    )),
     UnaryUfuncInfo('frac',
                    ref=lambda x: np.modf(x)[0],
                    dtypes=floating_types_and(torch.bfloat16, torch.float16),
@@ -9614,21 +9676,23 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     active_if=IS_WINDOWS),
                    )),
-    OpInfo('ge',
-           aliases=('greater_equal',),
-           dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
-           supports_autograd=False,
-           sample_inputs_func=sample_inputs_comparison_ops),
+    BinaryUfuncInfo('ge',
+                    aliases=('greater_equal',),
+                    dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
+                    always_returns_bool=True,
+                    supports_autograd=False,
+                    sample_inputs_func=sample_inputs_comparison_ops),
     OpInfo('geqrf',
            dtypes=floating_and_complex_types(),
            supports_autograd=False,
            sample_inputs_func=sample_inputs_geqrf,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],),
-    OpInfo('gt',
-           aliases=('greater',),
-           dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
-           supports_autograd=False,
-           sample_inputs_func=sample_inputs_comparison_ops),
+    BinaryUfuncInfo('gt',
+                    aliases=('greater',),
+                    dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
+                    always_returns_bool=True,
+                    supports_autograd=False,
+                    sample_inputs_func=sample_inputs_comparison_ops),
     UnaryUfuncInfo('imag',
                    ref=np.imag,
                    dtypes=complex_types(),
@@ -9684,11 +9748,12 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_kthvalue,
            error_inputs_func=error_inputs_kthvalue),
-    OpInfo('le',
-           aliases=('less_equal',),
-           dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
-           supports_autograd=False,
-           sample_inputs_func=sample_inputs_comparison_ops),
+    BinaryUfuncInfo('le',
+                    aliases=('less_equal',),
+                    dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
+                    always_returns_bool=True,
+                    supports_autograd=False,
+                    sample_inputs_func=sample_inputs_comparison_ops),
     OpInfo('linalg.det',
            op=torch.linalg.det,
            aliases=('det', ),
@@ -10078,11 +10143,12 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager',
                                     dtypes=all_types_and_complex_and(torch.half, torch.bfloat16)),
                    )),
-    OpInfo('lt',
-           aliases=('less',),
-           dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
-           supports_autograd=False,
-           sample_inputs_func=sample_inputs_comparison_ops),
+    BinaryUfuncInfo('lt',
+                    aliases=('less',),
+                    dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
+                    always_returns_bool=True,
+                    supports_autograd=False,
+                    sample_inputs_func=sample_inputs_comparison_ops),
     OpInfo('linalg.lu_factor',
            aten_name='linalg_lu_factor',
            op=torch.linalg.lu_factor,
@@ -11563,10 +11629,14 @@ op_db: List[OpInfo] = [
         supports_out=False,
         sample_inputs_func=sample_inputs_threshold,
     ),
-    OpInfo('nextafter',
-           dtypes=floating_types_and(torch.bfloat16),
-           supports_autograd=False,
-           sample_inputs_func=sample_inputs_nextafter),
+    BinaryUfuncInfo('nextafter',
+                    dtypes=floating_types_and(torch.bfloat16),
+                    supports_autograd=False,
+                    sample_inputs_func=sample_inputs_nextafter,
+                    skips=(
+                        # TypeError: nextafter(): argument 'other' (position 2) must be Tensor, not float
+                        DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs'),
+                    )),
     OpInfo('topk',
            dtypes=all_types_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
@@ -11594,62 +11664,74 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_batch_norm),
     # We have to add 2 OpInfo entry for `igamma` and `igammac`.First is the
     # standard entry, second is to run gradcheck tests on the second argument.
-    OpInfo('igamma',
-           dtypes=floating_types_and(torch.bfloat16, torch.float16),
-           aliases=('torch.special.gammainc',),
-           dtypesIfCUDA=floating_types(),
-           supports_autograd=False,
-           sample_inputs_func=sample_inputs_igamma_igammac),
-    OpInfo('igamma',
-           variant_test_name='grad_other',
-           # Since autograd formula is implemented only for other and
-           # gradcheck test verifies the formula for input in SampleInput,
-           # we permute the arguments.
-           op=lambda self, other, **kwargs: torch.igamma(other, self, **kwargs),
-           inplace_variant=None,
-           method_variant=None,
-           dtypes=floating_types_and(torch.bfloat16, torch.float16),
-           backward_dtypesIfCPU=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types(),
-           backward_dtypesIfCUDA=floating_types(),
-           supports_inplace_autograd=False,
-           skips=(
-               # test does not work with passing lambda for op
-               # AssertionError: False is not true : Tensors failed to compare as equal!
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-               # test fails are we permute the arguments function variant
-               # but not for inplace or method.
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),
-           ),
-           sample_inputs_func=sample_inputs_igamma_igammac),
-    OpInfo('igammac',
-           dtypes=floating_types_and(torch.bfloat16, torch.float16),
-           aliases=('torch.special.gammaincc',),
-           dtypesIfCUDA=floating_types(),
-           supports_autograd=False,
-           sample_inputs_func=sample_inputs_igamma_igammac),
-    OpInfo('igammac',
-           variant_test_name='grad_other',
-           # Since autograd formula is implemented only for other and
-           # gradcheck test verifies the formula for input in SampleInput,
-           # we permute the arguments
-           op=lambda self, other, **kwargs: torch.igammac(other, self, **kwargs),
-           inplace_variant=None,
-           method_variant=None,
-           dtypes=floating_types_and(torch.bfloat16, torch.float16),
-           backward_dtypesIfCPU=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types(),
-           backward_dtypesIfCUDA=floating_types(),
-           supports_inplace_autograd=False,
-           skips=(
-               # test does not work with passing lambda for op
-               # AssertionError: False is not true : Tensors failed to compare as equal!
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-               # test fails are we permute the arguments function variant
-               # but not for inplace or method.
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),
-           ),
-           sample_inputs_func=sample_inputs_igamma_igammac),
+    BinaryUfuncInfo('igamma',
+                    dtypes=floating_types_and(torch.bfloat16, torch.float16),
+                    aliases=('torch.special.gammainc',),
+                    dtypesIfCUDA=floating_types(),
+                    supports_autograd=False,
+                    sample_inputs_func=sample_inputs_igamma_igammac,
+                    skips=(
+                        # TypeError: igamma(): argument 'input' (position 1) must be Tensor, not float
+                        DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs'),
+                    )),
+    BinaryUfuncInfo('igamma',
+                    variant_test_name='grad_other',
+                    # Since autograd formula is implemented only for other and
+                    # gradcheck test verifies the formula for input in SampleInput,
+                    # we permute the arguments.
+                    op=lambda self, other, **kwargs: torch.igamma(other, self, **kwargs),
+                    inplace_variant=None,
+                    method_variant=None,
+                    dtypes=floating_types_and(torch.bfloat16, torch.float16),
+                    backward_dtypesIfCPU=floating_types_and(torch.bfloat16),
+                    dtypesIfCUDA=floating_types(),
+                    backward_dtypesIfCUDA=floating_types(),
+                    supports_inplace_autograd=False,
+                    skips=(
+                        # test does not work with passing lambda for op
+                        # AssertionError: False is not true : Tensors failed to compare as equal!
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+                        # test fails are we permute the arguments function variant
+                        # but not for inplace or method.
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),
+                        # TypeError: igamma(): argument 'input' (position 1) must be Tensor, not float
+                        DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs'),
+                    ),
+                    sample_inputs_func=sample_inputs_igamma_igammac),
+    BinaryUfuncInfo('igammac',
+                    dtypes=floating_types_and(torch.bfloat16, torch.float16),
+                    aliases=('torch.special.gammaincc',),
+                    dtypesIfCUDA=floating_types(),
+                    supports_autograd=False,
+                    sample_inputs_func=sample_inputs_igamma_igammac,
+                    skips=(
+                        # TypeError: igammac(): argument 'input' (position 1) must be Tensor, not float
+                        DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs'),
+                    )),
+    BinaryUfuncInfo('igammac',
+                    variant_test_name='grad_other',
+                    # Since autograd formula is implemented only for other and
+                    # gradcheck test verifies the formula for input in SampleInput,
+                    # we permute the arguments
+                    op=lambda self, other, **kwargs: torch.igammac(other, self, **kwargs),
+                    inplace_variant=None,
+                    method_variant=None,
+                    dtypes=floating_types_and(torch.bfloat16, torch.float16),
+                    backward_dtypesIfCPU=floating_types_and(torch.bfloat16),
+                    dtypesIfCUDA=floating_types(),
+                    backward_dtypesIfCUDA=floating_types(),
+                    supports_inplace_autograd=False,
+                    skips=(
+                        # test does not work with passing lambda for op
+                        # AssertionError: False is not true : Tensors failed to compare as equal!
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+                        # test fails are we permute the arguments function variant
+                        # but not for inplace or method.
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),
+                        # TypeError: igammac(): argument 'input' (position 1) must be Tensor, not float
+                        DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs'),
+                    ),
+                    sample_inputs_func=sample_inputs_igamma_igammac),
     OpInfo('nn.functional.softshrink',
            aten_name="softshrink",
            dtypes=floating_types(),
@@ -11746,11 +11828,16 @@ op_db: List[OpInfo] = [
                                   dtypes=(torch.float16,)),
                  ),
                  sample_kwargs=lambda device, dtype, input: ({'p': 5}, {'d': 5})),
-    OpInfo('ne',
-           aliases=('not_equal',),
-           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
-           supports_autograd=False,
-           sample_inputs_func=sample_inputs_comparison_ops),
+    BinaryUfuncInfo('ne',
+                    aliases=('not_equal',),
+                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+                    always_returns_bool=True,
+                    supports_autograd=False,
+                    sample_inputs_func=sample_inputs_comparison_ops,
+                    skips=(
+                        # AssertionError: False is not true : Tensors failed to compare as equal!
+                        DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs', 'test_type_promotion'),
+                    )),
     OpInfo('narrow',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            supports_out=False,
@@ -11796,23 +11883,33 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_permute),
-    OpInfo('pow',
-           dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
-           # Due to AVX2 curently not being fully supported for Float16, log_vml_cpu can't be enabled
-           # for Float16, causing this test to fail. pow's autograd for Float16 is thus currently
-           # unsupported on CPU.
-           backward_dtypes=floating_and_complex_types_and(torch.bfloat16),
-           backward_dtypesIfCUDA=floating_and_complex_types_and(torch.bfloat16, torch.half),
-           sample_inputs_func=sample_inputs_pow,
-           supports_inplace_autograd=False,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           assert_autodiffed=True),
-    OpInfo('float_power',
-           dtypes=all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool),
-           sample_inputs_func=sample_inputs_pow,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True),
+    BinaryUfuncInfo('pow',
+                    dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
+                    # Due to AVX2 curently not being fully supported for Float16, log_vml_cpu can't be enabled
+                    # for Float16, causing this test to fail. pow's autograd for Float16 is thus currently
+                    # unsupported on CPU.
+                    backward_dtypes=floating_and_complex_types_and(torch.bfloat16),
+                    backward_dtypesIfCUDA=floating_and_complex_types_and(torch.bfloat16, torch.half),
+                    sample_inputs_func=sample_inputs_pow,
+                    supports_inplace_autograd=False,
+                    supports_forward_ad=True,
+                    supports_fwgrad_bwgrad=True,
+                    assert_autodiffed=True,
+                    skips=(
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
+                        # RuntimeError: Integers to negative integer powers are not allowed.
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                                     dtypes=(torch.int8, torch.int16, torch.int32, torch.int64)),
+                    )),
+    BinaryUfuncInfo('float_power',
+                    dtypes=all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool),
+                    promotes_int_to_float=True,
+                    sample_inputs_func=sample_inputs_pow,
+                    supports_forward_ad=True,
+                    supports_fwgrad_bwgrad=True,
+                    skips=(
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
+                    )),
     OpInfo('qr',
            op=torch.qr,
            dtypes=floating_and_complex_types(),
@@ -12003,60 +12100,62 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_autodiffed=True),
-    OpInfo('__radd__',
-           op=torch.Tensor.__radd__,
-           dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
-           sample_inputs_func=sample_inputs_rbinops,
-           supports_out=False,
-           skips=(
-               # RuntimeError:
-               # object has no attribute __radd__:
-               #   File "<string>", line 3
-               # def the_method(i0):
-               #     return torch.__radd__(i0, 3.14j)
-               #            ~~~~~~~~~~~~~~ <--- HERE
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',),
-           ),
-           assert_autodiffed=True,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           autodiff_nonfusible_nodes=['aten::add'],),
-    OpInfo('__rdiv__',
-           op=torch.Tensor.__rdiv__,
-           dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
-           sample_inputs_func=sample_inputs_rbinops,
-           supports_out=False,
-           skips=(
-               # RuntimeError:
-               # object has no attribute __rdiv__:
-               #   File "<string>", line 3
-               # def the_method(i0):
-               #     return torch.__rdiv__(i0, 3.14j)
-               #            ~~~~~~~~~~~~~~ <--- HERE
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',),
-           ),
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           assert_autodiffed=True,
-           autodiff_nonfusible_nodes=['aten::mul', 'aten::reciprocal'],),
-    OpInfo('__rmul__',
-           op=torch.Tensor.__rmul__,
-           dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
-           sample_inputs_func=sample_inputs_rbinops,
-           supports_out=False,
-           skips=(
-               # RuntimeError:
-               # object has no attribute __rmul__:
-               #   File "<string>", line 3
-               # def the_method(i0):
-               #     return torch.__rmul__(i0, 3.14j)
-               #            ~~~~~~~~~~~~~~ <--- HERE
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',),
-           ),
-           assert_autodiffed=True,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           autodiff_nonfusible_nodes=['aten::mul'],),
+    BinaryUfuncInfo('__radd__',
+                    op=torch.Tensor.__radd__,
+                    dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
+                    sample_inputs_func=sample_inputs_rbinops,
+                    supports_out=False,
+                    skips=(
+                        # RuntimeError:
+                        # object has no attribute __radd__:
+                        #   File "<string>", line 3
+                        # def the_method(i0):
+                        #     return torch.__radd__(i0, 3.14j)
+                        #            ~~~~~~~~~~~~~~ <--- HERE
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',),
+                    ),
+                    assert_autodiffed=True,
+                    supports_forward_ad=True,
+                    supports_fwgrad_bwgrad=True,
+                    autodiff_nonfusible_nodes=['aten::add'],),
+    BinaryUfuncInfo('__rdiv__',
+                    op=torch.Tensor.__rdiv__,
+                    dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
+                    promotes_int_to_float=True,
+                    lhs_make_tensor_kwargs={'exclude_zero': True},
+                    sample_inputs_func=sample_inputs_rbinops,
+                    supports_out=False,
+                    skips=(
+                        # RuntimeError:
+                        # object has no attribute __rdiv__:
+                        #   File "<string>", line 3
+                        # def the_method(i0):
+                        #     return torch.__rdiv__(i0, 3.14j)
+                        #            ~~~~~~~~~~~~~~ <--- HERE
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',),
+                    ),
+                    supports_forward_ad=True,
+                    supports_fwgrad_bwgrad=True,
+                    assert_autodiffed=True,
+                    autodiff_nonfusible_nodes=['aten::mul', 'aten::reciprocal'],),
+    BinaryUfuncInfo('__rmul__',
+                    op=torch.Tensor.__rmul__,
+                    dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
+                    sample_inputs_func=sample_inputs_rbinops,
+                    supports_out=False,
+                    skips=(
+                        # RuntimeError:
+                        # object has no attribute __rmul__:
+                        #   File "<string>", line 3
+                        # def the_method(i0):
+                        #     return torch.__rmul__(i0, 3.14j)
+                        #            ~~~~~~~~~~~~~~ <--- HERE
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',),
+                    ),
+                    assert_autodiffed=True,
+                    supports_forward_ad=True,
+                    supports_fwgrad_bwgrad=True,
+                    autodiff_nonfusible_nodes=['aten::mul'],),
     OpInfo('__rand__',
            op=torch.Tensor.__rand__,
            dtypes=integral_types_and(torch.bool),
@@ -12064,20 +12163,20 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_autograd=False,
            supports_forward_ad=True,),
-    OpInfo('__ror__',
-           op=torch.Tensor.__ror__,
-           dtypes=integral_types_and(torch.bool),
-           sample_inputs_func=sample_inputs_rbinops,
-           supports_out=False,
-           supports_autograd=False,
-           supports_forward_ad=True,),
-    OpInfo('__rxor__',
-           op=torch.Tensor.__rxor__,
-           dtypes=integral_types_and(torch.bool),
-           sample_inputs_func=sample_inputs_rbinops,
-           supports_out=False,
-           supports_autograd=False,
-           supports_forward_ad=True,),
+    BinaryUfuncInfo('__ror__',
+                    op=torch.Tensor.__ror__,
+                    dtypes=integral_types_and(torch.bool),
+                    sample_inputs_func=sample_inputs_rbinops,
+                    supports_out=False,
+                    supports_autograd=False,
+                    supports_forward_ad=True,),
+    BinaryUfuncInfo('__rxor__',
+                    op=torch.Tensor.__rxor__,
+                    dtypes=integral_types_and(torch.bool),
+                    sample_inputs_func=sample_inputs_rbinops,
+                    supports_out=False,
+                    supports_autograd=False,
+                    supports_forward_ad=True,),
     OpInfo('__rmatmul__',
            op=torch.Tensor.__rmatmul__,
            dtypes=all_types_and_complex_and(torch.bfloat16),
@@ -12113,77 +12212,83 @@ op_db: List[OpInfo] = [
                #            ~~~~~~~~~~~~~~ <--- HERE
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',),
            )),
-    OpInfo('__rmod__',
-           op=torch.Tensor.__rmod__,
-           dtypes=floating_types_and(torch.bfloat16, torch.half,),
-           dtypesIfCUDA=all_types_and(torch.bfloat16, torch.half, torch.bool),
-           sample_inputs_func=sample_inputs_rbinops,
-           supports_out=False,
-           skips=(
-               # RuntimeError:
-               # object has no attribute __rmod__:
-               #   File "<string>", line 3
-               # def the_method(i0):
-               #     return torch.__rmod__(i0, 3.14)
-               #            ~~~~~~~~~~~~~~ <--- HERE
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',),
-           ),
-           # Support autograd after torch.remainder(Tensor, Tensor) supports
-           # autograd of the second argument.
-           # https://github.com/pytorch/pytorch/pull/58476/files#r637167630
-           supports_autograd=False,
-           assert_autodiffed=True,
-           autodiff_nonfusible_nodes=['aten::remainder'],),
-    OpInfo('__rpow__',
-           op=torch.Tensor.__rpow__,
-           dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
-           # Reference: https://github.com/pytorch/pytorch/issues/54774
-           # "log2" "_vml_cpu" not implemented for Half
-           backward_dtypesIfCPU=all_types_and_complex_and(torch.bfloat16, torch.bool),
-           sample_inputs_func=sample_inputs_rbinops,
-           supports_out=False,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           skips=(
-               # RuntimeError:
-               # object has no attribute __rpow__:
-               #   File "<string>", line 3
-               # def the_method(i0):
-               #     return torch.__rpow__(i0, 3.14j)
-               #            ~~~~~~~~~~~~~~ <--- HERE
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',),
-           ),
-           assert_autodiffed=True,
-           autodiff_nonfusible_nodes=['aten::pow'],),
-    OpInfo('__rsub__',
-           op=torch.Tensor.__rsub__,
-           dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
-           sample_inputs_func=sample_inputs_rbinops,
-           supports_out=False,
-           skips=(
-               # RuntimeError:
-               # object has no attribute __rsub__:
-               #   File "<string>", line 3
-               # def the_method(i0):
-               #     return torch.__rsub__(i0, 3.14j)
-               #            ~~~~~~~~~~~~~~ <--- HERE
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',),
-           ),
-           assert_autodiffed=True,
-           autodiff_nonfusible_nodes=['aten::rsub'],),
-    OpInfo('rsub',
-           dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
-           variant_test_name='rsub_tensor',
-           supports_out=False,
-           supports_inplace_autograd=False,
-           sample_inputs_func=partial(sample_inputs_rsub, variant='tensor'),),
-    OpInfo('rsub',
-           dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
-           variant_test_name='rsub_scalar',
-           supports_out=False,
-           supports_inplace_autograd=False,
-           sample_inputs_func=partial(sample_inputs_rsub, variant='scalar'),
-           assert_autodiffed=True,),
+    BinaryUfuncInfo('__rmod__',
+                    op=torch.Tensor.__rmod__,
+                    dtypes=floating_types_and(torch.bfloat16, torch.half,),
+                    dtypesIfCUDA=all_types_and(torch.bfloat16, torch.half, torch.bool),
+                    sample_inputs_func=sample_inputs_rbinops,
+                    supports_out=False,
+                    skips=(
+                        # RuntimeError:
+                        # object has no attribute __rmod__:
+                        #   File "<string>", line 3
+                        # def the_method(i0):
+                        #     return torch.__rmod__(i0, 3.14)
+                        #            ~~~~~~~~~~~~~~ <--- HERE
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',),
+                        # RuntimeError: "remainder_cuda" not implemented for 'Bool'
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                                     dtypes=(torch.bool,))
+                    ),
+                    # Support autograd after torch.remainder(Tensor, Tensor) supports
+                    # autograd of the second argument.
+                    # https://github.com/pytorch/pytorch/pull/58476/files#r637167630
+                    supports_autograd=False,
+                    assert_autodiffed=True,
+                    autodiff_nonfusible_nodes=['aten::remainder'],),
+    BinaryUfuncInfo('__rpow__',
+                    op=torch.Tensor.__rpow__,
+                    dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
+                    # Reference: https://github.com/pytorch/pytorch/issues/54774
+                    # "log2" "_vml_cpu" not implemented for Half
+                    backward_dtypesIfCPU=all_types_and_complex_and(torch.bfloat16, torch.bool),
+                    sample_inputs_func=sample_inputs_rbinops,
+                    supports_out=False,
+                    supports_forward_ad=True,
+                    supports_fwgrad_bwgrad=True,
+                    skips=(
+                        # RuntimeError:
+                        # object has no attribute __rpow__:
+                        #   File "<string>", line 3
+                        # def the_method(i0):
+                        #     return torch.__rpow__(i0, 3.14j)
+                        #            ~~~~~~~~~~~~~~ <--- HERE
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',),
+                        # RuntimeError: "pow_cuda" not implemented for 'Bool'
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
+                                     dtypes=(torch.bool,)),
+                    ),
+                    assert_autodiffed=True,
+                    autodiff_nonfusible_nodes=['aten::pow'],),
+    BinaryUfuncInfo('__rsub__',
+                    op=torch.Tensor.__rsub__,
+                    dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
+                    sample_inputs_func=sample_inputs_rbinops,
+                    supports_out=False,
+                    skips=(
+                        # RuntimeError:
+                        # object has no attribute __rsub__:
+                        #   File "<string>", line 3
+                        # def the_method(i0):
+                        #     return torch.__rsub__(i0, 3.14j)
+                        #            ~~~~~~~~~~~~~~ <--- HERE
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',),
+                    ),
+                    assert_autodiffed=True,
+                    autodiff_nonfusible_nodes=['aten::rsub'],),
+    BinaryUfuncInfo('rsub',
+                    dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
+                    variant_test_name='rsub_tensor',
+                    supports_out=False,
+                    supports_inplace_autograd=False,
+                    sample_inputs_func=partial(sample_inputs_rsub, variant='tensor'),),
+    BinaryUfuncInfo('rsub',
+                    dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
+                    variant_test_name='rsub_scalar',
+                    supports_out=False,
+                    supports_inplace_autograd=False,
+                    sample_inputs_func=partial(sample_inputs_rsub, variant='scalar'),
+                    assert_autodiffed=True,),
     OpInfo('select',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
            sample_inputs_func=sample_inputs_select,
@@ -12729,9 +12834,15 @@ op_db: List[OpInfo] = [
                # test does not work with passing lambda for op
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
            )),
-    OpInfo('polar',
-           dtypes=floating_types(),
-           sample_inputs_func=sample_inputs_polar),
+    BinaryUfuncInfo('polar',
+                    dtypes=floating_types(),
+                    sample_inputs_func=sample_inputs_polar,
+                    skips=(
+                        # RuntimeError: Expected object of scalar type Float but got scalar type Double for second argument
+                        DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs', 'test_type_promotion'),
+                        # TypeError: polar(): argument 'angle' (position 2) must be Tensor, not float
+                        DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs'),
+                    )),
     # TODO(@kshitij12345): Refactor similar to `mvlgamma` entries.
     # To test reference numerics against multiple values of argument `n`,
     # we make multiple OpInfo entries with each entry corresponding to different value of n (currently 0 to 4).
@@ -13565,13 +13676,16 @@ op_db: List[OpInfo] = [
                # TODO: see https://github.com/pytorch/pytorch/issues/64709
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
            )),
-    OpInfo('hypot',
-           dtypes=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_hypot,
-           ),
+    BinaryUfuncInfo('hypot',
+                    dtypes=floating_types_and(torch.bfloat16),
+                    dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+                    supports_forward_ad=True,
+                    supports_fwgrad_bwgrad=True,
+                    sample_inputs_func=sample_inputs_hypot,
+                    skips=(
+                        # TypeError: hypot(): argument 'other' (position 2) must be Tensor, not float
+                        DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs'),
+                    )),
     OpInfo('histogram',
            dtypes=floating_types(),
            dtypesIfCUDA=_dispatch_dtypes(),  # histogram is only implemented on CPU
@@ -13860,13 +13974,14 @@ op_db: List[OpInfo] = [
            autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
            autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
            sample_inputs_func=sample_unsqueeze),
-    OpInfo('xlogy',
-           aliases=('special.xlogy',),
-           dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           safe_casts_outputs=True,
-           sample_inputs_func=sample_inputs_xlogy),
+    BinaryUfuncInfo('xlogy',
+                    aliases=('special.xlogy',),
+                    dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
+                    promotes_int_to_float=True,
+                    supports_forward_ad=True,
+                    supports_fwgrad_bwgrad=True,
+                    safe_casts_outputs=True,
+                    sample_inputs_func=sample_inputs_xlogy),
     OpInfo('zero_',
            op=lambda x: torch.zero_(x.clone()),
            method_variant=None,
@@ -13881,34 +13996,37 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
            ),
            sample_inputs_func=sample_inputs_zero_),
-    OpInfo('special.xlog1py',
-           aten_name='special_xlog1py',
-           dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
-           backward_dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
-           safe_casts_outputs=True,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_xlog1py),
-    OpInfo('special.zeta',
-           aten_name='special_zeta',
-           dtypes=all_types_and(torch.bool),
-           supports_autograd=False,
-           safe_casts_outputs=True,
-           sample_inputs_func=sample_inputs_binary_pwise),
+    BinaryUfuncInfo('special.xlog1py',
+                    aten_name='special_xlog1py',
+                    dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
+                    backward_dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
+                    promotes_int_to_float=True,
+                    safe_casts_outputs=True,
+                    supports_forward_ad=True,
+                    supports_fwgrad_bwgrad=True,
+                    sample_inputs_func=sample_inputs_xlog1py),
+    BinaryUfuncInfo('special.zeta',
+                    aten_name='special_zeta',
+                    dtypes=all_types_and(torch.bool),
+                    promotes_int_to_float=True,
+                    supports_autograd=False,
+                    safe_casts_outputs=True,
+                    sample_inputs_func=sample_inputs_binary_pwise),
     # OpInfo entry to verify the gradient formula of `other`/`q`
-    OpInfo('special.zeta',
-           op=lambda q, x, **kwargs: torch.special.zeta(x, q, **kwargs),
-           aten_name='special_zeta',
-           variant_test_name='grad',
-           dtypes=all_types_and(torch.bool),
-           supports_autograd=True,
-           safe_casts_outputs=True,
-           skips=(
-               # Lambda doesn't work in JIT test
-               # AssertionError: JIT Test does not execute any logic
-               DecorateInfo(unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit"),
-           ),
-           sample_inputs_func=sample_inputs_zeta),
+    BinaryUfuncInfo('special.zeta',
+                    op=lambda q, x, **kwargs: torch.special.zeta(x, q, **kwargs),
+                    aten_name='special_zeta',
+                    variant_test_name='grad',
+                    dtypes=all_types_and(torch.bool),
+                    promotes_int_to_float=True,
+                    supports_autograd=True,
+                    safe_casts_outputs=True,
+                    skips=(
+                        # Lambda doesn't work in JIT test
+                        # AssertionError: JIT Test does not execute any logic
+                        DecorateInfo(unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit"),
+                    ),
+                    sample_inputs_func=sample_inputs_zeta),
     OpInfo('logsumexp',
            aliases=('special.logsumexp',),
            dtypes=all_types_and(torch.bool, torch.bfloat16),
