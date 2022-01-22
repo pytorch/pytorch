@@ -130,55 +130,87 @@ def draw_graph_compile(name):
     return partial(_draw_graph_compile, name=name)
 
 
-def _tvm_compile(fx_module, example_inputs, name=None):
+def _tvm_compile(
+    fx_module, example_inputs, target=None, tuning_logfile=None, use_ansor_tuning=False
+):
     import tvm
     from tvm import relay, auto_scheduler
     from tvm.contrib import graph_executor
     import os
 
-    jit_mod = torch.jit.script(fx_module)
-    # jit_mod = torch.jit.trace(fx_module, example_inputs)
+    # Find the target and device for TVM.
+    dev = tvm.cpu(0)
+    if target is None:
+        raise ValueError("Setup the TVM target correctly.")
+    elif isinstance(target, str):
+        if "cuda" in target:
+            dev = tvm.cuda(0)
+        target = tvm.target.Target(target)
+    elif isinstance(target, tvm.target.target.Target):
+        if "cuda" in target.keys:
+            dev = tvm.cuda(0)
 
+    # JIT the model and pass it to Torchscript to Relay frontend parser. TVM
+    # tutorials suggest tracing instead of scripting. The main reason is to
+    # avoid Pythonic computation to show up in JIT module. However, with Python
+    # key tracing, AOT Autograd leads to simpler graphs. Therefore, we use
+    # scripting here to retrieve the JIT module.
+    jit_mod = torch.jit.script(fx_module)
     shape_list = [(f"inp_{idx}", i.shape) for idx, i in enumerate(example_inputs)]
     mod, params = relay.frontend.from_pytorch(jit_mod, shape_list)
-    target = tvm.target.Target("llvm -mcpu=core-avx2")
-    tasks, task_weights = auto_scheduler.extract_tasks(mod['main'], params, target)
-    for task in tasks:
-        print(task.compute_dag)
-    if name is None:
-        log_file = f'{time.time()}.json'
-    else:
-        log_file = f'{name}.json'
-    if len(tasks) != 0:
-        tuner = auto_scheduler.TaskScheduler(tasks, task_weights)
-        if not os.path.exists(log_file):
+
+    # TVM Autotuning
+    if use_ansor_tuning:
+        tasks, task_weights = auto_scheduler.extract_tasks(mod["main"], params, target)
+        if tuning_logfile is None:
+            log_file = f"{time.time()}.json"
+        else:
+            log_file = f"{tuning_logfile}.json"
+        if len(tasks) != 0:
+            tuner = auto_scheduler.TaskScheduler(tasks, task_weights)
             tune_option = auto_scheduler.TuningOptions(
-                num_measure_trials=10000,  # change this to 20000 to achieve the best performance
+                num_measure_trials=20000,
                 measure_callbacks=[auto_scheduler.RecordToFile(log_file)],
                 # early_stopping=1000,
                 # verbose=2,
             )
             tuner.tune(tune_option)
+    elif tuning_logfile is not None:
+        log_file = f"{tuning_logfile}.json"
 
-    dev = tvm.cpu(0)
-    with auto_scheduler.ApplyHistoryBest(log_file):
-        with tvm.transform.PassContext(opt_level=3, config={"relay.backend.use_auto_scheduler": True}):
+    if use_ansor_tuning or tuning_logfile is not None:
+        assert os.path.exists(log_file)
+        with auto_scheduler.ApplyHistoryBest(log_file):
+            with tvm.transform.PassContext(
+                opt_level=3, config={"relay.backend.use_auto_scheduler": True}
+            ):
+                lib = relay.build(mod, target=target, params=params)
+    else:
+        with tvm.transform.PassContext(opt_level=3):
             lib = relay.build(mod, target=target, params=params)
+
+    # Get a graph executor graph module
     m = graph_executor.GraphModule(lib["default"](dev))
 
     def exec_tvm(*args):
         for idx, arg in enumerate(args, 0):
             if arg.dim() != 0:
-
-                m.set_input(f"inp_{idx}", tvm.nd.from_dlpack(torch.utils.dlpack.to_dlpack(arg)))
+                m.set_input(
+                    f"inp_{idx}",
+                    tvm.nd.from_dlpack(torch.utils.dlpack.to_dlpack(arg.contiguous())),
+                )
         m.run()
-        outs = [torch.utils.dlpack.from_dlpack(m.get_output(i).to_dlpack()) for i in range(m.get_num_outputs())]
+        outs = [
+            torch.utils.dlpack.from_dlpack(m.get_output(i).to_dlpack())
+            for i in range(m.get_num_outputs())
+        ]
         return outs
+
     return exec_tvm
 
 
-def tvm_compile(name):
-    return partial(tvm_compile, name=name)
+def tvm_compile(target, tuning_logfile=None, use_ansor_tuning=False):
+    return partial(_tvm_compile, target=target, tuning_logfile=tuning_logfile, use_ansor_tuning=use_ansor_tuning)
 
 
 def nop(f, _):
