@@ -5,6 +5,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Utils.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/EmptyTensor.h>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/cuda/LaunchUtils.h>
@@ -354,9 +355,7 @@ void multinomial_with_replacement_kernel_impl(
       // To exploit greater parallelism for the sampling, generate the
       // Uniform random samples in a separate kernel launch, into
       // temporarily allocated memory. The device RNG is thread-limited
-      Tensor sampled = native::empty_cuda({numDist, n_sample}, optTypeMetaToScalarType(self_v.options().dtype_opt()),
-                                          self_v.options().layout_opt(), self_v.options().device_opt(),
-                                          self_v.options().pinned_memory_opt());
+      Tensor sampled = at::detail::empty_cuda({numDist, n_sample}, self_v.options());
       at::native::uniform_(sampled, 0.0, 1.0, generator);
 
       dim3 block(requiredThreads);
