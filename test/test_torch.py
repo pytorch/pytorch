@@ -4469,6 +4469,14 @@ else:
 
             self.assertEqual(res, expected, atol=0, rtol=0)
 
+    @onlyNativeDeviceTypes
+    def test_scatter_zero_size_index(self, device) -> None:
+        null_index = torch.zeros((0, 4), dtype=torch.int64)
+        null_arr = torch.zeros((0, 4))
+        original = torch.arange(4, dtype=torch.float32)
+        result = original.scatter(0, null_index, null_arr)
+        self.assertEqual(result, original, atol=0, rtol=0)
+
     @onlyCUDA
     def test_sync_warning(self, device):
 
@@ -5608,6 +5616,63 @@ else:
             # copy is a shallow copy, only copies the tensor view,
             # not the data
             self.assertEqual(x, y)
+
+    @onlyNativeDeviceTypes
+    def test_copy_math_view(self, device):
+        for dst_dtype, src_dtype in [
+                (torch.float32, torch.float32),
+                (torch.float64, torch.float32),
+                (torch.int64, torch.int32),
+                (torch.complex128, torch.complex64),
+        ]:
+            src = make_tensor((100,), dtype=src_dtype, device=device)
+            dst = torch.empty(100, dtype=dst_dtype, device=device)
+
+            dst.copy_(src)
+            self.assertEqual(dst, src, exact_dtype=False)
+
+            dst.copy_(src._neg_view())
+            self.assertEqual(dst, src.neg(), exact_dtype=False)
+
+            dst._neg_view().copy_(torch._neg_view(src))
+            self.assertEqual(dst, src, exact_dtype=False)
+
+            dst._neg_view().copy_(src)
+            self.assertEqual(dst, src.neg(), exact_dtype=False)
+
+        for dst_dtype, src_dtype in [
+                (torch.complex64, torch.complex64),
+                (torch.complex128, torch.complex64),
+        ]:
+            src = make_tensor((100,), dtype=src_dtype, device=device)
+            dst = torch.empty(100, dtype=dst_dtype, device=device)
+
+            dst.conj().copy_(src)
+            self.assertEqual(dst, src.conj_physical(), exact_dtype=False)
+
+            dst.conj().copy_(src._neg_view())
+            self.assertEqual(dst, src.neg().conj_physical(), exact_dtype=False)
+
+    @onlyNativeDeviceTypes
+    @dtypes(torch.int64, torch.float32, torch.complex64)
+    def test_copy_transpose_math_view(self, device, dtype):
+        src = make_tensor((100, 100), dtype=dtype, device=device).transpose(0, 1)
+        dst = torch.empty((100, 100), dtype=dtype, device=device)
+
+        dst._neg_view().copy_(src)
+        self.assertEqual(dst, -src)
+        dst._neg_view().copy_(src._neg_view())
+        self.assertEqual(dst, src)
+        dst.copy_(src._neg_view())
+        self.assertEqual(dst, -src)
+
+        if dtype.is_complex:
+            dst.conj().copy_(src)
+            self.assertEqual(dst, src.conj_physical())
+            dst.conj().copy_(src.conj())
+            self.assertEqual(dst, src)
+            dst.copy_(src.conj())
+            self.assertEqual(dst, src.conj_physical())
 
     def test_clone_all_dtypes_and_devices(self, device):
         for dt in get_all_dtypes():
@@ -7858,96 +7923,6 @@ else:
                 'cuda', get_generator(mf, shape), transformation_cpu_fn, mf, default_is_preserve=True)
             self._test_memory_format_transformations(
                 'cpu', get_generator(mf, shape), transformation_cuda_fn, mf, default_is_preserve=True)
-
-    @dtypes(torch.complex64, torch.complex128)
-    def test_complex_unsupported(self, device, dtype):
-        t = torch.tensor((1 + 1j), device=device, dtype=dtype)
-        # Note: this is consistent with NumPy
-        with self.assertRaises(RuntimeError):
-            torch.floor(t)
-        with self.assertRaises(RuntimeError):
-            torch.ceil(t)
-        with self.assertRaises(RuntimeError):
-            torch.trunc(t)
-
-        # Tests min and max variants with complex inputs
-        # Note: whether PyTorch should support min and max on complex
-        # tensors is an open question.
-        # See https://github.com/pytorch/pytorch/issues/36374
-        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
-            torch.min(t)
-        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
-            t.min()
-        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
-            torch.min(t, dim=0)
-        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
-            torch.min(t, t)
-        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
-            torch.min(t, t, out=t)
-
-        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
-            torch.max(t)
-        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
-            t.max()
-        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
-            torch.max(t, dim=0)
-        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
-            torch.max(t, t)
-        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
-            torch.max(t, t, out=t)
-
-        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
-            torch.amin(t)
-        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
-            t.amin()
-        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
-            torch.amin(t, dim=0)
-
-        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
-            torch.amax(t)
-        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
-            t.amax()
-        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
-            torch.amax(t, dim=0)
-
-        # Tests _aminmax() variants with complex inputs,
-        # which are currently not supported due to min & max being unsupported
-        # for complex inputs, as per https://github.com/pytorch/pytorch/issues/36374
-        # Test with a single-element tensor t, as well as a multi-element tensor x
-        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
-            min_val, max_val = torch._aminmax(t)
-        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
-            min_val = torch._aminmax(t, dim=0)[0]
-        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
-            max_val = torch._aminmax(t, dim=0)[1]
-        # Test _aminmax() with a multi-element tensor
-        x = torch.tensor([(1 + 1j), (2 + 3j)], device=device, dtype=dtype)
-        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
-            min_val, max_val = torch._aminmax(x)
-        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
-            min_val = torch._aminmax(x, dim=0)[0]
-        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
-            max_val = torch._aminmax(x, dim=0)[1]
-
-        # Tests clamp variants with complex inputs
-        # Note: whether PyTorch should support clamp on complex
-        # tensors is an open question.
-        # See https://github.com/pytorch/pytorch/issues/33568
-        min_val = 1 + 1j
-        max_val = 4 + 4j
-        out = torch.empty((0,), device=device, dtype=dtype)
-        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
-            torch.clamp(t, min=min_val)
-        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
-            torch.clamp(t, max=max_val)
-        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
-            torch.clamp(t, min_val, max_val)
-        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
-            torch.clamp(t, min=min_val, out=out)
-        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
-            torch.clamp(t, max=max_val, out=out)
-        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
-            torch.clamp(t, min_val, max_val, out=out)
 
     def test_pickle_gradscaler(self, device):
         # This test is not in test_cuda.py because it should pass in 3 cases:
