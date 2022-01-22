@@ -23,4 +23,3 @@ class TORCH_API Squeeze : public TsNode {
 
 }  // namespace lazy
 }  // namespace torch
-
