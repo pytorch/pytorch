@@ -6,10 +6,6 @@ name: linux-bionic-rocm4.5-py3.7
 on:
   pull_request:
     types: [opened, synchronize, reopened, unassigned]
-  push:
-    branches:
-      - master
-      - release/*
   workflow_dispatch:
 
 env:
