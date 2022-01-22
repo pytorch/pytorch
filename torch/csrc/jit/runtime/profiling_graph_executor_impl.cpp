@@ -222,6 +222,9 @@ bool guardDifferentiableGraph(Node* dnode) {
         }
       }
 
+      bool requires_grad = dni->type()->expectRef<TensorType>().requires_grad();
+      gi[i]->setType(ty->withRequiresGrad(requires_grad));
+
       // we check if the optional is defined
       all_inputs_seen &= (dni->type()->cast<TensorType>() != TensorType::get());
     }

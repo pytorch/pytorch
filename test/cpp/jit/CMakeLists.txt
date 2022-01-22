@@ -77,6 +77,7 @@ set(JIT_TEST_SRCS
   ${JIT_TEST_ROOT}/test_mobile_type_parser.cpp
   ${JIT_TEST_ROOT}/test_module_api.cpp
   ${JIT_TEST_ROOT}/test_peephole_optimize.cpp
+  ${JIT_TEST_ROOT}/test_profiling.cpp
   ${JIT_TEST_ROOT}/test_qualified_name.cpp
   ${JIT_TEST_ROOT}/test_save_load.cpp
   ${JIT_TEST_ROOT}/test_schema_matching.cpp
