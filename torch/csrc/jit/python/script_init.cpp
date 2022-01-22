@@ -8,12 +8,14 @@
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
-#include <torch/csrc/jit/mobile/backport.h>
 #include <torch/csrc/jit/mobile/code.h>
+#include <torch/csrc/jit/mobile/compatibility/backport.h>
+#include <torch/csrc/jit/mobile/compatibility/model_compatibility.h>
 #include <torch/csrc/jit/mobile/import.h>
-#include <torch/csrc/jit/mobile/model_compatibility.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/operator_upgraders/upgraders.h>
+#include <torch/csrc/jit/operator_upgraders/upgraders_entry.h>
+#include <torch/csrc/jit/operator_upgraders/upgraders_guard.h>
 #include <torch/csrc/jit/operator_upgraders/version_map.h>
 #include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/jit/python/python_ivalue.h>
@@ -1614,14 +1616,7 @@ void initJitScriptBindings(PyObject* module) {
       py::arg("force_outplace"),
       py::arg("argument_names") = std::vector<std::string>());
 
-  m.def(
-      "_compile_graph_to_code_table",
-      [](const std::string& name, const std::shared_ptr<Graph>& graph) {
-        CompilationOptions options;
-        GraphFunction jitFunc(name, graph, nullptr);
-        auto mobileFunc = convertJitFunctionToMobileFunction(jitFunc, options);
-        return convertMobileFunctionToCodeTable(*mobileFunc, options);
-      });
+  m.def("_generate_upgraders_bytecode", &generate_bytecode_list);
 
   m.def(
       "_jit_script_class_compile",
@@ -1731,7 +1726,8 @@ void initJitScriptBindings(PyObject* module) {
     return Decl(p.parseTypeComment());
   });
 
-  m.def("_populate_upgraders_map", &populate_upgraders_map);
+  m.def("_is_upgraders_enabled", &is_upgraders_enabled);
+
   m.def("_get_upgraders_map_size", &get_upgraders_map_size);
   m.def("_dump_upgraders_map", &dump_upgraders_map);
 
