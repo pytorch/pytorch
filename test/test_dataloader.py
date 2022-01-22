@@ -1471,7 +1471,23 @@ except RuntimeError as e:
         self.assertTrue(count_repeated == len(self.dataset))
         self.assertTrue(minval == 0)
         self.assertTrue(maxval == len(self.dataset) - 1)
-        self.assertTrue(count_total == len(self.dataset) * 2)
+        self.assertTrue(count_total == n)
+
+        n = len(self.dataset) - 1
+        sampler_without_replacement = RandomSampler(self.dataset, num_samples=n)
+        count_repeated, minval, maxval, count_total = sample_stat(sampler_without_replacement, len(self.dataset))
+        self.assertTrue(count_repeated == 0)
+        self.assertTrue(minval >= 0)
+        self.assertTrue(maxval < len(self.dataset))
+        self.assertTrue(count_total == n)
+
+        n = len(self.dataset) + 1
+        sampler_without_replacement = RandomSampler(self.dataset, num_samples=n)
+        count_repeated, minval, maxval, count_total = sample_stat(sampler_without_replacement, len(self.dataset))
+        self.assertTrue(count_repeated == 1)
+        self.assertTrue(minval == 0)
+        self.assertTrue(maxval == len(self.dataset) - 1)
+        self.assertTrue(count_total == n)
 
         # raise error when replacement is non-boolean
         with self.assertRaisesRegex(TypeError, "replacement should be a boolean value, but got replacement=0"):
@@ -1528,7 +1544,7 @@ except RuntimeError as e:
         batch_size = 6
         count_num_samples_in_data_loader = len(self._get_data_loader(
             self.dataset, batch_size=batch_size, sampler=sampler))
-        self.assertEqual(int(math.ceil(float(num_samples) / batch_size)),
+        self.assertEqual(num_samples // batch_size + (num_samples % batch_size > 0),
                          count_num_samples_in_data_loader)
 
     def test_distributed_sampler_invalid_rank(self):
