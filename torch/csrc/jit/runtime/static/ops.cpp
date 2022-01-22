@@ -35,6 +35,7 @@
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
+#include <iterator>
 #include <mutex>
 #include <unordered_map>
 
@@ -90,10 +91,11 @@ void repeat_out(at::Tensor& result, const Tensor& self, IntArrayRef repeats) {
 at::Tensor& reshape_copy_out(
     at::Tensor& out,
     const at::Tensor& self,
-    const std::vector<int64_t>& proposed_shape,
+    at::IntArrayRef proposed_shape,
     bool infer_size) {
-  auto shape = infer_size ? at::infer_size(proposed_shape, self.numel())
-                          : proposed_shape;
+  auto shape = infer_size
+      ? at::infer_size(proposed_shape, self.numel())
+      : std::vector<int64_t>(proposed_shape.begin(), proposed_shape.end());
   at::native::resize_(out, shape, c10::nullopt);
 
   auto self_contig = self.expect_contiguous();
@@ -681,6 +683,68 @@ namespace {
 
 class VarStackNodeWrapper {
  public:
+  class VarStackNodeWrapperIter {
+   public:
+    using iterator_category = std::forward_iterator_tag;
+    using value_type = at::Tensor;
+    using difference_type = size_t;
+    using pointer = const at::Tensor*;
+    using reference = const at::Tensor&;
+
+    VarStackNodeWrapperIter() = default;
+
+    VarStackNodeWrapperIter(
+        const VarStackNodeWrapper* container,
+        size_t start_idx)
+        : container_(container), idx_(start_idx) {}
+
+    VarStackNodeWrapperIter& operator++() {
+      DCHECK_NE(idx_, container_->size());
+      ++idx_;
+      return *this;
+    }
+
+    VarStackNodeWrapperIter operator++(int) {
+      VarStackNodeWrapperIter old = *this;
+      ++(*this);
+      return old;
+    }
+
+    reference operator*() const {
+      TORCH_CHECK(container_ != nullptr);
+      return (*container_)[idx_];
+    }
+
+    pointer operator->() const {
+      TORCH_CHECK(container_ != nullptr);
+      return &(*container_)[idx_];
+    }
+
+    friend bool operator==(
+        VarStackNodeWrapperIter lhs,
+        VarStackNodeWrapperIter rhs) {
+      DCHECK_EQ(lhs.container_, rhs.container_);
+      return lhs.idx_ == rhs.idx_;
+    }
+
+    friend bool operator!=(
+        VarStackNodeWrapperIter lhs,
+        VarStackNodeWrapperIter rhs) {
+      return !(lhs == rhs);
+    }
+
+   private:
+    const VarStackNodeWrapper* container_ = nullptr;
+    size_t idx_ = 0;
+  };
+
+  // NB: to mimic the behavior of at::ArrayRef, both iterators are
+  // the const version.
+  using iterator = VarStackNodeWrapperIter;
+  using const_iterator = VarStackNodeWrapperIter;
+  using size_type = size_t;
+  using value_type = at::Tensor;
+
   explicit VarStackNodeWrapper(const ProcessedNode& pnode) : pnode_(pnode) {}
 
   const at::Tensor& operator[](size_t idx) const {
@@ -690,6 +754,43 @@ class VarStackNodeWrapper {
 
   size_t size() const {
     return pnode_.num_inputs() - 1;
+  }
+
+  iterator begin() {
+    return VarStackNodeWrapperIter(this, 0);
+  }
+  iterator end() {
+    return VarStackNodeWrapperIter(this, size());
+  }
+
+  const_iterator begin() const {
+    return VarStackNodeWrapperIter(this, 0);
+  }
+  const_iterator end() const {
+    return VarStackNodeWrapperIter(this, size());
+  }
+
+  const_iterator cbegin() const {
+    return VarStackNodeWrapperIter(this, 0);
+  }
+  const_iterator cend() const {
+    return VarStackNodeWrapperIter(this, size());
+  }
+
+  bool empty() const {
+    return size() == 0;
+  }
+
+  const at::Tensor& front() const {
+    TORCH_CHECK(
+        !empty(), "Attempted to access front() of empty VarStackNodeWrapper");
+    return pnode_.Input(0).toTensor();
+  }
+
+  const at::Tensor& back() const {
+    TORCH_CHECK(
+        !empty(), "Attempted to access back() of empty VarStackNodeWrapper");
+    return pnode_.Input(size() - 1).toTensor();
   }
 
  private:
@@ -908,9 +1009,10 @@ REGISTER_OPERATOR_FUNCTOR(aten::tanh, aten_tanh, [](Node* n) -> SROperator {
 REGISTER_OPERATOR_FUNCTOR(
     prim::TensorExprDynamicGroup,
     prim_TensorExprDynamicGroup,
-    [](Node*) -> SROperator {
-      return [](ProcessedNode* p_node) {
-        auto graph = p_node->node()->g(attr::Subgraph);
+    [](Node* n) -> SROperator {
+      auto graph = n->g(attr::Subgraph);
+      Code code(graph, "");
+      return [code](ProcessedNode* p_node) {
         auto num_outputs = p_node->num_outputs();
         Stack stack;
         if (p_node->Output(0).isNone()) {
@@ -924,7 +1026,7 @@ REGISTER_OPERATOR_FUNCTOR(
         for (auto i : c10::irange(p_node->num_inputs())) {
           stack.emplace_back(p_node->Input(i));
         }
-        runTensorExprDynamicGroup(graph, stack);
+        runTensorExprDynamicGroup(code, stack);
         if (p_node->Output(0).isNone()) {
           TORCH_INTERNAL_ASSERT(
               stack.size() == num_outputs,
@@ -1558,7 +1660,7 @@ REGISTER_OPERATOR_FUNCTOR(
       TORCH_CHECK(n->inputs().size() == 2);
       return [](ProcessedNode* p_node) {
         const auto& self = p_node->Input(0).toTensor(); // self
-        const auto proposed_shape = p_node->Input(1).toIntVector(); // shape
+        const auto proposed_shape = p_node->Input(1).toDimVector(); // shape
 
         if (p_node->Output(0).isNone()) {
           p_node->Output(0) = create_empty_from(self);
@@ -1735,7 +1837,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::repeat, aten_repeat, [](Node* n) -> SROperator {
   }
   return [](ProcessedNode* p_node) {
     const auto& self = p_node->Input(0).toTensor();
-    const auto repeats = p_node->Input(1).toIntVector();
+    const auto repeats = p_node->Input(1).toDimVector();
 
     if (p_node->Output(0).isNone()) {
       p_node->Output(0) = at::native::repeat(self, repeats);
@@ -1917,6 +2019,13 @@ REGISTER_OPERATOR_FUNCTOR(aten::softmax, aten_softmax, [](Node* n) -> SROperator
   };
 });
 
+static c10::MaybeOwned<at::Tensor> borrow_from_optional_tensor_ivalue(
+    const IValue& iv) {
+  if (iv.isNone()) {
+    return c10::MaybeOwned<at::Tensor>::owned(c10::in_place);
+  }
+  return c10::MaybeOwned<at::Tensor>::borrowed(iv.toTensor());
+}
 REGISTER_OPERATOR_FUNCTOR(
     static_runtime::layer_norm,
     aten_layer_norm,
@@ -1929,16 +2038,14 @@ REGISTER_OPERATOR_FUNCTOR(
       return [](ProcessedNode* p_node) {
         // ignore Input(5): `bool cudnn_enable=True`
         const auto& input = p_node->Input(0).toTensor();
-        const auto normalized_shape = p_node->Input(1).toIntVector();
-        auto weight_opt = p_node->Input(2).toOptional<at::Tensor>();
-        auto bias_opt = p_node->Input(3).toOptional<at::Tensor>();
+        const auto normalized_shape = p_node->Input(1).toDimVector();
         float eps = p_node->Input(4).toDouble();
 
         c10::MaybeOwned<at::Tensor> weight_maybe_owned =
-            at::borrow_from_optional_tensor(weight_opt);
+            borrow_from_optional_tensor_ivalue(p_node->Input(2));
         const at::Tensor& weight = *weight_maybe_owned;
         c10::MaybeOwned<at::Tensor> bias_maybe_owned =
-            at::borrow_from_optional_tensor(bias_opt);
+            borrow_from_optional_tensor_ivalue(p_node->Input(3));
         const at::Tensor& bias = *bias_maybe_owned;
 
         auto M_N = at::native::_check_layer_norm_inputs(
@@ -1972,8 +2079,8 @@ REGISTER_OPERATOR_FUNCTOR(
           at::native::resize_(p_node->Output(2).toTensor(), {M}, c10::nullopt);
         }
         at::Tensor& output = p_node->Output(0).toTensor();
-        at::Tensor mean = p_node->Output(1).toTensor();
-        at::Tensor rstd = p_node->Output(2).toTensor();
+        at::Tensor& mean = p_node->Output(1).toTensor();
+        at::Tensor& rstd = p_node->Output(2).toTensor();
         at::native::layer_norm_cpu_out(
             output,
             mean,
@@ -2023,7 +2130,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::norm, aten_norm, [](Node* n) -> SROperator {
       at::cpu::norm_outf(
           in0_t,
           in1_s,
-          p_node->Input(2).toIntVector(), // dim
+          p_node->Input(2).toDimVector(), // dim
           p_node->Input(3).toBool(), // keepdim
           p_node->Input(4).toScalarType(), // dtype
           out_t);
@@ -2044,7 +2151,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::norm, aten_norm, [](Node* n) -> SROperator {
       at::cpu::norm_outf(
           in0_t,
           in1_s,
-          p_node->Input(2).toIntVector(), // dim
+          p_node->Input(2).toDimVector(), // dim
           p_node->Input(3).toBool(), // keepdim
           out_t);
     };
@@ -2210,7 +2317,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::full, aten_full, [](Node* n) -> SROperator {
     return nullptr;
   }
   return [](ProcessedNode* p_node) {
-    const auto& size = p_node->Input(0).toIntVector();
+    const auto& size = p_node->Input(0).toDimVector();
     const auto fill_value = p_node->Input(1).toScalar();
     if (p_node->Output(0).isNone()) {
       const auto dtype = p_node->Input(2).toOptional<c10::ScalarType>();
@@ -2279,7 +2386,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::linalg_norm, aten_linalg_norm, [](Node* n) -> SR
           "aten::linalg_norm(Tensor self, Scalar? ord=None, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor"))) {
     return [](ProcessedNode* p_node) {
       const auto& input = p_node->Input(0).toTensor();
-      const auto dim = p_node->Input(2).toIntVector();
+      const auto dim = p_node->Input(2).toDimVector();
       const auto keepdim = p_node->Input(3).toBool();
       const auto dtype = p_node->Input(4).toOptional<c10::ScalarType>();
       if (p_node->Output(0).isNone()) {
@@ -2306,7 +2413,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::linalg_norm, aten_linalg_norm, [](Node* n) -> SR
           "aten::linalg_norm.ord_str(Tensor self, str ord, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor"))) {
     return [](ProcessedNode* p_node) {
       const auto& input = p_node->Input(0).toTensor();
-      const auto dim = p_node->Input(2).toIntVector();
+      const auto dim = p_node->Input(2).toDimVector();
       const auto keepdim = p_node->Input(3).toBool();
       const auto dtype = p_node->Input(4).toOptional<c10::ScalarType>();
       if (p_node->Output(0).isNone()) {
