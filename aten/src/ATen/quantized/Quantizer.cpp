@@ -126,7 +126,9 @@ inline Tensor new_qtensor(
   auto dtype = options.dtype();
   TORCH_CHECK(
       isQIntType(typeMetaToScalarType(dtype)),
-      "ScalarType is not supported in new_qtensor.");
+      "ScalarType ",
+      typeMetaToScalarType(dtype),
+      " is not supported in new_qtensor.");
   auto scalar_type = typeMetaToScalarType(dtype);
   int64_t size_bytes = get_sub_byte_tensor_size(sizes, dtype.itemsize(), scalar_type);
 

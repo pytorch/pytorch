@@ -35,8 +35,6 @@ uint8_t getAlignment(const Tensor &t) {
 cudnn_frontend::Tensor getTensorDescriptor(const Tensor &t, int64_t id, uint8_t alignment) {
   auto shape = t.sizes();
   auto strides = t.strides();
-  std::cout << "shape:" << shape << std::endl;
-  std::cout << "strides:" << strides << std::endl;
   return cudnn_frontend::TensorBuilder()
     .setDim(shape.size(), shape.data())
     .setStrides(strides.size(), strides.data())
@@ -71,14 +69,12 @@ void filterEngineConfigs(
   cudnn_frontend::EngineConfigList &to,
   bool deterministic, bool allow_tf32, c10::ScalarType scalar_type)
 {
-  std::cout << "determinsitic:" << deterministic << " allow_tf32:" << allow_tf32 << std::endl;
   auto filter = [=](cudnnBackendDescriptor_t c) {
     if (deterministic) {
       if (cudnn_frontend::hasNumericalNote<CUDNN_NUMERICAL_NOTE_NONDETERMINISTIC>(c)) return true;
     }
-    if (scalar_type == kFloat || !allow_tf32) {
+    if (scalar_type == kFloat || scalar_type == kChar || !allow_tf32) {
       if (cudnn_frontend::hasNumericalNote<CUDNN_NUMERICAL_NOTE_DOWN_CONVERT_INPUTS>(c)) return true;
-      std::cout << "scalar type:" << scalar_type << std::endl;
       if (cudnn_frontend::hasNumericalNote<CUDNN_NUMERICAL_NOTE_TENSOR_CORE>(c)) return true;
     }
     return false;
@@ -93,7 +89,7 @@ get_execplan_from_heuristics_else_fall_back(cudnn_frontend::OperationGraph&& opG
     .setHeurMode(CUDNN_HEUR_MODE_INSTANT)
     .build();
 
-  std::cout << "Heuristic has " << heuristics.getEngineConfigCount() << " configurations " << std::endl;
+  // std::cout << "Heuristic has " << heuristics.getEngineConfigCount() << " configurations " << std::endl;
   auto& engine_config = heuristics.getEngineConfig(heuristics.getEngineConfigCount());
 
   // Try engine configs returned by the heuristics and pick up the first one that works.
@@ -111,13 +107,13 @@ get_execplan_from_heuristics_else_fall_back(cudnn_frontend::OperationGraph&& opG
 
   {
     auto total_engines = opGraph.getEngineCount();
-    std::cout << opGraph.describe() << " has " << total_engines << " engines." << std::endl;
+    // std::cout << opGraph.describe() << " has " << total_engines << " engines." << std::endl;
     auto engine = cudnn_frontend::EngineBuilder().setGlobalEngineIdx(0).setOperationGraph(opGraph).build();
-    std::cout << engine.describe() << std::endl;
+    // std::cout << engine.describe() << std::endl;
 
     auto engine_config = cudnn_frontend::EngineConfigBuilder().setEngine(engine).build();
 
-    std::cout << engine_config.describe() << std::endl;
+    // std::cout << engine_config.describe() << std::endl;
 
     return cudnn_frontend::ExecutionPlanBuilder().setHandle(handle_).setEngineConfig(engine_config).build();
   }
@@ -179,27 +175,21 @@ void raw_cudnn_convolution_forward_out(
     return;
   }
 
-  std::cout << "input sizes:" << input.sizes() << std::endl;;
-  std::cout << "weight sizes:" << weight.sizes() << std::endl;
-  std::cout << "output sizes:" << output.sizes() << std::endl;
-
+  Tensor conv_output = at::empty_like(output);
   Tensor requantize_multiplier_tensor = at::empty_like(output);
   requantize_multiplier_tensor.fill_(requantize_multiplier);
-  Tensor requantized_tensor = at::empty_like(output);
   cudnnHandle_t handle = getCudnnHandle();
 
   CacheKey key;
   setConvolutionParams(&key.params, input, weight, padding, stride, dilation, groups, deterministic, allow_tf32);
-  // currently we are assuming accumulation data type is the same as the data
-  // type for input, that is not ideal for int8 conv ops, we want to use fp32
-  // for accumulation to preserve the accuracy
-  key.params.dataType = getCudnnDataType(output);
+  // operator datatype needs to be int32 for int8 convolution, but we can
+  // set the datatype for output tensor
+  key.params.dataType = CUDNN_DATA_INT32;
   key.input_alignment = getAlignment(input);
-  key.output_alignment = getAlignment(output);
+  key.output_alignment = getAlignment(conv_output);
   key.weight_alignment = getAlignment(weight);
 
   auto run = [&](cudnn_frontend::ManagedOpaqueDescriptor cfg) {
-    std::cout << "building plan:" << std::endl;
     auto plan = cudnn_frontend::ExecutionPlanBuilder()
         .setHandle(handle)
         .setEngineConfig(cfg)
@@ -207,13 +197,13 @@ void raw_cudnn_convolution_forward_out(
 
     auto workspace_size = plan.getWorkspaceSize();
     auto workspace = at::empty({workspace_size}, input.options().dtype(kByte));
-    void *data_ptrs[] = {reinterpret_cast<int8_t*>(input.data_ptr()), output.data_ptr(), reinterpret_cast<int8_t*>(weight.data_ptr())};
-    std::cout << plan.describe() << " requires workspace " << workspace_size << std::endl;
-    int64_t uids[] = {'x', 'y', 'w'};
+    void *data_ptrs[] = {reinterpret_cast<int8_t*>(input.data_ptr()), conv_output.data_ptr(), reinterpret_cast<int8_t*>(weight.data_ptr()), requantize_multiplier_tensor.data_ptr(), output.data_ptr()};
+    // std::cout << plan.describe() << " requires workspace " << workspace_size << std::endl;
+    int64_t uids[] = {'x', 'y', 'w', 's', 'r'};
     auto variantPack = cudnn_frontend::VariantPackBuilder()
         .setWorkspacePointer(workspace.data_ptr())
-        .setDataPointers(3, data_ptrs)
-        .setUids(3, uids)
+        .setDataPointers(5, data_ptrs)
+        .setUids(5, uids)
         .build();
     AT_CUDNN_CHECK(cudnnBackendExecute(handle, plan.get_raw_desc(), variantPack.get_raw_desc()));
   };
@@ -226,28 +216,28 @@ void raw_cudnn_convolution_forward_out(
 
   auto conv_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR)
       .setxDesc(getTensorDescriptor(input, 'x', key.input_alignment))
-      .setyDesc(getTensorDescriptor(output, 'y', key.output_alignment))
+      .setyDesc(getTensorDescriptor(conv_output, 'y', key.output_alignment))
       .setwDesc(getTensorDescriptor(weight, 'w', key.weight_alignment))
       .setcDesc(getConvDescriptor(key.params.dataType, padding, stride, dilation))
       .build();
-  std::cout << "operator:" << conv_op.describe() << std::endl;
+  // std::cout << "operator:" << conv_op.describe() << std::endl;
   // TODO: add bias
 
   auto requant_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
     .setxDesc(conv_op.getOutputTensor())
     .setbDesc(getTensorDescriptor(requantize_multiplier_tensor, 's', getAlignment(requantize_multiplier_tensor)))
-    .setyDesc(getTensorDescriptor(requantized_tensor, 's', getAlignment(requantized_tensor)))
-    .setpwDesc(getPointWiseMulDescriptor(getCudnnDataType(requantized_tensor)))
+    .setyDesc(getTensorDescriptor(output, 'r', getAlignment(output)))
+    .setpwDesc(getPointWiseMulDescriptor(getCudnnDataType(output)))
     .build();
-  std::cout << "operator:" << requant_op.describe() << std::endl;
+  // std::cout << "operator:" << requant_op.describe() << std::endl;
 
   std::array<cudnn_frontend::Operation const *, 2> ops = {&conv_op, &requant_op};
 
   auto opGraph = cudnn_frontend::OperationGraphBuilder()
       .setHandle(handle)
-      .setOperationGraph(1, ops.data())
+      .setOperationGraph(ops.size(), ops.data())
       .build();
-  std::cout << "opGraph: " << opGraph.describe() << std::endl;
+  // std::cout << "opGraph: " << opGraph.describe() << std::endl;
 
   auto heuristics = cudnn_frontend::EngineHeuristicsBuilder()
       .setOperationGraph(opGraph)
@@ -261,12 +251,11 @@ void raw_cudnn_convolution_forward_out(
   auto& engine_configs = heuristics.getEngineConfig(heuristics.getEngineConfigCount());
   auto& fallback_list = fallback.getFallbackList();
 
-  //cudnn_frontend::EngineConfigList filtered_configs;
-  //filterEngineConfigs(engine_configs, filtered_configs, deterministic, allow_tf32, input.scalar_type());
-  // filterEngineConfigs(fallback_list, filtered_configs, deterministic, allow_tf32, input.scalar_type());
+  cudnn_frontend::EngineConfigList filtered_configs;
+  filterEngineConfigs(engine_configs, filtered_configs, deterministic, allow_tf32, input.scalar_type());
+  filterEngineConfigs(fallback_list, filtered_configs, deterministic, allow_tf32, input.scalar_type());
 
   for (auto &cfg : engine_configs) {
-    std::cout << "trying out cfg:" << cfg << std::endl;
     try {
       run(cfg);
       engine_cache[key] = cfg;
@@ -334,13 +323,14 @@ class QConvInt8 final {
       int64_t output_zero_point) {
     TORCH_CHECK(!kReluFused, "conv relu not supported yet");
     TORCH_CHECK(!bias.has_value(), "bias is not supported yet");
-    std::cout << "before run" << std::endl;
     act = act.contiguous(c10::MemoryFormat::ChannelsLast);
+    weight = weight.contiguous(c10::MemoryFormat::ChannelsLast);
     // requantization
     // out_int8 = act_int8 * weight_int8 * act_scale * w_scale / output_scale
     auto act_scale = act.q_scale();
     auto weight_scale = weight.q_scale();
     auto requantize_multiplier = act_scale * weight_scale / output_scale;
+    //auto requantize_multiplier = output_scale / (act_scale * weight_scale);
     // TODO: check all zero_points are zero/all tensors are symmetrically quantized
     Tensor output_fp32_requant = raw_cudnn_convolution_forward<kSpatialDim>(
         act.int_repr(), weight.int_repr(),
@@ -351,13 +341,11 @@ class QConvInt8 final {
         requantize_multiplier
     );
 
-    std::cout << "before reassemble" << std::endl;
     // convert output fp32 Tensor to int8 by clamping
     // TODO: get the range based on target output dtype, for now
     // we hardcode this to the range for int8
     Tensor clampped = output_fp32_requant.clamp(-128, 127);
-    Tensor quantized_output = at::_make_per_tensor_quantized_tensor(clampped, output_scale, output_zero_point);
-    std::cout << "after reassemble" << std::endl;
+    Tensor quantized_output = at::_make_per_tensor_quantized_tensor(clampped.to(at::kChar), output_scale, output_zero_point);
     return quantized_output;
   }
 };
