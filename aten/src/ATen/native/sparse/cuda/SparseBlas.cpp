@@ -94,6 +94,7 @@ Tensor& addmm_out_sparse_csr_cuda(
     const Tensor& mat2,
     const Scalar& beta,
     const Scalar& alpha,
+    c10::optional<ScalarType> dtype_opt,
     Tensor& result) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(mat1.is_sparse_csr());
 

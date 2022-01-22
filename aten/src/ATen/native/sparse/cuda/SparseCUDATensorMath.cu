@@ -110,6 +110,7 @@ Tensor& addmm_out_sparse_dense_cuda(
     const Tensor& mat2,
     const Scalar& beta,
     const Scalar& alpha,
+    c10::optional<ScalarType> dtype_opt,
     Tensor& result
 ) {
   c10::MaybeOwned<Tensor> b_self = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
@@ -133,7 +134,8 @@ Tensor addmm_sparse_dense_cuda(
     const SparseTensor& mat1,
     const Tensor& mat2,
     const Scalar& beta,
-    const Scalar& alpha
+    const Scalar& alpha,
+    c10::optional<ScalarType> dtype_opt
 ) {
   c10::MaybeOwned<Tensor> b_self = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
   return s_addmm_sparse_dense_cuda(*b_self, mat1, mat2, beta, alpha);
@@ -144,7 +146,8 @@ Tensor& s_addmm_sparse_dense_cuda_(
     const SparseTensor& sparse,
     const Tensor& dense,
     const Scalar& beta,
-    const Scalar& alpha
+    const Scalar& alpha,
+    c10::optional<ScalarType> dtype_opt
 ) {
   return s_addmm_out_sparse_dense_cuda(t, t, sparse, dense, beta, alpha);
 }

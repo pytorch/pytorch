@@ -294,6 +294,7 @@ Tensor& addmm_out_sparse_csr_cpu(
     const Tensor& mat2,
     const Scalar& beta,
     const Scalar& alpha,
+    c10::optional<ScalarType> dtype_opt,
     Tensor& result) {
   TORCH_INTERNAL_ASSERT(mat1.is_sparse_csr());
 
@@ -390,7 +391,8 @@ Tensor addmm_sparse_csr_dense(
     const SparseCsrTensor& sparse,
     const Tensor& dense,
     const Scalar& beta,
-    const Scalar& alpha) {
+    const Scalar& alpha,
+    c10::optional<ScalarType> dtype_opt) {
   Tensor r = at::empty({0, 0}, self.options());
   at::addmm_out(r, self, sparse, dense, beta, alpha);
   return r;

@@ -5106,7 +5106,7 @@
   dispatch:
     SparseCsrCUDA: sparse_sampled_addmm_sparse_csr_cuda
 
-- func: addmm.out(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+- func: addmm.out(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   structured: True
   dispatch:
     CPU: addmm_out_cpu
@@ -5116,7 +5116,7 @@
     SparseCsrCPU: addmm_out_sparse_csr_cpu
     SparseCsrCUDA: addmm_out_sparse_csr_cuda
 
-- func: addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+- func: addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, ScalarType? dtype=None) -> Tensor
   structured_delegate: addmm.out
   variants: function, method
   dispatch:
@@ -5124,7 +5124,7 @@
     SparseCUDA: addmm_sparse_dense_cuda
     SparseCsrCPU, SparseCsrCUDA: addmm_sparse_csr_dense
 
-- func: addmm_(Tensor(a!) self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
+- func: addmm_(Tensor(a!) self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, ScalarType? dtype=None) -> Tensor(a!)
   structured_delegate: addmm.out
   variants: method
   dispatch:
