@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/native/UnaryOps.h>
+#include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/native/cuda/DistributionTemplates.h>
 
 namespace at { namespace native {
