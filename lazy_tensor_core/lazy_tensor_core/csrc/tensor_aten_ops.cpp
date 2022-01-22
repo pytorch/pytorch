@@ -21,7 +21,7 @@
 #include "lazy_tensor_core/csrc/ops/index_ops.h"
 #include "lazy_tensor_core/csrc/ops/nms.h"
 #include "lazy_tensor_core/csrc/ops/repeat.h"
-#include "lazy_tensor_core/csrc/ops/squeeze.h"
+#include <torch/csrc/lazy/core/view_ops/squeeze.h>
 #include "lazy_tensor_core/csrc/ops/stack.h"
 #include "lazy_tensor_core/csrc/ops/svd.h"
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_backward.h"
@@ -336,11 +336,11 @@ torch::lazy::LazyTensor squeeze(const torch::lazy::LazyTensor& input, int64_t di
 
 void squeeze_(torch::lazy::LazyTensor& input) {
   input.SetIrValue(
-      torch::lazy::MakeNode<ir::ops::Squeeze>(input.GetIrValue(), -1));
+      torch::lazy::MakeNode<torch::lazy::Squeeze>(input.GetIrValue(), -1));
 }
 
 void squeeze_(torch::lazy::LazyTensor& input, int64_t dim) {
-  input.SetIrValue(torch::lazy::MakeNode<ir::ops::Squeeze>(
+  input.SetIrValue(torch::lazy::MakeNode<torch::lazy::Squeeze>(
       input.GetIrValue(),
       torch::lazy::GetCanonicalDimensionIndex(dim, input.shape().Get().dim())));
 }

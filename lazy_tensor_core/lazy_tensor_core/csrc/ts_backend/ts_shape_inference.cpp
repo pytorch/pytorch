@@ -13,7 +13,7 @@
 #include <torch/jit.h>
 
 #include "lazy_tensor_core/csrc/ops/repeat.h"
-#include "lazy_tensor_core/csrc/ops/squeeze.h"
+#include <torch/csrc/lazy/core/view_ops/squeeze.h>
 #include "lazy_tensor_core/csrc/ops/stack.h"
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_backward.h"
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_forward.h"

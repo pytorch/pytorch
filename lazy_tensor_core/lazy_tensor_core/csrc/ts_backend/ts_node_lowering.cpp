@@ -21,7 +21,7 @@
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
 
 #include "lazy_tensor_core/csrc/ops/repeat.h"
-#include "lazy_tensor_core/csrc/ops/squeeze.h"
+#include <torch/csrc/lazy/core/view_ops/squeeze.h>
 #include "lazy_tensor_core/csrc/ops/stack.h"
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_backward.h"
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_forward.h"
@@ -135,7 +135,7 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     }
     if (node->op().op == at::aten::squeeze) {
       return LowerSqueeze(
-          torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::Squeeze>(
+          torch::lazy::NodeCast<torch_lazy_tensors::torch::lazy::Squeeze>(
               node, torch::lazy::OpKind(at::aten::squeeze)));
     }
     if (node->op().op == at::aten::stack) {
@@ -317,7 +317,7 @@ class TSNodeLowering : public TSNodeLoweringInterface {
                           /*step=*/step)};
   }
 
-  TSOpVector LowerSqueeze(const torch_lazy_tensors::ir::ops::Squeeze* node) {
+  TSOpVector LowerSqueeze(const torch_lazy_tensors::torch::lazy::Squeeze* node) {
     std::vector<torch::jit::NamedValue> arguments;
     arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
     if (node->dim() != -1) {
