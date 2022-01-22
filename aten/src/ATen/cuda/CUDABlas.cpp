@@ -408,8 +408,9 @@ void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float)) {
   }
 #endif
 
-template <>
-void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
+template <typename Dtype, typename C_Dtype,
+  typename std::enable_if<CUDABLAS_GEMM_DTYPE_IS_HALF_AND_C_DTYPE_IS_HALF_OR_FLOAT, Dtype>::type* = nullptr>
+void gemm(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {
   // See Note [Writing Nondeterministic Operations]
   globalContext().alertCuBLASConfigNotDeterministic();
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
@@ -460,6 +461,8 @@ void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
     // Disallow fp16 reductions that could lead to unexpected overflow issues.
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, cublas_flags));
 #endif  // defined(CUDA_VERSION) && CUDA_VERSION < 11000
+
+    constexpr auto c_dtype = std::is_same<C_Dtype, at::Half>::value ? CUDA_R_16F : CUDA_R_32F;
     TORCH_CUDABLAS_CHECK(cublasGemmEx(
         handle,
         opa,
@@ -476,7 +479,7 @@ void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
         ldb,
         &fbeta,
         c,
-        CUDA_R_16F,
+        c_dtype,
         ldc,
         CUDA_R_32F,
         CUBLAS_GEMM_DFALT_TENSOR_OP));
@@ -503,6 +506,8 @@ void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
   }
 #endif
 }
+template void gemm<at::Half, at::Half>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::Half, at::Half));
+template void gemm<at::Half, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::Half, float));
 
 #ifdef USE_ROCM
 template <>

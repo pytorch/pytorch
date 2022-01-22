@@ -2,8 +2,7 @@
 /*
   Provides a subset of CUDA BLAS functions as templates:
 
-    gemm<Dtype>(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c,
-  ldc)
+    gemm<Dtype, C_Dtype>(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)
 
     gemv<Dtype>(transa, m, n, alpha, a, lda, x, incx, beta, y, incy)
 
@@ -41,16 +40,25 @@ private:
 
 /* LEVEL 3 BLAS FUNCTIONS */
 
-#define CUDABLAS_GEMM_ARGTYPES(Dtype)                                                       \
+#define CUDABLAS_GEMM_ARGTYPES(Dtype) CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(Dtype, Dtype)
+
+#define CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)                                  \
   char transa, char transb, int64_t m, int64_t n, int64_t k, at::opmath_type<Dtype> alpha,  \
       const Dtype *a, int64_t lda, const Dtype *b, int64_t ldb, at::opmath_type<Dtype> beta,\
-      Dtype *c, int64_t ldc
+      C_Dtype *c, int64_t ldc
 
-template <typename Dtype>
-inline void gemm(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
-  AT_ERROR("at::cuda::blas::gemm: not implemented for ", typeid(Dtype).name());
+#define CUDABLAS_GEMM_DTYPE_IS_HALF_AND_C_DTYPE_IS_HALF_OR_FLOAT \
+    (std::is_same<Dtype, at::Half>::value && (std::is_same<C_Dtype, at::Half>::value || std::is_same<C_Dtype, float>::value))
+
+template <typename Dtype, typename C_Dtype = Dtype,
+  typename std::enable_if<!CUDABLAS_GEMM_DTYPE_IS_HALF_AND_C_DTYPE_IS_HALF_OR_FLOAT, Dtype>::type* = nullptr>
+inline void gemm(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {
+  AT_ERROR("at::cuda::blas::gemm: not implemented for input type ", typeid(Dtype).name(), " and output type ", typeid(C_Dtype).name());
 }
 
+template <typename Dtype, typename C_Dtype,
+  typename std::enable_if<CUDABLAS_GEMM_DTYPE_IS_HALF_AND_C_DTYPE_IS_HALF_OR_FLOAT, Dtype>::type* = nullptr>
+void gemm(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype));
 template <>
 void gemm<double>(CUDABLAS_GEMM_ARGTYPES(double));
 template <>
@@ -63,8 +71,6 @@ void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float));
   template <>
   void gemm<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>));
 #endif
-template <>
-void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half));
 #if defined(USE_ROCM) || defined(CUDA_VERSION) && CUDA_VERSION >= 11000
 template <>
 void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16));
