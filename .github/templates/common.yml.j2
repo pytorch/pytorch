@@ -186,9 +186,9 @@ concurrency:
           fetch-depth: 0
       {%- endif %}
           submodules: !{{ submodules }}
-      {$- if repository %}
+      {%- if repository != "pytorch/pytorch" %}
           repository: !{{ repository }}
-      {$- endif %}
+      {%- endif %}
       {%- if directory %}
           path: !{{ directory }}
       {%- endif %}

@@ -106,9 +106,6 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
-      {$- if repository %}
-          repository: pytorch/pytorch
-      {$- endif %}
           path: pytorch
       - name: Clean PyTorch checkout
         run: |
@@ -119,9 +116,7 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
-      {$- if repository %}
           repository: pytorch/builder
-      {$- endif %}
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -501,9 +496,6 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
-      {$- if repository %}
-          repository: pytorch/pytorch
-      {$- endif %}
           path: pytorch
       - name: Clean PyTorch checkout
         run: |
@@ -514,9 +506,7 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
-      {$- if repository %}
           repository: pytorch/builder
-      {$- endif %}
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -903,9 +893,6 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
-      {$- if repository %}
-          repository: pytorch/pytorch
-      {$- endif %}
           path: pytorch
       - name: Clean PyTorch checkout
         run: |
@@ -916,9 +903,7 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
-      {$- if repository %}
           repository: pytorch/builder
-      {$- endif %}
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -1308,9 +1293,6 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
-      {$- if repository %}
-          repository: pytorch/pytorch
-      {$- endif %}
           path: pytorch
       - name: Clean PyTorch checkout
         run: |
@@ -1321,9 +1303,7 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
-      {$- if repository %}
           repository: pytorch/builder
-      {$- endif %}
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -1713,9 +1693,6 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
-      {$- if repository %}
-          repository: pytorch/pytorch
-      {$- endif %}
           path: pytorch
       - name: Clean PyTorch checkout
         run: |
@@ -1726,9 +1703,7 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
-      {$- if repository %}
           repository: pytorch/builder
-      {$- endif %}
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -2117,9 +2092,6 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
-      {$- if repository %}
-          repository: pytorch/pytorch
-      {$- endif %}
           path: pytorch
       - name: Clean PyTorch checkout
         run: |
@@ -2130,9 +2102,7 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
-      {$- if repository %}
           repository: pytorch/builder
-      {$- endif %}
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -2512,9 +2482,6 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
-      {$- if repository %}
-          repository: pytorch/pytorch
-      {$- endif %}
           path: pytorch
       - name: Clean PyTorch checkout
         run: |
@@ -2525,9 +2492,7 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
-      {$- if repository %}
           repository: pytorch/builder
-      {$- endif %}
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -2914,9 +2879,6 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
-      {$- if repository %}
-          repository: pytorch/pytorch
-      {$- endif %}
           path: pytorch
       - name: Clean PyTorch checkout
         run: |
@@ -2927,9 +2889,7 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
-      {$- if repository %}
           repository: pytorch/builder
-      {$- endif %}
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -3319,9 +3279,6 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
-      {$- if repository %}
-          repository: pytorch/pytorch
-      {$- endif %}
           path: pytorch
       - name: Clean PyTorch checkout
         run: |
@@ -3332,9 +3289,7 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
-      {$- if repository %}
           repository: pytorch/builder
-      {$- endif %}
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -3724,9 +3679,6 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
-      {$- if repository %}
-          repository: pytorch/pytorch
-      {$- endif %}
           path: pytorch
       - name: Clean PyTorch checkout
         run: |
@@ -3737,9 +3689,7 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
-      {$- if repository %}
           repository: pytorch/builder
-      {$- endif %}
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -4128,9 +4078,6 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
-      {$- if repository %}
-          repository: pytorch/pytorch
-      {$- endif %}
           path: pytorch
       - name: Clean PyTorch checkout
         run: |
@@ -4141,9 +4088,7 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
-      {$- if repository %}
           repository: pytorch/builder
-      {$- endif %}
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -4523,9 +4468,6 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
-      {$- if repository %}
-          repository: pytorch/pytorch
-      {$- endif %}
           path: pytorch
       - name: Clean PyTorch checkout
         run: |
@@ -4536,9 +4478,7 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
-      {$- if repository %}
           repository: pytorch/builder
-      {$- endif %}
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -4925,9 +4865,6 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
-      {$- if repository %}
-          repository: pytorch/pytorch
-      {$- endif %}
           path: pytorch
       - name: Clean PyTorch checkout
         run: |
@@ -4938,9 +4875,7 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
-      {$- if repository %}
           repository: pytorch/builder
-      {$- endif %}
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -5330,9 +5265,6 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
-      {$- if repository %}
-          repository: pytorch/pytorch
-      {$- endif %}
           path: pytorch
       - name: Clean PyTorch checkout
         run: |
@@ -5343,9 +5275,7 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
-      {$- if repository %}
           repository: pytorch/builder
-      {$- endif %}
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -5735,9 +5665,6 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
-      {$- if repository %}
-          repository: pytorch/pytorch
-      {$- endif %}
           path: pytorch
       - name: Clean PyTorch checkout
         run: |
@@ -5748,9 +5675,7 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
-      {$- if repository %}
           repository: pytorch/builder
-      {$- endif %}
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -6139,9 +6064,6 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
-      {$- if repository %}
-          repository: pytorch/pytorch
-      {$- endif %}
           path: pytorch
       - name: Clean PyTorch checkout
         run: |
@@ -6152,9 +6074,7 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
-      {$- if repository %}
           repository: pytorch/builder
-      {$- endif %}
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -6534,9 +6454,6 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
-      {$- if repository %}
-          repository: pytorch/pytorch
-      {$- endif %}
           path: pytorch
       - name: Clean PyTorch checkout
         run: |
@@ -6547,9 +6464,7 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
-      {$- if repository %}
           repository: pytorch/builder
-      {$- endif %}
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -6936,9 +6851,6 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
-      {$- if repository %}
-          repository: pytorch/pytorch
-      {$- endif %}
           path: pytorch
       - name: Clean PyTorch checkout
         run: |
@@ -6949,9 +6861,7 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
-      {$- if repository %}
           repository: pytorch/builder
-      {$- endif %}
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -7341,9 +7251,6 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
-      {$- if repository %}
-          repository: pytorch/pytorch
-      {$- endif %}
           path: pytorch
       - name: Clean PyTorch checkout
         run: |
@@ -7354,9 +7261,7 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
-      {$- if repository %}
           repository: pytorch/builder
-      {$- endif %}
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -7746,9 +7651,6 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
-      {$- if repository %}
-          repository: pytorch/pytorch
-      {$- endif %}
           path: pytorch
       - name: Clean PyTorch checkout
         run: |
@@ -7759,9 +7661,7 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
-      {$- if repository %}
           repository: pytorch/builder
-      {$- endif %}
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
