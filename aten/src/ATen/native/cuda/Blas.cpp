@@ -177,17 +177,32 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     opmath_t beta_val = beta.to<opmath_t>();
     scalar_t* mat1_ptr = mat1_->data_ptr<scalar_t>();
     scalar_t* mat2_ptr = mat2_->data_ptr<scalar_t>();
-    scalar_t* result_ptr = result_->data_ptr<scalar_t>();
-    at::cuda::blas::gemm<scalar_t>(
-      transpose_mat1 ? mat1_->is_conj() ? 'c' : 't' : 'n',
-      transpose_mat2 ? mat2_->is_conj() ? 'c' : 't' : 'n',
-      m, n, k,
-      alpha_val,
-      mat1_ptr, mat1_ld,
-      mat2_ptr, mat2_ld,
-      beta_val,
-      result_ptr, result_ld
-    );
+
+    if (std::is_same<at::Half, scalar_t>::value && result_->scalar_type() == at::kFloat) {
+      float* result_ptr = result_->data_ptr<float>();
+      at::cuda::blas::gemm<scalar_t>(
+        transpose_mat1 ? mat1_->is_conj() ? 'c' : 't' : 'n',
+        transpose_mat2 ? mat2_->is_conj() ? 'c' : 't' : 'n',
+        m, n, k,
+        alpha_val,
+        mat1_ptr, mat1_ld,
+        mat2_ptr, mat2_ld,
+        beta_val,
+        result_ptr, result_ld
+      );
+    } else {
+      scalar_t* result_ptr = result_->data_ptr<scalar_t>();
+      at::cuda::blas::gemm<scalar_t>(
+        transpose_mat1 ? mat1_->is_conj() ? 'c' : 't' : 'n',
+        transpose_mat2 ? mat2_->is_conj() ? 'c' : 't' : 'n',
+        m, n, k,
+        alpha_val,
+        mat1_ptr, mat1_ld,
+        mat2_ptr, mat2_ld,
+        beta_val,
+        result_ptr, result_ld
+      );
+    }
   });
   if (!result.is_same(*result_)) {
     result.copy_(*result_);

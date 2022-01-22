@@ -38,7 +38,11 @@ TORCH_META_FUNC(addmm)(const Tensor& self, const Tensor& mat1, const Tensor& mat
       mat1.sizes()[0], "x", mat1.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
 
   auto names = at::namedinference::propagate_names_for_addmm(mat1, mat2, self);
-  set_output(0, {mat1.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
+  if (dtype_opt.has_value() && dtype_opt.value() == at::kFloat && self.dtype() == at::kHalf && self.is_cuda()) {
+    set_output(0, {mat1.sizes()[0], mat2.sizes()[1]}, {}, self.options().dtype(at::kFloat), names);
+  } else {
+    set_output(0, {mat1.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
+  }
 }
 
 TORCH_META_FUNC(mm)(const Tensor & self, const Tensor & mat2) {
