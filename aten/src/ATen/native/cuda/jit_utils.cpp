@@ -372,7 +372,7 @@ const std::string jit_code_template = R"ESCAPE(
       ${offset_calculator}<1> output_calculator,
       ${loader} l,
       ${storer} s,
-      ${compute_type} scalar_val) {
+      ${compute_type} scalar_val${extra_params}) {
     ${declare_load_arrays}
     ${declare_store_arrays}
 
@@ -398,7 +398,7 @@ const std::string jit_code_template = R"ESCAPE(
     #pragma unroll
     for (int j = 0; j < thread_work_size; j++) {
       if ((threadIdx.x  + j*num_threads) < remaining) {
-        out[j] = ${name}<${compute_type}>(${args});
+        out[j] = ${name}<${compute_type}>(${args}${extra_args});
       }
     }
 
@@ -446,7 +446,7 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
   void ${name}_vectorized${vec_size}_kernel(
       const int N,
       Array<char*, ${nInputs}+1> data,
-      ${compute_type} scalar_val) //[${nInputs}+1],
+      ${compute_type} scalar_val${extra_params}) //[${nInputs}+1],
       {
       constexpr int vec_size = ${vec_size};
       int remaining = N - block_work_size * blockIdx.x;
@@ -468,7 +468,7 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
         #pragma unroll
         for (int j = 0; j < thread_work_size; j++) {
           if ((threadIdx.x  + j*num_threads) < remaining) {
-            out[j] = ${name}<${compute_type}>(${args});
+            out[j] = ${name}<${compute_type}>(${args} ${extra_args});
           }
         }
         thread_idx = threadIdx.x;
@@ -496,7 +496,7 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
 
         #pragma unroll
         for (int j = 0; j < thread_work_size; j++) {
-          out[j] = ${name}<${compute_type}>(${args});
+          out[j] = ${name}<${compute_type}>(${args}${extra_args});
         }
         using vec_t_output = aligned_vector<${result_type}, vec_size>;
         vec_t_output * to_ = reinterpret_cast<vec_t_output *>(data[0]) + block_work_size / vec_size * idx;
@@ -605,9 +605,11 @@ std::string generate_code(
     bool contiguous,
     bool dynamic_casting,
     BinaryFuncVariant scalar_pos,
+    c10::SmallVector<std::string>& extra_args_typenames,
     bool vectorized,
     int vec_size) {
   at::jit::TemplateEnv env;
+
   env.s("index_type", "unsigned int");
   const int nInputs = nTensors - 1;
   env.s("nInputs", std::to_string(nInputs));
@@ -615,6 +617,22 @@ std::string generate_code(
   env.s("compute_type", compute_type);
   env.s("functor", func);
   env.s("name", name);
+
+  // Generate `extra_params` for function signature
+  // and `extra_args` for computation call if
+  // extra arguments to capture runtime state are passed.
+  // (look at polygamma for example).
+  std::string extra_params = "";
+  std::string extra_args = "";
+  for (size_t i = 0; i < extra_args_typenames.size(); i++) {
+    auto type = std::string(extra_args_typenames[i]);
+    auto name = "extra_arg_" + std::string(to_string(i));
+    extra_params += "," + type + " " + name;
+    extra_args += ", " + name;
+  }
+  env.s("extra_params", extra_params);
+  env.s("extra_args", extra_args);
+
   std::stringstream declare_load_arrays;
   for (int i = 0; i < nInputs; i++) {
     // TODO these arrays are potentially of the different types, use function
@@ -966,7 +984,7 @@ NvrtcFunction jit_pwise_function(
 // TODO: may need/want to initialize CUDA context here (refactor into nvrtc call)
 void launch_jitted_pwise_function(
     NvrtcFunction function,
-    std::array<void*, 7>& args,
+    void* args[],
     const int nBlocks,
     const int kBlockSize) {
   initializeCudaContext();
@@ -983,7 +1001,7 @@ void launch_jitted_pwise_function(
     1,
     0,
     stream,
-    args.data(),
+    args,
     nullptr));
 }
 
