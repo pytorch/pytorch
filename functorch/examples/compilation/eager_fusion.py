@@ -1,6 +1,5 @@
-from functorch import compiled_function, tvm_compile
+from functorch.compile import aot_function, tvm_compile
 import torch
-from functools import partial
 import time
 import torch.utils
 
@@ -12,9 +11,9 @@ def f(a):
     return (a * b).sum(dim=0)
 
 
-fw_compiler = partial(tvm_compile, name='fw_keops')
-bw_compiler = partial(tvm_compile, name='bw_keops')
-compiled_f = compiled_function(f, fw_compiler, bw_compiler)
+fw_compiler = tvm_compile(target='llvm', tuning_logfile='fw_keops')
+bw_compiler = tvm_compile(target='llvm', tuning_logfile='bw_keops')
+compiled_f = aot_function(f, fw_compiler, bw_compiler)
 
 # fw_compiler = lambda x, _: x
 # bw_compiler = lambda x, _: x
