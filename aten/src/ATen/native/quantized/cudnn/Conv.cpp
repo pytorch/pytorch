@@ -112,7 +112,6 @@ get_execplan_from_heuristics_else_fall_back(cudnn_frontend::OperationGraph&& opG
     // std::cout << engine.describe() << std::endl;
 
     auto engine_config = cudnn_frontend::EngineConfigBuilder().setEngine(engine).build();
-
     // std::cout << engine_config.describe() << std::endl;
 
     return cudnn_frontend::ExecutionPlanBuilder().setHandle(handle_).setEngineConfig(engine_config).build();
@@ -183,7 +182,7 @@ void raw_cudnn_convolution_forward_out(
   CacheKey key;
   setConvolutionParams(&key.params, input, weight, padding, stride, dilation, groups, deterministic, allow_tf32);
   // operator datatype needs to be int32 for int8 convolution, but we can
-  // set the datatype for output tensor
+  // set the datatype for output tensor to int32 or fp32
   key.params.dataType = CUDNN_DATA_INT32;
   key.input_alignment = getAlignment(input);
   key.output_alignment = getAlignment(conv_output);
@@ -221,7 +220,7 @@ void raw_cudnn_convolution_forward_out(
       .setcDesc(getConvDescriptor(key.params.dataType, padding, stride, dilation))
       .build();
   // std::cout << "operator:" << conv_op.describe() << std::endl;
-  // TODO: add bias
+  // TODO: add support for bias
 
   auto requant_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
     .setxDesc(conv_op.getOutputTensor())
