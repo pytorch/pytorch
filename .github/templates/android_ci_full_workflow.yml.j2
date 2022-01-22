@@ -8,8 +8,18 @@ name: !{{ build_environment }}
 {%- endblock %}
 
 on:
+{%- if is_default %}
   pull_request:
-    types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
+{%- endif -%}
+{%- for label in ciflow_config.labels | sort %}
+  {%- if loop.first %}
+  push:
+    tags:
+  {%- endif %}
+  {%- if label != "ciflow/default" %}
+      - '!{{ label }}/*'
+  {%- endif %}
+{%- endfor %}
 
 {% block build +%}
   # building and testing in a single job since bazel runs only small subset of tests
@@ -18,9 +28,6 @@ on:
     env:
       JOB_BASE_NAME: !{{ build_environment }}-build-and-test
       NUM_TEST_SHARDS: !{{ num_test_shards }}
-      IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == '!{{ ciflow_config.trigger_action }}') && (github.event.assigneed.login == '!{{ ciflow_config.trigger_actor }}') }}
-      LABEL_CONDITIONS: ${{ !{{ ciflow_config.label_conditions }} }}
-    if: !{{ ciflow_config.root_job_condition }}
     steps:
       - name: print labels
         run: echo "${PR_LABELS}"
