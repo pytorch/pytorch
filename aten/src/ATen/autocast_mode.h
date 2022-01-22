@@ -21,7 +21,7 @@ TORCH_API void set_autocast_cache_enabled(bool enabled);
 namespace {
   bool is_autocast_eligible(const Tensor& tensor, DeviceType device_type) {
     return device_type == DeviceType::CUDA
-        ? (tensor.is_cuda() || tensor.is_xla()) && tensor.is_floating_point()
+        ? (tensor.is_cuda() || tensor.is_xla() || tensor.is_lazy()) && tensor.is_floating_point()
         : (tensor.is_cpu() || tensor.is_mkldnn()) && tensor.is_floating_point();
   }
 } // namespace

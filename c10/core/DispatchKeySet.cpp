@@ -103,6 +103,15 @@ DispatchKeySet getAutocastRelatedKeySetFromBackend(DispatchKey t) {
     case DispatchKey::CUDA:
     case DispatchKey::XLA:
       return DispatchKeySet(DispatchKey::AutocastCUDA);
+    case DispatchKey::Lazy:
+      {
+        auto ltc_cuda_env = std::getenv("LTC_TS_CUDA");
+        if (ltc_cuda_env != nullptr && (std::strcmp(ltc_cuda_env, "true") == 0 || std::atoi(ltc_cuda_env) != 0)) {
+          return DispatchKeySet(DispatchKey::AutocastCUDA);
+        } else {
+          return DispatchKeySet(DispatchKey::AutocastCPU);
+        }
+      }
     default:
       return DispatchKeySet();
   }
