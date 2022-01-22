@@ -586,6 +586,12 @@ struct TORCH_API TupleTypeFactory<TupleType> {
   static TupleTypePtr fallback(const Type& type);
 };
 
+template <>
+struct TORCH_API TupleTypeFactory<c10::DynamicType> {
+  static DynamicTypePtr create(std::vector<TypePtr> elemTypes);
+  static DynamicTypePtr fallback(const Type&);
+};
+
 struct TORCH_API Tuple : c10::intrusive_ptr_target {
  private:
   TupleElements elements_;
@@ -2252,8 +2258,13 @@ struct IValue::TagType<c10::Type> {
   static TORCH_API c10::TypePtr get(const IValue&);
 };
 
+template <>
+struct IValue::TagType<c10::DynamicType> {
+  static TORCH_API c10::TypePtr get(const IValue&);
+};
+
 template <typename T>
-typename T::Ptr IValue::type() const {
+TypePtr IValue::type() const {
   return IValue::TagType<T>::get(*this);
 }
 

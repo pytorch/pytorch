@@ -3,8 +3,6 @@
 #include <memory>
 #include <type_traits>
 
-#include <ATen/core/class_type.h>
-#include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type_base.h>
 #include <c10/util/Optional.h>
 
@@ -59,6 +57,10 @@ constexpr DynamicTypeBits kDynamicClassTypeBit = DYNAMIC_TYPE_BIT(10);
   _(RRef, DYNAMIC_TYPE_BIT(21), 0)                                           \
   _(Future, DYNAMIC_TYPE_BIT(22), 0)                                         \
   _(Any, 0xffffffff, 1)
+
+#define FORWARD_DECL_TYPE(NAME, _, __) struct NAME ## Type;
+  FORALL_DYNAMIC_TYPES(FORWARD_DECL_TYPE)
+#undef FORWARD_DECL_TYPE
 
 class DynamicType;
 using DynamicTypePtr = std::shared_ptr<DynamicType>;
@@ -218,20 +220,5 @@ C10_NOINLINE DynamicTypePtr makeBaseType(DynamicType::Tag tag);
   }; // namespace c10
 FORALL_DYNAMIC_TYPES(DYNAMIC_TYPE_TAG_VALUE)
 #undef DYNAMIC_TYPE_TAG_VALUE
-
-template <>
-struct IValue::TagType<c10::DynamicType> {
-  static DynamicType::Ptr get(const c10::IValue& v);
-};
-
-namespace ivalue {
-
-template <>
-struct TORCH_API TupleTypeFactory<c10::DynamicType> {
-  static DynamicTypePtr create(std::vector<TypePtr> elemTypes);
-  static DynamicTypePtr fallback(const Type&);
-};
-
-} // namespace ivalue
 
 } // namespace c10

@@ -2,6 +2,7 @@
 
 #include <string>
 
+#include <ATen/core/class_type.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/type_factory.h>

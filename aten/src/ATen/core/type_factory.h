@@ -8,7 +8,11 @@
 
 namespace c10 {
 
-struct TORCH_API DynamicTypeFactory {
+template <typename T>
+struct TORCH_API TypeFactoryBase {};
+
+template <>
+struct TORCH_API TypeFactoryBase<c10::DynamicType> {
   template <typename T, typename... Args>
   static c10::DynamicTypePtr create(TypePtr ty, Args&&... args) {
     return std::make_shared<c10::DynamicType>(
@@ -45,6 +49,8 @@ struct TORCH_API DynamicTypeFactory {
   static const std::unordered_map<std::string, c10::TypePtr>& basePythonTypes();
 };
 
+using DynamicTypeFactory = TypeFactoryBase<c10::DynamicType>;
+
 // Helper functions for constructing DynamicTypes inline.
 template <
     typename T,
@@ -61,7 +67,8 @@ C10_ERASE DynamicTypePtr dynT(Args&&... args) {
   return DynamicTypeFactory::create<T>(std::forward<Args>(args)...);
 }
 
-struct TORCH_API DefaultTypeFactory {
+template <>
+struct TORCH_API TypeFactoryBase<c10::Type> {
   template <typename T, typename... Args>
   static c10::TypePtr create(TypePtr ty, Args&&... args) {
     return T::create(std::move(ty), std::forward<Args>(args)...);
@@ -87,12 +94,16 @@ struct TORCH_API DefaultTypeFactory {
   }
 };
 
-using TypeFactory =
+using DefaultTypeFactory = TypeFactoryBase<c10::Type>;
+
+using PlatformType =
 #ifdef C10_MOBILE
-    DynamicTypeFactory
+    c10::DynamicType
 #else
-    DefaultTypeFactory
+    c10::Type
 #endif
     ;
+
+using TypeFactory = TypeFactoryBase<PlatformType>;
 
 } // namespace c10
