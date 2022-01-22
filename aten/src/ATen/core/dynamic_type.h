@@ -149,6 +149,7 @@ class DynamicType : public SharedType {
   explicit DynamicType(Tag, c10::string_view, Arguments);
 
   TypePtr containedType(size_t) const override;
+  size_t containedTypeSize() const override;
   Tag tag() const {
     return tag_;
   }

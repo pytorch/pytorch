@@ -199,6 +199,11 @@ TypePtr DynamicType::containedType(size_t i) const {
   return arguments_.elems.at(i).ty;
 }
 
+size_t DynamicType::containedTypeSize() const {
+  TORCH_INTERNAL_ASSERT(tag_ != Tag::Class);
+  return arguments_.elems.size();
+}
+
 TypeKind DynamicType::dynamicKind() const {
   switch (tag_) {
 #define CASE_TYPE(T, _, __) \

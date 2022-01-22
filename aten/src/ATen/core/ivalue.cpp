@@ -77,7 +77,6 @@ const std::string ivalue::EnumHolder::unqualifiedClassName() const {
 
 } // namespace ivalue
 
-#ifndef C10_MOBILE
 c10::TypePtr IValue::TagType<c10::Type>::get(const IValue& v) {
   switch (v.tag) {
       case Tag::None:
@@ -132,7 +131,6 @@ c10::TypePtr IValue::TagType<c10::Type>::get(const IValue& v) {
   // switch above is complete but this silences compiler warnings
   TORCH_INTERNAL_ASSERT(false, "unhandled case in IValue::type()");
 }
-#endif
 
 void IValue::visit(const std::function<bool (const IValue &)>& visitor) const {
   if (visitor(*this)) {
@@ -466,7 +464,7 @@ std::ostream& printMaybeAnnotatedList(
     std::ostream& out,
     const IValue& the_list,
     IValueFormatter formatter) {
-  auto list_elem_type = the_list.type()->expectRef<ListType>().getElementType();
+  auto list_elem_type = the_list.type()->containedType(0);
   if (the_list.toListRef().size() == 0 ||
       !elementTypeCanBeInferredFromMembers(list_elem_type)) {
     out << "annotate(" << the_list.type()->annotation_str() << ", ";
