@@ -80,8 +80,9 @@ std::vector<int64_t> expand_param_if_needed(
 std::vector<Shape> compute_shape_arange_out(const at::Scalar & start, const at::Scalar & end, const at::Scalar & step, at::Tensor & out) {
   double size_d;
   // shape inference code copied from RangeFactories.cpp arange_out function
-  // Note: AT_DISPATCH_ALL_TYPES_AND is just a macro that defines the correct scalar_t based on your platform
+  // Note: AT_DISPATCH_ALL_TYPES_AND is just a macro that defines the correct c++ scalar_t type depending on out tensor
   AT_DISPATCH_ALL_TYPES_AND(c10::kBFloat16, out.scalar_type(), "compute_shape_arange_out", [&]() {
+    // Note: acc_type further defines an accumulataion type depending on the scalar_t and whether its on cuda vs cpu.
     using accscalar_t = at::acc_type<scalar_t, false>;
     auto xstart = start.to<accscalar_t>();
     auto xend = end.to<accscalar_t>();
@@ -94,7 +95,6 @@ std::vector<Shape> compute_shape_arange_out(const at::Scalar & start, const at::
     // and the effective output size starts differing on CPU vs GPU because of precision issues, which
     // we dont want.
     // the corner-case we do want to take into account is int64_t, which has higher precision than double
-    double size_d;
     // NOLINTNEXTLINE(bugprone-branch-clone)
     if (std::is_same<scalar_t, int64_t>::value) {
       size_d = std::ceil(static_cast<double>(end.to<accscalar_t>() - start.to<accscalar_t>())
