@@ -831,13 +831,13 @@ std::vector<::c10::ShapeSymbol> Broadcast(const std::vector<::c10::ShapeSymbol> 
   }
 
   if (rank_0 < rank_1) {
-    for (auto idx = rank_min; idx < rank_max; idx++) {
-      auto shape_idx = rank_max - 1 - idx;
+    for (size_t idx = rank_min; idx < rank_max; idx++) {
+      size_t shape_idx = rank_max - 1 - idx;
       final_shape[shape_idx] = input_shape_value_1[shape_idx];
     }
   } else {
-    for (auto idx = rank_min; idx < rank_max; idx++) {
-      auto shape_idx = rank_max - 1 - idx;
+    for (size_t idx = rank_min; idx < rank_max; idx++) {
+      size_t shape_idx = rank_max - 1 - idx;
       final_shape[shape_idx] = input_shape_value_0[shape_idx];
     }
   }
@@ -960,6 +960,11 @@ void ProcessMatMulNode(Node* n) {
     auto input_shape_value_1 = input_shape_1.sizes().value();
     size_t rank_0 = input_shape_value_0.size();
     size_t rank_1 = input_shape_value_1.size();
+    // the matmul supports the rank of either or both inputs to be 1
+    // the behavior is the same as appending a 1 to the input(s), do the matmul and remove the appended 1(s)
+    // e.g., [n,k] X [k] is documented to behave exactly as matrix vector product, which is equivalent to
+    // expanding [k] to [k,1], doing matmul which returns [n,1], and then removing the 1 to get [n]
+    // thus we append the 1(s) and treat it as a matmul, then remove the appended 1(s) in the end
     auto is_rank_0_1 = false;
     if (rank_0 == 1) {
       input_shape_value_0.insert(
@@ -973,10 +978,15 @@ void ProcessMatMulNode(Node* n) {
       rank_1 = 2;
       is_rank_1_1 = true;
     }
+    // Per https://pytorch.org/docs/stable/generated/torch.matmul.html
+    // the broadcasting logic only applies to the batch dimensions, and not the matrix dimensions
+    // so we remove the matrix dimensions which are the last 2 dimensions before broadcasting
     auto final_shape = Broadcast(
       std::vector<::c10::ShapeSymbol>(input_shape_value_0.begin(), input_shape_value_0.end() - 2),
       std::vector<::c10::ShapeSymbol>(input_shape_value_1.begin(), input_shape_value_1.end() - 2)
     );
+    // add the last 2 dimensions back, unless they do not exist in the first place and inserted by this function
+    // Then apply [n,k]X[k,m]=[n,m], where n=input_shape_value_0[rank_0 - 2], m=input_shape_value_1[rank_1 - 1]
     if (!is_rank_0_1) {
       final_shape.emplace_back(input_shape_value_0[rank_0 - 2]);
     }
