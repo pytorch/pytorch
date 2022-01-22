@@ -2,7 +2,7 @@
 
 #include <torch/csrc/python_headers.h>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <c10/util/irange.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
