@@ -2025,24 +2025,6 @@ Tensor _unsafe_view(const Tensor& self, IntArrayRef size) {
   return self.view(size);
 }
 
-Tensor unsqueeze_qtensor(const Tensor& self, int64_t dim) {
-  dim = maybe_wrap_dim(dim, self.dim() + 1);
-  auto g = inferUnsqueezeGeometry(self, dim);
-  auto quantizer = get_qtensorimpl(self)->quantizer();
-  if (quantizer->qscheme() == QScheme::PER_CHANNEL_AFFINE) {
-    const auto* per_channel_quantizer = static_cast<at::PerChannelAffineQuantizer*>(quantizer.get());
-    auto axis = per_channel_quantizer->axis();
-    if (axis >= dim) {
-      axis += 1;
-    }
-    quantizer = make_per_channel_affine_quantizer(per_channel_quantizer->scales(),
-                                                  per_channel_quantizer->zero_points(),
-                                                  axis,
-                                                  quantizer->scalar_type());
-  }
-  return make_qtensor(self, g.sizes, g.strides, quantizer);
-}
-
 Tensor unsqueeze(const Tensor& self, int64_t dim) {
   dim = maybe_wrap_dim(dim, self.dim() + 1);
   auto g = inferUnsqueezeGeometry(self, dim);
@@ -2076,7 +2058,20 @@ Tensor unsqueeze_sparse(Tensor const &self, int64_t dim) {
 
 Tensor unsqueeze_quantized(const Tensor& self, int64_t dim) {
   dim = maybe_wrap_dim(dim, self.dim() + 1);
-  return unsqueeze_qtensor(self, dim);
+  auto g = inferUnsqueezeGeometry(self, dim);
+  auto quantizer = get_qtensorimpl(self)->quantizer();
+  if (quantizer->qscheme() == QScheme::PER_CHANNEL_AFFINE) {
+    const auto* per_channel_quantizer = static_cast<at::PerChannelAffineQuantizer*>(quantizer.get());
+    auto axis = per_channel_quantizer->axis();
+    if (axis >= dim) {
+      axis += 1;
+    }
+    quantizer = make_per_channel_affine_quantizer(per_channel_quantizer->scales(),
+                                                  per_channel_quantizer->zero_points(),
+                                                  axis,
+                                                  quantizer->scalar_type());
+  }
+  return make_qtensor(self, g.sizes, g.strides, quantizer);
 }
 
 Tensor & unsqueeze_(Tensor& self, int64_t dim) {
