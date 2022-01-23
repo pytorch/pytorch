@@ -569,11 +569,6 @@ void launch_gather_topk_kernel(
   auto input = self.contiguous();
   // static_cast is required to ensure that the correct type (INDEX_T)
   // is provided to the kernel for the arguments.
-
-  // const char *name = "USE_MB";
-  // auto* value = std::getenv(name);
-  // int use_mb = std::stoi(value);
-  // bool should_use_multiblock_per_slice = use_mb;  // TODO logic to disbatch based on heuristics result
 #define RUN_K(INDEX_T, DIM, LAUNCH_FUNCTION_NAME)                       \
   LAUNCH_FUNCTION_NAME<scalar_t, INDEX_T, DIM>(                         \
       inputInfo,                                                        \
