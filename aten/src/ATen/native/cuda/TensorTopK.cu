@@ -553,7 +553,7 @@ bool should_use_multiblock(int64_t num_slices, int64_t slice_size) {
 }
 
 void launch_gather_topk_kernel(
-    const TensorBase& self, int64_t k, int64_t dim, bool largest, bool sorted,
+    const TensorBase& self, int64_t k, int64_t dim, bool largest,
     const TensorBase& values, const TensorBase& indices) {
   int numDims = self.dim();
   numDims = numDims == 0 ? 1 : numDims;
