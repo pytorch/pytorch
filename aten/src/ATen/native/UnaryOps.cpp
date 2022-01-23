@@ -580,6 +580,11 @@ Tensor& arctanh_out(const Tensor& self, Tensor& result) { return at::atanh_out(r
 Tensor arctanh(const Tensor& self) { return self.atanh(); }
 Tensor& arctanh_(Tensor& self) { return self.atanh_(); }
 
+// bitwise_invert, alias for bitwise_not
+Tensor& bitwise_invert_out(const Tensor& self, Tensor& result) { return at::bitwise_not_out(result, self); }
+Tensor bitwise_invert(const Tensor& self) { return self.bitwise_not(); }
+Tensor& bitwise_invert_(Tensor& self) { return self.bitwise_not_(); }
+
 Tensor& square_out(const Tensor& self, Tensor& result) { return at::pow_out(result, self, 2); }
 Tensor square(const Tensor& self) { return at::pow(self, 2); }
 Tensor& square_(Tensor& self) { return self.pow_(2); }

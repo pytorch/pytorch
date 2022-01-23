@@ -944,6 +944,15 @@
   dispatch:
     CPU, CUDA: bitwise_not_out
 
+# bitwise_invert, alias for bitwise_not
+- func: bitwise_invert(Tensor self) -> Tensor
+  variants: function, method
+
+- func: bitwise_invert_(Tensor(a!) self) -> Tensor(a!)
+  variants: method
+
+- func: bitwise_invert.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+
 - func: copysign.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   structured: True

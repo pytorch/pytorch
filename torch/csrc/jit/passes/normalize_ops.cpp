@@ -104,6 +104,7 @@ const std::unordered_map<Symbol, Symbol>& getOperatorAliasMap() {
       {aten::arcsinh_, aten::asinh_},
       {aten::arctanh, aten::atanh},
       {aten::arctanh_, aten::atanh_},
+      {aten::bitwise_invert, aten::bitwise_not},
       {aten::fix, aten::trunc},
       {aten::fix_, aten::trunc_},
       {aten::negative, aten::neg},

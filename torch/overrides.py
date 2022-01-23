@@ -360,6 +360,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.binomial: lambda count, prob, generator=None: -1,
         torch.bitwise_and: lambda input, other, out=None: -1,
         torch.bitwise_not: lambda input, out=None: -1,
+        torch.bitwise_invert: lambda input, out=None: -1,  # alias for torch.bitwise_not
         torch.bitwise_or: lambda input, other, out=None: -1,
         torch.bitwise_xor: lambda input, other, out=None: -1,
         torch.bitwise_left_shift: lambda input, other, out=None: -1,

@@ -8819,6 +8819,7 @@ op_db: List[OpInfo] = [
                     )),
     UnaryUfuncInfo('bitwise_not',
                    ref=np.bitwise_not,
+                   aliases=('bitwise_invert',),
                    dtypes=integral_types_and(torch.bool),
                    supports_autograd=False),
     BinaryUfuncInfo('bitwise_left_shift',
