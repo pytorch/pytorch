@@ -297,6 +297,7 @@ __global__ void radixFindKthValues(
     } scan_storage;
   };
   __shared__ TempStorage temp_storage;
+  __shared__ int s_block_counts[RADIX_DIGITS]; // only used when blk_per_slice == 1
 
   // reset temp_storage
   for (int i = 0; i < COUNTER_LANES; ++i) {
@@ -334,7 +335,11 @@ __global__ void radixFindKthValues(
       for (int j = 0, idx = tidx; j < BLOCK_THREADS; ++j, idx = (idx + 1) % BLOCK_THREADS) { // every thread access different bank
         digit_count += temp_storage.thread_counters[digit / PACKING_RATIO][idx][digit % PACKING_RATIO];
       }
-      counts[block_idx * RADIX_DIGITS + digit] = digit_count;
+      if (blocks_per_slice == 1) {
+        s_block_counts[digit] = digit_count;
+      } else {
+        counts[block_idx * RADIX_DIGITS + digit] = digit_count;
+      }
     }
   }
 
@@ -345,8 +350,12 @@ __global__ void radixFindKthValues(
   __shared__ bool s_desired_found;
 
   if (tidx == 0) {
-    int blocks_finished_old = atomicAdd(&semaphores[slice_idx], 1);
-    s_is_last_block_done = (blocks_finished_old == blocks_per_slice - 1);
+    if (blocks_per_slice == 1) {
+      s_is_last_block_done = true;
+    } else {
+      int blocks_finished_old = atomicAdd(&semaphores[slice_idx], 1);
+      s_is_last_block_done = (blocks_finished_old == blocks_per_slice - 1);
+    }
     s_desired_found = false;
   }
 
@@ -361,7 +370,11 @@ __global__ void radixFindKthValues(
       IndexType digit_count = 0;
       IndexType& digit_count_cumsum = digit_count;
       for (int blk = 0; blk < blocks_per_slice; ++blk) {
-        digit_count += counts[(slice_idx * blocks_per_slice + blk) * RADIX_DIGITS + digit];
+        if (blocks_per_slice == 1) {
+          digit_count += s_block_counts[digit];
+        } else {
+          digit_count += counts[(slice_idx * blocks_per_slice + blk) * RADIX_DIGITS + digit];
+        }
       }
 
       // Collectively compute the block-wide exclusive prefix sum
@@ -432,7 +445,7 @@ void launch(
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   reserved_shared_per_block = prop->reservedSharedMemPerBlock;
 #endif
-  constexpr int static_shared_per_block = RADIX_DIGITS * BLOCK_THREADS;
+  constexpr int static_shared_per_block = RADIX_DIGITS * BLOCK_THREADS + RADIX_DIGITS * sizeof(int);
   int shared_per_block = static_shared_per_block + reserved_shared_per_block;
   int blocks_per_mp = std::min(shared_per_mp / shared_per_block, prop->maxBlocksPerMultiProcessor);
   int items_per_thread = at::ceil_div((int64_t)(inputSliceSize * numInputSlices), (int64_t)(mpc * blocks_per_mp * BLOCK_THREADS));
@@ -540,6 +553,11 @@ void launch(
 
 } // namespace at::native::mbtopk
 
+bool should_use_multiblock(int64_t num_slices, int64_t slice_size) {
+  // This heuristics is based on the experiment in https://github.com/pytorch/pytorch/pull/71081
+  return (num_slices < 1000 && slice_size >= 20000) || (num_slices >= 1000 && slice_size >= 800);
+}
+
 void launch_gather_topk_kernel(
     const TensorBase& self, int64_t k, int64_t dim, bool largest, bool sorted,
     const TensorBase& values, const TensorBase& indices) {
@@ -552,7 +570,10 @@ void launch_gather_topk_kernel(
   // static_cast is required to ensure that the correct type (INDEX_T)
   // is provided to the kernel for the arguments.
 
-  bool should_use_multiblock_per_slice = true;  // TODO logic to disbatch based on heuristics result
+  // const char *name = "USE_MB";
+  // auto* value = std::getenv(name);
+  // int use_mb = std::stoi(value);
+  // bool should_use_multiblock_per_slice = use_mb;  // TODO logic to disbatch based on heuristics result
 #define RUN_K(INDEX_T, DIM, LAUNCH_FUNCTION_NAME)                       \
   LAUNCH_FUNCTION_NAME<scalar_t, INDEX_T, DIM>(                         \
       inputInfo,                                                        \
@@ -569,11 +590,11 @@ void launch_gather_topk_kernel(
       indicesInfo,                                                      \
       static_cast<INDEX_T>(indicesInfo.strides[collapseIndicesDim]));
 
-#define RUN_MB(INDEX_T, DIM)                    \
-  if (should_use_multiblock_per_slice) {        \
-    RUN_K(INDEX_T, DIM, mbtopk::launch);        \
-  } else {                                      \
-    RUN_K(INDEX_T, DIM, sbtopk::launch);        \
+#define RUN_MB(INDEX_T, DIM)                                            \
+  if (should_use_multiblock(inputSlices, sliceSize)) {                  \
+    RUN_K(INDEX_T, DIM, mbtopk::launch);                                \
+  } else {                                                              \
+    RUN_K(INDEX_T, DIM, sbtopk::launch);                                \
   }
 
 #define RUN_DIM(INDEX_T)                        \
