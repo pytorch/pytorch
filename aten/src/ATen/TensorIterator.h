@@ -58,7 +58,7 @@ using NameVector = SmallVector<Dimname, kDimVectorStaticSize>;
 // have to be added first via TensorIteratorConfig::add_owned_output(at::Tensor).
 // After adding all outputs, the inputs can be added via
 // TensorIteratorConfig::add_owned_input(at::Tensor).
-// Adding another output after inputs have been added will rise an exception.
+// Adding another output after inputs have been added will raise an exception.
 //
 // Note [Common Dtype Computation]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

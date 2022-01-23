@@ -47,6 +47,7 @@
 #include "torch/csrc/lazy/core/shape.h"
 #include <ATen/native/ConvUtils.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/WrapDimUtils.h>
 #include "aten/src/ATen/native/ReduceOpsUtils.h"
 #include "lazy_tensor_core/csrc/ts_backend/LazyShapeInference.h"
 #include "torch/csrc/api/include/torch/enum.h"
@@ -443,6 +444,89 @@ std::vector<Shape> compute_shape_nll_loss2d_backward(
     int64_t reduction, int64_t ignore_index, const at::Tensor& total_weight) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
+
+std::vector<Shape> compute_shape_grid_sampler_2d(const at::Tensor & input, const at::Tensor & grid, int64_t interpolation_mode, int64_t padding_mode, bool align_corners) {
+  // from `aten/src/ATen/native/cpu/GridSamplerKernel.cpp
+  int64_t N = input.size(0);
+  int64_t C = input.size(1);
+  int64_t H = grid.size(1);
+  int64_t W = grid.size(2);
+  return {Shape(input.scalar_type(), {N, C, H, W})};
+}
+
+std::vector<Shape> compute_shape_grid_sampler_2d_backward(const at::Tensor & grad_output, const at::Tensor & input, const at::Tensor & grid, int64_t interpolation_mode, int64_t padding_mode, bool align_corners, ::std::array<bool,2> output_mask) {
+  // from `aten/src/ATen/native/cpu/GridSamplerKernel.cpp
+  auto grad_input_shape = Shape(input.scalar_type(), input.sizes().vec());
+  auto grad_grid_shape = Shape(grid.scalar_type(), grid.sizes().vec());
+  return {grad_input_shape, grad_grid_shape};
+}
+
+std::vector<Shape> compute_shape_flip(const at::Tensor & self, at::IntArrayRef dims) {
+  return {Shape(self.scalar_type(), self.sizes().vec())};
+}
+
+std::vector<Shape> compute_shape__adaptive_avg_pool2d(const at::Tensor & self, at::IntArrayRef output_size) {
+  // Checks based on `aten/src/ATen/native/AdaptiveAveragePooling.cpp`
+  // and on `aten/src/ATen/native/cpu/AdaptiveAvgPoolKernel.cpp`
+  TORCH_CHECK(output_size.size() == 2, "adaptive_avg_pool2d: output_size must be 2");
+  TORCH_CHECK(
+      (output_size[0] >= 0 && output_size[1] >= 0),
+      "adaptive_avg_pool2d: elements of output_size must be greater than or equal to 0 ",
+      "but received {", output_size[0], ", ", output_size[1], "}");
+    int64_t ndim = self.ndimension();
+    for (const auto i : c10::irange(1, ndim)) {
+      TORCH_CHECK(self.size(i) > 0,
+        "adaptive_avg_pool2d(): Expected self to have non-zero size for non-batch dimensions, "
+        "but Tensor has sizes ", self.sizes(), " with dimension ", i, " being "
+        "empty");
+    }
+    TORCH_CHECK((ndim == 3 || ndim == 4),
+      "adaptive_avg_pool2d(): Expected 3D or 4D tensor, but got ", self.sizes());
+
+  int64_t channels  = self.size(-3);
+  int64_t output_height = output_size[0];
+  int64_t output_width = output_size[1];
+
+  if (ndim == 3) {
+    return {Shape(self.scalar_type(), {channels, output_height, output_width})};
+  } else {
+    int64_t nbatch = self.size(0);
+    return {Shape(self.scalar_type(), {nbatch, channels, output_height, output_width})};
+  }
+}
+
+std::vector<Shape> compute_shape__adaptive_avg_pool2d_backward(const at::Tensor & grad_output, const at::Tensor & self) {
+    // Checks based on `aten/src/ATen/native/AdaptiveAveragePooling.cpp`
+    int64_t ndim = grad_output.ndimension();
+
+    for (const auto i : c10::irange(1, ndim)) {
+      TORCH_CHECK(grad_output.size(i) > 0,
+        "adaptive_avg_pool2d_backward(): Expected grad_output to have non-zero size for non-batch dimensions, "
+        "but grad_output has sizes ", grad_output.sizes(), " with dimension ", i, " being "
+        "empty");
+    }
+
+    TORCH_CHECK((ndim == 3 || ndim == 4),
+      "adaptive_avg_pool2d_backward(): Expected 3D or 4D tensor, but got ", self.sizes());
+    TORCH_CHECK(self.dtype() == grad_output.dtype(),
+      "expected dtype ", self.dtype(), " for `grad_output` but got dtype ", grad_output.dtype());
+
+    return {Shape(self.scalar_type(), self.sizes().vec())};
+}
+
+std::vector<Shape> compute_shape_glu_backward(const at::Tensor & grad_output, const at::Tensor & self, int64_t dim) {
+  return {Shape(self.scalar_type(), self.sizes().vec())};
+}
+
+std::vector<Shape> compute_shape_l1_loss_backward(const at::Tensor & grad_output, const at::Tensor & self, const at::Tensor & target, int64_t reduction) {
+  TORCH_INTERNAL_ASSERT(grad_output.scalar_type() == self.dtype());
+  return {Shape(self.scalar_type(), self.sizes().vec())};
+}
+
+std::vector<Shape> compute_shape_clamp_min(const at::Tensor & self, const at::Scalar & min) {
+  return {Shape(self.scalar_type(), self.sizes().vec())};
+}
+
 
 } // namespace ops
 } // namespace ir
