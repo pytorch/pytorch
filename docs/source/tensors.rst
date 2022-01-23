@@ -258,6 +258,8 @@ Tensor class reference
     Tensor.bincount
     Tensor.bitwise_not
     Tensor.bitwise_not_
+    Tensor.bitwise_invert
+    Tensor.bitwise_invert_
     Tensor.bitwise_and
     Tensor.bitwise_and_
     Tensor.bitwise_or

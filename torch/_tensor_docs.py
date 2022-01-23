@@ -664,6 +664,20 @@ bitwise_not_() -> Tensor
 In-place version of :meth:`~Tensor.bitwise_not`
 """)
 
+add_docstr_all('bitwise_invert',
+               r"""
+bitwise_invert() -> Tensor
+
+See :func:`torch.bitwise_invert`
+""")
+
+add_docstr_all('bitwise_invert_',
+               r"""
+bitwise_invert_() -> Tensor
+
+In-place version of :meth:`~Tensor.bitwise_invert`
+""")
+
 add_docstr_all('bitwise_and',
                r"""
 bitwise_and() -> Tensor

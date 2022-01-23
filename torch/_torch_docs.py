@@ -1248,6 +1248,13 @@ Example:
     tensor([ 0,  1, -4], dtype=torch.int8)
 """.format(**common_args))
 
+add_docstr(torch.bitwise_invert,
+           r"""
+bitwise_invert(input, *, out=None) -> Tensor
+
+Alias of :func:`torch.bitwise_not`.
+""")
+
 add_docstr(torch.bmm,
            r"""
 bmm(input, mat2, *, out=None) -> Tensor
