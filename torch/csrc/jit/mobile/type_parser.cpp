@@ -6,7 +6,6 @@
 #include <ATen/core/type_factory.h>
 #include <c10/util/string_view.h>
 #include <torch/csrc/jit/frontend/parser_constants.h>
-#include <torch/csrc/jit/mobile/runtime_compatibility.h>
 #include <torch/custom_class.h>
 
 using torch::jit::valid_single_char_tokens;
@@ -151,6 +150,12 @@ TypePtr TypeParser::parse() {
       // other class starts with __torch__ following by custom names
       return parseCustomType();
     }
+  } else if (token == "Union") {
+    // TODO Union types are not supported on embedded runtime, and we need to
+    // generate compiler errors for users scripting UnionTypes. Right now
+    // for preserving backward compatibility we have to return a nullptr since
+    // it does not get involved in type reflection.
+    return nullptr;
   } else {
     TORCH_CHECK(
         false,
