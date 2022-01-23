@@ -55,7 +55,7 @@ jobs:
     steps:
       - name: print labels
         run: echo "${PR_LABELS}"
-      !{{ common.checkout_pytorch("recursive") }}
+      !{{ common.checkout() }}
       !{{ common.setup_miniconda("3.8") }}
       - name: Install macOS homebrew dependencies
         run: |
@@ -125,7 +125,7 @@ jobs:
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
     steps:
-      !{{ common.checkout_pytorch("false") }}
+      !{{ common.checkout(submodules="false") }}
       - uses: actions/download-artifact@v2
         name: Download PyTorch Build Artifacts from GHA
         with:
