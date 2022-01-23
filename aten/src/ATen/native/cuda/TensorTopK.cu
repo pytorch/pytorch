@@ -40,13 +40,11 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<T, IndexType> input,
                            IndexType inputWithinSliceStride,
 
                            at::cuda::detail::TensorInfo<T, IndexType> topK,
-                           IndexType numTopKSlices,
                            IndexType topKWithinSliceStride,
 
                            at::cuda::detail::TensorInfo<int64_t, IndexType> indices,
                            IndexType indicesWithinSliceStride,
                            T* kthValues) {
-  (void)numTopKSlices; // Suppress unused variable warning
   // Indices are limited to integer fp precision, so counts can fit in
   // int32, regardless of IndexType
 #if defined(USE_ROCM)
@@ -184,7 +182,6 @@ void launch(
     IndexType inputWithinSliceStride,
 
     at::cuda::detail::TensorInfo<T, IndexType> topK,
-    IndexType numTopKSlices, // TODO never used
     IndexType topKWithinSliceStride,
 
     at::cuda::detail::TensorInfo<int64_t, IndexType> indices,
@@ -202,7 +199,6 @@ void launch(
         numInputSlices,
         inputWithinSliceStride,
         topK,
-        numTopKSlices,
         topKWithinSliceStride,
         indices,
         indicesWithinSliceStride,
@@ -431,7 +427,6 @@ void launch(
     IndexType inputWithinSliceStride,
 
     at::cuda::detail::TensorInfo<T, IndexType> topK,
-    IndexType numTopKSlices, // TODO never used
     IndexType topKWithinSliceStride,
 
     at::cuda::detail::TensorInfo<int64_t, IndexType> indices,
@@ -542,7 +537,6 @@ void launch(
             numInputSlices,
             inputWithinSliceStride,
             topK,
-            numTopKSlices,
             topKWithinSliceStride,
             indices,
             indicesWithinSliceStride,
@@ -575,18 +569,17 @@ void launch_gather_topk_kernel(
       static_cast<INDEX_T>(sliceSize),                                  \
       static_cast<INDEX_T>(k),                                          \
       largest,                                                          \
-      static_cast<INDEX_T>(inputSlices),                                \
+      static_cast<INDEX_T>(numInputSlices),                             \
       /* The actual dimension that the k-selection is running in */     \
       /* may have changed from collapseDims() */                        \
       static_cast<INDEX_T>(inputInfo.strides[collapseInputDim]),        \
       topKInfo,                                                         \
-      static_cast<INDEX_T>(topKSlices),                                 \
       static_cast<INDEX_T>(topKInfo.strides[collapseTopKDim]),          \
       indicesInfo,                                                      \
       static_cast<INDEX_T>(indicesInfo.strides[collapseIndicesDim]));
 
 #define RUN_MB(INDEX_T, DIM)                                            \
-  if (should_use_multiblock(inputSlices, sliceSize)) {                  \
+  if (should_use_multiblock(numInputSlices, sliceSize)) {               \
     RUN_K(INDEX_T, DIM, mbtopk::launch);                                \
   } else {                                                              \
     RUN_K(INDEX_T, DIM, sbtopk::launch);                                \
@@ -638,13 +631,9 @@ void launch_gather_topk_kernel(
     /* restore stride in case it was collapsed */                         \
     topKInfo.strides[collapseTopKDim] = strideTopK;                       \
     indicesInfo.strides[collapseIndicesDim] = strideIndices;              \
-    int64_t inputSlices = 1;                                              \
+    int64_t numInputSlices = 1;                                           \
     for (int i = 0; i < inputInfo.dims; ++i) {                            \
-      inputSlices *= inputInfo.sizes[i];                                  \
-    }                                                                     \
-    int64_t topKSlices = 1;                                               \
-    for (int i = 0; i < topKInfo.dims; ++i) {                             \
-      topKSlices *= topKInfo.sizes[i];                                    \
+      numInputSlices *= inputInfo.sizes[i];                               \
     }                                                                     \
                                                                           \
     /* This is used as a template parameter to calculate indices. */      \
