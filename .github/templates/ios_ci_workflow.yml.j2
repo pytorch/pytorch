@@ -53,7 +53,7 @@ jobs:
     steps:
       - name: print labels
         run: echo "${PR_LABELS}"
-      !{{ common.checkout_pytorch("recursive") }}
+      !{{ common.checkout() }}
       !{{ common.setup_miniconda("3.8") }}
       - name: Install ios / conda Dependencies
         run: |
