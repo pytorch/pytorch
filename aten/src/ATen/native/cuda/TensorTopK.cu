@@ -216,8 +216,6 @@ namespace mbtopk {  // multi_block_topk
 constexpr int BLOCK_THREADS = 128;
 // in principle, we could write at most 255 into digit counter (in shared mem) with unsigned char type
 // TODO tune this, maybe smaller
-constexpr int MAX_ITEMS_PER_THREAD = 64;
-constexpr int ITEMS_PER_BLOCK = BLOCK_THREADS * MAX_ITEMS_PER_THREAD;
 
 // Over what radix we are selecting values
 constexpr int RADIX_BITS = 6; // digits are base-(2 ^ RADIX_BITS)
@@ -260,6 +258,7 @@ __global__ void radixFindKthValues(
     IndexType withinSliceStride,
 
     int current_bit,
+    int items_per_thread,
     IndexType blocks_per_slice,
     Bitwise desiredMask,
 
@@ -273,6 +272,7 @@ __global__ void radixFindKthValues(
   constexpr int PACKING_RATIO = sizeof(int) / sizeof(unsigned char);
   constexpr int COUNTER_LANES = RADIX_DIGITS / PACKING_RATIO;
 
+  int items_per_block = items_per_thread * BLOCK_THREADS;
   int tidx = threadIdx.x;
   IndexType block_idx = getLinearBlockId<IndexType>();
   IndexType slice_idx = block_idx / blocks_per_slice;
@@ -304,14 +304,14 @@ __global__ void radixFindKthValues(
   }
   __syncthreads();
 
-  int items_per_thread = (blk_idx_in_slice + 1 < blocks_per_slice)
-      ? MAX_ITEMS_PER_THREAD
-      : at::ceil_div((int64_t)(inputSliceSize - blk_idx_in_slice * ITEMS_PER_BLOCK), (int64_t)BLOCK_THREADS);
+  items_per_thread = (blk_idx_in_slice + 1 < blocks_per_slice)
+      ? items_per_thread
+      : at::ceil_div((int64_t)(inputSliceSize - blk_idx_in_slice * items_per_block), (int64_t)BLOCK_THREADS);
 
   // collect counts and store in shared memorey for each thread
   for (int i = 0; i < items_per_thread; ++i) {
     // Find the start offset for our slice
-    IndexType idx = tidx + i * BLOCK_THREADS + blk_idx_in_slice * ITEMS_PER_BLOCK;
+    IndexType idx = tidx + i * BLOCK_THREADS + blk_idx_in_slice * items_per_block;
     if (idx < inputSliceSize) {
       idx *= withinSliceStride;
       Bitwise val = TopKTypeConfig<T>::convert(doLdg(&data[idx]));
@@ -423,8 +423,24 @@ void launch(
 
     at::cuda::detail::TensorInfo<int64_t, IndexType> indices,
     IndexType indicesWithinSliceStride) {
+
+  // configure items_per_thread
+  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+  int mpc = prop->multiProcessorCount;
+  int shared_per_mp = prop->sharedMemPerMultiprocessor;
+  int reserved_shared_per_block = 0;
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+  reserved_shared_per_block = prop->reservedSharedMemPerBlock;
+#endif
+  constexpr int static_shared_per_block = RADIX_DIGITS * BLOCK_THREADS;
+  int shared_per_block = static_shared_per_block + reserved_shared_per_block;
+  int blocks_per_mp = std::min(shared_per_mp / shared_per_block, prop->maxBlocksPerMultiProcessor);
+  int items_per_thread = at::ceil_div((int64_t)(inputSliceSize * numInputSlices), (int64_t)(mpc * blocks_per_mp * BLOCK_THREADS));
+  items_per_thread = std::max(4, std::min(items_per_thread, 64)); // clamp to (4, 64)
+  int items_per_block = items_per_thread * BLOCK_THREADS;
+
   using Bitwise = typename TopKTypeConfig<T>::RadixType;
-  int64_t blocks_per_slice = at::ceil_div((int64_t)inputSliceSize, (int64_t)ITEMS_PER_BLOCK);
+  int64_t blocks_per_slice = at::ceil_div((int64_t)inputSliceSize, (int64_t)items_per_block);
   int64_t num_blocks = numInputSlices * blocks_per_slice;
 
   // temporary storage
@@ -465,6 +481,7 @@ void launch(
           numInputSlices,                                      \
           inputWithinSliceStride,                              \
           current_bit,                                         \
+          items_per_thread,                                     \
           blocks_per_slice,                                    \
           desiredMask,                                         \
           semaphores,                                          \
