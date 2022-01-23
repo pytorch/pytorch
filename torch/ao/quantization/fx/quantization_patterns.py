@@ -230,6 +230,7 @@ default_op_supported_dtypes = {
     torch.nn.SiLU: fp16_dtypes,
     torch.nn.Mish: fp16_dtypes,
     torch.nn.GELU: int8_dtypes,
+    torch.nn.Dropout: int8_dtypes,
     torch.nn.Softmax: int8_dtypes,
     torch.nn.functional.elu: int8_dtypes,
     torch.nn.functional.hardswish: int8_dtypes,
@@ -240,6 +241,7 @@ default_op_supported_dtypes = {
     torch.nn.functional.mish: fp16_dtypes,
     torch.nn.functional.gelu: int8_dtypes,
     torch.nn.functional.softmax: int8_dtypes,
+    torch.nn.functional.dropout: int8_dtypes,
     torch.sum: fp16_dtypes,
 }
 
@@ -1278,6 +1280,7 @@ class RNNDynamicQuantizeHandler(QuantizeHandler):
 ARGS_TO_SKIP = {
     torch._ops.ops.quantized.hardswish: ['inplace'],
     torch._ops.ops.quantized.elu: ['inplace'],
+    torch._ops.ops.quantized.dropout: ['inplace'],
     torch._ops.ops.quantized.instance_norm:
     ['running_mean', 'running_var', 'use_input_stats', 'momentum'],
 }
@@ -1292,6 +1295,7 @@ ARGS_TO_SKIP = {
 @register_quant_pattern(torch.nn.LayerNorm)
 @register_quant_pattern(torch.nn.SiLU)
 @register_quant_pattern(torch.nn.Mish)
+@register_quant_pattern(torch.nn.Dropout)
 # we currently only support reference patterns for these ops so they have been removed
 # until they receive a proper fp16 kernel. To use the reference pattern, use a custom qconfig
 # @register_quant_pattern(torch.nn.GELU)
@@ -1303,6 +1307,7 @@ ARGS_TO_SKIP = {
 @register_quant_pattern(torch.nn.functional.leaky_relu)
 @register_quant_pattern(torch.nn.functional.silu)
 @register_quant_pattern(torch.nn.functional.mish)
+@register_quant_pattern(torch.nn.functional.dropout)
 # we currently only support reference patterns for these ops so they have been removed
 # until they receive a proper fp16 kernel. To use the reference pattern, use a custom qconfig
 # @register_quant_pattern(torch.nn.functional.gelu)
@@ -1500,7 +1505,6 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
 @register_quant_pattern(torch.nn.AvgPool1d)
 @register_quant_pattern(torch.nn.AvgPool2d)
 @register_quant_pattern(torch.nn.AvgPool3d)
-@register_quant_pattern(torch.nn.Dropout)
 @register_quant_pattern(torch.nn.Hardtanh)
 @register_quant_pattern(torch.nn.MaxPool1d)
 @register_quant_pattern(torch.nn.MaxPool2d)
@@ -1510,7 +1514,6 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
 @register_quant_pattern(torch.adaptive_avg_pool1d)
 @register_quant_pattern(torch.nn.functional.adaptive_avg_pool2d)
 @register_quant_pattern(torch.nn.functional.adaptive_avg_pool3d)
-@register_quant_pattern(torch.nn.functional.dropout)
 @register_quant_pattern(torch.nn.functional.hardtanh)
 @register_quant_pattern(torch.nn.functional.hardtanh_)
 @register_quant_pattern(torch.nn.functional.interpolate)
