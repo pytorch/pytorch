@@ -1024,7 +1024,7 @@ Tensor masked_softmax_cuda(const Tensor& input_, int64_t dim, const Tensor& mask
     }
     return output;
 }
-	
+
 Tensor masked_softmax_backward_cuda(
     const Tensor& grad,
     const Tensor& output,

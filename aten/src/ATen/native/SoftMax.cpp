@@ -395,7 +395,7 @@ TORCH_IMPL_FUNC(log_softmax_backward_cpu_out) (
           "log_softmax_backward",
           [&] {
             host_softmax_backward<
-                scalar_t, 
+                scalar_t,
                 true /* LogSoftMax */,
                 false /* MaskedSoftMax */>(grad_input, grad_, output_, dim_);
           });
@@ -481,7 +481,7 @@ Tensor masked_softmax_cpu(const Tensor& input, int64_t dim, const Tensor& mask) 
   TORCH_CHECK(
       mask.scalar_type() == ScalarType::Bool,
       "Mask should be a boolean tensor");
-  
+
   auto input_ = input.contiguous();
   int64_t dim_ = maybe_wrap_dim(dim, input_.dim());
 
@@ -524,7 +524,7 @@ Tensor masked_softmax_backward_cpu(
   AT_DISPATCH_FLOATING_TYPES_AND(
       at::ScalarType::BFloat16, grad.scalar_type(), "masked_softmax_backward", [&] {
         host_softmax_backward<
-            scalar_t, 
+            scalar_t,
             false /* LogSoftMax */,
             true /* MaskedSoftmax */>(grad_input, grad_, output_, dim_, mask_.data_ptr<bool>());
       });

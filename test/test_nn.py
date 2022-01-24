@@ -15988,6 +15988,7 @@ class TestNNDeviceType(NNTestCase):
             pt_res = slow_masked_softmax(input, mask)
             self.assertEqual(pt_res, native_res, exact_dtype=True)
 
+    @onlyCPU
     def test_masked_softmax_grad(self, device):
         sizes = [(1, 1, 32), (3, 16, 310), (12, 4, 1024), (4, 2, 1200)]
         for (B, num_heads, L) in sizes:
