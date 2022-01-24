@@ -533,7 +533,8 @@ class AutoQuantizationState(torch.nn.Module):
         """
         if not hasattr(output, '_qtensor_info'):
             # TODO: use actual dtype instead of defaulting to float
-            output._qtensor_info = QTensorInfo(qtensor_id[0], torch.float)  # type: ignore[attr-defined]
+            output._qtensor_info = QTensorInfo(  # type: ignore[attr-defined]
+                qtensor_id[0], output.dtype, torch.float)
             qtensor_id[0] += 1
         self.output_qtensor_infos.append(output._qtensor_info)  # type: ignore[attr-defined]
         # TODO(future PR): add an observer if needed
@@ -650,7 +651,8 @@ class AutoQuantizationState(torch.nn.Module):
         # If a tensor does not have an ID, add it. This allows
         # us to track inputs shared by multiple quantizeable modules.
         if not hasattr(arg, '_qtensor_info'):
-            arg._qtensor_info = QTensorInfo(qtensor_id[0], arg.dtype)  # type: ignore[attr-defined]
+            arg._qtensor_info = QTensorInfo(  # type: ignore[attr-defined]
+                qtensor_id[0], arg.dtype, arg.dtype)
             qtensor_id[0] += 1
         arg_tensor_infos.append(arg._qtensor_info)  # type: ignore[attr-defined]
 
@@ -849,7 +851,8 @@ class AutoQuantizationState(torch.nn.Module):
                 dtype_to_use = args[0]._qtensor_info.inf_dtype
 
         def _add_output_qtensor_info(output):
-            output._qtensor_info = QTensorInfo(qtensor_id[0], dtype_to_use)
+            output._qtensor_info = QTensorInfo(
+                qtensor_id[0], output.dtype, dtype_to_use)  # type: ignore[arg-type]
             self.idx_to_seen_op_infos[self.idx].output_tensor_infos.append(
                 output._qtensor_info)
             qtensor_id[0] += 1
