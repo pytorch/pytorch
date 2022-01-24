@@ -7,7 +7,6 @@ import functools
 import warnings
 from collections import OrderedDict
 from typing import Any, List, Optional
-import torch.autograd.forward_ad as fwAD
 
 # Formerly known as: _ContextMethodMixin
 class FunctionCtx(object):
@@ -82,9 +81,9 @@ class FunctionCtx(object):
             >>>
             >>>     @staticmethod
             >>>     def jvp(ctx, x_t, y_t, _):
-            >>>         x_p, y_p = ctx.saved_tensors
+            >>>         x, y = ctx.saved_tensors
             >>>         z = ctx.z
-            >>>         return z * (y_p * x_t + x_p * y_t)
+            >>>         return z * (y * x_t + x * y_t)
             >>>
             >>>     @staticmethod
             >>>     def vjp(ctx, grad_out):
