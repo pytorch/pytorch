@@ -113,18 +113,26 @@ void histogramdd_cpu_contiguous(Tensor& hist, const TensorList& bin_edges,
     int64_t GRAIN_SIZE = std::max(int64_t(1), HISTOGRAM_GRAIN_SIZE / D);
 
     /* Parallelizes processing of input using at::parallel_for.
-     * Each thread accumulates a local result for some range of the input in hist_local
-     * before locking hist_mutex and adding its accumulated results to the hist tensor.
+     * Each thread accumulates a local result into their own slice of
+     * thread_histograms which get summed together at the end.
      */
-    std::mutex hist_mutex;
+    const auto num_threads = at::get_num_threads();
+    const auto hist_sizes = hist.sizes();
+    DimVector thread_hist_sizes(hist_sizes.size() + 1);
+    thread_hist_sizes[0] = num_threads;
+    std::copy(hist_sizes.begin(), hist_sizes.end(),
+              thread_hist_sizes.begin() + 1);
+    Tensor thread_histograms = at::zeros(thread_hist_sizes, hist.dtype());
+    TORCH_INTERNAL_ASSERT(thread_histograms.is_contiguous());
+
     at::parallel_for(0, N, GRAIN_SIZE, [&](int64_t start, int64_t end) {
-        // Allocates a tensor for the thread's local results
-        Tensor hist_local = at::zeros(hist.sizes(), hist.dtype());
-        TORCH_INTERNAL_ASSERT(hist_local.is_contiguous());
+        const auto tid = at::get_thread_num();
+        auto hist_strides = thread_histograms.strides();
+        input_t *hist_local_data = thread_histograms.data_ptr<input_t>();
 
-        input_t *hist_local_data = hist_local.data_ptr<input_t>();
-
-        const auto hist_strides = hist_local.strides();
+        // View only this thread's local results
+        hist_local_data += hist_strides[0] * tid;
+        hist_strides = hist_strides.slice(1);
 
         for (const auto i : c10::irange(start, end)) {
             bool skip_elt = false;
@@ -183,12 +191,9 @@ void histogramdd_cpu_contiguous(Tensor& hist, const TensorList& bin_edges,
                 hist_local_data[hist_index] += wt;
             }
         }
-
-
-        // Locks and updates the common output
-        const std::lock_guard<std::mutex> lock(hist_mutex);
-        hist.add_(hist_local);
     });
+
+    at::sum_out(hist, thread_histograms, /*dim=*/{0});
 }
 
 /* Some pre- and post- processing steps for the main algorithm.

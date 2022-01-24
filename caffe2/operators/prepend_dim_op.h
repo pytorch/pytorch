@@ -6,6 +6,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
+#include <c10/util/irange.h>
 
 namespace caffe2 {
 
@@ -35,7 +36,7 @@ class PrependDimOp : public Operator<Context> {
     actual_new_shape[0] = dim_size_;
     actual_new_shape[1] = input.size(0) / dim_size_;
     // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (int i = 1; i < input.sizes().size(); ++i) {
+    for (const auto i : c10::irange(1, input.sizes().size())) {
       actual_new_shape[i + 1] = input.size(i);
     }
     output->Resize(actual_new_shape);

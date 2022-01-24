@@ -35,3 +35,11 @@
 #else
 #define CUB_SUPPORTS_UNIQUE_BY_KEY() false
 #endif
+
+// cub support for cub::FutureValue is added to cub 1.15 in:
+// https://github.com/NVIDIA/cub/pull/305
+#if CUB_VERSION >= 101500
+#define CUB_SUPPORTS_FUTURE_VALUE() true
+#else
+#define CUB_SUPPORTS_FUTURE_VALUE() false
+#endif

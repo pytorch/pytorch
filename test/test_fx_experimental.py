@@ -667,6 +667,30 @@ class TestFXExperimental(JitTestCase):
 
         self.assertEqual(fused(inp), rn18(inp))
 
+    def test_conv_bn_fusion_not_running_state(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv = torch.nn.Conv2d(32, 64, 3, stride=2)
+                self.bn = torch.nn.BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=False)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                return x
+
+        model = M().eval()
+
+        traced = symbolic_trace(model)
+        fused = optimization.fuse(traced)
+        inp = torch.randn([1, 32, 50, 50])
+
+        # bn need not be folded in conv
+        self.assertTrue(
+            any(isinstance(m, torch.nn.BatchNorm2d) for m in fused.modules())
+        )
+        self.assertEqual(fused(inp), model(inp))
+
     def test_call_to_assert_no_msg(self):
         class M(torch.nn.Module):
             def forward(self, a, b):
@@ -851,6 +875,28 @@ terrible spacing
         a = torch.rand(64, 3, 7, 7)
         module_with_submodules = split_module(traced, m, lambda node: 0)
         module_with_submodules(a)
+
+    def test_split_module_default_arg(self):
+        class ModelToTrace(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = torch.nn.Linear(512, 512)
+
+            def forward(self, x, targets=None):
+                x = self.lin(x)
+
+                if targets is not None:
+                    x = x + targets
+
+                return x
+
+        mtt = ModelToTrace()
+        traced = torch.fx.symbolic_trace(mtt, concrete_args={'targets': None})
+
+        split = split_module(traced, mtt, lambda node: 0)
+
+        x = torch.randn(50, 512)
+        torch.testing.assert_allclose(split(x), traced(x))
 
     def test_normalize_binary_operators(self):
         ops_to_test = {
@@ -1147,9 +1193,10 @@ class {test_classname}(torch.nn.Module):
                 self.linear = torch.nn.Linear(2, 2)
                 self.attr = torch.randn(2)
                 self.register_buffer("attr2", torch.randn(2))
+                self.register_buffer("attr3", torch.ones(2, dtype=torch.int32))
 
             def forward(self, x):
-                return self.linear(self.seq(self.W + self.attr + self.attr2 + x))
+                return self.linear(self.seq(self.W + self.attr + self.attr2 + self.attr3 + x))
 
         mod = symbolic_trace(Test())
         module_name = "Foo"
@@ -1463,8 +1510,10 @@ class TestNormalizeOperators(JitTestCase):
         # Sorted and one entry on each line to minimize merge conflicts.
         op_skip = {
             # See: https://github.com/pytorch/pytorch/issues/64997
+            "as_strided",
             "block_diag",
             "broadcast_tensors",
+            "cartesian_prod",
             "contiguous",
             "einsum",
             "expand",
@@ -1481,7 +1530,12 @@ class TestNormalizeOperators(JitTestCase):
             "index_put",
             "nn.functional.conv2d",
             "nn.functional.dropout",
+            "nn.functional.dropout2d",
             "nn.functional.embedding",  # Implemented with a lambda
+            "nn.functional.embedding_bag",  # Implemented with a lambda
+            "nn.functional.rrelu",  # Implemented with a lambda
+            "nn.functional.feature_alpha_dropout",  # Implemented with a lambda
+            "nonzero",
             "polygamma",
             "special.polygamma",
             "repeat",
@@ -1489,6 +1543,7 @@ class TestNormalizeOperators(JitTestCase):
             "resize_",
             "resize_as_",
             "special.zeta",
+            "sum_to_size",
             "to_sparse",
             "unique",
             "unique_consecutive",
@@ -1518,6 +1573,9 @@ class TestNormalizeOperators(JitTestCase):
             'new_empty',
             'new_zeros',
             'new_full',
+            'normal',
+            'multinomial',
+            'bernoulli',
             "__getitem__",
             "__radd__",
             "__rsub__",
@@ -1529,6 +1587,12 @@ class TestNormalizeOperators(JitTestCase):
             '__ror__',
             '__rxor__',
             "__rmatmul__",
+            "atleast_1d",
+            "atleast_2d",
+            "atleast_3d",
+            "svd_lowrank",  # implemented with a lambda
+            "pca_lowrank",  # implemented with a lambda
+            "column_stack",
         }
 
         # Unsupported input types

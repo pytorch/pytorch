@@ -1785,11 +1785,15 @@ void concrete_dispatch_fn(
     "__torch_dispatch__"
   ));
 
-  if (op.schema().returns().size() == 1) {
+  if (num_returns == 0) {
+    // Check that we got a None return from Python. Anything else is an error.
+    TORCH_CHECK(out == py::none(), "Expected __torch_dispatch__ for ", op.operator_name(),
+                " to return None but it returned something else instead.");
+  } else if (num_returns == 1) {
     torch::jit::push(stack, torch::jit::toIValue(out.ptr(), op.schema().returns()[0].type()));
   } else {
     auto outs = py::cast<py::sequence>(out);
-    for (unsigned idx = 0; idx < outs.size(); idx++) {
+    for (const auto idx : c10::irange(outs.size())) {
       torch::jit::push(stack, torch::jit::toIValue(outs[idx].ptr(), op.schema().returns()[idx].type()));
     }
   }

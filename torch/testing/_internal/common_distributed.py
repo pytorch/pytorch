@@ -10,6 +10,7 @@ import traceback
 import types
 import unittest
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import timedelta
 from enum import Enum
 from functools import partial, reduce
@@ -32,6 +33,7 @@ from torch.testing._internal.common_utils import (
     sandcastle_skip,
 )
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -61,6 +63,25 @@ TEST_SKIPS = {
         86, "Test skipped at subprocess level, look at subprocess log for skip reason"
     ),
 }
+
+@dataclass
+class DistTestCases:
+    # Backends that do not support a specific collective
+    skip_collective = {}
+    skip_collective["allgather_coalesced"] = {"nccl", "mpi"}
+    skip_collective["gather"] = {"nccl"}
+    skip_collective["scatter"] = {"nccl"}
+    skip_collective["reduce"] = set()
+    skip_collective["sendrecv anysource"] = {"nccl"}
+    skip_collective["cpu barrier"] = {"nccl"}
+
+    # Sets showing that something is implemented
+    backend_feature = {}
+    backend_feature["gpu"] = {"nccl", "gloo"}
+    backend_feature["cuda"] = {"nccl", "gloo"}
+    backend_feature["ddp"] = {"nccl", "gloo"}
+    backend_feature["subgroup"] = {"nccl", "gloo"}
+    backend_feature["plugin"] = set()
 
 
 def skip_if_no_gpu(func):
@@ -139,7 +160,13 @@ def verify_ddp_error_logged(model_DDP, err_substr):
     assert "iteration" in ddp_logging_data
     assert "has_error" in ddp_logging_data
     assert "error" in ddp_logging_data
-    assert err_substr in ddp_logging_data["error"]
+    logging_err = ddp_logging_data["error"]
+    # Remove C++ stacktrace if needed.
+    actual = (
+        err_substr if err_substr.find("\nException raised from ") == -1
+        else err_substr.split("\nException raised from ")[0]
+    )
+    assert actual in logging_err, f"Did not find expected {actual} in ddp logging data error: {logging_err}"
 
 
 def with_nccl_blocking_wait(func):
@@ -516,7 +543,7 @@ class MultiProcessTestCase(TestCase):
 
     @staticmethod
     def _event_listener(parent_pipe, signal_pipe, rank: int):
-        logger.info(f"Starting event listener thread for {rank}")
+        logger.info(f"Starting event listener thread for rank {rank}")
         while True:
             ready_pipes = multiprocessing.connection.wait([parent_pipe, signal_pipe])
 
@@ -549,26 +576,25 @@ class MultiProcessTestCase(TestCase):
     def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe) -> None:
         self = cls(test_name)
 
+        self.rank = rank
+        self.file_name = file_name
+        self.run_test(test_name, parent_pipe)
+
+    def run_test(self, test_name: str, parent_pipe) -> None:
         # Start event listener thread.
         signal_recv_pipe, signal_send_pipe = torch.multiprocessing.Pipe(duplex=False)
         event_listener_thread = threading.Thread(
             target=MultiProcessTestCase._event_listener,
-            args=(parent_pipe, signal_recv_pipe, rank),
+            args=(parent_pipe, signal_recv_pipe, self.rank),
             daemon=True,
         )
         event_listener_thread.start()
-
-        self.rank = rank
-        self.file_name = file_name
-        self.run_test(test_name, parent_pipe, signal_send_pipe, event_listener_thread)
-
-    def run_test(
-        self, test_name: str, parent_pipe, signal_pipe=None, event_listener_thread=None
-    ) -> None:
         if sys.platform != "win32" and sys.platform != "darwin":
             # Register signal handler to dump stack traces on FATALs.
             # Windows and MacOS do not support the signal handlers.
             torch._C._set_print_stack_traces_on_fatal_signal(True)
+        # Show full C++ stacktraces when a Python error originating from C++ is raised.
+        os.environ["TORCH_SHOW_CPP_STACKTRACES"] = "1"
 
         # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
         # We're retrieving a corresponding test and executing it.
@@ -588,10 +614,11 @@ class MultiProcessTestCase(TestCase):
             parent_pipe.send(traceback.format_exc())
             sys.exit(MultiProcessTestCase.TEST_ERROR_EXIT_CODE)
         finally:
-            if signal_pipe is not None:
-                signal_pipe.send(None)
-            if event_listener_thread is not None:
-                event_listener_thread.join()
+            if signal_send_pipe is not None:
+                signal_send_pipe.send(None)
+
+            assert event_listener_thread is not None
+            event_listener_thread.join()
             # Close pipe after done with test.
             parent_pipe.close()
 
