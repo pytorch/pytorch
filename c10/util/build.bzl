@@ -1,5 +1,70 @@
 def define_targets(rules):
     rules.cc_library(
+        name = "ConstexprCrc",
+        hdrs = ["ConstexprCrc.h"],
+        linkstatic = True,
+        local_defines = ["C10_BUILD_MAIN_LIB"],
+        visibility = ["//visibility:public"],
+        deps = [
+            ":IdWrapper",
+            ":min",
+        ],
+    )
+
+    rules.cc_library(
+        name = "ExclusivelyOwned",
+        hdrs = ["ExclusivelyOwned.h"],
+        linkstatic = True,
+        local_defines = ["C10_BUILD_MAIN_LIB"],
+        visibility = ["//visibility:public"],
+        deps = [":min"],
+    )
+
+    rules.cc_library(
+        name = "IdWrapper",
+        hdrs = ["IdWrapper.h"],
+        linkstatic = True,
+        local_defines = ["C10_BUILD_MAIN_LIB"],
+        visibility = ["//visibility:public"],
+        deps = ["//c10/macros"],
+    )
+
+    rules.cc_library(
+        name = "MaybeOwned",
+        hdrs = ["MaybeOwned.h"],
+        linkstatic = True,
+        local_defines = ["C10_BUILD_MAIN_LIB"],
+        visibility = ["//visibility:public"],
+        deps = [
+            ":min",
+            "//c10/macros",
+        ],
+    )
+
+    rules.cc_library(
+        name = "ThreadLocal",
+        hdrs = ["ThreadLocal.h"],
+        linkstatic = True,
+        local_defines = ["C10_BUILD_MAIN_LIB"],
+        visibility = ["//visibility:public"],
+        deps = ["//c10/macros"],
+    )
+
+    rules.cc_library(
+        name = "ThreadLocalDebugInfo",
+        srcs = ["ThreadLocalDebugInfo.cpp"],
+        hdrs = ["ThreadLocalDebugInfo.h"],
+        linkstatic = True,
+        local_defines = ["C10_BUILD_MAIN_LIB"],
+        visibility = ["//visibility:public"],
+        deps = [
+            ":ThreadLocal",
+            ":min",
+            "//c10/macros",
+        ],
+    )
+
+    rules.cc_library(
         name = "TypeCast",
         srcs = ["TypeCast.cpp"],
         hdrs = ["TypeCast.h"],
@@ -14,69 +79,70 @@ def define_targets(rules):
     )
 
     rules.cc_library(
+        name = "TypeIndex",
+        hdrs = ["TypeIndex.h"],
+        linkstatic = True,
+        local_defines = ["C10_BUILD_MAIN_LIB"],
+        visibility = ["//visibility:public"],
+        deps = [
+            ":ConstexprCrc",
+            ":IdWrapper",
+            ":min",
+        ],
+    )
+
+    rules.cc_library(
+        name = "UniqueVoidPtr",
+        srcs = ["UniqueVoidPtr.cpp"],
+        hdrs = ["UniqueVoidPtr.h"],
+        linkstatic = True,
+        local_defines = ["C10_BUILD_MAIN_LIB"],
+        visibility = ["//visibility:public"],
+        deps = ["//c10/macros"],
+    )
+
+    rules.cc_library(
+        name = "accumulate",
+        hdrs = ["accumulate.h"],
+        linkstatic = True,
+        local_defines = ["C10_BUILD_MAIN_LIB"],
+        visibility = ["//visibility:public"],
+        deps = [":min"],
+    )
+
+    rules.cc_library(
         name = "base",
         srcs = [
             "DeadlockDetection.cpp",
-            "Half.cpp",
             "LeftRight.cpp",
             "MathConstants.cpp",
             "SmallVector.cpp",
-            "ThreadLocalDebugInfo.cpp",
             "Unicode.cpp",
-            "UniqueVoidPtr.cpp",
-            "complex_math.cpp",
             "int128.cpp",
-            "intrusive_ptr.cpp",
             "numa.cpp",
             "signal_handler.cpp",
             "thread_name.cpp",
         ],
         hdrs = [
-            "BFloat16-inl.h",
             "BFloat16-math.h",
-            "BFloat16.h",
             "Bitset.h",
-            "ConstexprCrc.h",
             "DeadlockDetection.h",
-            "ExclusivelyOwned.h",
             "FunctionRef.h",
-            "Half-inl.h",
-            "Half.h",
-            "IdWrapper.h",
             "LeftRight.h",
             "MathConstants.h",
-            "MaybeOwned.h",
             "ScopeExit.h",
             "SmallBuffer.h",
-            "ThreadLocal.h",
-            "ThreadLocalDebugInfo.h",
-            "TypeIndex.h",
-            "TypeSafeSignMath.h",
             "Unicode.h",
-            "UniqueVoidPtr.h",
             "Unroll.h",
-            "accumulate.h",
-            "complex.h",
-            "complex_math.h",
-            "complex_utils.h",
             "copysign.h",
             "either.h",
             "env.h",
             "flat_hash_map.h",
             "hash.h",
             "int128.h",
-            "intrusive_ptr.h",
-            "llvmMathExtras.h",
-            "math_compat.h",
             "numa.h",
             "order_preserving_flat_hash_map.h",
             "overloaded.h",
-            "python_stub.h",
-            "qint32.h",
-            "qint8.h",
-            "quint2x4.h",
-            "quint4x2.h",
-            "quint8.h",
             "signal_handler.h",
             "sparse_bitset.h",
             "tempfile.h",
@@ -91,10 +157,45 @@ def define_targets(rules):
         local_defines = ["C10_BUILD_MAIN_LIB"],
         visibility = ["//visibility:public"],
         deps = [
+            ":flat_hash_map",
+            ":IdWrapper",
+            ":llvmMathExtras",
             ":min",
+            ":types",
             "@fmt",
             "//c10/macros",
         ],
+    )
+
+    rules.cc_library(
+        name = "flat_hash_map",
+        hdrs = ["flat_hash_map.h"],
+        linkstatic = True,
+        local_defines = ["C10_BUILD_MAIN_LIB"],
+        visibility = ["//visibility:public"],
+        deps = ["//c10/macros"],
+    )
+
+    rules.cc_library(
+        name = "intrusive_ptr",
+        srcs = ["intrusive_ptr.cpp"],
+        hdrs = ["intrusive_ptr.h"],
+        linkstatic = True,
+        local_defines = ["C10_BUILD_MAIN_LIB"],
+        visibility = ["//visibility:public"],
+        deps = [
+            ":ExclusivelyOwned",
+            ":MaybeOwned",
+            ":min",
+        ],
+    )
+
+    rules.cc_library(
+        name = "llvmMathExtras",
+        hdrs = ["llvmMathExtras.h"],
+        linkstatic = True,
+        local_defines = ["C10_BUILD_MAIN_LIB"],
+        visibility = ["//visibility:public"],
     )
 
     rules.cc_library(
@@ -153,6 +254,15 @@ def define_targets(rules):
         }),
         linkstatic = True,
         local_defines = ["C10_BUILD_MAIN_LIB"],
+        visibility = ["//visibility:public"],
+    )
+
+    rules.cc_library(
+        name = "python_stub",
+        hdrs = ["python_stub.h"],
+        linkstatic = True,
+        local_defines = ["C10_BUILD_MAIN_LIB"],
+        visibility = ["//visibility:public"],
     )
 
     rules.cc_library(
@@ -163,8 +273,42 @@ def define_targets(rules):
         local_defines = ["C10_BUILD_MAIN_LIB"],
         visibility = ["//visibility:public"],
         deps = [
-            ":base",
+            ":IdWrapper",
+            ":TypeIndex",
+            ":flat_hash_map",
+            ":min",
             "//c10/core:ScalarType",
+            "//c10/macros",
+        ],
+    )
+
+    rules.cc_library(
+        name = "types",
+        srcs = [
+            "Half.cpp",
+            "complex_math.cpp",
+        ],
+        hdrs = [
+            "BFloat16-inl.h",
+            "BFloat16.h",
+            "Half-inl.h",
+            "Half.h",
+            "TypeSafeSignMath.h",
+            "complex.h",
+            "complex_math.h",
+            "complex_utils.h",
+            "math_compat.h",
+            "qint32.h",
+            "qint8.h",
+            "quint2x4.h",
+            "quint4x2.h",
+            "quint8.h",
+        ],
+        linkstatic = True,
+        local_defines = ["C10_BUILD_MAIN_LIB"],
+        visibility = ["//visibility:public"],
+        deps = [
+            ":min",
             "//c10/macros",
         ],
     )
