@@ -42,8 +42,8 @@ def exit_dual_level(*, level=None):
 
 def make_dual(tensor, tangent, *, level=None):
     r"""Function that creates a "dual object" that can be used to compute forward AD gradients
-    based on the given Tensor and its tangent. It returns a new Tensor that shares memory with
-    :attr:`tensor` and the :attr:`tangent` is used as-is.
+    based on the given Tensor and its tangent (the gradient). It returns a new Tensor that
+    shares memory with :attr:`tensor` and the :attr:`tangent` is used as-is.
 
     This function is backward differentiable.
 
@@ -57,7 +57,7 @@ def make_dual(tensor, tangent, *, level=None):
         ...   out = f(inp)
         ...   y, jvp = unpack_dual(out)
 
-    Please see our `forward-mode AD tutorial <https://pytorch.org/tutorials/intermediate/forward_ad_usage.html>`__
+    Please see the `forward-mode AD tutorial <https://pytorch.org/tutorials/intermediate/forward_ad_usage.html>`__
     for detailed steps on how to use this API.
 
     """
@@ -75,8 +75,8 @@ UnpackedDualTensor = namedtuple('UnpackedDualTensor', ['primal', 'tangent'])
 def unpack_dual(tensor, *, level=None):
     r"""Unpacks a "dual object" to return a namedtuple ``(primal, tangent)`` where
     ``primal`` is a view of :attr:`tensor`'s primal and ``tangent`` is
-    :attr:`tensor`'s tangent. Neither of these tensors can be dual tensor of level
-    :attr:`level`.
+    :attr:`tensor`'s tangent (the gradient). Neither of these tensors can be dual
+    tensor of level :attr:`level`.
 
     This function is backward differentiable.
 
@@ -88,7 +88,7 @@ def unpack_dual(tensor, *, level=None):
         ...   y, jvp = unpack_dual(out)
         ...   jvp = unpack_dual(out).tangent
 
-    Please see our `forward-mode AD tutorial <https://pytorch.org/tutorials/intermediate/forward_ad_usage.html>`__
+    Please see the `forward-mode AD tutorial <https://pytorch.org/tutorials/intermediate/forward_ad_usage.html>`__
     for detailed steps on how to use this API.
     """
     if level is None:
@@ -131,7 +131,7 @@ class dual_level(_DecoratorContextManager):
         >>> grad is None
         True
 
-    Please see our `forward-mode AD tutorial <https://pytorch.org/tutorials/intermediate/forward_ad_usage.html>`__
+    Please see the `forward-mode AD tutorial <https://pytorch.org/tutorials/intermediate/forward_ad_usage.html>`__
     for detailed steps on how to use this API.
     """
     def __init__(self):

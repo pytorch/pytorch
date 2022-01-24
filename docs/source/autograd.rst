@@ -23,7 +23,7 @@ Forward-mode Automatic Differentiation
     This API is in beta. Even though the function signatures are very unlikely to change, improved
     operator coverage is planned before we consider this stable.
 
-Please see our `forward-mode AD tutorial <https://pytorch.org/tutorials/intermediate/forward_ad_usage.html>`__
+Please see the `forward-mode AD tutorial <https://pytorch.org/tutorials/intermediate/forward_ad_usage.html>`__
 for detailed steps on how to use this API.
 
 .. autosummary::
