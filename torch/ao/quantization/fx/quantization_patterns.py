@@ -42,6 +42,7 @@ from .utils import (
     create_qparam_nodes,
     get_qconv_prepack_op,
     get_qconv_op,
+    create_node_from_old_node_preserve_meta,
 )
 
 from ..qconfig import QConfigAny
@@ -229,6 +230,7 @@ default_op_supported_dtypes = {
     torch.nn.SiLU: fp16_dtypes,
     torch.nn.Mish: fp16_dtypes,
     torch.nn.GELU: int8_dtypes,
+    torch.nn.Dropout: int8_dtypes,
     torch.nn.Softmax: int8_dtypes,
     torch.nn.functional.elu: int8_dtypes,
     torch.nn.functional.hardswish: int8_dtypes,
@@ -239,6 +241,7 @@ default_op_supported_dtypes = {
     torch.nn.functional.mish: fp16_dtypes,
     torch.nn.functional.gelu: int8_dtypes,
     torch.nn.functional.softmax: int8_dtypes,
+    torch.nn.functional.dropout: int8_dtypes,
     torch.sum: fp16_dtypes,
 }
 
@@ -443,9 +446,14 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
                     else:
                         quantized_index = 1
 
-                    return quantized_graph.create_node(
-                        'call_function', self.quantized_binary_op,
-                        load_arg(quantized=[quantized_index])(self.binary_op_node.args), self.binary_op_node.kwargs)
+                    return create_node_from_old_node_preserve_meta(
+                        quantized_graph,
+                        (
+                            'call_function', self.quantized_binary_op,
+                            load_arg(quantized=[quantized_index])(self.binary_op_node.args),
+                            self.binary_op_node.kwargs
+                        ),
+                        self.binary_op_node)
                 else:
                     activation_post_process = \
                         self._maybe_get_last_node_only_observer(modules)
@@ -459,8 +467,10 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
                             quantized_graph, node_name_to_scope)
                     kwargs = {**self.binary_op_node.kwargs}
                     add_args = (*load_arg(quantized=activation_dtype(qconfig))(self.binary_op_node.args), scale_arg, zero_point_arg)
-                    op = quantized_graph.create_node(
-                        'call_function', self.quantized_binary_op, add_args, kwargs)
+                    op = create_node_from_old_node_preserve_meta(
+                        quantized_graph,
+                        ('call_function', self.quantized_binary_op, add_args, kwargs),
+                        self.binary_op_node)
                     return op
             else:
                 assert dtypes == (torch.float16, torch.float16, None)
@@ -470,8 +480,10 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
                     relu_args = [op_out]
                     relu_args.extend(load_arg(quantized=torch.float)(self.relu_node.args[1:]))
                     relu_kwargs = load_arg(quantized=torch.float)(self.relu_node.kwargs)
-                    op_out = quantized_graph.create_node(
-                        "call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs)
+                    op_out = create_node_from_old_node_preserve_meta(
+                        quantized_graph,
+                        ("call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs),
+                        self.relu_node)
                 else:
                     op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
                 return quantized_graph.create_node(
@@ -494,8 +506,10 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
                 relu_args = [op_out]
                 relu_args.extend(load_arg(quantized=torch.float)(self.relu_node.args[1:]))
                 relu_kwargs = load_arg(quantized=torch.float)(self.relu_node.kwargs)
-                return quantized_graph.create_node(
-                    "call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs)
+                return create_node_from_old_node_preserve_meta(
+                    quantized_graph,
+                    ("call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs),
+                    self.relu_node)
             else:
                 return quantized_graph.node_copy(node, load_arg(quantized=torch.float))
 
@@ -621,8 +635,10 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                 relu_args = [conv_out]
                 relu_args.extend(load_arg(quantized=torch.float)(self.relu_node.args[1:]))
                 relu_kwargs = load_arg(quantized=torch.float)(self.relu_node.kwargs)
-                return quantized_graph.create_node(
-                    "call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs)
+                return create_node_from_old_node_preserve_meta(
+                    quantized_graph,
+                    ("call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs),
+                    self.relu_node)
             else:
                 return quantized_graph.node_copy(node, load_arg(quantized=torch.float))
 
@@ -697,10 +713,10 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                 else:
                     parent_name, name = _parent_name(self.conv_node.target)
                     setattr(modules[parent_name], name, ref_conv)
-                op_out = quantized_graph.create_node(
-                    'call_module',
-                    self.conv_node.target,
-                    args, {})
+                op_out = create_node_from_old_node_preserve_meta(
+                    quantized_graph,
+                    ('call_module', self.conv_node.target, args, {}),
+                    self.conv_node)
                 if output_activation_post_process:
                     op_out = quantize_node(
                         op_out,
@@ -723,11 +739,15 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                 quantized = qconv_cls.from_float(self.conv)
                 parent_name, name = _parent_name(self.conv_node.target)
                 setattr(modules[parent_name], name, quantized)
-                return quantized_graph.create_node(
-                    'call_module',
-                    self.conv_node.target,
-                    (load_arg(quantized=torch.quint8)(self.conv_node.args[0]),),
-                    {})
+                return create_node_from_old_node_preserve_meta(
+                    quantized_graph,
+                    (
+                        'call_module',
+                        self.conv_node.target,
+                        (load_arg(quantized=torch.quint8)(self.conv_node.args[0]),),
+                        {},
+                    ),
+                    self.conv_node)
         else:  # call_function
             assert self.conv_node.op == "call_function"
             if is_reference:
@@ -735,14 +755,18 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                 load_arg(quantized={0: torch.quint8, 1: torch.qint8})(self.conv_node.args)
                 args = load_arg(quantized=torch.float)(self.conv_node.args)
                 kwargs = load_arg(quantized=torch.float)(self.conv_node.kwargs)
-                op_out = quantized_graph.create_node(
-                    "call_function", self.conv, args, kwargs)
+                op_out = create_node_from_old_node_preserve_meta(
+                    quantized_graph,
+                    ("call_function", self.conv, args, kwargs),
+                    self.conv_node)
                 if self.relu_node:
                     relu_args = [op_out]
                     relu_args.extend(load_arg(quantized=torch.float)(self.relu_node.args[1:]))
                     relu_kwargs = load_arg(quantized=torch.float)(self.relu_node.kwargs)
-                    op_out = quantized_graph.create_node(
-                        "call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs)
+                    op_out = create_node_from_old_node_preserve_meta(
+                        quantized_graph,
+                        ("call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs),
+                        self.relu_node)
 
                 if activation_int8_quantized:
                     root_module = modules['']
@@ -800,8 +824,10 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                             quantized_graph, node_name_to_scope)
                     qconv_args = (conv_input, packed_weight, scale_node, zero_point_node)
                     kwargs = load_arg(quantized=torch.float)(self.conv_node.kwargs)
-                    op = quantized_graph.create_node(
-                        'call_function', qconv_op, qconv_args, kwargs)
+                    op = create_node_from_old_node_preserve_meta(
+                        quantized_graph,
+                        ('call_function', qconv_op, qconv_args, kwargs),
+                        self.conv_node)
                     # Store the name of the fused op to get the path of node after fusion as well.
                     # TODO: may need to change the key to Node regenerate the map in each transformation,
                     # since we might not be able to rely on the name
@@ -872,8 +898,10 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                 relu_args = [op_out]
                 relu_args.extend(load_arg(quantized=torch.float)(self.relu_node.args[1:]))
                 relu_kwargs = load_arg(quantized=torch.float)(self.relu_node.kwargs)
-                return quantized_graph.create_node(
-                    "call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs)
+                return create_node_from_old_node_preserve_meta(
+                    quantized_graph,
+                    ("call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs),
+                    self.relu_node)
             else:
                 return quantized_graph.node_copy(node, load_arg(quantized=None))
 
@@ -913,7 +941,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     parent_name, name = _parent_name(self.linear_node.target)
                     setattr(modules[parent_name], name, float_linear)
                     # Attach weight fake quant to the linear module
-                    if isinstance(float_linear, torch.nn.intrinsic.LinearReLU):
+                    if isinstance(float_linear, torch.nn.intrinsic.qat.LinearReLU):
                         fused_linear = float_linear
                         float_linear = float_linear[0]
                     weight_post_process = self.linear.weight_fake_quant
@@ -923,8 +951,8 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                         float_linear = self.linear[0]  # type: ignore[index]
                     # Attach the weight observer to the module
                     weight_post_process = qconfig.weight()  # type: ignore[union-attr]
-                    # Run weight observer
-                    weight_post_process(float_linear.weight)  # type: ignore[operator]
+                # Run weight observer
+                weight_post_process(float_linear.weight)  # type: ignore[operator]
 
                 weight_qparams = get_qparam_dict(weight_post_process)
                 # TODO: include the configuration in backend_config_dict
@@ -942,10 +970,10 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                 else:
                     parent_name, name = _parent_name(self.linear_node.target)
                     setattr(modules[parent_name], name, ref_linear)
-                op_out = quantized_graph.create_node(
-                    'call_module',
-                    self.linear_node.target,
-                    args, {})
+                op_out = create_node_from_old_node_preserve_meta(
+                    quantized_graph,
+                    ('call_module', self.linear_node.target, args, {}),
+                    self.linear_node)
                 if output_activation_post_process:
                     op_out = quantize_node(
                         op_out,
@@ -982,10 +1010,14 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                 dtype = torch.float
                 if activation_int8_quantized:
                     dtype = activation_dtype(qconfig)
-                return quantized_graph.create_node(
-                    'call_module',
-                    self.linear_node.target,
-                    (load_arg(quantized=dtype)(self.linear_node.args[0]),), {})
+                return create_node_from_old_node_preserve_meta(
+                    quantized_graph,
+                    (
+                        'call_module',
+                        self.linear_node.target,
+                        (load_arg(quantized=dtype)(self.linear_node.args[0]),), {},
+                    ),
+                    self.linear_node)
         else:  # call_function
             assert self.linear_node.op == 'call_function'
             if is_reference:
@@ -997,14 +1029,18 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                 args = load_arg(quantized=quantized_input_dtypes)(self.linear_node.args)
                 args = load_arg(quantized=torch.float)(self.linear_node.args)
                 kwargs = load_arg(quantized=torch.float)(self.linear_node.kwargs)
-                op_out = quantized_graph.create_node(
-                    "call_function", torch.nn.functional.linear, args, kwargs)
+                op_out = create_node_from_old_node_preserve_meta(
+                    quantized_graph,
+                    ("call_function", torch.nn.functional.linear, args, kwargs),
+                    self.linear_node)
                 if self.relu_node:
                     relu_args = [op_out]
                     relu_args.extend(load_arg(quantized=torch.float)(self.relu_node.args[1:]))
                     relu_kwargs = load_arg(quantized=torch.float)(self.relu_node.kwargs)
-                    op_out = quantized_graph.create_node(
-                        "call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs)
+                    op_out = create_node_from_old_node_preserve_meta(
+                        quantized_graph,
+                        ("call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs),
+                        self.relu_node)
 
                 if activation_statically_quantized:
                     # quantize output for statically quantized linear op
@@ -1064,8 +1100,10 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                             quantized_graph, node_name_to_scope)
 
                     qlinear_args = (linear_input, packed_weight, scale_node, zero_point_node)
-                    op = quantized_graph.create_node(
-                        "call_function", qlinear_op, qlinear_args, kwargs)
+                    op = create_node_from_old_node_preserve_meta(
+                        quantized_graph,
+                        ("call_function", qlinear_op, qlinear_args, kwargs),
+                        self.linear_node)
                     # Store the name of the fused op to get the path of node after fusion as well.
                     # TODO: may need to change the key to Node regenerate the map in each transformation,
                     # since we might not be able to rely on the name
@@ -1087,8 +1125,10 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
 
                     linear_input = load_arg(quantized=torch.float)(self.linear_node.args[0])
                     qlinear_args = (linear_input, packed_weight)  # type: ignore[assignment]
-                    op_out = quantized_graph.create_node(
-                        "call_function", qlinear_op, qlinear_args, kwargs)
+                    op_out = create_node_from_old_node_preserve_meta(
+                        quantized_graph,
+                        ("call_function", qlinear_op, qlinear_args, kwargs),
+                        self.linear_node)
                     # Store the name of the dynamic op to get the path of node after replacement as well.
                     # TODO: may need to change the key to Node regenerate the map in each transformation,
                     # since we might not be able to rely on the name
@@ -1102,8 +1142,10 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                         relu_args = [op_out]
                         relu_args.extend(load_arg(quantized=torch.float)(self.relu_node.args[1:]))
                         relu_kwargs = load_arg(quantized=torch.float)(self.relu_node.kwargs)
-                        op_out = quantized_graph.create_node(
-                            "call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs)
+                        op_out = create_node_from_old_node_preserve_meta(
+                            quantized_graph,
+                            ("call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs),
+                            self.relu_node)
                     else:
                         op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
                     return quantized_graph.create_node(
@@ -1144,11 +1186,10 @@ class BatchNormQuantizeHandler(QuantizeHandler):
             dtype = activation_dtype(qconfig)
             activation = load_arg(quantized=dtype)(self.bn_node.args[0])
             args = load_arg(quantized=torch.float)(self.bn_node.args)
-            op_out = quantized_graph.create_node(
-                "call_module",
-                self.bn_node.target,
-                args,
-                {})
+            op_out = create_node_from_old_node_preserve_meta(
+                quantized_graph,
+                ("call_module", self.bn_node.target, args, {}),
+                self.bn_node)
             if output_activation_post_process:
                 op_out = quantize_node(
                     op_out,
@@ -1165,11 +1206,15 @@ class BatchNormQuantizeHandler(QuantizeHandler):
             quantized = qbn_cls.from_float(self.bn)
             parent_name, name = _parent_name(self.bn_node.target)
             setattr(modules[parent_name], name, quantized)
-            return quantized_graph.create_node(
-                'call_module',
-                self.bn_node.target,
-                load_arg(quantized=[0])(self.bn_node.args),
-                load_arg(quantized=torch.float)(self.bn_node.kwargs))
+            return create_node_from_old_node_preserve_meta(
+                quantized_graph,
+                (
+                    'call_module',
+                    self.bn_node.target,
+                    load_arg(quantized=[0])(self.bn_node.args),
+                    load_arg(quantized=torch.float)(self.bn_node.kwargs),
+                ),
+                self.bn_node)
 
 @register_quant_pattern(torch.nn.qat.Embedding)
 @register_quant_pattern(torch.nn.qat.EmbeddingBag)
@@ -1219,11 +1264,15 @@ class EmbeddingQuantizeHandler(QuantizeHandler):
         quantized = qemb.from_float(emb)
         parent_name, name = _parent_name(emb_node.target)
         setattr(modules[parent_name], name, quantized)
-        return quantized_graph.create_node(
-            'call_module',
-            emb_node.target,
-            load_arg(quantized=torch.float)(emb_node.args),
-            load_arg(quantized=torch.float)(emb_node.kwargs))
+        return create_node_from_old_node_preserve_meta(
+            quantized_graph,
+            (
+                'call_module',
+                emb_node.target,
+                load_arg(quantized=torch.float)(emb_node.args),
+                load_arg(quantized=torch.float)(emb_node.kwargs),
+            ),
+            emb_node)
 
 # TODO (maybe): merge with embedding quantize handler
 @register_quant_pattern(torch.nn.GRUCell)
@@ -1273,15 +1322,20 @@ class RNNDynamicQuantizeHandler(QuantizeHandler):
         qmodule = qmodule_cls.from_float(module)
         parent_name, name = _parent_name(node.target)
         setattr(modules[parent_name], name, qmodule)
-        return quantized_graph.create_node(
-            'call_module',
-            node.target,
-            load_arg(quantized=torch.float)(node.args),
-            load_arg(quantized=torch.float)(node.kwargs))
+        return create_node_from_old_node_preserve_meta(
+            quantized_graph,
+            (
+                'call_module',
+                node.target,
+                load_arg(quantized=torch.float)(node.args),
+                load_arg(quantized=torch.float)(node.kwargs),
+            ),
+            node)
 
 ARGS_TO_SKIP = {
     torch._ops.ops.quantized.hardswish: ['inplace'],
     torch._ops.ops.quantized.elu: ['inplace'],
+    torch._ops.ops.quantized.dropout: ['inplace'],
     torch._ops.ops.quantized.instance_norm:
     ['running_mean', 'running_var', 'use_input_stats', 'momentum'],
 }
@@ -1296,6 +1350,7 @@ ARGS_TO_SKIP = {
 @register_quant_pattern(torch.nn.LayerNorm)
 @register_quant_pattern(torch.nn.SiLU)
 @register_quant_pattern(torch.nn.Mish)
+@register_quant_pattern(torch.nn.Dropout)
 # we currently only support reference patterns for these ops so they have been removed
 # until they receive a proper fp16 kernel. To use the reference pattern, use a custom qconfig
 # @register_quant_pattern(torch.nn.GELU)
@@ -1307,6 +1362,7 @@ ARGS_TO_SKIP = {
 @register_quant_pattern(torch.nn.functional.leaky_relu)
 @register_quant_pattern(torch.nn.functional.silu)
 @register_quant_pattern(torch.nn.functional.mish)
+@register_quant_pattern(torch.nn.functional.dropout)
 # we currently only support reference patterns for these ops so they have been removed
 # until they receive a proper fp16 kernel. To use the reference pattern, use a custom qconfig
 # @register_quant_pattern(torch.nn.functional.gelu)
@@ -1368,11 +1424,15 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
                     quantized_module = quantized_module_cls.from_float(module)
                     parent_name, name = _parent_name(node.target)
                     setattr(modules[parent_name], name, quantized_module)
-                    return quantized_graph.create_node(
-                        'call_module',
-                        node.target,
-                        load_arg(quantized=[0])(node.args),
-                        load_arg(quantized=torch.float)(node.kwargs))
+                    return create_node_from_old_node_preserve_meta(
+                        quantized_graph,
+                        (
+                            'call_module',
+                            node.target,
+                            load_arg(quantized=[0])(node.args),
+                            load_arg(quantized=torch.float)(node.kwargs),
+                        ),
+                        node)
                 else:
                     assert node.op == "call_function"
                     # call_function
@@ -1395,8 +1455,10 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
                         for arg in args_to_skip:
                             if arg in kwargs:
                                 kwargs.pop(arg)
-                    return quantized_graph.create_node(
-                        "call_function", quantized_op, args, kwargs)  # type: ignore[arg-type]
+                    return create_node_from_old_node_preserve_meta(
+                        quantized_graph,
+                        ("call_function", quantized_op, args, kwargs),  # type: ignore[arg-type]
+                        node)
             else:
                 assert dtypes in [(torch.float16, torch.float16, None)]
                 # Generally fp16 kernels don't exist for fp16 ops
@@ -1504,7 +1566,6 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
 @register_quant_pattern(torch.nn.AvgPool1d)
 @register_quant_pattern(torch.nn.AvgPool2d)
 @register_quant_pattern(torch.nn.AvgPool3d)
-@register_quant_pattern(torch.nn.Dropout)
 @register_quant_pattern(torch.nn.Hardtanh)
 @register_quant_pattern(torch.nn.MaxPool1d)
 @register_quant_pattern(torch.nn.MaxPool2d)
@@ -1514,7 +1575,6 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
 @register_quant_pattern(torch.adaptive_avg_pool1d)
 @register_quant_pattern(torch.nn.functional.adaptive_avg_pool2d)
 @register_quant_pattern(torch.nn.functional.adaptive_avg_pool3d)
-@register_quant_pattern(torch.nn.functional.dropout)
 @register_quant_pattern(torch.nn.functional.hardtanh)
 @register_quant_pattern(torch.nn.functional.hardtanh_)
 @register_quant_pattern(torch.nn.functional.interpolate)
@@ -1815,10 +1875,10 @@ class ConvReLUQuantizeHandlerNew(QuantizeHandler):
             else:
                 parent_name, name = _parent_name(self.conv_node.target)
                 setattr(modules[parent_name], name, ref_conv)
-            op_out = quantized_graph.create_node(
-                'call_module',
-                self.conv_node.target,
-                args, {})
+            op_out = create_node_from_old_node_preserve_meta(
+                quantized_graph,
+                ('call_module', self.conv_node.target, args, {}),
+                self.conv_node)
             # disabling quantize node for output for now, this will be controlled by the
             # backend_config_dict in the final design
             if output_activation_post_process:
@@ -1837,14 +1897,18 @@ class ConvReLUQuantizeHandlerNew(QuantizeHandler):
             load_arg(quantized={0: torch.quint8, 1: torch.qint8})(self.conv_node.args)
             args = load_arg(quantized=torch.float)(self.conv_node.args)
             kwargs = load_arg(quantized=torch.float)(self.conv_node.kwargs)
-            op_out = quantized_graph.create_node(
-                "call_function", self.conv, args, kwargs)
+            op_out = create_node_from_old_node_preserve_meta(
+                quantized_graph,
+                ("call_function", self.conv, args, kwargs),
+                self.conv_node)
             if self.relu_node:
                 relu_args = [op_out]
                 relu_args.extend(load_arg(quantized=torch.float)(self.relu_node.args[1:]))
                 relu_kwargs = load_arg(quantized=torch.float)(self.relu_node.kwargs)
-                op_out = quantized_graph.create_node(
-                    "call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs)
+                op_out = create_node_from_old_node_preserve_meta(
+                    quantized_graph,
+                    ("call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs),
+                    self.relu_node)
 
             # disabling quantize node for output for now, this will be controlled by the
             # backend_config_dict in the final design
@@ -1958,10 +2022,10 @@ class LinearReLUQuantizeHandlerNew(QuantizeHandler):
             else:
                 parent_name, name = _parent_name(self.linear_node.target)
                 setattr(modules[parent_name], name, ref_linear)
-            op_out = quantized_graph.create_node(
-                'call_module',
-                self.linear_node.target,
-                args, {})
+            op_out = create_node_from_old_node_preserve_meta(
+                quantized_graph,
+                ('call_module', self.linear_node.target, args, {}),
+                self.linear_node)
             if output_activation_post_process:
                 op_out = quantize_node(
                     op_out,
@@ -1982,14 +2046,18 @@ class LinearReLUQuantizeHandlerNew(QuantizeHandler):
             args = load_arg(quantized=quantized_input_dtypes)(self.linear_node.args)
             args = load_arg(quantized=torch.float)(self.linear_node.args)
             kwargs = load_arg(quantized=torch.float)(self.linear_node.kwargs)
-            op_out = quantized_graph.create_node(
-                "call_function", torch.nn.functional.linear, args, kwargs)
+            op_out = create_node_from_old_node_preserve_meta(
+                quantized_graph,
+                ("call_function", torch.nn.functional.linear, args, kwargs),
+                self.linear_node)
             if self.relu_node:
                 relu_args = [op_out]
                 relu_args.extend(load_arg(quantized=torch.float)(self.relu_node.args[1:]))
                 relu_kwargs = load_arg(quantized=torch.float)(self.relu_node.kwargs)
-                op_out = quantized_graph.create_node(
-                    "call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs)
+                op_out = create_node_from_old_node_preserve_meta(
+                    quantized_graph,
+                    ("call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs),
+                    self.relu_node)
 
             return op_out
             # TODO: enable later
