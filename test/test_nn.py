@@ -15029,6 +15029,7 @@ class TestNNDeviceType(NNTestCase):
             self.skipTest('Killed on Jetson GPU')
         if device == 'cpu' and IS_JETSON and dtype == torch.double:
             self.skipTest('OOM on Jetson CPU')
+
         def helper(n, c, h, w, kernel_size, stride=None):
             if stride is None:
                 stride = kernel_size
