@@ -1,4 +1,5 @@
 import collections
+import dataclasses
 import enum
 from typing import Callable, Tuple, Any, List, Optional, Dict
 
@@ -101,13 +102,13 @@ def seen_op_info_repr(self) -> str:
 
 SeenOpInfo.__repr__ = seen_op_info_repr  # type: ignore[assignment]
 
-QTensorInfo = collections.namedtuple(
-    'QTensorInfo',
-    [
-        'id',  # tensor ID
-        'inf_dtype',  # dtype at inference
-    ],
-)
+
+@dataclasses.dataclass
+class QTensorInfo:
+    id: int  # tensor ID
+    orig_dtype: torch.dtype  # dtype seen while tracing with example input
+    inf_dtype: torch.dtype  # dtype at inference
+
 
 def op_needs_quantization(op: Callable) -> bool:
     if op in functions_supported_by_quantization:
