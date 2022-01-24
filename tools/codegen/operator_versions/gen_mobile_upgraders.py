@@ -6,7 +6,7 @@ from typing import Any, Dict, List
 
 import torch
 from tools.codegen.code_template import CodeTemplate
-from torch.jit.generate_bytecode import generate_bytecode
+from torch.jit.generate_bytecode import generate_upgraders_bytecode
 
 class ByteCode(Enum):
     instructions = 1
@@ -341,7 +341,7 @@ def sort_upgrader(upgrader_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 def main() -> None:
 
-    upgrader_list = generate_bytecode()
+    upgrader_list = generate_upgraders_bytecode()
     sorted_upgrader_list = sort_upgrader(upgrader_list)
     for up in sorted_upgrader_list:
         print("after sort upgrader : ", next(iter(up)))
