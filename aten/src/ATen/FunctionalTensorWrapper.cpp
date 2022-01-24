@@ -130,15 +130,7 @@ void FunctionalTensorWrapper::commit_update() {
   generation_ = storage_impl->generation();
 }
 
-bool FunctionalTensorWrapper::is_aliased() const {
-  // Two FunctionalTensorWrapper objects are aliased if they share storage.
-  // That means that we can check if a given FunctionalTensorWrapper is aliased
-  // by checking the reference count on its storage.
-  return storage_.use_count() > 1;
-}
-
 bool FunctionalTensorWrapper::is_up_to_date() const {
-  if (!is_aliased()) return true;
   auto alias_generation = functional_storage_impl()->generation();
   return generation_ == alias_generation;
 }
@@ -230,10 +222,11 @@ Tensor to_functional_tensor(const Tensor& tensor) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!isFunctionalTensor(tensor));
   return at::detail::make_tensor<FunctionalTensorWrapper>(tensor);
 }
-TensorList to_functional_tensor(const c10::List<Tensor>& t_list) {
-  std::vector<Tensor> outputs(t_list.size());
+c10::List<Tensor> to_functional_tensor(const c10::List<Tensor>& t_list) {
+  c10::List<Tensor> outputs;
+  outputs.reserve(t_list.size());
   for (const auto i : c10::irange(t_list.size())) {
-    outputs[i] = to_functional_tensor(t_list[i]);
+    outputs.push_back(to_functional_tensor(t_list[i]));
   }
   return outputs;
 }

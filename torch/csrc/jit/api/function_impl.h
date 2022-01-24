@@ -24,6 +24,10 @@ struct TORCH_API GraphFunction : public Function {
 
   void run(Stack& stack) override;
 
+  std::function<void(GraphFunction&)> function_creator() const {
+    return function_creator_;
+  }
+
   c10::intrusive_ptr<c10::ivalue::Future> runAsync(
       Stack& stack,
       TaskLauncher taskLauncher = at::launch) override;
@@ -92,6 +96,7 @@ struct TORCH_API GraphFunction : public Function {
     return *executor;
   }
 
+  using Function::call;
   bool call(
       Stack& stack,
       size_t bailOut,

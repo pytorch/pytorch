@@ -20,10 +20,9 @@ class AllModuleTracer(torch.fx.Tracer):
 
     def __init__(self, autowrap_modules: Tuple[ModuleType] = (math, ),
                  autowrap_functions: Tuple[Callable, ...] = (),
-                 enable_cpatching: bool = False,
                  param_shapes_constant: bool = False) -> None:
         super().__init__(
-            autowrap_modules, autowrap_functions, enable_cpatching,
+            autowrap_modules, autowrap_functions,
             param_shapes_constant)
         self.node_name_to_dtype = {}
 
@@ -101,6 +100,14 @@ class AllModuleTracer(torch.fx.Tracer):
         if target == operator.mul:
             target = torch.mul
 
+        # TODO(future PR): move this into mappings
+        if target == 'add':
+            target = torch.add
+            kind = 'call_function'
+        if target == 'mul':
+            target = torch.mul
+            kind = 'call_function'
+
         dtype_to_use = torch.float
 
         if kind == 'call_function' or kind == 'call_method':
@@ -113,9 +120,13 @@ class AllModuleTracer(torch.fx.Tracer):
 
                 old_target = target
                 # TODO use arg_dequant_infos
-                target, arg_quant_infos, arg_dequant_infos, packed_param_name, additional_kwargs = \
-                    qstate.get_op_convert_info(target, unwrap_scale_zp=True)
-
+                new_target, arg_quant_infos, arg_dequant_infos, packed_param_name, additional_kwargs, _, _ = \
+                    qstate.get_op_convert_info(target)
+                for k in ('scale', 'zero_point'):
+                    if k in additional_kwargs:
+                        additional_kwargs[k] = additional_kwargs[k].item()
+                if new_target is not None:
+                    target = new_target
                 args = self._maybe_update_args_with_quants(args, arg_quant_infos, target)
                 # if there is a packed param, replace the relevant args
                 if packed_param_name is not None:
@@ -164,9 +175,11 @@ class AllModuleTracer(torch.fx.Tracer):
                 qstate.validate_cur_op(module_instance)
 
                 # TODO use arg_dequant_infos
-                _, arg_quant_infos, arg_dequant_infos, _packed_param_name, additional_kwargs = \
-                    qstate.get_op_convert_info(
-                        module_instance, unwrap_scale_zp=True)
+                _, arg_quant_infos, arg_dequant_infos, _packed_param_name, additional_kwargs, _, _ = \
+                    qstate.get_op_convert_info(module_instance)
+                for k in ('scale', 'zero_point'):
+                    if k in additional_kwargs:
+                        additional_kwargs[k] = additional_kwargs[k].item()
 
                 args = self._maybe_update_args_with_quants(args, arg_quant_infos, target)
                 kwargs.update(**additional_kwargs)

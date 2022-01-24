@@ -40,7 +40,7 @@
 
 namespace at {
 namespace vec {
-namespace {
+inline namespace CPU_CAPABILITY {
 
 #if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 
@@ -64,7 +64,7 @@ __m256i pack_saturate_and_clamp(
     T max_val);
 
 template <>
-__m256i pack_saturate_and_clamp<int32_t>(
+inline __m256i pack_saturate_and_clamp<int32_t>(
     __m256i first,
     __m256i second,
     int32_t min_val,
@@ -74,7 +74,7 @@ __m256i pack_saturate_and_clamp<int32_t>(
 }
 
 template <>
-__m256i pack_saturate_and_clamp<int8_t>(
+inline __m256i pack_saturate_and_clamp<int8_t>(
     __m256i first,
     __m256i second,
     int8_t min_val,
@@ -86,7 +86,7 @@ __m256i pack_saturate_and_clamp<int8_t>(
 }
 
 template <>
-__m256i pack_saturate_and_clamp<uint8_t>(
+inline __m256i pack_saturate_and_clamp<uint8_t>(
     __m256i first,
     __m256i second,
     uint8_t min_val,

@@ -228,6 +228,7 @@ class _SplitterBase:
         sample_input: Tensors,
         operator_support: OperatorSupportBase,
         settings: _SplitterSettingBase,
+        non_acc_submodule_name: str = "_run_on_cpu_",
     ):
         """
         Preprocesses graph before splitting:
@@ -255,6 +256,8 @@ class _SplitterBase:
         # Modify deps to add more deps for fused nodes
         self.deps = self.find_deps()
         self.update_deps_for_fusions()
+
+        self.non_acc_submodule_name = non_acc_submodule_name
 
     # ===============================================================
     # Helpers for ctor and initial state
@@ -421,7 +424,7 @@ class _SplitterBase:
         reports += f" {acc_subgraphs_num} acc subgraphs and {cpu_subgraphs_num} cpu subgraphs.\n"
 
         for i, subgraph in enumerate(subgraphs):
-            reports += f"_run_on_acc_{i}: " if subgraph.is_acc else f"_run_on_cpu_{i}: "
+            reports += f"_run_on_acc_{i}: " if subgraph.is_acc else f"{self.non_acc_submodule_name}{i}: "
             reports += f"{len(subgraph.nodes)} node(s)\n"
 
         self.tag(subgraphs)
@@ -745,8 +748,9 @@ class _SplitterBase:
     def tag(self, subgraphs: List[Subgraph]):
         self.tags: List[str] = []
         for subgraph in subgraphs:
-            template = "_run_on_acc_{}" if subgraph.is_acc else "_run_on_cpu_{}"
-            tag = template.format(len(self.tags))
+            subgraph_name = self.non_acc_submodule_name
+
+            tag = f"_run_on_acc_{len(self.tags)}" if subgraph.is_acc else f"{self.non_acc_submodule_name}{len(self.tags)}"
             self.tags.append(tag)
             for node in subgraph.nodes:
                 if hasattr(node, "tag"):

@@ -1,12 +1,13 @@
 #pragma once
 
-#include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
+#include <ATen/core/symbol.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/variant.h>
 #include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/ir/graph_node_list.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
@@ -55,6 +56,18 @@ TORCH_API inline bool doesNotHeapAllocateWhenStoredInIValue(const Type& type) {
   }
 }
 
+TORCH_API inline bool borrowsOutputs(c10::Symbol kind) {
+  static const std::array<c10::Symbol, 3> symbols_with_borrowed_outputs = {
+      c10::Symbol::fromQualString("static_runtime::select_tensor"),
+      c10::Symbol::fromQualString("static_runtime::dict_unpack"),
+      c10::Symbol::fromQualString("static_runtime::VarTupleUnpack"),
+  };
+  return std::find(
+             symbols_with_borrowed_outputs.begin(),
+             symbols_with_borrowed_outputs.end(),
+             kind) != symbols_with_borrowed_outputs.end();
+}
+
 // Group values used by `graph` into three categories:
 //
 // - output_aliases:
@@ -95,10 +108,50 @@ class ValueGroup {
   FastSet<const Value*> external_aliases_;
 };
 
+class TORCH_API ManagedTensorRanges {
+ public:
+  ManagedTensorRanges() = default;
+  ManagedTensorRanges(
+      const std::shared_ptr<Graph>& graph,
+      const FastSet<const Value*>& managed_tensor_values);
+
+  // If true, then this node is the last use of at least one
+  // managed tensor. availableTensorValuesAfterNode(node) will return a vector
+  // of the managed tensors that are available for re-use
+  // in the nodes following this one.
+  bool nodeFreesManagedTensors(Node* node) const;
+  const std::vector<const Value*>& availableTensorValuesAfterNode(
+      Node* node) const;
+
+  // For testing. True if v1 and v2 are both mutable types and have lifetimes
+  // that overlap.
+  bool lifetimesOverlap(const Value* v1, const Value* v2) const;
+
+ private:
+  struct Lifetime {
+    Lifetime(size_t start_, size_t end_) : start(start_), end(end_) {}
+    size_t start;
+    size_t end;
+  };
+
+  // Returns nullptr if we are not tracking the lifetime of value
+  Lifetime* getLifetime(const Value* value);
+  const Lifetime* getLifetime(const Value* value) const;
+  // Collect all values in the input that have tracked lifetimes.
+  // A value's lifetime may not be tracked if it is a graph input
+  // or immutable type (containers with at least one mutable
+  // type are mutable)
+  std::vector<const Value*> collectValuesWithTrackedLifetimes(
+      at::ArrayRef<const Value*> values);
+
+  // Maps Node* to the set of managed tensors that are now available
+  // for re-use after this node.
+  FastMap<Node*, std::vector<const Value*>> node_to_newly_free_tensors_{};
+  // Maps each Value* to its lifetime (start node index, end node index)
+  FastMap<const Value*, Lifetime> value_lifetimes_{};
+};
+
 struct TORCH_API StaticModuleOptions {
-  // to batch allocate (deallocate) tensor storage for all non-escaping
-  // temporary tensors
-  bool cleanup_activations{true};
   // enabling out variant allows Static Runtime to do memory planning
   bool enable_out_variant{true};
   // to reuse tensor storage for tensors whose live-range do not overlap to
@@ -108,6 +161,12 @@ struct TORCH_API StaticModuleOptions {
   // graph, where storage is deallocated outside static runtime
   // (enable_out_variant must be true)
   bool manage_output_tensors{false};
+  // Gates the ReplaceWithMaybeCopy pass, which replaces ops that
+  // sometimes alias their outputs with subgraphs that include an out
+  // variant.
+  bool use_maybe_copy_variants{true};
+  // enable TensorExpr fusion of ops at model loading time
+  bool enable_tensorexpr_fusion{false};
 };
 
 /// The static runime supports two execution modes.
@@ -163,12 +222,14 @@ class TORCH_API StaticModule {
  public:
   explicit StaticModule(
       std::shared_ptr<torch::jit::Graph> g,
-      const StaticModuleOptions& opts = StaticModuleOptions());
+      const StaticModuleOptions& opts = StaticModuleOptions(),
+      std::vector<IValue> sample_inputs = {});
 
   explicit StaticModule(
       const torch::jit::Module& m,
       bool is_frozen = false,
-      const StaticModuleOptions& opts = StaticModuleOptions());
+      const StaticModuleOptions& opts = StaticModuleOptions(),
+      std::vector<IValue> sample_inputs = {});
 
   typedef enum {
     CONSTANT_VALUE = -2, // VALUE nodes defined by prim::Constant
@@ -188,12 +249,13 @@ class TORCH_API StaticModule {
   using DefInfo = std::pair<int, int>;
 
  public:
+  using KeywordArgs = std::unordered_map<std::string, c10::IValue>;
   c10::IValue operator()(
       const std::vector<c10::IValue>& args,
-      const std::unordered_map<std::string, c10::IValue>& kwargs);
+      const KeywordArgs& kwargs = KeywordArgs());
   c10::IValue operator()(
       std::vector<c10::IValue>&& args,
-      const std::unordered_map<std::string, c10::IValue>& kwargs);
+      const KeywordArgs& kwargs = KeywordArgs());
 
   const Graph& graph() const {
     return *graph_;
@@ -212,6 +274,18 @@ class TORCH_API StaticModule {
 
   size_t num_inputs() const;
   size_t num_outputs() const;
+
+  size_t num_constants() const {
+    return constants_.size();
+  }
+
+  size_t num_intermediate_values() const {
+    return num_intermediate_values_;
+  }
+
+  size_t total_num_values() const {
+    return num_inputs() + num_constants() + num_intermediate_values();
+  }
 
   C10_NODISCARD const std::vector<uint16_t>& output_indices() const {
     return output_indices_;
@@ -237,6 +311,10 @@ class TORCH_API StaticModule {
 
   C10_NODISCARD Node* findNodeWithKindForTesting(const std::string& kind) const;
 
+  graph_node_list node_ptrs() const {
+    return graph_->nodes();
+  }
+
   bool is_optimizable_container_type(const Node* n) const {
     auto it = node_is_optimizable_container_type_.find(n);
     return it != node_is_optimizable_container_type_.end();
@@ -246,22 +324,49 @@ class TORCH_API StaticModule {
     return schema_;
   }
 
-  const FastMap<const Value*, std::vector<const Value*>>&
-  values_share_same_storage() const {
-    return value_to_same_storage_values_;
-  }
-
   const ValueGroup& value_group() const {
     return value_group_;
+  }
+
+  const FastSet<const Value*>& managed_tensor_values() const {
+    return managed_tensor_values_;
+  }
+
+  const FastSet<const Value*>& managed_output_tensor_values() const {
+    return managed_output_tensor_values_;
+  }
+
+  const FastSet<const Value*>& leaked_values() const {
+    return leaked_values_;
+  }
+
+  const ManagedTensorRanges& managed_tensor_ranges() const {
+    return managed_tensor_ranges_;
   }
 
   bool first_input_is_self() const {
     return module_.has_value();
   }
 
+  size_t inputs_offset() const {
+    return 0;
+  }
+
+  size_t constants_offset() const {
+    return inputs_offset() + num_inputs();
+  }
+
+  size_t intermediate_values_offset() const {
+    return constants_offset() + num_constants();
+  }
+
   StaticRuntime& runtime();
 
  private:
+  // Initialize various attributes that the memory planner will need.
+  // To be called at the tail of the ctor.
+  void prepareForMemoryPlanner();
+
   StaticModuleOptions opts_;
   std::shared_ptr<torch::jit::Graph> graph_;
   c10::optional<torch::jit::Module> module_;
@@ -280,11 +385,20 @@ class TORCH_API StaticModule {
 
   ValueGroup value_group_;
 
-  // map a value to the set of values that may share the same storage with it
-  FastMap<const Value*, std::vector<const Value*>>
-      value_to_same_storage_values_;
-
   FastSet<const Node*> node_is_optimizable_container_type_;
+
+  FastSet<const Value*> managed_tensor_values_{};
+  FastSet<const Value*> managed_output_tensor_values_{};
+  FastSet<const Value*> leaked_values_{};
+  ManagedTensorRanges managed_tensor_ranges_{};
+
+  size_t num_intermediate_values_ = 0;
+
+  // Includes self if module_ != nullopt.
+  // Note that we might have num_inputs_ == 0 even if the schema has a `self`
+  // argument. In this case, `self` isn't used in the graph, but the schema
+  // includes it anyways to be consistent with the JIT interpreter.
+  size_t num_inputs_;
 };
 
 class TORCH_API StaticRuntime {
@@ -296,17 +410,17 @@ class TORCH_API StaticRuntime {
 
   C10_DISABLE_COPY_AND_ASSIGN(StaticRuntime);
 
+  using KeywordArgs = std::unordered_map<std::string, c10::IValue>;
   c10::IValue operator()(
       const std::vector<c10::IValue>& args,
-      const std::unordered_map<std::string, c10::IValue>& kwargs);
+      const KeywordArgs& kwargs = KeywordArgs());
   c10::IValue operator()(
       std::vector<c10::IValue>&& args,
-      const std::unordered_map<std::string, c10::IValue>& kwargs);
+      const KeywordArgs& kwargs = KeywordArgs());
 
   void benchmark(
       const std::vector<std::vector<c10::IValue>>& args_list,
-      const std::vector<std::unordered_map<std::string, c10::IValue>>&
-          kwargs_list,
+      const std::vector<KeywordArgs>& kwargs_list,
       const int warmup_runs,
       const int main_runs,
       bool print_per_node_time = false,
@@ -331,8 +445,7 @@ class TORCH_API StaticRuntime {
 
   IndividualMetrics benchmark_individual_ops(
       const std::vector<std::vector<c10::IValue>>& args_list,
-      const std::vector<std::unordered_map<std::string, c10::IValue>>&
-          kwargs_list,
+      const std::vector<KeywordArgs>& kwargs_list,
       const int warmup_runs,
       const int main_runs);
 
@@ -361,6 +474,10 @@ class TORCH_API StaticRuntime {
     return nodes_;
   }
 
+  graph_node_list node_ptrs() const {
+    return static_module_.node_ptrs();
+  }
+
   const Graph& graph() const {
     return static_module_.graph();
   }
@@ -369,7 +486,7 @@ class TORCH_API StaticRuntime {
     return planner_.get();
   }
 
-  void check_for_memory_leak(bool output_returned = true);
+  bool check_for_memory_leak(bool output_returned = true);
 
   bool is_optimizable_container_type(Node* n) const {
     return static_module_.is_optimizable_container_type(n);
@@ -383,37 +500,81 @@ class TORCH_API StaticRuntime {
 
   bool checkOutputTensorMemoryLeaks();
 
-  bool isManagedOutputTensor(const IValue& ivalue);
+  bool isManagedOutputTensor(const IValue& ivalue) const;
+  bool isManagedOutputTensorValue(const Value* value) const;
 
   void disableManageOutputTensors();
 
+  // This is the fallback path taken if we can't construct the memory planner
+  // on the first iteration.
+  // IMPORTANT: Nothing here should be able to throw!!!
+  // This function can be called from the (implicitly) `noexcept` destructor
+  // of Deallocator, meaning that std::terminate will be called
+  // if any exception escapes. Even if resetMemory and ~Deallocator were
+  // `noexcept(false)`, it's possible that when ~Deallocator is called, the
+  // stack is already unwinding, so there's still danger of calling
+  // std::terminate.
+  void resetMemory() noexcept;
+
  private:
+  // A helper object that invokes memory planner deallocation code
+  // when destructed.
+  class Deallocator {
+   public:
+    explicit Deallocator(StaticRuntime& runtime) : runtime_(runtime) {}
+
+    Deallocator(Deallocator&&) = default;
+    Deallocator(const Deallocator&) = default;
+    Deallocator& operator=(const Deallocator&) = delete;
+    Deallocator& operator=(Deallocator&&) = delete;
+    ~Deallocator();
+
+    void setFinished() {
+      finished_ = true;
+    }
+
+   private:
+    void cleanupImpl();
+
+    bool finished_ = false;
+    StaticRuntime& runtime_;
+  };
+
   template <typename IValueList>
-  c10::IValue run_impl(
-      IValueList&& args,
-      const std::unordered_map<std::string, c10::IValue>& kwargs);
+  c10::IValue run_impl(IValueList&& args, const KeywordArgs& kwargs);
 
   template <typename IValueList>
   c10::IValue run_impl_record_functions(
       IValueList&& args,
-      const std::unordered_map<std::string, c10::IValue>& kwargs);
+      const KeywordArgs& kwargs);
 
   // helper method for copying input args/kwargs into inputs_
+  template <typename IValueList>
   void set_inputs(
-      const std::vector<c10::IValue>& args,
-      const std::unordered_map<std::string, c10::IValue>& kwargs);
-  void set_inputs(
-      std::vector<c10::IValue>&& args,
+      IValueList&& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
 
+  // Set Input(idx) to args[idx]. Invoked by set_inputs. Copies or moves
+  // depending on overload.
+  void set_arg(const size_t idx, std::vector<IValue>&& args);
+  void set_arg(const size_t idx, const std::vector<IValue>& args);
+
+  // Set Input(idx) to arg. Always copies. Used for kwargs.
+  void set_arg(const size_t idx, const IValue& arg);
+
+  bool fast_check_and_correct_overlap_with(
+      ProcessedNode& n,
+      c10::IValue& tensor_ival);
   void verify_and_correct_memory_overlap(ProcessedNode& n);
 
   // clean up owning refs of input IValues
-  void clean_up_input_ivalues() {
+  void clean_up_input_ivalues() noexcept {
     for (const auto idx : c10::irange(static_module_.num_inputs())) {
       values_[idx] = IValue();
     }
   }
+
+  void clean_up_intermediate_ivalues() noexcept;
 
   IValue move_outputs_to_tuple(uint32_t num_outputs);
 
@@ -421,19 +582,17 @@ class TORCH_API StaticRuntime {
 
   float benchmark_model(
       const std::vector<std::vector<c10::IValue>>& args_list,
-      const std::vector<std::unordered_map<std::string, c10::IValue>>&
-          kwargs_list,
+      const std::vector<KeywordArgs>& kwargs_list,
       const int warmup_runs,
       const int main_runs);
 
   void display_nodes(
       const std::vector<c10::IValue>& args,
-      const std::unordered_map<std::string, c10::IValue>& kwargs);
+      const KeywordArgs& kwargs);
 
-  // Memory planning is only enabled if sm->opts().cleanup_activations is true.
-  // Otherwise, the memory used by activations is cached inside the static
-  // runtime.
   const StaticModule& static_module_;
+  // Cache this so we don't have to call static_module_.first_input_is_self()
+  const bool first_input_is_self_;
   bool manage_output_tensors_enabled_ = false;
   std::unique_ptr<MemoryPlanner> planner_;
   // first static_module_.num_inputs() slots are inputs, next
@@ -459,8 +618,8 @@ class TORCH_API ProcessedFunction {
     kInterpreterFallback,
   };
 
-  const std::function<void(ProcessedNode*)>& f() const {
-    return f_;
+  void run(ProcessedNode* pnode) const {
+    return f_(pnode);
   }
 
   Kind kind() const {
@@ -550,8 +709,6 @@ class TORCH_API ProcessedNode {
   }
 #endif
 
-  bool verify_no_memory_overlap() const;
-
   bool check_outputs_for_memory_overlap() const {
     return fn_->checkMemoryOverlap();
   }
@@ -564,6 +721,9 @@ class TORCH_API ProcessedNode {
     return overlap_detected_;
   }
 
+  bool check_and_correct_overlap_with(
+      const at::Tensor& input,
+      c10::IValue& output);
   void verify_and_correct_memory_overlap();
 
   void set_values(IValue* values) {
@@ -574,11 +734,13 @@ class TORCH_API ProcessedNode {
   C10_NODISCARD uint16_t output_ivalue_index(uint16_t i) const {
     return outputs_offset_ + i;
   }
+  // used in debug mode
+  bool verify_no_memory_overlap(bool force_check = false) const;
 
  private:
   C10_NODISCARD bool verify_outputs_dont_overlap_each_other() const;
 
-  C10_NODISCARD bool verify_inputs_dont_overlap_outputs() const;
+  C10_NODISCARD bool verify_inputs_dont_overlap_outputs(bool force_check) const;
 
   Node* node_;
   const ProcessedFunction* fn_;
