@@ -285,6 +285,9 @@ Tensor linalg_pinv(
     const optional<Tensor>& atol_opt,
     const optional<Tensor>& rtol_opt,
     bool hermitian) {
+  // FIXME: Whenever we have a nice lstsq, we should dispatch this function to simply be
+  // `torch.lstsq(A, torch.eye(A.shape[-1]), atol=atol, rtol=rtol)`
+  // with a driver that supports singular inputs
   NoTF32Guard disable_tf32;
   ScalarType t = input.scalar_type();
   TORCH_CHECK((t == ScalarType::Double || t == ScalarType::Float || t == ScalarType::ComplexFloat || t == ScalarType::ComplexDouble)
@@ -2342,10 +2345,7 @@ Tensor& nuclear_norm_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tens
 
   auto permutation = create_dim_backshift_permutation(dim_[0], dim_[1], self.dim());
   Tensor p = self.permute(permutation);
-  // NOTE: U and V are computed only if gradmode is enabled, since the backward for nuclear
-  //       norm uses svd_backward, which requires them.
-  Tensor result_ = at::sum(std::get<1>(at::svd(p, /*some=*/true,
-                  /*compute_uv=*/at::GradMode::is_enabled() && self.requires_grad())), -1, keepdim);
+  Tensor result_ = at::sum(at::linalg_svdvals(p), -1, keepdim);
   if (keepdim) {
     result_.unsqueeze_(-1);
     auto permutation_reverse = create_reverse_permutation(permutation);
@@ -2412,7 +2412,7 @@ static Tensor& _linalg_norm_matrix_out(Tensor& result, const Tensor &self, const
   }
 
   if (std::abs(ord) == 2) {
-    // Need to shift the reduction dims to the back, because at::svd will only operate on
+    // Need to shift the reduction dims to the back, because at::linalg_svdvals will only operate on
     // the last 2 dimensions
     auto permutation = create_dim_backshift_permutation(dim_[0], dim_[1], self.dim());
     auto permutation_reverse = create_reverse_permutation(permutation);
@@ -2727,7 +2727,7 @@ Tensor linalg_cond(const Tensor& self, const optional<Scalar>& opt_ord) {
 
   // If ord == None or ord == ±2
   if (std::abs(ord.toDouble()) == 2.0) {
-    auto singular_values = std::get<1>(at::svd(self));
+    auto singular_values = at::linalg_svdvals(self);
     // singular values are sorted in descending order
     auto s_max = at::narrow(singular_values, /*dim=*/-1, /*start=*/0, /*length=*/1);
     auto s_min = at::narrow(singular_values, /*dim=*/-1, /*start=*/-1, /*length=*/1);

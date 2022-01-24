@@ -911,8 +911,8 @@ static void extra_kwargs(FunctionSignature& signature, PyObject* kwargs, Py_ssiz
 bool FunctionSignature::parse(PyObject* self, PyObject* args, PyObject* kwargs, PyObject* dst[],  // NOLINT
                               bool raise_exception) {
   auto nargs = args ? PyTuple_GET_SIZE(args) : 0;
-  ssize_t remaining_kwargs = kwargs ? PyDict_Size(kwargs) : 0;
-  ssize_t arg_pos = 0;
+  auto remaining_kwargs = kwargs ? PyDict_Size(kwargs) : 0;
+  Py_ssize_t arg_pos = 0;
   bool allow_varargs_intlist = false;
 
   // if there is a single positional IntArrayRef argument, i.e. expand(..), view(...),

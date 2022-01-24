@@ -2675,36 +2675,31 @@ def clone_sample(sample, **kwargs):
 
 
 def sample_inputs_svd_lowrank(op_info, device, dtype, requires_grad=False, **kwargs):
+    for sample in sample_inputs_singular_matrix_factors(op_info, device, dtype, requires_grad, **kwargs):
+        *batch, m, k = sample.input.shape
+        *_, n, _ = sample.args[0].shape
 
-    def generator():
-        for sample in sample_inputs_singular_matrix_factors(op_info, device, dtype, requires_grad, **kwargs):
-            *batch, m, k = sample.input.shape
-            *_, n, _ = sample.args[0].shape
+        # NOTE: since svd_lowrank relies on non rank-revealing SVD,
+        # it inherits the problem of unstable behavior with repeated
+        # singular values including zeros.
+        # Since we want to avoid (repeated) zeros as singular values,
+        # we can only use k for q.
+        # This issues could be resolved with using a rank-revealing SVD
+        # which does not include "zero" singular values.
+        op_kwargs = {
+            'q': k,
+            'M': None
+        }
 
-            # NOTE: since svd_lowrank relies on non rank-revealing SVD,
-            # it inherits the problem of unstable behavior with repeated
-            # singular values including zeros.
-            # Since we want to avoid (repeated) zeros as singular values,
-            # we can only use k for q.
-            # This issues could be resolved with using a rank-revealing SVD
-            # which does not include "zero" singular values.
-            op_kwargs = {
-                'q': k,
-                'M': None
-            }
+        # without M specified
+        yield clone_sample(sample, **op_kwargs)
 
-            # without M specified
-            yield clone_sample(sample, **op_kwargs)
-
-            # now with M
-            # TODO: fix bug in the documentation for svd_lowrank:
-            # M has to be (*, m, n), and not (*, 1, n) as written
-            # in the documentation
-            op_kwargs['M'] = make_tensor((*batch, m, n), device, dtype, requires_grad=requires_grad)
-            yield clone_sample(sample, **op_kwargs)
-
-    return list(generator())
-
+        # now with M
+        # TODO: fix bug in the documentation for svd_lowrank:
+        # M has to be (*, m, n), and not (*, 1, n) as written
+        # in the documentation
+        op_kwargs['M'] = make_tensor((*batch, m, n), device, dtype, requires_grad=requires_grad)
+        yield clone_sample(sample, **op_kwargs)
 
 def chunk_iter(iterable, size):
     it = iter(iterable)
@@ -2714,23 +2709,17 @@ def chunk_iter(iterable, size):
             break
         yield chunk
 
-
 def sample_inputs_pca_lowrank(op_info, device, dtype, requires_grad=False, **kwargs):
-
-    def generator():
-        # we reuse samples from svd_lowrank which come in group of two with
-        # kwarg['M'] = None and with kwarg['M'] = <some tensor>
-        samples = sample_inputs_svd_lowrank(op_info, device, dtype, requires_grad, **kwargs)
-        for s1, s2 in chunk_iter(samples, 2):
-            del s1.kwargs['M']
-            del s2.kwargs['M']
-            s1.kwargs['center'] = False
-            s2.kwargs['center'] = True
-            yield s1
-            yield s2
-
-    return list(generator())
-
+    # we reuse samples from svd_lowrank which come in group of two with
+    # kwarg['M'] = None and with kwarg['M'] = <some tensor>
+    samples = sample_inputs_svd_lowrank(op_info, device, dtype, requires_grad, **kwargs)
+    for s1, s2 in chunk_iter(samples, 2):
+        del s1.kwargs['M']
+        del s2.kwargs['M']
+        s1.kwargs['center'] = False
+        s2.kwargs['center'] = True
+        yield s1
+        yield s2
 
 def sample_inputs_linalg_cond(op_info, device, dtype, requires_grad=False, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -9716,7 +9705,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],),
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],),
     OpInfo('linalg.eig',
            aten_name='linalg_eig',
            op=torch.linalg.eig,
@@ -9862,7 +9851,7 @@ op_db: List[OpInfo] = [
     OpInfo('linalg.norm',
            op=torch.linalg.norm,
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            sample_inputs_func=sample_inputs_linalg_norm,
            aten_name='linalg_norm',
            skips=(
@@ -9875,9 +9864,8 @@ op_db: List[OpInfo] = [
            aten_name='linalg_matrix_norm',
            dtypes=floating_and_complex_types(),
            check_batched_gradgrad=False,
-           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            sample_inputs_func=sample_inputs_linalg_matrix_norm,
-           gradcheck_fast_mode=not TEST_WITH_ROCM,  # ROCM fails with gradcheck fast and succeeds with slow
            skips=(
                # Pre-existing condition; Needs to be fixed
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
@@ -10316,11 +10304,7 @@ op_db: List[OpInfo] = [
            # See https://github.com/pytorch/pytorch/issues/66357
            # Relies on copy_ to broadcast, but the forward AD path calls broadcast_to which
            # does not have a batching rule in core
-           check_batched_forward_grad=False,
-           skips=(
-               # Pre-existing condition; Needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
-           )),
+           check_batched_forward_grad=False),
     OpInfo('nanquantile',
            dtypes=floating_types(),
            sample_inputs_func=sample_inputs_reduction_quantile,
@@ -10329,11 +10313,7 @@ op_db: List[OpInfo] = [
            # See https://github.com/pytorch/pytorch/issues/66357
            # Relies on copy_ to broadcast, but the forward AD path calls broadcast_to which
            # does not have a batching rule in core
-           check_batched_forward_grad=False,
-           skips=(
-               # Pre-existing condition; Needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
-           )),
+           check_batched_forward_grad=False),
     BinaryUfuncInfo(
         'max',
         aliases=('maximum',),
@@ -12547,7 +12527,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            supports_autograd=False,
            sample_inputs_func=sample_inputs_linalg_invertible,
-           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            skips=(
                # Pre-existing condition; Needs to be fixed
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
@@ -12559,7 +12539,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            supports_autograd=False,
            sample_inputs_func=sample_inputs_linalg_pinv_hermitian,
-           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            skips=(
                # Pre-existing condition; Needs to be fixed
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
@@ -12574,7 +12554,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_linalg_pinv,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack]),
            skips=(
                # errors with "leaked XXXX bytes CUDA memory on device 0"
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', device_type='cuda'),
@@ -12595,7 +12575,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_linalg_pinv_singular,
            # Only large tensors show issues with implicit backward used prior to
            # explicit backward implementation.
-           decorators=[slowTest, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
+           decorators=[slowTest, skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            skips=(
                # test does not work with passing lambda for op
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
@@ -12613,7 +12593,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_linalg_pinv_hermitian,
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
-           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            ),
     OpInfo('eig',
            op=torch.eig,
@@ -12654,7 +12634,6 @@ op_db: List[OpInfo] = [
            # We're using at::allclose, which does not have a batching rule
            check_batched_grad=False,
            check_batched_gradgrad=False,
-           gradcheck_fast_mode=not TEST_WITH_ROCM,  # ROCM fails with gradcheck fast and succeeds with slow
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            skips=(
                # Fixme, forward over backward gives a numerical error
@@ -12670,7 +12649,6 @@ op_db: List[OpInfo] = [
            # We're using at::allclose, which does not have a batching rule
            check_batched_grad=False,
            check_batched_gradgrad=False,
-           gradcheck_fast_mode=not TEST_WITH_ROCM,  # ROCM fails with gradcheck fast and succeeds with slow
            sample_inputs_func=sample_inputs_svd,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            skips=(
@@ -12686,7 +12664,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            # We're using at::allclose, which does not have a batching rule
            check_batched_gradgrad=False,
-           gradcheck_fast_mode=not TEST_WITH_ROCM,  # ROCM fails with gradcheck fast and succeeds with slow
            sample_inputs_func=sample_inputs_linalg_svdvals,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack]),
     OpInfo('svd_lowrank',
@@ -12702,7 +12679,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_svd_lowrank,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            skips=(
                # test does not work with passing lambda for op
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
@@ -12720,7 +12697,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_pca_lowrank,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            skips=(
                # test does not work with passing lambda for op
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
@@ -12978,7 +12955,7 @@ op_db: List[OpInfo] = [
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            supports_out=False,
            sample_inputs_func=sample_inputs_linalg_invertible,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack]),
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack]),
     OpInfo('gather',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),

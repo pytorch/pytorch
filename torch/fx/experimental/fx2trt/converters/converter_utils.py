@@ -1,4 +1,6 @@
-from typing import Any, Tuple, Sequence, Union, List, Optional, Dict
+import operator
+import warnings
+from typing import Any, Tuple, Sequence, Union, List, Optional, Dict, Callable
 
 import numpy as np
 import tensorrt as trt
@@ -324,11 +326,12 @@ def add_binary_elementwise_layer(
     name: str
 ) -> TRTTensor:
     """
-    This function adds a TensorRT elementwise layer. We only allow at most one
-    operand to not be a trt tensor, otherwise, we should const fold it first.
-    If any operand is not a trt tensor, we make it a trt constant layer which
-    has the same type as the other trt tensor. Then we broadcast these two inputs
-    to have the same number of dimensions.
+    This function adds a TensorRT elementwise layer. We allow both operands to be
+    constant (not a trt tensor) because in implicit batch dimension mode, we could
+    introduce constant via .size() op. Other scenario should be const folded first.
+    If any operand is not a trt tensor, we make it a trt constant layer which has
+    the same type as the other trt tensor. Then we broadcast these two inputs to
+    have the same number of dimensions.
 
     Limitation:
         If we are using implicit batch dim mode, the operand that is not a trt
@@ -357,8 +360,9 @@ def add_binary_elementwise_layer(
         dtype = torch_dtype_from_trt(rhs_val.dtype)
         is_rhs_trt_tensor = True
     if not is_lhs_trt_tensor and not is_rhs_trt_tensor:
-        raise RuntimeError(f"Both operands of the binary elementwise op {name}"
-                           "are constant. In this case, please consider constant fold the model first.")
+        warnings.warn(f"Both operands of the binary elementwise op {name} "
+                      "are constant. In this case, please consider constant fold the model first.")
+        return get_python_op_from_trt_elementwise_op(op_type)(lhs_val, rhs_val)
 
     lhs_val = get_trt_tensor(network, lhs_val, f"{name}_lhs", dtype)
     rhs_val = get_trt_tensor(network, rhs_val, f"{name}_rhs", dtype)
@@ -614,3 +618,18 @@ def trunc_div(
                                           trt.ElementWiseOperation.PROD, target, f"{name}_output")
 
     return output
+
+
+def get_python_op_from_trt_elementwise_op(trt_op: TRTElementWiseOp) -> Callable[[Any, Any], Any]:
+    if trt_op == trt.ElementWiseOperation.SUM:
+        return operator.add
+    elif trt_op == trt.ElementWiseOperation.PROD:
+        return operator.mul
+    elif trt_op == trt.ElementWiseOperation.SUB:
+        return operator.sub
+    elif trt_op == trt.ElementWiseOperation.DIV:
+        return operator.truediv
+    elif trt_op == trt.ElementWiseOperation.FLOOR_DIV:
+        return operator.floordiv
+    else:
+        raise RuntimeError(f"{trt_op} is not supported yet!")
