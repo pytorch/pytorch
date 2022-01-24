@@ -28,23 +28,13 @@ void insertPrePackedLinearOp(std::shared_ptr<Graph>& graph) {
   // fuse decomposed linear into aten::linear
   FuseLinear(graph);
 
-  std::string linear_before_inline = R"(
+  const std::string linear_before_inline = R"(
     graph(%linear, %input, %weight, %bias):
-        %r = prim::CallFunction(%linear, %input, %weight, %bias)
-        return (%r))";
-  std::string prepacked_ops_pattern_before_inline = R"(
-    graph(%linear, %input, %weight, %bias):
-        %weight_t = aten::t(%weight)
-        %packed_weight_bias = vulkan_prepack::linear_prepack(
-            %weight_t, %bias)
-        %res = vulkan_prepack::linear_run(%input, %packed_weight_bias)
+        %res = prim::CallFunction(%linear, %input, %weight, %bias)
         return (%res))";
-  std::string linear_pattern = R"(
-    graph(%input, %weight, %bias):
-        %r = aten::linear(%input, %weight, %bias)
-        return (%r))";
-  std::string prepacked_ops_pattern = R"(
-    graph(%input, %weight, %bias):
+
+  const std::string prepacked_ops_pattern_before_inline = R"(
+    graph(%linear, %input, %weight, %bias):
         %weight_t = aten::t(%weight)
         %packed_weight_bias = vulkan_prepack::linear_prepack(
             %weight_t, %bias)
@@ -59,45 +49,68 @@ void insertPrePackedLinearOp(std::shared_ptr<Graph>& graph) {
     return (func_name == "linear");
   };
 
+  const std::vector<std::pair<std::string, std::string>> value_mappings(
+      {{"weight_t", "res"}, {"packed_weight_bias", "res"}, {"res", "res"}});
+
   SubgraphRewriter linear_call_fn_rewriter;
   linear_call_fn_rewriter.RegisterRewritePattern(
-      linear_before_inline, prepacked_ops_pattern_before_inline);
+      linear_before_inline,
+      prepacked_ops_pattern_before_inline,
+      value_mappings);
   linear_call_fn_rewriter.runOnGraph(graph, filter);
 
+  const std::string linear_pattern = R"(
+    graph(%input, %weight, %bias):
+        %res = aten::linear(%input, %weight, %bias)
+        return (%res))";
+  const std::string prepacked_ops_pattern = R"(
+    graph(%input, %weight, %bias):
+        %weight_t = aten::t(%weight)
+        %packed_weight_bias = vulkan_prepack::linear_prepack(
+            %weight_t, %bias)
+        %res = vulkan_prepack::linear_run(%input, %packed_weight_bias)
+        return (%res))";
+
   SubgraphRewriter linear_rewriter;
-  linear_rewriter.RegisterRewritePattern(linear_pattern, prepacked_ops_pattern);
+  linear_rewriter.RegisterRewritePattern(
+      linear_pattern, prepacked_ops_pattern, value_mappings);
   linear_rewriter.runOnGraph(graph);
 }
 
 void insertPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
   graph_rewrite_helper::replaceConvolutionWithAtenConv(graph);
 
-  std::string conv_2d_pattern = R"(
+  const std::string conv_2d_pattern = R"(
     graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[], %groups:int):
-        %r = aten::conv2d(%input, %weight, %bias, %stride, %padding, %dilation, %groups)
-        return (%r) )";
+        %res = aten::conv2d(%input, %weight, %bias, %stride, %padding, %dilation, %groups)
+        return (%res) )";
 
-  std::string prepacked_ops_conv2d_pattern = R"(
+  const std::string prepacked_ops_conv2d_pattern = R"(
     graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[], %groups:int):
         %output_min_max : None = prim::Constant()
         %packed_weight_bias = vulkan_prepack::conv2d_clamp_prepack(
             %weight, %bias, %stride, %padding, %dilation, %groups,
             %output_min_max, %output_min_max)
-        %r = vulkan_prepack::conv2d_clamp_run(%input, %packed_weight_bias)
-        return (%r) )";
+        %res = vulkan_prepack::conv2d_clamp_run(%input, %packed_weight_bias)
+        return (%res) )";
+
+  const std::vector<std::pair<std::string, std::string>> value_mappings(
+      {{"output_min_max", "res"},
+       {"packed_weight_bias", "res"},
+       {"res", "res"}});
 
   SubgraphRewriter rewriter;
   rewriter.RegisterRewritePattern(
-      conv_2d_pattern, prepacked_ops_conv2d_pattern);
+      conv_2d_pattern, prepacked_ops_conv2d_pattern, value_mappings);
   rewriter.runOnGraph(graph);
 
-  std::string conv_2d_transpose_pattern = R"(
+  const std::string conv_2d_transpose_pattern = R"(
       graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[],
           %output_padding:int[], %groups:int):
         %res = aten::conv_transpose2d(%input, %weight, %bias, %stride, %padding, %output_padding, %groups, %dilation)
         return (%res) )";
 
-  std::string prepacked_ops_conv2d_transpose_pattern = R"(
+  const std::string prepacked_ops_conv2d_transpose_pattern = R"(
     graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[], %output_padding:int[], %groups:int):
         %output_min_max : None = prim::Constant()
         %packed_weight_bias = vulkan_prepack::conv2d_transpose_clamp_prepack(
@@ -108,7 +121,9 @@ void insertPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
 
   SubgraphRewriter transpose_rewriter;
   transpose_rewriter.RegisterRewritePattern(
-      conv_2d_transpose_pattern, prepacked_ops_conv2d_transpose_pattern);
+      conv_2d_transpose_pattern,
+      prepacked_ops_conv2d_transpose_pattern,
+      value_mappings);
   transpose_rewriter.runOnGraph(graph);
 }
 
