@@ -26,7 +26,7 @@ from ._package_unpickler import PackageUnpickler
 from .file_structure_representation import Directory, _create_directory_from_file_list
 from .glob_group import GlobPattern
 from .importer import Importer
-
+from collections import defaultdict
 
 class PackageImporter(Importer):
     """Importers allow you to load code written to packages by :class:`PackageExporter`.
@@ -82,6 +82,7 @@ class PackageImporter(Importer):
         self.root = _PackageNode(None)
         self.modules = {}
         self.extern_modules = self._read_extern()
+        self.external_registry = defaultdict(dict)
 
         for extern_module in self.extern_modules:
             if not module_allowed(extern_module):

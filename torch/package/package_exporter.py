@@ -35,6 +35,8 @@ from ._stdlib import is_stdlib_module
 from .find_file_dependencies import find_files_source_depends_on
 from .glob_group import GlobGroup, GlobPattern
 from .importer import Importer, OrderedImporter, sys_importer
+from collections import defaultdict
+import inspect
 
 _gate_torchscript_serialization = True
 
@@ -202,6 +204,7 @@ class PackageExporter:
         self._written_files: Set[str] = set()
 
         self.serialized_reduces: Dict[int, Any] = {}
+        self.external_registry = defaultdict(dict)
 
         # A graph tracking all the modules and pickle objects added to this
         # package and the dependencies between them.
@@ -851,6 +854,7 @@ class PackageExporter:
     def _persistent_id(self, obj):
         if torch.is_storage(obj) or isinstance(obj, torch.storage.TypedStorage):
             if isinstance(obj, torch.storage.TypedStorage):
+                print("im a typed storage")
                 # TODO: Once we decide to break serialization FC, we can
                 # remove this case
                 storage = obj._storage
@@ -860,6 +864,7 @@ class PackageExporter:
                 storage_numel = obj.size()
 
             else:
+                print("I'm not typed storage")
                 storage = obj
                 storage_type = normalize_storage_type(type(storage))
                 dtype = torch.uint8
@@ -872,15 +877,24 @@ class PackageExporter:
             storage_present = self.storage_context.has_storage(storage)
             storage_id = self.storage_context.get_or_add_storage(storage)
             if not storage_present:
+                print(f'{storage_id} is not present')
                 if storage.device.type != "cpu":
                     storage = storage.cpu()
                 num_bytes = storage.nbytes()
                 self.zip_file.write_record(
                     f".data/{storage_id}.storage", storage.data_ptr(), num_bytes
                 )
+            elif isinstance(obj, torch.storage.TypedStorage):
+                print(f"found un storage - {storage_id}")
+                print( hasattr(obj, "__reduce_package__"))
+                import pdb
+                pdb.set_trace()
+                *obj.__reduce_package__(self),
             return ("storage", storage_type, storage_id, location, storage_numel)
 
-        if hasattr(obj, "__reduce_package__"):
+        if hasattr(obj, "__reduce_package__") and not inspect.isclass(obj):
+            # import pdb
+            # pdb.set_trace()
             if _gate_torchscript_serialization and isinstance(
                 obj, torch.jit.RecursiveScriptModule
             ):
@@ -897,8 +911,8 @@ class PackageExporter:
                 )
 
             return self.serialized_reduces[id(obj)]
-
-        return None
+        else:
+            return None
 
     def __enter__(self):
         return self

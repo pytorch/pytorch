@@ -212,6 +212,24 @@ def _storage_type_to_dtype_map():
         val: key for key, val in _dtype_to_storage_type_map().items()}
     return dtype_map
 
+def unpackage_typed_storage(importer, storage_type, key, location, size):
+    dtype = storage_type.dtype
+
+    if key not in importer.external_registry["torch_loaded_storage"]:
+        name = f"{key}.storage"
+        tensor = importer.zip_reader.get_storage_from_record(
+                    ".data/" + name, size, dtype
+                )
+        storage = tensor.storage()
+        if location.startswith('cuda'):
+            device = torch.cuda._utils._get_device_index(location, True)
+            assert torch.cuda.is_available()
+            assert torch.cuda._utils._get_device_index(location, True) < torch.cuda.device_count()
+            storage = storage.cuda(device)
+        importer.external_registry["torch_loaded_storage"][key] = storage
+    storage = importer.external_registry["torch_loaded_storage"][key]
+    return TypedStorage(wrap_storage=storage._untyped(), dtype=dtype)
+
 class TypedStorage:
     is_sparse = False
 
@@ -507,6 +525,39 @@ class TypedStorage:
         b = io.BytesIO()
         torch.save(self, b, _use_new_zipfile_serialization=False)
         return (_load_from_bytes, (b.getvalue(),))
+
+    def __reduce_package__(self, exporter=None):
+        print('reducing a typed storage package')
+        storage = self._storage
+        storage_type_str = self.pickle_storage_type()
+        storage_type = getattr(torch, storage_type_str)
+        dtype = self.dtype
+        storage_numel = self.size()
+
+        storage = cast(Storage, storage)
+        if type(storage).__module__ == 'torch.cuda':
+            location = 'cuda:' + str(self.get_device())
+        elif type(storage).__module__ == 'torch':
+            location = 'cpu'
+        else:
+            raise TypeError(f"storage: {type(self).__module__}  is not from cpu or cuda")
+        if storage not in exporter.external_registry:
+            storage_id = len(exporter.external_registry['storage'])
+            exporter.external_registry['storage'][storage] = {
+                'id': storage_id,
+                'source': self
+            }
+            if storage.device.type != "cpu":
+                storage = storage.cpu()
+            num_bytes = storage.nbytes()
+            # exporter.zip_file.write_record(
+            #         f".data/{storage_id}.storage", storage.data_ptr(), num_bytes
+            #     )
+        else:
+            storage_id = exporter.external_registry['storage'][storage]['id']
+            print(f'{storage_id} has been found already')
+        storage_id = exporter.external_registry['storage'][storage]['id']
+        return (unpackage_typed_storage, (storage_type, storage_id, location, storage_numel))
 
     def data_ptr(self):
         return self._storage.data_ptr()

@@ -537,6 +537,7 @@ if _enabled:
             """
             script_module_id = exporter.get_unique_id()
             exporter.script_module_serializer.serialize(self._c, int(script_module_id))
+            # print(exporter.storage_context.get_or_add_storage(storage))
             return (unpackage_script_module, (script_module_id,))
 
     class RecursiveScriptModule(ScriptModule):
