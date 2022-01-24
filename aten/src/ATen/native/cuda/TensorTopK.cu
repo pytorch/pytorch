@@ -264,7 +264,6 @@ __global__ void radixFindKthValues(
     T* kthValues       // size: num_slices, only write when current_bit reaches 0
 ) {
 
-
   int items_per_block = items_per_thread * BLOCK_THREADS;
   int tidx = threadIdx.x;
   IndexType block_idx = getLinearBlockId<IndexType>();
@@ -282,7 +281,7 @@ __global__ void radixFindKthValues(
   typedef cub::BlockScan<IndexType, BLOCK_THREADS> BlockScan;
   union __align__(16) TempStorage {
     uint32_t digit_counters[RADIX_DIGITS];
-    IndexType digit_count_cumsum[RADIX_DIGITS];
+    IndexType digit_count_cumsum[RADIX_DIGITS]; // only used if this it the last block for this slice
     typename BlockScan::TempStorage scan_storage;
   };
   __shared__ TempStorage temp_storage;
@@ -297,10 +296,10 @@ __global__ void radixFindKthValues(
       ? items_per_thread
       : at::ceil_div((int64_t)(slice_size - blk_idx_in_slice * items_per_block), (int64_t)BLOCK_THREADS);
 
-  // collect digit counts per thread and store in shared memorey
+  // collect digit counts and store in shared memorey
   for (int i = 0; i < items_per_thread; ++i) {
-    // Find the start offset for our slice
-    IndexType idx = tidx + i * BLOCK_THREADS + blk_idx_in_slice * items_per_block;
+    // Find the start offset for this slice
+    IndexType idx = blk_idx_in_slice * items_per_block + i * BLOCK_THREADS + tidx;
     if (idx < slice_size) {
       idx *= withinSliceStride;
       Bitwise val = TopKTypeConfig<T>::convert(doLdg(&data[idx]));
@@ -314,12 +313,13 @@ __global__ void radixFindKthValues(
 
   __syncthreads();
 
-    // load digit counter to register, one digit per thread
-    static_assert(RADIX_DIGITS <= BLOCK_THREADS, "this kernel requires RADIX_DIGITS <= BLOCK_THREADS");
-    IndexType digit_count = 0;
-    if (tidx < RADIX_DIGITS) {
-      digit_count = temp_storage.digit_counters[tidx];
-    }
+  // load digit counter to register, one digit per thread
+  static_assert(RADIX_DIGITS <= BLOCK_THREADS, "this kernel requires RADIX_DIGITS <= BLOCK_THREADS");
+  IndexType digit_count = 0;
+  if (tidx < RADIX_DIGITS) {
+    digit_count = temp_storage.digit_counters[tidx];
+  }
+
   // if blocks_per_slice == 1, there is no need to do cross-block reduction
   // in this case counts saved at registers instead of global memory
   if (blocks_per_slice > 1) {
@@ -331,8 +331,7 @@ __global__ void radixFindKthValues(
     __syncthreads(); // make sure all writes are finished before update semaphores
   }
 
-
-  // the last block of each slice accumulates counters from multiple blocks and updates desired
+  // the last block of each slice accumulates counters from multiple blocks and updates desired and ks_to_find
   __shared__ bool s_is_last_block_done;
 
   if (tidx == 0) {
@@ -362,6 +361,7 @@ __global__ void radixFindKthValues(
   BlockPrefixCallbackOp prefix_op(0);
   BlockScan(temp_storage.scan_storage).InclusiveSum(digit_count, digit_count_cumsum, prefix_op);
   __syncthreads();
+  // every thread also need the perfix_sum of it's left value for comparison, so save a copy in shared mem
   if (tidx < RADIX_DIGITS) {
     temp_storage.digit_count_cumsum[tidx] = digit_count_cumsum;
   }
@@ -455,8 +455,7 @@ void launch(
   TORCH_INTERNAL_ASSERT(getGridFromTiles(num_blocks, grid), "Too many slices for topk");
   dim3 block(BLOCK_THREADS);
 
-
-
+  // iterate radix bits for multiple passes
   for (int current_bit = sizeof(T) * 8 - RADIX_BITS; current_bit >= 0; current_bit -= RADIX_BITS) {
     radixFindKthValues<T, IndexType, Bitwise, Dim><<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
         input,
@@ -476,7 +475,7 @@ void launch(
     desiredMask = at::cuda::Bitfield<Bitwise>::setBitfield(desiredMask, RADIX_MASK, current_bit, RADIX_BITS);
   }
 
-  // Find topk values based on kth value
+  // Find topk values based on kth values
   {
     dim3 grid;
     TORCH_INTERNAL_ASSERT(getGridFromTiles(numInputSlices, grid), "Too many slices for topk");
