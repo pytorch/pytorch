@@ -106,7 +106,7 @@ class TestONNXShapeInference(unittest.TestCase):
         slice = g.op("Slice", input, start_input, end, axis, step)
         self.run_test(g, slice.node(), expect_tensor(None, shape=(None, None)))
 
-    def test_bcast_matmul(self):
+    def test_broadcast_matmul(self):
         g = self.create_empty_graph()
         constant = self.insert_tensor_constant(g, torch.ones(5, 1, 2))
         constant_2 = self.insert_tensor_constant(g, torch.ones(3, 1, 2, 1))

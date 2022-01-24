@@ -960,11 +960,8 @@ void ProcessMatMulNode(Node* n) {
     auto input_shape_value_1 = input_shape_1.sizes().value();
     size_t rank_0 = input_shape_value_0.size();
     size_t rank_1 = input_shape_value_1.size();
-    // the matmul supports the rank of either or both inputs to be 1
-    // the behavior is the same as appending a 1 to the input(s), do the matmul and remove the appended 1(s)
-    // e.g., [n,k] X [k] is documented to behave exactly as matrix vector product, which is equivalent to
-    // expanding [k] to [k,1], doing matmul which returns [n,1], and then removing the 1 to get [n]
-    // thus we append the 1(s) and treat it as a matmul, then remove the appended 1(s) in the end
+    // Handle inputs of rank 1 just like numpy.matmul:
+    // https://numpy.org/doc/stable/reference/generated/numpy.matmul.html
     auto is_rank_0_1 = false;
     if (rank_0 == 1) {
       input_shape_value_0.insert(
