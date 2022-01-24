@@ -214,6 +214,7 @@ constexpr int BLOCK_THREADS = 128;
 constexpr int RADIX_BITS = 6;
 constexpr int RADIX_DIGITS = 1 << RADIX_BITS; // 2 ^ RADIX_BITS
 constexpr int RADIX_MASK = (RADIX_DIGITS - 1);
+static_assert(RADIX_DIGITS <= BLOCK_THREADS, "radixFindKthValues kernel requires RADIX_DIGITS <= BLOCK_THREADS");
 
 // (Copied from CUB) A stateful callback functor that maintains a running prefix to be applied
 // during consecutive scan operations.
@@ -325,8 +326,7 @@ __global__ void radixFindKthValues(
   __syncthreads();
 
   // merge per threads digit counters to per block counters, every thread collects one counter
-  // the following assumption is required:
-  // CUDA_KERNEL_ASSERT(RADIX_DIGITS <= BLOCK_THREADS);
+  static_assert(RADIX_DIGITS <= BLOCK_THREADS, "this kernel requires RADIX_DIGITS <= BLOCK_THREADS");
   IndexType collected_digit_count = 0;
   if (tidx < RADIX_DIGITS) {
     for (int j = 0, idx = tidx; j < BLOCK_THREADS; ++j, idx = (idx + 1) % BLOCK_THREADS) {
@@ -347,7 +347,6 @@ __global__ void radixFindKthValues(
 
   // the last block of each slice accumulates counters from multiple blocks and updates desired
   __shared__ bool s_is_last_block_done;
-  __shared__ bool s_desired_found;
 
   if (tidx == 0) {
     if (blocks_per_slice == 1) {
@@ -356,7 +355,6 @@ __global__ void radixFindKthValues(
       int blocks_finished_old = atomicAdd(&semaphores[slice_idx], 1);
       s_is_last_block_done = (blocks_finished_old == blocks_per_slice - 1);
     }
-    s_desired_found = false;
   }
 
   __syncthreads();
@@ -364,29 +362,29 @@ __global__ void radixFindKthValues(
   if (!s_is_last_block_done)
     return;
 
-  // sum block counts
+  // accumulates counters from multiple blocks
+  if (tidx < RADIX_DIGITS && blocks_per_slice > 1) {
+    collected_digit_count = 0;
+    for (int blk = 0; blk < blocks_per_slice; ++blk) {
+      collected_digit_count += counts[(slice_idx * blocks_per_slice + blk) * RADIX_DIGITS + tidx];
+    }
+  }
+
+  // compute the block-wide inclusive prefix sum
+  IndexType& digit_count_cumsum = collected_digit_count;
   BlockPrefixCallbackOp prefix_op(0);
+  BlockScan(temp_storage.scan_storage.temp).InclusiveSum(collected_digit_count, digit_count_cumsum, prefix_op);
+  __syncthreads();
+  if (tidx < RADIX_DIGITS) {
+    temp_storage.scan_storage.digit_count_cumsum[tidx] = digit_count_cumsum;
+  }
+  __syncthreads();
 
   if (tidx < RADIX_DIGITS) {
-    if (blocks_per_slice > 1) {
-      // accumulates counters from multiple blocks
-      collected_digit_count = 0;
-      for (int blk = 0; blk < blocks_per_slice; ++blk) {
-        collected_digit_count += counts[(slice_idx * blocks_per_slice + blk) * RADIX_DIGITS + tidx];
-      }
-    }
-
-    // Collectively compute the block-wide inclusive prefix sum
-    IndexType& digit_count_cumsum = collected_digit_count;
-    BlockScan(temp_storage.scan_storage.temp).InclusiveSum(collected_digit_count, digit_count_cumsum, prefix_op);
-    // TODO move __syncthreads out of condition
-    __syncthreads();
-    temp_storage.scan_storage.digit_count_cumsum[tidx] = digit_count_cumsum;
-    __syncthreads();
-
-    // update desired
     IndexType digit_count_cumsum_left = (tidx == 0) ? 0 : temp_storage.scan_storage.digit_count_cumsum[tidx - 1];
 
+    // if not the last pass: update desired and ks_to_find
+    // if last pass: write out the kth value
     if (digit_count_cumsum_left < k_to_find && k_to_find <= digit_count_cumsum) {
       desired = at::cuda::Bitfield<Bitwise>::setBitfield(desired, tidx, current_bit, RADIX_BITS);
       if (current_bit > 0) {
@@ -395,13 +393,10 @@ __global__ void radixFindKthValues(
       } else {
         kthValues[slice_idx] = TopKTypeConfig<T>::deconvert(desired);
       }
-      s_desired_found = true; // TODO remove
     }
-    __syncthreads();
   }
-  // TODO ASSERT
 
-  // reset semaphores for next pass
+  // reset semaphores for the next pass
   if (tidx == 0) {
     semaphores[slice_idx] = 0;
   }
@@ -423,7 +418,7 @@ void launch(
     at::cuda::detail::TensorInfo<int64_t, IndexType> indices,
     IndexType indicesWithinSliceStride) {
 
-  // configure items_per_thread
+  // configure items_per_thread based on device architecture and input size
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   int mpc = prop->multiProcessorCount;
   int reserved_shared_per_block = 0;
