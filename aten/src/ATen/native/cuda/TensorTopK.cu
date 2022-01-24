@@ -342,6 +342,7 @@ __global__ void radixFindKthValues(
       counts[block_idx * RADIX_DIGITS + tidx] = collected_digit_count;
     }
     __threadfence(); // make sure writes are globally visible
+    __syncthreads(); // make sure all writes are finished before update semaphores
   }
 
 
