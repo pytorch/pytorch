@@ -27,7 +27,7 @@ constexpr DispatchKeySet all_dynlayer_keyset = DispatchKeySet({
   DispatchKey::ADInplaceOrView
 }) | autograd_dispatch_keyset;
 
-static void setDynamicLayerFrontBackKeysIncluded(bool included) {
+void setDynamicLayerFrontBackKeysIncluded(bool included) {
   c10::impl::tls_set_dispatch_key_included(kDynamicLayerFrontModeKey, included);
   c10::impl::tls_set_dispatch_key_included(kDynamicLayerBackModeKey, included);
 }
