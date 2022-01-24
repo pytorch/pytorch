@@ -182,9 +182,6 @@ make_fx_failures = {
     xfail('to_sparse'),
     xfail('allclose'),
     xfail('rsub', 'rsub_scalar'),
-    xfail('linalg.matrix_power'),
-    xfail('linalg.inv'),
-    xfail('linalg.cholesky'),
     xfail('nn.functional.dropout'),
     xfail('linalg.eigvals'),
     xfail('nn.functional.ctc_loss'),
@@ -326,7 +323,6 @@ class TestEagerFusionOpInfo(TestCase):
     @skipOps('TestEagerFusionOpInfo', 'test_aot_autograd_exhaustive', {
         xfail('__rmatmul__'),
         xfail('linalg.cholesky'),
-        xfail('linalg.inv'),
         xfail('matmul'),
         xfail('msort'),
         xfail('nn.functional.linear'),
