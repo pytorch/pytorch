@@ -643,7 +643,6 @@ PyObject* process_outputs(PyObject *op_obj, const std::shared_ptr<PyNode>& cdata
 
   Py_XDECREF(grad_fn->saved_for_forward);
   grad_fn->saved_for_forward = nullptr;
-  grad_fn->is_saved_tensor_for_backward = true;
 
   // Unpack the output, unless .forward() returned a tuple
   if (unpack_output) {
@@ -819,16 +818,12 @@ static PyObject *unpack_saved_variables(
 PyObject *THPFunction_saved_tensors(THPFunction *self, void *_unused)
 {
   HANDLE_TH_ERRORS
-  if (self->is_saved_tensor_for_backward){
+  if (self->saved_for_forward) {
+    return self->saved_for_forward;
+  } else {
     return unpack_saved_variables(self, [](const Variable& var) {
       return THPVariable_Wrap(var);
     });
-  } else {
-    if (self->saved_for_forward) {
-      return self->saved_for_forward;
-    } else {
-      return PyTuple_New(0);
-    }
   }
   END_HANDLE_TH_ERRORS
 }

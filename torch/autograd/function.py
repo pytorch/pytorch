@@ -15,9 +15,8 @@ class FunctionCtx(object):
     def save_for_backward(self, *tensors: torch.Tensor):
         r"""Saves given tensors for a future call to :func:`~Function.backward`.
 
-        **This should be called at most once, and only from inside the**
-        :func:`forward` **method. This should only be called with input or
-        output tensors**
+        This should be called at most once, and only from inside the
+        :func:`forward` method. This method should only be called with tensors.
 
         In :func:`backward`, saved tensors can be accessed through the :attr:`saved_tensors`
         attribute. Before returning them to the user, a check is made to ensure
@@ -56,11 +55,10 @@ class FunctionCtx(object):
         self.to_save = tensors
 
     def save_for_forward(self, *tensors: torch.Tensor):
-        r"""Saves given tensors for a future call to :func:`~Function.forward`.
+        r"""Saves given tensors for a future call to :func:`~Function.jvp`.
 
         This should be only called from inside the :func:`forward` method.
-        This method should only be called with tensors. Unlike `save_for_backward`,
-        the passed tensors need not be an input or output.
+        This method should only be called with tensors.
 
         In :func:`jvp`, saved objects can be accessed through the :attr:`saved_tensors`
         attribute. Before returning them to the user, the primals of the dual tensors
@@ -106,13 +104,13 @@ class FunctionCtx(object):
         for tensor in tensors:
             assert isinstance(tensor, torch.Tensor) or tensor is None, (
                 "save_for_forward expects all arguments to be tensors; you should "
-                "pass non-tensors as attributes on ctx.")
+                "save non-tensors as attributes on ctx.")
             if tensor is None:
                 primals.append(None)
             else:
                 primals.append(fwAD.unpack_dual(tensor).primal)
 
-        self.saved_for_forward = primals
+        self.saved_for_forward = tuple(primals)
 
     def mark_dirty(self, *args: torch.Tensor):
         r"""Marks given tensors as modified in an in-place operation.
