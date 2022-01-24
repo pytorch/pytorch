@@ -576,25 +576,26 @@ class ParameterDict(Module):
 
     def __init__(self, parameters: Optional[Mapping[str, Any]] = None) -> None:
         super(ParameterDict, self).__init__()
-        self._idxs: Dict[Any, None] = {}
+        self._idxs: Dict[str, None] = {}
         # BC-breaking if this was passed plain Tensors before
         if parameters is not None:
             self.update(parameters)
 
-    def _index_to_key(self, idx: Any) -> str:
-        if isinstance(idx, str):
-            return idx
-        elif isinstance(idx, container_abcs.Hashable):
-            return f"_hashed_key:{hash(idx)}"
-        else:
+    def _index_to_key(self, idx: str) -> str:
+        if not isinstance(idx, str):
             raise TypeError("Index given to ParameterDict cannot be used as a key as it is "
-                            f"not a key and not hashable. Type is '{type(idx).__name__}'")
+                            f"not a string. Type is '{type(idx).__name__}'. Open an issue on "
+                            "github if you need non-string keys.")
+        else:
+            # Do some mangling so that users can have entries that would otherwise conflict
+            # with Module attributes
+            return f"_internal_key{idx}"
 
-    def __getitem__(self, idx: Any) -> Any:
+    def __getitem__(self, idx: str) -> Any:
         key = self._index_to_key(idx)
         return getattr(self, key)
 
-    def __setitem__(self, idx: Any, value: Any) -> None:
+    def __setitem__(self, idx: str, value: Any) -> None:
         # BC-breaking if this was passed plain Tensors before
         self._idxs[idx] = None
         key = self._index_to_key(idx)
@@ -617,7 +618,9 @@ class ParameterDict(Module):
     def copy(self) -> 'ParameterDict':
         """Returns a copy of this :class:`~torch.nn.ParameterDict` instance.
         """
-        return ParameterDict(OrderedDict({k: self[k] for k in self._idxs}))
+        # We have to use an OrderedDict because the ParameterDict constructor
+        # behaves differently on plain dict vs OrderedDict
+        return ParameterDict(OrderedDict((k, self[k]) for k in self._idxs))
 
     def __contains__(self, key: str) -> bool:
         return key in self._idxs
@@ -655,15 +658,14 @@ class ParameterDict(Module):
         """Remove and return the last inserted `(key, parameter)` pair
         from the ParameterDict
         """
-        # Python 3 dict are ordered right?
         k, _ = self._idxs.popitem()
-        # Not nice, but hey
+        # We need the key in the _idxs to be able to access/del
         self._idxs[k] = None
         val = self[k]
         del self[k]
         return k, val
 
-    def get(self, key: str, default: Optional[Any] = None) -> 'Parameter | None':
+    def get(self, key: str, default: Optional[Any] = None) -> Any:
         r"""Return the parameter associated with key if present.
         Otherwise return default if provided, None if not.
 
@@ -676,19 +678,19 @@ class ParameterDict(Module):
         else:
             return default
 
-    def fromkeys(self, keys: Iterable['str'], default: Optional[Any] = None) -> 'ParameterDict':
+    def fromkeys(self, keys: Iterable[str], default: Optional[Any] = None) -> 'ParameterDict':
         r"""Return a new ParameterDict with the keys provided
 
         Args:
             keys (iterable, string): keys to make the new ParameterDict from
             default (Parameter, optional): value to set for all keys
         """
-        return ParameterDict({k: default for k in keys})
+        return ParameterDict(((k, default) for k in keys))
 
     def keys(self) -> Iterable[str]:
         r"""Return an iterable of the ParameterDict keys.
         """
-        return list(self._idxs)
+        return self._idxs.keys()
 
     def items(self) -> Iterable[Tuple[str, Any]]:
         r"""Return an iterable of the ParameterDict key/value pairs.
