@@ -51,8 +51,8 @@ Tensor _efficientzerotensor_cuda(IntArrayRef size,
     }
     auto allocator = at::native::ZeroTensorAllocator(device_);
     auto dtype_ = dtype_or_default(dtype);
-    auto out = at::detail::empty_generic(size, &allocator, at::DispatchKeySet(c10::DispatchKey::CUDA), dtype_, c10::nullopt);
-    out._set_zero(true);
+    auto zero_ks = at::DispatchKeySet(c10::DispatchKey::CUDA) | at::DispatchKeySet(c10::DispatchKey::ZeroTensor);
+    auto out = at::detail::empty_generic(size, &allocator, zero_ks, dtype_, c10::nullopt);
     return out;
 }
 
