@@ -156,7 +156,10 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
             register_activation_post_process_hook(m, pre_hook=activation_is_memoryless(m.qconfig))
 
     for name, child in module.named_children():
-        if type(child) in [nnq.FloatFunctional, nnq.QFunctional]:
+        # TODO remove Dropout special after codebase stable
+        if type(child) in [nn.Dropout]:
+            continue
+        elif type(child) in [nnq.FloatFunctional, nnq.QFunctional]:
             if needs_observation(child):
                 child.activation_post_process = get_activation_post_process(child.qconfig, device)
         elif isinstance(child, _FusedModule):
