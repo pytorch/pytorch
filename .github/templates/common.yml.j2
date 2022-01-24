@@ -177,8 +177,8 @@ concurrency:
           docker system prune -af
 {%- endmacro -%}
 
-{%- macro checkout_pytorch(submodules, deep_clone=True, pytorch_directory="") -%}
-      - name: Checkout PyTorch
+{%- macro checkout(submodules="recursive", deep_clone=True, directory="", repository="pytorch/pytorch") -%}
+      - name: Checkout !{{ 'PyTorch' if repository == "pytorch/pytorch" else repository }}
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
       {%- if deep_clone %}
@@ -186,15 +186,18 @@ concurrency:
           fetch-depth: 0
       {%- endif %}
           submodules: !{{ submodules }}
-      {%- if pytorch_directory %}
-          path: !{{ pytorch_directory }}
+      {%- if repository != "pytorch/pytorch" %}
+          repository: !{{ repository }}
       {%- endif %}
-      - name: Clean PyTorch checkout
+      {%- if directory %}
+          path: !{{ directory }}
+      {%- endif %}
+      - name: Clean !{{ 'PyTorch' if repository == "pytorch/pytorch" else repository }} checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
-      {%- if pytorch_directory%}
-        working-directory: !{{ pytorch_directory }}
+      {%- if directory%}
+        working-directory: !{{ directory }}
       {%- endif %}
 {%- endmacro -%}
 
