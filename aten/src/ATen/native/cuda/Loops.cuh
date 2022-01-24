@@ -13,6 +13,7 @@
 
 #include <ATen/native/cuda/MemoryAccess.cuh>
 
+
 namespace at { namespace native {
 
 template<int N>
