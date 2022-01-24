@@ -4,8 +4,12 @@
 name: periodic-win-vs2019-cuda11.5-py3
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, unassigned]
+  push:
+    tags:
+      - 'ciflow/all/*'
+      - 'ciflow/cuda/*'
+      - 'ciflow/scheduled/*'
+      - 'ciflow/win/*'
   schedule:
     - cron: 45 4,10,16,22 * * *
   workflow_dispatch:
@@ -46,14 +50,6 @@ jobs:
       JOB_BASE_NAME: periodic-win-vs2019-cuda11.5-py3-build
       http_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
       https_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
-      IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == 'unassigned') && (github.event.assigneed.login == 'pytorchbot') }}
-      LABEL_CONDITIONS: ${{ contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cuda') || contains(github.event.pull_request.labels.*.name, 'ciflow/scheduled') || contains(github.event.pull_request.labels.*.name, 'ciflow/win') }}
-    if: ${{ (github.repository_owner == 'pytorch') && (
-            (github.event_name == 'push') ||
-            (github.event_name == 'schedule') ||
-            (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cuda') || contains(github.event.pull_request.labels.*.name, 'ciflow/scheduled') || contains(github.event.pull_request.labels.*.name, 'ciflow/win')) ||
-            (false))
-         }}
     steps:
       - name: print labels
         run: echo "${PR_LABELS}"
