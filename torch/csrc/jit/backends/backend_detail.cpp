@@ -1,11 +1,11 @@
 #include <torch/csrc/jit/backends/backend_detail.h>
 
+#include <ATen/code_template.h>
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/backends/backend.h>
 #include <torch/csrc/jit/backends/backend_debug_handler.h>
 #include <torch/csrc/jit/backends/backend_debug_info.h>
 #include <torch/csrc/jit/backends/backend_resolver.h>
-#include <ATen/code_template.h>
 
 #include <memory>
 #include <stack>

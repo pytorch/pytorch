@@ -1866,7 +1866,7 @@ class ModRound {
   ExprPtr mod_divisor;
 };
 
-c10::optional< class ModRound > isModRound(TermPtr e) {
+c10::optional<class ModRound> isModRound(TermPtr e) {
   DivPtr div{nullptr};
   ModPtr mod{nullptr};
   ExprPtr denom{nullptr};
