@@ -402,7 +402,7 @@ void launch(
   int blocks_per_mp = std::min(regs_per_mp / REGS_PER_BLOCK, prop->maxBlocksPerMultiProcessor);
 #endif
   int64_t items_per_thread = at::ceil_div((int64_t)(inputSliceSize * numInputSlices), (int64_t)(mpc * blocks_per_mp * BLOCK_THREADS));
-  items_per_thread = std::max(4, std::min(items_per_thread, 64)); // clamp to (4, 64)
+  items_per_thread = std::max(4, std::min((int)items_per_thread, 64)); // clamp to (4, 64)
   int items_per_block = items_per_thread * BLOCK_THREADS;
 
   using Bitwise = typename TopKTypeConfig<T>::RadixType;
@@ -414,7 +414,6 @@ void launch(
 
   auto kthValues_buffer = allocator.allocate(numInputSlices * sizeof(T));
   T* kthValues = reinterpret_cast<T*>(kthValues_buffer.get());
-  AT_CUDA_CHECK(cudaMemsetAsync(kthValues, 0, numInputSlices * sizeof(T), c10::cuda::getCurrentCUDAStream()));
 
   auto semaphores_buffer = allocator.allocate(numInputSlices * sizeof(int));
   int* semaphores = reinterpret_cast<int*>(semaphores_buffer.get());
