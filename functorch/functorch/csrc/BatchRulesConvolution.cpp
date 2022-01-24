@@ -204,8 +204,7 @@ Tensor make_dummy(
   DimVector expand_shape(tensor_.sizes().begin(), tensor_.sizes().end());
   expand_shape[dim] = batch_size * orig_size;
 
-  // return tensor_.new_zeros(expand_shape);
-  return at::_efficientzerotensor(expand_shape, tensor.options());
+  return tensor_.new_empty({}).expand(expand_shape);
 }
 
 std::tuple<Tensor,optional<int64_t>>
