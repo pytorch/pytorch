@@ -1400,7 +1400,7 @@ class IrParser {
 
     {
       std::array<const char*, kNumBatchnormFwd> BatchNormFwd = {
-          "aten::_batch_norm_impl_index(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> (Tensor, Tensor, Tensor, Tensor, int)",
+          "aten::_batch_norm_impl_index(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled, Tensor? output_inplace, Tensor? save_mean_inplace, Tensor? save_var_inplace) -> (Tensor, Tensor, Tensor, Tensor, int)",
           "aten::native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)",
           "aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor"};
       for (auto signature : BatchNormFwd) {
@@ -1511,7 +1511,7 @@ class IrParser {
 
     {
       auto ptr_op = getOperatorForLiteral(
-          "aten::_batch_norm_impl_index_backward(int impl_index, Tensor input, Tensor grad_output, Tensor? weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_var_transform, bool train, float eps, bool[3] output_mask, Tensor reservedSpace) -> (Tensor, Tensor, Tensor)");
+          "aten::_batch_norm_impl_index_backward(int impl_index, Tensor input, Tensor grad_output, Tensor? weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_var_transform, bool train, float eps, bool[3] output_mask, Tensor reservedSpace, Tensor? grad_input_inplace, Tensor? grad_weight_inplace, Tensor? grad_bias_inplace) -> (Tensor, Tensor, Tensor)");
       REGISTER_PARSE_RULE(
           ptr_op,
           {
@@ -2913,7 +2913,7 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
 
   static auto batch_norm_impl_index_schema =
       getOperatorForLiteral(
-          "aten::_batch_norm_impl_index(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> (Tensor, Tensor, Tensor, Tensor, int)")
+          "aten::_batch_norm_impl_index(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled, Tensor? output_inplace, Tensor? save_mean_inplace, Tensor? save_var_inplace) -> (Tensor, Tensor, Tensor, Tensor, int)")
           ->schema();
   static auto native_batch_norm_schema =
       getOperatorForLiteral(
@@ -2963,7 +2963,7 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
 
   static auto batch_norm_impl_index_backward_schema =
       getOperatorForLiteral(
-          "aten::_batch_norm_impl_index_backward(int impl_index, Tensor input, Tensor grad_output, Tensor? weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_var_transform, bool train, float eps, bool[3] output_mask, Tensor reservedSpace) -> (Tensor, Tensor, Tensor)")
+          "aten::_batch_norm_impl_index_backward(int impl_index, Tensor input, Tensor grad_output, Tensor? weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_var_transform, bool train, float eps, bool[3] output_mask, Tensor reservedSpace, Tensor? grad_input_inplace, Tensor? grad_weight_inplace, Tensor? grad_bias_inplace) -> (Tensor, Tensor, Tensor)")
           ->schema();
   if (node->matches(batch_norm_impl_index_backward_schema)) {
     switch (offset) {

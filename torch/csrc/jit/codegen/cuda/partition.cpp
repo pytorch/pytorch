@@ -89,12 +89,20 @@ bool checkInputTensorTypes(const Node* node) {
   for (const auto i : c10::irange(node->inputs().size())) {
     const auto& val = node->inputs()[i];
     if (!compatibleType(val)) {
-      // special case on aten::_batch_norm_impl_index_backward, the 11th output
+      // special case on aten::_batch_norm_impl_index_backward, the 11th input
       // is going to be discarded, so no need to check data type there.
+      // so does 12th, 13th and 14th input
       if (node->kind() ==
               c10::Symbol::fromQualString(
                   "aten::_batch_norm_impl_index_backward") &&
-          i == 11) {
+          (i == 11 || i == 12 || i == 13 || i == 14)) {
+        continue;
+      }
+      // special case on aten::_batch_norm_impl_index, the 9th, 10th and 11th
+      // inputs are going to be discarded, so no need to check data type there.
+      if (node->kind() ==
+              c10::Symbol::fromQualString("aten::_batch_norm_impl_index") &&
+          (i == 9 || i == 10 || i == 11)) {
         continue;
       }
       return false;
@@ -107,8 +115,8 @@ bool checkOutputTensorTypes(const Node* node) {
   for (const auto i : c10::irange(node->outputs().size())) {
     const auto& val = node->outputs()[i];
     if (!compatibleType(val)) {
-      // special case on aten::_batch_norm_impl_index, the 4th output
-      // is going to be discarded, so no need to check data type there.
+      // special case on aten::_batch_norm_impl_index, the 4th output is going
+      // to be discarded, so no need to check data type there.
       if (node->kind() ==
               c10::Symbol::fromQualString("aten::_batch_norm_impl_index") &&
           i == 3) {
