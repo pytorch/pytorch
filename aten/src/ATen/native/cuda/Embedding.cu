@@ -6,7 +6,7 @@
 #include <c10/util/Exception.h>
 #include <c10/macros/Macros.h>
 
-#include <ATen/cuda/cub.cuh>
+#include <ATen/cuda/cub.h>
 
 #include <ATen/native/cuda/EmbeddingBackwardKernel.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
@@ -277,7 +277,7 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
   AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_dense_backward_cuda", [&] () {
     auto range = at::arange(num_indices, indices.options());
     int64_t nbits = cuda::cub::get_num_bits(num_weights);
-    cuda::cub::sort_pairs(
+    cuda::cub::radix_sort_pairs(
       indices.data_ptr<index_t>(), sorted_indices.data_ptr<index_t>(),
       range.data_ptr<index_t>(), orig_indices.data_ptr<index_t>(),
       num_indices, false/*, 0, nbits*/);

@@ -15,12 +15,12 @@ void wngrad_update(
     float epsilon,
     const float* lr,
     Context* /*context*/) {
-  for (auto i = 0; i < N; ++i) {
+  for (const auto i : c10::irange(N)) {
     float gi = g[i];
     nw[i] = w[i] + lr[0] * gi / (h[0] + epsilon);
   }
   float nhTmp = 0.0;
-  for (auto i = 0; i < N; ++i) {
+  for (const auto i : c10::irange(N)) {
     float gi = g[i];
     nhTmp += gi * gi;
   }
@@ -42,13 +42,13 @@ void wngrad_update_output_effective_lr(
     Context* /*context*/) {
   effectiveLROut[0] = lr[0] / (seqBIn[0] + epsilon);
   float seqBTmp = 0.0;
-  for (auto i = 0; i < N; ++i) {
+  for (const auto i : c10::irange(N)) {
     float gi = gradIn[i];
     seqBTmp += gi * gi;
   }
   seqBTmp /= (seqBIn[0] + epsilon);
   seqBOut[0] = seqBIn[0] + seqBTmp;
-  for (auto i = 0; i < N; ++i) {
+  for (const auto i : c10::irange(N)) {
     float grad = gradIn[i];
     paramOut[i] = paramIn[i] + effectiveLROut[0] * grad;
   }
@@ -69,14 +69,14 @@ void wngrad_update_output_effective_lr_and_update(
     Context* /*context*/) {
   effectiveLROut[0] = lr[0] / (seqBIn[0] + epsilon);
   float seqBTmp = 0.0;
-  for (auto i = 0; i < N; ++i) {
+  for (const auto i : c10::irange(N)) {
     float gi = gradIn[i];
     seqBTmp += gi * gi;
   }
   seqBTmp /= (seqBIn[0] + epsilon);
   seqBOut[0] = seqBIn[0] + seqBTmp;
 
-  for (auto i = 0; i < N; ++i) {
+  for (const auto i : c10::irange(N)) {
     float grad = gradIn[i];
     float update = updateOut[i] = effectiveLROut[0] * grad;
     paramOut[i] = paramIn[i] + update;
@@ -193,7 +193,7 @@ class SparseWngradOp final : public Operator<Context> {
 
     auto block_size = Input(GRAD).numel() / n;
 
-    for (auto i = 0; i < n; ++i) {
+    for (const auto i : c10::irange(n)) {
       auto idx = indices[i];
       if (block_size == 1) {
         float gi = gradIn[i];
@@ -222,7 +222,7 @@ class SparseWngradOp final : public Operator<Context> {
             " for input i:",
             i);
 #endif
-        for (auto j = 0; j < block_size; ++j) {
+        for (const auto j : c10::irange(block_size)) {
           float gi = gradIn[offsetI + j];
           paramOut[offsetIdx + j] =
               paramIn[offsetIdx + j] + lr[0] * gi / (seqBIn[0] + epsilon_);
@@ -230,7 +230,7 @@ class SparseWngradOp final : public Operator<Context> {
       }
     }
     float seqBTmp = 0.0;
-    for (auto i = 0; i < Input(GRAD).numel(); ++i) {
+    for (const auto i : c10::irange(Input(GRAD).numel())) {
       float gi = gradIn[i];
       seqBTmp += gi * gi;
     }

@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: distributed"]
+
 import copy
 import logging
 import math
@@ -1562,9 +1564,8 @@ class DistributedDataParallelTest(
             process_group=process_group,
             find_unused_parameters=True,
             gradient_as_bucket_view=gradient_as_bucket_view,
+            static_graph=static_graph,
         )
-        if static_graph:
-            cpu_model._set_static_graph()
         run_and_verify_grad(cpu_model)
 
         # Test on GPU
@@ -1575,9 +1576,8 @@ class DistributedDataParallelTest(
             process_group=process_group,
             find_unused_parameters=True,
             gradient_as_bucket_view=gradient_as_bucket_view,
+            static_graph=static_graph,
         )
-        if static_graph:
-            gpu_model._set_static_graph()
         run_and_verify_grad(gpu_model)
 
     @requires_gloo()
@@ -2317,6 +2317,11 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
         with self.assertRaisesRegex(RuntimeError, "device_ids not supported"):
             c10d.barrier(device_ids=[self.rank])
+
+    @skip_if_lt_x_gpu(2)
+    @requires_gloo()
+    def test_gloo_warn_not_in_group(self):
+        self._test_warn_not_in_group(backend="gloo")
 
 
 if __name__ == "__main__":

@@ -22,69 +22,35 @@
 class AveragePoolingOperatorTester {
  public:
   inline AveragePoolingOperatorTester& padding(uint32_t padding) {
-    this->paddingTop_ = padding;
-    this->paddingRight_ = padding;
-    this->paddingBottom_ = padding;
-    this->paddingLeft_ = padding;
+    this->paddingHeight_ = padding;
+    this->paddingWidth_ = padding;
     return *this;
   }
 
   inline AveragePoolingOperatorTester& padding(
       uint32_t paddingHeight,
       uint32_t paddingWidth) {
-    this->paddingTop_ = paddingHeight;
-    this->paddingRight_ = paddingWidth;
-    this->paddingBottom_ = paddingHeight;
-    this->paddingLeft_ = paddingWidth;
+    this->paddingHeight_ = paddingHeight;
+    this->paddingWidth_ = paddingWidth;
     return *this;
   }
 
   inline AveragePoolingOperatorTester& paddingHeight(uint32_t paddingHeight) {
-    this->paddingTop_ = paddingHeight;
-    this->paddingBottom_ = paddingHeight;
+    this->paddingHeight_ = paddingHeight;
     return *this;
   }
 
   inline AveragePoolingOperatorTester& paddingWidth(uint32_t paddingWidth) {
-    this->paddingRight_ = paddingWidth;
-    this->paddingLeft_ = paddingWidth;
+    this->paddingWidth_ = paddingWidth;
     return *this;
   }
 
-  inline AveragePoolingOperatorTester& paddingTop(uint32_t paddingTop) {
-    this->paddingTop_ = paddingTop;
-    return *this;
+  inline uint32_t paddingHeight() const {
+    return this->paddingHeight_;
   }
 
-  inline uint32_t paddingTop() const {
-    return this->paddingTop_;
-  }
-
-  inline AveragePoolingOperatorTester& paddingRight(uint32_t paddingRight) {
-    this->paddingRight_ = paddingRight;
-    return *this;
-  }
-
-  inline uint32_t paddingRight() const {
-    return this->paddingRight_;
-  }
-
-  inline AveragePoolingOperatorTester& paddingBottom(uint32_t paddingBottom) {
-    this->paddingBottom_ = paddingBottom;
-    return *this;
-  }
-
-  inline uint32_t paddingBottom() const {
-    return this->paddingBottom_;
-  }
-
-  inline AveragePoolingOperatorTester& paddingLeft(uint32_t paddingLeft) {
-    this->paddingLeft_ = paddingLeft;
-    return *this;
-  }
-
-  inline uint32_t paddingLeft() const {
-    return this->paddingLeft_;
+  inline uint32_t paddingWidth() const {
+    return this->paddingWidth_;
   }
 
   inline AveragePoolingOperatorTester& inputSize(
@@ -211,8 +177,7 @@ class AveragePoolingOperatorTester {
   }
 
   inline size_t outputHeight() const {
-    const size_t paddedInputHeight =
-        paddingTop() + inputHeight() + paddingBottom();
+    const size_t paddedInputHeight = inputHeight() + paddingHeight() * 2;
     if (paddedInputHeight <= poolingHeight()) {
       return 1;
     } else {
@@ -221,8 +186,7 @@ class AveragePoolingOperatorTester {
   }
 
   inline size_t outputWidth() const {
-    const size_t paddedInputWidth =
-        paddingLeft() + inputWidth() + paddingRight();
+    const size_t paddedInputWidth = inputWidth() + paddingWidth() * 2;
     if (paddedInputWidth <= poolingWidth()) {
       return 1;
     } else {
@@ -303,7 +267,7 @@ class AveragePoolingOperatorTester {
 
   inline size_t nextOutputHeight() const {
     const size_t paddedNextInputHeight =
-        paddingTop() + nextInputHeight() + paddingBottom();
+        nextInputHeight() + paddingHeight() * 2;
     if (paddedNextInputHeight <= poolingHeight()) {
       return 1;
     } else {
@@ -312,8 +276,7 @@ class AveragePoolingOperatorTester {
   }
 
   inline size_t nextOutputWidth() const {
-    const size_t paddedNextInputWidth =
-        paddingLeft() + nextInputWidth() + paddingRight();
+    const size_t paddedNextInputWidth = nextInputWidth() + paddingWidth() * 2;
     if (paddedNextInputWidth <= poolingWidth()) {
       return 1;
     } else {
@@ -430,9 +393,9 @@ class AveragePoolingOperatorTester {
             for (size_t c = 0; c < channels(); c++) {
               double acc = 0.0f;
               for (size_t py = 0; py < poolingHeight(); py++) {
-                const size_t iy = oy * strideHeight() + py - paddingTop();
+                const size_t iy = oy * strideHeight() + py - paddingHeight();
                 for (size_t px = 0; px < poolingWidth(); px++) {
-                  const size_t ix = ox * strideWidth() + px - paddingLeft();
+                  const size_t ix = ox * strideWidth() + px - paddingWidth();
                   if (ix < inputWidth() && iy < inputHeight()) {
                     acc += double(
                         int32_t(input
@@ -482,10 +445,8 @@ class AveragePoolingOperatorTester {
       ASSERT_EQ(
           pytorch_qnnp_status_success,
           pytorch_qnnp_create_average_pooling2d_nhwc_q8(
-              paddingTop(),
-              paddingRight(),
-              paddingBottom(),
-              paddingLeft(),
+              paddingHeight(),
+              paddingWidth(),
               poolingHeight(),
               poolingWidth(),
               strideHeight(),
@@ -596,9 +557,9 @@ class AveragePoolingOperatorTester {
             for (size_t c = 0; c < channels(); c++) {
               double acc = 0.0f;
               for (size_t py = 0; py < poolingHeight(); py++) {
-                const size_t iy = oy * strideHeight() + py - paddingTop();
+                const size_t iy = oy * strideHeight() + py - paddingHeight();
                 for (size_t px = 0; px < poolingWidth(); px++) {
-                  const size_t ix = ox * strideWidth() + px - paddingLeft();
+                  const size_t ix = ox * strideWidth() + px - paddingWidth();
                   if (ix < inputWidth() && iy < inputHeight()) {
                     acc += double(
                         int32_t(input
@@ -648,10 +609,8 @@ class AveragePoolingOperatorTester {
       ASSERT_EQ(
           pytorch_qnnp_status_success,
           pytorch_qnnp_create_average_pooling2d_nhwc_q8(
-              paddingTop(),
-              paddingRight(),
-              paddingBottom(),
-              paddingLeft(),
+              paddingHeight(),
+              paddingWidth(),
               poolingHeight(),
               poolingWidth(),
               strideHeight(),
@@ -731,9 +690,9 @@ class AveragePoolingOperatorTester {
             for (size_t c = 0; c < channels(); c++) {
               double acc = 0.0f;
               for (size_t py = 0; py < poolingHeight(); py++) {
-                const size_t iy = oy * strideHeight() + py - paddingTop();
+                const size_t iy = oy * strideHeight() + py - paddingHeight();
                 for (size_t px = 0; px < poolingWidth(); px++) {
-                  const size_t ix = ox * strideWidth() + px - paddingLeft();
+                  const size_t ix = ox * strideWidth() + px - paddingWidth();
                   if (ix < nextInputWidth() && iy < nextInputHeight()) {
                     acc += double(
                         int32_t(input
@@ -847,10 +806,8 @@ class AveragePoolingOperatorTester {
   }
 
  private:
-  uint32_t paddingTop_{0};
-  uint32_t paddingRight_{0};
-  uint32_t paddingBottom_{0};
-  uint32_t paddingLeft_{0};
+  uint32_t paddingHeight_{0};
+  uint32_t paddingWidth_{0};
   size_t inputHeight_{1};
   size_t inputWidth_{1};
   size_t channels_{1};

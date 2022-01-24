@@ -8,7 +8,7 @@
 
 #include <ATen/AccumulateType.h>
 
-#include <ATen/cuda/cub.cuh>
+#include <ATen/cuda/cub.h>
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/EmbeddingBackwardKernel.cuh>
 #include <ATen/native/cuda/KernelUtils.cuh>
@@ -159,8 +159,6 @@ Tensor embedding_bag_backward_cuda_sum_avg(
 
   auto grad_weight = at::zeros({num_weights, grad.size(1)}, grad.options());
 
-  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-
   ptrdiff_t num_indices = indices.numel();
 
   if (num_indices == 0) {
@@ -168,16 +166,14 @@ Tensor embedding_bag_backward_cuda_sum_avg(
     return at::zeros({num_weights, grad.size(1)}, grad.options());
   }
 
-  int64_t stride = grad_weight.stride(0);
-
   auto sorted_indices = at::empty_like(indices, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto orig_indices = at::empty_like(indices, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor count;
 
   AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_bag_backward_cuda_sum_avg", [&] () {
     auto range = at::arange(num_indices, indices.options());
-    int64_t nbits = cuda::cub::get_num_bits(num_weights);
-    cuda::cub::sort_pairs(
+    // int64_t nbits = cuda::cub::get_num_bits(num_weights);
+    cuda::cub::radix_sort_pairs(
       indices.data_ptr<index_t>(), sorted_indices.data_ptr<index_t>(),
       range.data_ptr<index_t>(), orig_indices.data_ptr<index_t>(),
       num_indices, false/*, 0, nbits*/);

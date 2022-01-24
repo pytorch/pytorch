@@ -4,7 +4,8 @@ from tools.codegen.api.types import (BaseCType, Binding, ConstRefCType,
                                      NamedCType, SpecialArgName, tensorT,
                                      memoryFormatT, tensorOptionsT, scalarTypeT,
                                      boolT, deviceT, layoutT, optionalTensorRefT,
-                                     scalarT, optionalScalarRefT)
+                                     scalarT, optionalScalarRefT,
+                                     VectorCType, longT, intArrayRefT)
 
 # This file implements a small program synthesis engine that implements
 # conversions between one API to another.
@@ -36,6 +37,10 @@ from tools.codegen.api.types import (BaseCType, Binding, ConstRefCType,
 
 options_ctype = NamedCType("options", ConstRefCType(BaseCType(tensorOptionsT)))
 
+longVec_ctype = VectorCType(BaseCType(longT))
+optionalScalar_ctype = OptionalCType(BaseCType(scalarT))
+optionalTensor_ctype = OptionalCType(BaseCType(tensorT))
+
 class UnsatError(RuntimeError):
     pass
 
@@ -59,7 +64,8 @@ class UnsatError(RuntimeError):
 def translate(
     bindings: Sequence[Union[Expr, Binding]],
     goals: Sequence[Union[NamedCType, Binding]],
-    *, method: bool = False
+    *, method: bool = False,
+    allow_expensive_conversions: bool = False
 ) -> List[Expr]:
 
     binding_exprs: List[Expr] = []
@@ -193,6 +199,41 @@ Check this module for more information.
         elif goal == NamedCType("pin_memory", OptionalCType(BaseCType(boolT))):
             options = direct_solve(options_ctype)
             return f'{options}.pinned_memory_opt()'
+
+        # We can always do translations from value types to reference types, like vector<int> -> IntArrayRef
+        elif goal.type == BaseCType(intArrayRefT):
+            return direct_solve(NamedCType(goal.name, longVec_ctype))
+        elif goal.type == BaseCType(optionalScalarRefT):
+            return direct_solve(NamedCType(goal.name, optionalScalar_ctype))
+        elif goal.type == BaseCType(optionalTensorRefT):
+            return direct_solve(NamedCType(goal.name, optionalTensor_ctype))
+
+
+        # Note [translation from C++ reference to value types]
+        # The below cases are all for when we have an argument with a reference type,
+        # and a corresponding goal with a value type.
+        # These are needed when we populate the inputs to a lambda capture and we need
+        # to guarantee the lifetime of each captured argument.
+        # We guard it with an explicit kwarg because converting to a value type is expensive
+        # (O(n)) to convert from IntArrayRef to vector<int>),
+        # so the caller of translate() should be explicit that they need it.
+        if allow_expensive_conversions:
+            if goal.type == VectorCType(BaseCType(longT)):
+                intArrayRef_ctype = NamedCType(goal.name, BaseCType(intArrayRefT))
+                argname = direct_solve(intArrayRef_ctype)
+                return f'{argname}.vec()'
+            elif goal.type == OptionalCType(BaseCType(scalarT)):
+                optionalScalarRef_ctype = NamedCType(goal.name, BaseCType(optionalScalarRefT))
+                argname = direct_solve(optionalScalarRef_ctype)
+                return f'{argname}.has_value() ? c10::make_optional({argname}) : c10::nullopt'
+            elif goal.type == OptionalCType(BaseCType(scalarT)):
+                optionalTensorRef_ctype = NamedCType(goal.name, BaseCType(optionalTensorRefT))
+                argname = direct_solve(optionalTensorRef_ctype)
+                return f'{argname}.has_value() ? c10::make_optional({argname}) : c10::nullopt'
+            # Technically, we also need to handle cases of C++ containers holding reference types.
+            # But there currently aren't any ops that require lambda capture codegen
+            # With arguments like std::vector<IntArrayRef>.
+            # If that changes, we'll have to add the translation here.
 
         unsat(goal)
 

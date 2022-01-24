@@ -1,9 +1,11 @@
-#include <conv_utils.h>
 #include <qnnpack/indirection.h>
+#include <qnnpack/log.h>
+#include <qnnpack/operator.h>
 #include <qnnpack/pack.h>
 #include <qnnpack_func.h>
 #include <cstring>
 #include <memory>
+#include <numeric>
 
 namespace qnnpack {
 
@@ -203,7 +205,7 @@ static void compute_sum_rows(
           block_start);
 }
 
-struct q8dwconv_context {
+struct q8dwconv2d_context {
   size_t groups;
   size_t group_stride;
   const uint8_t** indirection_buffer;
@@ -216,11 +218,29 @@ struct q8dwconv_context {
   size_t output_row_stride;
   size_t output_col_increment;
   union pytorch_qnnp_conv_quantization_params quantization_params;
-  const pytorch_q8dwconv_up_ukernel_function unipass_ukernel;
-  const pytorch_q8dwconv_mp_ukernel_function multipass_ukernel;
+  const pytorch_q8dwconv2d_up_ukernel_function unipass_ukernel;
+  const pytorch_q8dwconv2d_mp_ukernel_function multipass_ukernel;
 };
-static void compute_dwconv_unipass(
-    const struct q8dwconv_context context[1],
+
+struct q8dwconv3d_context {
+  size_t groups;
+  size_t group_stride;
+  const uint8_t** indirection_buffer;
+  size_t indirection_buffer_slice_stride;
+  size_t indirection_buffer_row_stride;
+  size_t indirection_buffer_col_stride;
+  const void* packed_weights;
+  uint8_t* output;
+  size_t output_depth;
+  size_t output_height;
+  size_t output_width;
+  size_t output_slice_stride;
+  union pytorch_qnnp_conv_quantization_params quantization_params;
+  const pytorch_q8dwconv3d_mp_ukernel_function multipass_ukernel;
+};
+
+static void compute_dwconv2d_unipass(
+    const struct q8dwconv2d_context context[1],
     size_t image,
     size_t output_y) {
   const size_t output_height = context->output_height;
@@ -238,8 +258,8 @@ static void compute_dwconv_unipass(
       context->output_col_increment,
       &context->quantization_params);
 }
-static void compute_dwconv_multiipass(
-    const struct q8dwconv_context context[1],
+static void compute_dwconv2d_multiipass(
+    const struct q8dwconv2d_context context[1],
     size_t image,
     size_t output_y) {
   const size_t output_height = context->output_height;
@@ -269,6 +289,40 @@ static void compute_dwconv_multiipass(
 #endif
 }
 
+static void compute_dwconv3d_multiipass(
+    const struct q8dwconv3d_context context[1],
+    size_t image,
+    size_t output_z) {
+  const size_t output_depth = context->output_depth;
+  PYTORCH_QNNP_ALIGN(16)
+#ifdef _MSC_VER
+  int32_t* multipass_acc =
+      (int32_t*)_malloca(sizeof(int32_t) * context->group_stride);
+#else
+  int32_t multipass_acc[context->group_stride];
+#endif
+
+  context->multipass_ukernel(
+      context->groups,
+      context->output_height,
+      context->output_width,
+      context->indirection_buffer +
+          (image * output_depth + output_z) *
+              context->indirection_buffer_slice_stride,
+      context->packed_weights,
+      multipass_acc,
+      context->output +
+          (image * output_depth + output_z) * context->output_slice_stride,
+      context->indirection_buffer_row_stride,
+      context->indirection_buffer_col_stride,
+      0,
+      &context->quantization_params);
+
+#ifdef _MSC_VER
+  _freea(multipass_acc);
+#endif
+}
+
 struct QnnpackDeleter {
   void operator()(pytorch_qnnp_operator_t op) {
     pytorch_qnnp_delete_operator(op);
@@ -279,6 +333,7 @@ enum pytorch_qnnp_status qnnpackConv(
     const pytorch_qnnp_operator_t convolution,
     void* packed_weights,
     const size_t batch_size,
+    const size_t input_depth,
     const size_t input_height,
     const size_t input_width,
     const uint8_t input_zero_point,
@@ -296,15 +351,16 @@ enum pytorch_qnnp_status qnnpackConv(
       convolution->group_output_channels * groups;
   const size_t kernel_width = convolution->kernel_width;
   const size_t kernel_height = convolution->kernel_height;
-  const size_t kernel_size = kernel_height * kernel_width;
+  const size_t kernel_depth = convolution->kernel_depth;
+  const size_t kernel_size = kernel_height * kernel_width * kernel_depth;
 
   if (batch_size == 0) {
     // If no batches, return
     return pytorch_qnnp_status_success;
   }
 
-  union pytorch_qnnp_q31_requantization_params requantization_params;
-  union pytorch_qnnp_conv_quantization_params conv_quantization_params;
+  union pytorch_qnnp_q31_requantization_params requantization_params {};
+  union pytorch_qnnp_conv_quantization_params conv_quantization_params {};
   if (convolution->ukernel_type == pytorch_qnnp_ukernel_type_xzp_gemm) {
     requantization_params = pytorch_qnnp_compute_requantization_params(
         // Note. XZP kernels are not changed for per channel quant.
@@ -326,14 +382,15 @@ enum pytorch_qnnp_status qnnpackConv(
   // We need to check if the corresponding values on this
   // invocation is same as cached values.
   // If so we can skip setup step.
-  if (convolution->input != input ||
-      convolution->batch_size != batch_size ||
+  if (convolution->input != input || convolution->batch_size != batch_size ||
+      convolution->input_depth != input_depth ||
       convolution->input_height != input_height ||
       convolution->input_width != input_width ||
       convolution->input_pixel_stride != input_pixel_stride) {
-    pytorch_qnnp_status status = pytorch_qnnp_setup_convolution2d_nhwc_q8(
+    pytorch_qnnp_status status = pytorch_qnnp_setup_convolution_ndhwc_q8(
         convolution,
         batch_size,
+        input_depth,
         input_height,
         input_width,
         input,
@@ -348,27 +405,27 @@ enum pytorch_qnnp_status qnnpackConv(
     }
   }
 
-  const size_t output_size = convolution->output_height * convolution->output_width;
+  const size_t output_size = convolution->output_height *
+      convolution->output_width * convolution->output_depth;
 
   switch (convolution->ukernel_type) {
     case pytorch_qnnp_ukernel_type_dwconv: {
-      const size_t width_step = convolution->dilation_width == 1
-          ? convolution->stride_width
-          : kernel_width;
       const uint32_t cr = pytorch_qnnp_params.q8dw9.cr;
       const size_t group_stride = (groups + (cr - 1)) & -cr;
 
+      const size_t step_height = convolution->step_height;
+      const size_t step_width = convolution->step_width;
+
       switch (kernel_size) {
         case 9: {
-          struct q8dwconv_context context = {
+          struct q8dwconv2d_context context = {
               .groups = groups,
               .group_stride = group_stride,
               .indirection_buffer =
                   (const uint8_t**)convolution->indirection_buffer,
-              .indirection_buffer_row_stride = kernel_size +
-                  (convolution->output_width * width_step - 1) * kernel_height,
+              .indirection_buffer_row_stride = step_height,
               .indirection_buffer_col_stride =
-                  kernel_height * width_step * sizeof(void*),
+                  kernel_height * step_width * sizeof(void*),
               .packed_weights = packed_weights,
               .output = output,
               .output_height = convolution->output_height,
@@ -387,22 +444,21 @@ enum pytorch_qnnp_status qnnpackConv(
           };
           pthreadpool_compute_2d(
               threadpool,
-              (pthreadpool_function_2d_t)compute_dwconv_unipass,
+              (pthreadpool_function_2d_t)compute_dwconv2d_unipass,
               &context,
               batch_size,
               convolution->output_height);
           break;
         }
         case 25: {
-          struct q8dwconv_context context = {
+          struct q8dwconv2d_context context = {
               .groups = groups,
               .group_stride = group_stride,
               .indirection_buffer =
                   (const uint8_t**)convolution->indirection_buffer,
-              .indirection_buffer_row_stride = kernel_size +
-                  (convolution->output_width * width_step - 1) * kernel_height,
+              .indirection_buffer_row_stride = step_height,
               .indirection_buffer_col_stride =
-                  kernel_height * width_step * sizeof(void*),
+                  kernel_height * step_width * sizeof(void*),
               .packed_weights = packed_weights,
               .output = output,
               .output_height = convolution->output_height,
@@ -421,10 +477,39 @@ enum pytorch_qnnp_status qnnpackConv(
           };
           pthreadpool_compute_2d(
               threadpool,
-              (pthreadpool_function_2d_t)compute_dwconv_multiipass,
+              (pthreadpool_function_2d_t)compute_dwconv2d_multiipass,
               &context,
               batch_size,
               convolution->output_height);
+          break;
+        }
+        case 27: {
+          struct q8dwconv3d_context context = {
+              .groups = groups,
+              .group_stride = group_stride,
+              .indirection_buffer =
+                  (const uint8_t**)convolution->indirection_buffer,
+              .indirection_buffer_slice_stride =
+                  step_height * convolution->output_height,
+              .indirection_buffer_row_stride = step_height * sizeof(void*),
+              .indirection_buffer_col_stride =
+                  kernel_height * kernel_depth * step_width * sizeof(void*),
+              .packed_weights = packed_weights,
+              .output = output,
+              .output_depth = convolution->output_depth,
+              .output_height = convolution->output_height,
+              .output_width = convolution->output_width,
+              .output_slice_stride = convolution->output_height *
+                  convolution->output_width * output_pixel_stride,
+              .quantization_params = conv_quantization_params,
+              .multipass_ukernel = pytorch_qnnp_params.q8dw27.mpdw,
+          };
+          pthreadpool_compute_2d(
+              threadpool,
+              (pthreadpool_function_2d_t)compute_dwconv3d_multiipass,
+              &context,
+              batch_size,
+              convolution->output_depth);
           break;
         }
         default:
@@ -442,14 +527,14 @@ enum pytorch_qnnp_status qnnpackConv(
       const size_t n_stride = (group_output_channels + (nr - 1)) & -nr;
 
       /* compute input row sum */
-      const size_t input_size = input_height * input_width;
+      const size_t input_size = input_depth * input_height * input_width;
       int32_t* a_sum = (int32_t*)realloc(
           convolution->a_sum,
-          sizeof(int32_t) * batch_size * groups * input_height * input_width);
+          sizeof(int32_t) * batch_size * groups * input_size);
       if (a_sum == nullptr) {
         pytorch_qnnp_log_error(
             "failed to allocate %zu bytes for row sum data",
-            sizeof(int32_t) * batch_size * groups * input_height * input_width);
+            sizeof(int32_t) * batch_size * groups * input_size);
         return pytorch_qnnp_status_out_of_memory;
       }
       convolution->a_sum = a_sum;

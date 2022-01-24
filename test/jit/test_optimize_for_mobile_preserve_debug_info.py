@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: mobile"]
+
 import torch
 import torch._C
 import torch.backends.xnnpack

@@ -6,6 +6,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/export_caffe2_op_to_c10.h"
+#include <c10/util/irange.h>
 
 C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(MergeIdLists);
 
@@ -50,7 +51,7 @@ class MergeIdListsOp : public Operator<Context> {
     // TODO(badri): Use unordered_set if performance is an issue
     std::set<T> deduped;
     std::vector<int> offsets(InputSize(), 0);
-    for (auto sample = 0; sample < batch_size; sample++) {
+    for (const auto sample : c10::irange(batch_size)) {
       for (size_t i = 0; i < InputSize(); i += 2) {
         auto& lengths = Input(i);
         const auto* lengths_data = lengths.template data<int32_t>();

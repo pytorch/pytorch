@@ -11,7 +11,7 @@ class IterableWrapperIterDataPipe(IterDataPipe):
     Args:
         iterable: Iterable object to be wrapped into an IterDataPipe
         deepcopy: Option to deepcopy input iterable object for each
-            iteration.
+            iterator. The copy is made when the first element is read in iter().
 
     .. note::
       If `deepcopy` is set to False explicitly, users should ensure
@@ -35,7 +35,7 @@ class IterableWrapperIterDataPipe(IterDataPipe):
             except TypeError:
                 warnings.warn(
                     "The input iterable can not be deepcopied, "
-                    "please be aware of in-place modification would affect source data"
+                    "please be aware of in-place modification would affect source data."
                 )
         for data in source_data:
             yield data
