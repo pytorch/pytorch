@@ -1,5 +1,7 @@
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/native/TensorIterator.h>
+//#FIXME Loops.cuh should not be necessary
+#include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/Reduce.cuh>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/SharedReduceOps.h>
