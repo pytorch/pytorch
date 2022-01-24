@@ -20,7 +20,7 @@ using namespace at::native;
 
 namespace at {
 namespace native {
-namespace sbtopk {  // single_block_topk
+namespace sbtopk { // single_block_topk
 
 template <typename T>
 struct AddOp {
@@ -188,7 +188,7 @@ void launch(
     IndexType indicesWithinSliceStride) {
 
     dim3 grid;
-    TORCH_INTERNAL_ASSERT(getGridFromTiles(numInputSlices, grid), "Too many slices to sort");
+    TORCH_INTERNAL_ASSERT(getGridFromTiles(numInputSlices, grid), "Too many slices for topk");
     dim3 block(std::min(
         at::ceil_div((int64_t)inputSliceSize, (int64_t)C10_WARP_SIZE) * (int64_t)C10_WARP_SIZE, (int64_t)1024));
     gatherTopK<T, IndexType, Dim, /* WithKthValues= */false><<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
@@ -205,7 +205,7 @@ void launch(
         nullptr);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
-} // namespace at::native::sbtopk
+} // namespace sbtopk
 
 namespace mbtopk {  // multi_block_topk
 
@@ -435,14 +435,19 @@ void launch(
   // configure items_per_thread
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   int mpc = prop->multiProcessorCount;
-  int shared_per_mp = prop->sharedMemPerMultiprocessor;
   int reserved_shared_per_block = 0;
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   reserved_shared_per_block = prop->reservedSharedMemPerBlock;
 #endif
   constexpr int static_shared_per_block = RADIX_DIGITS * BLOCK_THREADS + RADIX_DIGITS * sizeof(int);
   int shared_per_block = static_shared_per_block + reserved_shared_per_block;
+#if defined(USE_ROCM)
+  int shared_per_mp = prop->maxSharedMemoryPerMultiProcessor;
   int blocks_per_mp = std::min(shared_per_mp / shared_per_block, prop->maxBlocksPerMultiProcessor);
+#else
+  int shared_per_mp = prop->sharedMemPerMultiprocessor;
+  int blocks_per_mp = shared_per_mp / shared_per_block;
+#endif
   int items_per_thread = at::ceil_div((int64_t)(inputSliceSize * numInputSlices), (int64_t)(mpc * blocks_per_mp * BLOCK_THREADS));
   items_per_thread = std::max(4, std::min(items_per_thread, 64)); // clamp to (4, 64)
   int items_per_block = items_per_thread * BLOCK_THREADS;
@@ -476,7 +481,7 @@ void launch(
 
   Bitwise desiredMask = 0;
   dim3 grid;
-  TORCH_INTERNAL_ASSERT(getGridFromTiles(num_blocks, grid), "Too many slices to sort");
+  TORCH_INTERNAL_ASSERT(getGridFromTiles(num_blocks, grid), "Too many slices for topk");
   dim3 block(BLOCK_THREADS);
 
 #define RUN_K(BIT)                                             \
@@ -527,7 +532,7 @@ void launch(
   // Find topk values based on kth value
   {
     dim3 grid;
-    TORCH_INTERNAL_ASSERT(getGridFromTiles(numInputSlices, grid), "Too many slices to sort");
+    TORCH_INTERNAL_ASSERT(getGridFromTiles(numInputSlices, grid), "Too many slices for topk");
     dim3 block(std::min(at::ceil_div((int64_t)inputSliceSize, (int64_t)C10_WARP_SIZE) * (int64_t)C10_WARP_SIZE, (int64_t)1024));
     sbtopk::gatherTopK<T, IndexType, Dim, /* WithKthValues= */true><<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
             input,
@@ -545,7 +550,7 @@ void launch(
   }
 }
 
-} // namespace at::native::mbtopk
+} // namespace mbtopk
 
 bool should_use_multiblock(int64_t num_slices, int64_t slice_size) {
   // This heuristics is based on the experiment in https://github.com/pytorch/pytorch/pull/71081
@@ -596,7 +601,7 @@ void launch_gather_topk_kernel(
     RUN_MB(INDEX_T, -1);                        \
   }
 
-#define RUN_T(INDEX_T)                                                  \
+#define RUN_T(INDEX_T)                                                    \
   AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, input.scalar_type(), "topk_out_cuda", [&] { \
     at::cuda::detail::TensorInfo<scalar_t, INDEX_T> inputInfo =           \
       at::cuda::detail::getTensorInfo<scalar_t, INDEX_T>(input);          \
