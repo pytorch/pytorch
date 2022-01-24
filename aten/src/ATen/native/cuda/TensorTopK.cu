@@ -401,7 +401,7 @@ void launch(
   int regs_per_mp = prop->regsPerMultiprocessor;
   int blocks_per_mp = std::min(regs_per_mp / REGS_PER_BLOCK, prop->maxBlocksPerMultiProcessor);
 #endif
-  int items_per_thread = at::ceil_div((int64_t)(inputSliceSize * numInputSlices), (int64_t)(mpc * blocks_per_mp * BLOCK_THREADS));
+  int64_t items_per_thread = at::ceil_div((int64_t)(inputSliceSize * numInputSlices), (int64_t)(mpc * blocks_per_mp * BLOCK_THREADS));
   items_per_thread = std::max(4, std::min(items_per_thread, 64)); // clamp to (4, 64)
   int items_per_block = items_per_thread * BLOCK_THREADS;
 
