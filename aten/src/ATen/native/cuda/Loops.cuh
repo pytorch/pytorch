@@ -10,7 +10,7 @@
 
 #include <thrust/tuple.h>
 
-constexpr int num_threads() { 
+constexpr int num_threads() {
 #if defined(USE_ROCM)
   return 256;
 #else
