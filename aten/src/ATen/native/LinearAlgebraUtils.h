@@ -148,11 +148,11 @@ void squareCheckInputs(const Tensor& self, const char* const f_name);
 
 void checkFloatingOrComplex(const Tensor& t, const char* const f_name);
 
-TORCH_API void singleCheckErrors(int64_t info, const char* name, int64_t batch_id=-1);
+TORCH_API void singleCheckErrors(int64_t info, const c10::string_view name, int64_t batch_id=-1);
 
-TORCH_API void batchCheckErrors(const std::vector<int64_t>& infos, const char* name);
+TORCH_API void batchCheckErrors(const std::vector<int64_t>& infos, const c10::string_view name);
 
-TORCH_API void batchCheckErrors(const Tensor& infos, const char* name);
+TORCH_API void batchCheckErrors(const Tensor& infos, const c10::string_view name);
 
 void checkAllSameDim(TensorList tensors, int64_t dim);
 
