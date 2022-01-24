@@ -246,7 +246,7 @@ __global__ void radixFindKthValues(
     Bitwise* desires,  // size: num_slices
     IndexType* counts, // size: num_slices * blocks_per_slice * radix_digits
     T* kthValues       // size: num_slices, only write when current_bit reaches 0
-) {
+  ) {
 
   int items_per_block = items_per_thread * BLOCK_THREADS;
   int tidx = threadIdx.x;
