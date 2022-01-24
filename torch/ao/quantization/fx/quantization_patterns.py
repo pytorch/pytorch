@@ -947,7 +947,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     weight_post_process = self.linear.weight_fake_quant
                 else:
                     if isinstance(float_linear, torch.nn.intrinsic.LinearReLU):
-                        fused_linear = float_linear
+                        fused_linear = float_linear  # type: ignore[index]
                         float_linear = self.linear[0]  # type: ignore[index]
                     # Attach the weight observer to the module
                     weight_post_process = qconfig.weight()  # type: ignore[union-attr]
