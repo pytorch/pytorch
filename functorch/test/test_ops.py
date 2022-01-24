@@ -663,10 +663,7 @@ class TestOperators(TestCase):
         # Composite ops that do bad things. Need to be fixed in PyTorch core.
         # RuntimeError: Cannot access data pointer of Tensor that doesn't have storage
         xfail('tensor_split'),
-        xfail('linalg.inv'),
         xfail('linalg.eigvals'),
-        xfail('linalg.matrix_power'),
-        xfail('linalg.cholesky'),
 
         # Causing a CUDA assert, needs investigation
         skip('div', 'floor_rounding', device_type='cuda'),
