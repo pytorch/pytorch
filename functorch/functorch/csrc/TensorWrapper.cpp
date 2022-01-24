@@ -19,7 +19,7 @@ void dumpTensor(std::ostream& ss, const Tensor& tensor) {
   if (!wrapped) {
     auto* batched = maybeGetBatchedImpl(tensor);
     if (batched) {
-      ss << "Batched[ lvl=" << batched->level() << " dim=" << batched->bdim() << ", ";
+      ss << "Batched[lvl=" << batched->level() << " dim=" << batched->bdim() << ", ";
       dumpTensor(ss, batched->value());
       ss << "]";
       return;
@@ -27,13 +27,9 @@ void dumpTensor(std::ostream& ss, const Tensor& tensor) {
     ss << "Tensor" << tensor.sizes();
     return;
   }
-  if (wrapped->is_alive()) {
-    ss << "Wrapper[";
-  } else {
-    ss << "Wrapper[";
-  }
+  ss << "Wrapper[";
   if (wrapped->level().has_value()) {
-    ss << wrapped->level().value() << ", ";
+    ss << "lvl=" << wrapped->level().value() << ", ";
   } else {
     ss << "dead, ";
   }
@@ -58,6 +54,7 @@ void TensorWrapper::refreshMetadata() {
 
 void dumpTensorCout(const Tensor& tensor) {
   dumpTensor(std::cout, tensor);
+
   std::cout << std::endl;
 }
 
