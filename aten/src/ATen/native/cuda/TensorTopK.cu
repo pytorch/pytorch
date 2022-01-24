@@ -390,7 +390,7 @@ void launch(
 
   // configure items_per_thread based on device architecture and input size
   // occupancy of this kernel is limited by registers per threads
-  constexpr int REGS_PER_THREAD = 40;
+  constexpr int REGS_PER_THREAD = 40; // from nsight launch statistics
   constexpr int REGS_PER_BLOCK = REGS_PER_THREAD * BLOCK_THREADS;
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   int mpc = prop->multiProcessorCount;
