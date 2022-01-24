@@ -367,18 +367,20 @@ struct CodeImpl {
     return result;
   }
 
-  void emitLoadInputsAndNode(
+  virtual void emitOperatorOrInstruction(
       Node* node,
       OpCode op,
       int64_t X = 0,
-      uint64_t N = 0) {
-    emitLoadInputs(node->inputs());
+      uint64_t N = 0,
+      bool emit_inputs = true) {
+    if (emit_inputs) {
+      emitLoadInputs(node->inputs());
+    }
     insertInstruction(op, X, N);
   }
 
   void emitFormat(Node* node) {
-    emitLoadInputs(node->inputs());
-    insertInstruction(FORMAT, node->inputs().size(), 0);
+    emitOperatorOrInstruction(node, FORMAT, node->inputs().size(), 0);
   }
 
   void checkNodeAndEmit(Node* node) {
@@ -388,14 +390,10 @@ struct CodeImpl {
     if (unique_op_name.find("aten::__getitem__.Dict") == 0) {
       // __get_item__ overloaded operator for Dict
       // needs to be emitted an instruction
-      emitLoadInputsAndNode(node, DICT_INDEX);
+      emitOperatorOrInstruction(node, DICT_INDEX);
     } else {
       emitOperator(node);
     }
-  }
-
-  void emitUninitialized() {
-    insertInstruction(UN_INITIALIZED, 0, 0);
   }
 
   void emitConstant(Node* node) {
@@ -637,7 +635,6 @@ struct CodeImpl {
 
   void emitNode(Node* node) {
     WithCurrentNode guard(&current_node_, node);
-    // std::cout << node->kind().toQualString() << std::endl;
     switch (node->kind()) {
       default:
         // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
@@ -645,10 +642,10 @@ struct CodeImpl {
         // emitOperator(node);
         break;
       case prim::RaiseException:
-        emitLoadInputsAndNode(node, RAISE_EXCEPTION);
+        emitOperatorOrInstruction(node, RAISE_EXCEPTION);
         break;
       case prim::TupleIndex:
-        emitLoadInputsAndNode(node, TUPLE_INDEX);
+        emitOperatorOrInstruction(node, TUPLE_INDEX);
         break;
       case prim::Drop:
         emitDrop(node->inputs());
@@ -729,34 +726,34 @@ struct CodeImpl {
         emitExit(node);
         break;
       case prim::Uninitialized:
-        emitUninitialized();
+        emitOperatorOrInstruction(node, UN_INITIALIZED, 0, 0, false);
         break;
       case prim::dtype:
-        emitLoadInputsAndNode(node, DTYPE);
+        emitOperatorOrInstruction(node, DTYPE);
         break;
       case prim::device:
-        emitLoadInputsAndNode(node, DEVICE);
+        emitOperatorOrInstruction(node, DEVICE);
         break;
       case aten::dim:
-        emitLoadInputsAndNode(node, DIM);
+        emitOperatorOrInstruction(node, DIM);
         break;
       case prim::is_cuda:
-        emitLoadInputsAndNode(node, IS_CUDA);
+        emitOperatorOrInstruction(node, IS_CUDA);
         break;
       case aten::__not__:
-        emitLoadInputsAndNode(node, __NOT__);
+        emitOperatorOrInstruction(node, __NOT__);
         break;
       case aten::format:
         emitFormat(node);
         break;
       case aten::__is__:
-        emitLoadInputsAndNode(node, __IS__);
+        emitOperatorOrInstruction(node, __IS__);
         break;
       case aten::__isnot__:
-        emitLoadInputsAndNode(node, __ISNOT__);
+        emitOperatorOrInstruction(node, __ISNOT__);
         break;
       case prim::NumToTensor:
-        emitLoadInputsAndNode(node, NUM_TO_TENSOR);
+        emitOperatorOrInstruction(node, NUM_TO_TENSOR);
         break;
     }
   }
@@ -956,6 +953,20 @@ struct MobileCodeImpl : CodeImpl {
             op, node, unique_op_name, num_inputs, is_vararg);
         insertInstruction(OP, operation_index);
       }
+    }
+  }
+
+  void emitOperatorOrInstruction(
+      Node* node,
+      OpCode op,
+      int64_t X = 0,
+      uint64_t N = 0,
+      bool emit_inputs = true) override {
+    bool emit_promoted_ops_ = false;
+    if (emit_promoted_ops_) {
+      CodeImpl::emitOperatorOrInstruction(node, op, X, N, emit_inputs);
+    } else {
+      CodeImpl::emitOperator(node);
     }
   }
 
