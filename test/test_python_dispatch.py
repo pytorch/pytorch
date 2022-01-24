@@ -137,7 +137,7 @@ $5 = torch._ops.aten.kl_div($0, $1, 2, log_target=True)''')
         )
         self.assertExpectedRaisesInline(
             RuntimeError, lambda: A(torch.zeros(1)).detach(),
-            """detach returned invalid type str, expected Tensor"""
+            """Unable to cast Python instance of type <class 'str'> to C++ type 'at::Tensor'"""
         )
 
     def test_detach_appears_twice_when_called_once(self) -> None:
