@@ -5577,8 +5577,7 @@ for shape in [(1,), ()]:
                   check_backward_ad=False, check_batched_grad=False)
 
     def test_custom_function_forward_mode_forward_is_no_op(self):
-        error_regex = "A custom Function's forward is returning a view (or one of the input as-is)*"
-        for jvp_return_view in (True, False):
+        for jvp_mul_by_2 in (True, False):
             class MyFn(torch.autograd.Function):
                 @staticmethod
                 def forward(ctx, x, y):
@@ -5590,8 +5589,10 @@ for shape in [(1,), ()]:
 
                 @staticmethod
                 def jvp(ctx, x_t, y_t):
-                    if jvp_return_view:
-                        return x_t + y_t, x_t.view_as(x_t)
+                    if jvp_mul_by_2:
+                        # If the user returns input as-is, this result
+                        # isn't used!
+                        return x_t + y_t, x_t * 2
                     else:
                         return x_t + y_t, x_t
 
@@ -5599,11 +5600,12 @@ for shape in [(1,), ()]:
             t = torch.tensor(1., dtype=torch.double)
             y = torch.tensor(1., dtype=torch.double, requires_grad=True)
 
-            if not jvp_return_view:
-                with self.assertRaisesRegex(RuntimeError, error_regex):
-                    gradcheck(MyFn.apply, (x, y), check_forward_ad=True)
-            else:
-                gradcheck(MyFn.apply, (x, y), check_forward_ad=True)
+            with fwAD.dual_level():
+                x_dual = fwAD.make_dual(x, t)
+                _, out2 = MyFn.apply(x_dual, y)
+                self.assertTrue(fwAD.unpack_dual(out2).tangent._base is t)
+
+            gradcheck(MyFn.apply, (x, y), check_forward_ad=True)
 
     def test_custom_function_local_inplace(self):
         class MyFn(torch.autograd.Function):
