@@ -84,7 +84,7 @@ def generate_conda_matrix(os: str) -> List[Dict[str, str]]:
     if os == "linux":
         arches += CUDA_ARCHES
     elif os == "windows":
-        # We don't build CUDA 10.2 for window
+        # We don't build CUDA 10.2 for window see https://github.com/pytorch/pytorch/issues/65648
         arches += list_without(CUDA_ARCHES, ["10.2"])
     for python_version in FULL_PYTHON_VERSIONS:
         # We don't currently build conda packages for rocm
@@ -121,7 +121,7 @@ def generate_libtorch_matrix(os: str, abi_version: str) -> List[Dict[str, str]]:
     if os == "linux":
         arches += CUDA_ARCHES
     elif os == "windows":
-        # We don't build CUDA 10.2 for window
+        # We don't build CUDA 10.2 for window see https://github.com/pytorch/pytorch/issues/65648
         arches += list_without(CUDA_ARCHES, ["10.2"])
     for arch_version in ["cpu"] + CUDA_ARCHES:
         for libtorch_variant in libtorch_variants:
@@ -160,7 +160,7 @@ def generate_wheels_matrix(os: str) -> List[Dict[str, str]]:
         # NOTE: We only build manywheel packages for linux
         package_type = "manywheel"
     elif os == "windows":
-        # We don't build CUDA 10.2 for window
+        # We don't build CUDA 10.2 for window see https://github.com/pytorch/pytorch/issues/65648
         arches += list_without(CUDA_ARCHES, ["10.2"])
     ret: List[Dict[str, str]] = []
     for python_version in FULL_PYTHON_VERSIONS:
