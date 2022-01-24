@@ -1209,6 +1209,8 @@ void check_gpu_single_tensor(const at::Tensor& tensor) {
 }
 
 // Checks that all `tensors' have the same type and shape and reside on distinct GPUs.
+// TODO: test_c10d_nccl.py should consider adding tests for the error conditions here,
+// ie, that deliberately pass invalid tensors and check the right exception is thrown.
 void check_gpu_tensors_different_devices(const std::vector<at::Tensor>& tensors) {
   if (tensors.size() == 0) {
     TORCH_CHECK(false, "Tensor list must be nonempty");
@@ -1248,6 +1250,11 @@ void check_gpu_tensors_different_devices(const std::vector<at::Tensor>& tensors)
 }
 
 // Checks that all `tensors' have the same type and shape and reside on the same GPU.
+// TODO: test_c10d_nccl.py should consider adding tests for the error conditions here,
+// ie, that deliberately pass invalid tensors and check the right exception is thrown.
+// The "Expected list of tensors on the same device" condition may be a challenge,
+// because test_c10d_nccl.py (currently, typically) appears to assign just one GPU
+// to each process.
 int64_t check_gpu_tensors_same_device(const std::vector<at::Tensor>& tensors) {
   if (tensors.size() == 0) {
     TORCH_CHECK(false, "Tensor list must be nonempty");
@@ -1266,7 +1273,7 @@ int64_t check_gpu_tensors_same_device(const std::vector<at::Tensor>& tensors) {
     if (!t.is_non_overlapping_and_dense()) {
       TORCH_CHECK(false, "Tensors must be non-overlapping and dense");
     }
-    // If we're in this function, the user called a coalesced collective
+    // If we're in this function, the user called a _coalesced collective
     // on a set of tensors with potentially different sizes and strides.
     // Therefore, we don't check for matching sizes and strides,
     // but we do double-check tensors are on the same device.
