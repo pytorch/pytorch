@@ -9,6 +9,9 @@
 #include <torch/csrc/jit/serialization/import_source.h>
 #include <torch/csrc/jit/testing/file_check.h>
 #include <torch/torch.h>
+#include "ATen/core/interned_strings.h"
+#include "ATen/core/jit_type.h"
+#include "ATen/core/jit_type_base.h"
 
 namespace torch {
 namespace jit {
@@ -395,6 +398,26 @@ TEST(ModuleAPITest, Freezing) {
   testing::FileCheck().check_not("GetAttr")->run(*forward_g);
 
   auto frozen_mod2 = torch::jit::optimize_for_inference(m);
+  forward_g = frozen_mod.get_method("forward").graph();
+  testing::FileCheck().check_not("GetAttr")->run(*forward_g);
+}
+
+TEST(ModuleAPITest, OfiFreezesTraining) {
+  Module m("m");
+  m.register_parameter("foo", torch::ones({}), false);
+  m.define(R"(
+    def forward(self, x, b : int = 4):
+      return self.foo + x + b
+  )");
+  m.register_attribute("training", BoolType::get(), true);
+  m.eval();
+
+  // Before freezing, we have a GetAttr check
+  auto forward_g = m.get_method("forward").graph();
+  testing::FileCheck().check("GetAttr")->run(*forward_g);
+
+  // Freezing
+  auto frozen_mod = torch::jit::optimize_for_inference(m);
   forward_g = frozen_mod.get_method("forward").graph();
   testing::FileCheck().check_not("GetAttr")->run(*forward_g);
 }
