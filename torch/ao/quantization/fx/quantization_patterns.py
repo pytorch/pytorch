@@ -951,7 +951,10 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                         float_linear = self.linear[0]  # type: ignore[index]
                     # Attach the weight observer to the module
                     weight_post_process = qconfig.weight()  # type: ignore[union-attr]
+
                 # Run weight observer
+                # TODO: This is currently a hack for QAT to get the right shapes for scale and zero point.
+                # In the future, we should require the user to calibrate the model after calling prepare
                 weight_post_process(float_linear.weight)  # type: ignore[operator]
 
                 weight_qparams = get_qparam_dict(weight_post_process)
