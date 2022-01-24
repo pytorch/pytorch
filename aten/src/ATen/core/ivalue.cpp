@@ -959,7 +959,7 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(IValue::HashAliasedI
   auto cu = type_.cu_;
   auto object = ivalue::Object::create(WeakOrStrongTypePtr(type_.cu_, type_.type_), type()->numAttributes());
   for (const auto i : c10::irange(slots_.size())) {
-    if (slots_[i].type() == c10::CapsuleType::get()) {
+    if (*slots_[i].type() == *c10::TypeFactory::get<CapsuleType>()) {
       // If we've gotten here, it means that we have *not* copied this
       // class via __getstate__ and __setstate__. That fact and the
       // fact that we have a Capsule attribute mean that this is a

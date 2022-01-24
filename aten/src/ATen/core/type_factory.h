@@ -1,9 +1,10 @@
 #pragma once
 
 #include <type_traits>
+#include <unordered_map>
 
 #include <ATen/core/dynamic_type.h>
-#include <ATen/core/jit_type.h>
+#include <ATen/core/jit_type_base.h>
 #include <c10/macros/Macros.h>
 
 namespace c10 {
@@ -80,9 +81,7 @@ struct TORCH_API TypeFactoryBase<c10::Type> {
   static c10::TypePtr createNamedTuple(
       const std::string& name,
       const std::vector<c10::string_view>& fields,
-      const std::vector<c10::TypePtr>& types) {
-    return c10::TupleType::createNamed(name, fields, types);
-  }
+      const std::vector<c10::TypePtr>& types);
   template <typename T>
   C10_ERASE static c10::TypePtr createNamed(const std::string& name) {
     return T::create(name);
