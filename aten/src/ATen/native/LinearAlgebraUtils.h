@@ -300,7 +300,7 @@ static inline void checkFloatingOrComplex(const Tensor& t, const char* const f_n
  * Given a info int, obtained after a single operation, this function check if the computation
  * has been successful (info = 0) or not, and report in case of the latter.
  */
-static inline void singleCheckErrors(int64_t info, const char* name, int64_t batch_id=-1) {
+static inline void singleCheckErrors(int64_t info, const c10::string_view name, int64_t batch_id=-1) {
   std::string batch_string{""};
   if (batch_id >= 0) {
     batch_string = ": (Batch element " + std::to_string(batch_id) + ")";
@@ -309,27 +309,27 @@ static inline void singleCheckErrors(int64_t info, const char* name, int64_t bat
     TORCH_INTERNAL_ASSERT(false, name, batch_string,
         ": Argument ", -info, " has illegal value. Most certainly there is a bug in the implementation calling the backend library.");
   } else if (info > 0) {
-    if (strstr(name, "inv")) {
+    if (name.find("inv") != name.npos) {
       // inv, inverse, cholesky_inverse, etc.
       TORCH_CHECK_LINALG(false, name, batch_string,
           ": The diagonal element ", info, " is zero, the inversion could not be completed because the input matrix is singular.");
-    } else if (strstr(name, "solve")) {
+    } else if (name.find("solve") != name.npos) {
       // solve, linalg_solve, cholesky_solve, etc.
       TORCH_CHECK_LINALG(false, name, batch_string,
           ": The diagonal element ", info, " is zero, the solve could not be completed because the input matrix is singular.");
-    } else if (strstr(name, "cholesky")) {
+    } else if (name.find("cholesky") != name.npos) {
       TORCH_CHECK_LINALG(false, name, batch_string,
           ": The factorization could not be completed because the input is not positive-definite (the leading minor of order ", info, " is not positive-definite).");
-    } else if (strstr(name, "svd")) {
+    } else if (name.find("svd") != name.npos) {
       TORCH_CHECK_LINALG(false, name, batch_string,
           ": The algorithm failed to converge because the input matrix is ill-conditioned or has too many repeated singular values (error code: ", info, ").");
-    } else if (strstr(name, "eig") || strstr(name, "syevd")) {
+    } else if (name.find("eig") || name.find("syevd")) {
       TORCH_CHECK_LINALG(false, name, batch_string,
           ": The algorithm failed to converge because the input matrix is ill-conditioned or has too many repeated eigenvalues (error code: ", info, ").");
-    } else if (strstr(name, "lstsq")) {
+    } else if (name.find("lstsq")) {
       TORCH_CHECK_LINALG(false, name, batch_string,
           ": The least squares solution could not be computed because the input matrix does not have full rank (error code: ", info, ").");
-    } else if (strstr(name, "lu_factor")) {
+    } else if (name.find("lu_factor")) {
       TORCH_CHECK(false, name, batch_string,
           ": U[", info, ",", info, "] is zero and using it on lu_solve would result in a division by zero. "
           "If you still want to perform the factorization, consider calling linalg.lu(A, pivot) or "
@@ -345,7 +345,7 @@ static inline void singleCheckErrors(int64_t info, const char* name, int64_t bat
  * this function checks if the computation over all these batches has been
  * successful (info = 0) or not, and report in case of the latter.
  */
-static inline void batchCheckErrors(const std::vector<int64_t>& infos, const char* name) {
+static inline void batchCheckErrors(const std::vector<int64_t>& infos, const c10::string_view name) {
   for (size_t i = 0; i < infos.size(); i++) {
     auto info = infos[i];
     singleCheckErrors(info, name, i);
@@ -355,7 +355,7 @@ static inline void batchCheckErrors(const std::vector<int64_t>& infos, const cha
 /*
  * This is an overloaded case of the previous function for a tensor of infos.
  */
-static inline void batchCheckErrors(const Tensor& infos, const char* name) {
+static inline void batchCheckErrors(const Tensor& infos, const c10::string_view name) {
   auto infos_cpu = infos.to(at::kCPU);
   auto infos_data = infos_cpu.data_ptr<int>();
   for (int64_t i = 0; i < infos.numel(); i++) {
