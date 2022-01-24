@@ -215,9 +215,10 @@ class PackageExporter:
         # - Each directed edge (u, v) means u depends on v.
         # - Nodes may contain metadata that describe how to write the thing to the zipfile.
         self.dependency_graph = DiGraph()
-        self.script_module_serializer = torch._C.ScriptModuleSerializer(self.zip_file)
-        self.storage_context = self.script_module_serializer.storage_context()
+        # self.script_module_serializer = torch._C.ScriptModuleSerializer(self.zip_file)
 
+        self.script_module_serializer = torch._C.ScriptModuleSerializer(self.zip_file, torch._C.SerializationStorageContext() )
+        self.storage_context = self.script_module_serializer.storage_context()
         # These are OrderedDicts for compatibility with RemovableHandle.
         # Generic OrderedDict type annotations are not present until 3.7.
         # The real type signature is OrderedDict[int, Callable[[PackageExporter, str], None]]
