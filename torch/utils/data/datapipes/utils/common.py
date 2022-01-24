@@ -130,7 +130,7 @@ class StreamWrapper:
         return next(self.file_obj)
 
     def __repr__(self):
-        return "StreamWrapper<" + repr(self.file_obj) + ">"
+        return f"StreamWrapper<{self.file_obj!r}>"
 
     def __getstate__(self):
         return self.file_obj

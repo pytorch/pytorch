@@ -201,6 +201,9 @@ class TestStreamWrapper(TestCase):
                 self.opened = False
                 self.closed = True
 
+        def __repr__(self):
+            return "FakeFD"
+
     def test_dir(self):
         fd = TestStreamWrapper._FakeFD("")
         wrap_fd = StreamWrapper(fd)
@@ -241,6 +244,15 @@ class TestStreamWrapper(TestCase):
         fd = TestStreamWrapper._FakeFD("")
         wrap_fd = StreamWrapper(fd)
         _ = pickle.loads(pickle.dumps(wrap_fd))
+
+    def test_repr(self):
+        fd = TestStreamWrapper._FakeFD("")
+        wrap_fd = StreamWrapper(fd)
+        self.assertEqual(str(wrap_fd), "StreamWrapper<FakeFD>")
+
+        f = tempfile.TemporaryFile()
+        wrap_f = StreamWrapper(f)
+        self.assertEqual(str(wrap_f), "StreamWrapper<" + str(f) + ">")
 
 
 class TestIterableDataPipeBasic(TestCase):
