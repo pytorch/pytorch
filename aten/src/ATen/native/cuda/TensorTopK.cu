@@ -406,24 +406,19 @@ void launch(
     IndexType indicesWithinSliceStride) {
 
   // configure items_per_thread based on device architecture and input size
+  // occupancy of this kernel is limited by registers per threads
+  constexpr int REGS_PER_THREAD = 40;
+  constexpr int REGS_PER_BLOCK = REGS_PER_THREAD * BLOCK_THREADS;
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   int mpc = prop->multiProcessorCount;
-  int reserved_shared_per_block = 0;
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
-  reserved_shared_per_block = prop->reservedSharedMemPerBlock;
-#endif
-  constexpr int static_shared_per_block = RADIX_DIGITS * sizeof(IndexType);
-  int shared_per_block = static_shared_per_block + reserved_shared_per_block;
 #if defined(USE_ROCM)
-  int shared_per_mp = prop->maxSharedMemoryPerMultiProcessor;
-  int blocks_per_mp = shared_per_mp / shared_per_block;
+  int regs_per_mp = prop->regsPerBlock;
+  int blocks_per_mp = regs_per_mp / REGS_PER_BLOCK;
 #else
-  int shared_per_mp = prop->sharedMemPerMultiprocessor;
-  int blocks_per_mp = std::min(shared_per_mp / shared_per_block, prop->maxBlocksPerMultiProcessor);
+  int regs_per_mp = prop->regsPerMultiprocessor;
+  int blocks_per_mp = std::min(regs_per_mp / REGS_PER_BLOCK, prop->maxBlocksPerMultiProcessor);
 #endif
-  // TODO occupancy of this kernel is not limited by shared memory anymore
   int items_per_thread = at::ceil_div((int64_t)(inputSliceSize * numInputSlices), (int64_t)(mpc * blocks_per_mp * BLOCK_THREADS));
-  // digit counter saved in shared mem with unsigned char type, should not exceed 2^8 - 1 = 255
   items_per_thread = std::max(4, std::min(items_per_thread, 64)); // clamp to (4, 64)
   int items_per_block = items_per_thread * BLOCK_THREADS;
 
@@ -463,21 +458,20 @@ void launch(
 
 
   for (int current_bit = sizeof(T) * 8 - RADIX_BITS; current_bit >= 0; current_bit -= RADIX_BITS) {
-    radixFindKthValues<T, IndexType, Bitwise, Dim>
-        <<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
-            input,
-            inputSliceSize,
-            ks_to_find,
-            numInputSlices,
-            inputWithinSliceStride,
-            current_bit,
-            items_per_thread,
-            blocks_per_slice,
-            desiredMask,
-            semaphores,
-            desired,
-            counts,
-            kthValues);
+    radixFindKthValues<T, IndexType, Bitwise, Dim><<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
+        input,
+        inputSliceSize,
+        ks_to_find,
+        numInputSlices,
+        inputWithinSliceStride,
+        current_bit,
+        items_per_thread,
+        blocks_per_slice,
+        desiredMask,
+        semaphores,
+        desired,
+        counts,
+        kthValues);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
     desiredMask = at::cuda::Bitfield<Bitwise>::setBitfield(desiredMask, RADIX_MASK, current_bit, RADIX_BITS);
   }
@@ -488,17 +482,17 @@ void launch(
     TORCH_INTERNAL_ASSERT(getGridFromTiles(numInputSlices, grid), "Too many slices for topk");
     dim3 block(std::min(at::ceil_div((int64_t)inputSliceSize, (int64_t)C10_WARP_SIZE) * (int64_t)C10_WARP_SIZE, (int64_t)1024));
     sbtopk::gatherTopK<T, IndexType, Dim, /* WithKthValues= */true><<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
-            input,
-            inputSliceSize,
-            outputSliceSize,
-            largest,
-            numInputSlices,
-            inputWithinSliceStride,
-            topK,
-            topKWithinSliceStride,
-            indices,
-            indicesWithinSliceStride,
-            kthValues);
+        input,
+        inputSliceSize,
+        outputSliceSize,
+        largest,
+        numInputSlices,
+        inputWithinSliceStride,
+        topK,
+        topKWithinSliceStride,
+        indices,
+        indicesWithinSliceStride,
+        kthValues);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 }
