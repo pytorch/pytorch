@@ -2759,21 +2759,22 @@ void svd_magma(const Tensor& A,
                const Tensor& S,
                const Tensor& Vh,
                const Tensor& info) {
+  // A is on GPU and may not have the right strides.
+  // We copy it into CPU with the correct strides and in pinned_memory as MAGMA moves things between CPU and GPU
+  const auto A_ = A.mT()
+                   .to(A.options()
+                        .device(kCPU)
+                        .memory_format(at::MemoryFormat::Contiguous)
+                        .pinned_memory(true))
+                   .mT();
   // U, S, Vh, info are the right size and strides, but are on GPU
-  // This function expects them to be in CPU (and for efficiency, with pinned memory)
-  // A may not have the right strides, but we'll copy it into CPU with the correct strides
-  const auto A_ = A.mT().to(/*device=*/kCPU,
-                            /*dtype=*/A.scalar_type(),
-                            /*non_blocking=*/true,  // Irrelevant
-                            /*copy=*/true,  // Irrelevant
-                            /*memory_format=*/at::MemoryFormat::Contiguous).mT();
-
+  // We copy them into CPU in pinned_memory
   const auto empty_like_cpu = [](const Tensor& t) {
     return at::empty_like(t, t.options().device(kCPU).pinned_memory(true));
   };
   auto U_ = compute_uv ? empty_like_cpu(U) : Tensor{};
   auto S_ = empty_like_cpu(S);
-  auto Vh_ = compute_uv ? empty_like_cpu(Vh) : Tensor {};
+  auto Vh_ = compute_uv ? empty_like_cpu(Vh) : Tensor{};
   auto info_ = empty_like_cpu(info);
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(A.scalar_type(), "svd_cuda", [&] {
@@ -2850,8 +2851,8 @@ static void apply_lu_solve_looped_magma(const Tensor& b, const Tensor& lu, const
   auto pivots_data = pivots_cpu.data_ptr<magma_int_t>();
 
   auto b_stride = matrixStride(b);
-  auto lu_stride = lu.dim() > 2 ? lu.stride(-3) : 0;
-  auto pivots_stride = pivots_cpu.dim() > 1 ? pivots_cpu.stride(-2) : 0;
+  auto lu_stride = matrixStride(lu);
+  auto pivots_stride = pivots_cpu.size(-1);
   auto batch_size = batchCount(b);
 
   magma_int_t n = magma_int_cast(lu.size(-2), "n");
@@ -2895,8 +2896,6 @@ static void apply_lu_solve_batched_magma(const Tensor& b, const Tensor& lu, cons
       "Calling torch.lu_solve on a CUDA tensor requires compiling ",
       "PyTorch with MAGMA. Please rebuild with MAGMA.");
 #else
-  TORCH_INTERNAL_ASSERT(batchCount(b) == batchCount(lu), "batch_size of b and lu must be the same");
-  TORCH_INTERNAL_ASSERT(batchCount(lu) == batchCount(pivots.unsqueeze(-1)), "batch_size of lu and pivots must be the same");
   auto trans = to_magma(transpose);
   auto b_data = b.data_ptr<scalar_t>();
   auto lu_data = lu.data_ptr<scalar_t>();
@@ -2963,36 +2962,9 @@ static void lu_solve_looped_magma(const Tensor& b, const Tensor& lu, const Tenso
   });
 }
 
-namespace {
-
-c10::MaybeOwned<Tensor> maybe_expand_lu(const Tensor& b, const Tensor& lu) {
-  if (batchCount(b) != batchCount(lu)) {
-    IntArrayRef b_batch_size(b.sizes().data(), b.dim() - 2);
-    std::vector<int64_t> expand_size = b_batch_size.vec();
-    expand_size.insert(expand_size.end(), {lu.size(-2), lu.size(-1)});
-    return c10::MaybeOwned<Tensor>::owned(
-        cloneBatchedColumnMajor(lu.expand(expand_size)));
-  } else {
-    return c10::MaybeOwned<Tensor>::borrowed(lu);
-  }
-}
-
-c10::MaybeOwned<Tensor> maybe_expand_pivots(const Tensor& b,const Tensor& pivots) {
-  if (batchCount(b) != batchCount(pivots.unsqueeze(-1))) {
-    IntArrayRef b_batch_size(b.sizes().data(), b.dim() - 2);
-    std::vector<int64_t> expand_size = b_batch_size.vec();
-    expand_size.insert(expand_size.end(), {pivots.size(-1)});
-    return c10::MaybeOwned<Tensor>::owned(
-        pivots.expand(expand_size).clone(at::MemoryFormat::Contiguous));
-  } else {
-    return c10::MaybeOwned<Tensor>::borrowed(pivots);
-  }
-}
-
-}  // anonymous namespace
 
 static void lu_solve_trans_dispatch(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType trans) {
-  auto batch_size = batchCount(b);
+  auto batch_size = batchCount(lu);
   auto m = lu.size(-2);
   auto b2 = b.size(-1);
   bool over_magma_dim_limit = b2 > 1024;  // magma implementation of LU solve cannot handle a b tensor with last dim > 1024 (https://bitbucket.org/icl/magma/issues/19/dgesv_batched-dgetrs_batched-fails-for)
@@ -3008,15 +2980,11 @@ static void lu_solve_trans_dispatch(const Tensor& b, const Tensor& lu, const Ten
 #endif // ifdef USE_CUSOLVER
 #ifdef CUDART_VERSION
   else if ((batch_size > 2 && m <= 128) || (batch_size > 8 && over_magma_dim_limit)) {
-    c10::MaybeOwned<Tensor> lu_ = maybe_expand_lu(b, lu);
-    c10::MaybeOwned<Tensor> pivots_ = maybe_expand_pivots(b, pivots);
-    lu_solve_batched_cublas(b, *lu_, *pivots_, trans);
+    lu_solve_batched_cublas(b, lu, pivots, trans);
   }
 #endif // ifdef CUDART_VERSION
   else {
-    c10::MaybeOwned<Tensor> lu_ = maybe_expand_lu(b, lu);
-    c10::MaybeOwned<Tensor> pivots_ = maybe_expand_pivots(b, pivots);
-    lu_solve_batched_magma(b, *lu_, *pivots_, trans);
+    lu_solve_batched_magma(b, lu, pivots, trans);
   }
 }
 
