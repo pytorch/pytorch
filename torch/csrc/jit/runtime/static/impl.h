@@ -1,7 +1,7 @@
 #pragma once
 
-#include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
+#include <ATen/core/symbol.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
@@ -57,7 +57,8 @@ TORCH_API inline bool doesNotHeapAllocateWhenStoredInIValue(const Type& type) {
 }
 
 TORCH_API inline bool borrowsOutputs(c10::Symbol kind) {
-  static const std::array<c10::Symbol, 2> symbols_with_borrowed_outputs = {
+  static const std::array<c10::Symbol, 3> symbols_with_borrowed_outputs = {
+      c10::Symbol::fromQualString("static_runtime::select_tensor"),
       c10::Symbol::fromQualString("static_runtime::dict_unpack"),
       c10::Symbol::fromQualString("static_runtime::VarTupleUnpack"),
   };
@@ -151,9 +152,6 @@ class TORCH_API ManagedTensorRanges {
 };
 
 struct TORCH_API StaticModuleOptions {
-  // to batch allocate (deallocate) tensor storage for all non-escaping
-  // temporary tensors
-  bool cleanup_activations{true};
   // enabling out variant allows Static Runtime to do memory planning
   bool enable_out_variant{true};
   // to reuse tensor storage for tensors whose live-range do not overlap to
@@ -163,6 +161,12 @@ struct TORCH_API StaticModuleOptions {
   // graph, where storage is deallocated outside static runtime
   // (enable_out_variant must be true)
   bool manage_output_tensors{false};
+  // Gates the ReplaceWithMaybeCopy pass, which replaces ops that
+  // sometimes alias their outputs with subgraphs that include an out
+  // variant.
+  bool use_maybe_copy_variants{true};
+  // enable TensorExpr fusion of ops at model loading time
+  bool enable_tensorexpr_fusion{false};
 };
 
 /// The static runime supports two execution modes.
@@ -218,12 +222,14 @@ class TORCH_API StaticModule {
  public:
   explicit StaticModule(
       std::shared_ptr<torch::jit::Graph> g,
-      const StaticModuleOptions& opts = StaticModuleOptions());
+      const StaticModuleOptions& opts = StaticModuleOptions(),
+      std::vector<IValue> sample_inputs = {});
 
   explicit StaticModule(
       const torch::jit::Module& m,
       bool is_frozen = false,
-      const StaticModuleOptions& opts = StaticModuleOptions());
+      const StaticModuleOptions& opts = StaticModuleOptions(),
+      std::vector<IValue> sample_inputs = {});
 
   typedef enum {
     CONSTANT_VALUE = -2, // VALUE nodes defined by prim::Constant
@@ -556,6 +562,9 @@ class TORCH_API StaticRuntime {
   // Set Input(idx) to arg. Always copies. Used for kwargs.
   void set_arg(const size_t idx, const IValue& arg);
 
+  bool fast_check_and_correct_overlap_with(
+      ProcessedNode& n,
+      c10::IValue& tensor_ival);
   void verify_and_correct_memory_overlap(ProcessedNode& n);
 
   // clean up owning refs of input IValues
@@ -581,9 +590,6 @@ class TORCH_API StaticRuntime {
       const std::vector<c10::IValue>& args,
       const KeywordArgs& kwargs);
 
-  // Memory planning is only enabled if sm->opts().cleanup_activations is true.
-  // Otherwise, the memory used by activations is cached inside the static
-  // runtime.
   const StaticModule& static_module_;
   // Cache this so we don't have to call static_module_.first_input_is_self()
   const bool first_input_is_self_;
@@ -715,6 +721,9 @@ class TORCH_API ProcessedNode {
     return overlap_detected_;
   }
 
+  bool check_and_correct_overlap_with(
+      const at::Tensor& input,
+      c10::IValue& output);
   void verify_and_correct_memory_overlap();
 
   void set_values(IValue* values) {

@@ -1,18 +1,11 @@
-import warnings
-from torch.utils.data import IterDataPipe, _utils, functional_datapipe
 from typing import Callable, Iterator, Sized, TypeVar
 
-try:
-    import dill
+from torch.utils.data import IterDataPipe, _utils, functional_datapipe
+from torch.utils.data.datapipes.utils.common import DILL_AVAILABLE, check_lambda_fn
 
-    # XXX: By default, dill writes the Pickler dispatch table to inject its
-    # own logic there. This globally affects the behavior of the standard library
-    # pickler for any user who transitively depends on this module!
-    # Undo this extension to avoid altering the behavior of the pickler globally.
+if DILL_AVAILABLE:
+    import dill
     dill.extend(use_dill=False)
-    DILL_AVAILABLE = True
-except ImportError:
-    DILL_AVAILABLE = False
 
 T_co = TypeVar("T_co", covariant=True)
 
@@ -50,13 +43,10 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
     ) -> None:
         super().__init__()
         self.datapipe = datapipe
-        # Partial object has no attribute '__name__', but can be pickled
-        if hasattr(fn, "__name__") and fn.__name__ == "<lambda>" and not DILL_AVAILABLE:
-            warnings.warn(
-                "Lambda function is not supported for pickle, please use "
-                "regular python function or functools.partial instead."
-            )
+
+        check_lambda_fn(fn)
         self.fn = fn  # type: ignore[assignment]
+
         self.input_col = input_col
         if input_col is None and output_col is not None:
             raise ValueError("`output_col` must be None when `input_col` is None.")
@@ -145,8 +135,12 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
 class CollatorIterDataPipe(MapperIterDataPipe):
     r""":class:`CollatorIterDataPipe`.
 
-    Iterable DataPipe to collate samples from datapipe to Tensor(s) by `util_.collate.default_collate`,
-    or customized Data Structure by collate_fn.
+    Iterable DataPipe to collate samples from DataPipe to Tensor(s) by a custom collate function,
+    which defaults to `torch.utils.data.default_collate` if it is not specified.
+
+    .. note::
+        While writing a custom collate function, you can import `torch.utils.data.default_collate` for the
+        default behavior and `functools.partial` to specify any additional arguments.
 
     Args:
         datapipe: Iterable DataPipe being collated
