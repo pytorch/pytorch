@@ -468,7 +468,7 @@ static inline std::tuple<std::vector<int64_t>,
   return std::make_tuple(q_sizes, q_strides, n_columns_q);
 }
 
-bool svd_uses_cusolver(const Tensor& A) {
+static inline bool svd_uses_cusolver(const Tensor& A) {
   // if cusolver is available, it is used unconditionally
   return A.is_cuda()
          && at::globalContext().hasCuSOLVER()
