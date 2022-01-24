@@ -1,5 +1,5 @@
 import argparse
-from common import run, topics, commit_files_changed, commit_title, get_features
+from common import run, topics, get_features
 from collections import defaultdict
 import os
 import csv
@@ -82,17 +82,25 @@ class CommitList:
 
     @staticmethod
     def categorize(commit_hash, title):
-        title = commit_title(commit_hash)
+        features = get_features(commit_hash, return_dict=True)
+        title = features['title']
         # update this to check if each file starts with caffe2
         if 'caffe2' in title:
             return Commit(commit_hash, 'caffe2', 'Untopiced', title)
 
-        labels = []
+        labels = features['labels']
         if 'Reverted' in labels:
             return Commit(commit_hash, 'skip', 'Untopiced', title)
-
+        
         category = 'Uncategorized'
-        files_changed = commit_files_changed(commit_hash)
+        topic = 'Untopiced'
+
+        if 'bc_breaking' in labels:
+            topic = 'bc-breaking'
+        if 'module: deprecation' in labels:
+            topic = 'module: deprecation'
+
+        files_changed = features['files_changed']
         for file in files_changed:
             file_lowercase = file.lower()
             if CommitList.keywordInFile(file, ['.circleci', 'third_party', '.jenkins']):
@@ -127,7 +135,7 @@ class CommitList:
             if CommitList.keywordInFile(file, ['torch/package', 'test/package'] ):
                 category = 'package'
                 break
-            if CommitList.keywordInFile(file, ['torch/csrc/jit/mobile', 'aten/src/ATen/native/metal', 'test/mobile'] ):
+            if CommitList.keywordInFile(file, ['torch/csrc/jit/mobile', 'aten/src/ATen/native/metal', 'test/mobile', 'torch/backends/_nnapi/', 'test/test_nnapi.py'] ):
                 category = 'mobile'
                 break
             if CommitList.keywordInFile(file, ['aten/src/ATen/native/LinearAlgebra.cpp', 'test/test_linalg.py', 'torch/linalg']):
@@ -136,7 +144,7 @@ class CommitList:
             if CommitList.keywordInFile(file, ['torch/sparse']):
                 category = 'sparse_frontend'
                 break
-            if CommitList.keywordInFile(file, ['test/test_nn.py', 'test/test_module.py']):
+            if CommitList.keywordInFile(file, ['test/test_nn.py', 'test/test_module.py', 'torch/nn/modules']):
                 category = 'nn_frontend'
                 break
             if CommitList.keywordInFile(file, ['docker/', '.circleci', '.github', '.jenkins', '.azure_pipelines']):
@@ -144,6 +152,9 @@ class CommitList:
                 break
             if CommitList.keywordInFile(file, ['submodules/', 'third_party/']):
                 category = 'skip'
+                break
+            if CommitList.keywordInFile(file, ['torch/csrc/jit']):
+                category = 'jit'
                 break
 
         return Commit(commit_hash, category, 'Untopiced', title)
