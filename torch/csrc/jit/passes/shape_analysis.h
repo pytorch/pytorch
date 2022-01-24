@@ -11,12 +11,11 @@ struct Graph;
 
 struct propagation_error : std::exception {};
 
-class PropertyPropBase{
+class PropertyPropBase {
   // Used for both Shape Propagation and Dtype/Device Propagation
-  public:
+ public:
   explicit PropertyPropBase(std::shared_ptr<Graph> graph)
-      : graph_(std::move(graph)) {
-  }
+      : graph_(std::move(graph)) {}
   virtual ~PropertyPropBase() = default;
 
   void propagateBlock(Block* block, bool insert_expands = true);
@@ -25,7 +24,7 @@ class PropertyPropBase{
   void processIf(Node* node);
   void processLoop(Node* node);
 
-  protected:
+ protected:
   virtual void propagateNode(Node* node, bool insert_expands = true) = 0;
   void setUnshapedType(Value* o);
   void setUnshapedType(Node* node);
