@@ -260,35 +260,45 @@ namespace upsample_antialias {
 // taken from
 // https://github.com/python-pillow/Pillow/blob/6812205f18ca4ef54372e87e1a13ce4a859434df/
 // src/libImaging/Resample.c#L20-L29
-template <typename accscalar_t>
-__device__ __forceinline__ static accscalar_t bilinear_filter(accscalar_t x) {
-  if (x < 0) {
-    x = -x;
+struct BilinearFilterFunctor {
+
+  template <typename accscalar_t>
+  __device__ accscalar_t operator()(accscalar_t x) const {
+    if (x < 0) {
+      x = -x;
+    }
+    if (x < 1) {
+      return 1 - x;
+    }
+    return 0;
   }
-  if (x < 1) {
-    return 1 - x;
-  }
-  return 0;
-}
+
+  static const int size = 2;
+};
 
 // taken from
 // https://github.com/python-pillow/Pillow/blob/6812205f18ca4ef54372e87e1a13ce4a859434df/
 // src/libImaging/Resample.c#L46-L62
-template <typename accscalar_t>
-__device__ __forceinline__ static accscalar_t bicubic_filter(accscalar_t x) {
-  // https://en.wikipedia.org/wiki/Bicubic_interpolation#Bicubic_convolution_algorithm
-  const accscalar_t a = -0.5;
-  if (x < 0) {
-    x = -x;
+struct BicubicFilterFunctor {
+
+  template <typename accscalar_t>
+  __device__ accscalar_t operator()(accscalar_t x) const {
+    // https://en.wikipedia.org/wiki/Bicubic_interpolation#Bicubic_convolution_algorithm
+    const accscalar_t a = -0.5;
+    if (x < 0) {
+      x = -x;
+    }
+    if (x < 1) {
+      return ((a + 2) * x - (a + 3)) * x * x + 1;
+    }
+    if (x < 2) {
+      return (((x - 5) * x + 8) * x - 4) * a;
+    }
+    return 0;
   }
-  if (x < 1) {
-    return ((a + 2) * x - (a + 3)) * x * x + 1;
-  }
-  if (x < 2) {
-    return (((x - 5) * x + 8) * x - 4) * a;
-  }
-  return 0;
-}
+
+  static const int size = 4;
+};
 
 template <typename accscalar_t>
 __device__ __forceinline__ static void _compute_weights_span(
@@ -304,26 +314,20 @@ __device__ __forceinline__ static void _compute_weights_span(
   xsize = min(static_cast<int>(center + support + static_cast<accscalar_t>(0.5)), input_size) - xmin;
 }
 
-template <typename scalar_t, typename accscalar_t, int interp_mode>
+template <typename scalar_t, typename accscalar_t, typename interp_filter_t>
 __device__ __forceinline__ static void _compute_weights(
     scalar_t* wt_ptr,
     const accscalar_t scale,
     int interp_size,
+    const interp_filter_t& interp_filter,
     accscalar_t xmin_m_center,
     int xsize) {
-
-  scalar_t (*filter_fn)(scalar_t);
-  if (interp_mode == 2) {
-    filter_fn = upsample_antialias::bilinear_filter;
-  } else {
-    filter_fn = upsample_antialias::bicubic_filter;
-  }
 
   accscalar_t invscale = (scale >= 1.0) ? 1.0 / scale : 1.0;
   accscalar_t total_w = 0.0;
   int j = 0;
   for (j = 0; j < xsize; j++) {
-    accscalar_t w = filter_fn((j + xmin_m_center + static_cast<accscalar_t>(0.5)) * invscale);
+    accscalar_t w = interp_filter((j + xmin_m_center + static_cast<accscalar_t>(0.5)) * invscale);
     wt_ptr[j] = static_cast<scalar_t>(w);
     total_w += w;
   }
