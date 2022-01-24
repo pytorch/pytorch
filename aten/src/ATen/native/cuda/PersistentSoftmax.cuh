@@ -279,6 +279,9 @@ __global__ void softmax_warp_backward(output_t *gradInput, const input_t *grad, 
         for (int it = 0;  it < WARP_ITERATIONS;  ++it) {
             int element_index = local_idx + it * WARP_SIZE;
             if (element_index < element_count) {
+                if (is_masked && !mask_reg[i][it]) {
+                    gradInput[i*element_count+it*WARP_SIZE] = 0;
+                }
                 // compute gradients
                 if (is_log_softmax) {
                     gradInput[i*element_count+it*WARP_SIZE] = (grad_reg[i][it] - std::exp(output_reg[i][it]) * sum[i]);

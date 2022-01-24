@@ -783,17 +783,15 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
   return output;
 }
 
-template<template<typename, typename, typename> class Epilogue, bool is_log_softmax, bool is_masked_softmax = false>
-void host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t dim_, bool half_to_float, const Tensor &gI, const Tensor &mask_){
+template<template<typename, typename, typename> class Epilogue, bool is_log_softmax>
+void host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t dim_, bool half_to_float, const Tensor &gI){
   int64_t dim = maybe_wrap_dim(dim_, grad_.dim());
   if (grad_.numel() == 0) {
     return;
   }
   auto grad = grad_.contiguous();
-  auto mask = mask_.contiguous();
   static_assert(std::is_same<acc_type<at::Half, true>, float>::value, "accscalar_t for half should be float");
   if (grad.dim() == 0) grad = grad.view(1);
-  if (mask.dim() == 0) mask = mask.view(1);
   TORCH_CHECK(dim >=0 && dim < grad.dim(), "dim must be non-negative and less than input dimensions");
   auto output = output_.contiguous();
   if (output.dim() == 0) output = output.view(1);
@@ -815,16 +813,14 @@ void host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t d
         auto gI_ptr = gI.data_ptr<scalar_t>();
         auto grad_ptr = grad.data_ptr<scalar_t>();
         auto output_ptr = output.data_ptr<scalar_t>();
-        auto mask_ptr = mask.data_ptr<bool>();
         int64_t remaining = outer_size;
         int64_t chunk_size = (1<<30) / dim_size;
         while(remaining > 0) {
-          dispatch_softmax_backward<scalar_t, scalar_t, accscalar_t, is_log_softmax, is_masked_softmax>(
-            gI_ptr, grad_ptr, output_ptr, dim_size, dim_size, std::min<int64_t>(remaining, chunk_size), mask_ptr /* not masked */);
+          dispatch_softmax_backward<scalar_t, scalar_t, accscalar_t, is_log_softmax, false /* masked_softmax */>(
+            gI_ptr, grad_ptr, output_ptr, dim_size, dim_size, std::min<int64_t>(remaining, chunk_size));
           gI_ptr += chunk_size * dim_size;
           grad_ptr += chunk_size * dim_size;
           output_ptr += chunk_size * dim_size;
-          mask_ptr += chunk_size * dim_size;
           remaining -= chunk_size;
         }
       } else {
@@ -841,16 +837,14 @@ void host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t d
         auto gI_ptr = gI.data_ptr<scalar_t>();
         auto grad_ptr = grad.data_ptr<accscalar_t>();
         auto output_ptr = output.data_ptr<accscalar_t>();
-        auto mask_ptr = mask.data_ptr<bool>();
         int64_t remaining = outer_size;
         int64_t chunk_size = (1<<30) / dim_size;
         while(remaining > 0) {
-          dispatch_softmax_backward<accscalar_t, scalar_t, accscalar_t, is_log_softmax, is_masked_softmax>(
-            gI_ptr, grad_ptr, output_ptr, dim_size, dim_size, std::min<int64_t>(remaining, chunk_size), mask_ptr /* not masked */);
+          dispatch_softmax_backward<accscalar_t, scalar_t, accscalar_t, is_log_softmax, false /* masked_softmax */>(
+            gI_ptr, grad_ptr, output_ptr, dim_size, dim_size, std::min<int64_t>(remaining, chunk_size));
           gI_ptr += chunk_size * dim_size;
           grad_ptr += chunk_size * dim_size;
           output_ptr += chunk_size * dim_size;
-          mask_ptr += chunk_size * dim_size;
           remaining -= chunk_size;
         }
       } else {
@@ -920,8 +914,7 @@ TORCH_IMPL_FUNC(log_softmax_backward_cuda_out) (
          input_dtype == ScalarType::Half),
         "expected input and grad types to match, or input to be at::Half and grad to be at::Float");
   }
-  Tensor mask = at::ones_like(grad, ScalarType::Bool);
-  host_softmax_backward<LogSoftMaxBackwardEpilogue, true, false>(grad, output, dim, half_to_float, grad_input, mask);
+  host_softmax_backward<LogSoftMaxBackwardEpilogue, true>(grad, output, dim, half_to_float, grad_input);
 }
 
 TORCH_IMPL_FUNC(softmax_cuda_out) (
@@ -946,8 +939,7 @@ TORCH_IMPL_FUNC(softmax_backward_cuda_out)
         "expected input and grad types to match, or input to be at::Half and grad to be at::Float");
   }
   Tensor tmp = grad * output;
-  Tensor mask = at::ones_like(tmp, ScalarType::Bool);
-  host_softmax_backward<SoftMaxBackwardEpilogue, false, false>(tmp, output, dim, half_to_float, grad_input, mask);
+  host_softmax_backward<SoftMaxBackwardEpilogue, false>(tmp, output, dim, half_to_float, grad_input);
 }
 
 Tensor masked_softmax_cuda(const Tensor& input_, int64_t dim, const Tensor& mask_) {
@@ -1042,10 +1034,29 @@ Tensor masked_softmax_backward_cuda(
   TORCH_CHECK(mask_.scalar_type() == ScalarType::Bool, "Mask should be a boolean tensor");
 
   auto grad_input = at::empty_like(grad, grad.options());
-  int64_t softmax_elements = grad_input.size(dim);
 
+  // host_softmax_backward<LogSoftMaxBackwardEpilogue, false, true>(grad_, output_, dim, false, grad_input, mask_);
+
+  int softmax_elements = grad_input.size(dim);
   int batch_count = grad.numel() / softmax_elements;
-  host_softmax_backward<LogSoftMaxBackwardEpilogue, false, true>(grad_, output_, dim, false, grad_input, mask_);
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+    ScalarType::Half,
+    ScalarType::BFloat16,
+    grad_input.scalar_type(),
+    "masked_softmax_backward",
+    [&] {
+      using accscalar_t = acc_type<scalar_t, true>;
+      dispatch_softmax_backward<scalar_t, scalar_t, accscalar_t, false, true /* masked_softmax */>(
+        grad_input.data_ptr<scalar_t>(),  // gI_ptr
+        grad_.data_ptr<scalar_t>(),  // grad_ptr
+        output_.data_ptr<scalar_t>(),  // output_ptr
+        softmax_elements,  // softmax_elements
+        softmax_elements,   // softmax_elements_stride
+        batch_count,  // batch_count
+        mask.data_ptr<bool>()  /* not masked */
+      );
+    });
+
   return grad_input;
 }
 }
