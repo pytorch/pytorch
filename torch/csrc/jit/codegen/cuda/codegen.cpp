@@ -1171,6 +1171,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
       return;
     } else if (
         // Special case handling for a pattern where start == end - 1.
+        loop->start()->definition() != nullptr &&
         loop->start()->definition()->isA<BinaryOp>() &&
         loop->start()->definition()->as<BinaryOp>()->getBinaryOpType() ==
             BinaryOpType::Sub &&
