@@ -941,7 +941,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     parent_name, name = _parent_name(self.linear_node.target)
                     setattr(modules[parent_name], name, float_linear)
                     # Attach weight fake quant to the linear module
-                    if isinstance(float_linear, torch.nn.intrinsic.qat.LinearReLU):
+                    if isinstance(float_linear, torch.nn.intrinsic.LinearReLU):
                         fused_linear = float_linear
                         float_linear = float_linear[0]
                     weight_post_process = self.linear.weight_fake_quant
