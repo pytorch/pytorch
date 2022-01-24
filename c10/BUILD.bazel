@@ -1,15 +1,30 @@
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 load("//third_party:substitution.bzl", "header_template_rule")
 load("//tools/config:defs.bzl", "if_cuda")
 
-header_template_rule(
-    name = "cmake_macros_h",
-    src = "macros/cmake_macros.h.in",
-    out = "macros/cmake_macros.h",
-    substitutions = {
-        "cmakedefine": "define",
-        "#define C10_USE_NUMA": "/* #undef C10_USE_NUMA */",
-    },
+# The bool_flag targets allow configuring the build from the
+# command-line, e.g. --//c10:use_gflags or --no//c10:use_gflags to
+# disable.
+
+bool_flag(
+    name = "use_gflags",
+    build_setting_default = True,
+)
+
+bool_flag(
+    name = "use_glog",
+    build_setting_default = True,
+)
+
+config_setting(
+    name = "using_gflags",
+    flag_values = {":use_gflags": "true"},
+)
+
+config_setting(
+    name = "using_glog",
+    flag_values = {":use_glog": "true"},
 )
 
 header_template_rule(
@@ -28,17 +43,20 @@ cc_library(
         "core/impl/*.h",
         "cuda/*.h",
         "cuda/impl/*.h",
-        "macros/*.h",
         "mobile/*.h",
         "util/*.h",
         "util/*.hpp",
     ]),
     deps = [
-        "@com_github_gflags_gflags//:gflags",
-        "@com_github_glog//:glog",
-        ":cmake_macros_h",
         ":cuda_cmake_macros_h",
-    ],
+        "//c10/macros",
+    ] + select({
+        ":using_gflags": ["@com_github_gflags_gflags//:gflags"],
+        "//conditions:default": [],
+    }) + select({
+        ":using_glog": ["@com_github_glog//:glog"],
+        "//conditions:default": [],
+    }),
     visibility = ["//:__pkg__"],
 )
 
@@ -56,7 +74,7 @@ cc_library(
         ]),
         [],
     ),
-    copts = ["-DCAFFE2_BUILD_MAIN_LIB"],
+    local_defines = ["C10_BUILD_MAIN_LIB"],
     deps = [
         ":headers",
         "@fmt",
