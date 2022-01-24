@@ -229,6 +229,10 @@ static bool tls_set_is_included() {
   return c10::impl::tls_is_dispatch_key_included(kDynamicLayerFrontModeKey);
 }
 
+static void _set_dynamic_layer_keys_included(bool value) {
+  return setDynamicLayerFrontBackKeysIncluded(value);
+}
+
 static void dump_dls() {
   std::cout << getDynamicLayerStack() << std::endl;
 }
@@ -252,13 +256,13 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("_vmap_decrement_nesting", &at::functorch::_vmap_decrement_nesting, "remove batch dim");
   m.def("_grad_increment_nesting", &at::functorch::_grad_increment_nesting, "remove batch dim");
   m.def("_grad_decrement_nesting", &at::functorch::_grad_decrement_nesting, "remove batch dim");
-  m.def("_wrap_for_grad", &at::functorch::_wrap_for_grad, "add batch dim");
-  m.def("_unwrap_for_grad", &at::functorch::_unwrap_for_grad, "add batch dim");
+  m.def("_wrap_for_grad", &at::functorch::_wrap_for_grad, "wrap as gradtrackingtensor");
+  m.def("_unwrap_for_grad", &at::functorch::_unwrap_for_grad, "unwrap from gradtrackingtensor");
   m.def("_set_vmap_fallback_warning_enabled", &at::functorch::setVmapFallbackWarningEnabled, "Set vmap fallback warnings");
   m.def("_set_vmap_fallback_enabled", &at::functorch::setVmapFallbackEnabled);
   m.def("_is_vmap_fallback_enabled", &at::functorch::isVmapFallbackEnabled);
-  m.def("dlevel", &at::functorch::dlevel, "add batch dim");
-  m.def("dump_tensor", &at::functorch::dump_tensor, "add batch dim");
+  m.def("dlevel", &at::functorch::dlevel, "dlevel");
+  m.def("dump_tensor", &at::functorch::dump_tensor, "dump_tensor");
   m.def("reshape_dim_into", &at::functorch::reshape_dim_into);
   m.def("reshape_dim_outof", &at::functorch::reshape_dim_outof);
   m.def("are_transforms_active", &at::functorch::areTransformsActive);
@@ -273,6 +277,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("unwrap_batchedtensor", &at::functorch::unwrapTensorAtCurrentLevel);
   m.def("tls_set_vmap_excluded", &at::functorch::tls_set_vmap_excluded);
   m.def("tls_set_is_included", &at::functorch::tls_set_is_included);
+  m.def("_set_dynamic_layer_keys_included", &at::functorch::_set_dynamic_layer_keys_included);
   m.def("dump_dls", &at::functorch::dump_dls);
   m.def("dump_local_tls", &at::functorch::dump_local_tls);
   at::functorch::initPointwiseOperatorCompileCacheBindings(m.ptr());
