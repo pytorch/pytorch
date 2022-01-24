@@ -251,7 +251,7 @@ def _rewrite(mod_to_rewrite: nn.Module, allow_list: Optional[Set] = None) -> nn.
     if allow_list is None:
         allow_list = DEFAULT_REWRITE_ALLOW_LIST
     else:
-        allow_list.union(DEFAULT_REWRITE_ALLOW_LIST)
+        allow_list = allow_list.union(DEFAULT_REWRITE_ALLOW_LIST)
 
     # Rewrite this module's functions as well as all recursive modules'
     # functions that are attrs of this moodule. Return the new, rewritten module
