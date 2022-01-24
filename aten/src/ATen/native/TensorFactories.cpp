@@ -17,7 +17,6 @@
 #include <c10/util/irange.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/UnaryOps.h>
-#include <ATen/cuda/CUDAContext.h>
 
 #include <algorithm>
 #include <cctype>
@@ -27,7 +26,6 @@
 
 namespace at {
 namespace native {
-
 namespace {
 void window_function_checks(
     const char* function_name,
