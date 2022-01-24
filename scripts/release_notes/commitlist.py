@@ -139,8 +139,11 @@ class CommitList:
             if CommitList.keywordInFile(file, ['test/test_nn.py', 'test/test_module.py']):
                 category = 'nn_frontend'
                 break
-            if CommitList.keywordInFile(file, ['.circleci', '.github', '.jenkins', '.azure_pipelines']):
+            if CommitList.keywordInFile(file, ['docker/', '.circleci', '.github', '.jenkins', '.azure_pipelines']):
                 category = 'releng'
+                break
+            if CommitList.keywordInFile(file, ['submodules/', 'third_party/']):
+                category = 'skip'
                 break
 
         return Commit(commit_hash, category, 'Untopiced', title)
