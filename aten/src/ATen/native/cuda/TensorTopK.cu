@@ -189,8 +189,7 @@ void launch(
 
     dim3 grid;
     TORCH_INTERNAL_ASSERT(getGridFromTiles(numInputSlices, grid), "Too many slices for topk");
-    dim3 block(std::min(
-        at::ceil_div((int64_t)inputSliceSize, (int64_t)C10_WARP_SIZE) * (int64_t)C10_WARP_SIZE, (int64_t)1024));
+    dim3 block(std::min(at::ceil_div((int64_t)inputSliceSize, (int64_t)C10_WARP_SIZE) * (int64_t)C10_WARP_SIZE, (int64_t)1024));
     gatherTopK<T, IndexType, Dim, /* WithKthValues= */false><<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
         input,
         inputSliceSize,
@@ -207,18 +206,16 @@ void launch(
 }
 } // namespace sbtopk
 
-namespace mbtopk {  // multi_block_topk
+namespace mbtopk { // multi_block_topk
 
 constexpr int BLOCK_THREADS = 128;
-// in principle, we could write at most 255 into digit counter (in shared mem) with unsigned char type
-// TODO tune this, maybe smaller
 
 // Over what radix we are selecting values
-constexpr int RADIX_BITS = 6; // digits are base-(2 ^ RADIX_BITS)
+constexpr int RADIX_BITS = 6;
 constexpr int RADIX_DIGITS = 1 << RADIX_BITS; // 2 ^ RADIX_BITS
 constexpr int RADIX_MASK = (RADIX_DIGITS - 1);
 
-// A stateful callback functor that maintains a running prefix to be applied
+// (Copied from CUB) A stateful callback functor that maintains a running prefix to be applied
 // during consecutive scan operations.
 struct BlockPrefixCallbackOp {
   // Running prefix
@@ -246,11 +243,11 @@ template <typename T, typename IndexType, typename Bitwise, int Dim, int RADIX_B
 C10_LAUNCH_BOUNDS_1(BLOCK_THREADS)
 __global__ void radixFindKthValues(
     at::cuda::detail::TensorInfo<T, IndexType> input,
-    IndexType inputSliceSize,
-    IndexType* ksToFind, // aka `k`
+    IndexType slice_size,
+    IndexType* ks_to_find, // size: num_slices
     bool largest,
 
-    IndexType numInputSlices,
+    IndexType num_slices,
     IndexType withinSliceStride,
 
     int current_bit,
@@ -259,12 +256,13 @@ __global__ void radixFindKthValues(
     Bitwise desiredMask,
 
     // outputs
-    int* semaphores,
-    Bitwise* desires,
-    IndexType* counts,
-    T* kthValues // only writes when current_bit reaches 0
+    int* semaphores,   // size: num_slices
+    Bitwise* desires,  // size: num_slices
+    IndexType* counts, // size: num_slices * blocks_per_slice * radix_digits
+    T* kthValues       // size: num_slices, only write when current_bit reaches 0
 ) {
   constexpr int RADIX_DIGITS = 1 << RADIX_BITS; // 2 ^ RADIX_BITS
+  // digit counter per thread saved in shared mem with unsigned char type
   constexpr int PACKING_RATIO = sizeof(int) / sizeof(unsigned char);
   constexpr int COUNTER_LANES = RADIX_DIGITS / PACKING_RATIO;
 
@@ -273,29 +271,33 @@ __global__ void radixFindKthValues(
   IndexType block_idx = getLinearBlockId<IndexType>();
   IndexType slice_idx = block_idx / blocks_per_slice;
   IndexType blk_idx_in_slice = block_idx % blocks_per_slice;
-  if (slice_idx >= numInputSlices) {
+  if (slice_idx >= num_slices) {
     return;
   }
 
   Bitwise desired = desires[slice_idx];
-  IndexType kToFind = ksToFind[slice_idx];
-  IndexType sliceStartIndex = at::cuda::detail::IndexToOffset<T, IndexType, Dim>::get(slice_idx, input);
-  T* data = &input.data[sliceStartIndex];
+  IndexType k_to_find = ks_to_find[slice_idx];
+  IndexType slice_start_index = at::cuda::detail::IndexToOffset<T, IndexType, Dim>::get(slice_idx, input);
+  T* data = &input.data[slice_start_index];
 
   typedef cub::BlockScan<IndexType, BLOCK_THREADS> BlockScan;
   union __align__(16) TempStorage {
-    unsigned char thread_counters[COUNTER_LANES][BLOCK_THREADS]
-                                 [PACKING_RATIO]; // threads in a warp is guaranteed to access different banks
+    // one shared memory bank saves 4 (PACKING_RATIO) digit counter
+    // threads in a warp will access different banks
+    unsigned char thread_counters[COUNTER_LANES][BLOCK_THREADS][PACKING_RATIO];
+    // used to fill zeros
     uint32_t packed_thread_counters[COUNTER_LANES][BLOCK_THREADS];
+    // only used when blk_per_slice == 1
+    uint32_t block_counters[RADIX_DIGITS];
+    // used for scan
     struct {
       IndexType digit_count_cumsum[RADIX_DIGITS];
-      typename BlockScan::TempStorage temp_storage;
+      typename BlockScan::TempStorage temp;
     } scan_storage;
   };
   __shared__ TempStorage temp_storage;
-  __shared__ int s_block_counts[RADIX_DIGITS]; // only used when blk_per_slice == 1
 
-  // reset temp_storage
+  // fill thread_counters with zeros
   for (int i = 0; i < COUNTER_LANES; ++i) {
     temp_storage.packed_thread_counters[i][tidx] = 0;
   }
@@ -303,43 +305,49 @@ __global__ void radixFindKthValues(
 
   items_per_thread = (blk_idx_in_slice + 1 < blocks_per_slice)
       ? items_per_thread
-      : at::ceil_div((int64_t)(inputSliceSize - blk_idx_in_slice * items_per_block), (int64_t)BLOCK_THREADS);
+      : at::ceil_div((int64_t)(slice_size - blk_idx_in_slice * items_per_block), (int64_t)BLOCK_THREADS);
 
-  // collect counts and store in shared memorey for each thread
+  // collect digit counts per thread and store in shared memorey
   for (int i = 0; i < items_per_thread; ++i) {
     // Find the start offset for our slice
     IndexType idx = tidx + i * BLOCK_THREADS + blk_idx_in_slice * items_per_block;
-    if (idx < inputSliceSize) {
+    if (idx < slice_size) {
       idx *= withinSliceStride;
       Bitwise val = TopKTypeConfig<T>::convert(doLdg(&data[idx]));
-      bool hasVal = ((val & desiredMask) == (desired & desiredMask));
+      bool has_val = ((val & desiredMask) == (desired & desiredMask));
       Bitwise digit = at::cuda::Bitfield<Bitwise>::getBitfield(val, current_bit, RADIX_BITS);
-      if (hasVal) {
-        temp_storage.thread_counters[digit / PACKING_RATIO][tidx][digit % PACKING_RATIO]++; // threads in a warp is guaranteed to access different banks
+      if (has_val) {
+         // threads in a warp will access different banks
+        temp_storage.thread_counters[digit / PACKING_RATIO][tidx][digit % PACKING_RATIO]++;
       }
     }
   }
 
   __syncthreads();
 
-  // extract counts and write count out
-  for (int i = 0; i < (RADIX_DIGITS + BLOCK_THREADS - 1) / BLOCK_THREADS; ++i) {
-    // every thread collects one overall digit count stored in shared mem for each thread
-    int digit_count = 0;
-    int digit = i * BLOCK_THREADS + tidx;
-    if (digit < RADIX_DIGITS) {
-      for (int j = 0, idx = tidx; j < BLOCK_THREADS; ++j, idx = (idx + 1) % BLOCK_THREADS) { // every thread access different bank
-        digit_count += temp_storage.thread_counters[digit / PACKING_RATIO][idx][digit % PACKING_RATIO];
-      }
-      if (blocks_per_slice == 1) {
-        s_block_counts[digit] = digit_count;
-      } else {
-        counts[block_idx * RADIX_DIGITS + digit] = digit_count;
-      }
+  // merge per threads digit counters to per block counters, every thread collects one counter
+  // the following assumption is required:
+  // CUDA_KERNEL_ASSERT(RADIX_DIGITS <= BLOCK_THREADS);
+  int digit_count = 0;
+  if (tidx < RADIX_DIGITS) {
+    for (int j = 0, idx = tidx; j < BLOCK_THREADS; ++j, idx = (idx + 1) % BLOCK_THREADS) {
+      // use different starting index to avoid bank conflict
+      digit_count += temp_storage.thread_counters[tidx / PACKING_RATIO][idx][tidx % PACKING_RATIO];
     }
   }
-
-  __threadfence(); // make sure writes are globally visible
+  // if blocks_per_slice == 1, there is no need to do cross-block reduction
+  // in this case use shared memory instead of global memory to save counts
+  if (blocks_per_slice == 1) {
+    __syncthreads(); // make sure reading is finished before overwriting shared memory
+    if (tidx < RADIX_DIGITS) {
+      temp_storage.block_counters[tidx] = digit_count;
+    }
+  } else {
+    if (tidx < RADIX_DIGITS) {
+      counts[block_idx * RADIX_DIGITS + tidx] = digit_count;
+    }
+    __threadfence(); // make sure writes are globally visible
+  }
   __syncthreads();
 
   __shared__ bool s_is_last_block_done;
@@ -367,14 +375,14 @@ __global__ void radixFindKthValues(
       IndexType& digit_count_cumsum = digit_count;
       for (int blk = 0; blk < blocks_per_slice; ++blk) {
         if (blocks_per_slice == 1) {
-          digit_count += s_block_counts[digit];
+          digit_count += temp_storage.block_counters[digit];
         } else {
           digit_count += counts[(slice_idx * blocks_per_slice + blk) * RADIX_DIGITS + digit];
         }
       }
 
       // Collectively compute the block-wide exclusive prefix sum
-      BlockScan(temp_storage.scan_storage.temp_storage).InclusiveSum(digit_count, digit_count_cumsum, prefix_op);
+      BlockScan(temp_storage.scan_storage.temp).InclusiveSum(digit_count, digit_count_cumsum, prefix_op);
       __syncthreads();
       temp_storage.scan_storage.digit_count_cumsum[digit] = digit_count_cumsum;
       __syncthreads();
@@ -387,11 +395,11 @@ __global__ void radixFindKthValues(
       } else {
         digit_count_cumsum_left = (digit == 0) ? 0 : temp_storage.scan_storage.digit_count_cumsum[digit - 1];
       }
-      if (digit_count_cumsum_left < kToFind && kToFind <= digit_count_cumsum) {
+      if (digit_count_cumsum_left < k_to_find && k_to_find <= digit_count_cumsum) {
         desired = at::cuda::Bitfield<Bitwise>::setBitfield(desired, digit, current_bit, RADIX_BITS);
         if (current_bit > 0) {
           desires[slice_idx] = desired;
-          ksToFind[slice_idx] = kToFind - digit_count_cumsum_left;
+          ks_to_find[slice_idx] = k_to_find - digit_count_cumsum_left;
         } else {
           kthValues[slice_idx] = TopKTypeConfig<T>::deconvert(desired);
         }
@@ -439,7 +447,7 @@ void launch(
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   reserved_shared_per_block = prop->reservedSharedMemPerBlock;
 #endif
-  constexpr int static_shared_per_block = RADIX_DIGITS * BLOCK_THREADS + RADIX_DIGITS * sizeof(int);
+  constexpr int static_shared_per_block = RADIX_DIGITS * BLOCK_THREADS;
   int shared_per_block = static_shared_per_block + reserved_shared_per_block;
 #if defined(USE_ROCM)
   int shared_per_mp = prop->maxSharedMemoryPerMultiProcessor;
@@ -449,6 +457,7 @@ void launch(
   int blocks_per_mp = shared_per_mp / shared_per_block;
 #endif
   int items_per_thread = at::ceil_div((int64_t)(inputSliceSize * numInputSlices), (int64_t)(mpc * blocks_per_mp * BLOCK_THREADS));
+  // digit counter saved in shared mem with unsigned char type, should not exceed 2^8 - 1 = 255
   items_per_thread = std::max(4, std::min(items_per_thread, 64)); // clamp to (4, 64)
   int items_per_block = items_per_thread * BLOCK_THREADS;
 
@@ -467,10 +476,10 @@ void launch(
   int* semaphores = reinterpret_cast<int*>(semaphores_buffer.get());
   AT_CUDA_CHECK(cudaMemsetAsync(semaphores, 0, numInputSlices * sizeof(int), c10::cuda::getCurrentCUDAStream()));
 
-  auto ksToFind_buffer = allocator.allocate(numInputSlices * sizeof(IndexType));
-  IndexType* ksToFind = reinterpret_cast<IndexType*>(ksToFind_buffer.get());
+  auto ks_to_find_buffer = allocator.allocate(numInputSlices * sizeof(IndexType));
+  IndexType* ks_to_find = reinterpret_cast<IndexType*>(ks_to_find_buffer.get());
   fill<IndexType><<<std::min((numInputSlices + 511) / 512, (IndexType)65535), 512, 0, c10::cuda::getCurrentCUDAStream()>>>(
-          ksToFind, outputSliceSize, numInputSlices);
+          ks_to_find, outputSliceSize, numInputSlices);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   auto desired_buffer = allocator.allocate(numInputSlices * sizeof(Bitwise));
@@ -489,7 +498,7 @@ void launch(
       <<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>( \
           input,                                               \
           inputSliceSize,                                      \
-          ksToFind,                                            \
+          ks_to_find,                                            \
           largest,                                             \
           numInputSlices,                                      \
           inputWithinSliceStride,                              \
