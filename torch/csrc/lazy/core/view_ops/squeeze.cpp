@@ -24,7 +24,7 @@ Squeeze::Squeeze(const torch::lazy::Value& input, int dim)
       dim_(dim) {
   SetShapeDeferred(
       [&]() {
-        GetShapeFromTsValue input_shape(input);
+        const auto& input_shape = GetShapeFromTsValue(input);
         return torch::lazy::Shape(input_shape.scalar_type(),
           BuildSqueezedDimensions(input_shape.sizes(), dim));
       });
