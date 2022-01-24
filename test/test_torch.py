@@ -1391,6 +1391,7 @@ else:
 
         test_func(torch.gather)
         test_func(torch.Tensor.gather)
+
     @unittest.skipIf(IS_JETSON, "Flaky on Jetson")
     def test_nondeterministic_alert_grid_sample_2d(self, device):
         input = torch.empty(1, 1, 2, 2, device=device, requires_grad=True)
