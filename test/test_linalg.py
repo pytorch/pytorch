@@ -2882,14 +2882,14 @@ class TestLinalg(TestCase):
         for x, y in zip(cpu_result, device_result):
             self.assertEqual(x[..., :m].abs(), y[..., :m].abs(), exact_dtype=False)
 
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(*floating_and_complex_types())
-    def test_svd_errors_and_warnings(self, device, dtype):
+    def _test_svd_errors_and_warnings(self, device, dtype, linalg_svd=None):
         if torch.device(device).type == 'cpu':
             self.skipTest("Test broken on cpu (see gh-71645)")
 
-        for svd in [torch.svd, torch.linalg.svd]:
+        if linalg_svd is None:
+            linalg_svd = torch.linalg.svd
+
+        for svd in [torch.svd, linalg_svd]:
             # if non-empty out tensor with wrong shape is passed a warning is given
             a = torch.randn(3, 3, dtype=dtype, device=device)
             real_dtype = a.real.dtype if dtype.is_complex else dtype
@@ -2913,10 +2913,10 @@ class TestLinalg(TestCase):
                 svd(a, out=(out_u, out_s, out_v))
 
             out_u = torch.empty(0, dtype=dtype, device=device)
-            if svd == torch.linalg.svd:
-                msg = "but got Vh with dtype Int"
-            else:
+            if svd == torch.svd:
                 msg = "but got V with dtype Int"
+            else:
+                msg = "but got Vh with dtype Int"
             with self.assertRaisesRegex(RuntimeError, msg):
                 svd(a, out=(out_u, out_s, out_v))
 
@@ -2958,6 +2958,12 @@ class TestLinalg(TestCase):
             with self.assertRaisesRegex(torch.linalg.LinAlgError, error_msg):
                 svd(a)
 
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(*floating_and_complex_types())
+    def test_svd_errors_and_warnings(self, device, dtype):
+        self._test_svd_errors_and_warnings(device, dtype)
+
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
@@ -2995,31 +3001,38 @@ class TestLinalg(TestCase):
         self._test_svd_helper((5, 20), False, True, device, dtype)
 
     # ~~~ tests for torch.linalg.svd ~~~
-    @skipCUDAIfNoMagmaAndNoCusolver
-    @skipCPUIfNoLapack
-    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    def test_linalg_svd_compute_uv(self, device, dtype):
+    def _test_linalg_svd_compute_uv(self, device, dtype, svd=None):
         """
         Test the default case. Here we have the very same behavior as
         NumPy with compute_uv=True.
         """
+
+        if svd is None:
+            svd = torch.linalg.svd
+
         t = torch.randn((10, 11), device=device, dtype=dtype)
         np_t = t.cpu().numpy()
         for full_matrices in (True, False):
-            # check linalg.svd vs numpy
+            # check vs numpy
             expected = np.linalg.svd(np_t, full_matrices, compute_uv=True)
-            actual = torch.linalg.svd(t, full_matrices)
+            actual = svd(t, full_matrices)
             # sign/phase of the singular vectors is not unique and therefore absolute values are compared
             self.assertEqual(abs(actual[0]), abs(expected[0]))
             self.assertEqual(actual[1], expected[1])
             self.assertEqual(abs(actual[2]), abs(expected[2]))
-            # check linalg.svd vs linalg.svd(out=...)
+            # check svd vs svd(out=...)
             out = (torch.empty_like(actual[0]),
                    torch.empty_like(actual[1]),
                    torch.empty_like(actual[2]))
-            out2 = torch.linalg.svd(t, full_matrices, out=out)
+            out2 = svd(t, full_matrices, out=out)
             self.assertEqual(actual, out)
             self.assertEqual(actual, out2)
+
+    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCPUIfNoLapack
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_linalg_svd_compute_uv(self, device, dtype):
+        self._test_linalg_svd_compute_uv(device, dtype)
 
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
@@ -4348,6 +4361,7 @@ class TestLinalg(TestCase):
     @dtypes(*floating_and_complex_types())
     def test_linalg_svd_rank_revealing_restricted_as_matrix_rank(self, device, dtype):
 
+        # match to linalg.matrix_rank
         def matrix_rank(x, *args, **kwargs):
             if 'full_matrices' in kwargs:
                 full_matrices = kwargs['full_matrices']
@@ -4391,6 +4405,84 @@ class TestLinalg(TestCase):
                     if attr.startswith('_test_matrix_rank'):
                         test = getattr(self, attr)
                         test(device, dtype, matrix_rank=matrix_rank_fn)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(*floating_and_complex_types())
+    def test_linalg_svd_rank_revealing_as_svd_compute_uv(self, device, dtype):
+
+        # match to linalg.svd
+        def svd(x, *args, **kwargs):
+            if len(args) > 0:
+                full_matrices = args[0]
+
+            if 'out' in kwargs:
+                out = {
+                    'out': (
+                        *kwargs['out'],
+                        torch.empty(x.shape[:-2], dtype=torch.long, device=x.device)
+                    )
+                }
+            else:
+                out = {}
+
+            return torch.linalg.svd_rank_revealing(x, full_matrices=full_matrices, **out)[:-1]
+
+        self._test_linalg_svd_compute_uv(device, dtype, svd=svd)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(*floating_and_complex_types())
+    def test_linalg_svd_rank_revealing_restricted_as_svd_errors_and_warnings(self, device, dtype):
+
+        for op in (torch.linalg.svd_rank_revealing, torch.linalg.svd_rank_restricted):
+            # match to linalg.svd
+            def svd(x, *args, **kwargs):
+                if len(args) > 0:
+                    full_matrices = args[0]
+                elif 'full_matrices' in kwargs:
+                    full_matrices = kwargs['full_matrices']
+                else:
+                    full_matrices = True
+
+                if 'out' in kwargs:
+                    out = {
+                        'out': (
+                            *kwargs['out'],
+                            torch.empty(x.shape[:-2], dtype=torch.long, device=x.device)
+                        )
+                    }
+                else:
+                    out = {}
+
+                return op(x, full_matrices=full_matrices, **out)[:-1]
+
+            self._test_svd_errors_and_warnings(device, dtype, linalg_svd=svd)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(*floating_and_complex_types())
+    def test_linalg_svd_rank_restricted_rank_restriction(self, device, dtype):
+        n_low = 3
+        n_high = 10
+        for n in range(n_low, n_high + 1):
+            input = make_tensor((n, n), device=device, dtype=dtype, low=None, high=None)
+            for rank in range(n, 0, -1):
+                input[..., rank - 1, :] = 0
+
+                u, s, vh, r = torch.linalg.svd_rank_restricted(input)
+
+                # check if rank is right
+                self.assertEqual(r.item(), rank - 1)
+
+                # check for rank-restriction
+                ur = u[..., :, (rank - 1):]
+                sr = s[..., (rank - 1):]
+                vhr = vh[..., (rank - 1):, :]
+
+                self.assertEqual(ur, torch.zeros_like(ur))
+                self.assertEqual(sr, torch.zeros_like(sr))
+                self.assertEqual(vhr, torch.zeros_like(vhr))
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
