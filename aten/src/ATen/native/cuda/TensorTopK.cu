@@ -341,7 +341,7 @@ __global__ void radixFindKthValues(
   }
 
   // compute the block-wide inclusive prefix sum
-  IndexType& digit_count_cumsum = digit_count;
+  IndexType digit_count_cumsum;
   BlockScan(temp_storage.scan_storage).InclusiveSum(digit_count, digit_count_cumsum);
   __syncthreads();
   // every thread also need the perfix_sum of it's left value for comparison, so save a copy in shared mem
