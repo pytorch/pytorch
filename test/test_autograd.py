@@ -2306,6 +2306,16 @@ class TestAutograd(TestCase):
         self.assertIsNotNone(view.grad_fn)
         self.assertIs(view._base, x)
 
+    def test_detach_then_inplace_raises_in_autograd(self):
+        x = torch.randn([], requires_grad=True)
+        orig_x = x.detach().clone()
+
+        y = x ** 2  # saves x
+        z = x.detach()
+        z.zero_()
+        with self.assertRaisesRegex(RuntimeError, "has been modified by an inplace"):
+            y.backward()
+
     def _test_type_conversion_backward(self, t, ):
         fvar = Variable(t(torch.randn(5, 5).float()), requires_grad=True)
         fvar.double().sum().backward()
