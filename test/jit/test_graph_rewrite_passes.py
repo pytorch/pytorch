@@ -101,9 +101,9 @@ class TestGraphRewritePasses(JitTestCase):
         model1 = torch.jit.trace(FunctionalLinear(w1, b1), [x1])
         check_not1 = ["aten::matmul", "aten::add_", "aten::t"]
         self.check_single_replacement(
-            "aten::matmul", 
-            "vulkan_prepack::linear_run", 
-            torch._C._jit_pass_vulkan_insert_prepacked_ops, 
+            "aten::matmul",
+            "vulkan_prepack::linear_run",
+            torch._C._jit_pass_vulkan_insert_prepacked_ops,
             model1
         )
         self.check_op_presence([], check_not1, torch._C._jit_pass_vulkan_insert_prepacked_ops, model1)
@@ -125,9 +125,9 @@ class TestGraphRewritePasses(JitTestCase):
         check_not2 = ["aten::_convolution"]
         check_yes2 = ["vulkan_prepack::conv2d_clamp_run", "vulkan_prepack::conv2d_clamp_prepack"]
         self.check_single_replacement(
-            "aten::_convolution", 
-            "prim::Constant", 
-            torch._C._jit_pass_vulkan_insert_prepacked_ops, 
+            "aten::_convolution",
+            "prim::Constant",
+            torch._C._jit_pass_vulkan_insert_prepacked_ops,
             model2
         )
         self.check_op_presence(check_yes2, check_not2, torch._C._jit_pass_vulkan_insert_prepacked_ops, model2)
