@@ -2375,6 +2375,22 @@ TEST(StaticRuntime, ModelCrashOnFirstRunWithBorrows) {
   EXPECT_THROW(runtime(args), std::runtime_error);
 }
 
+TEST(StaticRuntime, ModelCrashOnFirstRunWithBorrowedInputs) {
+  const auto src = R"JIT(
+    graph(%0: Tensor, %1: Tensor):
+        %2: bool = prim::Constant[value=1]()
+        %3: Tensor = static_runtime::select_tensor(%0, %1, %2)
+        static_runtime_tests::maybe_throw(%2)
+        return (%3)
+  )JIT";
+  auto graph = getGraphFromIR(src);
+  auto static_module = StaticModule(graph);
+  auto& runtime = static_module.runtime();
+
+  std::vector<IValue> args{at::randn({1}), at::randn({1})};
+  EXPECT_THROW(runtime(std::move(args)), std::runtime_error);
+}
+
 TEST(StaticRuntime, ReplaceWithMaybeCopy) {
   const std::string to = R"IR(
     graph(%0 : Tensor):

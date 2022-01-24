@@ -935,8 +935,11 @@ void StaticRuntime::clean_up_intermediate_ivalues() noexcept {
 
 void StaticRuntime::resetMemory() noexcept {
   planner_.reset();
-  clean_up_input_ivalues();
+  // We must clean up intermediate values before inputs in case
+  // there are borrowed inputs and static runtime owns the only
+  // reference (e.g. the inputs were std::move'd into the runtime)
   clean_up_intermediate_ivalues();
+  clean_up_input_ivalues();
 }
 
 c10::IValue StaticRuntime::move_outputs_to_tuple(uint32_t num_outputs) {
