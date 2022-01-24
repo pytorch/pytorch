@@ -30,12 +30,16 @@ env:
 jobs:
 
   build:
+    # NOTE: These builds will not run successfully without running on `pytorch/pytorch` due to the limitations
+    #       of accessing secrets from forked pull requests and IOS' dependency on secrets for their build/test
+    if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: macos-10.15
     timeout-minutes: 240
     env:
       JOB_BASE_NAME: ios-12-5-1-x86-64-full-jit-build
       IOS_CERT_KEY_2022: ${{ secrets.IOS_CERT_KEY_2022 }}
       IOS_SIGN_KEY_2022: ${{ secrets.IOS_SIGN_KEY_2022 }}
+      IOS_DEV_TEAM_ID: ${{ secrets.IOS_DEV_TEAM_ID }}
       PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
     steps:
       - name: print labels
@@ -118,7 +122,6 @@ jobs:
             echo 'Error: xcodebuild is not installed.'
             exit 1
           fi
-          echo "${IOS_DEV_TEAM_ID}"
           if [ "${IOS_PLATFORM}" != "SIMULATOR" ]; then
             ruby scripts/xcode_build.rb -i build_ios/install -x ios/TestApp/TestApp.xcodeproj -p "${IOS_PLATFORM}" -c "${PROFILE}" -t "${IOS_DEV_TEAM_ID}"
           else
