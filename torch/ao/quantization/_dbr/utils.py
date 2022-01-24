@@ -281,27 +281,27 @@ class FuncOutputDTypeType(enum.Enum):
     DTYPE_DEFAULT_BC_UNSUPPORTED_SYNTAX = 2
 
 def get_func_output_dtype_type(
-    op: Callable,
-    args: Tuple[Any, ...],
-    op_packing_only_uses_module_attributes: bool,
+    seen_op_info: SeenOpInfo,
 ) -> FuncOutputDTypeType:
-    if isinstance(op, torch.nn.Module):
-        if type(op) in module_types_supported_by_quantization_preserves_dtype:
+    if seen_op_info.type_is_module:
+        if seen_op_info.type in module_types_supported_by_quantization_preserves_dtype:
             return FuncOutputDTypeType.DTYPE_EQUALS_INPUT_DTYPE
 
     # check for ops which need packed weights but the weights are
     # coming from another function
-    if not op_packing_only_uses_module_attributes:
+    if not seen_op_info.op_packing_only_uses_module_attributes:
         return FuncOutputDTypeType.DTYPE_DEFAULT_BC_UNSUPPORTED_SYNTAX
 
-    if op in functions_supported_by_quantization_preserves_dtype:
+    args = seen_op_info.input_tensor_infos
+    if seen_op_info.type in functions_supported_by_quantization_preserves_dtype:
         return FuncOutputDTypeType.DTYPE_EQUALS_INPUT_DTYPE
-    elif op in add_and_mul_ops and len(args) > 0 and \
-            args[0].dtype in (torch.int32, torch.int64):
+    elif seen_op_info.type in add_and_mul_ops and len(args) > 0 and \
+            args[0].orig_dtype in (torch.int32, torch.int64):
         # binary ops with torch.int arguments do not support quantization
         return FuncOutputDTypeType.DTYPE_EQUALS_INPUT_DTYPE
-    elif op == torch.cat and len(args) > 0 and \
-            args[0][0].dtype in (torch.int32, torch.int64):
+    elif seen_op_info.type == torch.cat and len(args) > 0 and \
+            args[0].orig_dtype in (torch.int32, torch.int64):
+        # TODO(before land): do we still need this branch?
         return FuncOutputDTypeType.DTYPE_EQUALS_INPUT_DTYPE
 
     return FuncOutputDTypeType.DTYPE_DEPENDS_ON_QCONFIG
@@ -355,14 +355,15 @@ def get_quantized_op(
     return None
 
 def get_input_observed_arg_idxs(
-    op: Callable,
+    op_type: Callable,
+    op_type_is_module: bool,
 ) -> Optional[List[int]]:
-    if isinstance(op, torch.nn.Module):
+    if op_type_is_module:
         # TODO(future PR): handle RNNs
         return [0]
-    if op == F.conv2d:
+    elif op_type == F.conv2d:
         return [0, 1]
-    elif op == F.linear:
+    elif op_type == F.linear:
         return [0, 1]
     # None means "observe all Tensor args"
     return None
@@ -666,7 +667,7 @@ def get_input_args_quant_dequant_info(
 def get_cur_qconfig(
     qconfig_dict: Dict[str, Any],
     cur_fqn: str,
-    cur_op: Callable,
+    cur_op_type: Callable,
 ) -> Optional[QConfigAny]:
     # precedence: global -> object_type -> module_name_regex -> module_name
     #   -> module_name_object_type_order
@@ -674,10 +675,6 @@ def get_cur_qconfig(
 
     # global
     global_qconfig = qconfig_dict['']
-
-    # object_type
-    is_module = isinstance(cur_op, type(torch.nn.Module))
-    cur_op_type = type(cur_op) if is_module else cur_op
 
     qconfig = maybe_adjust_qconfig_for_module_type_or_name(
         qconfig_dict, cur_op_type, cur_fqn, global_qconfig)
