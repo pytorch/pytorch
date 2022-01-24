@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
-#include <test/cpp/jit/test_utils.h>
 #include <ATen/code_template.h>
+#include <test/cpp/jit/test_utils.h>
 
 namespace torch {
 namespace jit {
