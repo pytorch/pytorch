@@ -755,8 +755,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
     def test_local_function_infer_scopes(self):
         class M(torch.nn.Module):
             def forward(self, x):
-                new_tensor_shape = x.size()[:-1] + \
-                    (1, 1, -1)
+                # Concatenation of scalars inserts unscoped tensors in IR graph.
+                new_tensor_shape = x.size()[:-1] + (1, 1, -1)
                 tensor = x.view(*new_tensor_shape)
                 return tensor
 
