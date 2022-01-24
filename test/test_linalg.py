@@ -3630,6 +3630,8 @@ class TestLinalg(TestCase):
             self.assertEqual(actual, expected)
 
         # test against numpy.linalg.solve
+        run_test((5, 5), (2, 0, 5, 3))  # broadcasting with 0 batch dim
+        run_test((2, 0, 5, 5), (5, 3))  # broadcasting with 0 batch dim
         run_test((2, 1, 3, 4, 4), (4, 6))  # broadcasting B
         run_test((4, 4), (2, 1, 3, 4, 2))  # broadcasting A
         run_test((1, 3, 1, 4, 4), (2, 1, 3, 4, 5))  # broadcasting A & B
