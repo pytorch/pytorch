@@ -823,6 +823,7 @@ class AutoQuantizationState(torch.nn.Module):
             self.tensor_id_to_observer[str(output_tensor_id)] = \
                 qconfig.activation()
         elif func_output_obs_type == FuncOutputObsType.REUSES_FIRST_INPUT_OBS:
+            assert seen_op_info.input_tensor_infos[0] is not None
             first_input_tensor_id = seen_op_info.input_tensor_infos[0].id
 
             first_input_obs = None
