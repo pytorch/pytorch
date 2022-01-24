@@ -55,7 +55,7 @@ jobs:
     steps:
       - name: print labels
         run: echo "${PR_LABELS}"
-      !{{ common.checkout_pytorch("recursive") }}
+      !{{ common.checkout() }}
       !{{ common.setup_miniconda("3.8") }}
       - name: Populate CI build options
         run: |
@@ -83,6 +83,7 @@ jobs:
           # Install dependencies
           brew install libtool
           conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi requests typing_extensions --yes
+          sudo gem install xcodeproj
       - name: Run Fastlane
         shell: bash -e {0}
         run: |
