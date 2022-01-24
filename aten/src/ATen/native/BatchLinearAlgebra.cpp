@@ -985,7 +985,7 @@ Tensor& linalg_solve_out(const Tensor& input, const Tensor& other, Tensor& resul
 
   // Now check LAPACK/MAGMA error codes
   // _linalg_check_errors calls 'infos = infos.to(kCPU)'
-  at::_linalg_check_errors(infos, "linalg.solve", input.dim() > 2);
+  at::_linalg_check_errors(infos, "linalg.solve", input.dim() == 2);
   return result;
 }
 
