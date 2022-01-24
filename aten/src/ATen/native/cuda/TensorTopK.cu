@@ -451,10 +451,10 @@ void launch(
   int shared_per_block = static_shared_per_block + reserved_shared_per_block;
 #if defined(USE_ROCM)
   int shared_per_mp = prop->maxSharedMemoryPerMultiProcessor;
-  int blocks_per_mp = std::min(shared_per_mp / shared_per_block, prop->maxBlocksPerMultiProcessor);
+  int blocks_per_mp = shared_per_mp / shared_per_block;
 #else
   int shared_per_mp = prop->sharedMemPerMultiprocessor;
-  int blocks_per_mp = shared_per_mp / shared_per_block;
+  int blocks_per_mp = std::min(shared_per_mp / shared_per_block, prop->maxBlocksPerMultiProcessor);
 #endif
   int items_per_thread = at::ceil_div((int64_t)(inputSliceSize * numInputSlices), (int64_t)(mpc * blocks_per_mp * BLOCK_THREADS));
   // digit counter saved in shared mem with unsigned char type, should not exceed 2^8 - 1 = 255
