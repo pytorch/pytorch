@@ -37,14 +37,6 @@ BIAS_INDEX_DICT = {
     torch.nn.functional.instance_norm : [4],
 }
 
-# turn foo.bar -> ['foo', 'bar']
-def _parent_name(target):
-    r = target.rsplit('.', 1)
-    if len(r) == 1:
-        return '', r[0]
-    else:
-        return r[0], r[1]
-
 def graph_pretty_str(g, shorten=True) -> str:
     """Returns a printable representation of the ops in the graph of g.
     If shorten is True, tries to abbreviate fields.
@@ -511,3 +503,15 @@ def maybe_get_next_module(
             return user
 
     return None
+
+def create_node_from_old_node_preserve_meta(
+    quantized_graph: Graph,
+    create_node_args: Tuple[Any, ...],
+    old_node: Node,
+) -> Node:
+    """
+    Creates `new_node` and copies the necessary metadata to it from `old_node`.
+    """
+    new_node = quantized_graph.create_node(*create_node_args)
+    new_node.stack_trace = old_node.stack_trace
+    return new_node
