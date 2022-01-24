@@ -1,5 +1,6 @@
 # encoding: utf-8
 import operator
+import warnings
 
 import torch  # isort:skip
 from typing import Sequence, Optional, List, cast
@@ -461,6 +462,20 @@ def dropout_mapper(node: torch.fx.Node, mod: nn.Module):
     """
     return node.kwargs["input"]
 
+try:
+    from torchvision.ops import stochastic_depth
+except Exception as e:
+    warnings.warn(f"Unable to import torchvision related libraries.: {e}")
+else:
+    @register_custom_acc_mapper_fn(
+        op_and_target=("call_function", stochastic_depth),
+        arg_replacement_tuples=[("input", "input")],
+    )
+    def stochastic_depth_mapper(node: torch.fx.Node, mod: nn.Module):
+        """
+        Remove dropout node and directly map its input to output.
+        """
+        return node.kwargs["input"]
 
 @register_acc_op_properties(AccOpProperty.pointwise, AccOpProperty.unary)
 @register_acc_op_mapping(
@@ -476,6 +491,26 @@ def hardtanh(*, input, min_val=-1.0, max_val=1.0):
 @register_acc_op
 def hardsigmoid(*, input):
     return nn.functional.hardsigmoid(input)
+
+
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_function", nn.functional.silu),
+    arg_replacement_tuples=[
+        ("input", "input"),
+    ],
+)
+def silu(node: torch.fx.Node, _: nn.Module) -> torch.fx.Node:
+    input_node = node.kwargs["input"]
+    with node.graph.inserting_before(node):
+        sigmoid_node = node.graph.call_function(
+            sigmoid, kwargs={"input": input_node}
+        )
+        sigmoid_node.meta = node.meta.copy()
+        new_node = node.graph.call_function(
+            mul, kwargs={"input": sigmoid_node, "other": input_node}
+        )
+        new_node.meta = node.meta.copy()
+        return new_node
 
 
 @register_custom_acc_mapper_fn(
