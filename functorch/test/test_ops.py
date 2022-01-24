@@ -269,9 +269,6 @@ def is_inplace(op, variant):
 vjp_fail = {
     skip('nn.functional.dropout'),  # randomness testing artifact
     skip('nn.functional.rrelu'),  # randomness testing artifact
-    xfail('linalg.cholesky'),
-    xfail('linalg.inv'),
-    xfail('linalg.matrix_power'),
     xfail('tensor_split'),
     xfail('to_sparse'),
     xfail('nn.functional.ctc_loss'),
@@ -356,10 +353,7 @@ class TestOperators(TestCase):
 
         # Composite ops that do bad things. Need to be fixed in PyTorch core.
         # RuntimeError: Cannot access data pointer of Tensor that doesn't have storage
-        xfail('linalg.inv'),
         xfail('linalg.eigvals'),
-        xfail('linalg.matrix_power'),
-        xfail('linalg.cholesky'),
         xfail('tensor_split'),
 
         # Causing a CUDA assert, needs investigation
