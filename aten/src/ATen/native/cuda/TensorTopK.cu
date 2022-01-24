@@ -216,22 +216,6 @@ constexpr int RADIX_DIGITS = 1 << RADIX_BITS; // 2 ^ RADIX_BITS
 constexpr int RADIX_MASK = (RADIX_DIGITS - 1);
 static_assert(RADIX_DIGITS <= BLOCK_THREADS, "radixFindKthValues kernel requires RADIX_DIGITS <= BLOCK_THREADS");
 
-// (Copied from CUB) A stateful callback functor that maintains a running prefix to be applied
-// during consecutive scan operations.
-struct BlockPrefixCallbackOp {
-  // Running prefix
-  int running_total;
-  // Constructor
-  __device__ BlockPrefixCallbackOp(int running_total) : running_total(running_total) {}
-  // Callback operator to be entered by the first warp of threads in the block.
-  // Thread-0 is responsible for returning a value for seeding the block-wide scan.
-  __device__ int operator()(int block_aggregate) {
-    int old_prefix = running_total;
-    running_total += block_aggregate;
-    return old_prefix;
-  }
-};
-
 template <typename T>
 __global__ void fill(T* x, T value, int size) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -358,8 +342,7 @@ __global__ void radixFindKthValues(
 
   // compute the block-wide inclusive prefix sum
   IndexType& digit_count_cumsum = digit_count;
-  BlockPrefixCallbackOp prefix_op(0);
-  BlockScan(temp_storage.scan_storage).InclusiveSum(digit_count, digit_count_cumsum, prefix_op);
+  BlockScan(temp_storage.scan_storage).InclusiveSum(digit_count, digit_count_cumsum);
   __syncthreads();
   // every thread also need the perfix_sum of it's left value for comparison, so save a copy in shared mem
   if (tidx < RADIX_DIGITS) {
@@ -500,9 +483,9 @@ void launch(
 
 bool should_use_multiblock(int64_t num_slices, int64_t slice_size) {
   // This heuristics is based on the experiment in https://github.com/pytorch/pytorch/pull/71081
-  // TODO rerun
-  return true;
-  return (num_slices < 1000 && slice_size >= 20000) || (num_slices >= 1000 && slice_size >= 800);
+  return (num_slices < 200 && slice_size >= 5000) ||
+      (num_slices >= 200 && num_slices < 4000 && slice_size >= 400) ||
+      (num_slices >= 4000 && slice_size >= 200);
 }
 
 void launch_gather_topk_kernel(
