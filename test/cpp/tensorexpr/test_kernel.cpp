@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 
+#include <ATen/code_template.h>
 #include <c10/util/irange.h>
 #include <test/cpp/tensorexpr/test_base.h>
-#include <ATen/code_template.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
