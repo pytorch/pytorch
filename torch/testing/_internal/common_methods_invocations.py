@@ -3027,53 +3027,53 @@ def _fill_indices(idx, dim, dim_size, elems_per_row, m, n, o):
                 idx[tuple(ii)] = torch.randperm(dim_size)[0:elems_per_row]
 
 def error_inputs_gather(op_info, device, **kwargs):
-        # src is [1, 2]
-        #        [3, 4]
+    # src is [1, 2]
+    #        [3, 4]
+    src = torch.tensor(((1, 2), (3, 4)), device=device, dtype=torch.float32)
+
+    # idx is [0, 0]
+    #        [1, 0]
+    idx = torch.tensor(((0, 0), (1, 0)), device=device, dtype=torch.long)
+
+    # Index should be smaller than self except on dimesion 1
+    bad_src = make_tensor((1, 1), device=device, dtype=torch.float32)
+    yield ErrorInput(SampleInput(bad_src, args=(1, idx,)), error_type=RuntimeError,
+                     error_regex="Size does not match at dimension 0")
+
+    # Index must have long dtype
+    bad_idx = idx.to(torch.int32)
+    yield ErrorInput(SampleInput(src, args=(1, bad_idx)), error_type=RuntimeError,
+                     error_regex="Expected dtype int64 for index")
+
+    # TODO: FIXME
+    # out.dtype must match src.dtype
+    # Creates new src & idx since SampleInputs can't share tensors
+    src = torch.tensor(((1, 2), (3, 4)), device=device, dtype=torch.float32)
+    idx = torch.tensor(((0, 0), (1, 0)), device=device, dtype=torch.long)
+    out = torch.empty((2, 2), device=device, dtype=torch.float64)
+    yield ErrorInput(SampleInput(src, args=(1, idx), kwargs={'out': out}), error_type=RuntimeError,
+                     error_regex="Expected out tensor to have dtype")
+
+    # src and index tensors must have the same # of dimensions
+    # idx too few dimensions
+    src = torch.tensor(((1, 2), (3, 4)), device=device, dtype=torch.float32)
+    idx = torch.tensor((0, 0), device=device, dtype=torch.long)
+    yield ErrorInput(SampleInput(src, args=(1, idx)), error_type=RuntimeError,
+                     error_regex="Index tensor must have the same number of dimensions")
+
+    # src too few dimensions
+    src = torch.tensor((1, 2), device=device, dtype=torch.float32)
+    idx = torch.tensor(((0, 0), (1, 0)), device=device, dtype=torch.long)
+    yield ErrorInput(SampleInput(src, args=(0, idx)), error_type=RuntimeError,
+                     error_regex="Index tensor must have the same number of dimensions")
+
+    # index out of bounds
+    # NOTE: this ErrorInput is guarded because bounds checking does not occur on CUDA devices
+    if torch.device(device).type == 'cpu':
         src = torch.tensor(((1, 2), (3, 4)), device=device, dtype=torch.float32)
-
-        # idx is [0, 0]
-        #        [1, 0]
-        idx = torch.tensor(((0, 0), (1, 0)), device=device, dtype=torch.long)
-
-        # Index should be smaller than self except on dimesion 1
-        bad_src = make_tensor((1, 1), device=device, dtype=torch.float32)
-        yield ErrorInput(SampleInput(bad_src, args=(1, idx,)), error_type=RuntimeError,
-                                     error_regex="Size does not match at dimension 0")
-
-        # Index must have long dtype
-        bad_idx = idx.to(torch.int32)
-        yield ErrorInput(SampleInput(src, args=(1, bad_idx)), error_type=RuntimeError,
-                                     error_regex="Expected dtype int64 for index")
-
-        # TODO: FIXME
-        # out.dtype must match src.dtype
-        # Creates new src & idx since SampleInputs can't share tensors
-        src = torch.tensor(((1, 2), (3, 4)), device=device, dtype=torch.float32)
-        idx = torch.tensor(((0, 0), (1, 0)), device=device, dtype=torch.long)
-        out = torch.empty((2, 2), device=device, dtype=torch.float64)
-        yield ErrorInput(SampleInput(src, args=(1, idx), kwargs={'out': out}), error_type=RuntimeError,
-                                     error_regex="Expected out tensor to have dtype")
-
-        # src and index tensors must have the same # of dimensions
-        # idx too few dimensions
-        src = torch.tensor(((1, 2), (3, 4)), device=device, dtype=torch.float32)
-        idx = torch.tensor((0, 0), device=device, dtype=torch.long)
-        yield ErrorInput(SampleInput(src, args=(1, idx)), error_type=RuntimeError,
-                                     error_regex="Index tensor must have the same number of dimensions")
-
-        # src too few dimensions
-        src = torch.tensor((1, 2), device=device, dtype=torch.float32)
-        idx = torch.tensor(((0, 0), (1, 0)), device=device, dtype=torch.long)
-        yield ErrorInput(SampleInput(src, args=(0, idx)), error_type=RuntimeError,
-                                     error_regex="Index tensor must have the same number of dimensions")
-
-        # index out of bounds
-        # NOTE: this ErrorInput is guarded because bounds checking does not occur on CUDA devices
-        if torch.device(device).type == 'cpu':
-            src = torch.tensor(((1, 2), (3, 4)), device=device, dtype=torch.float32)
-            idx = torch.tensor(((0, 23), (1, 0)), device=device, dtype=torch.long)
-            yield ErrorInput(SampleInput(src, args=(1, idx,)), error_type=RuntimeError,
-                                        error_regex="index 23 is out of bounds for dimension")
+        idx = torch.tensor(((0, 23), (1, 0)), device=device, dtype=torch.long)
+        yield ErrorInput(SampleInput(src, args=(1, idx,)), error_type=RuntimeError,
+                         error_regex="index 23 is out of bounds for dimension")
 
 # Error inputs for scatter
 def error_inputs_scatter_and_scatter_add(op_info, device, **kwargs):
@@ -3082,28 +3082,28 @@ def error_inputs_scatter_and_scatter_add(op_info, device, **kwargs):
     idx = torch.tensor(((0, 1), (1, 2)), device=device, dtype=torch.long)
     dst = torch.zeros((3, 5), device=device, dtype=torch.double)
     yield ErrorInput(SampleInput(dst, args=(0, idx, src)), error_type=RuntimeError,
-                                 error_regex="Expected self.dtype to be equal to src.dtype")
+                     error_regex="Expected self.dtype to be equal to src.dtype")
 
     # Index dtype must be long
     src = make_tensor((2, 5), device=device, dtype=torch.float32)
     idx = torch.tensor(((0, 1), (1, 2)), device=device, dtype=torch.int32)
     dst = torch.zeros((3, 5), device=device, dtype=torch.float32)
     yield ErrorInput(SampleInput(dst, args=(0, idx, src)), error_type=RuntimeError,
-                                 error_regex="Expected dtype int64 for index")
+                     error_regex="Expected dtype int64 for index")
 
     # Index and destination must have the same number of dimensions
     src = make_tensor((2, 5), device=device, dtype=torch.float32)
     idx = torch.tensor(((0, 1), (1, 2)), device=device, dtype=torch.long)
     dst = torch.zeros((3, 5, 3), device=device, dtype=torch.float32)
     yield ErrorInput(SampleInput(dst, args=(0, idx, src)), error_type=RuntimeError,
-                                 error_regex="Index tensor must have the same number of dimensions as self tensor")
+                     error_regex="Index tensor must have the same number of dimensions as self tensor")
 
     # Index and src must have the same number of dimensions when src is not a scalar
     src = make_tensor((2, 5, 2), device=device, dtype=torch.float32)
     idx = torch.tensor(((34, 1), (1, 2)), device=device, dtype=torch.long)
     dst = torch.zeros((3, 5), device=device, dtype=torch.float32)
     yield ErrorInput(SampleInput(dst, args=(0, idx, src)), error_type=RuntimeError,
-                                 error_regex="Index tensor must have the same number of dimensions as src tensor")
+                     error_regex="Index tensor must have the same number of dimensions as src tensor")
 
     # Index out of bounds
     # NOTE: this ErrorInput is guarded because bounds checking does not occur on CUDA devices
@@ -3112,7 +3112,7 @@ def error_inputs_scatter_and_scatter_add(op_info, device, **kwargs):
         idx = torch.tensor(((34, 1), (1, 2)), device=device, dtype=torch.long)
         dst = torch.zeros((3, 5), device=device, dtype=torch.float32)
         yield ErrorInput(SampleInput(dst, args=(0, idx, src)), error_type=RuntimeError,
-                                     error_regex="index 34 is out of bounds for dimension 0 with size 3")
+                         error_regex="index 34 is out of bounds for dimension 0 with size 3")
 
 def sample_inputs_take_along_dim(op_info, device, dtype, requires_grad, **kwargs):
     return (SampleInput(make_tensor((S, S), device, dtype,

@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 # Owner(s): ["module: scatter & gather ops"]
 
-import unittest
 import random
 
 import torch
@@ -112,7 +111,6 @@ class TestScatterGather(TestCase):
 
         self.assertEqual(actual, expected, atol=0, rtol=0)
 
-        # TODO: this fails because the idx is not the same shape?
         # Tests empty index
         dst = make_tensor((2, 2), device=device, dtype=dtype)
         idx = torch.tensor((), device=device, dtype=torch.long)
@@ -153,7 +151,7 @@ class TestScatterGather(TestCase):
     def test_scatter_add_mult_index_base(self, device, dtype):
         m, n = 30, 40
         idx = torch.zeros(m, n, device=device, dtype=torch.long)
-        src = make_tensor((m, n), device=device, dtype=dtype)
+        src = torch.ones(m, n, device=device, dtype=dtype)
         res0 = torch.zeros(m, n, device=device, dtype=dtype).scatter_add_(0, idx, src)
         res1 = torch.zeros(m, n, device=device, dtype=dtype).scatter_add_(1, idx, src)
 
