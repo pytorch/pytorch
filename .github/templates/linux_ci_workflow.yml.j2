@@ -7,18 +7,26 @@ name: !{{ build_environment }}
 {%- endblock %}
 
 on:
+{%- if is_default %}
   pull_request:
-    types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
-
-{%- if is_scheduled %}
-  schedule:
-    - cron: !{{ is_scheduled }}
-{%- else %}
+{%- endif %}
   push:
+{%- for label in ciflow_config.labels | sort %}
+  {%- if loop.first %}
+    tags:
+  {%- endif %}
+  {%- if label != "ciflow/default" %}
+      - '!{{ label }}/*'
+  {%- endif %}
+{%- endfor %}
+{%- if not is_scheduled and not only_on_pr %}
     branches:
       - master
       - release/*
-      - fbsync
+{%- endif %}
+{%- if is_scheduled and not only_on_pr %}
+  schedule:
+    - cron: !{{ is_scheduled }}
 {%- endif %}
   workflow_dispatch:
 
@@ -47,23 +55,24 @@ env:
 !{{ common.concurrency(build_environment) }}
 
 jobs:
-!{{ common.ciflow_should_run_job(ciflow_config) }}
 {% block build +%}
   build:
     runs-on: linux.2xlarge
-    needs: [!{{ ciflow_config.root_job_name }}]
     timeout-minutes: !{{ common.timeout_minutes }}
     env:
       JOB_BASE_NAME: !{{ build_environment }}-build
     outputs:
       docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
     steps:
+      - name: print labels
+        run: echo "${PR_LABELS}"
       !{{ common.setup_ec2_linux() }}
-      !{{ common.checkout_pytorch("recursive") }}
+      !{{ common.checkout() }}
       !{{ common.calculate_docker_image(false) }}
       - name: Pull Docker image
         run: |
-          !{{ common.pull_docker("${DOCKER_IMAGE}") }}
+          !{{ common.add_retry_to_env() }}
+          retry docker pull "${DOCKER_IMAGE}"
       !{{ common.parse_ref() }}
       - name: Build
         env:
@@ -105,7 +114,7 @@ jobs:
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
-          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
+          WORKFLOW_ID: '${{ github.run_id }}'
         run: |
           COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
           export COMMIT_TIME
@@ -142,13 +151,14 @@ jobs:
 {%- if not exclude_test %}
 {% block test +%}
   generate-test-matrix:
+    needs: build
     runs-on: ubuntu-18.04
-    needs: [!{{ ciflow_config.root_job_name }}]
     timeout-minutes: !{{ common.timeout_minutes }}
     env:
       TEST_RUNNER_TYPE: !{{ test_runner_type }}
       ENABLE_DISTRIBUTED_TEST: !{{ enable_distributed_test }}
       ENABLE_JIT_LEGACY_TEST: !{{ enable_jit_legacy_test }}
+      ENABLE_FX2TRT_TEST: !{{ enable_fx2trt_test }}
       ENABLE_MULTIGPU_TEST: !{{ enable_multigpu_test }}
       ENABLE_NOGPU_NO_AVX_TEST: !{{ enable_nogpu_no_avx_test }}
       ENABLE_NOGPU_NO_AVX2_TEST: !{{ enable_nogpu_no_avx2_test }}
@@ -158,8 +168,8 @@ jobs:
       ENABLE_XLA_TEST: !{{ enable_xla_test }}
       ENABLE_NOARCH_TEST: !{{ enable_noarch_test }}
       NUM_TEST_SHARDS: !{{ num_test_shards }}
-      MULTIGPU_RUNNER_TYPE: linux.16xlarge.nvidia.gpu
-      DISTRIBUTED_GPU_RUNNER_TYPE: linux.8xlarge.nvidia.gpu
+      MULTIGPU_RUNNER_TYPE: !{{ multigpu_runner_type }}
+      DISTRIBUTED_GPU_RUNNER_TYPE: !{{ distributed_gpu_runner_type }}
       NOGPU_RUNNER_TYPE: linux.2xlarge
       PR_BODY: ${{ github.event.pull_request.body }}
     outputs:
@@ -178,7 +188,7 @@ jobs:
         run: .github/scripts/generate_pytorch_test_matrix.py
 
   test:
-    needs: [build, generate-test-matrix, !{{ ciflow_config.root_job_name }}]
+    needs: [build, generate-test-matrix]
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
       fail-fast: false
@@ -192,16 +202,28 @@ jobs:
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
     steps:
+{%- if 'rocm' in test_runner_type %}
+      !{{ common.setup_rocm_linux() }}
+{%- else %}
       !{{ common.setup_ec2_linux() }}
-      !{{ common.checkout_pytorch("recursive") }}
+{%- endif %}
+      !{{ common.checkout() }}
       - name: Pull Docker image
         run: |
-          !{{ common.pull_docker("${DOCKER_IMAGE}") }}
+          !{{ common.add_retry_to_env() }}
+          retry docker pull "${DOCKER_IMAGE}"
+{%- if 'rocm' in test_runner_type %}
+      - name: ROCm set GPU_FLAG
+        if: ${{ contains(env.BUILD_ENVIRONMENT, 'rocm') && !contains(matrix.config, 'nogpu') }}
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+{%- else %}
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         if: ${{ contains(env.BUILD_ENVIRONMENT, 'cuda') && !contains(matrix.config, 'nogpu') }}
         run: |
           bash .github/scripts/install_nvidia_utils_linux.sh
           echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+{%- endif %}
       - name: Determine shm-size
         run: |
           shm_size="1g"
@@ -223,7 +245,11 @@ jobs:
           unzip -o artifacts.zip
       - name: Output disk space left
         run: |
+{%- if 'rocm' in test_runner_type %}
+          df -H
+{%- else %}
           sudo df -H
+{%- endif %}
       !{{ common.parse_ref() }}
       - name: Test
         env:
@@ -241,6 +267,7 @@ jobs:
           else
             TEST_COMMAND=.jenkins/pytorch/test.sh
           fi
+{%- if 'rocm' not in test_runner_type %}
           PROXY_ENV=
           # NOTE: XLA multiprocessing tests appear to have issues with squid proxy, going to disable for now
           #       We should investigate whether or not there's a list of hostnames we can add to no_proxy to
@@ -249,6 +276,7 @@ jobs:
             # shellcheck disable=SC2089
             PROXY_ENV="-e http_proxy=!{{ common.squid_proxy }} -e https_proxy=!{{ common.squid_proxy }} -e no_proxy=!{{ common.squid_no_proxy }}"
           fi
+{%- endif %}
           # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
           # Used for GPU_FLAG since that doesn't play nice
@@ -275,12 +303,16 @@ jobs:
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
+{%- if 'rocm' not in test_runner_type %}
             ${PROXY_ENV} \
+{%- endif %}
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --ulimit stack=10485760:83886080 \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
+{%- if 'rocm' not in test_runner_type %}
             --ipc=host \
+{%- endif %}
             --shm-size="${SHM_SIZE}" \
             --tty \
             --detach \
@@ -290,17 +322,35 @@ jobs:
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
           )
+{%- if 'rocm' in test_runner_type %}
+          # jenkins user does not have write permission to mounted workspace; work-around by copying within container to jenkins home
+          docker exec -t "${container_name}" sh -c "cd .. && cp -R workspace pytorch && cd pytorch && pip install dist/*.whl && ${TEST_COMMAND}"
+          # copy test results back to the mounted workspace, needed sudo, resulting permissions were correct
+          docker exec -t "${container_name}" sh -c "cd ../pytorch && sudo cp -R test/test-reports ../workspace/test"
+{%- else %}
           docker exec -t "${container_name}" sh -c "sudo chown -R jenkins . && pip install dist/*.whl && ${TEST_COMMAND}"
+{%- endif %}
+{%- if 'rocm' not in test_runner_type %}
       - name: Chown workspace
         if: always()
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+{%- endif %}
       !{{ common.render_test_results() }}
+{%- if 'rocm' in test_runner_type %}
+      !{{ common.upload_downloaded_files(name='linux', use_s3=False) }}
+      !{{ common.upload_test_reports(name='linux', artifact_name="test-reports", use_s3=False) }}
+{%- else %}
       !{{ common.upload_downloaded_files(name='linux') }}
       !{{ common.upload_test_reports(name='linux') }}
+{%- endif %}
       !{{ common.upload_test_statistics(build_environment) }}
+{%- if 'rocm' in test_runner_type %}
+      !{{ common.teardown_rocm_linux() }}
+{%- else %}
       !{{ common.teardown_ec2_linux() }}
+{%- endif %}
 {% endblock %}
 {%- endif -%}
 {%- if enable_doc_jobs %}
@@ -310,17 +360,18 @@ jobs:
     strategy:
       matrix:
         docs_type: [cpp, python]
-    needs: [build, !{{ ciflow_config.root_job_name }}]
+    needs: [build]
     env:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       DOCS_TYPE: ${{ matrix.docs_type }}
       WITH_PUSH: ${{ github.event_name == 'schedule' }}
     steps:
       !{{ common.setup_ec2_linux() }}
-      !{{ common.checkout_pytorch("recursive") }}
+      !{{ common.checkout() }}
       - name: Pull Docker image
         run: |
-          !{{ common.pull_docker("${DOCKER_IMAGE}") }}
+          !{{ common.add_retry_to_env() }}
+          retry docker pull "${DOCKER_IMAGE}"
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download PyTorch Build Artifacts
         with:
@@ -332,7 +383,7 @@ jobs:
       - name: Generate netrc (only for docs-push)
         if: ${{ github.event_name == 'schedule' }}
         env:
-          GITHUB_PYTORCHBOT_TOKEN: ${{ secrets.GITHUB_PYTORCHBOT_TOKEN }}
+          GITHUB_PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
         run: |
           # set credentials for https pushing
           echo "machine github.com" > "${RUNNER_TEMP}/.netrc"
@@ -364,7 +415,7 @@ jobs:
             --detach \
             --user jenkins \
 {%- if is_scheduled %}
-            -v "${RUNNER_TEMP}/.netrc":/var/lib/jenkins/workspace/.netrc \
+            -v "${RUNNER_TEMP}/.netrc":/var/lib/jenkins/.netrc \
 {%- endif %}
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
