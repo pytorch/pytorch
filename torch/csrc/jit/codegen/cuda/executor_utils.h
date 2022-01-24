@@ -38,9 +38,6 @@ void validateKernelOutputs(
     const std::vector<at::Tensor>& outputs,
     const c10::Device& device);
 
-// Returns if vectorizing the aten value by word size is possible
-bool canVectorize(const IValue& aten_val, int word_size);
-
 //! Bind kernel input values to runtime values
 kir::ExpressionEvaluator bindKernelInputs(
     const at::ArrayRef<IValue>& aten_inputs,
@@ -157,6 +154,8 @@ struct VectorizedTensorInfo {
   std::vector<int> out_misaligned_tensors_pos;
   std::unordered_map<int, int> inp_pos_to_word_size_map_to_verify;
   std::unordered_map<int, int> out_pos_to_word_size_map_to_verify;
+  std::unordered_map<TensorView*, int>
+      intermediate_tv_to_word_size_map_to_verify;
 };
 
 //! Compile-time info to be cached in each FusionExecutor:

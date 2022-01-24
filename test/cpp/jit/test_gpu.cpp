@@ -20225,6 +20225,49 @@ TEST_F(NVFuserTest, FusionSmemBlockGemmCacheDoubleBuffer_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
+TEST_F(NVFuserTest, FusionIntermediateTensorVectorize_CUDA) {
+  auto mem_types = {MemoryType::Shared, MemoryType::Local};
+
+  for (auto mem_type : mem_types) {
+    Fusion fusion;
+    FusionGuard fg(&fusion);
+
+    auto tv0 = makeContigTensor(1);
+    fusion.addInput(tv0);
+
+    auto tv1 = set(tv0);
+    auto tv2 = set(tv1);
+    auto tv3 = set(tv2);
+    fusion.addOutput(tv3);
+
+    tv1->setMemoryType(mem_type);
+
+    tv3->split(-1, 4);
+    TransformPropagator::from(tv3);
+
+    tv1->computeAt(tv3, -2);
+
+    tv2->axis(-1)->parallelize(ParallelType::Vectorize);
+
+    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+    at::manual_seed(0);
+    auto t0 = at::randn({15}, options);
+    FusionExecutor fe;
+    fe.compileFusion(&fusion);
+
+    // This should throw an exception as the extent of t0 is not
+    // divisible by the vector width
+    ASSERT_ANY_THROW(fe.runFusion({t0}));
+
+    auto t1 = at::randn({16}, options);
+    auto cg_outputs = fe.runFusion({t1});
+
+    auto ref = t1;
+
+    testValidate(&fusion, cg_outputs, {t1}, {ref}, __LINE__, __FILE__);
+  }
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

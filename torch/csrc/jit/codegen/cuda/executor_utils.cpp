@@ -338,6 +338,8 @@ void validateKernelOutputs(
       !mismatch, "Found one or more invalid arguments: ", msg.str());
 }
 
+namespace {
+
 bool canVectorize(const IValue& aten_val, int word_size) {
   if (!aten_val.isTensor()) {
     return false;
@@ -370,7 +372,40 @@ bool canVectorize(const IValue& aten_val, int word_size) {
   return true;
 }
 
-namespace {
+// Returns true if a TV can be used with ParallelType::Vectorize. When
+// input or output tensors are involved, the other version of
+// canVectorize is used.
+bool canVectorize(
+    TensorView* tv,
+    int word_size,
+    kir::ExpressionEvaluator& expr_eval) {
+  IterDomain* last_root_dim = nullptr;
+  for (size_t i = tv->getRootDomain().size(); i > 0; i--) {
+    auto r_id = tv->getRootDomain()[i - 1];
+    if (r_id->isReduction() || r_id->isTrivialReduction() ||
+        r_id->isBroadcast()) {
+      continue;
+    }
+    last_root_dim = r_id;
+    break;
+  }
+
+  if (last_root_dim == nullptr) {
+    return false;
+  }
+
+  auto last_dim_size = expr_eval.evaluate(last_root_dim->extent());
+
+  if (!last_dim_size.has_value()) {
+    return false;
+  }
+
+  if (last_dim_size.value() % word_size != 0) {
+    return false;
+  }
+
+  return true;
+}
 
 // Check if there's any split that is non-divisible and vectorized. If
 // found, Vectorize is illegal.
@@ -446,10 +481,18 @@ std::unique_ptr<caching::VectorizedTensorInfo> getVectorizedTensorValidationInfo
         vector_word_size.has_value(),
         "Non constant vector dimension found in ",
         out_tv);
-    tv_to_vector_word_size[out_tv] = vector_word_size.value();
-    tv_to_vector_word_size[in_tv] = vector_word_size.value();
+
+    // The expression here must be a UnaryOp::Set, so checking either of the
+    // input or output tensor should be sufficient. When the output is a
+    // fusion output, check the tensor as its size information is available
+    // without using the expression evaluator.
+    auto tv_to_verify = out_tv->isFusionOutput() ? out_tv : in_tv;
+    tv_to_vector_word_size[tv_to_verify] = vector_word_size.value();
 
     if (vector_dim->getParallelType() == ParallelType::MisalignedVectorize) {
+      TORCH_INTERNAL_ASSERT(
+          in_tv->isFusionInput() || out_tv->isFusionOutput(),
+          "MisalignedVectorize is assumed to be used with either input or output tensor");
       if (out_tv->getMemoryType() == MemoryType::Global &&
           in_tv->getMemoryType() == MemoryType::Local) {
         global_out_misaligned_tv.insert(out_tv);
@@ -475,6 +518,8 @@ std::unique_ptr<caching::VectorizedTensorInfo> getVectorizedTensorValidationInfo
       vectorized_tensor_info_ptr->inp_pos_to_word_size_map_to_verify;
   auto& out_pos_to_word_size_map_to_verify =
       vectorized_tensor_info_ptr->out_pos_to_word_size_map_to_verify;
+  auto& intermediate_tv_to_word_size_map_to_verify =
+      vectorized_tensor_info_ptr->intermediate_tv_to_word_size_map_to_verify;
 
   for (auto entry : tv_to_vector_word_size) {
     auto tv = entry.first;
@@ -510,6 +555,10 @@ std::unique_ptr<caching::VectorizedTensorInfo> getVectorizedTensorValidationInfo
       } else {
         out_pos_to_word_size_map_to_verify[out_pos] = word_size;
       }
+    } else {
+      // Intermediate tensors. Note that this must be Vectorize as
+      // MisalignedVectorize is only supported for inputs and outputs.
+      intermediate_tv_to_word_size_map_to_verify[tv] = word_size;
     }
   }
 
@@ -556,6 +605,18 @@ void validateVectorizedTensors(
           " as output provided does not allowed vectorization by word size, ",
           it.second);
     }
+  }
+
+  for (auto it : tensor_vectorization_validation_entry.get()
+                     .intermediate_tv_to_word_size_map_to_verify) {
+    auto tv = it.first;
+    auto vec_width = it.second;
+    TORCH_INTERNAL_ASSERT(
+        canVectorize(tv, vec_width, expr_eval),
+        "Error vectorizing, ",
+        tv->toString(),
+        " as the extent of the vectorized axis does not allowed vectorization by word size, ",
+        vec_width);
   }
 
   std::vector<c10::IValue> inp_misaligned_tensors;
