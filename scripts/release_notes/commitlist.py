@@ -136,6 +136,12 @@ class CommitList:
             if CommitList.keywordInFile(file, ['torch/sparse']):
                 category = 'sparse_frontend'
                 break
+            if CommitList.keywordInFile(file, ['test/test_nn.py', 'test/test_module.py']):
+                category = 'nn_frontend'
+                break
+            if CommitList.keywordInFile(file, ['.circleci', '.github', '.jenkins', '.azure_pipelines']):
+                category = 'releng'
+                break
 
         return Commit(commit_hash, category, 'Untopiced', title)
 

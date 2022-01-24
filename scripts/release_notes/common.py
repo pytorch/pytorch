@@ -9,24 +9,24 @@ import json
 
 categories = [
     'Uncategorized',
-    'distributed', # done
-    'mobile', # done
+    'distributed',
+    'mobile',
     'jit',
     'visualization',
-    'onnx', # done
-    'caffe2', # done
-    'quantization', # done
+    'onnx',
+    'caffe2',
+    'quantization',
     'amd',
     'cuda',
     'benchmark',
     'profiler',
     'performance_as_product',
-    'package', # done
+    'package',
     'dispatcher',
     'releng',
-    'fx', # done
+    'fx',
     'code_coverage',
-    'vulkan', # done
+    'vulkan',
     'skip',
     'nn_frontend',
     'linalg_frontend',
@@ -37,8 +37,8 @@ categories = [
     'autograd_frontend',
     'build_frontend',
     'memory_format_frontend',
-    'foreach_frontend', # done
-    'dataloader_frontend', # done
+    'foreach_frontend',
+    'dataloader_frontend',
     'sparse_frontend'
 ]
 
