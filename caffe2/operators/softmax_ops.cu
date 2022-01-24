@@ -5,6 +5,7 @@
 #include "caffe2/operators/softmax_op.h"
 #include "caffe2/operators/softmax_with_loss_op.h"
 #include "caffe2/operators/spatial_softmax_with_loss_op.h"
+#include "caffe2/utils/cub_namespace.cuh"
 
 namespace caffe2 {
 

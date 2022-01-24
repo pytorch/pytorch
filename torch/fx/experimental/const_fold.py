@@ -1,4 +1,4 @@
-from typing import Dict, Set, Optional, Union
+from typing import Callable, Dict, Set, Optional, Union
 
 import torch.fx
 import torch.fx.experimental.fx_acc.acc_utils as acc_utils
@@ -23,6 +23,11 @@ class FoldedGraphModule(torch.fx.GraphModule):
         const_subgraph: Optional[torch.fx.Graph] = None,
         fx_const_folded_attrs_name: str = None,
     ):
+        # In init, we set graph's owning module to root which will make graph's
+        # owning module be None because graph already have a owning module. We
+        # need owning module to run DCE. To work around we set the number of
+        # graph's owners to 0.
+        graph._owners = 0
         super().__init__(root, graph)
         self.const_subgraph_module = (
             None
@@ -107,7 +112,8 @@ def _inline_module(gm: torch.fx.GraphModule, inline_mod_name: str):
 
 
 def split_const_subgraphs(
-    module: Union[torch.nn.Module, torch.fx.GraphModule]
+    module: Union[torch.nn.Module, torch.fx.GraphModule],
+    skip_folding_node_fn: Optional[Callable[[torch.fx.Node], bool]] = None
 ) -> FoldedGraphModule:
     """
     Looks through `module` for any nodes that have all constant attribute inputs
@@ -133,10 +139,17 @@ def split_const_subgraphs(
 
         # If the node itself is constant, or all of its inputs are constant,
         # then tag it as constant.
-        if node.op == "get_attr" or set(node.all_input_nodes).issubset(const_nodes):
-            const_nodes.add(node)
-            if node.op != "get_attr":
-                found_const_folding = True
+        if node.op != "get_attr" and not set(node.all_input_nodes).issubset(const_nodes):
+            continue
+
+        # If provided skip folding function says to skip, then skip.
+        if skip_folding_node_fn and skip_folding_node_fn(node):
+            continue
+
+        # Must be a constant foldable node at this point.
+        const_nodes.add(node)
+        if node.op != "get_attr":
+            found_const_folding = True
 
     # If we did not find any const folding then return early without a const fold subgraph.
     if not found_const_folding:
@@ -152,20 +165,15 @@ def split_const_subgraphs(
     const_gm, non_const_gm = split.submod_0, split.submod_1
     const_mod_name, non_const_mod_name = "submod_0", "submod_1"
 
-    # Later we are creating get_attr nodes from main module get_attr nodes and we use the
-    # same node.target. If there's a get_attr that refers to an attributes in a module and
-    # this module is not included in non_const_gm then we would have a trouble when creating
-    # get_attr ndoes because it will try to find the module that owns the attribute first.
-    # Setting owning_module here makes the owning_module of non_const_gm.graph to None then
-    # the check when creating get_attr nodes will get skipped.
-    non_const_gm.graph.owning_module = split
-
     # The module that a call_module node refers to gets copied to submodules during split.
     # The path to the module also gets inlined, i.e. mod.a.b -> mod_a_b. Here we need to
     # attach inlined modules to `split` as it's the owning module now.
     for node in non_const_gm.graph.nodes:
         if node.op == "call_module":
             setattr(split, node.target, getattr(non_const_gm, node.target))
+    for node in const_gm.graph.nodes:
+        if node.op == "call_module":
+            setattr(split, node.target, getattr(const_gm, node.target))
 
     # split_module currently does not use get_attrs for attrs. Instead it passes
     # them in as args from the parent module, which used get_attrs. Here we set

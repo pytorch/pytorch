@@ -1,5 +1,4 @@
-#include <ATen/ATen.h>
-#include <ATen/NamedTensorUtils.h>
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/LinearAlgebra.h>
@@ -7,6 +6,7 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/native/ReduceOps.h>
+#include <c10/core/Scalar.h>
 
 namespace at { namespace native {
 
@@ -137,7 +137,7 @@ void _unpack_pivots_internal_kernel(
     }
   };
 
-  _launch_kernel<num_threads, thread_work_size>(iter.numel(), loop);
+  _launch_kernel<num_threads(), thread_work_size()>(iter.numel(), loop);
 }
 
 void unpack_pivots_cuda_kernel(

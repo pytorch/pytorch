@@ -12,6 +12,14 @@ extern "C" void dgemm_(char *transa, char *transb, int *m, int *n, int *k, doubl
 extern "C" void sgemm_(char *transa, char *transb, int *m, int *n, int *k, float *alpha, const float *a, int *lda, const float *b, int *ldb, float *beta, float *c, int *ldc);
 extern "C" void cgemm_(char *transa, char *transb, int *m, int *n, int *k, void *alpha, const void *a, int *lda, const void *b, int *ldb, void *beta, void *c, int *ldc);
 extern "C" void zgemm_(char *transa, char *transb, int *m, int *n, int *k, void *alpha, const void *a, int *lda, const void *b, int *ldb, void *beta, void *c, int *ldc);
+#ifdef BLAS_HAS_SBGEMM
+extern "C" void sbgemm_(char *transa, char *transb, int *m, int *n, int *k,
+                float *alpha,
+                const decltype(c10::impl::ScalarTypeToCPPType<at::kBFloat16>::t) *a, int *lda,
+                const decltype(c10::impl::ScalarTypeToCPPType<at::kBFloat16>::t) *b, int *ldb,
+                float *beta,
+                float *c, int *ldc);
+#endif  // BLAS_HAS_SBGEMM
 #endif  // AT_BUILD_WITH_BLAS()
 
 #if AT_BUILD_WITH_BLAS()
@@ -209,6 +217,41 @@ void gemm(
 #endif
   gemm_stub(
       at::kCPU, at::kComplexFloat,
+      transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+}
+
+void gemm(
+   TransposeType transa, TransposeType transb,
+   int64_t m, int64_t n, int64_t k,
+   const decltype(c10::impl::ScalarTypeToCPPType<at::kBFloat16>::t) alpha,
+   const decltype(c10::impl::ScalarTypeToCPPType<at::kBFloat16>::t) *a, int64_t lda,
+   const decltype(c10::impl::ScalarTypeToCPPType<at::kBFloat16>::t) *b, int64_t ldb,
+   const decltype(c10::impl::ScalarTypeToCPPType<at::kBFloat16>::t) beta,
+   decltype(c10::impl::ScalarTypeToCPPType<at::kBFloat16>::t) *c, int64_t ldc) {
+   internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
+#if AT_BUILD_WITH_BLAS() && defined(BLAS_HAS_SBGEMM)
+   if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
+      int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
+      char transa_ = to_blas(transa), transb_ = to_blas(transb);
+      // alpha and beta and C matrix in OpenBLAS sbgemm are of type "float" so we have to convert, copy and copy back.
+      float alpha_ = (float) alpha, beta_ = (float) beta;
+      int c_size = n_ * ldc_;
+      std::vector<float> float_v(c, c + c_size);
+      sbgemm_(&transa_, &transb_,
+              &m_, &n_, &k_,
+              &alpha_,
+              a, &lda_,
+              b, &ldb_,
+              &beta_,
+              float_v.data(), &ldc_);
+      for (auto cv: float_v) {
+        *(c++) = static_cast<_bfloat16_t>(cv);
+      }
+      return;
+   }
+#endif
+   gemm_stub(
+      at::kCPU, at::kBFloat16,
       transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
 

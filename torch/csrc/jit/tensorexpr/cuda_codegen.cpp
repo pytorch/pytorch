@@ -1,10 +1,11 @@
 #include <torch/csrc/jit/tensorexpr/cuda_codegen.h>
 #include <torch/csrc/jit/tensorexpr/half_support.h>
 
-#include <ATen/CUDAGeneratorImpl.h>
+#include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/executor_utils.h>
+#include <torch/csrc/jit/codegen/fuser/cuda/fused_kernel.h>
 #include <torch/csrc/jit/codegen/fuser/cuda/resource_strings.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
@@ -55,44 +56,6 @@ static const at::cuda::NVRTC& nvrtc() {
   return at::globalContext().getNVRTC();
 }
 
-// query codegen output arch and target
-static void codegenOutputQuery(
-    const cudaDeviceProp* const prop,
-    int& major,
-    int& minor,
-    bool& compile_to_sass) {
-  using CudaVersion = std::pair<int, int>;
-  CudaVersion nvrtc_version;
-  AT_CUDA_NVRTC_CHECK(
-      nvrtc().nvrtcVersion(&nvrtc_version.first, &nvrtc_version.second));
-
-  AT_ASSERT(nvrtc_version.first >= 6);
-
-  CudaVersion dev_version = CudaVersion(prop->major, prop->minor);
-  CudaVersion max_dev_version(dev_version);
-  // NOLINTNEXTLINE(bugprone-branch-clone)
-  if (nvrtc_version.first <= 7) { // 7 supports 2-5.x
-    max_dev_version = CudaVersion(5, 0);
-  } else if (nvrtc_version.first <= 8) { // 8 supports 2-6.x
-    max_dev_version = CudaVersion(6, 0);
-  } else if (nvrtc_version.first <= 9) { // 9 supports 3-7.2
-    max_dev_version = CudaVersion(7, 2);
-  } else if (nvrtc_version.first <= 10) { // 10 supports 3-7.5
-    max_dev_version = CudaVersion(7, 5);
-  } else if (nvrtc_version.first == 11 && nvrtc_version.second == 0) {
-    // 11.0 supports 3-8.0
-    max_dev_version = CudaVersion(8, 0);
-  }
-  if (dev_version > max_dev_version) {
-    dev_version = max_dev_version;
-  }
-  major = dev_version.first;
-  minor = dev_version.second;
-
-  // if we are clamping major/minor, sass is not compatible
-  compile_to_sass = (major == prop->major) && (minor == prop->minor);
-}
-
 std::string CudaPrinter::dtypeToCppString(const Dtype& dtype) {
   switch (dtype.scalar_type()) {
     case ScalarType::Bool:
@@ -140,6 +103,10 @@ void CudaAnalysis::visit(AllocatePtr v) {
     p = p->get_parent();
   }
   throw std::runtime_error("Global alloc not supported yet");
+}
+
+void CudaAnalysis::visit(PlacementAllocatePtr v) {
+  throw std::runtime_error("Memory reuse not supported yet");
 }
 
 void CudaAnalysis::visit(ForPtr v) {
@@ -1147,21 +1114,21 @@ void CudaCodeGen::call_raw(const std::vector<void*>& raw_args) {
   // module.
   for (size_t i = 0; i < gpu_block_extents.size(); i++) {
     if (gpu_block_extents[i]->isConstant()) {
-      gpu_block_extents_v[i] = immediateAs<int>(gpu_block_extents[i]);
+      gpu_block_extents_v[i] = immediateAs<int64_t>(gpu_block_extents[i]);
       continue;
     }
     ExprEval<SimpleIREvaluator> eval(
         ExprHandle(gpu_block_extents[i]), buffer_args);
-    gpu_block_extents_v[i] = eval.value<int>(raw_args);
+    gpu_block_extents_v[i] = eval.value<int64_t>(raw_args);
   }
   for (size_t i = 0; i < gpu_thread_extents.size(); i++) {
     if (gpu_thread_extents[i]->isConstant()) {
-      gpu_thread_extents_v[i] = immediateAs<int>(gpu_thread_extents[i]);
+      gpu_thread_extents_v[i] = immediateAs<int64_t>(gpu_thread_extents[i]);
       continue;
     }
     ExprEval<SimpleIREvaluator> eval(
         ExprHandle(gpu_thread_extents[i]), buffer_args);
-    gpu_thread_extents_v[i] = eval.value<int>(raw_args);
+    gpu_thread_extents_v[i] = eval.value<int64_t>(raw_args);
   }
 
   // Skip launching the kernel if there are no elements to process.
@@ -1279,7 +1246,7 @@ void CudaCodeGen::CompileToNVRTC(
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int major, minor;
   bool compile_to_sass = false;
-  codegenOutputQuery(prop, major, minor, compile_to_sass);
+  fuser::cuda::codegenOutputQuery(prop, major, minor, compile_to_sass);
 
   // Creates the NVRTC program
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)

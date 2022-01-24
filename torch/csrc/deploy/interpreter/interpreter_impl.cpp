@@ -1,11 +1,13 @@
+#include <torch/csrc/deploy/interpreter/interpreter_impl.h>
+
 #include <dlfcn.h>
 
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
-#include <torch/csrc/deploy/interpreter/interpreter_impl.h>
 
 #include <pybind11/embed.h>
 #include <pybind11/functional.h>
+#include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 
@@ -34,107 +36,11 @@ using namespace py::literals;
 #define PYOBJ_ASSERT(obj) assert(NULL != obj);
 #endif
 
-#define FOREACH_LIBRARY(_) \
-  _(array)                 \
-  _(_asyncio)              \
-  _(audioop)               \
-  _(binascii)              \
-  _(_bisect)               \
-  _(_blake2)               \
-  _(_bz2)                  \
-  _(cmath)                 \
-  _(_codecs_cn)            \
-  _(_codecs_hk)            \
-  _(_codecs_iso2022)       \
-  _(_codecs_jp)            \
-  _(_codecs_kr)            \
-  _(_codecs_tw)            \
-  _(_contextvars)          \
-  _(_crypt)                \
-  _(_csv)                  \
-  _(_ctypes)               \
-  _(_ctypes_test)          \
-  _(_curses)               \
-  _(_curses_panel)         \
-  _(_datetime)             \
-  _(_decimal)              \
-  _(_elementtree)          \
-  _(fcntl)                 \
-  _(grp)                   \
-  _(_hashlib)              \
-  _(_heapq)                \
-  _(_json)                 \
-  _(_lsprof)               \
-  _(_lzma)                 \
-  _(math)                  \
-  _(_md5)                  \
-  _(mmap)                  \
-  _(_multibytecodec)       \
-  _(_multiprocessing)      \
-  _(nis)                   \
-  _(_opcode)               \
-  _(ossaudiodev)           \
-  _(parser)                \
-  _(_pickle)               \
-  _(_posixsubprocess)      \
-  _(pyexpat)               \
-  _(_queue)                \
-  _(_random)               \
-  _(readline)              \
-  _(resource)              \
-  _(select)                \
-  _(_sha1)                 \
-  _(_sha256)               \
-  _(_sha3)                 \
-  _(_sha512)               \
-  _(_socket)               \
-  _(spwd)                  \
-  _(_ssl)                  \
-  _(_struct)               \
-  _(syslog)                \
-  _(termios)               \
-  _(_testbuffer)           \
-  _(_testcapi)             \
-  _(_testimportmultiple)   \
-  _(_testmultiphase)       \
-  _(unicodedata)           \
-  _(xxlimited)             \
-  _(_xxtestfuzz)           \
-  _(zlib)
-
-#define DECLARE_LIBRARY_INIT(name) extern "C" PyObject* PyInit_##name(void);
-FOREACH_LIBRARY(DECLARE_LIBRARY_INIT)
-#undef DECLARE_LIBRARY_INIT
-
-extern "C" PyObject* initModule(void);
-extern "C" __attribute__((__weak__)) PyObject* PyInit_tensorrt(void);
-
-extern "C"
-    __attribute__((__weak__)) struct _frozen _PyImport_FrozenModules_tensorrt[];
-
-const char* startup = R"RAW(
+const char* start = R"PYTHON(
 import _ssl # must come before _hashlib otherwise ssl's locks will be set to a Python that might no longer exist...
 import sys
 import importlib.abc
 import linecache
-
-# We need to register a custom meta path finder because we are registering
-# `torch._C` as a builtin module.
-#
-# Normally, builtins will be found by the `BuiltinImporter` meta path finder.
-# However, `BuiltinImporter` is hard-coded to assume that all builtin modules
-# are top-level imports.  Since `torch._C` is a submodule of `torch`, the
-# BuiltinImporter skips it.
-class F:
-    def find_spec(self, fullname, path, target=None):
-        if fullname == 'torch._C':
-            # Load this module using `BuiltinImporter`, but set `path` to None
-            # in order to trick it into loading our module.
-            return sys.meta_path[1].find_spec('torch._C', path=None, target=None)
-        elif fullname == 'tensorrt.tensorrt':
-            return sys.meta_path[1].find_spec('tensorrt.tensorrt', path=None, target=None)
-        return None
-sys.meta_path.insert(0, F())
 
 class RegisterModuleImporter(importlib.abc.InspectLoader):
     def __init__(self, find_module_source):
@@ -183,20 +89,19 @@ if torch.cuda.is_available():
   torch.zeros(1).cuda() # force cuda init...
 import warnings
 warnings.simplefilter("ignore")
-)RAW";
+)PYTHON";
+
+extern "C" __attribute__((__weak__)) PyObject* PyInit_tensorrt(void);
+extern "C"
+    __attribute__((__weak__)) struct _frozen _PyImport_FrozenModules_tensorrt[];
 
 using torch::deploy::BuiltinRegistry;
 // TODO(shunting) move this to the tensorrt code
-REGISTER_TORCH_DEPLOY_BUILTIN(tensorrt, _PyImport_FrozenModules_tensorrt);
-
-int extendFrozenModules() {
-  struct _frozen* p = BuiltinRegistry::getAllFrozenModules();
-  if (p == nullptr) {
-    return -1;
-  }
-  PyImport_FrozenModules = p;
-  return 0;
-}
+REGISTER_TORCH_DEPLOY_BUILTIN(
+    tensorrt,
+    _PyImport_FrozenModules_tensorrt,
+    "tensorrt.tensorrt",
+    PyInit_tensorrt);
 
 static py::object global_impl(const char* module, const char* name) {
   return py::module::import(module).attr(name);
@@ -245,19 +150,9 @@ struct InitLockAcquire {
 
 struct __attribute__((visibility("hidden"))) ConcreteInterpreterImpl
     : public torch::deploy::InterpreterImpl {
-  ConcreteInterpreterImpl() {
-#define APPEND_INIT(name) PyImport_AppendInittab(#name, PyInit_##name);
-    FOREACH_LIBRARY(APPEND_INIT)
-#undef APPEND_INIT
-    PyImport_AppendInittab("torch._C", initModule);
-    if (PyInit_tensorrt) {
-      PyImport_AppendInittab("tensorrt.tensorrt", PyInit_tensorrt);
-    }
-
-    BuiltinRegistry::sanityCheck();
-    int ret = extendFrozenModules();
-    TORCH_INTERNAL_ASSERT(ret == 0);
-
+  explicit ConcreteInterpreterImpl(
+      const std::vector<std::string>& extra_python_paths) {
+    BuiltinRegistry::runPreInitialization();
     PyPreConfig preconfig;
     PyPreConfig_InitIsolatedConfig(&preconfig);
     PyStatus status = Py_PreInitialize(&preconfig);
@@ -287,27 +182,16 @@ struct __attribute__((visibility("hidden"))) ConcreteInterpreterImpl
     status = Py_InitializeFromConfig(&config);
     PyConfig_Clear(&config);
     TORCH_INTERNAL_ASSERT(!PyStatus_Exception(status))
-
-    int r = PyRun_SimpleString(startup);
-    TORCH_INTERNAL_ASSERT(r == 0);
-
-    // _Py_PackageContext acts as a "hook" that CPython uses to intercept the
-    // process of assigning a module their name.  See: https://git.io/J3qPH.
-    // For a builtin module we need to emulate normal extension module loading
-    // to set a correct fully qualified name. After that we can clean up the
-    // reference created by PyImport_ImportModule().
-    if (PyInit_tensorrt) {
-      _Py_PackageContext = "tensorrt.tensorrt";
-      PyObject* pmodule = PyImport_ImportModule("tensorrt.tensorrt");
-      if (pmodule) {
-        Py_DECREF(pmodule);
-      } else {
-        PyErr_Print();
-        fprintf(
-            stderr, "Error: could not import module 'tensorrt.tensorrt'.\n");
-      }
-      _Py_PackageContext = nullptr;
+#ifdef FBCODE_CAFFE2
+    auto sys_path = global_impl("sys", "path");
+    for (const auto& entry : extra_python_paths) {
+      sys_path.attr("insert")(0, entry);
     }
+#endif
+    BuiltinRegistry::runPostInitialization();
+
+    int r = PyRun_SimpleString(start);
+    TORCH_INTERNAL_ASSERT(r == 0);
 
     // we cache these so we don't have to repeat the conversion of strings into
     // Python and hash table lookups to get to these object
@@ -414,13 +298,18 @@ struct __attribute__((visibility("hidden"))) ConcreteInterpreterSessionImpl
 
     py::tuple storages(obj.storages_.size());
     for (size_t i = 0, N = obj.storages_.size(); i < N; ++i) {
-      py::object new_storage =
-          py::reinterpret_steal<py::object>(torch::createPyObject(
-              obj.storages_[i], scalarTypeToTypeMeta(obj.types_[i])));
+      py::object new_storage = py::reinterpret_steal<py::object>(
+          torch::createPyObject(obj.storages_[i]));
       storages[i] = std::move(new_storage);
     }
+    py::tuple dtypes(obj.types_.size());
+    for (size_t i = 0, N = obj.types_.size(); i < N; ++i) {
+      auto dtype = (PyObject*)torch::getTHPDtype(obj.types_[i]);
+      Py_INCREF(dtype);
+      dtypes[i] = dtype;
+    }
     py::object result = interp_->loadStorage(
-        id, obj.containerFile_, py::bytes(obj.data_), storages);
+        id, obj.containerFile_, py::bytes(obj.data_), storages, dtypes);
     return wrap(result);
   }
   void unload(int64_t id) override {
@@ -517,6 +406,6 @@ torch::deploy::InterpreterSessionImpl* ConcreteInterpreterImpl::
 
 extern "C" __attribute__((visibility("default")))
 torch::deploy::InterpreterImpl*
-newInterpreterImpl(void) {
-  return new ConcreteInterpreterImpl();
+newInterpreterImpl(const std::vector<std::string>& extra_python_paths) {
+  return new ConcreteInterpreterImpl(extra_python_paths);
 }

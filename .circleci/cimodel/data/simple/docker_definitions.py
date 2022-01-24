@@ -4,11 +4,8 @@ from cimodel.lib.miniutils import quote
 from cimodel.data.simple.util.branch_filters import gen_filter_dict, RC_PATTERN
 
 
-# TODO: make this generated from a matrix rather than just a static list
+# NOTE: All hardcoded docker image builds have been migrated to GHA
 IMAGE_NAMES = [
-    "pytorch-linux-bionic-rocm4.1-py3.6",
-    "pytorch-linux-bionic-rocm4.2-py3.6",
-    "pytorch-linux-bionic-rocm4.3.1-py3.6",
 ]
 
 # This entry should be an element from the list above

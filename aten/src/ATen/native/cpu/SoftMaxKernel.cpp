@@ -9,6 +9,7 @@
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/Optional.h>
+#include <c10/util/irange.h>
 
 #include <ATen/AccumulateType.h>
 // [Note AVX-SSE transitions] In general we avoid calls into cmath for code
@@ -48,7 +49,7 @@ inline void _vec_log_softmax_lastdim(
           int64_t loop_end = CHUNK_SIZE;
           if (ii + CHUNK_SIZE > end)
             loop_end = end - ii;
-          for (int64_t j = 0; j < loop_end; j++) {
+          for (const auto j : c10::irange(loop_end)) {
             int64_t i = ii + j;
             scalar_t* input_data = input_data_base + i * dim_size;
             max_input_arr[j] = vec::reduce_all<scalar_t>(
@@ -56,7 +57,7 @@ inline void _vec_log_softmax_lastdim(
                 input_data,
                 dim_size);
           }
-          for (int64_t j = 0; j < loop_end; j++) {
+          for (const auto j : c10::irange(loop_end)) {
             int64_t i = ii + j;
             scalar_t* input_data = input_data_base + i * dim_size;
             scalar_t max_input = max_input_arr[j];
@@ -73,7 +74,7 @@ inline void _vec_log_softmax_lastdim(
               tmp_sum_scalar,
               tmp_sum_scalar,
               loop_end);
-          for (int64_t j = 0; j < loop_end; j++) {
+          for (const auto j : c10::irange(loop_end)) {
             int64_t i = ii + j;
             scalar_t* input_data = input_data_base + i * dim_size;
             scalar_t* output_data = output_data_base + i * dim_size;
@@ -111,7 +112,7 @@ inline void _vec_softmax_lastdim(
       outer_size,
       grain_size,
       [&](int64_t begin, int64_t end) {
-        for (int64_t i = begin; i < end; i++) {
+        for (const auto i : c10::irange(begin, end)) {
           scalar_t* input_data = input_data_base + i * dim_size;
           scalar_t* output_data = output_data_base + i * dim_size;
           scalar_t max_input = vec::reduce_all<scalar_t>(
@@ -152,7 +153,7 @@ inline void _vec_host_softmax_backward_lastdim(
       outer_size,
       grain_size,
       [&](int64_t begin, int64_t end) {
-        for (int64_t i = begin; i < end; i++) {
+        for (const auto i : c10::irange(begin, end)) {
           scalar_t* grad_input_data = grad_input_data_base + i * dim_size;
           scalar_t* grad_data = grad_data_base + i * dim_size;
           scalar_t* output_data = output_data_base + i * dim_size;
@@ -242,7 +243,7 @@ inline void _vec_softmax(
             Vec max_vec_o2 = std::get<1>(convert_result);
             std::get<0>(convert_result).store(temp_vec_input_data);
             std::get<1>(convert_result).store(temp_vec_input_data + vectorized_step);
-            for (int64_t d = 1; d < dim_size; d++) {
+            for (const auto d : c10::irange(1, dim_size)) {
               Vec_bf16 input_vec_bf16 = Vec_bf16::loadu(input_data + d * dim_stride);
               convert_result = convert_bfloat16_float(input_vec_bf16);
               max_vec_o1 = vec::maximum(max_vec_o1, std::get<0>(convert_result));
@@ -253,7 +254,7 @@ inline void _vec_softmax(
             // Step2: Calculate sum
             Vec sum_vec_o1 = Vec(0.0);
             Vec sum_vec_o2 = Vec(0.0);
-            for (int64_t d = 0; d < dim_size; d++) {
+            for (const auto d : c10::irange(dim_size)) {
               Vec output_vec_o1 = Vec::loadu(temp_vec_input_data + d*vectorized_step*2);
               Vec output_vec_o2 = Vec::loadu(temp_vec_input_data + d*vectorized_step*2 + vectorized_step);
               output_vec_o1 = (output_vec_o1 - max_vec_o1).exp();
@@ -265,7 +266,7 @@ inline void _vec_softmax(
               sum_vec_o2 = sum_vec_o2 + output_vec_o2;
             }
             // Step3: Unify
-            for (int64_t d = 0; d < dim_size; d++) {
+            for (const auto d : c10::irange(dim_size)) {
               Vec output_vec_o1 = Vec::loadu(temp_vec_output_data + d*vectorized_step*2);
               Vec output_vec_o2 = Vec::loadu(temp_vec_output_data + d*vectorized_step*2 + vectorized_step);
               output_vec_o1 = output_vec_o1/sum_vec_o1;
@@ -281,7 +282,7 @@ inline void _vec_softmax(
             // Case 1: For the idx at the end of total chunk for each thread, there are not enough numbers for parallization.
             // Case 2: For the idx at the end of each inner_size inside thread, there are not enough numbers for parallization.
             int64_t tail_number = ((idx+vectorized_step) > end) ? /*Case1*/ (end - idx) : /*Case2*/ (inner_size - inner_idx);
-            for (int64_t i=0; i < tail_number; i++) {
+            for (const auto i : c10::irange(tail_number)) {
               outer_idx = (idx + i) / inner_size;
               inner_idx = (idx + i) % inner_size;
               BFloat16* input_data =
@@ -290,19 +291,19 @@ inline void _vec_softmax(
                   output_data_base + outer_idx * outer_stride + inner_idx;
               // Step1: Get max score
               float max_input = float(input_data[0]);
-              for (int64_t d = 1; d < dim_size; d++) {
+              for (const auto d : c10::irange(1, dim_size)) {
                 max_input = std::max(max_input, float(input_data[d * dim_stride]));
               }
               // Step2: Calculate the Sum
               float sum_data = 0.0;
               float temp_output_data = 0.0;
-              for (int64_t d = 0; d < dim_size; d++) {
+              for (const auto d : c10::irange(dim_size)) {
                 temp_output_data = std::exp(input_data[d * dim_stride] - max_input);
                 sum_data += temp_output_data;
                 output_data[d * dim_stride] = c10::BFloat16(temp_output_data);
               }
               // Step3: Unify
-              for (int64_t d = 0; d < dim_size; d++) {
+              for (const auto d : c10::irange(dim_size)) {
                 output_data[d * dim_stride] =
                     c10::BFloat16(float(output_data[d * dim_stride])/sum_data);
               }
@@ -339,20 +340,20 @@ inline void _vec_softmax(
                 output_data_base + outer_idx * outer_stride + inner_idx;
             // Step 1: Get max Score
             Vec max_vec = Vec::loadu(input_data);
-            for (int64_t d = 1; d < dim_size; d++) {
+            for (const auto d : c10::irange(1, dim_size)) {
               Vec input_vec = Vec::loadu(input_data + d * dim_stride);
               max_vec = vec::maximum(max_vec, input_vec);
             }
             // Step2: Calculate sum
             Vec sum_vec = Vec(0.0);
-            for (int64_t d = 0; d < dim_size; d++) {
+            for (const auto d : c10::irange(dim_size)) {
               Vec output_vec =
                   (Vec::loadu(input_data + d * dim_stride) - max_vec).exp();
               output_vec.store(output_data + d * dim_stride);
               sum_vec = sum_vec + output_vec;
             }
             // Step3: Unify
-            for (int64_t d = 0; d < dim_size; d++) {
+            for (const auto d : c10::irange(dim_size)) {
               Vec output_vec =
                   Vec::loadu(output_data + d * dim_stride) / sum_vec;
               output_vec.store(output_data + d * dim_stride);
@@ -365,7 +366,7 @@ inline void _vec_softmax(
             // Case 1: For the idx at the end of total chunk for each thread, there are not enough numbers for parallization.
             // Case 2: For the idx at the end of each inner_size inside thread, there are not enough numbers for parallization.
             int64_t tail_number = ((idx+vectorized_step) > end) ? /*Case1*/ (end - idx) : /*Case2*/ (inner_size - inner_idx);
-            for (int64_t i=0; i < tail_number; i++) {
+            for (const auto i : c10::irange(tail_number)) {
               outer_idx = (idx + i) / inner_size;
               inner_idx = (idx + i) % inner_size;
               scalar_t* input_data =
@@ -374,18 +375,18 @@ inline void _vec_softmax(
                   output_data_base + outer_idx * outer_stride + inner_idx;
               // Step1: Get max score
               scalar_t max_input = input_data[0];
-              for (int64_t d = 1; d < dim_size; d++) {
+              for (const auto d : c10::irange(1, dim_size)) {
                 max_input = std::max(max_input, input_data[d * dim_stride]);
               }
               // Step2: Calculate the Sum
               scalar_t sum_data = 0;
-              for (int64_t d = 0; d < dim_size; d++) {
+              for (const auto d : c10::irange(dim_size)) {
                 output_data[d * dim_stride] =
                     std::exp(input_data[d * dim_stride] - max_input);
                 sum_data += output_data[d * dim_stride];
               }
               // Step3: Unify
-              for (int64_t d = 0; d < dim_size; d++) {
+              for (const auto d : c10::irange(dim_size)) {
                 output_data[d * dim_stride] =
                     output_data[d * dim_stride]/sum_data;
               }
@@ -402,8 +403,7 @@ struct vec_softmax {
     int64_t outer_size = 1;
     int64_t dim_size = input.size(dim);
     int64_t inner_size = 1;
-    for (int64_t i = 0; i < dim; ++i)
-      outer_size *= input.size(i);
+    for (const auto i : c10::irange(dim))outer_size *= input.size(i);
     for (int64_t i = dim + 1; i < input.dim(); ++i)
       inner_size *= input.size(i);
     scalar_t* input_data_base = input.data_ptr<scalar_t>();
