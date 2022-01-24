@@ -20,9 +20,6 @@ import torch.cuda.comm as comm
 from torch.nn.parallel import scatter_gather
 from torch.utils.checkpoint import checkpoint_sequential
 from torch._six import inf, nan
-
-from test_torch import AbstractTestCases
-
 from torch.testing._internal.common_methods_invocations import tri_tests_args, tri_large_tests_args, \
     _compare_trilu_indices, _compare_large_trilu_indices
 from torch.testing._internal.common_utils import TestCase, freeze_rng_state, run_tests, \
@@ -1541,34 +1538,6 @@ except RuntimeError as e:
         res = src[idx]
         res_cpu = src.cpu()[idx.cpu()]
         self.assertEqual(res.cpu(), res_cpu)
-
-    def test_tensor_gather(self):
-        AbstractTestCases._TestTorchMixin._test_gather(self, lambda t: t.cuda(), False)
-
-    def test_tensor_scatter(self):
-        AbstractTestCases._TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(), 'scatter_', test_bounds=False)
-
-    def test_tensor_scatterAdd(self):
-        AbstractTestCases._TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(), 'scatter_add_', test_bounds=False)
-
-    def test_scatter_add_mult_index_base(self):
-        AbstractTestCases._TestTorchMixin._test_scatter_add_mult_index_base(self, lambda t: t.cuda())
-
-    def test_tensor_scatterFill(self):
-        AbstractTestCases._TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(),
-                                                             'scatter_', True, test_bounds=False)
-
-    def test_tensor_scatter_complex(self):
-        AbstractTestCases._TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(),
-                                                             'scatter_', test_bounds=False, test_complex=True)
-
-    def test_tensor_scatterAdd_complex(self):
-        AbstractTestCases._TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(),
-                                                             'scatter_add_', test_bounds=False, test_complex=True)
-
-    def test_tensor_scatterFill_complex(self):
-        AbstractTestCases._TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(),
-                                                             'scatter_', True, test_bounds=False, test_complex=True)
 
     def test_min_max_inits(self):
         # Testing if THC_reduceAll received the correct index initialization.
