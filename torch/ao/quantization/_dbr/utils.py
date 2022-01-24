@@ -1,4 +1,3 @@
-import collections
 import dataclasses
 import enum
 from typing import Callable, Tuple, Any, List, Optional, Dict
@@ -43,71 +42,61 @@ def _raise_obs_op_mismatch(func, prev_op):
         f'defined over dynamic control flow!')
 
 
-# TODO(future PR): figure out if there is a better option than namedtuple
-SeenOpInfo = collections.namedtuple(
-    'SeenOpInfo',
-    [
-        # integer
-        'idx',
-        # Python type of the seen op. For modules, this is type(mod). For
-        # functions, this is the target function.
-        'type',
-        # True if the type is a module, False otherwise (for functions/methods).
-        'type_is_module',
-        # Note: FQN refers to the current module for modules and to the parent
-        # module for functions
-        'fqn',
-        # Information about the input tensors, List[QTensorInfo].
-        # Non-tensor inputs are represented with None.
-        'input_tensor_infos',
-        # Information about the output tensors, List[QTensorInfo].
-        # Non-tensor outputs are represented with None.
-        'output_tensor_infos',
-        # Information about tensors which will need to be packed,
-        # Dict[int, str]
-        # idx is the argument index in args
-        # name is the name of this parameter in the parent module
-        'packable_tensor_idx_to_name',
-        # Information about non-tensors which will need to be packed,
-        # Dict[int, Any]
-        # idx is the argument index in args
-        # arg is the argument value
-        'packable_nontensor_idx_to_arg',
-        # Information about tensors which will need to be packed from kwargs.
-        # Dict[str, str]
-        # kwarg_name is the kwarg name
-        # name is the name of this parameter in the parent module
-        'packable_tensor_kwarg_name_to_name',
-        # This is True if all packable args are simple attributes, or there
-        # are no packable args.
-        # This is False if some packable args are results of other functions.
-        # bool
-        'op_packing_only_uses_module_attributes',
-        # QConfig for the op, can be None
-        'qconfig',
-    ],
-)
-def seen_op_info_repr(self) -> str:
-    s = f"(type): {self.type}\n"
-    s += f"     (fqn): {self.fqn}\n"
-    s += f"     (input_tensor_infos): {self.input_tensor_infos}\n"
-    s += f"     (output_tensor_infos): {self.output_tensor_infos}"
-    if len(self.packable_tensor_idx_to_name):
-        s += f"\n     (packable_tensor_idx_to_name): {self.packable_tensor_idx_to_name}"
-    if len(self.packable_nontensor_idx_to_arg):
-        s += f"\n     (packable_nontensor_idx_to_arg): {self.packable_nontensor_idx_to_arg}"
-    if len(self.packable_tensor_kwarg_name_to_name):
-        s += f"\n     (packable_tensor_kwarg_name_to_name): {self.packable_tensor_kwarg_name_to_name}"
-    return s
-
-SeenOpInfo.__repr__ = seen_op_info_repr  # type: ignore[assignment]
-
-
 @dataclasses.dataclass
 class QTensorInfo:
     id: int  # tensor ID
     orig_dtype: torch.dtype  # dtype seen while tracing with example input
     inf_dtype: torch.dtype  # dtype at inference
+
+
+@dataclasses.dataclass
+class SeenOpInfo:
+    idx: int
+    # Python type of the seen op. For modules, this is type(mod). For
+    # functions, this is the target function.
+    type: Callable
+    # True if the type is a module, False otherwise (for functions/methods).
+    type_is_module: bool
+    # Note: FQN refers to the current module for modules and to the parent
+    # module for functions
+    fqn: str
+    # Information about the input tensors
+    # Non-tensor inputs are represented with None.
+    input_tensor_infos: List[Optional[QTensorInfo]]
+    # Information about the output tensors
+    # Non-tensor outputs are represented with None.
+    output_tensor_infos: List[QTensorInfo]
+    # Information about tensors which will need to be packed,
+    # idx is the argument index in args
+    # name is the name of this parameter in the parent module
+    packable_tensor_idx_to_name: Dict[int, Optional[str]]
+    # Information about non-tensors which will need to be packed,
+    # idx is the argument index in args
+    # arg is the argument value
+    packable_nontensor_idx_to_arg: Dict[int, Any]
+    # Information about tensors which will need to be packed from kwargs.
+    # kwarg_name is the kwarg name
+    # name is the name of this parameter in the parent module
+    packable_tensor_kwarg_name_to_name: Dict[str, Optional[str]]
+    # This is True if all packable args are simple attributes, or there
+    # are no packable args.
+    # This is False if some packable args are results of other functions.
+    op_packing_only_uses_module_attributes: bool
+    # QConfig for the op, can be None
+    qconfig: QConfigAny
+
+    def __repr__(self) -> str:
+        s = f"(type): {self.type}\n"
+        s += f"     (fqn): {self.fqn}\n"
+        s += f"     (input_tensor_infos): {self.input_tensor_infos}\n"
+        s += f"     (output_tensor_infos): {self.output_tensor_infos}"
+        if len(self.packable_tensor_idx_to_name):
+            s += f"\n     (packable_tensor_idx_to_name): {self.packable_tensor_idx_to_name}"
+        if len(self.packable_nontensor_idx_to_arg):
+            s += f"\n     (packable_nontensor_idx_to_arg): {self.packable_nontensor_idx_to_arg}"
+        if len(self.packable_tensor_kwarg_name_to_name):
+            s += f"\n     (packable_tensor_kwarg_name_to_name): {self.packable_tensor_kwarg_name_to_name}"
+        return s
 
 
 def op_needs_quantization(op: Callable) -> bool:
@@ -222,6 +211,7 @@ def get_func_output_obs_type(
     if op_type in add_and_mul_ops:
         if (
             len(seen_op_info.input_tensor_infos) > 0 and
+            seen_op_info.input_tensor_infos[0] is not None and
             seen_op_info.input_tensor_infos[0].inf_dtype in (torch.int32, torch.int64)
         ):
             # this is handling ops on dtypes such as torch.int
@@ -236,6 +226,7 @@ def get_func_output_obs_type(
     elif op_type == torch.cat:
         if (
             len(seen_op_info.input_tensor_infos) > 0 and
+            seen_op_info.input_tensor_infos[0] is not None and
             seen_op_info.input_tensor_infos[0].inf_dtype in (torch.int32, torch.int64)
         ):
             return FuncOutputObsType.NONE
@@ -255,11 +246,13 @@ def converted_func_needs_scale_zp(seen_op_info: SeenOpInfo) -> bool:
             inputs[1] is not None
         # disable quantization for torch.mul with int tensor arguments
         first_dtype_is_not_int = len(inputs) > 0 and \
+            inputs[0] is not None and \
             inputs[0].inf_dtype not in (torch.int32, torch.int64)
         return both_args_tensors and first_dtype_is_not_int
     elif op_type == torch.cat:
         inputs = seen_op_info.input_tensor_infos
         first_dtype_is_not_int = len(inputs) > 0 and \
+            inputs[0] is not None and \
             inputs[0].inf_dtype not in (torch.int32, torch.int64)
         return first_dtype_is_not_int
     elif op_type in (F.conv2d, F.linear):
@@ -296,10 +289,12 @@ def get_func_output_dtype_type(
     if seen_op_info.type in functions_supported_by_quantization_preserves_dtype:
         return FuncOutputDTypeType.DTYPE_EQUALS_INPUT_DTYPE
     elif seen_op_info.type in add_and_mul_ops and len(args) > 0 and \
+            args[0] is not None and \
             args[0].orig_dtype in (torch.int32, torch.int64):
         # binary ops with torch.int arguments do not support quantization
         return FuncOutputDTypeType.DTYPE_EQUALS_INPUT_DTYPE
     elif seen_op_info.type == torch.cat and len(args) > 0 and \
+            args[0] is not None and \
             args[0].orig_dtype in (torch.int32, torch.int64):
         # TODO(before land): do we still need this branch?
         return FuncOutputDTypeType.DTYPE_EQUALS_INPUT_DTYPE
@@ -346,6 +341,7 @@ def get_quantized_op(
 
     if (
         (op_type in add_and_mul_ops or op_type == torch.cat) and
+        seen_op_info.input_tensor_infos[0] is not None and
         seen_op_info.input_tensor_infos[0].inf_dtype in (torch.int32, torch.int64)
     ):
         # handle torch.mul with int tensor arguments
@@ -481,6 +477,8 @@ def get_producer_of_seen_op_info(
     Input: cur_seen_op_info, all seen ops
     Output: the SeenOpInfo which created the input to the current SeenOpInfo
     """
+    if cur_seen_op_info.input_tensor_infos[0] is None:
+        return None
     input_tensor_id = cur_seen_op_info.input_tensor_infos[0].id
     for idx, seen_op_info in idx_to_seen_op_info.items():
         for output_tensor_info in seen_op_info.output_tensor_infos:
