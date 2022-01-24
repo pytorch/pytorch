@@ -925,8 +925,11 @@ void destroyNodeOutputs(ProcessedNode& p_node) {
 } // namespace
 
 void StaticRuntime::clean_up_intermediate_ivalues() noexcept {
-  for (auto& p_node : nodes_) {
-    destroyNodeOutputs(p_node);
+  // We have to iterate in reverse order here due to borrowed
+  // IValues - we don't want to destroy a value until all of its
+  // borrows are cleaned up!
+  for (auto it = nodes_.rbegin(); it != nodes_.rend(); ++it) {
+    destroyNodeOutputs(*it);
   }
 }
 
