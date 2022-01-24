@@ -8,6 +8,9 @@ C10_CLANG_DIAGNOSTIC_PUSH()
 #if C10_CLANG_HAS_WARNING("-Wstring-conversion")
 C10_CLANG_DIAGNOSTIC_IGNORE("-Wstring-conversion")
 #endif
+#if C10_CLANG_HAS_WARNING("-Wimplicit-int-float-conversion")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-float-conversion")
+#endif
 
 namespace c10 {
 
