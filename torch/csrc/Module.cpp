@@ -15,6 +15,7 @@
 #include <ATen/VmapMode.h>
 #include <ATen/dlpack.h>
 #include <ATen/core/Vitals.h>
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <torch/csrc/THConcat.h>
 #include <c10/util/Logging.h>
 #include <c10/util/irange.h>
@@ -903,6 +904,8 @@ PyObject* initModule() {
     }
     CATCH_TH_ERRORS()
   });
+
+  c10::CheckGil = []{ return static_cast<bool>(PyGILState_Check()); };
 
   auto py_module = py::reinterpret_borrow<py::module>(module);
   py_module.def("_demangle", &c10::demangle);

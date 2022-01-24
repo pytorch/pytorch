@@ -307,6 +307,10 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   END_HANDLE_TH_ERRORS
 }
 
+TORCH_PYTHON_API bool CheckGil() {
+  return PyGILState_Check();
+}
+
 void dispatch_set_item(const Tensor& self, ArrayRef<at::indexing::TensorIndex> indices,
                        const Tensor& value, bool disable_slice_optimization=false) {
   pybind11::gil_scoped_release no_gil;

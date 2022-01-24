@@ -13,6 +13,7 @@
 #include <list>
 
 #include <ATen/core/grad_mode.h>
+#include <torch/csrc/Export.h>
 
 #if C10_MOBILE
 #define C10_DISPATCHER_INLINE_UNLESS_MOBILE inline
@@ -20,6 +21,8 @@
 #define C10_DISPATCHER_INLINE_UNLESS_MOBILE C10_ALWAYS_INLINE
 #endif
 namespace c10 {
+
+TORCH_API extern std::function<bool()> CheckGil;
 
 class TORCH_API OperatorHandle;
 template<class FuncType> class TypedOperatorHandle;
@@ -411,6 +414,8 @@ public:
 
   // See [Note: Argument forwarding in the dispatcher] for why Args doesn't use &&
   C10_ALWAYS_INLINE Return call(Args... args) const {
+    TORCH_CHECK(!CheckGil || !CheckGil(), "Dispatch for ", operator_name(),
+                " occured while python GIL was held");
     return c10::Dispatcher::singleton().call<Return, Args...>(*this, std::forward<Args>(args)...);
   }
 

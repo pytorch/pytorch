@@ -4,6 +4,8 @@
 
 namespace c10 {
 
+std::function<bool()> CheckGil;
+
 namespace detail {
 
 class RegistrationListenerList final {
