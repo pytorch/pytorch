@@ -285,10 +285,11 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
     return handle_torch_function_indexing(self, index);
   }
 
+  Tensor sliced;
   {
     pybind11::gil_scoped_release no_gil;
     variable_list variableIndices;
-    Variable sliced = at::indexing::applySlicing(
+    sliced = at::indexing::impl::applySlicing(
       self_, indices, variableIndices, /*disable_slice_optimization=*/is_tracing,
       self_.device(), self_.sizes());
 
