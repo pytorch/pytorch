@@ -352,26 +352,28 @@ inline T Round(const T x) {
 }
 #endif
 
-inline uint8_t QuantizeUint8(float scale, int32_t zero_point, float value) {
-  const int32_t qmin = std::numeric_limits<uint8_t>::min();
-  const int32_t qmax = std::numeric_limits<uint8_t>::max();
+template<typename T>
+inline T QuantizeValue(float scale, int32_t zero_point, float value) {
+  const int32_t qmin = std::numeric_limits<T>::min();
+  const int32_t qmax = std::numeric_limits<T>::max();
   auto r = zero_point + static_cast<int32_t>(Round(value / scale));
   r = std::max(r, qmin);
   r = std::min(r, qmax);
-  return static_cast<uint8_t>(r);
+  return static_cast<T>(r);
 }
 
-inline std::pair<uint8_t, uint8_t> activationLimits(
+template<typename T>
+inline std::pair<T, T> activationLimits(
     float scale,
     int32_t zero_point,
     Activation Ac) {
   switch (Ac) {
     case Activation::NONE:
-      return {std::numeric_limits<uint8_t>::min(),
-              std::numeric_limits<uint8_t>::max()};
+      return {std::numeric_limits<T>::min(),
+              std::numeric_limits<T>::max()};
     case Activation::RELU:
-      return {QuantizeUint8(scale, zero_point, 0.0),
-              std::numeric_limits<uint8_t>::max()};
+      return {QuantizeValue<T>(scale, zero_point, 0.0),
+              std::numeric_limits<T>::max()};
     default:
 #ifdef _MSC_VER
       __assume(0);
