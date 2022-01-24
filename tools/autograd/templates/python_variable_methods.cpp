@@ -921,7 +921,7 @@ static PyObject * THPVariable_storage(PyObject* self, PyObject* arg)
     return handle_torch_function(self, "storage");
   }
   auto& self_ = THPVariable_Unpack(self);
-  return createPyObject(self_.storage(), self_.dtype());
+  return createPyObject(self_.storage());
   END_HANDLE_TH_ERRORS
 }
 
