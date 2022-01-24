@@ -4026,6 +4026,27 @@ class TestAsArray(TestCase):
         check(requires_grad=False)
         check(requires_grad=False, copy=True)
 
+    @onlyCPU
+    def test_astensor_consistency(self, device):
+        examples = [
+            # Scalars
+            True,
+            42,
+            1.0,
+            # Mixed Lists
+            [True, False, 0],
+            [0.0, True, False],
+            [0, 1.0, 42],
+            [0.0, True, False, 42],
+            # With Complex
+            [0.0, True, False, 42, 5j],
+        ]
+
+        for e in examples:
+            original = torch.as_tensor(e)
+            t = torch.asarray(e)
+            self.assertEqual(t, original)
+
 instantiate_device_type_tests(TestTensorCreation, globals())
 instantiate_device_type_tests(TestRandomTensorCreation, globals())
 instantiate_device_type_tests(TestLikeTensorCreation, globals())
