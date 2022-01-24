@@ -1009,6 +1009,7 @@ class TestDecompositionOpInfo(TestCase):
         xfail('linalg.inv'),
         xfail('linalg.det', 'singular', device_type='cuda'),
         xfail('linalg.matrix_power'),
+        xfail('linalg.tensorinv'),
         xfail('to_sparse'),
         skip('tensor_split'),
         skip('mvlgamma'),
