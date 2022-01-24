@@ -90,8 +90,7 @@ class CommitList:
 
         labels = features['labels']
         if 'Reverted' in labels:
-            return Commit(commit_hash, 'skip', 'Untopiced', title)
-        
+            return Commit(commit_hash, 'skip', 'Untopiced', title) 
         category = 'Uncategorized'
         topic = 'Untopiced'
 
@@ -125,17 +124,17 @@ class CommitList:
             if 'onnx' in file_lowercase:
                 category = 'onnx'
                 break
-            if CommitList.keywordInFile(file, ['torch/fx', 'test_fx'] ):
+            if CommitList.keywordInFile(file, ['torch/fx', 'test_fx']):
                 category = 'fx'
                 break
             # torch/quantization, test/quantization, aten/src/ATen/native/quantized, torch/nn/{quantized, quantizable}
             if CommitList.keywordInFile(file, ['torch/quantization', 'test/quantization', 'aten/src/ATen/native/quantized', 'torch/nn/quantiz']):
                 category = 'quantization'
                 break
-            if CommitList.keywordInFile(file, ['torch/package', 'test/package'] ):
+            if CommitList.keywordInFile(file, ['torch/package', 'test/package']):
                 category = 'package'
                 break
-            if CommitList.keywordInFile(file, ['torch/csrc/jit/mobile', 'aten/src/ATen/native/metal', 'test/mobile', 'torch/backends/_nnapi/', 'test/test_nnapi.py'] ):
+            if CommitList.keywordInFile(file, ['torch/csrc/jit/mobile', 'aten/src/ATen/native/metal', 'test/mobile', 'torch/backends/_nnapi/', 'test/test_nnapi.py']):
                 category = 'mobile'
                 break
             if CommitList.keywordInFile(file, ['aten/src/ATen/native/LinearAlgebra.cpp', 'test/test_linalg.py', 'torch/linalg']):
@@ -249,7 +248,7 @@ The categories below are as follows:
 * Developers: All commits that are not end-user facing but still impact people that compile from source, develop into pytorch, extend pytorch, etc
 """
 
-    return [header,]
+    return [header, ]
 
 
 def main():
