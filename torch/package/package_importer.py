@@ -406,14 +406,21 @@ class PackageImporter(Importer):
 
         return module
 
+    def _is_interned(self, module):
+        spec = getattr(module, 'spec', None)
+        if spec is None:
+            return False
+        origin = getattr(spec, 'origin', None)
+        return origin == "<package_importer>"
+
     # note: copied from cpython's import code
     def _find_and_load(self, name):
         module = self.modules.get(name, _NEEDS_LOADING)
         if module is _NEEDS_LOADING:
             return self._do_find_and_load(name)
-
+        filename = getattr(module, '__file__', None)
         if module is None:
-            message = "import of {} halted; " "None in sys.modules".format(name)
+            message = f"import of {name} halted; " "None in sys.modules"
             raise ModuleNotFoundError(message, name=name)
 
         # To handle https://github.com/pytorch/pytorch/issues/57490, where std's
@@ -424,6 +431,10 @@ class PackageImporter(Importer):
         elif name == "typing":
             self.modules["typing.io"] = cast(Any, module).io
             self.modules["typing.re"] = cast(Any, module).re
+
+        if filename is None and self._is_interned(module):
+            message = f"import of {name} halted as it's source is was not interned"
+            raise ModuleNotFoundError(message, name=name)
 
         return module
 
