@@ -20,11 +20,15 @@ bool contains(DynamicType::Tag lhs, DynamicType::Tag rhs) {
   return contains(lhs, static_cast<DynamicTypeBits>(rhs));
 }
 
-C10_NOINLINE DynamicTypePtr makeBaseType(DynamicType::Tag tag) {
+} // namespace
+
+namespace detail {
+
+DynamicTypePtr makeBaseType(DynamicType::Tag tag) {
   return std::make_shared<DynamicType>(tag, DynamicType::Arguments{});
 }
 
-} // namespace
+} // namespace detail
 
 std::string DynamicType::str() const {
   if (name_) {
@@ -113,9 +117,9 @@ DynamicType::DynamicType(const Type& other) : SharedType(DynamicType::Kind) {
     return;
   }
   switch (kind) {
-#define CASE_TYPE(T, _) \
-  case T##Type::Kind:   \
-    tag_ = Tag::T;      \
+#define CASE_TYPE(T, _, __) \
+  case T##Type::Kind:       \
+    tag_ = Tag::T;          \
     break;
     FORALL_DYNAMIC_TYPES(CASE_TYPE)
 #undef CASE_TYPE
@@ -196,8 +200,8 @@ TypePtr DynamicType::containedType(size_t i) const {
 
 TypeKind DynamicType::dynamicKind() const {
   switch (tag_) {
-#define CASE_TYPE(T, _) \
-  case Tag::T:          \
+#define CASE_TYPE(T, _, __) \
+  case Tag::T:              \
     return TypeKind::T##Type;
     FORALL_DYNAMIC_TYPES(CASE_TYPE)
 #undef CASE_TYPE
@@ -358,11 +362,8 @@ ivalue::TupleTypeFactory<TupleType>::fallback(const Type& type) {
 #endif
 }
 
-#define DYNAMIC_TYPE_TAG_VALUE(NAME, _)                               \
-  const DynamicTypePtr& DynamicTypeTrait<NAME##Type>::getBaseType() { \
-    static auto type = makeBaseType(tagValue());                      \
-    return type;                                                      \
-  }
+#define DYNAMIC_TYPE_TAG_VALUE(NAME, _, __) \
+  constexpr bool DynamicTypeTrait<NAME##Type>::isBaseType;
 FORALL_DYNAMIC_TYPES(DYNAMIC_TYPE_TAG_VALUE)
 #undef DYNAMIC_TYPE_TAG_VALUE
 
