@@ -531,10 +531,13 @@ class TestOperators(TestCase):
         xfail('index_copy'),
         xfail('index_fill'),
         xfail('linalg.det', ''),
+        xfail('linalg.cholesky'),
         xfail('linalg.eig'),  # Uses aten::allclose
         xfail('linalg.eigh'),
         xfail('linalg.householder_product'),
+        xfail('linalg.inv'),
         xfail('linalg.matrix_norm'),
+        xfail('linalg.matrix_power'),
         xfail('linalg.norm'),
         xfail('linalg.slogdet'),
         xfail('logdet'),
