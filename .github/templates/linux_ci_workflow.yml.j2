@@ -65,7 +65,7 @@ jobs:
       docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
     steps:
       - name: print labels
-        run: echo "${PR_LABELS}"
+        run: echo ${{github.event_name}}
       !{{ common.setup_ec2_linux() }}
       !{{ common.checkout() }}
       !{{ common.calculate_docker_image(false) }}
