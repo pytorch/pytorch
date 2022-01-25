@@ -78,7 +78,7 @@ jobs:
     steps:
       !{{ common.setup_ec2_linux() }}
       !{{ common.checkout(deep_clone=False, directory="pytorch") }}
-      !{{ common.checkout(deep_clone=False, directory="builder", repository="pytorch/builder") }}
+      !{{ common.checkout(deep_clone=False, directory="builder", repository="pytorch/builder", checkout_head_ref=False) }}
 {%- if config["gpu_arch_type"] == 'cuda' and config["gpu_arch_version"].startswith('11') %}
       - name: Set BUILD_SPLIT_CUDA
         run: |
