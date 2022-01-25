@@ -1502,8 +1502,8 @@ void TensorExprKernel::compile() {
       bufferArgs_.emplace_back(BufHandle(bufs_.at(output)));
       tensorOutputTensorOptions_.emplace_back(
           c10::TensorOptions(tensorType(bufs_.at(output))).device(device_));
-      tensorOutputSizes_.push_back({});
-      tensorOutputStrides_.push_back({});
+      tensorOutputSizes_.emplace_back();
+      tensorOutputStrides_.emplace_back();
       isOutputScalar_.push_back(true);
       bufs_.erase(output);
       continue;
