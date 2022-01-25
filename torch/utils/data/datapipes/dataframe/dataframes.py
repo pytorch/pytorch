@@ -44,7 +44,7 @@ class Capture(object):
             res += str(op)
         return res
 
-    def __getattr__(self, attrname):  # ?
+    def __getattr__(self, attrname):
         if attrname == 'kwarg':
             raise Exception('no kwargs!')
         return CaptureGetAttr(self, attrname, ctx=self.ctx)
