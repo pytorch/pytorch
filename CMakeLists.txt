@@ -277,6 +277,7 @@ if(IOS)
   set(USE_BREAKPAD OFF)
 endif()
 
+option(USE_SLEEF_FOR_ARM_VEC256 "Use sleef for arm" OFF)
 option(USE_SOURCE_DEBUG_ON_MOBILE "Enable " ON)
 option(USE_LITE_INTERPRETER_PROFILER "Enable " ON)
 option(USE_VULKAN_FP16_INFERENCE "Vulkan - Use fp16 inference" OFF)
@@ -688,6 +689,10 @@ endif()
 
 if(USE_PYTORCH_QNNPACK)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_PYTORCH_QNNPACK")
+endif()
+
+if(USE_SLEEF_FOR_ARM_VEC256)
+  string(APPEND CMAKE_CXX_FLAGS " -DAT_BUILD_ARM_VEC256_WITH_SLEEF")
 endif()
 
 if(USE_XNNPACK)
