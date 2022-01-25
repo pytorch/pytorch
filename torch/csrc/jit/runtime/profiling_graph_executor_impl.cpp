@@ -377,14 +377,7 @@ void runNoGradOptimizations(std::shared_ptr<Graph>& graph) {
       GRAPH_DEBUG("After BatchMM, before Fusion\n", *graph);
 
       FuseTensorExprs(graph, getFusionGroupInlining() ? 2 : 1);
-      GRAPH_DEBUG(
-          "After Fusion, before RemoveTensorTypeSpecializations\n", *graph);
-
-      // Wipe tensor type info from the IR
-      RemoveTensorTypeSpecializations(graph);
-      GRAPH_DEBUG(
-          "After RemoveTensorTypeSpecializations, before customPostPasses\n",
-          *graph);
+      GRAPH_DEBUG("After Fusion, before customPostPasses\n", *graph);
     } else {
       // Rewrite subgraphs with many MMs into expressions that batch them.
       BatchMM(graph);
@@ -398,9 +391,14 @@ void runNoGradOptimizations(std::shared_ptr<Graph>& graph) {
     for (const auto& passPair : getCustomPostPasses()) {
       passPair.first(graph);
     }
+    GRAPH_DEBUG("After customPostPasses \n", *graph);
+    if (tensorExprFuserEnabled()) {
+      // Wipe tensor type info from the IR
+      RemoveTensorTypeSpecializations(graph);
+      GRAPH_DEBUG("After RemoveTensorTypeSpecializations\n", *graph);
+    }
   }
-  GRAPH_DEBUG(
-      "After customPostPasses (end of runNoGradOptimizations)\n", *graph);
+  GRAPH_DEBUG("End of runNoGradOptimizations\n");
 }
 
 void ProfilingGraphExecutorImpl::runProfilingOptimizations(
