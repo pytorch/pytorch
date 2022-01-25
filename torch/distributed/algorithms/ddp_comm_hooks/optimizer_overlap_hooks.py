@@ -3,6 +3,7 @@ from typing import Any, Callable
 import torch
 import torch.distributed as dist
 
+_FUNCTIONAL_OPTIM_STEP_METHOD_NAME = "step_param"
 
 class _OptimizerHookState(object):
     """
@@ -21,9 +22,27 @@ class _OptimizerHookState(object):
             **functional_optim_kwargs,
             _allow_empty_param_list=True,
         )
-        if not hasattr(self.functional_optimizer, "step_param"):
+        self._check_valid_functional_optim()
+
+    @classmethod
+    def from_functional_optim(cls, functional_optim):
+        r"""
+        Create a `_OptimizerHookState`, which simply
+        holds a functional optimizer, directly from a
+        functional optimizer given by `functional_optim`.
+        Note that the `functional_optim` must implement
+        `step_param` to support per-parameter optimization.
+        """
+        opt_hook_state_inst = cls.__new__(cls)  # Does not call __init__
+        opt_hook_state_inst.functional_optimizer = functional_optim
+        opt_hook_state_inst._check_valid_functional_optim()
+        return opt_hook_state_inst
+
+    def _check_valid_functional_optim(self):
+        if not hasattr(self.functional_optimizer, _FUNCTIONAL_OPTIM_STEP_METHOD_NAME):
             raise ValueError(
-                f"Class {functional_optim_cls} must implement method step_param."
+                f"Class {type(self.functional_optimizer)} must implement method "
+                f"{_FUNCTIONAL_OPTIM_STEP_METHOD_NAME}."
             )
 
 
