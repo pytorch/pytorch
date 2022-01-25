@@ -45,8 +45,8 @@ def draw_graph(traced: torch.fx.GraphModule, fname: str, figname: str = "fx_grap
     if clear_meta:
         new_graph = copy.deepcopy(traced.graph)
         traced = fx.GraphModule(traced, new_graph)
-    for node in traced.graph.nodes:
-        node.meta = {}
+        for node in traced.graph.nodes:
+            node.meta = {}
     base, ext = os.path.splitext(fname)
     if not ext:
         ext = ".svg"
@@ -180,6 +180,7 @@ def size_of(metadata):
     sizes = {
         torch.float: 4,
         torch.float16: 2,
+        torch.bfloat16: 2,
         torch.float32: 4,
         torch.float64: 8,
         torch.int: 4,
@@ -593,7 +594,6 @@ def compiled_module(mod, *args, **kwargs):
 
     def functional_call(named_params, named_buffers, *args, **kwargs):
         params_and_buffers = {**named_params, **named_buffers}
-        # import pdb; pdb.set_trace()
         return _stateless.functional_call(mod, params_and_buffers, args, kwargs)
 
     compiled_f = compiled_function(functional_call, *args, **kwargs)
@@ -607,6 +607,9 @@ def compiled_module(mod, *args, **kwargs):
             return compiled_f(
                 dict(self.orig_module.named_parameters()),
                 dict(self.orig_module.named_buffers()),
+                # to replace once appropriate PR lands in PyTorch core
+                # dict(self.orig_module.named_parameters(remove_duplicate=False)),
+                # dict(self.orig_module.named_buffers(remove_duplicate=False)),
                 *args,
                 **kwargs
             )
