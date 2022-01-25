@@ -129,6 +129,7 @@ class QuantizationTracer(Tracer):
         # qconfig using top level module type
         self.scope = Scope("", None)
         self.node_name_to_scope: Dict[str, Tuple[str, type]] = {}
+        self.record_stack_traces = True
 
     def is_leaf_module(self, m: torch.nn.Module, module_qualified_name: str) -> bool:
         return (
