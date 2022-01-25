@@ -9,9 +9,6 @@
 #include <torch/csrc/jit/serialization/import_source.h>
 #include <torch/csrc/jit/testing/file_check.h>
 #include <torch/torch.h>
-#include "ATen/core/interned_strings.h"
-#include "ATen/core/jit_type.h"
-#include "ATen/core/jit_type_base.h"
 
 namespace torch {
 namespace jit {
