@@ -2374,8 +2374,8 @@ std::tuple<Tensor, Tensor, Tensor> linalg_svd_jvp(const Tensor& dA,
   // dVh = dV^H
   // with dP = U^H dA V
   //      dX = dP - dS
-  //      E_{jk} = (S_j - S_k)
-  //      E_{kk} = 1
+  //      E_{jk} = S_k^2 - S_j^2 if j != k
+  //               1             otherwise
   const auto is_complex = dA.is_complex();
   const auto m = dA.size(-2);
   const auto n = dA.size(-1);
@@ -2476,8 +2476,8 @@ Tensor svd_backward(const Tensor& gU,
   //
   // Denote by skew(X) = X - X^T, and by A o B the coordinatewise product, then
   // if m == n
-  //   gA = U [(F o skew(U^T gU))S + S(F o skew(V^T gV)) + I o gS ]V^T
-  // where F_jk = 1 / (S_j - S_k) if j != k and zero otherwise
+  //   gA = U [(skew(U^T gU) / E)S + S(skew(V^T gV) / E) + I o gS ]V^T
+  // where E_{jk} = S_k^2 - S_j^2 if j != k and 1 otherwise
   //
   // if m > n
   //   gA = [term in m == n] + (I_m - UU^T)gU S^{-1} V^T
@@ -2505,10 +2505,12 @@ Tensor svd_backward(const Tensor& gU,
   //
   // To think about M, consider the case case k = 1. The, we have the bundle
   // pi : St_1(C^n) x U(1) -> M
-  // now, St_1(C^n) are just vectors of norm 1 in C^n. That's exactly S^{2n-1}.
+  // now, St_1(C^n) are just vectors of norm 1 in C^n. That's exactly the sphere of dimension 2n-1 in C^n \iso R^{2n}
+  // S^{2n-1} = { z \in C^n | z^H z = 1}.
   // Then, in this case, we're quotienting out U(1) completely, so we get that
   // pi : S^{2n-1} x U(1) -> CP(n-1)
-  // In other words, M is just the complex plane of dimension n-1, and pi is (pretty similar to)
+  // where CP(n-1) is the complex projective space of dimension n-1.
+  // In other words, M is just the complex projective space, and pi is (pretty similar to)
   // the usual principal bundle from S^{2n-1} to CP(n-1).
   // The case k > 1 is the same, but requiring a linear inependence condition between the
   // vectors from the different S^{2n-1} or CP(n-1).
@@ -2522,7 +2524,7 @@ Tensor svd_backward(const Tensor& gU,
   //
   // The big issue here is that M with its induced metric is not locally isometric to St_k(C^n) x U(k).
   // [The why is rather technical, but you can see that the horizontal distribution is not involutive,
-  // and hence integrable]
+  // and hence integrable due to Frobenius' theorem]
   // What this means in plain words is that, no matter how we choose to return the U and V from the
   // SVD, we won't be able to simply differentiate wrt. U and V and call it a day.
   // An example of a case where we can do this is when performing an eigendecomposition on a real
@@ -2563,8 +2565,8 @@ Tensor svd_backward(const Tensor& gU,
   // dVh = dV^H
   // with dP = U^H dA V
   //      dX = dP - dS
-  //      E_{jk} = (S_j - S_k)
-  //      E_{kk} = 1
+  //      E_{jk} = S_k^2 - S_j^2 if j != k
+  //               1             otherwise
   //
   // Similarly, writing skew(X) = X - X^H
   // the adjoint wrt. the canonical metric is given by
@@ -2826,10 +2828,10 @@ Tensor linalg_eig_backward(const Tensor& gL,
   // For A = VLV^{-1}, denoting the gradients gA, gV and gL, we have
   // gA = V^{-H}(diag_embed(gL) + (V^H gV -V^HV diag(real(V^H gV))) / E*)V^H
   // Where:
-  //   - E_ij = L_i - L_j if i != j
+  //   - E_{ij} = L_j - L_i if i != j
+  //              1         otherwise
   //   - diag_embed takes a vector into a diagonal matrix
   //   - diag zeroes out elements outside of the diagonal
-  //   - The division by E is done just outside of the diagonal. In the diagonal it is set to zero
 
   // Note: the term '-V^HV diag(real(V^H gV))' comes from the fact that the eigenvalue
   // decomposition is returned with eigenvectors normalized to have norm one.
@@ -2913,7 +2915,7 @@ std::tuple<Tensor, Tensor> linalg_eig_jvp(const Tensor& dA,
   // where
   // dP = V^{-1} dA V
   // dX = V ((dP - diag(dP)) / E)
-  // E_{ij} = L_i - L_j if i != j
+  // E_{ij} = L_j - L_i if i != j
   //          1         otherwise
 
   // Note: The Hermitian case is a simplification of this formula using that V^{-1} = V^H and that L is real
