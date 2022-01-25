@@ -1377,6 +1377,20 @@ class TestNN(NNTestCase):
         self.assertTrue(len(list(m.buffers())) == 0)
         self.assertTrue(len(m.state_dict()) == 1)
 
+    @unittest.skipIf(not TEST_NUMPY, "numpy not found")
+    def test_load_state_dict_invalid(self):
+        m = torch.nn.Linear(2, 2, bias=False)
+
+        state_dict = {'weight': np.random.randn(2, 2)}
+        with self.assertRaisesRegex(RuntimeError,
+                                    "expected torch.Tensor or Tensor-like object from checkpoint but received"):
+            m.load_state_dict(state_dict)
+
+        state_dict = {'weight': ((1., 1.), (2., 2.))}
+        with self.assertRaisesRegex(RuntimeError,
+                                    "expected torch.Tensor or Tensor-like object from checkpoint but received"):
+            m.load_state_dict(state_dict)
+
     def test_buffer_not_persistent_load(self):
         m = nn.Module()
         m.register_buffer('buf', torch.rand(5), persistent=False)
@@ -8868,6 +8882,19 @@ class TestNN(NNTestCase):
 
                     with self.assertRaisesRegex(RuntimeError, "Expected sequence length to be larger than 0 in RNN"):
                         rnn(input)
+
+    def test_RNN_input_size_zero(self):
+        for module in (nn.RNN, nn.LSTM, nn.GRU):
+            for device in get_all_device_types():
+                input = torch.zeros((5, 0, 3))
+                rnn = module(input_size=3, hidden_size=4)
+                if device == 'cuda':
+                    rnn.cuda()
+                    input = input.cuda()
+                outs = rnn(input)
+                self.assertEqual(outs[0].shape, torch.Size([5, 0, 4]))
+                # Check that backward does not cause a hard error
+                outs[0].sum().backward()
 
     @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
     def test_RNN_dropout_state(self):
