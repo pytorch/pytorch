@@ -301,6 +301,11 @@ def get_func_output_dtype_type(
 
     return FuncOutputDTypeType.DTYPE_DEPENDS_ON_QCONFIG
 
+def get_weight_argument_info(op: Callable) -> Optional[Tuple[int, str]]:
+    if op in (F.linear, F.conv2d):
+        return (1, 'weight')
+    return None
+
 def get_op_packing_only_uses_module_attributes(
     op: Callable,
     args: Tuple[Any, ...],
@@ -317,23 +322,13 @@ def get_op_packing_only_uses_module_attributes(
     """
     # check for ops which need packed weights but the weights are
     # coming from another function
-    packable_tensor_arg_idxs = get_packable_tensor_arg_idxs(op)
-    if packable_tensor_arg_idxs is not None:
-        for arg_idx in packable_tensor_arg_idxs:
-            if arg_idx >= len(args):
-                continue
-            arg_name_in_root = get_param_name(module, args[arg_idx])
-            if arg_name_in_root is None:
-                return False
-
-    packable_tensor_arg_names = get_packable_tensor_kwarg_names(op)
-    if packable_tensor_arg_names is not None:
-        for arg_name in packable_tensor_arg_names:
-            if arg_name not in kwargs:
-                continue
-            arg_name_in_root = get_param_name(module, kwargs[arg_name])
-            if arg_name_in_root is None:
-                return False
+    info = get_weight_argument_info(op)
+    if info is not None:
+        idx, name = info
+        param_name = args[idx] if idx < len(args) else kwargs[name]
+        arg_name_in_root = get_param_name(module, param_name)
+        if arg_name_in_root is None:
+            return False
     return True
 
 def get_quantized_op(
