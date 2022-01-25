@@ -344,7 +344,7 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
 void dispatch_set_item(const Tensor& self, ArrayRef<at::indexing::TensorIndex> indices,
                        const Tensor& value, bool disable_slice_optimization=false) {
   pybind11::gil_scoped_release no_gil;
-  dispatch_set_item(self, indices, value, disable_slice_optimization);
+  at::indexing::set_item(self, indices, value, disable_slice_optimization);
 }
 
 // NOTE: Here is the dispatch structure for `THPVariable_setitem`:
