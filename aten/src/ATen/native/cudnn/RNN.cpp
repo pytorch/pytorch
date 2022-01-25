@@ -788,9 +788,11 @@ namespace {
       return CUDNN_RNN_ALGO_STANDARD;
     }
 
+#if CUDNN_VERSION >= 8201 // 8.2.1
     if (use_rnn_persist_small_h(rnn, tensors, forward)) {
       return CUDNN_RNN_ALGO_PERSIST_STATIC_SMALL_H;
     }
+#endif
 
     if (getCudnnDataType(input) == CUDNN_DATA_HALF &&
         !tensors.is_input_packed()) {
