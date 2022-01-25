@@ -198,15 +198,15 @@ bool IsGoogleLoggingInitialized();
 } // namespace google
 
 namespace c10 {
-bool InitCaffeLogging(int* argc, char** argv) {
-  if (*argc == 0)
-    return true;
+namespace {
+
+void initGoogleLogging(char const* name) {
 #if !defined(_MSC_VER)
   // This trick can only be used on UNIX platforms
   if (!::google::glog_internal_namespace_::IsGoogleLoggingInitialized())
 #endif
   {
-    ::google::InitGoogleLogging(argv[0]);
+    ::google::InitGoogleLogging(name);
 #if !defined(_MSC_VER)
     // This is never defined on Windows
 #if !defined(__XROS__)
@@ -214,7 +214,26 @@ bool InitCaffeLogging(int* argc, char** argv) {
 #endif
 #endif
   }
+
   UpdateLoggingLevelsFromFlags();
+}
+
+} // namespace
+
+void initLogging() {
+  // Unlike caffe2 torch always writes to stderr.
+  FLAGS_logtostderr = 1;
+
+  initGoogleLogging("c10");
+}
+
+bool InitCaffeLogging(int* argc, char** argv) {
+  if (*argc == 0) {
+    return true;
+  }
+
+  initGoogleLogging(argv[0]);
+
   return true;
 }
 
@@ -254,6 +273,9 @@ C10_DEFINE_int(
     "The minimum log level that caffe2 will output.");
 
 namespace c10 {
+
+void initLogging() {}
+
 bool InitCaffeLogging(int* argc, char** argv) {
   // When doing InitCaffeLogging, we will assume that caffe's flag parser has
   // already finished.
