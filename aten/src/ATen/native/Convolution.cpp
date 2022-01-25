@@ -176,6 +176,11 @@ auto ConvParams::needs_64bit_indexing_no_split(const at::Tensor& input, const at
 }
 
 auto ConvParams::use_cudnn(const at::Tensor& input, const at::Tensor& weight) const -> bool {
+
+// cudnn and miopen are guaranteed not to be on mobile, and T110194934
+// suggests that maybe the compiledWithCuDNN() check sometimes segfaults
+// (though I can't imagine how)
+#if !defined(C10_MOBILE)
   if (needs_64bit_indexing_no_split(input, weight)) {
     return false;
   }
@@ -199,6 +204,9 @@ auto ConvParams::use_cudnn(const at::Tensor& input, const at::Tensor& weight) co
     }
   }
   return !is_output_padding_big();
+#else
+  return false;
+#endif
 }
 
 auto ConvParams::use_miopen(const at::Tensor& input, const at::Tensor& weight, bool bias_defined) const -> bool {
