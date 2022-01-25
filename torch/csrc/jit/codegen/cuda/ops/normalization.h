@@ -91,7 +91,8 @@ TORCH_CUDA_CU_API ForwardNormResult instance_norm(
     TensorView* running_var,
     const bool kUseInputStats,
     Val* momentum,
-    Val* eps);
+    Val* eps,
+    bool channels_last = false);
 
 } // namespace cuda
 } // namespace fuser

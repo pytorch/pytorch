@@ -466,7 +466,8 @@ ForwardNormResult instance_norm(
     TensorView* running_var,
     const bool kUseInputStats,
     Val* momentum,
-    Val* eps) {
+    Val* eps,
+    bool channels_last) {
   auto fusion = FusionGuard::getCurFusion();
 
   TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid.");
@@ -490,9 +491,9 @@ ForwardNormResult instance_norm(
   // N = reduction = H * W * D
   // weight = bias = C tensor
   const size_t kBatchDim = 0;
-  const size_t kChannelsDim = 1;
   const size_t kNumberOfDims =
       TensorDomain::noReductions(x->getMaybeRFactorDomain()).size();
+  const size_t kChannelsDim = channels_last ? kNumberOfDims - 1 : 1;
 
   std::vector<int> x_reduction_axes;
   std::vector<bool> x_broadcast_mask(kNumberOfDims, false);

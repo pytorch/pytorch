@@ -2728,8 +2728,8 @@ class TestCudaFuser(JitTestCase):
                                                track_running_stats=track_running_stats).to(dtype=dtype)
 
             def forward(self, x):
-                o = x * 2.0
-                o = self.bn(o)
+                o = self.bn(x)
+                o = o * 2.0
                 return o
 
         x = torch.randn(batch, c, hw, hw, dtype=torch.float, device="cuda").to(dtype=dtype).requires_grad_()

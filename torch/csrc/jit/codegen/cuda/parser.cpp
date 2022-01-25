@@ -1311,12 +1311,15 @@ class IrParser {
 
               // TODO: handle channels last
               MemoryFormat format;
-              std::list<Val*> list_val;
-              std::tie(format, list_val) = getConsistentValues(
-                  MemoryFormat::Contiguous(),
-                  value_map[node->inputs()[0]->unique()]);
-              auto input_t = list_val.front();
-              list_val.pop_front();
+
+              Val* input_t = nullptr;
+              std::tie(format, input_t) =
+                  value_map[node->input(0)->unique()].getEntry();
+              if (format.hasPermutation() && !format.isChannelsLast()) {
+                format = MemoryFormat::Contiguous();
+                input_t = value_map[node->input(0)->unique()].maybeConvertValue(
+                    format);
+              }
               auto input = input_t->as<TensorView>();
 
               TensorView* weight = nullptr;
@@ -1384,12 +1387,12 @@ class IrParser {
                   running_var,
                   kUseInputStats,
                   momentum_ptr,
-                  eps_ptr);
+                  eps_ptr,
+		  format.isChannelsLast());
 
-              if (node->kind() ==
-                  c10::Symbol::fromQualString("aten::instance_norm")) {
-                value_map.emplace(node->output()->unique(), result.output);
-              }
+              value_map.emplace(
+                  node->output()->unique(),
+                  ValueHolder(result.output, format));
             },
             [](const Node* node) -> bool { return true; },
             [](const Node* node) -> OperatorType {
