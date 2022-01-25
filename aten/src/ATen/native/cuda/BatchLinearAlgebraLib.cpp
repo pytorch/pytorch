@@ -621,9 +621,7 @@ void svd_cusolver(const Tensor& A,
                   const Tensor& S,
                   const Tensor& V,
                   const Tensor& info) {
-  // Here U and V are F-contig
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(U.mT().is_contiguous());
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(V.mT().is_contiguous());
+  // Here U and V are F-contig whenever they are defined (i.e. whenever compute_uv=true)
   const auto batch_size = batchCount(A);
   const auto m = A.size(-2);
   const auto n = A.size(-1);
