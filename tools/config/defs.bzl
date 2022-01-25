@@ -63,3 +63,10 @@ def if_cuda_is_configured(x):
 
 def if_rocm_is_configured(x):
     return if_rocm(x, [])
+
+def if_lightweight_dispatch(if_true, if_false = []):
+    """Helper for selecting based on the whether lightweight dispatch is configured. """
+    return selects.with_or({
+        "@//tools/config:lightweight_dispatch_enabled": if_true,
+        "//conditions:default": if_false,
+    })

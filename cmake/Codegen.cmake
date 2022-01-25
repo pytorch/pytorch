@@ -217,6 +217,42 @@ if(INTERN_BUILD_ATEN_OPS)
   file(GLOB_RECURSE sources_templates "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/templates/*\.cpp")
   set(declarations_yaml_templates "")
 
+  # Codegen unboxing
+  if(USE_LIGHTWEIGHT_DISPATCH)
+    file(GLOB_RECURSE all_unboxing_script "${CMAKE_CURRENT_LIST_DIR}/../tools/jit/*.py")
+
+    set(GEN_UNBOXING_COMMAND
+        "${PYTHON_EXECUTABLE}" -m tools.jit.gen_unboxing
+        --source-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen
+        --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
+        )
+    set("GEN_UNBOXING_COMMAND_sources"
+        ${GEN_UNBOXING_COMMAND}
+        --output-dependencies ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_unboxing_sources.cmake
+        )
+    message("GEN_UNBOXING_COMMAND_sources: ${GEN_UNBOXING_COMMAND_sources}")
+    execute_process(
+        COMMAND ${GEN_UNBOXING_COMMAND_sources} --dry-run
+        RESULT_VARIABLE RETURN_VALUE
+        WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
+    )
+    if(NOT RETURN_VALUE EQUAL 0)
+      message(FATAL_ERROR "Failed to get generated_unboxing_sources list")
+    endif()
+
+    include("${CMAKE_BINARY_DIR}/aten/src/ATen/generated_unboxing_sources.cmake")
+    add_custom_command(
+        COMMENT "Generating ATen unboxing sources"
+        OUTPUT
+        ${generated_unboxing_sources}
+        ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_unboxing_sources.cmake
+        COMMAND ${GEN_UNBOXING_COMMAND_sources}
+        DEPENDS ${all_unboxing_script} ${sources_templates}
+        ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/native_functions.yaml
+        WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
+    )
+  endif()
+
   foreach(gen_type "headers" "sources" "declarations_yaml")
     # The codegen outputs may change dynamically as PyTorch is
     # developed, but add_custom_command only supports dynamic inputs.
@@ -275,6 +311,9 @@ if(INTERN_BUILD_ATEN_OPS)
       ${generated_headers} ${core_generated_headers} ${ops_generated_headers}
       ${generated_sources} ${core_generated_sources} ${ops_generated_sources}
       ${generated_declarations_yaml})
+  if (USE_LIGHTWEIGHT_DISPATCH)
+    target_sources(ATEN_CPU_FILES_GEN_TARGET PRIVATE ${generated_unboxing_sources})
+  endif()
   add_custom_target(ATEN_CUDA_FILES_GEN_TARGET DEPENDS
       ${cuda_generated_headers} ${cuda_generated_sources})
   add_library(ATEN_CPU_FILES_GEN_LIB INTERFACE)

@@ -5,7 +5,7 @@ load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_proto_library", "c
 load("//third_party:substitution.bzl", "header_template_rule")
 load("//:tools/build_variables.bzl", "jit_core_sources", "libtorch_core_sources", "libtorch_cuda_sources", "libtorch_distributed_sources", "libtorch_extra_sources", "libtorch_nvfuser_generated_headers", "libtorch_nvfuser_runtime_sources", "libtorch_python_core_sources", "torch_cpp_srcs")
 load("//tools/rules:cu.bzl", "cu_library")
-load("//tools/config:defs.bzl", "if_cuda")
+load("//tools/config:defs.bzl", "if_cuda", "if_lightweight_dispatch")
 load("//:aten.bzl", "intern_build_aten_ops", "generate_aten")
 
 COMMON_COPTS = [
@@ -38,7 +38,60 @@ py_binary(
     ],
 )
 
+py_binary(
+    name = "gen_unboxing",
+    srcs = ["tools/setup_helpers/gen_unboxing.py"],
+    deps = [
+        ":tools_jit",
+        ":tools_codegen",
+    ],
+)
+
 aten_generation_srcs = ["aten/src/ATen/native/native_functions.yaml"] + glob(["aten/src/ATen/templates/**"])
+
+generated_lightweight_dispatch_cpp = [
+    "aten/src/ATen/RegisterFunctionalization_0.cpp",
+    "aten/src/ATen/RegisterFunctionalization_1.cpp",
+    "aten/src/ATen/RegisterFunctionalization_2.cpp",
+    "aten/src/ATen/RegisterFunctionalization_3.cpp",
+    "aten/src/ATen/RegisterCompositeImplicitAutograd.cpp",
+    "aten/src/ATen/RegisterCompositeExplicitAutograd.cpp",
+    "aten/src/ATen/RegisterMeta.cpp",
+    "aten/src/ATen/CPUFunctions.h",
+    "aten/src/ATen/CPUFunctions_inl.h",
+    "aten/src/ATen/CompositeExplicitAutogradFunctions.h",
+    "aten/src/ATen/CompositeExplicitAutogradFunctions_inl.h",
+    "aten/src/ATen/CompositeImplicitAutogradFunctions.h",
+    "aten/src/ATen/CompositeImplicitAutogradFunctions_inl.h",
+    "aten/src/ATen/FunctionalInverses.h",
+    "aten/src/ATen/Functions.h",
+    "aten/src/ATen/Functions.cpp",
+    "aten/src/ATen/RedispatchFunctions.h",
+    "aten/src/ATen/NativeFunctions.h",
+    "aten/src/ATen/MetaFunctions.h",
+    "aten/src/ATen/MetaFunctions_inl.h",
+    "aten/src/ATen/MethodOperators.h",
+    "aten/src/ATen/NativeMetaFunctions.h",
+    "aten/src/ATen/RegistrationDeclarations.h",
+    "aten/src/ATen/core/aten_interned_strings.h",
+    "aten/src/ATen/core/TensorBody.h",
+    "aten/src/ATen/core/TensorMethods.cpp",
+    "aten/src/ATen/core/ATenOpList.cpp",
+]
+
+generated_unboxing_cpp = [
+    "aten/src/ATen/CodegenFunctions.h",
+    "aten/src/ATen/CodegenFunctions_0.cpp",
+    "aten/src/ATen/CodegenFunctions_1.cpp",
+    "aten/src/ATen/CodegenFunctions_2.cpp",
+    "aten/src/ATen/CodegenFunctions_3.cpp",
+    "aten/src/ATen/CodegenFunctions_4.cpp",
+    "aten/src/ATen/CodegenUnboxingWrappers_0.cpp",
+    "aten/src/ATen/CodegenUnboxingWrappers_1.cpp",
+    "aten/src/ATen/CodegenUnboxingWrappers_2.cpp",
+    "aten/src/ATen/CodegenUnboxingWrappers_3.cpp",
+    "aten/src/ATen/CodegenUnboxingWrappers_4.cpp",
+]
 
 generated_cpu_cpp = [
     "aten/src/ATen/RegisterBackendSelect.cpp",
@@ -97,9 +150,7 @@ generated_cuda_cpp = [
 generate_aten(
     name = "generated_aten_cpp",
     srcs = aten_generation_srcs,
-    outs = generated_cpu_cpp + generated_cuda_cpp + [
-         "aten/src/ATen/Declarations.yaml",
-    ],
+    outs = generated_lightweight_dispatch_cpp,
     generator=":gen",
 )
 

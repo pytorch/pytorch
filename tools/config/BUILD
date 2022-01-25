@@ -39,3 +39,18 @@ config_setting(
     define_values = {"thread_sanitizer": "1"},
     visibility = ["//visibility:public"],
 )
+
+# Indicates whether we should use codegen unboxing + static dispatch
+# Currently only being supported on mobile build
+config_setting(
+    name = "lightweight_dispatch",
+    define_values = {"lightweight_dispatch": "true"},
+    visibility = ["//visibility:public"],
+)
+
+selects.config_setting_group(
+    name = "lightweight_dispatch_enabled",
+    match_all = [
+        ":lightweight_dispatch",
+    ],
+)
