@@ -1650,13 +1650,10 @@ Tensor block(TensorList tensors, IntArrayRef indices, int64_t idx_stride) {
            "block expects a non-empty TensorList");
   typedef c10::SmallVector<int64_t, 8> LowDimIdx;
 
-  const int64_t ten_dim = tensors[0].ndimension();
-  const int64_t result_dim = std::max(ten_dim, idx_stride);
-  for(auto tensor: tensors.slice(1)) {
-    TORCH_CHECK(tensor.ndimension() == ten_dim, 
-                "Dimension of tensor didn't match! ",
-                "Expecting: ", ten_dim, ", but getting: ", tensor.ndimension());
-  }
+  int64_t max_ten_dim = tensors[0].ndimension();
+  for(auto& tensor: tensors.slice(1))
+    max_ten_dim = std::max(max_ten_dim, tensor.squeeze().ndimension());
+  const int64_t result_dim = std::max(max_ten_dim, idx_stride);
   // std::cout << "line: 1621 tensors: " << tensors.size() << ", indices len: " << indices.size() << ", idx_strid: " << idx_stride << std::endl;
 
   std::vector<LowDimIdx> padded_idx;
@@ -1678,12 +1675,14 @@ Tensor block(TensorList tensors, IntArrayRef indices, int64_t idx_stride) {
   std::vector<LowDimIdx> slices_b;
   // std::cout << "line: 1635 " << result_dim << ", " << result_size << std::endl;
   
-  auto cat_shape = [](const LowDimIdx& a, const LowDimIdx& b, int64_t dim) -> LowDimIdx {
+  auto cat_shape = [](const LowDimIdx& a, const LowDimIdx& b,
+                      int64_t dim, const LowDimIdx& idx) -> LowDimIdx {
     LowDimIdx cated;
     for(int64_t i: c10::irange(a.size())) {
       if (i != dim) {
         TORCH_CHECK(a[i] == b[i], "Tensor size should match along dim: ", i,
-          ". Expecting size ", a[i], " but getting ", b[i], " instead.");
+          ". Expecting size ", a[i], " but getting ", b[i],
+          " instead at list index ", idx,  ".");
         cated.push_back(a[i]);
       } else {
         cated.push_back(a[i] + b[i]);
@@ -1691,12 +1690,13 @@ Tensor block(TensorList tensors, IntArrayRef indices, int64_t idx_stride) {
     }
     return cated;
   };
-  const int64_t unsuq_size = result_dim - ten_dim;
+  
   std::vector<LowDimIdx> ten_shapes;
   std::vector<std::vector<LowDimIdx>> hierar_shapes(result_dim, std::vector<LowDimIdx>());
 
   for(auto i: c10::irange(tensors.size())) {
     Tensor tensor = tensors[i];
+    const int64_t unsuq_size = result_dim - tensor.ndimension();
     LowDimIdx unsuq_sizes;
     for(auto j: c10::irange(unsuq_size)) {
       unsuq_sizes.push_back(1);
@@ -1704,6 +1704,7 @@ Tensor block(TensorList tensors, IntArrayRef indices, int64_t idx_stride) {
     for(auto j: c10::irange(unsuq_size, result_dim)) {
       unsuq_sizes.push_back(tensor.size(j - unsuq_size));
     }
+    // std::cout << "unsuq_sizes: " << unsuq_sizes << std::endl;
     tensor = tensor.view(unsuq_sizes);
     ten_shapes.push_back(unsuq_sizes);
     
@@ -1758,7 +1759,7 @@ Tensor block(TensorList tensors, IntArrayRef indices, int64_t idx_stride) {
           // std::cout << "line: 1707  init_shape: " << cated_shape << std::endl;
           for(auto a = itr + 1; a < ten_shapes.end(); a++) {
             // std::cout << "line: 1707  cat(" << cated_shape << ", " << *a << ")" << std::endl;
-            cated_shape = cat_shape(cated_shape, *a, j);
+            cated_shape = cat_shape(cated_shape, *a, j, padded_idx[i]);
           }
           hierar_shapes[j].push_back(cated_shape);
         } else {
@@ -1768,7 +1769,7 @@ Tensor block(TensorList tensors, IntArrayRef indices, int64_t idx_stride) {
           // std::cout << "line: 1715  init_shape: " << cated_shape << std::endl;
           for (auto a = itr + 1; a < hierar_shapes[j + 1].end(); a++) {
             // std::cout << "line: 1715  cat(" << cated_shape << ", " << *a << ")" << std::endl;
-            cated_shape = cat_shape(cated_shape, *a, j);
+            cated_shape = cat_shape(cated_shape, *a, j, padded_idx[i]);
           }
           hierar_shapes[j].push_back(cated_shape);
         }

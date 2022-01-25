@@ -1231,8 +1231,38 @@ def block_diag(*tensors):
     return torch._C._VariableFunctions.block_diag(tensors)  # type: ignore[attr-defined]
 
 
-def block(nested_tensor_list):
-    """
+def block(nested_tensor_list: Union[List[Tensor], List[List[Tensor]]]) -> Tensor:
+    """Assemble an tensor from nested lists of tensors.
+    Tensors in the innermost lists are concatenated along the last dimension (-1), 
+    then these are concatenated along the second-last dimension (-2), and so on until the outermost list is reached.
+    Tensors can be of any dimension, and in the case of non-uniform dimensionality across inputs tensors, 
+    leading axes of size 1 are inserted, to make tensor.ndim the same for all input tensors. 
+    
+    Args:
+        nested_tensor_list: list of tensor or nested tensor list, scalar are also allowed in the list.
+
+    Returns:
+        Tensor: A tensor assembled by elements in nested_tensor_list which have
+        dimensionality equal to max(depth of list of nest, max dimensionality of all input tensors)
+
+    Example::
+
+        >>> import torch
+        >>> A = torch.tensor([[0, 1], [1, 0]])        # A.shape = (2, 2)
+        >>> B = torch.tensor([[2, 2, 2], [2, 2, 2]])  # B.shape = (2, 3)
+        >>> C = torch.tensor([[3, 3, 3], [3, 3, 3]])  # C.shape = (2, 3)
+        >>> D = torch.tensor([[0, 4], [4, 0]])        # D.shape = (2, 2)
+        >>> torch.block([[A, B], [C, D]])
+        tensor([[0, 1, 2, 2, 2],
+                [1, 0, 2, 2, 2],
+                [3, 3, 3, 0, 4],
+                [3, 3, 3, 4, 0]])
+        >>> E = torch.tensor([[1, 1], [1, 1]])        # E.shape = (2, 2)
+        >>> F = torch.tensor([2, 2])                  # F.shape = (2,)
+        >>> torch.block([E, F])
+        tensor([[1, 1],
+                [1, 1],
+                [2, 2]])
     """
     tensors = []
     indices = []
@@ -1250,15 +1280,13 @@ def block(nested_tensor_list):
         elif isinstance(list_or_ten, list):
             que += [(e, idx + [i]) for i, e in enumerate(list_or_ten)]
         else:
-            raise ValueError("")
+            raise ValueError(f"nested_tensor_list only accept List or Tensor, but recived: {type(list_or_ten)}")
     
     flat_idx = []
     for idx in indices:
         assert len(idx) == list_dim, f"{idx}"
         flat_idx += idx
 
-    # tensors = nested_tensor_list
-    # print('hello world ', indices)
     if has_torch_function(tensors):
         return handle_torch_function(block, tensors, flat_idx, list_dim, *tensors)
     return torch._C._VariableFunctions.block(tensors, flat_idx, list_dim)  # type: ignore[attr-defined]

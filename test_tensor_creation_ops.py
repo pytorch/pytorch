@@ -9,6 +9,7 @@ import warnings
 import unittest
 from itertools import product, combinations, combinations_with_replacement, permutations
 import random
+from torch._C import dtype
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
@@ -365,70 +366,32 @@ class TestTensorCreation(TestCase):
     def test_block(self, device):
 
         def to_tensor_list(np_block, dtype=torch.float32, device='cpu'):
-            results = []
-            for array in np_block:
-                if isinstance(array, np.ndarray):
-                    results.append(torch.tensor(array, dtype=dtype, device=device))
-                elif isinstance(array, list):
-                    results.append(to_tensor_list(array, device=device))
-                else:
-                    raise TypeError(f"Unexpected object type: {type(np_block[0])}")
-            return results
+            if isinstance(np_block[0], np.ndarray):
+                return [
+                    torch.tensor(tensor, dtype=dtype, device=device)
+                    for tensor in np_block]
+            elif isinstance(np_block[0], list):
+                return [
+                    to_tensor_list(nest_list)
+                    for nest_list in np_block]
+            else:
+                raise TypeError(f"Unexpected object type: {type(np_block[0])}")
         
-        # Base case
-        A = np.random.normal(size=[3, 2]).astype(np.float32)
-        B = np.random.normal(size=[3, 4]).astype(np.float32)
+        A = np.ones([3, 2], dtype=np.float32)
+        B = np.ones([3, 4], dtype=np.float32)
         block_np = [
             [A, B],
             [A, B],
         ]
         result_check = np.block(block_np)
-        result = torch.block(to_tensor_list(block_np, device=device))
+        result = torch.block(to_tensor_list(block_np))
         self.assertEqual(result, result_check)
         
-        # test non aligned tensor size along 1-axis
-        A = np.random.normal(size=[3, 2]).astype(np.float32)
-        B = np.random.normal(size=[3, 4]).astype(np.float32)
-        block_np = [
-            [A, B],
-            [B, A],
-        ]
-        result_check = np.block(block_np)
-        result = torch.block(to_tensor_list(block_np, device=device))
-        self.assertEqual(result, result_check)
-        
-        # testing list dpeth(dim) > max tensor dim
-        A = np.random.normal(size=[3, 2]).astype(np.float32)
-        B = np.random.normal(size=[3, 4]).astype(np.float32)
-        block_np = [
-            [A, B],
-            [A, B],
-        ]
-        block_np = [
-            [block_np],
-            [block_np],
-        ]
-        result_check = np.block(block_np)
-        result = torch.block(to_tensor_list(block_np, device=device))
-        self.assertEqual(result, result_check)
-        
-        # test scalar(ndim == 0) tensors
-        A = np.array(1, dtype=np.float32)
-        block_np = [A]
-        result_check = np.block(block_np)
-        result = torch.block(to_tensor_list(block_np, device=device))
-        self.assertEqual(result, result_check)
-        
-        A = np.array(1, dtype=np.float32)
-        block_np = [
-            [A, A],
-            [A, A]
-        ]
-        result_check = np.block(block_np)
-        result = torch.block(to_tensor_list(block_np, device=device))
-        self.assertEqual(result, result_check)
+        print('hellow world')
+        print('hellow world !')
+        print('hellow world !!')
+        print('hellow world !!!')
 
-        # testing with non concatable tensors
         A = np.ones([4, 2], dtype=np.float32)
         B = np.ones([3, 4], dtype=np.float32)
         block_np = [
@@ -436,59 +399,7 @@ class TestTensorCreation(TestCase):
             [A, B],
         ]
         self.assertRaises(ValueError, lambda: np.block(block_np))
-        self.assertRaises(RuntimeError, lambda: torch.block(to_tensor_list(block_np, device=device)))
-        
-        A = np.ones([4], dtype=np.float32)
-        B = np.ones([1, 4], dtype=np.float32)
-        
-        # testing leading axis auto unsequeeze: A (4,) -> (1, 4)
-        block_np = [[A], [B]]
-        result_check = np.block(block_np)
-        result = torch.block(to_tensor_list(block_np, device=device))
-        self.assertEqual(result, result_check)
-        
-        # testing non uniform list depth
-        block_np = [[A], B]
-        self.assertRaises(ValueError, lambda: np.block(block_np))
-        self.assertRaises(AssertionError, lambda: torch.block(to_tensor_list(block_np, device=device)))
-        
-        block_np = [[A], [[A]]]
-        self.assertRaises(ValueError, lambda: np.block(block_np))
-        self.assertRaises(AssertionError, lambda: torch.block(to_tensor_list(block_np, device=device)))
-
-        test_dtypes = [
-            torch.uint8,
-            torch.int8,
-            torch.int16,
-            torch.int32,
-            torch.int64,
-            torch.float32,
-            torch.float64,
-            torch.complex64,
-            torch.complex128
-        ]
-
-        for dtype1 in test_dtypes:
-            for dtype2 in test_dtypes:
-                a = torch.ones([2, 2], device=device, dtype=dtype1)
-                b = torch.zeros([2, 2], device=device, dtype=dtype2)
-                block = [
-                    [a, b],
-                    [b, a],
-                ]
-                result = torch.block(block)
-                result_dtype = torch.result_type(a, b)
-                result_check = torch.cat([
-                    torch.cat([
-                        torch.ones([2, 2], device=device, dtype=result_dtype),
-                        torch.zeros([2, 2], device=device, dtype=result_dtype)
-                    ], dim=1),
-                    torch.cat([
-                        torch.zeros([2, 2], device=device, dtype=result_dtype),
-                        torch.ones([2, 2], device=device, dtype=result_dtype)
-                    ], dim=1),
-                ], dim=0)
-                self.assertEqual(result, result_check)
+        self.assertRaises(RuntimeError, lambda: torch.block(to_tensor_list(block_np)))
     
     def test_block_diag(self, device):
         def block_diag_workaround(*arrs):
@@ -1335,16 +1246,6 @@ class TestTensorCreation(TestCase):
     def test_zeros_dtype_out_match(self, device):
         d = torch.tensor((2, 3), device=device, dtype=torch.double)
         self.assertRaises(RuntimeError, lambda: torch.zeros((2, 3), device=device, dtype=torch.float32, out=d))
-
-    # FIXME: Create an OpInfo-based tensor creation method test that verifies this for all tensor
-    #   creation methods and verify all dtypes and layouts
-    @dtypes(torch.bool, torch.uint8, torch.int16, torch.int64, torch.float16, torch.float32, torch.complex64)
-    def test_zeros_dtype_layout_device_match(self, device, dtype):
-        layout = torch.strided
-        t = torch.zeros((2, 3), device=device, dtype=dtype, layout=layout)
-        self.assertIs(dtype, t.dtype)
-        self.assertIs(layout, t.layout)
-        self.assertEqual(torch.device(device), t.device)
 
     # TODO: update to work on CUDA, too
     @onlyCPU
