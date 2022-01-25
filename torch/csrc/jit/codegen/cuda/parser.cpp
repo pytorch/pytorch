@@ -1388,11 +1388,10 @@ class IrParser {
                   kUseInputStats,
                   momentum_ptr,
                   eps_ptr,
-		  format.isChannelsLast());
+                  format.isChannelsLast());
 
               value_map.emplace(
-                  node->output()->unique(),
-                  ValueHolder(result.output, format));
+                  node->output()->unique(), ValueHolder(result.output, format));
             },
             [](const Node* node) -> bool { return true; },
             [](const Node* node) -> OperatorType {
