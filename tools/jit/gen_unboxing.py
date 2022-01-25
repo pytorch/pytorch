@@ -9,7 +9,7 @@ from tools.codegen.api.types import CppSignatureGroup
 from tools.codegen.context import method_with_native_function
 from tools.codegen.gen import parse_native_yaml
 from tools.codegen.model import NativeFunction, NativeFunctionsGroup
-from tools.codegen.utils import Target, FileManager, mapMaybe
+from tools.codegen.utils import Target, FileManager, mapMaybe, make_file_manager
 from typing import Union, Sequence
 from typing_extensions import Literal
 
@@ -148,6 +148,9 @@ def main() -> None:
     parser.add_argument(
         "-d", "--install_dir", help="output directory", default="build/aten/src/ATen"
     )
+    parser.add_argument(
+        '--dry-run', action='store_true',
+        help='run without writing any files (still updates outputs)')
 
     options = parser.parse_args()
 
@@ -158,14 +161,7 @@ def main() -> None:
         parsed_yaml.backend_indices,
     )
 
-    template_dir = os.path.join(options.source_path, "templates")
-
-    def make_file_manager(install_dir: str) -> FileManager:
-        return FileManager(
-            install_dir=install_dir, template_dir=template_dir, dry_run=False
-        )
-
-    cpu_fm = make_file_manager(options.install_dir)
+    cpu_fm = make_file_manager(options=options)
     gen_unboxing(native_functions=native_functions, cpu_fm=cpu_fm)
 
 
