@@ -1,7 +1,9 @@
-import torch
+import itertools
 import math
-from torch.nn import Module
 from copy import deepcopy
+
+import torch
+from torch.nn import Module
 from torch.optim.lr_scheduler import _LRScheduler
 
 
@@ -26,8 +28,11 @@ class AveragedModel(Module):
             :class:`AveragedModel` parameter, the current value of :attr:`model`
             parameter and the number of models already averaged; if None,
             equally weighted average is used (default: None)
-        mode (str, optional): whether to use ``'parameters'`` or ``'state_dict'`` for update
-            (default: ``'parameters'``)
+        use_buffers (bool, optional): If the model has layers that contain
+            buffers(like BN), passing `use_buffers=True` would use buffers
+            along with parameters to perform the update. This has shown to
+            increase accuracy in models with layers that contain buffers.
+            (default: ``False``)
 
     Example:
         >>> loader, optimizer, model, loss_fn = ...
@@ -86,7 +91,7 @@ class AveragedModel(Module):
         Generalizes Well:
         https://arxiv.org/abs/2001.02312
     """
-    def __init__(self, model, device=None, avg_fn=None, mode='parameters'):
+    def __init__(self, model, device=None, avg_fn=None, use_buffers=False):
         super(AveragedModel, self).__init__()
         self.module = deepcopy(model)
         if device is not None:
@@ -98,17 +103,20 @@ class AveragedModel(Module):
                 return averaged_model_parameter + \
                     (model_parameter - averaged_model_parameter) / (num_averaged + 1)
         self.avg_fn = avg_fn
-        modes = ['parameters', 'state_dict']
-        if mode not in modes:
-            raise ValueError(f'Invalid mode passed, valid values are {", ".join(modes)}.')
-        self.use_state_dict = mode == 'state_dict'
+        self._use_buffers = use_buffers
 
     def forward(self, *args, **kwargs):
         return self.module(*args, **kwargs)
 
     def update_parameters(self, model):
-        self_param = self.module.state_dict().values() if self.use_state_dict else self.parameters()
-        model_param = model.state_dict().values() if self.use_state_dict else model.parameters()
+        self_param = (
+            itertools.chain(self.module.parameters(), self.module.buffers())
+            if self._use_buffers else self.parameters()
+        )
+        model_param = (
+            itertools.chain(model.parameters(), model.buffers())
+            if self._use_buffers else model.parameters()
+        )
         for p_swa, p_model in zip(self_param, model_param):
             device = p_swa.device
             p_model_ = p_model.detach().to(device)
