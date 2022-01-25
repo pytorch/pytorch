@@ -123,7 +123,7 @@ def sharded_embedding_bag(types, args, kwargs, pg):
     include_last_offset = kwargs.get("include_last_offset")
     padding_idx = kwargs.get("padding_idx")
 
-    local_shard = weight.local_shards()[0].tensor.contiguous()
+    local_shard = weight.local_shard().contiguous()
     sharding_dim = weight._sharding_spec.dim
     world_size = dist.get_world_size(pg)
     rank = dist.get_rank(pg)

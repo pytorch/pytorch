@@ -88,7 +88,7 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
         sharded_output = torch.nn.functional.linear(
             inp, sharded_linear.weight, sharded_linear.bias
         )
-        sharded_output = sharded_output.reshard(reshard_spec).collect_local_shard()
+        sharded_output = sharded_output.reshard(reshard_spec).local_shard()
         if unstack_output:
             sharded_output = torch.cat(torch.unbind(sharded_output))
         self.assertEqual(local_output, sharded_output)

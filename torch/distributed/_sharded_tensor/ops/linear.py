@@ -101,7 +101,7 @@ def sharded_linear(types, args, kwargs, pg):
     weight = args[1]
     bias = kwargs["bias"]
 
-    local_shard = weight.local_shards()[0].tensor
+    local_shard = weight.local_shard()
     local_shard_t = local_shard.t().contiguous()
     sharding_dim = weight._sharding_spec.dim
     world_size = dist.get_world_size(pg)
