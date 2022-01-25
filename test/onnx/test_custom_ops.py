@@ -1,3 +1,5 @@
+# Owner(s): ["module: onnx"]
+
 import unittest
 import torch
 import torch.utils.cpp_extension
@@ -119,7 +121,7 @@ class TestCustomAutogradFunction(unittest.TestCase):
                 return _unimplemented("prim::PythonOp", "unknown node kind: " + name)
 
         from torch.onnx import register_custom_op_symbolic
-        register_custom_op_symbolic("::prim_PythonOp", symbolic_pythonop, 1)
+        register_custom_op_symbolic("prim::PythonOp", symbolic_pythonop, 1)
 
         x = torch.randn(2, 3, 4, requires_grad=True)
         model = MyModule()

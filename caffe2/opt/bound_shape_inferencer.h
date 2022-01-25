@@ -138,6 +138,9 @@ class TORCH_API BoundShapeInferencer : public BoundShapeInferencerBase {
   void InferSoftmax(const OperatorDef& op);
   void InferBucketize(const OperatorDef& op);
   void InferLpNorm(const OperatorDef& op);
+  void InferClip(const OperatorDef& op);
+  void InferMean(const OperatorDef& op);
+  void InferDiv(const OperatorDef& op);
   void InferTranspose(const OperatorDef& op);
 
   // Standard shape/type inference using op schema registered shape inference

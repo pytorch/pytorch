@@ -32,8 +32,8 @@ bool isBackendDispatchKey(DispatchKey t) {
 // math_dispatch_keyset contains all keys in backend_dispatch_keyset and
 // autograd_dispatch_keyset Alias key DispatchKey::CompositeImplicitAutograd
 // maps to math_dispatch_keyset.
-constexpr DispatchKeySet math_dispatch_keyset = backend_dispatch_keyset |
-    autograd_dispatch_keyset | DispatchKeySet({DispatchKey::FuncTorchBatched});
+constexpr DispatchKeySet math_dispatch_keyset =
+    backend_dispatch_keyset | autograd_dispatch_keyset;
 
 DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
   TORCH_INTERNAL_ASSERT(t != DispatchKey::Undefined);
@@ -46,6 +46,20 @@ DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
       return backend_dispatch_keyset;
     default:
       return DispatchKeySet(t);
+  }
+}
+
+bool runtimeDispatchKeySetHas(DispatchKey t, DispatchKey k) {
+  TORCH_INTERNAL_ASSERT(t != DispatchKey::Undefined);
+  switch (t) {
+    case DispatchKey::Autograd:
+      return autograd_dispatch_keyset.has(k);
+    case DispatchKey::CompositeImplicitAutograd:
+      return math_dispatch_keyset.has(k);
+    case DispatchKey::CompositeExplicitAutograd:
+      return backend_dispatch_keyset.has(k);
+    default:
+      return t == k;
   }
 }
 
@@ -100,7 +114,7 @@ DispatchKeySet getAutogradRelatedKeySetFromBackend(DispatchKey t) {
 }
 
 bool isIncludedInAlias(DispatchKey k, DispatchKey alias) {
-  return k != DispatchKey::Undefined && getRuntimeDispatchKeySet(alias).has(k);
+  return k != DispatchKey::Undefined && runtimeDispatchKeySetHas(alias, k);
 }
 
 std::string toString(DispatchKeySet ts) {

@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/native/quantized/affine_quantizer.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -23,7 +24,7 @@ Tensor& quantized_copy_from_float_cpu_(Tensor& self, const Tensor& src) {
   AT_DISPATCH_QINT_TYPES(self.scalar_type(), "Copy", [&]() {
     float* src_data = src.data_ptr<float>();
     scalar_t* self_data = self.data_ptr<scalar_t>();
-    for (int i = 0; i < self.numel(); ++i) {
+    for (const auto i : c10::irange(self.numel())) {
       self_data[i] = quantize_val<scalar_t>(
           self.q_scale(), self.q_zero_point(), src_data[i]);
     }

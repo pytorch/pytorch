@@ -78,7 +78,7 @@ void _not(Stack& stack) {
 void boolTensor(Stack& stack) {
   at::Tensor a;
   pop(stack, a);
-  push(stack, a.is_nonzero());
+  push(stack, at::native::is_nonzero(a));
 }
 
 void toList(Stack& stack) {
@@ -122,7 +122,7 @@ void toList(Stack& stack) {
   TORCH_CHECK(
       (out_ty == FloatType::get() && t.is_floating_point()) ||
           (out_ty == ComplexType::get() && t.is_complex()) ||
-          tryScalarTypeFromJitType(out_ty) == t.scalar_type(),
+          tryScalarTypeFromJitType(*out_ty) == t.scalar_type(),
       "Output annotation element type and runtime tensor element type must match for tolist()");
 
   // Check that the dimension of the Tensor matches that of the
@@ -166,7 +166,17 @@ void numToTensorBool(Stack& stack) {
   push(stack, at::scalar_to_tensor(b));
 }
 
-static const std::array<mobile::prim_op_fn_register, 14> op_reg = {
+void dictIndex(Stack& stack) {
+  auto key = pop(stack);
+  auto dict = pop(stack).toGenericDict();
+  auto value = dict.find(key);
+  if (value == dict.end()) {
+    AT_ERROR("KeyError: ", key);
+  }
+  push(stack, value->value());
+}
+
+static const C10_UNUSED std::array<mobile::prim_op_fn_register, 15> op_reg = {
     mobile::prim_op_fn_register("prim::TupleIndex", tupleIndex),
     mobile::prim_op_fn_register("aten::Bool.Tensor", boolTensor),
     mobile::prim_op_fn_register("aten::format", aten_format),
@@ -179,8 +189,9 @@ static const std::array<mobile::prim_op_fn_register, 14> op_reg = {
     mobile::prim_op_fn_register("aten::__isnot__", isNot),
     mobile::prim_op_fn_register("aten::dim", dim),
     mobile::prim_op_fn_register("prim::Uninitialized", unInitialized),
-    mobile::prim_op_fn_register("aten::to.prim_dtype", toPrimDType),
-    mobile::prim_op_fn_register("prim::is_cuda", isCuda)
+    mobile::prim_op_fn_register("prim::is_cuda", isCuda),
+    mobile::prim_op_fn_register("aten::__getitem__.Dict_str", dictIndex),
+    mobile::prim_op_fn_register("prim::unchecked_cast", noop),
     // TODO: (@pavithran) size is overloaded with int[] and Tensor
     // so this throws error expecting int not Tensor
     // mobile::prim_op_fn_register("aten::size", size)

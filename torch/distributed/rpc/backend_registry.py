@@ -82,15 +82,6 @@ def register_backend(
     BackendType.__doc__ = _backend_type_doc
     return BackendType[backend_name]
 
-# Create a placeholder for PROCESS_GROUP BackendType
-# which is deprecated. The backend type can be accessed, but
-# will throw an error when the user tries to use it in init_rpc
-register_backend(
-    "PROCESS_GROUP",
-    lambda *args: None,
-    lambda *args: None,
-)
-
 def construct_rpc_backend_options(
     backend,
     rpc_timeout=rpc_constants.DEFAULT_RPC_TIMEOUT_SEC,
@@ -300,7 +291,6 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
         name,
         rank,
         world_size,
-        group,
         rpc_backend_options,
         reverse_device_maps,
         devices,

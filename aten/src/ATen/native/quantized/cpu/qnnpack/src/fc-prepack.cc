@@ -1,8 +1,10 @@
 #include <pytorch_qnnpack.h>
+#include <qnnpack/log.h>
 #include <qnnpack/pack.h>
 #include <qnnpack_func.h>
-#include <cstring>
 #include <cstdlib>
+#include <cstring>
+#include <cmath>
 
 namespace qnnpack {
 // For runtime quantization packing.

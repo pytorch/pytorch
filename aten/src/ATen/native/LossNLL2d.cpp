@@ -4,6 +4,8 @@
 #include <ATen/Parallel.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/cpu/utils.h>
+#include <ATen/native/Resize.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -102,15 +104,15 @@ static void nll_loss2d_forward_out_frame(
     const int64_t H = input.size(2);
     const int64_t W = input.size(3);
 
-    output.resize_({batch_size, H, W});
+    at::native::resize_output(output, {batch_size, H, W});
     auto input_acc = input.accessor<scalar_t, 4>();
     auto output_acc = output.accessor<scalar_t, 3>();
     auto target_acc = target.accessor<int64_t, 3>();
 
     at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
-      for (int64_t b = start; b < end; b++) {
-        for (int64_t h = 0; h < H; h++) {
-          for (int64_t w = 0; w < W; w++) {
+      for (const auto b : c10::irange(start, end)) {
+        for (const auto h : c10::irange(H)) {
+          for (const auto w : c10::irange(W)) {
             const int64_t cur_target = (int64_t)target_acc[b][h][w];
 
             if (cur_target == ignore_index) {
@@ -138,7 +140,20 @@ static void nll_loss2d_forward_out_frame(
   }
 
   // produce scalar outputs for the reduction case
-  output.resize_({});
+  at::native::resize_output(output, {});
+
+  if (target.numel() == 0) {
+    // Here target (and input) have zero elements
+    // Mean reduction on empty tensors produces NaN. See the discussion in
+    // https://github.com/pytorch/pytorch/pull/64572#issuecomment-926504162
+    if (reduction == Reduction::Mean) {
+      output.fill_(std::numeric_limits<double>::quiet_NaN());
+    } else {
+      output.zero_();
+    }
+    total_weight.zero_();
+    return;
+  }
 
   auto input_contiguous = input.contiguous();
   auto target_contiguous = target.contiguous();
@@ -162,8 +177,8 @@ static void nll_loss2d_forward_out_frame(
   const int64_t level_mask = level_step - 1;
 
   int64_t num_ignored = 0;
-  for (int64_t b = 0; b < batch_size; b++) {
-    for (int64_t elem = 0; elem < map_size; elem++) {
+  for (const auto b : c10::irange(batch_size)) {
+    for (const auto elem : c10::irange(map_size)) {
       const int64_t cur_target = target_data[b * map_size + elem];
       if (cur_target == ignore_index) {
         ++num_ignored;
@@ -212,9 +227,7 @@ static void nll_loss2d_forward_out_frame(
                                         std::end(loss_partial_sums),
                                         scalar_t{0});
 
-  if (reduction == Reduction::Mean &&
-      (total_weight_val != 0 || input.numel() == 0)) {
-    // allow NaN result for total_weight_val == 0 case, see #15870
+  if (reduction == Reduction::Mean) {
     output_val /= total_weight_val;
   }
 
@@ -274,9 +287,9 @@ static void nll_loss2d_backward_out_frame(
     auto target_acc = target.accessor<int64_t, 3>();
 
     at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
-      for (int64_t b = start; b < end; b++) {
-        for (int64_t h = 0; h < H; h++) {
-          for (int64_t w = 0; w < W; w++) {
+      for (const auto b : c10::irange(start, end)) {
+        for (const auto h : c10::irange(H)) {
+          for (const auto w : c10::irange(W)) {
             const int64_t cur_target = target_acc[b][h][w];
             if (cur_target == ignore_index) {
               continue;
@@ -295,9 +308,6 @@ static void nll_loss2d_backward_out_frame(
   }
 
   const scalar_t total_weight_value = *total_weight.data_ptr<scalar_t>();
-  if (total_weight_value <= 0) {
-    return;
-  }
 
   TORCH_CHECK(
       grad_output.dim() <= 1 && grad_output.numel() == 1,
@@ -316,29 +326,21 @@ static void nll_loss2d_backward_out_frame(
   const int64_t map_size = input.size(2) * input.size(3);
   const int64_t sample_size = map_size * n_classes;
 
-  scalar_t normalize = (reduction == at::Reduction::Mean)
-      ? total_weight_value
-      : static_cast<scalar_t>(1);
+  const auto grad = -(reduction == Reduction::Mean ? grad_output_value / total_weight_value
+                                                   : grad_output_value);
 
   at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
-    for (int64_t b = start; b < end; b++) {
-      for (int64_t elem = 0; elem < map_size; elem++) {
-        const int64_t cur_target = target_data[b * map_size + elem];
+    for (const auto b : c10::irange(start, end)) {
+      for (const auto elem : c10::irange(map_size)) {
+        const int64_t t = target_data[b * map_size + elem];
 
-        if (cur_target == ignore_index) {
-          continue;
+        if (t != ignore_index) {
+          TORCH_CHECK_INDEX(t >= 0 && t < n_classes, "Target ", t, " is out of bounds.");
+
+          const int64_t index = b * sample_size + t * map_size + elem;
+          grad_input_data[index] = weight_data != nullptr ? weight_data[t] * grad
+                                                          : grad;
         }
-
-        TORCH_CHECK_INDEX(
-            cur_target >= 0 && cur_target < n_classes,
-            "Target ",
-            cur_target,
-            " is out of bounds.");
-
-        const int64_t index = b * sample_size + cur_target * map_size + elem;
-        const scalar_t w = weight_data != nullptr ? weight_data[cur_target]
-                                                  : static_cast<scalar_t>(1);
-        grad_input_data[index] = -w / normalize * grad_output_value;
       }
     }
   });

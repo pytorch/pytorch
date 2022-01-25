@@ -29,7 +29,7 @@ __inline__ __device__ T WarpReduceSum(T val) {
   return val;
 }
 
-// Sums `val` accross all threads in a block.
+// Sums `val` across all threads in a block.
 //
 // Assumptions:
 //   - Thread blocks are an 1D set of threads (indexed with `threadIdx.x` only)
