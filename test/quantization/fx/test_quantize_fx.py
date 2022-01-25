@@ -496,6 +496,43 @@ class TestQuantizeFx(QuantizationTestCase):
             if n.op == 'call_module' and type(modules[n.target]) == nn.ReLU:
                 self.assertTrue(is_match(modules, n, pattern))
 
+    def test_fused_module_qat_swap(self):
+        class Tmp(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.tmp = torch.nn.Linear(5, 5)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                x = self.tmp(x)
+                return self.relu(x)
+
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mods1 = torch.nn.Sequential(Tmp(), torch.nn.Linear(5, 5))
+                self.mods2 = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                a = self.mods1(x)
+                x = torch.add(x, 5)
+                x = self.mods2(x)
+                x = torch.add(x, 5)
+                return a, x
+
+
+        model = M().train()
+        qconfig_dict = {
+            "": None,
+            "object_type": [
+                (torch.nn.Linear, default_qat_qconfig),
+                (torch.nn.ReLU, default_qat_qconfig),
+            ],
+        }
+        prepared = prepare_qat_fx(model, qconfig_dict)
+        self.assertTrue(isinstance(getattr(prepared.mods1, "0").tmp, torch.nn.intrinsic.qat.LinearReLU))
+
     def _get_conv_linear_test_cases(self, is_reference):
         """ Returns a list of test cases, with format:
         is_dynamic, ModuleClass, module_constructor_inputs,
@@ -3474,6 +3511,44 @@ class TestQuantizeFx(QuantizationTestCase):
                 expected_node_occurrence=node_occurrence,
                 expected_node_list=node_list)
 
+    def test_stack_trace_preserved(self):
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(1, 1)
+
+            def forward(self, x):
+                x = self.linear(x)
+                return x
+
+        m = M().eval()
+        mp = prepare_fx(m, get_default_qconfig_dict())
+
+        found_stack_trace = False
+        for n in mp.graph.nodes:
+            if n.op == 'call_module' and n.target == 'linear':
+                found_stack_trace = n.stack_trace is not None
+                break
+        self.assertTrue(found_stack_trace)
+
+        # test is_reference == True
+        mq = convert_fx(copy.deepcopy(mp), is_reference=True)
+        found_stack_trace = False
+        for n in mq.graph.nodes:
+            if n.op == 'call_module' and n.target == 'linear':
+                found_stack_trace = n.stack_trace is not None
+                break
+        self.assertTrue(found_stack_trace, f"stack trace not found, node: {n.format_node()}, is_reference: True")
+
+        # test is_reference == False
+        mq = convert_fx(mp, is_reference=False)
+        found_stack_trace = False
+        for n in mq.graph.nodes:
+            if n.op == 'call_module' and n.target == 'linear':
+                found_stack_trace = n.stack_trace is not None
+                break
+        self.assertTrue(found_stack_trace, f"stack trace not found, node: {n.format_node()}, is_reference: False")
+
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
     def setUp(self):
@@ -4714,7 +4789,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 x = self.hardtanh(x)
                 self.hardtanh_(x)
                 x = F.hardtanh(x)
-                F.hardtanh_(x)
                 return x
 
         data = (torch.rand((1, 2, 5, 5), dtype=torch.float),)
@@ -4722,7 +4796,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
         node_list = [
             ns.call_function(torch.quantize_per_tensor),
             ns.call_module(nnq.Conv2d),
-            ns.call_function(F.hardtanh_),
             ns.call_method('dequantize')
         ]
         for quant_type in self.static_quant_types:
