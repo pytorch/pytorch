@@ -348,17 +348,19 @@ static void _wrap_outputs(const std::shared_ptr<PyNode>& cdata, THPFunction *sel
     auto num_inputs = self->is_variable_input.size();
     THPObjectPtr pyInputs(PyTuple_New(num_inputs));
     if (!pyInputs) throw_python_error();
+    int64_t variable_idx = 0;
     for (const auto i : c10::irange(num_inputs)) {
       PyObject* input = nullptr;
       if (self->is_variable_input[i]) {
-        if (grad_inputs[i].defined() || !self->materialize_grads) {
-          input = THPVariable_Wrap(grad_inputs[i]);
+        if (grad_inputs[variable_idx].defined() || !self->materialize_grads) {
+          input = THPVariable_Wrap(grad_inputs[variable_idx]);
         } else {
-          input = THPVariable_Wrap(at::zeros_like(inputs[i]));
+          input = THPVariable_Wrap(at::zeros_like(inputs[variable_idx]));
         }
         if (!input) {
           throw_python_error();
         }
+        variable_idx++;
       } else {
         Py_INCREF(Py_None);
         input = Py_None;
