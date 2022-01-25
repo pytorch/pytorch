@@ -823,6 +823,20 @@ def get_traced_sample_variant_pairs(device, dtype, op):
     if has_fake_function:
         variants = {'method': getattr(torch.Tensor, op.name)}
 
+    # In eager mode, these ops can take (Tensor, bool) args; but in
+    # JIT they can only take (Tensor, Scalar), and bool is not a
+    # scalar in the JIT type system. So to test these in JIT, the bool
+    # is converted to an int for the test.
+    ops_with_unsupported_second_arg_bool = [
+        "div_floor_rounding",
+        "div_no_rounding",
+        "div_trunc_rounding",
+        "full_like",
+        "index_fill",
+        "mul_cpu",
+        "new_full",
+    ]
+
     # doesn't support tracing
     if has_fake_function:
         return outputs
@@ -834,6 +848,15 @@ def get_traced_sample_variant_pairs(device, dtype, op):
 
             if is_lambda(variant):
                 continue
+
+            if (
+                op.formatted_name in ops_with_unsupported_second_arg_bool
+                and len(sample.args) > 0
+                and isinstance(sample.args[0], bool)
+            ):
+                arr = [arg for arg in sample.args]
+                arr[0] = int(arr[0])
+                sample.args = tuple(arr)
 
             outputs.append((variant, sample))
 

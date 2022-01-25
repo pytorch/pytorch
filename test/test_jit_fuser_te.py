@@ -2187,7 +2187,7 @@ works_list = [
 ]
 
 known_failures = [
-    '__rmatmul__'
+    '__rmatmul__',
     'frac',
     'matmul',
 ]
