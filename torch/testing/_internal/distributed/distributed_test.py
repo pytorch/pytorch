@@ -36,6 +36,11 @@ from torch.distributed.algorithms.ddp_comm_hooks.optimizer_overlap_hooks import 
     _OptimizerHookState
 )
 
+from torch.distributed.optim import (
+    as_functional_optim,
+    functional_optim_map,
+)
+
 from torch.distributed.distributed_c10d import (
     get_world_size,
     _get_default_group,
@@ -75,8 +80,6 @@ from torch.testing._internal.common_utils import (
     sandcastle_skip,
     sandcastle_skip_if,
 )
-
-from torch.distributed.optim import functional_optim_map
 
 from torch.distributed.optim.functional_sgd import _FunctionalSGD
 from torch.distributed.optim.functional_adam import _FunctionalAdam
@@ -3954,12 +3957,13 @@ class DistributedTest:
                     # Register hook that runs allreduce + functional optimizer
                     # step.
                     allreduce_hook = default.allreduce_hook
+                    mapping = {v: k for k, v in functional_optim_map.items()}
                     if construct_from_functional:
-                        f_opt = functional_optim_cls(
-                            [],
+                        opt_cls = mapping[functional_optim_cls]
+                        f_opt = as_functional_optim(
+                            opt_cls,
                             *functional_optim_args,
                             **functional_optim_kwargs,
-                            _allow_empty_param_list=True
                         )
                         opt_hook_state = _OptimizerHookState.from_functional_optim(
                             f_opt
@@ -3983,7 +3987,6 @@ class DistributedTest:
                         static_graph=static_graph,
                     )
 
-                    mapping = {v: k for k, v in functional_optim_map.items()}
                     optimizer_no_hook = mapping.get(functional_optim_cls)(
                         ddp_model_with_no_hook.parameters(),
                         *functional_optim_args,
