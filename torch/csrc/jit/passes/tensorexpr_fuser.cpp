@@ -1177,6 +1177,7 @@ class TensorExprFuser {
       }
     }
     for (Node* fusion_group : fusion_groups) {
+      removeOutputsUsedOnlyInSize(fusion_group);
       VLOG(1) << "GenerateGuard for fusion group: " << *fusion_group;
       if (!GenerateGuard(fusion_group, add_composed_op_)) {
         VLOG(1) << "  Unfusing the fusion group because GenerateGuard failed"
