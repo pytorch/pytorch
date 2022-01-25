@@ -50,6 +50,21 @@ class QTensorInfo:
 
 
 @dataclasses.dataclass
+class FusionInfo:
+    # linear matched pattern, example: [torch.add, torch.relu]
+    pattern: Tuple[Callable, ...]
+    # what the current element should be replaced with during execution
+    # example: toq.add_relu (for torch.add -> torch.relu)
+    replacement_type_this_element: Callable
+    # true if the current element is the first element of the pattern,
+    # for example true for torch.add in (torch.add -> torch.relu)
+    is_first_element: bool
+    # true if the current element is the last element of the pattern,
+    # for example true for torch.relu in (torch.add -> torch.relu)
+    is_last_element: bool
+
+
+@dataclasses.dataclass
 class SeenQOpInfo:
     idx: int
     # Python type of the seen op. For modules, this is type(mod). For
@@ -84,6 +99,8 @@ class SeenQOpInfo:
     op_packing_only_uses_module_attributes: bool
     # QConfig for the op, can be None
     qconfig: QConfigAny
+    # fusion_info for the op, is None if no fusion is found
+    fusion_info: Optional[FusionInfo]
 
     def __repr__(self) -> str:
         s = f"(type): {self.type}\n"
@@ -96,6 +113,8 @@ class SeenQOpInfo:
             s += f"\n     (packable_nontensor_idx_to_arg): {self.packable_nontensor_idx_to_arg}"
         if len(self.packable_tensor_kwarg_name_to_name):
             s += f"\n     (packable_tensor_kwarg_name_to_name): {self.packable_tensor_kwarg_name_to_name}"
+        if self.fusion_info:
+            s += f"\n     (fusion_info): {self.fusion_info}"
         return s
 
 
