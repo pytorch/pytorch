@@ -19,9 +19,8 @@ class _OptimizerHookState(object):
         self._set_params_to_optimize(params)
 
     def _set_params_to_optimize(self, params):
-        self.params_to_optimize = params
-        if self.params_to_optimize is not None:
-            self.params_to_optimize = set(self.params_to_optimize)
+        if params is not None:
+            self.params_to_optimize = set(params)
 
     def _check_valid_functional_optim(self):
         if not hasattr(self.functional_optimizer, _FUNCTIONAL_OPTIM_STEP_METHOD_NAME):
@@ -42,7 +41,10 @@ def _hook_then_optimizer(
     .. warning ::
         This API is experimental adn subject to change.
     """
-    _has_set_params = optimizer_state.params_to_optimize is not None
+    has_set_params = (
+        hasattr(optimizer_state, 'params_to_optimize')
+        and optimizer_state.params_to_optimize is not None
+    )
 
     def hook_then_optimizer_wrapper(
         hook_state, bucket: dist.GradBucket
@@ -54,7 +56,7 @@ def _hook_then_optimizer(
             gradient_tensors = bucket.gradients()
             model_params = bucket.parameters()
             for grad_tensor, model_param in zip(gradient_tensors, model_params):
-                if not _has_set_params or model_param in optimizer_state.params_to_optimize:
+                if not has_set_params or model_param in optimizer_state.params_to_optimize:
                     optimizer_state.functional_optimizer.step_param(
                         model_param,
                         grad_tensor,
