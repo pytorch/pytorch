@@ -3,8 +3,9 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
+#include <array>
 #include <cstdint>
 #include <iostream>
 #include <string>
@@ -51,7 +52,7 @@ enum class PredicateType {
   ReductionWrite
 };
 
-enum class DataType { Double, Float, Half, Int, Int32, Bool, Null };
+enum class DataType { Double, Float, Half, Int, Int32, Bool, BFloat16, Null };
 
 // Returns if the datatype is a floating point type
 bool isFloatingPointType(DataType dtype);
@@ -69,6 +70,7 @@ enum class ExprType {
   TransposeOp,
   ShiftOp,
   GatherOp,
+  ViewOp,
   Split,
   Merge,
 };
@@ -169,9 +171,6 @@ bool isLogicalOp(const BinaryOpType bopt);
 // on input, for example bitwise_and is also used for boolean and in the jit
 bool alsoBooleanOperator(const BinaryOpType bopt);
 
-//! Operations that have tricky behaviors with all integer inputs
-bool noFullIntegerSupport(const BinaryOpType bopt);
-
 enum class TernaryOpType { Clamp, Threshold, Where };
 
 enum class ParallelType {
@@ -188,6 +187,24 @@ enum class ParallelType {
   Serial
 };
 
+static constexpr std::array<ParallelType, 6> kParallelTypeThreads = {
+    ParallelType::BIDx,
+    ParallelType::BIDy,
+    ParallelType::BIDz,
+    ParallelType::TIDx,
+    ParallelType::TIDy,
+    ParallelType::TIDz};
+
+static constexpr std::array<ParallelType, 3> kParallelTypeBIDs = {
+    ParallelType::BIDx,
+    ParallelType::BIDy,
+    ParallelType::BIDz};
+
+static constexpr std::array<ParallelType, 3> kParallelTypeTIDs = {
+    ParallelType::TIDx,
+    ParallelType::TIDy,
+    ParallelType::TIDz};
+
 enum class MemoryType { Local, Shared, Global };
 
 // sometimes broadcasted tensors may be inputed in the kernel with an explicit 1
@@ -203,7 +220,8 @@ enum class IterType {
   Reduction,
   BroadcastWithStride,
   BroadcastWithoutStride,
-  Gather
+  Gather,
+  Stride
 };
 
 enum class SwizzleType { NoSwizzle, Transpose };
@@ -264,6 +282,8 @@ enum class LaunchConfigType {
   TIDy,
   TIDx
 };
+
+const char* const kMagicZeroName = "nvfuser_zero";
 
 } // namespace cuda
 } // namespace fuser

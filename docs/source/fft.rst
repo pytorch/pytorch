@@ -32,6 +32,10 @@ Fast Fourier Transforms
     irfftn
     hfft
     ihfft
+    hfft2
+    ihfft2
+    hfftn
+    ihfftn
 
 Helper Functions
 ----------------

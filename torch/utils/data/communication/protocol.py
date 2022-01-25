@@ -62,10 +62,83 @@ class ProtocolServer(Protocol):
             raise EmptyQueue('queue is empty')
         self._req_received = response
         return response
-
         # TODO: Validate supported requests
 
-    def response_reset(self):
+    def response_terminate(self):
+        if not self.have_pending_request():
+            raise Exception("Attempting to reply with pending request")
+        if not isinstance(self._req_received, communication.messages.TerminateRequest):
+            raise Exception(
+                "Replaying with terminate status to other type of message")
+        self.response_queue.put(communication.messages.TerminateResponse())
+        self._req_received = None
+
+
+class MapDataPipeQueueProtocolServer(ProtocolServer):
+    def response_item(self, key, value):
+        if not self.have_pending_request():
+            raise Exception("Attempting to reply with pending request")
+        self.response_queue.put(communication.messages.GetItemResponse(key, value))
+        self._req_received = None
+
+    def response_len(self, size):
+        if not self.have_pending_request():
+            raise Exception("Attempting to reply with pending request")
+        self.response_queue.put(communication.messages.LenResponse(size))
+        self._req_received = None
+
+    def response_index_out_of_bound(self):
+        if not self.have_pending_request():
+            raise Exception("Attempting to reply with pending request")
+        self.response_queue.put(communication.messages.StopIterationResponse())
+        self._req_received = None
+
+class MapDataPipeQueueProtocolClient(ProtocolClient):
+    def request_len(self):
+        if not self.can_take_request():
+            raise Exception('Can not request len while we are still waiting response for previous request')
+        request = communication.messages.LenRequest()
+        self.request_queue.put(request)
+        self.request_sent(request)
+
+    def request_item(self, index):
+        if not self.can_take_request():
+            raise Exception('Can not request item while we are still waiting response for previous request')
+        request = communication.messages.GetItemRequest(index)
+        self.request_queue.put(request)
+        self.request_sent(request)
+
+    def get_response_len(self, block=False, timeout=None):
+        if not self.waiting_for_response():
+            raise Exception('Can not expect any response without submitted request')
+        try:
+            response = self.response_queue.get(block=block, timeout=timeout)
+        except TimeoutError:
+            raise EmptyQueue('queue is empty')
+        self.request_served(response)
+        if not isinstance(response, communication.messages.LenResponse):
+            raise Exception('Invalid response received')
+        return response
+
+    def get_response_item(self, block=False, timeout=None):
+        if not self.waiting_for_response():
+            raise Exception('Can not expect any response without submitted request')
+        try:
+            response = self.response_queue.get(block=block, timeout=timeout)
+        except TimeoutError:
+            raise EmptyQueue('queue is empty')
+        self.request_served(response)
+        # if not isinstance(response, communication.messages.GetItemResponse):
+        #     raise Exception('Invalid response received')
+        return response
+
+
+class EmptyQueue(Exception):
+    pass
+
+
+class IterDataPipeQueueProtocolServer(ProtocolServer):
+    def response_reset_iterator(self):
         if not self.have_pending_request():
             raise Exception("Attempting to reply with pending request")
         if not isinstance(self._req_received, communication.messages.ResetIteratorRequest):
@@ -80,62 +153,35 @@ class ProtocolServer(Protocol):
         self.response_queue.put(communication.messages.GetNextResponse(value))
         self._req_received = None
 
-    def response_stop(self):
+    def response_stop_iteration(self):
         if not self.have_pending_request():
             raise Exception("Attempting to reply with pending request")
         self.response_queue.put(communication.messages.StopIterationResponse())
         self._req_received = None
 
-    def response_invalid(self):
+    def response_invalid_state(self):
         if not self.have_pending_request():
             raise Exception("Attempting to reply with pending request")
         self.response_queue.put(communication.messages.InvalidStateResponse())
         self._req_received = None
 
-    def response_terminate(self):
-        if not self.have_pending_request():
-            raise Exception("Attempting to reply with pending request")
-        if not isinstance(self._req_received, communication.messages.TerminateRequest):
-            raise Exception(
-                "Replaying with terminate status to other type of message")
-        self.response_queue.put(communication.messages.TerminateResponse())
-        self._req_received = None
-
-
-class MapDataPipeQueueProtocolClient(ProtocolClient):
-    pass
-
-
-class MapDataPipeQueueProtocolServer(ProtocolServer):
-    pass
-
-
-class EmptyQueue(Exception):
-    pass
-
-
-class IterDataPipeQueueProtocolServer(ProtocolServer):
-    pass
-
 
 class IterDataPipeQueueProtocolClient(ProtocolClient):
-    def request_reset(self):
+    def request_reset_iterator(self):
         if not self.can_take_request():
-            raise Exception(
-                'Can not reset while we are still waiting response for previous request')
+            raise Exception('Can not reset while we are still waiting response for previous request')
         request = communication.messages.ResetIteratorRequest()
         self.request_queue.put(request)
         self.request_sent(request)
 
     def request_next(self):
         if not self.can_take_request():
-            raise Exception(
-                'Can not request next item while we are still waiting response for previous request')
+            raise Exception('Can not request next item while we are still waiting response for previous request')
         request = communication.messages.GetNextRequest()
         self.request_queue.put(request)
         self.request_sent(request)
 
-    def get_response_reset(self, block=False):
+    def get_response_reset_iterator(self, block=False):
         try:
             response = self.response_queue.get(block=block)
         except Exception as e:  # TODO: Catch only timeout exceptions

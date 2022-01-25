@@ -159,7 +159,7 @@ MetaNetDef parseMetaNetDef(const std::string& value) {
       value);
   return def;
 }
-}
+} // namespace
 
 class PredictorTest : public testing::Test {
  public:

@@ -350,7 +350,7 @@ def pad_sequence(sequences, batch_first=False, padding_value=0.0):
     Args:
         sequences (list[Tensor]): list of variable length sequences.
         batch_first (bool, optional): output will be in ``B x T x *`` if True, or in
-            ``T x B x *`` otherwise
+            ``T x B x *`` otherwise. Default: False.
         padding_value (float, optional): value for padded elements. Default: 0.
 
     Returns:
@@ -363,9 +363,58 @@ def pad_sequence(sequences, batch_first=False, padding_value=0.0):
     return torch._C._nn.pad_sequence(sequences, batch_first, padding_value)
 
 
+def unpad_sequence(padded_sequences, lengths, batch_first=False):
+    # type: (Tensor, Tensor, bool) -> List[Tensor]
+    r"""Unpad padded Tensor into a list of variable length Tensors
+
+    ``unpad_sequence`` unstacks padded Tensor into a list of variable length Tensors.
+
+    Example:
+        >>> from torch.nn.utils.rnn import pad_sequence, unpad_sequence
+        >>> a = torch.ones(25, 300)
+        >>> b = torch.ones(22, 300)
+        >>> c = torch.ones(15, 300)
+        >>> sequences = [a, b, c]
+        >>> padded_sequences = pad_sequence(sequences)
+        >>> lengths = torch.as_tensor([v.size(0) for v in sequences])
+        >>> unpadded_sequences = unpad_sequence(padded_sequences, lengths)
+        >>> torch.allclose(sequences[0], unpadded_sequences[0])
+        True
+        >>> torch.allclose(sequences[1], unpadded_sequences[1])
+        True
+        >>> torch.allclose(sequences[2], unpadded_sequences[2])
+        True
+
+    Args:
+        padded_sequences (Tensor): padded sequences.
+        lengths (Tensor): length of original (unpadded) sequences.
+        batch_first (bool, optional): whether batch dimension first or not. Default: False.
+
+    Returns:
+        a list of :class:`Tensor` objects
+    """
+
+    unpadded_sequences = []
+
+    if not batch_first:
+        padded_sequences.transpose_(0, 1)
+
+    max_length = padded_sequences.shape[1]
+    idx = torch.arange(max_length)
+
+    for seq, length in zip(padded_sequences, lengths):
+        mask = idx < length
+        unpacked_seq = seq[mask]
+        unpadded_sequences.append(unpacked_seq)
+
+    return unpadded_sequences
+
+
 def pack_sequence(sequences, enforce_sorted=True):
     # type: (List[Tensor], bool) -> PackedSequence
     r"""Packs a list of variable length Tensors
+
+    Consecutive call of the next functions: ``pad_sequence``, ``pack_padded_sequence``.
 
     ``sequences`` should be a list of Tensors of size ``L x *``, where `L` is
     the length of a sequence and `*` is any number of trailing dimensions,
@@ -396,3 +445,35 @@ def pack_sequence(sequences, enforce_sorted=True):
     """
     lengths = torch.as_tensor([v.size(0) for v in sequences])
     return pack_padded_sequence(pad_sequence(sequences), lengths, enforce_sorted=enforce_sorted)
+
+
+def unpack_sequence(packed_sequences):
+    # type: (PackedSequence) -> List[Tensor]
+    r"""Unpacks PackedSequence into a list of variable length Tensors
+
+    ``packed_sequences`` should be a PackedSequence object.
+
+
+    Example:
+        >>> from torch.nn.utils.rnn import pack_sequence, unpack_sequence
+        >>> a = torch.tensor([1,2,3])
+        >>> b = torch.tensor([4,5])
+        >>> c = torch.tensor([6])
+        >>> sequences = [a, b, c]
+        [tensor([ 1,  2,  3]), tensor([ 4,  5]), tensor([ 6])]
+        >>> packed_sequences = pack_sequence(sequences)
+        PackedSequence(data=tensor([ 1,  4,  6,  2,  5,  3]), batch_sizes=tensor([ 3,  2,  1]))
+        >>> unpacked_sequences = unpack_sequence(packed_sequences)
+        [tensor([ 1,  2,  3]), tensor([ 4,  5]), tensor([ 6])]
+
+
+    Args:
+        packed_sequences (PackedSequence): A PackedSequence object.
+
+    Returns:
+        a list of :class:`Tensor` objects
+    """
+
+    padded_sequences, lengths = pad_packed_sequence(packed_sequences, batch_first=True)
+    unpacked_sequences = unpad_sequence(padded_sequences, lengths, batch_first=True)
+    return unpacked_sequences

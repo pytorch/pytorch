@@ -19,7 +19,7 @@ void mkldnn_matmul(
 bool use_mkldnn_bf16_matmul(
     const Tensor& mat1,
     const Tensor& mat2,
-    const c10::optional<Tensor>& result_opt){
+    const Tensor& result_opt){
   return false;
 }
 
@@ -205,9 +205,7 @@ inline bool checksize(const Tensor& mat1, const Tensor& mat2){
 bool use_mkldnn_bf16_matmul(
     const Tensor& mat1,
     const Tensor& mat2,
-    const c10::optional<Tensor>& result_opt) {
-  c10::MaybeOwned<Tensor> result_maybe_owned = at::borrow_from_optional_tensor(result_opt);
-  const Tensor& result = *result_maybe_owned;
+    const Tensor& result) {
   return (
       use_mkldnn_bf16_matmul() &&
       mat1.scalar_type() == kBFloat16 &&

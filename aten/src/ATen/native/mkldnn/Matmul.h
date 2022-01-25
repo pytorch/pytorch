@@ -17,7 +17,7 @@ TORCH_API void mkldnn_matmul(
 bool use_mkldnn_bf16_matmul(
     const Tensor& mat1,
     const Tensor& mat2,
-    const c10::optional<Tensor>& result_opt);
+    const Tensor& result_opt);
 
 // Try running mkldnn optimized gemm, or returns false if naive gemm would be faster
 bool mkldnn_bf16_gemm(
