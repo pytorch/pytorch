@@ -108,12 +108,12 @@ class dual_level(_DecoratorContextManager):
     .. Note::
 
         The ``dual_level`` context appropriately enters and exit the dual level to
-        controls the current forward ad level, which is used by default by the other
+        controls the current forward AD level, which is used by default by the other
         functions in this API.
 
         We currently don't plan to support nested ``dual_level`` contexts, however, so
-        only a single forward ad level is supported. To compute higher-order
-        forward grads, one can use `functorch <https://github.com/pytorch/functorch>`__.
+        only a single forward AD level is supported. To compute higher-order
+        forward grads, one can use `functorch's jvp <https://github.com/pytorch/functorch#jvp>`__.
 
     Example::
 
