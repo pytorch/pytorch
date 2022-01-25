@@ -4,7 +4,7 @@ import sys
 import torch
 import torch.distributed as dist
 
-from torch.distributed import sharded_tensor
+from torch.distributed.shard import sharded_tensor
 from torch.distributed.distributed_c10d import _get_default_group
 
 from torch.testing._internal.common_distributed import (

@@ -3,7 +3,7 @@
 import sys
 import torch
 
-from torch.distributed import sharded_tensor
+from torch.distributed.shard import sharded_tensor
 from torch.distributed.shard.sharding_spec import (
     ChunkShardingSpec,
 )

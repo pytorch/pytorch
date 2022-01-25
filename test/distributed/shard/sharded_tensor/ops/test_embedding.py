@@ -4,7 +4,7 @@ import sys
 
 import torch
 import torch.distributed as dist
-from torch.distributed.shard.sharded_tensor import (
+from torch.distributed.shard import (
     shard_parameter,
 )
 from torch.testing._internal.common_distributed import (

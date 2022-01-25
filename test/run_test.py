@@ -202,6 +202,7 @@ WINDOWS_BLOCKLIST = [
     "distributed/pipeline/sync/test_worker",
     "distributed/elastic/agent/server/test/api_test",
     "distributed/elastic/multiprocessing/api_test",
+    "distributed/shard/sharding_spec/test_sharding_spec",
     "distributed/shard/sharded_tensor/test_sharded_tensor",
     "distributed/shard/sharded_tensor/ops/test_embedding",
     "distributed/shard/sharded_tensor/ops/test_embedding_bag",
