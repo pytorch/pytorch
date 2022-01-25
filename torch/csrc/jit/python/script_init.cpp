@@ -1039,7 +1039,7 @@ void initJitScriptBindings(PyObject* module) {
   // Used by torch.package to save ScriptModule objects in unified format.
   py::class_<ScriptModuleSerializer>(m, "ScriptModuleSerializer")
       .def(py::init<caffe2::serialize::PyTorchStreamWriter&>())
-      .def(py::init<caffe2::serialize::PyTorchStreamWriter&, SerializationStorageContext&>())
+      .def(py::init<caffe2::serialize::PyTorchStreamWriter&, std::shared_ptr<SerializationStorageContext>>())
       .def("serialize", &ScriptModuleSerializer::serialize_unified_format)
       .def(
           "write_files",
