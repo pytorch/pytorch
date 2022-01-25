@@ -75,8 +75,8 @@ node {
   name: "OuterNNSquential/Sequential[outer_nn_squential]/InnerNNSquential[0]/Sequential[inner_nn_squential]/Linear[0]/input.1"
   op: "aten::linear"
   input: "input/x"
-  input: "OuterNNSquential/Sequential[outer_nn_squential]/InnerNNSquential[0]/Sequential[inner_nn_squential]/Linear[0]/weight/weight.9"
-  input: "OuterNNSquential/Sequential[outer_nn_squential]/InnerNNSquential[0]/Sequential[inner_nn_squential]/Linear[0]/bias/bias.9"
+  input: "OuterNNSquential/Sequential[outer_nn_squential]/InnerNNSquential[0]/Sequential[inner_nn_squential]/Linear[0]/weight/weight.1"
+  input: "OuterNNSquential/Sequential[outer_nn_squential]/InnerNNSquential[0]/Sequential[inner_nn_squential]/Linear[0]/bias/bias.1"
   attr {
     key: "_output_shapes"
     value {
