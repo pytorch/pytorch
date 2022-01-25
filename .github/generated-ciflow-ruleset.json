@@ -56,27 +56,19 @@
       "linux-xenial-cuda11.3-py3.7-gcc7-bazel-test"
     ],
     "ciflow/binaries": [
-      "linux-binary-conda",
-      "linux-binary-libtorch-cxx11-abi",
-      "linux-binary-libtorch-pre-cxx11",
-      "linux-binary-manywheel",
       "windows-binary-conda",
       "windows-binary-libtorch-cxx11-abi",
       "windows-binary-libtorch-pre-cxx11",
       "windows-binary-wheel"
     ],
     "ciflow/binaries_conda": [
-      "linux-binary-conda",
       "windows-binary-conda"
     ],
     "ciflow/binaries_libtorch": [
-      "linux-binary-libtorch-cxx11-abi",
-      "linux-binary-libtorch-pre-cxx11",
       "windows-binary-libtorch-cxx11-abi",
       "windows-binary-libtorch-pre-cxx11"
     ],
     "ciflow/binaries_wheel": [
-      "linux-binary-manywheel",
       "windows-binary-wheel"
     ],
     "ciflow/cpu": [
@@ -113,10 +105,6 @@
       "win-vs2019-cuda11.3-py3"
     ],
     "ciflow/default": [
-      "linux-binary-conda",
-      "linux-binary-libtorch-cxx11-abi",
-      "linux-binary-libtorch-pre-cxx11",
-      "linux-binary-manywheel",
       "linux-bionic-py3.7-clang9",
       "linux-docs",
       "linux-vulkan-bionic-py3.7-clang9",
