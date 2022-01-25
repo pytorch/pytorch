@@ -26,6 +26,13 @@ class _OptimizerHookState(object):
 
     @classmethod
     def from_functional_optim(cls, functional_optim):
+        r"""
+        Create a `_OptimizerHookState`, which simply
+        holds a functional optimizer, directly from a
+        functional optimizer given by `functional_optim`.
+        Note that the `functional_optim` must implement
+        `step_param` to support per-parameter optimization.
+        """
         opt_hook_state_inst = cls.__new__(cls)  # Does not call __init__
         opt_hook_state_inst.functional_optimizer = functional_optim
         opt_hook_state_inst._check_valid_functional_optim()
