@@ -41,14 +41,16 @@ def exit_dual_level(*, level=None):
     _current_level = level - 1
 
 def make_dual(tensor, tangent, *, level=None):
-    r"""Function that creates a "dual object" that can be used to compute forward AD gradients
-    based on the given Tensor and its tangent (the gradient). It returns a new Tensor that
-    shares memory with :attr:`tensor` and the :attr:`tangent` is used as-is.
+    r"""Associates :attr:`tensor` with a forward AD gradient, :attr:`tangent`, to create
+    a "dual tensor", which is used to compute forward AD gradients.
+
+    The result is a new tensor aliased with :attr:`tensor`. :attr:`tensor`
+    is used as-is.
 
     This function is backward differentiable.
 
-    Given a function `f` whose jacobian is `J`, it allows to compute the jacobian vector product,
-    named `jvp`, between `J` and a given vector `v` as follows.
+    Given a function `f` whose jacobian is `J`, it allows one to compute the Jacobian-vector product (`jvp`)
+    between `J` and a given vector `v` as follows.
 
     Example::
 
@@ -73,10 +75,11 @@ def make_dual(tensor, tangent, *, level=None):
 UnpackedDualTensor = namedtuple('UnpackedDualTensor', ['primal', 'tangent'])
 
 def unpack_dual(tensor, *, level=None):
-    r"""Unpacks a "dual object" to return a namedtuple ``(primal, tangent)`` where
-    ``primal`` is a view of :attr:`tensor`'s primal and ``tangent`` is
-    :attr:`tensor`'s tangent (the gradient). Neither of these tensors can be dual
-    tensor of level :attr:`level`.
+    r"""Unpacks a "dual tensor" to get both its Tensor value and its forward AD gradient, i.e. ``tangent``.
+
+    The result is a namedtuple ``(primal, tangent)`` where ``primal`` is a view of
+    :attr:`tensor`'s primal and ``tangent`` is :attr:`tensor`'s tangent as-is.
+    Neither of these tensors can be dual tensor of level :attr:`level`.
 
     This function is backward differentiable.
 
