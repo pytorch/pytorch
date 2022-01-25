@@ -1,4 +1,3 @@
-
 #include <torch/csrc/jit/codegen/cuda/executor.h>
 
 #include <torch/csrc/jit/codegen/cuda/codegen.h>
@@ -15,6 +14,15 @@
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty_native.h>
+#include <ATen/ops/zeros.h>
+#endif
+
 #include <c10/core/DeviceGuard.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAStream.h>
@@ -214,10 +222,6 @@ void FusionExecutor::compileFusion(
     TORCH_INTERNAL_ASSERT(false, ss.str());
   }
 
-  TORCH_CHECK(
-      !kernel_summary.has_grid_reduction_in_loop,
-      "Grid reduction must not be placed inside a loop.");
-
   // TODO: pass block_size here;
   c10::optional<int> block_size = c10::nullopt;
   if (!inputs.empty()) {
@@ -290,7 +294,7 @@ at::Tensor inferAndAllocOutput(
   std::vector<kir::Val*> sizes;
 
   for (const auto id : maybe_rfactor_domain) {
-    if (id->isReduction() ||
+    if (id->isReduction() || id->isStride() ||
         id->iterType() == IterType::BroadcastWithoutStride) {
       continue;
     }
@@ -484,8 +488,7 @@ LaunchParams FusionExecutor::computeLaunchParams(
   // Add workspace for reduction and broadcast
   uint64_t reduction_broadcast_workspace = 0;
   const bool has_workspace = kernel_summary.has_block_reductions ||
-      kernel_summary.number_of_grid_reductions > 0 ||
-      kernel_summary.has_block_broadcasts;
+      kernel_summary.has_grid_reductions || kernel_summary.has_block_broadcasts;
   if (has_workspace &&
       kernel_summary.largest_smem_data_type != DataType::Null) {
     // Not using nThreads here since it does not handle uninitialized value
@@ -671,8 +674,6 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     //   2. `executor_entry` is not initialized
     executor_utils::validateKernelInputs(&fusion_, inputs, options_.device);
 
-    const auto kernel = lowered_.kernel();
-
     if (!evaluator_precomputed_integers_) {
       evaluator_precomputed_integers_ =
           std::make_unique<KernelPrecomputedIntegers>(&fusion_, lowered_);
@@ -685,8 +686,37 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     launch_params =
         computeLaunchParams(launch_constraints, expr_eval, warp_size_);
 
+    if (kernel()->summary().has_cooperative_grid_reduction) {
+#ifndef __HIP_PLATFORM_HCC__
+      int num_blocks_per_SM = -1;
+      at::globalContext().getNVRTC().cuOccupancyMaxActiveBlocksPerMultiprocessor(
+          &num_blocks_per_SM,
+          compiled_kernel_.function,
+          (int)(launch_params.bdimx() * launch_params.bdimy() * launch_params.bdimz()),
+          (size_t)launch_params.smem());
+
+      TORCH_INTERNAL_ASSERT(
+          (int64_t)(
+              num_blocks_per_SM *
+              at::cuda::getDeviceProperties(options_.device.index())
+                  ->multiProcessorCount) >= launch_params.gdimx() *
+                  launch_params.gdimy() * launch_params.gdimz(),
+          "Wanted to launch a cooperative kernel, however the number of blocks is greater than ",
+          "what can be resident on the GPU at once. Need: ",
+          launch_params.gdimx() * launch_params.gdimy() * launch_params.gdimz(),
+          " but limited to ",
+          num_blocks_per_SM,
+          " * ",
+          at::cuda::getDeviceProperties(options_.device.index())
+              ->multiProcessorCount);
+#else
+      TORCH_INTERNAL_ASSERT(
+          false, "Cross grid communication not supported with HIP.");
+#endif
+    }
+
     executor_utils::validateVectorizedTensors(
-        &fusion_, inputs, outputs, lowered_, compileTimeDataCache());
+        &fusion_, inputs, outputs, lowered_, compileTimeDataCache(), expr_eval);
 
     auto& fusion = fusion_;
 
@@ -728,7 +758,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
 
     global_buffers = allocGlobalVals(expr_eval);
 
-    if (kernel->summary().is_stochastic) {
+    if (kernel()->summary().is_stochastic) {
       // NOTE: this is how we map offset to PW kernels in order to have
       // identical random number generator to match native PyTorch results.
       // But it doesn't really work as it takes assumption how threads are
@@ -813,19 +843,40 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
   }
 
   if (execute_kernel_) {
-    FUSER_PERF_SCOPE("ExecutorRunFusion::cuLaunchKernel");
-    AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuLaunchKernel(
-        compiled_kernel_.function,
-        launch_params.gdimx(),
-        launch_params.gdimy(),
-        launch_params.gdimz(),
-        launch_params.bdimx(),
-        launch_params.bdimy(),
-        launch_params.bdimz(),
-        launch_params.smem(),
-        stream,
-        kernel_arguments.getBuffer(),
-        nullptr));
+    if (!kernel()->summary().has_cooperative_grid_reduction) {
+      FUSER_PERF_SCOPE("ExecutorRunFusion::cuLaunchKernel");
+      AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuLaunchKernel(
+          compiled_kernel_.function,
+          launch_params.gdimx(),
+          launch_params.gdimy(),
+          launch_params.gdimz(),
+          launch_params.bdimx(),
+          launch_params.bdimy(),
+          launch_params.bdimz(),
+          launch_params.smem(),
+          stream,
+          kernel_arguments.getBuffer(),
+          nullptr));
+    } else {
+#ifndef __HIP_PLATFORM_HCC__
+      FUSER_PERF_SCOPE("ExecutorRunFusion::cuLaunchCooperativeKernel");
+      AT_CUDA_DRIVER_CHECK(
+          at::globalContext().getNVRTC().cuLaunchCooperativeKernel(
+              compiled_kernel_.function,
+              launch_params.gdimx(),
+              launch_params.gdimy(),
+              launch_params.gdimz(),
+              launch_params.bdimx(),
+              launch_params.bdimy(),
+              launch_params.bdimz(),
+              launch_params.smem(),
+              stream,
+              kernel_arguments.getBuffer()));
+#else
+      TORCH_INTERNAL_ASSERT(
+          false, "Cross grid communication not supported with HIP.");
+#endif
+    }
   }
 
   if (measure_kernel_time_ ||

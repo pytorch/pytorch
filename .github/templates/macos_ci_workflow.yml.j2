@@ -7,8 +7,9 @@ name: !{{ build_environment }}
 {%- endblock %}
 
 on:
+{%- if is_default -%}
   pull_request:
-    types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
+{%- endif -%}
 
 {%- if is_scheduled %}
   schedule:
@@ -18,8 +19,15 @@ on:
     branches:
       - master
       - release/*
-      - fbsync
 {%- endif %}
+{%- for label in ciflow_config.labels | sort %}
+  {%- if loop.first %}
+    tags:
+  {%- endif %}
+  {%- if label != "ciflow/default" %}
+      - '!{{ label }}/*'
+  {%- endif %}
+{%- endfor %}
   workflow_dispatch:
 
 # For setup-miniconda, see https://github.com/conda-incubator/setup-miniconda/issues/179
@@ -35,18 +43,19 @@ env:
 !{{ common.set_xcode_version(xcode_version) }}
 
 jobs:
-!{{ common.ciflow_should_run_job(ciflow_config) }}
 {% block build +%}
   build:
     runs-on: !{{ test_runner_type }}
-    needs: [!{{ ciflow_config.root_job_name }}]
     env:
       JOB_BASE_NAME: !{{ build_environment }}
       # For sccache access (only on non-forked PRs)
       AWS_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
+      PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
     steps:
-      !{{ common.checkout_pytorch("recursive") }}
+      - name: print labels
+        run: echo "${PR_LABELS}"
+      !{{ common.checkout() }}
       !{{ common.setup_miniconda("3.8") }}
       - name: Install macOS homebrew dependencies
         run: |
@@ -79,8 +88,8 @@ jobs:
 {%- if not exclude_test %}
 {% block test +%}
   generate-test-matrix:
+    needs: build
     runs-on: ubuntu-18.04
-    needs: [!{{ ciflow_config.root_job_name }}]
     timeout-minutes: !{{ common.timeout_minutes }}
     env:
       TEST_RUNNER_TYPE: !{{ test_runner_type }}
@@ -103,7 +112,7 @@ jobs:
         run: .github/scripts/generate_pytorch_test_matrix.py
 
   test:
-    needs: [build, generate-test-matrix, !{{ ciflow_config.root_job_name }}]
+    needs: [build, generate-test-matrix]
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
       fail-fast: false
@@ -116,7 +125,7 @@ jobs:
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
     steps:
-      !{{ common.checkout_pytorch("false") }}
+      !{{ common.checkout(submodules="false") }}
       - uses: actions/download-artifact@v2
         name: Download PyTorch Build Artifacts from GHA
         with:
@@ -136,9 +145,9 @@ jobs:
           python3 -mpip install dist/*.whl
           .jenkins/pytorch/macos-test.sh
       !{{ common.render_test_results() }}
-      !{{ common.upload_downloaded_files(name='macos', use_s3=False, artifact_name="test-jsons", when="${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}") }}
+      !{{ common.upload_downloaded_files(name='macos', artifact_name="test-jsons", use_s3=False) }}
       !{{ common.upload_test_reports("macos", artifact_name="test-reports", use_s3=False) }}
-      !{{ common.upload_test_statistics(build_environment, when="${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}") }}
+      !{{ common.upload_test_statistics(build_environment) }}
 {% endblock +%}
 {%- endif %}
 

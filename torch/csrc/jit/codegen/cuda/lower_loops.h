@@ -16,9 +16,9 @@ namespace fuser {
 namespace cuda {
 
 //! Loop nest generator pass will get IR that looks something like:
-//! T0[I0o{ceil(I0/4)}, I1o{ceil(I1/128)}, I0iU{4}, I1i{128}] = ...* for( i :
-//! I0o{ceil(I0/4)} ) { and will generate the loop nest structure for these
-//! exprs like:
+//! T0[I0o{ceil(I0/4)}, I1o{ceil(I1/128)}, I0iU{4}, I1i{128}] = ...
+
+//  and will generate the loop nest structure for these exprs like:
 //!
 //! for( i : I0o{ceil(I0/4)} ) {
 //!   for( j : I1o{ceil(I1/128)} ) {
