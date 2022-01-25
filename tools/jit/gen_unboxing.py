@@ -49,9 +49,7 @@ TORCH_API void {f.func.name.unambiguous_name()}(Stack & stack);
             )
 
             # parse arguments into C++ code
-            arguments = unboxing.convert_arguments(
-                args, f.func.arguments.tensor_options
-            )
+            arguments = unboxing.convert_arguments(args)
 
             # for each C++ argument, generate the conversion code
             code_connector = "\n\t"
