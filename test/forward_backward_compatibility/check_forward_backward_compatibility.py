@@ -119,6 +119,10 @@ ALLOW_LIST = [
     ("aten::quantile", datetime.date(2022, 9, 30)),
     ("aten::nanquantile", datetime.date(2022, 9, 30)),
     ("aten::_convolution_double_backward", datetime.date(2022, 3, 31)),
+    ("aten::cudnn_batch_norm_backward", datetime.date(2022, 2, 28)),
+    ("aten::cudnn_batch_norm", datetime.date(2022, 2, 28)),
+    ("aten::_batch_norm_impl_index_backward", datetime.date(2022, 2, 28)),
+    ("aten::_batch_norm_impl_index", datetime.date(2022, 2, 28)),
 ]
 
 ALLOW_LIST_COMPILED = [
