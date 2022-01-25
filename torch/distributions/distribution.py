@@ -2,7 +2,7 @@ import torch
 import warnings
 from torch.distributions import constraints
 from torch.distributions.utils import lazy_property
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, Type
 
 
 class Distribution(object):
@@ -60,6 +60,24 @@ class Distribution(object):
                         f"but found invalid values:\n{value}"
                     )
         super(Distribution, self).__init__()
+
+    def __init_subclass__(cls, *args, **kwargs):
+        super().__init_subclass__(*args, **kwargs)
+
+        # Automatically decorate icdf methods to apply sample validation if necessary
+        def icdf_decorator(func):
+            def wrapper(self: Type[Distribution], value: torch.Tensor):
+                icdf_result = func(self, value)
+                if self._validate_args:
+                    self._validate_sample(icdf_result)
+                return icdf_result
+
+            return wrapper
+
+        if 'icdf' in cls.__dict__:
+            icdf_func = cls.__dict__['icdf']
+            setattr(cls, 'icdf', icdf_decorator(icdf_func))
+
 
     def expand(self, batch_shape, _instance=None):
         """
