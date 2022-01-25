@@ -3534,8 +3534,6 @@
     CPU, Meta: range_out
     CUDA: range_cuda_out
 
-# CASE 1: Tensor, Tensor(a), Tensor(a!)
-# CASE 2: Use MemoryFormat memory_format=contiguous_format parameter; API change: numpy dosn't
 - func: ravel(Tensor(a) self) -> Tensor(a)
   variants: function, method
 

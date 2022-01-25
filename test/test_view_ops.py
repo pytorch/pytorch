@@ -918,14 +918,16 @@ class TestOldViewOps(TestCase):
                 self.assertEqual(flat.shape, torch.Size([size]))
                 self.assertEqual(src.view(-1), flat)
                 self.assertEqual(flat._base, src)
+                self.assertTrue(flat.is_contiguous())
 
                 # Non-continuous Tensor -> Copy
                 if nc:
                     nc_src = src.t()
                     nc_flat = nc_src.ravel()
                     self.assertEqual(nc_flat.shape, torch.Size([size]))
-                    self.assertEqual(nc_src.reshape(-1), nc_flat)
-                    self.assertTrue(nc_flat._base != nc_src)
+                    self.assertEqual(nc_src.contiguous().view(-1), nc_flat)
+                    self.assertNotEqual(nc_flat._base, src)
+                    self.assertTrue(nc_flat.is_contiguous())
 
         # Test that flatten returns 1-dim tensor when given a 0-dim tensor
         zero_dim_tensor = torch.tensor(123, device=device)
@@ -933,7 +935,7 @@ class TestOldViewOps(TestCase):
         one_dim_tensor = torch.tensor([123], device=device)
         flat1 = zero_dim_tensor.ravel()
         ones_like_tensor = torch.ones(10, device=device)[::2]
-        flat2 = ones_like_tensor.contiguous().view(-1)
+        flat2 = ones_like_tensor.ravel()
 
         self.assertEqual(zero_dim_tensor.shape, torch.Size([]))
         self.assertEqual(flat0.shape, torch.Size([1]))
@@ -944,9 +946,9 @@ class TestOldViewOps(TestCase):
         self.assertEqual(flat0, one_dim_tensor)
         self.assertEqual(flat0, flat1)
         self.assertEqual(flat0.shape, flat1.shape)
-        self.assertTrue(flat0.is_contiguous()) # ~TODO~
-        self.assertTrue(flat1.is_contiguous()) # == one_dim_tensor.is_contiguous())
-        self.assertTrue(flat2.is_contiguous())# != ones_like_tensor.is_contiguous())
+        self.assertTrue(flat0.is_contiguous())
+        self.assertTrue(flat1.is_contiguous())
+        self.assertTrue(flat2.is_contiguous())
 
         # Test both float tensor and quantized tensor
         tensors = [torch.randn(5, 5, 5, 5, device=device),

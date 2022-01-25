@@ -2072,32 +2072,8 @@ Tensor flatten(const Tensor& self, DimnameList dims, Dimname out_dim) {
   return native::flatten(self, *dims.begin(), *(dims.end() - 1), out_dim);
 }
 
-
-// CASE 1: self.contiguous().view(-1)
-// CASE 2: specify memory format
-Tensor ravel(const Tensor& self/*, at::MemoryFormat memory_format=at::MemoryFormat::Contiguous*/) {
-  /*auto memory_format = self.suggest_memory_format();
-  auto output_tesnor = at::ravel(self.shape, memory_format);
-
-  switch (memory_format) {
-      case MemoryFormat::ChannelsLast: {
-	auto input_cl_contiguous = self.contiguous(
-		MemoryFormat::ChannelsLast); // if kernel requires memory dense
-					     // tensor
-	break;
-     }
-     case MemoryFormat::Contiguous: {
-	break;
-     }
-     default:
-    TORCH_CHECK(
-        false,
-        "Unsupported memory format. Supports only ChannelsLast, Contiguous");
-}
-  if(self.is_contiguous(memory_format)) {
-      return self.reshape(-1);
-  }*/
-  return self.contiguous().view(-1); //.reshape(-1); //.clone(at::MemoryFormat::Contiguous);
+Tensor ravel(const Tensor& self) {
+  return self.contiguous().view(-1);
 }
 
 static inline void handle_unflatten_exception(const std::runtime_error &e,
