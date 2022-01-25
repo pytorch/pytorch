@@ -102,9 +102,11 @@ void _process_forward_mode_AD(const variable_list &inputs,
     return;
   }
 
-
-  auto forward_grads = jvp_user_function(inputs, input_grads);
-
+  torch::autograd::variable_list forward_grads;
+  {
+    at::AutoFwGradMode fw_grad_mode(false);
+    forward_grads = jvp_user_function(inputs, input_grads);
+  }
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   const auto num_forward_grads = forward_grads.size();

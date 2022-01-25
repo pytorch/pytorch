@@ -204,6 +204,7 @@ static int THPFunction_traverse(THPFunction *self, visitproc visit, void *arg)
   Py_VISIT(self->to_save);
   Py_VISIT(self->non_differentiable);
   Py_VISIT(self->dirty_tensors);
+  Py_VISIT(self->saved_for_forward);
   return 0;
 }
 
@@ -218,6 +219,7 @@ static int THPFunction_clear(THPFunction *self)
   Py_CLEAR(self->to_save);
   Py_CLEAR(self->non_differentiable);
   Py_CLEAR(self->dirty_tensors);
+  Py_CLEAR(self->saved_for_forward);
 
   self->output_info.clear();
   self->input_info.clear();
@@ -639,6 +641,9 @@ PyObject* process_outputs(PyObject *op_obj, const std::shared_ptr<PyNode>& cdata
     grad_fn->non_differentiable = nullptr;
   }
 
+  Py_XDECREF(grad_fn->saved_for_forward);
+  grad_fn->saved_for_forward = nullptr;
+
   // Unpack the output, unless .forward() returned a tuple
   if (unpack_output) {
     PyObject *output = PyTuple_GET_ITEM(outputs.get(), 0);
@@ -813,9 +818,13 @@ static PyObject *unpack_saved_variables(
 PyObject *THPFunction_saved_tensors(THPFunction *self, void *_unused)
 {
   HANDLE_TH_ERRORS
-  return unpack_saved_variables(self, [](const Variable& var) {
-    return THPVariable_Wrap(var);
-  });
+  if (self->saved_for_forward) {
+    return self->saved_for_forward;
+  } else {
+    return unpack_saved_variables(self, [](const Variable& var) {
+      return THPVariable_Wrap(var);
+    });
+  }
   END_HANDLE_TH_ERRORS
 }
 
@@ -959,6 +968,7 @@ static struct PyGetSetDef THPFunction_properties[] = {
   {"to_save", &getObject<&THPFunction::to_save>, &setObject<&THPFunction::to_save>, nullptr, nullptr},
   {"non_differentiable", &getObject<&THPFunction::non_differentiable>, &setObject<&THPFunction::non_differentiable>, nullptr, nullptr},
   {"dirty_tensors", &getObject<&THPFunction::dirty_tensors>, &setObject<&THPFunction::dirty_tensors>, nullptr, nullptr},
+  {"saved_for_forward", &getObject<&THPFunction::saved_for_forward>, &setObject<&THPFunction::saved_for_forward>, nullptr, nullptr},
   {"needs_input_grad", &getObject<&THPFunction::needs_input_grad>, nullptr, nullptr, nullptr},
   {"requires_grad", getRequiresGrad, nullptr, nullptr, nullptr},
   {"metadata", (getter)THPFunction_metadata, nullptr, nullptr, nullptr},
