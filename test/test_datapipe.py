@@ -46,6 +46,7 @@ from torch.utils.data import (
     runtime_validation_disabled,
 )
 from torch.utils.data.graph import traverse
+from torch.utils.data.datapipes.utils.common import StreamWrapper
 from torch.utils.data.datapipes.utils.decoder import (
     basichandlers as decoder_basichandlers,
 )
@@ -173,6 +174,85 @@ class TestDataChunk(TestCase):
         rng.shuffle(elements)
 
         self.assertEqual(chunk, elements)
+
+
+class TestStreamWrapper(TestCase):
+    class _FakeFD:
+        def __init__(self, filepath):
+            self.filepath = filepath
+            self.opened = False
+            self.closed = False
+
+        def open(self):
+            self.opened = True
+
+        def read(self):
+            if self.opened:
+                return "".join(self)
+            else:
+                raise IOError("Cannot read from un-opened file descriptor")
+
+        def __iter__(self):
+            for i in range(5):
+                yield str(i)
+
+        def close(self):
+            if self.opened:
+                self.opened = False
+                self.closed = True
+
+        def __repr__(self):
+            return "FakeFD"
+
+    def test_dir(self):
+        fd = TestStreamWrapper._FakeFD("")
+        wrap_fd = StreamWrapper(fd)
+
+        s = set(dir(wrap_fd))
+        for api in ['open', 'read', 'close']:
+            self.assertTrue(api in s)
+
+    def test_api(self):
+        fd = TestStreamWrapper._FakeFD("")
+        wrap_fd = StreamWrapper(fd)
+
+        self.assertFalse(fd.opened)
+        self.assertFalse(fd.closed)
+        with self.assertRaisesRegex(IOError, "Cannot read from"):
+            wrap_fd.read()
+
+        wrap_fd.open()
+        self.assertTrue(fd.opened)
+        self.assertEqual("01234", wrap_fd.read())
+
+        del wrap_fd
+        self.assertFalse(fd.opened)
+        self.assertTrue(fd.closed)
+
+    def test_pickle(self):
+        f = tempfile.TemporaryFile()
+        with self.assertRaises(TypeError) as ctx1:
+            pickle.dumps(f)
+
+        wrap_f = StreamWrapper(f)
+        with self.assertRaises(TypeError) as ctx2:
+            pickle.dumps(wrap_f)
+
+        # Same exception when pickle
+        self.assertEqual(str(ctx1.exception), str(ctx2.exception))
+
+        fd = TestStreamWrapper._FakeFD("")
+        wrap_fd = StreamWrapper(fd)
+        _ = pickle.loads(pickle.dumps(wrap_fd))
+
+    def test_repr(self):
+        fd = TestStreamWrapper._FakeFD("")
+        wrap_fd = StreamWrapper(fd)
+        self.assertEqual(str(wrap_fd), "StreamWrapper<FakeFD>")
+
+        f = tempfile.TemporaryFile()
+        wrap_f = StreamWrapper(f)
+        self.assertEqual(str(wrap_f), "StreamWrapper<" + str(f) + ">")
 
 
 class TestIterableDataPipeBasic(TestCase):
