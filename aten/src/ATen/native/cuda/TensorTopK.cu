@@ -216,10 +216,10 @@ constexpr int RADIX_DIGITS = 1 << RADIX_BITS; // 2 ^ RADIX_BITS
 constexpr int RADIX_MASK = (RADIX_DIGITS - 1);
 static_assert(RADIX_DIGITS <= BLOCK_THREADS, "radixFindKthValues kernel requires RADIX_DIGITS <= BLOCK_THREADS");
 
-template <typename T>
-__global__ void fill(T* x, T value, int size) {
-  int idx = blockIdx.x * blockDim.x + threadIdx.x;
-  for (int i = idx; i < size; i += gridDim.x * blockDim.x) {
+template <typename T, typename IndexType>
+__global__ void fill(T* x, T value, IndexType size) {
+  IndexType idx = blockIdx.x * blockDim.x + threadIdx.x;
+  for (IndexType i = idx; i < size; i += gridDim.x * blockDim.x) {
     x[i] = value;
   }
 }
@@ -242,10 +242,10 @@ __global__ void radixFindKthValues(
     Bitwise desiredMask,
 
     // outputs
-    int* semaphores,   // size: num_slices
-    Bitwise* desires,  // size: num_slices
-    IndexType* counts, // size: num_slices * blocks_per_slice * radix_digits
-    T* kthValues       // size: num_slices, only write when current_bit reaches 0
+    uint32_t* semaphores,  // size: num_slices
+    Bitwise* desires,      // size: num_slices
+    IndexType* counts,     // size: num_slices * blocks_per_slice * radix_digits
+    T* kthValues           // size: num_slices, only write when current_bit reaches 0
   ) {
 
   int items_per_block = items_per_thread * BLOCK_THREADS;
@@ -322,7 +322,7 @@ __global__ void radixFindKthValues(
     if (blocks_per_slice == 1) {
       s_is_last_block_done = true;
     } else {
-      int blocks_finished_old = atomicAdd(&semaphores[slice_idx], 1);
+      uint32_t blocks_finished_old = atomicAdd(&semaphores[slice_idx], 1);
       s_is_last_block_done = (blocks_finished_old == blocks_per_slice - 1);
     }
   }
@@ -415,9 +415,10 @@ void launch(
   auto kthValues_buffer = allocator.allocate(numInputSlices * sizeof(T));
   T* kthValues = reinterpret_cast<T*>(kthValues_buffer.get());
 
-  auto semaphores_buffer = allocator.allocate(numInputSlices * sizeof(int));
-  int* semaphores = reinterpret_cast<int*>(semaphores_buffer.get());
-  AT_CUDA_CHECK(cudaMemsetAsync(semaphores, 0, numInputSlices * sizeof(int), c10::cuda::getCurrentCUDAStream()));
+  TORCH_CHECK(blocks_per_slice <= std::numeric_limits<uint32_t>::max(), "blocks_per_slice larger than uint32 maximum is not supported");
+  auto semaphores_buffer = allocator.allocate(numInputSlices * sizeof(uint32_t));
+  uint32_t* semaphores = reinterpret_cast<uint32_t*>(semaphores_buffer.get());
+  AT_CUDA_CHECK(cudaMemsetAsync(semaphores, 0, numInputSlices * sizeof(uint32_t), c10::cuda::getCurrentCUDAStream()));
 
   auto ks_to_find_buffer = allocator.allocate(numInputSlices * sizeof(IndexType));
   IndexType* ks_to_find = reinterpret_cast<IndexType*>(ks_to_find_buffer.get());
