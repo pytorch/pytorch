@@ -29,7 +29,7 @@ PyTorch today:
 - efficiently computing Jacobians and Hessians
 - efficiently computing batched Jacobians and Hessians
 
-Composing `vmap`, `grad`, and `vjp` transforms allows us to express the above
+Composing `vmap`, `grad`, `vjp`, and `jvp` transforms allows us to express the above
 without designing a separate subsystem for each. This idea of composable function
 transforms comes from the [JAX framework](https://github.com/google/jax).
 
@@ -147,7 +147,8 @@ assert torch.allclose(y, x.sin())
 ## What are the transforms?
 
 Right now, we support the following transforms:
-- `grad`, `vjp`, `jacrev`
+- `grad`, `vjp`, `jvp`,
+- `jacrev`, `jacfwd`, `hessian`
 - `vmap`
 
 Furthermore, we have some utilities for working with PyTorch modules.
@@ -218,7 +219,7 @@ inputs = (weights,examples, targets)
 grad_weight_per_example = vmap(grad(compute_loss), in_dims=(None, 0, 0))(*inputs)
 ```
 
-### vjp and jacrev
+### vjp
 
 The `vjp` transform applies `func` to `inputs` and returns a new function that
 computes vjps given some `cotangents` Tensors.
@@ -227,8 +228,24 @@ from functorch import vjp
 outputs, vjp_fn = vjp(func, inputs); vjps = vjp_fn(*cotangents)
 ```
 
+### jvp
+
+The `jvp` transforms computes Jacobian-vector-products and is also known as
+"forward-mode AD". It is not a higher-order function unlike most other transforms,
+but it returns the outputs of `func(inputs)` as well as the `jvp`s.
+```py
+from functorch import jvp
+x = torch.randn(5)
+y = torch.randn(5)
+f = lambda x, y: (x * y)
+_, output = jvp(f, (x, y), (torch.ones(5), torch.ones(5)))
+assert torch.allclose(output, x + y)
+```
+
+### jacrev, jacfwd, and hessian
+
 The `jacrev` transform returns a new function that takes in `x` and returns the
-Jacobian of `torch.sin` with respect to `x`
+Jacobian of `torch.sin` with respect to `x` using reverse-mode AD.
 ```py
 from functorch import jacrev
 x = torch.randn(5)
@@ -245,13 +262,35 @@ jacobian = vmap(jacrev(torch.sin))(x)
 assert jacobian.shape == (64, 5, 5)
 ```
 
-`jacrev` can be composed with itself to produce hessians:
+`jacfwd` is a drop-in replacement for `jacrev` that computes Jacobians using
+forward-mode AD:
+```py
+from functorch import jacfwd
+x = torch.randn(5)
+jacobian = jacfwd(torch.sin)(x)
+expected = torch.diag(torch.cos(x))
+assert torch.allclose(jacobian, expected)
+```
+
+Composing `jacrev` with itself or `jacfwd` can produce hessians:
 ```py
 def f(x):
   return x.sin().sum()
 
 x = torch.randn(5)
-hessian = jacrev(jacrev(f))(x)
+hessian0 = jacrev(jacrev(f))(x)
+hessian1 = jacfwd(jacrev(f))(x)
+```
+
+The `hessian` is a convenience function that combines `jacfwd` and `jacrev`:
+```py
+from functorch import hessian
+
+def f(x):
+  return x.sin().sum()
+
+x = torch.randn(5)
+hess = hessian(f)(x)
 ```
 
 ### Tracing through the transformations
