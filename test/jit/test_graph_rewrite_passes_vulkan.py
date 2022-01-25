@@ -52,7 +52,7 @@ class TestGraphRewritePassesVulkan(TestGraphRewritePasses):
         model_2(x_2)  # make sure it runs
 
 # TODO: elimintate this code and move TestGraphRewritePassesVulkan inside test_graph_rewrite_passes.py
-# after CI build is implemented that supports USE_VULKAN=1 
+# after CI build is implemented that supports USE_VULKAN=1
 if __name__ == '__main__':
     test_case = TestGraphRewritePassesVulkan()
     test_case.test_vulkan_insert_pre_packed_ops()
