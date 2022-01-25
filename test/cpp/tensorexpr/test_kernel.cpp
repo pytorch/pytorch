@@ -1765,6 +1765,20 @@ graph(%x : int, %y : int):
   parseIR(ir, graph.get(), vmap);
   TensorExprKernel k(graph);
 
+  auto stmt = k.getCodeGenStmt();
+  std::ostringstream oss;
+  oss << *stmt;
+
+  // Verify the generated IR. We expect to see a scalar variable (Let) followed
+  // by a store to a 0-dim buffer.
+  const std::string& verification_pattern = R"IR(
+# CHECK: int64_t
+# CHECK-NEXT: [0ll] =
+# CHECK-NEXT: int64_t
+# CHECK-NEXT: [0ll] =
+)IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
   int64_t x = 2, y = 3, r = 0, z = 0;
 
   // Verify that TEK::runFast works correctly with scalar outputs
