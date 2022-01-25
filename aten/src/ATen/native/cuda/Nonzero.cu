@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <ATen/cuda/EmptyTensor.h>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh> //for MAX_DIMS
 #include <ATen/cuda/cub.cuh>
@@ -69,9 +70,8 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out){
   //However, out with correct sizes and incorrect strides will have to be copied to from the intermediate we've produced.
   bool need_to_copy = out.dim() == 2 && out.sizes()[0] == num_nonzeros_h && out.sizes()[1] == self.dim() && !out.t().is_contiguous();
   at::Tensor out_temp = need_to_copy ?
-    at::native::empty_cuda({self.dim(), num_nonzeros_h}, optTypeMetaToScalarType(out.options().dtype_opt()),
-                           out.options().layout_opt(), out.options().device_opt(), out.options().pinned_memory_opt()) :
-    out.resize_({self.dim(), num_nonzeros_h});
+      Tensor(at::detail::empty_cuda({self.dim(), num_nonzeros_h}, out.options())) :
+      out.resize_({self.dim(), num_nonzeros_h});
   //Scalars are expected to produce output of size (1,0), so we can't write to it
   if (self.dim() > 0) {
     cub::CountingInputIterator<int64_t> counting_itr(0);
@@ -116,7 +116,7 @@ Tensor& nonzero_out_cuda(const Tensor& self, Tensor& out){
 }
 
 Tensor nonzero_cuda(const Tensor& self){
-  Tensor out = at::native::empty_cuda({0}, kLong, self.options().layout_opt(), self.options().device_opt(), self.options().pinned_memory_opt());
+  Tensor out = at::detail::empty_cuda({0}, self.options().dtype(kLong));
   return at::native::nonzero_out_cuda(self, out);
 }
 } //namespace::native
