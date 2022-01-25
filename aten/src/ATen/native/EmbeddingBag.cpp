@@ -107,7 +107,7 @@ index_select_add(const Tensor &select_indices,
   auto output_stride0 = output.strides()[0];
   auto output_stride1 = output.strides()[1];
 
-  for (int64_t i = 0; i < numel; i++) {
+  for (const auto i : c10::irange(numel)) {
     // We can skip indices equal to padding_idx so they are not included in
     // the reduction
     if (select_indices_data[i] != padding_idx) {
@@ -247,7 +247,7 @@ index_select_add(const Tensor &select_indices,
     auto output_stride0 = output.strides()[0];
     auto output_stride1 = output.strides()[1];
     auto numel = add_indices.numel();
-    for (int64_t i = 0; i < numel; i++) {
+    for (const auto i : c10::irange(numel)) {
       // We can skip indices equal to padding_idx so they are not included in
       // the reduction
       if (select_indices_data[i] != padding_idx) {
@@ -302,14 +302,14 @@ index_select_scale_add(const Tensor &select_indices,
   auto* scale_data = scale.data_ptr<data_t>();
   auto scale_stride = scale.strides()[0];
 
-  for (int64_t i = 0; i < numel; i++) {
+  for (const auto i : c10::irange(numel)) {
     // We can skip indices equal to padding_idx so they are not included in
     // the reduction
     if (select_indices_data[i] != padding_idx) {
       auto* src_base = src_data + src_stride0 * select_indices_data[i];
       auto* output_base = output_data + output_stride0 * add_indices_data[i];
       auto scale = scale_data[i * scale_stride];
-      for (int64_t j = 0; j < ddim; j++) {
+      for (const auto j : c10::irange(ddim)) {
         output_base[j * output_stride1] += src_base[j * src_stride1] * scale;
       }
     } else if (bag_size.defined()) {
@@ -419,14 +419,14 @@ index_select_scale_add(const Tensor &select_indices,
     auto numel = add_indices.numel();
 
 
-    for (int64_t i = 0; i < numel; i++) {
+    for (const auto i : c10::irange(numel)) {
       // We can skip indices equal to padding_idx so they are not included in
       // the reduction
       if (select_indices_data[i] != padding_idx) {
         auto* src_base = src_data + src_stride0 * select_indices_data[i];
         auto* output_base = output_data + output_stride0 * add_indices_data[i];
         auto scale = scale_data[i * scale_stride];
-        for (int64_t j = 0; j < ddim; j++) {
+        for (const auto j : c10::irange(ddim)) {
           output_base[j * output_stride1] += src_base[j * src_stride1] * scale;
         }
       } else if (bag_size.defined()) {
@@ -493,8 +493,8 @@ void make_bag_size_out(
     const bool include_last_offset,
     const bool requires_grad) {
   if (requires_grad || mode == MODE_MEAN || mode == MODE_MAX) {
-    auto num_bags = offsets.size(0) - (include_last_offset ? 1 : 0);
-    bag_size_out = at::zeros({num_bags}, offsets.options());
+    auto num_bags = offsets.sizes()[0] - (include_last_offset ? 1 : 0);
+    at::native::resize_(bag_size_out, {num_bags}, c10::nullopt);
     // Compute this for MODE_MEAN and MODE_MAX (latter needed for backwards)
     if (num_bags != 1) {
       bag_size_out.slice(0, 0, bag_size_out.sizes()[0] - 1, 1) =
@@ -504,6 +504,8 @@ void make_bag_size_out(
     if (num_bags > 0) {
       bag_size_out[-1] = indices.sizes()[0] - offsets[num_bags - 1];
     }
+  } else {
+    at::native::resize_(bag_size_out, offsets.sizes(), c10::nullopt);
   }
 }
 
@@ -699,7 +701,7 @@ void _embedding_bag_cpu_impl_out(Tensor& output, Tensor& offset2bag,
       // make bag_size output deterministic
       at::native::zero_(bag_size);
     }
-    max_indices = bag_size;
+     max_indices.copy_(bag_size);
   } else { // MODE_MAX
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       weight.scalar_type(), "embedding_bag_cpu_max_out", [&]() {

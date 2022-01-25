@@ -47,6 +47,18 @@ Val* IrBuilder::negExpr(Val* val) {
   return result;
 }
 
+Val* IrBuilder::notExpr(Val* val) {
+  auto result = newResult(val->dtype());
+  create<UnaryOp>(UnaryOpType::Not, result, val);
+  return result;
+}
+
+Val* IrBuilder::setExpr(Val* val) {
+  auto result = newResult(val->dtype());
+  create<UnaryOp>(UnaryOpType::Set, result, val);
+  return result;
+}
+
 Val* IrBuilder::setExprNamedScalar(const std::string& name, Val* val) {
   auto result = create<NamedScalar>(name, val->dtype());
   create<UnaryOp>(UnaryOpType::Set, result, val);
@@ -145,9 +157,116 @@ Bool* IrBuilder::trueVal() {
 
 NamedScalar* IrBuilder::magicZeroVal() {
   if (magic_zero_ == nullptr) {
-    magic_zero_ = create<kir::NamedScalar>("nvfuser_zero", DataType::Int);
+    magic_zero_ = create<kir::NamedScalar>(kMagicZeroName, DataType::Int);
   }
   return magic_zero_;
+}
+
+Val* SimplifyingIrBuilder::negExpr(Val* val) {
+  if (auto int_val = dynamic_cast<kir::Int*>(val)) {
+    if (int_val->isConst()) {
+      return create<Int>(-int_val->value().value());
+    }
+  }
+  return IrBuilder::negExpr(val);
+}
+
+Val* SimplifyingIrBuilder::notExpr(Val* val) {
+  if (auto bool_val = dynamic_cast<Bool*>(val)) {
+    if (bool_val->isConst()) {
+      if (bool_val->value().value()) {
+        return falseVal();
+      } else {
+        return trueVal();
+      }
+    }
+  }
+  return IrBuilder::notExpr(val);
+}
+
+Val* SimplifyingIrBuilder::addExpr(Int* lhs, Int::ScalarType rhs) {
+  if (rhs == 0) {
+    return lhs;
+  } else if (lhs == nullptr) {
+    return IrBuilder::create<kir::Int>(rhs);
+  } else if (lhs->isConst()) {
+    return IrBuilder::create<kir::Int>(lhs->value().value() + rhs);
+  } else if (rhs > 0) {
+    return IrBuilder::addExpr(lhs, IrBuilder::create<kir::Int>(rhs));
+  } else {
+    return IrBuilder::subExpr(lhs, IrBuilder::create<kir::Int>(-rhs));
+  }
+}
+
+Val* SimplifyingIrBuilder::addExpr(Int* lhs, Int* rhs) {
+  if (rhs == nullptr) {
+    return lhs;
+  } else if (lhs == nullptr) {
+    return rhs;
+  } else if (lhs->isConst()) {
+    return addExpr(rhs, lhs->value().value());
+  } else if (rhs->isConst()) {
+    return addExpr(lhs, rhs->value().value());
+  } else {
+    return IrBuilder::addExpr(lhs, rhs);
+  }
+}
+
+Val* SimplifyingIrBuilder::addExpr(Val* lhs, Val* rhs) {
+  TORCH_INTERNAL_ASSERT(lhs != nullptr || rhs != nullptr);
+  if (lhs == nullptr || lhs->isZeroInt()) {
+    return rhs;
+  } else if (rhs == nullptr || rhs->isZeroInt()) {
+    return lhs;
+  }
+  auto lhs_int = dynamic_cast<Int*>(lhs);
+  auto rhs_int = dynamic_cast<Int*>(rhs);
+  if (lhs_int != nullptr && rhs_int != nullptr) {
+    return addExpr(lhs_int, rhs_int);
+  } else {
+    return IrBuilder::addExpr(lhs, rhs);
+  }
+}
+
+Val* SimplifyingIrBuilder::subExpr(Val* lhs, Val* rhs) {
+  return addExpr(lhs, negExpr(rhs));
+}
+
+Val* SimplifyingIrBuilder::andExpr(Val* lhs, Val* rhs) {
+  TORCH_INTERNAL_ASSERT(!(lhs == nullptr && rhs == nullptr));
+
+  if (lhs == nullptr) {
+    return rhs;
+  } else if (rhs == nullptr) {
+    return lhs;
+  }
+
+  bool lhs_definitely_true = false;
+  bool lhs_definitely_false = false;
+  auto lhs_bool = dynamic_cast<Bool*>(lhs);
+  if (lhs_bool && lhs_bool->isConst()) {
+    lhs_definitely_true = lhs_bool->value().value();
+    lhs_definitely_false = !lhs_bool->value().value();
+  }
+  auto rhs_bool = dynamic_cast<Bool*>(rhs);
+  bool rhs_definitely_true = false;
+  bool rhs_definitely_false = false;
+  if (rhs_bool && rhs_bool->isConst()) {
+    rhs_definitely_true = rhs_bool->value().value();
+    rhs_definitely_false = !rhs_bool->value().value();
+  }
+
+  if (lhs_definitely_true && rhs_definitely_true) {
+    return trueVal();
+  } else if (lhs_definitely_false || rhs_definitely_false) {
+    return falseVal();
+  } else if (lhs_definitely_true) {
+    return rhs;
+  } else if (rhs_definitely_true) {
+    return lhs;
+  }
+
+  return IrBuilder::andExpr(lhs, rhs);
 }
 
 } // namespace kir

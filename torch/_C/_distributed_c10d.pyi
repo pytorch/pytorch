@@ -48,6 +48,7 @@ class Logger:
         device_ids: List[int],
         output_device: int,
         broadcast_buffers: bool,
+        has_sync_bn: bool,
     ): ...
     ...
 
@@ -350,6 +351,8 @@ class _ProcessGroupWrapper(ProcessGroup):
         pg: ProcessGroup,
         gloo_pg: ProcessGroupGloo
     ): ...
+    wrapped_pg: ProcessGroup
+
 
 class ProcessGroupNCCL(ProcessGroup):
     class Options: ...

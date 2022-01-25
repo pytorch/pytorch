@@ -15,7 +15,7 @@
 #include <ATen/cuda/CUDAUtils.h>
 
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/cub.cuh>
+#include <ATen/cuda/cub.h>
 #include <c10/util/irange.h>
 #include <c10/core/QScheme.h>
 
@@ -209,12 +209,28 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
   if (indices.size() > (size_t)self.dim()) {
     TORCH_CHECK_INDEX(false, "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   }
-  auto value_ = value.contiguous();
-  Tensor linearIndex, expandedValue, src;
+  if (!self.is_contiguous()) {
+    self = self.contiguous();
+  }
+  Tensor linearIndex, src, expandedValue = value;
   int64_t nElemBefore, strideBefore, sliceSize;
   std::vector<int64_t> inversePerm;
   std::tie(linearIndex, src, nElemBefore, strideBefore, sliceSize, inversePerm) = makeLinearIndex(self, indices, !unsafe);
   int64_t num_indices = linearIndex.numel();
+
+  if (expandedValue.numel() < num_indices * nElemBefore * sliceSize) {
+    auto expanded_size = at::DimVector(expandedValue.sizes());
+    auto size1 = expandedValue.sizes();
+    auto size2 = linearIndex.sizes();
+    if (are_expandable(size1, size2)) {
+      expanded_size = infer_size_dimvector(size1, size2);
+    }
+    if (nElemBefore > 1) {
+      expanded_size.insert(expanded_size.begin(), nElemBefore);
+    }
+    expandedValue = expandedValue.expand(expanded_size);
+  }
+  expandedValue = expandedValue.contiguous();
 
   if (num_indices > 0 && sliceSize > 0) {
       const bool permuted = !src.is_contiguous();
@@ -229,7 +245,7 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
       // cub on CUDA <= 11.2 have a bug that for small sizes
       // cub's sort can be much slower than thrust's merge sort
       // this bug is fixed in CUDA 11.3
-#if defined(CUDA_VERSION) && CUDA_VERSION < 11030
+#if (defined(CUDA_VERSION) && CUDA_VERSION < 11030) || defined(USE_ROCM)
       if (num_indices < 50000) {
         index_put_with_sort_kernel_thrust_helper(linearIndex, orig_indices, sorted_indices, num_indices);
       } else
@@ -240,13 +256,16 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
       // linearIndex can not be negative, and we take advantage of this
       // fact to sort on less bits for better performance.
       int64_t nbits = cuda::cub::get_num_bits(largestIndex(self) / sliceSize);
-      cuda::cub::sort_pairs(
+      cuda::cub::radix_sort_pairs(
         linearIndex.data_ptr<int64_t>(), sorted_indices.data_ptr<int64_t>(),
         range.data_ptr<int64_t>(), orig_indices.data_ptr<int64_t>(),
         num_indices, false, 0, nbits);
       }
 
-      TORCH_INTERNAL_ASSERT(linearIndex.numel()*sliceSize*nElemBefore == value.numel(), "number of flattened indices did not match number of elements in the value tensor", linearIndex.numel()*sliceSize*nElemBefore, value.numel());
+      TORCH_INTERNAL_ASSERT(
+          linearIndex.numel()*sliceSize*nElemBefore == expandedValue.numel(),
+          "number of flattened indices did not match number of elements in the value tensor: ",
+          linearIndex.numel()*sliceSize*nElemBefore, " vs ", expandedValue.numel());
       const int UNROLL = 4;
       const int indices_per_block = 4;
       dim3 grid(ceil_div(num_indices, (int64_t) indices_per_block),
@@ -255,11 +274,11 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
       dim3 block(C10_WARP_SIZE, indices_per_block);
 
       AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
-      value_.scalar_type(), "indexing_backward", [&] {
+      expandedValue.scalar_type(), "indexing_backward", [&] {
         indexing_backward_kernel<scalar_t, UNROLL><<<grid, block, 0, stream>>>(
           sorted_indices.data_ptr<int64_t>(),
           orig_indices.data_ptr<int64_t>(),
-          value_.data_ptr<scalar_t>(),
+          expandedValue.data_ptr<scalar_t>(),
           src_.data_ptr<scalar_t>(),
           num_indices,
           sliceSize,
@@ -269,8 +288,9 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
 
-      if (permuted)
-          self.copy_(src_.permute(inversePerm));
+      if (permuted) {
+        self.copy_(src_.permute(inversePerm));
+      }
   }
 }
 
@@ -454,36 +474,16 @@ bool indexShouldBeMajor(cuda::detail::TensorInfo<scalar_t, unsigned int> &info,
   return false;
 }
 
-Tensor& index_add_cuda_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source, const Scalar &alpha) {
-  dim = maybe_wrap_dim(dim, self.dim());
-
-  TensorArg self_arg{self, "self", 1}, index_arg{index, "index", 3}, source_arg{source, "source", 4};
-  checkAllSameGPU(__func__, {self_arg, index_arg, source_arg});
-
-  TORCH_CHECK_INDEX(index.dim() <= 1, "index_add_(): Index is supposed to be a vector");
-  TORCH_CHECK(index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int, "index_add_(): Expected dtype int32/int64 for index");
-  TORCH_CHECK(self.scalar_type() == source.scalar_type(),
-              "index_add_(): self and source must have the same scalar type");
-  TORCH_CHECK(dim == 0 || dim < source.dim(),
-              "index_add_(): Indexing dim ", dim, " is out of bounds of tensor");
-  TORCH_CHECK(index.numel() == (source.dim() == 0 ? 1 : source.size(dim)),
-              "index_add_(): Number of indices should be equal to self.size(dim)");
-
-  at::assert_no_internal_overlap(self);
-  at::assert_no_overlap(self, index);
-  at::assert_no_overlap(self, source);
+void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Scalar& alpha, const Tensor& result) {
+  if (!result.is_same(self)) result.copy_(self);
 
   // Scalars are treated as 1-d tensor
-  Tensor self_ = (self.dim() == 0) ? self.view(1) : self;
+  Tensor self_ = (result.dim() == 0) ? result.view(1) : result;
   Tensor source_ = (source.dim() == 0) ? source.view(1) : source;
 
-  TORCH_CHECK(self.dim() <= MAX_TENSORINFO_DIMS, "tensor has too many (>", MAX_TENSORINFO_DIMS, ") dims");
+  TORCH_CHECK(result.dim() <= MAX_TENSORINFO_DIMS, "tensor has too many (>", MAX_TENSORINFO_DIMS, ") dims");
   TORCH_CHECK(source.dim() <= MAX_TENSORINFO_DIMS, "tensor has too many (>", MAX_TENSORINFO_DIMS, ") dims" );
   TORCH_CHECK(index.dim() <= MAX_TENSORINFO_DIMS, "tensor has too many (>", MAX_TENSORINFO_DIMS, ") dims");
-
-  at::assert_no_internal_overlap(self);
-  at::assert_no_partial_overlap(self, index);
-  at::assert_no_partial_overlap(self, source);
 
   if (globalContext().deterministicAlgorithms()){
     torch::List<c10::optional<Tensor>> indices;
@@ -492,7 +492,8 @@ Tensor& index_add_cuda_(Tensor & self, int64_t dim, const Tensor & index, const 
       indices.emplace_back();
     }
     indices.emplace_back(index.to(at::kLong));
-    return self.index_put_(indices, source * alpha, true);
+    result.index_put_(indices, source * alpha, true);
+    return;
   }
 
   // The `source` is partitioned into two parts:
@@ -506,7 +507,7 @@ Tensor& index_add_cuda_(Tensor & self, int64_t dim, const Tensor & index, const 
   ptrdiff_t numIndex = index.numel();
 
   if (sliceSize == 0) {
-    return self;
+    return;
   }
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   bool indContig = index.is_contiguous();
@@ -537,10 +538,10 @@ Tensor& index_add_cuda_(Tensor & self, int64_t dim, const Tensor & index, const 
   dim3 largeIndexGrid(std::min(ceil_div(sourceTotalSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
   dim3 largeIndexBlock(std::min(sourceTotalSize, (ptrdiff_t)128));
 
-  if (cuda::detail::canUse32BitIndexMath(self) &&
+  if (cuda::detail::canUse32BitIndexMath(result) &&
       cuda::detail::canUse32BitIndexMath(source) &&
       cuda::detail::canUse32BitIndexMath(index)) {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "index_add", [&] {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16, result.scalar_type(), "index_add", [&] {
       cuda::detail::TensorInfo<scalar_t, unsigned int> selfInfo =
           cuda::detail::getTensorInfo<scalar_t, unsigned int>(self_);
       int selfAddDim = selfInfo.collapseDims(dim);
@@ -614,9 +615,13 @@ Tensor& index_add_cuda_(Tensor & self, int64_t dim, const Tensor & index, const 
     });
   }
 
-  return self;
 #undef SMALL_INDEX
 #undef LARGE_INDEX
+}
+
+TORCH_IMPL_FUNC(index_add_cuda_out)
+(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Scalar& alpha, const Tensor& result) {
+  index_add_cuda_impl(self, dim, index, source, alpha, result);
 }
 
 namespace {
