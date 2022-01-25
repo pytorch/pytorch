@@ -44,4 +44,10 @@ inline bool areAnyTensorSubclassLike(TensorList tensors) {
   return std::any_of(tensors.begin(), tensors.end(), isTensorSubclassLike);
 }
 
+inline bool areAnyOptionalTensorSubclassLike(const torch::List<c10::optional<Tensor>>& tensors) {
+  return std::any_of(tensors.begin(), tensors.end(), [](const optional<Tensor>& opt_tensor) {
+    return (opt_tensor.has_value() && isTensorSubclassLike(opt_tensor.value()));
+    });
+}
+
 }
