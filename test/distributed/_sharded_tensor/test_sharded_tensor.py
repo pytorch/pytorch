@@ -14,6 +14,7 @@ from torch.distributed._sharded_tensor import (
     load_with_process_group,
     pre_load_state_dict_hook,
     shard_parameter,
+    shard_tensor,
     state_dict_hook,
 )
 from torch.distributed._sharding_spec import (
@@ -330,11 +331,87 @@ class TestShardParameter(ShardedTensorTestBase):
             shard_parameter(fc, 'weight', spec)
 
 
-class TestCollectLocalShard(ShardedTensorTestBase):
+class TestShardTensor(ShardedTensorTestBase):
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
-    def test_collect_local_shard(self):
+    def test_shard_tensor(self):
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
+            ],
+        )
+        tensor = torch.rand(12, 12).cuda(self.rank)
+        st = shard_tensor(tensor, spec)
+
+        # Verify.
+        self.assertTrue(isinstance(st, _sharded_tensor.ShardedTensor))
+        local_shard = st.local_shard()
+        self.assertEqual(1, len(st.local_shards()))
+        self.assertEqual(torch.Size([3, 12]), local_shard.size())
+        self.assertEqual(torch.narrow(tensor, 0, 3 * self.rank, 3), local_shard)
+
+    @with_comms(init_rpc=False)
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    def test_shard_tensor_errors(self):
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
+            ],
+        )
+        tensor = torch.rand(12, 12).cuda(self.rank)
+
+        with self.assertRaisesRegex(ValueError, 'does not match with src_rank'):
+            shard_tensor(tensor, spec, src_rank=self.rank)
+
+        with self.assertRaisesRegex(ValueError, 'not a contiguous Tensor'):
+            tensor_t = torch.rand(12, 12).cuda(self.rank).t()
+            shard_tensor(tensor_t, spec)
+
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                f"rank:{self.rank}/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
+            ],
+        )
+        with self.assertRaisesRegex(ValueError, 'does not match with sharding_spec'):
+            shard_tensor(tensor, spec)
+
+        spec = EnumerableShardingSpec([
+            ShardMetadata(
+                shard_offsets=[0, 0],
+                shard_sizes=[5, 5],
+                placement="rank:0/cuda:0",
+            ),
+            ShardMetadata(
+                shard_offsets=[5, 0],
+                shard_sizes=[5, 5],
+                placement="rank:1/cuda:1",
+            ),
+        ])
+        with self.assertRaisesRegex(
+            NotImplementedError, 'Only ChunkShardingspec is supported.'
+        ):
+            shard_tensor(tensor, spec)
+
+
+class TestGetLocalShard(ShardedTensorTestBase):
+    @with_comms(init_rpc=False)
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    def test_local_shard(self):
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
@@ -345,12 +422,9 @@ class TestCollectLocalShard(ShardedTensorTestBase):
             ],
         )
         st = _sharded_tensor.rand(spec, 24, 12)
-        local_shard = st.collect_local_shard()
+        local_shard = st.local_shard()
         self.assertEqual(torch.Size([6, 12]), local_shard.size())
-        self.assertEqual(
-            st.local_shards()[0].tensor,
-            local_shard,
-        )
+        self.assertEqual(st.local_shard(), local_shard)
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(4)
@@ -375,25 +449,19 @@ class TestCollectLocalShard(ShardedTensorTestBase):
         with self.assertRaisesRegex(
             NotImplementedError, "Only single local shard is supported."
         ):
-            local_shard = st.collect_local_shard()
+            local_shard = st.local_shard()
 
 
 class TestReshard(ShardedTensorTestBase):
     def _run_sharded_tensor_reshard(self, sharding_spec, reshard_spec, input_size):
         torch.manual_seed(0)
-        fc = torch.nn.Linear(*input_size).cuda(self.rank)
-        fc_compare = torch.nn.Linear(*input_size).cuda(self.rank)
-        fc_compare.weight = torch.nn.Parameter(fc.weight.detach().clone())
-        shard_parameter(fc, "weight", sharding_spec)
-        st = fc.weight
+        local_tensor = torch.rand(*input_size).cuda(self.rank)
+        st = shard_tensor(local_tensor, sharding_spec)
+        st_compare = shard_tensor(local_tensor, reshard_spec)
         st.reshard(reshard_spec)
-        shard_parameter(fc_compare, "weight", reshard_spec)
-        st_compare = fc_compare.weight
         self.assertEqual(1, len(st.local_shards()))
-        self.assertEqual(
-            st.local_shards()[0].tensor,
-            st_compare.local_shards()[0].tensor,
-        )
+        self.assertEqual(1, len(st_compare.local_shards()))
+        self.assertEqual(st.local_shard(), st_compare.local_shard())
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(4)
@@ -473,7 +541,7 @@ class TestReshard(ShardedTensorTestBase):
             st.reshard(enumerable_sharding_spec)
 
     def _run_partial_tensor_n_reshard(
-        self, reshard_spec, input_size, world_size, ranks, aggr_op
+        self, reshard_spec, input_size, world_size, aggr_op
     ):
         results = []
         results_compare = []
@@ -481,7 +549,7 @@ class TestReshard(ShardedTensorTestBase):
             tensor = torch.rand(*input_size).cuda(self.rank)
             results.append(tensor)
             results_compare.append(tensor.clone().detach())
-        pg = dist.new_group(ranks=ranks)
+        pg = dist.distributed_c10d._get_default_group()
         parital_tensor = _PartialTensor(torch.cat(results), pg, aggr_op=aggr_op)
         local_sharded_result = parital_tensor.reshard(reshard_spec)
         local_shards = local_sharded_result.local_shards()
@@ -504,10 +572,10 @@ class TestReshard(ShardedTensorTestBase):
             ],
         )
         self._run_partial_tensor_n_reshard(
-            spec, [13, 21], 4, [0, 1, 2, 3], dist.ReduceOp.SUM
+            spec, [13, 21], 4, dist.ReduceOp.SUM
         )
         self._run_partial_tensor_n_reshard(
-            spec, [12, 22], 4, [0, 1, 2, 3], dist.ReduceOp.MAX
+            spec, [12, 22], 4, dist.ReduceOp.MAX
         )
 
 
@@ -1285,6 +1353,27 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         with self.assertRaisesRegex(RuntimeError, 'Need to initialize default process group'):
             state_dict_deser = torch.load(buffer)
         rpc.shutdown()
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    def test_cleanup(self):
+
+        def create_tensors():
+            spec = ChunkShardingSpec(
+                dim=0,
+                placements=[
+                    "rank:0/cuda:0",
+                    "rank:1/cuda:1",
+                    "rank:2/cuda:2",
+                    "rank:3/cuda:3",
+                ],
+            )
+            st1 = _sharded_tensor.empty(spec, 10, 20, init_rrefs=True)
+            st2 = _sharded_tensor.empty(spec, 10, 20)
+
+        create_tensors()
+        self.assertEqual(0, len(_sharded_tensor.api._sharded_tensor_map))
 
 
 class TestShardedTensorEnumerable(ShardedTensorTestBase):
