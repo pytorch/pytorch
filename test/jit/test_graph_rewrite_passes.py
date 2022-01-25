@@ -4,15 +4,15 @@ from torch.testing._internal.jit_utils import JitTestCase
 import torch
 import torch._C
 from torch.testing import FileCheck
-from typing import Callable
+from typing import Callable, Dict
 
 class FunctionalConv2d(torch.nn.Module):
-    def __init__(self, weight: torch.Tensor, bias: torch.Tensor):
+    def __init__(self, weight: torch.Tensor, bias: torch.Tensor) -> None:
         super(FunctionalConv2d, self).__init__()
         self.weight = weight
         self.bias = bias
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = torch.nn.functional.conv2d(
             input=x.unsqueeze(dim=0),
             weight=self.weight,
@@ -21,23 +21,23 @@ class FunctionalConv2d(torch.nn.Module):
         return x
 
 class FunctionalLinear(torch.nn.Module):
-    def __init__(self, weight: torch.Tensor, bias: torch.Tensor = None):
+    def __init__(self, weight: torch.Tensor, bias: torch.Tensor = None) -> None:
         super(FunctionalLinear, self).__init__()
         self.weight = weight
         self.bias = bias
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         res = torch.matmul(x, self.weight.t())
         if self.bias is not None:
             res.add_(self.bias)
         return res
 
 class FunctionalMatmul(torch.nn.Module):
-    def __init__(self, weight: torch.Tensor):
+    def __init__(self, weight: torch.Tensor) -> None:
         super(FunctionalMatmul, self).__init__()
         self.weight = weight
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         return torch.matmul(x, self.weight)
 
 class TestGraphRewritePasses(JitTestCase):
@@ -47,7 +47,7 @@ class TestGraphRewritePasses(JitTestCase):
         new_kind: str,
         jit_pass: Callable[[str], None],
         model: torch.jit.ScriptModule
-    ):
+    ) -> None:
         for node in model.graph.nodes():
             if node.kind() == old_kind:
                 source_range_1 = node.sourceRange()
@@ -59,55 +59,52 @@ class TestGraphRewritePasses(JitTestCase):
 
     def check_op_presence(
         self,
-        check_yes: list[str],
-        check_not: list[str],
+        pattern_count_map: Dict[str, int],
         jit_pass: Callable[[str], None],
         model: torch.jit.ScriptModule
-    ):
+    ) -> None:
         jit_pass(model.graph)
-        for cn in check_not:
-            FileCheck().check_not(cn).run(model.graph)
-        for cy in check_yes:
-            FileCheck().check(cy).run(model.graph)
+        for pattern, v in pattern_count_map.items():
+            FileCheck().check_count(pattern, v, exactly=True).run(model.graph)
 
-    def test_fuse_linear(self):
-        x1 = torch.rand(3)
-        w1 = torch.rand(5, 3)
-        b1 = torch.rand(5)
-        model1 = torch.jit.trace(FunctionalLinear(w1, b1), [x1])
-        check_not = ["aten::matmul", "aten::addmm", "aten::add_", "aten::t("]
-        self.check_single_replacement("aten::matmul", "aten::linear", torch._C._jit_pass_fuse_linear, model1)
-        self.check_op_presence([], check_not, torch._C._jit_pass_fuse_linear, model1)
-        model1(x1)  # make sure it runs
+    def test_fuse_linear(self) -> None:
+        x_1 = torch.rand(3)
+        w_1 = torch.rand(5, 3)
+        b_1 = torch.rand(5)
+        model_1 = torch.jit.trace(FunctionalLinear(w_1, b_1), [x_1])
+        check_pattern_count_map_1 = {"aten::matmul": 0, "aten::addmm": 0, "aten::add_": 0, "aten::t(": 0}
+        self.check_single_replacement("aten::matmul", "aten::linear", torch._C._jit_pass_fuse_linear, model_1)
+        self.check_op_presence(check_pattern_count_map_1, torch._C._jit_pass_fuse_linear, model_1)
+        model_1(x_1)  # make sure it runs
 
-        model2 = torch.jit.trace(FunctionalLinear(w1, None), [x1])
-        self.check_single_replacement("aten::matmul", "aten::linear", torch._C._jit_pass_fuse_linear, model2)
-        self.check_op_presence([], check_not, torch._C._jit_pass_fuse_linear, model2)
-        model2(x1)  # make sure it runs
+        model_2 = torch.jit.trace(FunctionalLinear(w_1, None), [x_1])
+        self.check_single_replacement("aten::matmul", "aten::linear", torch._C._jit_pass_fuse_linear, model_2)
+        self.check_op_presence(check_pattern_count_map_1, torch._C._jit_pass_fuse_linear, model_2)
+        model_2(x_1)  # make sure it runs
 
         # check matmuls are not fused
-        x3 = torch.rand(5, 6, 5)
-        w3 = torch.rand(5, 5, 100)
-        model3 = torch.jit.trace(FunctionalMatmul(w3), [x3])
-        check_not3 = ["aten::linear"]
-        self.check_single_replacement("aten::matmul", "aten::matmul", torch._C._jit_pass_fuse_linear, model3)
-        self.check_op_presence([], check_not3, torch._C._jit_pass_fuse_linear, model3)
-        model3(x3)  # make sure it runs
+        x_3 = torch.rand(5, 6, 5)
+        w_3 = torch.rand(5, 5, 100)
+        model_3 = torch.jit.trace(FunctionalMatmul(w_3), [x_3])
+        check_pattern_count_map_3 = {"aten::linear": 0}
+        self.check_single_replacement("aten::matmul", "aten::matmul", torch._C._jit_pass_fuse_linear, model_3)
+        self.check_op_presence(check_pattern_count_map_3, torch._C._jit_pass_fuse_linear, model_3)
+        model_3(x_3)  # make sure it runs
 
-    def test_vulkan_insert_pre_packed_ops(self):
-        x1 = torch.rand(3)
-        w1 = torch.rand(5, 3)
-        b1 = torch.rand(5)
-        model1 = torch.jit.trace(FunctionalLinear(w1, b1), [x1])
-        check_not1 = ["aten::matmul", "aten::add_", "aten::t"]
+    def test_vulkan_insert_pre_packed_ops(self) -> None:
+        x_1 = torch.rand(3)
+        w_1 = torch.rand(5, 3)
+        b_1 = torch.rand(5)
+        model_1 = torch.jit.trace(FunctionalLinear(w_1, b_1), [x_1])
+        check_pattern_count_map_1 = {"aten::matmul": 0, "aten::add_": 0, "aten::t": 0}
         self.check_single_replacement(
             "aten::matmul",
             "vulkan_prepack::linear_run",
             torch._C._jit_pass_vulkan_insert_prepacked_ops,
-            model1
+            model_1
         )
-        self.check_op_presence([], check_not1, torch._C._jit_pass_vulkan_insert_prepacked_ops, model1)
-        model1(x1)  # make sure it runs
+        self.check_op_presence(check_pattern_count_map_1, torch._C._jit_pass_vulkan_insert_prepacked_ops, model_1)
+        model_1(x_1)  # make sure it runs
 
         conv2d_in_channels = 3
         conv2d_out_channels = 4
@@ -122,13 +119,12 @@ class TestGraphRewritePasses(JitTestCase):
         x2_shape = (3, 2, 5)
         x2 = torch.rand(x2_shape)
         model2 = torch.jit.trace(FunctionalConv2d(conv2d_weight, conv2d_bias), [x2])
-        check_not2 = ["aten::_convolution"]
-        check_yes2 = ["vulkan_prepack::conv2d_clamp_run", "vulkan_prepack::conv2d_clamp_prepack"]
+        check_pattern_count_map_2 = {"aten::_convolution": 0, "vulkan_prepack::conv2d_clamp_run": 1, "vulkan_prepack::conv2d_clamp_prepack": 1}
         self.check_single_replacement(
             "aten::_convolution",
             "prim::Constant",
             torch._C._jit_pass_vulkan_insert_prepacked_ops,
             model2
         )
-        self.check_op_presence(check_yes2, check_not2, torch._C._jit_pass_vulkan_insert_prepacked_ops, model2)
+        self.check_op_presence(check_pattern_count_map_2, torch._C._jit_pass_vulkan_insert_prepacked_ops, model2)
         model2(x2)  # make sure it runs
