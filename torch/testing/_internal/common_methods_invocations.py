@@ -4751,8 +4751,6 @@ def sample_inputs_logdet(op_info, device, dtype, requires_grad, **kwargs):
                         A[list(cond[i])][0, :].neg_()
         return A
 
-    samples = []
-
     # cases constructed using make_tensor()
     tensor_shapes = (
         (S, S),
@@ -4764,7 +4762,7 @@ def sample_inputs_logdet(op_info, device, dtype, requires_grad, **kwargs):
     for shape in tensor_shapes:
         t = make_tensor(shape, device=device, dtype=dtype)
         d = make_nonzero_det(t).requires_grad_(requires_grad)
-        samples.append(SampleInput(d))
+        yield SampleInput(d)
 
     # cases constructed using:
     #  1) make_symmetric_matrices
@@ -4779,14 +4777,13 @@ def sample_inputs_logdet(op_info, device, dtype, requires_grad, **kwargs):
     def _helper(constructor, *shape, **kwargs):
         t = constructor(*shape, device=device, dtype=dtype)
         d = make_nonzero_det(t, **kwargs).requires_grad_(requires_grad)
-        samples.append(SampleInput(d))
+        yield SampleInput(d)
 
     for shape in symmetric_shapes:
         _helper(make_symmetric_matrices, *shape)
         _helper(make_symmetric_pd_matrices, *shape)
         _helper(make_fullrank_matrices_with_distinct_singular_values, *shape, min_singular_value=0)
 
-    return tuple(samples)
 
 def np_unary_ufunc_integer_promotion_wrapper(fn):
     # Wrapper that passes PyTorch's default scalar
@@ -5167,7 +5164,7 @@ def sample_inputs_symeig(op_info, device, dtype, requires_grad=False):
                     "eigenvectors": True}
         # A gauge-invariant function
         o.output_process_fn_grad = lambda output: (output[0], abs(output[1]))
-    return out
+        yield o
 
 def sample_inputs_linalg_eig(op_info, device, dtype, requires_grad=False):
     """
@@ -5179,8 +5176,7 @@ def sample_inputs_linalg_eig(op_info, device, dtype, requires_grad=False):
     samples = sample_inputs_linalg_invertible(op_info, device, dtype, requires_grad)
     for sample in samples:
         sample.output_process_fn_grad = out_fn
-
-    return samples
+        yield sample
 
 def sample_inputs_linalg_eigh(op_info, device, dtype, requires_grad=False, **kwargs):
     """
@@ -5199,8 +5195,7 @@ def sample_inputs_linalg_eigh(op_info, device, dtype, requires_grad=False, **kwa
     for sample in samples:
         sample.kwargs = {"UPLO": np.random.choice(["L", "U"])}
         sample.output_process_fn_grad = out_fn
-
-    return samples
+        yield sample
 
 
 def sample_inputs_linalg_slogdet(op_info, device, dtype, requires_grad=False):
@@ -5210,8 +5205,7 @@ def sample_inputs_linalg_slogdet(op_info, device, dtype, requires_grad=False):
     samples = sample_inputs_linalg_invertible(op_info, device, dtype, requires_grad)
     for sample in samples:
         sample.output_process_fn_grad = out_fn
-
-    return samples
+        yield sample
 
 
 def sample_inputs_linalg_pinv(op_info, device, dtype, requires_grad=False, **kwargs):
@@ -5325,8 +5319,7 @@ def sample_inputs_legacy_solve(op_info, device, dtype, requires_grad=False, **kw
     # Reverses tensor order
     for sample in out:
         sample.input, sample.args = sample.args[0], (sample.input,)
-
-    return out
+        yield sample
 
 
 def sample_inputs_cholesky_solve(op_info, device, dtype, requires_grad=False, **kwargs):
