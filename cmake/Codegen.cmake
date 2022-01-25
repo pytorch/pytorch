@@ -311,7 +311,7 @@ if(INTERN_BUILD_ATEN_OPS)
       ${generated_headers} ${core_generated_headers} ${ops_generated_headers}
       ${generated_sources} ${core_generated_sources} ${ops_generated_sources}
       ${generated_declarations_yaml})
-  if (USE_LIGHTWEIGHT_DISPATCH)
+  if(USE_LIGHTWEIGHT_DISPATCH)
     target_sources(ATEN_CPU_FILES_GEN_TARGET PRIVATE ${generated_unboxing_sources})
   endif()
   add_custom_target(ATEN_CUDA_FILES_GEN_TARGET DEPENDS
