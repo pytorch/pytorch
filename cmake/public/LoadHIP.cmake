@@ -155,7 +155,7 @@ if(HIP_FOUND)
   set(PYTORCH_FOUND_HIP TRUE)
 
   # Find ROCM version for checks
-  # ROCM 4.5 and later will have header api for version management
+  # ROCM 5.0 and later will have header api for version management
   if(EXISTS ${ROCM_INCLUDE_DIRS}/rocm_version.h)
 
     set(PROJECT_RANDOM_BINARY_DIR "${PROJECT_BINARY_DIR}")
