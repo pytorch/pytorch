@@ -86,14 +86,19 @@ jobs:
           # Install dependencies
           brew install libtool
           conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi requests typing_extensions --yes
-          sudo gem install xcodeproj
+      - name: Setup ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: 2.6
+          bundler-cache: true
+          working-directory: ios/TestApp/
       - name: Run Fastlane
         shell: bash -e {0}
         run: |
           set -x
           cd ios/TestApp
           # install fastlane
-          sudo gem install bundler && bundle install
+          gem install bundler && bundle install
           # install certificates
           echo "${IOS_CERT_KEY_2022}" >> cert.txt
           base64 --decode cert.txt -o Certificates.p12
