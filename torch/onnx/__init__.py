@@ -286,6 +286,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             If a custom opset is referenced by ``model`` but not mentioned in this dictionary,
             the opset version is set to 1. Only custom opset domain name and version should be
             indicated through this argument.
+
         export_modules_as_functions (bool or set of type of nn.Module, default False): Flag to enable
             exporting all ``nn.Module`` forward calls as local functions in ONNX. Or a set to indicate the
             particular types of modules to export as local functions in ONNX.
