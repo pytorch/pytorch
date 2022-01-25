@@ -108,6 +108,7 @@ jobs:
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
       - uses: !{{ common.upload_artifact_s3_action }}
+        if: always()
         with:
           name: !{{ config["build_name"] }}
           retention-days: 14

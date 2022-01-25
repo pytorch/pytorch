@@ -100,6 +100,7 @@ jobs:
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
       - uses: seemethere/upload-artifact-s3@v3
+        if: always()
         with:
           name: conda-py3_7-cpu
           retention-days: 14
@@ -370,6 +371,7 @@ jobs:
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
       - uses: seemethere/upload-artifact-s3@v3
+        if: always()
         with:
           name: conda-py3_7-cuda11_1
           retention-days: 14
@@ -642,6 +644,7 @@ jobs:
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
       - uses: seemethere/upload-artifact-s3@v3
+        if: always()
         with:
           name: conda-py3_7-cuda11_3
           retention-days: 14
@@ -914,6 +917,7 @@ jobs:
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
       - uses: seemethere/upload-artifact-s3@v3
+        if: always()
         with:
           name: conda-py3_7-cuda11_5
           retention-days: 14
@@ -1185,6 +1189,7 @@ jobs:
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
       - uses: seemethere/upload-artifact-s3@v3
+        if: always()
         with:
           name: conda-py3_8-cpu
           retention-days: 14
@@ -1455,6 +1460,7 @@ jobs:
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
       - uses: seemethere/upload-artifact-s3@v3
+        if: always()
         with:
           name: conda-py3_8-cuda11_1
           retention-days: 14
@@ -1727,6 +1733,7 @@ jobs:
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
       - uses: seemethere/upload-artifact-s3@v3
+        if: always()
         with:
           name: conda-py3_8-cuda11_3
           retention-days: 14
@@ -1999,6 +2006,7 @@ jobs:
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
       - uses: seemethere/upload-artifact-s3@v3
+        if: always()
         with:
           name: conda-py3_8-cuda11_5
           retention-days: 14
@@ -2270,6 +2278,7 @@ jobs:
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
       - uses: seemethere/upload-artifact-s3@v3
+        if: always()
         with:
           name: conda-py3_9-cpu
           retention-days: 14
@@ -2540,6 +2549,7 @@ jobs:
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
       - uses: seemethere/upload-artifact-s3@v3
+        if: always()
         with:
           name: conda-py3_9-cuda11_1
           retention-days: 14
@@ -2812,6 +2822,7 @@ jobs:
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
       - uses: seemethere/upload-artifact-s3@v3
+        if: always()
         with:
           name: conda-py3_9-cuda11_3
           retention-days: 14
@@ -3084,6 +3095,7 @@ jobs:
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
       - uses: seemethere/upload-artifact-s3@v3
+        if: always()
         with:
           name: conda-py3_9-cuda11_5
           retention-days: 14
@@ -3355,6 +3367,7 @@ jobs:
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
       - uses: seemethere/upload-artifact-s3@v3
+        if: always()
         with:
           name: conda-py3_10-cpu
           retention-days: 14
@@ -3625,6 +3638,7 @@ jobs:
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
       - uses: seemethere/upload-artifact-s3@v3
+        if: always()
         with:
           name: conda-py3_10-cuda11_1
           retention-days: 14
@@ -3897,6 +3911,7 @@ jobs:
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
       - uses: seemethere/upload-artifact-s3@v3
+        if: always()
         with:
           name: conda-py3_10-cuda11_3
           retention-days: 14
@@ -4169,6 +4184,7 @@ jobs:
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
       - uses: seemethere/upload-artifact-s3@v3
+        if: always()
         with:
           name: conda-py3_10-cuda11_5
           retention-days: 14
