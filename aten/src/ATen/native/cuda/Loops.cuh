@@ -14,7 +14,7 @@ constexpr int num_threads() {
 #if defined(USE_ROCM)
   return 256;
 #else
-  return 128;
+  return C10_WARP_SIZE * 4;
 #endif
 }
 constexpr int thread_work_size() { return 4; }
