@@ -1,4 +1,5 @@
 from abc import ABC
+import inspect
 from typing import Dict, Type
 
 from torch.distributed._fsdp import FullyShardedDataParallel
@@ -75,9 +76,11 @@ def _as_overlapped_optim(optim_cls: Type, *args, **kwargs):
     """
     Returns a new ``OverlappedOptimizer`` instance that supports ``optim_cls``.
     """
-    for registered_optim_cls, overlapped_optim_cls in _registered_overlapped_optims.items():
-        if issubclass(optim_cls, registered_optim_cls):
-            return overlapped_optim_cls(optim_cls, *args, **kwargs)
+    for clz in inspect.getmro(optim_cls):
+        try:
+            return _registered_overlapped_optims[clz](optim_cls, *args, **kwargs)
+        except KeyError:
+            pass
 
     # Fallback to standard overlapped optimizer, which will raise errors if user
     # is attempting to use an unsupported optimizer.
