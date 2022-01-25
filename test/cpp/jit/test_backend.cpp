@@ -202,7 +202,6 @@ TEST(BackendTest, TestPrimDtype) {
 
   std::stringstream ss;
   c._save_for_mobile(ss);
-  c._save_for_mobile("test_model.ptl");
   auto mc = _load_for_mobile(ss);
   auto res_mobile = mc.forward(inputs);
 
@@ -360,9 +359,15 @@ TEST(BackendTestDebugInfo, TestCompiler) {
   lm._save_for_mobile(ss, ExtraFilesMap(), true);
   auto mlm = _load_for_mobile(ss);
   std::string error_pattern = R"(
-  Module hierarchy:top(m)::<unknown>.aten::add
+  Module hierarchy:top(m)::<unknown>.__loweredModule__(m)::forward.aten::add
 Traceback of TorchScript (most recent call last):
-  File "<string>", line 5, in <unknown>
+  File "<string>", line 3, in <unknown>
+
+            def forward(self, x: Tensor, h: Tensor):
+                return self.__loweredModule__.forward(x, h)
+                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
+
+  File "<string>", line 5, in forward
                 typed_inputs: List[Any] = [x, h, ]
                 if self.__backend.is_available() :
                   _0, = self.__backend.execute(self.__handles["forward"], typed_inputs)
@@ -414,9 +419,15 @@ TEST(BackendTestDebugInfo, TestExceptionStackForCompilerWithModuleHierarchy) {
   lm._save_for_mobile(ss, ExtraFilesMap(), true);
   auto mlm = _load_for_mobile(ss);
   std::string error_pattern = R"(
-  Module hierarchy:top(C)::<unknown>.A0(A)::forward.aten::add
+  Module hierarchy:top(C)::<unknown>.__loweredModule__(C)::forward.A0(A)::forward.aten::add
 Traceback of TorchScript (most recent call last):
-  File "<string>", line 5, in <unknown>
+  File "<string>", line 3, in <unknown>
+
+            def forward(self, x: Tensor, y: Tensor):
+                return self.__loweredModule__.forward(x, y)
+                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
+
+  File "<string>", line 5, in forward
                 typed_inputs: List[Any] = [x, y, ]
                 if self.__backend.is_available() :
                   _0, = self.__backend.execute(self.__handles["forward"], typed_inputs)
@@ -507,9 +518,15 @@ TEST(
    *
    */
   std::string error_pattern = R"(
-  Module hierarchy:top(C)::<unknown>.B0(B)::forward.A0(A)::forward.aten::add
+  Module hierarchy:top(C)::<unknown>.__loweredModule__(C)::forward.B0(B)::forward.A0(A)::forward.aten::add
 Traceback of TorchScript (most recent call last):
-  File "<string>", line 5, in <unknown>
+  File "<string>", line 3, in <unknown>
+
+            def forward(self, x: Tensor, y: Tensor):
+                return self.__loweredModule__.forward(x, y)
+                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
+
+  File "<string>", line 5, in forward
                 typed_inputs: List[Any] = [x, y, ]
                 if self.__backend.is_available() :
                   _0, = self.__backend.execute(self.__handles["forward"], typed_inputs)
@@ -594,13 +611,19 @@ TEST(BackendTestDebugInfo, TestExceptionStackForCompilerWithLoweredSubModule) {
   c._save_for_mobile(ss, ExtraFilesMap(), true);
   auto c_loaded = _load_for_mobile(ss);
   std::string error_pattern = R"(
-  Module hierarchy:top(C)::<unknown>.A0(A)::forward.aten::add
+  Module hierarchy:top(C)::<unknown>.A0(A)::forward.__loweredModule__(A)::forward.aten::add
 Traceback of TorchScript (most recent call last):
   File "<string>", line 3, in <unknown>
 
     def forward(self, x, y):
       return self.A0.forward(x, y) + self.B0.forward(x)
              ~~~~~~~~~~~~~~~ <--- HERE
+
+  File "<string>", line 3, in forward
+
+            def forward(self, x: Tensor, y: Tensor):
+                return self.__loweredModule__.forward(x, y)
+                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
 
   File "<string>", line 5, in forward
                 typed_inputs: List[Any] = [x, y, ]
@@ -715,13 +738,19 @@ TEST(
    *
    *  */
   std::string error_pattern = R"(
-  Module hierarchy:top(C)::<unknown>.A0(A)::forward.AA0(AA)::forward.aten::add
+  Module hierarchy:top(C)::<unknown>.A0(A)::forward.__loweredModule__(A)::forward.AA0(AA)::forward.aten::add
 Traceback of TorchScript (most recent call last):
   File "<string>", line 3, in <unknown>
 
     def forward(self, x, y):
       return self.A0.forward(x, y) + self.B0.forward(x)
              ~~~~~~~~~~~~~~~ <--- HERE
+
+  File "<string>", line 3, in forward
+
+            def forward(self, x: Tensor, y: Tensor):
+                return self.__loweredModule__.forward(x, y)
+                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
 
   File "<string>", line 5, in forward
                 typed_inputs: List[Any] = [x, y, ]
