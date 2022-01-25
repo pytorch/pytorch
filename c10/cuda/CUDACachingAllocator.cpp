@@ -1275,11 +1275,11 @@ class DeviceCachingAllocator {
   void process_events() {
     insert_events_deferred_until_no_capture();
 
-    // Process outstanding cudaEvents. Events that are completed are removed
-    // from the queue, and the 'event_count' for the corresponding allocation
-    // is decremented. Stops at the first event which has not been completed.
-    // Since events on different devices or streams may occur out of order,
-    // the processing of some events may be delayed.
+    // Process outstanding cudaEvents. Events that are completed are
+    // removed from the queue, and the 'event_count' for the
+    // corresponding allocation is decremented. We maintain a separate
+    // list of events per stream to avoid head-of-line delays if one
+    // or more streams has long-running operations.
     for (auto it = cuda_events.begin(); it != cuda_events.end();) {
       while (!it->second.empty()) {
         auto& e = it->second.front();
@@ -1305,7 +1305,7 @@ class DeviceCachingAllocator {
       }
 
       // Copy the iterator and advance off because we may erase it if
-      // we clearted all the relevant events.
+      // we cleared all the events for this stream.
       auto candidate = it;
       it++;
 
