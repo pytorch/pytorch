@@ -9,6 +9,7 @@ import warnings
 
 from torch.onnx.symbolic_helper import parse_args, _unimplemented, _is_tensor_list, ScalarType
 from torch.onnx.symbolic_opset9 import expand, unused, mul
+from torch.onnx.symbolic_opset9 import linalg_vector_norm as lvn
 from torch.nn.modules.utils import _single, _pair, _triple
 from torch.onnx.utils import _add_block, _add_input_to_block, _add_output_to_block
 
@@ -811,6 +812,17 @@ def flatten(g, input, start_dim, end_dim):
 
     return sym_help._flatten_helper(g, input, start_dim, end_dim, dim)
 
+@parse_args("v", "f", "is", "i", "v")
+def linalg_vector_norm(g, self, ord, dim, keepdim, dtype):
+    if ord == 0:
+        if dim is None:
+            self = sym_help._reshape_helper(g, self, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64)))
+            keepdim = None
+        cond_op = g.op("Not", g.op("Equal", self, g.op("Constant", value_t=torch.LongTensor([0]))))
+        cond_op = g.op("Cast", cond_op, to_i=sym_help.cast_pytorch_to_onnx["Long"])
+        return sym_help._reducesum_helper(g, cond_op, axes_i=dim, keepdims_i=keepdim)
+    else:
+        return lvn(g, self, ord, dim, keepdim, dtype)
 
 @parse_args("v", "v", "v", "i", "i", "i", "v", "i", "i")
 def embedding_bag(g,
