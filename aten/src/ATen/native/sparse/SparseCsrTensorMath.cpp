@@ -243,7 +243,8 @@ Tensor round_sparse_csr(const Tensor& self) {
 
 Tensor& round_sparse_csr_(Tensor& self) {
   TORCH_INTERNAL_ASSERT(self.is_sparse_csr());
-  return self.values().round_();
+  self.values().round_();
+  return self;
 }
 
 // angle, isneginf, isposinf and signbit currently don't have an inplace variant
