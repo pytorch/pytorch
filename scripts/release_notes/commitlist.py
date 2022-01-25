@@ -84,16 +84,18 @@ class CommitList:
     def categorize(commit_hash, title):
         features = get_features(commit_hash, return_dict=True)
         title = features['title']
-        # update this to check if each file starts with caffe2
-        if 'caffe2' in title:
-            return Commit(commit_hash, 'caffe2', 'Untopiced', title)
-
-        labels = features['labels']
-        if 'Reverted' in labels:
-            return Commit(commit_hash, 'skip', 'Untopiced', title) 
         category = 'Uncategorized'
         topic = 'Untopiced'
 
+        # update this to check if each file starts with caffe2
+        if 'caffe2' in title:
+            return Commit(commit_hash, 'caffe2', topic, title)
+        if '[codemod]' in title.lower():
+            return Commit(commit_hash, 'skip', topic, title)
+        
+        labels = features['labels']
+        if 'Reverted' in labels:
+            return Commit(commit_hash, 'skip', topic, title) 
         if 'bc_breaking' in labels:
             topic = 'bc-breaking'
         if 'module: deprecation' in labels:
@@ -102,7 +104,7 @@ class CommitList:
         files_changed = features['files_changed']
         for file in files_changed:
             file_lowercase = file.lower()
-            if CommitList.keywordInFile(file, ['.circleci', 'third_party', '.jenkins']):
+            if CommitList.keywordInFile(file, ['docker/', '.circleci', '.github', '.jenkins', '.azure_pipelines']):
                 category = 'releng'
                 break
             # datapipe(s), torch/utils/data, test_{dataloader, datapipe}
@@ -146,17 +148,11 @@ class CommitList:
             if CommitList.keywordInFile(file, ['test/test_nn.py', 'test/test_module.py', 'torch/nn/modules']):
                 category = 'nn_frontend'
                 break
-            if CommitList.keywordInFile(file, ['docker/', '.circleci', '.github', '.jenkins', '.azure_pipelines']):
-                category = 'releng'
-                break
-            if CommitList.keywordInFile(file, ['submodules/', 'third_party/']):
-                category = 'skip'
-                break
             if CommitList.keywordInFile(file, ['torch/csrc/jit']):
                 category = 'jit'
                 break
 
-        return Commit(commit_hash, category, 'Untopiced', title)
+        return Commit(commit_hash, category, topic, title)
 
     @staticmethod
     def get_commits_between(base_version, new_version):
