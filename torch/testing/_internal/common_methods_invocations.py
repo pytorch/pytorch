@@ -6705,7 +6705,7 @@ def sample_inputs_scatter_reduce(op_info, device, dtype, requires_grad):
         return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
 
     def _index(shape, max_index):
-        return torch.from_numpy(np.random.choice(max_index, size=shape))
+        return torch.from_numpy(np.random.choice(max_index, size=shape)).to(dtype=torch.int64, device=device)
 
     reduces = ["sum", "prod", "mean", "amax", "amin"]
     shapes_and_dims = [((M,), 1), ((M, S), 2), ((M, M, S), 3), ((1, M, M, S), 4)]
