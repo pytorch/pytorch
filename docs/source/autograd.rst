@@ -23,6 +23,13 @@ Functional higher level API
     This API is in beta. Even though the function signatures are very unlikely to change, major
     improvements to performances are planned before we consider this stable.
 
+.. note::
+    In the future, we plan to replace the functional higher level API by upstreaming
+    `functorch <https://github.com/pytorch/functorch>`_ after it becomes more mature.
+    functorch is able to compute similar quantities and already has a number of
+    performance improvements but today there are different tradeoffs in which you
+    would choose to use either functorch or autograd.functional.
+
 This section contains the higher level API for the autograd that builds on the basic API above
 and allows you to compute jacobians, hessians, etc.
 
