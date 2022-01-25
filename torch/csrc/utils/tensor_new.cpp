@@ -1163,8 +1163,11 @@ Tensor asarray(
     // Make tensor from sequence, inferring its type, and then convert
     // it to the desired type.
     tensor = internal_new_from_data(
-        TensorOptions(), dtype_unwrapped, device, obj, false, false, true);
-    tensor = tensor.to(dtype_unwrapped);
+        TensorOptions(), dtype_unwrapped, device, obj,
+        /* copy_variables = */ false, /* copy_numpy = */ false, /* type_inference = */ true);
+    if (dtype.has_value()) {
+      tensor = tensor.to(dtype_unwrapped);
+    }
     tensor.set_requires_grad(requires_grad);
   }
 
