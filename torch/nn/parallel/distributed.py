@@ -1534,7 +1534,7 @@ class DistributedDataParallel(Module, Joinable):
             overlapped_optim.register_ddp(self)
         except NotImplementedError:
             raise RuntimeError(
-                f"{optim} does not support overlapped DDP. Please file an issue to PyTorch."
+                f"{optim} does not support overlapped DDP. Please file an issue to PyTorch or the respective owner of {optim}."
             )
 
     def _distributed_broadcast_coalesced(

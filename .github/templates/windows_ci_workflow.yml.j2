@@ -87,7 +87,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      !{{ common.checkout_pytorch("recursive") }}
+      !{{ common.checkout() }}
       !{{ common.display_ec2_information() }}
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
@@ -178,7 +178,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      !{{ common.checkout_pytorch("recursive") }}
+      !{{ common.checkout() }}
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
