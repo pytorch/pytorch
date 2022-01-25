@@ -37,6 +37,11 @@ using qbinary_fn =
 using qadd_scalar_fn =
     void (*)(Tensor& /*out*/, const Tensor& /*self*/, const Scalar& other /*other*/);
 using qhardswish_fn = void (*)(const at::Tensor& /*qx*/, at::Tensor& /*qy*/);
+using qdropout_fn = void(*)(
+    const at::Tensor& /*qx*/,
+    const Scalar& /*p*/,
+    bool training /*training*/,
+    at::Tensor& /*qy*/);
 using qmaxpool_2d_fn = void (*)(
     const Tensor& qx,
     int64_t iC, // input/output channels
@@ -177,6 +182,7 @@ DECLARE_DISPATCH(qclamp_minmax_fn, qclamp_max_stub);
 DECLARE_DISPATCH(qelu_fn, qelu_stub);
 DECLARE_DISPATCH(qhardsigmoid_fn, qhardsigmoid_stub);
 DECLARE_DISPATCH(qhardswish_fn, qhardswish_stub);
+DECLARE_DISPATCH(qdropout_fn, qdropout_stub);
 DECLARE_DISPATCH(qmaxpool_2d_fn, qmaxpool_2d_nhwc_stub);
 DECLARE_DISPATCH(qnormalize_fn, quantized_normalize_stub);
 DECLARE_DISPATCH(qrelu_fn, qrelu_stub);
