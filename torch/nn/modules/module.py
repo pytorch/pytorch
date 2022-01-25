@@ -214,7 +214,7 @@ class Module:
 
         class Model(nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
                 self.conv1 = nn.Conv2d(1, 20, 5)
                 self.conv2 = nn.Conv2d(20, 20, 5)
 
@@ -224,6 +224,10 @@ class Module:
 
     Submodules assigned in this way will be registered, and will have their
     parameters converted too when you call :meth:`to`, etc.
+
+    .. note::
+        As per the example above, an ``__init__()`` call to the parent class
+        must be made before assignment on the child.
 
     :ivar training: Boolean represents whether this module is in training or
                     evaluation mode.
@@ -1383,6 +1387,13 @@ class Module:
             key = prefix + name
             if key in state_dict:
                 input_param = state_dict[key]
+                if not torch.overrides.is_tensor_like(input_param):
+                    error_msgs.append('While copying the parameter named "{}", '
+                                      'expected torch.Tensor or Tensor-like object from checkpoint but '
+                                      'received {}'
+                                      .format(key, type(input_param)))
+                    continue
+
                 # This is used to avoid copying uninitialized parameters into
                 # non-lazy modules, since they dont have the hook to do the checks
                 # in such case, it will error when accessing the .shape attribute.
@@ -1662,7 +1673,7 @@ class Module:
             memo: a memo to store the set of modules already added to the result
             prefix: a prefix that will be added to the name of the module
             remove_duplicate: whether to remove the duplicated module instances in the result
-            or not
+                or not
 
         Yields:
             (string, Module): Tuple of name and module

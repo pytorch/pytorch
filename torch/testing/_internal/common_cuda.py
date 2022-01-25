@@ -3,10 +3,10 @@ r"""This file is allowed to initialize CUDA context when imported."""
 import functools
 import torch
 import torch.cuda
-from torch.testing._internal.common_utils import TEST_NUMBA
+from torch.testing._internal.common_utils import TEST_NUMBA, IS_WINDOWS
 import inspect
 import contextlib
-from setuptools import distutils
+from distutils.version import LooseVersion
 
 
 TEST_CUDA = torch.cuda.is_available()
@@ -16,7 +16,7 @@ CUDA_DEVICE = torch.device("cuda:0") if TEST_CUDA else None
 TEST_CUDNN = TEST_CUDA and torch.backends.cudnn.is_acceptable(torch.tensor(1., device=CUDA_DEVICE))
 TEST_CUDNN_VERSION = torch.backends.cudnn.version() if TEST_CUDNN else 0
 
-CUDA11OrLater = torch.version.cuda and distutils.version.LooseVersion(torch.version.cuda) >= "11.0"
+CUDA11OrLater = torch.version.cuda and LooseVersion(torch.version.cuda) >= "11.0"
 CUDA9 = torch.version.cuda and torch.version.cuda.startswith('9.')
 SM53OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (5, 3)
 SM60OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (6, 0)
@@ -166,3 +166,12 @@ def _get_torch_cuda_version():
         return (0, 0)
     cuda_version = str(torch.version.cuda)
     return tuple(int(x) for x in cuda_version.split("."))
+
+def _check_cusparse_generic_available():
+    version = _get_torch_cuda_version()
+    min_supported_version = (10, 1)
+    if IS_WINDOWS:
+        min_supported_version = (11, 0)
+    return version >= min_supported_version
+
+TEST_CUSPARSE_GENERIC = _check_cusparse_generic_available()

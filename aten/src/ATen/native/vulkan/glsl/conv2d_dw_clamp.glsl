@@ -1,15 +1,16 @@
 #version 450 core
 #define PRECISION $precision
+#define FORMAT    $format
+
 layout(std430) buffer;
-layout(set = 0, rgba16f, binding = 0) writeonly PRECISION uniform image3D uOutput;
-layout(set = 0, binding = 1) uniform PRECISION sampler3D uInput;
-layout(set = 0, binding = 2) uniform PRECISION sampler3D uKernel;
-layout(set = 0, binding = 3) readonly buffer bias {
+layout(set = 0, binding = 0, FORMAT) writeonly PRECISION uniform image3D uOutput;
+layout(set = 0, binding = 1)         uniform PRECISION sampler3D uInput;
+layout(set = 0, binding = 2)         uniform PRECISION sampler3D uKernel;
+layout(set = 0, binding = 3)         readonly buffer bias {
   vec4 data[];
 }
 uBias;
-
-layout(push_constant) uniform constBlock {
+layout(set = 0, binding = 4) uniform constBlock {
   ivec2 padding;
   ivec2 kernelSize;
   ivec2 stride;

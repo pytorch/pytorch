@@ -66,6 +66,8 @@ class AliasDb {
   // hold in memory any element that exists in the other
   TORCH_API bool mayContainAlias(Value* a, Value* b) const;
 
+  TORCH_API bool mayContainAlias(Value* a, const at::ArrayRef<Value*> b) const;
+
   // Do any values in group `a` share a memory location or hold in memory
   // any element that exists in group `b`
   TORCH_API bool mayContainAlias(
@@ -156,6 +158,9 @@ class AliasDb {
   // Create a new `value` that does not alias anything else.
   void createValue(const Value* value);
 
+  // Enable more precise treatment of prim::TupleConstruct.
+  void enablePreciseTupleContainerAnalysis();
+
   friend struct MutationRemover;
 
  private:
@@ -211,6 +216,8 @@ class AliasDb {
   void analyzeFork(Node* node);
   void analyzeWait(Node* node);
   void analyzeRpcAsync(Node* node);
+  void analyzeBatchNorm(Node* node);
+  void analyzeInstanceNorm(Node* node);
   void analyzeGradOf(Node* node);
   void analyzeSetAttr(Node* node);
   void analyzeConservative(Node* node);
@@ -231,9 +238,9 @@ class AliasDb {
       bool add_wildcard_to_contained_elems = true);
   Element* getOrCreateElement(const Value* value);
 
-  c10::optional<AliasTypeSet> mapTypeToAliasTypeSetPtr(
-      const TypePtr& type) const;
+  const AliasTypeSet* mapTypeToAliasTypeSetPtr(const TypePtr& type) const;
   bool functionalNonEscapingListUse(const Use& use) const;
+  bool functionalNonEscapingTupleUse(const Use& use) const;
 
   std::shared_ptr<Graph> graph_;
 

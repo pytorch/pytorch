@@ -34,7 +34,7 @@ bool hasNonElementWiseOperation(const Node* node) {
 //   2. on the same device;
 // TODO: update this when codegen can output scalar
 static c10::optional<c10::Device> getDevice(const Value* value) {
-  if (!value->type()->isSubtypeOf(TensorType::get())) {
+  if (!value->type()->isSubtypeOf(*TensorType::get())) {
     // not tensor type, return false as the op is not outputing scalar.
     return c10::nullopt;
   }
@@ -86,7 +86,7 @@ bool compatibleType(const torch::jit::Value* val) {
 }
 
 bool checkInputTensorTypes(const Node* node) {
-  for (size_t i = 0; i < node->inputs().size(); i++) {
+  for (const auto i : c10::irange(node->inputs().size())) {
     const auto& val = node->inputs()[i];
     if (!compatibleType(val)) {
       // special case on aten::_batch_norm_impl_index_backward, the 11th output
@@ -104,7 +104,7 @@ bool checkInputTensorTypes(const Node* node) {
 }
 
 bool checkOutputTensorTypes(const Node* node) {
-  for (size_t i = 0; i < node->outputs().size(); i++) {
+  for (const auto i : c10::irange(node->outputs().size())) {
     const auto& val = node->outputs()[i];
     if (!compatibleType(val)) {
       // special case on aten::_batch_norm_impl_index, the 4th output

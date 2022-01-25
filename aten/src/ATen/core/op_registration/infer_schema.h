@@ -52,7 +52,7 @@ constexpr std::array<ArgumentDef, sizeof...(Ts)> createArgumentVectorFromTypes(s
     checkStaticTypes<Ts...>(),
 
     // Create the return value
-    std::array<ArgumentDef, sizeof...(Ts)>{ArgumentDef(&getTypePtr_<std::decay_t<Ts>>::call)...}
+    std::array<ArgumentDef, sizeof...(Ts)>{ArgumentDef(&getTypePtrCopy<std::decay_t<Ts>>)...}
   );
 }
 
