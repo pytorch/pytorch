@@ -146,6 +146,10 @@ class TestQuantizedSparseLayers(TestCase):
             model.weight = nn.Parameter(W_q.dequantize())
             model.eval()
 
+            # Add `sparse_params` to the model. The test for correct
+            # sparse_param addition is in the sparsifier tests
+            model.linear.sparse_params = {'sparse_block_shape': (1, 4)}
+
             # Note: At the moment, for sparse kernels
             # fbgemm supports only static quantized sparse linear
             # qnnpack supports only dynamically quantized sparse linear
@@ -184,33 +188,35 @@ class TestQuantizedSparseLayers(TestCase):
                 Y_hat = sqmodel(X_q)
                 self.assertEqual(Y_ref.dequantize(), Y_hat.dequantize())
 
-            if qengine_is_qnnpack():
+            elif qengine_is_qnnpack():
                 qconfig = {nn.Linear : tq.qconfig.default_dynamic_qconfig}
-                dqmodel = copy.deepcopy(model)
-                sdqmodel = copy.deepcopy(model)
+                qmodel = copy.deepcopy(model)
+                sqmodel = copy.deepcopy(model)
 
-                tq.propagate_qconfig_(dqmodel, qconfig)
-                tq.propagate_qconfig_(sdqmodel, qconfig)
+                tq.propagate_qconfig_(qmodel, qconfig)
+                tq.propagate_qconfig_(sqmodel, qconfig)
 
                 # Make sure the quantization parameters are computed the same way
-                qparams = dqmodel.linear.qconfig.weight().calculate_qparams()
-                sqparams = sdqmodel.linear.qconfig.weight().calculate_qparams()
+                qparams = qmodel.linear.qconfig.weight().calculate_qparams()
+                sqparams = sqmodel.linear.qconfig.weight().calculate_qparams()
                 self.assertEqual(qparams, sqparams)
 
                 # Make sure mapping of sparse kernels does not affect the non-sparse
                 sparse_mapping = copy.deepcopy(tq.get_default_dynamic_quant_module_mappings())
                 sparse_mapping[nn.Linear] = ao_nn_sq.dynamic.Linear
-                with LinearBlockSparsePattern(1, 4):
-                    tq.convert(sdqmodel, inplace=True, mapping=sparse_mapping)
-                tq.convert(dqmodel, mapping=tq.get_default_dynamic_quant_module_mappings(), inplace=True)
+                tq.convert(sqmodel, inplace=True, mapping=sparse_mapping)
+                tq.convert(qmodel, mapping=tq.get_default_dynamic_quant_module_mappings(), inplace=True)
 
-                assert isinstance(sdqmodel.linear, ao_nn_sq.dynamic.Linear), "Convert failed"
-                assert isinstance(dqmodel.linear, nn.quantized.dynamic.Linear), "Mapping failed"
+                assert isinstance(sqmodel.linear, ao_nn_sq.dynamic.Linear), "Convert failed"
+                assert isinstance(qmodel.linear, nn.quantized.dynamic.Linear), "Mapping failed"
 
                 # Make sure numerics are right
-                Y_ref = dqmodel(X_fp32)
-                Y_hat = sdqmodel(X_fp32)
+                Y_ref = qmodel(X_fp32)
+                Y_hat = sqmodel(X_fp32)
                 self.assertEqual(Y_ref, Y_hat)
+
+            row_block_size, col_block_size = sqmodel.linear._packed_params._weight_bias()[2:]
+            assert row_block_size == 1 and col_block_size == 4
 
     @override_qengines
     def test_sparse_qlinear_serdes(self):
@@ -239,7 +245,8 @@ class TestQuantizedSparseLayers(TestCase):
             W_fp32 *= mask
             W_q = torch.quantize_per_tensor(W_fp32, W_scale, W_zp, torch.qint8)
 
-            model.weight = nn.Parameter(W_q.dequantize())
+            model.linear.weight = nn.Parameter(W_q.dequantize())
+            model.linear.sparse_params = {'sparse_block_shape': (1, 4)}
             model.eval()
 
             # Note: At the moment, for sparse kernels
@@ -287,7 +294,7 @@ class TestQuantizedSparseLayers(TestCase):
                 Y_hat = sqmodel(X_q)
                 self.assertEqual(Y_ref.dequantize(), Y_hat.dequantize())
 
-            if qengine_is_qnnpack():
+            elif qengine_is_qnnpack():
                 qconfig = {nn.Linear : tq.qconfig.default_dynamic_qconfig}
                 dqmodel = copy.deepcopy(model)
                 sdqmodel = copy.deepcopy(model)

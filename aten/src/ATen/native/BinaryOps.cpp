@@ -7,7 +7,8 @@
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
-
+#include <ATen/ExpandUtils.h>
+#include <ATen/RedispatchFunctions.h>
 #include <torch/library.h>
 
 namespace at {
@@ -623,6 +624,45 @@ Tensor mul(const Tensor& self, const Scalar& other) {
 
 Tensor& mul_(Tensor& self, const Scalar& other) {
   return at::mul_out(self, wrapped_scalar_tensor(other), self); // redispatch!
+}
+
+Device correct_out_device(const Tensor& self, const Tensor& other) {
+  if (self.device() == at::kCPU){
+      return other.device();
+  } else {
+    return self.device();
+  }
+}
+
+Tensor mul_zerotensor(const Tensor& self, const Tensor& other) {
+  auto out_device = correct_out_device(self, other);
+  // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
+  auto device_ = Device(DeviceType::Meta);
+  auto meta_out = at::redispatch::mul(c10::DispatchKeySet(at::DispatchKey::Meta), self.to(device_), other.to(device_));
+  return at::_efficientzerotensor(meta_out.sizes(), meta_out.options().device(out_device));
+}
+
+Tensor add_zerotensor(const Tensor& self, const Tensor& other, const Scalar& alpha) {
+  auto out_device = correct_out_device(self, other);
+  // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
+  auto device_ = Device(DeviceType::Meta);
+  auto meta_out = at::redispatch::add(c10::DispatchKeySet(at::DispatchKey::Meta), self.to(device_), other.to(device_));
+
+  auto get_out_like = [&] (const Tensor& tensor)
+  {
+      auto sizes = meta_out.sizes();
+      return at::_to_copy(tensor.expand(sizes), meta_out.options().device(out_device));
+  };
+
+  if (self._is_zerotensor()) {
+    if (other._is_zerotensor()) {
+      return at::_efficientzerotensor(meta_out.sizes(), meta_out.options().device(out_device));
+    }
+    auto res = get_out_like(other);
+    return alpha.equal(1) ? res : res.mul(alpha);
+  } else {
+    return get_out_like(self);
+  }
 }
 
 // multiply, alias for mul

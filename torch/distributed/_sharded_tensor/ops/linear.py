@@ -10,8 +10,17 @@ from torch.distributed._sharding_spec._internals import (
     get_split_size,
     get_chunked_dim_size,
 )
+from torch.distributed.nn.functional import (
+    all_to_all_single,
+    reduce_scatter,
+)
 
+from torch.distributed._sharded_tensor import (
+    sharded_op_impl,
+    ShardedTensor
+)
 
+@sharded_op_impl(torch.nn.functional.linear)
 def sharded_linear(types, args, kwargs, pg):
     """
     Handles ``__torch_function__`` dispatch for ``torch.nn.functional.linear``.
@@ -72,8 +81,6 @@ def sharded_linear(types, args, kwargs, pg):
     5. If placements are not in order any appropriate rearrangement of rows
        are done for the (13 x 16) matrix and finally the bias term is added.
     """
-    from torch.distributed._sharded_tensor import ShardedTensor
-
     input = args[0]
     weight = args[1]
     bias = kwargs["bias"]
@@ -108,11 +115,18 @@ def sharded_linear(types, args, kwargs, pg):
     rank = dist.get_rank(pg)
 
     if sharding_dim == 1:
-        return _handle_row_wise_sharding(input, world_size, weight, rank, local_shard_t, bias, pg)
+        return _handle_row_wise_sharding(
+            input, world_size, weight, rank, local_shard_t, bias, pg
+        )
     elif sharding_dim == 0:
-        return _handle_col_wise_sharding(input, world_size, weight, local_shard_t, bias, pg)
+        return _handle_col_wise_sharding(
+            input, world_size, weight, local_shard_t, bias, pg
+        )
     else:
-        raise RuntimeError(f'nn.Linear weight sharded on dim {sharding_dim} not supported!')
+        raise RuntimeError(
+            f"nn.Linear weight sharded on dim {sharding_dim} not supported!"
+        )
+
 
 def _handle_col_wise_sharding(input, world_size, weight, local_shard_t, bias, pg):
     """
@@ -130,16 +144,20 @@ def _handle_col_wise_sharding(input, world_size, weight, local_shard_t, bias, pg
 
     Returns: final result of linear operation.
     """
-    return _handle_col_wise_sharding_base(
-        torch.matmul,
-        weight.size(0),
-        len(input.size()) - 1,
-        input,
-        world_size,
-        weight,
-        local_shard_t,
-        pg,
-    ) + bias
+    return (
+        _handle_col_wise_sharding_base(
+            torch.matmul,
+            weight.size(0),
+            len(input.size()) - 1,
+            input,
+            world_size,
+            weight,
+            local_shard_t,
+            pg,
+        )
+        + bias
+    )
+
 
 def _handle_row_wise_sharding(input, world_size, weight, rank, local_shard_t, bias, pg):
     """
@@ -183,15 +201,19 @@ def _handle_row_wise_sharding(input, world_size, weight, rank, local_shard_t, bi
         for idx, placement in enumerate(weight._sharding_spec.placements):
             split_size = input_split_sizes[placement.rank()]
             offset_start_idx = idx * sharded_dim_size_max
-            indices[placement.rank()] = list(range(offset_start_idx, offset_start_idx + split_size))
+            indices[placement.rank()] = list(
+                range(offset_start_idx, offset_start_idx + split_size)
+            )
         indices_flatten = list(idx for indice in indices for idx in indice)
 
-        input_t = input_t.index_select(0, torch.tensor(indices_flatten, device=input_t.device))
+        input_t = input_t.index_select(
+            0, torch.tensor(indices_flatten, device=input_t.device)
+        )
 
     gathered_input = torch.empty(input_split_sizes[rank] * world_size, input_t_size[1], device=input_t.device)
 
-    # Perform alltoall
-    dist.all_to_all_single(gathered_input, input_t, input_split_sizes=input_split_sizes, group=pg)
+    # Perform autograd enabled alltoall
+    all_to_all_single(gathered_input, input_t, input_split_sizes=input_split_sizes, group=pg)
     gathered_input = gathered_input.t()
 
     # Perform local matmuls for all shards
@@ -203,7 +225,7 @@ def _handle_row_wise_sharding(input, world_size, weight, rank, local_shard_t, bi
 
     # Gather all the results appropriately.
     local_result = torch.empty_like(results[rank])
-    dist.reduce_scatter(local_result, results, group=pg)
+    local_result = reduce_scatter(local_result, results, group=pg)
 
     # Return the appropriate local result.
     return local_result + bias

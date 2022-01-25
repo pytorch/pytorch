@@ -11,6 +11,7 @@ import torch
 import torch.nn as nn
 import torch.optim
 import torch.utils.data
+import torch.utils.data.datapipes as dp
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, TEST_WITH_ASAN, TEST_WITH_ROCM, IS_WINDOWS,
@@ -85,6 +86,45 @@ class TestRecordFunction(TestCase):
                 self.assertTrue(e.input_shapes == [[], [], [], [], [], [3, 4, 5]])
         self.assertTrue(found_test_1)
         self.assertTrue(found_test_2)
+
+    def test_datapipe_with_record_function(self):
+        with _profile(with_stack=True, use_kineto=kineto_available(), record_shapes=True) as prof:
+            input_dp1 = dp.iter.IterableWrapper(range(4))
+            input_dp2 = dp.iter.IterableWrapper(range(4, 8))
+            input_dp3 = dp.iter.IterableWrapper(range(8, 12))
+            output_dp = input_dp1.mux(input_dp2, input_dp3)
+            output = list(output_dp)
+
+        has_iter = False
+        has_mux = False
+        for e in prof.function_events:
+            if has_iter and has_mux:
+                break
+
+            if not has_iter and e.name == "enumerate(DataPipe)#IterableWrapperIterDataPipe":
+                has_iter = True
+            if not has_mux and e.name == "enumerate(DataPipe)#MultiplexerIterDataPipe":
+                has_mux = True
+        self.assertTrue(has_iter)
+        self.assertTrue(has_mux)
+
+    def test_datapipe_with_record_function_fork(self):
+        with _profile(with_stack=True, use_kineto=kineto_available(), record_shapes=True) as prof:
+            input_dp = dp.iter.IterableWrapper(range(10))
+            dp1, dp2, dp3 = input_dp.fork(num_instances=3)
+            output1 = list(dp1)
+        has_iter = False
+        has_child = False
+        for e in prof.function_events:
+            if has_iter and has_child:
+                break
+
+            if not has_iter and e.name == "enumerate(DataPipe)#IterableWrapperIterDataPipe":
+                has_iter = True
+            if not has_child and e.name == "enumerate(DataPipe)#_ChildDataPipe":
+                has_child = True
+        self.assertTrue(has_iter)
+        self.assertTrue(has_child)
 
 class TestProfiler(TestCase):
     def test_source(self):

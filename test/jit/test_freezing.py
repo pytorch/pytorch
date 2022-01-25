@@ -1649,6 +1649,30 @@ class TestFrozenOptimizations(JitTestCase):
             self.assertEqual(mod_eager(inp), scripted_mod(inp))
             self.assertEqual(mod_eager(inp), scripted_mod(inp))
 
+    def test_conv_bn_folding_not_forward(self):
+        class ConvBN(torch.nn.Module):
+            def __init__(self, in_channels, out_channels, **kwargs):
+                super(ConvBN, self).__init__()
+                self.conv = torch.nn.Conv2d(in_channels, out_channels, bias=True, **kwargs)
+                self.bn = torch.nn.BatchNorm2d(out_channels, eps=0.001)
+                self.amt = 3.2
+
+            def forward(self, x):
+                x = self.conv(x)
+                return self.bn(x)
+
+            @torch.jit.export
+            def make_prediction(self, x):
+                return self.forward(x) + self.amt
+
+        mod_eager = ConvBN(3, 32, kernel_size=3, stride=2).eval()
+        scripted_mod = torch.jit.script(mod_eager)
+        torch._C._jit_pass_inline(scripted_mod.make_prediction.graph)
+        FileCheck().check("conv").check("aten::batch_norm").run(scripted_mod.make_prediction.graph)
+
+        # _jit_pass_optimize_frozen_graph should not be called on non-method attributes (e.g. "amt")
+        scripted_mod = torch.jit.freeze(scripted_mod, preserved_attrs=["make_prediction", "amt"])
+        FileCheck().check("conv").check_not("aten::batch_norm").run(scripted_mod.make_prediction.graph)
 
     def test_conv_add_folding(self):
 
@@ -2145,6 +2169,37 @@ class TestFrozenOptimizations(JitTestCase):
                 FileCheck().check("aten::cudnn_convolution_relu").run(frozen_mod.graph)
 
             self.assertEqual(mod_eager(inp), frozen_mod(inp))
+
+    @unittest.skipIf(not TEST_CUDNN, "requires CUDNN")
+    def test_freeze_conv_relu_fusion_not_forward(self):
+        class Net(nn.Module):
+            def __init__(self, in_channels, out_channels, **kwargs):
+                super(Net, self).__init__()
+                self.conv = nn.Conv2d(in_channels, out_channels, bias=None, **kwargs)
+                self.relu = nn.ReLU(inplace=True)
+
+            def forward(self, x):
+                z = self.conv(x)
+                out = self.conv(x)
+                out = self.relu(out)
+                return out
+
+            @torch.jit.export
+            def make_prediction(self, x):
+                return self.forward(x)
+
+        mod_eager = Net(3, 6, kernel_size=3, stride=2).eval().cuda()
+
+        inps = [5, 3, 4, 4]
+        inp = torch.rand(inps).cuda()
+
+        scripted_mod = torch.jit.script(mod_eager)
+
+        frozen_mod = torch.jit.freeze(scripted_mod, preserved_attrs=['make_prediction'])
+        optimized_mod = torch.jit.optimize_for_inference(frozen_mod, other_methods=['make_prediction'])
+        FileCheck().check("aten::cudnn_convolution_relu").run(optimized_mod.make_prediction.graph)
+
+        self.assertEqual(mod_eager.make_prediction(inp), optimized_mod.make_prediction(inp))
 
     @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
     def test_incompatible_perf_formats(self):

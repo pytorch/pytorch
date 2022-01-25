@@ -126,28 +126,36 @@ def apply_masked_reduction_along_dim(op, input, *args, **kwargs):
     return output
 
 
-def apply_masked_normalization_along_dim(op, x, dim, dtype=None, mask=None):
+def apply_masked_normalization_along_dim(op, input, *args, **kwargs):
     """Applies normalization op along given dimension to strided x
     elements that are valid according to mask tensor.
     """
-    if x.ndim == 0:  # scalar input
-        return op(x, dim, dtype=dtype)
-    y = torch.zeros_like(x, dtype=dtype)
-    inpmask = torch._masked._input_mask(x, mask=mask)
-    dim_ = dim % x.ndim
-    left_ranges = tuple(map(range, x.shape[:dim_]))
-    right_ranges = tuple(map(range, x.shape[dim_ + 1:]))
+    mask = kwargs.pop('mask', None)
+    dim_pos = kwargs.pop('dim_position', 0)
+    if input.ndim == 0:  # scalar input
+        return op(input, *args, **kwargs)
+    dtype = kwargs.get('dtype', input.dtype)
+    dim = args[dim_pos]
+    args0 = args[:dim_pos] + (0,) + args[dim_pos + 1:]
+    output = torch.zeros_like(input, dtype=dtype)
+    inpmask = torch._masked._input_mask(input, mask=mask)
+    dim_ = dim % input.ndim
+    left_ranges = tuple(map(range, input.shape[:dim_]))
+    right_ranges = tuple(map(range, input.shape[dim_ + 1:]))
     for s in itertools.product(*(left_ranges + ((slice(None),),) + right_ranges)):
         indices = inpmask[s].argwhere()
-        y[s][indices] = op(x[s][indices], 0, dtype=dtype)
-    return y
+        output[s][indices] = op(input[s][indices], *args0, **kwargs)
+    return output
 
 
 reference_functions = dict(
     norm=lambda *args, **kwargs: apply_masked_reduction_along_dim(torch.linalg.vector_norm, *args, **dict(kwargs, dim_position=1)),
+    var=lambda *args, **kwargs: apply_masked_reduction_along_dim(torch.var, *args, **dict(kwargs, dim_position=0)),
     softmax=lambda *args, **kwargs: apply_masked_normalization_along_dim(torch.softmax, *args, **kwargs),
     log_softmax=lambda *args, **kwargs: apply_masked_normalization_along_dim(torch.log_softmax, *args, **kwargs),
     softmin=lambda *args, **kwargs: apply_masked_normalization_along_dim(torch.nn.functional.softmin, *args, **kwargs),
+    normalize=lambda *args, **kwargs: apply_masked_normalization_along_dim(
+        torch.nn.functional.normalize, *args, **dict(kwargs, dim_position=1)),
 )
 
 masked_ops = [op for op in op_db if op.name.startswith('_masked.')]
@@ -160,10 +168,14 @@ class TestMasked(TestCase):
     @suppress_warnings
     @ops(masked_ops_with_references)
     def test_reference_masked(self, device, dtype, op):
-        ref_op = reference_functions[op.name.rsplit('.', 1)[-1]]
+        op_name = op.name.rsplit('.', 1)[-1]
+        ref_op = reference_functions[op_name]
         sample_inputs = op.sample_inputs(device, dtype)
         for sample_input in sample_inputs:
             t_inp, t_args, t_kwargs = sample_input.input, sample_input.args, sample_input.kwargs
+            if op_name == 'var' and not (t_inp.dtype.is_floating_point or t_inp.dtype.is_complex):
+                # torch.var does not support integer inputs
+                continue
             actual = op.op(t_inp, *t_args, **t_kwargs)
             expected = ref_op(t_inp, *t_args, **t_kwargs)
             outmask = torch._masked._output_mask(op.op, t_inp, *t_args, **t_kwargs)

@@ -1,12 +1,18 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+// ${generated_comment}
+
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/FunctionalTensorWrapper.h>
-#include <ATen/Functions.h>
-#include <ATen/RedispatchFunctions.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/FunctionalInverses.h>
 #include <torch/library.h>
 
-// ${generated_comment}
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Operators.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty_strided_native.h>
+$ops_headers
+#endif
 
 namespace at {
 namespace functionalization {

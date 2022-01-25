@@ -98,6 +98,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       };
     });
 
+// See [Borrowed IValue Outputs]
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
     static_runtime::dict_unpack,
     static_runtime_dict_unpack,
@@ -105,7 +106,8 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       return [](ProcessedNode* p_node) {
         DCHECK(p_node->num_inputs() - 1 == p_node->outputs().size());
         auto dict = p_node->Input(0).toGenericDict();
-        for (size_t i = 1; i < p_node->num_inputs(); ++i) {
+        const auto num_inputs = p_node->num_inputs();
+        for (size_t i = 1; i < num_inputs; ++i) {
           const auto& key = p_node->Input(i);
           auto value = dict.find(key);
           TORCH_CHECK(value != dict.end(), "Key not in dict: ", key);
@@ -202,12 +204,12 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     prim_GetAttr,
     [](Node* n) -> SROperator {
       return [](ProcessedNode* p_node) {
-        auto module = p_node->Input(0).toObject();
+        auto& module = p_node->Input(0).toObjectRef();
         Node* node = p_node->node();
         const auto& type = node->input()->type()->expectRef<ClassType>();
         const auto& field = node->s(attr::name);
         const auto slot = type.getAttributeSlot(field);
-        p_node->Output(0) = module->getSlot(slot);
+        p_node->Output(0) = module.getSlot(slot);
       };
     });
 
@@ -216,12 +218,12 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     prim_SetAttr,
     [](Node* n) -> SROperator {
       return [](ProcessedNode* p_node) {
-        auto module = p_node->Input(0).toObject();
+        auto& module = p_node->Input(0).toObjectRef();
         Node* node = p_node->node();
         const auto& type = node->inputs()[0]->type()->expectRef<ClassType>();
         const auto& field = node->s(attr::name);
         const auto slot = type.getAttributeSlot(field);
-        module->setSlot(slot, p_node->Input(1));
+        module.setSlot(slot, p_node->Input(1));
       };
     });
 
@@ -267,7 +269,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       }
       return [](ProcessedNode* p_node) {
         const auto& in0_t = p_node->Input(0).toTensor();
-        const auto in1_iv = p_node->Input(1).toIntVector();
+        const auto in1_iv = p_node->Input(1).toDimVector();
         p_node->Output(0) = at::native::permute(in0_t, in1_iv);
       };
     });
@@ -283,7 +285,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       }
       return [](ProcessedNode* p_node) {
         const auto& in0_t = p_node->Input(0).toTensor();
-        const auto in1_iv = p_node->Input(1).toIntVector();
+        const auto in1_iv = p_node->Input(1).toDimVector();
         p_node->Output(0) = at::native::reshape(in0_t, in1_iv);
       };
     });
@@ -476,6 +478,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       };
     });
 
+// See [Borrowed IValue Outputs]
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
     static_runtime::VarTupleUnpack,
     static_runtime_VarTupleUnpack,
@@ -547,19 +550,144 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     });
 
 REGISTER_NATIVE_OPERATOR_FUNCTOR(aten::split, aten_split, [](Node* n) -> SROperator {
-  if (!n->matches(torch::schema(
+  if (n->matches(torch::schema(
           "aten::split(Tensor(a -> *) self, int split_size, int dim=0) -> Tensor(a)[]"))) {
-    LogAndDumpSchema(n);
-    return nullptr;
+    return [](ProcessedNode* p_node) {
+      const auto& self = p_node->Input(0).toTensor();
+      const auto split_size = p_node->Input(1).toInt();
+      const auto dim = p_node->Input(2).toInt();
+      p_node->Output(0) = at::native::split(self, split_size, dim);
+    };
   }
 
-  return [](ProcessedNode* p_node) {
-    const auto& self = p_node->Input(0).toTensor();
-    const auto split_size = p_node->Input(1).toInt();
-    const auto dim = p_node->Input(2).toInt();
-    p_node->Output(0) = at::native::split(self, split_size, dim);
-  };
+  if (n->matches(torch::schema(
+          "aten::split(Tensor(a -> *) self, int[] split_sizes, int dim=0) -> (Tensor[])"))) {
+    return [](ProcessedNode* p_node) {
+      const auto& self = p_node->Input(0).toTensor();
+      const auto& split_sizes = p_node->Input(1).toIntList();
+      const auto dim = p_node->Input(2).toInt();
+      p_node->Output(0) =
+          at::native::split_with_sizes(self, split_sizes.vec(), dim);
+    };
+  }
+
+  LogAndDumpSchema(n);
+  return nullptr;
 });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::split_with_sizes,
+    aten_split_with_sizes,
+    [](Node* n) -> SROperator {
+      if (!n->matches(torch::schema(
+              "aten::split_with_sizes(Tensor(a -> *) self, int[] split_sizes, int dim=0) -> Tensor(a)[]")) &&
+          !n->matches(torch::schema(
+              "aten::split_with_sizes(Tensor(a -> *) self, int[] split_sizes, int dim=0) -> (Tensor[])"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+      return [](ProcessedNode* p_node) {
+        const auto& self = p_node->Input(0).toTensor();
+        const auto& split_sizes = p_node->Input(1).toIntList();
+        const auto dim = p_node->Input(2).toInt();
+        p_node->Output(0) =
+            at::native::split_with_sizes(self, split_sizes.vec(), dim);
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    static_runtime::select_tensor,
+    aten_select_tensor,
+    [](Node* n) -> SROperator {
+      TORCH_CHECK(n->inputs().size() == 3);
+      return [](ProcessedNode* p_node) {
+        const auto did_copy = p_node->Input(2).toBool();
+        DCHECK(p_node->Input(0).isTensor());
+        DCHECK(!did_copy || p_node->Input(1).isTensor());
+        const IValue& assignFrom =
+            did_copy ? p_node->Input(1) : p_node->Input(0);
+        // Create an IValue that borrows the input Tensor in order to
+        // save a refcount increment here and decrement in
+        // MemoryPlanner::deallocate. MemoryPlanner knows about this
+        // and will safely clean it up by using the corresponding
+        // destroyBorrow method.
+        p_node->Output(0) =
+            IValue(c10::MaybeOwnedTraits<at::TensorBase>::createBorrow(
+                assignFrom.toTensor()));
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::mul,
+    aten_mul,
+    [](Node* n) -> SROperator {
+      if (!n->matches(
+              torch::schema("aten::mul.left_t(t[] l, int n) -> (t[])"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+      return [](ProcessedNode* pnode) {
+        const auto& list = pnode->Input(0).toList();
+        const auto n = pnode->Input(1).toInt();
+
+        auto list_type = list.elementType();
+        auto ret = c10::impl::GenericList(list_type);
+        ret.reserve(list.size() * n);
+        for (const auto i : c10::irange(n)) {
+          (void)i;
+          for (const auto& ival : list) {
+            ret.push_back(ival);
+          }
+        }
+        pnode->Output(0) = ret;
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::sub,
+    aten_sub,
+    [](Node* n) -> SROperator {
+      if (!n->matches(torch::schema("aten::sub.int(int a, int b) -> (int)"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+      return [](ProcessedNode* pnode) {
+        const auto a = pnode->Input(0).toInt();
+        const auto b = pnode->Input(1).toInt();
+        pnode->Output(0) = a - b;
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::add,
+    aten_add,
+    [](Node* n) -> SROperator {
+      if (!n->matches(torch::schema("aten::add.t(t[] a, t[] b) -> (t[])"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+      return [](ProcessedNode* pnode) {
+        const auto& a = pnode->Input(0).toList();
+        const auto& b = pnode->Input(1).toList();
+        auto ret = a.copy();
+        ret.append(b);
+        pnode->Output(0) = ret;
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::Int,
+    aten_Int,
+    [](Node* n) -> SROperator {
+      if (!n->matches(torch::schema("aten::Int(Tensor a) -> int"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+      return [](ProcessedNode* pnode) {
+        const auto& input = pnode->Input(0).toTensor();
+        pnode->Output(0) = at::native::item(input).toInt();
+      };
+    });
 
 } // namespace jit
 } // namespace torch

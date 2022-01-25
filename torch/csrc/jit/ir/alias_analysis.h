@@ -45,8 +45,7 @@ class AliasDb {
  public:
   TORCH_API explicit AliasDb(
       std::shared_ptr<Graph> graphi,
-      bool isFrozen = false,
-      bool enablePreciseTupleContainerAnalysis = false);
+      bool isFrozen = false);
   TORCH_API ~AliasDb();
 
   // There are limitations to what effects the alias analysis can track. Two
@@ -66,6 +65,8 @@ class AliasDb {
   // Does `a` and `b` potentially share a memory location or do either
   // hold in memory any element that exists in the other
   TORCH_API bool mayContainAlias(Value* a, Value* b) const;
+
+  TORCH_API bool mayContainAlias(Value* a, const at::ArrayRef<Value*> b) const;
 
   // Do any values in group `a` share a memory location or hold in memory
   // any element that exists in group `b`
@@ -247,9 +248,6 @@ class AliasDb {
   // objects. Freezing API invokes alias analysis to check if they are mutated
   // internally.
   bool isFrozen_;
-
-  // Enable precise treatment of prim::TupleConstruct.
-  bool enablePreciseTupleContainerAnalysis_ = false;
 
   // The points-to graph that stores aliasing relationships
   std::unique_ptr<MemoryDAGBuilder> memoryDAGBuilder_;
