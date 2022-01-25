@@ -6,7 +6,7 @@ from typing import Any, Dict, List
 
 import torch
 from tools.codegen.code_template import CodeTemplate
-from torch.jit.operator_upgraders import generate_bytecode
+from torch.jit.generate_bytecode import generate_bytecode
 
 class ByteCode(Enum):
     instructions = 1
