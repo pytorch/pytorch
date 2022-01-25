@@ -3534,7 +3534,9 @@
     CPU, Meta: range_out
     CUDA: range_cuda_out
 
-- func: ravel(Tensor(a) self) -> Tensor(a)
+# CASE 1: Tensor, Tensor(a), Tensor(a!)
+# CASE 2: Use MemoryFormat memory_format=contiguous_format parameter; API change: numpy dosn't
+- func: ravel(Tensor self) -> Tensor
   variants: function, method
 
 - func: reciprocal(Tensor self) -> Tensor
