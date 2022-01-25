@@ -5,6 +5,7 @@ from .utils import (
     FusionInfo,
     SeenQOpInfo,
     get_users_of_seen_q_op_info,
+    get_producer_of_seen_q_op_info,
 )
 
 def _identity(x):
@@ -29,6 +30,29 @@ def pattern_is_match(
             is_match = False
             break
     return is_match
+
+def get_seen_q_op_info_of_start_of_fusion(
+    seen_q_op_info_end_of_fusion: SeenQOpInfo,
+    idx_to_seen_q_op_infos: Dict[int, SeenQOpInfo],
+) -> SeenQOpInfo:
+    assert seen_q_op_info_end_of_fusion.fusion_info is not None
+    cur_seen_q_op_info = seen_q_op_info_end_of_fusion
+    for idx in range(len(seen_q_op_info_end_of_fusion.fusion_info.pattern) - 1):
+        cur_seen_q_op_info = get_producer_of_seen_q_op_info(
+            idx_to_seen_q_op_infos, cur_seen_q_op_info)  # type: ignore[assignment]
+    return cur_seen_q_op_info
+
+def get_seen_q_op_info_of_end_of_fusion(
+    seen_q_op_info_start_of_fusion: SeenQOpInfo,
+    idx_to_seen_q_op_infos: Dict[int, SeenQOpInfo],
+) -> SeenQOpInfo:
+    assert seen_q_op_info_start_of_fusion.fusion_info is not None
+    cur_seen_q_op_info = seen_q_op_info_start_of_fusion
+    for idx in range(len(seen_q_op_info_start_of_fusion.fusion_info.pattern) - 1):
+        users = get_users_of_seen_q_op_info(
+            idx_to_seen_q_op_infos, cur_seen_q_op_info)
+        cur_seen_q_op_info = users[0]
+    return cur_seen_q_op_info
 
 def match_fusion_patterns(
     idx_to_seen_q_op_infos: Dict[int, SeenQOpInfo],
