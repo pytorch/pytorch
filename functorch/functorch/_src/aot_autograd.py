@@ -502,6 +502,8 @@ def compiled_function(
     cached_res = None
 
     fn_id = id(fn)
+    fw_compiler_id = id(fw_compiler)
+    bw_compiler_id = id(bw_compiler)
 
     if isinstance(static_argnums, int):
         static_argnums = [static_argnums]
@@ -521,7 +523,11 @@ def compiled_function(
         # TODO - move the hashing part of static_args to C++.
         static_args_hashed = []
         if static_argnums is not None:
-            tensor_args, static_args, static_args_hashed = filter_tensor_and_static_args(args, static_argnums)
+            (
+                tensor_args,
+                static_args,
+                static_args_hashed,
+            ) = filter_tensor_and_static_args(args, static_argnums)
 
         # Now flatten the tensor args
         if HAS_TREE:
@@ -533,7 +539,14 @@ def compiled_function(
         num_tensor_args = len(flattened_tensor_args)
         flattened_args = flattened_tensor_args + static_args
         flattened_args_for_cache = flattened_tensor_args + static_args_hashed
-        cached_res = compile_cache.at(fn_id, num_tensor_args, hasher_type, *flattened_args_for_cache)
+        cached_res = compile_cache.at(
+            fn_id,
+            fw_compiler_id,
+            bw_compiler_id,
+            num_tensor_args,
+            hasher_type,
+            *flattened_args_for_cache,
+        )
 
         # Compile the function and save it in the cache
         if cached_res is None:
@@ -547,7 +560,9 @@ def compiled_function(
                 flattened_tensor_args = args[:num_tensor_args]
                 static_args = args[num_tensor_args:]
 
-                tensor_args, kwargs = pytree.tree_unflatten(flattened_tensor_args, tensor_args_spec)
+                tensor_args, kwargs = pytree.tree_unflatten(
+                    flattened_tensor_args, tensor_args_spec
+                )
 
                 # Rearrange the args as per the original arg ordering
                 if static_argnums is None:
@@ -566,7 +581,13 @@ def compiled_function(
 
             # Save the compiled_fn in the cache
             compile_cache.insert(
-                fn_id, num_tensor_args, hasher_type, cached_res, *flattened_args_for_cache
+                fn_id,
+                fw_compiler_id,
+                bw_compiler_id,
+                num_tensor_args,
+                hasher_type,
+                cached_res,
+                *flattened_args_for_cache,
             )
 
         cached_fn, out_spec = cached_res
