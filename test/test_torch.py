@@ -2955,7 +2955,7 @@ else:
 
                 self.assertEqual(output, input_list)
 
-    # FIXME: move to test indexing          
+    # FIXME: move to test indexing
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_index_fill(self, device, dtype):
         x = torch.tensor([[1, 2], [4, 5]], dtype=dtype, device=device)
