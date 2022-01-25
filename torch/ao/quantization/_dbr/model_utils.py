@@ -11,6 +11,7 @@ from torch.quantization import (
     ObserverBase,
     FakeQuantizeBase,
 )
+from typing import Optional
 
 def pack_weights_for_functionals(
     module: torch.nn.Module,
@@ -66,10 +67,10 @@ def pack_weights_for_functionals(
 
             elif seen_op_info.type == F.linear:
                 # fetch all the info needed for packed params
-                def get_tensor_param_name(idx, name):
-                    name = seen_op_info.packable_tensor_idx_to_name.get(idx, None)
-                    if name is not None:
-                        return name
+                def get_tensor_param_name(idx: int, name: str) -> Optional[str]:
+                    param_name = seen_op_info.packable_tensor_idx_to_name.get(idx, None)
+                    if param_name is not None:
+                        return param_name
                     return seen_op_info.packable_tensor_kwarg_name_to_name.get(name, None)
 
                 weight_name = get_tensor_param_name(1, 'weight')
