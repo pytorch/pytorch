@@ -52,7 +52,7 @@ jobs:
       docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
     steps:
       - name: print labels
-        run: echo ${{github.event_name}}
+        run: echo "${PR_LABELS}"
       - name: Display EC2 information
         shell: bash
         run: |
@@ -266,7 +266,7 @@ jobs:
       ENABLE_SLOW_TEST: ''
       ENABLE_DOCS_TEST: ''
       ENABLE_BACKWARDS_COMPAT_TEST: ''
-      ENABLE_XLA_TEST: 1
+      ENABLE_XLA_TEST: ''
       ENABLE_NOARCH_TEST: 1
       NUM_TEST_SHARDS: 2
       MULTIGPU_RUNNER_TYPE: linux.16xlarge.nvidia.gpu
