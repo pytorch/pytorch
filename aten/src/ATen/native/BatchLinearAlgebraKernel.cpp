@@ -851,7 +851,7 @@ void apply_lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& in
 #if !AT_BUILD_WITH_LAPACK()
   TORCH_CHECK(
       false,
-      "Calling torch.lu on a CPU tensor requires compiling ",
+      "Calling torch.linalg.lu_factor on a CPU tensor requires compiling ",
       "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
 #else
   TORCH_CHECK(compute_pivots, "linalg.lu_factor: LU without pivoting is not implemented on the CPU");
@@ -908,8 +908,8 @@ void apply_lu_solve(const Tensor& b, const Tensor& lu, const Tensor& pivots, Tra
   const auto trans = to_blas(transpose);
   auto pivots_data = pivots.data_ptr<int>();
   auto b_stride = matrixStride(b);
-  auto lu_stride = lu.dim() > 2 ? lu.stride(-3) : 0;
-  auto pivots_stride = pivots.dim() > 1 ? pivots.stride(-2) : 0;
+  auto lu_stride = matrixStride(lu);
+  auto pivots_stride = pivots.size(-1);
   auto batch_size = batchCount(b);
 
   auto n = lu.size(-2);
@@ -950,7 +950,7 @@ void unpack_pivots_cpu_kernel(TensorIterator& iter, const int64_t dim_size) {
 
     for (const auto elem : c10::irange(nelems)) {
       (void)elem; //Suppress unused variable warning
-      // WARNING: torch.lu returns int32 pivots,
+      // WARNING: linalg.lu_factor returns int32 pivots,
       // this behavior could change in the future.
       const auto perm_data = reinterpret_cast<int64_t*>(perm_ptr);
       const auto pivots_data = reinterpret_cast<const int32_t*>(pivots_ptr);
