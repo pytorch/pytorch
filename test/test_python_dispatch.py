@@ -135,9 +135,8 @@ $5 = torch._ops.aten.kl_div($0, $1, 2, log_target=True)''')
         self.assertRaisesRegexp(
             RuntimeError, "Unable to cast", lambda: A(torch.zeros(1)).neg(),
         )
-        self.assertExpectedRaisesInline(
-            RuntimeError, lambda: A(torch.zeros(1)).detach(),
-            """Unable to cast Python instance of type <class 'str'> to C++ type 'at::Tensor'"""
+        self.assertRaisesRegexp(
+            RuntimeError, "Unable to cast", lambda: A(torch.zeros(1)).detach(),
         )
 
     def test_detach_appears_twice_when_called_once(self) -> None:
