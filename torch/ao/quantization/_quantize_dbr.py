@@ -39,9 +39,10 @@ def prepare(model, qconfig_dict, example_inputs, inplace=False, allow_list=None,
         prepare_custom_config_dict = {}
 
     for qconfig_dict_option in ('module_name_regex', 'module_name_object_type_order'):
-        assert qconfig_dict_option not in qconfig_dict, \
-            f'{qconfig_dict_option} option of qconfig_dict is not ' + \
-            'implemented yet in define-by-run quantization'
+        if qconfig_dict_option in qconfig_dict:
+            assert len(qconfig_dict[qconfig_dict_option]) == 0, \
+                f'{qconfig_dict_option} option of qconfig_dict is not ' + \
+                'implemented yet in define-by-run quantization'
 
     normalize_object_types(qconfig_dict)
     convert_dict_to_ordered_dict(qconfig_dict)

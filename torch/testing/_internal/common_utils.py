@@ -2484,6 +2484,8 @@ def retry(ExceptionToCheck, tries=3, delay=3, skip_after_retries=False):
     return deco_retry
 
 
+# FIXME: modernize these to be consistent with make_tensor
+#   and review including them in torch.testing
 # Methods for matrix generation
 
 def random_square_matrix_of_rank(l, rank, dtype=torch.double, device='cpu'):
@@ -2776,7 +2778,7 @@ def random_sparse_pd_matrix(matrix_size, density=0.01, **kwargs):
     indices_tensor = torch.tensor([icoords, jcoords])
     return torch.sparse_coo_tensor(indices_tensor, values, (matrix_size, matrix_size), dtype=dtype, device=device)
 
-
+# FIXME: remove this by updating test suites using it
 def do_test_dtypes(self, dtypes, layout, device):
     for dtype in dtypes:
         if dtype != torch.float16:
@@ -2785,7 +2787,7 @@ def do_test_dtypes(self, dtypes, layout, device):
             self.assertIs(layout, out.layout)
             self.assertEqual(device, out.device)
 
-
+# FIXME: remove this by updating test suites using it
 def do_test_empty_full(self, dtypes, layout, device):
     shape = torch.Size([2, 3])
 
@@ -2839,43 +2841,8 @@ def do_test_empty_full(self, dtypes, layout, device):
                                             dtype=int64_dtype, layout=layout, device=device, requires_grad=False),
                             int64_dtype, layout, device, fv + 5, False)
 
-# this helper method is to recursively
-# clone the tensor-type input of operators tested by OpInfo
-def clone_input_helper(input):
-    if isinstance(input, torch.Tensor):
-        return torch.clone(input)
-
-    if isinstance(input, Sequence):
-        return tuple(map(clone_input_helper, input))
-
-    return input
-
-THESE_TAKE_WAY_TOO_LONG = {
-    'test_Conv3d_groups',
-    'test_conv_double_backward',
-    'test_conv_double_backward_groups',
-    'test_Conv3d_dilated',
-    'test_Conv3d_stride_padding',
-    'test_Conv3d_dilated_strided',
-    'test_Conv3d',
-    'test_Conv2d_dilated',
-    'test_ConvTranspose3d_dilated',
-    'test_ConvTranspose2d_dilated',
-    'test_snli',
-    'test_Conv2d',
-    'test_Conv2d_padding',
-    'test_ConvTranspose2d_no_bias',
-    'test_ConvTranspose2d',
-    'test_ConvTranspose3d',
-    'test_Conv2d_no_bias',
-    'test_matmul_4d_4d',
-    'test_multinomial_invalid_probs',
-}
-
-
+# FIXME: improve load_tests() documentation here
 running_script_path = None
-
-
 def set_running_script_path():
     global running_script_path
     try:
@@ -2885,7 +2852,6 @@ def set_running_script_path():
     except Exception:
         pass
 
-
 def check_test_defined_in_running_script(test_case):
     if running_script_path is None:
         return
@@ -2894,7 +2860,6 @@ def check_test_defined_in_running_script(test_case):
         "is not defined in the running script \"{}\", but in \"{}\". Did you " \
         "accidentally import a unittest.TestCase from another file?".format(
             test_case.id(), running_script_path, test_case_class_file)
-
 
 def load_tests(loader, tests, pattern):
     set_running_script_path()
@@ -2906,6 +2871,7 @@ def load_tests(loader, tests, pattern):
     return test_suite
 
 
+# FIXME: document this and move it to test_serialization
 class BytesIOContext(io.BytesIO):
     def __enter__(self):
         return self
@@ -2980,22 +2946,15 @@ def set_cwd(path: str) -> Iterator[None]:
         os.chdir(old_cwd)
 
 
-# Using @precisionOverride specific to your test is the recommended way
+# FIXME: delete this
+# Using @toleranceOverride specific to your test is the recommended way
 # of doing this. These are just some values that worked for test_nn.
 dtype2prec_DONTUSE = {torch.float: 1e-5,
                       torch.double: 1e-5,
                       torch.half: 1e-2,
                       torch.bfloat16: 1e-1}
 
-
-def _wrap_warn_once(regex):
-    def decorator(fn):
-        def inner(self, *args, **kwargs):
-            with self.assertWarnsOnceRegex(UserWarning, regex):
-                fn(self, *args, **kwargs)
-        return inner
-    return decorator
-
+# FIXME: move to test_sparse or sparse utils
 # This is a wrapper that wraps a test to run this test twice, one with
 # coalesced=True, another with coalesced=False for coalesced/uncoalesced sparse tensors.
 def coalescedonoff(f):
@@ -3200,6 +3159,8 @@ def get_cycles_per_ms() -> float:
     return mean(vals[2 : num - 2])
 
 
+# OpInfo utils
+
 T = TypeVar('T')
 def first_sample(self: unittest.TestCase, samples: Iterable[T]) -> T:
     """
@@ -3210,3 +3171,14 @@ def first_sample(self: unittest.TestCase, samples: Iterable[T]) -> T:
         return next(iter(samples))
     except StopIteration:
         raise unittest.SkipTest('Skipped! Need at least 1 sample input')
+
+# this helper method is to recursively
+# clone the tensor-type input of operators tested by OpInfo
+def clone_input_helper(input):
+    if isinstance(input, torch.Tensor):
+        return torch.clone(input)
+
+    if isinstance(input, Sequence):
+        return tuple(map(clone_input_helper, input))
+
+    return input
