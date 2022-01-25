@@ -3,7 +3,7 @@
 #include <ATen/core/builtin_function.h>
 #include <ATen/core/function_schema.h>
 #include <ATen/core/ivalue.h>
-#include <ATen/core/jit_type.h>
+#include <ATen/core/class_type.h>
 #include <ATen/core/op_registration/infer_schema.h>
 #include <ATen/core/stack.h>
 #include <c10/util/C++17.h>
@@ -440,18 +440,22 @@ c10::IValue make_custom_class(CtorArgs&&... args) {
   return c10::IValue(std::move(userClassInstance));
 }
 
-
-// Alternative api for creating a torchbind class over torch::class_ this api is preffered to prevent size regressions
-// on Edge usecases. Must be used in conjunction with TORCH_SELECTIVE_CLASS macro aka
+// Alternative api for creating a torchbind class over torch::class_ this api is
+// preffered to prevent size regressions on Edge usecases. Must be used in
+// conjunction with TORCH_SELECTIVE_CLASS macro aka
 // selective_class<foo>("foo_namespace", TORCH_SELECTIVE_CLASS("foo"))
 template <class CurClass>
-inline class_<CurClass> selective_class_(const std::string& namespace_name, detail::SelectiveStr<true> className) {
-  auto class_name = std::string(className.operator const char *());
+inline class_<CurClass> selective_class_(
+    const std::string& namespace_name,
+    detail::SelectiveStr<true> className) {
+  auto class_name = std::string(className.operator const char*());
   return torch::class_<CurClass>(namespace_name, class_name);
 }
 
 template <class CurClass>
-inline detail::ClassNotSelected selective_class_(const std::string&, detail::SelectiveStr<false>) {
+inline detail::ClassNotSelected selective_class_(
+    const std::string&,
+    detail::SelectiveStr<false>) {
   return detail::ClassNotSelected();
 }
 

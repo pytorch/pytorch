@@ -370,6 +370,11 @@ class TestSortAndSelect(TestCase):
                         k = random.randint(1, testTensor.size(dim))
                         compare(testTensor, k, dim, dir)
 
+        # This tests the code path where on CUDA, topk is implemented with sort.
+        t = torch.randn((2, 100000), device=device)
+        compare(t, 2000, 1, True)
+        compare(t, 2000, 1, False)
+
     def test_topk_arguments(self, device):
         q = torch.randn(10, 2, 10, device=device)
         # Make sure True isn't mistakenly taken as the 2nd dimension (interpreted as 1)
@@ -393,6 +398,8 @@ class TestSortAndSelect(TestCase):
             x_empty = torch.empty(5, 0, dtype=dtype, device=device)
             x_ill_formed_empty = torch.empty(5, 0, 0, dtype=dtype, device=device)
             x_ill_formed_empty_another = torch.empty(5, 0, 5, dtype=dtype, device=device)
+            if dtype in floating_types_and(torch.float16, torch.bfloat16):
+                x_nan = torch.tensor([float("nan"), 0, 0, float("nan"), float("nan"), 1], dtype=dtype, device=device)
             expected_unique_dim0 = torch.tensor([[[1., 1.],
                                                   [0., 1.],
                                                   [2., 1.],
@@ -432,6 +439,10 @@ class TestSortAndSelect(TestCase):
             expected_unique_empty = torch.tensor([], dtype=dtype, device=device)
             expected_inverse_empty = torch.tensor([], dtype=torch.long, device=device)
             expected_counts_empty = torch.tensor([], dtype=torch.long, device=device)
+            if dtype in floating_types_and(torch.float16, torch.bfloat16):
+                expected_unique_nan = torch.tensor([float("nan"), 0, float("nan"), float("nan"), 1], dtype=dtype, device=device)
+                expected_inverse_nan = torch.tensor([0, 1, 1, 2, 3, 4], dtype=torch.long, device=device)
+                expected_counts_nan = torch.tensor([1, 2, 1, 1, 1], dtype=torch.long, device=device)
             # dim0
             x_unique = torch.unique(x, dim=0)
             self.assertEqual(expected_unique_dim0, x_unique)
@@ -542,6 +553,17 @@ class TestSortAndSelect(TestCase):
             self.assertEqual(expected_inverse_empty, x_inverse)
             self.assertEqual(expected_counts_empty, x_counts)
 
+            # test tensor with nan
+            if dtype in floating_types_and(torch.float16, torch.bfloat16):
+                x_unique, x_inverse, x_counts = torch.unique(
+                    x_nan,
+                    return_inverse=True,
+                    return_counts=True,
+                    dim=0)
+                self.assertEqual(expected_unique_nan, x_unique)
+                self.assertEqual(expected_inverse_nan, x_inverse)
+                self.assertEqual(expected_counts_nan, x_counts)
+
             # test not a well formed tensor
             # Checking for runtime error, as this is the expected behaviour
             with self.assertRaises(RuntimeError):
@@ -574,6 +596,9 @@ class TestSortAndSelect(TestCase):
                 dtype=dtype,
                 device=device
             )
+            # test tensor with nan
+            if dtype in floating_types_and(torch.float16, torch.bfloat16):
+                y_nan = torch.tensor([float("nan"), 0, 0, float("nan"), float("nan"), 1], dtype=dtype, device=device)
             expected_y_unique = torch.tensor(
                 [[0, 1],
                  [1, 2],
@@ -588,6 +613,11 @@ class TestSortAndSelect(TestCase):
             expected_y_counts = torch.tensor([3, 2, 1, 2, 1, 1], dtype=torch.int64, device=device)
             expected_y_inverse_bool = torch.tensor([0, 0, 0, 1, 1, 1, 2, 2, 3, 3], dtype=torch.int64, device=device)
             expected_y_counts_bool = torch.tensor([3, 3, 2, 2], dtype=torch.int64, device=device)
+            if dtype in floating_types_and(torch.float16, torch.bfloat16):
+                expected_y_unique_nan = torch.tensor([float("nan"), 0, float("nan"), float("nan"), 1], dtype=dtype, device=device)
+                expected_y_inverse_nan = torch.tensor([0, 1, 1, 2, 3, 4], dtype=torch.long, device=device)
+                expected_y_counts_nan = torch.tensor([1, 2, 1, 1, 1], dtype=torch.long, device=device)
+
             y_unique, y_inverse, y_counts = torch.unique_consecutive(y, return_inverse=True, return_counts=True, dim=0)
             if x.dtype == torch.bool:
                 self.assertEqual(expected_y_inverse_bool, y_inverse)
@@ -595,6 +625,17 @@ class TestSortAndSelect(TestCase):
             else:
                 self.assertEqual(expected_y_inverse, y_inverse)
                 self.assertEqual(expected_y_counts, y_counts)
+
+            # test tensor with nan
+            if dtype in floating_types_and(torch.float16, torch.bfloat16):
+                y_unique, y_inverse, y_counts = torch.unique_consecutive(
+                    y_nan,
+                    return_inverse=True,
+                    return_counts=True,
+                    dim=0)
+                self.assertEqual(expected_y_unique_nan, y_unique)
+                self.assertEqual(expected_y_inverse_nan, y_inverse)
+                self.assertEqual(expected_y_counts_nan, y_counts)
 
         run_test(device, torch.float)
         run_test(device, torch.double)
@@ -879,17 +920,6 @@ class TestSortAndSelect(TestCase):
             res1val, res1ind = torch.kthvalue(x, k, keepdim=False)
             self.assertEqual(res1val[:, :], res2val[:, :, k - 1], atol=0, rtol=0)
             self.assertEqual(res1ind[:, :], res2ind[:, :, k - 1], atol=0, rtol=0)
-
-    # test overlapping output
-    @dtypes(torch.double)
-    @onlyNativeDeviceTypes   # Fails on XLA
-    def test_kthvalue_overlap(self, device, dtype):
-        S = 10
-        k = 5
-        a = torch.randn(S, device=device)
-        indices = torch.empty((), device=device, dtype=torch.long)
-        with self.assertRaisesRegex(RuntimeError, "unsupported operation:"):
-            torch.kthvalue(a, k, out=(a, indices))
 
     @dtypes(torch.float)
     @onlyNativeDeviceTypes   # Fails on XLA

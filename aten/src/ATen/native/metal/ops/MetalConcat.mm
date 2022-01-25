@@ -203,7 +203,7 @@ Tensor cat(const TensorList tensors, int64_t dim) {
 }
 
 TORCH_LIBRARY_IMPL(aten, Metal, m) {
-  m.impl("_cat", TORCH_FN(cat));
+  m.impl(TORCH_SELECTIVE_NAME("aten::_cat"), TORCH_FN(cat));
 }
 
 }

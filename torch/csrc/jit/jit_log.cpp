@@ -1,4 +1,3 @@
-
 #include <cstdlib>
 #include <iomanip>
 #include <sstream>
@@ -110,15 +109,16 @@ void JitLoggingConfig::parse() {
 }
 
 bool is_enabled(const char* cfname, JitLoggingLevels level) {
-  auto &files_to_levels = JitLoggingConfig::getInstance().getFilesToLevels();
+  const auto& files_to_levels =
+      JitLoggingConfig::getInstance().getFilesToLevels();
   std::string fname{cfname};
   fname = c10::detail::StripBasename(fname);
-  auto end_index = fname.find_last_of('.') == std::string::npos
+  const auto end_index = fname.find_last_of('.') == std::string::npos
       ? fname.size()
       : fname.find_last_of('.');
-  auto fname_no_ext = fname.substr(0, end_index);
+  const auto fname_no_ext = fname.substr(0, end_index);
 
-  auto it = files_to_levels.find(fname_no_ext);
+  const auto it = files_to_levels.find(fname_no_ext);
   if (it == files_to_levels.end()) {
     return false;
   }

@@ -13,7 +13,7 @@ struct SourceLocation {
   int line = -1;
 };
 
-void EmitShortFrameInfo(
+TORCH_API void EmitShortFrameInfo(
     std::ostream& stream,
     const std::vector<SourceLocation>& frames);
 

@@ -123,22 +123,24 @@ class Backend(object):
         elif value == Backend.UNDEFINED:
             raise ValueError("Invalid backend: '{}'".format(name))
         elif value != Backend.GLOO and value != Backend.NCCL and value != Backend.MPI:
-            value = name
+            value = name.lower()
         return value
 
     @classmethod
     def register_backend(cls, name, func):
         """
-        Registers a new backend.
+        Registers a new backend with the given name and instantiating function.
 
-        This class method is used by 3rd party cpp extension to register new backend.
+        This class method is used by 3rd party ``ProcessGroup`` extension to
+        register new backends.
 
         Args:
-            name (str): Backend name matching with the one in `init_process_group()`.
+            name (str): Backend name of the ``ProcessGroup`` extension. It
+                        should match the one in ``init_process_group()``.
             func (function): Function handler that instantiates the backend.
-                             The function should be implemented in the backend cpp extension
-                             and takes four arguments, including prefix_store, rank,
-                             world_size, and timeout.
+                             The function should be implemented in the backend
+                             extension and takes four arguments, including
+                             ``store``, ``rank``, ``world_size``, and ``timeout``.
 
         .. note:: This support of 3rd party backend is experimental and subject to change.
 
@@ -1562,6 +1564,17 @@ def _tensor_to_object(tensor, tensor_size):
     buf = tensor.numpy().tobytes()[:tensor_size]
     return _unpickler(io.BytesIO(buf)).load()
 
+def _check_for_nccl_backend(group):
+    pg = group or _get_default_group()
+    # It is not expected for PG to be wrapped many times, but support it just
+    # in case
+    while isinstance(pg, _ProcessGroupWrapper):
+        pg = pg.wrapped_pg
+
+    return (
+        is_nccl_available() and
+        isinstance(pg, ProcessGroupNCCL)
+    )
 
 def all_gather_object(object_list, obj, group=None):
     """
@@ -1615,9 +1628,8 @@ def all_gather_object(object_list, obj, group=None):
 
     input_tensor, local_size = _object_to_tensor(obj)
     current_device = torch.device("cpu")
-    if is_nccl_available() and isinstance(
-        group or _get_default_group(), ProcessGroupNCCL
-    ):
+    is_nccl_backend = _check_for_nccl_backend(group)
+    if is_nccl_backend:
         # See note about using torch.cuda.current_device() here in docstring.
         # We cannot simply use my_rank since rank == device is not necessarily
         # true.
@@ -1711,9 +1723,9 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
     my_rank = get_rank()
     _validate_output_list_for_rank(my_rank, dst, object_gather_list)
     input_tensor, local_size = _object_to_tensor(obj)
-    group_backend = get_backend(group)
     current_device = torch.device("cpu")
-    is_nccl_backend = group_backend == Backend.NCCL
+    is_nccl_backend = _check_for_nccl_backend(group)
+
     if is_nccl_backend:
         current_device = torch.device("cuda", torch.cuda.current_device())
         input_tensor = input_tensor.to(current_device)
@@ -1809,7 +1821,7 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
         >>> # Assumes backend is not NCCL
         >>> device = torch.device("cpu")
         >>> dist.broadcast_object_list(objects, src=0, device=device)
-        >>> broadcast_objects
+        >>> objects
         ['foo', 12, {1: 2}]
     """
     if _rank_not_in_group(group):
@@ -1830,8 +1842,7 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
     # ``current_device`` is CUDA if backend is NCCL otherwise CPU device. In the
     # case it is not ``None`` we move the size and object tensors to be
     # broadcasted to this device.
-    group_backend = get_backend(group)
-    is_nccl_backend = group_backend == Backend.NCCL
+    is_nccl_backend = _check_for_nccl_backend(group)
     current_device = None
     if device is not None:
         if is_nccl_backend and device.type != "cuda":
@@ -1855,7 +1866,7 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
         object_tensor = torch.cat(tensor_list)
     else:
         object_tensor = torch.empty(
-            torch.sum(object_sizes_tensor).int().item(),  # type: ignore[arg-type]
+            torch.sum(object_sizes_tensor).item(),  # type: ignore[arg-type]
             dtype=torch.uint8,
         )
 
@@ -1902,6 +1913,9 @@ def scatter_object_list(
     .. note:: Note that this API differs slightly from the scatter collective
         since it does not provide an ``async_op`` handle and thus will be a
         blocking call.
+
+    .. note:: Note that this API does not support the NCCL backend, as the
+        tensor-based scatter collective is not supported by ProcessGroupNCCL.
 
     .. warning::
         :func:`scatter_object_list` uses ``pickle`` module implicitly, which

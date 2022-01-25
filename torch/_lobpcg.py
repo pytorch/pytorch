@@ -291,7 +291,8 @@ class LOBPCGAutogradFunction(torch.autograd.Function):
             ortho_iparams, ortho_fparams, ortho_bparams
         )
 
-        ctx.save_for_backward(A, B, D, U, largest)
+        ctx.save_for_backward(A, B, D, U)
+        ctx.largest = largest
 
         return D, U
 
@@ -300,7 +301,8 @@ class LOBPCGAutogradFunction(torch.autograd.Function):
         A_grad = B_grad = None
         grads = [None] * 14
 
-        A, B, D, U, largest = ctx.saved_tensors
+        A, B, D, U = ctx.saved_tensors
+        largest = ctx.largest
 
         # lobpcg.backward has some limitations. Checks for unsupported input
         if A.is_sparse or (B is not None and B.is_sparse and ctx.needs_input_grad[2]):
@@ -352,7 +354,7 @@ def lobpcg(A: Tensor,
            ) -> Tuple[Tensor, Tensor]:
 
     """Find the k largest (or smallest) eigenvalues and the corresponding
-    eigenvectors of a symmetric positive defined generalized
+    eigenvectors of a symmetric positive definite generalized
     eigenvalue problem using matrix-free LOBPCG methods.
 
     This function is a front-end to the following LOBPCG algorithms

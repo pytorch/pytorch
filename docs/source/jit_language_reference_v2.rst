@@ -209,12 +209,13 @@ such as ``Future[int]``. Structural types are composable with any ``TSType``.
 ::
 
     TSStructuralType ::=  TSTuple | TSNamedTuple | TSList | TSDict |
-                        TSOptional | TSFuture | TSRRef
+                        TSOptional | TSUnion | TSFuture | TSRRef
 
     TSTuple          ::= "Tuple" "[" (TSType ",")* TSType "]"
     TSNamedTuple     ::= "namedtuple" "(" (TSType ",")* TSType ")"
     TSList           ::= "List" "[" TSType "]"
     TSOptional       ::= "Optional" "[" TSType "]"
+    TSUnion          ::= "Union" "[" (TSType ",")* TSType "]"
     TSFuture         ::= "Future" "[" TSType "]"
     TSRRef           ::= "RRef" "[" TSType "]"
     TSDict           ::= "Dict" "[" KeyType "," TSType "]"
@@ -828,11 +829,12 @@ TorchScript Type System Definition
     TSPrimitiveType ::= "int" | "float" | "double" | "complex" | "bool" | "str" | "None"
 
     TSStructualType ::=  TSTuple | TSNamedTuple | TSList | TSDict |
-                         TSOptional | TSFuture | TSRRef
+                         TSOptional | TSUnion | TSFuture | TSRRef
     TSTuple         ::= "Tuple" "[" (TSType ",")* TSType "]"
     TSNamedTuple    ::= "namedtuple" "(" (TSType ",")* TSType ")"
     TSList          ::= "List" "[" TSType "]"
     TSOptional      ::= "Optional" "[" TSType "]"
+    TSUnion         ::= "Union" "[" (TSType ",")* TSType "]"
     TSFuture        ::= "Future" "[" TSType "]"
     TSRRef          ::= "RRef" "[" TSType "]"
     TSDict          ::= "Dict" "[" KeyType "," TSType "]"
@@ -855,7 +857,6 @@ documentation is unsupported. The following table summarizes ``typing`` construc
 -----------------------------  ----------------
 ``typing.Any``                  In development
 ``typing.NoReturn``             Not supported
-``typing.Union``                In development
 ``typing.Callable``             Not supported
 ``typing.Literal``              Not supported
 ``typing.ClassVar``             Not supported
@@ -1905,4 +1906,4 @@ Type Refinement
 
 - ``torch.jit.isinstance()``
     - Returns a boolean indicating whether a variable is of the specified type.
-    - More deatils about its usage and examples can be found in :meth:`~torch.jit.isinstance`.
+    - More details about its usage and examples can be found in :meth:`~torch.jit.isinstance`.

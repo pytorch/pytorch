@@ -78,7 +78,7 @@ But that may not always be the case. For instance:
 Under the hood, to prevent reference cycles, PyTorch has *packed* the tensor
 upon saving and *unpacked* it into a different tensor for reading. Here, the
 tensor you get from accessing ``y.grad_fn._saved_result`` is a different tensor
-object than ``x`` (but they still share the same storage).
+object than ``y`` (but they still share the same storage).
 
 Whether a tensor will be packed into a different tensor object depends on
 whether it is an output of its own `grad_fn`, which is an implementation detail
@@ -108,7 +108,7 @@ Setting ``requires_grad``
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
 :attr:`requires_grad` is a flag, defaulting to false *unless wrapped
-in a ``nn.Parameter``*, that allows for fine-grained exclusion of
+in a* ``nn.Parameter``, that allows for fine-grained exclusion of
 subgraphs from gradient computation. It takes effect in both the
 forward and backward passes:
 
