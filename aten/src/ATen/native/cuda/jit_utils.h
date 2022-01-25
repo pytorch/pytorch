@@ -34,6 +34,7 @@ std::string generate_code(
     bool contiguous,
     bool dynamic_casting,
     BinaryFuncVariant scalar_pos,
+    c10::SmallVector<std::string>& extra_args_typenames,
     bool vectorized=false,
     int vec_size=0);
 
@@ -43,15 +44,27 @@ NvrtcFunction jit_pwise_function(
 
 void launch_jitted_pwise_function(
     NvrtcFunction function,
-    std::array<void*, 7>& args,
+    void* args[],
     const int nBlocks,
     const int kBlockSize);
 
+template <typename T>
+struct delayed_false : std::false_type {
+};
 
 // Defines type names
-template <typename T> inline std::string typeName() {
-    TORCH_INTERNAL_ASSERT(false, "invalid type");
-    return "void";
+// NOTE: General case is instantiated only for invalid types.
+// All the valid types have specialization using the TYPE_NAME_FN
+// macro below.
+template <typename T>
+inline std::string typeName() {
+  // we can't use static_assert(false) directly as the
+  // program will be not compile even if the template is not
+  // instantiated, so we use `delayed_false`
+  // to make sure compiler doesn't eagerly raise
+  // fail this assertion.
+  static_assert(delayed_false<T>::value, "invalid type for jiterator");
+  return "void";
 }
 
 #define TYPE_NAME_FN(ctype, name) \

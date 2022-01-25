@@ -9,7 +9,7 @@ from tools.codegen.operator_versions.gen_mobile_upgraders import (
 from pathlib import Path
 import tempfile
 import os
-from torch.jit.operator_upgraders import generate_bytecode
+from torch.jit.generate_bytecode import generate_bytecode
 
 pytorch_test_dir = Path(__file__).resolve().parents[1]
 
