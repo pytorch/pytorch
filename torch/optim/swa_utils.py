@@ -66,10 +66,10 @@ class AveragedModel(Module):
         When using SWA with models containing Batch Normalization you may
         need to update the activation statistics for Batch Normalization.
         This can be done either by using the :meth:`torch.optim.swa_utils.update_bn`
-        or by setting :attr:`use_buffers` to `True`. The first approach updates the 
-        statistics in a post-training step by passing data through the model. The 
+        or by setting :attr:`use_buffers` to `True`. The first approach updates the
+        statistics in a post-training step by passing data through the model. The
         second does it during the parameter update phase by averaging all buffers.
-        Empirical evidence has shown that updating the statistics in normalization 
+        Empirical evidence has shown that updating the statistics in normalization
         layers increases accuracy, but you may wish to empirically test which
         approach yields the best results in your problem.
 
