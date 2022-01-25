@@ -120,8 +120,8 @@ class TestGraphRewritePasses(JitTestCase):
         x_2 = torch.rand(x_2_shape)
         model_2 = torch.jit.trace(FunctionalConv2d(conv2d_weight, conv2d_bias), [x_2])
         check_pattern_count_map_2 = {
-            "aten::_convolution": 0, 
-            "vulkan_prepack::conv2d_clamp_run": 1, 
+            "aten::_convolution": 0,
+            "vulkan_prepack::conv2d_clamp_run": 1,
             "vulkan_prepack::conv2d_clamp_prepack": 1
         }
         self.check_single_replacement(
@@ -131,8 +131,8 @@ class TestGraphRewritePasses(JitTestCase):
             model_2
         )
         self.check_op_presence(
-            check_pattern_count_map_2, 
-            torch._C._jit_pass_vulkan_insert_prepacked_ops, 
+            check_pattern_count_map_2,
+            torch._C._jit_pass_vulkan_insert_prepacked_ops,
             model_2
         )
         model_2(x_2)  # make sure it runs
