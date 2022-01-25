@@ -5576,6 +5576,37 @@ for shape in [(1,), ()]:
         gradcheck(MyFn.apply, (1, x.requires_grad_(True), 1, y.requires_grad_(True)), check_forward_ad=True,
                   check_backward_ad=False, check_batched_grad=False)
 
+    def test_custom_function_forward_mode_forward_is_no_op(self):
+        for jvp_mul_by_2 in (True, False):
+            class MyFn(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x, y):
+                    return x + y, x
+
+                @staticmethod
+                def vjp(ctx, gO1, gO2):
+                    return gO1 + gO2, gO1
+
+                @staticmethod
+                def jvp(ctx, x_t, y_t):
+                    if jvp_mul_by_2:
+                        # If the user returns input as-is, this result
+                        # isn't used!
+                        return x_t + y_t, x_t * 2
+                    else:
+                        return x_t + y_t, x_t
+
+            x = torch.tensor(1., dtype=torch.double, requires_grad=True)
+            t = torch.tensor(1., dtype=torch.double)
+            y = torch.tensor(1., dtype=torch.double, requires_grad=True)
+
+            with fwAD.dual_level():
+                x_dual = fwAD.make_dual(x, t)
+                _, out2 = MyFn.apply(x_dual, y)
+                self.assertTrue(fwAD.unpack_dual(out2).tangent._base is t)
+
+            gradcheck(MyFn.apply, (x, y), check_forward_ad=True)
+
     def test_custom_function_local_inplace(self):
         class MyFn(torch.autograd.Function):
             @staticmethod

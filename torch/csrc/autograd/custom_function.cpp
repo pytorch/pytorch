@@ -147,7 +147,12 @@ void _process_forward_mode_AD(const variable_list &inputs,
       }
     } else {
       // At this point, outputs[i] cannot be one of the input (raw_outputs[i] might be but was changed by the backward code)
-      TORCH_INTERNAL_ASSERT(!is_input);
+      TORCH_INTERNAL_ASSERT(inputs_mapping.count(out.unsafeGetTensorImpl()) == 0);
+      if (is_input && !is_modified) {
+        // If the forward return an input as-is, since backward code performed a view without the
+        // forward no-grad guard, we are done.
+        continue;
+      }
 
       if (out.is_view() && impl::get_view_autograd_meta(out)->has_fw_view()) {
         // If the output is a view
