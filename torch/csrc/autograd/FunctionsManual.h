@@ -460,6 +460,16 @@ std::tuple<Tensor, Tensor> _cudnn_convolution_backward(
     at::IntArrayRef output_padding, at::IntArrayRef stride, at::IntArrayRef dilation, bool transposed, int64_t groups,
     ::std::array<bool,2> output_mask);
 
+Tensor scatter_reduce_backward(
+  const Tensor& grad,
+  const Tensor& input,
+  int dim,
+  const Tensor& index,
+  c10::string_view reduce,
+  const Tensor& result
+);
+
+
 } // namespace details
 } // namespace generated
 } // namespace autograd
