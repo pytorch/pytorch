@@ -91,8 +91,7 @@ class CommitList:
         if 'caffe2' in title:
             return Commit(commit_hash, 'caffe2', topic, title)
         if '[codemod]' in title.lower():
-            return Commit(commit_hash, 'skip', topic, title)
-        
+            return Commit(commit_hash, 'skip', topic, title) 
         labels = features['labels']
         if 'Reverted' in labels:
             return Commit(commit_hash, 'skip', topic, title) 
