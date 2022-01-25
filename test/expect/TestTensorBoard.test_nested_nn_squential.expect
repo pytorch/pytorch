@@ -50,7 +50,7 @@ node {
   }
 }
 node {
-  name: "OuterNNSquential/Sequential[outer_nn_squential]/InnerNNSquential[0]/Sequential[inner_nn_squential]/Linear[0]/bias/bias.9"
+  name: "OuterNNSquential/Sequential[outer_nn_squential]/InnerNNSquential[0]/Sequential[inner_nn_squential]/Linear[0]/bias/bias.1"
   op: "prim::GetAttr"
   input: "OuterNNSquential/Sequential[outer_nn_squential]/InnerNNSquential[0]/Sequential[inner_nn_squential]/Linear[0]/weight/_0.1"
   attr {
