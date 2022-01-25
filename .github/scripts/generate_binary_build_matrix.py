@@ -13,8 +13,7 @@ architectures:
 from typing import Dict, List, Tuple
 
 
-# CUDA_ARCHES = ["10.2", "11.1", "11.3", "11.5"]
-CUDA_ARCHES = ["11.5"]
+CUDA_ARCHES = ["10.2", "11.1", "11.3", "11.5"]
 
 
 ROCM_ARCHES = ["4.3.1", "4.5.2"]
@@ -62,8 +61,7 @@ LIBTORCH_CONTAINER_IMAGES: Dict[Tuple[str, str], str] = {
     ("cpu", CXX11_ABI): "pytorch/libtorch-cxx11-builder:cpu",
 }
 
-# FULL_PYTHON_VERSIONS = ["3.7", "3.8", "3.9", "3.10"]
-FULL_PYTHON_VERSIONS = ["3.7"]
+FULL_PYTHON_VERSIONS = ["3.7", "3.8", "3.9", "3.10"]
 
 
 def translate_desired_cuda(gpu_arch_type: str, gpu_arch_version: str) -> str:
@@ -112,9 +110,9 @@ def generate_conda_matrix(os: str) -> List[Dict[str, str]]:
 def generate_libtorch_matrix(os: str, abi_version: str) -> List[Dict[str, str]]:
     libtorch_variants = [
         "shared-with-deps",
-        # "shared-without-deps",
-        # "static-with-deps",
-        # "static-without-deps",
+        "shared-without-deps",
+        "static-with-deps",
+        "static-without-deps",
     ]
     ret: List[Dict[str, str]] = []
     arches = ["cpu"]
