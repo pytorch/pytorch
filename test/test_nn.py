@@ -1377,6 +1377,20 @@ class TestNN(NNTestCase):
         self.assertTrue(len(list(m.buffers())) == 0)
         self.assertTrue(len(m.state_dict()) == 1)
 
+    @unittest.skipIf(not TEST_NUMPY, "numpy not found")
+    def test_load_state_dict_invalid(self):
+        m = torch.nn.Linear(2, 2, bias=False)
+
+        state_dict = {'weight': np.random.randn(2, 2)}
+        with self.assertRaisesRegex(RuntimeError,
+                                    "expected torch.Tensor or Tensor-like object from checkpoint but received"):
+            m.load_state_dict(state_dict)
+
+        state_dict = {'weight': ((1., 1.), (2., 2.))}
+        with self.assertRaisesRegex(RuntimeError,
+                                    "expected torch.Tensor or Tensor-like object from checkpoint but received"):
+            m.load_state_dict(state_dict)
+
     def test_buffer_not_persistent_load(self):
         m = nn.Module()
         m.register_buffer('buf', torch.rand(5), persistent=False)
