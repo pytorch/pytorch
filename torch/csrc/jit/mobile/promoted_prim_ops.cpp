@@ -1,5 +1,3 @@
-#include <ATen/core/dynamic_type.h>
-#include <ATen/core/type_factory.h>
 #include <torch/csrc/jit/mobile/promoted_prim_ops.h>
 
 namespace torch {
@@ -117,15 +115,15 @@ void toList(Stack& stack) {
 
   // Rebuild the output type using elem_ty_val and dim_val. Start
   // with the element type corresponding to elem_ty_val.
-  at::TypePtr out_ty;
+  TypePtr out_ty;
   if (elem_ty_val == 0) {
-    out_ty = at::IntType::get();
+    out_ty = IntType::get();
   } else if (elem_ty_val == 1) {
-    out_ty = at::FloatType::get();
+    out_ty = FloatType::get();
   } else if (elem_ty_val == 2) {
-    out_ty = at::BoolType::get();
+    out_ty = BoolType::get();
   } else if (elem_ty_val == 3) {
-    out_ty = at::ComplexType::get();
+    out_ty = ComplexType::get();
   } else {
     TORCH_CHECK(
         false,
@@ -138,8 +136,8 @@ void toList(Stack& stack) {
   // the elements will be casted to double/c10::complex<double>
   // later.
   TORCH_CHECK(
-      (out_ty == at::FloatType::get() && t.is_floating_point()) ||
-          (out_ty == at::ComplexType::get() && t.is_complex()) ||
+      (out_ty == FloatType::get() && t.is_floating_point()) ||
+          (out_ty == ComplexType::get() && t.is_complex()) ||
           tryScalarTypeFromJitType(*out_ty) == t.scalar_type(),
       "Output annotation element type and runtime tensor element type must match for tolist()");
 
@@ -152,7 +150,7 @@ void toList(Stack& stack) {
   // Wrap out_ty in a ListType dim times.
   for (const auto i : c10::irange(dim_val)) {
     (void)i; // Suppress unused variable warning
-    out_ty = at::ListType::create(out_ty);
+    out_ty = ListType::create(out_ty);
   }
 
   int64_t dim = t.dim();
@@ -168,7 +166,7 @@ void toList(Stack& stack) {
 void numToTensorScalar(Stack& stack) {
   at::Scalar s;
   pop(stack, s);
-  push(stack, at::scalar_tensor(s));
+  push(stack, at::scalar_to_tensor(s));
 }
 
 void isCuda(Stack& stack) {
@@ -178,7 +176,10 @@ void isCuda(Stack& stack) {
 }
 
 void numToTensorBool(Stack& stack) {
-  numToTensorScalar(stack);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  bool b;
+  pop(stack, b);
+  push(stack, at::scalar_to_tensor(b));
 }
 
 void dictIndex(Stack& stack) {
