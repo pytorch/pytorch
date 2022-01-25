@@ -42,10 +42,8 @@ def exit_dual_level(*, level=None):
 
 def make_dual(tensor, tangent, *, level=None):
     r"""Associates :attr:`tensor` with a forward AD gradient, :attr:`tangent`, to create
-    a "dual tensor", which is used to compute forward AD gradients.
-
-    The result is a new tensor aliased with :attr:`tensor`. :attr:`tensor`
-    is used as-is.
+    a "dual tensor", which is used to compute forward AD gradients. The result is a new
+    tensor aliased with :attr:`tensor`. :attr:`tensor` is used as-is.
 
     This function is backward differentiable.
 
@@ -76,7 +74,6 @@ UnpackedDualTensor = namedtuple('UnpackedDualTensor', ['primal', 'tangent'])
 
 def unpack_dual(tensor, *, level=None):
     r"""Unpacks a "dual tensor" to get both its Tensor value and its forward AD gradient, i.e. ``tangent``.
-
     The result is a namedtuple ``(primal, tangent)`` where ``primal`` is a view of
     :attr:`tensor`'s primal and ``tangent`` is :attr:`tensor`'s tangent as-is.
     Neither of these tensors can be dual tensor of level :attr:`level`.
@@ -105,7 +102,7 @@ def unpack_dual(tensor, *, level=None):
     return UnpackedDualTensor(primal, dual)
 
 class dual_level(_DecoratorContextManager):
-    r"""Context-manager that enables forward ad. All forward AD computation must
+    r"""Context-manager that enables forward AD. All forward AD computation must
     be performed in a ``dual_level`` context.
 
     .. Note::
