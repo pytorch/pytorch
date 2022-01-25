@@ -12,7 +12,7 @@
 
 namespace c10 {
 
-#define FORALL_NS_SYMBOLS(_)         \
+#define FORALL_NS_NAMESPACES(_)      \
   _(namespaces, prim)                \
   _(namespaces, aten)                \
   _(namespaces, cuda)                \
@@ -22,7 +22,10 @@ namespace c10 {
   _(namespaces, user)                \
   _(namespaces, _caffe2)             \
   _(namespaces, dimname)             \
-  _(namespaces, namespaces)          \
+  _(namespaces, namespaces)
+
+#define FORALL_NS_SYMBOLS(_)         \
+  FORALL_NS_NAMESPACES(_)            \
   _(prim, Assign)                    \
   _(prim, BroadcastingChunk)         \
   _(prim, BroadcastSizes)            \
