@@ -15,16 +15,13 @@ on:
       - 'ciflow/trunk/*'
   workflow_dispatch:
 
-# For setup-miniconda, see https://github.com/conda-incubator/setup-miniconda/issues/179
-defaults:
-  run:
-    shell: bash -x -e -l {0}
 env:
   BUILD_ENVIRONMENT: ios-12-5-1-arm64-custom-ops
   IN_CI: 1
   IS_GHA: 1
   IOS_PLATFORM: OS
   IOS_ARCH: arm64
+  PYTHON_VERSION: 3.8
 
 
 jobs:
@@ -60,14 +57,6 @@ jobs:
           ruby-version: 2.6
           bundler-cache: true
           working-directory: ios/TestApp/
-      # NOTE: the setup-miniconda action takes it upon itself to overwrite the PATH with whatever it thinks is correct
-      #       meaning that things like setup-ruby won't actually get setup correctly if run after setup-miniconda
-      - name: Setup miniconda
-        uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-update-conda: true
-          python-version: 3.8
-          activate-environment: build
       - name: Populate CI build options
         run: |
           # Most builds use the lite interpreter, if certain builds shouldn't
@@ -89,13 +78,33 @@ jobs:
               echo "USE_COREML_DELEGATE=1" >> "${GITHUB_ENV}"
               ;;
           esac
-      - name: Install ios / conda Dependencies
+      - name: Install brew dependencies
         run: |
           # Install dependencies
           brew install libtool
           conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi requests typing_extensions --yes
+      - name: Install conda dependencies
+        run: |
+          # Creates a conda environment in temporary folder
+          conda \
+            create \
+            -y \
+            -p \
+            "${RUNNER_TEMP}/build" \
+            "python=${PYTHON_VERSION}" \
+            numpy \
+            ninja \
+            pyyaml \
+            mkl \
+            mkl-include \
+            setuptools \
+            cmake \
+            cffi \
+            requests \
+            typing_extensions
+          # Sets conda environment using CONDA_PREFIX env variable, should persist through the rest of the steps
+          echo "CONDA_PREFIX=${RUNNER_TEMP}/build" >> "${GITHUB_ENV}"
       - name: Run Fastlane
-        shell: bash -e {0}
         run: |
           set -x
           cd ios/TestApp
