@@ -173,19 +173,19 @@ class InverseWishart(ExponentialFamily):
     def mean(self):
         nu = self.df  # has shape (batch_shape)
         p = self._event_shape[-1]  # has singleton shape
-        if self.df.le(p + 1).any():
+        if nu.le(p + 1).any():
             raise ValueError("Mean of the Inverse Wishart distribution can be caculated only for df > ndim + 1.")
-        return self.covariance_matrix / (nu - p - 1).clamp(min=1e-10).view(self._batch_shape + (1, 1))
+        return self.covariance_matrix / (nu - p - 1).view(self._batch_shape + (1, 1))
 
     @property
     def variance(self):
         nu = self.df  # has shape (batch_shape)
         p = self._event_shape[-1]  # has singleton shape
-        if self.df.le(p + 3).any():
+        if nu.le(p + 3).any():
             raise ValueError(
                 "Elementwise variance of the Inverse Wishart distribution can be caculated only for df > ndim + 3."
             )
-        if self.df.ge(p - 3).any():
+        if nu.ge(p - 3).any():
             warnings.warn(
                 """
                 In singular case, Elementwise variance of the Inverse Wishart distribution
