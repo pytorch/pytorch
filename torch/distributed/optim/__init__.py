@@ -31,6 +31,8 @@ functional_optim_map = {
     optim.Adamax: _FunctionalAdamax,
 }
 
+# DistributedOptimizer imports torch.distributed.rpc names, so gate availability
+# based on RPC being available.
 if hasattr(torch._C, '_rpc_init'):
     from .optimizer import DistributedOptimizer
 
