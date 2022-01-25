@@ -83,7 +83,7 @@ class TestCommon(TestCase):
             if dtype in allowed_backward_dtypes:
                 unsupported_backward_dtypes.append(dtype)
 
-        for dtype in [k for k in all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool)]:
+        for dtype in list(all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool)):
             # tries to acquire samples - failure indicates lack of support
             requires_grad = (dtype in allowed_backward_dtypes and op.supports_autograd)
             try:

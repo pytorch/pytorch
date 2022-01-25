@@ -210,8 +210,8 @@ class TestViewOps(TestCase):
         # because view(dtype) does not support backward yet
         # TODO: Remove this when autograd support is added
         if dtype.is_floating_point or dtype.is_complex:
-            for view_dtype in [*[k for k in floating_types_and(torch.half, torch.bfloat16)],
-                               *[k for k in complex_types()]]:
+            for view_dtype in [*list(floating_types_and(torch.half, torch.bfloat16)),
+                               *list(complex_types())]:
                 t = make_tensor((5, 5, 64), device, dtype, low=-5, high=5, requires_grad=True)
                 self.assertFalse(t.view(view_dtype).requires_grad)
 
@@ -222,7 +222,7 @@ class TestViewOps(TestCase):
     def test_view_dtype_upsize_errors(self, device, dtype):
         dtype_size = torch._utils._element_size(dtype)
 
-        for view_dtype in [k for k in all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool)]:
+        for view_dtype in list(all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool)):
             view_dtype_size = torch._utils._element_size(view_dtype)
             if view_dtype_size <= dtype_size:
                 continue
@@ -1702,20 +1702,20 @@ class TestOldViewOps(TestCase):
 
     def test_resize_all_dtypes_and_devices(self, device):
         shape = (2, 2)
-        for dt in [k for k in all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool)]:
+        for dt in list(all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool)):
             x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
             x.resize_(shape)
             self.assertEqual(shape, x.shape)
 
     def test_resize_as_all_dtypes_and_devices(self, device):
-        for dt in [k for k in all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool)]:
+        for dt in list(all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool)):
             x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
             y = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=dt, device=device)
             x.resize_as_(y)
             self.assertEqual(y.shape, x.shape)
 
     def test_view_all_dtypes_and_devices(self, device):
-        for dt in [k for k in all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool)]:
+        for dt in list(all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool)):
             x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
             self.assertEqual(x.view(6).shape, [6])
 

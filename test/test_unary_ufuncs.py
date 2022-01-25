@@ -608,14 +608,14 @@ class TestUnaryUfuncs(TestCase):
 
     @skipCUDAIfRocm
     def test_frexp_assert_raises(self, device):
-        invalid_input_dtypes = [k for k in integral_types_and(torch.bool)] + \
-            [k for k in complex_types()]
+        invalid_input_dtypes = list(integral_types_and(torch.bool)) + \
+            list(complex_types())
         for dtype in invalid_input_dtypes:
             input = make_tensor((50, 50), device, dtype)
             with self.assertRaisesRegex(RuntimeError, r"torch\.frexp\(\) only supports floating-point dtypes"):
                 torch.frexp(input)
 
-        for dtype in [k for k in floating_types_and(torch.half)]:
+        for dtype in list(floating_types_and(torch.half)):
             input = make_tensor((50, 50), device, dtype)
 
             dtypes = list(all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
@@ -1345,10 +1345,10 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(torch.empty(0, dtype=torch.long), z[0])
 
     # TODO: rationalize with exp OpInfo
-    @dtypes(*([k for k in floating_types_and(torch.bfloat16)] +
-              [k for k in complex_types()]))
-    @dtypesIfCUDA(*([k for k in floating_types_and(torch.half, torch.bfloat16)] +
-                    [k for k in complex_types()]))
+    @dtypes(*list(floating_types_and(torch.bfloat16)) +
+              list(complex_types()))
+    @dtypesIfCUDA(*list(floating_types_and(torch.half, torch.bfloat16)) +
+                    list(complex_types()))
     def test_exp(self, device, dtype):
         for v in (2, -2) + ((1j, 1 + 1j) if dtype.is_complex else ()):
             a = torch.tensor(v, dtype=dtype, device=device) * torch.arange(18, device=device) / 3 * math.pi

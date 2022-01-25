@@ -54,7 +54,7 @@ import torch.backends.quantized
 import torch.testing._internal.data
 from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32
 from torch.testing._internal.common_dtype import (
-    floating_types_and, integral_types, get_all_math_dtypes, all_types_and_complex_and, complex_types,
+    floating_types_and, get_all_math_dtypes, all_types_and_complex_and, complex_types,
     all_types_and, floating_types, floating_and_complex_types, integral_types_and
 )
 
@@ -322,8 +322,8 @@ class AbstractTestCases:
             height = 5
             width = 5
             for device in get_all_device_types():
-                for dt1 in [k for k in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16)]:
-                    for dt2 in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16):
+                for dt1 in list(all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16)):
+                    for dt2 in list(all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16)):
                         for contiguous in [True, False]:
                             x1 = get_tensor((height, width), dt1, device, contiguous)
                             x2 = get_tensor((height, width), dt2, device, contiguous)
@@ -341,14 +341,14 @@ class AbstractTestCases:
                                 self.assertEqual(expected, result)
 
         def test_dtypes(self):
-            all_dtypes = [k for k in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16)]
+            all_dtypes = list(all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
             do_test_dtypes(self, all_dtypes, torch.strided, torch.device('cpu'))
             if torch.cuda.is_available():
                 all_dtypes.remove(torch.bfloat16)  # Remove once _th_zero_ is enabled on cuda for bfloat16
                 do_test_dtypes(self, all_dtypes, torch.strided, torch.device('cuda:0'))
 
         def test_copy_dtypes(self):
-            all_dtypes = [k for k in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16)]
+            all_dtypes = list(all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
             for dtype in all_dtypes:
                 copied_dtype = copy.deepcopy(dtype)
                 self.assertIs(dtype, copied_dtype)
@@ -3193,7 +3193,7 @@ class TestTorchDeviceType(TestCase):
         c = torch.tensor(a_s._untyped(), device=device, dtype=dtype).reshape(a.size())
         self.assertEqual(a, c)
 
-        for error_dtype in [k for k in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16)]:
+        for error_dtype in list(all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16)):
             if error_dtype == dtype:
                 continue
             with self.assertRaisesRegex(RuntimeError, r'Expected a Storage of type'):
@@ -3210,7 +3210,7 @@ class TestTorchDeviceType(TestCase):
         c = torch.tensor([], device=device, dtype=dtype).set_(a_s._untyped()).reshape(a.size())
         self.assertEqual(a, c)
 
-        for error_dtype in [k for k in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16)]:
+        for error_dtype in list(all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16)):
             if error_dtype == dtype:
                 continue
             with self.assertRaisesRegex(RuntimeError, r'Expected a Storage of type'):
@@ -4611,7 +4611,7 @@ else:
         t.bernoulli_(0.5)
         self.assertTrue(isBinary(t))
 
-        for p_dtype in [k for k in floating_types_and(*((torch.half, ) if device.startswith('cuda') else ()))]:
+        for p_dtype in list(floating_types_and(*((torch.half, ) if device.startswith('cuda') else ()))):
             p = torch.rand(10, dtype=p_dtype, device=device).expand(10, 10)
             t.fill_(2)
             t.bernoulli_(p)
@@ -5589,7 +5589,7 @@ else:
         self.assertEqual(x, torch.tensor([False, True], dtype=torch.bool, device=device))
 
     def test_unfold_all_devices_and_dtypes(self, device):
-        for dt in [k for k in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16)]:
+        for dt in list(all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16)):
 
             if dt == torch.bool:
                 x = torch.empty((0, 1, 3, 0), dtype=dt, device=device)
@@ -5609,7 +5609,7 @@ else:
 
     def test_copy_all_dtypes_and_devices(self, device):
         from copy import copy
-        for dt in [k for k in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16)]:
+        for dt in list(all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16)):
             x = torch.tensor([1, 2, 3, 4], dtype=dt, device=device)
             x_clone = x.clone()
             y = copy(x)
@@ -5676,7 +5676,7 @@ else:
             self.assertEqual(dst, src.conj_physical())
 
     def test_clone_all_dtypes_and_devices(self, device):
-        for dt in [k for k in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16)]:
+        for dt in list(all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16)):
             x = torch.tensor((1, 1), dtype=dt, device=device)
             y = x.clone()
             self.assertEqual(x, y)

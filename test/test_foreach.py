@@ -139,7 +139,7 @@ class TestForeach(TestCase):
         self._binary_test(dtype, inplace_op, inplace_ref, inputs, is_fastpath, is_inplace=True)
         if opinfo.supports_alpha_param:
             alpha = None
-            if dtype in [k for k in integral_types()]:
+            if dtype in list(integral_types()):
                 alpha = 3
             elif dtype.is_complex:
                 alpha = complex(3, 3)
@@ -176,7 +176,7 @@ class TestForeach(TestCase):
     @ops(foreach_binary_op_db)
     def test_binary_op_tensorlists_fastpath(self, device, dtype, op):
         for N in N_values:
-            disable_fastpath = op.ref == torch.div and dtype in [k for k in integral_types()] + [torch.bool]
+            disable_fastpath = op.ref == torch.div and dtype in list(integral_types()) + [torch.bool]
             if op.ref == torch.add and dtype == torch.bool:
                 disable_fastpath = True
             self._test_binary_op_tensorlists(device, dtype, op, N, True, disable_fastpath)
@@ -198,17 +198,17 @@ class TestForeach(TestCase):
     @ops(foreach_binary_op_db)
     def test_binary_op_scalar_fastpath(self, device, dtype, op):
         for N, scalar in itertools.product(N_values, Scalars):
-            disable_fastpath = op.ref == torch.div and dtype in [k for k in integral_types()] + [torch.bool]
+            disable_fastpath = op.ref == torch.div and dtype in list(integral_types()) + [torch.bool]
             if isinstance(scalar, int):
                 disable_fastpath |= dtype == torch.bool
             if isinstance(scalar, float):
-                disable_fastpath |= dtype in [k for k in integral_types()] + [torch.bool]
+                disable_fastpath |= dtype in list(integral_types()) + [torch.bool]
             if isinstance(scalar, bool):
                 disable_fastpath |= dtype == torch.bool
                 if op.ref in (torch.add, torch.mul):
                     disable_fastpath = False
             if isinstance(scalar, complex):
-                disable_fastpath |= dtype not in [k for k in complex_types()]
+                disable_fastpath |= dtype not in list(complex_types())
             self._test_binary_op_scalar(device, dtype, op, N, scalar, True, disable_fastpath)
 
     @ops(foreach_binary_op_db)
@@ -238,16 +238,16 @@ class TestForeach(TestCase):
     def test_binary_op_scalarlist_fastpath(self, device, dtype, op):
         for N in N_values:
             for type_str, scalarlist in getScalarLists(N):
-                bool_int_div = op.ref == torch.div and dtype in [k for k in integral_types()] + [torch.bool]
+                bool_int_div = op.ref == torch.div and dtype in list(integral_types()) + [torch.bool]
                 disable_fastpath = bool_int_div
                 if type_str == "int":
                     disable_fastpath |= dtype == torch.bool
                 if type_str == "float":
-                    disable_fastpath |= dtype in [k for k in integral_types()] + [torch.bool]
+                    disable_fastpath |= dtype in list(integral_types()) + [torch.bool]
                 if type_str == "complex":
-                    disable_fastpath |= dtype not in [k for k in complex_types()]
+                    disable_fastpath |= dtype not in list(complex_types())
                 if type_str == "mixed":
-                    disable_fastpath |= True and dtype not in [k for k in complex_types()]
+                    disable_fastpath |= True and dtype not in list(complex_types())
                 self._test_binary_op_scalarlist(device, dtype, op, N, scalarlist, True, disable_fastpath)
 
     @ops(foreach_binary_op_db)
@@ -304,7 +304,7 @@ class TestForeach(TestCase):
     @skipMeta
     @ops(foreach_pointwise_op_db)
     def test_pointwise_op_fastpath(self, device, dtype, op):
-        disable_fastpath = dtype in [k for k in integral_types()] + [torch.bool]
+        disable_fastpath = dtype in list(integral_types()) + [torch.bool]
         # for N, scalar in itertools.product(N_values, Scalars):
         for N in N_values:
             self._test_pointwise_op(device, dtype, op, N, True, disable_fastpath)
@@ -362,7 +362,7 @@ class TestForeach(TestCase):
         op, ref, inplace_op, inplace_ref = self._get_funcs(opinfo, 1)
         inputs = opinfo.sample_inputs(device, dtype, N, noncontiguous=not is_fastpath),
         # note(mkozuki): Complex inputs for `_foreach_abs` go through slowpath.
-        if opinfo.name == "_foreach_abs" and dtype in [k for k in complex_types()]:
+        if opinfo.name == "_foreach_abs" and dtype in list(complex_types()):
             is_fastpath = False
         self._regular_unary_test(dtype, op, ref, inputs, is_fastpath)
         self._inplace_unary_test(dtype, inplace_op, inplace_ref, inputs, is_fastpath)
@@ -533,7 +533,7 @@ class TestForeach(TestCase):
                 return
             with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
                 foreach_op([tensor1], [tensor2])
-            if dtype in [k for k in integral_types()] + [torch.bool] and foreach_op == torch._foreach_div:
+            if dtype in list(integral_types()) + [torch.bool] and foreach_op == torch._foreach_div:
                 with self.assertRaisesRegex(RuntimeError, "result type"):
                     foreach_op_([tensor1], [tensor2])
             else:

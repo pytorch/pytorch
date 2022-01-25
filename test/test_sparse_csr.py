@@ -751,8 +751,7 @@ class TestSparseCSR(TestCase):
     @dtypesIfCUDA(*complex_types(),
                   *floating_types_and(
                       *((torch.half, ) if SM53OrLater and TEST_CUSPARSE_GENERIC else ()),
-                      *((torch.bfloat16, ) if SM80OrLater and TEST_CUSPARSE_GENERIC else ()))
-                 )
+                      *((torch.bfloat16, ) if SM80OrLater and TEST_CUSPARSE_GENERIC else ())))
     @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2})
     def test_sparse_mm(self, device, dtype):
         def test_shape(d1, d2, d3, nnz, transposed, index_dtype):
