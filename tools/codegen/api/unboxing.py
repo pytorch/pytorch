@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 from tools.codegen.api import cpp
 from tools.codegen.api.cpp import argumenttype_type
@@ -11,7 +11,6 @@ from tools.codegen.model import (
     OptionalType,
     ListType,
     BaseTy,
-    TensorOptionsArguments,
     NativeFunction,
     Variant,
 )
