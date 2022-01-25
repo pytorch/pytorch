@@ -27,7 +27,7 @@ import tools.codegen.api.structured as structured
 from tools.codegen.api.translate import translate
 from tools.codegen.selective_build.selector import SelectiveBuilder
 from tools.codegen.utils import (
-    Target, concatMap, context, mapMaybe, YamlDumper, YamlLoader, FileManager, assert_never
+    Target, concatMap, context, mapMaybe, YamlDumper, YamlLoader, FileManager, assert_never, make_file_manager
 )
 from tools.codegen.context import (method_with_native_function,
                                    native_function_manager,
@@ -1575,8 +1575,6 @@ def main() -> None:
     native_functions, backend_indices = parsed_yaml.native_functions, parsed_yaml.backend_indices
     grouped_native_functions = get_grouped_native_functions(native_functions)
 
-    template_dir = os.path.join(options.source_path, "templates")
-
     # NB: It is mandatory to NOT use os.path.join here, as the install directory
     # will eventually be ingested by cmake, which does not respect Windows style
     # path slashes.  If you switch this to use os.path.join, you'll get an error
@@ -1592,13 +1590,10 @@ def main() -> None:
     ops_install_dir = f'{options.install_dir}/ops'
     pathlib.Path(ops_install_dir).mkdir(parents=True, exist_ok=True)
 
-    def make_file_manager(install_dir: str) -> FileManager:
-        return FileManager(install_dir=install_dir, template_dir=template_dir, dry_run=options.dry_run)
-
-    core_fm = make_file_manager(core_install_dir)
-    cpu_fm = make_file_manager(options.install_dir)
-    cuda_fm = make_file_manager(options.install_dir)
-    ops_fm = make_file_manager(ops_install_dir)
+    core_fm = make_file_manager(options=options, install_dir=core_install_dir)
+    cpu_fm = make_file_manager(options=options)
+    cuda_fm = make_file_manager(options=options)
+    ops_fm = make_file_manager(options=options, install_dir=ops_install_dir)
 
     extra_cuda_headers = '''\
 #include <c10/cuda/CUDAGuard.h>
