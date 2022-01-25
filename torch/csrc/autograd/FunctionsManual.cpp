@@ -2628,7 +2628,7 @@ Tensor svd_backward(const Tensor& gU,
 
       if (gU.defined()) {
         if (gVh.defined()) {
-          return (skew(UhgU) / E) * S.unsqueeze(-2) + S.unsqueeze(-1) * (skew(VhgV) / E);
+          return (skew(UhgU) * S.unsqueeze(-2) + S.unsqueeze(-1) * skew(VhgV)) / E;
         } else {
           return (skew(UhgU) / E) * S.unsqueeze(-2);
         }
