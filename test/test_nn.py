@@ -8883,6 +8883,19 @@ class TestNN(NNTestCase):
                     with self.assertRaisesRegex(RuntimeError, "Expected sequence length to be larger than 0 in RNN"):
                         rnn(input)
 
+    def test_RNN_input_size_zero(self):
+        for module in (nn.RNN, nn.LSTM, nn.GRU):
+            for device in get_all_device_types():
+                input = torch.zeros((5, 0, 3))
+                rnn = module(input_size=3, hidden_size=4)
+                if device == 'cuda':
+                    rnn.cuda()
+                    input = input.cuda()
+                outs = rnn(input)
+                self.assertEqual(outs[0].shape, torch.Size([5, 0, 4]))
+                # Check that backward does not cause a hard error
+                outs[0].sum().backward()
+
     @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
     def test_RNN_dropout_state(self):
         for p in (0, 0.1234):
