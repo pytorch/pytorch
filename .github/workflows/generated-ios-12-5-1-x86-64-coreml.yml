@@ -82,25 +82,23 @@ jobs:
         run: |
           # Install dependencies
           brew install libtool
-          conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi requests typing_extensions --yes
       - name: Install conda dependencies
         run: |
           # Creates a conda environment in temporary folder
           conda \
             create \
             -y \
-            -p \
-            "${RUNNER_TEMP}/build" \
+            -p "${RUNNER_TEMP}/build" \
             "python=${PYTHON_VERSION}" \
-            numpy \
-            ninja \
-            pyyaml \
+            cffi \
+            cmake \
             mkl \
             mkl-include \
-            setuptools \
-            cmake \
-            cffi \
+            ninja \
+            numpy \
+            pyyaml \
             requests \
+            setuptools \
             typing_extensions
           # Sets conda environment using CONDA_PREFIX env variable, should persist through the rest of the steps
           echo "CONDA_PREFIX=${RUNNER_TEMP}/build" >> "${GITHUB_ENV}"
