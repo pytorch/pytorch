@@ -12038,7 +12038,7 @@ op_db: List[OpInfo] = [
                    safe_casts_outputs=True),
     UnaryUfuncInfo('real',
                    ref=np.real,
-                   dtypes=complex_types(),
+                   dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
                    supports_out=False,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
