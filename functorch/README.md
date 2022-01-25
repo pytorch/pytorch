@@ -110,6 +110,19 @@ pytest test/test_vmap.py -v
 pytest test/test_eager_transforms.py -v
 ```
 
+To do devel install:
+    
+```
+pip install -e .
+```
+    
+To install with optional dependencies, e.g. for AOTAutograd:
+    
+```
+pip install -e .[aot]
+```
+    
+    
 </p>
 </details>
 
