@@ -279,12 +279,12 @@ FileStore::FileStore(const std::string& path, int numWorkers)
       regularPrefix_("/"),
       deletePrefix_("-") {
   // increment world size
-  add(worldSizeKey_, 1);
+  addHelper(worldSizeKey_, 1);
 }
 
 FileStore::~FileStore() {
   // decrement world size
-  add(worldSizeKey_, -1);
+  addHelper(worldSizeKey_, -1);
 
   // If the file does not exist - exit.
   // This can happen when FileStore is invoked from python language which has
