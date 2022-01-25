@@ -149,7 +149,8 @@ public:
   hash_key_t computeCacheKey(PyObject *args,
                              const std::vector<at::Tensor> &tensorArgs,
                              int numTensorArgs, const std::string &hasherType,
-                             int64_t id) {
+                             int64_t id, int64_t fw_compiler_id,
+                             int64_t bw_compiler_id) {
     LocalState state;
     hash_key_t cacheKey;
     for (int i = 0; i < numTensorArgs; ++i) {
@@ -162,6 +163,8 @@ public:
       }
     }
     cacheKey.push_back(id);
+    cacheKey.push_back(fw_compiler_id);
+    cacheKey.push_back(bw_compiler_id);
     cacheKey.push_back(numTensorArgs);
 
     // Cache the non-tensor args. Currently, all the non-tensor args are cached.
@@ -188,13 +191,13 @@ public:
   }
 
   /// Check if the function has already been compiled.
-  // py::object at(int64_t id, int numTensorArgs, PyObject *args, PyObject
-  // *kwargs) {
-  py::object at(int64_t id, int numTensorArgs, const std::string &hasherType,
+  py::object at(int64_t id, int64_t fw_compiler_id, int64_t bw_compiler_id,
+                int numTensorArgs, const std::string &hasherType,
                 PyObject *args) {
     std::vector<at::Tensor> tensorArgs = parsePythonArgs(numTensorArgs, args);
     hash_key_t cacheKey =
-        computeCacheKey(args, tensorArgs, numTensorArgs, hasherType, id);
+        computeCacheKey(args, tensorArgs, numTensorArgs, hasherType, id,
+                        fw_compiler_id, bw_compiler_id);
 
     auto item = cache_.find(cacheKey); // protected by GIL
 
@@ -205,12 +208,14 @@ public:
   }
 
   /// Insert a new compiled functions for new tensor properties.
-  void insert(int64_t id, int numTensorArgs, const std::string &hasherType,
+  void insert(int64_t id, int64_t fw_compiler_id, int64_t bw_compiler_id,
+              int numTensorArgs, const std::string &hasherType,
               const py::object &compileFn, PyObject *args) {
     std::vector<at::Tensor> tensorArgs = parsePythonArgs(numTensorArgs, args);
     LocalState state;
     hash_key_t cacheKey =
-        computeCacheKey(args, tensorArgs, numTensorArgs, hasherType, id);
+        computeCacheKey(args, tensorArgs, numTensorArgs, hasherType, id,
+                        fw_compiler_id, bw_compiler_id);
     cache_.emplace(cacheKey, compileFn);
   }
 
@@ -231,21 +236,24 @@ static CompileCache *createCompileCache() { return new CompileCache(); }
 namespace at {
 namespace functorch {
 
-// TODO(anijain) - Add static compilation cache
 void initCompileCacheBindings(PyObject *module) {
   py::handle te(module);
   py::class_<CompileCache>(te, "CompileCache")
       .def(py::init(&createCompileCache))
       .def("at",
-           [](CompileCache &self, int64_t id, int numTensorArgs,
+           [](CompileCache &self, int64_t id, int64_t fw_compiler_id,
+              int64_t bw_compiler_id, int numTensorArgs,
               const std::string hasherType, py::args args) {
-             return self.at(id, numTensorArgs, hasherType, args.ptr());
+             return self.at(id, fw_compiler_id, bw_compiler_id, numTensorArgs,
+                            hasherType, args.ptr());
            })
       .def("insert",
-           [](CompileCache &self, int64_t id, int numTensorArgs,
+           [](CompileCache &self, int64_t id, int64_t fw_compiler_id,
+              int64_t bw_compiler_id, int numTensorArgs,
               const std::string hasherType, const py::object &compileFn,
               py::args args, py::kwargs kwargs) {
-             self.insert(id, numTensorArgs, hasherType, compileFn, args.ptr());
+             self.insert(id, fw_compiler_id, bw_compiler_id, numTensorArgs,
+                         hasherType, compileFn, args.ptr());
            })
       .def("clear", [](CompileCache &self) { self.clear(); })
       .def("size", [](CompileCache &self) { return self.size(); });
