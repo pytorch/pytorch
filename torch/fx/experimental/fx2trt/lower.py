@@ -1,36 +1,39 @@
 import dataclasses as dc
 import logging
 import typing as t
-from dataclasses import field
-from typing import Callable, Type, Set, Optional, List
+from typing import Type, Set, Optional
 
+import tensorrt as trt
 import torch
 import torch.fx as fx
 import torch.fx.experimental.fx_acc.acc_tracer as acc_tracer
 import torch.nn as nn
 from torch.fx.experimental.const_fold import split_const_subgraphs
-from torch.fx.experimental.fx2trt import (
+
+from .fx2trt import (
     TRTInterpreter,
-    InputTensorSpec,
-    TRTModule,
 )
-from torch.fx.experimental.fx2trt.passes.fuse_pass import (  # @manual=//caffe2:torch_fx2trt
+from .input_tensor_spec import (
+    InputTensorSpec,
+)
+from .passes.fuse_pass import (
     fuse_permute_linear,
     fuse_permute_matmul,
     fuse_unsqueeze_cat_sum,
 )
-
-# @manual=//caffe2:torch_fx2trt
-from torch.fx.experimental.fx2trt.passes.remove_duplicate_output_args import (
+from .passes.remove_duplicate_output_args import (
     RemoveDuplicateOutputArgsFunc,
     remove_duplicate_output_args,
 )
-from torch.fx.experimental.fx2trt.split import (
+from .split import (
     Splitter,
     SplitFunc,
 )
-from torch.fx.experimental.fx2trt.tools.timing_cache_utils import (
+from .tools.timing_cache_utils import (
     TimingCacheManager,
+)
+from .trt_module import (
+    TRTModule,
 )
 from torch.fx.experimental.fx_acc import acc_normalizer
 
@@ -39,6 +42,54 @@ logger = logging.getLogger(__name__)
 
 Input = t.Sequence[t.Any]
 TModule = t.TypeVar("TModule", bound=nn.Module)
+
+
+def lower_to_trt(
+    module: nn.Module,
+    input,
+    max_batch_size: int = 2048,
+    max_workspace_size=1 << 25,
+    explicit_batch_dimension=False,
+    fp16_mode=True,
+    enable_fuse=True,
+    verbose_log=False,
+    timing_cache_prefix="",
+    save_timing_cache=True,
+    cuda_graph_batch_size=-1,
+) -> nn.Module:
+    """
+    Takes in original module, input and lowering setting, run lowering workflow to turn module
+    into lowered module, or so called TRTModule.
+
+    Args:
+        module: Original module for lowering.
+        input: Input for module.
+        max_batch_size: Maximum batch size (must be >= 1 to be set, 0 means not set)
+        max_workspace_size: Maximum size of workspace given to TensorRT.
+        explicit_batch_dimension: Use explicit batch dimension in TensorRT if set True, otherwise use implicit batch dimension.
+        fp16_mode: fp16 config given to TRTModule.
+        enable_fuse: Enable pass fusion during lowering if set to true. l=Lowering will try to find pattern defined
+        in torch.fx.experimental.fx2trt.passes from original module, and replace with optimized pass before apply lowering.
+        verbose_log: Enable verbose log for TensorRT if set True.
+        timing_cache_prefix: Timing cache file name for timing cache used by fx2trt.
+        save_timing_cache: Update timing cache with current timing cache data if set to True.
+        cuda_graph_batch_size: Cuda graph batch size, default to be -1.
+
+    Returns:
+        A torch.nn.Module lowered by TensorRT.
+    """
+    lower_setting = LowerSetting(
+        max_batch_size=max_batch_size,
+        max_workspace_size=max_workspace_size,
+        explicit_batch_dimension=explicit_batch_dimension,
+        fp16_mode=fp16_mode,
+        enable_fuse=enable_fuse,
+        verbose_log=verbose_log,
+        timing_cache_prefix=timing_cache_prefix,
+        save_timing_cache=save_timing_cache,
+    )
+    lowerer = Lowerer.create(lower_setting=lower_setting)
+    return lowerer(module, input)
 
 
 @dc.dataclass
@@ -94,7 +145,7 @@ class LowerSetting:
     modules will not be traced into.
     """
     max_batch_size: int = 2048
-    input_specs: List[InputTensorSpec] = field(default_factory=list)
+    input_specs: t.List[InputTensorSpec] = dc.field(default_factory=list)
     explicit_batch_dimension: bool = True
     explicit_precision: bool = False
     fp16_mode: bool = False
@@ -146,8 +197,6 @@ class LowerTrtInterpreter:
             except Exception as e:
                 logger.warning(f"Cannot load timing cache for {split_name}: {str(e)}")
                 cache_data = None
-
-        import tensorrt as trt  # @manual=//caffe2:torch_fx2trt # noqa: F401
 
         interpreter = TRTInterpreter(
             mod,
@@ -285,7 +334,7 @@ class Lowerer(LowerFunc):
         module: nn.Module,
         input: Input,
         cuda_graph_batch_size: int = -1,
-        skip_folding_node_fn: Optional[Callable[[fx.Node], bool]] = None,
+        skip_folding_node_fn: t.Optional[t.Callable[[fx.Node], bool]] = None,
     ) -> nn.Module:
         """See `LowerFunc` protocol"""
         if self.fp16:

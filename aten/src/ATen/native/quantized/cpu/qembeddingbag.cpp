@@ -959,6 +959,7 @@ class QEmbeddingBag final {
           false);
     } else {
       TORCH_INTERNAL_ASSERT(
+          false,
           "Currently only support 8-bit embedding_bag quantization");
     }
   }
@@ -995,6 +996,7 @@ class QEmbedding final {
           true);
     } else {
       TORCH_INTERNAL_ASSERT(
+          false,
           "Currently only support 8-bit embedding quantization");
     }
     return output;
