@@ -870,7 +870,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.rand_like: lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1,
         torch.randint_like: lambda input, high, dtype=None, layout=torch.strided, device=None, requires_grad=False: -1,
         torch.randn_like: lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1,
-        torch.ravel: lambda input: -1, #, memory_format=torch.contiguous_format: -1,
+        torch.ravel: lambda input: -1,
         torch.real: lambda input, out=None: -1,
         torch.vdot: lambda input, other, out=None: -1,
         torch.view_as_real: lambda input: -1,
