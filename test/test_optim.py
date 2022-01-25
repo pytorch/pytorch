@@ -2477,8 +2477,8 @@ class TestSWAUtils(TestCase):
         for p_avg, p_swa in zip(averaged_params, averaged_dnn.parameters()):
             self.assertEqual(p_avg, p_swa)
 
-    def test_averaged_model_exponential_use_state_dict(self):
-        # Test AveragedModel with EMA as avg_fn and use_state_dict as True.
+    def test_averaged_model_exponential_buffers(self):
+        # Test AveragedModel with EMA as avg_fn and use_buffers as True.
         dnn = torch.nn.Sequential(
             torch.nn.Conv2d(1, 5, kernel_size=3),
             torch.nn.BatchNorm2d(5, momentum=0.3),
