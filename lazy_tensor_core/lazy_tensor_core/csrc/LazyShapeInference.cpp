@@ -46,6 +46,7 @@
 // #include <functional>
 #include "torch/csrc/lazy/core/shape.h"
 #include <ATen/native/ConvUtils.h>
+#include <ATen/AccumulateType.h>
 #include "aten/src/ATen/native/ReduceOpsUtils.h"
 #include "lazy_tensor_core/csrc/ts_backend/LazyShapeInference.h"
 #include "torch/csrc/api/include/torch/enum.h"
@@ -74,6 +75,58 @@ std::vector<int64_t> expand_param_if_needed(
   } else {
     return list_param.vec();
   }
+}
+
+std::vector<Shape> compute_shape_arange_out(const at::Scalar & start, const at::Scalar & end, const at::Scalar & step, at::Tensor & out) {
+  double size_d;
+  // shape inference code copied from RangeFactories.cpp arange_out function
+  // Note: AT_DISPATCH_ALL_TYPES_AND is just a macro that defines the correct c++ scalar_t type depending on out tensor
+  AT_DISPATCH_ALL_TYPES_AND(c10::kBFloat16, out.scalar_type(), "compute_shape_arange_out", [&]() {
+    // Note: acc_type further defines an accumulataion type depending on the scalar_t and whether its on cuda vs cpu.
+    using accscalar_t = at::acc_type<scalar_t, false>;
+    auto xstart = start.to<accscalar_t>();
+    auto xend = end.to<accscalar_t>();
+    auto xstep = step.to<accscalar_t>();
+
+    // we use double precision for (start - end) / step
+    // to compute size_d for consistency across devices.
+    // The problem with using accscalar_t is that accscalar_t might be float32 on gpu for a float32 scalar_t,
+    // but double on cpu for the same,
+    // and the effective output size starts differing on CPU vs GPU because of precision issues, which
+    // we dont want.
+    // the corner-case we do want to take into account is int64_t, which has higher precision than double
+    // NOLINTNEXTLINE(bugprone-branch-clone)
+    if (std::is_same<scalar_t, int64_t>::value) {
+      size_d = std::ceil(static_cast<double>(end.to<accscalar_t>() - start.to<accscalar_t>())
+                         / step.to<accscalar_t>());
+    } else {
+      size_d = std::ceil(static_cast<double>(end.to<double>() - start.to<double>())
+                         / step.to<double>());
+    }
+
+    TORCH_CHECK(xstep > 0 || xstep < 0, "step must be nonzero");
+    TORCH_CHECK(std::isfinite(static_cast<double>(xstart)) &&
+             std::isfinite(static_cast<double>(xend)),
+             "unsupported range: ", xstart, " -> ", xend);
+    TORCH_CHECK(((xstep > 0) && (xend >= xstart)) || ((xstep < 0) && (xend <= xstart)),
+             "upper bound and larger bound inconsistent with step sign");
+
+    TORCH_CHECK(size_d >= 0 && size_d <= static_cast<double>(std::numeric_limits<int64_t>::max()),
+             "invalid size, possible overflow?");
+  });
+
+  int64_t size = static_cast<int64_t>(size_d);
+
+
+  // From torch.arange docs:
+  // dtype (torch.dtype, optional) – the desired data type of returned tensor.
+  // Default: if None, uses a global default (see torch.set_default_tensor_type()).
+  // If dtype is not given, infer the data type from the other input arguments.
+  // If any of start, end, or stop are floating-point, the dtype is inferred to be the default dtype, see get_default_dtype().
+  // Otherwise, the dtype is inferred to be torch.int64.
+
+  // Since out tensor is specified, its dtype should always be used?
+  return {Shape(out.scalar_type(), {size})};
 }
 
 std::vector<Shape> compute_shape_binary_cross_entropy(const at::Tensor & self, const at::Tensor & target, const c10::optional<at::Tensor> & weight, int64_t reduction) {
@@ -151,11 +204,11 @@ std::vector<Shape> compute_shape_convolution(const at::Tensor & input, const at:
   }
 }
 
-std::vector<Shape> compute_shape_masked_fill(at::Tensor & self, const at::Tensor & mask, const at::Scalar & value) {
+std::vector<Shape> compute_shape_masked_fill_(at::Tensor & self, const at::Tensor & mask, const at::Scalar & value) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
-std::vector<Shape> compute_shape_masked_fill(at::Tensor & self, const at::Tensor & mask, const at::Tensor & value) {
+std::vector<Shape> compute_shape_masked_fill_(at::Tensor & self, const at::Tensor & mask, const at::Tensor & value) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
@@ -276,6 +329,10 @@ std::vector<Shape> compute_shape_relu(const at::Tensor& self) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
+std::vector<Shape> compute_shape_relu_(at::Tensor& self) {
+  return compute_shape_relu(self);
+}
+
 std::vector<Shape> compute_shape_bitwise_and(const at::Tensor& self, const at::Scalar& other) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
@@ -293,7 +350,7 @@ std::vector<Shape> compute_shape_sum(
   return {Shape(self.scalar_type(), {})};;
 }
 
-std::vector<Shape> compute_shape_zero(at::Tensor& self) {
+std::vector<Shape> compute_shape_zero_(at::Tensor& self) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 

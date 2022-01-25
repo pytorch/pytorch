@@ -9,6 +9,7 @@ full_codegen:
   - addcdiv
   - addcmul
   - addmm
+  - arange.start_out
   - avg_pool2d
   - avg_pool2d_backward
   - baddbmm

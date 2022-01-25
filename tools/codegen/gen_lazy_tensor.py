@@ -198,7 +198,8 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
         'func_declarations': list(concat_map_codegen(
             dest.GenLazyShapeInferenceDefinition(backend_indices[backend_key],
                                                  tensor_class),
-            grouped_native_functions
+            grouped_native_functions,
+            codegenInplaceVariant=True,
         )),
     })
     # Generate IR node classes

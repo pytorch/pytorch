@@ -1,10 +1,10 @@
 from typing import List, Union, Tuple
 from tools.codegen.model import (Type, BaseTy, BaseType, OptionalType,
                                  ListType, OperatorName, FunctionSchema,
-                                 Return)
+                                 Return, TensorOptionsArguments)
 from tools.codegen.api.types import (BaseCppType, BaseCType, OptionalCType,
                                      ConstRefCType, NamedCType,
-                                     MutRefCType,
+                                     MutRefCType, deviceT, layoutT,
                                      VectorCType, boolT, longT, doubleT, ListCType, stringT,
                                      scalarT, scalarTypeT, ArrayRefCType, ArrayCType, TupleCType)
 
@@ -46,6 +46,10 @@ def process_ir_type(typ: Type) -> Union[BaseCType, VectorCType, OptionalCType, L
             return BaseCType(doubleT)
         elif typ.name == BaseTy.str:
             return BaseCType(stringT)
+        elif typ.name == BaseTy.Device:
+            return BaseCType(deviceT)
+        elif typ.name == BaseTy.Layout:
+            return BaseCType(layoutT)
         else:
             raise AssertionError(f"TODO add support for type {repr(typ)}")
     elif isinstance(typ, OptionalType):
@@ -130,11 +134,11 @@ class LazyIrSchema:
                           "tensor_options",
                           "post_tensor_options_kwarg_only",
                           "out"]:
-            if getattr(func.arguments, arg_field) is not None:
-                keyword_arg_types.extend([
-                    NamedCType(
-                        arg.name,
-                        process_ir_type(arg.type)) for arg in getattr(func.arguments, arg_field)])
+            curr_args = getattr(func.arguments, arg_field)
+            if curr_args is not None:
+                if isinstance(curr_args, TensorOptionsArguments):
+                    curr_args = curr_args.all()
+                keyword_arg_types.extend([NamedCType(arg.name, process_ir_type(arg.type)) for arg in curr_args])
         self.keyword_arg_types = tuple(keyword_arg_types)
         self.name = func.name
         self.returns = func.returns
