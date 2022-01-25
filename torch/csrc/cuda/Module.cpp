@@ -1,7 +1,6 @@
-#include <TH/TH.h>
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/CUDAGeneratorImpl.h>
+#include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <ATen/cuda/CachingHostAllocator.h>
@@ -209,7 +208,7 @@ PyObject * THCPModule_cudaCachingAllocator_raw_alloc(PyObject *_unused, PyObject
         "(ssize_t size, intptr_t stream);");
     return nullptr;
   }
-  ssize_t size = PyLong_AsSsize_t(size_o);
+  auto size = PyLong_AsSsize_t(size_o);
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   cudaStream_t stream = static_cast<cudaStream_t>(PyLong_AsVoidPtr(stream_o));
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
