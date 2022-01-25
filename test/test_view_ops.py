@@ -933,7 +933,7 @@ class TestOldViewOps(TestCase):
         one_dim_tensor = torch.tensor([123], device=device)
         flat1 = zero_dim_tensor.ravel()
         ones_like_tensor = torch.ones(10, device=device)[::2]
-        flat2 = ones_like_tensor.ravel()
+        flat2 = ones_like_tensor.contiguous().view(-1)
 
         self.assertEqual(zero_dim_tensor.shape, torch.Size([]))
         self.assertEqual(flat0.shape, torch.Size([1]))

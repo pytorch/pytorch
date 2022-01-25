@@ -2097,7 +2097,7 @@ Tensor ravel(const Tensor& self/*, at::MemoryFormat memory_format=at::MemoryForm
   if(self.is_contiguous(memory_format)) {
       return self.reshape(-1);
   }*/
-  return self.view(; //.reshape(-1); //.clone(at::MemoryFormat::Contiguous);
+  return self.contiguous().view(-1); //.reshape(-1); //.clone(at::MemoryFormat::Contiguous);
 }
 
 static inline void handle_unflatten_exception(const std::runtime_error &e,
