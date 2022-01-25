@@ -5717,10 +5717,10 @@ class TestTorch(TestCase):
         reduces = ["sum", "prod", "mean", "amax", "amin"]
         fills = {"sum": 0, "prod": 1, "mean": 0, "amax": -(2 ** 31), "amin": 2 ** 31 - 1}
         fns = {"sum": lambda t, v: t.add_(v),
-                "prod": lambda t, v: t.mul_(v),
-                "mean": lambda t, v, n: t.mul_(n).add_(v).div_(n + 1),
-                "amax": lambda t, v: torch.max(t, v, out=t),
-                "amin": lambda t, v: torch.min(t, v, out=t)}
+               "prod": lambda t, v: t.mul_(v),
+               "mean": lambda t, v, n: t.mul_(n).add_(v).div_(n + 1),
+               "amax": lambda t, v: torch.max(t, v, out=t),
+               "amin": lambda t, v: torch.min(t, v, out=t)}
 
         index = torch.randint(0, output_size, shape, dtype=torch.long, device=device)
         input = torch.randn(shape, dtype=dtype, device=device)
