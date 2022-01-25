@@ -404,7 +404,7 @@ class DeviceCachingAllocator {
   // See free() for this thing's purpose
   std::vector<Block*> needs_events_deferred_until_no_capture;
   // outstanding cuda events
-  std::deque<std::pair<cudaEvent_t, Block*>> cuda_events;
+  std::unordered_map<cuda::CUDAStream, std::deque<std::pair<cudaEvent_t, Block*>>> cuda_events;
 
   // record used memory.
   size_t total_allocated_memory = 0;
@@ -1224,16 +1224,19 @@ class DeviceCachingAllocator {
     TORCH_INTERNAL_ASSERT(captures_underway == 0);
     insert_events_deferred_until_no_capture();
 
-    for (auto& e : cuda_events) {
-      cudaEvent_t event = e.first;
-      Block* block = e.second;
+    for (auto& st : cuda_events) {
+      for (auto &e : st.second) {
+        cudaEvent_t event = e.first;
+        Block* block = e.second;
 
-      C10_CUDA_CHECK(cudaEventSynchronize(event));
-      free_event_internal(event);
+        C10_CUDA_CHECK(cudaEventSynchronize(event));
+        free_event_internal(event);
 
-      block->event_count--;
-      if (block->event_count == 0) {
-        free_block(block);
+        block->event_count--;
+        if (block->event_count == 0)
+        {
+          free_block(block);
+        }
       }
     }
 
@@ -1253,7 +1256,7 @@ class DeviceCachingAllocator {
       C10_CUDA_CHECK(cudaEventRecord(event, stream.stream()));
 
       block->event_count++;
-      cuda_events.emplace_back(event, block);
+      cuda_events[stream].emplace_back(event, block);
     }
 
     C10_CUDA_CHECK(cudaSetDevice(prev_device));
@@ -1277,27 +1280,38 @@ class DeviceCachingAllocator {
     // is decremented. Stops at the first event which has not been completed.
     // Since events on different devices or streams may occur out of order,
     // the processing of some events may be delayed.
-    while (!cuda_events.empty()) {
-      auto& e = cuda_events.front();
-      cudaEvent_t event = e.first;
-      Block* block = e.second;
+    for (auto it = cuda_events.begin(); it != cuda_events.end();) {
+      while (!it->second.empty()) {
+        auto& e = it->second.front();
+        cudaEvent_t event = e.first;
+        Block* block = e.second;
 
-      cudaError_t err = cudaEventQuery(event);
-      if (err == cudaErrorNotReady) {
-        // ignore and clear the error if not ready
-        cudaGetLastError();
-        break;
-      } else if (err != cudaSuccess) {
-        C10_CUDA_CHECK(err);
+        cudaError_t err = cudaEventQuery(event);
+        if (err == cudaErrorNotReady) {
+          // ignore and clear the error if not ready
+          cudaGetLastError();
+          break;
+        } else if (err != cudaSuccess) {
+          C10_CUDA_CHECK(err);
+        }
+
+        free_event_internal(event);
+
+        block->event_count--;
+        if (block->event_count == 0) {
+          free_block(block);
+        }
+        it->second.pop_front();
       }
 
-      free_event_internal(event);
+      // Copy the iterator and advance off because we may erase it if
+      // we clearted all the relevant events.
+      auto candidate = it;
+      it++;
 
-      block->event_count--;
-      if (block->event_count == 0) {
-        free_block(block);
+      if (candidate->second.empty()) {
+        cuda_events.erase(candidate);
       }
-      cuda_events.pop_front();
     }
   }
 
