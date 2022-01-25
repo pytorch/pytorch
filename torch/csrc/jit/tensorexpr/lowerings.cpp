@@ -148,7 +148,7 @@ int nnc_lowerings_lazy_registration() {
   DEFINE_COMPARISON_SCALAR_OP_LOWERING(ge, cast<bool>(a >= b))
 #undef DEFINE_COMPARISON_SCALAR_OP_LOWERING
 
-#define DEFINE_INT_SCALAR_OP_LOWERING(op_name, op)                        \
+#define DEFINE_BITWISE_SCALAR_OP_LOWERING(op_name, op)                    \
   RegisterNNCLoweringsFunction aten_##op_name##_int_scalar(               \
       {"aten::" #op_name ".int(int a, int b) -> (int)"},                  \
       [](const std::vector<ArgValue>& inputs,                             \
@@ -162,14 +162,16 @@ int nnc_lowerings_lazy_registration() {
             outputType,                                                   \
             [](const ExprHandle& a, const ExprHandle& b) { return op; }); \
       });
-  DEFINE_INT_SCALAR_OP_LOWERING(__and__, boolToInteger(a) & boolToInteger(b))
-  DEFINE_INT_SCALAR_OP_LOWERING(__or__, boolToInteger(a) | boolToInteger(b))
-  DEFINE_INT_SCALAR_OP_LOWERING(__xor__, boolToInteger(a) ^ boolToInteger(b))
-  DEFINE_INT_SCALAR_OP_LOWERING(__lshift__, a << b)
-  DEFINE_INT_SCALAR_OP_LOWERING(__rshift__, a >> b)
-#undef DEFINE_INT_SCALAR_OP_LOWERING
+  DEFINE_BITWISE_SCALAR_OP_LOWERING(
+      __and__, boolToInteger(a) & boolToInteger(b))
+  DEFINE_BITWISE_SCALAR_OP_LOWERING(__or__, boolToInteger(a) | boolToInteger(b))
+  DEFINE_BITWISE_SCALAR_OP_LOWERING(
+      __xor__, boolToInteger(a) ^ boolToInteger(b))
+  DEFINE_BITWISE_SCALAR_OP_LOWERING(__lshift__, a << b)
+  DEFINE_BITWISE_SCALAR_OP_LOWERING(__rshift__, a >> b)
+#undef DEFINE_BITWISE_SCALAR_OP_LOWERING
 
-#define DEFINE_BOOL_SCALAR_OP_LOWERING(op_name, op)                       \
+#define DEFINE_LOGICAL_SCALAR_OP_LOWERING(op_name, op)                    \
   RegisterNNCLoweringsFunction aten_##op_name##_bool_scalar(              \
       {"aten::" #op_name ".bool(bool a, bool b) -> (bool)"},              \
       [](const std::vector<ArgValue>& inputs,                             \
@@ -183,10 +185,10 @@ int nnc_lowerings_lazy_registration() {
             outputType,                                                   \
             [](const ExprHandle& a, const ExprHandle& b) { return op; }); \
       });
-  DEFINE_BOOL_SCALAR_OP_LOWERING(__and__, a && b)
-  DEFINE_BOOL_SCALAR_OP_LOWERING(__or__,  a || b)
-  DEFINE_BOOL_SCALAR_OP_LOWERING(__xor__, a != b)
-#undef DEFINE_BOOL_SCALAR_OP_LOWERING
+  DEFINE_LOGICAL_SCALAR_OP_LOWERING(__and__, a && b)
+  DEFINE_LOGICAL_SCALAR_OP_LOWERING(__or__, a || b)
+  DEFINE_LOGICAL_SCALAR_OP_LOWERING(__xor__, a != b)
+#undef DEFINE_LOGICAL_SCALAR_OP_LOWERING
 
   RegisterNNCLoweringsFunction aten_div(
       {"aten::div.Scalar(Tensor self, Scalar other) -> (Tensor)",

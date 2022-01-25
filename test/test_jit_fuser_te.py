@@ -1395,21 +1395,21 @@ class TestTEFuser(JitTestCase):
           return (%z)"""
 
         binary_ops = [
-                "aten::mul",
-                "aten::add",
-                "aten::sub",
-                "aten::div",
-                "aten::lt",
-                "aten::le",
-                "aten::eq",
-                "aten::ne",
-                "aten::gt",
-                "aten::ge",
-                "aten::__or__",
-                "aten::__xor__",
-                "aten::__and__",
-                "aten::__lshift__",
-                "aten::__rshift__",
+            "aten::mul",
+            "aten::add",
+            "aten::sub",
+            "aten::div",
+            "aten::lt",
+            "aten::le",
+            "aten::eq",
+            "aten::ne",
+            "aten::gt",
+            "aten::ge",
+            "aten::__or__",
+            "aten::__xor__",
+            "aten::__and__",
+            "aten::__lshift__",
+            "aten::__rshift__",
         ]
         dtypes = ['int', 'float', 'bool']
         values = {'int' : [10, 3], 'float' : [12.34, 2.78], 'bool' : [True, False]}
@@ -1441,7 +1441,7 @@ class TestTEFuser(JitTestCase):
                     res = k.run((x, y))
                     self.assertEqual(ref, res)
                 except Exception as e:
-                    raise RuntimeError(" ".join(["Failed at runtime:",device, str(x), str(y), str(code)]))
+                    raise RuntimeError(" ".join(["Failed at runtime:", device, str(x), str(y), str(code)]))
 
     def test_matmul(self):
         def fn(x, y):
