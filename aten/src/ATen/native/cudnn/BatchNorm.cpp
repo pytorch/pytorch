@@ -3,8 +3,6 @@
 #include <ATen/Config.h>
 #include <ATen/cuda/CUDAConfig.h>
 
-#include <iostream>
-
 #if !AT_CUDNN_ENABLED()
 
 namespace at { namespace native {
@@ -136,7 +134,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
                                 input->dim()
                               );
 
-  // auto output_t = at::empty_like(*input, input->options(), input->suggest_memory_format());
   at::Tensor output_t = output_inplace.has_value() \
     ? output_inplace.value() \
     : at::empty_like(*input, input->options(), input->suggest_memory_format());

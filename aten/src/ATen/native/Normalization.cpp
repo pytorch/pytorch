@@ -625,7 +625,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _instance_norm_channels_last
   at::Tensor save_var = at::empty({b, c}, save_mean_var_options);
 
   auto slice_numel = input[0].numel();
-  // at::Tensor buffer;
   at::Tensor reservedSpace;
   int64_t impl_index;
   for (int64_t i = 0; i < b; i++) {
@@ -669,13 +668,6 @@ std::tuple<Tensor, Tensor, Tensor> _instance_norm_channels_last_backward(
   int64_t b = input.size(0);
   int64_t c = input.size(1);
 
-  // This function calls vectorized_elementwise_kernel to do copy on GPU, which has much better performance than
-  //   unrolled_elementwise_kernel for channels_last strided tensors.
-  auto vectorized_copy = [&](const at::Tensor& dest, const at::Tensor& src, int64_t batch_idx, int64_t numel) {
-    if (!dest.defined()) return;
-    dest[batch_idx].as_strided(numel, 1).copy_(src.as_strided(numel, 1), /* non_blocking= */ true);
-  };
-
   auto grad_input_slice_numel = grad_input[0].numel();
 
   for (int64_t i = 0; i < b; i++) {
@@ -695,11 +687,6 @@ std::tuple<Tensor, Tensor, Tensor> _instance_norm_channels_last_backward(
       grad_input[i],
       get_batch_if_defined(grad_weight, i, c),
       get_batch_if_defined(grad_bias, i, c));
-
-    // Todo: remove those copies and make them calculated inplace, in the above BN backward call
-    // vectorized_copy(grad_input, std::get<0>(res), i, grad_input_slice_numel);
-    // vectorized_copy(get_batch_if_defined(grad_weight, i, c).value(), std::get<1>(res), 0, c);
-    // vectorized_copy(get_batch_if_defined(grad_bias, i, c).value(), std::get<2>(res), 0, c);
   };
 
   return std::make_tuple(grad_input, grad_weight, grad_bias);
