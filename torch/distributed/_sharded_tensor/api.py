@@ -8,6 +8,7 @@ from typing import (
     Optional,
     Union
 )
+import weakref
 
 import copy
 import threading
@@ -47,7 +48,7 @@ from .utils import (
 # Tracking for sharded tensor objects.
 _sharded_tensor_lock = threading.Lock()
 _sharded_tensor_current_id = 0
-_sharded_tensor_map: Dict[int, 'ShardedTensor'] = {}
+_sharded_tensor_map: Dict[int, 'weakref.ReferenceType[ShardedTensor]'] = {}
 
 # Custom sharded ops
 _SHARDED_OPS: Dict[str, Callable] = {}
@@ -68,7 +69,11 @@ def _register_remote_shards(sharded_tensor_id: int, rrefs: List[rpc.RRef[Shard]]
             raise RuntimeError(
                 f'Could not find sharded_tensor_id: {sharded_tensor_id} in map: {_sharded_tensor_map.keys()}')
 
-        _sharded_tensor_map[sharded_tensor_id]._register_remote_shards(rrefs, rpc_rank)
+        sharded_tensor = _sharded_tensor_map[sharded_tensor_id]()
+        if sharded_tensor is None:
+            raise RuntimeError('ShardedTensor weakref has been deallocated')
+        else:
+            sharded_tensor._register_remote_shards(rrefs, rpc_rank)
 
 
 class CreateOp(Enum):
@@ -195,14 +200,14 @@ class ShardedTensor(object):
         self._remote_shards: Dict[int, List[rpc.RRef[Shard]]] = {}
 
     def _post_init(self):
-        with _sharded_tensor_lock:
-            global _sharded_tensor_current_id, _sharded_tensor_map
-            self._sharded_tensor_id = _sharded_tensor_current_id
-            _sharded_tensor_map[self._sharded_tensor_id] = self
-            _sharded_tensor_current_id += 1
-
         # Initialize RPC if available.
         if self._init_rrefs:
+            with _sharded_tensor_lock:
+                global _sharded_tensor_current_id, _sharded_tensor_map
+                self._sharded_tensor_id = _sharded_tensor_current_id
+                _sharded_tensor_map[self._sharded_tensor_id] = weakref.ref(self)
+                _sharded_tensor_current_id += 1
+
             if not rpc._is_current_rpc_agent_set():
                 raise RuntimeError(
                     'RPC Framework needs to be initialized using'
@@ -617,7 +622,7 @@ class ShardedTensor(object):
             raise NotImplementedError("Only ChunkShardingSpec supported for reshard.")
         current_sharding_dim = int(self._sharding_spec.dim)  # type: ignore[attr-defined]
         reshard_dim = int(resharding_spec.dim)
-        local_shard = self.local_shards()[0].tensor
+        local_shard = self.local_shard()
         current_rank = dist.get_rank(self._process_group)
         world_size = dist.get_world_size(self._process_group)
         if current_sharding_dim == reshard_dim:
@@ -629,8 +634,8 @@ class ShardedTensor(object):
                 split_size = get_split_size(self.size(reshard_dim), world_size)
                 for idx, placement in enumerate(self._sharding_spec.placements):  # type: ignore[attr-defined]
                     if current_rank == placement.rank():  # type: ignore[union-attr]
-                        new_dim = resharding_spec.placements[idx].placement.rank()  # type: ignore[union-attr]
-                        input_split_sizes[new_dim] = local_shard.size(0)
+                        new_rank = resharding_spec.placements[idx].placement.rank()  # type: ignore[union-attr]
+                        input_split_sizes[new_rank] = local_shard.size(0)
                         sharded_dim_size = get_chunked_dim_size(
                             self.size(reshard_dim), split_size, idx
                         )
@@ -712,7 +717,7 @@ class ShardedTensor(object):
         self.local_shards()[0].tensor = local_shard
         return self
 
-    def collect_local_shard(self) -> torch.Tensor:
+    def local_shard(self) -> torch.Tensor:
         """
         Return local shards for a sharded_tensor. For now we only support single local shard.
 
@@ -1010,6 +1015,8 @@ class _PartialTensor(object):
         Returns:
             A :class:`ShardedTensor` filled with local aggregated result.
         """
+        if not isinstance(resharding_spec, ChunkShardingSpec):
+            raise NotImplementedError("Only ChunkShardingSpec supported for reshard.")
         sharding_dim = int(resharding_spec.dim)  # type: ignore[attr-defined]
         world_size = dist.get_world_size(self.pg)
         local_shards = torch.tensor_split(self.local_partial_shard, world_size)
