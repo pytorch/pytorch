@@ -7,7 +7,7 @@ namespace serialize {
 // Flag that controls if we want to enable upgraders
 // in the server side. When this flag is set to False,
 // it will switch to old dynamic versioning approach
-#define ENABLE_UPGRADERS false
+#define ENABLE_UPGRADERS true
 
 constexpr uint64_t kMinSupportedFileFormatVersion = 0x1L;
 
@@ -101,9 +101,6 @@ constexpr uint64_t kMinProducedFileFormatVersion = 0x3L;
 //  for details.
 //  0x7L: Enable support for operators with default arguments plus out arguments.
 constexpr uint64_t kProducedBytecodeVersion = 0x7L;
-
-static_assert(kProducedBytecodeVersion >= kProducedFileFormatVersion,
-    "kProducedBytecodeVersion must be higher or equal to kProducedFileFormatVersion.");
 
 // Introduce kMinSupportedBytecodeVersion and kMaxSupportedBytecodeVersion
 // for limited backward/forward compatibility support of bytecode. If
