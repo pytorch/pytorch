@@ -2900,6 +2900,7 @@ def index(g, self, index):
 @parse_args("v", "v", "is", "i", "v")
 def linalg_norm(g, self, ord, dim, keepdim, dtype):
     # Conditions based on https://pytorch.org/docs/stable/generated/torch.linalg.norm.html
+    ord_value = None
     if dim is None:
         if sym_help._is_none(ord):
             self = sym_help._reshape_helper(g, self, [-1])
@@ -2910,22 +2911,21 @@ def linalg_norm(g, self, ord, dim, keepdim, dtype):
                                   "Input rank must be known at export time.")
         if self_dim == 1:
             ord_value = sym_help._parse_arg(ord, "f")
-            output = linalg_vector_norm(g, self, ord_value, dim, keepdim, dtype)
         else:
-            output = linalg_matrix_norm(g, self, ord, [0, 1], keepdim, dtype)
+            dim = [0, 1]
     else:
         if len(dim) == 1:
             if sym_help._is_none(ord):
                 ord = g.op("Constant", value_t=torch.LongTensor([2]))
             ord_value = sym_help._parse_arg(ord, "f")
-            output = linalg_vector_norm(g, self, ord_value, dim, keepdim, dtype)
-        else:
-            output = linalg_matrix_norm(g, self, ord, dim, keepdim, dtype)
-    return output
+    if ord_value:
+        return linalg_vector_norm(g, self, ord_value, dim, keepdim, dtype)
+    return linalg_matrix_norm(g, self, ord, dim, keepdim, dtype)
 
 
 @parse_args("v", "f", "is", "i", "v")
 def linalg_vector_norm(g, self, ord, dim, keepdim, dtype):
+    # Conditions based on https://pytorch.org/docs/stable/generated/torch.linalg.vector_norm.html
     if dim is None:
         self = sym_help._reshape_helper(g, self, [-1])
         keepdim = None
@@ -2946,6 +2946,7 @@ def linalg_vector_norm(g, self, ord, dim, keepdim, dtype):
 
 @parse_args("v", "v", "is", "i", "v")
 def linalg_matrix_norm(g, self, ord, dim, keepdim, dtype):
+    # Conditions based on https://pytorch.org/docs/stable/generated/torch.linalg.matrix_norm.html
     ord_value = sym_help._parse_arg(ord, "s")
     if ord_value == 'fro':
         return frobenius_norm(g, self, dim, keepdim)
@@ -2956,12 +2957,16 @@ def linalg_matrix_norm(g, self, ord, dim, keepdim, dtype):
         if ord_value is None:
             return frobenius_norm(g, self, dim, keepdim)
         if ord_value == 2 or ord_value == -2:
+            # ord = 2/-2 unimplemented due to lack of operators
+            # used to calculate singular values
             return _unimplemented("linalg.matrix_norm", "ord==2")
         # Wrap the dim vector to handle neagtive dim values
         self_dim = sym_help._get_tensor_rank(self)
         if self_dim is None:
             return _unimplemented("linalg.matrix_norm",
                                   "Input rank must be known at export time.")
+        # Common implementation for cases with
+        # ord = 1/-1 and ord = inf/-inf
         if dim[0] < 0:
             dim[0] += self_dim
         if dim[1] < 0:
