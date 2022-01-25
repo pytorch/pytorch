@@ -31,6 +31,11 @@ from torch.distributed.algorithms.ddp_comm_hooks import (
     quantization as quantization_hooks,
     optimizer_overlap as optimizer_overlap_hooks
 )
+
+from torch.distributed.algorithms.ddp_comm_hooks.optimizer_overlap_hooks import (
+    _OptimizerHookState
+)
+
 from torch.distributed.distributed_c10d import (
     get_world_size,
     _get_default_group,
@@ -60,11 +65,13 @@ from torch.testing._internal.common_distributed import (
     DistTestCases
 )
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     IS_MACOS,
     IS_WINDOWS,
     FILE_SCHEMA,
     IS_FBCODE,
     NO_MULTIPROCESSING_SPAWN,
+    parametrize,
     sandcastle_skip,
     sandcastle_skip_if,
 )
@@ -3916,7 +3923,8 @@ class DistributedTest:
 
         def _test_ddp_hook_with_optimizer_parity(
             self, grad_as_bucket_view, static_graph, functional_optim_cls,
-            *functional_optim_args, **functional_optim_kwargs
+            construct_from_functional, *functional_optim_args,
+            **functional_optim_kwargs
         ):
             rank = self.rank
             torch.cuda.set_device(rank)
@@ -3929,8 +3937,8 @@ class DistributedTest:
                 models_to_test.append(
                     (torchvision.models.resnet50(), torch.randn(1, 3, 3, 1000).cuda())
                 )
-            # Enable determinism in cudnn operators
             for (model, inp) in models_to_test:
+                # Enable determinism in cudnn operators
                 with torch.backends.cudnn.flags(
                     enabled=True, deterministic=True, benchmark=False
                 ):
@@ -3946,11 +3954,22 @@ class DistributedTest:
                     # Register hook that runs allreduce + functional optimizer
                     # step.
                     allreduce_hook = default.allreduce_hook
-                    opt_hook_state = optimizer_overlap_hooks._OptimizerHookState(
-                        functional_optim_cls,
-                        *functional_optim_args,
-                        **functional_optim_kwargs,
-                    )
+                    if construct_from_functional:
+                        f_opt = functional_optim_cls(
+                            [],
+                            *functional_optim_args,
+                            **functional_optim_kwargs,
+                            _allow_empty_param_list=True
+                        )
+                        opt_hook_state = _OptimizerHookState.from_functional_optim(
+                            f_opt
+                        )
+                    else:
+                        opt_hook_state = _OptimizerHookState(
+                            functional_optim_cls,
+                            *functional_optim_args,
+                            **functional_optim_kwargs,
+                        )
                     ddp_model_with_optimizer_hook.register_comm_hook(
                         None,
                         optimizer_overlap_hooks._hook_then_optimizer(allreduce_hook, opt_hook_state),
@@ -4023,21 +4042,27 @@ class DistributedTest:
         )
         @skip_if_lt_x_gpu(2)
         @skip_if_rocm
-        def test_ddp_hook_with_optimizer_parity_adamw(self):
-            for grad_as_bucket_view, static_graph in itertools.product(
-                [True, False], [True, False]
-            ):
-                adamw_lr = 1e-2
-                adamw_betas = (0.9, 0.99)
-                adamw_eps = 1e-6
-                self._test_ddp_hook_with_optimizer_parity(
-                    grad_as_bucket_view,
-                    static_graph,
-                    _FunctionalAdamW,
-                    adamw_lr,
-                    betas=adamw_betas,
-                    eps=adamw_eps,
-                )
+        @parametrize("grad_as_bucket_view", [True, False])
+        @parametrize("static_graph", [True, False])
+        @parametrize("construct_from_functional", [True, False])
+        def test_ddp_hook_with_optimizer_parity_adamw(
+            self,
+            grad_as_bucket_view,
+            static_graph,
+            construct_from_functional,
+        ):
+            adamw_lr = 1e-2
+            adamw_betas = (0.9, 0.99)
+            adamw_eps = 1e-6
+            self._test_ddp_hook_with_optimizer_parity(
+                grad_as_bucket_view,
+                static_graph,
+                _FunctionalAdamW,
+                construct_from_functional,
+                adamw_lr,
+                betas=adamw_betas,
+                eps=adamw_eps,
+            )
 
         @sandcastle_skip_if(
             BACKEND not in DistTestCases.backend_feature["ddp"],
@@ -4045,21 +4070,20 @@ class DistributedTest:
         )
         @skip_if_lt_x_gpu(2)
         @skip_if_rocm
-        def test_ddp_hook_with_optimizer_parity_adam(self):
-            for grad_as_bucket_view, static_graph in itertools.product(
-                [True, False], [True, False]
-            ):
-                adam_lr = 1e-2
-                adam_betas = (0.9, 0.99)
-                adam_eps = 1e-6
-                self._test_ddp_hook_with_optimizer_parity(
-                    grad_as_bucket_view,
-                    static_graph,
-                    _FunctionalAdam,
-                    adam_lr,
-                    betas=adam_betas,
-                    eps=adam_eps,
-                )
+        @parametrize("construct_from_functional", [True, False])
+        def test_ddp_hook_with_optimizer_parity_adam(self, construct_from_functional):
+            adam_lr = 1e-2
+            adam_betas = (0.9, 0.99)
+            adam_eps = 1e-6
+            self._test_ddp_hook_with_optimizer_parity(
+                True,  # grad as bucket view
+                False,  # static graph
+                _FunctionalAdam,
+                construct_from_functional,
+                adam_lr,
+                betas=adam_betas,
+                eps=adam_eps,
+            )
 
         @sandcastle_skip_if(
             BACKEND not in DistTestCases.backend_feature["ddp"],
@@ -4067,20 +4091,22 @@ class DistributedTest:
         )
         @skip_if_lt_x_gpu(2)
         @skip_if_rocm
-        def test_ddp_hook_with_optimizer_parity_sgd(self):
-            for grad_as_bucket_view, static_graph in itertools.product(
-                [True, False], [True, False]
-            ):
-                sgd_lr = 1e-2
-                sgd_momentum = 0.9
-                sgd_weight_decay = 0.01
-                self._test_ddp_hook_with_optimizer_parity(
-                    grad_as_bucket_view, static_graph,
-                    _FunctionalSGD,
-                    sgd_lr,
-                    momentum=sgd_momentum,
-                    weight_decay=sgd_weight_decay,
-                )
+        @parametrize("construct_from_functional", [True, False])
+        def test_ddp_hook_with_optimizer_parity_sgd(self, construct_from_functional):
+            sgd_lr = 1e-2
+            sgd_momentum = 0.9
+            sgd_weight_decay = 0.01
+            # Not testing grad_as_bucket_view and static_graph as they are
+            # tested in AdamW test above.
+            self._test_ddp_hook_with_optimizer_parity(
+                True,  # grad as bucket view
+                False,  # static_graph
+                _FunctionalSGD,
+                construct_from_functional,
+                sgd_lr,
+                momentum=sgd_momentum,
+                weight_decay=sgd_weight_decay,
+            )
 
         def _test_ddp_hook_parity(self, state, hook):
             rank = self.rank
@@ -8388,3 +8414,5 @@ class DistributedTest:
             self.assertIsNone(module.module.l1.weight.grad)
             self.assertIsNone(module.module.l1.bias.grad)
             self.assertIsNone(module.module.buffer.grad)
+
+instantiate_parametrized_tests(DistributedTest._DistTestBase)
