@@ -158,6 +158,31 @@ class TestCompileCache(TestCase):
             args = [torch.randn(10, requires_grad=True) for _ in range(100)]
             check(args, aot_autograd_f, f)
 
+    def test_multiple_compiler(self):
+        def fn(x, bias):
+            return x + bias
+
+        def nop_duplicate(fx_g, _):
+            return fx_g
+
+        for hasher_type in ["DynamicShapeHasher", "StaticShapeHasher"]:
+            functorch.compile.clear_compile_cache()
+            start_num_recomps = functorch.compile.num_of_recompilations()
+            nop_fn = aot_function(fn, nop, nop, hasher_type=hasher_type)
+            nop_duplicate_fn = aot_function(
+                fn, nop_duplicate, nop_duplicate, hasher_type=hasher_type
+            )
+
+            a = torch.randn(10, 20, requires_grad=True)
+            b = torch.randn(20, requires_grad=True)
+            nop_fn(a, b)
+            nop_duplicate_fn(a, b)
+
+            end_num_recomps = functorch.compile.num_of_recompilations()
+
+            total_recomps = end_num_recomps - start_num_recomps
+            assert total_recomps == 2
+
 
 class TestCompileCacheStaticArgs(TestCase):
     def check(self, a, b, aot_autograd_fn, fn):
