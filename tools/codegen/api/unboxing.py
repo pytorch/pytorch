@@ -108,35 +108,14 @@ class ArgumentCppCode:
 
 
 # Convert all the arguments in a NativeFunction to C++ code, including TensorOptions.
-def convert_arguments(
-    args: List[Argument], tensor_option_arg: Optional[TensorOptionsArguments]
-) -> Dict[str, ArgumentCppCode]:
+def convert_arguments(args: List[Argument]) -> Dict[str, ArgumentCppCode]:
     argument_str = "(std::move(peek(stack, {pos}, {args_num})))"
     arguments: Dict[str, ArgumentCppCode] = {}
-    tensor_option_args: Dict[str, str] = {}
     for i, arg in enumerate(args):
         ivalue_str = argument_str.format(pos=i, args_num=len(args))
         res = argumenttype_ivalue_convert(arg.type, ivalue_str, arg.name)
-        # handle tensor options and other keyword arguments
-        if tensor_option_arg and arg.name in tensor_option_arg.__dict__:
-            tensor_option_args[arg.name] = res.val_name
         arguments[arg.name] = res
 
-        # only generate tensor options when native function is taking it
-    if tensor_option_arg:
-        arguments["options"] = ArgumentCppCode(
-            val_name="options",
-            code=[
-                f"""
-        const auto options = TensorOptions()
-            .dtype({tensor_option_args['dtype']})
-            .layout({tensor_option_args['layout']})
-            .device({tensor_option_args['device']})
-            .pinned_memory({tensor_option_args['pin_memory']});
-                """
-            ],
-            ctype="at::TensorOptions",
-        )
     return arguments
 
 
