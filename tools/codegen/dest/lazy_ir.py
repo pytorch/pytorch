@@ -89,7 +89,7 @@ def aten_symbol(schema: LazyIrSchema) -> str:
         return f'c10::Symbol::fromQualString("aten::{schema.aten_name}")'
     return f'at::aten::{schema.aten_name}'
 
-def cached_shape_inference(func: NativeFunction, schema: LazyIrSchema,
+def cached_shape_inference(kernel_name: str, func: NativeFunction, schema: LazyIrSchema,
                            returns_length: int, all_types: List[NamedCType]) -> str:
     # call the meta kernel if it exists, to compute output shape/dtype for our IR
     if func.structured or func.structured_delegate is not None:
@@ -105,7 +105,7 @@ def cached_shape_inference(func: NativeFunction, schema: LazyIrSchema,
             {meta_out}
 """
     else:
-        shape_sig = ComputeShapeSignature(metadata.kernel, func)
+        shape_sig = ComputeShapeSignature(kernel_name, func)
         shapes_body = f"""
             cached_shapes = shape_cache->Add(dag_hash, std::make_shared<std::vector<Shape>>({shape_sig.shape_call}));
 """    
@@ -256,7 +256,7 @@ class GenLazyNativeFuncDefinition:
         dag_hash = f"torch::lazy::hash_t dag_hash = torch::lazy::OperandHashes({{{', '.join(ir_values)}}}, node_hash);"
         hash_str = node_hash + "\n        " + dag_hash
 
-        shape_str = cached_shape_inference(func, schema, returns_length, all_types)
+        shape_str = cached_shape_inference(metadata.kernel, func, schema, returns_length, all_types)
 
         node_str = f"""auto node = torch::lazy::MakeNode<ir::ops::{schema.node_name}>({node_ctor_input_str},
                                                                                       std::move(shapes));"""
