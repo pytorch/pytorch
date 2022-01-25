@@ -15,8 +15,6 @@ from typing import Union, NamedTuple, Callable, Any
 import torch
 import torch.cuda
 import torch.distributed as dist
-import torch.distributed.algorithms.ddp_comm_hooks.post_localSGD_hook as post_localSGD
-import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
 import torch.distributed.algorithms.model_averaging.averagers as averagers
 import torch.distributed.algorithms.model_averaging.utils as model_averaging_utils
 import torch.nn as nn
@@ -25,9 +23,13 @@ import torch.nn.utils._stateless as _stateless
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
 from torch.cuda.amp import GradScaler, autocast
-from torch.distributed.algorithms.ddp_comm_hooks import default_hooks as default
+
 from torch.distributed.algorithms.ddp_comm_hooks import (
+    post_localSGD_hook as post_localSGD,
+    powerSGD_hook as powerSGD,
+    default_hooks as default,
     quantization as quantization_hooks,
+    optimizer_overlap as optimizer_overlap_hooks
 )
 from torch.distributed.distributed_c10d import (
     get_world_size,
@@ -3944,14 +3946,14 @@ class DistributedTest:
                     # Register hook that runs allreduce + functional optimizer
                     # step.
                     allreduce_hook = default.allreduce_hook
-                    opt_hook_state = default._OptimizerHookState(
+                    opt_hook_state = optimizer_overlap_hooks._OptimizerHookState(
                         functional_optim_cls,
                         *functional_optim_args,
                         **functional_optim_kwargs,
                     )
                     ddp_model_with_optimizer_hook.register_comm_hook(
                         None,
-                        default._hook_then_optimizer(allreduce_hook, opt_hook_state),
+                        optimizer_overlap_hooks._hook_then_optimizer(allreduce_hook, opt_hook_state),
                     )
                     # Create DDP model with no hook that does optimizer after
                     # backward.
