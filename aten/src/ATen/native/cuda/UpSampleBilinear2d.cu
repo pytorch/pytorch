@@ -30,7 +30,6 @@ __global__ void upsample_bilinear2d_out_frame(
   const int channels = idata.size(1);
   const int height1 = idata.size(2);
   const int width1 = idata.size(3);
-  const int height2 = odata.size(2);
   const int width2 = odata.size(3);
 
   if (index < n) {
@@ -71,7 +70,6 @@ __global__ void upsample_bilinear2d_nhwc_out_frame(
     const accscalar_t rheight,
     const accscalar_t rwidth,
     const bool align_corners,
-    const int batchsize,
     const int channels,
     const int height1,
     const int width1,
@@ -183,7 +181,6 @@ __global__ void upsample_bilinear2d_backward_out_frame(
 template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(1024)
 __global__ void upsample_bilinear2d_backward_nhwc_out_frame(
-    const size_t nc,
     const int height1,
     const int width1,
     const int height2,
@@ -260,7 +257,6 @@ static void upsample_bilinear2d_out_cuda_template(
   int output_height = output_size[0];
   int output_width = output_size[1];
 
-  int nbatch = input.size(0);
   int channels = input.size(1);
   int input_height = input.size(2);
   int input_width = input.size(3);
@@ -283,7 +279,6 @@ static void upsample_bilinear2d_out_cuda_template(
       TORCH_CHECK(output.numel() < std::numeric_limits<int>::max(),
         "upsample_bilinear2d_nhwc only supports output tensors with less than INT_MAX elements");
 
-      const int batchsize = input.size(0);
       const int channels = input.size(1);
       const int height1 = input.size(2);
       const int width1 = input.size(3);
@@ -308,7 +303,6 @@ static void upsample_bilinear2d_out_cuda_template(
       upsample_bilinear2d_nhwc_out_frame<scalar_t, accscalar_t>
         <<<ceil_div(num_kernels, num_threads), num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
           rheight, rwidth, align_corners,
-          batchsize,
           channels,
           height1,
           width1,
@@ -403,7 +397,6 @@ static void upsample_bilinear2d_backward_out_cuda_template(
 
       upsample_bilinear2d_backward_nhwc_out_frame<scalar_t, accscalar_t>
           <<<ceil_div(num_kernels, static_cast<size_t>(num_threads)), num_threads, 0, stream>>>(
-              nbatch * channels,
               input_height,
               input_width,
               output_height,
