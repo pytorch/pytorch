@@ -102,9 +102,6 @@ constexpr uint64_t kMinProducedFileFormatVersion = 0x3L;
 //  0x7L: Enable support for operators with default arguments plus out arguments.
 constexpr uint64_t kProducedBytecodeVersion = 0x7L;
 
-static_assert(kProducedBytecodeVersion >= kProducedFileFormatVersion,
-    "kProducedBytecodeVersion must be higher or equal to kProducedFileFormatVersion.");
-
 // Introduce kMinSupportedBytecodeVersion and kMaxSupportedBytecodeVersion
 // for limited backward/forward compatibility support of bytecode. If
 // kMinSupportedBytecodeVersion <= model_version <= kMaxSupportedBytecodeVersion (in loader),
