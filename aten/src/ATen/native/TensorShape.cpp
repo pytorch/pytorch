@@ -26,7 +26,6 @@
 #include <algorithm>
 #include <cstdint>
 #include <vector>
-#include <iostream>
 
 namespace at {
 namespace native {
@@ -1655,6 +1654,7 @@ Tensor block(TensorList tensors, IntArrayRef indices, int64_t idx_stride) {
     max_ten_dim = std::max(max_ten_dim, tensor.squeeze().ndimension());
   const int64_t result_dim = std::max(max_ten_dim, idx_stride);
 
+  // inserting leading one axis to indices which record the index(position) of tensor inside the nested_tensor_list
   std::vector<LowDimIdx> padded_idx;
   const int64_t pad_size = result_dim - idx_stride;
   for(int64_t i = 0; i < indices.size(); i += idx_stride) {
@@ -1675,6 +1675,8 @@ Tensor block(TensorList tensors, IntArrayRef indices, int64_t idx_stride) {
 
   auto cat_shape = [](const LowDimIdx& a, const LowDimIdx& b,
                       int64_t dim, const LowDimIdx& idx) -> LowDimIdx {
+    // compute the shape of two tenosr after concated along "dim" axis 
+    // and also checking is two tensor are concateble at the same time
     LowDimIdx cated;
     for(int64_t i: c10::irange(a.size())) {
       if (i != dim) {
@@ -1694,16 +1696,17 @@ Tensor block(TensorList tensors, IntArrayRef indices, int64_t idx_stride) {
 
   for(auto i: c10::irange(tensors.size())) {
     Tensor tensor = tensors[i];
-    const int64_t unsuq_size = result_dim - tensor.ndimension();
-    LowDimIdx unsuq_sizes;
-    for(auto j: c10::irange(unsuq_size)) {
-      unsuq_sizes.push_back(1);
+    // adding "unsqu(unsqueeze)_size" of leading one to tensor
+    const int64_t unsqu_size = result_dim - tensor.ndimension();
+    LowDimIdx unsqu_sizes;
+    for(auto j: c10::irange(unsqu_size)) {
+      unsqu_sizes.push_back(1);
     }
-    for(auto j: c10::irange(unsuq_size, result_dim)) {
-      unsuq_sizes.push_back(tensor.size(j - unsuq_size));
+    for(auto j: c10::irange(unsqu_size, result_dim)) {
+      unsqu_sizes.push_back(tensor.size(j - unsqu_size));
     }
-    tensor = tensor.view(unsuq_sizes);
-    ten_shapes.push_back(unsuq_sizes);
+    tensor = tensor.view(unsqu_sizes);
+    ten_shapes.push_back(unsqu_sizes);
 
     auto ten_ndim = tensor.ndimension();
     auto idx = padded_idx[i];
