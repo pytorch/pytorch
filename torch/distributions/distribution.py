@@ -62,14 +62,14 @@ class Distribution(object):
         super(Distribution, self).__init__()
 
     def __init_subclass__(cls, *args, **kwargs):
-        super().__init_subclass__(*args, **kwargs)
+        super().__init_subclass__(*args, **kwargs) # type: ignore
 
         # Automatically decorate icdf methods to apply sample validation if necessary
         def icdf_decorator(func):
-            def wrapper(self: Type[Distribution], value: torch.Tensor):
+            def wrapper(self, value: torch.Tensor):
                 icdf_result = func(self, value)
                 if self._validate_args:
-                    self._validate_sample(icdf_result)
+                    cls._validate_sample(self, icdf_result)
                 return icdf_result
 
             return wrapper
