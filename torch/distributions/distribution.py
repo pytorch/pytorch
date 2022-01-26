@@ -2,7 +2,7 @@ import torch
 import warnings
 from torch.distributions import constraints
 from torch.distributions.utils import lazy_property
-from typing import Dict, Optional, Any, Type
+from typing import Dict, Optional, Any
 
 
 class Distribution(object):
@@ -76,8 +76,7 @@ class Distribution(object):
 
         if 'icdf' in cls.__dict__:
             icdf_func = cls.__dict__['icdf']
-            setattr(cls, 'icdf', icdf_decorator(icdf_func))
-
+            cls.icdf = icdf_decorator(icdf_func)
 
     def expand(self, batch_shape, _instance=None):
         """
