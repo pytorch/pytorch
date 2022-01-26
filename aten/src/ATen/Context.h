@@ -387,4 +387,14 @@ private:
   bool changed = false;
 };
 
+#ifdef USE_ROCM
+struct TORCH_API BackwardPassGuard {
+  BackwardPassGuard();
+  ~BackwardPassGuard();
+  static bool is_backward_pass();
+private:
+  static thread_local bool is_backward_pass_;
+};
+#endif
+
 } // namespace at
