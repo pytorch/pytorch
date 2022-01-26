@@ -184,4 +184,6 @@ class TransformedDistribution(Distribution):
         value = self.base_dist.icdf(value)
         for transform in self.transforms:
             value = transform(value)
+        if self._validate_args:
+            self._validate_sample(value)
         return value

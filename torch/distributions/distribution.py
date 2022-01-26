@@ -61,23 +61,6 @@ class Distribution(object):
                     )
         super(Distribution, self).__init__()
 
-    def __init_subclass__(cls):
-        super().__init_subclass__()
-
-        # Automatically decorate icdf methods to apply sample validation if necessary
-        def icdf_decorator(func):
-            def wrapper(self, value: torch.Tensor):
-                icdf_result = func(self, value)
-                if self._validate_args:
-                    cls._validate_sample(self, icdf_result)
-                return icdf_result
-
-            return wrapper
-
-        if 'icdf' in cls.__dict__:
-            icdf_func = cls.__dict__['icdf']
-            cls.icdf = icdf_decorator(icdf_func)
-
     def expand(self, batch_shape, _instance=None):
         """
         Returns a new distribution instance (or populates an existing instance
