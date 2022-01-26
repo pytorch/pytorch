@@ -1430,7 +1430,7 @@ void ldl_solve_kernel(
   if (factors.is_complex()) {
     TORCH_CHECK(
         !hermitian,
-        "torch.linalg.ldl_solve: complex tensors with hermitian=True flag are not supported.");
+        "torch.linalg.ldl_solve: complex tensors with hermitian=True flag are not supported on CUDA.");
   }
 
   ldl_solve_cusolver(factors, pivots, B, upper);
