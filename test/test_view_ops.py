@@ -926,7 +926,7 @@ class TestOldViewOps(TestCase):
                     nc_flat = nc_src.ravel()
                     self.assertEqual(nc_flat.shape, torch.Size([size]))
                     self.assertEqual(nc_src.contiguous().view(-1), nc_flat)
-                    self.assertNotEqual(nc_flat._base, src)
+                    self.assertTrue(nc_flat._base != nc_src)
                     self.assertTrue(nc_flat.is_contiguous())
 
         # Test that flatten returns 1-dim tensor when given a 0-dim tensor
