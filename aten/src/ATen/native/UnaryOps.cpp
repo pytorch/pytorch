@@ -390,7 +390,7 @@ Tensor real(const Tensor& self) {
     }
     return at::select(real_tensor, real_tensor.dim() - 1, 0);
   } else {
-    TORCH_CHECK(false, "real is not implemented for tensors with non-complex dtypes.");
+    return self;
   }
 }
 
