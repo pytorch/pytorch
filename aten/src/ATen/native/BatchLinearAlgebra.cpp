@@ -376,9 +376,12 @@ TORCH_META_FUNC(linalg_ldl_solve)
       " does not match b dtype ",
       B.scalar_type());
 
+    std::vector<int64_t> B_broadcast_size;
+    std::tie(B_broadcast_size, std::ignore) = at::native::_linalg_broadcast_batch_dims(B, factors);
+
   // prefer column major strides
-  auto result_strides = at::native::contiguous_strides(B.sizes(), /*column_major=*/true);
-  set_output(0, B.sizes(), result_strides, B.options(), {});
+  auto result_strides = at::native::contiguous_strides(B_broadcast_size, /*column_major=*/true);
+  set_output(0, B_broadcast_size, result_strides, B.options(), {});
 }
 
 TORCH_META_FUNC(triangular_solve)(const Tensor& self, const Tensor& A, bool upper, bool transpose, bool unitriangular) {
@@ -4338,21 +4341,12 @@ TORCH_IMPL_FUNC(linalg_ldl_factor_ex_out)
       " dtype, but got info with dtype ",
       info.scalar_type());
 
-  auto ndim = self.dim();
-  auto pivots_shape = IntArrayRef(self.sizes().data(), ndim - 1);
-  auto info_shape = IntArrayRef(self.sizes().data(), ndim - 2);
-  at::native::resize_output(pivots, pivots_shape);
-  at::native::resize_output(info, info_shape);
-
   auto info_ = info.expect_contiguous();
   info_->zero_();
   auto pivots_ = pivots.expect_contiguous();
 
-  bool factors_equal_expected_shape = factors.sizes().equals(self.sizes());
-  bool factors_batched_column_major = factors.mT().is_contiguous();
-
   c10::MaybeOwned<Tensor> factors_;
-  if (factors_equal_expected_shape && factors_batched_column_major) {
+  if (factors.mT().is_contiguous()) {
     factors_ = c10::MaybeOwned<Tensor>::borrowed(factors);
     factors_->copy_(self);
   } else {
@@ -4370,7 +4364,6 @@ TORCH_IMPL_FUNC(linalg_ldl_factor_ex_out)
       self.device().type(), *factors_, *pivots_, *info_, upper, hermitian);
 
   if (!factors.is_same(*factors_)) {
-    at::native::resize_output(factors, factors_->sizes());
     factors.copy_(*factors_);
   }
   if (!info.is_same(*info_)) {
@@ -4412,11 +4405,8 @@ TORCH_IMPL_FUNC(linalg_ldl_solve_out)
 
   auto pivots_ = pivots.expect_contiguous();
 
-  bool result_equal_expected_shape = result.sizes().equals(B_broadcast.sizes());
-  bool result_batched_column_major = result.mT().is_contiguous();
-
   c10::MaybeOwned<Tensor> result_;
-  if (result_equal_expected_shape && result_batched_column_major) {
+  if (result.mT().is_contiguous()) {
     result_ = c10::MaybeOwned<Tensor>::borrowed(result);
     result_->copy_(B_broadcast);
   } else {
@@ -4434,7 +4424,6 @@ TORCH_IMPL_FUNC(linalg_ldl_solve_out)
       B.device().type(), *factors_, *pivots_, *result_, upper, hermitian);
 
   if (!result.is_same(*result_)) {
-    at::native::resize_output(result, result_->sizes());
     result.copy_(*result_);
   }
 }
