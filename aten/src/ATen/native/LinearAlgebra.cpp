@@ -2308,8 +2308,7 @@ Tensor &frobenius_norm_out(const Tensor& self,
     if (self.is_complex()){
       result_ = at::sqrt(at::sum(at::real(self.conj() * self), dim_, keepdim));
     } else {
-      auto inter_sum = at::sum((self * self), dim_, keepdim);
-      result_ = at::sqrt(inter_sum);
+      result_ = at::sqrt(at::sum((self * self), dim_, keepdim));
     }
   }
   // NOTE: It would be better to avoid resize and copy by using norm_out and sqrt_out above.
