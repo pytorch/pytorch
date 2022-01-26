@@ -656,7 +656,6 @@ std::string generate_code(
   env.s("compute_type", compute_type);
   env.s("functor", func);
   env.s("name", name);
-  env.s("traits_string", get_traits_string());
   env.s("cmath_string", get_cmath_string());
 
   // Generate `extra_params` for function signature
@@ -715,12 +714,15 @@ std::string generate_code(
   // but the definition of std::complex is needed for dynamic casting even if the compute type is not complex
   if (f_inputs_type == "std::complex<float>" || result_type == "std::complex<float>" ||
       f_inputs_type == "std::complex<double>" || result_type == "std::complex<double>") {
+    env.s("traits_string", get_traits_string());
     env.s("complex_body_string", get_complex_body_string());
     env.s("complex_math_string", get_complex_math_string());
   } else if (dynamic_casting) {
+    env.s("traits_string", get_traits_string());
     env.s("complex_body_string", get_complex_body_string());
     env.s("complex_math_string", "");
   } else {
+    env.s("traits_string", "");
     env.s("complex_body_string", "");
     env.s("complex_math_string", "");
   }
