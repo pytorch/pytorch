@@ -656,8 +656,7 @@ class TestForeach(TestCase):
     # note: BFloat16 has the same number of exponent bits as FP32
     # so if squared L2 norm overflows in BF16, then it also overflows in FP32.
     @onlyCUDA
-    @dtypes(torch.half, torch.bfloat16)
-    @ops(foreach_reduce_op_db)
+    @ops(foreach_reduce_op_db, allowed_dtypes=(torch.half, torch.bfloat16))
     def test_foreach_l2_large_value_input(self, device, dtype, op):
         ord, N = 2, 10
         max_value = torch.finfo(dtype).max
