@@ -4248,28 +4248,6 @@ TORCH_IMPL_FUNC(linalg_ldl_factor_ex_out)
  const Tensor& factors,
  const Tensor& pivots,
  const Tensor& info) {
-  TORCH_CHECK(
-      factors.scalar_type() == self.scalar_type(),
-      "torch.linalg.ldl_factor_ex: ",
-      "Expected factors to have ",
-      self.scalar_type(),
-      " dtype, but got factors with dtype ",
-      info.scalar_type());
-  TORCH_CHECK(
-      pivots.scalar_type() == ScalarType::Int,
-      "torch.linalg.ldl_factor_ex: ",
-      "Expected pivots to have ",
-      ScalarType::Int,
-      " dtype, but got pivots with dtype ",
-      info.scalar_type());
-  TORCH_CHECK(
-      info.scalar_type() == ScalarType::Int,
-      "torch.linalg.ldl_factor_ex: ",
-      "Expected info to have ",
-      ScalarType::Int,
-      " dtype, but got info with dtype ",
-      info.scalar_type());
-
   // LAPACK workspace query segfalts if the input has 0 in batch dimensions.
   if (self.numel() == 0) {
     info.zero_();
@@ -4319,14 +4297,6 @@ TORCH_IMPL_FUNC(linalg_ldl_solve_out)
  bool upper,
  bool hermitian,
  const Tensor& result) {
-  TORCH_CHECK(
-      result.scalar_type() == factors.scalar_type(),
-      "torch.linalg.ldl_solve: ",
-      "Expected result to have ",
-      factors.scalar_type(),
-      " dtype, but got result with dtype ",
-      result.scalar_type());
-
   if (factors.numel() == 0 || pivots.numel() == 0) {
     return;
   }
