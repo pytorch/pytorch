@@ -4960,12 +4960,18 @@
 
 - func: frobenius_norm(Tensor self) -> Tensor
   variants: function
+  dispatch:
+    CompositeExplicitAutograd: frobenius_norm
 
 - func: frobenius_norm.dim(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
   variants: function
+  dispatch:
+    CompositeExplicitAutograd: frobenius_norm
 
 - func: frobenius_norm.out(Tensor self, int[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
+  dispatch:
+    CompositeExplicitAutograd: frobenius_norm_out
 
 - func: nuclear_norm(Tensor self, bool keepdim=False) -> Tensor
   variants: function
@@ -10959,23 +10965,15 @@
 
 - func: linalg_matrix_norm(Tensor self, Scalar ord, int[] dim=[-2,-1], bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   python_module: linalg
-  dispatch:
-        CompositeExplicitAutograd: linalg_matrix_norm
 
 - func: linalg_matrix_norm.out(Tensor self, Scalar ord, int[] dim=[-2,-1], bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
-  dispatch:
-        CompositeExplicitAutograd: linalg_matrix_norm
 
 - func: linalg_matrix_norm.str_ord(Tensor self, str ord='fro', int[] dim=[-2,-1], bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   python_module: linalg
-  dispatch:
-        CompositeExplicitAutograd: linalg_matrix_norm
 
 - func: linalg_matrix_norm.str_ord_out(Tensor self, str ord='fro', int[] dim=[-2,-1], bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
-  dispatch:
-        CompositeExplicitAutograd: linalg_matrix_norm
 
 - func: linalg_svd.U(Tensor self, bool full_matrices=True, *, Tensor(a!) U, Tensor(b!) S, Tensor(c!) Vh) -> (Tensor(a!) U, Tensor(b!) S, Tensor(c!) Vh)
   python_module: linalg
