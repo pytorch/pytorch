@@ -568,10 +568,10 @@ std::tuple<Tensor&, Tensor&> conv_depthwise2d_backward_cuda_out(
     IntArrayRef dilation,
     Tensor & grad_input,
     Tensor & grad_weight) {
-  auto self = self_.expect_contiguous();
   auto grad_output = grad_output_.expect_contiguous();
 
   if (grad_weight.defined()) {
+    auto self = self_.expect_contiguous();
     conv_depthwise2d_grad_weight_out(
         *self, *grad_output, grad_weight,
         kernel_size[1], kernel_size[0],
@@ -583,7 +583,7 @@ std::tuple<Tensor&, Tensor&> conv_depthwise2d_backward_cuda_out(
   if (grad_input.defined()) {
     auto weight = weight_.expect_contiguous();
     conv_depthwise2d_backward_out(
-        *self, *grad_output, grad_input, *weight,
+        self_, *grad_output, grad_input, *weight,
         kernel_size[1], kernel_size[0],
         stride[1], stride[0],
         padding[1], padding[0],
