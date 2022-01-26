@@ -60,8 +60,7 @@ void print_unsupported_ops_and_throw(
   error_message += "}";
   TORCH_CHECK(
       false,
-      "Following ops cannot be found. ",
-      "Check fburl.com/missing_ops for the fix.",
+      "Following ops cannot be found. Please check if the operator library is included in the build. If built with selected ops, check if these ops are in the list. If you are a Meta employee, please see fburl.com/missing_ops for a fix. Or post it in https://discuss.pytorch.org/",
       error_message);
 }
 
