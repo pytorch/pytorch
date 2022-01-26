@@ -13166,12 +13166,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_flatten,
-           skips=(
-               # File "pytorch/torch/testing/_internal/common_jit.py", line 306, in test_type
-               # self.assertTrue(actual_type.isSubtypeOf(out_type))
-               # AssertionError: False is not true
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-           )
            ),
     OpInfo('column_stack',
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
