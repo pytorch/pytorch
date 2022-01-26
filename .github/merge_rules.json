@@ -1,7 +1,7 @@
 [
    {
     "name": "ONNX exporter",
-    "patterns": ["torch/onnx/**", "torch/csrc/jit/passes/onnx/**", "torch/csrc/jit/passes/onnx.*", "test/onnx/**"],
+    "patterns": ["torch/onnx/**", "torch/csrc/jit/passes/onnx/**", "torch/csrc/jit/passes/onnx.*", "test/onnx/**", "docs/source/onnx.rst"],
     "approved_by": ["garymm"],
     "mandatory_app_id": 12274
    },
@@ -14,7 +14,7 @@
    {
     "name": "OSS CI",
     "patterns": [".github/**", ".circleci/**", ".jenkins/**"],
-    "approved_by": ["seemethere", "malfet"],
+    "approved_by": ["seemethere", "malfet", "suo"],
     "mandatory_app_id": 12274
    }
 ]
