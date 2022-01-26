@@ -596,7 +596,7 @@ void computeAtBetween(
               return mapped_to_trivial_reduction.count(id);
             });
 
-        pos = pos_it == consumer->domain()->domain().end()
+        auto consumer_pos = pos_it == consumer->domain()->domain().end()
             ? pos
             : std::min(
                   (int)std::distance(
@@ -605,7 +605,7 @@ void computeAtBetween(
                   (pos < 0 ? pos + (int)consumer->nDims() : pos));
         // Assume we don't want to reset computeAt on tensors that have already
         // performed it.
-        producer->computeAt(consumer, pos, mode);
+        producer->computeAt(consumer, consumer_pos, mode);
       }
     }
   }

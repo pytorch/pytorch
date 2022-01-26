@@ -476,6 +476,48 @@ void multiReductionInliner(
       scheduler_utils::computeWithOutputs(
           red_tv, pos, ComputeAtMode::BestEffort);
     }
+    // For topologies where there may not be paths to all inputs/outputs from
+    // the reductions, we need to take a similar approach to the unrolled
+    // version and setup of compute at from inputs->outputs that are not
+    // inputs/outputs of the reductions.
+    std::vector<TensorView*> compute_to;
+    std::unordered_set<TensorView*> outs_of_reds;
+    {
+      auto outs_of_red_vec = ir_utils::outputTvsOf(ref_tvs);
+      outs_of_reds = std::unordered_set<TensorView*>(
+          outs_of_red_vec.begin(), outs_of_red_vec.end());
+    }
+    for (auto out : ir_utils::filterByType<TensorView>(fusion->outputs())) {
+      // only terminating outputs
+      if (out->uses().size()) {
+        continue;
+      }
+      if (outs_of_reds.find(out) != outs_of_reds.end()) {
+        continue;
+      }
+      compute_to.push_back(out);
+    }
+
+    std::vector<TensorView*> compute_from;
+    std::unordered_set<TensorView*> inps_of_reds;
+    {
+      auto inps_of_red_vec = ir_utils::inputTvsOf(ref_tvs);
+      inps_of_reds = std::unordered_set<TensorView*>(
+          inps_of_red_vec.begin(), inps_of_red_vec.end());
+    }
+    for (auto inp : ir_utils::filterByType<TensorView>(fusion->inputs())) {
+      if (inps_of_reds.find(inp) != inps_of_reds.end()) {
+        continue;
+      }
+      compute_from.push_back(inp);
+    }
+
+    scheduler_utils::computeAtBetween(
+        compute_from,
+        compute_to,
+        -1,
+        ComputeAtMode::MostInlined,
+        mapped_to_trivial_reduction);
   }
 }
 
