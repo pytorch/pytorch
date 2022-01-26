@@ -83,6 +83,7 @@ jobs:
           chmod +x "${RUNNER_TEMP}/conda.sh"
           /bin/bash "${RUNNER_TEMP}/conda.sh" -b -p "${RUNNER_TEMP}/anaconda"
           echo "${RUNNER_TEMP}/anaconda/bin" >> "${GITHUB_PATH}"
+          # shellcheck disable=SC1091
           source "${RUNNER_TEMP}/anaconda/bin/activate"
           conda install -y \
             cffi \
@@ -117,6 +118,7 @@ jobs:
           rm cert.txt
       - name: Build
         run: |
+          # shellcheck disable=SC1091
           source "${RUNNER_TEMP}/anaconda/bin/activate"
           export TCLLIBPATH="/usr/local/lib"
           python -VV
