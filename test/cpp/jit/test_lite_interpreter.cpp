@@ -6,15 +6,15 @@
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/resolver.h>
-#include <torch/csrc/jit/mobile/backport.h>
-#include <torch/csrc/jit/mobile/backport_manager.h>
+#include <torch/csrc/jit/mobile/compatibility/backport.h>
+#include <torch/csrc/jit/mobile/compatibility/backport_manager.h>
+#include <torch/csrc/jit/mobile/compatibility/model_compatibility.h>
+#include <torch/csrc/jit/mobile/compatibility/runtime_compatibility.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
-#include <torch/csrc/jit/mobile/model_compatibility.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/mobile/parse_bytecode.h>
 #include <torch/csrc/jit/mobile/parse_operators.h>
-#include <torch/csrc/jit/mobile/runtime_compatibility.h>
 #include <torch/csrc/jit/mobile/upgrader_mobile.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import.h>
@@ -202,6 +202,26 @@ TEST(LiteInterpreterTest, Dict) {
   std::vector<torch::jit::IValue> inputs({torch::ones({})});
   auto output = bc.get_method("forward")(inputs);
   AT_ASSERT(output.toGenericDict().at("result").toTensor().item().toInt() == 2);
+}
+
+TEST(LiteInterpreterTest, List) {
+  Module m("m");
+  m.define(R"JIT(
+  def foo(self, x):
+      return [x + 2]
+
+  def forward(self, x):
+      d = self.foo(x)
+      return d
+  )JIT");
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  std::vector<torch::jit::IValue> inputs({torch::ones({})});
+  auto output = bc.get_method("forward")(inputs);
+  auto server_output = m.forward(inputs);
+  EXPECT_EQ(output.toList().get(0).toTensor().item().toInt(), 3);
+  EXPECT_EQ(output, server_output);
 }
 
 TEST(LiteInterpreterTest, PrimOverload) {
@@ -2035,6 +2055,67 @@ void enumerateTupleType(
   }
 }
 
+class LiteInterpreterDynamicTypeTestFixture
+    : public ::testing::TestWithParam<size_t> {
+ protected:
+  void SetUp() override {
+    cu = std::make_shared<CompilationUnit>();
+    std::vector<TypePtr> keyTypes = {
+        AnyType::get(),
+        IntType::get(),
+        BoolType::get(),
+        FloatType::get(),
+        ComplexType::get(),
+        StringType::get(),
+        TensorType::get(),
+        DeviceObjType::get(),
+    };
+    types = {
+        NoneType::get(),
+        NumberType::get(),
+        ClassType::create("__torch__.TestClass1", cu),
+        ClassType::create("__torch__.TestClass2", cu),
+        AnyListType::get(),
+        AnyTupleType::get(),
+        StreamObjType::get(),
+        CapsuleType::get(),
+        GeneratorType::get(),
+        StorageType::get(),
+        VarType::create("t"),
+        VarType::create("v"),
+        AnyClassType::get()};
+    std::copy(keyTypes.begin(), keyTypes.end(), back_inserter(types));
+    auto expandTypes = [&](size_t tupleSize) {
+      std::vector<TypePtr> nested;
+      for (const auto& type : types) {
+        if (!(type == AnyType::get())) {
+          nested.emplace_back(ListType::create(type));
+          if (!(type == NoneType::get() ||
+                type->kind() == OptionalType::Kind)) {
+            nested.emplace_back(OptionalType::create(type));
+          }
+        }
+        for (const auto& keyType : keyTypes) {
+          nested.emplace_back(DictType::create(keyType, type));
+        }
+      }
+      std::vector<TypePtr> tmp;
+      enumerateTupleType(tupleSize, tmp, types, nested);
+      std::move(
+          std::begin(nested), std::end(nested), std::back_inserter(types));
+    };
+    expandTypes(1);
+    expandTypes(1);
+  }
+  std::shared_ptr<CompilationUnit> cu;
+  std::vector<TypePtr> types;
+
+ public:
+  static constexpr size_t kNumSplits = 10;
+};
+
+constexpr size_t LiteInterpreterDynamicTypeTestFixture::kNumSplits;
+
 /**
  * Enumerate all possible JIT types appearing in mobile runtime, and test
  * whether subtyping relation is preserved after one of the JIT types is
@@ -2045,50 +2126,14 @@ void enumerateTupleType(
  * of types. We call expandTypes() twice to test types nested less or equal
  * to two levels. e.g. List[Optional[Tensor]], Optional[Dict[Int, Bool]], etc.
  */
-TEST(LiteInterpreterTest, DynamicType) {
-  auto cu = std::make_shared<CompilationUnit>();
-  std::vector<TypePtr> keyTypes = {
-      AnyType::get(),
-      IntType::get(),
-      BoolType::get(),
-      FloatType::get(),
-      ComplexType::get(),
-      StringType::get(),
-      TensorType::get(),
-      DeviceObjType::get(),
-  };
-  std::vector<TypePtr> types = {
-      NoneType::get(),
-      NumberType::get(),
-      ClassType::create("__torch__.TestClass1", cu),
-      ClassType::create("__torch__.TestClass2", cu),
-      AnyListType::get(),
-      AnyTupleType::get(),
-      StreamObjType::get(),
-      CapsuleType::get()};
-  std::copy(keyTypes.begin(), keyTypes.end(), back_inserter(types));
-  auto expandTypes = [&](size_t tupleSize) {
-    std::vector<TypePtr> nested;
-    for (const auto& type : types) {
-      if (!(type == AnyType::get())) {
-        nested.push_back(ListType::create(type));
-        if (!(type == NoneType::get() || type->kind() == OptionalType::Kind)) {
-          nested.push_back(OptionalType::create(type));
-        }
-      }
-      for (const auto& keyType : keyTypes) {
-        nested.push_back(DictType::create(keyType, type));
-      }
-    }
-    std::vector<TypePtr> tmp;
-    enumerateTupleType(tupleSize, tmp, types, nested);
-    std::move(std::begin(nested), std::end(nested), std::back_inserter(types));
-  };
-  expandTypes(1);
-  expandTypes(1);
+TEST_P(LiteInterpreterDynamicTypeTestFixture, Conformance) {
+  size_t num = types.size() / LiteInterpreterDynamicTypeTestFixture::kNumSplits;
+  size_t begin = num * GetParam();
+  size_t end = std::min(types.size(), begin + num);
   for (const auto& a : types) {
     auto da = DynamicType::create(*a);
-    for (const auto& b : types) {
+    for (size_t i = begin; i < end; i++) {
+      const auto& b = types[i];
       bool result = a->isSubtypeOf(*b);
       EXPECT_EQ(result, da->isSubtypeOf(*b));
       result = b->isSubtypeOf(*a);
@@ -2096,6 +2141,13 @@ TEST(LiteInterpreterTest, DynamicType) {
     }
   }
 }
+
+INSTANTIATE_TEST_CASE_P(
+    PyTorch,
+    LiteInterpreterDynamicTypeTestFixture,
+    ::testing::Range(
+        static_cast<size_t>(0),
+        LiteInterpreterDynamicTypeTestFixture::kNumSplits));
 
 } // namespace jit
 } // namespace torch
