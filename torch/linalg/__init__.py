@@ -856,17 +856,18 @@ Keyword args:
 Examples::
 
     >>> A = torch.randn(3, 3)
+    >>> A = A @ A.mT # make symmetric
     >>> A
-    tensor([[ 0.1222,  1.0385, -0.8855],
-            [-0.3465, -0.0985, -1.1092],
-            [-1.9515, -1.4130,  0.0787]])
+    tensor([[7.2079, 4.2414, 1.9428],
+            [4.2414, 3.4554, 0.3264],
+            [1.9428, 0.3264, 1.3823]])
     >>> factors, pivots, info = torch.linalg.ldl_factor_ex(A)
     >>> factors
-    tensor([[ 0.1222,  0.0000,  0.0000],
-            [-1.9515,  0.0787,  0.0000],
-            [ 0.7330,  0.2235,  0.4713]])
+    tensor([[ 7.2079,  0.0000,  0.0000],
+            [ 0.5884,  0.9595,  0.0000],
+            [ 0.2695, -0.8513,  0.1633]])
     >>> pivots
-    tensor([-3, -3,  3], dtype=torch.int32)
+    tensor([1, 2, 3], dtype=torch.int32)
     >>> info
     tensor(0, dtype=torch.int32)
 """)
