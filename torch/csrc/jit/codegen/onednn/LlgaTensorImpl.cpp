@@ -9,6 +9,16 @@ namespace jit {
 namespace fuser {
 namespace onednn {
 
+dnnl::graph::engine& Engine::getEngine() {
+  static dnnl::graph::engine cpu_engine(dnnl::graph::engine::kind::cpu, 0);
+  return cpu_engine;
+}
+
+dnnl::graph::stream& Stream::getStream() {
+  static dnnl::graph::stream cpu_stream{Engine::getEngine(), nullptr};
+  return cpu_stream;
+}
+
 LlgaTensorImpl::LlgaTensorImpl(
     at::Storage&& storage,
     const caffe2::TypeMeta& data_type,
@@ -18,9 +28,9 @@ LlgaTensorImpl::LlgaTensorImpl(
           c10::DispatchKeySet(c10::DispatchKey::MkldnnCPU),
           data_type),
       desc_(desc) {
-  sizes_and_strides_.set_sizes(desc.sizes());
-  refresh_numel();
-}
+        sizes_and_strides_.set_sizes(desc.sizes());
+        refresh_numel();
+      }
 
 // The following are publically exposed as methods of Tensor
 c10::IntArrayRef LlgaTensorImpl::strides() const {
@@ -55,6 +65,7 @@ bool LlgaTensorImpl::has_storage() const {
 }
 
 at::Tensor empty_llga(const LlgaTensorDesc& desc, const c10::TensorOptions& options) {
+  auto sizes = desc.sizes();
   auto nbytes = desc.storage_size();
 
   auto allocator = at::GetCPUAllocator();
@@ -75,8 +86,11 @@ const LlgaTensorDesc& get_llga_desc(const at::Tensor& tensor) {
   return static_cast<LlgaTensorImpl*>(tensor.unsafeGetTensorImpl())->desc();
 }
 
+
 dnnl::graph::tensor llga_from_aten_tensor(const at::Tensor& tensor) {
-  return {get_llga_desc(tensor).logical_tensor(), tensor.data_ptr()};
+  return {get_llga_desc(tensor).logical_tensor(),
+          torch::jit::fuser::onednn::Engine::getEngine(),
+          tensor.data_ptr()};
 }
 
 using data_type = dnnl::graph::logical_tensor::data_type;
@@ -108,7 +122,7 @@ LlgaTensorDesc LlgaTensorDesc::supplementTensorInfo(const at::Tensor& t) const {
     auto sizes = t.sizes().vec();
     auto strides = t.strides().vec();
     auto dtype = getLlgaDataType(t.scalar_type());
-    return {tid_, sizes, strides, dtype};
+    return {tid_, sizes, strides, dtype, property_type_};
   }
 }
 

@@ -1,9 +1,9 @@
 #pragma once
 
-#include <torch/csrc/jit/codegen/onednn/LlgaTensorImpl.h>
-#include <torch/csrc/jit/codegen/onednn/graph_helper.h>
 #include <unordered_map>
 
+#include <torch/csrc/jit/codegen/onednn/LlgaTensorImpl.h>
+#include <torch/csrc/jit/codegen/onednn/graph_helper.h>
 #include <oneapi/dnnl/dnnl_graph.hpp>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
@@ -25,6 +25,8 @@ class LlgaKernel {
 
   void run(Stack& stack);
 
+  void initialize(const TensorArgs& inputs);
+
   const std::string& debugName() const {
     return debugName_;
   }
@@ -40,9 +42,7 @@ class LlgaKernel {
 
   ArgSpecs initializeInputSpecs(const TensorArgs& inputs);
 
-  ArgSpecs initializeOutputSpecs(
-      const dnnl::graph::partition& partition,
-      const ArgSpecs& inputSpecs) const;
+  ArgSpecs initializeOutputSpecs() const;
 
   dnnl::graph::compiled_partition compile(
       const dnnl::graph::partition& partition);
@@ -82,20 +82,6 @@ class LlgaKernel {
   std::string debugName_;
   std::once_flag initialized_flag;
   bool is_initialized_ = false;
-};
-
-struct Engine {
-  // CPU engine singleton
-  static dnnl::graph::engine& getEngine();
-  Engine(const Engine&) = delete;
-  void operator=(const Engine&) = delete;
-};
-
-struct Stream {
-  // CPU stream singleton
-  static dnnl::graph::stream& getStream();
-  Stream(const Stream&) = delete;
-  void operator=(const Stream&) = delete;
 };
 
 } // namespace onednn

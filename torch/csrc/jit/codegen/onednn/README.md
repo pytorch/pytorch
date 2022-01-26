@@ -61,13 +61,13 @@ torch/csrc/jit/codegen/onednn/LlgaTensorImpl.h
 torch/csrc/jit/codegen/onednn/LlgaTensorImpl.cpp
 ```
 
-CMake where bridge code is included:
+CMake files where bridge code is included:
 
 ```bash
 caffe2/CMakeLists.txt
 ```
 
-CMake where oneDNN Graph submodule are included:
+CMake files where oneDNN Graph submodule are included:
 
 ```bash
 third_party/ideep/mkl-dnn
@@ -77,8 +77,6 @@ cmake/Dependencies.cmake
 ```
 
 ## How to use
-
-Use `export DNNL_GRAPH_CONSTANT_CACHE=1` to enable the weight cache (This is a temporary API).
 
 
 ```python

@@ -17,14 +17,14 @@ set_property(
   TARGET caffe2::mkldnn PROPERTY INTERFACE_LINK_LIBRARIES
   ${MKLDNN_LIBRARIES})
 if(NOT APPLE AND NOT WIN32)
-  if(NOT TARGET caffe2::dnnl_graph_static)
-    add_library(caffe2::dnnl_graph_static INTERFACE IMPORTED)
+  if(NOT TARGET caffe2::dnnl_graph)
+    add_library(caffe2::dnnl_graph INTERFACE IMPORTED)
   endif()
 
   set_property(
-    TARGET caffe2::dnnl_graph_static PROPERTY INTERFACE_INCLUDE_DIRECTORIES
+    TARGET caffe2::dnnl_graph PROPERTY INTERFACE_INCLUDE_DIRECTORIES
     ${MKLDNN_INCLUDE_DIR})
   set_property(
-    TARGET caffe2::dnnl_graph_static PROPERTY INTERFACE_LINK_LIBRARIES
+    TARGET caffe2::dnnl_graph PROPERTY INTERFACE_LINK_LIBRARIES
     ${MKLDNN_LIBRARIES})
 endif()

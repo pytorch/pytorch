@@ -30,9 +30,11 @@ void insertTypeGuardForFusionGroup(
       continue;
     }
 
-    // fusion outputs are already guarded
-    if (input->node()->kind() == prim::Constant ||
-        input->node()->kind() == prim::oneDNNFusionGroup) {
+    // fusion outputs are already implicitly/explicitly guarded
+    torch::jit::Node* producer_node = input->node();
+    torch::jit::NodeKind producer_node_type = producer_node->kind();
+    if ((producer_node_type == prim::Constant) ||
+        (producer_node_type == prim::oneDNNFusionGroup)) {
       continue;
     }
     inputs_to_check.push_back(input);

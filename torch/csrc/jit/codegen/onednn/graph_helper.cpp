@@ -123,7 +123,6 @@ Operator createOperator(Node* node) {
 
     case aten::sigmoid:
       return makeEltwiseOp(node, opkind::Sigmoid);
-
     case aten::gelu:
       return makeEltwiseOp(node, opkind::GELU);
 
@@ -274,8 +273,10 @@ void mayAddListConstructIntoConcatPartition(
   // Since prim::ListConstruct is not visible to the LLGA,
   // it will not be in any partition returned from partfuseritioning results.
   // We need rewrite opToOwningPartition to make the prim::ListConstruct to be
-  // virtually in the same partition with the aten::cat, so that
-  // prim::ListConstruct can be fused into the fusion group by graph fuser
+  // 'virtually' in the same partition with the aten::cat, so that
+  // prim::ListConstruct can be fused into the fusion group by graph fuser.
+  // We emphasize on 'virtually' because get_num_ops() for cat's partition
+  // would still return 1.
   if (n->kind() == aten::cat && opToOwningPartition.has(n)) {
     auto listConstrcut = n->input(0)->node();
     auto partitionId = opToOwningPartition.get(n);
@@ -353,6 +354,45 @@ bool isViewOp(Node* n) {
   return false;
 }
 
+// Except for conv & GEMMs, which should always be handled by oneDNN Graph,
+// only use single-op partitions for ops unsupported by NNC, or ops
+// that oneDNN executes faster. prim::ListConstruct is an exception, since
+// we simply want to fuse it with cat.
+bool isBetterSuitedForLLGA(NodeKind kindOfOp) {
+  if ((kindOfOp == aten::layer_norm) ||
+      (kindOfOp == aten::avg_pool2d) ||
+      (kindOfOp == aten::matmul) ||
+      (kindOfOp == aten::max_pool2d) ||
+      (kindOfOp == aten::conv2d) ||
+      (kindOfOp == aten::_convolution) ||
+      (kindOfOp == aten::mm) ||
+      (kindOfOp == aten::linear) ||
+      (kindOfOp == aten::cat) ||
+      (kindOfOp == prim::ListConstruct)) {
+    return true;
+  } else {
+    GRAPH_DEBUG(kindOfOp.toQualString(),
+                " will not be used in a single-op oneDNN Graph partition.");
+    return false;
+  }
+}
+
+bool LlgaGraphHelper::checkForSingleOpPartition(Node* node) {
+  if (opToOwningPartition_.has(node)) {
+    auto partitionId = opToOwningPartition_.get(node);
+    if (partitions_[partitionId].get_ops_num() == 1) {
+      auto kindOfNode = node->kind();
+      return isBetterSuitedForLLGA(kindOfNode);
+    } else {
+      // multi-op partition
+      return true;
+    }
+  } else {
+    // this op isn't present in any partition
+    return false;
+  }
+}
+
 bool LlgaGraphHelper::shouldConsiderForMerge(Node* node) {
   // if we're already in the process of merging
   if (isLlgaSubgraph(node)) {
@@ -361,7 +401,7 @@ bool LlgaGraphHelper::shouldConsiderForMerge(Node* node) {
   if (isViewOp(node)) {
     return false;
   }
-  return opToOwningPartition_.has(node);
+  return checkForSingleOpPartition(node);
 }
 
 Node* LlgaGraphHelper::createSingletonSubgraph(Node* n, AliasDb& aliasDb) {

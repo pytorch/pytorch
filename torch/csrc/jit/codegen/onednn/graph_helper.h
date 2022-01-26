@@ -50,6 +50,8 @@ class LlgaGraphHelper {
 
   bool shouldConsiderForMerge(Node* node);
 
+  bool checkForSingleOpPartition(Node* node);
+
   Node* createSingletonSubgraph(Node* n, AliasDb& db);
 
   void mergeNodeIntoSubgraph(Node* toMerge, Node* subgraphNode, AliasDb& db);
@@ -67,8 +69,7 @@ class LlgaGraphHelper {
 
   OpPartitionMap opToOwningPartition_;
   std::vector<dnnl::graph::partition> partitions_;
-  std::map<size_t, Value*>
-      tensorIdToValue_; // map from tensorId to torch::jit::Value
+  std::map<size_t, Value*> tensorIdToValue_; // map from tensorId to torch::jit::Value
 };
 
 class LlgaNodeWrapper {
