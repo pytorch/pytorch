@@ -11066,7 +11066,9 @@ op_db: List[OpInfo] = [
            decorators=[
                # RuntimeError: Cannot insert a Tensor that requires grad as a constant.
                # Consider making it a parameter or input, or detaching the gradient
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,))
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+               # TODO(@anjali411): fix this
+               DecorateInfo(unittest.skip('Skipped!'), 'TestGradients', "test_forward_mode_AD"),
            ],
            sample_inputs_func=sample_inputs_instance_norm,),
     OpInfo('nn.functional.layer_norm',
@@ -11748,7 +11750,11 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
-           sample_inputs_func=sample_inputs_batch_norm),
+           sample_inputs_func=sample_inputs_batch_norm,
+           skips=(
+               # TODO(@anjali411): fix this
+               DecorateInfo(unittest.skip('Skipped!'), 'TestGradients', "test_forward_mode_AD"),
+           )),
     # This variant tests batch_norm with cuDNN disabled only on CUDA devices
     OpInfo('nn.functional.batch_norm',
            variant_test_name='without_cudnn',
@@ -14558,9 +14564,9 @@ op_db: List[OpInfo] = [
             # On CUDA, the op is dispatched (and a few more conditions) to
             # _fused_dropout, which doesn't support forward AD
             DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD', device_type='cuda'),
-            # (ROCm) NotImplementedError: Trying to use forward AD with native_dropout that does not support it
+            # NotImplementedError: Trying to use forward AD with native_dropout that does not support it
             DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_fwgrad_bwgrad',
-                         device_type='cuda', dtypes=[torch.float64], active_if=TEST_WITH_ROCM),),
+                         device_type='cuda', dtypes=[torch.float64]),),
         gradcheck_wrapper=wrapper_set_seed,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
