@@ -251,13 +251,13 @@ EXAMPLES = [
     Example(InverseWishart, [
         {
             'covariance_matrix': torch.tensor([[2.0, 0.3], [0.3, 0.25]], requires_grad=True),
-            'df': torch.tensor([6], requires_grad=True),
+            'df': torch.tensor([6.], requires_grad=True),
         },
         {
             'precision_matrix': torch.tensor([[2.0, 0.1, 0.0],
                                               [0.1, 0.25, 0.0],
                                               [0.0, 0.0, 0.3]], requires_grad=True),
-            'df': torch.tensor([8, 7], requires_grad=True),
+            'df': torch.tensor([8., 7.], requires_grad=True),
         },
         {
             'scale_tril': torch.tensor([[[2.0, 0.0], [-0.5, 0.25]],
@@ -267,11 +267,11 @@ EXAMPLES = [
         },
         {
             'covariance_matrix': torch.tensor([[5.0, -0.5], [-0.5, 1.5]]),
-            'df': torch.tensor([6]),
+            'df': torch.tensor([6.]),
         },
         {
             'covariance_matrix': torch.tensor([[5.0, -0.5], [-0.5, 1.5]]),
-            'df': 6,
+            'df': 6.,
         },
     ]),
     Example(Kumaraswamy, [
