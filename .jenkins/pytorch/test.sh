@@ -439,6 +439,9 @@ test_xla() {
   cp -a "$(pwd)/xla/tmp/pytorch_py_test.log" "$XLA_ARTIFACT_PATH/custom-op-build" || true
   cp -a "$(pwd)/xla/tmp/pytorch_py_test.log" "$XLA_ARTIFACT_PATH/jit-hook-build" || true
   cat "$(pwd)/xla/tmp/pytorch_py_test.log" || true
+  cat "$(pwd)/tmp/pytorch_py_test.log" || true
+  echo "$(pwd)
+  find . -name "pytorch_py_test.log"
   assert_git_not_dirty
 }
 
