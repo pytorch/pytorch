@@ -20,9 +20,6 @@ import warnings
 torch._C._jit_set_profiling_executor(True)
 torch._C._jit_set_profiling_mode(True)
 
-from parameterized import parameterized_class
-
-
 from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, \
     enable_profiling_mode_for_profiling_tests, TestCase
 from torch.testing._internal.jit_utils import JitTestCase, \
@@ -79,7 +76,6 @@ def inline_fusion_groups():
     finally:
         torch._C._debug_set_fusion_group_inlining(old_inlining)
 
-@parameterized_class([{"dynamic_shapes": True}, {"dynamic_shapes": False}])
 class TestTEFuser(JitTestCase):
     def setUp(self):
         self.old_cpu_fuser_state = torch._C._jit_can_fuse_on_cpu()
@@ -90,6 +86,9 @@ class TestTEFuser(JitTestCase):
         # TODO: force LLVM. need to add it to asan, mac, windows builds + sandcastle
         # torch._C._jit_set_te_must_use_llvm_cpu(True)
         torch._C._jit_override_can_fuse_on_gpu(True)
+
+        # note: `self.dynamic_shapes` instatiated in specialization of class
+        # defined below
 
         self.old_profiling_executor = torch._C._jit_set_profiling_executor(True)
         self.old_profiling_mode = torch._C._jit_set_profiling_mode(True)
@@ -2213,6 +2212,14 @@ class TestTEFuser(JitTestCase):
                     torch._C._jit_pass_inline(g)
                     torch._C._jit_pass_dce(g)
                     FileCheck().check_count("TensorExprDynamicGuard", len(gen_tensor), exactly=True).run(g)
+
+class TestTEFuserStatic(TestTEFuser):
+    dynamic_shapes = False
+
+class TestTEFuserDynamic(TestTEFuser):
+    dynamic_shapes = True
+
+del TestTEFuser
 
 works_list = [
     '__radd__',
