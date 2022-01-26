@@ -4345,12 +4345,9 @@ TORCH_IMPL_FUNC(linalg_ldl_factor_ex_out)
   info_->zero_();
   auto pivots_ = pivots.expect_contiguous();
 
-  c10::MaybeOwned<Tensor> factors_;
+  auto factors_ = at::native::borrow_else_clone(factors.mT().is_contiguous(), factors, self, /*row_major=*/false);
   if (factors.mT().is_contiguous()) {
-    factors_ = c10::MaybeOwned<Tensor>::borrowed(factors);
     factors_->copy_(self);
-  } else {
-    factors_ = c10::MaybeOwned<Tensor>::owned(cloneBatchedColumnMajor(self));
   }
 
   if (upper) {
@@ -4405,19 +4402,10 @@ TORCH_IMPL_FUNC(linalg_ldl_solve_out)
 
   auto pivots_ = pivots.expect_contiguous();
 
-  c10::MaybeOwned<Tensor> result_;
+  auto factors_ = at::native::borrow_else_clone(result.mT().is_contiguous(), factors, factors, /*row_major=*/false);
+  auto result_ = at::native::borrow_else_clone(result.mT().is_contiguous(), result, B, /*row_major=*/false);
   if (result.mT().is_contiguous()) {
-    result_ = c10::MaybeOwned<Tensor>::borrowed(result);
     result_->copy_(B_broadcast);
-  } else {
-    result_ = c10::MaybeOwned<Tensor>::owned(cloneBatchedColumnMajor(B));
-  }
-
-  c10::MaybeOwned<Tensor> factors_;
-  if (factors.mT().is_contiguous()) {
-    factors_ = c10::MaybeOwned<Tensor>::borrowed(factors);
-  } else {
-    factors_ = c10::MaybeOwned<Tensor>::owned(cloneBatchedColumnMajor(factors));
   }
 
   ldl_solve_stub(
