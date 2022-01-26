@@ -243,17 +243,17 @@ class DispatchKeySet final {
   // because you can end up with weird results.
   // e.g. DispatchKeySet(DispatchKey::AutogradCPU).has_any(DispatchKeySet(DispatchKey::CPU)) would return true.
   inline bool has_any(DispatchKeySet ks) const {
-	TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-	  // Either there are no backend bits in the input keyset
-	  ((ks.repr_ & full_backend_mask) == 0) ||
-	  // or there are no per-backend-functionality bits
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      // Either there are no backend bits in the input keyset
+      ((ks.repr_ & full_backend_mask) == 0) ||
+      // or there are no per-backend-functionality bits
       // See [Note: Per-Backend Functionality Dispatch Keys]
-	  ((ks & DispatchKeySet({
-		  DispatchKey::Dense,
-		  DispatchKey::Quantized,
-		  DispatchKey::Sparse,
-		  DispatchKey::AutogradFunctionality,
-		}).repr_) == 0));
+      ((ks & DispatchKeySet({
+          DispatchKey::Dense,
+          DispatchKey::Quantized,
+          DispatchKey::Sparse,
+          DispatchKey::AutogradFunctionality,
+        }).repr_) == 0));
     return static_cast<bool>((repr_ & ks.repr_) != 0);
   }
   // Test if DispatchKeySet is a superset of ks.
@@ -379,6 +379,17 @@ class DispatchKeySet final {
     // E.g. 000001 (CPU) should give us an offset of 0, 000010 (CUDA) should give us an offset of 1, etc.
     auto backend_idx = DispatchKeySet((repr_ & offset_and_mask.mask) >> 1).indexOfHighestBit();
     return offset_and_mask.offset + backend_idx;
+  }
+
+  // returns the "index" of the highest priority backend in the keyset.
+  // This is pretty similar to getBackendKey(), but:
+  // - It's hotpath code (part of the runtime bitset calculation)
+  // - I's returns an integer index, not an enum value
+  // - Everything is shifted to the right by 1.
+  //   BackendComponent::InvalidBit is technically the lowest enum value,
+  //   but it isn't included in the runtime table. So CPUBit = 1, CUDABit = 2, etc.
+  uint64_t getBackendIndex() const {
+      return DispatchKeySet((repr_ & full_backend_mask) >> 1).indexOfHighestBit();
   }
 
  private:
