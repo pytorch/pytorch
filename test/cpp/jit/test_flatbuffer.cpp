@@ -735,7 +735,7 @@ TEST(FlatbufferTest, DefaultArgsConv) {
   AT_ASSERT(outputref.dim() == output.dim());
   AT_ASSERT(output.equal(outputref));
 
-  auto buff = save_mobile_module_to_bytes(bc);
+  auto buff = save_mobile_module_to_bytes(bc, true);
   mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
   for (int i = 0; i < 1; ++i) {
     res = bc2.get_method("forward")(inputs);
@@ -953,7 +953,7 @@ TEST(FlatbufferTest, DefaultArgsWithOutArg) {
   bc.run_method("forward", input_x, input_h);
   AT_ASSERT(input_x.equal(4 * torch::ones({})));
 
-  auto buff = save_mobile_module_to_bytes(bc);
+  auto buff = save_mobile_module_to_bytes(bc, true);
   mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
   auto input_x2 = 2 * torch::ones({});
   auto input_h2 = torch::ones({});

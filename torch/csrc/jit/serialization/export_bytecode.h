@@ -41,5 +41,8 @@ TORCH_API IValue convertMobileFunctionToCodeTable(
     const mobile::Function& func,
     const CompilationOptions& compilation_options);
 
+//SourceRangeTagMap m_source_range_tags_;
+//int64_t m_current_source_range_tag_;
+
 } // namespace jit
 } // namespace torch

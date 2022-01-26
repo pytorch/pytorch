@@ -342,6 +342,59 @@ void getBackendDebugInfoMap(
   }
 }
 
+SourceRangeRecords getBackendSourceRanges(const Module& m) {
+  SourceRangeRecords sr_records;
+  if (isLoweredModule(m)) {
+    constexpr size_t kSourceRange = 1;
+    auto backend_debug_info =
+        m.attr("__backend_debug_info").toCustomClass<PyTorchBackendDebugInfo>();
+    const auto& map = backend_debug_info->getDebugInfoMap();
+    if (map) {
+      const auto& map_val = map.value();
+      // This map is map of debug handle-to-DebugInfoTuple
+      // DebugInfoTuple= <source range, op name, inlined_cs_ptr>
+      for (const auto& it : map_val) {
+        auto& source_range =
+            std::get<kDebugInfoTupleSourceRangeIndex>(it.second);
+        sr_records.emplace_back(
+            std::numeric_limits<size_t>::max(), source_range);
+        // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
+        auto cs_ptr = std::get<kDebugInfoTupleInlinedCSIndex>(it.second);
+        if (cs_ptr) {
+          for (const auto& e : cs_ptr->vec()) {
+            // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
+            const auto sr = std::get<kSourceRange>(e);
+            sr_records.emplace_back(std::numeric_limits<size_t>::max(), sr);
+          }
+        }
+      }
+    }
+  }
+  for (const auto& c : m.children()) {
+    const auto& child_sr_records = getBackendSourceRanges(c);
+    sr_records.reserve(sr_records.size() + child_sr_records.size());
+    std::move(
+        child_sr_records.begin(),
+        child_sr_records.end(),
+        std::back_inserter(sr_records));
+  }
+  return sr_records;
+}
+
+void updateSourceRangeTags(
+    const SourceRangeRecords& ranges,
+    SourceRangeTagMap& m_source_range_tags,
+    int64_t* m_current_source_range_tag) {
+  std::cout << "ranges: " << ranges.size() << std::endl;
+  for (const auto& range : ranges) {
+    if (m_source_range_tags.find(range.range) == m_source_range_tags.end()) {
+      std::cout << "m_current_source_range_tag: " << m_current_source_range_tag << std::endl;
+      m_source_range_tags[range.range] = *m_current_source_range_tag;
+      (*m_current_source_range_tag)++;
+    }
+  }
+}
+
 mobile::Module jitModuleToMobile(
     const Module& module,
     const CompilationOptions& options) {
@@ -376,6 +429,15 @@ mobile::Module jitModuleToMobile(
       backend_debug_info_map.begin(), backend_debug_info_map.end());
   m.setDebugTable(MobileDebugTable(
       debug_handle_cs_ptr_map.begin(), debug_handle_cs_ptr_map.end()));
+  auto backend_source_range_records = getBackendSourceRanges(module);
+  SourceRangePickler source_range_pickler;
+  SourceRangeTagMap m_source_range_tags;
+  int64_t m_current_source_range_tag_ = 0;
+  updateSourceRangeTags(backend_source_range_records,
+                        m_source_range_tags,
+                        &m_current_source_range_tag_);
+  m.setIsLoweredModule(isLoweredModule(module));
+  m.setSourceRangeTags(m_source_range_tags);
   return m;
 }
 

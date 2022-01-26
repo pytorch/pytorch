@@ -98,7 +98,7 @@ void toList(Stack& stack) {
   }
 
   // Rebuild the output type using elem_ty_val and dim_val. Start
-  // with the element type corresponding to elem_ty_val.
+  // with the element type corresponding to elem_ty_vscalar_to_tensoral.
   TypePtr out_ty;
   if (elem_ty_val == 0) {
     out_ty = IntType::get();

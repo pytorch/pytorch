@@ -7,7 +7,7 @@
 #include <torch/csrc/jit/mobile/flatbuffer_loader.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/instruction.h>
-#include <torch/csrc/jit/serialization/export.h>
+#include <torch/csrc/jit/backends/backend_debug_info.h>
 #include <string>
 
 namespace torch {
@@ -25,11 +25,14 @@ using mobile::serialization::CreateObject;
 using mobile::serialization::CreateOperator;
 using mobile::serialization::CreateTensorMetadataDirect;
 using mobile::serialization::CreateTupleDirect;
+using mobile::serialization::CreateMobileDebugInfo;
 
 namespace {
 
 // We will store IValue NONE in index 0 in flatbuffer.
 constexpr int kNoneIndex = 0;
+
+const int64_t kInvalidSourceRangeTag = -1;
 
 class FlatbufferSerializer {
  public:
@@ -37,7 +40,8 @@ class FlatbufferSerializer {
 
   flatbuffers::DetachedBuffer serializeModule(
       const mobile::Module& module,
-      bool include_tensor_data_in_flatbuffer);
+      bool include_tensor_data_in_flatbuffer,
+      bool save_mobile_debug_info);
 
  private:
   template <typename It>
@@ -132,6 +136,11 @@ class FlatbufferSerializer {
   std::unordered_map<IValue, uint32_t, IValueHash> cached_ivalues_;
 
   const mobile::CompilationUnit* mcu_ = nullptr;
+  flatbuffers::Offset<jit::mobile::serialization::MobileDebugInfo> mobileDebugInfoToFB(
+      FlatBufferBuilder& fbb);
+
+  flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<mobile::serialization::MobileDebugInfo>>>
+  mobileDebugInfosToFB(FlatBufferBuilder& fbb);
 };
 
 flatbuffers::Offset<jit::mobile::serialization::Schema> FlatbufferSerializer::
@@ -163,6 +172,146 @@ flatbuffers::Offset<jit::mobile::serialization::Schema> FlatbufferSerializer::
   }
   return CreateSchema(
       fbb, fbb.CreateVector(arg_vec), fbb.CreateVector(return_vec));
+}
+
+c10::IValue serialize_module_instance_info(
+    const c10::optional<ModuleInstanceInfo>& m) {
+  if (!m) {
+    return c10::IValue();
+  }
+  const auto& m_val = m.value();
+  std::string module_type_name = m_val.class_type()->name()->qualifiedName();
+  auto module_instance_name = m_val.instance_name();
+  if (m_val.class_type()) {
+    module_type_name = m_val.class_type()->name()->qualifiedName();
+  }
+  auto key_val = module_type_name + module_instance_name;
+  auto m_inst_it = serialized_module_instance_info_.find(key_val);
+  if (m_inst_it != serialized_module_instance_info_.end()) {
+    return m_inst_it->second;
+  }
+  // Module instance info is serialized as
+  // {type name, instance name}
+  serialized_module_instance_info_[key_val] =
+      c10::ivalue::Tuple::create({module_type_name, module_instance_name});
+  return serialized_module_instance_info_[key_val];
+}
+
+c10::IValue serializeInlinedStackCall(
+    const InlinedCallStackPtr& cs_ptr,
+    const SourceRangeTagMap& source_range_tags) {
+  if (!cs_ptr) {
+    std::cout << "here" << std::endl;
+    return c10::IValue();
+  }
+  auto cs_it = serialized_inlined_callstack_.find(cs_ptr);
+  if (cs_it != serialized_inlined_callstack_.end()) {
+    return cs_it->second;
+  }
+  // Inlined callstack pointer is serialized as tuple of 4 elements
+  // {IValue(module_instance_info), source_range_tag, IValue(InlinedCallStack),
+  // function name} Note function name is serialized separately because Function
+  // is only in memory structure. It gets constructed by JIT from serialized
+  // Code at runtime. As such even InlinedCallStack get constructed by JIT at
+  // runtime during graph inlining. However, we introduce
+  // serialization/deserialization of it in order to generate callstack debug
+  // information, _when_ equivalent InlinedCallStack cannot be constructed at
+  // runtime. For example, in lite interpreter or delegated backend.
+  std::vector<c10::IValue> elements;
+  elements.reserve(4);
+  elements.emplace_back(
+      serialize_module_instance_info(cs_ptr->module_instance()));
+  int64_t source_range_tag{kInvalidSourceRangeTag};
+  const SourceRange& sr = cs_ptr->source_range().findSourceRangeThatGenerated()
+                          ? cs_ptr->source_range().findSourceRangeThatGenerated().value()
+                          : cs_ptr->source_range();
+  auto sr_it = source_range_tags.find(sr);
+  if (sr_it != source_range_tags.end()) {
+    source_range_tag = sr_it->second;
+  }
+  elements.emplace_back(source_range_tag);
+  if (cs_ptr->callee()) {
+    elements.emplace_back(
+        serializeInlinedStackCall(cs_ptr->callee().value(), source_range_tags));
+  } else {
+    elements.emplace_back(c10::IValue());
+  }
+  auto fn_name = cs_ptr->function_name();
+  if (!fn_name.empty()) {
+    std::cout << fn_name << std::endl;
+    elements.emplace_back(fn_name);
+  } else {
+    elements.emplace_back("FunctionName_UNKNOWN");
+  }
+  c10::IValue serialized_cs = c10::ivalue::Tuple::create(elements);
+  serialized_inlined_callstack_[cs_ptr] = serialized_cs;
+  return serialized_cs;
+}
+
+c10::IValue serializeDebugInfo(
+    const std::unordered_map<int64_t, DebugInfoTuple>& callstack_ptrs,
+    const SourceRangeTagMap& source_range_tags) {
+  std::vector<c10::IValue> ivalues;
+  for (const auto& it : callstack_ptrs) {
+    int64_t debug_handle = it.first;
+    std::vector<c10::IValue> elements;
+    /*
+     * Debug handles and debug info (source range + inlinded callstack)
+     * are serialized as a tuple of 3 elements
+     * {debug_handle, source_range_tag, serialized_callstack}
+     */
+    elements.reserve(4);
+    elements.emplace_back(debug_handle);
+    int64_t source_range_tag{kInvalidSourceRangeTag};
+    const auto& source_range =
+        std::get<kDebugInfoTupleSourceRangeIndex>(it.second);
+    const SourceRange& sr = source_range.findSourceRangeThatGenerated()
+                            ? source_range.findSourceRangeThatGenerated().value()
+                            : source_range;
+    auto sr_it = source_range_tags.find(sr);
+    if (sr_it != source_range_tags.end()) {
+      source_range_tag = sr_it->second;
+    }
+    elements.emplace_back(source_range_tag);
+    elements.emplace_back(std::get<kDebugInfoTupleNodeNameIndex>(it.second));
+    const auto& inlined_cs_ptr =
+        std::get<kDebugInfoTupleInlinedCSIndex>(it.second);
+    elements.emplace_back(serializeInlinedStackCall(inlined_cs_ptr, source_range_tags));
+    ivalues.emplace_back(c10::ivalue::Tuple::create(elements));
+  }
+  std::vector<at::Tensor> table;
+  c10::IValue ivalue = c10::ivalue::Tuple::create(std::move(ivalues));
+  return ivalue;
+}
+
+flatbuffers::Offset<mobile::serialization::MobileDebugInfo>  FlatbufferSerializer::mobileDebugInfoToFB(FlatBufferBuilder& fbb){
+
+  flatbuffers::Offset<mobile::serialization::InlinedCallStack> inlineCallOffset =
+      mobile::serialization::CreateInlinedCallStack(
+          fbb,
+          fbb.CreateSharedString("a"),
+          fbb.CreateSharedString("a"),
+          0,
+          mobile::serialization::InlinedCallStackUnion::NONE,
+          0,
+          fbb.CreateSharedString("a"));
+
+  return mobile::serialization::CreateMobileDebugInfo(
+      fbb,
+      0,
+      0,
+      fbb.CreateSharedString("a"),
+      inlineCallOffset);
+}
+
+flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<mobile::serialization::MobileDebugInfo>>>
+    FlatbufferSerializer::mobileDebugInfosToFB(FlatBufferBuilder& fbb) {
+  std::vector<flatbuffers::Offset<mobile::serialization::MobileDebugInfo>> mdis;
+  mdis.reserve(5);
+  for (int i = 0; i < 5; ++i) {
+      mdis.emplace_back(mobileDebugInfoToFB(fbb));
+  }
+  return fbb.CreateVector(mdis);
 }
 
 flatbuffers::Offset<mobile::serialization::Function> FlatbufferSerializer::
@@ -268,9 +417,64 @@ flatbuffers::Offset<mobile::serialization::Function> FlatbufferSerializer::
   return function_offset;
 }
 
+bool isLoweredModule(const Module& m) {
+  c10::QualifiedName type_name;
+  if (m.type()->name()) {
+    type_name = m.type()->name().value();
+  }
+  bool isLoweredModule = false;
+  for (const auto& atom : type_name.atoms()) {
+    if (atom == "LoweredModule") {
+      isLoweredModule = true;
+      break;
+    }
+  }
+  return isLoweredModule;
+}
+
+SourceRangeRecords getBackendSourceRanges(const Module& m) {
+  SourceRangeRecords sr_records;
+  if (isLoweredModule(m)) {
+    constexpr size_t kSourceRange = 1;
+    auto backend_debug_info =
+        m.attr("__backend_debug_info").toCustomClass<PyTorchBackendDebugInfo>();
+    const auto& map = backend_debug_info->getDebugInfoMap();
+    if (map) {
+      const auto& map_val = map.value();
+      // This map is map of debug handle-to-DebugInfoTuple
+      // DebugInfoTuple= <source range, op name, inlined_cs_ptr>
+      for (const auto& it : map_val) {
+        auto& source_range =
+            std::get<kDebugInfoTupleSourceRangeIndex>(it.second);
+        sr_records.emplace_back(
+            std::numeric_limits<size_t>::max(), source_range);
+        // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
+        auto cs_ptr = std::get<kDebugInfoTupleInlinedCSIndex>(it.second);
+        if (cs_ptr) {
+          for (const auto& e : cs_ptr->vec()) {
+            // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
+            const auto sr = std::get<kSourceRange>(e);
+            sr_records.emplace_back(std::numeric_limits<size_t>::max(), sr);
+          }
+        }
+      }
+    }
+  }
+  for (const auto& c : m.children()) {
+    const auto& child_sr_records = getBackendSourceRanges(c);
+    sr_records.reserve(sr_records.size() + child_sr_records.size());
+    std::move(
+        child_sr_records.begin(),
+        child_sr_records.end(),
+        std::back_inserter(sr_records));
+  }
+  return sr_records;
+}
+
 flatbuffers::DetachedBuffer FlatbufferSerializer::serializeModule(
     const mobile::Module& module,
-    bool include_tensor_data_in_flatbuffer) {
+    bool include_tensor_data_in_flatbuffer,
+    bool save_mobile_debug_info) {
   FlatBufferBuilder fbb;
 
   mcu_ = &module.compilation_unit();
@@ -319,7 +523,7 @@ flatbuffers::DetachedBuffer FlatbufferSerializer::serializeModule(
     }
     storage_data_offset = fbb.CreateVector(storage_data);
   }
-
+  auto mobile_debug_infos = mobileDebugInfosToFB(fbb);
   auto mod = CreateModule(
       fbb,
       0, /* version */
@@ -329,8 +533,23 @@ flatbuffers::DetachedBuffer FlatbufferSerializer::serializeModule(
       fbb.CreateVector(ivalue_offsets_),
       tensor_data_.size(),
       storage_data_offset,
-      fbb.CreateVector(obj_types_offset_));
+      fbb.CreateVector(obj_types_offset_),
+      mobile_debug_infos);
   fbb.Finish(mod);
+
+  if (save_mobile_debug_info) {
+//    auto backend_source_range_records = getBackendSourceRanges(module);
+//    SourceRangePickler source_range_pickler;
+//    updateSourceRangeTags(backend_source_range_records);
+    const auto& debug_info = module.getDebugTable().getCallStackPtrMap();
+    std::cout << debug_info.size() << std::endl;
+    BackendDebugInfoMapType debug_handle_cs_ptr_map(
+        debug_info.begin(), debug_info.end());
+    auto source_range_tags = module.getSourceRangeTags();
+    auto debug_info_node = serializeDebugInfo(debug_handle_cs_ptr_map, source_range_tags);
+    std::cout << debug_info_node.isNone() << std::endl;
+  }
+
   return fbb.Release();
 }
 
@@ -663,18 +882,20 @@ flatbuffers::Offset<mobile::serialization::IValue> FlatbufferSerializer::
 
 void save_mobile_module(
     const mobile::Module& module,
-    const std::string& filename) {
+    const std::string& filename,
+    const bool save_mobile_debug_info) {
   FlatbufferSerializer fb_serializer;
-  auto buffer = fb_serializer.serializeModule(module, true);
+  auto buffer = fb_serializer.serializeModule(module, true, save_mobile_debug_info);
   std::fstream ofile(filename, std::ios::binary | std::ios::out);
   ofile.write(reinterpret_cast<char*>(buffer.data()), buffer.size());
   ofile.close();
 }
 
 flatbuffers::DetachedBuffer save_mobile_module_to_bytes(
-    const mobile::Module& module) {
+    const mobile::Module& module,
+    const bool save_mobile_debug_info) {
   FlatbufferSerializer fb_serializer;
-  return fb_serializer.serializeModule(module, true);
+  return fb_serializer.serializeModule(module, true, save_mobile_debug_info);
 }
 
 } // namespace jit

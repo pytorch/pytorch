@@ -92,6 +92,11 @@ class FlatbufferLoader {
   std::shared_ptr<mobile::CompilationUnit> mcu_;
   std::shared_ptr<CompilationUnit> cu_;
   mobile::serialization::Module* module_ = nullptr;
+  static InlinedCallStackPtr parseInlinedCallStack(
+      const mobile::serialization::InlinedCallStack* inlinedCallStack);
+  ska::flat_hash_map<int64_t, DebugInfoTuple> parseMobileDebugInfo(
+      const  flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::MobileDebugInfo>>* pVector,
+      ska::flat_hash_map<int64_t, SourceRange> srMap);
 };
 
 mobile::Module FlatbufferLoader::parseModule(
@@ -107,6 +112,9 @@ mobile::Module FlatbufferLoader::parseModule(
   all_types_.resize(module->object_types()->size());
   storages_.resize(module->storage_data_size());
   storage_loaded_.resize(module->storage_data_size(), false);
+  auto mobile_debug_infos = module->mobile_debug_infos();
+  ska::flat_hash_map<int64_t, SourceRange> srMap;
+  ska::flat_hash_map<int64_t, DebugInfoTuple> callStackTrace = parseMobileDebugInfo(mobile_debug_infos, srMap);
 
   for (uint32_t i = 0; i < ivalues->size(); i++) {
     const auto* ival = ivalues->Get(i);
@@ -468,6 +476,50 @@ TypePtr FlatbufferLoader::getOrCreateTypeAnnotations(
   type_annotations_[offset] = type;
   return type;
 }
+
+InlinedCallStackPtr torch::jit::FlatbufferLoader::parseInlinedCallStack(
+    const mobile::serialization::InlinedCallStack* inlinedCallStack) {
+  auto instance_name = inlinedCallStack->module_instance_name()->str();
+  std::shared_ptr<CompilationUnit> cu = std::make_shared<CompilationUnit>();
+  auto type_ptr = cu->get_class(inlinedCallStack->module_type_name()->str());
+  auto module_instance_info = ModuleInstanceInfo(type_ptr, instance_name);
+  InlinedCallStackPtr callee, cs_ptr;
+  if (inlinedCallStack->calle()){
+    callee = parseInlinedCallStack(inlinedCallStack->calle_as_InlinedCallStack());
+  }
+  SourceRange source_range;
+  if (callee) {
+    cs_ptr = c10::make_intrusive<InlinedCallStack>(
+        callee, nullptr, source_range, module_instance_info);
+  } else {
+    cs_ptr = c10::make_intrusive<InlinedCallStack>(
+        nullptr, source_range, module_instance_info);
+  }
+  return cs_ptr;
+}
+
+ska::flat_hash_map<int64_t, DebugInfoTuple> torch::jit::FlatbufferLoader::parseMobileDebugInfo(
+    const  flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::MobileDebugInfo>>* mobile_debug_infos,
+    ska::flat_hash_map<int64_t, SourceRange> srMap) {
+  ska::flat_hash_map<int64_t, DebugInfoTuple> callstack_ptrs;
+  callstack_ptrs.reserve(mobile_debug_infos->size());
+  for (uint32_t i = 0; i < mobile_debug_infos->size(); ++i) {
+    const auto* mobileDebugInfo = mobile_debug_infos->Get(i);
+    InlinedCallStackPtr inlinedCallStackPtr = parseInlinedCallStack(
+        mobileDebugInfo->inlined_call_stack());
+    int64_t debug_handle = mobileDebugInfo->sr_start();
+    int64_t source_range_tag = mobileDebugInfo->sr_end();
+    const std::string& node_name = mobileDebugInfo->node_name()->str();
+    SourceRange source_range;
+    callstack_ptrs[debug_handle] = std::make_tuple(
+        source_range,
+        node_name,
+        inlinedCallStackPtr);
+  }
+
+  return callstack_ptrs;
+}
+
 
 } // namespace
 

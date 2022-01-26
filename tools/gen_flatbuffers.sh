@@ -1,10 +1,12 @@
 #!/bin/bash
 ROOT=$(pwd)
+echo $ROOT
 FF_LOCATION="$ROOT/third_party/flatbuffers"
 cd "$FF_LOCATION" || exit
-mkdir build
-cd build || exit
-cmake ..
+#mkdir -p build
+#cd build || exit
+echo $(pwd)
+cmake .
 cmake --build . --target flatc
 mkdir -p "$ROOT/build/torch/csrc/jit/serialization"
 ./flatc --cpp --gen-mutable --scoped-enums \

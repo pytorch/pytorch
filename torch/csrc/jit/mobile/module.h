@@ -127,6 +127,22 @@ class TORCH_API Module {
     return has_debug_handles_;
   }
 
+  void setIsLoweredModule(bool is_lowered_module) {
+    is_lowered_module_ = is_lowered_module;
+  }
+
+  bool isLoweredModule() const {
+    return is_lowered_module_;
+  }
+
+  void setSourceRangeTags(SourceRangeTagMap source_range_tags) {
+    m_sr_tags_ = source_range_tags;
+  }
+
+  SourceRangeTagMap getSourceRangeTags() const {
+    return m_sr_tags_;
+  }
+
   const CompilationUnit& compilation_unit() const {
     return *cu_.get();
   }
@@ -141,6 +157,9 @@ class TORCH_API Module {
   std::shared_ptr<CompilationUnit> cu_;
   MobileDebugTable debug_table_;
   bool has_debug_handles_ = false;
+  bool is_lowered_module_ = false;
+
+  SourceRangeTagMap m_sr_tags_;
 
   // Extra handle for the module to delete when itself is deleted
   std::shared_ptr<char> mem_to_delete_;

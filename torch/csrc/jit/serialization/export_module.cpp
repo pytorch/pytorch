@@ -552,6 +552,7 @@ void ScriptModuleSerializer::updateSourceRangeTags(
     const SourceRangeRecords& ranges) {
   for (const auto& range : ranges) {
     if (source_range_tags_.find(range.range) == source_range_tags_.end()) {
+      std::cout << "current_source_range_tag_:" << current_source_range_tag_ << std::endl;
       source_range_tags_[range.range] = current_source_range_tag_;
       current_source_range_tag_++;
     }
