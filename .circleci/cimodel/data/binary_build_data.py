@@ -31,13 +31,6 @@ def get_processor_arch_name(gpu_version):
     )
 
 CONFIG_TREE_DATA = OrderedDict(
-    macos=([None], OrderedDict(
-        wheel=dimensions.STANDARD_PYTHON_VERSIONS,
-        conda=dimensions.STANDARD_PYTHON_VERSIONS,
-        libtorch=[
-            "3.7",
-        ],
-    )),
     macos_arm64=([None], OrderedDict(
         wheel=[
             "3.8",
